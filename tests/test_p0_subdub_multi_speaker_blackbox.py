@@ -141,6 +141,8 @@ def test_multi_diarization_debug_fields_are_bounded_and_durable_safe():
             "multi_diarization_provider_word_count": 0,
             "multi_diarization_provider_speaker_count": 0,
             "multi_diarization_mapped_speaker_count": 0,
+            "multi_diarization_raw_annotation_count": 0,
+            "multi_diarization_terminal_empty": True,
             "api_key": "must-not-leak",
             "raw_response": {"must": "not persist"},
         }
@@ -155,6 +157,8 @@ def test_multi_diarization_debug_fields_are_bounded_and_durable_safe():
         "multi_diarization_provider_word_count": 0,
         "multi_diarization_provider_speaker_count": 0,
         "multi_diarization_mapped_speaker_count": 0,
+        "multi_diarization_raw_annotation_count": 0,
+        "multi_diarization_terminal_empty": True,
     }
 
 
@@ -186,6 +190,8 @@ def test_pipeline_persists_only_attempted_multi_diagnostics(
         "multi_diarization_provider_word_count": 0,
         "multi_diarization_provider_speaker_count": 0,
         "multi_diarization_mapped_speaker_count": 0,
+        "multi_diarization_raw_annotation_count": 0,
+        "multi_diarization_terminal_empty": True,
     } if include_diagnostics else {}
 
     async def no_progress(*_args, **_kwargs):

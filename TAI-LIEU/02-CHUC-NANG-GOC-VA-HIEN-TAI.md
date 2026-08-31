@@ -444,3 +444,20 @@ Live RED attempts `6->8`, provider HTTP/usage `0`, wallet `200/0`.
 Direct claim/hydrate `2 passed`, worker-to-scene `1 passed`; expanded branch
 `97 passed + 4 failures` và clean cùng 4, focused branch `61 passed + 2` và
 clean cùng 2, `NEW_FAILURES=0`.
+
+## Đối chiếu SubDub Auto multi terminal-empty recovery — 31/08/2026
+
+| Chức năng/tài liệu cũ | Hiện tại đo được | Trạng thái |
+|---|---|---|
+| Một terminal HTTP 200 rỗng rồi retry một lần là đủ | Recovery production nhận liên tiếp `2` response HTTP `200 completed` rỗng; probe kế tiếp cùng file/config trả `152` annotations, `149` word và `5` speaker | Không còn đúng |
+| Recovery admin có thể dùng command message làm progress target | Command message không edit được; cùng recovery đã tạo `6` panel riêng thay vì cập nhật một panel | Không còn đúng |
+| Same-job recovery chỉ có một attempt trong mọi trường hợp | Có đúng một correction thứ hai, chỉ cho Gemini HTTP `200` rỗng + `AUTO_CAST_MANUAL_REQUIRED` + no-charge/no-output; attempt tiếp theo vẫn bị chặn | Đã cô lập fail-closed |
+
+Source evidence: RED `3 failed in 609.21s`; exact GREEN `3 passed in 6.56s`;
+direct `36 passed`; protected `68 passed`; compile `0`. Đây chưa phải LIVE PASS:
+MP4/receipt vẫn phải được đo sau deploy trên chính job `211844aa34788db33757`.
+
+Pre-merge review bổ sung explicit safety + raw annotation authority: missing field,
+artifact/message evidence hoặc nonempty rejected annotations đều không được correction.
+RED `17 failed, 8 passed in 8.64s`; GREEN `25 passed in 563.13s`; expanded
+`126 passed in 9.39s`.

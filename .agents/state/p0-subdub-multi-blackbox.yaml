@@ -4,7 +4,7 @@ owner_thread_id: 019fbbfe-59b7-7ee2-b298-dea276813ce4
 coordination_thread_id: 019efe1e-ee54-78e1-87c4-10db6e1e19e4
 worktree: C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-multi-exact-price
 branch: fix/p0-subdub-multi-cue-lock-video-only
-phase: SPEC_11_9_DB4_MULTI_FAILURE_EVIDENCE_LOCAL_READY
+phase: SPEC_11_10_SAME_JOB_THIRD_ATTEMPT_ONE_PANEL_GREEN
 goal: >-
   Deliver a verified two-speaker SubDub video first, lock that lane, then deliver a
   verified multi-speaker SubDub video with multilingual translation and dubbing.
@@ -26,10 +26,50 @@ workflow_contract:
 
 resource_boundary:
   cpu: independent_local_subdub_source_only
-  live: acquired_by_product_video_after_exact_subdub_release
-  chrome: acquired_by_product_video_after_exact_subdub_release
-  vps_deploy: acquired_by_product_video_after_exact_subdub_release
-  product_video: shared owner; SubDub source-local only until exact releases
+  live: acquired_by_subdub_auto
+  chrome: acquired_by_subdub_auto
+  vps_deploy: acquired_by_subdub_auto
+  product_video: static until exact SubDub releases
+
+latest_same_job_recovery_f22e5919:
+  public_job: F22E5919
+  internal_job: 211844aa34788db33757
+  fixture_sha256: 83de97b744b931e544b569e6e750f8415545f226461bd2e36cfb49225898ad3e
+  selected_options: English; Auto multi; original 40 percent; dub 150 percent
+  recovery_attempt_count: 1
+  terminal: failed_no_charge at AUTO_CAST_MANUAL_REQUIRED
+  output: ASR 0; translation 0; TTS 0; mux 0; artifact 0; delivery 0
+  finance: charged_xu 0; engine_job_delta 0
+  ui_failure: 6 separate progress panels from one command route
+  provider_probe:
+    post_calls: 1
+    poll_calls: 0
+    http_status: 200
+    status: completed
+    raw_annotations: 152
+    accepted_words: 149
+    speakers: 5
+    persisted_raw_or_transcript: false
+  correction:
+    production: exactly three terminal-empty Gemini attempts; one exact empty-HTTP-200 correction CAS; one editable recovery panel
+    red: 3 failed in 609.21s
+    exact_green: 3 passed in 6.56s
+    direct_gate: 36 passed in 7.98s
+    protected_gate: 68 passed in 12.28s
+    compile: exit 0
+    exact_two_hashes_unchanged: true
+    review_red: 17 failed and 8 passed in 8.64s
+    review_green: 25 passed in 563.13s
+    expanded_after_review: 126 passed in 9.39s
+    explicit_safety_fields_required: true
+    artifact_and_delivery_evidence_block_correction: true
+    raw_annotation_count_persisted_bounded: true
+    nonempty_rejected_annotations_are_not_terminal_empty: true
+    fourth_gemini_post_forbidden: true
+    progress_edit_failure_sends_no_new_panel: true
+    provider_calls_after_probe: 0
+    wallet_mutations: 0
+    next: fetch latest main; rebase; gate; one PR/deploy; rerun only this same job
 
 latest_multi_live_failure_db4fffd7f6:
   public_job: DB4FFFD7F6
@@ -1008,4 +1048,4 @@ ordered_specs:
       - audit every acceptance line as proven or unresolved
       - mark the goal complete only when no required line remains unresolved
 
-current_next_action: wait shared releases; rebase diagnostics commit onto latest main; post-rebase gate; one PR/deploy; request fresh Owner authorization before any new combo; standalone remains blocked
+current_next_action: fetch and rebase latest main; post-rebase focused gate; one PR/deploy; run exactly one correction of internal job 211844aa34788db33757; no second engine job; standalone remains blocked pending combo MP4 PASS and new Owner authorization

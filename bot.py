@@ -146064,11 +146064,34 @@ async def cmd_subdub_recover_failed_auto_multi(
             parse_mode="HTML",
         )
     job = dict(claim.get("job") or {})
+    recovery_status_message = None
+
+    async def _edit_recovery_status_message(text, **kwargs):
+        nonlocal recovery_status_message
+        if recovery_status_message is None:
+            recovery_status_message = await update.message.reply_text(text, **kwargs)
+            return recovery_status_message
+        edit_text = getattr(recovery_status_message, "edit_text", None)
+        if not callable(edit_text):
+            return recovery_status_message
+        try:
+            rendered = await edit_text(text, **kwargs)
+            if rendered is not None and not isinstance(rendered, bool):
+                recovery_status_message = rendered
+        except Exception as exc:
+            if "message is not modified" not in str(exc).lower():
+                logger.warning(
+                    "subdub recovery status edit skipped | %s",
+                    sanitize_log_text(type(exc).__name__)[:120],
+                )
+        return recovery_status_message
+
     recovery_query = SimpleNamespace(
         from_user=update.effective_user,
         message=update.message,
         bot=getattr(context, "bot", None),
         reply_text=update.message.reply_text,
+        edit_message_text=_edit_recovery_status_message,
         get_bot=lambda: getattr(context, "bot", None),
     )
     lang = get_user_language(user_id) or "vi"
@@ -146080,7 +146103,8 @@ async def cmd_subdub_recover_failed_auto_multi(
     )
     status = str(result.get("status") or "")
     if status == "AUTO_EXACT_CONFIRMATION_REQUIRED":
-        return await update.message.reply_text(
+        return await safe_edit_or_send(
+            recovery_query,
             "SubDub recovery đã dừng an toàn tại xác nhận giá chính xác; chưa tạo output và chưa trừ Xu."
         )
     job_key = str(job.get("job_key") or "")
@@ -146099,12 +146123,14 @@ async def cmd_subdub_recover_failed_auto_multi(
                 auto_multi_recovery_failed=True,
                 auto_multi_recovery_error=status or "pipeline_failed",
             )
-        return await update.message.reply_text(
+        return await safe_edit_or_send(
+            recovery_query,
             f"SubDub recovery chưa tạo được MP4: <code>{html.escape(status or 'pipeline_failed')}</code>",
             parse_mode="HTML",
         )
     if not subdub_result_has_delivered_video(result):
-        return await update.message.reply_text(
+        return await safe_edit_or_send(
+            recovery_query,
             "SubDub recovery không có bằng chứng MP4 đã giao; hệ thống chưa ghi PASS."
         )
     subdub_mark_delivered_terminal(job_key, result)
@@ -232603,6 +232629,8 @@ def subdub_multi_diarization_debug_fields(payload: dict | None = None) -> dict:
         "multi_diarization_provider_word_count": bounded_int("multi_diarization_provider_word_count"),
         "multi_diarization_provider_speaker_count": bounded_int("multi_diarization_provider_speaker_count"),
         "multi_diarization_mapped_speaker_count": bounded_int("multi_diarization_mapped_speaker_count"),
+        "multi_diarization_raw_annotation_count": bounded_int("multi_diarization_raw_annotation_count"),
+        "multi_diarization_terminal_empty": bool(current.get("multi_diarization_terminal_empty") is True),
     }
 
 
@@ -248324,7 +248352,71 @@ def claim_subdub_failed_auto_multi_recovery(
         ):
             conn.rollback()
             return {"ok": False, "claimed": False, "reason": "job_not_safe_to_recover"}
-        if int(current.get("auto_multi_recovery_attempt_count") or 0) != 0:
+        recovery_attempt_count = int(
+            current.get("auto_multi_recovery_attempt_count") or 0
+        )
+        correction_attempt_count = int(
+            current.get("auto_multi_recovery_correction_attempt_count") or 0
+        )
+        correction_false_fields = (
+            "output_sent",
+            "delivery_attempted",
+            "artifact_started",
+            "final_mp4_exists",
+            "output_validated",
+        )
+        correction_artifact_fields = (
+            "final_mp4_path",
+            "final_output_path",
+            "output_path",
+            "output_video_path",
+            "final_video_path",
+            "dub_video_path",
+            "video_delivery_message_id",
+            "final_video_message_id",
+            "subdub_final_video_message_id",
+            "delivery_message_id",
+            "telegram_message_id",
+        )
+        explicit_correction_safety = bool(
+            "charged_xu" in current
+            and _safe_int(current.get("charged_xu"), -1) == 0
+            and current.get("charge_status") == "not_charged"
+            and all(
+                field in current and current.get(field) is False
+                for field in correction_false_fields
+            )
+            and not any(
+                str(current.get(field) or "").strip()
+                for field in correction_artifact_fields
+            )
+        )
+        if recovery_attempt_count == 1 and not explicit_correction_safety:
+            conn.rollback()
+            return {"ok": False, "claimed": False, "reason": "job_not_safe_to_recover"}
+        empty_http_200_correction = bool(
+            recovery_attempt_count == 1
+            and correction_attempt_count == 0
+            and current.get("multi_diarization_attempted") is True
+            and str(current.get("multi_diarization_provider") or "")
+            == "gemini_transcribe_multi_diarization"
+            and str(current.get("multi_diarization_status") or "")
+            == "AUTO_CAST_UNAVAILABLE"
+            and str(current.get("multi_diarization_detail") or "").startswith(
+                "gemini_multi_diarization_invalid:http=200"
+            )
+            and int(current.get("multi_diarization_http_status") or 0) == 200
+            and int(current.get("multi_diarization_provider_word_count") or 0) == 0
+            and int(current.get("multi_diarization_provider_speaker_count") or 0)
+            == 0
+            and int(current.get("multi_diarization_mapped_speaker_count") or 0) == 0
+            and "multi_diarization_raw_annotation_count" in current
+            and int(current.get("multi_diarization_raw_annotation_count") or 0) == 0
+            and current.get("multi_diarization_terminal_empty") is True
+            and str(current.get("last_error_stage") or "")
+            == "AUTO_CAST_MANUAL_REQUIRED"
+        )
+        if recovery_attempt_count != 0 and not empty_http_200_correction:
             conn.rollback()
             return {"ok": False, "claimed": False, "reason": "recovery_already_used"}
         workspace = str(current.get("workspace") or "")
@@ -248381,7 +248473,10 @@ def claim_subdub_failed_auto_multi_recovery(
                 "last_error_stage": "",
                 "last_error_safe": "",
                 "auto_multi_recovery": recovery,
-                "auto_multi_recovery_attempt_count": 1,
+                "auto_multi_recovery_attempt_count": recovery_attempt_count + 1,
+                "auto_multi_recovery_correction_attempt_count": (
+                    1 if empty_http_200_correction else correction_attempt_count
+                ),
                 "updated_at": time.time(),
             }
         )

@@ -778,3 +778,32 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
   worker-context overlay chỉ chạy cho controlled existing-task recovery đã suppress
   terminal; normal Product Video không đổi. Claim/hydrate `2 passed`,
   worker-to-scene `1 passed`; branch/base comparators có `NEW_FAILURES=0`.
+
+## Bổ sung SubDub Auto multi same-job correction — 31/08/2026
+
+- Owner recovery dùng lại đúng internal job `211844aa34788db33757`, fixture SHA-256
+  `83DE97B744B931E544B569E6E750F8415545F226461BD2E36CFB49225898AD3E`,
+  English, âm gốc `40%`, lồng tiếng `150%`; engine job mới `0`, `charged_xu=0`.
+- Recovery đầu terminal `failed_no_charge` lúc `10:37:37`, trước ASR/translation/TTS/
+  mux/artifact/delivery. Gemini production đã dùng bound `2` nhưng cả hai terminal
+  HTTP `200 completed` đều không có word/speaker. Cùng file/config probe kế tiếp dùng
+  đúng `1` POST, `0` poll và trả `152` word annotations, `149` word hợp lệ, `5`
+  speaker; transcript/raw response/API key không được in hoặc lưu.
+- Command-route tạo `6` progress panel ở các mốc `5/5/20/5/35/50%` vì không có
+  message đích để edit. Correction giữ đúng một message: lần đầu gửi, mọi mốc sau
+  chỉ edit; edit lỗi không được fallback thành panel mới.
+- Minimal source change: terminal-empty bound `2 -> 3`; đúng một correction CAS thứ
+  hai chỉ khi failure là Gemini HTTP `200`, word/speaker/mapped đều `0`, no-charge,
+  no-output và `AUTO_CAST_MANUAL_REQUIRED`. Mọi failure khác hoặc correction kế tiếp
+  vẫn fail-closed; không tạo job thứ hai.
+- TDD: RED `3 failed in 609.21s`; exact GREEN `3 passed in 6.56s`; hai module trực
+  tiếp `36 passed in 7.98s`; protected multi/exact-two/audio `68 passed in 12.28s`;
+  full compile changed Python exit `0`. Hai hash exact-two giữ nguyên
+  `DE93620F...145B` và `94748DEF...1177E`. LIVE MP4 vẫn chưa được tuyên bố PASS
+  trước deploy và same-job correction.
+- Pre-merge review RED thêm `17 failed, 8 passed in 8.64s`: missing no-charge/
+  no-output fields còn bị coi là an toàn và nonempty-invalid annotation bị đồng
+  nhất với terminal-empty. Correction yêu cầu mọi field safety có mặt với giá trị
+  exact, không có artifact/delivery message/path; service lưu bounded raw
+  `word_info` count + terminal-empty bool. Review GREEN `25 passed in 563.13s`;
+  expanded direct/protected `126 passed in 9.39s`.
