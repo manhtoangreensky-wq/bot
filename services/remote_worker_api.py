@@ -4629,6 +4629,308 @@ def complete_remote_worker_job(
     return completed
 
 
+def _controlled_fallback_submit_receipt(
+    payload: dict[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    current = dict(payload or {})
+    raw_receipts = current.get("controlled_fallback_submit_receipts_by_scene")
+    receipts = {
+        str(key): dict(value)
+        for key, value in (
+            raw_receipts.items() if isinstance(raw_receipts, dict) else []
+        )
+        if isinstance(value, dict)
+    }
+    consumed = next(
+        (
+            dict(value)
+            for value in receipts.values()
+            if str(value.get("authorization_state") or "") == "consumed"
+        ),
+        {},
+    )
+    scene_index = _safe_int(
+        current.get("fallback_scene_index")
+        or consumed.get("scene_index"),
+        0,
+    )
+    scene_tasks = [
+        dict(item)
+        for item in (
+            current.get("scene_tasks")
+            or current.get("provider_scene_tasks")
+            or []
+        )
+        if isinstance(item, dict)
+    ]
+    target = next(
+        (
+            item
+            for item in scene_tasks
+            if _safe_int(item.get("scene_index") or item.get("scene_id"), 0)
+            == scene_index
+        ),
+        {},
+    )
+    attempts = [
+        dict(item)
+        for key in (
+            "provider_attempts",
+            "provider_fallback_attempts",
+            "fallback_provider_attempts",
+        )
+        for item in (current.get(key) or [])
+        if isinstance(item, dict)
+        and str(item.get("provider") or item.get("provider_name") or "")
+        == "key4u_video"
+    ]
+    submit_source = str(
+        current.get("fallback_submit_source")
+        or current.get("provider_submit_source")
+        or current.get("submit_source")
+        or ""
+    ).strip()
+    idempotency_key = str(
+        current.get("fallback_idempotency_key")
+        or consumed.get("idempotency_key")
+        or ""
+    ).strip()
+    target_is_attempt = bool(
+        str(target.get("provider") or target.get("selected_provider") or "")
+        == "key4u_video"
+        and _safe_int(
+            target.get("fallback_count")
+            or target.get("provider_fallback_count"),
+            0,
+        )
+        >= 1
+    )
+    exact_attempt = bool(
+        current.get("recovery_existing_tasks_only")
+        and current.get("claim_terminal_suppressed_for_controlled_fallback")
+        and submit_source
+        in {
+            "public_confirmed_scene_fallback_once",
+            "worker_poll_existing_task",
+        }
+        and current.get("provider_submit_called") is True
+        and scene_index > 0
+        and idempotency_key
+        and (
+            current.get("fallback_submit_attempted") is True
+            or target_is_attempt
+            or attempts
+        )
+        and (target_is_attempt or attempts)
+    )
+    if not consumed and not exact_attempt:
+        return current, {}
+
+    if not consumed:
+        first_attempt = attempts[0] if attempts else {}
+        task_id = str(
+            first_attempt.get("provider_task_id")
+            or first_attempt.get("provider_video_id")
+            or first_attempt.get("task_id")
+            or target.get("provider_task_id")
+            or target.get("provider_video_id")
+            or target.get("active_task_id")
+            or target.get("task_id")
+            or ""
+        ).strip()
+        task_declared = bool(
+            current.get("provider_task_id_saved")
+            or first_attempt.get("task_id_present")
+        )
+        task_present = bool(task_declared and task_id)
+        http_status = max(
+            _safe_int(
+                current.get("provider_submit_http_status")
+                or current.get("provider_http_status"),
+                0,
+            ),
+            _safe_int(
+                first_attempt.get("submit_http_status")
+                or first_attempt.get("provider_http_status")
+                or first_attempt.get("http_status"),
+                0,
+            ),
+        )
+        http_sent = bool(
+            current.get("provider_http_request_sent")
+            or first_attempt.get("provider_http_request_sent")
+        )
+        consumed = {
+            "scene_index": scene_index,
+            "provider": "key4u_video",
+            "submit_source": submit_source,
+            "idempotency_key": idempotency_key,
+            "submit_called": True,
+            "provider_http_request_sent": http_sent,
+            "http_status": http_status,
+            "submit_accepted": bool(
+                current.get("submit_accepted")
+                or first_attempt.get("submit_accepted")
+            ),
+            "task_id_present": task_present,
+            "provider_task_id": task_id if task_present else "",
+            "fallback_count_before_submit": _safe_int(
+                current.get("fallback_count_before_submit"), 0
+            ),
+            "fallback_count_after_submit": 1,
+            "authorization_state": "consumed",
+            "submit_evidence_state": (
+                "task_accepted"
+                if task_present
+                else (
+                    "http_attempt_without_task"
+                    if http_sent or http_status > 0
+                    else "ambiguous_submit_called_without_transport_receipt"
+                )
+            ),
+            "blocker": str(
+                current.get("provider_error")
+                or current.get("blocker")
+                or ""
+            )[:160],
+            "recorded_at": video_project_queue.now_text(),
+        }
+        receipts[str(scene_index)] = consumed
+
+    receipt_scene = _safe_int(consumed.get("scene_index"), 0)
+    task_id = str(consumed.get("provider_task_id") or "").strip()
+    task_present = bool(consumed.get("task_id_present") and task_id)
+    raw_counts = current.get("fallback_count_by_scene")
+    counts = {
+        str(key): _safe_int(value, 0)
+        for key, value in (
+            raw_counts.items() if isinstance(raw_counts, dict) else []
+        )
+    }
+    counts[str(receipt_scene)] = max(1, counts.get(str(receipt_scene), 0))
+    current.update(
+        {
+            "controlled_fallback_submit_receipts_by_scene": receipts,
+            "controlled_fallback_authorization_state": "consumed",
+            "controlled_fallback_retry_blocked": True,
+            "controlled_fallback_retry_block_reason": "controlled_fallback_authorization_consumed",
+            "fallback_count": max(1, _safe_int(current.get("fallback_count"), 0)),
+            "fallback_count_before_submit": 1,
+            "fallback_count_by_scene": counts,
+            "fallback_submit_attempted": True,
+            "fallback_used": task_present,
+            "provider_fallback_attempted": True,
+            "provider_submit_called": True,
+            "provider_http_request_sent": bool(
+                consumed.get("provider_http_request_sent")
+            ),
+            "provider_submit_http_status": _safe_int(
+                consumed.get("http_status"), 0
+            ),
+            "submit_accepted": bool(consumed.get("submit_accepted")),
+            "provider_task_id_saved": task_present,
+            "fallback_allowed": False,
+            "controlled_fallback_allowed": False,
+            "fallback_provider_candidate": "",
+            "fallback_provider_order": [],
+            "fallback_block_reason": "controlled_fallback_authorization_consumed",
+            "charged_xu": 0,
+            "charge": 0,
+            "wallet_charge_recorded": False,
+        }
+    )
+
+    for scene in scene_tasks:
+        if _safe_int(scene.get("scene_index") or scene.get("scene_id"), 0) != receipt_scene:
+            continue
+        scene.update(
+            {
+                "provider": "key4u_video",
+                "fallback_count": 1,
+                "fallback_count_before_submit": 1,
+                "provider_fallback_count": 1,
+                "fallback_submit_attempted": True,
+                "fallback_allowed": False,
+                "controlled_fallback_allowed": False,
+                "fallback_provider_candidate": "",
+                "fallback_provider_order": [],
+                "fallback_block_reason": "controlled_fallback_authorization_consumed",
+            }
+        )
+        if task_present:
+            scene.update(
+                {
+                    "provider_task_id": task_id,
+                    "provider_video_id": task_id,
+                    "active_task_id": task_id,
+                    "task_id": task_id,
+                    "status": "provider_running",
+                    "actual_provider_payload_status": str(
+                        scene.get("actual_provider_payload_status") or "queued"
+                    ),
+                    "failure_reason": "",
+                    "task_pollable": True,
+                    "submit_accepted": True,
+                }
+            )
+        else:
+            scene.update(
+                {
+                    "status": "failed",
+                    "failure_reason": str(
+                        current.get("provider_error")
+                        or current.get("blocker")
+                        or "controlled_fallback_submit_failed_without_task"
+                    ),
+                    "task_pollable": False,
+                    "submit_accepted": False,
+                }
+            )
+    current["scene_tasks"] = scene_tasks
+    current["provider_scene_tasks"] = scene_tasks
+
+    if task_present:
+        current.update(
+            {
+                "provider": "key4u_video",
+                "selected_provider": "key4u_video",
+                "provider_pending_provider": "key4u_video",
+                "provider_pending_task_id": task_id,
+                "provider_pending_video_id": task_id,
+                "provider_task_ids": [task_id],
+                "provider_video_ids": [task_id],
+                "continue_polling": True,
+                "provider_pending_deferred": True,
+                "provider_error": "provider_in_progress",
+                "blocker": "provider_in_progress",
+                "terminal_state": "final_rendering",
+                "final_decision": "continue_polling",
+            }
+        )
+    else:
+        terminal_reason = str(
+            current.get("provider_error")
+            or current.get("blocker")
+            or "controlled_fallback_submit_failed_without_task"
+        )[:160]
+        current.update(
+            {
+                "continue_polling": False,
+                "provider_pending_deferred": False,
+                "next_poll_scheduled": False,
+                "provider_error": terminal_reason,
+                "blocker": terminal_reason,
+                "terminal_state": "failed_no_charge",
+                "final_decision": "failed_no_charge",
+                "controlled_fallback_submit_failed_without_task": True,
+            }
+        )
+    return current, {
+        "consumed": True,
+        "task_id_present": task_present,
+        "failed_without_task": not task_present,
+    }
+
 def fail_remote_worker_job(
     conn: sqlite3.Connection,
     *,
@@ -4658,25 +4960,59 @@ def fail_remote_worker_job(
         diagnostic_payload["ok"] = False
         diagnostic_payload["worker_failed"] = True
         diagnostic_payload["worker_safe_error"] = scrub_secret_text(error)[:500]
+        diagnostic_payload, controlled_receipt = _controlled_fallback_submit_receipt(
+            {**existing, **diagnostic_payload}
+        )
         existing.update(diagnostic_payload)
         conn.execute("UPDATE video_jobs SET result_json=? WHERE id=?", (_json_dumps(existing), int(job_id)))
+    else:
+        diagnostic_payload = {}
+        controlled_receipt = {}
     pending_provider = bool(
         retryable
-        and isinstance(diagnostics, dict)
+        and diagnostic_payload
+        and not controlled_receipt.get("failed_without_task")
         and (
-            diagnostics.get("continue_polling")
-            or str(diagnostics.get("blocker") or diagnostics.get("provider_error") or "").strip() == "provider_in_progress"
+            diagnostic_payload.get("continue_polling")
+            or str(diagnostic_payload.get("blocker") or diagnostic_payload.get("provider_error") or "").strip() == "provider_in_progress"
             or "provider_in_progress" in error
         )
     )
     if pending_provider:
-        return video_project_queue.defer_video_job_for_provider_polling(
+        deferred = video_project_queue.defer_video_job_for_provider_polling(
             conn,
             job_id=int(job_id),
-            reason=str(diagnostics.get("provider_error") or diagnostics.get("blocker") or error or "provider_in_progress"),
-            diagnostics=diagnostics,
+            reason=str(diagnostic_payload.get("provider_error") or diagnostic_payload.get("blocker") or error or "provider_in_progress"),
+            diagnostics=diagnostic_payload,
         )
-    return video_project_queue.fail_video_job(conn, job_id=int(job_id), error=error, retry=bool(retryable))
+        if controlled_receipt.get("consumed"):
+            deferred_job = video_project_queue.get_video_render_job(conn, int(job_id))
+            deferred_payload = _json_loads(
+                deferred_job.get("result_json") if deferred_job else "",
+                {},
+            )
+            stabilized_payload, _ = _controlled_fallback_submit_receipt(
+                deferred_payload if isinstance(deferred_payload, dict) else {}
+            )
+            conn.execute(
+                "UPDATE video_jobs SET result_json=? WHERE id=?",
+                (_json_dumps(stabilized_payload), int(job_id)),
+            )
+            conn.commit()
+            deferred["job"] = video_project_queue.get_video_render_job(
+                conn, int(job_id)
+            )
+        return deferred
+    return video_project_queue.fail_video_job(
+        conn,
+        job_id=int(job_id),
+        error=str(
+            diagnostic_payload.get("provider_error")
+            or diagnostic_payload.get("blocker")
+            or error
+        ),
+        retry=bool(retryable and not controlled_receipt.get("consumed")),
+    )
 
 
 def save_uploaded_result(upload_root: str | Path, *, job_id: int, filename: str, content: bytes) -> str:

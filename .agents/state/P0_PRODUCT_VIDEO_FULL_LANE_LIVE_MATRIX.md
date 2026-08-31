@@ -752,12 +752,27 @@ starting the next.
   11 deselected in 5.72s`; guard inverse `3 passed`; focused `83 passed in
   17.30s`; combined `206 passed, 1 exact baseline deselected in 34.58s`; full
   compile exit `0`.
-- [ ] Ship provider-transition correction, restore same job from backup, then
-  resume the still-unconsumed scene-1 authorization. No upload/Confirm/new job/
-  ShopAIKey resubmit.
-- [ ] Ship hydration correction, restore the same backed-up job state, then start
-  worker once more under the still-unconsumed scene-1 authorization. No upload,
-  Confirm, new job or ShopAIKey resubmit.
+- [x] Provider-transition correction shipped as PR #953, squash SHA
+  `5ebc665ef8eb4fc291e783ce37290c98fbb33859`; deploy run `33411801263`
+  SUCCESS in `23m29s`. SubDub #954 runtime `36c5d327...` contains PR #953 by
+  ancestry; bot/worker tracked diff `0`, services active and Owner worker inactive.
+- [-] CAS v4 restored the same job with backup SHA `a0b9e1a5...`, mode `0600`.
+  The next worker tick crossed the controlled transition and transiently reported
+  `provider_submit_called=true`/scene-1 fallback count `1`, then a later ShopAIKey
+  reconcile erased the Key4U attempt receipt and restored the old 37-character task
+  hash. Provider usage stayed `0`, but paid-call evidence is ambiguous, so the exact
+  one-call authorization is treated as consumed and worker was stopped. No CAS,
+  restart or paid retry is allowed under the old authorization.
+- [x] Submit-receipt RED `2 failed`; production-shape/poll-survival/retry-lock
+  GREEN `4 passed`; focused fail/defer/restart/spend `71 passed`; combined
+  `210 passed, 1 exact baseline deselected in 26.97s`; full compile exit `0`.
+- [x] Rebased cleanly onto SubDub #955 exact main `832681d9...`; post-rebase
+  focused `71 passed in 513.19s`, combined `210 passed, 1 exact baseline
+  deselected in 27.64s`, full compile exit `0`; no overlapping file.
+- [ ] Ship receipt persistence only. After deploy, persist the current ambiguous
+  scene-1 receipt as consumed/failed-no-charge without provider call. A new paid
+  attempt requires a new exact Owner authorization; ShopAIKey resubmit remains
+  forbidden.
 - [ ] Poll cadence respects `next_poll_at`; poll-only claims do not increase attempts.
 - [ ] Only scene 1 may use the controlled Key4U fallback; scene 2 keeps its own
   product-correct provider/task authority.
@@ -777,6 +792,29 @@ starting the next.
   charged Xu `0`, transaction and credit-event deltas `0`.
 - [ ] Mark `PV2-R01 LOCKED_LIVE_PASS`; freeze its code and only then open the next
   active representative in Strategy V2.
+
+### SPEC-04I: Compatible Product Add-on — SubDub Auto 2-Speaker
+
+> Pending until `SPEC-04H.9` is terminal. This spec does not reopen or modify any
+> lane/product already marked `LOCKED_LIVE_PASS`.
+
+- [ ] Audit every active Product Video lane by media semantics. Show Auto 2-speaker
+  only where a source video/audio with dialogue exists; do not mechanically attach
+  it to text/image-only generation lanes.
+- [ ] Reuse the locked SubDub Auto 2-speaker contract unchanged: detect male/female,
+  translate, synthesize two voices and mux/deliver through the product's existing
+  Tail Add-on boundary. Product adapters may connect data, but SubDub engine/cast/
+  timing/mux/wallet code stays byte-locked.
+- [ ] Expose Auto multi-speaker only as a disabled/locked option with truthful copy
+  until SubDub Auto multi has a real MP4 LIVE PASS. It must have no provider route,
+  callback submit, price or wallet side effect while locked.
+- [ ] TDD compatibility, route/back/idempotency/Add-on materialization and no-cross-
+  product guards. Live-test one not-yet-PASS media-compatible Product Video lane;
+  prove male/female detection, translation, two-voice dub, final MP4, receipt/report
+  and Owner wallet delta `0` without retesting a locked product.
+- [ ] Only after that representative PASS, connect the same contract to remaining
+  compatible unfinished products, adapted to each product's own source/context;
+  never copy flow mechanically.
 
 ### SPEC-05: Distinct Two-Scene Product/Lane LIVE Matrix
 
