@@ -514,3 +514,27 @@ Receipt source rebased cleanly onto SubDub #955 exact main
 `13d9ae667752f972f12fd944f033d1640cfb7350`; post-rebase focused is `71 passed
 in 513.19s`, combined `210 passed, 1 exact baseline deselected in 27.64s`, and
 full compile exits `0`.
+
+## Job 28 receipt deploy and terminal lock
+
+PR #956 squash-merged exact SHA
+`95c8f1fee510a93d21dfdcba581976de561f81b9`; deploy run `33429546236`
+SUCCESS in `4m20s`. Bot and inactive Owner worker run the exact SHA; bot/web/nginx
+are active, health is OK and tracked diff is `0`.
+
+The no-provider receipt CAS was first rehearsed on a SQLite snapshot, then applied
+once to production. Backup is `/opt/toanaas/bot/delete/pv2-r01-job28-ambiguous-
+receipt-production-20260901T022707.json`, SHA `a89d4d5c...`, mode `0600`.
+Job/project/outbox are now `failed/failed/terminal_failed`. The durable receipt is
+`ambiguous_submit_called_without_transport_receipt`, authorization `consumed`,
+fallback counts scene 1/2 are `1/0`, attempts remain `40`, task-set SHA is unchanged,
+wallet remains `200/0`, transactions `0`, credit events `1`, provider usage `0`,
+charged Xu `0`, artifacts/delivery `0`. CAS provider calls and wallet mutations are
+both `0`.
+
+Do not reuse the old scene-1 authorization. Do not CAS, restart the Owner worker or
+call a provider until Owner supplies a new exact authorization for one replacement
+Key4U attempt on the existing job, including scene scope, no ShopAIKey resubmit,
+quote `144/144/144`, budget/cost `212/212` and charged Xu `0`. `PV2-R01` remains
+open until two clips, final MP4, Add-ons, receipt/report and zero-wallet acceptance
+all pass.
