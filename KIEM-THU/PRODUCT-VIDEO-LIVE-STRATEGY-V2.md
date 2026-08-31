@@ -149,6 +149,13 @@ The completed Tail UI and terminal engine seams remain byte-locked.
   - [x] Rebased cleanly onto SubDub #955 main `832681d9...`; post-rebase focused
     `71 passed in 513.19s`, combined `210 passed, 1 deselected in 27.64s`, compile
     `0`, no file overlap.
+  - [x] Receipt PR #956 deployed exact SHA `95c8f1fe...` via run `33429546236`
+    SUCCESS. No-provider CAS stored backup SHA `a89d4d5c...`, mode `0600`, and
+    terminalized the existing job as failed-no-charge with immutable ambiguity
+    receipt consumed, scene counts `[1,0]`, task/finance/output deltas `0`.
+  - [-] The old scene-1 authorization is consumed. Stop before any CAS/restart or
+    paid call. A new exact Owner authorization is required for one replacement
+    attempt; `PV2-R01` remains open and `V2-04`/`SPEC-04I` remain blocked behind it.
     `PV2-R01` stays open until real MP4/receipt/report/zero-wallet acceptance passes.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.

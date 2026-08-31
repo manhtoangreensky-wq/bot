@@ -769,6 +769,21 @@ starting the next.
 - [x] Rebased cleanly onto SubDub #955 exact main `832681d9...`; post-rebase
   focused `71 passed in 513.19s`, combined `210 passed, 1 exact baseline
   deselected in 27.64s`, full compile exit `0`; no overlapping file.
+- [x] Receipt persistence shipped as PR #956, squash SHA
+  `95c8f1fee510a93d21dfdcba581976de561f81b9`; deploy run `33429546236`
+  SUCCESS in `4m20s`. Bot and inactive Owner worker exact SHA; tracked diff `0`,
+  bot/web/nginx active and health OK.
+- [x] No-provider receipt CAS rehearsed then applied once. Production backup
+  `/opt/toanaas/bot/delete/pv2-r01-job28-ambiguous-receipt-production-
+  20260901T022707.json`, SHA `a89d4d5c...`, mode `0600`. Job/project/outbox are
+  `failed/failed/terminal_failed`; receipt is immutable
+  `ambiguous_submit_called_without_transport_receipt`, authorization `consumed`,
+  counts `[1,0]`, attempts `40`, task-set SHA unchanged, charged/provider usage/
+  wallet/artifact/delivery deltas `0`.
+- [-] `SPEC-04H.8` is blocked only at a new paid-action gate. The prior exact
+  scene-1 authorization is consumed and cannot be reused. No CAS/restart/provider
+  call may occur until Owner explicitly authorizes one replacement Key4U attempt
+  and its exact scene scope. `PV2-R01` remains open; no LIVE PASS is claimed.
 - [ ] Ship receipt persistence only. After deploy, persist the current ambiguous
   scene-1 receipt as consumed/failed-no-charge without provider call. A new paid
   attempt requires a new exact Owner authorization; ShopAIKey resubmit remains
