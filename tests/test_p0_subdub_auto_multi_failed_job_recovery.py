@@ -449,6 +449,145 @@ def test_failed_auto_multi_correction_rejects_nonempty_rejected_annotations(
     assert correction["reason"] == "recovery_already_used"
 
 
+def test_failed_auto_multi_legacy_observability_gap_needs_literal_and_wins_once(
+    tmp_path,
+    monkeypatch,
+):
+    db_path, _job, _source, source_sha256 = _seed_job(tmp_path, monkeypatch)
+    first = bot.claim_subdub_failed_auto_multi_recovery(
+        JOB_ID,
+        owner_user_id=OWNER_ID,
+        chat_id=OWNER_ID,
+        source_sha256=source_sha256,
+        target_language="English",
+        original_volume_percent=40,
+        dub_volume_percent=150,
+        confirm_paid=True,
+    )
+    failed = _terminal_empty_recovery_failure(first["job"])
+    failed.pop("multi_diarization_raw_annotation_count")
+    failed.pop("multi_diarization_terminal_empty")
+    _persist_recovery_job(db_path, failed)
+
+    ordinary = bot.claim_subdub_failed_auto_multi_recovery(
+        JOB_ID,
+        owner_user_id=OWNER_ID,
+        chat_id=OWNER_ID,
+        source_sha256=source_sha256,
+        target_language="English",
+        original_volume_percent=40,
+        dub_volume_percent=150,
+        confirm_paid=True,
+    )
+    assert ordinary["ok"] is False
+    assert ordinary["reason"] == "recovery_already_used"
+
+    override = bot.claim_subdub_failed_auto_multi_recovery(
+        JOB_ID,
+        owner_user_id=OWNER_ID,
+        chat_id=OWNER_ID,
+        source_sha256=source_sha256,
+        target_language="English",
+        original_volume_percent=40,
+        dub_volume_percent=150,
+        confirm_paid=True,
+        allow_legacy_observability_gap=True,
+    )
+    assert override["ok"] is True
+    assert override["claimed"] is True
+    assert override["job"]["internal_job_id"] == JOB_ID
+    assert override["job"]["auto_multi_recovery_attempt_count"] == 2
+    assert override["job"]["auto_multi_recovery_correction_attempt_count"] == 1
+    assert override["job"]["auto_multi_recovery_observability_override_used"] is True
+    assert (
+        override["job"]["auto_multi_recovery_observability_authority"]
+        == "owner_literal_legacy_gap"
+    )
+
+    failed_again = _terminal_empty_recovery_failure(override["job"])
+    failed_again.pop("multi_diarization_raw_annotation_count")
+    failed_again.pop("multi_diarization_terminal_empty")
+    _persist_recovery_job(db_path, failed_again)
+    duplicate = bot.claim_subdub_failed_auto_multi_recovery(
+        JOB_ID,
+        owner_user_id=OWNER_ID,
+        chat_id=OWNER_ID,
+        source_sha256=source_sha256,
+        target_language="English",
+        original_volume_percent=40,
+        dub_volume_percent=150,
+        confirm_paid=True,
+        allow_legacy_observability_gap=True,
+    )
+    assert duplicate["ok"] is False
+    assert duplicate["reason"] == "legacy_observability_override_not_allowed"
+
+
+def test_failed_auto_multi_legacy_gap_override_rejects_partial_raw_evidence(
+    tmp_path,
+    monkeypatch,
+):
+    db_path, _job, _source, source_sha256 = _seed_job(tmp_path, monkeypatch)
+    first = bot.claim_subdub_failed_auto_multi_recovery(
+        JOB_ID,
+        owner_user_id=OWNER_ID,
+        chat_id=OWNER_ID,
+        source_sha256=source_sha256,
+        target_language="English",
+        original_volume_percent=40,
+        dub_volume_percent=150,
+        confirm_paid=True,
+    )
+    failed = _terminal_empty_recovery_failure(first["job"])
+    failed.pop("multi_diarization_terminal_empty")
+    _persist_recovery_job(db_path, failed)
+
+    result = bot.claim_subdub_failed_auto_multi_recovery(
+        JOB_ID,
+        owner_user_id=OWNER_ID,
+        chat_id=OWNER_ID,
+        source_sha256=source_sha256,
+        target_language="English",
+        original_volume_percent=40,
+        dub_volume_percent=150,
+        confirm_paid=True,
+        allow_legacy_observability_gap=True,
+    )
+
+    assert result["ok"] is False
+    assert result["reason"] == "legacy_observability_override_not_allowed"
+
+
+@pytest.mark.parametrize("raw_state", ("complete", "partial"))
+def test_failed_auto_multi_legacy_gap_literal_rejects_first_recovery(
+    tmp_path,
+    monkeypatch,
+    raw_state,
+):
+    db_path, job, _source, source_sha256 = _seed_job(tmp_path, monkeypatch)
+    if raw_state == "complete":
+        job["multi_diarization_raw_annotation_count"] = 0
+        job["multi_diarization_terminal_empty"] = True
+    else:
+        job["multi_diarization_raw_annotation_count"] = 0
+    _persist_recovery_job(db_path, job)
+
+    result = bot.claim_subdub_failed_auto_multi_recovery(
+        JOB_ID,
+        owner_user_id=OWNER_ID,
+        chat_id=OWNER_ID,
+        source_sha256=source_sha256,
+        target_language="English",
+        original_volume_percent=40,
+        dub_volume_percent=150,
+        confirm_paid=True,
+        allow_legacy_observability_gap=True,
+    )
+
+    assert result["ok"] is False
+    assert result["reason"] == "legacy_observability_override_not_allowed"
+
+
 def test_failed_auto_multi_recovery_state_is_exact_and_not_receipt_resume(
     tmp_path,
     monkeypatch,
@@ -623,8 +762,25 @@ def test_failed_auto_multi_recovery_command_requires_exact_literal_and_args(
         "original_volume_percent": 40,
         "dub_volume_percent": 150,
         "confirm_paid": True,
+        "allow_legacy_observability_gap": False,
     }
     assert executions[0]["job_id"] == JOB_ID
+
+    legacy = SimpleNamespace(
+        args=[
+            JOB_ID,
+            SOURCE_SHA256,
+            "English",
+            "40",
+            "150",
+            "--confirm-paid",
+            "--confirm-observability-gap",
+        ]
+    )
+    asyncio.run(bot.cmd_subdub_recover_failed_auto_multi(update, legacy))
+    assert len(claims) == 2
+    assert claims[1][1]["allow_legacy_observability_gap"] is True
+    assert executions[1]["job_id"] == JOB_ID
 
 
 def test_failed_auto_multi_recovery_command_edits_one_progress_panel(

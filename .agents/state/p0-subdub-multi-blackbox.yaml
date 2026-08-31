@@ -69,7 +69,28 @@ latest_same_job_recovery_f22e5919:
     progress_edit_failure_sends_no_new_panel: true
     provider_calls_after_probe: 0
     wallet_mutations: 0
+    review_first_attempt_literal_red: 2 failed in 6.61s
+    review_first_attempt_literal_green: 4 passed in 556.37s
+    final_recovery_module: 30 passed in 5.49s
     next: fetch latest main; rebase; gate; one PR/deploy; rerun only this same job
+  legacy_observability_override:
+    runtime_before_override: 47f18beda7bca219a71f2562398f0e669a7ec279
+    durable_safety_explicit: true
+    both_raw_fields_missing: true
+    db_backfill_or_fabrication: false
+    literal: --confirm-observability-gap
+    ordinary_path_still_blocked: true
+    partial_raw_evidence_blocked: true
+    one_shot_marker: auto_multi_recovery_observability_override_used
+    red: 3 failed in 6.70s
+    exact_green: 3 passed in 4.76s
+    recovery_module: 28 passed in 5.66s
+    expanded_protected: 128 passed in 8.98s
+    post_rebase_protected: 128 passed in 561.56s
+    full_parser_compile: exit 0
+    provider_calls: 0
+    db_mutations: 0
+    wallet_mutations: 0
 
 latest_multi_live_failure_db4fffd7f6:
   public_job: DB4FFFD7F6

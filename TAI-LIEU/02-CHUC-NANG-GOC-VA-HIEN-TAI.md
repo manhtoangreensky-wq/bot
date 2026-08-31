@@ -461,3 +461,13 @@ Pre-merge review bổ sung explicit safety + raw annotation authority: missing f
 artifact/message evidence hoặc nonempty rejected annotations đều không được correction.
 RED `17 failed, 8 passed in 8.64s`; GREEN `25 passed in 563.13s`; expanded
 `126 passed in 9.39s`.
+
+Legacy job failure trước raw-observability deploy không được coi là terminal-empty.
+Một Owner literal riêng chỉ thừa nhận **khoảng trống bằng chứng**, không backfill giá
+trị raw; cả hai field phải cùng thiếu và marker chỉ dùng một lần. RED `3 failed in
+6.70s`; GREEN `3 passed in 4.76s`; expanded `128 passed in 8.98s`.
+Post-rebase: `128 passed in 561.56s`; full compile exit `0`.
+
+Literal legacy ở first attempt bị review chặn: complete/partial raw evidence không
+được biến thành ordinary CAS. RED `2 failed in 6.61s`; GREEN `4 passed in
+556.37s`; full recovery module `30 passed`; compile `0`.
