@@ -843,3 +843,22 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
   compile exit `0`. Review RED mixed malformed `1 failed in 6.89s`; GREEN
   `3 passed in 7.27s`; final combined `111 passed in 9.94s`; compile `0`.
   Chưa có LIVE MP4 PASS.
+## Bổ sung Product Video job #28 claim/poll authority — 31/08/2026
+
+- Worker-context PR #943 đã deploy; bot/Owner worker được đồng bộ ở
+  `1b25926257634545436dd8bf8aea5af005d6e4ab`. Query-only trước start PASS:
+  job `28`, project `32`, outbox `27`, quote `144/144/144`, budget/cost
+  `212/212`, đúng một Key4U slot scene 1, side effects `0`.
+- Worker PID `830225` được start theo exact Owner authorization rồi dừng khi attempts
+  tăng `8 -> 40`. Provider defer đã lưu `next_poll_at`, nhưng claim scan không đọc
+  cổng thời gian nên re-claim ngay. Root lặp ShopAIKey `provider_in_progress`;
+  metadata cả hai scene đổi sang Key4U dù chỉ scene 1 được cấp quyền. Artifact,
+  delivery, provider-usage và transaction vẫn `0`; credit events `1`; wallet
+  `200/0`; charged Xu `0`.
+- Bẫy vận hành: `next_poll_at` không chỉ là metadata hiển thị; worker claim phải
+  coi đó là admission gate. Claim-scoped fallback phải khớp cả root scene index,
+  scene marker và Key4U candidate; exact quote một mình không cấp quyền cho scene
+  khác. RED `2 failed in 773.83s`; GREEN `2 passed in 6.00s`; focused `33 passed`;
+  protected `165 passed`; final combined sau mọi self-review `206 passed, 1 baseline
+  deselected in 28.88s`;
+  full compile/YAML/diff/scope/secret exit `0`.

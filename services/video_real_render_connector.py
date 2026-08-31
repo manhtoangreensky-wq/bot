@@ -1690,8 +1690,22 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         if "key4u_video" in runtime_candidates and current_provider != "key4u_video":
             fallback_chain.append("key4u_video")
             runtime_fallback_candidate_recovered = True
+    claim_scoped_recovery = bool(
+        job.get("recovery_existing_tasks_only")
+        and job.get("claim_terminal_suppressed_for_controlled_fallback")
+    )
+    claim_scoped_scene_matches = bool(
+        not claim_scoped_recovery
+        or (
+            _safe_int(job.get("fallback_scene_index"), 0) == scene_index
+            and scene_task.get("controlled_fallback_allowed") is True
+            and str(scene_task.get("fallback_provider_candidate") or "").strip()
+            == "key4u_video"
+        )
+    )
     controlled_fallback_allowed = bool(
         automatic_fallback_forbidden
+        and claim_scoped_scene_matches
         and exact_quote_preserved
         and public_confirmed
         and invoice_confirmed

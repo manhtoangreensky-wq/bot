@@ -1,5 +1,5 @@
 task_id: P0_PRODUCT_VIDEO_V2_PV2_R01
-phase: PV2_R01_JOB28_WORKER_CONTEXT_LOCAL_READY
+phase: PV2_R01_JOB28_PROVIDER_AUTHORITY_LOOP_POST_REBASE_GATE_GREEN
 pointer: V2-03/PV2-R01
 base_sha: 3d16cf60511318d2c5eb7c799ecbee8c07631c1b
 goal: Restore the complete existing content flow for all four Video Trend lanes, then live the most complex upload lane once at tier 400 with two real scenes, strict subtitle/transition Add-ons, durable MP4 receipt, customer report and zero Owner wallet mutation.
@@ -594,15 +594,53 @@ pv2_r01_job28_tier400_fallback_budget:
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
+pv2_r01_job28_provider_authority_loop:
+  worker_context_pr: 943
+  worker_context_merge_sha: 252758be251a84ca2896207544f46180fb1e3d69
+  worker_context_deploy_run: 33317232271
+  runtime_bot_worker_sha_before_start: 1b25926257634545436dd8bf8aea5af005d6e4ab
+  query_only_preflight: PASS
+  owner_authorization: exactly one paid Key4U call for scene 1; no new job; no ShopAIKey resubmit; quote 144; budget cost cap 212; charged 0
+  worker_pid: 830225
+  live_attempts_before_after: [8, 40]
+  live_root_provider: shopaikey_video
+  live_root_error: provider_in_progress
+  live_scene_provider_after: [key4u_video, key4u_video]
+  live_scene_controlled_after: [false, false]
+  live_scene_fallback_count_after: [0, 0]
+  live_artifact_delivery_counts: [0, 0]
+  live_finance: transactions 0; credit events 1; provider usage 0; wallet 200/0; charged 0
+  worker_stop_state: inactive PID 0
+  root_causes:
+    - deferred provider next_poll_at was persisted but claim scan ignored it, causing immediate reclaims
+    - claim-scoped fallback_scene_index 1 did not constrain scene policy, so scene 2 was also eligible
+  red: 2 failed and 10 deselected in 773.83s
+  review_red: 1 failed and 11 deselected in 6.56s because scene candidate could fall back to root candidate
+  exact_green: 2 passed and 10 deselected in 6.00s
+  review_green: 2 passed and 10 deselected in 7.52s
+  focused_green: 33 passed in 9.19s
+  protected_green: 165 passed in 33.78s
+  strategy_verifier: 8 passed and 1 exact baseline Script fixture SHA failure
+  final_combined: 206 passed and 1 exact baseline deselected in 28.88s after all self-review refinements
+  full_compile: bot.py plus changed production and test files exit 0
+  yaml_diff_scope_secret: exit 0; exactly 10 scoped files; secret hits 0
+  production_scope: services/remote_worker_api.py and services/video_real_render_connector.py
+  self_review: Critical 0; Important 0; poll-only attempt exemption requires existing provider task
+  local_commit_created: true
+  post_rebase_base_sha: 8cf77fef403a72e7a74a25db340f0932df25a4e4
+  post_rebase_head_before_evidence_amend: 164cb43
+  post_rebase_regression: 206 passed and 1 exact baseline deselected in 569.78s
+  post_rebase_full_compile: exit 0
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  live_pass: false
 next_action: >-
-  Finish compile/YAML/diff/scope review, commit and ship the controlled-fallback
-  worker-context hydration overlay, deploy and sync the stopped Owner Product Video
-  worker to the exact merge SHA. Rerun query-only production dry-run, then prepare
-  a new backed-up CAS from the current failed attempts=8 state for existing job
-  28/project 32/outbox 27 only. Do not upload, confirm, create a new project/job/outbox,
-  resubmit ShopAIKey primary or change the customer quote. Start the worker only
-  after post-CAS dry-run proves quote 144/144/144, budget/cost 212/212, one-scene
-  Key4U candidate, idempotency match, no delivery/no charge and side effects 0.
-  Materialize a real two-scene MP4, validate cover-fit 9:16 plus subtitle/transition/
-  audio, persist receipt and customer report, prove zero wallet delta, and only
-  then mark PV2-R01 LOCKED_LIVE_PASS.
+  Ship only the post-rebase claim poll-backoff plus claim-scoped scene authority
+  correction. Keep the worker inactive and do not
+  roll back production DB until post-deploy read-only forensics classify whether
+  the existing 37-character task identities changed. Rebuild one backed-up CAS for
+  existing job 28/project 32/outbox 27 only, preserving quote 144/144/144,
+  budget/cost 212/212, one Key4U scene-1 slot and no ShopAIKey resubmit. Require a
+  prove the exact existing Owner authorization remains unconsumed before any
+  worker/provider restart; otherwise stop. Then
+  materialize and validate the real two-scene MP4/receipt/report/zero-wallet proof.

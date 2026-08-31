@@ -680,3 +680,197 @@ def test_live28_worker_payload_preserves_controlled_fallback_context(
         }
     )
     assert "controlled_fallback_worker_context" not in normal_payload
+
+
+def test_live28_controlled_recovery_authorizes_only_locked_scene(monkeypatch):
+    monkeypatch.setenv("VIDEO_PROVIDER_NOT_START_STALL_SECONDS", "60")
+    monkeypatch.setattr(
+        connector,
+        "real_video_provider_readiness",
+        lambda *_args, **_kwargs: {
+            "ok": True,
+            "ready_provider_order": ["shopaikey_video", "key4u_video"],
+            "providers": [],
+        },
+    )
+    scenes = [
+        {
+            **_stalled_primary_scene(),
+            "scene_index": index,
+            "provider_task_id": f"shop-task-live28-{index}",
+            "provider_video_id": f"shop-task-live28-{index}",
+            "active_task_id": f"shop-task-live28-{index}",
+            "request_job_id": f"28-{index}",
+            "controlled_fallback_allowed": index == 1,
+            "fallback_provider_candidate": "key4u_video" if index == 1 else "",
+            "fallback_scene_index": 1 if index == 1 else 0,
+        }
+        for index in (1, 2)
+    ]
+    job = _confirmed_exact_quote_job(
+        id=28,
+        job_id=28,
+        scene_count=2,
+        provider_order=["shopaikey_video", "key4u_video"],
+        configured_provider_chain=["shopaikey_video", "key4u_video"],
+        recovery_existing_tasks_only=True,
+        fallback_scene_index=1,
+        fallback_provider_candidate="key4u_video",
+        controlled_fallback_allowed=True,
+        claim_terminal_suppressed_for_controlled_fallback=True,
+        scene_tasks=scenes,
+        provider_budget_xu=212,
+        fallback_provider_cost_xu=212,
+        automatic_retry_allowed=False,
+        automatic_resubmit_allowed=False,
+        provider_submit_allowed=False,
+    )
+
+    scene_one = connector.product_video_scene_stall_policy(job, scenes[0], 1)
+    scene_two = connector.product_video_scene_stall_policy(job, scenes[1], 2)
+    scene_one_without_candidate = connector.product_video_scene_stall_policy(
+        job,
+        {**scenes[0], "fallback_provider_candidate": ""},
+        1,
+    )
+
+    assert scene_one["controlled_fallback_allowed"] is True
+    assert scene_one["fallback_allowed"] is True
+    assert scene_one["fallback_provider_candidate"] == "key4u_video"
+    assert scene_two["controlled_fallback_allowed"] is False
+    assert scene_two["fallback_allowed"] is False
+    assert scene_two["fallback_block_reason"] == "automatic_fallback_forbidden"
+    assert scene_one_without_candidate["controlled_fallback_allowed"] is False
+    assert scene_one_without_candidate["fallback_allowed"] is False
+
+
+def test_live28_deferred_provider_poll_waits_until_next_poll_at(
+    monkeypatch,
+    tmp_path,
+):
+    conn = sqlite3.connect(tmp_path / "live28-next-poll.db")
+    conn.row_factory = sqlite3.Row
+    queue.ensure_video_project_queue_schema(conn)
+    project = queue.create_video_project(
+        conn,
+        user_id=7126457028,
+        profile_id="video_trend",
+        topic="PV2-R01 bounded provider poll",
+        asset_pack={
+            "source": "product_video",
+            "product_type": "video_trend",
+            "render_mode": "real",
+            "provider_call": True,
+            "admin_only": True,
+            "no_charge": True,
+            "public_user": False,
+        },
+    )
+    project_id = int(project["project_id"])
+    queue.update_video_project(
+        conn,
+        project_id,
+        status="queued_for_worker",
+        is_confirmed=1,
+        scene_count=2,
+        invoice_json={
+            "scene_count": 2,
+            "total_xu": 144,
+            "admin_only": True,
+            "no_charge": True,
+            "public_user_confirmed": True,
+        },
+    )
+    job = queue.enqueue_video_render_job(
+        conn,
+        project_id=project_id,
+        user_id=7126457028,
+        max_attempts=3,
+    )
+    job_id = int(job["id"])
+    queue.update_video_project(conn, project_id, job_id=job_id)
+    scene_tasks = [
+        {
+            "scene_index": index,
+            "request_job_id": f"{job_id}-{index}",
+            "provider": "shopaikey_video",
+            "provider_task_id": f"shop-task-live28-{index}",
+            "active_task_id": f"shop-task-live28-{index}",
+            "status": "provider_running",
+            "actual_provider_payload_status": "IN_PROGRESS",
+            "provider_status_payload_source": "shopaikey.data.status",
+            "fallback_count": 0,
+            "clip_valid": False,
+        }
+        for index in (1, 2)
+    ]
+    payload = {
+        **_confirmed_exact_quote_job(
+            id=job_id,
+            job_id=job_id,
+            project_id=project_id,
+        ),
+        "scene_count": 2,
+        "scene_tasks": scene_tasks,
+        "provider_scene_tasks": scene_tasks,
+        "recovery_existing_tasks_only": True,
+        "provider_pending_deferred": True,
+        "continue_polling": True,
+        "provider_error": "provider_in_progress",
+        "blocker": "provider_in_progress",
+        "next_poll_at": "2026-08-31 16:35:22",
+        "next_poll_scheduled_at": "2026-08-31 16:35:22",
+        "automatic_retry_allowed": False,
+        "automatic_resubmit_allowed": False,
+        "automatic_fallback_allowed": False,
+        "provider_submit_allowed": False,
+    }
+    conn.execute(
+        "UPDATE video_jobs SET status='queued',attempts=8,result_json=? WHERE id=?",
+        (json.dumps(payload), job_id),
+    )
+    outbox = queue.ensure_product_video_dispatch_outbox(
+        conn,
+        job_id=job_id,
+        project_id=project_id,
+        scene_indexes=[1, 2],
+    )
+    conn.execute(
+        "UPDATE video_dispatch_outbox SET dispatch_status='acknowledged',acknowledged_at=CURRENT_TIMESTAMP WHERE outbox_id=?",
+        (int(outbox["outbox_id"]),),
+    )
+    conn.commit()
+    monkeypatch.setattr(
+        remote_worker_api,
+        "_product_video_runtime_eligibility",
+        lambda *_args, **_kwargs: {
+            "runtime_candidate_keys": ["shopaikey_video"],
+            "eligible_provider_keys": ["shopaikey_video"],
+            "worker_local_ready_provider_keys": ["shopaikey_video", "key4u_video"],
+            "contract_valid_provider_chain": ["shopaikey_video", "key4u_video"],
+            "provider_submit_allowed": False,
+        },
+    )
+
+    early = remote_worker_api._claim_video_render_candidate(
+        conn,
+        worker_id="live28-owner-worker",
+        owner_product_video_only=True,
+        public_enabled=False,
+        now=datetime(2026, 8, 31, 16, 35, 10),
+    )
+    after_early = queue.get_video_render_job(conn, job_id)
+    due = remote_worker_api._claim_video_render_candidate(
+        conn,
+        worker_id="live28-owner-worker",
+        owner_product_video_only=True,
+        public_enabled=False,
+        now=datetime(2026, 8, 31, 16, 35, 23),
+    )
+
+    assert early == {}
+    assert after_early["status"] == "queued"
+    assert int(after_early["attempts"]) == 8
+    assert int(due["id"]) == job_id
+    assert int(queue.get_video_render_job(conn, job_id)["attempts"]) == 8
+    conn.close()

@@ -3190,6 +3190,23 @@ def _claim_video_render_candidate(
                 result_payload = video_project_queue._json_loads(job.get("result_json"), {})
                 if not isinstance(result_payload, dict):
                     result_payload = {}
+                next_poll_at = _parse_queue_time(
+                    result_payload.get("next_poll_at")
+                    or result_payload.get("next_poll_scheduled_at")
+                )
+                if (
+                    result_payload.get("provider_pending_deferred")
+                    and result_payload.get("continue_polling")
+                    and next_poll_at is not None
+                    and next_poll_at > current_dt
+                ):
+                    continue
+                provider_poll_resume = bool(
+                    result_payload.get("provider_pending_deferred")
+                    and result_payload.get("continue_polling")
+                    and next_poll_at is not None
+                    and next_poll_at <= current_dt
+                )
                 preclaim_runtime_eligibility = _product_video_runtime_eligibility(
                     job,
                     result_payload,
@@ -3494,6 +3511,9 @@ def _claim_video_render_candidate(
                     job["result_json"] = video_project_queue._json_dumps(result_payload)
                     job["scene_claim_state"] = claim_state
                     job["dispatch_outbox"] = dispatch_outbox
+                    job["provider_poll_resume"] = bool(
+                        provider_poll_resume and has_existing_provider_task
+                    )
                     chosen = job
                     chosen_project = project
                     break
@@ -3594,9 +3614,10 @@ def _claim_video_render_candidate(
             progress_message = "provider_in_progress"
             result_payload.update(telemetry)
             result_json_value = video_project_queue._json_dumps(result_payload)
+        attempt_increment = 0 if chosen.get("provider_poll_resume") else 1
         cursor = conn.execute(
             """UPDATE video_jobs
-               SET status='processing', attempts=COALESCE(attempts,0)+1, locked_by=?, locked_at=?,
+               SET status='processing', attempts=COALESCE(attempts,0)+?, locked_by=?, locked_at=?,
                    lease_expires_at=?, started_at=COALESCE(started_at, ?), updated_at=?,
                    progress_percent=?, progress_message=?, result_json=?
                WHERE id=? AND job_type=?
@@ -3608,6 +3629,7 @@ def _claim_video_render_candidate(
                       )
                  )""",
             (
+                attempt_increment,
                 sanitize_worker_id(worker_id),
                 current,
                 lease_expires,

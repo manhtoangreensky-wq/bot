@@ -594,12 +594,12 @@ PV2-R01 live failure-loop on runtime `02c1c4aa0533788816d740245ba9812bf4f63ea0`:
   for suppressed controlled existing-task recovery. Worker-to-scene `1 passed`,
   claim/hydrate `2 passed`; expanded branch `97 passed + 4 failures` vs clean
   same 4, focused branch `61 passed + 2` vs clean same 2, `NEW_FAILURES=0`.
-- [ ] Ship that overlay, then use existing controlled
-  fallback on **job #28 only**: poll old ShopAIKey tasks, submit Key4U VEO at most once
-  per failed scene using existing idempotency keys. No new upload, Confirm,
-  project/job/outbox, primary submit or price change. Verify MP4, cover-fit 9:16,
-  subtitle, transition, audio, receipt, report and zero-wallet before
-  `PV2-R01 LOCKED_LIVE_PASS`.
+- [x] Worker-context overlay shipped as PR #943, squash `252758be...`, deploy
+  `33317232271` SUCCESS. Bot and stopped Owner worker were synchronized/compiled at
+  `1b259262...`; query-only quote/budget/cost/one-scene authority remained exact.
+- [-] Continue only `SPEC-04H` below. Do not start `SPEC-05`, another product,
+  quality row, upload, Confirm, project/job/outbox, ShopAIKey submit or price change
+  before `SPEC-04H.9` is terminal.
 - [x] Owner approved `D:\TOANAAS\video AI tham khảo` as the fixture library for
   later Product Video rows. Measure hash/metadata per selected file; do not swap
   the active PV2-R01 fixture during its failure loop.
@@ -631,7 +631,123 @@ Current source evidence:
 - Final `py_compile bot.py` exit `0`; `git diff --check` exit `0`; forbidden-path,
   secret-value and completed UI hunk hits `0`.
 
+### SPEC-04H: PV2-R01 Job #28 Poll and Scene Authority
+
+Only this spec is active. Ordered sub-specs are blocking gates; finish each before
+starting the next.
+
+#### SPEC-04H.0 — Scope and protected locks
+
+- [x] Existing identity only: request `VID-20260829-D78AA3`, project `32`, job `28`,
+  outbox `27`, scenes `130/131`, fixture SHA prefix `784FBE5B`.
+- [x] Customer quote stays `144/144/144`; provider budget/cost cap stays `212/212`;
+  Owner charged Xu stays `0`.
+- [x] Product Video Edit, AI Edit, Long Video and all already-LIVE-PASS products are
+  protected. No code/test/live action for those products in this goal.
+- [x] Reuse Tail/engine/artifact/delivery code by contract, adapted to Trend upload
+  semantics; mechanical cross-product copying is forbidden.
+
+#### SPEC-04H.1 — Query-only preflight and bounded live start
+
+- [x] Bot/worker runtime synchronized at `1b259262...`; worker initially inactive.
+- [x] Query-only preflight proved one controlled Key4U slot for scene 1,
+  idempotency match, other active Owner jobs `0`, artifacts `0`, side effects `0`.
+- [x] Exact Owner authorization limited paid Key4U to scene 1, no new job and no
+  ShopAIKey resubmit.
+
+#### SPEC-04H.2 — Live RED forensic and safe stop
+
+- [x] Worker PID `830225` was stopped when attempts rose `8 -> 40`.
+- [x] Durable RED: root looped ShopAIKey `provider_in_progress`; both scenes were
+  reclassified to Key4U metadata although only scene 1 was authorized; scene-level
+  controlled markers/fallback counts remained `false/0`.
+- [x] Artifact/delivery `0`; provider usage/transactions `0`; credit events `1`;
+  wallet `200/0`; charged Xu `0`. Worker final state inactive/PID 0.
+
+#### SPEC-04H.3 — TDD RED
+
+- [x] RED: claim-scoped scene 1 authority must not authorize scene 2.
+- [x] RED: provider-deferred job must remain idle before durable `next_poll_at`.
+- [x] RED: a due poll-only claim must not increment render attempts.
+- [x] Self-review RED: scene 1 cannot borrow a root Key4U candidate when its own
+  candidate marker is missing.
+- [x] Measured RED: initial pair `2 failed, 10 deselected in 773.83s`; poll-attempt
+  refinement `1 failed, 11 deselected in 8.45s`; missing scene candidate
+  `1 failed, 11 deselected in 6.56s`.
+
+#### SPEC-04H.4 — Minimal production fix
+
+- [x] `services/video_real_render_connector.py`: claim-scoped fallback requires
+  exact root scene index + scene controlled marker + scene-level Key4U candidate.
+- [x] `services/remote_worker_api.py`: skip early claim before `next_poll_at`; due
+  poll-only claim receives a lease without increasing attempts.
+- [x] Provider adapters, provider URLs/ENV, Tail, Add-ons, quality, quote, wallet,
+  artifact, delivery and other product routes unchanged.
+
+#### SPEC-04H.5 — Source verification and review
+
+- [x] Exact GREEN pair `2 passed, 10 deselected in 6.00s`; poll-attempt GREEN
+  `1 passed, 11 deselected in 6.60s`.
+- [x] Self-review exact pair GREEN `2 passed, 10 deselected in 7.52s`.
+- [x] Focused job28/controlled fallback/spend safety `33 passed`.
+- [x] Direct claim/defer/stall/scene authority blast radius `165 passed`.
+- [x] Final combined regression `206 passed, 1 exact baseline deselected in 35.28s`;
+  full compile exit `0`; YAML/diff/scope/secret gates clean.
+- [x] Final combined after all self-review refinements `206 passed, 1 exact baseline
+  deselected in 28.88s`; full compile exit `0`; YAML/diff/scope/secret gates clean.
+- [x] Exact self-review: Critical `0`, Important `0`; poll-only attempt exemption
+  additionally requires an existing provider task.
+- [x] One focused local commit created; remote ship waits for exact SubDub releases.
+
+#### SPEC-04H.6 — One source commit and ship
+
+- [x] One focused commit on `fix/product-video-job28-provider-authority-loop`.
+- [x] Rebased onto exact SubDub runtime/main `8cf77fef403a72e7a74a25db340f0932df25a4e4`;
+  pre-evidence-amend HEAD `164cb43`; post-rebase regression `206 passed, 1 exact
+  baseline deselected in 569.78s`; full compile exit `0`.
+- [ ] One PR, checks GREEN, squash merge, exact deploy run SUCCESS.
+- [ ] Bot and inactive Product Video worker exact merge SHA; worker heartbeat not
+  started before the next live authorization.
+
+#### SPEC-04H.7 — Post-deploy DB/task identity and backed-up CAS
+
+- [ ] Read-only compare current two 37-character task identities with pre-start
+  backup hashes; classify whether a Key4U submit already occurred without printing IDs.
+- [ ] Build/rehearse one CAS from current attempts/state; backup mode `0600` and SHA.
+- [ ] Post-CAS query-only proof: exact identity, one scene-1 Key4U authority, scene 2
+  preserved primary authority, next-poll gate, quote/budget/cost exact, artifacts/
+  delivery/charge absent and side effects `0`.
+- [ ] Treat the exact Owner authorization as unconsumed only if read-only evidence
+  proves Key4U submit/call count remained `0`; otherwise stop before restart.
+
+#### SPEC-04H.8 — Same-job live terminal
+
+- [ ] Start the inactive worker once; no upload/Confirm/new job/ShopAIKey submit.
+- [ ] Poll cadence respects `next_poll_at`; poll-only claims do not increase attempts.
+- [ ] Only scene 1 may use the controlled Key4U fallback; scene 2 keeps its own
+  product-correct provider/task authority.
+- [ ] Two distinct scene clips and one final MP4 terminal; otherwise stop at the
+  exact new RED and reopen only `SPEC-04H`.
+
+#### SPEC-04H.9 — Full product/add-on/artifact/delivery lock
+
+- [ ] Revalidate the complete Trend upload flow: analysis, content/profile, entity
+  details, style, requirements/context, plan, prompts, Add-on, Review, tier 400,
+  Invoice, Confirm and Status. Do not count a partial traversal as PASS.
+- [ ] Subtitle-source and transition `1/1` are requested, materialized, applied and
+  visibly present; missing Add-on list is empty.
+- [ ] MP4 is real two-scene cover-fit 9:16, H.264 + AAC, measured SHA/bytes/duration/
+  dimensions/first-last frames/scene boundary/loudness, with no black padding.
+- [ ] Exactly one Telegram MP4, receipt and customer report; delivery deduped;
+  charged Xu `0`, transaction and credit-event deltas `0`.
+- [ ] Mark `PV2-R01 LOCKED_LIVE_PASS`; freeze its code and only then open the next
+  active representative in Strategy V2.
+
 ### SPEC-05: Distinct Two-Scene Product/Lane LIVE Matrix
+
+> Historical table only under the V2 scope override. Do not execute Long Video or
+> Video Edit rows. Active product/lane order and distributed quality assignments
+> come only from `KIEM-THU/PRODUCT-VIDEO-LIVE-STRATEGY-V2.md`, after SPEC-04H.9.
 
 Each row needs a different scenario or fixture, exact request/project/job/outbox identity, two scene outputs, final MP4 SHA256/bytes/codec/dimensions/duration, audio evidence when requested, add-on requested/materialized/applied proof, Telegram delivery message id, `charged_xu=0`, zero wallet transaction delta, and no duplicate submit/delivery.
 
@@ -666,6 +782,7 @@ Each row needs a different scenario or fixture, exact request/project/job/outbox
 
 | Time (Asia/Saigon) | Spec | Evidence | Result |
 |---|---|---|---|
+| 2026-08-31 | PV2-R01 job28 provider-authority loop | PR #943 runtime synced; query preflight PASS; Owner start attempts 8->40 then worker stopped; both scenes wrongly opened to Key4U metadata; side effects 0; RED 2 failed -> GREEN 2 passed; focused 33; protected 165 | SOURCE GREEN; ship/deploy/new CAS still open |
 | 2026-08-30 | PV2-R01 job28 authority-repair RED/GREEN | PR #934 -> `ef81f6a...`; deploy `33290296142` SUCCESS; worker generation `4ab7fd...`; live blocker recovery `3/3`; RED 1 failed -> GREEN 1 passed; protected 242 and final 251 passed | SOURCE PASS; one repair ship/live still open |
 | 2026-08-28 | SPEC-04G ship/runtime | PR #917 -> `d5dc300...`; compile/deploy SUCCESS; bot+worker exact SHA | PASS |
 | 2026-08-28 | SPEC-04G live | Job #26 tier 400, Invoice/Confirm/Status, valid 2-scene 9:16 MP4, delivery 27652, 0 Xu/0 tx | QUALITY/ARTIFACT PASS |
