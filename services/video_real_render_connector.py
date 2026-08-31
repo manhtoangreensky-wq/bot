@@ -1703,6 +1703,9 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
             == "key4u_video"
         )
     )
+    if claim_scoped_recovery and not claim_scoped_scene_matches:
+        fallback_chain = []
+        runtime_fallback_candidate_recovered = False
     controlled_fallback_allowed = bool(
         automatic_fallback_forbidden
         and claim_scoped_scene_matches

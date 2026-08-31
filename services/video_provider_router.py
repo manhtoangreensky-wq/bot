@@ -859,6 +859,17 @@ def product_video_public_confirm_context(metadata: dict[str, Any] | None = None)
         )
     )
     fallback_count = _int_metadata(metadata.get("fallback_count") or metadata.get("provider_fallback_count"), 0)
+    if (
+        current_source
+        == PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_SCENE_FALLBACK_ONCE
+        and _truthy_metadata(metadata.get("fallback_submit_attempted"))
+        and str(metadata.get("fallback_idempotency_key") or "").strip()
+        and "fallback_count_before_submit" in metadata
+    ):
+        fallback_count = max(
+            0,
+            _int_metadata(metadata.get("fallback_count_before_submit"), 0),
+        )
     user_visible_price_xu = _int_metadata(
         metadata.get("user_visible_price_xu")
         or metadata.get("package_xu")

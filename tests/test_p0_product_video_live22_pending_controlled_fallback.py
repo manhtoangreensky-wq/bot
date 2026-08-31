@@ -9,6 +9,7 @@ import pytest
 
 import remote_worker
 from services import remote_worker_api
+from services import video_provider_router as router
 from services import video_real_render_connector as connector
 from services import video_project_queue as queue
 
@@ -624,6 +625,21 @@ def test_live28_worker_payload_preserves_controlled_fallback_context(
         captured["fallback_count_before_submit"] = request.metadata.get(
             "fallback_count_before_submit"
         )
+        captured["fallback_count"] = request.metadata.get("fallback_count")
+        captured["router_policy"] = router.product_video_controlled_fallback_policy(
+            "provider_timeout",
+            request.metadata,
+        )
+        captured["retry_router_policy"] = (
+            router.product_video_controlled_fallback_policy(
+                "provider_timeout",
+                {
+                    **request.metadata,
+                    "fallback_count": 2,
+                    "fallback_count_before_submit": 1,
+                },
+            )
+        )
         captured["fallback_idempotency_key"] = request.metadata.get(
             "fallback_idempotency_key"
         )
@@ -666,6 +682,14 @@ def test_live28_worker_payload_preserves_controlled_fallback_context(
     assert captured["provider_budget_xu"] == 212
     assert captured["fallback_provider_cost_xu"] == 212
     assert captured["fallback_count_before_submit"] == 0
+    assert captured["fallback_count"] == 1
+    assert captured["router_policy"]["fallback_submit_allowed"] is True
+    assert captured["router_policy"]["fallback_block_reason"] == ""
+    assert captured["retry_router_policy"]["fallback_submit_allowed"] is False
+    assert (
+        captured["retry_router_policy"]["fallback_block_reason"]
+        == "fallback_limit_reached"
+    )
     assert captured["fallback_idempotency_key"] == fallback_key
 
     normal_persisted = {
@@ -740,6 +764,9 @@ def test_live28_controlled_recovery_authorizes_only_locked_scene(monkeypatch):
     assert scene_two["controlled_fallback_allowed"] is False
     assert scene_two["fallback_allowed"] is False
     assert scene_two["fallback_block_reason"] == "automatic_fallback_forbidden"
+    assert scene_two["fallback_provider_candidate"] == ""
+    assert scene_two["fallback_provider_order"] == []
+    assert scene_two["fallback_idempotency_key"] == ""
     assert scene_one_without_candidate["controlled_fallback_allowed"] is False
     assert scene_one_without_candidate["fallback_allowed"] is False
 

@@ -116,9 +116,18 @@ The completed Tail UI and terminal engine seams remain byte-locked.
   - [x] After exact SubDub release, rebased onto main/runtime `8cf77fef...`.
     Post-rebase gate is `206 passed, 1 baseline deselected in 569.78s`; full
     compile exit `0`; production scope remains exactly two services.
-  - [ ] Ship this authority-loop correction, classify existing task identities
-    read-only after deploy, then prepare one backed-up same-job CAS. New upload,
-    Confirm, project/job/outbox, ShopAIKey resubmit or price change is forbidden.
+  - [x] Authority-loop PR #950 deployed exact runtime `78b2815...`; post-deploy
+    forensic proved both task hashes unchanged and paid Key4U scene-1 authorization
+    unconsumed. CAS v2 backup SHA `77975e9d...`, mode `0600`; early/due claim proof
+    preserved attempts `40`, scene 1 controlled and scene 2 primary-only.
+  - [-] First worker tick exposed hydration RED before paid HTTP: telemetry count
+    `1` hit the current-attempt limit and scene 2 inherited the root candidate.
+    Worker stopped with provider/ShopAIKey/Key4U submit/wallet/artifact deltas `0`.
+    Source RED `2 failed` -> GREEN `2 passed`; focused `49 passed`; combined
+    `206 passed, 1 baseline deselected in 33.68s`; compile `0`. Direct self-review
+    also proves before-submit `1` remains blocked. Ship/recover same job next.
+  - [x] Rebased cleanly onto SubDub #951 main `8de058a...`; post-rebase combined
+    `206 passed, 1 exact baseline deselected in 34.67s`, no overlapping file.
     The exact existing Owner authorization may continue only if read-only evidence
     proves no Key4U submit/call occurred; otherwise stop before restart.
     `PV2-R01` stays open until real MP4/receipt/report/zero-wallet acceptance passes.
