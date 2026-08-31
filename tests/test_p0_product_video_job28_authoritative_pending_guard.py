@@ -5,7 +5,7 @@ import sqlite3
 from datetime import datetime, timedelta
 
 import remote_worker
-from services import remote_worker_api, video_project_queue
+from services import remote_worker_api, video_project_queue, video_provider_router
 
 
 def _job28_pending_diagnostics() -> dict:
@@ -208,6 +208,287 @@ def test_job28_fail_api_persists_running_authority_not_stale_terminal() -> None:
         ] == ["existing-scene-task-1", "existing-scene-task-2"]
         assert persisted["no_charge"] is True
         assert int(result["project"].get("total_xu_charged") or 0) == 0
+    finally:
+        conn.close()
+
+
+def _controlled_scene1_submit_diagnostics(*, task_id_present: bool) -> dict:
+    diagnostics = _job28_pending_diagnostics()
+    key4u_task = "key4u-scene-1-task" if task_id_present else ""
+    diagnostics.update(
+        {
+            "source": "product_video",
+            "recovery_existing_tasks_only": True,
+            "original_submit_source": "public_user_final_confirm",
+            "public_user_confirmed": True,
+            "invoice_confirmed": True,
+            "provider_submit_accepted_before": True,
+            "user_visible_price_xu": 144,
+            "persisted_quoted_price_xu": 144,
+            "customer_charge_planned_xu": 144,
+            "provider_budget_xu": 212,
+            "fallback_provider_cost_xu": 212,
+            "quote_consistent": True,
+            "claim_terminal_suppressed_for_controlled_fallback": True,
+            "fallback_scene_index": 1,
+            "fallback_idempotency_key": "job28-scene1-key4u-once",
+            "fallback_submit_attempted": True,
+            "fallback_count": 1,
+            "fallback_count_before_submit": 0,
+            "fallback_count_by_scene": {"1": 0, "2": 0},
+            "submit_source": "public_confirmed_scene_fallback_once",
+            "provider_submit_source": "public_confirmed_scene_fallback_once",
+            "provider_submit_called": True,
+            "provider_http_request_sent": task_id_present,
+            "provider_submit_http_status": 200 if task_id_present else 0,
+            "submit_accepted": task_id_present,
+            "provider_task_id_saved": task_id_present,
+            "provider_task_ids": [key4u_task] if key4u_task else [],
+            "provider_video_ids": [key4u_task] if key4u_task else [],
+            "provider_error": "provider_in_progress" if task_id_present else "all_video_providers_submit_failed",
+            "blocker": "provider_in_progress" if task_id_present else "all_video_providers_submit_failed",
+            "provider_attempts": [
+                {
+                    "provider": "key4u_video",
+                    "phase": "submit",
+                    "submit_called": True,
+                    "provider_http_request_sent": task_id_present,
+                    "provider_http_status": 200 if task_id_present else 0,
+                    "submit_http_status": 200 if task_id_present else 0,
+                    "submit_accepted": task_id_present,
+                    "task_id_present": task_id_present,
+                    "task_pollable": task_id_present,
+                    "blocker": "" if task_id_present else "all_video_providers_submit_failed",
+                }
+            ],
+        }
+    )
+    diagnostics["scene_tasks"] = [
+        {
+            **item,
+            **(
+                {
+                    "provider": "key4u_video",
+                    "provider_task_id": key4u_task,
+                    "active_task_id": key4u_task,
+                    "status": "provider_running" if task_id_present else "failed",
+                    "actual_provider_payload_status": "queued" if task_id_present else "",
+                    "fallback_count": 1,
+                    "fallback_submit_attempted": True,
+                    "submit_accepted": task_id_present,
+                    "task_pollable": task_id_present,
+                    "failure_reason": "" if task_id_present else "all_video_providers_submit_failed",
+                }
+                if int(item.get("scene_index") or 0) == 1
+                else {}
+            ),
+        }
+        for item in diagnostics["scene_tasks"]
+    ]
+    return diagnostics
+
+
+def _claimed_job28_for_submit_receipt(conn: sqlite3.Connection) -> dict:
+    project = video_project_queue.create_video_project(
+        conn,
+        user_id=28,
+        profile_id="video_trend",
+        topic="job 28 controlled submit receipt",
+        asset_pack={
+            "source": "product_video",
+            "render_mode": "real",
+            "provider_call": True,
+            "product_type": "video_trend",
+            "public_user": True,
+        },
+    )
+    video_project_queue.update_video_project(
+        conn,
+        int(project["project_id"]),
+        status="queued_for_worker",
+        total_xu_estimated=144,
+        is_confirmed=1,
+        scene_count=2,
+    )
+    video_project_queue.enqueue_video_render_job(
+        conn,
+        project_id=int(project["project_id"]),
+        user_id=28,
+    )
+    return video_project_queue.claim_next_video_job(
+        conn,
+        worker_id="job28-owner-worker",
+    )
+
+
+def test_job28_failed_controlled_submit_receipt_survives_and_blocks_retry() -> None:
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    try:
+        claimed = _claimed_job28_for_submit_receipt(conn)
+        result = remote_worker_api.fail_remote_worker_job(
+            conn,
+            worker_id="job28-owner-worker",
+            job_id=int(claimed["id"]),
+            safe_error="RuntimeError:provider_in_progress",
+            retryable=True,
+            diagnostics=_controlled_scene1_submit_diagnostics(
+                task_id_present=False
+            ),
+        )
+        persisted = json.loads(result["job"]["result_json"])
+        receipt = persisted["controlled_fallback_submit_receipts_by_scene"]["1"]
+
+        assert result["status"] == "failed"
+        assert result["job"]["status"] == "failed"
+        assert result["project"]["video_terminal_state"] == "failed_no_charge"
+        assert receipt["provider"] == "key4u_video"
+        assert receipt["submit_called"] is True
+        assert receipt["provider_http_request_sent"] is False
+        assert receipt["task_id_present"] is False
+        assert receipt["authorization_state"] == "consumed"
+        assert (
+            receipt["submit_evidence_state"]
+            == "ambiguous_submit_called_without_transport_receipt"
+        )
+        assert persisted["controlled_fallback_retry_blocked"] is True
+        assert persisted["fallback_count_by_scene"] == {"1": 1, "2": 0}
+        assert [item.get("fallback_count", 0) for item in persisted["scene_tasks"]] == [1, 0]
+        retry_policy = video_provider_router.product_video_controlled_fallback_policy(
+            "provider_timeout",
+            persisted,
+        )
+        assert retry_policy["fallback_submit_allowed"] is False
+        assert retry_policy["fallback_block_reason"] == "fallback_limit_reached"
+        assert persisted["charged_xu"] == 0
+    finally:
+        conn.close()
+
+
+def test_job28_accepted_controlled_submit_receipt_survives_defer() -> None:
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    try:
+        claimed = _claimed_job28_for_submit_receipt(conn)
+        result = remote_worker_api.fail_remote_worker_job(
+            conn,
+            worker_id="job28-owner-worker",
+            job_id=int(claimed["id"]),
+            safe_error="RuntimeError:provider_in_progress",
+            retryable=True,
+            diagnostics=_controlled_scene1_submit_diagnostics(
+                task_id_present=True
+            ),
+        )
+        persisted = json.loads(result["job"]["result_json"])
+        receipt = persisted["controlled_fallback_submit_receipts_by_scene"]["1"]
+
+        assert result["deferred"] is True
+        assert result["job"]["status"] == "queued"
+        assert receipt["provider"] == "key4u_video"
+        assert receipt["submit_called"] is True
+        assert receipt["provider_http_request_sent"] is True
+        assert receipt["http_status"] == 200
+        assert receipt["submit_accepted"] is True
+        assert receipt["task_id_present"] is True
+        assert receipt["authorization_state"] == "consumed"
+        assert receipt["submit_evidence_state"] == "task_accepted"
+        assert persisted["controlled_fallback_retry_blocked"] is True
+        assert persisted["fallback_count_by_scene"] == {"1": 1, "2": 0}
+        assert [item.get("fallback_count", 0) for item in persisted["scene_tasks"]] == [1, 0]
+        assert persisted["charged_xu"] == 0
+    finally:
+        conn.close()
+
+
+def test_job28_live_shape_without_root_submit_source_still_consumes_receipt() -> None:
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    try:
+        claimed = _claimed_job28_for_submit_receipt(conn)
+        diagnostics = _controlled_scene1_submit_diagnostics(
+            task_id_present=False
+        )
+        diagnostics.update(
+            {
+                "submit_source": "worker_poll_existing_task",
+                "provider_submit_source": "worker_poll_existing_task",
+                "fallback_submit_attempted": False,
+                "provider_attempts": [],
+            }
+        )
+        result = remote_worker_api.fail_remote_worker_job(
+            conn,
+            worker_id="job28-owner-worker",
+            job_id=int(claimed["id"]),
+            safe_error="RuntimeError:provider_in_progress",
+            retryable=True,
+            diagnostics=diagnostics,
+        )
+        persisted = json.loads(result["job"]["result_json"])
+        receipt = persisted["controlled_fallback_submit_receipts_by_scene"]["1"]
+
+        assert result["status"] == "failed"
+        assert receipt["provider"] == "key4u_video"
+        assert receipt["submit_source"] == "worker_poll_existing_task"
+        assert receipt["authorization_state"] == "consumed"
+        assert (
+            receipt["submit_evidence_state"]
+            == "ambiguous_submit_called_without_transport_receipt"
+        )
+        assert persisted["controlled_fallback_retry_blocked"] is True
+        assert persisted["fallback_count_by_scene"] == {"1": 1, "2": 0}
+        assert persisted["charged_xu"] == 0
+    finally:
+        conn.close()
+
+
+def test_job28_consumed_receipt_survives_later_primary_poll_diagnostics() -> None:
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    try:
+        claimed = _claimed_job28_for_submit_receipt(conn)
+        first = remote_worker_api.fail_remote_worker_job(
+            conn,
+            worker_id="job28-owner-worker",
+            job_id=int(claimed["id"]),
+            safe_error="RuntimeError:provider_in_progress",
+            retryable=True,
+            diagnostics=_controlled_scene1_submit_diagnostics(
+                task_id_present=True
+            ),
+        )
+        reclaimed = video_project_queue.claim_next_video_job(
+            conn,
+            worker_id="job28-owner-worker",
+        )
+        assert int(reclaimed["id"]) == int(first["job"]["id"])
+
+        later = remote_worker_api.fail_remote_worker_job(
+            conn,
+            worker_id="job28-owner-worker",
+            job_id=int(reclaimed["id"]),
+            safe_error="RuntimeError:provider_in_progress",
+            retryable=True,
+            diagnostics=_job28_pending_diagnostics(),
+        )
+        persisted = json.loads(later["job"]["result_json"])
+        receipt = persisted["controlled_fallback_submit_receipts_by_scene"]["1"]
+        scene_one = next(
+            item
+            for item in persisted["scene_tasks"]
+            if int(item.get("scene_index") or 0) == 1
+        )
+
+        assert later["deferred"] is True
+        assert receipt["provider"] == "key4u_video"
+        assert receipt["authorization_state"] == "consumed"
+        assert scene_one["provider"] == "key4u_video"
+        assert scene_one["provider_task_id"] == "key4u-scene-1-task"
+        assert scene_one["fallback_count"] == 1
+        assert persisted["controlled_fallback_retry_blocked"] is True
+        assert persisted["fallback_count_by_scene"] == {"1": 1, "2": 0}
+        assert persisted["charged_xu"] == 0
     finally:
         conn.close()
 

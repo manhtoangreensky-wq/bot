@@ -1,5 +1,5 @@
 task_id: P0_PRODUCT_VIDEO_V2_PV2_R01
-phase: PV2_R01_JOB28_PROVIDER_TRANSITION_SOURCE_GREEN
+phase: PV2_R01_JOB28_SUBMIT_RECEIPT_SOURCE_GREEN
 pointer: V2-03/PV2-R01
 base_sha: 3d16cf60511318d2c5eb7c799ecbee8c07631c1b
 goal: Restore the complete existing content flow for all four Video Trend lanes, then live the most complex upload lane once at tier 400 with two real scenes, strict subtitle/transition Add-ons, durable MP4 receipt, customer report and zero Owner wallet mutation.
@@ -677,10 +677,48 @@ pv2_r01_job28_provider_transition_live_red:
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
+pv2_r01_job28_submit_receipt_live_red:
+  pr_953_merge_sha: 5ebc665ef8eb4fc291e783ce37290c98fbb33859
+  deploy_run: 33411801263 SUCCESS in 23m29s
+  latest_runtime_sha: 36c5d3270b6a4ae2224fed17579e8cc0f6032650
+  pr_953_in_latest_runtime_ancestry: true
+  cas_v4_backup: /opt/toanaas/bot/delete/pv2-r01-job28-authority-cas-v2-production-20260831T235007.json
+  cas_v4_backup_sha_mode: a0b9e1a5e283636638538974653a0372fb8624b7c59ed7f487dbeb64a9c75e9c mode 0600
+  live_transient: scene1 key4u transition; provider_submit_called true; fallback count 1; scene2 remained ShopAIKey
+  persisted_after_reconcile: key4u receipt absent; old 37-character ShopAIKey task hash restored; provider usage 0
+  authorization_classification: AMBIGUOUS_STOP_BEFORE_RESTART; exact one-call authorization treated consumed
+  post_stop: worker inactive PID 0; attempts 40; jobs/projects/outbox unchanged; wallet 200/0; transactions 0; credit events 1; artifacts/delivery 0
+  source_red: 2 failed because durable controlled receipt was missing
+  exact_green: 4 passed and 9 deselected in 5.21s; failed-no-task, accepted-task, production-shape and poll-survival
+  focused_green: 71 passed in 14.00s
+  combined_green: 210 passed and 1 exact baseline deselected in 26.97s
+  full_compile: exit 0
+  post_rebase_base_sha: 832681d9b85c00621ef04a677b93b5b7799c4366
+  post_rebase_head_before_evidence_amend: 13d9ae667752f972f12fd944f033d1640cfb7350
+  post_rebase_focused: 71 passed in 513.19s
+  post_rebase_combined: 210 passed and 1 exact baseline deselected in 27.64s
+  post_rebase_full_compile: exit 0
+  production_scope: services/remote_worker_api.py
+  receipt_invariants:
+    - authorization consumed is immutable
+    - fallback count by scene is 1/0 and next baseline is 1
+    - accepted task survives defer/reconcile and is poll-only
+    - no-task attempt terminalizes failed_no_charge
+    - fallback retry policy returns fallback_limit_reached
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  live_pass: false
+spec_04i_subdub_auto_two_speaker_addon:
+  phase: PENDING_AFTER_SPEC_04H_9
+  compatible_media_only: true
+  locked_subdub_engine_unchanged: true
+  auto_multi_option_locked_until_live_mp4_pass: true
+  representative_live_target: one unfinished media-compatible Product Video lane
+  acceptance: male/female detection; translation; two-voice dub; final MP4; receipt/report; wallet delta 0
 next_action: >-
-  Ship only the controlled provider-transition correction. Keep the worker
-  inactive until exact deploy/runtime readback, then
-  restore the same job 28 state from the backed-up authority CAS contract and run
-  the still-unconsumed scene-1 Key4U authorization once. Do not upload, Confirm,
-  create a new job or resubmit ShopAIKey. Continue to real two-scene MP4,
-  receipt/report and zero-wallet proof before opening another product.
+  Ship only durable controlled-fallback submit receipt persistence. Keep the Owner
+  Product Video worker inactive and do not CAS/restart or call a paid provider under
+  the consumed/ambiguous authorization. After deploy, persist current scene-1
+  ambiguity as consumed and failed_no_charge without provider call. Request a new
+  exact paid authorization before another Key4U submit; never resubmit ShopAIKey.
+  Continue SPEC-04H.8/04H.9 before opening SPEC-04I or another product.

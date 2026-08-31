@@ -480,3 +480,37 @@ Key4U request. All other recovery mismatches still fail before router. RED `1 fa
 11 deselected in 553.10s`; GREEN `1 passed, 11 deselected in 5.72s`; inverse guard
 `3 passed`; focused `83 passed`; combined `206 passed, 1 deselected in 34.58s`;
 full compile exit `0`.
+
+## Job 28 submit-receipt RED after PR #953
+
+PR #953 squash `5ebc665ef8eb4fc291e783ce37290c98fbb33859` deployed through
+run `33411801263` SUCCESS in `23m29s`. Latest SubDub runtime `36c5d327...`
+contains PR #953 by ancestry. CAS v4 backup
+`/opt/toanaas/bot/delete/pv2-r01-job28-authority-cas-v2-production-
+20260831T235007.json` has SHA `a0b9e1a5...`, mode `0600`.
+
+The controlled tick crossed into scene-1 Key4U and transiently reported
+`provider_submit_called=true` plus fallback count `1`; scene 2 remained ShopAIKey.
+A later primary reconcile erased the Key4U receipt and restored the old 37-character
+task hash. Provider usage stayed `0`, but that does not prove no transport attempt,
+so the exact one-call authorization is classified
+`AMBIGUOUS_STOP_BEFORE_RESTART` and treated consumed. Worker is inactive; attempts
+`40`, identity counts, wallet `200/0`, transactions `0`, credit events `1`, artifact
+and delivery counts remain unchanged. No further CAS or paid retry is allowed under
+the old authorization.
+
+Minimal receipt persistence lives only at the worker fail/defer boundary. It accepts
+only claim-scoped same-scene Key4U attempts with an idempotency key; stores immutable
+scene/provider/call/HTTP/task/count evidence; enforces scene counts `1/0`; keeps an
+accepted task poll-only through later reconcile; terminalizes no-task attempts as
+failed-no-charge; and makes the next policy decision `fallback_limit_reached`.
+RED `2 failed`; exact failed/accepted/production-shape/poll-survival GREEN `4 passed`;
+focused `71 passed in 14.00s`; combined `210 passed, 1 exact baseline deselected
+in 26.97s`;
+full compile exit `0`. Source tests made no provider call or wallet mutation.
+
+Receipt source rebased cleanly onto SubDub #955 exact main
+`832681d9b85c00621ef04a677b93b5b7799c4366`. Pre-evidence-amend HEAD is
+`13d9ae667752f972f12fd944f033d1640cfb7350`; post-rebase focused is `71 passed
+in 513.19s`, combined `210 passed, 1 exact baseline deselected in 27.64s`, and
+full compile exits `0`.

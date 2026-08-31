@@ -135,9 +135,20 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     ShopAIKey task identity. Worker stopped with all side-effect deltas `0`.
   - [-] Transition source RED `1 failed` -> GREEN `1 passed`; inverse mismatch guard
     `3 passed`; focused `83 passed`; combined `206 passed, 1 deselected`; compile
-    `0`. Ship/recover same job next; authorization remains unconsumed.
-    The exact existing Owner authorization may continue only if read-only evidence
-    proves no Key4U submit/call occurred; otherwise stop before restart.
+    `0`. PR #953 deployed exact SHA `5ebc665e...`; latest SubDub runtime
+    `36c5d327...` contains it by ancestry.
+  - [-] The next controlled tick transiently reported a scene-1 Key4U submit attempt
+    and fallback count `1`, but later ShopAIKey reconcile erased its receipt and
+    restored the old task hash. Provider usage remained `0`; evidence is still
+    ambiguous, so the exact one-call authorization is treated consumed and the
+    worker is stopped. No CAS/restart/paid retry is allowed under that authorization.
+  - [x] Durable receipt source: failed/no-task terminal, accepted/task defer,
+    production-shape and poll-survival/retry-lock comparators `4 passed`; focused
+    `71 passed`; combined `210 passed, 1 baseline deselected`; compile `0`.
+    Ship receipt only; persist current ambiguity consumed/no-charge after deploy.
+  - [x] Rebased cleanly onto SubDub #955 main `832681d9...`; post-rebase focused
+    `71 passed in 513.19s`, combined `210 passed, 1 deselected in 27.64s`, compile
+    `0`, no file overlap.
     `PV2-R01` stays open until real MP4/receipt/report/zero-wallet acceptance passes.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
