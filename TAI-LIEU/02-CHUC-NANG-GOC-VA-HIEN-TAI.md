@@ -471,3 +471,17 @@ Post-rebase: `128 passed in 561.56s`; full compile exit `0`.
 Literal legacy ở first attempt bị review chặn: complete/partial raw evidence không
 được biến thành ordinary CAS. RED `2 failed in 6.61s`; GREEN `4 passed in
 556.37s`; full recovery module `30 passed`; compile `0`.
+## Đối chiếu parser evidence Auto multi — 31/08/2026
+
+| Trước correction | Hiện tại đo được | Trạng thái |
+|---|---|---|
+| Raw annotation >0 nhưng accepted word=0 không phân biệt được nguyên nhân | Durable state chỉ có aggregate counts + rejection code, không transcript/label/timestamp/raw payload | Đã bổ sung evidence |
+| Một singleton/noise label làm hỏng toàn bộ response dù còn ≥3 speaker mạnh | Chỉ lọc khi weak words ≤2 và ≤2%, còn 3–8 speaker mạnh; mapper vẫn đòi phủ 100% cue và mọi strong label | Bounded filter, không bịa speaker |
+
+Diagnostics RED `3 failed in 796.08s`; behavior RED `3 failed in 9.00s`;
+behavior GREEN `3 passed in 19.32s`; propagation GREEN `2 passed in 638.78s`;
+parser/blackbox `70 passed`; exact-two/timing `37 passed`; boundary `3 passed`;
+combined `110 passed`; post-rebase `110 passed in 657.28s`; compile `0`.
+Review mixed malformed RED `1 failed in 6.89s` -> GREEN `3 passed in 7.27s`;
+final combined `111 passed`, compile `0`.
+No provider call, MP4, or wallet mutation during source TDD.

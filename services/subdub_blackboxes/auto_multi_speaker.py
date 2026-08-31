@@ -53,6 +53,18 @@ def _multi_diarization_debug_fields(source: Mapping[str, object]) -> dict[str, o
         "multi_diarization_mapped_speaker_count": bounded_int("multi_diarization_mapped_speaker_count"),
         "multi_diarization_raw_annotation_count": bounded_int("multi_diarization_raw_annotation_count"),
         "multi_diarization_terminal_empty": bool(current.get("multi_diarization_terminal_empty") is True),
+        "multi_diarization_parse_rejection": str(
+            current.get("multi_diarization_parse_rejection") or ""
+        )[:80],
+        "multi_diarization_dropped_weak_word_count": bounded_int(
+            "multi_diarization_dropped_weak_word_count"
+        ),
+        "multi_diarization_dropped_weak_speaker_count": bounded_int(
+            "multi_diarization_dropped_weak_speaker_count"
+        ),
+        "multi_diarization_weak_label_filter_applied": bool(
+            current.get("multi_diarization_weak_label_filter_applied") is True
+        ),
     }
 
 
@@ -1222,6 +1234,25 @@ async def run_auto_multi_speaker_blackbox(
                     "multi_diarization_terminal_empty": bool(
                         isinstance(rediarized, Mapping)
                         and rediarized.get("provider_terminal_empty") is True
+                    ),
+                    "multi_diarization_parse_rejection": str(
+                        rediarized.get("provider_parse_rejection") or ""
+                    )[:80]
+                    if isinstance(rediarized, Mapping)
+                    else "",
+                    "multi_diarization_dropped_weak_word_count": int(
+                        rediarized.get("provider_dropped_weak_word_count") or 0
+                    )
+                    if isinstance(rediarized, Mapping)
+                    else 0,
+                    "multi_diarization_dropped_weak_speaker_count": int(
+                        rediarized.get("provider_dropped_weak_speaker_count") or 0
+                    )
+                    if isinstance(rediarized, Mapping)
+                    else 0,
+                    "multi_diarization_weak_label_filter_applied": bool(
+                        isinstance(rediarized, Mapping)
+                        and rediarized.get("provider_weak_label_filter_applied") is True
                     ),
                 }
             )

@@ -820,3 +820,26 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
   RED `2 failed in 6.61s`. Guard mới chặn literal nếu predicate legacy không đúng;
   GREEN `4 passed in 556.37s`, recovery module `30 passed in 5.49s`, full compile
   exit `0`.
+
+## Bổ sung parser evidence Auto multi — 31/08/2026
+
+- Same-job recovery nhận HTTP `200 completed` với `151` raw `word_info`, nhưng
+  accepted word/speaker/mapped đều `0` và dừng trước TTS/mux/artifact/delivery;
+  `charged_xu=0`. Raw response/text/label/timing/key không được lưu.
+- Parser giữ aggregate-only counts và một rejection code:
+  `annotation_fields_invalid`, `word_identity_conflict`,
+  `speaker_count_out_of_range`, `speaker_word_count_below_min`, hoặc
+  `no_valid_word_annotations`. Lane multi cho phép bỏ tối đa `2` weak words và
+  tối đa `2%` canonical words chỉ khi còn `3–8` speaker mạnh, mỗi speaker có ít
+  nhất `2` words. Cue mapper sau lọc vẫn phải phủ `100%` cue, giữ confidence hiện
+  hành và chứng minh mọi speaker mạnh; cue chỉ có weak evidence vẫn fail-closed.
+- RED `3 failed in 796.08s`; focused GREEN `4 passed in 5.80s`; service/blackbox
+  `67 passed in 6.37s`; exact-two/timing `37 passed in 8.18s`. Provider/DB/wallet
+  action trong source-local loop là `0`. Behavior RED `3 failed in 9.00s`;
+  behavior GREEN `3 passed in 19.32s`; propagation RED `2 failed in 6.95s`;
+  propagation GREEN `2 passed in 638.78s`; parser/blackbox `70 passed in 11.09s`;
+  exact-two/timing `37 passed in 10.00s`; boundary cap/mapper `3 passed in 29.68s`;
+  combined `110 passed in 14.92s`; post-rebase `110 passed in 657.28s`; full
+  compile exit `0`. Review RED mixed malformed `1 failed in 6.89s`; GREEN
+  `3 passed in 7.27s`; final combined `111 passed in 9.94s`; compile `0`.
+  Chưa có LIVE MP4 PASS.

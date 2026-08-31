@@ -26,10 +26,10 @@ workflow_contract:
 
 resource_boundary:
   cpu: independent_local_subdub_source_only
-  live: acquired_by_subdub_auto
-  chrome: acquired_by_subdub_auto
-  vps_deploy: acquired_by_subdub_auto
-  product_video: static until exact SubDub releases
+  live: released_by_subdub_auto; acquired_by_product_video
+  chrome: released_by_subdub_auto; acquired_by_product_video
+  vps_deploy: released_by_subdub_auto; acquired_by_product_video
+  product_video: shared owner; SubDub source-local only until exact releases
 
 latest_same_job_recovery_f22e5919:
   public_job: F22E5919
@@ -88,6 +88,35 @@ latest_same_job_recovery_f22e5919:
     expanded_protected: 128 passed in 8.98s
     post_rebase_protected: 128 passed in 561.56s
     full_parser_compile: exit 0
+  parser_evidence_source_local:
+    scope: aggregate diagnostics plus bounded weak-label filter for Auto multi only
+    same_job_observed: raw_annotations 151; accepted_words 0; accepted_speakers 0
+    rejection_codes:
+      - annotation_fields_invalid
+      - word_identity_conflict
+      - speaker_count_out_of_range
+      - speaker_word_count_below_min
+      - no_valid_word_annotations
+    singleton_label_policy: drop at most 2 weak words and 2 percent only if 3-8 strong labels remain; mapper requires all-cue coverage
+    red: 3 failed in 796.08s
+    focused_green: 4 passed in 5.80s
+    service_blackbox: 67 passed in 6.37s
+    exact_two_timing: 37 passed in 8.18s
+    behavior_red: 3 failed in 9.00s
+    behavior_green: 3 passed in 19.32s
+    propagation_red: 2 failed in 6.95s
+    propagation_green: 2 passed in 638.78s
+    parser_blackbox_final: 70 passed in 11.09s
+    exact_two_timing_final: 37 passed in 10.00s
+    bounded_weak_and_mapper_boundaries: 3 passed in 29.68s
+    combined_gate: 110 passed in 14.92s
+    post_rebase_combined: 110 passed in 657.28s
+    post_rebase_compile: exit 0
+    review_mixed_malformed_red: 1 failed in 6.89s
+    review_mixed_malformed_green: 3 passed in 7.27s
+    final_combined_gate: 111 passed in 9.94s
+    final_compile: exit 0
+    full_compile: exit 0
     provider_calls: 0
     db_mutations: 0
     wallet_mutations: 0

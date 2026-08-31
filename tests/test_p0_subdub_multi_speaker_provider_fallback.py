@@ -117,6 +117,99 @@ def test_multi_gemini_parser_rejects_two_or_more_than_eight_labels():
     )
 
 
+def test_multi_parser_evidence_distinguishes_two_speaker_threshold_rejection():
+    evidence = fallback.gemini_multi_diarization_parse_evidence(
+        _gemini_payload(("spk_1", "spk_2"))
+    )
+
+    assert evidence == {
+        "raw_annotation_count": 4,
+        "candidate_word_count": 4,
+        "candidate_speaker_count": 2,
+        "canonical_word_count": 4,
+        "canonical_speaker_count": 2,
+        "accepted_word_count": 0,
+        "accepted_speaker_count": 2,
+        "dropped_weak_word_count": 0,
+        "dropped_weak_speaker_count": 0,
+        "weak_label_filter_applied": False,
+        "rejection": "speaker_count_out_of_range",
+    }
+
+
+def test_multi_parser_evidence_reports_invalid_annotation_fields_without_text():
+    payload = _gemini_payload()
+    payload["steps"][0]["content"][0]["annotations"][0].pop("end_offset")
+
+    evidence = fallback.gemini_multi_diarization_parse_evidence(payload)
+
+    assert evidence["raw_annotation_count"] == 6
+    assert evidence["candidate_word_count"] == 5
+    assert evidence["candidate_speaker_count"] == 3
+    assert evidence["canonical_word_count"] == 5
+    assert evidence["canonical_speaker_count"] == 3
+    assert evidence["accepted_word_count"] == 0
+    assert evidence["rejection"] == "annotation_fields_invalid"
+    assert "text" not in evidence
+    assert "speaker" not in evidence
+
+
+def test_multi_gemini_rejects_mixed_valid_and_malformed_annotations(monkeypatch):
+    payload = _gemini_payload()
+    payload["steps"][0]["content"][0]["annotations"].append(
+        {
+            "type": "word_info",
+            "text": "malformed",
+            "speaker": "spk_noise",
+            "start_offset": "3.100s",
+        }
+    )
+    payload.update({"id": "v1_mixed_malformed", "status": "completed"})
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, _url, **_kwargs):
+            return SimpleNamespace(status_code=200, json=lambda: payload)
+
+    monkeypatch.setattr(fallback.httpx, "AsyncClient", lambda **_kwargs: Client())
+
+    result = asyncio.run(
+        fallback.gemini_transcribe_multi_diarized_words(
+            b"wav",
+            "audio/wav",
+            api_key="configured",
+        )
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == fallback.AUTO_CAST_UNAVAILABLE
+    assert result["parse_rejection"] == "annotation_fields_invalid"
+    assert result["words"] == []
+
+
+def test_multi_parser_evidence_reports_conflicting_word_identity():
+    payload = _gemini_payload()
+    annotations = payload["steps"][0]["content"][0]["annotations"]
+    annotations[1] = {
+        **annotations[0],
+        "speaker": "spk_2",
+    }
+
+    evidence = fallback.gemini_multi_diarization_parse_evidence(payload)
+
+    assert evidence["raw_annotation_count"] == 6
+    assert evidence["candidate_word_count"] == 6
+    assert evidence["canonical_word_count"] == 0
+    assert evidence["canonical_speaker_count"] == 0
+    assert evidence["accepted_word_count"] == 0
+    assert evidence["rejection"] == "word_identity_conflict"
+
+
 def test_multi_gemini_request_does_not_hint_or_force_speaker_count(monkeypatch):
     captured = {}
 
@@ -465,6 +558,285 @@ def test_multi_parser_deduplicates_exact_rows_before_minimum_word_gate():
     annotations.append(dict(third[0]))
 
     assert fallback.extract_gemini_multi_diarized_words(payload) == []
+
+
+def test_multi_parser_accepts_151_raw_with_one_bounded_weak_label():
+    payload = _gemini_payload(("spk_1", "spk_2", "spk_3", "spk_4"))
+    annotations = payload["steps"][0]["content"][0]["annotations"]
+    cursor = 4.0
+    while len(annotations) < 150:
+        label = f"spk_{len(annotations) % 4 + 1}"
+        annotations.append(
+            {
+                "type": "word_info",
+                "text": f"measured-{len(annotations)}",
+                "speaker": label,
+                "start_offset": f"{cursor:.3f}s",
+                "end_offset": f"{cursor + 0.2:.3f}s",
+            }
+        )
+        cursor += 0.25
+    annotations.append(
+        {
+            "type": "word_info",
+            "text": "one-off-label",
+            "speaker": "spk_noise",
+            "start_offset": f"{cursor:.3f}s",
+            "end_offset": f"{cursor + 0.2:.3f}s",
+        }
+    )
+
+    evidence = fallback.gemini_multi_diarization_parse_evidence(payload)
+    words = fallback.extract_gemini_multi_diarized_words(payload)
+
+    assert evidence == {
+        "raw_annotation_count": 151,
+        "candidate_word_count": 151,
+        "candidate_speaker_count": 5,
+        "canonical_word_count": 151,
+        "canonical_speaker_count": 5,
+        "accepted_word_count": 150,
+        "accepted_speaker_count": 4,
+        "dropped_weak_word_count": 1,
+        "dropped_weak_speaker_count": 1,
+        "weak_label_filter_applied": True,
+        "rejection": "",
+    }
+    assert len(words) == 150
+    assert list(dict.fromkeys(item["speaker"] for item in words)) == [
+        "spk_1",
+        "spk_2",
+        "spk_3",
+        "spk_4",
+    ]
+
+
+def test_multi_gemini_result_reports_bounded_weak_label_filter(monkeypatch):
+    payload = _gemini_payload(("spk_1", "spk_2", "spk_3", "spk_4"))
+    annotations = payload["steps"][0]["content"][0]["annotations"]
+    cursor = 4.0
+    while len(annotations) < 150:
+        label = f"spk_{len(annotations) % 4 + 1}"
+        annotations.append(
+            {
+                "type": "word_info",
+                "text": f"measured-{len(annotations)}",
+                "speaker": label,
+                "start_offset": f"{cursor:.3f}s",
+                "end_offset": f"{cursor + 0.2:.3f}s",
+            }
+        )
+        cursor += 0.25
+    annotations.append(
+        {
+            "type": "word_info",
+            "text": "one-off-label",
+            "speaker": "spk_noise",
+            "start_offset": f"{cursor:.3f}s",
+            "end_offset": f"{cursor + 0.2:.3f}s",
+        }
+    )
+    payload.update({"id": "v1_bounded_weak", "status": "completed"})
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, _url, **_kwargs):
+            return SimpleNamespace(status_code=200, json=lambda: payload)
+
+    monkeypatch.setattr(fallback.httpx, "AsyncClient", lambda **_kwargs: Client())
+
+    result = asyncio.run(
+        fallback.gemini_transcribe_multi_diarized_words(
+            b"wav",
+            "audio/wav",
+            api_key="configured",
+        )
+    )
+
+    assert result["ok"] is True
+    assert len(result["words"]) == 150
+    assert result["speaker_ids"] == ["spk_1", "spk_2", "spk_3", "spk_4"]
+    assert result["dropped_weak_word_count"] == 1
+    assert result["dropped_weak_speaker_count"] == 1
+    assert result["weak_label_filter_applied"] is True
+
+
+def test_multi_parser_rejects_weak_label_when_fraction_is_not_bounded():
+    payload = _gemini_payload(("spk_1", "spk_2", "spk_3", "spk_4"))
+    annotations = payload["steps"][0]["content"][0]["annotations"]
+    annotations.append(
+        {
+            "type": "word_info",
+            "text": "one-off-label",
+            "speaker": "spk_noise",
+            "start_offset": "4.000s",
+            "end_offset": "4.200s",
+        }
+    )
+
+    evidence = fallback.gemini_multi_diarization_parse_evidence(payload)
+
+    assert evidence["raw_annotation_count"] == 9
+    assert evidence["dropped_weak_word_count"] == 1
+    assert evidence["weak_label_filter_applied"] is False
+    assert evidence["accepted_word_count"] == 0
+    assert evidence["rejection"] == "speaker_word_count_below_min"
+    assert fallback.extract_gemini_multi_diarized_words(payload) == []
+
+
+def test_multi_mapper_rejects_when_filtered_weak_label_is_only_cue_evidence():
+    payload = _gemini_payload(("spk_1", "spk_2", "spk_3", "spk_4"))
+    annotations = payload["steps"][0]["content"][0]["annotations"]
+    cursor = 4.0
+    while len(annotations) < 100:
+        label = f"spk_{len(annotations) % 4 + 1}"
+        annotations.append(
+            {
+                "type": "word_info",
+                "text": f"measured-{len(annotations)}",
+                "speaker": label,
+                "start_offset": f"{cursor:.3f}s",
+                "end_offset": f"{cursor + 0.2:.3f}s",
+            }
+        )
+        cursor += 0.25
+    annotations.append(
+        {
+            "type": "word_info",
+            "text": "isolated-noise-label",
+            "speaker": "spk_noise",
+            "start_offset": "30.000s",
+            "end_offset": "30.200s",
+        }
+    )
+    words = fallback.extract_gemini_multi_diarized_words(payload)
+
+    assert words
+    assert fallback.apply_multi_diarized_words_to_segments(
+        [{"start": 30.0, "end": 30.2, "text": "isolated"}],
+        words,
+    ) == []
+
+
+def test_multi_parser_accepts_two_bounded_weak_words_in_large_transcript():
+    payload = _gemini_payload(("spk_1", "spk_2", "spk_3", "spk_4"))
+    annotations = payload["steps"][0]["content"][0]["annotations"]
+    cursor = 4.0
+    while len(annotations) < 198:
+        label = f"spk_{len(annotations) % 4 + 1}"
+        annotations.append(
+            {
+                "type": "word_info",
+                "text": f"measured-{len(annotations)}",
+                "speaker": label,
+                "start_offset": f"{cursor:.3f}s",
+                "end_offset": f"{cursor + 0.2:.3f}s",
+            }
+        )
+        cursor += 0.25
+    for index in range(2):
+        annotations.append(
+            {
+                "type": "word_info",
+                "text": f"noise-{index}",
+                "speaker": f"spk_noise_{index}",
+                "start_offset": f"{cursor:.3f}s",
+                "end_offset": f"{cursor + 0.2:.3f}s",
+            }
+        )
+        cursor += 0.25
+
+    evidence = fallback.gemini_multi_diarization_parse_evidence(payload)
+    words = fallback.extract_gemini_multi_diarized_words(payload)
+
+    assert evidence["raw_annotation_count"] == 200
+    assert evidence["dropped_weak_word_count"] == 2
+    assert evidence["dropped_weak_speaker_count"] == 2
+    assert evidence["weak_label_filter_applied"] is True
+    assert evidence["accepted_speaker_count"] == 4
+    assert len(words) == 198
+
+
+def test_multi_parser_rejects_more_than_two_weak_words_even_when_fraction_is_small():
+    payload = _gemini_payload(("spk_1", "spk_2", "spk_3", "spk_4"))
+    annotations = payload["steps"][0]["content"][0]["annotations"]
+    cursor = 4.0
+    while len(annotations) < 200:
+        label = f"spk_{len(annotations) % 4 + 1}"
+        annotations.append(
+            {
+                "type": "word_info",
+                "text": f"measured-{len(annotations)}",
+                "speaker": label,
+                "start_offset": f"{cursor:.3f}s",
+                "end_offset": f"{cursor + 0.2:.3f}s",
+            }
+        )
+        cursor += 0.25
+    for index in range(3):
+        annotations.append(
+            {
+                "type": "word_info",
+                "text": f"noise-{index}",
+                "speaker": f"spk_noise_{index}",
+                "start_offset": f"{cursor:.3f}s",
+                "end_offset": f"{cursor + 0.2:.3f}s",
+            }
+        )
+        cursor += 0.25
+
+    evidence = fallback.gemini_multi_diarization_parse_evidence(payload)
+
+    assert evidence["dropped_weak_word_count"] == 3
+    assert evidence["weak_label_filter_applied"] is False
+    assert evidence["rejection"] == "speaker_word_count_below_min"
+    assert fallback.extract_gemini_multi_diarized_words(payload) == []
+
+
+def test_multi_mapper_maps_every_cue_after_bounded_weak_filter():
+    payload = _gemini_payload(("spk_1", "spk_2", "spk_3", "spk_4"))
+    annotations = payload["steps"][0]["content"][0]["annotations"]
+    cursor = 4.0
+    while len(annotations) < 100:
+        label = f"spk_{len(annotations) % 4 + 1}"
+        annotations.append(
+            {
+                "type": "word_info",
+                "text": f"measured-{len(annotations)}",
+                "speaker": label,
+                "start_offset": f"{cursor:.3f}s",
+                "end_offset": f"{cursor + 0.2:.3f}s",
+            }
+        )
+        cursor += 0.25
+    annotations.append(
+        {
+            "type": "word_info",
+            "text": "bounded-noise",
+            "speaker": "spk_noise",
+            "start_offset": f"{cursor:.3f}s",
+            "end_offset": f"{cursor + 0.2:.3f}s",
+        }
+    )
+    words = fallback.extract_gemini_multi_diarized_words(payload)
+    mapped = fallback.apply_multi_diarized_words_to_segments(
+        [
+            {"start": 0.0, "end": 0.9, "text": "speaker one"},
+            {"start": 1.0, "end": 1.9, "text": "speaker two"},
+            {"start": 2.0, "end": 2.9, "text": "speaker three"},
+            {"start": 3.0, "end": 3.9, "text": "speaker four"},
+        ],
+        words,
+    )
+
+    assert len(mapped) == 4
+    assert fallback.detected_speaker_count(mapped) == 4
+    assert all(item["speaker_confidence"] == 1.0 for item in mapped)
 
 
 def test_multi_parser_rejects_conflicting_speaker_for_same_word_identity():
@@ -1107,6 +1479,10 @@ def test_underclustered_multi_failure_preserves_provider_diagnostics(
             "mapped_speaker_count": 0,
             "provider_raw_annotation_count": 0,
             "provider_terminal_empty": True,
+            "provider_parse_rejection": "",
+            "provider_dropped_weak_word_count": 0,
+            "provider_dropped_weak_speaker_count": 0,
+            "provider_weak_label_filter_applied": False,
         }
 
     state = {
@@ -1146,6 +1522,10 @@ def test_underclustered_multi_failure_preserves_provider_diagnostics(
         "multi_diarization_mapped_speaker_count": 0,
         "multi_diarization_raw_annotation_count": 0,
         "multi_diarization_terminal_empty": True,
+        "multi_diarization_parse_rejection": "",
+        "multi_diarization_dropped_weak_word_count": 0,
+        "multi_diarization_dropped_weak_speaker_count": 0,
+        "multi_diarization_weak_label_filter_applied": False,
     }
     assert result["status"] == speaker_cast.AUTO_CAST_MANUAL_REQUIRED
     assert {key: result[key] for key in expected} == expected
