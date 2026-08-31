@@ -34,6 +34,8 @@ MAX_DROPPED_WEAK_WORD_FRACTION = 0.02
 MAX_DROPPED_ZERO_DURATION_WORDS = 3
 MAX_DROPPED_ZERO_DURATION_WORD_FRACTION = 0.02
 MIN_SEGMENT_SPEAKER_CONFIDENCE = 0.70
+MIN_SEGMENT_SPEAKER_PLURALITY_MARGIN = 0.10
+MAX_NEAREST_WORD_GAP_SECONDS = 0.50
 MAX_REDIARIZATION_SECONDS = 5 * 60
 TARGET_SAMPLE_RATE = 16_000
 PCM_STREAM_CHUNK_BYTES = 1024 * 1024
@@ -444,12 +446,51 @@ def apply_multi_diarized_words_to_segments(
                 evidence[label] += overlap
                 word_counts[label] += 1
         total = sum(evidence.values())
-        if total <= 0.0:
-            return []
-        selected = max(evidence, key=evidence.get)
-        confidence = evidence[selected] / total
-        if confidence < MIN_SEGMENT_SPEAKER_CONFIDENCE or word_counts[selected] < 1:
-            return []
+        selected = ""
+        confidence = 0.0
+        if total > 0.0:
+            ranked = sorted(evidence, key=evidence.get, reverse=True)
+            selected = ranked[0]
+            confidence = evidence[selected] / total
+            runner_up = evidence[ranked[1]] / total if len(ranked) > 1 else 0.0
+            if (
+                word_counts[selected] < 1
+                or (
+                    confidence < MIN_SEGMENT_SPEAKER_CONFIDENCE
+                    and confidence - runner_up
+                    < MIN_SEGMENT_SPEAKER_PLURALITY_MARGIN
+                )
+            ):
+                return []
+        else:
+            nearest: list[tuple[float, str]] = []
+            for item in words:
+                label = str(item.get("speaker") or "").strip()
+                if label not in evidence:
+                    continue
+                word_start = float(item.get("start"))
+                word_end = float(item.get("end"))
+                gap = (
+                    word_start - end
+                    if word_start >= end
+                    else start - word_end
+                    if word_end <= start
+                    else 0.0
+                )
+                if 0.0 <= gap <= MAX_NEAREST_WORD_GAP_SECONDS:
+                    nearest.append((gap, label))
+            if not nearest:
+                return []
+            minimum_gap = min(gap for gap, _label in nearest)
+            nearest_labels = {
+                label
+                for gap, label in nearest
+                if math.isclose(gap, minimum_gap, abs_tol=0.001)
+            }
+            if len(nearest_labels) != 1:
+                return []
+            selected = next(iter(nearest_labels))
+            confidence = 1.0
         speaker_number = label_numbers[selected]
         mapped.append(
             {
