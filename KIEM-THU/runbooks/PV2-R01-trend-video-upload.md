@@ -429,3 +429,32 @@ Stop on the exact failed component. Update the master checklist and durable trac
 write one RED at the Trend product boundary, reuse the known-good shared Tail/engine,
 and fix only a Trend adapter/material seam. Do not edit Product Video Edit, Long
 Video, either Self-shot product, or a product already frozen as LIVE PASS.
+
+## Job 28 hydration RED after PR #950
+
+PR #950 deployed exact runtime `78b2815da77f09c27eb5962e3968b86583a8a4c7`
+through run `33393610565` SUCCESS. Bot and inactive Owner worker were synchronized,
+compiled and tracked-clean. Query-only task hashes matched pre-start backup
+`f7e16c79...`; provider usage/submit/fallback/journal markers were `0`, proving the
+scene-1 paid Key4U authorization unconsumed. Authority CAS v2 backup is
+`/opt/toanaas/bot/delete/pv2-r01-job28-authority-cas-v2-production-
+20260831T210914.json`, SHA `77975e9d...`, mode `0600`.
+
+The first worker tick produced a safe LIVE RED before paid HTTP: scene 1 request
+metadata carried telemetry `fallback_count=1` and the policy read it as a previous
+attempt; scene 2 inherited the root Key4U candidate despite no scene authority.
+Observer stopped the worker. Attempts stayed `40`, task hashes and job counts stayed
+exact, provider usage/HTTP submit/wallet/artifact/delivery stayed `0`.
+
+Minimal source correction keeps current-attempt telemetry `1` but evaluates the
+limit from explicit persisted `fallback_count_before_submit=0`; a later retry with
+before-submit `1` remains blocked. Claim-scoped non-target scenes return empty
+candidate/order/idempotency. RED `2 failed, 10 deselected in 576.10s`; GREEN
+`2 passed, 10 deselected in 7.87s`; focused `49 passed`; combined `206 passed,
+1 exact baseline deselected in 33.68s` after retry-lock self-review; full compile
+exit `0`. Worker remains
+inactive until correction ship/runtime and same-job state restoration.
+
+The correction rebased cleanly onto SubDub #951 exact main `8de058a1...` with no
+file overlap. Post-rebase combined evidence is `206 passed, 1 exact baseline
+deselected in 34.67s`; pre-evidence-amend HEAD is `0f797826...`.

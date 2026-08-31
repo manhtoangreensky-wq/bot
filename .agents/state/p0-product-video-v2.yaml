@@ -1,5 +1,5 @@
 task_id: P0_PRODUCT_VIDEO_V2_PV2_R01
-phase: PV2_R01_JOB28_PROVIDER_AUTHORITY_LOOP_POST_REBASE_GATE_GREEN
+phase: PV2_R01_JOB28_HYDRATION_SOURCE_GREEN
 pointer: V2-03/PV2-R01
 base_sha: 3d16cf60511318d2c5eb7c799ecbee8c07631c1b
 goal: Restore the complete existing content flow for all four Video Trend lanes, then live the most complex upload lane once at tier 400 with two real scenes, strict subtitle/transition Add-ons, durable MP4 receipt, customer report and zero Owner wallet mutation.
@@ -634,13 +634,34 @@ pv2_r01_job28_provider_authority_loop:
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
+pv2_r01_job28_hydration_live_red:
+  pr_950_merge_sha: 78b2815da77f09c27eb5962e3968b86583a8a4c7
+  deploy_run: 33393610565 SUCCESS in 25m36s
+  runtime_bot_worker_sha: 78b2815da77f09c27eb5962e3968b86583a8a4c7
+  prestart_backup_sha_mode: f7e16c79... mode 0600
+  task_set_sha256: 85784d78a66ccd921a6c2de41ca253fde1809c20b43f2ffecab8d565248d95ef
+  authorization_forensic: UNCONSUMED_PROVEN; provider usage 0; submit/fallback/journal markers 0
+  authority_cas_backup: /opt/toanaas/bot/delete/pv2-r01-job28-authority-cas-v2-production-20260831T210914.json
+  authority_cas_sha_mode: 77975e9d06bbfe3dd9709d53ed710a86951670257ca172dfef84fa34c2224888 mode 0600
+  authority_cas_claim_proof: early empty; due job 28; attempts 40 to 40; controlled scene [1]; scene2 ShopAIKey no candidate
+  live_red: scene1 fallback_limit_reached before HTTP because request telemetry count 1; scene2 inherited root Key4U candidate
+  post_stop: worker inactive PID 0; task hashes and job counts unchanged; provider usage/HTTP submit/wallet/artifact/delivery 0
+  source_red: 2 failed and 10 deselected in 576.10s
+  source_green: 2 passed and 10 deselected in 7.87s
+  focused_green: 49 passed in 9.53s
+  combined_green: 206 passed and 1 exact baseline deselected in 33.68s after retry-lock self-review
+  post_rebase_base_sha: 8de058a11bd7ec1acd9ab8d9329bd16c76f75506
+  post_rebase_head_before_evidence_amend: 0f7978266522e342582d18cad5c7d872b6e20060
+  post_rebase_combined: 206 passed and 1 exact baseline deselected in 34.67s
+  full_compile: exit 0
+  production_scope: services/video_provider_router.py and services/video_real_render_connector.py
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  live_pass: false
 next_action: >-
-  Ship only the post-rebase claim poll-backoff plus claim-scoped scene authority
-  correction. Keep the worker inactive and do not
-  roll back production DB until post-deploy read-only forensics classify whether
-  the existing 37-character task identities changed. Rebuild one backed-up CAS for
-  existing job 28/project 32/outbox 27 only, preserving quote 144/144/144,
-  budget/cost 212/212, one Key4U scene-1 slot and no ShopAIKey resubmit. Require a
-  prove the exact existing Owner authorization remains unconsumed before any
-  worker/provider restart; otherwise stop. Then
-  materialize and validate the real two-scene MP4/receipt/report/zero-wallet proof.
+  Ship only the hydration/count-before-submit and scene-candidate isolation
+  correction. Keep the worker inactive until exact deploy/runtime readback, then
+  restore the same job 28 state from the backed-up authority CAS contract and run
+  the still-unconsumed scene-1 Key4U authorization once. Do not upload, Confirm,
+  create a new job or resubmit ShopAIKey. Continue to real two-scene MP4,
+  receipt/report and zero-wallet proof before opening another product.

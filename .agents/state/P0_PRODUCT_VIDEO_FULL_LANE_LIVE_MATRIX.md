@@ -705,24 +705,43 @@ starting the next.
 - [x] Rebased onto exact SubDub runtime/main `8cf77fef403a72e7a74a25db340f0932df25a4e4`;
   pre-evidence-amend HEAD `164cb43`; post-rebase regression `206 passed, 1 exact
   baseline deselected in 569.78s`; full compile exit `0`.
-- [ ] One PR, checks GREEN, squash merge, exact deploy run SUCCESS.
-- [ ] Bot and inactive Product Video worker exact merge SHA; worker heartbeat not
-  started before the next live authorization.
+- [x] PR #950 squash-merged exact SHA `78b2815da77f09c27eb5962e3968b86583a8a4c7`;
+  deploy run `33393610565` SUCCESS in `25m36s`; workflow compile/package/SSH PASS.
+- [x] VPS bot/web/nginx active and health OK at exact merge SHA; tracked bot diff
+  `0`. Owner Product Video worker fast-forwarded/compiled to exact SHA with tracked
+  diff `0`, then kept inactive/dead PID `0` before CAS/live authorization.
 
 #### SPEC-04H.7 — Post-deploy DB/task identity and backed-up CAS
 
-- [ ] Read-only compare current two 37-character task identities with pre-start
-  backup hashes; classify whether a Key4U submit already occurred without printing IDs.
-- [ ] Build/rehearse one CAS from current attempts/state; backup mode `0600` and SHA.
-- [ ] Post-CAS query-only proof: exact identity, one scene-1 Key4U authority, scene 2
-  preserved primary authority, next-poll gate, quote/budget/cost exact, artifacts/
-  delivery/charge absent and side effects `0`.
-- [ ] Treat the exact Owner authorization as unconsumed only if read-only evidence
-  proves Key4U submit/call count remained `0`; otherwise stop before restart.
+- [x] Query-only forensic compared both 37-character task hashes with pre-start
+  backup SHA `f7e16c79...`, mode `0600`; task-set SHA matched exactly. Provider
+  usage, fallback/submit markers and matching journal submit markers were all `0`,
+  so the exact scene-1 Key4U authorization was proven unconsumed.
+- [x] CAS v2 rehearsed on two independent SQLite snapshots, then production applied
+  once with backup `/opt/toanaas/bot/delete/pv2-r01-job28-authority-cas-v2-
+  production-20260831T210914.json`, SHA `77975e9d...`, mode `0600`.
+- [x] Post-CAS query-only + snapshot claim proof: identity `28/32/27`, attempts
+  `40->40`, early claim empty, due claim job `28`, one controlled scene `[1]`,
+  scene 2 ShopAIKey/no candidate, quote `144/144/144`, budget/cost `212/212`,
+  artifact/delivery/provider/wallet side effects `0`.
 
 #### SPEC-04H.8 — Same-job live terminal
 
-- [ ] Start the inactive worker once; no upload/Confirm/new job/ShopAIKey submit.
+- [-] Worker start on runtime `78b2815` exposed a new hydration RED before paid
+  HTTP: scene 1 request carried current telemetry count `1` into the policy and
+  hit `fallback_limit_reached`; scene 2 inherited root Key4U candidate. Observer
+  stopped worker immediately. Task hashes/job counts/attempts `40`, provider usage,
+  ShopAIKey/Key4U HTTP submit markers, wallet, artifacts and delivery all stayed `0`.
+- [x] Source RED `2 failed, 10 deselected in 576.10s`; minimal GREEN `2 passed,
+  10 deselected in 7.87s`; focused hydration/policy/spend/parallel/reconcile
+  `49 passed in 9.53s`; combined `206 passed, 1 exact baseline deselected in
+  33.68s` after retry-lock self-review; full compile exit `0`.
+- [x] Rebased cleanly onto SubDub #951 exact main `8de058a...`; post-rebase
+  combined `206 passed, 1 exact baseline deselected in 34.67s`; production/test
+  diff auto-merged without overlap.
+- [ ] Ship hydration correction, restore the same backed-up job state, then start
+  worker once more under the still-unconsumed scene-1 authorization. No upload,
+  Confirm, new job or ShopAIKey resubmit.
 - [ ] Poll cadence respects `next_poll_at`; poll-only claims do not increase attempts.
 - [ ] Only scene 1 may use the controlled Key4U fallback; scene 2 keeps its own
   product-correct provider/task authority.
