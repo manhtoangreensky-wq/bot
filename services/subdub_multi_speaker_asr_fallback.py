@@ -37,7 +37,7 @@ KEY4U_TRANSCRIPT_MAX_ATTEMPTS = 2
 KEY4U_TRANSCRIPT_RETRY_DELAY_SECONDS = 1.0
 GEMINI_INTERACTION_MAX_POLLS = 40
 GEMINI_INTERACTION_POLL_SECONDS = 3.0
-GEMINI_EMPTY_RESULT_MAX_ATTEMPTS = 2
+GEMINI_EMPTY_RESULT_MAX_ATTEMPTS = 3
 GEMINI_EMPTY_RESULT_RETRY_DELAY_SECONDS = 1.0
 MAX_DIRECT_AUDIO_BYTES = MAX_REDIARIZATION_SECONDS * 44_100 * 2 * 2
 _REDIARIZATION_LOCK = threading.Lock()
@@ -81,6 +81,32 @@ def detected_speaker_count(segments: object) -> int:
         if label and label not in labels:
             labels.append(label)
     return len(labels)
+
+
+def gemini_word_info_annotation_count(payload: object) -> int:
+    count = 0
+    steps = payload.get("steps") if isinstance(payload, dict) else None
+    if not isinstance(steps, list):
+        return 0
+    for step in steps:
+        content = step.get("content") if isinstance(step, dict) else None
+        if not isinstance(content, list):
+            continue
+        for content_item in content:
+            annotations = (
+                content_item.get("annotations")
+                if isinstance(content_item, dict)
+                else None
+            )
+            if not isinstance(annotations, list):
+                continue
+            count += sum(
+                isinstance(annotation, dict)
+                and str(annotation.get("type") or "").strip().lower()
+                == "word_info"
+                for annotation in annotations
+            )
+    return count
 
 
 def _canonical_words(words: object) -> list[dict]:
@@ -710,6 +736,14 @@ async def gemini_transcribe_multi_diarized_words(
                         else ""
                     ).strip().lower()
 
+                raw_annotation_count = gemini_word_info_annotation_count(
+                    response_payload
+                )
+                terminal_empty = bool(
+                    response_http_status < 400
+                    and interaction_status in {"completed", "incomplete"}
+                    and raw_annotation_count == 0
+                )
                 words = extract_gemini_multi_diarized_words(response_payload)
                 labels = _ordered_speaker_labels(words)
                 if response_http_status < 400 and words:
@@ -720,11 +754,12 @@ async def gemini_transcribe_multi_diarized_words(
                         "words": words,
                         "speaker_ids": labels,
                         "http_status": response_http_status,
+                        "raw_annotation_count": raw_annotation_count,
+                        "terminal_empty": False,
                         "detail": f"words={len(words)}; speakers={len(labels)}",
                     }
                 if (
-                    response_http_status < 400
-                    and interaction_status in {"completed", "incomplete"}
+                    terminal_empty
                     and attempt + 1 < GEMINI_EMPTY_RESULT_MAX_ATTEMPTS
                 ):
                     await asyncio.sleep(GEMINI_EMPTY_RESULT_RETRY_DELAY_SECONDS)
@@ -736,6 +771,8 @@ async def gemini_transcribe_multi_diarized_words(
                     "words": [],
                     "speaker_ids": [],
                     "http_status": response_http_status,
+                    "raw_annotation_count": raw_annotation_count,
+                    "terminal_empty": terminal_empty,
                     "detail": (
                         "gemini_multi_diarization_invalid:"
                         f"http={response_http_status};status={interaction_status or 'missing'}"
@@ -865,6 +902,12 @@ async def rediarize_underclustered_segments(
                 "provider_word_count": len(words),
                 "provider_speaker_count": len(diarization.get("speaker_ids") or []),
                 "mapped_speaker_count": speaker_count,
+                "provider_raw_annotation_count": int(
+                    diarization.get("raw_annotation_count") or 0
+                ),
+                "provider_terminal_empty": bool(
+                    diarization.get("terminal_empty") is True
+                ),
                 "detail": str(
                     diarization.get("detail")
                     or "multi_speaker_diarization_unavailable"
@@ -881,6 +924,10 @@ async def rediarize_underclustered_segments(
             "provider_word_count": len(words),
             "provider_speaker_count": len(diarization.get("speaker_ids") or []),
             "mapped_speaker_count": speaker_count,
+            "provider_raw_annotation_count": int(
+                diarization.get("raw_annotation_count") or 0
+            ),
+            "provider_terminal_empty": False,
             "detail": f"segments={len(mapped)}; speakers={speaker_count}",
         }
     finally:

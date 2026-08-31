@@ -51,6 +51,8 @@ def _multi_diarization_debug_fields(source: Mapping[str, object]) -> dict[str, o
         "multi_diarization_provider_word_count": bounded_int("multi_diarization_provider_word_count"),
         "multi_diarization_provider_speaker_count": bounded_int("multi_diarization_provider_speaker_count"),
         "multi_diarization_mapped_speaker_count": bounded_int("multi_diarization_mapped_speaker_count"),
+        "multi_diarization_raw_annotation_count": bounded_int("multi_diarization_raw_annotation_count"),
+        "multi_diarization_terminal_empty": bool(current.get("multi_diarization_terminal_empty") is True),
     }
 
 
@@ -1212,6 +1214,15 @@ async def run_auto_multi_speaker_blackbox(
                     )
                     if isinstance(rediarized, Mapping)
                     else 0,
+                    "multi_diarization_raw_annotation_count": int(
+                        rediarized.get("provider_raw_annotation_count") or 0
+                    )
+                    if isinstance(rediarized, Mapping)
+                    else 0,
+                    "multi_diarization_terminal_empty": bool(
+                        isinstance(rediarized, Mapping)
+                        and rediarized.get("provider_terminal_empty") is True
+                    ),
                 }
             )
         if not isinstance(rediarized, Mapping) or rediarized.get("ok") is not True:

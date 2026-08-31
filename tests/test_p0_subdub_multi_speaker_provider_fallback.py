@@ -276,6 +276,187 @@ def test_multi_gemini_retries_one_terminal_http_200_empty_response(monkeypatch):
     assert sleep_calls == [fallback.GEMINI_EMPTY_RESULT_RETRY_DELAY_SECONDS]
 
 
+def test_multi_gemini_retries_two_terminal_http_200_empty_responses_before_success(
+    monkeypatch,
+):
+    post_calls = []
+    get_calls = []
+    sleep_calls = []
+    responses = [
+        {
+            "id": "v1_empty_fixture_1",
+            "status": "completed",
+            "steps": [],
+        },
+        {
+            "id": "v1_empty_fixture_2",
+            "status": "completed",
+            "steps": [],
+        },
+        {
+            **_gemini_payload(),
+            "id": "v1_valid_fixture",
+            "status": "completed",
+        },
+    ]
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, url, **_kwargs):
+            post_calls.append(url)
+            payload = responses[len(post_calls) - 1]
+            return SimpleNamespace(status_code=200, json=lambda: payload)
+
+        async def get(self, url, **_kwargs):
+            get_calls.append(url)
+            raise AssertionError("completed interactions must not be polled")
+
+    async def no_wait(seconds):
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr(fallback.httpx, "AsyncClient", lambda **_kwargs: Client())
+    monkeypatch.setattr(fallback.asyncio, "sleep", no_wait)
+
+    result = asyncio.run(
+        fallback.gemini_transcribe_multi_diarized_words(
+            b"wav",
+            "audio/wav",
+            api_key="configured",
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "PASS"
+    assert len(post_calls) == 3
+    assert get_calls == []
+    assert sleep_calls == [
+        fallback.GEMINI_EMPTY_RESULT_RETRY_DELAY_SECONDS,
+        fallback.GEMINI_EMPTY_RESULT_RETRY_DELAY_SECONDS,
+    ]
+
+
+def test_multi_gemini_stops_after_three_terminal_http_200_empty_responses(
+    monkeypatch,
+):
+    post_calls = []
+    sleep_calls = []
+    responses = [
+        {"id": f"v1_empty_fixture_{index}", "status": "completed", "steps": []}
+        for index in range(3)
+    ]
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, url, **_kwargs):
+            post_calls.append(url)
+            if len(post_calls) > len(responses):
+                raise AssertionError("a fourth Gemini POST is forbidden")
+            payload = responses[len(post_calls) - 1]
+            return SimpleNamespace(status_code=200, json=lambda: payload)
+
+        async def get(self, _url, **_kwargs):
+            raise AssertionError("completed interactions must not be polled")
+
+    async def no_wait(seconds):
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr(fallback.httpx, "AsyncClient", lambda **_kwargs: Client())
+    monkeypatch.setattr(fallback.asyncio, "sleep", no_wait)
+
+    result = asyncio.run(
+        fallback.gemini_transcribe_multi_diarized_words(
+            b"wav",
+            "audio/wav",
+            api_key="configured",
+        )
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == fallback.AUTO_CAST_UNAVAILABLE
+    assert len(post_calls) == 3
+    assert sleep_calls == [
+        fallback.GEMINI_EMPTY_RESULT_RETRY_DELAY_SECONDS,
+        fallback.GEMINI_EMPTY_RESULT_RETRY_DELAY_SECONDS,
+    ]
+
+
+def test_multi_gemini_does_not_retry_nonempty_rejected_annotations(monkeypatch):
+    post_calls = []
+    sleep_calls = []
+    payload = {
+        "id": "v1_nonempty_invalid_fixture",
+        "status": "completed",
+        "steps": [
+            {
+                "content": [
+                    {
+                        "annotations": [
+                            {
+                                "type": "word_info",
+                                "speaker": "speaker_0",
+                                "text": "hello",
+                                "start_offset": "0s",
+                                "end_offset": "0.5s",
+                            },
+                            {
+                                "type": "word_info",
+                                "speaker": "speaker_0",
+                                "text": "again",
+                                "start_offset": "0.5s",
+                                "end_offset": "1s",
+                            },
+                        ]
+                    }
+                ]
+            }
+        ],
+    }
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, url, **_kwargs):
+            post_calls.append(url)
+            return SimpleNamespace(status_code=200, json=lambda: payload)
+
+        async def get(self, _url, **_kwargs):
+            raise AssertionError("completed interactions must not be polled")
+
+    async def no_wait(seconds):
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr(fallback.httpx, "AsyncClient", lambda **_kwargs: Client())
+    monkeypatch.setattr(fallback.asyncio, "sleep", no_wait)
+
+    result = asyncio.run(
+        fallback.gemini_transcribe_multi_diarized_words(
+            b"wav",
+            "audio/wav",
+            api_key="configured",
+        )
+    )
+
+    assert result["ok"] is False
+    assert result["raw_annotation_count"] == 2
+    assert result["terminal_empty"] is False
+    assert len(post_calls) == 1
+    assert sleep_calls == []
+
+
 def test_multi_parser_deduplicates_exact_rows_before_minimum_word_gate():
     payload = _gemini_payload()
     annotations = payload["steps"][0]["content"][0]["annotations"]
@@ -924,6 +1105,8 @@ def test_underclustered_multi_failure_preserves_provider_diagnostics(
             "provider_word_count": 0,
             "provider_speaker_count": 0,
             "mapped_speaker_count": 0,
+            "provider_raw_annotation_count": 0,
+            "provider_terminal_empty": True,
         }
 
     state = {
@@ -961,6 +1144,8 @@ def test_underclustered_multi_failure_preserves_provider_diagnostics(
         "multi_diarization_provider_word_count": 0,
         "multi_diarization_provider_speaker_count": 0,
         "multi_diarization_mapped_speaker_count": 0,
+        "multi_diarization_raw_annotation_count": 0,
+        "multi_diarization_terminal_empty": True,
     }
     assert result["status"] == speaker_cast.AUTO_CAST_MANUAL_REQUIRED
     assert {key: result[key] for key in expected} == expected
