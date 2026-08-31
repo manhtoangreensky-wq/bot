@@ -3987,27 +3987,6 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             )
         )
     )
-    if recovery_provider_mismatch:
-        raise RealVideoRenderError(
-            "scene_provider_mismatch",
-            diagnostics={
-                "ok": False,
-                "scene_index": scene_index,
-                "scene_id": scene_index,
-                "request_job_id": request_job_id,
-                "provider_error": "scene_provider_mismatch",
-                "blocker": "scene_provider_mismatch",
-                "provider_binding_present": bool(pending_provider_key),
-                "provider_order_match": False,
-                "provider_submit_called": False,
-                "provider_submit_allowed": False,
-                "automatic_retry_allowed": False,
-                "automatic_resubmit_allowed": False,
-                "automatic_fallback_allowed": False,
-                "recovery_existing_tasks_only": True,
-                "no_charge": True,
-            },
-        )
     pending_policy = product_video_scene_stall_policy(job, pending_scene_task, scene_index) if pending_matches_request else {}
     scene_fallback_order = list(pending_policy.get("fallback_provider_order") or [])
     scene_fallback_allowed = bool(pending_policy.get("fallback_allowed"))
@@ -4034,6 +4013,34 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         scene_index,
         fallback_provider_candidate,
     ) if fallback_provider_candidate else ""
+    controlled_provider_transition = bool(
+        recovery_provider_mismatch
+        and scene_fallback_allowed
+        and controlled_fallback_allowed
+        and fallback_provider_candidate in recovery_provider_order
+        and fallback_idempotency_key
+    )
+    if recovery_provider_mismatch and not controlled_provider_transition:
+        raise RealVideoRenderError(
+            "scene_provider_mismatch",
+            diagnostics={
+                "ok": False,
+                "scene_index": scene_index,
+                "scene_id": scene_index,
+                "request_job_id": request_job_id,
+                "provider_error": "scene_provider_mismatch",
+                "blocker": "scene_provider_mismatch",
+                "provider_binding_present": bool(pending_provider_key),
+                "provider_order_match": False,
+                "provider_submit_called": False,
+                "provider_submit_allowed": False,
+                "automatic_retry_allowed": False,
+                "automatic_resubmit_allowed": False,
+                "automatic_fallback_allowed": False,
+                "recovery_existing_tasks_only": True,
+                "no_charge": True,
+            },
+        )
     if pending_matches_request and scene_provider_stalled and scene_fallback_allowed:
         pending_matches_request = False
         pending_task_id = ""

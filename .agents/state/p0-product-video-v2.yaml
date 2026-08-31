@@ -1,5 +1,5 @@
 task_id: P0_PRODUCT_VIDEO_V2_PV2_R01
-phase: PV2_R01_JOB28_HYDRATION_SOURCE_GREEN
+phase: PV2_R01_JOB28_PROVIDER_TRANSITION_SOURCE_GREEN
 pointer: V2-03/PV2-R01
 base_sha: 3d16cf60511318d2c5eb7c799ecbee8c07631c1b
 goal: Restore the complete existing content flow for all four Video Trend lanes, then live the most complex upload lane once at tier 400 with two real scenes, strict subtitle/transition Add-ons, durable MP4 receipt, customer report and zero Owner wallet mutation.
@@ -658,9 +658,28 @@ pv2_r01_job28_hydration_live_red:
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
+pv2_r01_job28_provider_transition_live_red:
+  pr_952_merge_sha: 4152d6bc7b6934a9fc40b477ddc02fae8960651b
+  deploy_run: 33407010553 SUCCESS in 4m21s
+  runtime_bot_worker_sha: 4152d6bc7b6934a9fc40b477ddc02fae8960651b
+  restored_cas_backup: /opt/toanaas/bot/delete/pv2-r01-job28-authority-cas-v2-production-20260831T222248.json
+  restored_cas_sha_mode: 5d5377285399f3256c33e583e68b44bb74663e7364e2857681d9436e3e027553 mode 0600
+  live_red: controlled scene1 retained ShopAIKey pending identity while executor chain was Key4U, so scene_provider_mismatch fired before transition
+  scene2_isolated: true
+  post_stop: worker inactive PID 0; attempts 40; task hashes/job counts/provider usage/HTTP submit/wallet/artifact/delivery deltas 0
+  source_red: 1 failed and 11 deselected in 553.10s
+  source_green: 1 passed and 11 deselected in 5.72s
+  inverse_guard_green: 3 passed and 43 deselected in 6.21s
+  focused_green: 83 passed in 17.30s
+  combined_green: 206 passed and 1 exact baseline deselected in 34.58s
+  full_compile: exit 0
+  production_scope: services/video_real_render_connector.py
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  live_pass: false
 next_action: >-
-  Ship only the hydration/count-before-submit and scene-candidate isolation
-  correction. Keep the worker inactive until exact deploy/runtime readback, then
+  Ship only the controlled provider-transition correction. Keep the worker
+  inactive until exact deploy/runtime readback, then
   restore the same job 28 state from the backed-up authority CAS contract and run
   the still-unconsumed scene-1 Key4U authorization once. Do not upload, Confirm,
   create a new job or resubmit ShopAIKey. Continue to real two-scene MP4,

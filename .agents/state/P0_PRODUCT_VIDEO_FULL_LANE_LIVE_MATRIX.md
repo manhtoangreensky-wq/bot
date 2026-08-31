@@ -739,6 +739,22 @@ starting the next.
 - [x] Rebased cleanly onto SubDub #951 exact main `8de058a...`; post-rebase
   combined `206 passed, 1 exact baseline deselected in 34.67s`; production/test
   diff auto-merged without overlap.
+- [x] Hydration correction shipped as PR #952, squash SHA
+  `4152d6bc7b6934a9fc40b477ddc02fae8960651b`; deploy run `33407010553`
+  SUCCESS in `4m21s`; bot/worker exact SHA, tracked diff `0`, worker inactive
+  before CAS restore.
+- [-] Corrected live tick exposed a second pre-HTTP RED: scene 1 had exact
+  controlled Key4U authority but still carried its ShopAIKey pending task identity,
+  so the recovery provider mismatch guard fired before transition. Scene 2 remained
+  correctly isolated. Worker stopped; task hashes/attempts/job counts/provider
+  usage/HTTP submit/wallet/artifact/delivery deltas stayed `0`.
+- [x] Transition RED `1 failed, 11 deselected in 553.10s`; exact GREEN `1 passed,
+  11 deselected in 5.72s`; guard inverse `3 passed`; focused `83 passed in
+  17.30s`; combined `206 passed, 1 exact baseline deselected in 34.58s`; full
+  compile exit `0`.
+- [ ] Ship provider-transition correction, restore same job from backup, then
+  resume the still-unconsumed scene-1 authorization. No upload/Confirm/new job/
+  ShopAIKey resubmit.
 - [ ] Ship hydration correction, restore the same backed-up job state, then start
   worker once more under the still-unconsumed scene-1 authorization. No upload,
   Confirm, new job or ShopAIKey resubmit.
