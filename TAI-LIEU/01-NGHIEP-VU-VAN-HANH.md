@@ -807,3 +807,16 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
   exact, không có artifact/delivery message/path; service lưu bounded raw
   `word_info` count + terminal-empty bool. Review GREEN `25 passed in 563.13s`;
   expanded direct/protected `126 passed in 9.39s`.
+- Sau deploy `47f18be`, durable legacy job đã có mọi safety field explicit false/
+  no-charge nhưng thiếu đúng cả hai raw-observability fields vì failure xảy ra trước
+  deploy. Không backfill/giả mạo DB. Admin command có literal riêng
+  `--confirm-observability-gap`; override chỉ cho cả hai field cùng thiếu, cùng job/
+  SHA/Owner/options, one-shot marker và strict safety. Partial raw evidence bị chặn.
+  RED `3 failed in 6.70s`; exact GREEN `3 passed in 4.76s`; recovery module `28
+  passed in 5.66s`; expanded protected `128 passed in 8.98s`; full parser compile
+  exit `0`. Post-rebase exact main: `128 passed in 561.56s`, full compile exit
+  `0`. Chưa gọi provider hay correction lần hai trước deploy override.
+- Review phát hiện literal legacy trước ordinary recovery có thể đi vào first CAS;
+  RED `2 failed in 6.61s`. Guard mới chặn literal nếu predicate legacy không đúng;
+  GREEN `4 passed in 556.37s`, recovery module `30 passed in 5.49s`, full compile
+  exit `0`.

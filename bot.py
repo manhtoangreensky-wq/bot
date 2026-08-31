@@ -146039,11 +146039,20 @@ async def cmd_subdub_recover_failed_auto_multi(
     args = [str(value or "").strip() for value in (getattr(context, "args", []) or [])]
     usage = (
         "Cách dùng: /subdub_recover_failed_auto_multi "
-        "<internal_job_id> <source_sha256> English 40 150 --confirm-paid"
+        "<internal_job_id> <source_sha256> English 40 150 --confirm-paid "
+        "[--confirm-observability-gap]"
     )
-    if len(args) != 6 or args[-1] != SUBDUB_FAILED_AUTO_MULTI_RECOVERY_LITERAL:
+    ordinary_recovery = bool(
+        len(args) == 6 and args[-1] == SUBDUB_FAILED_AUTO_MULTI_RECOVERY_LITERAL
+    )
+    legacy_gap_recovery = bool(
+        len(args) == 7
+        and args[-2] == SUBDUB_FAILED_AUTO_MULTI_RECOVERY_LITERAL
+        and args[-1] == SUBDUB_FAILED_AUTO_MULTI_LEGACY_GAP_LITERAL
+    )
+    if not ordinary_recovery and not legacy_gap_recovery:
         return await update.message.reply_text(usage)
-    internal_job_id, source_sha256, target_language, original_raw, dub_raw, _literal = args
+    internal_job_id, source_sha256, target_language, original_raw, dub_raw = args[:5]
     if not original_raw.isdigit() or not dub_raw.isdigit():
         return await update.message.reply_text(usage)
     chat_id = getattr(update.message, "chat_id", user_id)
@@ -146056,6 +146065,7 @@ async def cmd_subdub_recover_failed_auto_multi(
         original_volume_percent=int(original_raw),
         dub_volume_percent=int(dub_raw),
         confirm_paid=True,
+        allow_legacy_observability_gap=legacy_gap_recovery,
     )
     if not claim.get("ok") or not claim.get("claimed"):
         reason = sanitize_log_text(str(claim.get("reason") or "recovery_not_claimed"))[:120]
@@ -248156,6 +248166,9 @@ def _subdub_auto_engine_job_cas(
 
 SUBDUB_FAILED_AUTO_MULTI_RECOVERY_STATUS = "recovering_auto_multi"
 SUBDUB_FAILED_AUTO_MULTI_RECOVERY_LITERAL = "--confirm-paid"
+SUBDUB_FAILED_AUTO_MULTI_LEGACY_GAP_LITERAL = (
+    "--confirm-observability-gap"
+)
 
 
 def _subdub_sha256_file(path: str) -> str:
@@ -248286,6 +248299,7 @@ def claim_subdub_failed_auto_multi_recovery(
     original_volume_percent: int,
     dub_volume_percent: int,
     confirm_paid: bool,
+    allow_legacy_observability_gap: bool = False,
 ) -> dict:
     safe_id = str(internal_job_id or "").strip()
     if not confirm_paid:
@@ -248391,6 +248405,7 @@ def claim_subdub_failed_auto_multi_recovery(
                 for field in correction_artifact_fields
             )
         )
+        raw_observability_fields = {"multi_diarization_raw_annotation_count", "multi_diarization_terminal_empty"}
         if recovery_attempt_count == 1 and not explicit_correction_safety:
             conn.rollback()
             return {"ok": False, "claimed": False, "reason": "job_not_safe_to_recover"}
@@ -248416,9 +248431,42 @@ def claim_subdub_failed_auto_multi_recovery(
             and str(current.get("last_error_stage") or "")
             == "AUTO_CAST_MANUAL_REQUIRED"
         )
-        if recovery_attempt_count != 0 and not empty_http_200_correction:
+        legacy_observability_override = bool(
+            allow_legacy_observability_gap is True
+            and recovery_attempt_count == 1
+            and correction_attempt_count == 0
+            and explicit_correction_safety
+            and not (raw_observability_fields & set(current))
+            and current.get("multi_diarization_attempted") is True
+            and str(current.get("multi_diarization_provider") or "")
+            == "gemini_transcribe_multi_diarization"
+            and str(current.get("multi_diarization_status") or "")
+            == "AUTO_CAST_UNAVAILABLE"
+            and str(current.get("multi_diarization_detail") or "").startswith(
+                "gemini_multi_diarization_invalid:http=200"
+            )
+            and int(current.get("multi_diarization_http_status") or 0) == 200
+            and int(current.get("multi_diarization_provider_word_count") or 0) == 0
+            and int(current.get("multi_diarization_provider_speaker_count") or 0) == 0
+            and int(current.get("multi_diarization_mapped_speaker_count") or 0) == 0
+            and str(current.get("last_error_stage") or "")
+            == "AUTO_CAST_MANUAL_REQUIRED"
+            and current.get("auto_multi_recovery_observability_override_used") is not True
+        )
+        if allow_legacy_observability_gap and not legacy_observability_override:
             conn.rollback()
-            return {"ok": False, "claimed": False, "reason": "recovery_already_used"}
+            return {"ok": False, "claimed": False, "reason": "legacy_observability_override_not_allowed"}
+
+        if recovery_attempt_count != 0 and not (
+            empty_http_200_correction or legacy_observability_override
+        ):
+            conn.rollback()
+            reason = (
+                "legacy_observability_override_not_allowed"
+                if allow_legacy_observability_gap
+                else "recovery_already_used"
+            )
+            return {"ok": False, "claimed": False, "reason": reason}
         workspace = str(current.get("workspace") or "")
         workspace_safety = subtitle_dub_workspace_path_safety(workspace)
         if not workspace_safety.get("allowed"):
@@ -248475,7 +248523,17 @@ def claim_subdub_failed_auto_multi_recovery(
                 "auto_multi_recovery": recovery,
                 "auto_multi_recovery_attempt_count": recovery_attempt_count + 1,
                 "auto_multi_recovery_correction_attempt_count": (
-                    1 if empty_http_200_correction else correction_attempt_count
+                    1
+                    if empty_http_200_correction or legacy_observability_override
+                    else correction_attempt_count
+                ),
+                **(
+                    {
+                        "auto_multi_recovery_observability_override_used": True,
+                        "auto_multi_recovery_observability_authority": "owner_literal_legacy_gap",
+                    }
+                    if legacy_observability_override
+                    else {}
                 ),
                 "updated_at": time.time(),
             }

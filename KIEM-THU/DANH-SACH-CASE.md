@@ -104,6 +104,13 @@ Canh lỗi bổ sung cho `SD-MS-01` sau live 31/08/2026: recovery của cùng jo
 message ID, hay response có nonzero raw `word_info` dù parser reject đều phải chặn
 correction.
 
+Legacy-only comparator: nếu failure xảy ra trước khi hai raw fields được deploy,
+ordinary command vẫn phải bị chặn. Override chỉ PASS khi có literal
+`--confirm-observability-gap`, cả hai fields cùng thiếu, mọi safety field explicit,
+marker chưa dùng; partial raw evidence hoặc lần override thứ hai phải FAIL.
+Literal legacy trên first recovery với raw evidence complete hoặc partial cũng phải
+FAIL, không được chuyển thành ordinary recovery.
+
 Comparator UI bổ sung: `2` lane × `6` kiểu giọng (nữ mặc định, nam mặc định,
 Kho voice, voice riêng, Auto 2, Auto multi) phải cùng callback
 `videodub|audio_mix`, cùng ba callback màn chính và cùng numeric range.
