@@ -248443,6 +248443,25 @@ def claim_subdub_failed_auto_multi_recovery(
             and str(current.get("last_error_stage") or "")
             == "AUTO_CAST_MANUAL_REQUIRED"
         )
+        mapper_alignment_correction = bool(
+            recovery_attempt_count == 1
+            and correction_attempt_count == 0
+            and explicit_correction_safety
+            and current.get("multi_diarization_attempted") is True
+            and str(current.get("multi_diarization_provider") or "")
+            == "gemini_transcribe_multi_diarization"
+            and str(current.get("multi_diarization_status") or "") == "PASS"
+            and str(current.get("multi_diarization_parse_rejection") or "") == ""
+            and int(current.get("multi_diarization_http_status") or 0) == 200
+            and int(current.get("multi_diarization_raw_annotation_count") or 0) > 0
+            and int(current.get("multi_diarization_provider_word_count") or 0) > 0
+            and 3
+            <= int(current.get("multi_diarization_provider_speaker_count") or 0)
+            <= subdub_speaker_cast.MAX_AUTO_SPEAKER_LABELS
+            and int(current.get("multi_diarization_mapped_speaker_count") or 0) == 0
+            and str(current.get("last_error_stage") or "")
+            == "AUTO_CAST_MANUAL_REQUIRED"
+        )
         legacy_observability_override = bool(
             allow_legacy_observability_gap is True
             and recovery_attempt_count == 1
@@ -248470,7 +248489,9 @@ def claim_subdub_failed_auto_multi_recovery(
             return {"ok": False, "claimed": False, "reason": "legacy_observability_override_not_allowed"}
 
         if recovery_attempt_count != 0 and not (
-            empty_http_200_correction or legacy_observability_override
+            empty_http_200_correction
+            or mapper_alignment_correction
+            or legacy_observability_override
         ):
             conn.rollback()
             reason = (
@@ -248536,7 +248557,9 @@ def claim_subdub_failed_auto_multi_recovery(
                 "auto_multi_recovery_attempt_count": recovery_attempt_count + 1,
                 "auto_multi_recovery_correction_attempt_count": (
                     1
-                    if empty_http_200_correction or legacy_observability_override
+                    if empty_http_200_correction
+                    or mapper_alignment_correction
+                    or legacy_observability_override
                     else correction_attempt_count
                 ),
                 **(

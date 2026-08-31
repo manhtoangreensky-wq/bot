@@ -960,6 +960,54 @@ def test_multi_mapper_maps_every_cue_after_bounded_weak_filter():
     assert all(item["speaker_confidence"] == 1.0 for item in mapped)
 
 
+def test_multi_mapper_keeps_all_cues_with_strong_plurality_or_one_nearby_word():
+    words = [
+        {"word": "lead", "start": 0.0, "end": 0.3, "speaker": "spk_1"},
+        {"word": "lead", "start": 0.3, "end": 0.6, "speaker": "spk_1"},
+        {"word": "second", "start": 0.6, "end": 0.85, "speaker": "spk_2"},
+        {"word": "third", "start": 0.9, "end": 1.05, "speaker": "spk_3"},
+        {"word": "third", "start": 1.05, "end": 1.2, "speaker": "spk_3"},
+        {"word": "nearby", "start": 1.5, "end": 1.8, "speaker": "spk_2"},
+        {"word": "third", "start": 1.8, "end": 1.95, "speaker": "spk_3"},
+        {"word": "third", "start": 1.95, "end": 2.1, "speaker": "spk_3"},
+    ]
+    segments = [
+        {"start": 0.0, "end": 0.9, "text": "plurality"},
+        {"start": 1.42, "end": 1.45, "text": "nearby"},
+        {"start": 1.8, "end": 2.1, "text": "third"},
+    ]
+
+    mapped = fallback.apply_multi_diarized_words_to_segments(segments, words)
+
+    assert len(mapped) == 3
+    assert fallback.detected_speaker_count(mapped) == 3
+    assert [item["speaker_id"] for item in mapped] == [
+        "chunk_00:speaker_0",
+        "chunk_00:speaker_1",
+        "chunk_00:speaker_2",
+    ]
+
+
+def test_multi_mapper_rejects_ambiguous_tie_and_far_nearest_word():
+    tied_words = [
+        {"word": "one", "start": 0.0, "end": 0.4, "speaker": "spk_1"},
+        {"word": "two", "start": 0.4, "end": 0.8, "speaker": "spk_2"},
+        {"word": "three", "start": 0.8, "end": 1.2, "speaker": "spk_3"},
+        {"word": "one-again", "start": 2.0, "end": 2.4, "speaker": "spk_1"},
+        {"word": "two-again", "start": 2.4, "end": 2.8, "speaker": "spk_2"},
+        {"word": "three-again", "start": 2.8, "end": 3.2, "speaker": "spk_3"},
+    ]
+
+    assert fallback.apply_multi_diarized_words_to_segments(
+        [{"start": 0.0, "end": 0.8, "text": "tie"}],
+        tied_words,
+    ) == []
+    assert fallback.apply_multi_diarized_words_to_segments(
+        [{"start": 1.4, "end": 1.5, "text": "far gap"}],
+        tied_words,
+    ) == []
+
+
 def test_multi_parser_rejects_conflicting_speaker_for_same_word_identity():
     payload = _gemini_payload()
     annotations = payload["steps"][0]["content"][0]["annotations"]
