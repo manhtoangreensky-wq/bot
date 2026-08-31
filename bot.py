@@ -232641,6 +232641,18 @@ def subdub_multi_diarization_debug_fields(payload: dict | None = None) -> dict:
         "multi_diarization_mapped_speaker_count": bounded_int("multi_diarization_mapped_speaker_count"),
         "multi_diarization_raw_annotation_count": bounded_int("multi_diarization_raw_annotation_count"),
         "multi_diarization_terminal_empty": bool(current.get("multi_diarization_terminal_empty") is True),
+        "multi_diarization_parse_rejection": str(
+            current.get("multi_diarization_parse_rejection") or ""
+        )[:80],
+        "multi_diarization_dropped_weak_word_count": bounded_int(
+            "multi_diarization_dropped_weak_word_count"
+        ),
+        "multi_diarization_dropped_weak_speaker_count": bounded_int(
+            "multi_diarization_dropped_weak_speaker_count"
+        ),
+        "multi_diarization_weak_label_filter_applied": bool(
+            current.get("multi_diarization_weak_label_filter_applied") is True
+        ),
     }
 
 

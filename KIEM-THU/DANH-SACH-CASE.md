@@ -110,6 +110,13 @@ ordinary command vẫn phải bị chặn. Override chỉ PASS khi có literal
 marker chưa dùng; partial raw evidence hoặc lần override thứ hai phải FAIL.
 Literal legacy trên first recovery với raw evidence complete hoặc partial cũng phải
 FAIL, không được chuyển thành ordinary recovery.
+Parser evidence comparator: raw count may be stored only as an aggregate. Never
+persist annotation text, speaker labels, timestamps, raw response or key. A `151`
+raw / `5` canonical-label response with one singleton may filter exactly `1` weak
+word only when weak total ≤`2` words and ≤`2%`, leaving `3–8` strong labels. Mapper
+must still cover every cue; a cue whose only evidence is the filtered label must
+FAIL. Two strong labels remain `speaker_count_out_of_range`; missing fields,
+unbounded weak fraction and conflicting identity require distinct rejection.
 
 Comparator UI bổ sung: `2` lane × `6` kiểu giọng (nữ mặc định, nam mặc định,
 Kho voice, voice riêng, Auto 2, Auto multi) phải cùng callback

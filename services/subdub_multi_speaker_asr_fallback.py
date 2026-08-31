@@ -29,6 +29,8 @@ KEY4U_FALLBACK_BASE_URL = "https://api.key4u.vn/v1"
 MIN_MULTI_SPEAKERS = 3
 MAX_GEMINI_DIARIZATION_SPEAKERS = 8
 MIN_WORDS_PER_SPEAKER = 2
+MAX_DROPPED_WEAK_WORDS = 2
+MAX_DROPPED_WEAK_WORD_FRACTION = 0.02
 MIN_SEGMENT_SPEAKER_CONFIDENCE = 0.70
 MAX_REDIARIZATION_SECONDS = 5 * 60
 TARGET_SAMPLE_RATE = 16_000
@@ -161,13 +163,48 @@ def _canonical_words(words: object) -> list[dict]:
     return canonical
 
 
-def extract_gemini_multi_diarized_words(payload: object) -> list[dict]:
-    """Extract 3-8 first-seen labels; no expected-speaker count is accepted."""
+def _bounded_multi_words(canonical: list[dict]) -> tuple[list[dict], dict]:
+    """Drop only bounded singleton labels while preserving 3-8 proven labels."""
+
+    labels = _ordered_speaker_labels(canonical)
+    counts = {
+        label: sum(item["speaker"] == label for item in canonical)
+        for label in labels
+    }
+    strong_labels = [
+        label for label in labels if counts[label] >= MIN_WORDS_PER_SPEAKER
+    ]
+    weak_labels = [label for label in labels if label not in strong_labels]
+    weak_word_count = sum(counts[label] for label in weak_labels)
+    weak_fraction = weak_word_count / len(canonical) if canonical else 0.0
+    filter_allowed = bool(
+        weak_labels
+        and MIN_MULTI_SPEAKERS
+        <= len(strong_labels)
+        <= MAX_GEMINI_DIARIZATION_SPEAKERS
+        and weak_word_count <= MAX_DROPPED_WEAK_WORDS
+        and weak_fraction <= MAX_DROPPED_WEAK_WORD_FRACTION
+    )
+    accepted = (
+        [item for item in canonical if item["speaker"] in set(strong_labels)]
+        if filter_allowed
+        else list(canonical)
+    )
+    return accepted, {
+        "accepted_speaker_count": len(_ordered_speaker_labels(accepted)),
+        "dropped_weak_word_count": weak_word_count,
+        "dropped_weak_speaker_count": len(weak_labels),
+        "weak_label_filter_applied": filter_allowed,
+    }
+
+
+def _gemini_multi_diarized_word_candidates(payload: object) -> list[dict]:
+    """Return only structurally valid word rows; never normalize acceptance here."""
 
     words: list[dict] = []
     steps = payload.get("steps") if isinstance(payload, dict) else None
     if not isinstance(steps, list):
-        return []
+        return words
     for step in steps:
         content = step.get("content") if isinstance(step, dict) else None
         if not isinstance(content, list):
@@ -206,8 +243,59 @@ def extract_gemini_multi_diarized_words(payload: object) -> list[dict]:
                             "speaker": speaker,
                         }
                     )
-    words = _canonical_words(words)
+    return words
+
+
+def gemini_multi_diarization_parse_evidence(payload: object) -> dict:
+    """Return bounded parser evidence without retaining transcript or labels."""
+
+    raw_annotation_count = gemini_word_info_annotation_count(payload)
+    candidates = _gemini_multi_diarized_word_candidates(payload)
+    canonical = _canonical_words(candidates)
+    candidate_labels = _ordered_speaker_labels(candidates)
+    canonical_labels = _ordered_speaker_labels(canonical)
+    bounded, weak_evidence = _bounded_multi_words(canonical)
+    rejection = ""
+    accepted: list[dict] = []
+
+    if raw_annotation_count and len(candidates) != raw_annotation_count:
+        rejection = "annotation_fields_invalid"
+    elif candidates and not canonical:
+        rejection = "word_identity_conflict"
+    elif not canonical:
+        rejection = "no_valid_word_annotations"
+    elif weak_evidence["dropped_weak_speaker_count"] and not weak_evidence[
+        "weak_label_filter_applied"
+    ]:
+        rejection = "speaker_word_count_below_min"
+    elif not MIN_MULTI_SPEAKERS <= weak_evidence["accepted_speaker_count"] <= MAX_GEMINI_DIARIZATION_SPEAKERS:
+        rejection = "speaker_count_out_of_range"
+    else:
+        accepted = bounded
+
+    return {
+        "raw_annotation_count": raw_annotation_count,
+        "candidate_word_count": len(candidates),
+        "candidate_speaker_count": len(candidate_labels),
+        "canonical_word_count": len(canonical),
+        "canonical_speaker_count": len(canonical_labels),
+        "accepted_word_count": len(accepted),
+        **weak_evidence,
+        "rejection": rejection,
+    }
+
+
+def extract_gemini_multi_diarized_words(payload: object) -> list[dict]:
+    """Extract 3-8 first-seen labels; no expected-speaker count is accepted."""
+
+    candidates = _gemini_multi_diarized_word_candidates(payload)
+    words = _canonical_words(candidates)
     if not words:
+        return []
+    words, weak_evidence = _bounded_multi_words(words)
+    if weak_evidence["dropped_weak_speaker_count"] and not weak_evidence[
+        "weak_label_filter_applied"
+    ]:
         return []
     labels = _ordered_speaker_labels(words)
     if not MIN_MULTI_SPEAKERS <= len(labels) <= MAX_GEMINI_DIARIZATION_SPEAKERS:
@@ -736,8 +824,11 @@ async def gemini_transcribe_multi_diarized_words(
                         else ""
                     ).strip().lower()
 
-                raw_annotation_count = gemini_word_info_annotation_count(
+                parse_evidence = gemini_multi_diarization_parse_evidence(
                     response_payload
+                )
+                raw_annotation_count = int(
+                    parse_evidence.get("raw_annotation_count") or 0
                 )
                 terminal_empty = bool(
                     response_http_status < 400
@@ -746,7 +837,11 @@ async def gemini_transcribe_multi_diarized_words(
                 )
                 words = extract_gemini_multi_diarized_words(response_payload)
                 labels = _ordered_speaker_labels(words)
-                if response_http_status < 400 and words:
+                if (
+                    response_http_status < 400
+                    and words
+                    and not str(parse_evidence.get("rejection") or "")
+                ):
                     return {
                         "ok": True,
                         "status": "PASS",
@@ -756,6 +851,16 @@ async def gemini_transcribe_multi_diarized_words(
                         "http_status": response_http_status,
                         "raw_annotation_count": raw_annotation_count,
                         "terminal_empty": False,
+                        "parse_rejection": "",
+                        "dropped_weak_word_count": int(
+                            parse_evidence.get("dropped_weak_word_count") or 0
+                        ),
+                        "dropped_weak_speaker_count": int(
+                            parse_evidence.get("dropped_weak_speaker_count") or 0
+                        ),
+                        "weak_label_filter_applied": bool(
+                            parse_evidence.get("weak_label_filter_applied") is True
+                        ),
                         "detail": f"words={len(words)}; speakers={len(labels)}",
                     }
                 if (
@@ -773,6 +878,18 @@ async def gemini_transcribe_multi_diarized_words(
                     "http_status": response_http_status,
                     "raw_annotation_count": raw_annotation_count,
                     "terminal_empty": terminal_empty,
+                    "parse_rejection": str(
+                        parse_evidence.get("rejection") or ""
+                    )[:80],
+                    "dropped_weak_word_count": int(
+                        parse_evidence.get("dropped_weak_word_count") or 0
+                    ),
+                    "dropped_weak_speaker_count": int(
+                        parse_evidence.get("dropped_weak_speaker_count") or 0
+                    ),
+                    "weak_label_filter_applied": bool(
+                        parse_evidence.get("weak_label_filter_applied") is True
+                    ),
                     "detail": (
                         "gemini_multi_diarization_invalid:"
                         f"http={response_http_status};status={interaction_status or 'missing'}"
@@ -908,6 +1025,18 @@ async def rediarize_underclustered_segments(
                 "provider_terminal_empty": bool(
                     diarization.get("terminal_empty") is True
                 ),
+                "provider_parse_rejection": str(
+                    diarization.get("parse_rejection") or ""
+                )[:80],
+                "provider_dropped_weak_word_count": int(
+                    diarization.get("dropped_weak_word_count") or 0
+                ),
+                "provider_dropped_weak_speaker_count": int(
+                    diarization.get("dropped_weak_speaker_count") or 0
+                ),
+                "provider_weak_label_filter_applied": bool(
+                    diarization.get("weak_label_filter_applied") is True
+                ),
                 "detail": str(
                     diarization.get("detail")
                     or "multi_speaker_diarization_unavailable"
@@ -928,6 +1057,16 @@ async def rediarize_underclustered_segments(
                 diarization.get("raw_annotation_count") or 0
             ),
             "provider_terminal_empty": False,
+            "provider_parse_rejection": "",
+            "provider_dropped_weak_word_count": int(
+                diarization.get("dropped_weak_word_count") or 0
+            ),
+            "provider_dropped_weak_speaker_count": int(
+                diarization.get("dropped_weak_speaker_count") or 0
+            ),
+            "provider_weak_label_filter_applied": bool(
+                diarization.get("weak_label_filter_applied") is True
+            ),
             "detail": f"segments={len(mapped)}; speakers={speaker_count}",
         }
     finally:
