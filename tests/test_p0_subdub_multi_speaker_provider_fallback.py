@@ -611,6 +611,127 @@ def test_multi_parser_accepts_151_raw_with_one_bounded_weak_label():
     ]
 
 
+def test_multi_parser_accepts_bounded_zero_duration_annotations_with_strong_cast():
+    payload = _gemini_payload(("spk_1", "spk_2", "spk_3", "spk_4"))
+    annotations = payload["steps"][0]["content"][0]["annotations"]
+    cursor = 4.0
+    while len(annotations) < 148:
+        label = f"spk_{len(annotations) % 4 + 1}"
+        annotations.append(
+            {
+                "type": "word_info",
+                "text": f"measured-{len(annotations)}",
+                "speaker": label,
+                "start_offset": f"{cursor:.3f}s",
+                "end_offset": f"{cursor + 0.2:.3f}s",
+            }
+        )
+        cursor += 0.25
+    annotations.append(
+        {
+            "type": "word_info",
+            "text": "one-off-label",
+            "speaker": "spk_noise",
+            "start_offset": f"{cursor:.3f}s",
+            "end_offset": f"{cursor + 0.2:.3f}s",
+        }
+    )
+    cursor += 0.25
+    for index in range(3):
+        annotations.append(
+            {
+                "type": "word_info",
+                "text": f"zero-duration-{index}",
+                "speaker": "spk_1",
+                "start_offset": f"{cursor:.3f}s",
+                "end_offset": f"{cursor:.3f}s",
+            }
+        )
+        cursor += 0.25
+
+    evidence = fallback.gemini_multi_diarization_parse_evidence(payload)
+    words = fallback.extract_gemini_multi_diarized_words(payload)
+
+    assert evidence == {
+        "raw_annotation_count": 152,
+        "candidate_word_count": 149,
+        "candidate_speaker_count": 5,
+        "canonical_word_count": 149,
+        "canonical_speaker_count": 5,
+        "accepted_word_count": 148,
+        "accepted_speaker_count": 4,
+        "dropped_weak_word_count": 1,
+        "dropped_weak_speaker_count": 1,
+        "weak_label_filter_applied": True,
+        "rejection": "",
+    }
+    assert len(words) == 148
+    assert list(dict.fromkeys(item["speaker"] for item in words)) == [
+        "spk_1",
+        "spk_2",
+        "spk_3",
+        "spk_4",
+    ]
+
+
+def test_multi_parser_rejects_more_than_three_zero_duration_annotations():
+    payload = _gemini_payload(("spk_1", "spk_2", "spk_3", "spk_4"))
+    annotations = payload["steps"][0]["content"][0]["annotations"]
+    cursor = 4.0
+    while len(annotations) < 196:
+        label = f"spk_{len(annotations) % 4 + 1}"
+        annotations.append(
+            {
+                "type": "word_info",
+                "text": f"measured-{len(annotations)}",
+                "speaker": label,
+                "start_offset": f"{cursor:.3f}s",
+                "end_offset": f"{cursor + 0.2:.3f}s",
+            }
+        )
+        cursor += 0.25
+    for index in range(4):
+        annotations.append(
+            {
+                "type": "word_info",
+                "text": f"zero-duration-{index}",
+                "speaker": "spk_1",
+                "start_offset": f"{cursor:.3f}s",
+                "end_offset": f"{cursor:.3f}s",
+            }
+        )
+        cursor += 0.25
+
+    evidence = fallback.gemini_multi_diarization_parse_evidence(payload)
+
+    assert evidence["raw_annotation_count"] == 200
+    assert evidence["candidate_word_count"] == 196
+    assert evidence["accepted_word_count"] == 0
+    assert evidence["rejection"] == "annotation_fields_invalid"
+    assert fallback.extract_gemini_multi_diarized_words(payload) == []
+
+
+def test_multi_parser_rejects_zero_duration_annotation_with_missing_speaker():
+    payload = _gemini_payload()
+    annotations = payload["steps"][0]["content"][0]["annotations"]
+    annotations.append(
+        {
+            "type": "word_info",
+            "text": "malformed",
+            "start_offset": "3.100s",
+            "end_offset": "3.100s",
+        }
+    )
+
+    evidence = fallback.gemini_multi_diarization_parse_evidence(payload)
+
+    assert evidence["raw_annotation_count"] == 7
+    assert evidence["candidate_word_count"] == 6
+    assert evidence["accepted_word_count"] == 0
+    assert evidence["rejection"] == "annotation_fields_invalid"
+    assert fallback.extract_gemini_multi_diarized_words(payload) == []
+
+
 def test_multi_gemini_result_reports_bounded_weak_label_filter(monkeypatch):
     payload = _gemini_payload(("spk_1", "spk_2", "spk_3", "spk_4"))
     annotations = payload["steps"][0]["content"][0]["annotations"]

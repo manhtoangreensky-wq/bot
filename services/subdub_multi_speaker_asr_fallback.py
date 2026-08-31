@@ -31,6 +31,8 @@ MAX_GEMINI_DIARIZATION_SPEAKERS = 8
 MIN_WORDS_PER_SPEAKER = 2
 MAX_DROPPED_WEAK_WORDS = 2
 MAX_DROPPED_WEAK_WORD_FRACTION = 0.02
+MAX_DROPPED_ZERO_DURATION_WORDS = 3
+MAX_DROPPED_ZERO_DURATION_WORD_FRACTION = 0.02
 MIN_SEGMENT_SPEAKER_CONFIDENCE = 0.70
 MAX_REDIARIZATION_SECONDS = 5 * 60
 TARGET_SAMPLE_RATE = 16_000
@@ -246,6 +248,59 @@ def _gemini_multi_diarized_word_candidates(payload: object) -> list[dict]:
     return words
 
 
+def _bounded_zero_duration_drop_allowed(
+    payload: object,
+    *,
+    candidate_word_count: int,
+) -> bool:
+    raw_annotation_count = gemini_word_info_annotation_count(payload)
+    dropped_count = raw_annotation_count - candidate_word_count
+    if dropped_count <= 0:
+        return False
+    zero_duration_count = 0
+    steps = payload.get("steps") if isinstance(payload, dict) else None
+    for step in steps if isinstance(steps, list) else []:
+        content = step.get("content") if isinstance(step, dict) else None
+        for content_item in content if isinstance(content, list) else []:
+            annotations = (
+                content_item.get("annotations")
+                if isinstance(content_item, dict)
+                else None
+            )
+            for annotation in annotations if isinstance(annotations, list) else []:
+                if (
+                    not isinstance(annotation, dict)
+                    or str(annotation.get("type") or "").strip().lower()
+                    != "word_info"
+                ):
+                    continue
+                speaker = annotation.get("speaker") or annotation.get(
+                    "speaker_label"
+                )
+                text = annotation.get("text") or annotation.get("word")
+                start_offset = annotation.get("start_offset")
+                end_offset = annotation.get("end_offset")
+                start = _offset_seconds(start_offset)
+                end = _offset_seconds(end_offset)
+                if (
+                    isinstance(speaker, str)
+                    and speaker.strip()
+                    and isinstance(text, str)
+                    and text.strip()
+                    and isinstance(start_offset, str)
+                    and isinstance(end_offset, str)
+                    and start >= 0.0
+                    and end == start
+                ):
+                    zero_duration_count += 1
+    return bool(
+        dropped_count == zero_duration_count
+        and zero_duration_count <= MAX_DROPPED_ZERO_DURATION_WORDS
+        and zero_duration_count / raw_annotation_count
+        <= MAX_DROPPED_ZERO_DURATION_WORD_FRACTION
+    )
+
+
 def gemini_multi_diarization_parse_evidence(payload: object) -> dict:
     """Return bounded parser evidence without retaining transcript or labels."""
 
@@ -258,7 +313,14 @@ def gemini_multi_diarization_parse_evidence(payload: object) -> dict:
     rejection = ""
     accepted: list[dict] = []
 
-    if raw_annotation_count and len(candidates) != raw_annotation_count:
+    if (
+        raw_annotation_count
+        and len(candidates) != raw_annotation_count
+        and not _bounded_zero_duration_drop_allowed(
+            payload,
+            candidate_word_count=len(candidates),
+        )
+    ):
         rejection = "annotation_fields_invalid"
     elif candidates and not canonical:
         rejection = "word_identity_conflict"
@@ -289,6 +351,16 @@ def extract_gemini_multi_diarized_words(payload: object) -> list[dict]:
     """Extract 3-8 first-seen labels; no expected-speaker count is accepted."""
 
     candidates = _gemini_multi_diarized_word_candidates(payload)
+    raw_annotation_count = gemini_word_info_annotation_count(payload)
+    if (
+        raw_annotation_count
+        and len(candidates) != raw_annotation_count
+        and not _bounded_zero_duration_drop_allowed(
+            payload,
+            candidate_word_count=len(candidates),
+        )
+    ):
+        return []
     words = _canonical_words(candidates)
     if not words:
         return []
