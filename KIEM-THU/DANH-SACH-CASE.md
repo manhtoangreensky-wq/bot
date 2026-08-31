@@ -65,6 +65,11 @@ cảnh, không tạo job tier `400` riêng và không dồn quality coverage và
 - `charged_xu=0`, transaction và credit-event count/max-ID delta 0.
 - Duplicate callback không tạo job, delivery, settlement hoặc report thứ hai.
 
+Canh lỗi riêng `PV2-R01`: provider-deferred job phải tôn trọng `next_poll_at`,
+không tăng claim attempts trong cửa sổ chờ. Controlled fallback đã khóa scene 1
+không được lan sang scene 2; scene index, scene marker và Key4U candidate phải cùng
+khớp trước submit. ShopAIKey task identity cũ không được đổi nhãn thành Key4U task.
+
 ## Public Landing Motion
 
 | ID | Viewport/chế độ | PASS bắt buộc |

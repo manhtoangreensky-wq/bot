@@ -485,3 +485,16 @@ combined `110 passed`; post-rebase `110 passed in 657.28s`; compile `0`.
 Review mixed malformed RED `1 failed in 6.89s` -> GREEN `3 passed in 7.27s`;
 final combined `111 passed`, compile `0`.
 No provider call, MP4, or wallet mutation during source TDD.
+## Đối chiếu Product Video provider-deferred claim — 31/08/2026
+
+| Giả định cũ | Hiện tại đo được | Trạng thái |
+|---|---|---|
+| Lưu `next_poll_at` là đủ để worker chờ | Job #28 bị claim `32` lần trong một cửa sổ defer, attempts `8 -> 40` | Không còn đúng |
+| Exact quote + Key4U ready có thể cấp fallback cho mọi scene stalled | Quyền Owner chỉ cấp scene 1 nhưng policy cũng mở scene 2 | Không được phép |
+| Root controlled marker đại diện đủ cho scene authority | Phải đồng thời khớp root `fallback_scene_index`, scene controlled marker và Key4U candidate | Đã cô lập |
+
+Correction chỉ thêm hai guard; provider adapter, Tail, quote, wallet và artifact
+không đổi. RED `2 failed`; exact GREEN `2 passed`; focused `33 passed`;
+protected `165 passed`; final combined sau mọi self-review `206 passed, 1 baseline
+deselected in 28.88s`;
+compile/YAML/diff/scope/secret `0`. LIVE MP4 vẫn chưa PASS.

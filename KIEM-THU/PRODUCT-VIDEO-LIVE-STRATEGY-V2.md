@@ -95,10 +95,33 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     suppression + Key4U candidate are all true. Claim/hydrate integration `2 passed`;
     worker-to-scene render `1 passed`; expanded branch/main share exact 4 failures,
     focused branch/main share exact 2 failures, `NEW_FAILURES=0`.
-  - [ ] Ship the worker-context overlay, then invoke existing
-    one-per-scene Key4U controlled fallback on job #28 only. New upload, Confirm,
-    project/job/outbox, primary submit or price change is forbidden. `PV2-R01` stays
-    open until real MP4/receipt/report/zero-wallet acceptance passes.
+  - [x] Worker-context overlay shipped as PR #943, squash `252758be...`; deploy
+    run `33317232271` SUCCESS. Bot and stopped Owner worker were synchronized to
+    latest runtime `1b259262...`; query-only preflight still proved quote
+    `144/144/144`, budget/cost `212/212`, one scene-1 Key4U slot and side effects 0.
+  - [x] Owner-authorized worker start exposed a provider-authority RED before
+    artifact: attempts `8->40`, root repeatedly returned ShopAIKey
+    `provider_in_progress`, and both scene rows were reclassified to Key4U while
+    scene-level controlled flags/fallback counts remained `false/0`. Worker was
+    stopped; artifacts/delivery/provider-usage/transaction/wallet deltas remained 0.
+  - [x] Source correction is isolated to two guards: respect deferred
+    `next_poll_at` before claim, and require claim-scoped scene index/marker/candidate
+    before controlled fallback. Self-review also made scene-level Key4U candidate
+    mandatory instead of falling back to root. RED `2 failed`; exact GREEN `2 passed`; focused
+    `33 passed`; protected claim/stall/scene authority `165 passed`; full compile,
+    YAML/diff/scope/secret gates `0`. Strategy verifier has `8 passed` plus the
+    exact pre-existing Script fixture SHA failure; that fixture is byte-unchanged.
+    Final self-review gate is `206 passed, 1 baseline deselected in 28.88s`, full
+    compile `0`, Critical/Important `0/0`.
+  - [x] After exact SubDub release, rebased onto main/runtime `8cf77fef...`.
+    Post-rebase gate is `206 passed, 1 baseline deselected in 569.78s`; full
+    compile exit `0`; production scope remains exactly two services.
+  - [ ] Ship this authority-loop correction, classify existing task identities
+    read-only after deploy, then prepare one backed-up same-job CAS. New upload,
+    Confirm, project/job/outbox, ShopAIKey resubmit or price change is forbidden.
+    The exact existing Owner authorization may continue only if read-only evidence
+    proves no Key4U submit/call occurred; otherwise stop before restart.
+    `PV2-R01` stays open until real MP4/receipt/report/zero-wallet acceptance passes.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 

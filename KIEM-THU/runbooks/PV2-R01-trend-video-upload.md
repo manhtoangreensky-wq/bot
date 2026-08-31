@@ -298,6 +298,38 @@ Key4U candidate are all present. Normal Product Video claims do not receive the
 overlay. Worker stays stopped until this source seam is shipped and a new
 query-only dry-run/CAS passes.
 
+PR #943 shipped the conditional worker-context overlay as squash
+`252758be251a84ca2896207544f46180fb1e3d69`; deploy run `33317232271` was
+SUCCESS. Bot and the inactive Owner worker were then synchronized/compiled at
+`1b25926257634545436dd8bf8aea5af005d6e4ab`. Query-only dry-run again proved
+job `28`, project `32`, outbox `27`, quote `144/144/144`, budget/cost `212/212`,
+one scene-1 Key4U candidate, idempotency match and side effects `0`.
+
+The exact Owner-authorized start was stopped after a new bounded RED. Attempts rose
+`8 -> 40` because provider defer persisted `next_poll_at` but claim scan ignored it.
+Root repeatedly entered ShopAIKey `provider_in_progress`. Both scene tasks changed
+provider metadata from ShopAIKey to Key4U even though only scene 1 was authorized;
+both retained fallback count `0`, scene-level controlled `false`, no artifact and no
+delivery. Transactions/provider usage stayed `0`; credit events stayed `1`; wallet
+stayed `200/0`; charged Xu stayed `0`.
+
+The minimal correction does not alter provider adapters. Claim scan now skips a
+provider-deferred job until its durable `next_poll_at`. A claim-scoped recovery
+(`claim_terminal_suppressed_for_controlled_fallback=true`) authorizes Key4U only
+when root `fallback_scene_index`, the scene's controlled marker and its Key4U
+candidate all match. RED was `2 failed, 10 deselected in 773.83s`; exact GREEN
+`2 passed, 10 deselected in 6.00s`; focused `33 passed`; protected direct impact
+`165 passed`; full compile and YAML/diff/scope/secret gates exit `0`. The Strategy
+verifier retains one exact baseline Script fixture SHA failure; the fixture is
+byte-unchanged. Keep the worker stopped until this ships and a new backed-up CAS
+plus new Owner action-time authorization are complete.
+
+After exact SubDub release, the one Product Video commit rebased onto
+`8cf77fef403a72e7a74a25db340f0932df25a4e4`. Pre-evidence-amend HEAD is
+`164cb43`; the exact post-rebase regression is `206 passed, 1 baseline deselected
+in 569.78s`, and full compile exits `0`. The worker remains inactive; no DB,
+provider or wallet action was performed during this gate.
+
 For later Product Video rows, Owner approved the fixture library
 `D:\TOANAAS\video AI tham khảo`. Select a suitable complete video, then measure
 its SHA/bytes/streams/duration before live. PV2-R01 remains locked to SHA
