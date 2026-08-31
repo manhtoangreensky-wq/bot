@@ -643,6 +643,12 @@ def test_live28_worker_payload_preserves_controlled_fallback_context(
         captured["fallback_idempotency_key"] = request.metadata.get(
             "fallback_idempotency_key"
         )
+        captured["pending_task_id"] = request.metadata.get(
+            "provider_pending_task_id"
+        )
+        captured["pending_video_id"] = request.metadata.get(
+            "provider_pending_video_id"
+        )
         output = tmp_path / "key4u-live28-scene-1.mp4"
         output.write_bytes(b"key4u-live28-scene")
         return {
@@ -671,7 +677,7 @@ def test_live28_worker_payload_preserves_controlled_fallback_context(
         connector._render_scene_async(
             scene,
             str(tmp_path / "provider-scene-1.mp4"),
-            list(payload["provider_order"]),
+            ["key4u_video"],
         )
     )
 
@@ -691,6 +697,8 @@ def test_live28_worker_payload_preserves_controlled_fallback_context(
         == "fallback_limit_reached"
     )
     assert captured["fallback_idempotency_key"] == fallback_key
+    assert captured["pending_task_id"] == ""
+    assert captured["pending_video_id"] == ""
 
     normal_persisted = {
         **persisted,

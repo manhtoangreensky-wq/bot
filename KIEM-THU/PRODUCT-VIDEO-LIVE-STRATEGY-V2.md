@@ -128,6 +128,14 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     also proves before-submit `1` remains blocked. Ship/recover same job next.
   - [x] Rebased cleanly onto SubDub #951 main `8de058a...`; post-rebase combined
     `206 passed, 1 exact baseline deselected in 34.67s`, no overlapping file.
+  - [x] Hydration correction PR #952 deployed exact runtime `4152d6bc...` through
+    run `33407010553` SUCCESS. Same-job CAS restore used backup SHA `5d537728...`.
+    Corrected live tick isolated scene 2 but hit `scene_provider_mismatch` for scene
+    1 before paid HTTP because controlled Key4U transition still carried the primary
+    ShopAIKey task identity. Worker stopped with all side-effect deltas `0`.
+  - [-] Transition source RED `1 failed` -> GREEN `1 passed`; inverse mismatch guard
+    `3 passed`; focused `83 passed`; combined `206 passed, 1 deselected`; compile
+    `0`. Ship/recover same job next; authorization remains unconsumed.
     The exact existing Owner authorization may continue only if read-only evidence
     proves no Key4U submit/call occurred; otherwise stop before restart.
     `PV2-R01` stays open until real MP4/receipt/report/zero-wallet acceptance passes.

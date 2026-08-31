@@ -458,3 +458,25 @@ inactive until correction ship/runtime and same-job state restoration.
 The correction rebased cleanly onto SubDub #951 exact main `8de058a1...` with no
 file overlap. Post-rebase combined evidence is `206 passed, 1 exact baseline
 deselected in 34.67s`; pre-evidence-amend HEAD is `0f797826...`.
+
+## Job 28 controlled provider-transition RED after PR #952
+
+PR #952 deployed exact runtime `4152d6bc7b6934a9fc40b477ddc02fae8960651b`
+through run `33407010553` SUCCESS in `4m21s`. CAS restore backup
+`/opt/toanaas/bot/delete/pv2-r01-job28-authority-cas-v2-production-
+20260831T222248.json` has SHA `5d537728...`, mode `0600`.
+
+The corrected live tick preserved scene 2 as ShopAIKey/no fallback, but scene 1
+entered a valid Key4U-only executor while still holding the old ShopAIKey pending
+identity. `_render_scene_async` checked provider mismatch before evaluating exact
+controlled transition authority, so it stopped before paid HTTP. Worker was stopped;
+attempts remained `40`, task hashes/job counts and provider usage/HTTP submit/wallet/
+artifact/delivery deltas stayed `0`.
+
+Minimal correction computes canonical scene policy first. A mismatch is exempt only
+when that same scene has controlled fallback allowed, matching fallback executor and
+non-empty idempotency; the primary pending task identity is then cleared before the
+Key4U request. All other recovery mismatches still fail before router. RED `1 failed,
+11 deselected in 553.10s`; GREEN `1 passed, 11 deselected in 5.72s`; inverse guard
+`3 passed`; focused `83 passed`; combined `206 passed, 1 deselected in 34.58s`;
+full compile exit `0`.
