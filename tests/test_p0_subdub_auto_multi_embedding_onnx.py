@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import math
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from services import subdub_multi_speaker_embedding_onnx as service
@@ -209,3 +211,214 @@ def test_acoustic_model_imports_onnxruntime_only_for_real_session(
     )
 
     assert imported == []
+
+
+def acoustic_words() -> list[dict]:
+    return [
+        {"index": 0, "word": "one", "start": 0.0, "end": 0.2},
+        {"index": 1, "word": "two", "start": 0.55, "end": 0.75},
+        {"index": 2, "word": "three", "start": 1.2, "end": 1.4},
+        {"index": 3, "word": "four", "start": 1.9, "end": 2.1},
+        {"index": 4, "word": "five", "start": 2.6, "end": 2.8},
+        {"index": 5, "word": "six", "start": 3.3, "end": 3.5},
+        {"index": 6, "word": "seven", "start": 4.0, "end": 4.2},
+    ]
+
+
+def test_acoustic_word_timeline_and_units_preserve_every_word_once():
+    words = acoustic_words()
+
+    validated = service.validate_word_timeline(words, duration_seconds=5.0)
+    units = service.build_acoustic_units(validated, duration_seconds=5.0)
+
+    assert validated == words
+    assert [index for unit in units for index in unit["word_indexes"]] == list(
+        range(len(words))
+    )
+    assert len(units) == 6
+    assert units[0] == {
+        "unit_index": 0,
+        "word_indexes": [0, 1],
+        "start": 0.0,
+        "end": 0.75,
+        "original_speech_seconds": 0.4,
+    }
+
+
+def test_acoustic_units_split_only_after_gap_strictly_greater_than_350ms():
+    words = acoustic_words()
+
+    units = service.build_acoustic_units(words, duration_seconds=5.0)
+
+    assert units[0]["word_indexes"] == [0, 1]
+    assert units[1]["word_indexes"] == [2]
+
+
+def test_acoustic_units_split_before_word_that_would_exceed_2_5_seconds():
+    words = [
+        {"index": 0, "word": "a", "start": 0.0, "end": 0.8},
+        {"index": 1, "word": "b", "start": 0.9, "end": 1.7},
+        {"index": 2, "word": "c", "start": 1.8, "end": 2.6},
+        {"index": 3, "word": "d", "start": 3.1, "end": 3.3},
+        {"index": 4, "word": "e", "start": 3.8, "end": 4.0},
+        {"index": 5, "word": "f", "start": 4.5, "end": 4.7},
+        {"index": 6, "word": "g", "start": 5.2, "end": 5.4},
+        {"index": 7, "word": "h", "start": 5.9, "end": 6.1},
+    ]
+
+    units = service.build_acoustic_units(words, duration_seconds=7.0)
+
+    assert units[0]["word_indexes"] == [0, 1]
+    assert units[0]["start"] == 0.0
+    assert units[0]["end"] == 1.7
+    assert units[1]["word_indexes"] == [2]
+    assert units[1]["start"] == 1.8
+    assert units[1]["end"] == 2.6
+
+
+def test_short_acoustic_unit_keeps_original_timing_for_later_zero_padding():
+    units = service.build_acoustic_units(acoustic_words(), duration_seconds=5.0)
+
+    short_unit = units[1]
+    assert short_unit["start"] == 1.2
+    assert short_unit["end"] == 1.4
+    assert short_unit["original_speech_seconds"] == 0.2
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "not_list",
+        "too_few_units",
+        "wrong_index",
+        "empty_text",
+        "bool_time",
+        "nan_time",
+        "overlap",
+        "past_duration",
+        "duplicate_identity",
+    ),
+)
+def test_acoustic_word_timeline_rejects_malformed_or_unsupported_input(mutation):
+    words = acoustic_words()
+    value: object = words
+    if mutation == "not_list":
+        value = {}
+    elif mutation == "too_few_units":
+        value = [
+            {"index": index, "word": str(index), "start": index * 0.2, "end": index * 0.2 + 0.1}
+            for index in range(6)
+        ]
+    elif mutation == "wrong_index":
+        words[2]["index"] = 99
+    elif mutation == "empty_text":
+        words[2]["word"] = "  "
+    elif mutation == "bool_time":
+        words[2]["start"] = True
+    elif mutation == "nan_time":
+        words[2]["end"] = math.nan
+    elif mutation == "overlap":
+        words[2]["start"] = 0.7
+    elif mutation == "past_duration":
+        words[-1]["end"] = 5.1
+    else:
+        words.append(dict(words[-1]))
+
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        service.build_acoustic_units(value, duration_seconds=5.0)
+
+
+def test_acoustic_word_timeline_rejects_more_than_sidecar_bound():
+    count = speaker_cast.MAX_SIDECAR_CUES + 1
+    words = [
+        {
+            "index": index,
+            "word": f"w{index}",
+            "start": index * 0.001,
+            "end": index * 0.001 + 0.0005,
+        }
+        for index in range(count)
+    ]
+
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        service.validate_word_timeline(words, duration_seconds=count * 0.001 + 1.0)
+
+
+FBANK_GOLDEN_PATH = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "subdub_auto_multi_fbank_golden.npz"
+)
+FBANK_GOLDEN_SHA256 = (
+    "4ce1c8bebc35ca0141bc88831672a93f9e654173cf40e0dddcd4cc664d9a7c32"
+)
+
+
+def deterministic_fbank_pcm() -> np.ndarray:
+    indexes = np.arange(12_000, dtype=np.int64)
+    return (((indexes * 7_919 + 12_345) % 65_536) - 32_768).astype(np.int16)
+
+
+def test_fbank_matches_hash_locked_wespeaker_reference_fixture():
+    assert hashlib.sha256(FBANK_GOLDEN_PATH.read_bytes()).hexdigest() == (
+        FBANK_GOLDEN_SHA256
+    )
+    with np.load(FBANK_GOLDEN_PATH, allow_pickle=False) as golden:
+        assert int(golden["sample_rate"]) == 16_000
+        assert int(golden["sample_formula_version"]) == 1
+        expected = np.asarray(golden["features"], dtype=np.float32)
+
+    actual = service.compute_fbank(deterministic_fbank_pcm())
+
+    assert actual.dtype == np.float32
+    assert actual.shape == expected.shape == (73, 80)
+    np.testing.assert_allclose(actual, expected, rtol=2e-4, atol=2e-4)
+    np.testing.assert_allclose(actual.mean(axis=0), 0.0, atol=2e-5)
+
+
+@pytest.mark.parametrize(
+    "samples",
+    (
+        np.zeros((1, 400), dtype=np.int16),
+        np.zeros(400, dtype=np.int32),
+        np.asarray([], dtype=np.int16),
+        np.zeros(399, dtype=np.int16),
+        np.asarray([math.nan] + [0.0] * 399, dtype=np.float32),
+        np.asarray([math.inf] + [0.0] * 399, dtype=np.float32),
+    ),
+)
+def test_fbank_rejects_invalid_pcm_contract(samples):
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        service.compute_fbank(samples)
+
+
+def test_fbank_is_deterministic_and_does_not_mutate_pcm():
+    pcm = deterministic_fbank_pcm()
+    before = pcm.copy()
+
+    first = service.compute_fbank(pcm)
+    second = service.compute_fbank(pcm)
+
+    assert np.array_equal(pcm, before)
+    assert np.array_equal(first, second)
+
+
+def test_fbank_zero_pads_short_unit_without_mutating_authoritative_timing():
+    short_unit = service.build_acoustic_units(
+        acoustic_words(),
+        duration_seconds=5.0,
+    )[1]
+    authoritative = dict(short_unit)
+    pcm = deterministic_fbank_pcm()[:3_200].copy()
+    pcm_before = pcm.copy()
+    explicit_padding = np.pad(pcm, (0, 8_000 - pcm.size))
+
+    actual = service.compute_fbank(pcm)
+    padded_reference = service.compute_fbank(explicit_padding)
+
+    assert actual.shape == (48, 80)
+    assert np.array_equal(actual, padded_reference)
+    assert np.array_equal(pcm, pcm_before)
+    assert short_unit == authoritative
+    assert short_unit["start"] == 1.2
+    assert short_unit["end"] == 1.4
