@@ -17,58 +17,54 @@
 ### Current pointer
 
 - Current SPEC: `SPEC-11`.
-- Current SUBSPEC: `SPEC-11.5A`.
-- Current phase: `POST_REBASE_READY / evidence amend then shared release`.
-- Production action active: `NO; Product Video released shared resources`.
-- Telegram/provider job active: `NO; combo #3A3BEA618D and standalone #282347E26C terminal delivered`.
+- Current SUBSPEC: `SPEC-11.5B`.
+- Current phase: `LOCAL_SOURCE_AND_RESOURCE_PASS / TASK_10_VERIFY_DOCS`.
+- Production action active: `NO; acoustic branch is local-only before Task 11`.
+- Telegram/provider job active: `NO; #B4CB6D5FE8 is unchanged during local TDD`.
 - Wallet mutation: `0`.
-- Next allowed action: push one focused PR, squash/deploy/runtime readback, then
-  run the ordered multi live matrix.
-- Next forbidden action: edit classifier/cast thresholds, audio UI, pricing,
-  wallet, provider/model/endpoint, multi engine, or move to standalone/multi
-  before the corrected combo artifact passes.
+- Next allowed action: finish measured Task 10 gates; acquire exact shared
+  resources; fetch/rebase; one PR/squash/deploy/runtime; send the final acoustic
+  recovery command once for the same job and observe read-only.
+- Next forbidden action: upload, Confirm, create a replacement job, send recovery
+  twice, alter wallet/price/ENV/provider endpoint, or touch exact-two files.
 
-### Task contract — active SPEC-08 correction
+### Task contract — active SPEC-11.5B local acoustic Auto multi
 
-- `GOAL`: exact fixture SHA `85C8793D...` produces one real combo MP4 followed
-  by one final receipt, with independently detected male/female speaker groups;
-  translated subtitle cues and dubbed speech stay locked to the original cue
-  timeline. The SRT remains an internal render/QC artifact and is not sent
-  automatically. Then the same fixture produces a standalone dubbed MP4; only
-  then lock lane 2 and open multi-speaker work.
-- `SCOPE`: repair only the measured per-cue speech timing and successful video
-  delivery policy after the already-passing exact-two cast authority.
-- `BASE_SHA`: `6476f20bdd9f8728a5db0b1d62a245b0d612aea8` (PR `#918`, the
-  exact deployed cast build that produced live job `#9542CF588E`).
+- `GOAL`: exact fixture SHA `83DE97B7...` produces one real English Auto multi
+  MP4 followed by one receipt from existing job `#B4CB6D5FE8`; local acoustic
+  authority detects `3–8` real speakers, assigns the same number of distinct
+  voices, preserves every word/cue timestamp, uses original `40` / dub `150`,
+  creates no new job and charges `0 Xu`.
+- `SCOPE`: strict Deepgram word timeline plus isolated CPU ONNX speaker
+  embedding only for exact Auto multi; final fourth same-job acoustic CAS.
+- `BASE_SHA`: local `origin/main 36c5d3270b6a4ae2224fed17579e8cc0f6032650`
+  before Task 11 fetch; authoritative remote base must be measured again before push.
 - `ALLOWED_FILES`:
-  - `bot.py`: speech-unit meter, exact cue-locked plan/FFmpeg graph, timing
-    telemetry and successful delivery policy only;
-  - `services/subtitle_dub_product_pipeline.py`: attach source text to the
-    translated exact-two cue, activate exact cue timing and return metrics;
-  - dedicated timing/delivery tests plus the superseded SRT companion contract;
-  - this checklist, tester case/guide, current operations docs and durable state.
-- `PROTECTED_FILES`: `services/subdub_blackboxes/auto_multi_speaker.py` SHA-256
-  `55AAB894...`; `services/subdub_speaker_cast.py` SHA-256 `DE93620F...`;
-  `services/subdub_two_speaker_asr_fallback.py` SHA-256 `94748DEF...`; audio
-  UI/state, classifier/cast, Key4U transport/retry, Gemini parser,
-  pricing/wallet, provider/model/endpoint and Product Video remain unchanged.
-  Manual/default and Auto multi timing/delivery behavior remain unchanged.
-- `ACCEPTANCE`: independent `male-male`, `male-female`, `female-female` are
-  still legal; exact fixture groups stay `speaker_0=male/low` and
-  `speaker_1=female/high`. Every translated/TTS cue records source/target rate,
-  generated/fitted duration and zero drift; final duration equals source.
-  Automatic output order is MP4 then receipt with zero auxiliary file.
-- `TARGETED_TESTS`: source-text/rate meter, per-cue planner, real FFmpeg
-  duration+RMS, product integration, combo/standalone delivery and multi
-  isolation, first observed RED and then fresh GREEN.
-- `REGRESSION_TESTS`: two/multi isolation, protected hashes, timeout/cancel,
-  audio numeric UI, pricing/receipt and no-provider/no-wallet comparators.
-- `PROHIBITED_ACTIONS`: no classifier/cast edit, forced pairing, multi timing or
-  delivery edit, paid provider test before deployed live, ENV/secret or wallet
-  change, UI redesign, unrelated refactor or premature Telegram live.
-- `STOP_CONDITIONS`: any protected hash changes, aggregate evidence exceeds
-  48 seconds, model/license/hash cannot be verified, a new applicable failure
-  appears, or LIVE produces no real final MP4 followed by one final receipt.
+  - `services/subdub_multi_speaker_embedding_onnx.py` and hash-locked model/notices;
+  - `bot.py` strict word/acoustic dispatch and exact recovery CAS only;
+  - `services/subdub_blackboxes/auto_multi_speaker.py` acoustic authority wrapper;
+  - focused tests/resource fixtures and measured SubDub docs/tester/state.
+- `PROTECTED_FILES`: `services/subdub_speaker_cast.py` SHA-256
+  `DE93620F...145B`; `services/subdub_two_speaker_asr_fallback.py` SHA-256
+  `94748DEF...1177E`; exact-two/default/manual, audio UI, price/wallet,
+  Product Video, PayOS, WebApp and ENV/secrets remain unchanged.
+- `ACCEPTANCE`: model preflight CPU/hash/notices PASS; strict words covered once;
+  deterministic stable `3–8` clusters without hints; acoustic sidecar/resume
+  authority exact; MP4 then receipt from the same job; no auxiliary delivery,
+  job/provider/wallet/transaction/credit delta `0` except already-authorized
+  calls inside this one recovery.
+- `TARGETED_TESTS`: model/frontend/embedding/clustering/cues, strict word
+  propagation, wrapper integration, legacy/valid resume, fourth CAS/attempt-five,
+  and exact-fixture offline resource gate.
+- `REGRESSION_TESTS`: exact-two hashes/routes, provider fallback comparator,
+  timeout/cancel/lock/O(N²) cap, timing/translation shape, no duplicate TTS,
+  no speaker fabrication and no raw evidence persistence.
+- `PROHIBITED_ACTIONS`: no replacement job/upload/Confirm/recovery replay;
+  no expected `k`, fixture-specific branch, provider label override, threshold
+  relaxation, ENV/secret/wallet/schema change or unrelated refactor.
+- `STOP_CONDITIONS`: protected/model/license hash mismatch, new applicable test
+  failure, no exact shared release, wrong pre-recovery authority, CAS loser,
+  or terminal without a validated MP4 followed by receipt.
 
 ### Luật bất biến
 
@@ -1532,9 +1528,8 @@ Task contract:
   `d47086e65f2f9c424c28652ff8f1d2a3e9958d88`, `0 behind / 1 ahead`.
 - [x] Post-rebase: focused `23 passed, 1 cache warning in 546.19s`; protected
   hashes `3/3`; compile bot/service/tests, YAML/diff/scope/secret exit `0`.
-- [-] One focused PR, squash merge, one deploy. Verify GitHub deploy
-  SUCCESS, bot/worker exact merge SHA, accepted generation and active
-  bot/web/nginx before live.
+- [x] Prior correction ship/deploy cycle is historical and terminal; the current
+  local acoustic implementation is tracked separately in `SPEC-11.5B`.
 
 ### SPEC-11.5 — Ordered live matrix on the exact multi fixture
 
@@ -1647,17 +1642,62 @@ Task contract:
   excluded from staging. Shared resources were released for Product Video
   while this correction remains source-local.
 
+#### SPEC-11.5B — Local acoustic speaker authority and final same-job recovery
+
+- [x] Owner approved spec commit `c28866b`; design file SHA-256 is
+  `5A0B086488814D85C1BF5EC6CC11B996D4B99313A2832643C9A240FCF37DA5E5`.
+  Implementation plan commit is `7b3569e`; execution is single-agent/TDD.
+- [x] Hash-locked model asset is `26,534,127` bytes, SHA-256
+  `9FEA6516...056A1`, `feats [B,T,80] -> embs [B,256]`, CPU-only, with three
+  required notices/licenses. Model mutation/missing notice fails pre-inference.
+- [x] Strict Deepgram nondiarized word authority, NumPy 80-bin fbank, bounded
+  CPU embedding, deterministic spectral clustering `k=3..8`, acoustic cue
+  coverage and Auto-Multi-only integration were built in commits `27d8025`
+  through `23782cd`, each after measured focused RED.
+- [x] Active wrapper no longer calls provider re-diarization/crosswalk or consumes
+  expected-speaker hints. Provider/legacy sidecars force-fresh; only an exact
+  acoustic source/model/algorithm/media/timeline bundle can resume without ASR.
+- [x] Final recovery commit `b54ac52` permits only same job
+  `b4cb6d5fe8a7bdfce507`, exact fixture/English/40/150/no-output/no-charge,
+  attempt/correction `3/2 -> 4/3`; attempt `5`, duplicate and concurrent loser
+  are blocked. Model preflight occurs before `BEGIN IMMEDIATE`.
+- [x] Exact-fixture resource commit `0eb04d1` measured `18` non-overlap regions,
+  `14` speech runs, `87` windows, `174` embeddings/two views, stable `k=5`,
+  region stability `18/18`; two fresh runs passed. No raw PCM, embeddings,
+  provider payload or secrets are persisted.
+- [x] Task 10 fresh gate: focused/direct-impact `281 passed in 10.88s`; real
+  resource `3 passed in 22.68s` then `3 passed in 21.31s`; full changed-Python
+  compile and range diff-check exit `0`; YAML `3/3`; forbidden paths `0`; hard
+  secret signatures `0`; all model/spec/fixture/protected hashes exact.
+- [x] Protected first run classified one harness-only failure after `77` passes:
+  the pre-acoustic multi fake returned no strict words. Test fixture was updated
+  to express the new interface; focused `2 passed in 4.78s`, full replay
+  `78 passed in 513.92s`, `NEW_FAILURES=0`; production bytes unchanged by this correction.
+- [x] Task 10 exact diff review: `4` production files, `2,416` added lines;
+  fixture-specific acoustic branch `0`, expected-speaker hint `0`, provider
+  crosswalk call additions `0`, network imports `0`, raw PCM/embedding/payload
+  persistence `0`, wallet mutation `0`; Critical `0`, Important `0`.
+- [-] Task 10 commit only, then exact shared acquisition and Task 11
+  fetch/rebase/PR/deploy.
+- [B] After exact runtime readback, snapshot and back up the same job authority,
+  send `/subdub_recover_failed_auto_multi ... --confirm-paid --confirm-local-acoustic`
+  exactly once, then observe read-only until final MP4/receipt or terminal failure.
+- [B] LIVE PASS remains pending. No model/resource/test result substitutes for a
+  playable MP4 from `#B4CB6D5FE8` followed by one receipt and zero finance/job delta.
+
 ### SPEC-11 acceptance
 
-- [B] Combo and standalone each delivered one empirically validated
-  multi-speaker MP4 followed only by one receipt, with ≥3 stable distinct
-  voices, cue-locked timing, correct volume propagation and zero wallet delta.
+- [B] Owner's later exact same-job order supersedes the old new-upload/standalone
+  matrix: only existing combo `#B4CB6D5FE8` may run. PASS requires one
+  empirically validated multi-speaker MP4 followed only by one receipt, `3–8`
+  stable distinct voices, cue-locked timing, original `40` / dub `150`, no new
+  job and zero wallet/transaction/credit/provider-usage delta.
 
 ## SPEC-12 — Publish final evidence and close the goal
 
 - [B] Push the completed checklist/state plus exact RED/GREEN/compile/diff,
-  PR/merge/deploy/runtime, both multi jobs, artifact hashes, receipt and wallet
-  evidence to GitHub.
+  PR/merge/deploy/runtime, same-job artifact hash, receipt and wallet evidence
+  to GitHub.
 - [B] Mark multi `LOCKED_LIVE_PASS`; report remaining blockers as `NONE`; only
   then complete the Owner goal.
 

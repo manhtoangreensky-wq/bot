@@ -3,8 +3,8 @@ product: SubDub
 owner_thread_id: 019fbbfe-59b7-7ee2-b298-dea276813ce4
 coordination_thread_id: 019efe1e-ee54-78e1-87c4-10db6e1e19e4
 worktree: C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-multi-exact-price
-branch: fix/p0-subdub-multi-cue-lock-video-only
-phase: SPEC_11_10_SAME_JOB_THIRD_ATTEMPT_ONE_PANEL_GREEN
+branch: fix/p0-subdub-multi-annotation-field-compat
+phase: SPEC_11_5B_LOCAL_ACOUSTIC_TASK_10_VERIFY_DOCS
 goal: >-
   Deliver a verified two-speaker SubDub video first, lock that lane, then deliver a
   verified multi-speaker SubDub video with multilingual translation and dubbing.
@@ -26,10 +26,123 @@ workflow_contract:
 
 resource_boundary:
   cpu: independent_local_subdub_source_only
-  live: released_by_subdub_auto; acquired_by_product_video
-  chrome: released_by_subdub_auto; acquired_by_product_video
-  vps_deploy: released_by_subdub_auto; acquired_by_product_video
-  product_video: shared owner; SubDub source-local only until exact releases
+  live: released_by_subdub_auto; not_acquired_for_task_11
+  chrome: not_acquired_for_task_11
+  vps_deploy: released_by_subdub_auto; not_acquired_for_task_11
+  coordination: recheck exact markers before fetch/push/PR/deploy/Telegram/provider/VPS
+
+local_acoustic_auto_multi_20260901:
+  approved_spec:
+    commit: c28866bc2a765da0a6dafb90d84c9ddfb1e845d5
+    sha256: 5a0b086488814d85c1bf5ec6cc11b996d4b99313a2832643c9a240fcf37da5e5
+    plan_commit: 7b3569e01228a785aa18a663a137f74fc0bc27dc
+  exact_job:
+    public_code: B4CB6D5FE8
+    internal_job: b4cb6d5fe8a7bdfce507
+    fixture_bytes: 9869032
+    fixture_sha256: 83de97b744b931e544b569e6e750f8415545f226461bd2e36cfb49225898ad3e
+    selected_options: English; Auto multi; original 40 percent; dub 150 percent
+    required_finance: charged_xu 0; root engine-job delta 0
+    new_job_forbidden: true
+  lane_gate:
+    voice_kind: auto_speaker_gender
+    voice_selection_mode: auto_speaker
+    auto_speaker_lane: multi
+    default_manual_exact_two_unchanged: true
+  model:
+    path: assets/models/subdub_auto_multi/voxceleb_resnet34.onnx
+    bytes: 26534127
+    sha256: 9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1
+    input: feats BxTx80 float32
+    output: embs Bx256 float32
+    provider: CPUExecutionProvider only
+    notices_required: 3
+  frontend_and_clustering:
+    strict_words: provider index/start/end preserved; each retained word covered once
+    word_unit_gap_ms: 350
+    word_unit_max_ms: 2500
+    short_feature_pad_ms: 500
+    fbank_bins: 80
+    embedding_window_seconds: 1.5
+    embedding_period_seconds: 0.75
+    speaker_count_range: 3-8
+    embedding_window_cap: 1000
+    provider_labels_or_expected_count_used: false
+  exact_fixture_resource:
+    nonoverlap_regions: 18
+    speech_runs: 14
+    windows_per_view: 87
+    embeddings_two_views: 174
+    detected_speakers: 5
+    region_stability: 18/18
+    base_window_cluster_sizes: [17, 24, 13, 20, 13]
+    region_cluster_sizes: [2, 6, 2, 7, 1]
+    run_1: 3 passed in 26.15s
+    run_2: 3 passed in 22.71s
+    live_pass: false
+  recovery_contract:
+    literal: --confirm-local-acoustic
+    required_before: attempt 3; correction 2; crosswalk marker true; acoustic marker false
+    allowed_after: attempt 4; correction 3; acoustic marker true
+    attempt_5_or_duplicate: blocked without mutation
+    preflight_before_transaction: true
+    same_row_job_workspace: true
+  implementation_commits:
+    model: 0f72f23
+    strict_word_timeline: 27d8025
+    fbank: 4e30212
+    embeddings: 0bddeea
+    clustering: 7bf3bd7
+    cues: 7465e11
+    integration: 23782cd
+    final_recovery: b54ac52
+    fixture_resource: 0eb04d1
+  pre_task10_evidence:
+    focused_direct_impact: 281 passed
+    scoped_compile: exit 0
+    diff_check: exit 0
+    provider_calls: 0
+    db_mutations: 0
+    wallet_mutations: 0
+    exact_two_cast_sha256: de93620f3f038b5759a53e696c5c85d3553fcee758686df56c70e6b11bac145b
+    exact_two_asr_fallback_sha256: 94748def11c38d76952192A996FA42231D75B39D4D9ECD3407FF671D92E1177E
+  task10_fresh_evidence:
+    focused: 281 passed in 10.88s
+    resource_run_1: 3 passed in 22.68s
+    resource_run_2: 3 passed in 21.31s
+    protected_first: 77 passed and 1 harness failure in 1020.14s
+    harness_root: old multi fake lacked strict word timeline and local acoustic result; production failed closed at AUTO_CAST_UNAVAILABLE
+    harness_focused_green: 2 passed and 6 deselected in 4.78s
+    protected_replay: 78 passed in 513.92s; new failures 0
+    full_changed_python_compile: exit 0; no output
+    yaml: 3 parsed
+    diff_check: exit 0
+    forbidden_paths: 0
+    hard_secret_signatures: 0
+    provider_calls: 0
+    db_mutations: 0
+    wallet_mutations: 0
+  task10_review:
+    production_files_reviewed: 4
+    production_added_lines: 2416
+    fixture_specific_production_branch: 0; exact job and SHA constants are recovery CAS guards only
+    expected_speaker_hint: 0
+    provider_crosswalk_call_additions: 0
+    network_import_additions: 0
+    raw_pcm_embedding_provider_payload_persistence: 0
+    wallet_mutation: 0
+    acoustic_matrix_cap: 1000
+    protected_exact_two_files_changed: 0
+    critical: 0
+    important: 0
+    tester_surfaces: 4 existing issue templates; 5 new local Auto multi source/resource/CAS rows; no external issue or project mutation
+  current:
+    source: PASS
+    resource: PASS
+    deployed: false
+    live: pending_same_job_mp4_and_receipt
+    task_10: completed_pending_commit
+    task_11: pending_task_10_and_exact_shared_acquisition
 
 latest_same_job_recovery_f22e5919:
   public_job: F22E5919
@@ -945,7 +1058,7 @@ ordered_specs:
 
   - id: SPEC-04
     title: Live-test and lock the two-speaker lane
-    status: failure_loop_build
+    status: completed
     acceptance:
       - upload only 2 giọng nam nữ.mp4 with SHA-256 85c8793d197cf2782bb554d46282e82a83bcb062a0483e412a0ca1da668f9f51
       - Tự động 2 giọng works in both Lồng tiếng video and Phụ đề + Lồng tiếng
@@ -1077,14 +1190,14 @@ ordered_specs:
 
   - id: SPEC-05
     title: Continue the isolated multi-speaker lane only after SPEC-04 passes
-    status: blocked_by_order
+    status: source_and_resource_pass_live_pending
     acceptance:
-      - upload only test nhiều giọng.mp4
-      - select Tự động nhiều giọng
+      - recover only existing job b4cb6d5fe8a7bdfce507; no upload or new job
+      - preserve Tự động nhiều giọng with English and original 40/dub 150
       - detect at least three real speaker labels without inventing labels
       - assign a distinct validated TTS voice to every detected label
       - multilingual translation and dubbing preserve speaker-to-voice mapping
-      - one final playable MP4 is automatically delivered; one valid SRT remains internal for burn-in/QC or explicit download
+      - one final playable MP4 is automatically delivered from the same job; one valid SRT remains internal for burn-in/QC or explicit download
       - receipt shows subtitle price, dubbing price, dubbing type, speaker/voice counts, casts, and total
       - charged_xu equals 0 and no wallet transaction is created
     on_failure: stay on SPEC-05 and repeat RED/GREEN/ship/live until all acceptance evidence passes
@@ -1098,4 +1211,4 @@ ordered_specs:
       - audit every acceptance line as proven or unresolved
       - mark the goal complete only when no required line remains unresolved
 
-current_next_action: fetch and rebase latest main; post-rebase focused gate; one PR/deploy; run exactly one correction of internal job 211844aa34788db33757; no second engine job; standalone remains blocked pending combo MP4 PASS and new Owner authorization
+current_next_action: finish Task 10 docs/tester/state plus fresh focused/protected/resource/compile/hash/scope/secret gates; commit docs only; acquire exact shared markers; fetch/rebase latest main; one PR/deploy; send exactly one acoustic recovery command for internal job b4cb6d5fe8a7bdfce507; no upload, Confirm, second command or new job; LIVE PASS only on MP4 then receipt with charged_xu 0

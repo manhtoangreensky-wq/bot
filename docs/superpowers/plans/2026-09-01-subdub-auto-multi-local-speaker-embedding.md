@@ -18,6 +18,27 @@ tasks share the same model asset, Python modules, tests, and recovery state.
 Use `superpowers:executing-plans` inline in this task. Do not dispatch
 subagents.
 
+### Execution ledger — 01/09/2026
+
+| Task | State | Measured authority |
+|---|---|---|
+| 1–8 | `COMPLETED` | Commits `0f72f23` through `b54ac52`; every production behavior followed focused RED then minimal GREEN |
+| 9 | `COMPLETED` | Commit `0eb04d1`; real offline fixture gate selected stable `k=5` twice with the hash-locked model |
+| 10 | `COMPLETED_PENDING_COMMIT` | Operational truth/tester/state updated; all fresh gates terminal; exact diff review Critical `0` / Important `0` |
+| 11 | `PENDING_TASK_10` | No remote/live action until Task 10 is terminal and exact shared-resource acquisition markers are sent |
+
+This ledger is the resumable task state; the detailed unchecked command boxes
+below remain the immutable implementation recipe and are not rewritten as
+historical evidence.
+
+Task 9 empirical note: the existing job workspace had no strict transcript
+checkpoint. Its only exact acoustic timing authority was a 32-cue sidecar;
+speaker/text/provider fields were removed and overlapping intervals were unioned
+to 18 timing-only regions for the real-model `k=5` gate. The separately sanitized
+50-word fixture proves strict parser/unit/coverage behavior but is not claimed as
+the job's transcript or `k=5` authority. Therefore Task 11's same-job MP4 remains
+the mandatory end-to-end production proof.
+
 ## Repository context
 
 - Project root: `C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-multi-exact-price`.

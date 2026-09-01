@@ -498,3 +498,25 @@ không đổi. RED `2 failed`; exact GREEN `2 passed`; focused `33 passed`;
 protected `165 passed`; final combined sau mọi self-review `206 passed, 1 baseline
 deselected in 28.88s`;
 compile/YAML/diff/scope/secret `0`. LIVE MP4 vẫn chưa PASS.
+
+## Đối chiếu Auto multi local acoustic authority — 01/09/2026
+
+| Tài liệu/cơ chế trước | Source hiện tại đo được | Trạng thái |
+|---|---|---|
+| Provider diarization/crosswalk là speaker identity cuối cho Auto multi | Deepgram chỉ cấp strict word timeline; local CPU ONNX acoustic embedding dựng lại `3–8` speaker trên chính timeline đó | Không còn đúng sau khi branch này deploy |
+| Undercluster `1–2` label gọi provider re-diarization | Legacy/provider sidecar bị force-fresh; active acoustic path không gọi provider crosswalk hoặc nhận expected-speaker hint | Đã bỏ khỏi active wrapper |
+| Whole-run embedding đủ đại diện một người nói | Word units được chia thành subsegment `1.5s`/period `0.75s`; short region repeat-to-fill; exact resource đo `87` windows từ `18` regions | Không còn đúng |
+| Global eigengap có thể chọn `k=1/2` rồi validator sẽ quyết định | Spectral selection chỉ đánh giá miền hợp lệ `k=3..8`, vẫn fail-closed nếu không ổn định; không có fixture-specific `k=5` branch | Đã sửa theo contract |
+| Hai view phải giữ nguyên từng window label | Stability authority ở consumer acoustic-region level; resource gate đo `18/18` region labels ổn định giữa hai view | Đã sửa mức so sánh |
+| Có thể lưu word/embedding/provider payload để debug | Durable state chỉ lưu model/algorithm/count/cluster/coverage aggregates; PCM, embedding, raw payload và transcript bị cấm | Đã giới hạn dữ liệu |
+| Retry/correction có thể tạo job mới | Final CAS chỉ chuyển cùng job `#B4CB6D5FE8` từ attempt `3` lên `4`; attempt `5` và concurrent loser bị chặn | Đã khóa one-shot |
+
+Model runtime source là `26,534,127` bytes, SHA-256
+`9FEA6516...056A1`, CPU provider, notices bắt buộc. Exact offline resource proof
+đo `18` regions / `87` windows / `174` embeddings / stable `k=5`; Task 10
+fresh gate đo focused `281 passed in 10.88s`, resource `3 passed` hai lượt
+(`22.68s`, `21.31s`), protected `78 passed in 513.92s`, compile/diff `0`.
+Một comparator cũ thiếu strict-word/acoustic fake đã fail đúng production guard;
+chỉ test harness được cập nhật, focused `2 passed`, production delta không đổi.
+Những số này chỉ chứng minh source/resource. Production vẫn chạy code cũ cho tới
+exact-SHA deploy; MP4/receipt của chính `#B4CB6D5FE8` vẫn là gate LIVE chưa hoàn tất.
