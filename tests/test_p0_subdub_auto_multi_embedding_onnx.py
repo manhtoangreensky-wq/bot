@@ -818,6 +818,26 @@ def test_cluster_replay_is_byte_deterministic():
     assert first == second
 
 
+def test_cluster_eigengap_selects_only_within_three_to_eight():
+    measured = np.asarray(
+        [
+            0.0,
+            0.71285373,
+            2.15419693,
+            2.34119563,
+            2.60387157,
+            3.63415394,
+            3.76249787,
+            4.39807630,
+            4.73579320,
+            5.32348514,
+        ],
+        dtype=np.float64,
+    )
+
+    assert service._select_speaker_count_from_eigenvalues(measured) == 5
+
+
 def test_cluster_returns_bounded_acoustic_unit_confidences():
     payload = clustering_payload(3)
 
@@ -918,26 +938,30 @@ def test_diarize_word_timeline_composes_two_views_and_bounded_result(monkeypatch
 
     def fake_extract(
         pcm_path,
-        units,
+        plan,
         *,
         deadline_monotonic,
         stop_requested,
         session_factory=None,
-        _feature_shift_samples=0,
+        feature_shift_samples=0,
     ):
         calls.append(
             {
                 "pcm_path": pcm_path,
-                "unit_count": len(units),
+                "unit_count": len(plan["windows"]),
                 "deadline": deadline_monotonic,
                 "stopped": stop_requested(),
                 "session_factory": session_factory,
-                "shift": _feature_shift_samples,
+                "shift": feature_shift_samples,
             }
         )
         return matrix.copy()
 
-    monkeypatch.setattr(service, "extract_unit_embeddings", fake_extract)
+    monkeypatch.setattr(
+        service,
+        "extract_acoustic_subsegment_embeddings",
+        fake_extract,
+    )
     result = service.diarize_word_timeline(
         "fixture.pcm",
         words,
@@ -981,3 +1005,221 @@ def test_diarize_word_timeline_propagates_fail_closed_embedding_boundary(monkeyp
             deadline_monotonic=10**12,
             stop_requested=lambda: False,
         )
+
+
+def test_acoustic_subsegments_match_wespeaker_window_period_and_short_repeat():
+    regions = [
+        {"index": 0, "start": 0.0, "end": 0.5},
+        {"index": 1, "start": 1.0, "end": 2.0},
+        {"index": 2, "start": 2.2, "end": 4.2},
+    ]
+
+    plan = service.build_acoustic_subsegment_plan(
+        regions,
+        duration_seconds=5.0,
+    )
+
+    assert plan["region_count"] == 3
+    assert plan["run_count"] == 2
+    assert plan["window_seconds"] == 1.5
+    assert plan["period_seconds"] == 0.75
+    assert plan["runs"][0]["region_indexes"] == [0]
+    assert plan["runs"][0]["speech_seconds"] == 0.5
+    assert plan["windows"][0] == {
+        "window_index": 0,
+        "run_index": 0,
+        "speech_start_seconds": 0.0,
+        "speech_end_seconds": 0.5,
+        "feature_seconds": 1.5,
+        "repeat_to_fill": True,
+        "source_position": 0.0,
+    }
+    assert plan["runs"][1]["region_indexes"] == [1, 2]
+    assert plan["runs"][1]["speech_seconds"] == 3.0
+    assert [
+        (item["speech_start_seconds"], item["speech_end_seconds"])
+        for item in plan["windows"][1:]
+    ] == [(0.0, 1.5), (0.75, 2.25), (1.5, 3.0)]
+
+
+def test_acoustic_subsegment_plan_rejects_overlapping_regions():
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        service.build_acoustic_subsegment_plan(
+            [
+                {"index": 0, "start": 0.0, "end": 1.0},
+                {"index": 1, "start": 0.9, "end": 1.5},
+            ],
+            duration_seconds=2.0,
+        )
+
+
+def test_region_labels_use_nearest_subsegment_center_without_majority_override():
+    plan = {
+        "regions": [
+            {"index": 0, "run_index": 0, "speech_start_seconds": 0.0, "speech_end_seconds": 0.5},
+            {"index": 1, "run_index": 0, "speech_start_seconds": 1.0, "speech_end_seconds": 2.0},
+            {"index": 2, "run_index": 0, "speech_start_seconds": 2.0, "speech_end_seconds": 2.5},
+        ],
+        "windows": [
+            {"window_index": 0, "run_index": 0, "speech_start_seconds": 0.0, "speech_end_seconds": 1.5},
+            {"window_index": 1, "run_index": 0, "speech_start_seconds": 0.75, "speech_end_seconds": 2.25},
+            {"window_index": 2, "run_index": 0, "speech_start_seconds": 1.5, "speech_end_seconds": 2.5},
+        ],
+    }
+    cluster_result = {
+        "speaker_count": 3,
+        "labels": [0, 1, 2],
+        "unit_confidences": [0.8, 0.7, 0.9],
+    }
+
+    mapped = service.map_subsegment_clusters_to_regions(plan, cluster_result)
+
+    assert mapped == {
+        "labels": [0, 1, 2],
+        "unit_confidences": [0.8, 0.7, 0.9],
+        "speaker_count": 3,
+    }
+
+
+def test_subsegment_embedding_runner_executes_every_planned_window(
+    monkeypatch,
+    tmp_path,
+):
+    configure_test_assets(monkeypatch, tmp_path)
+    pcm_path = write_embedding_pcm(tmp_path)
+    regions = [
+        {"index": index, "start": index * 0.6, "end": index * 0.6 + 0.5}
+        for index in range(6)
+    ]
+    plan = service.build_acoustic_subsegment_plan(
+        regions,
+        duration_seconds=4.0,
+    )
+    outputs = embedding_vectors(plan["window_count"])
+    session = EmbeddingFakeSession(outputs)
+
+    result = service.extract_acoustic_subsegment_embeddings(
+        str(pcm_path),
+        plan,
+        deadline_monotonic=10**12,
+        stop_requested=lambda: False,
+        session_factory=lambda *_args, **_kwargs: session,
+        feature_shift_samples=0,
+    )
+
+    assert result.shape == (plan["window_count"], service.EMBEDDING_DIM)
+    assert result.dtype == np.float32
+    assert len(session.run_calls) == plan["window_count"]
+    np.testing.assert_allclose(np.linalg.norm(result, axis=1), 1.0, atol=1e-6)
+
+
+def test_shifted_subsegment_frontend_does_not_append_repeated_tail(
+    monkeypatch,
+    tmp_path,
+):
+    configure_test_assets(monkeypatch, tmp_path)
+    pcm_path = write_embedding_pcm(tmp_path)
+    regions = [
+        {"index": index, "start": index * 0.6, "end": index * 0.6 + 0.5}
+        for index in range(6)
+    ]
+    plan = service.build_acoustic_subsegment_plan(
+        regions,
+        duration_seconds=4.0,
+    )
+    outputs = embedding_vectors(plan["window_count"])
+    session = EmbeddingFakeSession(outputs)
+    sample_lengths = []
+
+    def capture_fbank(samples):
+        sample_lengths.append(len(samples))
+        return np.ones((10, service.MEL_BINS), dtype=np.float32)
+
+    monkeypatch.setattr(service, "compute_fbank", capture_fbank)
+
+    service.extract_acoustic_subsegment_embeddings(
+        str(pcm_path),
+        plan,
+        deadline_monotonic=10**12,
+        stop_requested=lambda: False,
+        session_factory=lambda *_args, **_kwargs: session,
+        feature_shift_samples=80,
+    )
+
+    assert sample_lengths == [23_920] * plan["window_count"]
+
+
+def test_two_views_accept_window_differences_when_every_region_is_stable(monkeypatch):
+    plan = {
+        "regions": [
+            {"index": 0, "run_index": 0, "speech_start_seconds": 0.0, "speech_end_seconds": 0.3},
+            {"index": 1, "run_index": 0, "speech_start_seconds": 1.4, "speech_end_seconds": 1.6},
+            {"index": 2, "run_index": 0, "speech_start_seconds": 2.7, "speech_end_seconds": 3.0},
+            {"index": 3, "run_index": 0, "speech_start_seconds": 3.2, "speech_end_seconds": 3.5},
+        ],
+        "windows": [
+            {"window_index": 0, "run_index": 0, "speech_start_seconds": 0.0, "speech_end_seconds": 0.8, "source_position": 0.0},
+            {"window_index": 1, "run_index": 0, "speech_start_seconds": 0.5, "speech_end_seconds": 1.3, "source_position": 0.5},
+            {"window_index": 2, "run_index": 0, "speech_start_seconds": 1.1, "speech_end_seconds": 1.9, "source_position": 1.1},
+            {"window_index": 3, "run_index": 0, "speech_start_seconds": 1.7, "speech_end_seconds": 2.5, "source_position": 1.7},
+            {"window_index": 4, "run_index": 0, "speech_start_seconds": 2.2, "speech_end_seconds": 3.0, "source_position": 2.2},
+            {"window_index": 5, "run_index": 0, "speech_start_seconds": 3.0, "speech_end_seconds": 3.5, "source_position": 3.0},
+        ],
+    }
+    labels = iter(
+        (
+            np.asarray([0, 1, 1, 2, 2, 2], dtype=np.int64),
+            np.asarray([0, 0, 1, 1, 2, 2], dtype=np.int64),
+        )
+    )
+    monkeypatch.setattr(
+        service,
+        "_stable_cluster_view",
+        lambda *_args, **_kwargs: (3, next(labels), np.arange(6, dtype=np.float64)),
+    )
+    monkeypatch.setattr(service, "_validate_cluster_support", lambda *_args: [2, 2, 1])
+    monkeypatch.setattr(service, "_cluster_unit_confidences", lambda _m, _l, _k: [0.8] * 6)
+    matrix = np.eye(6, dtype=np.float32)
+
+    result = service.stable_cluster_acoustic_regions(plan, matrix, matrix)
+
+    assert result["speaker_count"] == 3
+    assert result["region_labels"] == [0, 1, 2, 2]
+    assert result["region_confidences"] == [0.8, 0.8, 0.8, 0.8]
+    assert result["stability_pass"] is True
+
+
+def test_two_views_reject_any_region_assignment_difference(monkeypatch):
+    plan = {
+        "regions": [
+            {"index": 0, "run_index": 0, "speech_start_seconds": 0.0, "speech_end_seconds": 0.3},
+            {"index": 1, "run_index": 0, "speech_start_seconds": 1.4, "speech_end_seconds": 1.6},
+            {"index": 2, "run_index": 0, "speech_start_seconds": 2.7, "speech_end_seconds": 3.0},
+            {"index": 3, "run_index": 0, "speech_start_seconds": 3.2, "speech_end_seconds": 3.5},
+        ],
+        "windows": [
+            {"window_index": 0, "run_index": 0, "speech_start_seconds": 0.0, "speech_end_seconds": 0.8, "source_position": 0.0},
+            {"window_index": 1, "run_index": 0, "speech_start_seconds": 0.5, "speech_end_seconds": 1.3, "source_position": 0.5},
+            {"window_index": 2, "run_index": 0, "speech_start_seconds": 1.1, "speech_end_seconds": 1.9, "source_position": 1.1},
+            {"window_index": 3, "run_index": 0, "speech_start_seconds": 1.7, "speech_end_seconds": 2.5, "source_position": 1.7},
+            {"window_index": 4, "run_index": 0, "speech_start_seconds": 2.2, "speech_end_seconds": 3.0, "source_position": 2.2},
+            {"window_index": 5, "run_index": 0, "speech_start_seconds": 3.0, "speech_end_seconds": 3.5, "source_position": 3.0},
+        ],
+    }
+    labels = iter(
+        (
+            np.asarray([0, 1, 1, 2, 2, 2], dtype=np.int64),
+            np.asarray([0, 0, 2, 1, 2, 2], dtype=np.int64),
+        )
+    )
+    monkeypatch.setattr(
+        service,
+        "_stable_cluster_view",
+        lambda *_args, **_kwargs: (3, next(labels), np.arange(6, dtype=np.float64)),
+    )
+    monkeypatch.setattr(service, "_validate_cluster_support", lambda *_args: [2, 2, 1])
+    monkeypatch.setattr(service, "_cluster_unit_confidences", lambda _m, _l, _k: [0.8] * 6)
+    matrix = np.eye(6, dtype=np.float32)
+
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        service.stable_cluster_acoustic_regions(plan, matrix, matrix)

@@ -81,11 +81,13 @@ def bounded_multi_acoustic_evidence(
         or not subdub_multi_speaker_embedding_onnx.MIN_UNITS
         <= unit_count
         <= subdub_multi_speaker_embedding_onnx.MAX_CLUSTER_UNITS
-        or window_count != unit_count * 2
+        or window_count < unit_count * 2
+        or window_count > subdub_multi_speaker_embedding_onnx.MAX_CLUSTER_UNITS * 2
+        or window_count % 2 != 0
         or coverage_count != word_count
         or len(cluster_sizes) != speaker_count
         or any(type(value) is not int or value < 2 for value in cluster_sizes)
-        or sum(cluster_sizes) != unit_count
+        or sum(cluster_sizes) != window_count // 2
         or current.get("multi_acoustic_stability_pass") is not True
     ):
         return {}

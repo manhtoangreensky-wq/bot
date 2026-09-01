@@ -42,6 +42,8 @@ MIN_CLUSTER_UNPADDED_SECONDS = 0.8
 MIN_CLUSTER_UNITS = 2
 MAX_CLUSTER_UNITS = 1_000
 KMEANS_MAX_ITERATIONS = 30
+SUBSEGMENT_WINDOW_SECONDS = 1.5
+SUBSEGMENT_PERIOD_SECONDS = 0.75
 FBANK_FRAME_LENGTH = 400
 FBANK_FRAME_SHIFT = 160
 FBANK_FFT_POINTS = 512
@@ -277,6 +279,336 @@ def build_acoustic_units(
     if covered_indexes != list(range(len(validated))):
         raise _manual_required(ValueError("acoustic_word_coverage_invalid"))
     return units
+
+
+def build_acoustic_subsegment_plan(
+    regions: object,
+    *,
+    duration_seconds: float,
+) -> dict[str, object]:
+    """Build upstream WeSpeaker 1.5s/0.75s windows over speech-only runs."""
+
+    if (
+        type(duration_seconds) not in {int, float}
+        or not math.isfinite(float(duration_seconds))
+        or not 0.0 < float(duration_seconds) <= MAX_SOURCE_SECONDS
+        or type(regions) is not list
+        or not regions
+        or len(regions) > speaker_cast.MAX_SIDECAR_CUES
+    ):
+        raise _manual_required(ValueError("acoustic_regions_invalid"))
+    validated = []
+    previous_start = -math.inf
+    previous_end = -math.inf
+    for index, raw in enumerate(regions):
+        if type(raw) is not dict or raw.get("index") != index:
+            raise _manual_required(ValueError("acoustic_region_index_invalid"))
+        start_value = raw.get("start")
+        end_value = raw.get("end")
+        if type(start_value) not in {int, float} or type(end_value) not in {int, float}:
+            raise _manual_required(ValueError("acoustic_region_time_invalid"))
+        start = float(start_value)
+        end = float(end_value)
+        if (
+            not math.isfinite(start)
+            or not math.isfinite(end)
+            or start < 0.0
+            or start >= end
+            or end > float(duration_seconds)
+            or start < previous_start
+            or start < previous_end
+        ):
+            raise _manual_required(ValueError("acoustic_region_time_invalid"))
+        validated.append({"index": index, "start": start, "end": end})
+        previous_start = start
+        previous_end = end
+
+    grouped: list[list[dict]] = []
+    current: list[dict] = []
+    for item in validated:
+        if current and item["start"] - current[-1]["end"] > UNIT_SPLIT_GAP_SECONDS:
+            grouped.append(current)
+            current = []
+        current.append(item)
+    if current:
+        grouped.append(current)
+    if not 1 <= len(grouped) <= MAX_CLUSTER_UNITS:
+        raise _manual_required(ValueError("acoustic_run_count_invalid"))
+
+    mapped_regions: list[dict] = []
+    runs: list[dict] = []
+    windows: list[dict] = []
+    for run_index, items in enumerate(grouped):
+        speech_cursor = 0.0
+        region_indexes = []
+        for item in items:
+            speech_seconds = item["end"] - item["start"]
+            mapped_regions.append(
+                {
+                    **item,
+                    "run_index": run_index,
+                    "speech_start_seconds": round(speech_cursor, 6),
+                    "speech_end_seconds": round(speech_cursor + speech_seconds, 6),
+                }
+            )
+            region_indexes.append(item["index"])
+            speech_cursor += speech_seconds
+        run_seconds = round(speech_cursor, 6)
+        runs.append(
+            {
+                "run_index": run_index,
+                "region_indexes": region_indexes,
+                "speech_seconds": run_seconds,
+            }
+        )
+        if run_seconds <= SUBSEGMENT_WINDOW_SECONDS:
+            starts = [0.0]
+        else:
+            maximum_start = run_seconds - SUBSEGMENT_WINDOW_SECONDS
+            count = int(math.floor(maximum_start / SUBSEGMENT_PERIOD_SECONDS)) + 1
+            starts = [index * SUBSEGMENT_PERIOD_SECONDS for index in range(count)]
+            if starts[-1] < maximum_start - 1e-9:
+                starts.append(maximum_start)
+        for start in starts:
+            end = min(start + SUBSEGMENT_WINDOW_SECONDS, run_seconds)
+            windows.append(
+                {
+                    "window_index": len(windows),
+                    "run_index": run_index,
+                    "speech_start_seconds": round(start, 6),
+                    "speech_end_seconds": round(end, 6),
+                    "feature_seconds": SUBSEGMENT_WINDOW_SECONDS,
+                    "repeat_to_fill": end - start < SUBSEGMENT_WINDOW_SECONDS,
+                    "source_position": round(items[0]["start"] + start, 6),
+                }
+            )
+    if not 1 <= len(windows) <= MAX_CLUSTER_UNITS:
+        raise _manual_required(ValueError("acoustic_window_count_invalid"))
+    return {
+        "region_count": len(mapped_regions),
+        "run_count": len(runs),
+        "window_count": len(windows),
+        "window_seconds": SUBSEGMENT_WINDOW_SECONDS,
+        "period_seconds": SUBSEGMENT_PERIOD_SECONDS,
+        "regions": mapped_regions,
+        "runs": runs,
+        "windows": windows,
+    }
+
+
+def map_subsegment_clusters_to_regions(
+    plan: object,
+    cluster_result: object,
+) -> dict[str, object]:
+    if type(plan) is not dict or type(cluster_result) is not dict:
+        raise _manual_required(ValueError("acoustic_region_mapping_invalid"))
+    regions = plan.get("regions")
+    windows = plan.get("windows")
+    labels = cluster_result.get("labels")
+    confidences = cluster_result.get("unit_confidences")
+    speaker_count = cluster_result.get("speaker_count")
+    if (
+        type(regions) is not list
+        or not regions
+        or type(windows) is not list
+        or not windows
+        or type(labels) is not list
+        or type(confidences) is not list
+        or len(labels) != len(windows)
+        or len(confidences) != len(windows)
+        or type(speaker_count) is not int
+        or not MIN_SPEAKERS <= speaker_count <= MAX_SPEAKERS
+        or any(type(value) is not int or not 0 <= value < speaker_count for value in labels)
+        or any(
+            type(value) not in {int, float}
+            or not math.isfinite(float(value))
+            or not 0.0 <= float(value) <= 1.0
+            for value in confidences
+        )
+    ):
+        raise _manual_required(ValueError("acoustic_region_mapping_invalid"))
+    mapped_labels = []
+    mapped_confidences = []
+    for region in regions:
+        region_center = 0.5 * (
+            float(region["speech_start_seconds"])
+            + float(region["speech_end_seconds"])
+        )
+        candidates = [
+            window
+            for window in windows
+            if window.get("run_index") == region.get("run_index")
+        ]
+        if not candidates:
+            raise _manual_required(ValueError("acoustic_region_mapping_invalid"))
+        selected = min(
+            candidates,
+            key=lambda window: (
+                abs(
+                    0.5
+                    * (
+                        float(window["speech_start_seconds"])
+                        + float(window["speech_end_seconds"])
+                    )
+                    - region_center
+                ),
+                int(window["window_index"]),
+            ),
+        )
+        window_index = int(selected["window_index"])
+        mapped_labels.append(int(labels[window_index]))
+        mapped_confidences.append(float(confidences[window_index]))
+    if len(set(mapped_labels)) != speaker_count:
+        raise _manual_required(ValueError("acoustic_region_speaker_coverage_invalid"))
+    return {
+        "labels": mapped_labels,
+        "unit_confidences": mapped_confidences,
+        "speaker_count": speaker_count,
+    }
+
+
+def diarize_acoustic_regions(
+    pcm_path: str,
+    regions: object,
+    *,
+    duration_seconds: float,
+    deadline_monotonic: float,
+    stop_requested: Callable[[], bool],
+    session_factory: Callable | None = None,
+) -> dict[str, object]:
+    plan = build_acoustic_subsegment_plan(
+        regions,
+        duration_seconds=duration_seconds,
+    )
+    base = extract_acoustic_subsegment_embeddings(
+        pcm_path,
+        plan,
+        deadline_monotonic=deadline_monotonic,
+        stop_requested=stop_requested,
+        session_factory=session_factory,
+        feature_shift_samples=0,
+    )
+    shifted = extract_acoustic_subsegment_embeddings(
+        pcm_path,
+        plan,
+        deadline_monotonic=deadline_monotonic,
+        stop_requested=stop_requested,
+        session_factory=session_factory,
+        feature_shift_samples=FBANK_FRAME_SHIFT // 2,
+    )
+    cluster_result = stable_cluster_acoustic_regions(
+        plan,
+        base,
+        shifted,
+    )
+    speaker_count = int(cluster_result["speaker_count"])
+    region_cluster_sizes = [
+        int(cluster_result["region_labels"].count(label))
+        for label in range(speaker_count)
+    ]
+    if any(size < 1 for size in region_cluster_sizes):
+        raise _manual_required(ValueError("acoustic_region_speaker_coverage_invalid"))
+    return {
+        "ok": True,
+        "status": "PASS",
+        "provider": "local_wespeaker_resnet34_spectral",
+        "detected_speaker_count": speaker_count,
+        "model_sha256": MODEL_SHA256,
+        "algorithm_version": ALGORITHM_VERSION,
+        "region_count": int(plan["region_count"]),
+        "run_count": int(plan["run_count"]),
+        "window_count": int(plan["window_count"]),
+        "embedding_window_count": int(plan["window_count"]) * 2,
+        "window_cluster_sizes": list(cluster_result["window_cluster_sizes"]),
+        "region_cluster_sizes": region_cluster_sizes,
+        "region_labels": list(cluster_result["region_labels"]),
+        "region_confidences": list(cluster_result["region_confidences"]),
+        "stability_pass": True,
+    }
+
+
+def stable_cluster_acoustic_regions(
+    plan: object,
+    base_embeddings: object,
+    shifted_embeddings: object,
+) -> dict[str, object]:
+    if type(plan) is not dict:
+        raise _manual_required(ValueError("acoustic_subsegment_plan_invalid"))
+    positions = [
+        float(item["source_position"]) + index * 1e-9
+        for index, item in enumerate(plan["windows"])
+    ]
+    speech_seconds = [
+        float(item["speech_end_seconds"]) - float(item["speech_start_seconds"])
+        for item in plan["windows"]
+    ]
+    base, base_positions, base_speech = _cluster_payload(
+        {"embeddings": base_embeddings, "source_positions": positions, "speech_seconds": speech_seconds}
+    )
+    shifted, shifted_positions, shifted_speech = _cluster_payload(
+        {"embeddings": shifted_embeddings, "source_positions": positions, "speech_seconds": speech_seconds}
+    )
+    if (
+        base.shape != shifted.shape
+        or not np.array_equal(base_positions, shifted_positions)
+        or not np.array_equal(base_speech, shifted_speech)
+    ):
+        raise _manual_required(ValueError("acoustic_cluster_view_mismatch"))
+    base_count, base_labels, _base_eigenvalues = _stable_cluster_view(
+        base,
+        base_positions,
+    )
+    shifted_count, shifted_labels, _shifted_eigenvalues = _stable_cluster_view(
+        shifted,
+        shifted_positions,
+    )
+    if base_count != shifted_count:
+        raise _manual_required(ValueError("acoustic_cluster_unstable"))
+    base_sizes = _validate_cluster_support(base_labels, base_speech, base_count)
+    shifted_sizes = _validate_cluster_support(
+        shifted_labels,
+        shifted_speech,
+        shifted_count,
+    )
+    base_confidence = _cluster_unit_confidences(base, base_labels, base_count)
+    shifted_confidence = _cluster_unit_confidences(
+        shifted,
+        shifted_labels,
+        shifted_count,
+    )
+    base_mapped = map_subsegment_clusters_to_regions(
+        plan,
+        {
+            "speaker_count": base_count,
+            "labels": base_labels.tolist(),
+            "unit_confidences": base_confidence,
+        },
+    )
+    shifted_mapped = map_subsegment_clusters_to_regions(
+        plan,
+        {
+            "speaker_count": shifted_count,
+            "labels": shifted_labels.tolist(),
+            "unit_confidences": shifted_confidence,
+        },
+    )
+    if base_mapped["labels"] != shifted_mapped["labels"]:
+        raise _manual_required(ValueError("acoustic_cluster_unstable"))
+    return {
+        "speaker_count": base_count,
+        "window_cluster_sizes": list(base_sizes),
+        "shifted_window_cluster_sizes": list(shifted_sizes),
+        "region_labels": list(base_mapped["labels"]),
+        "region_confidences": [
+            round(min(base_value, shifted_value), 6)
+            for base_value, shifted_value in zip(
+                base_mapped["unit_confidences"],
+                shifted_mapped["unit_confidences"],
+                strict=True,
+            )
+        ],
+        "stability_pass": True,
+    }
 
 
 def _fbank_hamming_window() -> np.ndarray:
@@ -619,6 +951,127 @@ def extract_unit_embeddings(
         _EMBEDDING_LOCK.release()
 
 
+def extract_acoustic_subsegment_embeddings(
+    pcm_path: str,
+    plan: object,
+    *,
+    deadline_monotonic: float,
+    stop_requested: Callable[[], bool],
+    session_factory: Callable | None = None,
+    feature_shift_samples: int = 0,
+) -> np.ndarray:
+    acquired = _EMBEDDING_LOCK.acquire(blocking=False)
+    if not acquired:
+        raise _manual_required(RuntimeError("acoustic_embedding_busy"))
+    try:
+        _embedding_boundary_check(
+            deadline_monotonic=deadline_monotonic,
+            stop_requested=stop_requested,
+        )
+        if type(plan) is not dict:
+            raise ValueError("acoustic_subsegment_plan_invalid")
+        regions = plan.get("regions")
+        runs = plan.get("runs")
+        windows = plan.get("windows")
+        if (
+            type(regions) is not list
+            or type(runs) is not list
+            or type(windows) is not list
+            or not regions
+            or not runs
+            or not windows
+            or len(windows) > MAX_CLUSTER_UNITS
+            or type(feature_shift_samples) is not int
+            or not 0 <= feature_shift_samples < FBANK_FRAME_SHIFT
+        ):
+            raise ValueError("acoustic_subsegment_plan_invalid")
+        path = Path(str(pcm_path or ""))
+        if not path.is_file():
+            raise ValueError("acoustic_pcm_missing")
+        pcm_bytes = path.stat().st_size
+        if (
+            pcm_bytes <= 0
+            or pcm_bytes % PCM_BYTES_PER_SAMPLE
+            or pcm_bytes
+            > int(MAX_SOURCE_SECONDS * PCM_SAMPLE_RATE * PCM_BYTES_PER_SAMPLE)
+        ):
+            raise ValueError("acoustic_pcm_size_invalid")
+        sample_count = pcm_bytes // PCM_BYTES_PER_SAMPLE
+        region_samples: dict[int, np.ndarray] = {}
+        with path.open("rb") as handle:
+            for region in regions:
+                _embedding_boundary_check(
+                    deadline_monotonic=deadline_monotonic,
+                    stop_requested=stop_requested,
+                )
+                index = int(region["index"])
+                start = int(round(float(region["start"]) * PCM_SAMPLE_RATE))
+                end = int(round(float(region["end"]) * PCM_SAMPLE_RATE))
+                if start < 0 or end <= start or end > sample_count or index in region_samples:
+                    raise ValueError("acoustic_pcm_range_invalid")
+                handle.seek(start * PCM_BYTES_PER_SAMPLE)
+                raw = handle.read((end - start) * PCM_BYTES_PER_SAMPLE)
+                samples = np.frombuffer(raw, dtype="<i2").astype(np.int16, copy=True)
+                if len(samples) != end - start or not np.any(samples):
+                    raise ValueError("acoustic_pcm_energy_invalid")
+                region_samples[index] = samples
+        run_samples: dict[int, np.ndarray] = {}
+        for run in runs:
+            run_index = int(run["run_index"])
+            indexes = list(run["region_indexes"])
+            if not indexes or run_index in run_samples:
+                raise ValueError("acoustic_run_invalid")
+            run_samples[run_index] = np.concatenate(
+                [region_samples[int(index)] for index in indexes]
+            )
+        session = _embedding_session(session_factory)
+        rows = []
+        target_samples = int(round(SUBSEGMENT_WINDOW_SECONDS * PCM_SAMPLE_RATE))
+        for window in windows:
+            _embedding_boundary_check(
+                deadline_monotonic=deadline_monotonic,
+                stop_requested=stop_requested,
+            )
+            signal = run_samples[int(window["run_index"])]
+            start = int(round(float(window["speech_start_seconds"]) * PCM_SAMPLE_RATE))
+            end = int(round(float(window["speech_end_seconds"]) * PCM_SAMPLE_RATE))
+            if start < 0 or end <= start or end > len(signal):
+                raise ValueError("acoustic_window_range_invalid")
+            samples = signal[start:end]
+            if len(samples) <= 0:
+                raise ValueError("acoustic_window_empty")
+            samples = np.resize(samples, target_samples).astype(np.int16, copy=False)
+            if feature_shift_samples:
+                samples = samples[feature_shift_samples:]
+            features = compute_fbank(samples)
+            output = session.run(
+                [MODEL_OUTPUT_NAME],
+                {MODEL_INPUT_NAME: features[None, :, :]},
+            )
+            if type(output) not in {list, tuple} or len(output) != 1:
+                raise ValueError("acoustic_embedding_output_invalid")
+            array = output[0]
+            if (
+                not isinstance(array, np.ndarray)
+                or array.dtype != np.dtype(np.float32)
+                or array.shape != (1, EMBEDDING_DIM)
+                or not np.isfinite(array).all()
+            ):
+                raise ValueError("acoustic_embedding_output_invalid")
+            row = array[0].astype(np.float32, copy=True)
+            norm = float(np.linalg.norm(row.astype(np.float64)))
+            if not math.isfinite(norm) or norm <= np.finfo(np.float32).eps:
+                raise ValueError("acoustic_embedding_norm_invalid")
+            rows.append(np.asarray(row / np.float32(norm), dtype=np.float32))
+        return np.stack(rows, axis=0).astype(np.float32, copy=False)
+    except speaker_cast.AutoCastManualRequired:
+        raise
+    except Exception as exc:
+        raise _manual_required(exc)
+    finally:
+        _EMBEDDING_LOCK.release()
+
+
 def _cluster_payload(value: object) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     if type(value) is dict:
         raw_embeddings = value.get("embeddings")
@@ -777,16 +1230,48 @@ def _stable_cluster_view(
         or eigenvalues.shape[0] != embeddings.shape[0]
     ):
         raise _manual_required(ValueError("acoustic_eigendecomposition_invalid"))
-    search_count = min(eigenvalues.shape[0], MAX_SPEAKERS + 2)
-    differences = np.diff(eigenvalues[:search_count])
-    if differences.size == 0 or not np.isfinite(differences).all():
-        raise _manual_required(ValueError("acoustic_eigengap_invalid"))
-    speaker_count = int(np.argmax(differences)) + 1
-    if not MIN_SPEAKERS <= speaker_count <= MAX_SPEAKERS:
-        raise _manual_required(ValueError("acoustic_cluster_count_out_of_range"))
+    speaker_count = _select_speaker_count_from_eigenvalues(eigenvalues)
     spectral = eigenvectors[:, :speaker_count]
     labels = _deterministic_kmeans(spectral, speaker_count, source_positions)
     return speaker_count, labels, eigenvalues
+
+
+def _select_speaker_count_from_eigenvalues(eigenvalues: object) -> int:
+    values = np.asarray(eigenvalues, dtype=np.float64)
+    if (
+        values.ndim != 1
+        or values.size <= MIN_SPEAKERS
+        or not np.isfinite(values).all()
+    ):
+        raise _manual_required(ValueError("acoustic_eigengap_invalid"))
+    maximum_k = min(MAX_SPEAKERS, values.size - 1)
+    if maximum_k < MIN_SPEAKERS:
+        raise _manual_required(ValueError("acoustic_cluster_count_out_of_range"))
+    candidate_ks = np.arange(MIN_SPEAKERS, maximum_k + 1, dtype=np.int64)
+    candidate_gaps = np.asarray(
+        [values[k] - values[k - 1] for k in candidate_ks],
+        dtype=np.float64,
+    )
+    if not np.isfinite(candidate_gaps).all() or np.any(candidate_gaps < 0.0):
+        raise _manual_required(ValueError("acoustic_eigengap_invalid"))
+    selected_index = int(np.argmax(candidate_gaps))
+    selected_gap = float(candidate_gaps[selected_index])
+    high_maximum = min(speaker_cast.MAX_AUTO_SPEAKER_LABELS, values.size - 1)
+    if high_maximum > MAX_SPEAKERS:
+        high_ks = np.arange(MAX_SPEAKERS + 1, high_maximum + 1, dtype=np.int64)
+        high_gaps = np.asarray(
+            [values[k] - values[k - 1] for k in high_ks],
+            dtype=np.float64,
+        )
+        if (
+            not np.isfinite(high_gaps).all()
+            or np.any(high_gaps < 0.0)
+            or float(np.max(high_gaps)) > selected_gap
+        ):
+            raise _manual_required(
+                ValueError("acoustic_cluster_count_out_of_range")
+            )
+    return int(candidate_ks[selected_index])
 
 
 def _validate_cluster_support(
@@ -1016,42 +1501,33 @@ def diarize_word_timeline(
         validated_words,
         duration_seconds=duration_seconds,
     )
-    base = extract_unit_embeddings(
+    regions = [
+        {
+            "index": int(unit["unit_index"]),
+            "start": float(unit["start"]),
+            "end": float(unit["end"]),
+        }
+        for unit in units
+    ]
+    acoustic = diarize_acoustic_regions(
         pcm_path,
-        units,
+        regions,
+        duration_seconds=duration_seconds,
         deadline_monotonic=deadline_monotonic,
         stop_requested=stop_requested,
         session_factory=session_factory,
-        _feature_shift_samples=0,
     )
-    shifted = extract_unit_embeddings(
-        pcm_path,
-        units,
-        deadline_monotonic=deadline_monotonic,
-        stop_requested=stop_requested,
-        session_factory=session_factory,
-        _feature_shift_samples=FBANK_FRAME_SHIFT // 2,
-    )
-    positions = [float(unit["start"]) for unit in units]
-    speech_seconds = [float(unit["original_speech_seconds"]) for unit in units]
-    cluster_result = spectral_cluster_embeddings(
-        {
-            "embeddings": base,
-            "source_positions": positions,
-            "speech_seconds": speech_seconds,
-        },
-        {
-            "embeddings": shifted,
-            "source_positions": positions,
-            "speech_seconds": speech_seconds,
-        },
-    )
+    cluster_result = {
+        "speaker_count": int(acoustic["detected_speaker_count"]),
+        "labels": list(acoustic["region_labels"]),
+        "unit_confidences": list(acoustic["region_confidences"]),
+    }
     segments = build_clustered_segments(
         validated_words,
         units,
         cluster_result,
     )
-    speaker_count = int(cluster_result["speaker_count"])
+    speaker_count = int(acoustic["detected_speaker_count"])
     if len({item["speaker_id"] for item in segments}) != speaker_count:
         raise _manual_required(ValueError("acoustic_segment_speaker_coverage_invalid"))
     return {
@@ -1064,8 +1540,10 @@ def diarize_word_timeline(
         "algorithm_version": ALGORITHM_VERSION,
         "word_count": len(validated_words),
         "unit_count": len(units),
-        "embedding_window_count": len(units) * 2,
-        "cluster_sizes": sorted(int(value) for value in cluster_result["cluster_sizes"]),
-        "stability_pass": bool(cluster_result["stability_pass"]),
+        "embedding_window_count": int(acoustic["embedding_window_count"]),
+        "cluster_sizes": sorted(
+            int(value) for value in acoustic["window_cluster_sizes"]
+        ),
+        "stability_pass": bool(acoustic["stability_pass"]),
         "word_coverage_count": len(validated_words),
     }
