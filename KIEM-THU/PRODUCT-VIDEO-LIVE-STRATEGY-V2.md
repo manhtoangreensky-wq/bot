@@ -200,6 +200,14 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     explicit current paths, Kling and Hailuo remain unchanged. RED `1 failed` ->
     GREEN `1 passed in 5.06s`; family guard `24 passed`; affected `269 passed in
     60.93s`. Scene-2 slot remains unused; no LIVE PASS claimed.
+  - [-] PR #961 deployed exact SHA `91be7e95...` through run `33485495005`
+    SUCCESS `3m35s`; runtime preflight proved submit `/v1/videos/generations` and
+    poll `/v1/videos/{id}`. The final authorized scene-2 call returned a real task,
+    so cap reached `2/2`; no further submit is permitted. LIVE RED: accepted task
+    inherited ShopAIKey's old `900s` stall/exhausted state and claim scan terminalized
+    before poll. Worker stopped; wallet/provider/identity unchanged. Receipt reset
+    source RED `1 failed` -> GREEN `1 passed in 6.08s`; focused `68 passed`; impact
+    `270 passed in 64.50s`. Next is deploy then poll-only existing Key4U task.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 

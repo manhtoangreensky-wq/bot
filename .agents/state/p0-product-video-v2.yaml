@@ -812,6 +812,24 @@ pv2_r01_job28_key4u_legacy_veo_normalization:
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
+pv2_r01_job28_scene2_accepted_stale_clock_red:
+  prior_pr: 961
+  prior_merge_sha: 91be7e951626b2b494361c55999f9629c778e041
+  prior_deploy_run: 33485495005 SUCCESS in 3m35s
+  runtime_preflight: submit /v1/videos/generations; poll /v1/videos/{task_id}; provider calls 0
+  live_calls_consumed_remaining: [2, 0]
+  receipt_keys: [1, 2]
+  scene2_receipt: task_accepted; task length 37
+  live_terminal: failed_no_charge before scene2 task poll
+  root_cause: accepted replacement inherited primary 900s stall/exhausted state
+  post_stop: worker inactive PID 0; attempts 40; lock released; wallet 200/0; tx0; credit events1; usage0; identity32/28/27
+  red: 1 failed
+  exact_green: 1 passed in 6.08s
+  focused_green: 68 passed in 11.04s
+  impact_green: 270 passed in 64.50s
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  live_pass: false
 spec_04i_subdub_auto_two_speaker_addon:
   phase: PENDING_AFTER_SPEC_04H_9
   compatible_media_only: true
@@ -820,8 +838,8 @@ spec_04i_subdub_auto_two_speaker_addon:
   representative_live_target: one unfinished media-compatible Product Video lane
   acceptance: male/female detection; translation; two-voice dub; final MP4; receipt/report; wallet delta 0
 next_action: >-
-  Ship/deploy only the exact official-host legacy VEO path normalization. Keep Owner
-  worker inactive through runtime preflight. Preserve scene-1 consumed receipt and
-  use only the one remaining Owner-authorized scene-2 call on existing job 28. Stop
-  at the global cap or terminal MP4; do not reclassify scene1 without proof and do
-  not open another product or SPEC-04I.
+  Ship/deploy only accepted-replacement stall-clock reset. Keep Owner worker inactive
+  through exact runtime. Requeue existing job 28 by backup-safe CAS for poll-only
+  scene2 task; provider submit must remain impossible because global cap is 2/2.
+  Download/validate scene2 if ready, then terminal partial/no-charge. Do not submit
+  again or open another product/SPEC-04I.

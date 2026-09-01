@@ -643,3 +643,25 @@ RED `1 failed in 5.51s`; exact GREEN `1 passed in 5.06s`; family/custom-proxy ga
 `24 passed in 5.75s`; affected impact `269 passed in 60.93s`. Source verification
 made no provider call or wallet mutation. Job #28 remains terminal, worker inactive,
 scene-1 receipt consumed and scene-2 authorization unused.
+
+## Accepted scene-2 task stale-clock RED
+
+PR #961 merged/runtime exact SHA
+`91be7e951626b2b494361c55999f9629c778e041`; deploy run `33485495005`
+SUCCESS in `3m35s`. Provider-free runtime preflight proved model
+`veo_3_1-fast`, submit `/v1/videos/generations`, poll `/v1/videos/{task_id}`,
+auth/config valid and provider calls `0`.
+
+The final authorized scene-2 call returned a real 37-character Key4U task. Global
+authorization is now consumed `2/2`; no more submit is permitted. Job still stopped
+failed-no-charge because the new task inherited ShopAIKey's old `900s` elapsed,
+stalled and exhausted fields, so claim scan terminalized before polling it. Worker
+was stopped; attempts remain `40`, lock released, wallet `200/0`, transactions `0`,
+credit events `1`, provider usage `0`, identity counts `32/28/27`, artifacts `0`.
+
+The local receipt correction force-resets every accepted replacement task to fresh
+`provider_running/queued`, clears all elapsed/stall/exhausted/failure fields, and
+keeps the task poll-only at cap. RED `1 failed`; exact GREEN `1 passed in 6.08s`;
+focused `68 passed in 11.04s`; affected impact `270 passed in 64.50s`. Source tests
+made no provider call or wallet mutation. Next deploy/CAS may only poll the existing
+scene-2 task; it cannot submit any third call.
