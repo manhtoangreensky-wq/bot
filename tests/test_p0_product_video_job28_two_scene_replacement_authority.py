@@ -941,7 +941,7 @@ def test_real_replacement_dispatch_uses_only_key4u_and_preserves_exact_scope(
     monkeypatch,
     tmp_path,
 ) -> None:
-    payload = _job28_payload()
+    payload = _v3_job28_payload()
     eligibility = {
         "worker_local_ready_provider_keys": ["key4u_video"],
         "contract_valid_provider_chain": ["shopaikey_video", "key4u_video"],
@@ -962,6 +962,9 @@ def test_real_replacement_dispatch_uses_only_key4u_and_preserves_exact_scope(
         )
         captured["authorization_id"] = request.metadata.get(
             "replacement_authorization_id"
+        )
+        captured["fallback_idempotency_key"] = request.metadata.get(
+            "fallback_idempotency_key"
         )
         captured["scope"] = [
             request.metadata.get("controlled_fallback_replacement_job_id"),
@@ -1007,8 +1010,23 @@ def test_real_replacement_dispatch_uses_only_key4u_and_preserves_exact_scope(
     assert result["ok"] is True
     assert captured["provider_chain"] == "key4u_video"
     assert captured["submit_source"] == "public_confirmed_scene_fallback_once"
-    assert captured["authorization"]["authorization_id"] == AUTHORIZATION_ID
-    assert captured["authorization_id"] == AUTHORIZATION_ID
+    assert captured["authorization"]["authorization_id"] == V3_AUTHORIZATION_ID
+    assert captured["authorization_id"] == V3_AUTHORIZATION_ID
+    assert captured["fallback_idempotency_key"] == (
+        connector.product_video_scene_replacement_idempotency_key(
+            28,
+            1,
+            "key4u_video",
+            V3_AUTHORIZATION_ID,
+        )
+    )
+    assert captured["fallback_idempotency_key"] != (
+        connector.product_video_scene_fallback_idempotency_key(
+            28,
+            1,
+            "key4u_video",
+        )
+    )
     assert captured["scope"] == [28, 32, 27, "VID-20260829-D78AA3"]
     assert captured["finance"] == [144, 144, 144, 212, 212]
     assert result["provider"] == "key4u_video"

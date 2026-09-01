@@ -849,3 +849,34 @@ for `bot.py`, `local_worker.py`, `services/remote_worker_api.py` and the changed
 returned exit `0`; diff-check passed. Source gates made `0` provider calls and `0`
 wallet mutations. Next action is one PR/deploy, exact-runtime readback, backup-safe
 rehearsal/CAS, then one worker start under the V3 hard stop.
+
+## V3 live idempotency boundary
+
+PR #970 squash/runtime `0780f7ae4a0215a74bc46792bf528061a52ffb76`;
+deploy `33533569117` SUCCESS in `3m44s`. Bot and Owner worker matched exact SHA with
+tracked diff `0`; bot/web/nginx were active. Snapshot rehearsal, production CAS and
+the deployed pre-start parser/claim verifier passed. V3 was `0/2`, V2 stayed
+immutable at `2/0`, only scene 1 was controlled, all prices/caps/wallet values were
+unchanged, and DB/provider/wallet pre-start mutations were `0/0/0`. Production
+backup `/opt/toanaas/bot/delete/pv2-r01-job28-v3-replacement-production-
+20260902T000903.json` has SHA `ec0c5b7b...` and mode `0600`.
+
+The first V3 worker tick was stopped before scene 2. It persisted a V3 scene-1
+receipt at `1/1`, but the task hash prefix `e5ec08abdfc0` exactly matched the old V2
+task from the proven backup; `provider_http_request_sent=false` and submit HTTP `0`.
+Thus no genuinely new paid call is evidenced and the receipt must not consume V3.
+Worker PID `1035369` was stopped to inactive PID `0`; wallet `200/0`, transactions,
+provider usage and charged Xu stayed `0`; artifact/concat/delivery stayed `0`.
+
+Code tracing isolated the exact source: `product_video_scene_stall_policy` generated
+the versioned replacement idempotency key, but `_render_scene_async` discarded it
+and recomputed the legacy fallback key. Key4U deduplication therefore returned the
+old V2 task. RED `1 failed, 24 deselected in 551.30s`; minimal GREEN `1 passed, 24
+deselected in 6.63s`. Job28/fallback comparators are `50 passed in 10.21s`; legacy
+fallback plus locked engine/UI comparators are `57 passed in 8.34s`; compile and
+diff-check exit `0`. The correction propagates the policy key when present and keeps
+the legacy key unchanged for non-versioned fallback. After ship, only the false V3
+scene-1 receipt may be CAS-reset before resuming the unchanged two-new-call cap.
+Final strategy verification returned `8 passed` plus the exact pre-existing PV2-R03
+fixture SHA failure; this correction changes no PV2-R03 file. YAML, changed-file
+compile, diff-check and secret scan returned exit `0`.
