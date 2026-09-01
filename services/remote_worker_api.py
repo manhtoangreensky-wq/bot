@@ -403,6 +403,13 @@ def _merge_controlled_fallback_durable_internal_fields(
     receipts = dict(old_receipts)
     for scene, receipt in new_receipts.items():
         receipts.setdefault(str(scene), dict(receipt))
+    replacement_all = {
+        str(key): dict(value)
+        for key, value in old_replacement_all.items()
+        if isinstance(value, dict)
+    }
+    if authorization_id:
+        replacement_all[authorization_id] = receipts
 
     old_legacy = dict(
         old.get("controlled_fallback_submit_receipts_by_scene") or {}
@@ -458,10 +465,10 @@ def _merge_controlled_fallback_durable_internal_fields(
     merged: dict[str, Any] = {}
     if authorization:
         merged["controlled_fallback_replacement_authorization"] = authorization
-    if authorization_id:
+    if replacement_all:
         merged[
             "controlled_fallback_replacement_submit_receipts_by_authorization"
-        ] = {authorization_id: receipts}
+        ] = replacement_all
     if legacy:
         merged["controlled_fallback_submit_receipts_by_scene"] = legacy
     if history:

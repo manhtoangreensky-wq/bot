@@ -262,6 +262,26 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     focused `67 passed`; broad branch keeps the exact same 61 baseline failures,
     `NEW_FAILURES=0`; hash/full compile/diff PASS. Ship once, then poll only the
     same accepted task.
+  - [-] PR #966 deployed as `47d56e5c...` through run `33511826474` SUCCESS in
+    `3m57s`; latest main/runtime `3d45e2e...` contains it. Snapshot/production CAS
+    and pre-start verifier passed; backup SHA `16201473...`, mode `0600`. Worker
+    PID `1016755` claimed job `28` once then stopped inactive. Latest poll markers
+    prove recovered family contract + model-qualified ID were used, but Key4U
+    returned HTTP `400 / task_not_exist`. Submit remained false/HTTP `0`; task hash,
+    cap `2/0`, identities and finance unchanged; artifact/delivery `0`.
+  - [x] Exact Owner V3 authority now grants only two new paid Key4U calls on existing
+    `28/32/27`: one scene-1 replacement and one scene-2 replacement. V2 is immutable
+    at `2/0`; new identity, upload/Confirm replay and ShopAIKey resubmit stay banned;
+    price `144/144/144`, provider cap `212/212`, Owner charged Xu `0` stay fixed.
+  - [x] V3 durable-merge RED `1 failed, 2 passed, 22 deselected in 635.35s` proved
+    activating V3 dropped the inactive V2 receipt namespace. The minimal correction
+    preserves every persisted namespace and accepts worker receipts only for the
+    persisted active V3 authority. Exact V3 `3 passed`; focused `50 passed`; locked
+    engine/UI `78 passed`; broad branch and clean main share the exact same 73
+    historical failures, `NEW_FAILURES=0`; full compile/diff PASS; provider/wallet
+    side effects `0/0`.
+  - [ ] Ship/deploy this single seam, backup-safe CAS existing `28/32/27` to V3
+    `0/2`, start one Owner worker and stop after two calls or terminal two-scene MP4.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 

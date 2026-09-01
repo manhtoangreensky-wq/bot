@@ -19,6 +19,7 @@ from services import (
 
 
 AUTHORIZATION_ID = "pv2-r01-job28-key4u-replacements-v2"
+V3_AUTHORIZATION_ID = "pv2-r01-job28-key4u-replacements-v3"
 LEGACY_RECEIPT = {
     "scene_index": 1,
     "provider": "key4u_video",
@@ -60,6 +61,43 @@ def _authorization() -> dict:
         "provider_budget_xu": 212,
         "fallback_provider_cost_xu": 212,
         "owner_charged_xu": 0,
+    }
+
+
+def _v3_authorization() -> dict:
+    return {
+        **_authorization(),
+        "authorization_id": V3_AUTHORIZATION_ID,
+        "authorization_version": 3,
+    }
+
+
+def _authorization_receipt(
+    authorization_id: str,
+    authorization_version: int,
+    scene_index: int,
+    *,
+    task_id: str,
+) -> dict:
+    return {
+        "authorization_id": authorization_id,
+        "authorization_version": authorization_version,
+        "authorization_state": "consumed",
+        "scene_index": scene_index,
+        "provider": "key4u_video",
+        "submit_source": "public_confirmed_scene_fallback_once",
+        "idempotency_key": f"{authorization_id}-scene-{scene_index}-key4u",
+        "submit_called": True,
+        "provider_http_request_sent": bool(task_id),
+        "http_status": 200 if task_id else 0,
+        "submit_accepted": bool(task_id),
+        "task_id_present": bool(task_id),
+        "provider_task_id": task_id,
+        "submit_evidence_state": (
+            "task_accepted_poll_only"
+            if task_id
+            else "submit_failed_without_task"
+        ),
     }
 
 
@@ -137,6 +175,26 @@ def _job28_payload() -> dict:
     }
 
 
+def _v3_job28_payload() -> dict:
+    payload = _job28_payload()
+    payload["controlled_fallback_replacement_authorization"] = _v3_authorization()
+    payload[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ] = {
+        AUTHORIZATION_ID: {
+            str(scene_index): _authorization_receipt(
+                AUTHORIZATION_ID,
+                2,
+                scene_index,
+                task_id=f"consumed-v2-scene-{scene_index}",
+            )
+            for scene_index in (1, 2)
+        },
+        V3_AUTHORIZATION_ID: {},
+    }
+    return payload
+
+
 def _replacement_context(payload: dict, scene_index: int) -> dict:
     assert hasattr(
         video_provider_router,
@@ -155,11 +213,17 @@ def _replacement_submit_diagnostics(
     task_id: str,
 ) -> dict:
     current = copy.deepcopy(payload)
+    authorization_id = str(
+        current.get("controlled_fallback_replacement_authorization", {}).get(
+            "authorization_id"
+        )
+        or ""
+    )
     current.update(
         {
             "fallback_scene_index": scene_index,
             "fallback_idempotency_key": (
-                f"{AUTHORIZATION_ID}-scene-{scene_index}-key4u"
+                f"{authorization_id}-scene-{scene_index}-key4u"
             ),
             "fallback_submit_attempted": True,
             "submit_source": "public_confirmed_scene_fallback_once",
@@ -268,6 +332,171 @@ def test_replacement_authorization_ignores_legacy_receipt_but_enforces_scene_and
     inconsistent = _replacement_context(inconsistent_counter, 1)
     assert inconsistent["valid"] is False
     assert inconsistent["block_reason"] == "replacement_authorization_invalid"
+
+
+def test_v3_starts_fresh_without_replaying_consumed_v2_or_stale_task_state() -> None:
+    payload = _v3_job28_payload()
+    v2_receipts = copy.deepcopy(
+        payload["controlled_fallback_replacement_submit_receipts_by_authorization"][
+            AUTHORIZATION_ID
+        ]
+    )
+
+    scene_one = _replacement_context(payload, 1)
+    scene_two = _replacement_context(payload, 2)
+
+    for context in (scene_one, scene_two):
+        assert context["valid"] is True
+        assert context["authorization_id"] == V3_AUTHORIZATION_ID
+        assert context["authorization_version"] == 3
+        assert context["consumed_scene_indexes"] == []
+        assert context["remaining_scene_indexes"] == [1, 2]
+        assert context["pending_poll_scene_indexes"] == []
+        assert context["terminal_failed_scene_indexes"] == []
+        assert context["calls_consumed"] == 0
+        assert context["calls_remaining"] == 2
+        assert context["scene_authorized"] is True
+    assert payload[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ][AUTHORIZATION_ID] == v2_receipts
+
+    wrong_identity = copy.deepcopy(payload)
+    wrong_identity["job_id"] = 29
+    assert _replacement_context(wrong_identity, 1)["block_reason"] == (
+        "replacement_identity_scope_mismatch"
+    )
+    wrong_finance = copy.deepcopy(payload)
+    wrong_finance["provider_budget_xu"] = 213
+    assert _replacement_context(wrong_finance, 1)["block_reason"] == (
+        "replacement_finance_scope_mismatch"
+    )
+
+
+def test_v3_consumes_each_scene_once_with_exact_two_call_global_cap() -> None:
+    payload = _v3_job28_payload()
+    v2_receipts = copy.deepcopy(
+        payload["controlled_fallback_replacement_submit_receipts_by_authorization"][
+            AUTHORIZATION_ID
+        ]
+    )
+
+    first, _ = remote_worker_api._controlled_fallback_submit_receipt(
+        _replacement_submit_diagnostics(payload, scene_index=1, task_id="")
+    )
+    assert first[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ][AUTHORIZATION_ID] == v2_receipts
+    assert sorted(
+        first["controlled_fallback_replacement_submit_receipts_by_authorization"][
+            V3_AUTHORIZATION_ID
+        ]
+    ) == ["1"]
+    assert _replacement_context(first, 1)["block_reason"] == (
+        "replacement_scene_call_cap_reached"
+    )
+    assert _replacement_context(first, 2)["scene_authorized"] is True
+
+    second, _ = remote_worker_api._controlled_fallback_submit_receipt(
+        _replacement_submit_diagnostics(first, scene_index=2, task_id="")
+    )
+    assert second[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ][AUTHORIZATION_ID] == v2_receipts
+    assert sorted(
+        second["controlled_fallback_replacement_submit_receipts_by_authorization"][
+            V3_AUTHORIZATION_ID
+        ]
+    ) == ["1", "2"]
+    assert second["controlled_fallback_replacement_authorization"][
+        "calls_consumed"
+    ] == 2
+    assert second["controlled_fallback_replacement_authorization"]["state"] == (
+        "consumed"
+    )
+    assert _replacement_context(second, 1)["calls_remaining"] == 0
+    assert _replacement_context(second, 2)["block_reason"] == (
+        "replacement_global_call_cap_reached"
+    )
+
+    replayed, _ = remote_worker_api._controlled_fallback_submit_receipt(
+        copy.deepcopy(second)
+    )
+    assert replayed[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ] == second[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ]
+
+
+def test_v3_durable_merge_keeps_v2_immutable_and_accepts_only_active_v3_receipt() -> None:
+    persisted = _v3_job28_payload()
+    v2_receipts = copy.deepcopy(
+        persisted[
+            "controlled_fallback_replacement_submit_receipts_by_authorization"
+        ][AUTHORIZATION_ID]
+    )
+    incoming = copy.deepcopy(persisted)
+    incoming[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ][AUTHORIZATION_ID]["1"]["provider_task_id"] = "forbidden-v2-replay"
+    incoming[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ][V3_AUTHORIZATION_ID]["1"] = _authorization_receipt(
+        V3_AUTHORIZATION_ID,
+        3,
+        1,
+        task_id="",
+    )
+
+    merged = remote_worker_api._merge_controlled_fallback_durable_internal_fields(
+        persisted,
+        incoming,
+    )
+    receipts = merged[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ]
+
+    assert set(receipts) == {AUTHORIZATION_ID, V3_AUTHORIZATION_ID}
+    assert receipts[AUTHORIZATION_ID] == v2_receipts
+    assert sorted(receipts[V3_AUTHORIZATION_ID]) == ["1"]
+    assert merged["controlled_fallback_replacement_authorization"][
+        "authorization_id"
+    ] == V3_AUTHORIZATION_ID
+    assert merged["controlled_fallback_replacement_authorization"][
+        "calls_consumed"
+    ] == 1
+
+    conflicting = copy.deepcopy(incoming)
+    conflicting["controlled_fallback_replacement_authorization"].update(
+        {
+            "authorization_id": "forbidden-worker-v4",
+            "authorization_version": 4,
+        }
+    )
+    conflicting[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ] = {
+        "forbidden-worker-v4": {
+            "2": _authorization_receipt(
+                "forbidden-worker-v4",
+                4,
+                2,
+                task_id="forbidden-worker-task",
+            )
+        }
+    }
+    rejected = remote_worker_api._merge_controlled_fallback_durable_internal_fields(
+        persisted,
+        conflicting,
+    )
+    assert rejected["controlled_fallback_replacement_authorization"][
+        "authorization_id"
+    ] == V3_AUTHORIZATION_ID
+    assert rejected[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ] == persisted[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ]
 
 
 def test_replacement_policy_allows_each_scene_once_and_never_exceeds_two_calls() -> None:

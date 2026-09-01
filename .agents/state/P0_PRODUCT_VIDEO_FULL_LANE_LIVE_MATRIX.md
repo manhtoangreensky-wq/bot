@@ -901,6 +901,33 @@ starting the next.
   5.01s`; focused `67 passed in 7.02s`; broad `373 passed, 1 skipped, exact same
   61 baseline failures in 37.98s`, `NEW_FAILURES=0`; locked hash/direct/full
   compile/diff PASS. Provider calls and wallet mutations during source gate `0`.
+- [-] PR #966 squash `47d56e5c...`, deploy `33511826474` SUCCESS in `3m57s`;
+  latest shared runtime `3d45e2e...` contains #966 by ancestry. Snapshot and
+  production alias-clear CAS plus deployed verifier PASS; production backup
+  `/opt/toanaas/bot/delete/pv2-r01-job28-scene2-poll-only-production-
+  20260901T215503.json`, SHA `16201473...`, mode `0600`. Owner worker PID `1016755`
+  claimed existing job `28` once and was stopped inactive PID `0` after terminal.
+  Latest poll proves both corrections executed: contract recovered from
+  `KEY4U_VEO_VIDEO_POLL_URL` and task ID model-qualified. Key4U returned HTTP `400`
+  with safe message `task_not_exist`. Root submit false/HTTP `0`, accepted task hash
+  prefix `925d3315ec8a` unchanged, cap `2/0`, artifact/concat/delivery `0`, wallet
+  `200/0`, transactions/provider usage/charged Xu `0/0/0`, credit events `1`.
+- [x] The prior blocker is closed by the exact Owner V3 authorization. V2 remains
+  immutable and consumed at `2/0`; V3 alone grants exactly two new Key4U calls,
+  one replacement for scene 1 and one for scene 2, on existing identity `28/32/27`.
+  New job/project/outbox, upload/Confirm replay and ShopAIKey resubmit remain
+  prohibited; prices stay `144/144/144`, provider cap `212/212`, charged Xu `0`.
+- [x] V3 source RED proved durable worker merge dropped the inactive V2 receipt
+  namespace whenever V3 became active: `1 failed, 2 passed, 22 deselected in
+  635.35s`. Minimal GREEN keeps every persisted namespace immutable and permits
+  incoming receipts only for the persisted active V3 authority. Exact V3 `3 passed,
+  22 deselected in 5.39s`; job28 focused `50 passed in 12.34s`; focused plus locked
+  engine/UI hashes `78 passed in 9.92s`. Broad branch `338 passed, 73 failed` vs
+  clean main `335 passed, exact same 73 failed in 715.58s`, so `NEW_FAILURES=0`.
+  Full compile and diff-check exit `0`; source provider calls/wallet mutations `0/0`.
+- [ ] Ship the single V3 seam, deploy/read back exact SHA, then backup-safe rehearse
+  and CAS existing `28/32/27` to V3 `0/2`. Start the Owner worker once and hard-stop
+  after two new calls or terminal two-scene MP4, whichever occurs first.
 - [ ] Two distinct scene clips and one final MP4 terminal; otherwise stop at the
   exact new RED and reopen only `SPEC-04H`.
 

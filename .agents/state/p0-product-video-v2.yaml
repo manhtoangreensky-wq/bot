@@ -934,6 +934,51 @@ pv2_r01_job28_existing_task_poll_contract_recovery:
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
+pv2_r01_job28_provider_task_not_exist_terminal:
+  phase: TERMINAL_SUPERSEDED_BY_V3_AUTHORIZATION
+  prior_pr: 966
+  prior_merge_sha: 47d56e5c78efebb5fded42fec456b13f84c9a37c
+  prior_deploy_run: 33511826474 SUCCESS in 3m57s
+  latest_runtime_ancestry: 3d45e2e9755279523b812de7f57e02df35f73e7b contains PR966
+  production_backup: /opt/toanaas/bot/delete/pv2-r01-job28-scene2-poll-only-production-20260901T215503.json
+  production_backup_sha_mode: 16201473f6ce6f65d231a0ef820c578bf85b85df1a8ed8d0ac6dc65b16222820 mode 0600
+  prestart_verifier: PASS; scene1 taskless; scene2 task hash prefix 925d3315ec8a active pollable; cap 2/0; submit false
+  live_worker: PID 1016755 claimed existing job28 once then stopped inactive PID 0
+  live_terminal: failed_no_charge; artifact concat delivery 0
+  latest_poll_contract_recovered: true
+  latest_poll_endpoint_source: KEY4U_VEO_VIDEO_POLL_URL
+  latest_poll_task_id_model_qualified: true
+  latest_poll_http_message: 400 task_not_exist
+  submit_forensic: root submit false HTTP 0; no third submit; task hash unchanged
+  calls_consumed_remaining: [2, 0]
+  finance: wallet 200/0; transactions 0; credit events 1; provider usage 0; charged Xu 0
+  blocker: resolved by exact Owner V3 authorization; V2 remains immutable at 2/0
+  required_new_authority: received for exactly two V3 Key4U calls on existing 28/32/27; no new job/upload/confirm/ShopAIKey resubmit
+  live_pass: false
+pv2_r01_job28_v3_replacement_authority:
+  phase: SOURCE_READY_TO_SHIP
+  authorization_id: pv2-r01-job28-key4u-replacements-v3
+  authorization_version: 3
+  identity: job 28; project 32; outbox 27; request VID-20260829-D78AA3
+  prior_v2: immutable consumed 2/0; replay prohibited
+  v3_calls: exactly 2 new paid Key4U calls; one scene1 replacement and one scene2 replacement
+  prohibited: no new job/project/outbox; no upload/Confirm replay; no ShopAIKey resubmit
+  finance: user/persisted/planned 144/144/144; provider budget/cost 212/212; charged Xu 0
+  stop_condition: after two V3 calls or terminal two-scene MP4, whichever is first
+  root_cause: durable merge emitted only active authorization receipts and dropped immutable V2 namespace
+  source_scope: preserve all persisted receipt namespaces; accept incoming receipts only for persisted active V3 authorization
+  source_red: 1 failed, 2 passed, 22 deselected in 635.35s
+  exact_green: 3 passed, 22 deselected in 5.39s
+  focused_green: 50 passed in 12.34s
+  locked_engine_ui_green: 78 passed in 9.92s
+  broad_branch: 338 passed and 73 failed
+  broad_clean_main: 335 passed and exact same 73 test IDs failed in 715.58s
+  new_failures: 0
+  full_compile: bot.py local_worker.py remote_worker_api.py changed test exit 0
+  diff_check: exit 0
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  live_pass: false
 spec_04i_subdub_auto_two_speaker_addon:
   phase: PENDING_AFTER_SPEC_04H_9
   compatible_media_only: true
@@ -942,8 +987,8 @@ spec_04i_subdub_auto_two_speaker_addon:
   representative_live_target: one unfinished media-compatible Product Video lane
   acceptance: male/female detection; translation; two-voice dub; final MP4; receipt/report; wallet delta 0
 next_action: >-
-  Ship/deploy only the existing-task Key4U poll-contract recovery correction. Keep
-  Owner worker inactive through exact runtime. Reinstall existing job 28 by
-  backup-safe alias-clear CAS for poll-only scene2 task; provider submit must remain
-  impossible because global cap is 2/2. Verify scene1 taskless, then poll/download
-  scene2. Do not submit again or open another product/SPEC-04I.
+  Ship the single V3 receipt-namespace seam, deploy and verify exact runtime SHA.
+  Rehearse then production-CAS only existing 28/32/27 from V2 consumed 2/0 to active
+  V3 0/2 while preserving all identity/price/wallet/receipt invariants. Start the
+  Owner worker once and stop after two V3 Key4U calls or terminal two-scene MP4.
+  Do not open another product or SPEC-04I before PV2-R01 artifact/delivery lock.
