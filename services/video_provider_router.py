@@ -964,12 +964,293 @@ def product_video_public_confirm_context(metadata: dict[str, Any] | None = None)
     }
 
 
+def product_video_controlled_replacement_authorization_context(
+    metadata: dict[str, Any] | None = None,
+    *,
+    scene_index: int = 0,
+) -> dict[str, Any]:
+    metadata = dict(metadata or {})
+    raw = metadata.get("controlled_fallback_replacement_authorization")
+    authorization = dict(raw) if isinstance(raw, dict) else {}
+    present = bool(authorization)
+    requested_scene = max(0, _int_metadata(scene_index, 0))
+    empty = {
+        "present": present,
+        "valid": False,
+        "authorization_id": "",
+        "authorization_version": 0,
+        "allowed_scene_indexes": [],
+        "consumed_scene_indexes": [],
+        "remaining_scene_indexes": [],
+        "pending_poll_scene_indexes": [],
+        "calls_consumed": 0,
+        "calls_remaining": 0,
+        "per_scene_call_cap": 0,
+        "global_call_cap": 0,
+        "scene_authorized": False,
+        "scene_consumed": False,
+        "block_reason": "",
+    }
+    if not present:
+        return empty
+
+    authorization_id = str(authorization.get("authorization_id") or "").strip()
+    authorization_version = _int_metadata(
+        authorization.get("authorization_version"), 0
+    )
+    provider = str(authorization.get("provider") or "").strip()
+    allowed_scene_indexes = sorted(
+        {
+            _int_metadata(item, 0)
+            for item in (authorization.get("allowed_scene_indexes") or [])
+            if _int_metadata(item, 0) > 0
+        }
+    )
+    per_scene_call_cap = _int_metadata(
+        authorization.get("per_scene_call_cap"), 0
+    )
+    global_call_cap = _int_metadata(authorization.get("global_call_cap"), 0)
+
+    raw_receipts = metadata.get(
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    )
+    receipts_by_authorization = (
+        raw_receipts if isinstance(raw_receipts, dict) else {}
+    )
+    current_receipts_raw = receipts_by_authorization.get(authorization_id)
+    current_receipts = (
+        current_receipts_raw if isinstance(current_receipts_raw, dict) else {}
+    )
+    receipt_consumed = {
+        _int_metadata(key, 0)
+        for key, value in current_receipts.items()
+        if _int_metadata(key, 0) > 0
+        and isinstance(value, dict)
+        and str(value.get("authorization_state") or "") == "consumed"
+    }
+    declared_consumed = {
+        _int_metadata(item, 0)
+        for item in (authorization.get("consumed_scene_indexes") or [])
+        if _int_metadata(item, 0) > 0
+    }
+    consumed_scene_indexes = sorted(receipt_consumed | declared_consumed)
+    declared_calls_consumed = _int_metadata(
+        authorization.get("calls_consumed"), 0
+    )
+    calls_consumed = max(
+        len(consumed_scene_indexes),
+        declared_calls_consumed,
+    )
+    calls_remaining = max(0, global_call_cap - calls_consumed)
+    remaining_scene_indexes = [
+        item
+        for item in allowed_scene_indexes
+        if item not in consumed_scene_indexes
+    ]
+
+    scene_tasks = [
+        dict(item)
+        for item in (
+            metadata.get("scene_tasks")
+            or metadata.get("provider_scene_tasks")
+            or []
+        )
+        if isinstance(item, dict)
+    ]
+    tasks_by_scene = {
+        _int_metadata(item.get("scene_index") or item.get("scene_id"), 0): item
+        for item in scene_tasks
+        if _int_metadata(item.get("scene_index") or item.get("scene_id"), 0) > 0
+    }
+    pending_poll_scene_indexes: list[int] = []
+    terminal_failed_scene_indexes: list[int] = []
+    for raw_scene, receipt in current_receipts.items():
+        receipt_scene = _int_metadata(raw_scene, 0)
+        if receipt_scene <= 0 or not isinstance(receipt, dict):
+            continue
+        task_present = bool(
+            receipt.get("task_id_present")
+            and str(receipt.get("provider_task_id") or "").strip()
+        )
+        task = tasks_by_scene.get(receipt_scene, {})
+        result_present = bool(
+            task.get("clip_valid")
+            or task.get("result_url_valid")
+            or task.get("artifact_valid")
+            or _int_metadata(
+                task.get("artifact_bytes")
+                or task.get("clip_bytes")
+                or task.get("output_bytes"),
+                0,
+            )
+            > 0
+        )
+        task_status = str(
+            task.get("actual_provider_payload_status")
+            or task.get("normalized_provider_status")
+            or task.get("provider_status")
+            or task.get("status")
+            or task.get("failure_reason")
+            or ""
+        ).strip().lower().replace("-", "_").replace(" ", "_")
+        task_terminal_without_result = bool(
+            not result_present
+            and task_status
+            in {
+                "failed",
+                "failure",
+                "error",
+                "rejected",
+                "cancelled",
+                "canceled",
+                "expired",
+                "terminal_failed",
+                "failed_no_charge",
+                "success",
+                "succeeded",
+                "completed",
+                "done",
+            }
+        )
+        if task_present and not result_present and not task_terminal_without_result:
+            pending_poll_scene_indexes.append(receipt_scene)
+        if task_present and task_terminal_without_result:
+            terminal_failed_scene_indexes.append(receipt_scene)
+    pending_poll_scene_indexes = sorted(set(pending_poll_scene_indexes))
+    terminal_failed_scene_indexes = sorted(set(terminal_failed_scene_indexes))
+
+    scope_pairs = (
+        (
+            "job_id",
+            authorization.get("job_id"),
+            metadata.get("controlled_fallback_replacement_job_id")
+            or metadata.get("root_job_id")
+            or metadata.get("current_job_id")
+            or metadata.get("job_id")
+            or metadata.get("id"),
+        ),
+        (
+            "project_id",
+            authorization.get("project_id"),
+            metadata.get("controlled_fallback_replacement_project_id")
+            or metadata.get("project_id"),
+        ),
+        (
+            "outbox_id",
+            authorization.get("outbox_id"),
+            metadata.get("controlled_fallback_replacement_outbox_id")
+            or metadata.get("outbox_id")
+            or metadata.get("dispatch_outbox_id"),
+        ),
+        (
+            "request_id",
+            authorization.get("request_id"),
+            metadata.get("controlled_fallback_replacement_request_id")
+            or metadata.get("request_id"),
+        ),
+    )
+    scope_valid = all(
+        str(expected or "").strip()
+        and str(expected or "").strip() == str(actual or "").strip()
+        for _name, expected, actual in scope_pairs
+    )
+    finance_fields = (
+        "user_visible_price_xu",
+        "persisted_quoted_price_xu",
+        "customer_charge_planned_xu",
+        "provider_budget_xu",
+        "fallback_provider_cost_xu",
+    )
+    finance_valid = all(
+        _int_metadata(authorization.get(key), -1)
+        == _int_metadata(metadata.get(key), -2)
+        and _int_metadata(authorization.get(key), 0) > 0
+        for key in finance_fields
+    )
+    finance_valid = bool(
+        finance_valid
+        and _int_metadata(authorization.get("owner_charged_xu"), -1) == 0
+        and _int_metadata(metadata.get("charged_xu") or metadata.get("charge"), 0)
+        == 0
+        and not _truthy_metadata(metadata.get("wallet_charge_recorded"))
+    )
+    schema_valid = bool(
+        authorization_id
+        and authorization_version >= 2
+        and provider == "key4u_video"
+        and allowed_scene_indexes
+        and per_scene_call_cap == 1
+        and global_call_cap == 2
+        and global_call_cap <= len(allowed_scene_indexes)
+        and set(consumed_scene_indexes).issubset(set(allowed_scene_indexes))
+        and calls_consumed <= global_call_cap
+        and declared_calls_consumed == len(consumed_scene_indexes)
+    )
+    valid = bool(schema_valid and scope_valid and finance_valid)
+
+    if not schema_valid:
+        block_reason = "replacement_authorization_invalid"
+    elif not scope_valid:
+        block_reason = "replacement_identity_scope_mismatch"
+    elif not finance_valid:
+        block_reason = "replacement_finance_scope_mismatch"
+    elif requested_scene and requested_scene not in allowed_scene_indexes:
+        block_reason = "replacement_scene_not_authorized"
+    elif calls_consumed >= global_call_cap:
+        block_reason = "replacement_global_call_cap_reached"
+    elif requested_scene and requested_scene in consumed_scene_indexes:
+        block_reason = "replacement_scene_call_cap_reached"
+    elif terminal_failed_scene_indexes:
+        block_reason = "replacement_consumed_task_terminal_failed"
+    elif pending_poll_scene_indexes:
+        block_reason = "replacement_accepted_task_poll_only"
+    elif str(authorization.get("state") or "active") != "active":
+        block_reason = "replacement_authorization_not_active"
+    else:
+        block_reason = ""
+    scene_authorized = bool(
+        valid
+        and requested_scene > 0
+        and requested_scene in remaining_scene_indexes
+        and not pending_poll_scene_indexes
+        and not terminal_failed_scene_indexes
+        and calls_consumed < global_call_cap
+        and str(authorization.get("state") or "active") == "active"
+    )
+    return {
+        **empty,
+        "present": True,
+        "valid": valid,
+        "authorization_id": authorization_id,
+        "authorization_version": authorization_version,
+        "allowed_scene_indexes": allowed_scene_indexes,
+        "consumed_scene_indexes": consumed_scene_indexes,
+        "remaining_scene_indexes": remaining_scene_indexes,
+        "pending_poll_scene_indexes": pending_poll_scene_indexes,
+        "terminal_failed_scene_indexes": terminal_failed_scene_indexes,
+        "calls_consumed": calls_consumed,
+        "calls_remaining": calls_remaining,
+        "per_scene_call_cap": per_scene_call_cap,
+        "global_call_cap": global_call_cap,
+        "scene_authorized": scene_authorized,
+        "scene_consumed": bool(requested_scene in consumed_scene_indexes),
+        "block_reason": block_reason,
+    }
+
+
 def product_video_controlled_fallback_policy(
     blocker: str,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     metadata = dict(metadata or {})
     context = product_video_public_confirm_context(metadata)
+    replacement = product_video_controlled_replacement_authorization_context(
+        metadata,
+        scene_index=_int_metadata(
+            metadata.get("fallback_scene_index") or metadata.get("scene_index"),
+            0,
+        ),
+    )
     clean_blocker = str(blocker or "").strip()
     allowed = True
     reason = ""
@@ -1000,7 +1281,13 @@ def product_video_controlled_fallback_policy(
     elif context["charged"]:
         allowed = False
         reason = "already_charged"
-    elif context["fallback_count"] >= 1:
+    elif replacement["present"] and not replacement["scene_authorized"]:
+        allowed = False
+        reason = str(
+            replacement.get("block_reason")
+            or "replacement_authorization_invalid"
+        )
+    elif not replacement["present"] and context["fallback_count"] >= 1:
         allowed = False
         reason = "fallback_limit_reached"
     elif clean_blocker not in PRODUCT_VIDEO_CONTROLLED_FALLBACK_BLOCKERS:
@@ -1008,6 +1295,13 @@ def product_video_controlled_fallback_policy(
         reason = "blocker_not_fallbackable"
     return {
         **context,
+        "replacement_authorization_present": replacement["present"],
+        "replacement_authorization_valid": replacement["valid"],
+        "replacement_authorization_id": replacement["authorization_id"],
+        "replacement_authorization_version": replacement["authorization_version"],
+        "replacement_calls_consumed": replacement["calls_consumed"],
+        "replacement_calls_remaining": replacement["calls_remaining"],
+        "replacement_scene_authorized": replacement["scene_authorized"],
         "fallback_allowed": bool(allowed),
         "fallback_submit_allowed": bool(allowed),
         "fallback_block_reason": reason,

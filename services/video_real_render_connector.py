@@ -46,6 +46,7 @@ from services.video_provider_router import (
     PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK,
     capability_options,
     normalize_capability_values,
+    product_video_controlled_replacement_authorization_context,
     product_video_route_contract,
     provider_status_payload,
     run_provider_generation,
@@ -1527,6 +1528,23 @@ def product_video_scene_fallback_idempotency_key(job_id: Any, scene_index: int, 
     ).hexdigest()[:24]
 
 
+def product_video_scene_replacement_idempotency_key(
+    job_id: Any,
+    scene_index: int,
+    fallback_provider: str,
+    authorization_id: str,
+) -> str:
+    return hashlib.sha256(
+        (
+            f"{str(job_id or '').strip()}|"
+            f"{max(1, _safe_int(scene_index, 1))}|"
+            f"{str(fallback_provider or '').strip()}|"
+            f"{str(authorization_id or '').strip()}|"
+            "product_video_scene_replacement_once"
+        ).encode("utf-8")
+    ).hexdigest()[:24]
+
+
 def product_video_scene_dispatch_idempotency_key(job_id: Any, scene_index: int, provider_key: str) -> str:
     return hashlib.sha256(
         f"{str(job_id or '').strip()}|{max(1, _safe_int(scene_index, 1))}|{str(provider_key or '').strip()}|product_video_scene_dispatch".encode("utf-8")
@@ -1609,6 +1627,12 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
     timed_out = bool(_scene_task_has_provider_id(scene_task) and not result_url_valid and elapsed >= total_threshold)
     stalled = bool(not_start_stalled or running_stalled or timed_out)
     fallback_count = _safe_int(scene_task.get("fallback_count") or scene_task.get("provider_fallback_count"), 0)
+    replacement = product_video_controlled_replacement_authorization_context(
+        {**job, "fallback_scene_index": scene_index},
+        scene_index=scene_index,
+    )
+    replacement_scene_authorized = bool(replacement.get("scene_authorized"))
+    effective_fallback_count = 0 if replacement_scene_authorized else fallback_count
     source = str(
         job.get("original_submit_source")
         or job.get("public_confirm_submit_source")
@@ -1679,7 +1703,7 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         and public_confirmed
         and invoice_confirmed
         and _scene_task_has_provider_id(scene_task)
-        and fallback_count <= 0
+        and effective_fallback_count <= 0
         and not delivered
         and not charged
     ):
@@ -1697,10 +1721,19 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
     claim_scoped_scene_matches = bool(
         not claim_scoped_recovery
         or (
-            _safe_int(job.get("fallback_scene_index"), 0) == scene_index
-            and scene_task.get("controlled_fallback_allowed") is True
-            and str(scene_task.get("fallback_provider_candidate") or "").strip()
-            == "key4u_video"
+            replacement_scene_authorized
+            or (
+                _safe_int(job.get("fallback_scene_index"), 0) == scene_index
+                and scene_task.get("controlled_fallback_allowed") is True
+            )
+        )
+        and (
+            not claim_scoped_recovery
+            or (
+                str(scene_task.get("fallback_provider_candidate") or "").strip()
+                == "key4u_video"
+                or replacement_scene_authorized
+            )
         )
     )
     if claim_scoped_recovery and not claim_scoped_scene_matches:
@@ -1713,7 +1746,7 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         and public_confirmed
         and invoice_confirmed
         and _scene_task_has_provider_id(scene_task)
-        and fallback_count <= 0
+        and effective_fallback_count <= 0
         and fallback_chain
         and fallback_chain[0] == "key4u_video"
         and not delivered
@@ -1723,7 +1756,7 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         stalled
         and public_confirmed
         and invoice_confirmed
-        and fallback_count <= 0
+        and effective_fallback_count <= 0
         and fallback_chain
         and not delivered
         and not charged
@@ -1732,7 +1765,10 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
     if result_url_valid:
         fallback_block_reason = "scene_already_has_valid_clip"
     elif automatic_fallback_forbidden and not controlled_fallback_allowed:
-        fallback_block_reason = "automatic_fallback_forbidden"
+        fallback_block_reason = str(
+            replacement.get("block_reason")
+            or "automatic_fallback_forbidden"
+        )
     elif not stalled:
         if is_not_start:
             fallback_block_reason = "not_start_under_threshold"
@@ -1748,7 +1784,7 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         fallback_block_reason = "already_delivered"
     elif charged:
         fallback_block_reason = "already_charged"
-    elif fallback_count > 0:
+    elif effective_fallback_count > 0:
         fallback_block_reason = "scene_fallback_already_used"
     elif not fallback_chain:
         fallback_block_reason = "no_fallback_provider"
@@ -1758,11 +1794,19 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
     fallback_eligibility_reason = "eligible" if fallback_allowed else fallback_block_reason
     threshold = not_start_threshold if is_not_start else (running_threshold if running_stalled else total_threshold)
     fallback_provider = str((fallback_chain or [""])[0] or "")
-    fallback_idempotency_key = product_video_scene_fallback_idempotency_key(
-        job.get("job_id") or job.get("id") or job.get("project_id") or "",
-        scene_index,
-        fallback_provider,
-    ) if fallback_provider else ""
+    if fallback_provider and replacement_scene_authorized:
+        fallback_idempotency_key = product_video_scene_replacement_idempotency_key(
+            job.get("job_id") or job.get("id") or job.get("project_id") or "",
+            scene_index,
+            fallback_provider,
+            str(replacement.get("authorization_id") or ""),
+        )
+    else:
+        fallback_idempotency_key = product_video_scene_fallback_idempotency_key(
+            job.get("job_id") or job.get("id") or job.get("project_id") or "",
+            scene_index,
+            fallback_provider,
+        ) if fallback_provider else ""
     return {
         "scene_index": max(1, _safe_int(scene_index, 1)),
         "current_scene_status": current_scene_status,
@@ -1801,11 +1845,33 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         "fallback_allowed": fallback_allowed,
         "automatic_fallback_forbidden": automatic_fallback_forbidden,
         "controlled_fallback_allowed": controlled_fallback_allowed,
+        "replacement_authorization_present": bool(replacement.get("present")),
+        "replacement_authorization_valid": bool(replacement.get("valid")),
+        "replacement_authorization_id": str(
+            replacement.get("authorization_id") or ""
+        ),
+        "replacement_authorization_version": _safe_int(
+            replacement.get("authorization_version"), 0
+        ),
+        "replacement_calls_consumed": _safe_int(
+            replacement.get("calls_consumed"), 0
+        ),
+        "replacement_calls_remaining": _safe_int(
+            replacement.get("calls_remaining"), 0
+        ),
+        "replacement_scene_authorized": replacement_scene_authorized,
+        "replacement_pending_poll_scene_indexes": list(
+            replacement.get("pending_poll_scene_indexes") or []
+        ),
         "runtime_fallback_candidate_recovered": runtime_fallback_candidate_recovered,
         "fallback_authorization_source": (
-            "persisted_exact_quote_final_confirm"
-            if controlled_fallback_allowed
-            else ""
+            "owner_versioned_scene_replacement"
+            if replacement_scene_authorized
+            else (
+                "persisted_exact_quote_final_confirm"
+                if controlled_fallback_allowed
+                else ""
+            )
         ),
         "exact_quote_preserved": exact_quote_preserved,
         "fallback_block_reason": fallback_block_reason,
@@ -4380,6 +4446,48 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "fallback_execution_tick_called": fallback_execution_tick_called,
             "fallback_submit_attempted": bool(scene_fallback_allowed),
             "fallback_idempotency_key": fallback_idempotency_key,
+            "controlled_fallback_replacement_authorization": _meta_value(
+                "controlled_fallback_replacement_authorization"
+            )
+            or {},
+            "controlled_fallback_replacement_submit_receipts_by_authorization": _meta_value(
+                "controlled_fallback_replacement_submit_receipts_by_authorization"
+            )
+            or {},
+            "controlled_fallback_submit_receipt_history": _meta_value(
+                "controlled_fallback_submit_receipt_history"
+            )
+            or [],
+            "controlled_fallback_replacement_job_id": _meta_value(
+                "controlled_fallback_replacement_job_id"
+            )
+            or (job or {}).get("job_id")
+            or (job or {}).get("id"),
+            "controlled_fallback_replacement_project_id": _meta_value(
+                "controlled_fallback_replacement_project_id"
+            )
+            or (job or {}).get("project_id"),
+            "controlled_fallback_replacement_outbox_id": _meta_value(
+                "controlled_fallback_replacement_outbox_id"
+            )
+            or (job or {}).get("outbox_id")
+            or (job or {}).get("dispatch_outbox_id"),
+            "controlled_fallback_replacement_request_id": _meta_value(
+                "controlled_fallback_replacement_request_id"
+            )
+            or (job or {}).get("request_id"),
+            "replacement_authorization_id": str(
+                pending_policy.get("replacement_authorization_id") or ""
+            ),
+            "replacement_authorization_version": _safe_int(
+                pending_policy.get("replacement_authorization_version"), 0
+            ),
+            "replacement_calls_consumed": _safe_int(
+                pending_policy.get("replacement_calls_consumed"), 0
+            ),
+            "replacement_calls_remaining": _safe_int(
+                pending_policy.get("replacement_calls_remaining"), 0
+            ),
             "provider_eligibility_snapshot": _meta_value("provider_eligibility_snapshot") or {},
             "provider_eligibility_snapshot_id": _meta_value("provider_eligibility_snapshot_id") or "",
             "configured_provider_chain": _meta_value("configured_provider_chain") or [],
@@ -4518,7 +4626,381 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "artifact_hash": str(result.get("artifact_hash") or ""),
         }
     )
+    _record_replacement_scene_result_for_next_scene(
+        job,
+        scene_index,
+        scene_result,
+    )
     return scene_result
+
+
+def _record_replacement_scene_result_for_next_scene(
+    job: dict[str, Any] | None,
+    scene_index: int,
+    result: dict[str, Any] | None,
+) -> None:
+    if not isinstance(job, dict) or not isinstance(
+        job.get("controlled_fallback_replacement_authorization"), dict
+    ):
+        return
+    shared_authorization = job.get(
+        "controlled_fallback_replacement_authorization"
+    )
+    shared_all_receipts = job.get(
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    )
+    shared_legacy_receipts = job.get(
+        "controlled_fallback_submit_receipts_by_scene"
+    )
+    shared_history = job.get("controlled_fallback_submit_receipt_history")
+    shared_counts = job.get("fallback_count_by_scene")
+    shared_scene_tasks = job.get("scene_tasks")
+    shared_provider_scene_tasks = job.get("provider_scene_tasks")
+    result = dict(result or {})
+    output_path = str(result.get("output_path") or result.get("local_path") or "")
+    try:
+        output_bytes = os.path.getsize(output_path) if output_path else 0
+    except OSError:
+        output_bytes = 0
+    if not result.get("ok") or output_bytes <= 0:
+        return
+    authorization = dict(
+        job.get("controlled_fallback_replacement_authorization") or {}
+    )
+    authorization_id = str(authorization.get("authorization_id") or "").strip()
+    authorization_version = _safe_int(
+        authorization.get("authorization_version"), 0
+    )
+    if not authorization_id or authorization_version < 2:
+        return
+    result_provider = str(result.get("provider") or "").strip()
+    raw_existing_receipts = job.get(
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    )
+    existing_receipts = (
+        raw_existing_receipts.get(authorization_id, {})
+        if isinstance(raw_existing_receipts, dict)
+        else {}
+    )
+    existing_scene_receipt = (
+        existing_receipts.get(str(scene_index), {})
+        if isinstance(existing_receipts, dict)
+        else {}
+    )
+    replacement_before_result = (
+        product_video_controlled_replacement_authorization_context(
+            job,
+            scene_index=scene_index,
+        )
+    )
+    if result_provider != "key4u_video" or not (
+        replacement_before_result.get("scene_authorized")
+        or (
+            isinstance(existing_scene_receipt, dict)
+            and str(existing_scene_receipt.get("authorization_state") or "")
+            == "consumed"
+            and str(existing_scene_receipt.get("provider") or "")
+            == "key4u_video"
+        )
+    ):
+        return
+    scene_tasks = [
+        dict(item)
+        for item in (
+            job.get("scene_tasks") or job.get("provider_scene_tasks") or []
+        )
+        if isinstance(item, dict)
+    ]
+    target = next(
+        (
+            item
+            for item in scene_tasks
+            if _safe_int(item.get("scene_index") or item.get("scene_id"), 0)
+            == _safe_int(scene_index, 0)
+        ),
+        {},
+    )
+    task_ids = result.get("provider_task_ids")
+    task_id = str(
+        result.get("task_id")
+        or (task_ids[0] if isinstance(task_ids, list) and task_ids else "")
+        or target.get("provider_task_id")
+        or ""
+    ).strip()
+    raw_all_receipts = job.get(
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    )
+    all_receipts = {
+        str(key): {
+            str(scene): dict(receipt)
+            for scene, receipt in (
+                value.items() if isinstance(value, dict) else []
+            )
+            if isinstance(receipt, dict)
+        }
+        for key, value in (
+            raw_all_receipts.items()
+            if isinstance(raw_all_receipts, dict)
+            else []
+        )
+    }
+    active_receipts = all_receipts.setdefault(authorization_id, {})
+    if str(scene_index) not in active_receipts:
+        active_receipts[str(scene_index)] = {
+            "authorization_id": authorization_id,
+            "authorization_version": authorization_version,
+            "scene_index": _safe_int(scene_index, 0),
+            "provider": "key4u_video",
+            "submit_source": PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_SCENE_FALLBACK_ONCE,
+            "idempotency_key": str(
+                target.get("fallback_idempotency_key")
+                or job.get("fallback_idempotency_key")
+                or ""
+            ),
+            "submit_called": True,
+            "provider_http_request_sent": True,
+            "http_status": _safe_int(
+                result.get("provider_submit_http_status")
+                or result.get("provider_http_status")
+                or 200,
+                200,
+            ),
+            "submit_accepted": True,
+            "task_id_present": bool(task_id),
+            "provider_task_id": task_id,
+            "authorization_state": "consumed",
+            "submit_evidence_state": "task_completed_with_artifact",
+            "blocker": "",
+            "recorded_at": video_project_queue_service.now_text(),
+        }
+
+    raw_legacy_receipts = job.get("controlled_fallback_submit_receipts_by_scene")
+    legacy_receipts = {
+        str(key): dict(value)
+        for key, value in (
+            raw_legacy_receipts.items()
+            if isinstance(raw_legacy_receipts, dict)
+            else []
+        )
+        if isinstance(value, dict)
+    }
+    raw_history = job.get("controlled_fallback_submit_receipt_history")
+    history = [
+        dict(item)
+        for item in (raw_history if isinstance(raw_history, list) else [])
+        if isinstance(item, dict)
+    ]
+    archived_ids = {
+        str(item.get("archived_authorization_id") or "") for item in history
+    }
+    for legacy_scene, legacy_receipt in sorted(legacy_receipts.items()):
+        archive_id = f"legacy-scene-{legacy_scene}-v1"
+        if archive_id not in archived_ids:
+            history.append(
+                {
+                    **legacy_receipt,
+                    "archived_authorization_id": archive_id,
+                }
+            )
+    consumed_scene_indexes = sorted(
+        {
+            _safe_int(scene, 0)
+            for scene, receipt in active_receipts.items()
+            if _safe_int(scene, 0) > 0
+            and str(receipt.get("authorization_state") or "") == "consumed"
+        }
+    )
+    global_call_cap = max(0, _safe_int(authorization.get("global_call_cap"), 0))
+    authorization.update(
+        {
+            "consumed_scene_indexes": consumed_scene_indexes,
+            "calls_consumed": len(consumed_scene_indexes),
+            "state": (
+                "consumed"
+                if global_call_cap > 0
+                and len(consumed_scene_indexes) >= global_call_cap
+                else "active"
+            ),
+        }
+    )
+    raw_counts = job.get("fallback_count_by_scene")
+    fallback_count_by_scene = {
+        str(key): _safe_int(value, 0)
+        for key, value in (
+            raw_counts.items() if isinstance(raw_counts, dict) else []
+        )
+    }
+    for consumed_scene in consumed_scene_indexes:
+        key = str(consumed_scene)
+        fallback_count_by_scene[key] = max(
+            fallback_count_by_scene.get(key, 0),
+            (1 if key in legacy_receipts else 0) + 1,
+        )
+    for item in scene_tasks:
+        if _safe_int(item.get("scene_index") or item.get("scene_id"), 0) != _safe_int(
+            scene_index, 0
+        ):
+            continue
+        item.update(
+            {
+                "provider": str(result.get("provider") or item.get("provider") or ""),
+                "provider_task_id": task_id,
+                "provider_video_id": task_id,
+                "active_task_id": task_id,
+                "task_id": task_id,
+                "status": "completed",
+                "actual_provider_payload_status": "SUCCESS",
+                "clip_valid": True,
+                "result_url_valid": True,
+                "artifact_valid": True,
+                "artifact_bytes": output_bytes,
+                "clip_bytes": output_bytes,
+                "output_path": output_path,
+                "failure_reason": "",
+                "continue_polling": False,
+                "fallback_count": fallback_count_by_scene.get(
+                    str(scene_index), 0
+                ),
+                "provider_fallback_count": fallback_count_by_scene.get(
+                    str(scene_index), 0
+                ),
+                "replacement_authorization_id": authorization_id,
+            }
+        )
+    job.update(
+        {
+            "controlled_fallback_replacement_authorization": authorization,
+            "controlled_fallback_replacement_submit_receipts_by_authorization": all_receipts,
+            "controlled_fallback_submit_receipts_by_scene": legacy_receipts,
+            "controlled_fallback_submit_receipt_history": history,
+            "replacement_authorization_id": authorization_id,
+            "replacement_authorization_version": authorization_version,
+            "replacement_calls_consumed": len(consumed_scene_indexes),
+            "replacement_calls_remaining": max(
+                0, global_call_cap - len(consumed_scene_indexes)
+            ),
+            "fallback_count_by_scene": fallback_count_by_scene,
+            "fallback_count": max(
+                sum(fallback_count_by_scene.values()),
+                _safe_int(job.get("fallback_count"), 0),
+            ),
+            "charged_xu": 0,
+            "charge": 0,
+            "wallet_charge_recorded": False,
+            "scene_tasks": scene_tasks,
+            "provider_scene_tasks": scene_tasks,
+        }
+    )
+    replacement = product_video_controlled_replacement_authorization_context(
+        job,
+        scene_index=0,
+    )
+    remaining = list(replacement.get("remaining_scene_indexes") or [])
+    if replacement.get("valid") and not replacement.get(
+        "pending_poll_scene_indexes"
+    ) and remaining:
+        next_scene = _safe_int(remaining[0], 0)
+        for item in scene_tasks:
+            item_scene = _safe_int(
+                item.get("scene_index") or item.get("scene_id"), 0
+            )
+            selected = item_scene == next_scene
+            item.update(
+                {
+                    "fallback_allowed": selected,
+                    "controlled_fallback_allowed": selected,
+                    "fallback_provider_candidate": (
+                        "key4u_video" if selected else ""
+                    ),
+                    "fallback_provider_order": (
+                        ["key4u_video"] if selected else []
+                    ),
+                    "fallback_scene_index": next_scene if selected else 0,
+                    "fallback_idempotency_key": (
+                        product_video_scene_replacement_idempotency_key(
+                            job.get("job_id")
+                            or job.get("id")
+                            or job.get("project_id")
+                            or "",
+                            next_scene,
+                            "key4u_video",
+                            str(replacement.get("authorization_id") or ""),
+                        )
+                        if selected
+                        else ""
+                    ),
+                }
+            )
+        job.update(
+            {
+                "fallback_allowed": True,
+                "controlled_fallback_allowed": True,
+                "fallback_provider": "key4u_video",
+                "fallback_provider_candidate": "key4u_video",
+                "fallback_provider_order": ["key4u_video"],
+                "next_provider_or_model_candidate": "key4u_video",
+                "fallback_scene_index": next_scene,
+                "fallback_idempotency_key": product_video_scene_replacement_idempotency_key(
+                    job.get("job_id")
+                    or job.get("id")
+                    or job.get("project_id")
+                    or "",
+                    next_scene,
+                    "key4u_video",
+                    str(replacement.get("authorization_id") or ""),
+                ),
+                "claim_terminal_suppressed_for_controlled_fallback": True,
+            }
+        )
+        job["scene_tasks"] = scene_tasks
+        job["provider_scene_tasks"] = scene_tasks
+    else:
+        for item in scene_tasks:
+            item.update(
+                {
+                    "fallback_allowed": False,
+                    "controlled_fallback_allowed": False,
+                    "fallback_provider_candidate": "",
+                    "fallback_provider_order": [],
+                    "fallback_scene_index": 0,
+                    "fallback_idempotency_key": "",
+                }
+            )
+        job.update(
+            {
+                "fallback_allowed": False,
+                "controlled_fallback_allowed": False,
+                "fallback_provider": "",
+                "fallback_provider_candidate": "",
+                "fallback_provider_order": [],
+                "next_provider_or_model_candidate": "",
+                "fallback_scene_index": 0,
+                "fallback_idempotency_key": "",
+                "scene_tasks": scene_tasks,
+                "provider_scene_tasks": scene_tasks,
+            }
+        )
+    if isinstance(shared_authorization, dict):
+        shared_authorization.clear()
+        shared_authorization.update(authorization)
+    if isinstance(shared_all_receipts, dict):
+        shared_all_receipts.clear()
+        shared_all_receipts.update(all_receipts)
+    if isinstance(shared_legacy_receipts, dict):
+        shared_legacy_receipts.clear()
+        shared_legacy_receipts.update(legacy_receipts)
+    if isinstance(shared_history, list):
+        shared_history[:] = history
+    if isinstance(shared_counts, dict):
+        shared_counts.clear()
+        shared_counts.update(fallback_count_by_scene)
+    if isinstance(shared_scene_tasks, list):
+        shared_scene_tasks[:] = scene_tasks
+    if (
+        isinstance(shared_provider_scene_tasks, list)
+        and shared_provider_scene_tasks is not shared_scene_tasks
+    ):
+        shared_provider_scene_tasks[:] = scene_tasks
 
 
 def build_real_scene_renderer(

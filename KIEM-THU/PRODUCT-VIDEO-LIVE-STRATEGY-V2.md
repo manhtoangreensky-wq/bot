@@ -153,10 +153,23 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     SUCCESS. No-provider CAS stored backup SHA `a89d4d5c...`, mode `0600`, and
     terminalized the existing job as failed-no-charge with immutable ambiguity
     receipt consumed, scene counts `[1,0]`, task/finance/output deltas `0`.
-  - [-] The old scene-1 authorization is consumed. Stop before any CAS/restart or
-    paid call. A new exact Owner authorization is required for one replacement
-    attempt; `PV2-R01` remains open and `V2-04`/`SPEC-04I` remain blocked behind it.
-    `PV2-R01` stays open until real MP4/receipt/report/zero-wallet acceptance passes.
+  - [x] Owner supplied a new versioned authorization for exactly two Key4U calls
+    on existing identity `job 28 / project 32 / outbox 27`: one replacement for
+    scene 1 and one for scene 2; no new identity row, upload/Confirm replay or
+    ShopAIKey submit; quote `144/144/144`, budget/cost `212/212`, charged `0`.
+  - [x] Versioned scene authority source is ready: RED `5 failed in 5.11s`;
+    exact replacement + locked-engine contract `15 passed in 7.06s`; old receipt
+    + replacement focused `37 passed in 7.00s`; final impact batch
+    `252 passed in 77.55s`.
+    Strategy/Tail matrix is `47 passed` plus the exact pre-existing Script fixture
+    SHA failure reproduced on clean baseline, so `NEW_FAILURES=0`.
+    Full compile of bot/worker/services/tests and diff check exit `0`; engine-route
+    hash lock, `bot.py`, Tail and SubDub sources remain unchanged. Provider calls
+    and wallet mutations during source verification are `0`.
+  - [-] `PV2-R01` remains open. Ship/deploy this source, install the authorization
+    with snapshot-first CAS, then start the existing job once. Stop at two calls,
+    any terminal replacement failure, or terminal two-scene MP4. `V2-04` and
+    `SPEC-04I` remain blocked until real MP4/receipt/report/zero-wallet acceptance.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 

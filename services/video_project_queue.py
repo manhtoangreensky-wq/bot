@@ -7134,6 +7134,169 @@ def recover_product_video_existing_tasks(
         raise
 
 
+def _product_video_replacement_ledger_fields(
+    job: dict[str, Any],
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    source = {
+        **job,
+        **{
+            key: value
+            for key, value in result.items()
+            if key
+            in {
+                "controlled_fallback_replacement_authorization",
+                "controlled_fallback_replacement_submit_receipts_by_authorization",
+                "controlled_fallback_submit_receipts_by_scene",
+                "controlled_fallback_submit_receipt_history",
+                "fallback_count_by_scene",
+            }
+        },
+    }
+    authorization = source.get(
+        "controlled_fallback_replacement_authorization"
+    )
+    if not isinstance(authorization, dict) or _as_int(
+        authorization.get("authorization_version"), 0
+    ) < 2:
+        return {}
+    authorization_fields = {
+        "authorization_id",
+        "authorization_version",
+        "state",
+        "provider",
+        "job_id",
+        "project_id",
+        "outbox_id",
+        "request_id",
+        "allowed_scene_indexes",
+        "per_scene_call_cap",
+        "global_call_cap",
+        "consumed_scene_indexes",
+        "calls_consumed",
+        "user_visible_price_xu",
+        "persisted_quoted_price_xu",
+        "customer_charge_planned_xu",
+        "provider_budget_xu",
+        "fallback_provider_cost_xu",
+        "owner_charged_xu",
+    }
+    receipt_fields = {
+        "authorization_id",
+        "authorization_version",
+        "authorization_state",
+        "scene_index",
+        "provider",
+        "submit_source",
+        "idempotency_key",
+        "submit_called",
+        "provider_http_request_sent",
+        "http_status",
+        "submit_accepted",
+        "task_id_present",
+        "provider_task_id",
+        "fallback_count_before_submit",
+        "fallback_count_after_submit",
+        "submit_evidence_state",
+        "blocker",
+        "recorded_at",
+        "archived_authorization_id",
+    }
+
+    def receipt(value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            return {}
+        return {
+            str(key): item
+            for key, item in value.items()
+            if str(key) in receipt_fields
+        }
+
+    safe_authorization = {
+        str(key): item
+        for key, item in authorization.items()
+        if str(key) in authorization_fields
+    }
+    raw_replacement = source.get(
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    )
+    safe_replacement = {
+        str(authorization_id): {
+            str(scene): receipt(value)
+            for scene, value in receipts.items()
+            if receipt(value)
+        }
+        for authorization_id, receipts in (
+            raw_replacement.items()
+            if isinstance(raw_replacement, dict)
+            else []
+        )
+        if isinstance(receipts, dict)
+    }
+    raw_legacy = source.get("controlled_fallback_submit_receipts_by_scene")
+    safe_legacy = {
+        str(scene): receipt(value)
+        for scene, value in (
+            raw_legacy.items() if isinstance(raw_legacy, dict) else []
+        )
+        if receipt(value)
+    }
+    raw_history = source.get("controlled_fallback_submit_receipt_history")
+    safe_history = [
+        receipt(item)
+        for item in (raw_history if isinstance(raw_history, list) else [])
+        if receipt(item)
+    ]
+    raw_counts = (
+        job.get("fallback_count_by_scene")
+        if isinstance(job.get("fallback_count_by_scene"), dict)
+        else result.get("fallback_count_by_scene")
+    )
+    counts = {
+        str(scene): max(0, _as_int(value, 0))
+        for scene, value in (
+            raw_counts.items()
+            if isinstance(raw_counts, dict)
+            else []
+        )
+    }
+    active_authorization_id = str(
+        safe_authorization.get("authorization_id") or ""
+    )
+    active_receipts = safe_replacement.get(active_authorization_id, {})
+    for scene, value in active_receipts.items():
+        if str(value.get("authorization_state") or "") != "consumed":
+            continue
+        counts[str(scene)] = max(
+            counts.get(str(scene), 0),
+            (1 if str(scene) in safe_legacy else 0) + 1,
+        )
+    calls_consumed = max(
+        0, _as_int(safe_authorization.get("calls_consumed"), 0)
+    )
+    global_call_cap = max(
+        0, _as_int(safe_authorization.get("global_call_cap"), 0)
+    )
+    return {
+        "controlled_fallback_replacement_authorization": safe_authorization,
+        "controlled_fallback_replacement_submit_receipts_by_authorization": safe_replacement,
+        "controlled_fallback_submit_receipts_by_scene": safe_legacy,
+        "controlled_fallback_submit_receipt_history": safe_history,
+        "replacement_authorization_id": str(
+            safe_authorization.get("authorization_id") or ""
+        ),
+        "replacement_authorization_version": _as_int(
+            safe_authorization.get("authorization_version"), 0
+        ),
+        "replacement_calls_consumed": calls_consumed,
+        "replacement_calls_remaining": max(0, global_call_cap - calls_consumed),
+        "fallback_count_by_scene": counts,
+        "charge": 0,
+        "charged_xu": 0,
+        "wallet_charge_recorded": False,
+    }
+
+
 def product_video_scene_ledger_state(
     project: dict | None = None,
     job: dict | None = None,
@@ -8342,6 +8505,7 @@ def product_video_scene_ledger_state(
         "panel_completed_scene_count": coverage_count,
         "panel_unresolved_scene_count": len(unresolved_indexes),
         "scene_ledger_rendered_at": now_text(now_dt),
+        **_product_video_replacement_ledger_fields(job, result),
     }
 
 
