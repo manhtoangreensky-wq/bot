@@ -269,6 +269,104 @@ def test_key4u_veo_fallback_uses_openai_multipart_and_persists_poll_url(monkeypa
     assert result.raw["provider_poll_url_override"] == f"{KEY4U_VN}/v1/videos/{{task_id}}"
 
 
+def test_key4u_veo_derives_current_official_generation_contract_without_new_env():
+    env = _key4u_env(KEY4U_BASE_URL=KEY4U_VN)
+
+    resolution = resolve_product_video_model(
+        tier=400,
+        provider_chain=["key4u_video"],
+        scene_count=2,
+        required_capability="text_to_video",
+        requires_concat=True,
+        env=env,
+    )
+
+    assert resolution["ok"] is True
+    assert resolution["selected_provider"] == "key4u_video"
+    assert resolution["selected_model"] == "veo_3_1-fast"
+    assert resolution["provider_interface"] == "key4u_google_veo_exclusive"
+    assert resolution["provider_endpoint_source"] == (
+        "derived:key4u_official_videos_generations"
+    )
+    assert resolution["provider_submit_url_override"] == (
+        f"{KEY4U_VN}/v1/videos/generations"
+    )
+    assert resolution["provider_poll_url_override"] == (
+        f"{KEY4U_VN}/v1/videos/{{task_id}}"
+    )
+    assert resolution["contract_validation_status"] == "ok"
+    assert resolution["submit_skipped_due_to_contract"] is False
+
+
+def test_key4u_veo_does_not_derive_official_endpoint_without_auth():
+    resolution = resolve_product_video_model(
+        tier=400,
+        provider_chain=["key4u_video"],
+        scene_count=2,
+        required_capability="text_to_video",
+        requires_concat=True,
+        env={"KEY4U_BASE_URL": KEY4U_VN},
+    )
+
+    assert resolution["ok"] is False
+    assert resolution.get("provider_submit_url_override", "") == ""
+    assert resolution["contract_block_reason"] == (
+        "key4u_model_contract_missing_no_charge"
+    )
+
+
+def test_key4u_veo_derived_official_contract_uses_json_wire_payload(monkeypatch):
+    env = _key4u_env(KEY4U_BASE_URL=KEY4U_VN)
+    resolution = resolve_product_video_model(
+        tier=400,
+        provider_chain=["key4u_video"],
+        scene_count=2,
+        required_capability="text_to_video",
+        requires_concat=True,
+        env=env,
+    )
+    provider = _key4u_provider(env)
+    captured = {}
+
+    def fake_json(url, payload=None, **kwargs):
+        captured.update({"url": url, "payload": payload, "method": kwargs.get("method", "POST")})
+        return {
+            "ok": True,
+            "status_code": 200,
+            "body": {"id": "video_test_derived_123", "status": "queued"},
+            "response_shape": {"type": "dict"},
+        }
+
+    monkeypatch.setattr(provider, "_open_json", fake_json)
+    monkeypatch.setattr(
+        provider,
+        "_open_multipart_form",
+        lambda *_args, **_kwargs: pytest.fail("derived official contract must use JSON"),
+    )
+
+    result = provider.submit_video_job(
+        _request_for_resolution(resolution, seconds=8)
+    )
+
+    assert result.ok is True
+    assert captured == {
+        "url": f"{KEY4U_VN}/v1/videos/generations",
+        "payload": {
+            "model": "veo_3_1-fast",
+            "prompt": "Product video scene.",
+            "resolution": "1080p",
+            "aspect_ratio": "9:16",
+            "duration": 8,
+        },
+        "method": "POST",
+    }
+    assert result.raw["provider_poll_url_override"] == (
+        f"{KEY4U_VN}/v1/videos/{{task_id}}"
+    )
+    assert result.raw["provider_http_request_sent"] is True
+    assert result.raw["submit_http_status"] == 200
+
+
 def test_key4u_kling_wire_payload_is_family_exact(monkeypatch):
     env = _key4u_env(
         KEY4U_KLING_VIDEO_ENDPOINT=f"{KEY4U_VN}/kling/v1/videos/text2video",

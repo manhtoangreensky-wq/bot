@@ -7,6 +7,9 @@ import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
+from providers.video_generic_http_provider import GenericHttpVideoProvider
 from services import (
     remote_worker_api,
     video_provider_router,
@@ -1016,7 +1019,10 @@ def test_real_per_scene_orchestrator_advances_replacement_authority_in_same_tick
         {
             "user_id": 7126457028,
             "product_type": "video_trend",
+            "quality_tier": 400,
             "scene_count": 2,
+            "scene_duration_seconds": 8,
+            "expected_duration_seconds": 16,
             "orchestration_mode": "per_scene_8s",
             "scene_cards": [
                 {
@@ -1455,3 +1461,295 @@ def test_failed_scene1_receipt_cannot_rewrite_scene2_and_terminal_releases_lock(
         assert persisted["charged_xu"] == 0
     finally:
         conn.close()
+
+
+def test_orchestrator_skips_consumed_no_task_scene_and_calls_only_remaining_scene(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    payload = _job28_payload()
+    payload.update(
+        {
+            "user_id": 7126457028,
+            "product_type": "video_trend",
+            "scene_count": 2,
+            "orchestration_mode": "per_scene_8s",
+            "scene_cards": [
+                {
+                    "scene_index": 1,
+                    "video_prompt": "consumed failed scene one",
+                    "target_duration_sec": 8,
+                    "aspect_ratio": "9:16",
+                },
+                {
+                    "scene_index": 2,
+                    "video_prompt": "remaining replacement scene two",
+                    "target_duration_sec": 8,
+                    "aspect_ratio": "9:16",
+                },
+            ],
+        }
+    )
+    scene_one_failed = _replacement_submit_diagnostics(
+        payload,
+        scene_index=1,
+        task_id="",
+    )
+    scene_one_failed, _ = remote_worker_api._controlled_fallback_submit_receipt(
+        scene_one_failed
+    )
+    for item in scene_one_failed["scene_tasks"]:
+        index = int(item.get("scene_index") or 0)
+        if index == 1:
+            item.update(
+                {
+                    "status": "failed",
+                    "failure_reason": "provider_in_progress",
+                    "controlled_fallback_allowed": False,
+                    "fallback_provider_candidate": "",
+                    "fallback_provider_order": [],
+                }
+            )
+        elif index == 2:
+            item.update(
+                {
+                    "provider": "shopaikey_video",
+                    "selected_provider": "shopaikey_video",
+                    "status": "provider_not_start",
+                    "actual_provider_payload_status": "NOT_START",
+                    "failure_reason": "",
+                    "fallback_count": 0,
+                    "provider_fallback_count": 0,
+                    "fallback_count_before_submit": 0,
+                    "fallback_allowed": True,
+                    "controlled_fallback_allowed": True,
+                    "fallback_provider_candidate": "key4u_video",
+                    "fallback_provider_order": ["key4u_video"],
+                    "fallback_scene_index": 2,
+                }
+            )
+    scene_one_failed["provider_scene_tasks"] = copy.deepcopy(
+        scene_one_failed["scene_tasks"]
+    )
+    scene_one_failed.update(
+        {
+            "scene_cards": payload["scene_cards"],
+            "fallback_scene_index": 2,
+            "fallback_allowed": True,
+            "controlled_fallback_allowed": True,
+            "fallback_provider_candidate": "key4u_video",
+            "fallback_provider_order": ["key4u_video"],
+            "fallback_count_by_scene": {"1": 2, "2": 0},
+            "terminal_state": "final_rendering",
+            "final_decision": "continue_polling",
+            "continue_polling": True,
+        }
+    )
+    calls: list[int] = []
+
+    def fake_provider_generation(request, *, output_dir, environ, **_kwargs):
+        del output_dir
+        calls.append(int(request.metadata.get("scene_index") or 0))
+        assert environ.get("VIDEO_PROVIDER_CHAIN") == "key4u_video"
+        return {
+            "ok": False,
+            "provider": "key4u_video",
+            "selected_provider": "key4u_video",
+            "provider_router_called": True,
+            "provider_submit_called": True,
+            "provider_http_request_sent": True,
+            "provider_submit_http_status": 200,
+            "provider_task_ids": ["key4u-scene-two-new-task"],
+            "provider_video_ids": ["key4u-scene-two-new-task"],
+            "provider_task_id_saved": True,
+            "task_id_present": True,
+            "submit_accepted": True,
+            "provider_status": "running",
+            "normalized_provider_status": "running",
+            "continue_polling": True,
+            "provider_error": "provider_in_progress",
+            "blocker": "provider_in_progress",
+            "no_charge": True,
+        }
+
+    monkeypatch.setattr(
+        connector,
+        "run_provider_generation",
+        fake_provider_generation,
+    )
+    monkeypatch.setattr(
+        connector,
+        "_canonical_product_video_workspace",
+        lambda _job: str(tmp_path / "workspace"),
+    )
+
+    result = connector._run_per_scene_provider_orchestrator(
+        scene_one_failed,
+        str(tmp_path / "discarded"),
+        provider_order=["shopaikey_video", "key4u_video"],
+        provider_events=[],
+        debug_results=[],
+    )
+
+    assert calls == [2]
+    assert result["continue_polling"] is True
+    assert result["terminal_state"] == "final_rendering"
+    receipts = result[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ][AUTHORIZATION_ID]
+    assert sorted(receipts) == ["1"]
+    assert result["replacement_calls_consumed"] == 1
+    assert result["replacement_calls_remaining"] == 1
+
+
+def test_remaining_scene_transition_submits_official_key4u_task_then_polls_only_new_id(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    payload = _job28_payload()
+    scene_one_failed = _replacement_submit_diagnostics(
+        payload,
+        scene_index=1,
+        task_id="",
+    )
+    job, _ = remote_worker_api._controlled_fallback_submit_receipt(
+        scene_one_failed
+    )
+    for item in job["scene_tasks"]:
+        index = int(item.get("scene_index") or 0)
+        if index == 1:
+            item.update(
+                {
+                    "status": "failed",
+                    "failure_reason": "provider_in_progress",
+                    "controlled_fallback_allowed": False,
+                    "fallback_provider_candidate": "",
+                    "fallback_provider_order": [],
+                }
+            )
+        elif index == 2:
+            item.update(
+                {
+                    "provider": "shopaikey_video",
+                    "selected_provider": "shopaikey_video",
+                    "status": "provider_not_start",
+                    "actual_provider_payload_status": "NOT_START",
+                    "provider_status_raw": "NOT_START",
+                    "failure_reason": "",
+                    "fallback_count": 0,
+                    "provider_fallback_count": 0,
+                    "fallback_count_before_submit": 0,
+                    "fallback_allowed": True,
+                    "controlled_fallback_allowed": True,
+                    "fallback_provider_candidate": "key4u_video",
+                    "fallback_provider_order": ["key4u_video"],
+                    "fallback_scene_index": 2,
+                    "provider_stalled_not_start": True,
+                    "provider_scene_stalled": True,
+                    "scene_not_start_elapsed": 900,
+                    "provider_wait_elapsed_seconds": 900,
+                }
+            )
+    job["provider_scene_tasks"] = copy.deepcopy(job["scene_tasks"])
+    job.update(
+        {
+            "user_id": 7126457028,
+            "product_type": "video_trend",
+            "quality_tier": 400,
+            "scene_count": 2,
+            "scene_duration_seconds": 8,
+            "expected_duration_seconds": 16,
+            "orchestration_mode": "per_scene_8s",
+            "fallback_scene_index": 2,
+            "fallback_count_by_scene": {"1": 2, "2": 0},
+            "fallback_allowed": True,
+            "controlled_fallback_allowed": True,
+            "fallback_provider_candidate": "key4u_video",
+            "fallback_provider_order": ["key4u_video"],
+            "provider_order": ["shopaikey_video", "key4u_video"],
+            "configured_provider_chain": ["shopaikey_video", "key4u_video"],
+            "contract_valid_provider_chain": ["shopaikey_video", "key4u_video"],
+            "runtime_candidate_keys": ["key4u_video"],
+            "provider_model_map": {"key4u_video": "veo_3_1-fast"},
+            "provider_request_defaults": {
+                "key4u_video": {"duration": 8, "resolution": "1080p"}
+            },
+            "terminal_state": "final_rendering",
+            "continue_polling": True,
+        }
+    )
+    for key, value in {
+        "PRODUCT_VIDEO_PROVIDER_SUBMIT_ENABLED": "1",
+        "KEY4U_VIDEO_ENABLED": "1",
+        "KEY4U_VIDEO_SUBMIT_URL": "https://api.key4u.vn/v1/video/create",
+        "KEY4U_VIDEO_POLL_URL": "https://api.key4u.vn/v1/video/query?id={task_id}",
+        "KEY4U_VIDEO_AUTH_HEADER_NAME": "Authorization",
+        "KEY4U_VIDEO_AUTH_HEADER_VALUE": "Bearer test-key",
+        "KEY4U_VIDEO_MODEL": "veo_3_1-fast",
+        "KEY4U_VIDEO_CAPABILITIES": "text_to_video,scene_video,multi_scene_video",
+        "KEY4U_BASE_URL": "https://api.key4u.vn",
+        "VIDEO_PROVIDER_CHAIN": "key4u_video",
+        "VIDEO_PROVIDER_MAX_POLL_ATTEMPTS": "1",
+        "VIDEO_PROVIDER_POLL_INTERVAL_SECONDS": "0",
+        "REAL_PROVIDER_SMOKE_ENABLED": "1",
+    }.items():
+        monkeypatch.setenv(key, value)
+    calls: list[tuple[str, str, str]] = []
+
+    def fake_open_json(self, url, payload=None, *, method="POST", **_kwargs):
+        calls.append((method, url, str((payload or {}).get("model") or "")))
+        if method == "POST":
+            return {
+                "ok": True,
+                "status_code": 200,
+                "body": {"id": "key4u_scene2_new_task", "status": "queued"},
+                "response_shape": {"type": "dict"},
+            }
+        assert "old-shopaikey-scene-2" not in url
+        assert url.endswith("/v1/videos/key4u_scene2_new_task")
+        return {
+            "ok": True,
+            "status_code": 200,
+            "body": {"id": "key4u_scene2_new_task", "status": "pending"},
+            "response_shape": {"type": "dict"},
+        }
+
+    monkeypatch.setattr(GenericHttpVideoProvider, "_open_json", fake_open_json)
+    scene = SimpleNamespace(
+        scene_id=2,
+        video_prompt="remaining replacement scene two",
+        visual_prompt="remaining replacement scene two",
+        aspect_ratio="9:16",
+        target_duration_sec=8,
+        _toan_aas_job=job,
+    )
+
+    with pytest.raises(connector.RealVideoRenderError) as exc_info:
+        asyncio.run(
+            connector._render_scene_async(
+                scene,
+                str(tmp_path / "scene-2.mp4"),
+                ["key4u_video"],
+            )
+        )
+
+    diagnostics = exc_info.value.diagnostics
+    assert str(exc_info.value) == "provider_in_progress"
+    assert calls == [
+        (
+            "POST",
+            "https://api.key4u.vn/v1/videos/generations",
+            "veo_3_1-fast",
+        ),
+        (
+            "GET",
+            "https://api.key4u.vn/v1/videos/key4u_scene2_new_task",
+            "",
+        ),
+    ]
+    assert diagnostics["provider_submit_called"] is True
+    assert diagnostics["provider_http_request_sent"] is True
+    assert diagnostics["provider_submit_http_status"] == 200
+    assert diagnostics["provider_task_id_saved"] is True
+    assert diagnostics["provider_task_ids"] == ["key4u_scene2_new_task"]
+    assert diagnostics["continue_polling"] is True

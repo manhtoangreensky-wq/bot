@@ -596,3 +596,32 @@ replacement + claim + spend gate `63 passed in 8.65s`. Source tests made no
 provider call or wallet mutation. Final impact is `253 passed in 66.58s`; full
 compile exits `0`. Do not consume the remaining scene-2 slot before this correction
 is deployed and the false scene-2 state is repaired by backed-up CAS.
+
+## Key4U official VEO endpoint root cause
+
+PR #959 merged/runtime exact SHA
+`6f94cd6aaf77024b368d1067368ec96de85100bf`; deploy run `33476386996`
+SUCCESS in `3m15s`. The false scene-2 state was repaired with backup SHA
+`98466b40...`, mode `0600`, but Product Video did not use the remaining slot because
+scene 1 had no task. A final pause CAS kept terminal rows, attempts `40`, released
+the lock and preserved calls `1/1`; backup SHA `039a07b0...`, mode `0600`.
+
+The scene-1 receipt was not a paid transport attempt. Router diagnostics showed
+`submit_called=true`, HTTP status `0`, `provider_http_request_sent=false`, no task,
+and a contract block before adapter transport. Official Key4U docs specify:
+
+- Create video: `POST https://api.key4u.vn/v1/videos/generations`
+  (`https://docs.key4u.vn/api-41690907`).
+- Poll task: `GET https://api.key4u.vn/v1/videos/{id}`
+  (`https://docs.key4u.vn/api-41690898`).
+
+The provider-free correction derives these URLs from configured Key4U base only
+when authentication exists, preserves explicit family endpoints, sends documented
+JSON (`model`, `prompt`, `resolution`, `aspect_ratio`, `duration`), and records
+transport truth. RED `2 failed`; contract GREEN `2 passed in 4.44s`; end-to-end
+transition mock `1 passed in 5.18s` proves POST official then GET only the newly
+returned Key4U task ID, never the old ShopAIKey task. Focused gate `55 passed,
+1 exact baseline Tail deselected in 14.77s`; impact `268 passed in 65.52s`; full
+compile `0`; branch and clean main share the same seven historical failures, so
+`NEW_FAILURES=0`. Source verification made no provider call or wallet mutation.
+LIVE PASS remains open until real two-scene MP4.

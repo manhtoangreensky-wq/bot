@@ -773,6 +773,29 @@ pv2_r01_job28_cross_scene_receipt_live_red:
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
+pv2_r01_job28_key4u_official_veo_contract:
+  prior_pr: 959
+  prior_merge_sha: 6f94cd6aaf77024b368d1067368ec96de85100bf
+  prior_deploy_run: 33476386996 SUCCESS in 3m15s
+  scene2_repair_backup_sha_mode: 98466b4050da04a4aa9e83d893a3ddbef623347a7b4c317cb7e2dce1e71aed60 mode 0600
+  pause_backup_sha_mode: 039a07b0bedfa92f8a9f74b0a9ceb6af9503d08560ca53d87f2e688ab0451311 mode 0600
+  pause_state: failed/failed/terminal_failed; attempts 40; lock released; calls 1/1; scene2 unused
+  root_cause: key4u veo official endpoint absent from model contract; submit blocked before HTTP
+  official_submit: https://api.key4u.vn/v1/videos/generations
+  official_poll: https://api.key4u.vn/v1/videos/{id}
+  official_docs: https://docs.key4u.vn/api-41690907 and https://docs.key4u.vn/api-41690898
+  derived_only_with_auth: true
+  explicit_endpoint_override_preserved: true
+  red: 2 failed
+  contract_green: 2 passed in 4.44s
+  end_to_end_green: 1 passed in 5.18s; POST official then GET only new task id
+  focused_green: 55 passed and 1 exact baseline Tail deselected in 14.77s
+  impact_green: 268 passed in 65.52s
+  full_compile: exit 0
+  baseline_comparator: branch and clean main share exact 7 historical failures; NEW_FAILURES=0
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  live_pass: false
 spec_04i_subdub_auto_two_speaker_addon:
   phase: PENDING_AFTER_SPEC_04H_9
   compatible_media_only: true
@@ -781,9 +804,8 @@ spec_04i_subdub_auto_two_speaker_addon:
   representative_live_target: one unfinished media-compatible Product Video lane
   acceptance: male/female detection; translation; two-voice dub; final MP4; receipt/report; wallet delta 0
 next_action: >-
-  Ship/deploy only the cross-scene receipt/attempt/terminal-lock correction. Keep
-  Owner worker inactive and do not consume the remaining scene-2 slot until exact
-  runtime readback and a backup-safe CAS that removes only the false scene-2 leak
-  while preserving the consumed scene-1 receipt. Then run existing job 28 once,
-  stop on the remaining call or terminal MP4, and finish SPEC-04H.9 before any other
-  product or SPEC-04I.
+  Ship/deploy only the official Key4U VEO contract correction. Keep Owner worker
+  inactive through exact runtime readback. Then reclassify the scene-1 pre-HTTP
+  receipt with backup-safe CAS, preserving all history and finance, and use no more
+  than the two Owner-authorized real Key4U calls total. Stop at cap or terminal MP4;
+  finish SPEC-04H.9 before any other product or SPEC-04I.
