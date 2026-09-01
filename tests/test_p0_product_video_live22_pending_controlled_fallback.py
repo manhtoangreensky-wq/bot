@@ -413,6 +413,7 @@ def test_live24_claim_gate_preserves_stalled_scenes_for_controlled_fallback(
     stored = queue.get_video_render_job(conn, job_id)
     stored_payload = json.loads(stored["result_json"])
     assert stored["status"] == "processing"
+    assert stored["attempts"] == 0
     assert stored_payload["claim_terminal_suppressed_for_controlled_fallback"] is True
     assert stored_payload["fallback_provider_candidate"] == "key4u_video"
     assert stored_payload["fallback_scene_index"] == 1

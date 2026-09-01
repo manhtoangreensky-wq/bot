@@ -469,6 +469,83 @@ def _merge_controlled_fallback_durable_internal_fields(
     return merged
 
 
+def _preserve_unreceipted_replacement_scene_authority(
+    persisted: dict[str, Any] | None,
+    incoming: dict[str, Any] | None,
+) -> dict[str, Any]:
+    persisted = dict(persisted or {})
+    current = dict(incoming or {})
+    authorization = persisted.get(
+        "controlled_fallback_replacement_authorization"
+    )
+    if not isinstance(authorization, dict) or _safe_int(
+        authorization.get("authorization_version"), 0
+    ) < 2:
+        return current
+    authorization_id = str(authorization.get("authorization_id") or "").strip()
+    allowed_scenes = {
+        _safe_int(item, 0)
+        for item in (authorization.get("allowed_scene_indexes") or [])
+        if _safe_int(item, 0) > 0
+    }
+    target_scene = _safe_int(current.get("fallback_scene_index"), 0)
+    mutable_scenes = {target_scene} if target_scene in allowed_scenes else set()
+    receipts_by_authorization = current.get(
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    )
+    active_receipts = (
+        receipts_by_authorization.get(authorization_id, {})
+        if isinstance(receipts_by_authorization, dict)
+        else {}
+    )
+    if isinstance(active_receipts, dict):
+        mutable_scenes.update(
+            _safe_int(scene, 0)
+            for scene, receipt in active_receipts.items()
+            if _safe_int(scene, 0) in allowed_scenes
+            and isinstance(receipt, dict)
+            and str(receipt.get("authorization_state") or "") == "consumed"
+        )
+
+    def scene_map(payload: dict[str, Any]) -> dict[int, dict[str, Any]]:
+        rows = payload.get("scene_tasks") or payload.get("provider_scene_tasks") or []
+        return {
+            _safe_int(item.get("scene_index") or item.get("scene_id"), 0): dict(item)
+            for item in rows
+            if isinstance(item, dict)
+            and _safe_int(item.get("scene_index") or item.get("scene_id"), 0) > 0
+        }
+
+    persisted_scenes = scene_map(persisted)
+    incoming_scenes = scene_map(current)
+    merged_scenes: list[dict[str, Any]] = []
+    for scene in sorted(set(persisted_scenes) | set(incoming_scenes)):
+        if scene in mutable_scenes or scene not in persisted_scenes:
+            merged_scenes.append(dict(incoming_scenes.get(scene) or persisted_scenes[scene]))
+        else:
+            merged_scenes.append(dict(persisted_scenes[scene]))
+    if merged_scenes:
+        current["scene_tasks"] = merged_scenes
+        current["provider_scene_tasks"] = [dict(item) for item in merged_scenes]
+
+    persisted_counts = persisted.get("fallback_count_by_scene")
+    incoming_counts = current.get("fallback_count_by_scene")
+    counts = {
+        str(key): _safe_int(value, 0)
+        for key, value in (
+            incoming_counts.items() if isinstance(incoming_counts, dict) else []
+        )
+    }
+    if isinstance(persisted_counts, dict):
+        for scene, value in persisted_counts.items():
+            scene_number = _safe_int(scene, 0)
+            if scene_number not in mutable_scenes:
+                counts[str(scene)] = _safe_int(value, 0)
+    if counts:
+        current["fallback_count_by_scene"] = counts
+    return current
+
+
 def scrub_secret_text(value: Any) -> str:
     text = str(value or "").replace("\r", " ").replace("\n", " ")
     safe_placeholders: dict[str, str] = {}
@@ -3843,6 +3920,10 @@ def _claim_video_render_candidate(
                     job["provider_poll_resume"] = bool(
                         provider_poll_resume and has_existing_provider_task
                     )
+                    job["existing_task_recovery_claim"] = bool(
+                        result_payload.get("recovery_existing_tasks_only")
+                        and has_existing_provider_task
+                    )
                     chosen = job
                     chosen_project = project
                     break
@@ -3943,7 +4024,10 @@ def _claim_video_render_candidate(
             progress_message = "provider_in_progress"
             result_payload.update(telemetry)
             result_json_value = video_project_queue._json_dumps(result_payload)
-        attempt_increment = 0 if chosen.get("provider_poll_resume") else 1
+        attempt_increment = 0 if (
+            chosen.get("provider_poll_resume")
+            or chosen.get("existing_task_recovery_claim")
+        ) else 1
         cursor = conn.execute(
             """UPDATE video_jobs
                SET status='processing', attempts=COALESCE(attempts,0)+?, locked_by=?, locked_at=?,
@@ -5700,6 +5784,10 @@ def fail_remote_worker_job(
                 existing,
                 diagnostics,
             )
+        )
+        receipt_input = _preserve_unreceipted_replacement_scene_authority(
+            existing,
+            receipt_input,
         )
         diagnostic_payload, controlled_receipt = _controlled_fallback_submit_receipt(
             receipt_input
