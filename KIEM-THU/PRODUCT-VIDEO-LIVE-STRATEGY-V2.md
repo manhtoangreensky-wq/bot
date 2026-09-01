@@ -192,6 +192,14 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     endpoint overrides. RED `2 failed`; contract GREEN `2 passed`; end-to-end
     transition submits/polls only the new Key4U ID. Focused `55 passed, 1 exact
     baseline Tail deselected`; final impact `268 passed in 65.52s`; full compile `0`.
+  - [x] PR #960 deployed exact SHA `9d663f4e...` through run `33481990125`
+    SUCCESS `3m40s`. Provider-free runtime preflight proved production already has
+    explicit `KEY4U_VEO_VIDEO_ENDPOINT=/v1/videos`, so the derived endpoint did not
+    take authority. The next source correction normalizes only official Key4U hosts
+    with exact legacy path `/v1/videos` to `/v1/videos/generations`; custom proxies,
+    explicit current paths, Kling and Hailuo remain unchanged. RED `1 failed` ->
+    GREEN `1 passed in 5.06s`; family guard `24 passed`; affected `269 passed in
+    60.93s`. Scene-2 slot remains unused; no LIVE PASS claimed.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 

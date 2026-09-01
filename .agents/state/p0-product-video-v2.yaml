@@ -796,6 +796,22 @@ pv2_r01_job28_key4u_official_veo_contract:
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
+pv2_r01_job28_key4u_legacy_veo_normalization:
+  prior_pr: 960
+  prior_merge_sha: 9d663f4eb519a69f59b8bb8d7951c1a1d5d1dcd0
+  prior_deploy_run: 33481990125 SUCCESS in 3m40s
+  runtime_preflight: explicit KEY4U_VEO_VIDEO_ENDPOINT host api.key4u.vn path /v1/videos overrode derived fallback
+  correction_scope: normalize exact /v1/videos only on api.key4u.vn or api.key4u.shop to /v1/videos/generations
+  custom_proxy_preserved: true
+  kling_hailuo_preserved: true
+  scene2_slot_used: false
+  red: 1 failed in 5.51s
+  exact_green: 1 passed in 5.06s
+  family_green: 24 passed in 5.75s
+  impact_green: 269 passed in 60.93s
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  live_pass: false
 spec_04i_subdub_auto_two_speaker_addon:
   phase: PENDING_AFTER_SPEC_04H_9
   compatible_media_only: true
@@ -804,8 +820,8 @@ spec_04i_subdub_auto_two_speaker_addon:
   representative_live_target: one unfinished media-compatible Product Video lane
   acceptance: male/female detection; translation; two-voice dub; final MP4; receipt/report; wallet delta 0
 next_action: >-
-  Ship/deploy only the official Key4U VEO contract correction. Keep Owner worker
-  inactive through exact runtime readback. Then reclassify the scene-1 pre-HTTP
-  receipt with backup-safe CAS, preserving all history and finance, and use no more
-  than the two Owner-authorized real Key4U calls total. Stop at cap or terminal MP4;
-  finish SPEC-04H.9 before any other product or SPEC-04I.
+  Ship/deploy only the exact official-host legacy VEO path normalization. Keep Owner
+  worker inactive through runtime preflight. Preserve scene-1 consumed receipt and
+  use only the one remaining Owner-authorized scene-2 call on existing job 28. Stop
+  at the global cap or terminal MP4; do not reclassify scene1 without proof and do
+  not open another product or SPEC-04I.
