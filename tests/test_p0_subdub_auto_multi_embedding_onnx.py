@@ -971,7 +971,7 @@ def test_diarize_word_timeline_composes_two_views_and_bounded_result(monkeypatch
         session_factory="fixture-session",
     )
 
-    assert [item["shift"] for item in calls] == [0, 80]
+    assert [item["shift"] for item in calls] == [0, 5]
     assert all(item["unit_count"] == 30 for item in calls)
     assert result["ok"] is True
     assert result["status"] == "PASS"
@@ -1186,6 +1186,41 @@ def test_two_views_accept_window_differences_when_every_region_is_stable(monkeyp
     assert result["speaker_count"] == 3
     assert result["region_labels"] == [0, 1, 2, 2]
     assert result["region_confidences"] == [0.8, 0.8, 0.8, 0.8]
+    assert result["stability_pass"] is True
+
+
+def test_two_views_align_numeric_label_permutation_before_stability_check(
+    monkeypatch,
+):
+    plan = {
+        "regions": [
+            {"index": index, "run_index": 0, "speech_start_seconds": index, "speech_end_seconds": index + 0.2}
+            for index in range(6)
+        ],
+        "windows": [
+            {"window_index": index, "run_index": 0, "speech_start_seconds": index, "speech_end_seconds": index + 0.8, "source_position": index}
+            for index in range(6)
+        ],
+    }
+    labels = iter(
+        (
+            np.asarray([0, 0, 1, 1, 2, 2], dtype=np.int64),
+            np.asarray([1, 1, 2, 2, 0, 0], dtype=np.int64),
+        )
+    )
+    monkeypatch.setattr(
+        service,
+        "_stable_cluster_view",
+        lambda *_args, **_kwargs: (3, next(labels), np.arange(6, dtype=np.float64)),
+    )
+    monkeypatch.setattr(service, "_validate_cluster_support", lambda *_args: [2, 2, 2])
+    monkeypatch.setattr(service, "_cluster_unit_confidences", lambda _m, _l, _k: [0.8] * 6)
+    matrix = np.eye(6, dtype=np.float32)
+
+    result = service.stable_cluster_acoustic_regions(plan, matrix, matrix)
+
+    assert result["speaker_count"] == 3
+    assert result["region_labels"] == [0, 0, 1, 1, 2, 2]
     assert result["stability_pass"] is True
 
 
