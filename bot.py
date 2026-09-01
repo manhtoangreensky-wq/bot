@@ -232832,6 +232832,11 @@ SUBDUB_AUTO_VOICE_FIELDS = frozenset({
     "auto_quote_exact_known", "auto_quote_billable_words",
     "auto_quote_auto_xu", "auto_quote_subtitle_xu",
     "auto_quote_total_xu", "auto_quote_text_source",
+    "multi_acoustic_backend", "multi_acoustic_model_sha256",
+    "multi_acoustic_algorithm_version", "multi_acoustic_speaker_count",
+    "multi_acoustic_word_count", "multi_acoustic_unit_count",
+    "multi_acoustic_embedding_window_count", "multi_acoustic_cluster_sizes",
+    "multi_acoustic_stability_pass", "multi_acoustic_word_coverage_count",
 })
 
 SUBDUB_AUTO_PROFILE_PRIVATE_FIELDS = frozenset({
@@ -232931,7 +232936,10 @@ def set_video_dubbing_pending(user_id, step: str, **fields) -> dict:
         previous_target = subdub_translation_cache_language_key(state.get("target_language") or "")
         next_target = subdub_translation_cache_language_key(fields.get("target_language") or "")
         translation_target_changed = previous_target != next_target
+    acoustic_fields = auto_multi_speaker.bounded_multi_acoustic_evidence(fields)
     for key, value in fields.items():
+        if key in auto_multi_speaker.MULTI_ACOUSTIC_STATE_FIELDS:
+            continue
         if key in {
             "mode", "process_type", "video_file_id", "source_file_id", "source_file_name",
             "video_processing_mode", "video_file_unique_id", "source_file_unique_id", "source_mime_type",
@@ -232994,6 +233002,7 @@ def set_video_dubbing_pending(user_id, step: str, **fields) -> dict:
             "volume_config_source", "audio_mix_return_step",
         }:
             state[key] = _short_pending_text(value)
+    state.update(acoustic_fields)
     if translation_target_changed:
         state["translated_subtitle_ref"] = ""
         state["translated_subtitle_target_language"] = ""
@@ -247190,6 +247199,9 @@ async def video_dubbing_prepare_subtitles(
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
     )
     source_bytes_override = state.get("_pipeline_source_bytes_override")
+    exact_acoustic_multi = bool(
+        require_auto_cast and auto_multi_speaker.is_auto_multi_speaker_state(state)
+    )
     if isinstance(source_bytes_override, bytearray):
         source_bytes_override = bytes(source_bytes_override)
     if not isinstance(source_bytes_override, bytes):
@@ -247230,6 +247242,49 @@ async def video_dubbing_prepare_subtitles(
             content_type = override_content_type
         else:
             source_bytes, content_type = await video_dubbing_download_source(context, state)
+    cached_acoustic_segments: list[dict] = []
+    if exact_acoustic_multi:
+        acoustic_evidence = auto_multi_speaker.bounded_multi_acoustic_evidence(state)
+        cached_acoustic_ready = False
+        try:
+            cached_sidecar = subdub_speaker_cast.load_sidecar(
+                str(state.get("speaker_sidecar_path") or ""),
+                expected_sha256=str(state.get("speaker_sidecar_sha256") or ""),
+                workspace=speaker_workspace,
+            )
+            cached_cues = video_dubbing_segments_from_subtitle(source_subtitle)
+            restored_cues = subdub_speaker_cast.restore_cached_cue_ids_from_sidecar(
+                cached_sidecar,
+                cached_cues,
+                media_sha256=hashlib.sha256(bytes(source_bytes)).hexdigest(),
+                subtitle_sha256=subdub_speaker_sidecar_subtitle_sha256(
+                    source_subtitle
+                ),
+            )
+            cached_labels = subdub_speaker_cast.ordered_auto_speaker_labels(
+                cached_sidecar.get("cues") or []
+            )
+            cached_acoustic_ready = bool(
+                acoustic_evidence
+                and restored_cues
+                and len(cached_labels)
+                == acoustic_evidence["multi_acoustic_speaker_count"]
+                and cached_sidecar.get("acoustic")
+                == auto_multi_speaker.acoustic_sidecar_evidence(
+                    acoustic_evidence
+                )
+            )
+            if cached_acoustic_ready:
+                cached_acoustic_segments = list(restored_cues)
+        except (
+            subdub_speaker_cast.AutoCastUnavailable,
+            TypeError,
+            ValueError,
+            OverflowError,
+        ):
+            cached_acoustic_ready = False
+        if not cached_acoustic_ready:
+            source_subtitle = ""
     source_info = {}
     if (
         source_subtitle
@@ -247317,7 +247372,13 @@ async def video_dubbing_prepare_subtitles(
                         else ""
                     )
                 if require_auto_cast and "require_diarization" in resolve_parameters:
-                    resolve_kwargs["require_diarization"] = True
+                    if exact_acoustic_multi:
+                        resolve_kwargs.pop("require_diarization", None)
+                    else:
+                        resolve_kwargs["require_diarization"] = True
+                if exact_acoustic_multi and "require_auto_multi_word_timeline" in resolve_parameters:
+                    resolve_kwargs["require_auto_multi_word_timeline"] = True
+                    resolve_kwargs.pop("require_diarization", None)
                 if (
                     require_auto_cast
                     and "allow_two_speaker_key4u_fallback" in resolve_parameters
@@ -247329,6 +247390,7 @@ async def video_dubbing_prepare_subtitles(
                 if (
                     require_auto_cast
                     and "allow_multi_speaker_key4u_fallback" in resolve_parameters
+                    and not exact_acoustic_multi
                 ):
                     resolve_kwargs["allow_multi_speaker_key4u_fallback"] = bool(
                         auto_multi_speaker.is_auto_multi_speaker_state(state)
@@ -247359,11 +247421,74 @@ async def video_dubbing_prepare_subtitles(
         raise RuntimeError("subtitle_segments_empty")
     if require_auto_cast:
         fresh_auto_asr = str(source_info.get("source_kind") or "") == "asr"
-        if fresh_auto_asr:
+        if fresh_auto_asr and exact_acoustic_multi:
+            word_timeline = list(source_info.get("word_timeline") or [])
+            if not word_timeline:
+                raise subdub_speaker_cast.AutoCastUnavailable()
+            acoustic_prepared = {
+                "state": dict(state),
+                "source_bytes": bytes(source_bytes),
+                "source_segments": list(source_segments),
+                "duration_seconds": float(
+                    source_info.get("duration_seconds") or duration_hint or 0.0
+                ),
+            }
+            pcm_path = await _extract_subdub_auto_pcm(
+                acoustic_prepared,
+                dict(state),
+                channels=1,
+                sample_rate=16_000,
+                sample_format="s16le",
+            )
+            acoustic_result = await auto_multi_speaker.run_local_acoustic_diarization_off_event_loop(
+                Path(pcm_path),
+                word_timeline,
+                duration_seconds=float(
+                    source_info.get("duration_seconds") or duration_hint or 0.0
+                ),
+            )
+            source_segments = list(acoustic_result.get("segments") or [])
+            if not source_segments:
+                raise subdub_speaker_cast.AutoCastUnavailable()
+            source_subtitle = video_dubbing_srt_from_segments(source_segments)
+            source_script = video_dubbing_plain_script(source_subtitle)
+            acoustic_fields = auto_multi_speaker.bounded_multi_acoustic_evidence({
+                "multi_acoustic_backend": acoustic_result.get("provider"),
+                "multi_acoustic_model_sha256": acoustic_result.get("model_sha256"),
+                "multi_acoustic_algorithm_version": acoustic_result.get("algorithm_version"),
+                "multi_acoustic_speaker_count": acoustic_result.get("detected_speaker_count"),
+                "multi_acoustic_word_count": acoustic_result.get("word_count"),
+                "multi_acoustic_unit_count": acoustic_result.get("unit_count"),
+                "multi_acoustic_embedding_window_count": acoustic_result.get("embedding_window_count"),
+                "multi_acoustic_cluster_sizes": acoustic_result.get("cluster_sizes"),
+                "multi_acoustic_stability_pass": acoustic_result.get("stability_pass"),
+                "multi_acoustic_word_coverage_count": acoustic_result.get("word_coverage_count"),
+            })
+            if not acoustic_fields:
+                raise subdub_speaker_cast.AutoCastUnavailable()
+            acoustic_subtitle_ref = set_video_dubbing_artifact(
+                user_id,
+                "source_subtitle",
+                source_subtitle,
+            )
+            state = set_video_dubbing_pending(
+                user_id,
+                state.get("step") or "processing",
+                **video_dubbing_sync_state_fields(
+                    state,
+                    exclude={"subtitle_ref", "source_subtitle_ref"},
+                ),
+                **acoustic_fields,
+                subtitle_ref=acoustic_subtitle_ref,
+                source_subtitle_ref=acoustic_subtitle_ref,
+            )
+        elif fresh_auto_asr:
             source_segments = subdub_canonical_auto_speaker_segments(
                 source_segments,
                 extraction_source="asr",
             )
+        elif exact_acoustic_multi and cached_acoustic_segments:
+            source_segments = list(cached_acoustic_segments)
         else:
             source_segments = subdub_canonical_cues.canonicalize_segments(
                 source_segments,
@@ -247380,6 +247505,13 @@ async def video_dubbing_prepare_subtitles(
                 media_sha256=media_sha256,
                 subtitle_sha256=subtitle_sha256,
             )
+            if exact_acoustic_multi:
+                sidecar_acoustic = auto_multi_speaker.acoustic_sidecar_evidence(
+                    acoustic_fields
+                )
+                if not sidecar_acoustic:
+                    raise subdub_speaker_cast.AutoCastUnavailable()
+                sidecar["acoustic"] = sidecar_acoustic
             receipt = subdub_speaker_cast.persist_sidecar(
                 sidecar,
                 workspace=speaker_workspace,
@@ -247483,6 +247615,24 @@ async def video_dubbing_prepare_subtitles(
             if retimed_segments:
                 output_segments = video_dubbing_qc_segments(retimed_segments, preserve_timestamps=True)
                 output_subtitle = video_dubbing_srt_from_segments(output_segments) or output_subtitle
+    if require_auto_cast and exact_acoustic_multi:
+        acoustic_labels = subdub_speaker_cast.ordered_auto_speaker_labels(source_segments)
+        if not 3 <= len(acoustic_labels) <= 8 or len(output_segments) != len(source_segments):
+            raise subdub_speaker_cast.AutoCastUnavailable()
+        for source_item, output_item in zip(source_segments, output_segments, strict=True):
+            try:
+                identical_timing = (
+                    float(source_item.get("start")) == float(output_item.get("start"))
+                    and float(source_item.get("end")) == float(output_item.get("end"))
+                )
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise subdub_speaker_cast.AutoCastUnavailable() from exc
+            if (
+                source_item.get("cue_id") != output_item.get("cue_id")
+                or source_item.get("speaker_id") != output_item.get("speaker_id")
+                or not identical_timing
+            ):
+                raise subdub_speaker_cast.AutoCastUnavailable()
     timing_validation = subdub_validate_cue_locked_timing(
         source_segments,
         output_segments if needs_translation else source_segments,

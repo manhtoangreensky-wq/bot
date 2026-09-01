@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import math
+from pathlib import Path
 
 import pytest
 
@@ -461,3 +463,557 @@ def test_normal_resolver_still_prefers_embedded_subtitle(monkeypatch):
 
     assert result["source_kind"] == "embedded_subtitle"
     assert "word_timeline" not in result
+
+
+def acoustic_pipeline_words() -> list[dict]:
+    return [
+        {
+            "index": index,
+            "word": f"word{index}",
+            "start": round(index * 0.4, 3),
+            "end": round(index * 0.4 + 0.2, 3),
+        }
+        for index in range(30)
+    ]
+
+
+def acoustic_pipeline_segments() -> list[dict]:
+    segments = []
+    for index, speaker in enumerate((0, 1, 2)):
+        start = float(index * 4)
+        end = float((index + 1) * 4 - 0.2)
+        segments.append(
+            {
+                "cue_id": f"acoustic-{index}",
+                "index": index + 1,
+                "start": start,
+                "end": end,
+                "text": " ".join(f"word{word}" for word in range(index * 10, (index + 1) * 10)),
+                "speaker": speaker,
+                "speaker_id": f"chunk_00:speaker_{speaker}",
+                "speaker_confidence": 0.9,
+                "chunk_index": 0,
+            }
+        )
+    return segments
+
+
+def acoustic_state_fields() -> dict:
+    return {
+        "multi_acoustic_backend": "local_wespeaker_resnet34_spectral",
+        "multi_acoustic_model_sha256": (
+            "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
+        ),
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-spectral-v1",
+        "multi_acoustic_speaker_count": 3,
+        "multi_acoustic_word_count": 30,
+        "multi_acoustic_unit_count": 12,
+        "multi_acoustic_embedding_window_count": 24,
+        "multi_acoustic_cluster_sizes": [4, 4, 4],
+        "multi_acoustic_stability_pass": True,
+        "multi_acoustic_word_coverage_count": 30,
+    }
+
+
+def test_pending_state_preserves_bounded_acoustic_field_types(monkeypatch):
+    monkeypatch.setattr(bot, "USER_PENDING", {})
+
+    state = bot.set_video_dubbing_pending(
+        7126457028,
+        "processing",
+        mode=bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        voice_kind="auto_speaker_gender",
+        voice_selection_mode="auto_speaker",
+        auto_speaker_lane="multi",
+        **acoustic_state_fields(),
+    )
+
+    for field, expected in acoustic_state_fields().items():
+        assert state[field] == expected
+        assert type(state[field]) is type(expected)
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid"),
+    (
+        ("multi_acoustic_speaker_count", 9),
+        ("multi_acoustic_word_count", -1),
+        ("multi_acoustic_unit_count", 1_001),
+        ("multi_acoustic_embedding_window_count", 7),
+        ("multi_acoustic_cluster_sizes", [1, 2, 3]),
+        ("multi_acoustic_stability_pass", "true"),
+    ),
+)
+def test_pending_state_rejects_invalid_acoustic_field_values(
+    monkeypatch,
+    field,
+    invalid,
+):
+    monkeypatch.setattr(bot, "USER_PENDING", {})
+    fields = acoustic_state_fields()
+    fields[field] = invalid
+
+    state = bot.set_video_dubbing_pending(
+        7126457028,
+        "processing",
+        mode=bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        **fields,
+    )
+
+    assert field not in state
+
+
+def test_exact_multi_prepare_runs_local_acoustics_before_translation(
+    monkeypatch,
+    tmp_path,
+):
+    source_bytes = b"exact-multi-source"
+    source_srt = "1\n00:00:00,000 --> 00:00:12,000\nsource words\n"
+    words = acoustic_pipeline_words()
+    acoustic_segments = acoustic_pipeline_segments()
+    calls = []
+    artifacts = []
+    pending_state = {
+        "step": "processing",
+        "video_processing_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        "mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        "source_file_id": "fixture",
+        "source_media_type": "video",
+        "source_mime_type": "video/mp4",
+        "source_duration": 12,
+        "target_language": "English",
+        "translate_requested": "1",
+        "voice_kind": "auto_speaker_gender",
+        "voice_selection_mode": "auto_speaker",
+        "auto_speaker_lane": "multi",
+        "_pipeline_workspace": str(tmp_path),
+        "_pipeline_source_bytes_override": source_bytes,
+        "_pipeline_source_content_type_override": "video/mp4",
+    }
+
+    async def resolve(
+        *_args,
+        require_auto_multi_word_timeline=False,
+        require_diarization=False,
+        **kwargs,
+    ):
+        calls.append(
+            (
+                "resolve",
+                {
+                    **dict(kwargs),
+                    "require_auto_multi_word_timeline": (
+                        require_auto_multi_word_timeline
+                    ),
+                    **(
+                        {"require_diarization": True}
+                        if require_diarization
+                        else {}
+                    ),
+                },
+            )
+        )
+        return {
+            "source_kind": "asr",
+            "subtitle": source_srt,
+            "script": "source words",
+            "asr_provider": "deepgram",
+            "segments": [{"index": 1, "start": 0.0, "end": 12.0, "text": "source words"}],
+            "word_timeline": list(words),
+            "detected_language": "en",
+            "duration_seconds": 12,
+        }
+
+    async def extract_pcm(prepared, received_state, **kwargs):
+        calls.append(("extract", dict(kwargs), list(prepared["source_segments"])))
+        assert received_state["auto_speaker_lane"] == "multi"
+        path = tmp_path / "acoustic.pcm"
+        path.write_bytes(b"\x01\x00" * 8_000)
+        return str(path)
+
+    async def acoustic(pcm_path, word_timeline, *, duration_seconds):
+        calls.append(("acoustic", list(word_timeline), duration_seconds, str(pcm_path)))
+        Path(pcm_path).unlink(missing_ok=True)
+        return {
+            "ok": True,
+            "status": "PASS",
+            "provider": "local_wespeaker_resnet34_spectral",
+            "segments": [dict(item) for item in acoustic_segments],
+            "detected_speaker_count": 3,
+            "model_sha256": (
+                "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
+            ),
+            "algorithm_version": "wespeaker-resnet34-spectral-v1",
+            "word_count": 30,
+            "unit_count": 12,
+            "embedding_window_count": 24,
+            "cluster_sizes": [4, 4, 4],
+            "stability_pass": True,
+            "word_coverage_count": 30,
+        }
+
+    async def translate(segments, target_language, **_kwargs):
+        calls.append(("translate", [dict(item) for item in segments], target_language))
+        translated = [{**item, "text": f"English {item['text']}"} for item in segments]
+        return {
+            "segments": translated,
+            "provider": "fixture",
+            "translation_missing_count": 0,
+            "srt": bot.video_dubbing_srt_from_segments(translated),
+        }
+
+    def pending(_user_id, step, **fields):
+        pending_state.update(fields)
+        pending_state["step"] = step
+        return dict(pending_state)
+
+    def artifact(_user_id, kind, value):
+        reference = f"artifact-ref-{len(artifacts) + 1}"
+        artifacts.append((reference, kind, value))
+        return reference
+
+    monkeypatch.setattr(bot, "video_dubbing_resolve_source_script", resolve)
+    monkeypatch.setattr(bot, "_extract_subdub_auto_pcm", extract_pcm)
+    monkeypatch.setattr(
+        bot.auto_multi_speaker,
+        "run_local_acoustic_diarization_off_event_loop",
+        acoustic,
+        raising=False,
+    )
+    monkeypatch.setattr(bot, "translate_subtitle_segments", translate)
+    monkeypatch.setattr(bot, "set_video_dubbing_artifact", artifact)
+    monkeypatch.setattr(bot, "set_video_dubbing_pending", pending)
+
+    prepared = asyncio.run(
+        bot.video_dubbing_prepare_subtitles(
+            None,
+            dict(pending_state),
+            7126457028,
+            allow_confirmed_product=True,
+            require_auto_cast=True,
+        )
+    )
+
+    resolve_call = calls[0]
+    assert resolve_call[0] == "resolve"
+    assert resolve_call[1]["require_auto_multi_word_timeline"] is True
+    assert resolve_call[1].get("require_diarization") is None
+    assert [item[0] for item in calls] == ["resolve", "extract", "acoustic", "translate"]
+    assert calls[1][1] == {"channels": 1, "sample_rate": 16_000, "sample_format": "s16le"}
+    translated_input = calls[3][1]
+    assert [item["speaker_id"] for item in translated_input] == [
+        "chunk_00:speaker_0",
+        "chunk_00:speaker_1",
+        "chunk_00:speaker_2",
+    ]
+    assert [(item["start"], item["end"]) for item in prepared["output_segments"]] == [
+        (0.0, 3.8),
+        (4.0, 7.8),
+        (8.0, 11.8),
+    ]
+    assert prepared["state"]["multi_acoustic_speaker_count"] == 3
+    assert prepared["state"]["multi_acoustic_word_coverage_count"] == 30
+    assert prepared["state"]["multi_acoustic_cluster_sizes"] == [4, 4, 4]
+    source_artifacts = [item for item in artifacts if item[1] == "source_subtitle"]
+    assert len(source_artifacts) == 2
+    assert source_artifacts[-1][2] == prepared["source_subtitle"]
+    assert prepared["state"]["subtitle_ref"] == source_artifacts[-1][0]
+    assert prepared["state"]["source_subtitle_ref"] == source_artifacts[-1][0]
+    sidecar = bot.subdub_speaker_cast.load_sidecar(
+        prepared["state"]["speaker_sidecar_path"],
+        expected_sha256=prepared["state"]["speaker_sidecar_sha256"],
+        workspace=str(tmp_path),
+    )
+    assert bot.subdub_speaker_cast.ordered_auto_speaker_labels(sidecar["cues"]) == [
+        "chunk_00:speaker_0",
+        "chunk_00:speaker_1",
+        "chunk_00:speaker_2",
+    ]
+    assert sidecar["acoustic"] == {
+        "algorithm_version": "wespeaker-resnet34-spectral-v1",
+        "backend": "local_wespeaker_resnet34_spectral",
+        "cluster_sizes": [4, 4, 4],
+        "embedding_window_count": 24,
+        "model_sha256": (
+            "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
+        ),
+        "speaker_count": 3,
+        "stability_pass": True,
+        "unit_count": 12,
+        "word_count": 30,
+        "word_coverage_count": 30,
+    }
+    assert "embeddings" not in sidecar
+    assert "pcm" not in sidecar
+    assert hashlib.sha256(source_bytes).hexdigest() == sidecar["media_sha256"]
+
+
+@pytest.mark.parametrize(
+    "state_patch",
+    (
+        {},
+        {"auto_speaker_lane": ""},
+        {"voice_selection_mode": "manual", "auto_speaker_lane": "multi"},
+    ),
+)
+def test_non_multi_prepare_never_requests_acoustic_word_timeline(
+    monkeypatch,
+    tmp_path,
+    state_patch,
+):
+    source_srt = "1\n00:00:00,000 --> 00:00:01,000\nhello\n"
+    captured = []
+
+    async def resolve(*_args, **kwargs):
+        captured.append(dict(kwargs))
+        return {
+            "source_kind": "asr",
+            "subtitle": source_srt,
+            "script": "hello",
+            "asr_provider": "fixture",
+            "segments": [{
+                "index": 1,
+                "start": 0.0,
+                "end": 1.0,
+                "text": "hello",
+                "speaker": 0,
+                "speaker_confidence": 0.9,
+            }],
+        }
+
+    monkeypatch.setattr(bot, "video_dubbing_resolve_source_script", resolve)
+    monkeypatch.setattr(bot, "set_video_dubbing_artifact", lambda *_args: "source-ref")
+    monkeypatch.setattr(bot, "USER_PENDING", {})
+    monkeypatch.setattr(bot, "subdub_mode_requests_translation", lambda *_args: False)
+    base = {
+        "step": "processing",
+        "video_processing_mode": bot.VIDEO_SUBTITLE_MODE_DUB,
+        "source_file_id": "fixture",
+        "source_media_type": "video",
+        "source_mime_type": "video/mp4",
+        "voice_kind": "auto_speaker_gender",
+        "voice_selection_mode": "auto_speaker",
+        "_pipeline_workspace": str(tmp_path),
+        "_pipeline_source_bytes_override": b"source",
+        "_pipeline_source_content_type_override": "video/mp4",
+        **state_patch,
+    }
+    require_auto = base.get("voice_selection_mode") == "auto_speaker"
+    prepared = asyncio.run(
+        bot.video_dubbing_prepare_subtitles(
+            None,
+            base,
+            1,
+            allow_confirmed_product=True,
+            require_auto_cast=require_auto,
+        )
+    )
+
+    assert "require_auto_multi_word_timeline" not in captured[0]
+    assert not any(key.startswith("multi_acoustic_") for key in prepared["state"])
+
+
+def test_exact_multi_legacy_cached_sidecar_forces_fresh_acoustic_authority(
+    monkeypatch,
+    tmp_path,
+):
+    old_srt = "1\n00:00:00,000 --> 00:00:01,000\nlegacy\n"
+    old_segments = bot.subdub_canonical_auto_speaker_segments(
+        [
+            {
+                "index": index + 1,
+                "start": float(index),
+                "end": float(index + 1),
+                "text": f"legacy {index}",
+                "speaker": index % 2,
+                "speaker_confidence": 0.9,
+            }
+            for index in range(2)
+        ],
+        extraction_source="legacy",
+    )
+    source_bytes = b"legacy-source"
+    sidecar = bot.subdub_speaker_cast.build_sidecar(
+        old_segments,
+        media_sha256=hashlib.sha256(source_bytes).hexdigest(),
+        subtitle_sha256=bot.subdub_speaker_sidecar_subtitle_sha256(old_srt),
+    )
+    receipt = bot.subdub_speaker_cast.persist_sidecar(sidecar, workspace=str(tmp_path))
+    calls = []
+
+    async def resolve(
+        *_args,
+        require_auto_multi_word_timeline=False,
+        require_diarization=False,
+        **_kwargs,
+    ):
+        calls.append((require_auto_multi_word_timeline, require_diarization))
+        raise bot.subdub_speaker_cast.AutoCastUnavailable()
+
+    monkeypatch.setattr(bot, "get_video_dubbing_artifact", lambda *_args: old_srt)
+    monkeypatch.setattr(bot, "video_dubbing_has_media", lambda *_args: True)
+    monkeypatch.setattr(bot, "video_dubbing_resolve_source_script", resolve)
+    state = {
+        "step": "processing",
+        "video_processing_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        "subtitle_ref": "legacy-ref",
+        "source_file_id": "fixture",
+        "source_media_type": "video",
+        "source_mime_type": "video/mp4",
+        "source_duration": 2,
+        "voice_kind": "auto_speaker_gender",
+        "voice_selection_mode": "auto_speaker",
+        "auto_speaker_lane": "multi",
+        "_pipeline_workspace": str(tmp_path),
+        "_pipeline_source_bytes_override": source_bytes,
+        "_pipeline_source_content_type_override": "video/mp4",
+        "speaker_sidecar_path": receipt["path"],
+        "speaker_sidecar_sha256": receipt["sha256"],
+    }
+
+    with pytest.raises(bot.subdub_speaker_cast.AutoCastUnavailable):
+        asyncio.run(
+            bot.video_dubbing_prepare_subtitles(
+                None,
+                state,
+                7,
+                allow_confirmed_product=True,
+                require_auto_cast=True,
+            )
+        )
+
+    assert calls == [(True, False)]
+
+
+def test_exact_multi_cached_acoustic_state_without_sidecar_authority_forces_fresh_asr(
+    monkeypatch,
+    tmp_path,
+):
+    source_bytes = b"acoustic-cache-source"
+    old_srt = "1\n00:00:00,000 --> 00:00:01,000\nlegacy\n"
+    old_segments = bot.subdub_canonical_auto_speaker_segments(
+        [
+            {
+                "index": index + 1,
+                "start": float(index),
+                "end": float(index + 1),
+                "text": f"legacy {index}",
+                "speaker": index,
+                "speaker_confidence": 0.9,
+            }
+            for index in range(3)
+        ],
+        extraction_source="legacy",
+    )
+    sidecar = bot.subdub_speaker_cast.build_sidecar(
+        old_segments,
+        media_sha256=hashlib.sha256(source_bytes).hexdigest(),
+        subtitle_sha256=bot.subdub_speaker_sidecar_subtitle_sha256(old_srt),
+    )
+    receipt = bot.subdub_speaker_cast.persist_sidecar(sidecar, workspace=str(tmp_path))
+    calls = []
+
+    async def resolve(
+        *_args,
+        require_auto_multi_word_timeline=False,
+        **_kwargs,
+    ):
+        calls.append(require_auto_multi_word_timeline)
+        raise bot.subdub_speaker_cast.AutoCastUnavailable()
+
+    monkeypatch.setattr(bot, "get_video_dubbing_artifact", lambda *_args: old_srt)
+    monkeypatch.setattr(bot, "video_dubbing_has_media", lambda *_args: True)
+    monkeypatch.setattr(bot, "video_dubbing_resolve_source_script", resolve)
+    state = {
+        "step": "processing",
+        "video_processing_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        "subtitle_ref": "legacy-ref",
+        "source_file_id": "fixture",
+        "source_media_type": "video",
+        "source_mime_type": "video/mp4",
+        "source_duration": 3,
+        "voice_kind": "auto_speaker_gender",
+        "voice_selection_mode": "auto_speaker",
+        "auto_speaker_lane": "multi",
+        "_pipeline_workspace": str(tmp_path),
+        "_pipeline_source_bytes_override": source_bytes,
+        "_pipeline_source_content_type_override": "video/mp4",
+        "speaker_sidecar_path": receipt["path"],
+        "speaker_sidecar_sha256": receipt["sha256"],
+        **acoustic_state_fields(),
+    }
+
+    with pytest.raises(bot.subdub_speaker_cast.AutoCastUnavailable):
+        asyncio.run(
+            bot.video_dubbing_prepare_subtitles(
+                None,
+                state,
+                7,
+                allow_confirmed_product=True,
+                require_auto_cast=True,
+            )
+        )
+
+    assert calls == [True]
+
+
+def test_exact_multi_matching_acoustic_sidecar_reuses_without_asr(
+    monkeypatch,
+    tmp_path,
+):
+    source_bytes = b"matching-acoustic-source"
+    segments = acoustic_pipeline_segments()
+    source_srt = bot.video_dubbing_srt_from_segments(segments)
+    evidence = acoustic_state_fields()
+    sidecar = bot.subdub_speaker_cast.build_sidecar(
+        segments,
+        media_sha256=hashlib.sha256(source_bytes).hexdigest(),
+        subtitle_sha256=bot.subdub_speaker_sidecar_subtitle_sha256(source_srt),
+    )
+    sidecar["acoustic"] = bot.auto_multi_speaker.acoustic_sidecar_evidence(evidence)
+    receipt = bot.subdub_speaker_cast.persist_sidecar(sidecar, workspace=str(tmp_path))
+
+    async def forbidden(*_args, **_kwargs):
+        raise AssertionError("matching acoustic resume must not call ASR")
+
+    monkeypatch.setattr(bot, "get_video_dubbing_artifact", lambda *_args: source_srt)
+    monkeypatch.setattr(bot, "video_dubbing_has_media", lambda *_args: True)
+    monkeypatch.setattr(bot, "video_dubbing_resolve_source_script", forbidden)
+    monkeypatch.setattr(bot, "subdub_mode_requests_translation", lambda *_args: False)
+    state = {
+        "step": "processing",
+        "video_processing_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        "subtitle_ref": "acoustic-ref",
+        "source_subtitle_ref": "acoustic-ref",
+        "source_file_id": "fixture",
+        "source_media_type": "video",
+        "source_mime_type": "video/mp4",
+        "source_duration": 12,
+        "voice_kind": "auto_speaker_gender",
+        "voice_selection_mode": "auto_speaker",
+        "auto_speaker_lane": "multi",
+        "_pipeline_workspace": str(tmp_path),
+        "_pipeline_source_bytes_override": source_bytes,
+        "_pipeline_source_content_type_override": "video/mp4",
+        "speaker_sidecar_path": receipt["path"],
+        "speaker_sidecar_sha256": receipt["sha256"],
+        **evidence,
+    }
+
+    prepared = asyncio.run(
+        bot.video_dubbing_prepare_subtitles(
+            None,
+            state,
+            7,
+            allow_confirmed_product=True,
+            require_auto_cast=True,
+        )
+    )
+
+    assert [item["speaker_id"] for item in prepared["source_segments"]] == [
+        "chunk_00:speaker_0",
+        "chunk_00:speaker_1",
+        "chunk_00:speaker_2",
+    ]
+    assert prepared["state"]["multi_acoustic_speaker_count"] == 3
+    assert prepared["asr_provider"] == "cached_subtitle"

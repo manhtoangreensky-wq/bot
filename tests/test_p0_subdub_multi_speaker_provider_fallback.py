@@ -1636,7 +1636,7 @@ def test_multi_pcm_stream_rejects_oversized_sparse_file_before_read(tmp_path):
     ) == b""
 
 
-def test_underclustered_multi_adapter_ignores_stale_receipt_and_rediarizes_once(
+def test_underclustered_legacy_stale_receipt_fails_without_provider_crosswalk(
     tmp_path,
     monkeypatch,
 ):
@@ -1713,24 +1713,12 @@ def test_underclustered_multi_adapter_ignores_stale_receipt_and_rediarizes_once(
         )
     )
 
-    refined = result["prepared"]
-    assert speaker_cast.ordered_auto_speaker_labels(
-        refined["source_segments"]
-    ) == [
-        "chunk_00:speaker_0",
-        "chunk_00:speaker_1",
-        "chunk_00:speaker_2",
-    ]
-    assert [item["speaker_id"] for item in refined["output_segments"]] == [
-        item["speaker_id"] for item in refined["source_segments"]
-    ]
-    assert refined["state"]["multi_diarization_provider"] == (
-        "gemini_transcribe_multi_diarization"
-    )
-    assert calls == {"extract": 1, "rediarize": 1}
+    assert result["ok"] is False
+    assert result["status"] == speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+    assert calls == {"extract": 0, "rediarize": 0}
 
 
-def test_underclustered_multi_genuine_resume_skips_rediarization(
+def test_underclustered_legacy_resume_fails_without_provider_crosswalk(
     tmp_path,
     monkeypatch,
 ):
@@ -1779,14 +1767,12 @@ def test_underclustered_multi_genuine_resume_skips_rediarization(
         )
     )
 
-    assert result["prepared"] is prepared
-    # This focused wrapper test certifies only that a genuine resume does not
-    # submit a new re-diarization provider call. The downstream classifier may
-    # still load its cached/prepared PCM through the full preflight path.
+    assert result["ok"] is False
+    assert result["status"] == speaker_cast.AUTO_CAST_MANUAL_REQUIRED
     assert calls == []
 
 
-def test_underclustered_multi_failure_preserves_provider_diagnostics(
+def test_legacy_provider_failure_is_not_invoked_by_acoustic_wrapper(
     tmp_path,
     monkeypatch,
 ):
@@ -1798,10 +1784,14 @@ def test_underclustered_multi_failure_preserves_provider_diagnostics(
         assert require_auto_cast is True
         return prepared
 
+    calls = {"extract": 0, "provider": 0}
+
     async def base_extract(_prepared, _state, **_kwargs):
+        calls["extract"] += 1
         return str(stereo_pcm)
 
     async def rediarize(*_args, **_kwargs):
+        calls["provider"] += 1
         return {
             "ok": False,
             "status": speaker_cast.AUTO_CAST_UNAVAILABLE,
@@ -1846,25 +1836,10 @@ def test_underclustered_multi_failure_preserves_provider_diagnostics(
         )
     )
 
-    expected = {
-        "multi_diarization_attempted": True,
-        "multi_diarization_provider": "gemini_transcribe_multi_diarization",
-        "multi_diarization_status": "FAIL_TIMEOUT",
-        "multi_diarization_detail": "gemini_multi_transcribe_timeout",
-        "multi_diarization_http_status": 0,
-        "multi_diarization_provider_word_count": 0,
-        "multi_diarization_provider_speaker_count": 0,
-        "multi_diarization_mapped_speaker_count": 0,
-        "multi_diarization_raw_annotation_count": 0,
-        "multi_diarization_terminal_empty": True,
-        "multi_diarization_parse_rejection": "",
-        "multi_diarization_dropped_weak_word_count": 0,
-        "multi_diarization_dropped_weak_speaker_count": 0,
-        "multi_diarization_weak_label_filter_applied": False,
-    }
+    assert result["ok"] is False
     assert result["status"] == speaker_cast.AUTO_CAST_MANUAL_REQUIRED
-    assert {key: result[key] for key in expected} == expected
-    assert {key: result["state"][key] for key in expected} == expected
+    assert calls == {"extract": 0, "provider": 0}
+    assert not any(key.startswith("multi_diarization_") for key in result)
 
 
 def test_multi_gender_classifier_supports_same_gender_and_mixed_groups(
