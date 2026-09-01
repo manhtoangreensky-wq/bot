@@ -925,9 +925,29 @@ starting the next.
   engine/UI hashes `78 passed in 9.92s`. Broad branch `338 passed, 73 failed` vs
   clean main `335 passed, exact same 73 failed in 715.58s`, so `NEW_FAILURES=0`.
   Full compile and diff-check exit `0`; source provider calls/wallet mutations `0/0`.
-- [ ] Ship the single V3 seam, deploy/read back exact SHA, then backup-safe rehearse
-  and CAS existing `28/32/27` to V3 `0/2`. Start the Owner worker once and hard-stop
-  after two new calls or terminal two-scene MP4, whichever occurs first.
+- [x] PR #970 squash/runtime `0780f7ae...`; deploy `33533569117` SUCCESS in
+  `3m44s`; bot/worker exact SHA and tracked diff `0`, bot/web/nginx active. Snapshot
+  rehearsal and production CAS PASS on existing `28/32/27`: V3 `0/2`, V2 immutable
+  `2/0`, only scene 1 controlled, prices/cap/wallet unchanged. Production backup
+  SHA `ec0c5b7b...`, mode `0600`; pre-start parser/claim verifier PASS with DB/
+  provider/wallet mutations `0/0/0`.
+- [-] First V3 live tick was hard-stopped before scene 2. Receipt scene 1 changed to
+  V3 `1/1`, but task hash `e5ec08abdfc0` exactly matched the old V2 task and receipt
+  transport remained `http_sent=false`, HTTP `0`; therefore no new paid call is
+  proven and the V3 scene-1 receipt cannot be treated as consumed. Root trace found
+  `_render_scene_async` discarded the versioned replacement idempotency key and
+  recomputed the legacy key, allowing provider dedupe to return the old task.
+  Worker inactive PID `0`; wallet `200/0`, transactions/provider usage/charged Xu
+  `0/0/0`; artifact/concat/delivery `0`.
+- [x] Exact idempotency RED `1 failed, 24 deselected in 551.30s`; minimal GREEN
+  `1 passed, 24 deselected in 6.63s`. Job28/fallback `50 passed in 10.21s`; legacy
+  fallback plus locked engine/UI `57 passed in 8.34s`; compile/diff exit `0`.
+  Versioned authority now supplies its own key; non-versioned fallback retains the
+  legacy key unchanged. Ship this seam, then CAS-reset only the false V3 receipt and
+  resume within the original two-new-call cap.
+- [x] Final strategy verifier `8 passed` plus the exact pre-existing PV2-R03 fixture
+  SHA failure; no file in that product/spec changed. YAML, changed production/test
+  compile, diff-check and secret scan exit `0`.
 - [ ] Two distinct scene clips and one final MP4 terminal; otherwise stop at the
   exact new RED and reopen only `SPEC-04H`.
 

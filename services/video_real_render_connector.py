@@ -4074,11 +4074,17 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
     scene_provider_stalled = bool(pending_policy.get("provider_scene_stalled"))
     fallback_execution_tick_called = bool(pending_matches_request and scene_provider_stalled)
     fallback_provider_candidate = str((scene_fallback_order or [""])[0] or "")
-    fallback_idempotency_key = product_video_scene_fallback_idempotency_key(
-        (job or {}).get("job_id") or (job or {}).get("id") or request_job_id,
-        scene_index,
-        fallback_provider_candidate,
-    ) if fallback_provider_candidate else ""
+    fallback_idempotency_key = str(
+        pending_policy.get("fallback_idempotency_key") or ""
+    ) or (
+        product_video_scene_fallback_idempotency_key(
+            (job or {}).get("job_id") or (job or {}).get("id") or request_job_id,
+            scene_index,
+            fallback_provider_candidate,
+        )
+        if fallback_provider_candidate
+        else ""
+    )
     controlled_provider_transition = bool(
         recovery_provider_mismatch
         and scene_fallback_allowed

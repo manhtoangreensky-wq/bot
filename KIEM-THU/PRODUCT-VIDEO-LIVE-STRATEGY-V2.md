@@ -280,8 +280,17 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     engine/UI `78 passed`; broad branch and clean main share the exact same 73
     historical failures, `NEW_FAILURES=0`; full compile/diff PASS; provider/wallet
     side effects `0/0`.
-  - [ ] Ship/deploy this single seam, backup-safe CAS existing `28/32/27` to V3
-    `0/2`, start one Owner worker and stop after two calls or terminal two-scene MP4.
+  - [x] PR #970/runtime `0780f7ae...`, deploy `33533569117` SUCCESS `3m44s`.
+    Snapshot/production CAS and deployed pre-start verifier passed: V3 `0/2`, V2
+    `2/0` immutable, identity/price/cap/wallet exact, production backup SHA
+    `ec0c5b7b...` mode `0600`, source/live-prep provider/wallet mutations `0/0`.
+  - [-] First V3 live tick was stopped before scene 2: V3 scene-1 receipt became
+    `1/1`, but task hash `e5ec08abdfc0` was the old V2 task and transport remained
+    false/HTTP `0`. Source proved renderer recomputed the legacy idempotency key and
+    ignored the versioned key. Worker is inactive PID `0`; finance/artifact/delivery
+    unchanged. RED `1 failed, 24 deselected in 551.30s` -> GREEN `1 passed, 24
+    deselected in 6.63s`; focused `50 passed`; legacy/locked `57 passed`; compile/
+    diff PASS. Ship, reset only this false receipt, then resume the original cap.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 
