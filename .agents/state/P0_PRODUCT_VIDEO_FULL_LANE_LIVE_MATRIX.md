@@ -824,6 +824,14 @@ starting the next.
   official docs. Exact official-host normalization RED `1 failed` -> GREEN `1 passed
   in 5.06s`; custom proxy + family guard `24 passed`; impact `269 passed in 60.93s`.
   Scene-2 slot is still unused and job remains terminal/inactive.
+- [-] PR #961/runtime `91be7e95...`, deploy `33485495005` SUCCESS `3m35s`.
+  Runtime preflight selected official generation/poll paths. Remaining scene-2 call
+  returned a real Key4U task; calls are now `2/2`, receipts `[1,2]`, no artifact.
+  Accepted task inherited the old primary `900s` stall clock and was terminalized
+  before poll. Worker stopped; attempts `40`, lock released, wallet `200/0`, usage
+  `0`, identity unchanged. Stall-reset RED `1 failed` -> GREEN `1 passed in 6.08s`;
+  focused `68 passed`; impact `270 passed in 64.50s`. No submit remains authorized;
+  ship correction and poll only the accepted scene-2 task.
 - [ ] Two distinct scene clips and one final MP4 terminal; otherwise stop at the
   exact new RED and reopen only `SPEC-04H`.
 

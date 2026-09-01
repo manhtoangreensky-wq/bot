@@ -1753,3 +1753,108 @@ def test_remaining_scene_transition_submits_official_key4u_task_then_polls_only_
     assert diagnostics["provider_task_id_saved"] is True
     assert diagnostics["provider_task_ids"] == ["key4u_scene2_new_task"]
     assert diagnostics["continue_polling"] is True
+
+
+def test_accepted_replacement_task_resets_primary_stall_clock_before_poll() -> None:
+    payload = _job28_payload()
+    scene_one_failed = _replacement_submit_diagnostics(
+        payload,
+        scene_index=1,
+        task_id="",
+    )
+    persisted, _ = remote_worker_api._controlled_fallback_submit_receipt(
+        scene_one_failed
+    )
+    for item in persisted["scene_tasks"]:
+        if int(item.get("scene_index") or 0) == 1:
+            item.update(
+                {
+                    "status": "failed",
+                    "failure_reason": "provider_in_progress",
+                    "exhausted": True,
+                    "controlled_fallback_allowed": False,
+                    "fallback_provider_candidate": "",
+                    "fallback_provider_order": [],
+                }
+            )
+        elif int(item.get("scene_index") or 0) == 2:
+            item.update(
+                {
+                    "provider": "key4u_video",
+                    "selected_provider": "key4u_video",
+                    "status": "provider_stalled_not_start",
+                    "current_scene_status": "provider_stalled_not_start",
+                    "actual_provider_payload_status": "queued",
+                    "provider_status_raw": "NOT_START",
+                    "failure_reason": "all_video_providers_submit_failed",
+                    "fallback_count": 1,
+                    "provider_fallback_count": 1,
+                    "fallback_count_before_submit": 0,
+                    "provider_elapsed_seconds": 900,
+                    "provider_wait_elapsed_seconds": 900,
+                    "scene_not_start_elapsed": 900,
+                    "provider_stalled_not_start": True,
+                    "provider_scene_stalled": True,
+                    "provider_in_progress_stalled": True,
+                    "provider_progress_stuck": True,
+                    "exhausted": True,
+                }
+            )
+    persisted["provider_scene_tasks"] = copy.deepcopy(persisted["scene_tasks"])
+    persisted.update(
+        {
+            "fallback_scene_index": 2,
+            "fallback_allowed": True,
+            "controlled_fallback_allowed": True,
+            "fallback_provider_candidate": "key4u_video",
+            "fallback_provider_order": ["key4u_video"],
+            "claim_terminal_suppressed_for_controlled_fallback": True,
+            "terminal_state": "final_rendering",
+            "continue_polling": True,
+        }
+    )
+    diagnostics = _replacement_submit_diagnostics(
+        persisted,
+        scene_index=2,
+        task_id="key4u-scene-two-new-task",
+    )
+
+    normalized, state = remote_worker_api._controlled_fallback_submit_receipt(
+        diagnostics
+    )
+    scene_two = next(
+        item
+        for item in normalized["scene_tasks"]
+        if int(item.get("scene_index") or 0) == 2
+    )
+    ledger = video_project_queue.product_video_scene_ledger_state(
+        {"scene_count": 2},
+        {"id": 28, "status": "processing", "attempts": 40},
+        normalized,
+    )
+
+    assert state["task_id_present"] is True
+    assert state["task_terminal_failed"] is False
+    assert scene_two["status"] == "provider_running"
+    assert scene_two["current_scene_status"] == "provider_running"
+    assert scene_two["actual_provider_payload_status"] == "queued"
+    assert scene_two["provider_status_raw"] == "queued"
+    assert scene_two["provider_elapsed_seconds"] == 0
+    assert scene_two["provider_wait_elapsed_seconds"] == 0
+    assert scene_two["scene_not_start_elapsed"] == 0
+    assert scene_two["provider_stalled_not_start"] is False
+    assert scene_two["provider_scene_stalled"] is False
+    assert scene_two["provider_in_progress_stalled"] is False
+    assert scene_two["provider_progress_stuck"] is False
+    assert scene_two["exhausted"] is False
+    assert scene_two["failure_reason"] == ""
+    assert scene_two["task_pollable"] is True
+    assert scene_two["submit_accepted"] is True
+    assert normalized["replacement_calls_consumed"] == 2
+    assert normalized["replacement_calls_remaining"] == 0
+    assert normalized["provider_pending_task_id"] == "key4u-scene-two-new-task"
+    assert normalized["continue_polling"] is True
+    assert normalized["terminal_state"] == "final_rendering"
+    assert ledger["aggregate_job_status"] != "failed_no_charge"
+    assert ledger["active_scene_indexes"] == [2]
+    assert ledger["continue_polling"] is True

@@ -5361,19 +5361,42 @@ def _controlled_fallback_replacement_submit_receipt(
             }
         )
         if scene_task_present:
+            accepted_at = str(
+                receipt.get("recorded_at") or video_project_queue.now_text()
+            )
             scene.update(
                 {
                     "provider_task_id": scene_task_id,
                     "provider_video_id": scene_task_id,
                     "active_task_id": scene_task_id,
                     "task_id": scene_task_id,
-                    "status": str(scene.get("status") or "provider_running"),
-                    "actual_provider_payload_status": str(
-                        scene.get("actual_provider_payload_status") or "queued"
-                    ),
+                    "status": "provider_running",
+                    "current_scene_status": "provider_running",
+                    "provider_status": "running",
+                    "normalized_provider_status": "running",
+                    "provider_status_raw": "queued",
+                    "actual_provider_payload_status": "queued",
+                    "provider_status_payload_source": "replacement_task_accepted",
+                    "authoritative_status_source": "replacement_task_accepted",
+                    "provider_started_at": accepted_at,
+                    "provider_wait_started_at": accepted_at,
+                    "provider_progress_last_changed_at": accepted_at,
+                    "provider_elapsed_seconds": 0,
+                    "provider_wait_elapsed_seconds": 0,
+                    "scene_not_start_elapsed": 0,
+                    "provider_progress_last_changed_elapsed_seconds": 0,
+                    "provider_stalled_not_start": False,
+                    "provider_scene_stalled": False,
+                    "provider_in_progress_stalled": False,
+                    "scene_running_without_result_stalled": False,
+                    "provider_progress_stuck": False,
+                    "exhausted": False,
                     "failure_reason": "",
+                    "provider_error": "",
+                    "blocker": "",
                     "task_pollable": True,
                     "submit_accepted": True,
+                    "continue_polling": True,
                 }
             )
         else:
@@ -5401,12 +5424,37 @@ def _controlled_fallback_replacement_submit_receipt(
                 "provider_pending_video_id": task_id,
                 "provider_task_ids": [task_id],
                 "provider_video_ids": [task_id],
+                "status": "provider_pending",
+                "canonical_status": "provider_pending",
+                "provider_status": "running",
+                "normalized_provider_status": "running",
+                "provider_status_raw": "queued",
+                "actual_provider_payload_status": "queued",
+                "provider_status_payload_source": "replacement_task_accepted",
+                "authoritative_status_source": "replacement_task_accepted",
+                "provider_started_at": str(
+                    selected_receipt.get("recorded_at")
+                    or video_project_queue.now_text()
+                ),
+                "provider_wait_started_at": str(
+                    selected_receipt.get("recorded_at")
+                    or video_project_queue.now_text()
+                ),
+                "provider_elapsed_seconds": 0,
+                "provider_wait_elapsed_seconds": 0,
+                "scene_not_start_elapsed": 0,
+                "provider_progress_last_changed_elapsed_seconds": 0,
+                "provider_stalled_not_start": False,
+                "provider_scene_stalled": False,
+                "provider_in_progress_stalled": False,
+                "provider_progress_stuck": False,
                 "continue_polling": True,
                 "provider_pending_deferred": True,
                 "provider_error": "provider_in_progress",
                 "blocker": "provider_in_progress",
                 "terminal_state": "final_rendering",
                 "final_decision": "continue_polling",
+                "controlled_fallback_submit_failed_without_task": False,
             }
         )
     elif (
