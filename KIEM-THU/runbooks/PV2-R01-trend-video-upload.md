@@ -689,3 +689,38 @@ Clean main reproduced the deselected historical attempts assertion as `1 failed 
 `PY_COMPILE_EXIT=0`; locked engine route hash PASS. Source verification made no
 provider call or wallet mutation. The only allowed live continuation is polling
 and downloading the already accepted scene-2 task; no third submit is authorized.
+
+## Scene-1 stale task ownership RED
+
+PR #963 squash/runtime `6960c7f66c122c887bf5e0f9246f30d316b48e2c`;
+deploy `33496787770` SUCCESS in `3m6s`. Bot and Owner worker checkout matched exact
+SHA with tracked diff `0`; Owner worker remained inactive PID `0`, bot/web/nginx
+active and health OK. Snapshot rehearsal and production poll-only CAS both passed:
+identity `28/32/27`, attempts `40`, cap `2/0`, scene 2 task length `37`, submit
+false, wallet `200/0`, transactions `0`, credit events `1`, usage and charged Xu
+`0`. Production backup is `/opt/toanaas/bot/delete/pv2-r01-job28-scene2-poll-only-
+production-20260901T172821.json`, SHA `78872b67...`, mode `0600`.
+
+The deployed ledger correctly returned `processing_scenes`, active scene `[2]` and
+continued polling, but a read-only verifier blocked worker start because scene 1's
+old task still entered durable ownership from historical `scene_ledger`, provider
+events, winner map and canonical summary. Both current scene rows already declared
+scene 1 failed/exhausted/taskless; therefore the old task was not a valid current
+authority. Worker was never started and provider calls stayed `0`. A fail-closed
+pause CAS returned the existing job/project to failed-no-charge while preserving
+outbox, task, receipts, cap, attempts and finance. Pause backup is
+`/opt/toanaas/bot/delete/pv2-r01-job28-scene1-ownership-guard-
+20260901T173710.json`, SHA `09713e3d...`, mode `0600`.
+
+The minimal correction derives explicit current taskless scenes from current result
+rows only. A scene is eligible only when its current rows contain no task identity
+and explicitly report `task_id_present=false`, `task_pollable=false`,
+`exhausted=true` and terminal failed status; task-bearing historical rows for only
+that scene are then ignored. Every current row for the scene must agree; a
+disagreeing row preserves task ownership. A current accepted or terminal task
+remains authority. Primary RED `1 failed in 6.19s`; GREEN `1 passed in 5.05s`;
+self-review disagreement RED `1 failed in 6.23s` -> consensus GREEN `2 passed in
+5.50s`; old/new exact guards `4 passed in 5.70s`; focused `51 passed in 8.69s`;
+impact `199 passed, 1 exact baseline deselected in 27.08s`; locked engine hash and
+final full compile PASS. Source verification made no provider call or wallet
+mutation.

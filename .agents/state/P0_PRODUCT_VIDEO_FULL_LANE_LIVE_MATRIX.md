@@ -845,6 +845,24 @@ starting the next.
   reproduced the deselected historical attempts assertion as `1 failed in
   612.99s`, so `NEW_FAILURES=0`; full compile and locked engine hash exit/PASS `0`.
   Cap remains `2/2`, remaining `0`; the next live action may poll/download only.
+- [-] PR #963 squash `6960c7f6...`, deploy `33496787770` SUCCESS `3m6s`;
+  bot and inactive Owner worker exact SHA/clean, services active/health OK. Snapshot
+  rehearsal and production poll-only CAS PASS with cap `2/0`, submit false and
+  finance unchanged; production backup SHA `78872b67...`, mode `0600`. Deployed
+  ledger suppressed the false job terminal, but read-only pre-start verifier found
+  scene 1's old task still resurrected from `scene_ledger`, provider events, winner
+  map and canonical summary despite both current rows declaring scene 1 failed,
+  taskless and exhausted. Worker was never started. Job was immediately paused
+  fail-closed with backup SHA `09713e3d...`, mode `0600`; status
+  `failed/failed/acknowledged`, attempts `40`, cap/receipts/task/finance unchanged.
+- [x] Same-spec ownership RED `1 failed in 6.19s` -> GREEN `1 passed in 5.05s`.
+  Self-review disagreement RED `1 failed in 6.23s` -> consensus GREEN `2 passed
+  in 5.50s`; exact old/new guards `4 passed in 5.70s`; focused `51 passed in
+  8.69s`; impact `199 passed, 1 exact baseline deselected in 27.08s`; locked
+  engine hash and final full compile PASS/exit `0`. Only unanimous current rows
+  explicitly failed+exhausted+taskless suppress task-bearing history for that
+  scene; a disagreeing row preserves ownership. Scene 2's real accepted task
+  remains active/pollable. Provider calls and wallet mutations `0`.
 - [ ] Two distinct scene clips and one final MP4 terminal; otherwise stop at the
   exact new RED and reopen only `SPEC-04H`.
 

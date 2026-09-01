@@ -852,6 +852,33 @@ pv2_r01_job28_scene2_pollable_task_ledger_authority:
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
+pv2_r01_job28_scene1_stale_task_ownership:
+  phase: SOURCE_READY_TO_SHIP
+  prior_pr: 963
+  prior_merge_sha: 6960c7f66c122c887bf5e0f9246f30d316b48e2c
+  prior_deploy_run: 33496787770 SUCCESS in 3m6s
+  runtime_bot_worker: exact SHA; tracked diff 0; owner worker inactive PID 0
+  poll_only_rehearsal: PASS; cap 2/0; submit false; provider calls 0; wallet mutations 0
+  poll_only_production_backup: /opt/toanaas/bot/delete/pv2-r01-job28-scene2-poll-only-production-20260901T172821.json
+  poll_only_production_backup_sha_mode: 78872b6749a113d865ecf1c8a9843add4ecbf0d83a7a66ee3c940b7ad9882376 mode 0600
+  live_red: stale scene1 task resurrected from scene_ledger/provider_events/winner map/canonical summary despite current failed taskless exhausted rows
+  worker_started: false
+  fail_closed_pause_backup: /opt/toanaas/bot/delete/pv2-r01-job28-scene1-ownership-guard-20260901T173710.json
+  fail_closed_pause_backup_sha_mode: 09713e3d614eb819595f356a53720e4311d9b913435990c72188105895fd63ea mode 0600
+  paused_state: failed/failed/acknowledged; attempts 40; cap 2/0; submit false; charged 0; wallet 200/0
+  source_red: 1 failed in 6.19s
+  source_green: 1 passed in 5.05s
+  disagreement_red: 1 failed in 6.23s
+  consensus_green: 2 passed in 5.50s
+  exact_guards: 4 passed in 5.70s
+  focused_green: 51 passed in 8.69s
+  impact_green: 199 passed and 1 exact baseline deselected in 27.08s
+  strategy_gate: 34 passed and 1 exact fixture SHA baseline deselected in 6.21s
+  locked_engine_hash: PASS
+  full_compile: exit 0
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  live_pass: false
 spec_04i_subdub_auto_two_speaker_addon:
   phase: PENDING_AFTER_SPEC_04H_9
   compatible_media_only: true
@@ -860,8 +887,9 @@ spec_04i_subdub_auto_two_speaker_addon:
   representative_live_target: one unfinished media-compatible Product Video lane
   acceptance: male/female detection; translation; two-voice dub; final MP4; receipt/report; wallet delta 0
 next_action: >-
-  Ship/deploy only the pollable-task ledger authority correction. Keep Owner worker
-  inactive through exact runtime. Requeue existing job 28 by backup-safe CAS for
+  Ship/deploy only the current-scene task ownership correction. Keep Owner worker
+  inactive through exact runtime. Reinstall existing job 28 by backup-safe CAS for
   poll-only scene2 task; provider submit must remain impossible because global cap
-  is 2/2. Download/validate scene2 if ready, then terminal partial/no-charge. Do not
-  submit again or open another product/SPEC-04I.
+  is 2/2. Verify scene1 remains taskless before start. Download/validate scene2 if
+  ready, then terminal partial/no-charge. Do not submit again or open another
+  product/SPEC-04I.

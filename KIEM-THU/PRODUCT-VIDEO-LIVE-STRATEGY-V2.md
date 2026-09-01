@@ -219,6 +219,21 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     31.37s`; clean main reproduced that historical failure in
     `612.99s`, `NEW_FAILURES=0`; compile/hash gates PASS. Cap is still `2/2`; ship
     once, then poll/download the existing scene-2 task without provider submit.
+  - [-] PR #963 runtime `6960c7f6...`, deploy `33496787770` SUCCESS `3m6s`.
+    Rehearsal/production CAS kept cap `2/0`, submit false and finance unchanged,
+    backup SHA `78872b67...` mode `0600`. Pre-start read-only verifier proved the
+    job-level false terminal was fixed, but scene 1 still inherited its historical
+    task through old ledger/event/winner/canonical fields. Worker was never started;
+    fail-closed pause backup SHA `09713e3d...` mode `0600` restored the existing
+    rows to terminal guard without changing identity, task, receipts, cap or money.
+  - [x] Current-row task ownership correction: only unanimous current rows with
+    taskless + failed + exhausted state suppress task-bearing history for that
+    scene; a disagreeing current row preserves ownership and accepted scene 2
+    remains active/pollable. RED `1 failed in 6.19s`; GREEN `1 passed in 5.05s`;
+    disagreement RED `1 failed in 6.23s` -> consensus GREEN `2 passed in 5.50s`;
+    exact `4 passed`; focused `51 passed`; impact `199 passed, 1 baseline
+    deselected`; hash/final full compile PASS. Ship this correction, then reinstall
+    the same poll-only state; no provider submit.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 
