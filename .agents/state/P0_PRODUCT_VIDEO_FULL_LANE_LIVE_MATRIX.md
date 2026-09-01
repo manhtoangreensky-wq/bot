@@ -799,6 +799,14 @@ starting the next.
   cannot spend a second slot for the same scene.
 - [ ] Scene 1 and scene 2 may each consume exactly one replacement slot; authority
   cannot leak across scenes and total replacement calls cannot exceed `2`.
+- [-] PR #958/runtime `1b8394d8...` and CAS backup SHA `4f21a5fc...` are proven.
+  First live tick consumed scene-1 as ambiguous/no-transport and terminalized
+  failed-no-charge; scene 2 had no receipt/call. Exact forensic exposed three source
+  seams: attempts `40->41`, terminal lock not cleared, and unreceipted scene 2
+  inherited Key4U/count `1`. Worker is inactive, wallet `200/0`, provider usage `0`,
+  identity counts `32/28/27`. RED `2 failed`; GREEN `2 passed in 5.42s`; focused
+  `63 passed in 8.65s`. Ship correction only; do not use remaining slot yet.
+  Final impact is `253 passed in 66.58s`; full compile exit `0`.
 - [ ] Two distinct scene clips and one final MP4 terminal; otherwise stop at the
   exact new RED and reopen only `SPEC-04H`.
 

@@ -1343,3 +1343,115 @@ def test_complete_api_preserves_internal_replacement_receipts(
         assert int(completed["project"].get("total_xu_charged") or 0) == 0
     finally:
         conn.close()
+
+
+def test_failed_scene1_receipt_cannot_rewrite_scene2_and_terminal_releases_lock() -> None:
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    try:
+        project = video_project_queue.create_video_project(
+            conn,
+            user_id=28,
+            profile_id="video_trend",
+            topic="job 28 cross-scene receipt isolation",
+            asset_pack={
+                "source": "product_video",
+                "render_mode": "real",
+                "provider_call": True,
+                "product_type": "video_trend",
+                "public_user": True,
+            },
+        )
+        project_id = int(project["project_id"])
+        video_project_queue.update_video_project(
+            conn,
+            project_id,
+            status="queued_for_worker",
+            total_xu_estimated=144,
+            is_confirmed=1,
+            scene_count=2,
+        )
+        job = video_project_queue.enqueue_video_render_job(
+            conn,
+            project_id=project_id,
+            user_id=28,
+        )
+        claimed = video_project_queue.claim_next_video_job(
+            conn,
+            worker_id="job28-owner-worker",
+        )
+        job_id = int(claimed["id"])
+        seed = _job28_payload()
+        seed.update({"id": job_id, "job_id": job_id, "project_id": project_id})
+        seed["controlled_fallback_replacement_authorization"].update(
+            {"job_id": job_id, "project_id": project_id}
+        )
+        conn.execute(
+            "UPDATE video_jobs SET result_json=? WHERE id=?",
+            (json.dumps(seed), job_id),
+        )
+        conn.commit()
+
+        diagnostics = _replacement_submit_diagnostics(
+            seed,
+            scene_index=1,
+            task_id="",
+        )
+        for item in diagnostics["scene_tasks"]:
+            if int(item.get("scene_index") or 0) == 2:
+                item.update(
+                    {
+                        "provider": "key4u_video",
+                        "selected_provider": "key4u_video",
+                        "status": "provider_running",
+                        "actual_provider_payload_status": "queued",
+                        "failure_reason": "all_video_providers_submit_failed",
+                        "fallback_count": 1,
+                        "provider_fallback_count": 1,
+                        "fallback_count_before_submit": 0,
+                        "fallback_allowed": False,
+                        "controlled_fallback_allowed": False,
+                        "fallback_provider_candidate": "shopaikey_video",
+                        "fallback_provider_order": ["shopaikey_video"],
+                    }
+                )
+        diagnostics["provider_scene_tasks"] = copy.deepcopy(
+            diagnostics["scene_tasks"]
+        )
+
+        failed = remote_worker_api.fail_remote_worker_job(
+            conn,
+            worker_id="job28-owner-worker",
+            job_id=job_id,
+            safe_error="RuntimeError:provider_in_progress",
+            retryable=True,
+            diagnostics=diagnostics,
+        )
+        persisted = json.loads(failed["job"]["result_json"])
+        scene_two = next(
+            item
+            for item in persisted["scene_tasks"]
+            if int(item.get("scene_index") or 0) == 2
+        )
+        receipts = persisted[
+            "controlled_fallback_replacement_submit_receipts_by_authorization"
+        ][AUTHORIZATION_ID]
+
+        assert failed["job"]["status"] == "failed"
+        assert failed["job"]["locked_by"] == ""
+        assert failed["job"]["locked_at"] in (None, "")
+        assert failed["job"]["lease_expires_at"] in (None, "")
+        assert sorted(receipts) == ["1"]
+        assert scene_two["provider"] == "shopaikey_video"
+        assert scene_two["provider_task_id"] == "old-shopaikey-scene-2"
+        assert scene_two["fallback_count"] == 0
+        assert scene_two["controlled_fallback_allowed"] is False
+        assert scene_two["fallback_provider_candidate"] == ""
+        assert persisted["fallback_count_by_scene"] == {"1": 2, "2": 0}
+        assert persisted["controlled_fallback_replacement_authorization"][
+            "calls_consumed"
+        ] == 1
+        assert persisted["replacement_calls_remaining"] == 1
+        assert persisted["charged_xu"] == 0
+    finally:
+        conn.close()

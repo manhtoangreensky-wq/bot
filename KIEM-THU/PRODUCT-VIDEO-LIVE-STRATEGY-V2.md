@@ -170,6 +170,15 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     with snapshot-first CAS, then start the existing job once. Stop at two calls,
     any terminal replacement failure, or terminal two-scene MP4. `V2-04` and
     `SPEC-04I` remain blocked until real MP4/receipt/report/zero-wallet acceptance.
+  - [-] PR #958 deployed exact SHA `1b8394d8...` through run `33473365381`
+    SUCCESS `3m11s`. Authorization CAS rehearsal and production passed with backup
+    SHA `4f21a5fc...`, mode `0600`; the first live tick consumed scene-1 slot as
+    ambiguous/no-transport, then stopped failed-no-charge. Worker is inactive;
+    identity and wallet/provider deltas remain `0`. Forensic RED: attempts changed
+    `40->41`, terminal lock remained, and scene 2 was rewritten Key4U/count `1`
+    without a receipt. Source correction RED `2 failed` -> GREEN `2 passed in
+    5.42s`; focused replacement/legacy/claim/spend `63 passed in 8.65s`; final
+    impact `253 passed in 66.58s`; full compile exit `0`.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 

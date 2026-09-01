@@ -570,3 +570,29 @@ then snapshot rehearsal and mode-0600 backup before one CAS that installs the ne
 authorization on the existing rows. Start the Owner worker once and stop after two
 new calls, any terminal replacement failure, or terminal two-scene MP4. Only the
 terminal MP4/receipt/report/zero-wallet evidence may close `SPEC-04H.8/.9`.
+
+## First versioned replacement live RED
+
+PR #958 deployed exact SHA `1b8394d892b82c2ded4403a9a84ff7918b4036f2`
+through run `33473365381` SUCCESS in `3m11s`. The authorization CAS passed on a
+SQLite snapshot and production; production backup is `/opt/toanaas/bot/delete/
+pv2-r01-job28-two-scene-replacement-production-20260901T123853.json`, SHA
+`4f21a5fc57d15a39f905f0b686c7b44f23eb6da538c28b0e01959858034537d7`,
+mode `0600`.
+
+One worker start consumed scene-1 replacement as
+`ambiguous_submit_called_without_transport_receipt` and terminalized
+failed-no-charge. Scene 2 had no receipt and no paid call. Worker was stopped;
+wallet remains `200/0`, transactions `0`, credit events `1`, provider usage `0`,
+and global identity counts remain projects/jobs/outboxes `32/28/27`.
+
+Read-only forensic exposed three local seams: the existing-task replacement claim
+incremented attempts `40->41`; terminal fail left `locked_by`; and incoming worker
+diagnostics rewrote unreceipted scene 2 to Key4U/count `1`. The minimal correction
+exempts existing-task recovery claims from attempt increments, clears all terminal
+lock fields, and takes non-target/unreceipted scene authority from persisted DB.
+RED `2 failed in 7.99s`; exact GREEN `2 passed in 5.42s`; focused legacy +
+replacement + claim + spend gate `63 passed in 8.65s`. Source tests made no
+provider call or wallet mutation. Final impact is `253 passed in 66.58s`; full
+compile exits `0`. Do not consume the remaining scene-2 slot before this correction
+is deployed and the false scene-2 state is repaired by backed-up CAS.

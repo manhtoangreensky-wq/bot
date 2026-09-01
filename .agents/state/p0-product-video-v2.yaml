@@ -752,6 +752,27 @@ pv2_r01_job28_two_scene_replacement_authority:
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
+pv2_r01_job28_cross_scene_receipt_live_red:
+  prior_pr: 958
+  prior_merge_sha: 1b8394d892b82c2ded4403a9a84ff7918b4036f2
+  prior_deploy_run: 33473365381 SUCCESS in 3m11s
+  cas_backup: /opt/toanaas/bot/delete/pv2-r01-job28-two-scene-replacement-production-20260901T123853.json
+  cas_backup_sha_mode: 4f21a5fc57d15a39f905f0b686c7b44f23eb6da538c28b0e01959858034537d7 mode 0600
+  live_receipts: scene 1 ambiguous_submit_called_without_transport_receipt; scene 2 absent
+  calls_consumed_remaining: [1, 1]
+  live_terminal: failed_no_charge
+  live_attempts: [40, 41]
+  cross_scene_leak: scene 2 rewritten key4u/count 1 without receipt
+  terminal_lock_leak: locked_by remained vps-toanaas-01
+  post_stop: worker inactive PID 0; wallet 200/0; tx 0; credit events 1; provider usage 0; identity counts 32/28/27
+  red: 2 failed in 7.99s
+  exact_green: 2 passed in 5.42s
+  focused_green: 63 passed in 8.65s
+  impact_green: 253 passed in 66.58s
+  full_compile: exit 0
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  live_pass: false
 spec_04i_subdub_auto_two_speaker_addon:
   phase: PENDING_AFTER_SPEC_04H_9
   compatible_media_only: true
@@ -760,9 +781,9 @@ spec_04i_subdub_auto_two_speaker_addon:
   representative_live_target: one unfinished media-compatible Product Video lane
   acceptance: male/female detection; translation; two-voice dub; final MP4; receipt/report; wallet delta 0
 next_action: >-
-  Ship/deploy the versioned two-scene replacement authority, then rehearse and apply
-  one exact backed-up CAS to existing identity 28/32/27 while the Owner worker is
-  inactive. Start the worker once and observe no more than two new Key4U calls,
-  one per scene; stop on cap, any terminal failed replacement or terminal two-scene
-  MP4. Then finish receipt/report and SPEC-04H.9. Do not open SPEC-04I or another
-  product first.
+  Ship/deploy only the cross-scene receipt/attempt/terminal-lock correction. Keep
+  Owner worker inactive and do not consume the remaining scene-2 slot until exact
+  runtime readback and a backup-safe CAS that removes only the false scene-2 leak
+  while preserving the consumed scene-1 receipt. Then run existing job 28 once,
+  stop on the remaining call or terminal MP4, and finish SPEC-04H.9 before any other
+  product or SPEC-04I.
