@@ -179,6 +179,19 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     without a receipt. Source correction RED `2 failed` -> GREEN `2 passed in
     5.42s`; focused replacement/legacy/claim/spend `63 passed in 8.65s`; final
     impact `253 passed in 66.58s`; full compile exit `0`.
+  - [x] PR #959 deployed exact SHA `6f94cd6a...` through run `33476386996`
+    SUCCESS `3m15s`. Worker source was synchronized exact and remained inactive.
+    Backed-up CAS repaired attempts/lock/false scene-2 authority, then job #28 was
+    deliberately terminalized because scene 1 had no task; scene-2 slot stayed
+    unused. Final pause backup SHA `039a07b0...`, mode `0600`; calls remain `1/1`,
+    finance/identity deltas `0`.
+  - [x] Root scene-1 no-transport is contract-local, not a provider response:
+    Key4U VEO lacked the current official endpoint, so payload build stopped before
+    HTTP. Provider-free source now derives official POST `/v1/videos/generations`
+    and GET `/v1/videos/{id}` only when Key4U auth exists, preserving explicit
+    endpoint overrides. RED `2 failed`; contract GREEN `2 passed`; end-to-end
+    transition submits/polls only the new Key4U ID. Focused `55 passed, 1 exact
+    baseline Tail deselected`; final impact `268 passed in 65.52s`; full compile `0`.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 

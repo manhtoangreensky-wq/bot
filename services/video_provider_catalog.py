@@ -197,6 +197,36 @@ def _first_endpoint(env: dict[str, str] | os._Environ[str], names: tuple[str, ..
     return "", ""
 
 
+def _key4u_official_google_veo_endpoints(
+    env: dict[str, str] | os._Environ[str],
+) -> tuple[str, str, str, str]:
+    auth_present = any(
+        str(env.get(name) or "").strip()
+        for name in (
+            "KEY4U_VIDEO_AUTH_HEADER_VALUE",
+            "VIDEO_KEY4U_AUTH_HEADER_VALUE",
+            "KEY4U_API_KEY",
+            "KEY4U_TOKEN",
+        )
+    )
+    if not auth_present:
+        return "", "", "", ""
+    base = next(
+        (
+            str(env.get(name) or "").strip().rstrip("/")
+            for name in ("KEY4U_BASE_URL", "KEY4U_API_BASE")
+            if _valid_endpoint_url(env.get(name))
+        ),
+        "https://api.key4u.vn",
+    )
+    return (
+        f"{base}/v1/videos/generations",
+        "derived:key4u_official_videos_generations",
+        f"{base}/v1/videos/{{task_id}}",
+        "derived:key4u_official_video_task",
+    )
+
+
 def _cost_tier_allowed(product_tier: str, model_cfg: dict[str, Any]) -> bool:
     model_cost = str(model_cfg.get("cost_tier") or model_cfg.get("tier") or "").strip().lower()
     if not model_cost:
@@ -259,6 +289,15 @@ def model_interface_contract(
     if family in {"minimax_hailuo", "google_veo"}:
         submit_url, submit_source = _first_endpoint(data, _KEY4U_EXCLUSIVE_ENDPOINT_ENVS.get(family, ()))
         poll_url, poll_source = _first_endpoint(data, _KEY4U_EXCLUSIVE_POLL_ENVS.get(family, ()))
+        if family == "google_veo" and not submit_url:
+            (
+                submit_url,
+                submit_source,
+                derived_poll_url,
+                derived_poll_source,
+            ) = _key4u_official_google_veo_endpoints(data)
+            if not poll_url:
+                poll_url, poll_source = derived_poll_url, derived_poll_source
         base.update(
             {
                 "provider_interface": f"key4u_{family}_exclusive",

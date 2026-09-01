@@ -684,7 +684,11 @@ def build_key4u_video_payload(request: VideoGenerationRequest, env: dict[str, st
     return data
 
 
-def _key4u_wire_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def _key4u_wire_payload(
+    payload: dict[str, Any],
+    *,
+    submit_url: str = "",
+) -> dict[str, Any]:
     data = dict(payload or {})
     metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
     family = str(metadata.get("selected_family") or "").strip().lower()
@@ -721,6 +725,25 @@ def _key4u_wire_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if resolution:
             wire["resolution"] = resolution
         return wire
+    if (
+        family == "google_veo"
+        and urllib.parse.urlparse(
+            str(submit_url or metadata.get("provider_submit_url_override") or "")
+        ).path.rstrip("/").endswith("/v1/videos/generations")
+    ):
+        return {
+            "model": str(data.get("model") or ""),
+            "prompt": str(data.get("prompt") or "")[:4000],
+            "resolution": str(
+                data.get("resolution") or defaults.get("resolution") or "1080p"
+            ),
+            "aspect_ratio": str(
+                data.get("aspect_ratio") or data.get("ratio") or "9:16"
+            ),
+            "duration": int(
+                data.get("duration") or data.get("duration_seconds") or 8
+            ),
+        }
     return data
 
 
@@ -1168,7 +1191,11 @@ class GenericHttpVideoProvider:
             clean_metadata.pop("provider_poll_url_override", None)
             payload["metadata"] = clean_metadata
         auth_name, auth_value = self._auth_header()
-        wire_payload = _key4u_wire_payload(payload) if self.provider_name == "key4u_video" else payload
+        wire_payload = (
+            _key4u_wire_payload(payload, submit_url=submit_url)
+            if self.provider_name == "key4u_video"
+            else payload
+        )
         if (
             self.provider_name == "key4u_video"
             and str(payload_metadata.get("provider_interface") or "") == "key4u_google_veo_exclusive"
@@ -1220,6 +1247,9 @@ class GenericHttpVideoProvider:
             "http_status": int(result.get("status_code") or 0),
             "submit_http_status": int(result.get("status_code") or 0),
             "provider_response_http_status": int(result.get("status_code") or 0),
+            "provider_http_request_sent": bool(
+                int(result.get("status_code") or 0) > 0
+            ),
             "submit_response_shape": result.get("response_shape") or _response_shape(body),
             "provider_response_body_shape": result.get("response_shape") or _response_shape(body),
             "provider_error_message_safe": _safe_provider_error_message(body),

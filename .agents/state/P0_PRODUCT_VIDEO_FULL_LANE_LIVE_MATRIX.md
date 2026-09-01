@@ -807,6 +807,17 @@ starting the next.
   identity counts `32/28/27`. RED `2 failed`; GREEN `2 passed in 5.42s`; focused
   `63 passed in 8.65s`. Ship correction only; do not use remaining slot yet.
   Final impact is `253 passed in 66.58s`; full compile exit `0`.
+- [x] PR #959/runtime `6f94cd6a...`, deploy `33476386996` SUCCESS `3m15s`.
+  False scene-2 state was repaired by rehearsal/production CAS, but the remaining
+  slot was not used because scene 1 had no task. Pause CAS backup SHA `039a07b0...`,
+  mode `0600`; terminal rows, attempts `40`, lock released, calls `1/1`, scene-2
+  unused, wallet/provider/identity unchanged.
+- [x] Official Key4U docs prove VEO/OpenAI video uses POST
+  `https://api.key4u.vn/v1/videos/generations` and GET `/v1/videos/{id}`. Source now
+  derives these only when auth exists, keeps explicit overrides, sends documented
+  JSON, and records transport truth. RED `2 failed`; GREEN `2 passed`; focused
+  `55 passed, 1 exact baseline Tail deselected`; impact `268 passed in 65.52s`;
+  compile `0`; branch/clean main share the same 7 historical failures.
 - [ ] Two distinct scene clips and one final MP4 terminal; otherwise stop at the
   exact new RED and reopen only `SPEC-04H`.
 
