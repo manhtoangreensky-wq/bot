@@ -630,3 +630,189 @@ def test_embedding_runner_releases_lock_after_session_exception(monkeypatch, tmp
 
     assert service._EMBEDDING_LOCK.acquire(blocking=False)
     service._EMBEDDING_LOCK.release()
+
+
+def clustering_payload(
+    speaker_count: int,
+    *,
+    rows_per_speaker: int = 10,
+    speech_seconds: list[float] | None = None,
+    source_positions: list[float] | None = None,
+) -> dict:
+    rows = []
+    for speaker in range(speaker_count):
+        center = np.zeros(max(8, speaker_count), dtype=np.float32)
+        center[speaker] = 1.0
+        rows.extend([center.copy() for _ in range(rows_per_speaker)])
+    count = len(rows)
+    return {
+        "embeddings": np.stack(rows),
+        "source_positions": list(source_positions or range(count)),
+        "speech_seconds": list(speech_seconds or [0.5] * count),
+        "expected_speaker_count": 99,
+        "provider_speaker_labels": ["fabricated"] * count,
+    }
+
+
+@pytest.mark.parametrize("speaker_count", (3, 5, 8))
+def test_cluster_selects_literal_supported_speaker_count(speaker_count):
+    payload = clustering_payload(speaker_count)
+    expected_labels = [
+        speaker
+        for speaker in range(speaker_count)
+        for _ in range(10)
+    ]
+
+    result = service.spectral_cluster_embeddings(payload, payload)
+
+    assert result["ok"] is True
+    assert result["status"] == "PASS"
+    assert result["speaker_count"] == speaker_count
+    assert result["labels"] == expected_labels
+    assert result["cluster_sizes"] == [10] * speaker_count
+    assert result["stability_pass"] is True
+    assert result["algorithm_version"] == service.ALGORITHM_VERSION
+
+
+@pytest.mark.parametrize("speaker_count", (2, 9))
+def test_cluster_rejects_count_outside_three_to_eight(speaker_count):
+    payload = clustering_payload(speaker_count)
+
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        service.spectral_cluster_embeddings(payload, payload)
+
+
+@pytest.mark.parametrize("mutation", ("too_few", "nan", "inf", "zero_norm", "shape_mismatch"))
+def test_cluster_rejects_invalid_embedding_matrix(mutation):
+    base = clustering_payload(3)
+    shifted = clustering_payload(3)
+    if mutation == "too_few":
+        base["embeddings"] = base["embeddings"][:5]
+        base["source_positions"] = base["source_positions"][:5]
+        base["speech_seconds"] = base["speech_seconds"][:5]
+        shifted = base
+    elif mutation == "nan":
+        base["embeddings"][0, 0] = np.nan
+    elif mutation == "inf":
+        base["embeddings"][0, 0] = np.inf
+    elif mutation == "zero_norm":
+        base["embeddings"][0] = 0.0
+    else:
+        shifted["embeddings"] = shifted["embeddings"][:-1]
+        shifted["source_positions"] = shifted["source_positions"][:-1]
+        shifted["speech_seconds"] = shifted["speech_seconds"][:-1]
+
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        service.spectral_cluster_embeddings(base, shifted)
+
+
+def test_cluster_rejects_matrix_above_bounded_unit_limit(monkeypatch):
+    matrix = np.ones((1_001, 8), dtype=np.float32)
+    called = []
+
+    def forbidden(_embeddings):
+        called.append(True)
+        raise AssertionError("oversized O(N^2) matrix must not be allocated")
+
+    monkeypatch.setattr(service, "_pruned_similarity", forbidden)
+
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        service.spectral_cluster_embeddings(matrix, matrix)
+    assert called == []
+
+
+def test_cluster_rejects_base_shifted_k_disagreement():
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        service.spectral_cluster_embeddings(
+            clustering_payload(3),
+            clustering_payload(5),
+        )
+
+
+def test_cluster_rejects_base_shifted_assignment_disagreement():
+    base = clustering_payload(3)
+    shifted = clustering_payload(3)
+    shifted["embeddings"][0] = shifted["embeddings"][10]
+
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        service.spectral_cluster_embeddings(base, shifted)
+
+
+def test_cluster_rejects_tiny_speech_support():
+    speech = [0.05] * 10 + [0.5] * 20
+    payload = clustering_payload(
+        3,
+        rows_per_speaker=10,
+        speech_seconds=speech,
+    )
+
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        service.spectral_cluster_embeddings(payload, payload)
+
+
+@pytest.mark.parametrize(
+    "labels",
+    (
+        np.asarray([0] + [1] * 10 + [2] * 10, dtype=np.int64),
+        np.asarray([0] * 10 + [2] * 10, dtype=np.int64),
+    ),
+)
+def test_cluster_support_rejects_singleton_or_empty_cluster(labels):
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        service._validate_cluster_support(
+            labels,
+            np.full(labels.shape[0], 0.5, dtype=np.float64),
+            3,
+        )
+
+
+def test_cluster_canonical_labels_follow_source_position_after_permutation():
+    original = clustering_payload(3)
+    permutation = np.asarray(
+        [20, 10, 0]
+        + [index for index in range(30) if index not in {0, 10, 20}],
+        dtype=np.int64,
+    )
+    permuted = {
+        "embeddings": original["embeddings"][permutation],
+        "source_positions": [original["source_positions"][index] for index in permutation],
+        "speech_seconds": [original["speech_seconds"][index] for index in permutation],
+    }
+
+    original_result = service.spectral_cluster_embeddings(original, original)
+    permuted_result = service.spectral_cluster_embeddings(permuted, permuted)
+    restored = np.empty(30, dtype=np.int64)
+    restored[permutation] = np.asarray(permuted_result["labels"])
+
+    assert restored.tolist() == original_result["labels"]
+
+
+def test_cluster_ignores_provider_labels_and_expected_count_hints():
+    payload = clustering_payload(5)
+    clean = {
+        key: value
+        for key, value in payload.items()
+        if key in {"embeddings", "source_positions", "speech_seconds"}
+    }
+
+    hinted = service.spectral_cluster_embeddings(payload, payload)
+    unhinted = service.spectral_cluster_embeddings(clean, clean)
+
+    assert hinted == unhinted
+
+
+def test_cluster_rejects_nonconvergence(monkeypatch):
+    monkeypatch.setattr(service, "KMEANS_MAX_ITERATIONS", 0)
+    payload = clustering_payload(3)
+
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        service.spectral_cluster_embeddings(payload, payload)
+
+
+def test_cluster_replay_is_byte_deterministic():
+    payload = clustering_payload(5)
+
+    first = service.spectral_cluster_embeddings(payload, payload)
+    second = service.spectral_cluster_embeddings(payload, payload)
+
+    assert first == second

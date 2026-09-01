@@ -38,6 +38,10 @@ MIN_UNITS = 6
 MIN_SPEAKERS = 3
 MAX_SPEAKERS = 8
 MAX_SOURCE_SECONDS = 300.0
+MIN_CLUSTER_UNPADDED_SECONDS = 0.8
+MIN_CLUSTER_UNITS = 2
+MAX_CLUSTER_UNITS = 1_000
+KMEANS_MAX_ITERATIONS = 30
 FBANK_FRAME_LENGTH = 400
 FBANK_FRAME_SHIFT = 160
 FBANK_FFT_POINTS = 512
@@ -603,3 +607,234 @@ def extract_unit_embeddings(
         raise _manual_required(exc)
     finally:
         _EMBEDDING_LOCK.release()
+
+
+def _cluster_payload(value: object) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    if type(value) is dict:
+        raw_embeddings = value.get("embeddings")
+        raw_positions = value.get("source_positions")
+        raw_speech = value.get("speech_seconds")
+    else:
+        raw_embeddings = value
+        raw_positions = None
+        raw_speech = None
+    if not isinstance(raw_embeddings, np.ndarray):
+        raise _manual_required(ValueError("acoustic_cluster_embeddings_invalid"))
+    embeddings = np.asarray(raw_embeddings)
+    if (
+        embeddings.ndim != 2
+        or embeddings.dtype.kind not in {"f", "i", "u"}
+        or not MIN_UNITS <= embeddings.shape[0] <= MAX_CLUSTER_UNITS
+        or embeddings.shape[1] <= 0
+        or not np.isfinite(embeddings).all()
+    ):
+        raise _manual_required(ValueError("acoustic_cluster_embeddings_invalid"))
+    matrix = embeddings.astype(np.float64, copy=True)
+    norms = np.linalg.norm(matrix, axis=1)
+    if not np.isfinite(norms).all() or np.any(norms <= np.finfo(np.float32).eps):
+        raise _manual_required(ValueError("acoustic_cluster_embedding_norm_invalid"))
+    matrix /= norms[:, None]
+
+    count = matrix.shape[0]
+    if raw_positions is None:
+        positions = np.arange(count, dtype=np.float64)
+    else:
+        if type(raw_positions) not in {list, tuple} or len(raw_positions) != count:
+            raise _manual_required(ValueError("acoustic_cluster_positions_invalid"))
+        if any(type(value) not in {int, float} for value in raw_positions):
+            raise _manual_required(ValueError("acoustic_cluster_positions_invalid"))
+        positions = np.asarray(raw_positions, dtype=np.float64)
+    if (
+        not np.isfinite(positions).all()
+        or np.any(positions < 0.0)
+        or len(np.unique(positions)) != count
+    ):
+        raise _manual_required(ValueError("acoustic_cluster_positions_invalid"))
+
+    if raw_speech is None:
+        speech_seconds = np.full(count, UNIT_MIN_FEATURE_SECONDS, dtype=np.float64)
+    else:
+        if type(raw_speech) not in {list, tuple} or len(raw_speech) != count:
+            raise _manual_required(ValueError("acoustic_cluster_speech_invalid"))
+        if any(type(value) not in {int, float} for value in raw_speech):
+            raise _manual_required(ValueError("acoustic_cluster_speech_invalid"))
+        speech_seconds = np.asarray(raw_speech, dtype=np.float64)
+    if not np.isfinite(speech_seconds).all() or np.any(speech_seconds <= 0.0):
+        raise _manual_required(ValueError("acoustic_cluster_speech_invalid"))
+    return matrix, positions, speech_seconds
+
+
+def _pruned_similarity(embeddings: np.ndarray) -> np.ndarray:
+    similarity = 0.5 * (1.0 + embeddings @ embeddings.T)
+    if not np.isfinite(similarity).all():
+        raise _manual_required(ValueError("acoustic_similarity_invalid"))
+    count = similarity.shape[0]
+    low_count = max(2, count - 10) if count < 1_000 else int(count * 0.99)
+    if not 0 < low_count < count:
+        raise _manual_required(ValueError("acoustic_pruning_invalid"))
+    pruned = np.empty_like(similarity)
+    for row_index in range(count):
+        indexes = np.argsort(similarity[row_index], kind="stable")
+        pruned[row_index] = 1.0
+        pruned[row_index, indexes[:low_count]] = 0.0
+    pruned = 0.5 * (pruned + pruned.T)
+    np.fill_diagonal(pruned, 0.0)
+    if not np.isfinite(pruned).all():
+        raise _manual_required(ValueError("acoustic_pruning_invalid"))
+    return pruned
+
+
+def _canonical_cluster_labels(
+    labels: np.ndarray,
+    source_positions: np.ndarray,
+) -> np.ndarray:
+    raw_labels = sorted(set(int(value) for value in labels.tolist()))
+    ordered = sorted(
+        raw_labels,
+        key=lambda label: (
+            float(np.min(source_positions[labels == label])),
+            label,
+        ),
+    )
+    mapping = {label: canonical for canonical, label in enumerate(ordered)}
+    return np.asarray([mapping[int(label)] for label in labels], dtype=np.int64)
+
+
+def _deterministic_kmeans(
+    data: np.ndarray,
+    speaker_count: int,
+    source_positions: np.ndarray,
+) -> np.ndarray:
+    if KMEANS_MAX_ITERATIONS <= 0:
+        raise _manual_required(ValueError("acoustic_cluster_nonconvergent"))
+    count = data.shape[0]
+    source_order = np.lexsort((np.arange(count), source_positions))
+    seed_indexes = [int(source_order[0])]
+    while len(seed_indexes) < speaker_count:
+        distances = np.stack(
+            [
+                np.sum((data - data[index]) ** 2, axis=1)
+                for index in seed_indexes
+            ],
+            axis=1,
+        )
+        minimum = np.min(distances, axis=1)
+        minimum[np.asarray(seed_indexes, dtype=np.int64)] = -1.0
+        maximum = float(np.max(minimum))
+        if not math.isfinite(maximum) or maximum <= np.finfo(np.float64).eps:
+            raise _manual_required(ValueError("acoustic_cluster_seed_invalid"))
+        candidates = np.flatnonzero(np.isclose(minimum, maximum, rtol=0.0, atol=1e-12))
+        next_index = min(
+            candidates.tolist(),
+            key=lambda index: (float(source_positions[index]), int(index)),
+        )
+        seed_indexes.append(int(next_index))
+    centroids = data[np.asarray(seed_indexes, dtype=np.int64)].copy()
+    previous_labels: np.ndarray | None = None
+    for _iteration in range(KMEANS_MAX_ITERATIONS):
+        distances = np.sum(
+            (data[:, None, :] - centroids[None, :, :]) ** 2,
+            axis=2,
+        )
+        if not np.isfinite(distances).all():
+            raise _manual_required(ValueError("acoustic_cluster_distance_invalid"))
+        labels = np.argmin(distances, axis=1).astype(np.int64)
+        if len(set(labels.tolist())) != speaker_count:
+            raise _manual_required(ValueError("acoustic_cluster_empty"))
+        updated = np.stack(
+            [np.mean(data[labels == label], axis=0) for label in range(speaker_count)],
+            axis=0,
+        )
+        if not np.isfinite(updated).all():
+            raise _manual_required(ValueError("acoustic_cluster_centroid_invalid"))
+        if previous_labels is not None and np.array_equal(labels, previous_labels):
+            return _canonical_cluster_labels(labels, source_positions)
+        previous_labels = labels
+        centroids = updated
+    raise _manual_required(ValueError("acoustic_cluster_nonconvergent"))
+
+
+def _stable_cluster_view(
+    embeddings: np.ndarray,
+    source_positions: np.ndarray,
+) -> tuple[int, np.ndarray, np.ndarray]:
+    pruned = _pruned_similarity(embeddings)
+    laplacian = np.diag(np.sum(np.abs(pruned), axis=1)) - pruned
+    eigenvalues, eigenvectors = np.linalg.eigh(laplacian)
+    if (
+        not np.isfinite(eigenvalues).all()
+        or not np.isfinite(eigenvectors).all()
+        or eigenvalues.shape[0] != embeddings.shape[0]
+    ):
+        raise _manual_required(ValueError("acoustic_eigendecomposition_invalid"))
+    search_count = min(eigenvalues.shape[0], MAX_SPEAKERS + 2)
+    differences = np.diff(eigenvalues[:search_count])
+    if differences.size == 0 or not np.isfinite(differences).all():
+        raise _manual_required(ValueError("acoustic_eigengap_invalid"))
+    speaker_count = int(np.argmax(differences)) + 1
+    if not MIN_SPEAKERS <= speaker_count <= MAX_SPEAKERS:
+        raise _manual_required(ValueError("acoustic_cluster_count_out_of_range"))
+    spectral = eigenvectors[:, :speaker_count]
+    labels = _deterministic_kmeans(spectral, speaker_count, source_positions)
+    return speaker_count, labels, eigenvalues
+
+
+def _validate_cluster_support(
+    labels: np.ndarray,
+    speech_seconds: np.ndarray,
+    speaker_count: int,
+) -> list[int]:
+    cluster_sizes: list[int] = []
+    for label in range(speaker_count):
+        membership = labels == label
+        unit_count = int(np.count_nonzero(membership))
+        speech_total = float(np.sum(speech_seconds[membership]))
+        if (
+            unit_count < MIN_CLUSTER_UNITS
+            or not math.isfinite(speech_total)
+            or speech_total < MIN_CLUSTER_UNPADDED_SECONDS
+        ):
+            raise _manual_required(ValueError("acoustic_cluster_unsupported"))
+        cluster_sizes.append(unit_count)
+    return cluster_sizes
+
+
+def spectral_cluster_embeddings(
+    base_embeddings: object,
+    shifted_embeddings: object,
+) -> dict[str, object]:
+    """Select and validate one stable deterministic 3-8 speaker partition."""
+
+    base, positions, speech_seconds = _cluster_payload(base_embeddings)
+    shifted, shifted_positions, shifted_speech = _cluster_payload(shifted_embeddings)
+    if (
+        base.shape != shifted.shape
+        or not np.array_equal(positions, shifted_positions)
+        or not np.array_equal(speech_seconds, shifted_speech)
+    ):
+        raise _manual_required(ValueError("acoustic_cluster_view_mismatch"))
+    base_count, base_labels, eigenvalues = _stable_cluster_view(base, positions)
+    shifted_count, shifted_labels, _shifted_eigenvalues = _stable_cluster_view(
+        shifted,
+        positions,
+    )
+    if base_count != shifted_count or not np.array_equal(base_labels, shifted_labels):
+        raise _manual_required(ValueError("acoustic_cluster_unstable"))
+    cluster_sizes = _validate_cluster_support(
+        base_labels,
+        speech_seconds,
+        base_count,
+    )
+    return {
+        "ok": True,
+        "status": "PASS",
+        "speaker_count": base_count,
+        "labels": [int(value) for value in base_labels.tolist()],
+        "cluster_sizes": cluster_sizes,
+        "eigenvalues": [
+            round(float(value), 8)
+            for value in eigenvalues[: min(len(eigenvalues), MAX_SPEAKERS + 2)]
+        ],
+        "stability_pass": True,
+        "algorithm_version": ALGORITHM_VERSION,
+    }
