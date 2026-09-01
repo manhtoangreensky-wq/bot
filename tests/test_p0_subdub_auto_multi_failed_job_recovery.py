@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import sqlite3
+import threading
 from types import SimpleNamespace
 
 import bot
@@ -13,6 +15,12 @@ import pytest
 OWNER_ID = 7_126_457_028
 JOB_ID = "211844aa34788db33757"
 SOURCE_SHA256 = "83de97b744b931e544b569e6e750f8415545f226461bd2e36cfb49225898ad3e"
+ACOUSTIC_JOB_ID = "b4cb6d5fe8a7bdfce507"
+ACOUSTIC_PUBLIC_CODE = "B4CB6D5FE8"
+ACOUSTIC_MODEL_SHA256 = (
+    "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
+)
+ACOUSTIC_ALGORITHM_VERSION = "wespeaker-resnet34-spectral-v1"
 
 
 def _seed_job(tmp_path, monkeypatch):
@@ -93,6 +101,349 @@ def _seed_job(tmp_path, monkeypatch):
     monkeypatch.setattr(bot, "ENGINE_ASYNC_MEMORY_JOBS", {})
     monkeypatch.setattr(bot, "SUBTITLE_DUB_PIPELINE_JOBS", {})
     return db_path, job, source, source_sha256
+
+
+def _seed_exact_acoustic_job(tmp_path, monkeypatch):
+    workspace = tmp_path / ACOUSTIC_JOB_ID
+    workspace.mkdir()
+    source = workspace / "test_nhieu_giong.mp4"
+    source.write_bytes(b"hash-is-injected-exact-authorized-fixture")
+    job_key = (
+        f"{OWNER_ID}|{OWNER_ID}|AgADeSIAAh1tkVQ|"
+        "subtitle_plus_dub|auto_multi_speaker"
+    )
+    job = {
+        "feature": "subtitle_dub",
+        "internal_job_id": ACOUSTIC_JOB_ID,
+        "job_id": ACOUSTIC_JOB_ID,
+        "public_code": ACOUSTIC_PUBLIC_CODE,
+        "job_key": job_key,
+        "user_id": OWNER_ID,
+        "chat_id": OWNER_ID,
+        "status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "lifecycle_state": "failed_no_charge",
+        "current_stage": "failed_no_charge",
+        "progress_stage": "failed_no_charge",
+        "charge_status": "not_charged",
+        "charged_xu": 0,
+        "output_sent": False,
+        "delivery_attempted": False,
+        "artifact_started": False,
+        "final_mp4_exists": False,
+        "output_validated": False,
+        "workspace": str(workspace),
+        "input_save": {
+            "path": str(source),
+            "size": source.stat().st_size,
+            "content_type": "video/mp4",
+        },
+        "source_sha256": SOURCE_SHA256,
+        "target_language": "English",
+        "original_audio_volume_percent": 40,
+        "dubbed_voice_volume_percent": 150,
+        "auto_exact_session_nonce": "acoustic-recovery-session",
+        "multi_diarization_attempted": True,
+        "multi_diarization_provider": "gemini_transcribe_multi_diarization",
+        "multi_diarization_status": "PASS",
+        "multi_diarization_parse_rejection": "",
+        "multi_diarization_http_status": 200,
+        "multi_diarization_raw_annotation_count": 149,
+        "multi_diarization_provider_word_count": 147,
+        "multi_diarization_provider_speaker_count": 5,
+        "multi_diarization_mapped_speaker_count": 0,
+        "auto_multi_recovery_attempt_count": 3,
+        "auto_multi_recovery_correction_attempt_count": 2,
+        "auto_multi_recovery_crosswalk_correction_used": True,
+        "last_error_stage": "AUTO_CAST_MANUAL_REQUIRED",
+        "provider_task_id": f"subdub:{ACOUSTIC_JOB_ID}",
+    }
+    db_path = tmp_path / "acoustic-recovery.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """CREATE TABLE system_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            note TEXT,
+            updated_at TEXT,
+            updated_by TEXT
+        )"""
+    )
+    conn.execute(
+        "INSERT INTO system_settings(key,value,note,updated_at,updated_by) VALUES(?,?,?,?,?)",
+        (
+            f"engine_async_job:{ACOUSTIC_JOB_ID}",
+            json.dumps(job, ensure_ascii=False),
+            "fixture",
+            "2026-09-01 00:00:00",
+            str(OWNER_ID),
+        ),
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(bot, "db_connect", lambda: sqlite3.connect(db_path))
+    monkeypatch.setattr(
+        bot,
+        "subtitle_dub_workspace_path_safety",
+        lambda _workspace: {"allowed": True},
+    )
+    monkeypatch.setattr(bot, "_subdub_sha256_file", lambda _path: SOURCE_SHA256)
+    monkeypatch.setattr(bot, "ENGINE_ASYNC_MEMORY_JOBS", {})
+    monkeypatch.setattr(bot, "SUBTITLE_DUB_PIPELINE_JOBS", {})
+    return db_path, job, source
+
+
+def exact_acoustic_preflight():
+    return {
+        "ok": True,
+        "status": "PASS",
+        "model_sha256": ACOUSTIC_MODEL_SHA256,
+        "algorithm_version": ACOUSTIC_ALGORITHM_VERSION,
+    }
+
+
+def test_exact_acoustic_recovery_claims_same_job_once_and_blocks_attempt_five(
+    tmp_path,
+    monkeypatch,
+):
+    db_path, job, source = _seed_exact_acoustic_job(tmp_path, monkeypatch)
+    before_count = sqlite3.connect(db_path).execute(
+        "SELECT COUNT(*) FROM system_settings"
+    ).fetchone()[0]
+
+    claimed = bot.claim_subdub_failed_auto_multi_recovery(
+        ACOUSTIC_JOB_ID,
+        owner_user_id=OWNER_ID,
+        chat_id=OWNER_ID,
+        source_sha256=SOURCE_SHA256,
+        target_language="English",
+        original_volume_percent=40,
+        dub_volume_percent=150,
+        confirm_paid=True,
+        allow_acoustic_recovery=True,
+        acoustic_preflight=exact_acoustic_preflight,
+    )
+
+    assert claimed["ok"] is True
+    assert claimed["claimed"] is True
+    recovered = claimed["job"]
+    assert recovered["internal_job_id"] == ACOUSTIC_JOB_ID
+    assert recovered["public_code"] == ACOUSTIC_PUBLIC_CODE
+    assert recovered["job_key"] == job["job_key"]
+    assert recovered["workspace"] == str(source.parent)
+    assert recovered["auto_multi_recovery_attempt_count"] == 4
+    assert recovered["auto_multi_recovery_correction_attempt_count"] == 3
+    assert recovered["auto_multi_acoustic_recovery_used"] is True
+    assert recovered["auto_multi_acoustic_backend"] == (
+        "local_wespeaker_resnet34_spectral"
+    )
+    assert recovered["auto_multi_acoustic_model_sha256"] == ACOUSTIC_MODEL_SHA256
+    assert recovered["auto_multi_acoustic_algorithm_version"] == (
+        ACOUSTIC_ALGORITHM_VERSION
+    )
+    after_count = sqlite3.connect(db_path).execute(
+        "SELECT COUNT(*) FROM system_settings"
+    ).fetchone()[0]
+    assert after_count == before_count == 1
+
+    terminal = dict(recovered)
+    terminal.update(
+        {
+            "status": "failed_no_charge",
+            "terminal_state": "failed_no_charge",
+            "lifecycle_state": "failed_no_charge",
+            "current_stage": "failed_no_charge",
+            "progress_stage": "failed_no_charge",
+            "charge_status": "not_charged",
+            "charged_xu": 0,
+            "output_sent": False,
+            "delivery_attempted": False,
+            "artifact_started": False,
+            "final_mp4_exists": False,
+            "output_validated": False,
+        }
+    )
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE system_settings SET value=? WHERE key=?",
+        (
+            json.dumps(terminal, ensure_ascii=False),
+            f"engine_async_job:{ACOUSTIC_JOB_ID}",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    duplicate = bot.claim_subdub_failed_auto_multi_recovery(
+        ACOUSTIC_JOB_ID,
+        owner_user_id=OWNER_ID,
+        chat_id=OWNER_ID,
+        source_sha256=SOURCE_SHA256,
+        target_language="English",
+        original_volume_percent=40,
+        dub_volume_percent=150,
+        confirm_paid=True,
+        allow_acoustic_recovery=True,
+        acoustic_preflight=exact_acoustic_preflight,
+    )
+
+    assert duplicate["ok"] is False
+    assert duplicate["reason"] == "recovery_already_used"
+    stored = json.loads(
+        sqlite3.connect(db_path).execute(
+            "SELECT value FROM system_settings WHERE key=?",
+            (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+        ).fetchone()[0]
+    )
+    assert stored == terminal
+
+
+def test_exact_acoustic_preflight_fails_before_database_transaction(
+    monkeypatch,
+):
+    calls = []
+
+    def forbidden_db():
+        calls.append("db")
+        raise AssertionError("preflight must precede BEGIN IMMEDIATE")
+
+    monkeypatch.setattr(bot, "db_connect", forbidden_db)
+
+    result = bot.claim_subdub_failed_auto_multi_recovery(
+        ACOUSTIC_JOB_ID,
+        owner_user_id=OWNER_ID,
+        chat_id=OWNER_ID,
+        source_sha256=SOURCE_SHA256,
+        target_language="English",
+        original_volume_percent=40,
+        dub_volume_percent=150,
+        confirm_paid=True,
+        allow_acoustic_recovery=True,
+        acoustic_preflight=lambda: {"ok": False, "status": "FAIL"},
+    )
+
+    assert result["ok"] is False
+    assert result["reason"] == "acoustic_preflight_failed"
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    (
+        ("public_code", "WRONGCODE", "acoustic_recovery_not_allowed"),
+        ("user_id", OWNER_ID + 1, "acoustic_recovery_not_allowed"),
+        ("chat_id", OWNER_ID + 1, "acoustic_recovery_not_allowed"),
+        ("job_key", "wrong|route", "acoustic_recovery_not_allowed"),
+        ("source_sha256", "0" * 64, "acoustic_recovery_not_allowed"),
+        ("target_language", "Vietnamese", "acoustic_recovery_not_allowed"),
+        ("original_audio_volume_percent", 39, "acoustic_recovery_not_allowed"),
+        ("dubbed_voice_volume_percent", 149, "acoustic_recovery_not_allowed"),
+        ("auto_multi_recovery_attempt_count", 2, "acoustic_recovery_not_allowed"),
+        ("auto_multi_recovery_correction_attempt_count", 1, "acoustic_recovery_not_allowed"),
+        ("auto_multi_recovery_crosswalk_correction_used", False, "acoustic_recovery_not_allowed"),
+        ("auto_multi_acoustic_recovery_used", True, "recovery_already_used"),
+        ("status", "delivered", "job_not_safe_to_recover"),
+        ("terminal_state", "delivered", "job_not_safe_to_recover"),
+        ("charged_xu", 1, "job_not_safe_to_recover"),
+        ("charge_status", "charged", "job_not_safe_to_recover"),
+        ("output_sent", True, "job_not_safe_to_recover"),
+        ("artifact_started", True, "job_not_safe_to_recover"),
+        ("final_mp4_path", "/tmp/existing.mp4", "job_not_safe_to_recover"),
+    ),
+)
+def test_exact_acoustic_recovery_rejects_every_mutated_authority_without_write(
+    tmp_path,
+    monkeypatch,
+    field,
+    value,
+    reason,
+):
+    db_path, job, _source = _seed_exact_acoustic_job(tmp_path, monkeypatch)
+    job[field] = value
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE system_settings SET value=? WHERE key=?",
+        (
+            json.dumps(job, ensure_ascii=False),
+            f"engine_async_job:{ACOUSTIC_JOB_ID}",
+        ),
+    )
+    conn.commit()
+    old_value = conn.execute(
+        "SELECT value FROM system_settings WHERE key=?",
+        (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+    ).fetchone()[0]
+    conn.close()
+
+    result = bot.claim_subdub_failed_auto_multi_recovery(
+        ACOUSTIC_JOB_ID,
+        owner_user_id=OWNER_ID,
+        chat_id=OWNER_ID,
+        source_sha256=SOURCE_SHA256,
+        target_language="English",
+        original_volume_percent=40,
+        dub_volume_percent=150,
+        confirm_paid=True,
+        allow_acoustic_recovery=True,
+        acoustic_preflight=exact_acoustic_preflight,
+    )
+
+    assert result["ok"] is False
+    assert result["reason"] == reason
+    stored = sqlite3.connect(db_path).execute(
+        "SELECT value FROM system_settings WHERE key=?",
+        (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+    ).fetchone()[0]
+    assert stored == old_value
+
+
+def test_exact_acoustic_recovery_concurrent_claim_has_one_cas_winner(
+    tmp_path,
+    monkeypatch,
+):
+    db_path, _job, _source = _seed_exact_acoustic_job(tmp_path, monkeypatch)
+    barrier = threading.Barrier(2)
+
+    def claim():
+        barrier.wait(timeout=5.0)
+        return bot.claim_subdub_failed_auto_multi_recovery(
+            ACOUSTIC_JOB_ID,
+            owner_user_id=OWNER_ID,
+            chat_id=OWNER_ID,
+            source_sha256=SOURCE_SHA256,
+            target_language="English",
+            original_volume_percent=40,
+            dub_volume_percent=150,
+            confirm_paid=True,
+            allow_acoustic_recovery=True,
+            acoustic_preflight=exact_acoustic_preflight,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _index: claim(), range(2)))
+
+    winners = [result for result in results if result.get("claimed") is True]
+    losers = [result for result in results if result.get("claimed") is not True]
+    assert len(winners) == 1
+    assert len(losers) == 1
+    assert losers[0]["reason"] in {
+        "recovery_already_used",
+        "recovery_cas_lost",
+    }
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM system_settings").fetchone()[0] == 1
+        stored = json.loads(
+            conn.execute(
+                "SELECT value FROM system_settings WHERE key=?",
+                (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+            ).fetchone()[0]
+        )
+    finally:
+        conn.close()
+    assert stored["auto_multi_recovery_attempt_count"] == 4
+    assert stored["auto_multi_recovery_correction_attempt_count"] == 3
+    assert stored["auto_multi_acoustic_recovery_used"] is True
 
 
 def test_failed_auto_multi_recovery_cas_keeps_same_job_and_wins_once(
@@ -912,6 +1263,24 @@ def test_failed_auto_multi_recovery_command_requires_exact_literal_and_args(
     assert len(claims) == 2
     assert claims[1][1]["allow_legacy_observability_gap"] is True
     assert executions[1]["job_id"] == JOB_ID
+
+    acoustic = SimpleNamespace(
+        args=[
+            ACOUSTIC_JOB_ID,
+            SOURCE_SHA256,
+            "English",
+            "40",
+            "150",
+            "--confirm-paid",
+            "--confirm-local-acoustic",
+        ]
+    )
+    asyncio.run(bot.cmd_subdub_recover_failed_auto_multi(update, acoustic))
+    assert len(claims) == 3
+    assert claims[2][0] == ACOUSTIC_JOB_ID
+    assert claims[2][1]["allow_legacy_observability_gap"] is False
+    assert claims[2][1]["allow_acoustic_recovery"] is True
+    assert executions[2]["job_id"] == JOB_ID
 
 
 def test_failed_auto_multi_recovery_command_edits_one_progress_panel(

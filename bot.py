@@ -146193,7 +146193,7 @@ async def cmd_subdub_recover_failed_auto_multi(
     usage = (
         "Cách dùng: /subdub_recover_failed_auto_multi "
         "<internal_job_id> <source_sha256> English 40 150 --confirm-paid "
-        "[--confirm-observability-gap]"
+        "[--confirm-observability-gap|--confirm-local-acoustic]"
     )
     ordinary_recovery = bool(
         len(args) == 6 and args[-1] == SUBDUB_FAILED_AUTO_MULTI_RECOVERY_LITERAL
@@ -146203,7 +146203,12 @@ async def cmd_subdub_recover_failed_auto_multi(
         and args[-2] == SUBDUB_FAILED_AUTO_MULTI_RECOVERY_LITERAL
         and args[-1] == SUBDUB_FAILED_AUTO_MULTI_LEGACY_GAP_LITERAL
     )
-    if not ordinary_recovery and not legacy_gap_recovery:
+    acoustic_recovery = bool(
+        len(args) == 7
+        and args[-2] == SUBDUB_FAILED_AUTO_MULTI_RECOVERY_LITERAL
+        and args[-1] == SUBDUB_FAILED_AUTO_MULTI_ACOUSTIC_LITERAL
+    )
+    if not ordinary_recovery and not legacy_gap_recovery and not acoustic_recovery:
         return await update.message.reply_text(usage)
     internal_job_id, source_sha256, target_language, original_raw, dub_raw = args[:5]
     if not original_raw.isdigit() or not dub_raw.isdigit():
@@ -146219,6 +146224,9 @@ async def cmd_subdub_recover_failed_auto_multi(
         dub_volume_percent=int(dub_raw),
         confirm_paid=True,
         allow_legacy_observability_gap=legacy_gap_recovery,
+        **(
+            {"allow_acoustic_recovery": True} if acoustic_recovery else {}
+        ),
     )
     if not claim.get("ok") or not claim.get("claimed"):
         reason = sanitize_log_text(str(claim.get("reason") or "recovery_not_claimed"))[:120]
@@ -248574,6 +248582,95 @@ SUBDUB_FAILED_AUTO_MULTI_RECOVERY_LITERAL = "--confirm-paid"
 SUBDUB_FAILED_AUTO_MULTI_LEGACY_GAP_LITERAL = (
     "--confirm-observability-gap"
 )
+SUBDUB_FAILED_AUTO_MULTI_ACOUSTIC_LITERAL = "--confirm-local-acoustic"
+SUBDUB_FINAL_ACOUSTIC_JOB_ID = "b4cb6d5fe8a7bdfce507"
+SUBDUB_FINAL_ACOUSTIC_PUBLIC_CODE = "B4CB6D5FE8"
+SUBDUB_FINAL_ACOUSTIC_SOURCE_SHA256 = (
+    "83de97b744b931e544b569e6e750f8415545f226461bd2e36cfb49225898ad3e"
+)
+
+
+def _subdub_multi_acoustic_model_preflight() -> dict:
+    service = auto_multi_speaker.subdub_multi_speaker_embedding_onnx
+    result = dict(service.model_preflight())
+    result["algorithm_version"] = service.ALGORITHM_VERSION
+    return result
+
+
+def _subdub_final_acoustic_recovery_reason(
+    current: dict,
+    *,
+    safe_id: str,
+    owner_user_id,
+    chat_id,
+    source_sha256: str,
+    target_language: str,
+    original_volume_percent: int,
+    dub_volume_percent: int,
+) -> str:
+    attempt_count = int(current.get("auto_multi_recovery_attempt_count") or 0)
+    correction_count = int(
+        current.get("auto_multi_recovery_correction_attempt_count") or 0
+    )
+    if (
+        current.get("auto_multi_acoustic_recovery_used") is True
+        or attempt_count >= 4
+        or correction_count >= 3
+    ):
+        return "recovery_already_used"
+    if (
+        safe_id != SUBDUB_FINAL_ACOUSTIC_JOB_ID
+        or str(current.get("internal_job_id") or current.get("job_id") or "")
+        != SUBDUB_FINAL_ACOUSTIC_JOB_ID
+        or str(current.get("public_code") or "")
+        != SUBDUB_FINAL_ACOUSTIC_PUBLIC_CODE
+        or str(current.get("user_id") or "") != str(owner_user_id)
+        or str(current.get("chat_id") or current.get("user_id") or "")
+        != str(chat_id)
+        or not str(current.get("job_key") or "").endswith(
+            "|subtitle_plus_dub|auto_multi_speaker"
+        )
+        or str(current.get("source_sha256") or "").strip().lower()
+        != SUBDUB_FINAL_ACOUSTIC_SOURCE_SHA256
+        or str(source_sha256 or "").strip().lower()
+        != SUBDUB_FINAL_ACOUSTIC_SOURCE_SHA256
+        or str(current.get("target_language") or "") != "English"
+        or str(target_language or "").strip() != "English"
+        or current.get("original_audio_volume_percent") != 40
+        or current.get("dubbed_voice_volume_percent") != 150
+        or type(original_volume_percent) is not int
+        or original_volume_percent != 40
+        or type(dub_volume_percent) is not int
+        or dub_volume_percent != 150
+        or attempt_count != 3
+        or correction_count != 2
+        or current.get("auto_multi_recovery_crosswalk_correction_used") is not True
+    ):
+        return "acoustic_recovery_not_allowed"
+    false_fields = (
+        "output_sent", "delivery_attempted", "artifact_started",
+        "final_mp4_exists", "output_validated",
+    )
+    artifact_fields = (
+        "final_mp4_path", "final_output_path", "output_path",
+        "output_video_path", "final_video_path", "dub_video_path",
+        "video_delivery_message_id", "final_video_message_id",
+        "delivery_message_id", "telegram_message_id",
+    )
+    if (
+        current.get("status") != "failed_no_charge"
+        or current.get("terminal_state") != "failed_no_charge"
+        or type(current.get("charged_xu")) is not int
+        or current.get("charged_xu") != 0
+        or current.get("charge_status") != "not_charged"
+        or any(
+            field not in current or current.get(field) is not False
+            for field in false_fields
+        )
+        or any(str(current.get(field) or "").strip() for field in artifact_fields)
+    ):
+        return "job_not_safe_to_recover"
+    return ""
 
 
 def _subdub_sha256_file(path: str) -> str:
@@ -248705,12 +248802,41 @@ def claim_subdub_failed_auto_multi_recovery(
     dub_volume_percent: int,
     confirm_paid: bool,
     allow_legacy_observability_gap: bool = False,
+    allow_acoustic_recovery: bool = False,
+    acoustic_preflight=None,
 ) -> dict:
     safe_id = str(internal_job_id or "").strip()
     if not confirm_paid:
         return {"ok": False, "claimed": False, "reason": "literal_confirm_required"}
     if not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", safe_id):
         return {"ok": False, "claimed": False, "reason": "invalid_job_id"}
+    acoustic_preflight_result: dict = {}
+    if allow_acoustic_recovery:
+        preflight = acoustic_preflight or _subdub_multi_acoustic_model_preflight
+        if not callable(preflight):
+            return {
+                "ok": False,
+                "claimed": False,
+                "reason": "acoustic_preflight_failed",
+            }
+        try:
+            acoustic_preflight_result = dict(preflight() or {})
+        except Exception:
+            acoustic_preflight_result = {}
+        service = auto_multi_speaker.subdub_multi_speaker_embedding_onnx
+        if not (
+            acoustic_preflight_result.get("ok") is True
+            and acoustic_preflight_result.get("status") == "PASS"
+            and acoustic_preflight_result.get("model_sha256")
+            == service.MODEL_SHA256
+            and acoustic_preflight_result.get("algorithm_version")
+            == service.ALGORITHM_VERSION
+        ):
+            return {
+                "ok": False,
+                "claimed": False,
+                "reason": "acoustic_preflight_failed",
+            }
     setting_key = _engine_async_job_key(safe_id)
     conn = None
     try:
@@ -248728,6 +248854,24 @@ def claim_subdub_failed_auto_multi_recovery(
         if not isinstance(current, dict):
             conn.rollback()
             return {"ok": False, "claimed": False, "reason": "job_payload_invalid"}
+        if allow_acoustic_recovery:
+            acoustic_reason = _subdub_final_acoustic_recovery_reason(
+                current,
+                safe_id=safe_id,
+                owner_user_id=owner_user_id,
+                chat_id=chat_id,
+                source_sha256=source_sha256,
+                target_language=target_language,
+                original_volume_percent=original_volume_percent,
+                dub_volume_percent=dub_volume_percent,
+            )
+            if acoustic_reason:
+                conn.rollback()
+                return {
+                    "ok": False,
+                    "claimed": False,
+                    "reason": acoustic_reason,
+                }
         if not (
             str(current.get("status") or "") == "failed_no_charge"
             and str(current.get("terminal_state") or "") == "failed_no_charge"
@@ -248755,7 +248899,7 @@ def claim_subdub_failed_auto_multi_recovery(
         if not job_key.endswith("|subtitle_plus_dub|auto_multi_speaker"):
             conn.rollback()
             return {"ok": False, "claimed": False, "reason": "not_auto_multi_combo"}
-        if not (
+        if not allow_acoustic_recovery and not (
             current.get("multi_diarization_attempted") is True
             and str(current.get("multi_diarization_provider") or "")
             == "gemini_transcribe_multi_diarization"
@@ -248903,7 +249047,8 @@ def claim_subdub_failed_auto_multi_recovery(
             return {"ok": False, "claimed": False, "reason": "legacy_observability_override_not_allowed"}
 
         if recovery_attempt_count != 0 and not (
-            empty_http_200_correction
+            allow_acoustic_recovery
+            or empty_http_200_correction
             or mapper_alignment_correction
             or crosswalk_correction
             or legacy_observability_override
@@ -248969,9 +249114,13 @@ def claim_subdub_failed_auto_multi_recovery(
                 "last_error_stage": "",
                 "last_error_safe": "",
                 "auto_multi_recovery": recovery,
-                "auto_multi_recovery_attempt_count": recovery_attempt_count + 1,
+                "auto_multi_recovery_attempt_count": (
+                    4 if allow_acoustic_recovery else recovery_attempt_count + 1
+                ),
                 "auto_multi_recovery_correction_attempt_count": (
-                    2
+                    3
+                    if allow_acoustic_recovery
+                    else 2
                     if crosswalk_correction
                     else 1
                     if (
@@ -248992,6 +249141,17 @@ def claim_subdub_failed_auto_multi_recovery(
                         "auto_multi_recovery_observability_authority": "owner_literal_legacy_gap",
                     }
                     if legacy_observability_override
+                    else {}
+                ),
+                **(
+                    {
+                        "auto_multi_acoustic_recovery_used": True,
+                        "auto_multi_acoustic_backend": "local_wespeaker_resnet34_spectral",
+                        "auto_multi_acoustic_model_sha256": acoustic_preflight_result["model_sha256"],
+                        "auto_multi_acoustic_algorithm_version": acoustic_preflight_result["algorithm_version"],
+                        "auto_multi_acoustic_owner_authority": "owner_literal_final_recovery",
+                    }
+                    if allow_acoustic_recovery
                     else {}
                 ),
                 "updated_at": time.time(),
