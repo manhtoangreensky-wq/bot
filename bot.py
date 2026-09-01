@@ -248618,8 +248618,54 @@ def _subdub_final_acoustic_recovery_reason(
         or correction_count >= 3
     ):
         return "recovery_already_used"
+    recovery_authority = current.get("auto_multi_recovery")
+    nested_selection_valid = bool(
+        type(recovery_authority) is dict
+        and recovery_authority.get("owner_confirmed_paid") is True
+        and str(recovery_authority.get("source_sha256") or "").strip().lower()
+        == SUBDUB_FINAL_ACOUSTIC_SOURCE_SHA256
+        and str(recovery_authority.get("target_language") or "") == "English"
+        and type(recovery_authority.get("original_volume_percent")) is int
+        and recovery_authority.get("original_volume_percent") == 40
+        and type(recovery_authority.get("dub_volume_percent")) is int
+        and recovery_authority.get("dub_volume_percent") == 150
+    )
+    root_source_sha256 = current.get("source_sha256")
+    root_target_language = current.get("target_language")
+    root_original_volume = current.get("original_audio_volume_percent")
+    root_dub_volume = current.get("dubbed_voice_volume_percent")
+    root_selection_conflicts = bool(
+        (
+            root_source_sha256 not in {None, ""}
+            and (
+                not isinstance(root_source_sha256, str)
+                or root_source_sha256.strip().lower()
+                != SUBDUB_FINAL_ACOUSTIC_SOURCE_SHA256
+            )
+        )
+        or (
+            root_target_language not in {None, ""}
+            and (
+                not isinstance(root_target_language, str)
+                or root_target_language != "English"
+            )
+        )
+        or (
+            root_original_volume is not None
+            and (
+                type(root_original_volume) is not int
+                or root_original_volume != 40
+            )
+        )
+        or (
+            root_dub_volume is not None
+            and (type(root_dub_volume) is not int or root_dub_volume != 150)
+        )
+    )
     if (
-        safe_id != SUBDUB_FINAL_ACOUSTIC_JOB_ID
+        not nested_selection_valid
+        or root_selection_conflicts
+        or safe_id != SUBDUB_FINAL_ACOUSTIC_JOB_ID
         or str(current.get("internal_job_id") or current.get("job_id") or "")
         != SUBDUB_FINAL_ACOUSTIC_JOB_ID
         or str(current.get("public_code") or "")
@@ -248630,14 +248676,9 @@ def _subdub_final_acoustic_recovery_reason(
         or not str(current.get("job_key") or "").endswith(
             "|subtitle_plus_dub|auto_multi_speaker"
         )
-        or str(current.get("source_sha256") or "").strip().lower()
-        != SUBDUB_FINAL_ACOUSTIC_SOURCE_SHA256
         or str(source_sha256 or "").strip().lower()
         != SUBDUB_FINAL_ACOUSTIC_SOURCE_SHA256
-        or str(current.get("target_language") or "") != "English"
         or str(target_language or "").strip() != "English"
-        or current.get("original_audio_volume_percent") != 40
-        or current.get("dubbed_voice_volume_percent") != 150
         or type(original_volume_percent) is not int
         or original_volume_percent != 40
         or type(dub_volume_percent) is not int

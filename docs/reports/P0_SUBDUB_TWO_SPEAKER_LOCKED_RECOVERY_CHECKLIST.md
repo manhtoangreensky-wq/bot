@@ -18,13 +18,13 @@
 
 - Current SPEC: `SPEC-11`.
 - Current SUBSPEC: `SPEC-11.5B`.
-- Current phase: `POST_REBASE_GATES_PASS / EOL_GUARD_COMMIT_THEN_PUSH`.
-- Production action active: `NO; acoustic branch is local-only before Task 11`.
+- Current phase: `LIVE_FOUND_NESTED_AUTHORITY_GREEN / ONE_CORRECTION_PR`.
+- Production action active: `NO; correction source gate terminal before PR`.
 - Telegram/provider job active: `NO; #B4CB6D5FE8 is unchanged during local TDD`.
 - Wallet mutation: `0`.
-- Next allowed action: commit the measured EOL guard/evidence; lease-safe push;
-  one PR/squash/deploy/runtime; send the final acoustic recovery command once
-  for the same job and observe read-only.
+- Next allowed action: commit/push one nested-authority guard PR, deploy/read
+  exact runtime, re-snapshot the same job, then send the final acoustic recovery
+  command once and observe read-only.
 - Next forbidden action: upload, Confirm, create a replacement job, send recovery
   twice, alter wallet/price/ENV/provider endpoint, or touch exact-two files.
 
@@ -1693,7 +1693,24 @@ Task contract:
   `5A0B0864...A5E5`; content diff is empty.
 - [x] Final post-rebase compile exit `0`; YAML `3/3`, diff-check, exact hashes
   and LF attributes all terminal clean.
-- [-] One EOL-guard/evidence commit, then lease-safe push/one PR/deploy.
+- [x] PR `#967` squash-merged as `c6a431e2ea031cf1d3881d153d8d33f53fadba95`;
+  Deploy run `33516918998` SUCCESS in `3m47s`. VPS checkout exact, tracked diff
+  `0`, bot/web/nginx active, health `ok`, NumPy `2.4.6`, ORT `1.29.0`, CPU
+  model preflight PASS and all model/spec/fixture hashes exact.
+- [x] Pre-CAS read-only snapshot: root engine jobs `322`; exact job/code/owner/
+  suffix, failed-no-charge, attempt/correction `3/2`, crosswalk marker true,
+  acoustic marker absent, all five output flags false, artifact/delivery `0`,
+  charged Xu `0`. Recovery command was not sent.
+- [x] Live-found root: exact source SHA, English and `40/150` are durable under
+  `auto_multi_recovery`; their optional root copies are null. Existing guard
+  would reject before CAS even though executor already uses that nested authority.
+- [x] Nested-authority RED `2 failed, 54 deselected in 5.62s`; minimal guard
+  requires nested source/English/40/150/Owner-confirm exact, permits missing root
+  copies, rejects any present conflict, and retains source-path/SHA verification
+  inside the transaction. Focused GREEN `2 passed in 524.06s`; full recovery
+  `56 passed`; acoustic protected `48 passed`; compile/diff `0`; provider/DB/
+  wallet mutations `0`.
+- [-] One correction commit/PR/deploy, then re-snapshot and one command only.
 - [B] After exact runtime readback, snapshot and back up the same job authority,
   send `/subdub_recover_failed_auto_multi ... --confirm-paid --confirm-local-acoustic`
   exactly once, then observe read-only until final MP4/receipt or terminal failure.
