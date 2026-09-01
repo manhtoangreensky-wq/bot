@@ -830,6 +830,28 @@ pv2_r01_job28_scene2_accepted_stale_clock_red:
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
+pv2_r01_job28_scene2_pollable_task_ledger_authority:
+  phase: SOURCE_READY_TO_SHIP
+  prior_pr: 962
+  prior_merge_sha: 8624a528102ebb30a9da1a33d02da9a367c18ee6
+  prior_deploy_run: 33488979036 SUCCESS in 3m13s
+  authorization_calls_consumed_remaining: [2, 0]
+  root_cause: stale root scene_status_by_index scene2 failed outranked current task-bearing pollable provider_running queued row
+  scene1_no_task_failure_preserved: true
+  explicit_current_terminal_failure_preserved: true
+  red: 1 failed and 1 passed
+  exact_green: 2 passed in 7.57s
+  final_inverse_guard: 2 passed in 6.13s
+  focused_green: 49 passed in 9.65s
+  impact_green: 197 passed and 1 exact baseline deselected in 31.37s
+  baseline_comparator: clean main reproduced exact attempts assertion as 1 failed in 612.99s; NEW_FAILURES=0
+  strategy_gate: 32 passed and 1 exact fixture SHA baseline deselected in 6.54s
+  strategy_baseline: clean main reproduced exact fixture SHA failure in 6.42s; NEW_FAILURES=0
+  full_compile: PY_COMPILE_EXIT=0
+  locked_engine_hash: PASS
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  live_pass: false
 spec_04i_subdub_auto_two_speaker_addon:
   phase: PENDING_AFTER_SPEC_04H_9
   compatible_media_only: true
@@ -838,8 +860,8 @@ spec_04i_subdub_auto_two_speaker_addon:
   representative_live_target: one unfinished media-compatible Product Video lane
   acceptance: male/female detection; translation; two-voice dub; final MP4; receipt/report; wallet delta 0
 next_action: >-
-  Ship/deploy only accepted-replacement stall-clock reset. Keep Owner worker inactive
-  through exact runtime. Requeue existing job 28 by backup-safe CAS for poll-only
-  scene2 task; provider submit must remain impossible because global cap is 2/2.
-  Download/validate scene2 if ready, then terminal partial/no-charge. Do not submit
-  again or open another product/SPEC-04I.
+  Ship/deploy only the pollable-task ledger authority correction. Keep Owner worker
+  inactive through exact runtime. Requeue existing job 28 by backup-safe CAS for
+  poll-only scene2 task; provider submit must remain impossible because global cap
+  is 2/2. Download/validate scene2 if ready, then terminal partial/no-charge. Do not
+  submit again or open another product/SPEC-04I.

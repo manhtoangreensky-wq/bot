@@ -208,6 +208,17 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     before poll. Worker stopped; wallet/provider/identity unchanged. Receipt reset
     source RED `1 failed` -> GREEN `1 passed in 6.08s`; focused `68 passed`; impact
     `270 passed in 64.50s`. Next is deploy then poll-only existing Key4U task.
+  - [x] PR #962/runtime `8624a528...`, deploy `33488979036` SUCCESS `3m13s`,
+    reset that accepted task clock. The subsequent poll-only CAS exposed stale
+    root scene status authority: summary scene 2 `failed` overrode its current
+    pollable `provider_running/queued` task row. Source now gives authority only to
+    the current task-bearing pollable non-terminal row; scene 1 no-task failure and
+    explicit current terminal failures remain terminal. RED `1 failed, 1 passed`;
+    exact GREEN `2 passed in 7.57s`; final inverse guard `2 passed in 6.13s`;
+    focused `49 passed in 9.65s`; impact `197 passed, 1 baseline deselected in
+    31.37s`; clean main reproduced that historical failure in
+    `612.99s`, `NEW_FAILURES=0`; compile/hash gates PASS. Cap is still `2/2`; ship
+    once, then poll/download the existing scene-2 task without provider submit.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 

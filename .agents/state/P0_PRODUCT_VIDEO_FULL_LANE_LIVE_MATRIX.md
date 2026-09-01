@@ -832,6 +832,19 @@ starting the next.
   `0`, identity unchanged. Stall-reset RED `1 failed` -> GREEN `1 passed in 6.08s`;
   focused `68 passed`; impact `270 passed in 64.50s`. No submit remains authorized;
   ship correction and poll only the accepted scene-2 task.
+- [x] PR #962/runtime `8624a528...`, deploy `33488979036` SUCCESS `3m13s`,
+  reset the accepted task clock. Poll-only CAS then proved a second source RED:
+  stale root `scene_status_by_index[2]=failed` outranked the current scene-2
+  pollable `provider_running/queued` row, so the ledger terminalized without a
+  poll. Minimal authority correction lets only a current task-bearing pollable
+  non-terminal scene row override that stale summary; scene 1 remains failed with
+  no task and an explicit current provider failure still wins. RED `1 failed, 1
+  passed`; exact GREEN `2 passed in 7.57s`; final inverse guard `2 passed in
+  6.13s`; focused ledger/job28 `49 passed in 9.65s`; impact `197 passed, 1 exact
+  baseline deselected in 31.37s`. Clean main
+  reproduced the deselected historical attempts assertion as `1 failed in
+  612.99s`, so `NEW_FAILURES=0`; full compile and locked engine hash exit/PASS `0`.
+  Cap remains `2/2`, remaining `0`; the next live action may poll/download only.
 - [ ] Two distinct scene clips and one final MP4 terminal; otherwise stop at the
   exact new RED and reopen only `SPEC-04H`.
 

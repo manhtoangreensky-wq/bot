@@ -1858,3 +1858,114 @@ def test_accepted_replacement_task_resets_primary_stall_clock_before_poll() -> N
     assert ledger["aggregate_job_status"] != "failed_no_charge"
     assert ledger["active_scene_indexes"] == [2]
     assert ledger["continue_polling"] is True
+
+
+def test_pollable_scene_two_row_overrides_stale_failed_summary_without_reviving_scene_one() -> None:
+    task_id = "key4u-existing-scene-two-task"
+    scene_tasks = [
+        {
+            "scene_index": 1,
+            "status": "failed",
+            "failure_reason": "all_video_providers_submit_failed",
+            "task_id_present": False,
+            "task_pollable": False,
+            "exhausted": True,
+        },
+        {
+            "scene_index": 2,
+            "provider": "key4u_video",
+            "provider_task_id": task_id,
+            "active_task_id": task_id,
+            "status": "provider_running",
+            "provider_status_raw": "queued",
+            "task_id_present": True,
+            "task_pollable": True,
+            "submit_accepted": True,
+            "exhausted": False,
+        },
+    ]
+    result = {
+        "scene_count": 2,
+        "terminal_state": "failed_no_charge",
+        "final_decision": "failed_no_charge",
+        "aggregate_job_status": "failed_no_charge",
+        "aggregate_reason": "required_scene_exhausted_no_charge",
+        "continue_polling": False,
+        "provider_submit_allowed": False,
+        "replacement_calls_consumed": 2,
+        "replacement_calls_remaining": 0,
+        "scene_active_task_by_index": {"2": task_id},
+        "scene_status_by_index": {"1": "failed", "2": "failed"},
+        "scene_status_by_scene": {"1": "failed", "2": "failed"},
+        "scene_tasks": scene_tasks,
+        "provider_scene_tasks": copy.deepcopy(scene_tasks),
+    }
+
+    ledger = video_project_queue.product_video_scene_ledger_state(
+        {"scene_count": 2},
+        {"id": 28, "status": "failed", "attempts": 40},
+        result,
+    )
+    by_scene = {
+        int(item["scene_index"]): item for item in ledger["scene_ledger"]
+    }
+
+    assert by_scene[1]["active_task_id"] == ""
+    assert by_scene[1]["task_id_present"] is False
+    assert by_scene[1]["status"] == "failed"
+    assert by_scene[2]["active_task_id"] == task_id
+    assert by_scene[2]["task_pollable"] is True
+    assert by_scene[2]["status"] == "provider_running"
+    assert (
+        by_scene[2]["authoritative_status_source"]
+        == "current_pollable_scene_task_status"
+    )
+    assert ledger["scene_status_by_index"] == {
+        "1": "failed",
+        "2": "provider_running",
+    }
+    assert ledger["active_scene_indexes"] == [2]
+    assert ledger["exhausted_scene_indexes"] == [1]
+    assert ledger["aggregate_job_status"] != "failed_no_charge"
+    assert ledger["continue_polling"] is True
+
+
+def test_current_scene_two_terminal_failure_still_overrides_stale_running_summary() -> None:
+    task_id = "key4u-existing-scene-two-terminal-task"
+    result = {
+        "scene_count": 2,
+        "scene_active_task_by_index": {"2": task_id},
+        "scene_status_by_index": {"1": "failed", "2": "provider_running"},
+        "scene_tasks": [
+            {
+                "scene_index": 1,
+                "status": "failed",
+                "task_id_present": False,
+                "exhausted": True,
+            },
+            {
+                "scene_index": 2,
+                "provider": "key4u_video",
+                "provider_task_id": task_id,
+                "active_task_id": task_id,
+                "status": "failed",
+                "provider_status_raw": "FAILURE",
+                "failure_reason": "provider_terminal_failure",
+                "task_id_present": True,
+                "task_pollable": True,
+                "exhausted": True,
+            },
+        ],
+    }
+
+    ledger = video_project_queue.product_video_scene_ledger_state(
+        {"scene_count": 2},
+        {"id": 28, "status": "processing", "attempts": 40},
+        result,
+    )
+
+    assert ledger["scene_status_by_index"] == {"1": "failed", "2": "failed"}
+    assert ledger["active_scene_indexes"] == []
+    assert ledger["exhausted_scene_indexes"] == [1, 2]
+    assert ledger["aggregate_job_status"] == "failed_no_charge"
+    assert ledger["continue_polling"] is False
