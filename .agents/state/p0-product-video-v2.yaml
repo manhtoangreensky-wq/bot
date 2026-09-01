@@ -956,7 +956,7 @@ pv2_r01_job28_provider_task_not_exist_terminal:
   required_new_authority: received for exactly two V3 Key4U calls on existing 28/32/27; no new job/upload/confirm/ShopAIKey resubmit
   live_pass: false
 pv2_r01_job28_v3_replacement_authority:
-  phase: SOURCE_IDEMPOTENCY_CORRECTION_READY_TO_SHIP
+  phase: SOURCE_LEDGER_NAMESPACE_CORRECTION_READY_TO_SHIP
   authorization_id: pv2-r01-job28-key4u-replacements-v3
   authorization_version: 3
   identity: job 28; project 32; outbox 27; request VID-20260829-D78AA3
@@ -996,6 +996,18 @@ pv2_r01_job28_v3_replacement_authority:
   idempotency_compile_diff: exit 0
   idempotency_strategy_gate: 8 passed and 1 exact pre-existing PV2-R03 fixture SHA failure
   idempotency_yaml_secret: exit 0
+  idempotency_pr_merge: 971 / 538b3e605b65f8580d44d17f53f72b7a15f7b7bd
+  idempotency_deploy: 33538556118 SUCCESS in 3m30s
+  idempotency_runtime: bot and inactive worker exact SHA; tracked diff 0; bot/web/nginx active
+  post_deploy_current: failed/failed/acknowledged; V3 receipt scene1 only; old task hash e5ec08abdfc0; transport 0; V2 namespace missing
+  persistence_stage_claim: before/DB-after/worker-payload all preserve V2 and V3; provider/wallet 0/0
+  persistence_stage_fail_defer: persisted V2+V3 plus incoming V3-only produces V2+V3; production DB changes/provider/wallet 0/0/0
+  ledger_namespace_root: product_video_scene_ledger_state preferred partial active-only result receipt map over persisted job namespaces
+  ledger_namespace_red: 1 failed, 25 deselected in 651.64s
+  ledger_namespace_green: 1 passed, 25 deselected in 7.23s
+  ledger_namespace_focused: 52 passed in 10.66s
+  ledger_namespace_locked: 48 passed in 9.42s
+  ledger_namespace_compile_diff: exit 0
   live_pass: false
 spec_04i_subdub_auto_two_speaker_addon:
   phase: PENDING_AFTER_SPEC_04H_9
@@ -1005,8 +1017,8 @@ spec_04i_subdub_auto_two_speaker_addon:
   representative_live_target: one unfinished media-compatible Product Video lane
   acceptance: male/female detection; translation; two-voice dub; final MP4; receipt/report; wallet delta 0
 next_action: >-
-  Ship the exact versioned-idempotency propagation seam and verify runtime SHA.
-  Backup-safe classify/reset only the false V3 scene1 receipt because no new HTTP
-  transport occurred and its task is the old V2 task. Resume the same existing
-  28/32/27 worker under the unchanged cap of two genuinely new Key4U calls; stop
-  after two calls or terminal two-scene MP4. Do not open another product or SPEC-04I.
+  Ship the exact ledger namespace merge seam and verify runtime SHA. Then restore
+  immutable V2 receipts from the proven production backup and backup-safe reset only
+  the false V3 scene1 receipt because no new HTTP transport occurred and its task is
+  the old V2 task. Resume existing 28/32/27 under the unchanged cap of two genuinely
+  new Key4U calls; stop after two calls or terminal two-scene MP4. Open nothing else.

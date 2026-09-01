@@ -499,6 +499,56 @@ def test_v3_durable_merge_keeps_v2_immutable_and_accepts_only_active_v3_receipt(
     ]
 
 
+def test_v3_scene_ledger_merges_partial_active_receipt_without_dropping_v2() -> None:
+    job = _v3_job28_payload()
+    v2_receipts = copy.deepcopy(
+        job["controlled_fallback_replacement_submit_receipts_by_authorization"][
+            AUTHORIZATION_ID
+        ]
+    )
+    partial = copy.deepcopy(job)
+    partial[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ] = {
+        AUTHORIZATION_ID: {
+            "1": {
+                **v2_receipts["1"],
+                "provider_task_id": "forbidden-v2-ledger-overwrite",
+            }
+        },
+        V3_AUTHORIZATION_ID: {
+            "1": _authorization_receipt(
+                V3_AUTHORIZATION_ID,
+                3,
+                1,
+                task_id="v3-new-scene-one-task",
+            )
+        }
+    }
+    partial["controlled_fallback_replacement_authorization"].update(
+        {
+            "calls_consumed": 1,
+            "consumed_scene_indexes": [1],
+        }
+    )
+
+    ledger = video_project_queue.product_video_scene_ledger_state(
+        {},
+        job,
+        partial,
+    )
+    receipts = ledger[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ]
+
+    assert set(receipts) == {AUTHORIZATION_ID, V3_AUTHORIZATION_ID}
+    assert receipts[AUTHORIZATION_ID] == v2_receipts
+    assert sorted(receipts[V3_AUTHORIZATION_ID]) == ["1"]
+    assert ledger["replacement_authorization_id"] == V3_AUTHORIZATION_ID
+    assert ledger["replacement_calls_consumed"] == 1
+    assert ledger["replacement_calls_remaining"] == 1
+
+
 def test_replacement_policy_allows_each_scene_once_and_never_exceeds_two_calls() -> None:
     payload = _job28_payload()
     payload["scene_index"] = 1
