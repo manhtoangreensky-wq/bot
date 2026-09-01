@@ -930,6 +930,19 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
   mutation `0`; verdict Critical `0`, Important `0`. Tester surface local giữ
   đúng `4` issue templates và thêm `5` case source/resource/CAS, không tạo issue/
   Project bên ngoài.
+- Post-rebase lên exact Product Video/main runtime base
+  `47D56E5C78EFEBB5FDED42FEC456B13F84C9A37C`: Git bỏ đúng commit crosswalk
+  đã merge, giữ `12` scoped commits, branch `0 behind/12 ahead`. Focused
+  `281 passed in 529.36s`; protected exact-two/direct impact
+  `78 passed in 530.83s`; real ONNX resource `3 passed in 18.02s`.
+- Resource RED sau checkout: two JSON fixtures có content Git LF nhưng working
+  tree bị `core.autocrlf=true` đổi CRLF, làm SHA mismatch trước inference. Fix
+  chỉ thêm `.gitattributes text eol=lf` cho đúng hai fixture; bytes quay lại exact
+  `C061A165...B802F` và `5F16F84E...71D95F`, resource GREEN `3 passed`.
+  Không đổi JSON data, hash constants, model hay production behavior.
+- Cùng gate hash phát hiện spec approved Markdown cũng bị checkout CRLF. EOL
+  contract được mở rộng đúng một path spec; byte rewrite chỉ thay CRLF→LF và
+  khôi phục exact approved SHA-256 `5A0B0864...A5E5`, nội dung Git không đổi.
 - Trạng thái vận hành hiện tại là `SOURCE_AND_RESOURCE_PASS / NOT_DEPLOYED /
   LIVE_PENDING`. Chỉ được công nhận LIVE PASS khi **chính** job `#B4CB6D5FE8`
   giao MP4 thật rồi một receipt, có `3–8` speaker âm học, số distinct voice bằng

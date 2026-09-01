@@ -18,13 +18,13 @@
 
 - Current SPEC: `SPEC-11`.
 - Current SUBSPEC: `SPEC-11.5B`.
-- Current phase: `LOCAL_SOURCE_AND_RESOURCE_PASS / TASK_10_VERIFY_DOCS`.
+- Current phase: `POST_REBASE_GATES_PASS / EOL_GUARD_COMMIT_THEN_PUSH`.
 - Production action active: `NO; acoustic branch is local-only before Task 11`.
 - Telegram/provider job active: `NO; #B4CB6D5FE8 is unchanged during local TDD`.
 - Wallet mutation: `0`.
-- Next allowed action: finish measured Task 10 gates; acquire exact shared
-  resources; fetch/rebase; one PR/squash/deploy/runtime; send the final acoustic
-  recovery command once for the same job and observe read-only.
+- Next allowed action: commit the measured EOL guard/evidence; lease-safe push;
+  one PR/squash/deploy/runtime; send the final acoustic recovery command once
+  for the same job and observe read-only.
 - Next forbidden action: upload, Confirm, create a replacement job, send recovery
   twice, alter wallet/price/ENV/provider endpoint, or touch exact-two files.
 
@@ -1677,8 +1677,23 @@ Task contract:
   fixture-specific acoustic branch `0`, expected-speaker hint `0`, provider
   crosswalk call additions `0`, network imports `0`, raw PCM/embedding/payload
   persistence `0`, wallet mutation `0`; Critical `0`, Important `0`.
-- [-] Task 10 commit only, then exact shared acquisition and Task 11
-  fetch/rebase/PR/deploy.
+- [x] Task 10 committed as pre-rebase `9d02950`; tracked tree was clean except
+  Owner untracked `.agents/tools/` and `artifacts/`.
+- [x] Task 11 shared LIVE/CHROME/VPS acquired and broadcast. Fetch measured
+  exact main `47d56e5c78efebb5fded42fec456b13f84c9a37c`; rebase skipped only already-
+  applied crosswalk `70aff60`, retained `12` scoped commits, `0 behind/12 ahead`.
+- [x] Post-rebase focused `281 passed in 529.36s`; protected replay `78 passed
+  in 530.83s`; real model/fixture `3 passed in 18.02s`.
+- [x] Resource RED was packaging-only: `core.autocrlf=true` converted the two
+  hash-locked JSON fixtures to CRLF on checkout. `.gitattributes` now forces
+  `text eol=lf`; exact hashes restored to `C061A165...B802F` and
+  `5F16F84E...71D95F`; no fixture data/hash constant/production change.
+- [x] Same hash gate found approved spec Markdown checked out CRLF. Its dedicated
+  `eol=lf` attribute plus mechanical normalization restored exact spec SHA-256
+  `5A0B0864...A5E5`; content diff is empty.
+- [x] Final post-rebase compile exit `0`; YAML `3/3`, diff-check, exact hashes
+  and LF attributes all terminal clean.
+- [-] One EOL-guard/evidence commit, then lease-safe push/one PR/deploy.
 - [B] After exact runtime readback, snapshot and back up the same job authority,
   send `/subdub_recover_failed_auto_multi ... --confirm-paid --confirm-local-acoustic`
   exactly once, then observe read-only until final MP4/receipt or terminal failure.

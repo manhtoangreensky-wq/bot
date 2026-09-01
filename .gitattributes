@@ -6,3 +6,6 @@ deploy/localbotapi/release/systemd/* text eol=lf
 deploy/localbotapi/bootstrap/*.sh text eol=lf
 deploy/localbotapi/bootstrap/*.py text eol=lf
 deploy/localbotapi/bootstrap/systemd/* text eol=lf
+tests/fixtures/subdub_auto_multi_fixture_words.json text eol=lf
+tests/fixtures/subdub_auto_multi_fixture_acoustic_regions.json text eol=lf
+docs/superpowers/specs/2026-09-01-subdub-auto-multi-local-speaker-embedding-design.md text eol=lf

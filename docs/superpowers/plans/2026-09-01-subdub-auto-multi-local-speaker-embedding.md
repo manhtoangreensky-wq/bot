@@ -25,7 +25,7 @@ subagents.
 | 1–8 | `COMPLETED` | Commits `0f72f23` through `b54ac52`; every production behavior followed focused RED then minimal GREEN |
 | 9 | `COMPLETED` | Commit `0eb04d1`; real offline fixture gate selected stable `k=5` twice with the hash-locked model |
 | 10 | `COMPLETED_PENDING_COMMIT` | Operational truth/tester/state updated; all fresh gates terminal; exact diff review Critical `0` / Important `0` |
-| 11 | `PENDING_TASK_10` | No remote/live action until Task 10 is terminal and exact shared-resource acquisition markers are sent |
+| 11 | `READY_TO_PUSH` | Shared resources acquired; exact main `47d56e5`; focused/resource/protected/compile/hash gates terminal; LF guard/evidence commit pending before one PR/deploy/recovery |
 
 This ledger is the resumable task state; the detailed unchecked command boxes
 below remain the immutable implementation recipe and are not rewritten as
