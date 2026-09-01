@@ -515,6 +515,103 @@ def acoustic_state_fields() -> dict:
     }
 
 
+def test_acoustic_failure_evidence_is_bounded_and_contains_no_raw_words():
+    error = bot.subdub_speaker_cast.AutoCastManualRequired()
+    error.__cause__ = ValueError("acoustic_cluster_unstable")
+    words = acoustic_pipeline_words()
+
+    evidence = bot.subdub_multi_acoustic_failure_evidence(
+        error,
+        words,
+        duration_seconds=12.0,
+    )
+
+    assert evidence == {
+        "multi_acoustic_failure_code": "acoustic_cluster_unstable",
+        "multi_acoustic_failure_word_count": 30,
+        "multi_acoustic_failure_duration_ms": 12_000,
+    }
+    serialized = repr(evidence)
+    assert "word0" not in serialized
+    assert "speaker" not in serialized
+
+
+def test_exact_multi_persists_bounded_failure_evidence_before_reraising(
+    monkeypatch,
+    tmp_path,
+):
+    words = acoustic_pipeline_words()
+    updates = []
+
+    async def resolve(*_args, **_kwargs):
+        return {
+            "source_kind": "asr",
+            "subtitle": "1\n00:00:00,000 --> 00:00:12,000\nsource\n",
+            "script": "source",
+            "asr_provider": "deepgram",
+            "segments": [{"index": 1, "start": 0.0, "end": 12.0, "text": "source"}],
+            "word_timeline": words,
+            "duration_seconds": 12.0,
+        }
+
+    async def extract(*_args, **_kwargs):
+        path = tmp_path / "acoustic.pcm"
+        path.write_bytes(b"\x01\x00" * 8_000)
+        return str(path)
+
+    async def fail(*_args, **_kwargs):
+        error = bot.subdub_speaker_cast.AutoCastManualRequired()
+        error.__cause__ = ValueError("acoustic_cluster_unstable")
+        raise error
+
+    monkeypatch.setattr(bot, "video_dubbing_resolve_source_script", resolve)
+    monkeypatch.setattr(bot, "_extract_subdub_auto_pcm", extract)
+    monkeypatch.setattr(bot.auto_multi_speaker, "run_local_acoustic_diarization_off_event_loop", fail)
+    monkeypatch.setattr(bot, "set_video_dubbing_artifact", lambda *_args: "source-ref")
+    pending = {
+        "_pipeline_job_key": "exact-job-key",
+        "_pipeline_workspace": str(tmp_path),
+    }
+
+    def preserve_pending(_uid, step, **fields):
+        pending.update(fields)
+        pending["step"] = step
+        return dict(pending)
+
+    monkeypatch.setattr(bot, "set_video_dubbing_pending", preserve_pending)
+    monkeypatch.setattr(bot, "update_subtitle_dub_pipeline_job", lambda key, **fields: updates.append((key, fields)) or fields)
+
+    with pytest.raises(bot.subdub_speaker_cast.AutoCastManualRequired):
+        asyncio.run(
+            bot.video_dubbing_prepare_subtitles(
+                None,
+                {
+                    "step": "processing",
+                    "video_processing_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                    "source_file_id": "fixture",
+                    "source_media_type": "video",
+                    "source_mime_type": "video/mp4",
+                    "voice_kind": "auto_speaker_gender",
+                    "voice_selection_mode": "auto_speaker",
+                    "auto_speaker_lane": "multi",
+                    "_pipeline_job_key": "exact-job-key",
+                    "_pipeline_workspace": str(tmp_path),
+                    "_pipeline_source_bytes_override": b"source",
+                    "_pipeline_source_content_type_override": "video/mp4",
+                },
+                7,
+                allow_confirmed_product=True,
+                require_auto_cast=True,
+            )
+        )
+
+    assert updates == [("exact-job-key", {
+        "multi_acoustic_failure_code": "acoustic_cluster_unstable",
+        "multi_acoustic_failure_word_count": 30,
+        "multi_acoustic_failure_duration_ms": 12_000,
+    })]
+
+
 def test_pending_state_preserves_bounded_acoustic_field_types(monkeypatch):
     monkeypatch.setattr(bot, "USER_PENDING", {})
 
