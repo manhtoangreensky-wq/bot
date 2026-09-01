@@ -791,3 +791,61 @@ Broad branch `373 passed, 1 skipped, exact same 61 baseline failures in 37.98s`,
 therefore `NEW_FAILURES=0`. Locked engine hash PASS in `5.05s`; direct and full
 compile plus diff-check exit `0`. Source verification made no provider call or
 wallet mutation.
+
+## Provider task terminally absent after poll-contract recovery
+
+PR #966 squash/runtime `47d56e5c78efebb5fded42fec456b13f84c9a37c`;
+deploy `33511826474` SUCCESS in `3m57s`. The latest shared runtime
+`3d45e2e9755279523b812de7f57e02df35f73e7b` contains PR #966 by ancestry. Bot and
+Owner worker matched exact runtime, tracked diff `0`, bot/web/nginx active and
+health OK; Owner worker remained inactive before CAS.
+
+Snapshot rehearsal, production alias-clear CAS and deployed ledger verifier passed.
+Production backup is `/opt/toanaas/bot/delete/pv2-r01-job28-scene2-poll-only-
+production-20260901T215503.json`, SHA `16201473...`, mode `0600`. Scene 1 was failed
+and taskless; scene 2 retained accepted task hash prefix `925d3315ec8a`, active/
+pollable; cap `2/0`, submit false and finance unchanged.
+
+Owner worker PID `1016755` claimed existing job `28` exactly once and was stopped
+inactive PID `0` after terminal. Sanitized forensic proves both source corrections
+were in effect: `provider_poll_contract_recovered=true`, endpoint source
+`KEY4U_VEO_VIDEO_POLL_URL`, and `poll_task_id_model_qualified=true`. Key4U returned
+HTTP `400` with safe message `task_not_exist`. Root submit remained false with HTTP
+`0`; no third submit occurred; accepted task hash/cap/identity remained unchanged;
+artifact, concat and delivery were `0`; wallet `200/0`, transactions `0`, credit
+events `1`, provider usage `0`, charged Xu `0`.
+
+This is now an external authority blocker, not another source-routing ambiguity.
+Both approved replacement calls are consumed and the only accepted task is absent
+at provider. Producing the required two-scene MP4 needs a new explicit Owner paid-
+call authorization on existing identity `job 28 / project 32 / outbox 27`. Under
+the current authorization, no third submit, new job/project/outbox, upload/Confirm
+replay or ShopAIKey resubmit is permitted. `PV2-R01`, `SPEC-04H.8/.9` and
+`SPEC-04I` remain open.
+
+## V3 two-scene replacement authority
+
+The Owner supplied a new exact V3 authorization for existing identity `job 28 /
+project 32 / outbox 27` only. V2 remains immutable and consumed at `2/0`. V3 grants
+exactly two new paid Key4U calls: one replacement for scene 1 and one for scene 2.
+It forbids a new job/project/outbox, upload or Confirm replay and any ShopAIKey
+resubmit. User-visible/persisted/planned price remains `144/144/144`, provider
+budget/cost cap remains `212/212`, and Owner charged Xu remains `0`. Execution must
+stop after two V3 calls or a terminal two-scene MP4, whichever happens first.
+
+Source audit found one exact seam before production CAS: durable worker merge kept
+only the active authorization's receipt namespace, so activating V3 could erase the
+historical V2 receipts. The RED reproduced only that loss: `1 failed, 2 passed, 22
+deselected in 635.35s`. The minimal correction copies every persisted namespace
+unchanged and permits incoming receipts only within the persisted active V3
+namespace. V2 replay or overwrite is ignored, while V3 starts independently at
+`0/2` and each scene can consume only one slot.
+
+Exact V3 GREEN is `3 passed, 22 deselected in 5.39s`; job28 focused is `50 passed
+in 12.34s`; focused plus locked engine/UI comparators are `78 passed in 9.92s`.
+The broad branch has `338 passed, 73 failed`; clean main has `335 passed` and the
+exact same 73 failed test IDs in `715.58s`, therefore `NEW_FAILURES=0`. Full compile
+for `bot.py`, `local_worker.py`, `services/remote_worker_api.py` and the changed test
+returned exit `0`; diff-check passed. Source gates made `0` provider calls and `0`
+wallet mutations. Next action is one PR/deploy, exact-runtime readback, backup-safe
+rehearsal/CAS, then one worker start under the V3 hard stop.
