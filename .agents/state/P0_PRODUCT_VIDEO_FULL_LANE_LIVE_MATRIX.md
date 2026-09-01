@@ -863,6 +863,25 @@ starting the next.
   explicitly failed+exhausted+taskless suppress task-bearing history for that
   scene; a disagreeing row preserves ownership. Scene 2's real accepted task
   remains active/pollable. Provider calls and wallet mutations `0`.
+- [-] PR #964 squash/runtime `85cb4482...`; deploy `33501305826` SUCCESS in
+  `3m25s`; bot and inactive Owner worker exact SHA/clean, services active/health
+  OK. Snapshot plus deployed pre-start verifier passed after CAS cleared every
+  scene-1 task alias; production backup SHA `25d54637...`, mode `0600`. Worker PID
+  `996057` claimed existing job `28` once and terminalized. Terminal forensic proves
+  no third submit: root submit false/HTTP `0`, every new attempt is `phase=poll`,
+  Key4U poll HTTP `400`, accepted scene-2 raw task hash prefix `925d3315ec8a`
+  unchanged, cap `2/0`, provider usage/transactions/charged Xu `0`, wallet `200/0`,
+  artifact/concat/delivery `0`. Worker stopped inactive PID `0`.
+- [x] Poll-contract root is isolated to official Key4U OpenAI video. Runtime and
+  submit evidence use model `veo3.1-fast` with a raw 37-character `task_...`, while
+  official GET `/v1/videos/{id}` examples use a model-qualified ID such as
+  `sora-2:task_...`; raw GET returned the measured `400`. Minimal adapter fix adds
+  the configured model exactly once only for Key4U official hosts + exact OpenAI
+  poll path + raw `task_...`. Composite IDs, generic query, Kling, Hailuo and custom
+  proxy stay unchanged. RED `1 failed, 5 passed in 8.52s`; exact GREEN `6 passed
+  in 4.93s`; focused Key4U/job28 `52 passed in 6.38s`; broad branch `371 passed,
+  1 skipped, 61 failed in 48.17s` vs clean main exact same 61 IDs with `365 passed,
+  1 skipped in 601.32s`, `NEW_FAILURES=0`; locked hash/full compile/diff PASS.
 - [ ] Two distinct scene clips and one final MP4 terminal; otherwise stop at the
   exact new RED and reopen only `SPEC-04H`.
 
