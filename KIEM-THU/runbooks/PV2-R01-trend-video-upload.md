@@ -665,3 +665,27 @@ keeps the task poll-only at cap. RED `1 failed`; exact GREEN `1 passed in 6.08s`
 focused `68 passed in 11.04s`; affected impact `270 passed in 64.50s`. Source tests
 made no provider call or wallet mutation. Next deploy/CAS may only poll the existing
 scene-2 task; it cannot submit any third call.
+
+## Pollable scene-2 task ledger authority RED
+
+PR #962 merged/runtime exact SHA
+`8624a528102ebb30a9da1a33d02da9a367c18ee6`; deploy run `33488979036`
+SUCCESS in `3m13s`. The backup-safe poll-only CAS kept existing identities and
+authorization cap `2/2`, but the worker terminalized before polling because the
+persisted root summary still said scene 2 was failed. The current task-bearing
+scene row remained `provider_running/queued`, pollable, elapsed `0` and not
+stalled; scene 1 remained failed with no task.
+
+The ledger previously ranked the stale failed summary above the current running
+row whenever that row did not carry a separate current-status telemetry field.
+The minimal correction treats only a current scene task row with a pollable task
+and a non-terminal status as authoritative over the stale failed summary. It does
+not copy an active task into scene 1, and explicit current provider failure remains
+terminal. RED `1 failed, 1 passed`; exact GREEN `2 passed in 7.57s`; focused
+inverse guard `2 passed in 6.13s`; job28/ledger `49 passed in 9.65s`; impact
+`197 passed, 1 deselected in 31.37s`.
+Clean main reproduced the deselected historical attempts assertion as `1 failed in
+612.99s`, therefore `NEW_FAILURES=0`. Full compile returned
+`PY_COMPILE_EXIT=0`; locked engine route hash PASS. Source verification made no
+provider call or wallet mutation. The only allowed live continuation is polling
+and downloading the already accepted scene-2 task; no third submit is authorized.

@@ -7667,11 +7667,28 @@ def product_video_scene_ledger_state(
         )
         current_status_class = _status_class(current_status_raw)
         historical_status_class = _status_class(historical_status_raw)
+        scene_row_status = _status_class(merged.get("status"))
+        pollable_scene_overrides_stale_failure = bool(
+            task_ids
+            and merged.get("task_pollable")
+            and source_name.endswith(
+                (
+                    ".scene_tasks",
+                    ".provider_scene_tasks",
+                    ".product_video_scene_tasks",
+                )
+            )
+            and _status_class(record.get("status")) == "failed"
+            and scene_row_status in {"running", "not_start", "pending"}
+            and current_status_class != "failed"
+            and historical_status_class != "failed"
+        )
         success_with_result = bool(current_status_class == "succeeded" and result_present)
         provider_status_conflict = bool(success_with_result and historical_status_class == "not_start")
         trusted_status_authority = bool(
             clip_valid
             or success_with_result
+            or pollable_scene_overrides_stale_failure
             or (
                 current_status_raw
                 and task_ids
@@ -7690,6 +7707,9 @@ def product_video_scene_ledger_state(
         elif success_with_result:
             candidate_status = "result_pending_validation"
             authoritative_status_source = f"current_result_bearing_success:{current_status_source or 'provider_response'}"
+        elif pollable_scene_overrides_stale_failure:
+            candidate_status = scene_row_status
+            authoritative_status_source = "current_pollable_scene_task_status"
         elif current_status_raw:
             candidate_status = current_status_class
             authoritative_status_source = f"current_provider_status:{current_status_source}"
