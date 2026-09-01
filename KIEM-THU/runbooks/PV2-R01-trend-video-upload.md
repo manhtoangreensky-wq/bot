@@ -625,3 +625,21 @@ returned Key4U task ID, never the old ShopAIKey task. Focused gate `55 passed,
 compile `0`; branch and clean main share the same seven historical failures, so
 `NEW_FAILURES=0`. Source verification made no provider call or wallet mutation.
 LIVE PASS remains open until real two-scene MP4.
+
+## Runtime explicit legacy VEO endpoint normalization
+
+PR #960 merged/runtime `9d663f4eb519a69f59b8bb8d7951c1a1d5d1dcd0`;
+deploy run `33481990125` SUCCESS in `3m40s`. Bot and Owner worker source were
+synchronized exact, tracked diff `0`, worker inactive. A provider-free resolver
+preflight using the real worker environment showed auth/config ready but explicit
+`KEY4U_VEO_VIDEO_ENDPOINT` still pointed to `api.key4u.vn/v1/videos`. Because
+explicit config intentionally outranks derived defaults, PR #960 did not replace it.
+
+The bounded correction recognizes only official Key4U hosts (`api.key4u.vn` and
+`api.key4u.shop`) with the exact legacy path `/v1/videos`, normalizing that submit
+path to `/v1/videos/generations`. Poll `/v1/videos/{task_id}` stays unchanged.
+Custom proxy endpoints and all Kling/Hailuo contracts remain explicit and unchanged.
+RED `1 failed in 5.51s`; exact GREEN `1 passed in 5.06s`; family/custom-proxy gate
+`24 passed in 5.75s`; affected impact `269 passed in 60.93s`. Source verification
+made no provider call or wallet mutation. Job #28 remains terminal, worker inactive,
+scene-1 receipt consumed and scene-2 authorization unused.

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
@@ -227,6 +228,28 @@ def _key4u_official_google_veo_endpoints(
     )
 
 
+def _normalize_key4u_official_google_veo_submit_endpoint(
+    submit_url: str,
+    submit_source: str,
+) -> tuple[str, str]:
+    parsed = urllib.parse.urlsplit(str(submit_url or "").strip())
+    if (
+        (parsed.hostname or "").lower() in {"api.key4u.vn", "api.key4u.shop"}
+        and parsed.path.rstrip("/") == "/v1/videos"
+    ):
+        normalized = urllib.parse.urlunsplit(
+            (
+                parsed.scheme,
+                parsed.netloc,
+                "/v1/videos/generations",
+                "",
+                "",
+            )
+        )
+        return normalized, f"normalized:{submit_source or 'key4u_official_videos'}"
+    return submit_url, submit_source
+
+
 def _cost_tier_allowed(product_tier: str, model_cfg: dict[str, Any]) -> bool:
     model_cost = str(model_cfg.get("cost_tier") or model_cfg.get("tier") or "").strip().lower()
     if not model_cost:
@@ -289,6 +312,13 @@ def model_interface_contract(
     if family in {"minimax_hailuo", "google_veo"}:
         submit_url, submit_source = _first_endpoint(data, _KEY4U_EXCLUSIVE_ENDPOINT_ENVS.get(family, ()))
         poll_url, poll_source = _first_endpoint(data, _KEY4U_EXCLUSIVE_POLL_ENVS.get(family, ()))
+        if family == "google_veo" and submit_url:
+            submit_url, submit_source = (
+                _normalize_key4u_official_google_veo_submit_endpoint(
+                    submit_url,
+                    submit_source,
+                )
+            )
         if family == "google_veo" and not submit_url:
             (
                 submit_url,

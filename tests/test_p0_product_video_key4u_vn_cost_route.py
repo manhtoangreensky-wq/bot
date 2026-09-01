@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from providers.key4u_provider import config_from_env
 from providers.video_generic_http_provider import (
     GenericHttpVideoProvider,
@@ -228,13 +230,14 @@ def _request_for_resolution(resolution, *, seconds, prompt="Product video scene.
     )
 
 
-def test_key4u_veo_fallback_uses_openai_multipart_and_persists_poll_url(monkeypatch):
+def test_key4u_veo_normalizes_legacy_videos_endpoint_to_official_json_contract(monkeypatch):
     env = _key4u_env(
         KEY4U_VEO_VIDEO_ENDPOINT=f"{KEY4U_VN}/v1/videos",
         KEY4U_VEO_VIDEO_POLL_URL=f"{KEY4U_VN}/v1/videos/{{task_id}}",
     )
     resolution = resolve_product_video_model(
         tier=400,
+        provider_chain=["key4u_video"],
         scene_count=2,
         required_capability="text_to_video",
         requires_concat=True,
@@ -243,8 +246,8 @@ def test_key4u_veo_fallback_uses_openai_multipart_and_persists_poll_url(monkeypa
     provider = _key4u_provider(env)
     captured = {}
 
-    def fake_multipart(url, fields, **kwargs):
-        captured.update({"url": url, "fields": fields})
+    def fake_json(url, payload=None, **kwargs):
+        captured.update({"url": url, "payload": payload, "method": kwargs.get("method", "POST")})
         return {
             "ok": True,
             "status_code": 200,
@@ -252,21 +255,71 @@ def test_key4u_veo_fallback_uses_openai_multipart_and_persists_poll_url(monkeypa
             "response_shape": {"type": "dict"},
         }
 
-    monkeypatch.setattr(provider, "_open_multipart_form", fake_multipart, raising=False)
+    monkeypatch.setattr(provider, "_open_json", fake_json)
+    monkeypatch.setattr(
+        provider,
+        "_open_multipart_form",
+        lambda *_args, **_kwargs: pytest.fail("legacy /v1/videos must normalize to official JSON contract"),
+    )
     result = provider.submit_video_job(_request_for_resolution(resolution, seconds=8))
 
     assert result.ok is True
+    assert resolution["provider_endpoint_source"] == (
+        "normalized:KEY4U_VEO_VIDEO_ENDPOINT"
+    )
+    assert resolution["provider_submit_url_override"] == (
+        f"{KEY4U_VN}/v1/videos/generations"
+    )
     assert captured == {
-        "url": f"{KEY4U_VN}/v1/videos",
-        "fields": {
+        "url": f"{KEY4U_VN}/v1/videos/generations",
+        "payload": {
             "model": "veo_3_1-fast",
             "prompt": "Product video scene.",
-            "seconds": "8",
-            "size": "9x16",
-            "watermark": "false",
+            "resolution": "1080p",
+            "aspect_ratio": "9:16",
+            "duration": 8,
         },
+        "method": "POST",
     }
     assert result.raw["provider_poll_url_override"] == f"{KEY4U_VN}/v1/videos/{{task_id}}"
+
+
+def test_key4u_veo_keeps_custom_proxy_videos_endpoint_override(monkeypatch):
+    proxy = "https://video-proxy.example.com"
+    env = _key4u_env(
+        KEY4U_VEO_VIDEO_ENDPOINT=f"{proxy}/v1/videos",
+        KEY4U_VEO_VIDEO_POLL_URL=f"{proxy}/v1/videos/{{task_id}}",
+    )
+    resolution = resolve_product_video_model(
+        tier=400,
+        provider_chain=["key4u_video"],
+        scene_count=2,
+        required_capability="text_to_video",
+        requires_concat=True,
+        env=env,
+    )
+    provider = _key4u_provider(env)
+    captured = {}
+
+    def fake_multipart(url, fields, **_kwargs):
+        captured.update({"url": url, "fields": fields})
+        return {
+            "ok": True,
+            "status_code": 200,
+            "body": {"id": "custom_proxy_task", "status": "queued"},
+            "response_shape": {"type": "dict"},
+        }
+
+    monkeypatch.setattr(provider, "_open_multipart_form", fake_multipart)
+    result = provider.submit_video_job(
+        _request_for_resolution(resolution, seconds=8)
+    )
+
+    assert result.ok is True
+    assert resolution["provider_endpoint_source"] == "KEY4U_VEO_VIDEO_ENDPOINT"
+    assert resolution["provider_submit_url_override"] == f"{proxy}/v1/videos"
+    assert captured["url"] == f"{proxy}/v1/videos"
+    assert captured["fields"]["model"] == "veo_3_1-fast"
 
 
 def test_key4u_veo_derives_current_official_generation_contract_without_new_env():

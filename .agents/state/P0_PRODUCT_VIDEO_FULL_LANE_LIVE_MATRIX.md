@@ -818,6 +818,12 @@ starting the next.
   JSON, and records transport truth. RED `2 failed`; GREEN `2 passed`; focused
   `55 passed, 1 exact baseline Tail deselected`; impact `268 passed in 65.52s`;
   compile `0`; branch/clean main share the same 7 historical failures.
+- [x] PR #960/runtime `9d663f4e...`, deploy `33481990125` SUCCESS `3m40s`.
+  Runtime preflight was provider-free and found explicit production VEO path
+  `/v1/videos`; this correctly overrode the derived fallback, but is stale versus
+  official docs. Exact official-host normalization RED `1 failed` -> GREEN `1 passed
+  in 5.06s`; custom proxy + family guard `24 passed`; impact `269 passed in 60.93s`.
+  Scene-2 slot is still unused and job remains terminal/inactive.
 - [ ] Two distinct scene clips and one final MP4 terminal; otherwise stop at the
   exact new RED and reopen only `SPEC-04H`.
 
