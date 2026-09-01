@@ -1,0 +1,23 @@
+PANNs pretrained model record license: Creative Commons Attribution 4.0
+International (CC BY 4.0)
+
+Licensed work:
+- Upstream checkpoint: MobileNetV1_mAP=0.389.pth
+- Zenodo record: https://zenodo.org/records/3960586
+- DOI: https://doi.org/10.5281/zenodo.3960586
+- Upstream MD5: a419303e1c88aa1b9d2ac3811563d371
+- Derived ONNX SHA-256:
+  0DA2C433751FD5AAC39593476E9A4B7A92B41D8492EB8DDB28D7EAE8D7BD7BCD
+
+Creators:
+Qiuqiang Kong, Yin Cao, Turab Iqbal, Yuxuan Wang, Wenwu Wang, and
+Mark Plumbley.
+
+License URL:
+https://creativecommons.org/licenses/by/4.0/
+
+Under CC BY 4.0, sharing and adaptation are permitted for any purpose,
+including commercially, provided appropriate credit is given, a link to the
+license is provided, and changes are indicated. This repository converts the
+PyTorch checkpoint to ONNX for deterministic local inference; no training data
+is redistributed.
