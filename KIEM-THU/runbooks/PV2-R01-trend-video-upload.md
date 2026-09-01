@@ -538,3 +538,35 @@ Key4U attempt on the existing job, including scene scope, no ShopAIKey resubmit,
 quote `144/144/144`, budget/cost `212/212` and charged Xu `0`. `PV2-R01` remains
 open until two clips, final MP4, Add-ons, receipt/report and zero-wallet acceptance
 all pass.
+
+## Job 28 versioned two-scene replacement authority
+
+Owner authorized exactly two new paid Key4U calls on the existing identity only:
+one scene-1 replacement and one scene-2 replacement. Job/project/outbox remain
+`28/32/27`; request remains `VID-20260829-D78AA3`; upload and Confirm are not
+replayed; ShopAIKey is poll-only/submit-forbidden; quote remains `144/144/144`,
+provider budget/cost remains `212/212`, and Owner charged Xu remains `0`.
+
+Source uses authorization version `2`, exact allowlist `[1,2]`, per-scene call cap
+`1`, global cap `2`, immutable legacy receipt history and a separate immutable
+receipt namespace keyed by authorization ID. A scene with an accepted task is
+poll-only. A submit without task or a later terminal failed accepted task consumes
+that scene slot and stops failed-no-charge. A ShopAIKey result cannot consume the
+new Key4U authority. The existing per-scene orchestrator stays byte-locked.
+
+Measured evidence: initial RED `5 failed in 5.11s`; exact source, safety and
+locked-engine comparators `15 passed in 7.06s`; legacy receipt plus replacement
+focused gate `37 passed in 7.00s`; final affected impact batch
+`252 passed in 77.55s`; full
+`py_compile` for bot, workers, four services and test exits `0`; diff check exits
+`0`. `bot.py`, Tail, SubDub sources and the locked orchestrator hash are unchanged.
+Strategy/Tail verification is `47 passed` plus the exact pre-existing Script
+fixture SHA test failure; clean source reproduces that same ID and hashes, so
+`NEW_FAILURES=0`.
+Source verification made `0` provider calls and `0` wallet mutations.
+
+This is source-ready only, not LIVE PASS. Next: one PR/deploy/runtime readback,
+then snapshot rehearsal and mode-0600 backup before one CAS that installs the new
+authorization on the existing rows. Start the Owner worker once and stop after two
+new calls, any terminal replacement failure, or terminal two-scene MP4. Only the
+terminal MP4/receipt/report/zero-wallet evidence may close `SPEC-04H.8/.9`.

@@ -780,17 +780,25 @@ starting the next.
   `ambiguous_submit_called_without_transport_receipt`, authorization `consumed`,
   counts `[1,0]`, attempts `40`, task-set SHA unchanged, charged/provider usage/
   wallet/artifact/delivery deltas `0`.
-- [-] `SPEC-04H.8` is blocked only at a new paid-action gate. The prior exact
-  scene-1 authorization is consumed and cannot be reused. No CAS/restart/provider
-  call may occur until Owner explicitly authorizes one replacement Key4U attempt
-  and its exact scene scope. `PV2-R01` remains open; no LIVE PASS is claimed.
-- [ ] Ship receipt persistence only. After deploy, persist the current ambiguous
-  scene-1 receipt as consumed/failed-no-charge without provider call. A new paid
-  attempt requires a new exact Owner authorization; ShopAIKey resubmit remains
-  forbidden.
-- [ ] Poll cadence respects `next_poll_at`; poll-only claims do not increase attempts.
-- [ ] Only scene 1 may use the controlled Key4U fallback; scene 2 keeps its own
-  product-correct provider/task authority.
+- [x] Owner authorized exactly two new Key4U calls for existing job/project/outbox
+  `28/32/27`: one replacement per scene, no new identity row, no upload/Confirm,
+  no ShopAIKey resubmit, quote `144/144/144`, budget/cost `212/212`, charged `0`.
+- [x] `SPEC-04H.8` source is READY_TO_SHIP. Authorization v2 has scene allowlist
+  `[1,2]`, per-scene cap `1`, global cap `2`, immutable legacy history and one
+  immutable receipt namespace per authorization. Accepted tasks are poll-only;
+  no-task or terminal failed tasks consume their slot and stop failed-no-charge.
+  RED `5 failed in 5.11s`; exact + locked-engine `15 passed in 7.06s`; focused
+  `37 passed`; impact `252 passed in 77.55s`; full compile/diff `0`. The locked orchestrator hash,
+  `bot.py`, Tail and SubDub sources are unchanged.
+  Strategy/Tail matrix has `47 passed` and the exact baseline Script fixture SHA
+  failure reproduced on clean source; `NEW_FAILURES=0`.
+- [ ] Ship/deploy one PR, then install the new authorization with rehearsal/backup/
+  production CAS while Owner worker is inactive. CAS must preserve receipt history,
+  exact identities, attempts, quote, provider cap and wallet/provider baselines.
+- [ ] Poll cadence respects `next_poll_at`; an accepted Key4U task is poll-only and
+  cannot spend a second slot for the same scene.
+- [ ] Scene 1 and scene 2 may each consume exactly one replacement slot; authority
+  cannot leak across scenes and total replacement calls cannot exceed `2`.
 - [ ] Two distinct scene clips and one final MP4 terminal; otherwise stop at the
   exact new RED and reopen only `SPEC-04H`.
 

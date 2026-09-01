@@ -725,6 +725,33 @@ pv2_r01_job28_submit_receipt_live_red:
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
+pv2_r01_job28_two_scene_replacement_authority:
+  phase: SOURCE_READY_TO_SHIP
+  owner_authorization: exactly 2 new paid Key4U calls; one replacement scene 1 and one scene 2; existing job/project/outbox only
+  identity: [28, 32, 27]
+  request_id: VID-20260829-D78AA3
+  no_new_identity: true
+  no_upload_confirm_replay: true
+  shopaikey_submit_forbidden: true
+  allowed_scene_indexes: [1, 2]
+  per_scene_call_cap: 1
+  global_call_cap: 2
+  customer_quote_xu: [144, 144, 144]
+  provider_budget_cost_xu: [212, 212]
+  owner_charged_xu: 0
+  red: 5 failed in 5.11s
+  exact_green: 15 passed in 7.06s including locked-engine hash comparator
+  focused_green: 37 passed in 7.00s
+  impact_green: 252 passed in 77.55s
+  strategy_tail_matrix: 47 passed plus exact pre-existing Script fixture SHA failure
+  baseline_comparator: clean source reproduced the same Script fixture test ID and hashes; NEW_FAILURES=0
+  full_compile: exit 0
+  diff_check: exit 0
+  engine_route_hash_lock: unchanged and passing
+  protected_sources: bot.py; services/video_tail9.py; SubDub two/multi files unchanged
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  live_pass: false
 spec_04i_subdub_auto_two_speaker_addon:
   phase: PENDING_AFTER_SPEC_04H_9
   compatible_media_only: true
@@ -733,9 +760,9 @@ spec_04i_subdub_auto_two_speaker_addon:
   representative_live_target: one unfinished media-compatible Product Video lane
   acceptance: male/female detection; translation; two-voice dub; final MP4; receipt/report; wallet delta 0
 next_action: >-
-  Keep the Owner Product Video worker inactive and do not CAS/restart or call any
-  paid provider under the consumed scene-1 authorization. Resume SPEC-04H.8 only
-  after a new exact Owner authorization identifies one replacement Key4U attempt,
-  its scene scope, same existing job 28, no ShopAIKey resubmit, quote 144/144/144,
-  budget/cost cap 212/212 and charged Xu 0. Then continue to two clips/final MP4,
-  receipt/report and SPEC-04H.9. Do not open SPEC-04I or another product first.
+  Ship/deploy the versioned two-scene replacement authority, then rehearse and apply
+  one exact backed-up CAS to existing identity 28/32/27 while the Owner worker is
+  inactive. Start the worker once and observe no more than two new Key4U calls,
+  one per scene; stop on cap, any terminal failed replacement or terminal two-scene
+  MP4. Then finish receipt/report and SPEC-04H.9. Do not open SPEC-04I or another
+  product first.
