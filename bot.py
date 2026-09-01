@@ -40410,6 +40410,82 @@ def deepgram_word_items(data: dict) -> list[dict]:
         })
     return result
 
+
+def deepgram_acoustic_word_items(
+    data: dict,
+    *,
+    duration_seconds: float,
+) -> list[dict]:
+    if type(duration_seconds) not in {int, float}:
+        return []
+    duration = float(duration_seconds)
+    if not math.isfinite(duration) or duration <= 0.0 or type(data) is not dict:
+        return []
+    results = data.get("results")
+    if type(results) is not dict:
+        return []
+    channels = results.get("channels")
+    if type(channels) is not list or not channels or type(channels[0]) is not dict:
+        return []
+    alternatives = channels[0].get("alternatives")
+    if (
+        type(alternatives) is not list
+        or not alternatives
+        or type(alternatives[0]) is not dict
+    ):
+        return []
+    words = alternatives[0].get("words")
+    if type(words) is not list or not words:
+        return []
+
+    result: list[dict] = []
+    identities: set[tuple[float, float, str]] = set()
+    previous_start = -math.inf
+    for item in words:
+        if type(item) is not dict:
+            return []
+        raw_text = item.get("punctuated_word")
+        if not isinstance(raw_text, str) or not raw_text.strip():
+            raw_text = item.get("word")
+        if not isinstance(raw_text, str):
+            return []
+        word = " ".join(raw_text.split())
+        if not word:
+            return []
+        start_value = item.get("start")
+        end_value = item.get("end")
+        if type(start_value) not in {int, float} or type(end_value) not in {int, float}:
+            return []
+        start = float(start_value)
+        end = float(end_value)
+        if (
+            not math.isfinite(start)
+            or not math.isfinite(end)
+            or start < 0.0
+            or start >= end
+            or end > duration
+            or start < previous_start
+        ):
+            return []
+        identity = (start, end, word.casefold())
+        if identity in identities:
+            return []
+        rounded_start = round(start, 3)
+        rounded_end = round(end, 3)
+        if rounded_start >= rounded_end:
+            return []
+        identities.add(identity)
+        result.append(
+            {
+                "index": len(result),
+                "word": word,
+                "start": rounded_start,
+                "end": rounded_end,
+            }
+        )
+        previous_start = start
+    return result
+
 def deepgram_srt_from_response(data: dict, max_words_per_block: int = 12) -> str:
     words = deepgram_word_items(data)
     if not words:
@@ -64939,6 +65015,7 @@ async def asr_transcribe_audio(
     updated_by="",
     context: ContextTypes.DEFAULT_TYPE | None = None,
     require_diarization: bool = False,
+    require_auto_multi_word_timeline: bool = False,
     allow_two_speaker_key4u_fallback: bool = False,
     allow_multi_speaker_key4u_fallback: bool = False,
     media_duration_seconds: float = 0.0,
@@ -64946,12 +65023,33 @@ async def asr_transcribe_audio(
 ) -> dict:
     del response_format, context
     require_diarization = bool(require_diarization)
+    require_auto_multi_word_timeline = bool(require_auto_multi_word_timeline)
+    if require_diarization and require_auto_multi_word_timeline:
+        return {
+            "ok": False,
+            "status": AUTO_CAST_UNAVAILABLE,
+            "provider": "",
+            "text": "",
+            "segments": [],
+            "word_timeline": [],
+            "detail": "acoustic_word_timeline_conflict",
+        }
     allow_two_speaker_key4u_fallback = bool(
         require_diarization and allow_two_speaker_key4u_fallback
     )
     allow_multi_speaker_key4u_fallback = bool(
         require_diarization and allow_multi_speaker_key4u_fallback
     )
+    if require_auto_multi_word_timeline and not allow_confirmed_product:
+        return {
+            "ok": False,
+            "status": AUTO_CAST_UNAVAILABLE,
+            "provider": "",
+            "text": "",
+            "segments": [],
+            "word_timeline": [],
+            "detail": "auto_multi_acoustic_confirmation_required",
+        }
     if require_diarization and not allow_confirmed_product:
         return {
             "ok": False,
@@ -64960,6 +65058,16 @@ async def asr_transcribe_audio(
             "text": "",
             "segments": [],
             "detail": "auto_speaker_confirmation_required",
+        }
+    if require_auto_multi_word_timeline and not DEEPGRAM_API_KEY:
+        return {
+            "ok": False,
+            "status": AUTO_CAST_UNAVAILABLE,
+            "provider": "",
+            "text": "",
+            "segments": [],
+            "word_timeline": [],
+            "detail": "deepgram_acoustic_word_timeline_unavailable",
         }
     if require_diarization and not DEEPGRAM_API_KEY:
         return {
@@ -64974,7 +65082,7 @@ async def asr_transcribe_audio(
     errors = []
     provider_order = (
         ["deepgram"]
-        if require_diarization
+        if require_diarization or require_auto_multi_word_timeline
         else {
             "key4u": ["key4u"],
             "shopaikey": ["shopaikey"],
@@ -65076,11 +65184,53 @@ async def asr_transcribe_audio(
                     require_diarization=True,
                     timeout_seconds=timeout_seconds,
                 )
+            elif require_auto_multi_word_timeline:
+                result = await deepgram_asr_adapter(
+                    audio_bytes,
+                    content_type,
+                    require_diarization=False,
+                    timeout_seconds=timeout_seconds,
+                )
             else:
                 result = await deepgram_asr_adapter(audio_bytes, content_type)
             transcript = str(result.get("transcript") or "").strip()
             transcript_json = dict(result.get("transcript_json") or {})
             segments = deepgram_segments_from_response(transcript_json)
+            word_timeline = []
+            if result.get("ok") and transcript and require_auto_multi_word_timeline:
+                duration_value = media_duration_seconds
+                if type(duration_value) not in {int, float} or not math.isfinite(
+                    float(duration_value)
+                ) or float(duration_value) <= 0.0:
+                    metadata = transcript_json.get("metadata")
+                    duration_value = (
+                        metadata.get("duration") if type(metadata) is dict else 0.0
+                    )
+                word_timeline = deepgram_acoustic_word_items(
+                    transcript_json,
+                    duration_seconds=duration_value,
+                )
+                if not word_timeline:
+                    save_provider_attempt(
+                        "translation_asr",
+                        {
+                            "called": True,
+                            "provider": "deepgram",
+                            "route": "listen",
+                            "status": AUTO_CAST_UNAVAILABLE,
+                            "error": "ACOUSTIC_WORD_TIMELINE_REQUIRED",
+                        },
+                        updated_by,
+                    )
+                    return {
+                        "ok": False,
+                        "status": AUTO_CAST_UNAVAILABLE,
+                        "provider": "deepgram",
+                        "text": "",
+                        "segments": [],
+                        "word_timeline": [],
+                        "detail": "ACOUSTIC_WORD_TIMELINE_REQUIRED",
+                    }
             if result.get("ok") and transcript and segments:
                 save_provider_attempt(
                     "translation_asr",
@@ -65094,7 +65244,7 @@ async def asr_transcribe_audio(
                     },
                     updated_by,
                 )
-                return {
+                success = {
                     "ok": True,
                     "status": "PASS",
                     "provider": "deepgram",
@@ -65104,6 +65254,9 @@ async def asr_transcribe_audio(
                     "duration_seconds": float(segments[-1]["end"] if segments else 0),
                     "detail": f"chars={len(transcript)}; segments={len(segments)}",
                 }
+                if require_auto_multi_word_timeline:
+                    success["word_timeline"] = word_timeline
+                return success
             status = str(result.get("status") or "FAIL")
             save_provider_attempt(
                 "translation_asr",
@@ -244866,14 +245019,22 @@ async def transcribe_media_to_segments(
     require_diarization: bool = False,
     allow_two_speaker_key4u_fallback: bool = False,
     allow_multi_speaker_key4u_fallback: bool = False,
+    require_auto_multi_word_timeline: bool = False,
 ) -> dict:
     require_diarization = bool(require_diarization)
+    require_auto_multi_word_timeline = bool(require_auto_multi_word_timeline)
     source_bytes = b""
     content_type = "application/octet-stream"
     file_name = ""
     media_kind = ""
     source_hash = ""
     checkpoint_path = ""
+    media_duration_for_words = (
+        float(duration_seconds)
+        if type(duration_seconds) in {int, float}
+        and 0.0 < float(duration_seconds) < float("inf")
+        else 0.0
+    )
     if isinstance(file_ref, dict):
         source_bytes = bytes(file_ref.get("bytes") or b"")
         content_type = str(
@@ -244884,12 +245045,18 @@ async def transcribe_media_to_segments(
         ).lower()
         file_name = str(file_ref.get("file_name") or file_ref.get("source_file_name") or "").lower()
         media_kind = str(file_ref.get("media_kind") or file_ref.get("source_media_kind") or "").lower()
-        duration_seconds = int(duration_seconds or _safe_int(file_ref.get("duration_seconds") or file_ref.get("duration") or file_ref.get("source_duration"), 0))
+        raw_duration_seconds = duration_seconds or file_ref.get("duration_seconds") or file_ref.get("duration") or file_ref.get("source_duration")
+        if (
+            type(raw_duration_seconds) in {int, float}
+            and 0.0 < float(raw_duration_seconds) < float("inf")
+        ):
+            media_duration_for_words = float(raw_duration_seconds)
+        duration_seconds = int(_safe_int(raw_duration_seconds, 0))
         source_hash = str(file_ref.get("source_hash") or file_ref.get("source_sha256") or "").strip().lower()
         checkpoint_path = str(file_ref.get("asr_checkpoint_path") or "").strip()
     auto_asr_timeout_seconds = (
         float(subdub_delivery_timeout_seconds_for_duration(duration_seconds))
-        if require_diarization
+        if require_diarization or require_auto_multi_word_timeline
         else 60.0
     )
     if not source_bytes and context is not None and isinstance(file_ref, dict):
@@ -244946,6 +245113,12 @@ async def transcribe_media_to_segments(
                 "ok": False,
                 "detail": f"video_probe_exception:{type(exc).__name__}",
             }
+        probe_duration = source_video_probe.get("duration")
+        if (
+            type(probe_duration) in {int, float}
+            and 0.0 < float(probe_duration) < float("inf")
+        ):
+            media_duration_for_words = float(probe_duration)
         if (
             source_video_probe.get("ok")
             and source_video_probe.get("has_video")
@@ -244981,7 +245154,7 @@ async def transcribe_media_to_segments(
         )
     )
     direct_threshold_seconds = (
-        5 * 60 if require_diarization else SUBDUB_DIRECT_ASR_MAX_SECONDS
+        5 * 60 if require_diarization or require_auto_multi_word_timeline else SUBDUB_DIRECT_ASR_MAX_SECONDS
     )
     if chunk_plan_accepts_metadata:
         long_plan = subdub_long_video_chunk_plan(
@@ -244991,6 +245164,26 @@ async def transcribe_media_to_segments(
         )
     else:
         long_plan = subdub_long_video_chunk_plan(duration_seconds)
+    if (
+        require_auto_multi_word_timeline
+        and int(max_seconds or 0) <= 0
+        and long_plan.get("chunking_enabled")
+    ):
+        return {
+            "output_valid": False,
+            "status": AUTO_CAST_UNAVAILABLE,
+            "detail": "ACOUSTIC_WORD_TIMELINE_REQUIRED",
+            "transcript_text": "",
+            "segments": [],
+            "word_timeline": [],
+            "detected_language": "",
+            "duration_seconds": int(duration_seconds or 0),
+            "confidence": 0.0,
+            "provider": "",
+            "chunk_count": int(long_plan.get("chunk_count") or 0),
+            "chunk_strategy": "acoustic_word_timeline_long_media_guard",
+            "global_timing_preserved": False,
+        }
     if (
         allow_two_speaker_key4u_fallback
         and int(max_seconds or 0) <= 0
@@ -245032,6 +245225,7 @@ async def transcribe_media_to_segments(
             await _emit_asr_progress_once()
             if (
                 not require_diarization
+                and not require_auto_multi_word_timeline
                 and getattr(video_dubbing_transcribe_bytes, "__name__", "") != "video_dubbing_transcribe_bytes"
             ):
                 try:
@@ -245170,6 +245364,7 @@ async def transcribe_media_to_segments(
     try:
         if (
             not require_diarization
+            and not require_auto_multi_word_timeline
             and getattr(video_dubbing_transcribe_bytes, "__name__", "") != "video_dubbing_transcribe_bytes"
         ):
             try:
@@ -245214,6 +245409,12 @@ async def transcribe_media_to_segments(
                         "timeout_seconds": auto_asr_timeout_seconds,
                     }
                     if require_diarization
+                    else {
+                        "require_auto_multi_word_timeline": True,
+                        "media_duration_seconds": float(media_duration_for_words),
+                        "timeout_seconds": auto_asr_timeout_seconds,
+                    }
+                    if require_auto_multi_word_timeline
                     else {}
                 ),
             )
@@ -245232,9 +245433,10 @@ async def transcribe_media_to_segments(
             "duration_seconds": int(duration_seconds or 0),
             "confidence": 0.0,
             "provider": "",
+            **({"word_timeline": []} if require_auto_multi_word_timeline else {}),
         }
     if asr_status == AUTO_CAST_UNAVAILABLE:
-        return {
+        failure = {
             "output_valid": False,
             "status": AUTO_CAST_UNAVAILABLE,
             "detail": sanitize_log_text(str(detail or "auto_cast_unavailable"))[:180],
@@ -245245,8 +245447,11 @@ async def transcribe_media_to_segments(
             "confidence": 0.0,
             "provider": str(provider or ""),
         }
+        if require_auto_multi_word_timeline:
+            failure["word_timeline"] = []
+        return failure
     if asr_status == "deepgram_timeout":
-        return {
+        failure = {
             "output_valid": False,
             "status": "deepgram_timeout",
             "detail": sanitize_log_text(str(detail or "deepgram_timeout"))[:180],
@@ -245257,6 +245462,9 @@ async def transcribe_media_to_segments(
             "confidence": 0.0,
             "provider": str(provider or "deepgram"),
         }
+        if require_auto_multi_word_timeline:
+            failure["word_timeline"] = []
+        return failure
     transcript = str(transcript or "").strip()
     if not transcript or transcript.startswith("❌"):
         return {
@@ -245265,6 +245473,20 @@ async def transcribe_media_to_segments(
             "detail": sanitize_log_text(str(detail or ""))[:180],
             "transcript_text": "",
             "segments": [],
+            "detected_language": "",
+            "duration_seconds": int(duration_seconds or 0),
+            "confidence": 0.0,
+            "provider": str(provider or ""),
+        }
+    word_timeline = list(asr_result.get("word_timeline") or [])
+    if require_auto_multi_word_timeline and not word_timeline:
+        return {
+            "output_valid": False,
+            "status": AUTO_CAST_UNAVAILABLE,
+            "detail": "ACOUSTIC_WORD_TIMELINE_REQUIRED",
+            "transcript_text": "",
+            "segments": [],
+            "word_timeline": [],
             "detected_language": "",
             "duration_seconds": int(duration_seconds or 0),
             "confidence": 0.0,
@@ -245286,7 +245508,7 @@ async def transcribe_media_to_segments(
         if "global_timing_preserved" in asr_result
         else provider_segments
     )
-    return {
+    success = {
         "output_valid": bool(segments),
         "status": "PASS" if segments else "segment_generation_failed",
         "transcript_text": transcript,
@@ -245301,6 +245523,9 @@ async def transcribe_media_to_segments(
         "subtitle_timing_source": timing_source,
         "global_timing_preserved": global_timing_preserved,
     }
+    if require_auto_multi_word_timeline:
+        success["word_timeline"] = word_timeline
+    return success
 
 async def video_dubbing_resolve_source_script(
     source_bytes: bytes,
@@ -245321,9 +245546,13 @@ async def video_dubbing_resolve_source_script(
     require_diarization: bool = False,
     allow_two_speaker_key4u_fallback: bool = False,
     allow_multi_speaker_key4u_fallback: bool = False,
+    require_auto_multi_word_timeline: bool = False,
 ) -> dict:
-    embedded_subtitle, subtitle_detail = await video_dubbing_extract_embedded_subtitle(source_bytes, content_type)
-    if embedded_subtitle:
+    require_auto_multi_word_timeline = bool(require_auto_multi_word_timeline)
+    embedded_subtitle, subtitle_detail = "", ""
+    if not require_auto_multi_word_timeline:
+        embedded_subtitle, subtitle_detail = await video_dubbing_extract_embedded_subtitle(source_bytes, content_type)
+    if embedded_subtitle and not require_auto_multi_word_timeline:
         return {
             "source_kind": "embedded_subtitle",
             "subtitle": embedded_subtitle,
@@ -245332,7 +245561,7 @@ async def video_dubbing_resolve_source_script(
             "detail": subtitle_detail,
             "detected_language": subdub_detect_language_from_text(embedded_subtitle, "auto"),
         }
-    if prefer_visual_subtitles:
+    if prefer_visual_subtitles and not require_auto_multi_word_timeline:
         try:
             visual_result = await asyncio.wait_for(
                 video_dubbing_extract_visual_subtitle(
@@ -245396,18 +245625,29 @@ async def video_dubbing_resolve_source_script(
         progress_callback=progress_callback,
         allow_two_speaker_key4u_fallback=allow_two_speaker_key4u_fallback,
         allow_multi_speaker_key4u_fallback=allow_multi_speaker_key4u_fallback,
-        **({"require_diarization": True} if require_diarization else {}),
+        **(
+            {"require_diarization": True}
+            if require_diarization
+            else {"require_auto_multi_word_timeline": True}
+            if require_auto_multi_word_timeline
+            else {}
+        ),
     )
     if not result.get("output_valid"):
         failure_status = str(result.get("status") or "asr_failed")
-        if require_diarization and failure_status == AUTO_CAST_UNAVAILABLE:
+        if (
+            require_diarization or require_auto_multi_word_timeline
+        ) and failure_status == AUTO_CAST_UNAVAILABLE:
             raise subdub_speaker_cast.AutoCastUnavailable()
         raise RuntimeError(failure_status)
+    word_timeline = list(result.get("word_timeline") or [])
+    if require_auto_multi_word_timeline and not word_timeline:
+        raise subdub_speaker_cast.AutoCastUnavailable()
     transcript = str(result.get("transcript_text") or "").strip()
     subtitle_text = video_dubbing_srt_from_segments(list(result.get("segments") or []))
     if not subtitle_text:
         raise RuntimeError("subtitle_generation_failed")
-    return {
+    source_result = {
         "source_kind": "asr",
         "subtitle": subtitle_text,
         "script": transcript,
@@ -245424,6 +245664,9 @@ async def video_dubbing_resolve_source_script(
         "speech_chunk_count": int(result.get("speech_chunk_count") or 0),
         "subtitle_timing_source": str(result.get("subtitle_timing_source") or ""),
     }
+    if require_auto_multi_word_timeline:
+        source_result["word_timeline"] = word_timeline
+    return source_result
 
 async def video_dubbing_render_video(
     source_bytes: bytes,
