@@ -1969,3 +1969,181 @@ def test_current_scene_two_terminal_failure_still_overrides_stale_running_summar
     assert ledger["exhausted_scene_indexes"] == [1, 2]
     assert ledger["aggregate_job_status"] == "failed_no_charge"
     assert ledger["continue_polling"] is False
+
+
+def test_explicit_current_scene_one_no_task_suppresses_stale_task_ownership() -> None:
+    stale_scene_one_task = "key4u-stale-scene-one-history-task"
+    accepted_scene_two_task = "key4u-current-scene-two-task-value"
+    current_scene_tasks = [
+        {
+            "scene_index": 1,
+            "status": "failed",
+            "failure_reason": "replacement_scene1_consumed_without_task",
+            "provider_task_id": "",
+            "active_task_id": "",
+            "primary_task_id": "",
+            "winning_task_id": "",
+            "task_id_present": False,
+            "task_pollable": False,
+            "submit_accepted": False,
+            "exhausted": True,
+        },
+        {
+            "scene_index": 2,
+            "provider": "key4u_video",
+            "provider_task_id": accepted_scene_two_task,
+            "active_task_id": accepted_scene_two_task,
+            "primary_task_id": accepted_scene_two_task,
+            "status": "provider_running",
+            "actual_provider_payload_status": "queued",
+            "provider_status_raw": "queued",
+            "task_id_present": True,
+            "task_pollable": True,
+            "submit_accepted": True,
+            "exhausted": False,
+        },
+    ]
+    result = {
+        "scene_count": 2,
+        "terminal_state": "failed_no_charge",
+        "final_decision": "failed_no_charge",
+        "continue_polling": False,
+        "provider_submit_allowed": False,
+        "replacement_calls_consumed": 2,
+        "replacement_calls_remaining": 0,
+        "scene_status_by_index": {"1": "failed", "2": "failed"},
+        "scene_active_task_by_index": {
+            "1": "",
+            "2": accepted_scene_two_task,
+        },
+        "task_scene_index_map": {accepted_scene_two_task: 2},
+        "task_to_scene_index": {accepted_scene_two_task: 2},
+        "scene_winner_task_by_index": {
+            "1": stale_scene_one_task,
+            "2": accepted_scene_two_task,
+        },
+        "scene_tasks": current_scene_tasks,
+        "provider_scene_tasks": copy.deepcopy(current_scene_tasks),
+        "scene_ledger": [
+            {
+                "scene_index": 1,
+                "status": "failed",
+                "primary_task_id": stale_scene_one_task,
+                "active_task_id": stale_scene_one_task,
+                "winning_task_id": stale_scene_one_task,
+                "task_id_present": True,
+                "task_pollable": True,
+                "exhausted": True,
+            },
+            {
+                "scene_index": 2,
+                "status": "failed",
+                "primary_task_id": accepted_scene_two_task,
+                "active_task_id": accepted_scene_two_task,
+                "winning_task_id": accepted_scene_two_task,
+                "task_id_present": True,
+                "task_pollable": True,
+                "exhausted": True,
+            },
+        ],
+        "provider_events": [
+            {
+                "scene_index": 1,
+                "provider": "key4u_video",
+                "provider_task_id": stale_scene_one_task,
+                "status": "failed",
+                "provider_status_raw": "FAILURE",
+            },
+            {
+                "scene_index": 2,
+                "provider": "key4u_video",
+                "provider_task_id": accepted_scene_two_task,
+                "status": "failed",
+                "provider_status_raw": "queued",
+            },
+        ],
+        "canonical_scene_index": 1,
+        "canonical_task_selected": stale_scene_one_task,
+        "canonical_status": "failed",
+        "provider_status_raw": "FAILURE",
+    }
+
+    ledger = video_project_queue.product_video_scene_ledger_state(
+        {"scene_count": 2},
+        {"id": 28, "status": "failed", "attempts": 40},
+        result,
+    )
+    by_scene = {
+        int(item["scene_index"]): item for item in ledger["scene_ledger"]
+    }
+
+    assert stale_scene_one_task not in ledger["task_to_scene_index"]
+    assert ledger["task_to_scene_index"] == {accepted_scene_two_task: 2}
+    assert by_scene[1]["active_task_id"] == ""
+    assert by_scene[1]["primary_task_id"] == ""
+    assert by_scene[1]["winning_task_id"] == ""
+    assert by_scene[1]["task_candidates"] == []
+    assert by_scene[1]["task_id_present"] is False
+    assert by_scene[1]["task_pollable"] is False
+    assert by_scene[1]["status"] == "failed"
+    assert by_scene[2]["active_task_id"] == accepted_scene_two_task
+    assert by_scene[2]["task_pollable"] is True
+    assert by_scene[2]["status"] in {"provider_running", "provider_not_start"}
+    assert ledger["scene_status_by_index"] == {
+        "1": "failed",
+        "2": by_scene[2]["status"],
+    }
+    assert ledger["active_scene_indexes"] == [2]
+    assert ledger["exhausted_scene_indexes"] == [1]
+    assert ledger["aggregate_job_status"] != "failed_no_charge"
+    assert ledger["continue_polling"] is True
+
+
+def test_disagreeing_current_scene_rows_do_not_suppress_existing_task_ownership() -> None:
+    task_id = "key4u-current-scene-one-task-value"
+    result = {
+        "scene_count": 1,
+        "scene_tasks": [
+            {
+                "scene_index": 1,
+                "status": "failed",
+                "provider_task_id": "",
+                "active_task_id": "",
+                "task_id_present": False,
+                "task_pollable": False,
+                "exhausted": True,
+            }
+        ],
+        "provider_scene_tasks": [
+            {
+                "scene_index": 1,
+                "provider_task_id": "",
+                "active_task_id": "",
+                "status": "pending_submit",
+                "task_id_present": False,
+                "task_pollable": False,
+                "exhausted": False,
+            }
+        ],
+        "scene_ledger": [
+            {
+                "scene_index": 1,
+                "provider_task_id": task_id,
+                "active_task_id": task_id,
+                "status": "provider_running",
+                "task_id_present": True,
+                "task_pollable": True,
+            }
+        ],
+    }
+
+    ledger = video_project_queue.product_video_scene_ledger_state(
+        {"scene_count": 1},
+        {"id": 28, "status": "processing", "attempts": 40},
+        result,
+    )
+
+    assert ledger["task_to_scene_index"] == {task_id: 1}
+    assert ledger["active_scene_indexes"] == [1]
+    assert ledger["scene_ledger"][0]["active_task_id"] == task_id
+    assert ledger["scene_ledger"][0]["task_pollable"] is True

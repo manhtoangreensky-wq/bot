@@ -7525,6 +7525,26 @@ def product_video_scene_ledger_state(
                     values.append(text)
         return values
 
+    current_rows_by_index: dict[int, list[dict[str, Any]]] = {}
+    for key in ("scene_tasks", "provider_scene_tasks", "product_video_scene_tasks"):
+        for item in _items(result.get(key)):
+            index = _product_video_scene_task_index(item)
+            if index in records:
+                current_rows_by_index.setdefault(index, []).append(item)
+    explicit_current_taskless_indexes = {
+        index
+        for index, rows in current_rows_by_index.items()
+        if rows
+        and not any(_candidate_ids(item) for item in rows)
+        and all(
+            item.get("task_id_present") is False
+            and item.get("task_pollable") is False
+            and item.get("exhausted") is True
+            and _status_class(item.get("status")) == "failed"
+            for item in rows
+        )
+    }
+
     def _merge_item(item: dict[str, Any], source_name: str) -> None:
         nonlocal unknown_scene_task_ignored, phantom_result_prevented
         debug = dict(item.get("debug") or {}) if isinstance(item.get("debug"), dict) else {}
@@ -7534,6 +7554,8 @@ def product_video_scene_ledger_state(
         if index not in records:
             if task_ids:
                 unknown_scene_task_ignored = True
+            return
+        if index in explicit_current_taskless_indexes and task_ids:
             return
         if source_name not in sources_used:
             sources_used.append(source_name)
