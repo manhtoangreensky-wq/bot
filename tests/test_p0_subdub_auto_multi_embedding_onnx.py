@@ -422,3 +422,211 @@ def test_fbank_zero_pads_short_unit_without_mutating_authoritative_timing():
     assert short_unit == authoritative
     assert short_unit["start"] == 1.2
     assert short_unit["end"] == 1.4
+
+
+class EmbeddingFakeSession(FakeSession):
+    def __init__(self, outputs, *, exception: Exception | None = None):
+        super().__init__(
+            inputs=[FakeIO("feats", ["B", "T", 80], "tensor(float)")],
+            outputs=[FakeIO("embs", ["B", 256], "tensor(float)")],
+            providers=["CPUExecutionProvider"],
+        )
+        self.embedding_outputs = list(outputs)
+        self.exception = exception
+        self.run_calls: list[tuple[list[str], dict[str, np.ndarray]]] = []
+
+    def run(self, output_names, feeds):
+        self.run_calls.append((list(output_names), dict(feeds)))
+        if self.exception is not None:
+            raise self.exception
+        return [self.embedding_outputs[len(self.run_calls) - 1]]
+
+
+def embedding_units() -> list[dict]:
+    return [
+        {
+            "unit_index": index,
+            "word_indexes": [index],
+            "start": round(index * 0.6, 3),
+            "end": round(index * 0.6 + 0.5, 3),
+            "original_speech_seconds": 0.5,
+        }
+        for index in range(6)
+    ]
+
+
+def write_embedding_pcm(tmp_path: Path, *, zero: bool = False) -> Path:
+    sample_count = 4 * service.PCM_SAMPLE_RATE
+    if zero:
+        samples = np.zeros(sample_count, dtype=np.int16)
+    else:
+        indexes = np.arange(sample_count, dtype=np.int64)
+        samples = (((indexes * 3_571 + 913) % 60_000) - 30_000).astype(np.int16)
+    path = tmp_path / "source.pcm"
+    path.write_bytes(samples.astype("<i2", copy=False).tobytes())
+    return path
+
+
+def embedding_vectors(count: int = 6) -> list[np.ndarray]:
+    outputs = []
+    for index in range(count):
+        value = np.zeros((1, service.EMBEDDING_DIM), dtype=np.float32)
+        value[0, index] = np.float32(index + 1)
+        outputs.append(value)
+    return outputs
+
+
+def test_embedding_runner_reads_each_unit_and_returns_l2_normalized_rows(
+    monkeypatch,
+    tmp_path,
+):
+    configure_test_assets(monkeypatch, tmp_path)
+    pcm_path = write_embedding_pcm(tmp_path)
+    session = EmbeddingFakeSession(embedding_vectors())
+    factories = []
+
+    def factory(*args, **kwargs):
+        factories.append((args, kwargs))
+        return session
+
+    result = service.extract_unit_embeddings(
+        str(pcm_path),
+        embedding_units(),
+        deadline_monotonic=10**12,
+        stop_requested=lambda: False,
+        session_factory=factory,
+    )
+
+    assert result.shape == (6, service.EMBEDDING_DIM)
+    assert result.dtype == np.float32
+    np.testing.assert_allclose(np.linalg.norm(result, axis=1), 1.0, atol=1e-6)
+    assert len(factories) == 1
+    assert len(session.run_calls) == 6
+    for output_names, feeds in session.run_calls:
+        assert output_names == [service.MODEL_OUTPUT_NAME]
+        assert list(feeds) == [service.MODEL_INPUT_NAME]
+        features = feeds[service.MODEL_INPUT_NAME]
+        assert features.dtype == np.float32
+        assert features.ndim == 3
+        assert features.shape[0] == 1
+        assert features.shape[2] == service.MEL_BINS
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "zero_norm",
+        "nan",
+        "inf",
+        "wrong_rank",
+        "wrong_dimension",
+        "inconsistent_dimension",
+    ),
+)
+def test_embedding_runner_rejects_invalid_model_outputs(monkeypatch, tmp_path, mutation):
+    configure_test_assets(monkeypatch, tmp_path)
+    pcm_path = write_embedding_pcm(tmp_path)
+    outputs = embedding_vectors()
+    if mutation == "zero_norm":
+        outputs[0] = np.zeros((1, service.EMBEDDING_DIM), dtype=np.float32)
+    elif mutation == "nan":
+        outputs[0][0, 0] = np.nan
+    elif mutation == "inf":
+        outputs[0][0, 0] = np.inf
+    elif mutation == "wrong_rank":
+        outputs[0] = np.zeros(service.EMBEDDING_DIM, dtype=np.float32)
+    elif mutation == "wrong_dimension":
+        outputs[0] = np.ones((1, 128), dtype=np.float32)
+    else:
+        outputs[1] = np.ones((1, 255), dtype=np.float32)
+    session = EmbeddingFakeSession(outputs)
+
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        service.extract_unit_embeddings(
+            str(pcm_path),
+            embedding_units(),
+            deadline_monotonic=10**12,
+            stop_requested=lambda: False,
+            session_factory=lambda *_args, **_kwargs: session,
+        )
+
+    assert service._EMBEDDING_LOCK.acquire(blocking=False)
+    service._EMBEDDING_LOCK.release()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("missing_pcm", "misaligned_pcm", "zero_energy", "invalid_units"),
+)
+def test_embedding_runner_rejects_invalid_pcm_or_units_before_inference(
+    monkeypatch,
+    tmp_path,
+    mutation,
+):
+    configure_test_assets(monkeypatch, tmp_path)
+    pcm_path = write_embedding_pcm(tmp_path, zero=mutation == "zero_energy")
+    units: object = embedding_units()
+    if mutation == "missing_pcm":
+        pcm_path.unlink()
+    elif mutation == "misaligned_pcm":
+        pcm_path.write_bytes(b"\x00")
+    elif mutation == "invalid_units":
+        units = []
+    called = []
+
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        service.extract_unit_embeddings(
+            str(pcm_path),
+            units,
+            deadline_monotonic=10**12,
+            stop_requested=lambda: False,
+            session_factory=lambda *_args, **_kwargs: called.append(True),
+        )
+
+    assert called == []
+
+
+@pytest.mark.parametrize("boundary", ("deadline", "stopped", "lock_busy"))
+def test_embedding_runner_fails_before_session_at_resource_boundary(
+    monkeypatch,
+    tmp_path,
+    boundary,
+):
+    configure_test_assets(monkeypatch, tmp_path)
+    pcm_path = write_embedding_pcm(tmp_path)
+    called = []
+    acquired = False
+    if boundary == "lock_busy":
+        acquired = service._EMBEDDING_LOCK.acquire(blocking=False)
+        assert acquired
+    try:
+        with pytest.raises(speaker_cast.AutoCastManualRequired):
+            service.extract_unit_embeddings(
+                str(pcm_path),
+                embedding_units(),
+                deadline_monotonic=-1.0 if boundary == "deadline" else 10**12,
+                stop_requested=lambda: boundary == "stopped",
+                session_factory=lambda *_args, **_kwargs: called.append(True),
+            )
+    finally:
+        if acquired:
+            service._EMBEDDING_LOCK.release()
+    assert called == []
+
+
+def test_embedding_runner_releases_lock_after_session_exception(monkeypatch, tmp_path):
+    configure_test_assets(monkeypatch, tmp_path)
+    pcm_path = write_embedding_pcm(tmp_path)
+    session = EmbeddingFakeSession([], exception=RuntimeError("fixture failure"))
+
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        service.extract_unit_embeddings(
+            str(pcm_path),
+            embedding_units(),
+            deadline_monotonic=10**12,
+            stop_requested=lambda: False,
+            session_factory=lambda *_args, **_kwargs: session,
+        )
+
+    assert service._EMBEDDING_LOCK.acquire(blocking=False)
+    service._EMBEDDING_LOCK.release()

@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import math
 from pathlib import Path
+import threading
+import time
 from typing import Callable
 
 import numpy as np
@@ -43,6 +45,8 @@ FBANK_FFT_BINS = FBANK_FFT_POINTS // 2
 
 _HAMMING_WINDOW: np.ndarray | None = None
 _MEL_FILTER_MATRIX: np.ndarray | None = None
+_EMBEDDING_LOCK = threading.Lock()
+_REAL_SESSION = None
 
 
 def _manual_required(error: Exception | None = None) -> speaker_cast.AutoCastManualRequired:
@@ -394,3 +398,208 @@ def compute_fbank(pcm_samples: np.ndarray) -> np.ndarray:
         raise
     except Exception as exc:
         raise _manual_required(exc)
+
+
+def _embedding_boundary_check(
+    *,
+    deadline_monotonic: float,
+    stop_requested: Callable[[], bool],
+) -> None:
+    if type(deadline_monotonic) not in {int, float}:
+        raise _manual_required(ValueError("acoustic_deadline_invalid"))
+    deadline = float(deadline_monotonic)
+    if not math.isfinite(deadline) or time.monotonic() >= deadline:
+        raise _manual_required(TimeoutError("acoustic_embedding_timeout"))
+    if not callable(stop_requested) or bool(stop_requested()):
+        raise _manual_required(RuntimeError("acoustic_embedding_cancelled"))
+
+
+def _embedding_session(session_factory: Callable | None):
+    global _REAL_SESSION
+    if session_factory is not None:
+        if not callable(session_factory):
+            raise _manual_required(ValueError("acoustic_session_factory_invalid"))
+        session = session_factory(
+            str(MODEL_PATH),
+            providers=["CPUExecutionProvider"],
+        )
+    else:
+        if _REAL_SESSION is None:
+            _REAL_SESSION = _create_real_session()
+        session = _REAL_SESSION
+    model_preflight(session_factory=lambda *_args, **_kwargs: session)
+    return session
+
+
+def _validated_embedding_units(
+    units: object,
+    *,
+    pcm_duration_seconds: float,
+) -> list[dict]:
+    if (
+        type(units) is not list
+        or not MIN_UNITS <= len(units) <= speaker_cast.MAX_SIDECAR_CUES
+    ):
+        raise _manual_required(ValueError("acoustic_embedding_units_invalid"))
+    validated: list[dict] = []
+    previous_end = -math.inf
+    for expected_index, item in enumerate(units):
+        if type(item) is not dict or type(item.get("unit_index")) is not int:
+            raise _manual_required(ValueError("acoustic_embedding_unit_invalid"))
+        if item["unit_index"] != expected_index:
+            raise _manual_required(ValueError("acoustic_embedding_unit_index_invalid"))
+        word_indexes = item.get("word_indexes")
+        if (
+            type(word_indexes) is not list
+            or not word_indexes
+            or any(type(value) is not int or value < 0 for value in word_indexes)
+        ):
+            raise _manual_required(ValueError("acoustic_embedding_words_invalid"))
+        start_value = item.get("start")
+        end_value = item.get("end")
+        speech_value = item.get("original_speech_seconds")
+        if (
+            type(start_value) not in {int, float}
+            or type(end_value) not in {int, float}
+            or type(speech_value) not in {int, float}
+        ):
+            raise _manual_required(ValueError("acoustic_embedding_time_invalid"))
+        start = float(start_value)
+        end = float(end_value)
+        speech_seconds = float(speech_value)
+        if (
+            not math.isfinite(start)
+            or not math.isfinite(end)
+            or not math.isfinite(speech_seconds)
+            or start < 0.0
+            or start >= end
+            or start < previous_end
+            or end > pcm_duration_seconds + 1e-6
+            or speech_seconds <= 0.0
+            or speech_seconds > end - start + 1e-6
+        ):
+            raise _manual_required(ValueError("acoustic_embedding_time_invalid"))
+        validated.append(
+            {
+                "unit_index": expected_index,
+                "word_indexes": list(word_indexes),
+                "start": start,
+                "end": end,
+                "original_speech_seconds": speech_seconds,
+            }
+        )
+        previous_end = end
+    return validated
+
+
+def extract_unit_embeddings(
+    pcm_path: str,
+    units: object,
+    *,
+    deadline_monotonic: float,
+    stop_requested: Callable[[], bool],
+    session_factory: Callable | None = None,
+) -> np.ndarray:
+    """Run bounded CPU-only inference over exact acoustic unit ranges."""
+
+    acquired = _EMBEDDING_LOCK.acquire(blocking=False)
+    if not acquired:
+        raise _manual_required(RuntimeError("acoustic_embedding_busy"))
+    try:
+        _embedding_boundary_check(
+            deadline_monotonic=deadline_monotonic,
+            stop_requested=stop_requested,
+        )
+        path = Path(str(pcm_path or ""))
+        if not path.is_file():
+            raise ValueError("acoustic_pcm_missing")
+        pcm_bytes = path.stat().st_size
+        maximum_bytes = int(
+            MAX_SOURCE_SECONDS * PCM_SAMPLE_RATE * PCM_BYTES_PER_SAMPLE
+        )
+        if (
+            pcm_bytes <= 0
+            or pcm_bytes % PCM_BYTES_PER_SAMPLE
+            or pcm_bytes > maximum_bytes
+        ):
+            raise ValueError("acoustic_pcm_size_invalid")
+        pcm_sample_count = pcm_bytes // PCM_BYTES_PER_SAMPLE
+        pcm_duration_seconds = pcm_sample_count / float(PCM_SAMPLE_RATE)
+        validated_units = _validated_embedding_units(
+            units,
+            pcm_duration_seconds=pcm_duration_seconds,
+        )
+
+        unit_samples: list[np.ndarray] = []
+        with path.open("rb") as handle:
+            for unit in validated_units:
+                _embedding_boundary_check(
+                    deadline_monotonic=deadline_monotonic,
+                    stop_requested=stop_requested,
+                )
+                start_sample = int(round(float(unit["start"]) * PCM_SAMPLE_RATE))
+                end_sample = int(round(float(unit["end"]) * PCM_SAMPLE_RATE))
+                if (
+                    start_sample < 0
+                    or end_sample <= start_sample
+                    or end_sample > pcm_sample_count
+                ):
+                    raise ValueError("acoustic_pcm_range_invalid")
+                byte_count = (end_sample - start_sample) * PCM_BYTES_PER_SAMPLE
+                handle.seek(start_sample * PCM_BYTES_PER_SAMPLE)
+                raw = handle.read(byte_count)
+                if len(raw) != byte_count:
+                    raise ValueError("acoustic_pcm_range_short_read")
+                samples = np.frombuffer(raw, dtype="<i2").astype(np.int16, copy=True)
+                if samples.size != end_sample - start_sample or not np.any(samples):
+                    raise ValueError("acoustic_pcm_energy_invalid")
+                unit_samples.append(samples)
+
+        _embedding_boundary_check(
+            deadline_monotonic=deadline_monotonic,
+            stop_requested=stop_requested,
+        )
+        session = _embedding_session(session_factory)
+        embeddings: list[np.ndarray] = []
+        for samples in unit_samples:
+            _embedding_boundary_check(
+                deadline_monotonic=deadline_monotonic,
+                stop_requested=stop_requested,
+            )
+            features = compute_fbank(samples)
+            _embedding_boundary_check(
+                deadline_monotonic=deadline_monotonic,
+                stop_requested=stop_requested,
+            )
+            output = session.run(
+                [MODEL_OUTPUT_NAME],
+                {MODEL_INPUT_NAME: features[None, :, :]},
+            )
+            if type(output) not in {list, tuple} or len(output) != 1:
+                raise ValueError("acoustic_embedding_output_invalid")
+            array = output[0]
+            if (
+                not isinstance(array, np.ndarray)
+                or array.dtype != np.dtype(np.float32)
+                or array.shape != (1, EMBEDDING_DIM)
+                or not np.isfinite(array).all()
+            ):
+                raise ValueError("acoustic_embedding_output_invalid")
+            row = array[0].astype(np.float32, copy=True)
+            norm = float(np.linalg.norm(row.astype(np.float64)))
+            if not math.isfinite(norm) or norm <= np.finfo(np.float32).eps:
+                raise ValueError("acoustic_embedding_norm_invalid")
+            embeddings.append(np.asarray(row / np.float32(norm), dtype=np.float32))
+        result = np.stack(embeddings, axis=0).astype(np.float32, copy=False)
+        if (
+            result.shape != (len(validated_units), EMBEDDING_DIM)
+            or not np.isfinite(result).all()
+        ):
+            raise ValueError("acoustic_embeddings_invalid")
+        return result
+    except speaker_cast.AutoCastManualRequired:
+        raise
+    except Exception as exc:
+        raise _manual_required(exc)
+    finally:
+        _EMBEDDING_LOCK.release()
