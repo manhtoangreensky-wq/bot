@@ -880,3 +880,29 @@ scene-1 receipt may be CAS-reset before resuming the unchanged two-new-call cap.
 Final strategy verification returned `8 passed` plus the exact pre-existing PV2-R03
 fixture SHA failure; this correction changes no PV2-R03 file. YAML, changed-file
 compile, diff-check and secret scan returned exit `0`.
+
+## V3 ledger namespace persistence boundary
+
+PR #971 squash/runtime `538b3e605b65f8580d44d17f53f72b7a15f7b7bd`;
+deploy `33538556118` SUCCESS in `3m30s`. Bot and inactive Owner worker matched exact
+SHA with tracked diff `0`; bot/web/nginx were active. Current read-only production
+state remained failed-no-charge with only the false V3 scene-1 receipt, old task
+hash `e5ec08abdfc0`, transport HTTP `0`, no artifact/delivery and unchanged finance.
+However, the immutable V2 receipt namespace had disappeared during the worker cycle.
+
+Three snapshot stages isolated the exact writer without provider calls. Actual claim
+and worker payload preserved both `{V2,V3}`. Calling the actual fail/defer API with
+persisted `{V2,V3}` plus an incoming V3-only diagnostic also preserved both. In both
+stages production DB changes, provider calls and wallet mutations were `0/0/0`.
+The only remaining boundary was `product_video_scene_ledger_state(job, result)`:
+its replacement-field projection let a partial active-only `result` overwrite all
+persisted namespaces from `job`, so the following fail API could no longer recover
+V2.
+
+Ledger RED `1 failed, 25 deselected in 651.64s`; final GREEN `1 passed, 25 deselected
+in 7.23s`. The minimal correction starts with every persisted namespace, accepts new
+receipts only for the active V3 authorization, and ignores an incoming attempt to
+rewrite V2. Job28/persistence focused tests are `52 passed in 10.66s`; locked engine/
+UI comparators are `48 passed in 9.42s`; changed production/test compile and diff-
+check exit `0`. No production reset or worker restart is allowed before this seam is
+deployed and the immutable V2 namespace is restored from the proven backup.

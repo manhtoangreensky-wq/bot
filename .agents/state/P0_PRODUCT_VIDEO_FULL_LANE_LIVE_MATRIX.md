@@ -948,6 +948,23 @@ starting the next.
 - [x] Final strategy verifier `8 passed` plus the exact pre-existing PV2-R03 fixture
   SHA failure; no file in that product/spec changed. YAML, changed production/test
   compile, diff-check and secret scan exit `0`.
+- [x] PR #971 squash/runtime `538b3e60...`; deploy `33538556118` SUCCESS in
+  `3m30s`; bot and inactive Owner worker exact SHA, tracked diff `0`, bot/web/nginx
+  active. Read-only current state confirmed V3 false receipt `[1]`, old task hash,
+  transport `0`, no artifact/delivery and finance unchanged. It also proved V2
+  namespace had disappeared after the worker cycle despite the #970 fail/complete
+  durable merge.
+- [x] Boundary stages on SQLite snapshots isolated the second namespace loss:
+  actual claim + worker payload preserved `{V2,V3}`; actual `fail/defer` with an
+  active-only incoming payload also preserved `{V2,V3}`; production changes/provider/
+  wallet were `0/0/0`. Only `product_video_scene_ledger_state(job, partial_result)`
+  preferred the active-only result map and erased V2 before fail persistence.
+- [x] Ledger namespace RED `1 failed, 25 deselected in 651.64s`; final GREEN
+  `1 passed, 25 deselected in 7.23s`. The ledger now starts from persisted namespaces,
+  accepts only active V3 partial receipts and ignores attempted V2 overwrite.
+  Job28/persistence focused `52 passed in 10.66s`; locked engine/UI `48 passed in
+  9.42s`; changed production/test compile and diff-check exit `0`. Ship this exact
+  seam before any production reset or worker restart.
 - [ ] Two distinct scene clips and one final MP4 terminal; otherwise stop at the
   exact new RED and reopen only `SPEC-04H`.
 

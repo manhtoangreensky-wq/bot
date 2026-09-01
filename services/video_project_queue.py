@@ -7138,6 +7138,51 @@ def _product_video_replacement_ledger_fields(
     job: dict[str, Any],
     result: dict[str, Any],
 ) -> dict[str, Any]:
+    persisted_replacement = job.get(
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    )
+    partial_replacement = result.get(
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    )
+    authorization = result.get(
+        "controlled_fallback_replacement_authorization"
+    ) or job.get("controlled_fallback_replacement_authorization")
+    active_authorization_id = str(
+        authorization.get("authorization_id") or ""
+    ) if isinstance(authorization, dict) else ""
+    merged_replacement = {
+        str(authorization_id): {
+            str(scene): dict(receipt)
+            for scene, receipt in receipts.items()
+            if isinstance(receipt, dict)
+        }
+        for authorization_id, receipts in (
+            persisted_replacement.items()
+            if isinstance(persisted_replacement, dict)
+            else []
+        )
+        if isinstance(receipts, dict)
+    }
+    if not merged_replacement and isinstance(partial_replacement, dict):
+        merged_replacement = {
+            str(authorization_id): {
+                str(scene): dict(receipt)
+                for scene, receipt in receipts.items()
+                if isinstance(receipt, dict)
+            }
+            for authorization_id, receipts in partial_replacement.items()
+            if isinstance(receipts, dict)
+        }
+    elif active_authorization_id and isinstance(partial_replacement, dict):
+        active_receipts = merged_replacement.setdefault(active_authorization_id, {})
+        partial_active_receipts = partial_replacement.get(active_authorization_id)
+        for scene, receipt in (
+            partial_active_receipts.items()
+            if isinstance(partial_active_receipts, dict)
+            else []
+        ):
+            if isinstance(receipt, dict):
+                active_receipts.setdefault(str(scene), dict(receipt))
     source = {
         **job,
         **{
@@ -7152,6 +7197,9 @@ def _product_video_replacement_ledger_fields(
                 "fallback_count_by_scene",
             }
         },
+        "controlled_fallback_replacement_submit_receipts_by_authorization": (
+            merged_replacement
+        ),
     }
     authorization = source.get(
         "controlled_fallback_replacement_authorization"

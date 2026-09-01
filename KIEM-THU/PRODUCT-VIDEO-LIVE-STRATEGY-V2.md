@@ -291,6 +291,13 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     unchanged. RED `1 failed, 24 deselected in 551.30s` -> GREEN `1 passed, 24
     deselected in 6.63s`; focused `50 passed`; legacy/locked `57 passed`; compile/
     diff PASS. Ship, reset only this false receipt, then resume the original cap.
+  - [x] PR #971/runtime `538b3e60...`, deploy `33538556118` SUCCESS `3m30s` fixed
+    versioned idempotency. Post-deploy readback found V2 namespace was also lost in
+    the worker cycle. Snapshot stages proved claim/worker payload and fail/defer each
+    preserve `{V2,V3}`; only scene-ledger projection erased V2 from a partial active-
+    only result. Ledger RED `1 failed, 25 deselected in 651.64s` -> GREEN `1 passed,
+    25 deselected in 7.23s`; focused `52 passed`; locked `48 passed`; compile/diff
+    PASS. Ship ledger seam before reset/resume; provider/wallet remain `0/0`.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 
