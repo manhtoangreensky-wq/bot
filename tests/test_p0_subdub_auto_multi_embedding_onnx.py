@@ -816,3 +816,168 @@ def test_cluster_replay_is_byte_deterministic():
     second = service.spectral_cluster_embeddings(payload, payload)
 
     assert first == second
+
+
+def test_cluster_returns_bounded_acoustic_unit_confidences():
+    payload = clustering_payload(3)
+
+    result = service.spectral_cluster_embeddings(payload, payload)
+
+    assert len(result["unit_confidences"]) == 30
+    assert all(0.0 <= value <= 1.0 for value in result["unit_confidences"])
+    assert "embeddings" not in result
+    assert "centroids" not in result
+
+
+def test_clustered_segments_preserve_word_order_coverage_and_boundaries():
+    words = acoustic_words()
+    units = service.build_acoustic_units(words, duration_seconds=5.0)
+    cluster_result = {
+        "labels": [0, 1, 1, 2, 0, 2],
+        "unit_confidences": [0.91, 0.82, 0.79, 0.88, 0.77, 0.93],
+    }
+
+    segments = service.build_clustered_segments(words, units, cluster_result)
+
+    assert [item["text"] for item in segments] == [
+        "one two",
+        "three four",
+        "five",
+        "six",
+        "seven",
+    ]
+    assert [(item["start"], item["end"]) for item in segments] == [
+        (0.0, 0.75),
+        (1.2, 2.1),
+        (2.6, 2.8),
+        (3.3, 3.5),
+        (4.0, 4.2),
+    ]
+    assert [item["speaker"] for item in segments] == [0, 1, 2, 0, 2]
+    assert [item["speaker_id"] for item in segments] == [
+        "chunk_00:speaker_0",
+        "chunk_00:speaker_1",
+        "chunk_00:speaker_2",
+        "chunk_00:speaker_0",
+        "chunk_00:speaker_2",
+    ]
+    assert [item["speaker_confidence"] for item in segments] == [
+        0.91,
+        0.79,
+        0.88,
+        0.77,
+        0.93,
+    ]
+    assert [item["index"] for item in segments] == [1, 2, 3, 4, 5]
+    assert len({item["cue_id"] for item in segments}) == len(segments)
+    assert all(item["chunk_index"] == 0 for item in segments)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("missing_label", "extra_label", "invalid_label", "missing_word", "bad_confidence"),
+)
+def test_clustered_segments_fail_closed_on_coverage_or_label_mismatch(mutation):
+    words = acoustic_words()
+    units = service.build_acoustic_units(words, duration_seconds=5.0)
+    labels: object = {
+        "labels": [0, 1, 1, 2, 0, 2],
+        "unit_confidences": [0.9] * 6,
+    }
+    if mutation == "missing_label":
+        labels["labels"] = labels["labels"][:-1]
+    elif mutation == "extra_label":
+        labels["labels"] = labels["labels"] + [1]
+    elif mutation == "invalid_label":
+        labels["labels"][0] = -1
+    elif mutation == "missing_word":
+        units[0]["word_indexes"] = [0]
+    else:
+        labels["unit_confidences"][0] = math.nan
+
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        service.build_clustered_segments(words, units, labels)
+
+
+def thirty_acoustic_words() -> list[dict]:
+    return [
+        {
+            "index": index,
+            "word": f"word{index}",
+            "start": round(index * 0.6, 3),
+            "end": round(index * 0.6 + 0.2, 3),
+        }
+        for index in range(30)
+    ]
+
+
+def test_diarize_word_timeline_composes_two_views_and_bounded_result(monkeypatch):
+    words = thirty_acoustic_words()
+    matrix = clustering_payload(3)["embeddings"]
+    calls = []
+
+    def fake_extract(
+        pcm_path,
+        units,
+        *,
+        deadline_monotonic,
+        stop_requested,
+        session_factory=None,
+        _feature_shift_samples=0,
+    ):
+        calls.append(
+            {
+                "pcm_path": pcm_path,
+                "unit_count": len(units),
+                "deadline": deadline_monotonic,
+                "stopped": stop_requested(),
+                "session_factory": session_factory,
+                "shift": _feature_shift_samples,
+            }
+        )
+        return matrix.copy()
+
+    monkeypatch.setattr(service, "extract_unit_embeddings", fake_extract)
+    result = service.diarize_word_timeline(
+        "fixture.pcm",
+        words,
+        duration_seconds=18.0,
+        deadline_monotonic=10**12,
+        stop_requested=lambda: False,
+        session_factory="fixture-session",
+    )
+
+    assert [item["shift"] for item in calls] == [0, 80]
+    assert all(item["unit_count"] == 30 for item in calls)
+    assert result["ok"] is True
+    assert result["status"] == "PASS"
+    assert result["provider"] == "local_wespeaker_resnet34_spectral"
+    assert result["detected_speaker_count"] == 3
+    assert result["model_sha256"] == service.MODEL_SHA256
+    assert result["algorithm_version"] == service.ALGORITHM_VERSION
+    assert result["word_count"] == 30
+    assert result["unit_count"] == 30
+    assert result["embedding_window_count"] == 60
+    assert result["cluster_sizes"] == [10, 10, 10]
+    assert result["stability_pass"] is True
+    assert result["word_coverage_count"] == 30
+    assert len(result["segments"]) == 3
+    assert len({item["speaker_id"] for item in result["segments"]}) == 3
+    for forbidden in ("embeddings", "centroids", "pcm_path", "word_timeline"):
+        assert forbidden not in result
+
+
+def test_diarize_word_timeline_propagates_fail_closed_embedding_boundary(monkeypatch):
+    def fail(*_args, **_kwargs):
+        raise speaker_cast.AutoCastManualRequired()
+
+    monkeypatch.setattr(service, "extract_unit_embeddings", fail)
+
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        service.diarize_word_timeline(
+            "fixture.pcm",
+            thirty_acoustic_words(),
+            duration_seconds=18.0,
+            deadline_monotonic=10**12,
+            stop_requested=lambda: False,
+        )

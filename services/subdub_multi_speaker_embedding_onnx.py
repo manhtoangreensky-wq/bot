@@ -503,6 +503,7 @@ def extract_unit_embeddings(
     deadline_monotonic: float,
     stop_requested: Callable[[], bool],
     session_factory: Callable | None = None,
+    _feature_shift_samples: int = 0,
 ) -> np.ndarray:
     """Run bounded CPU-only inference over exact acoustic unit ranges."""
 
@@ -533,6 +534,12 @@ def extract_unit_embeddings(
             units,
             pcm_duration_seconds=pcm_duration_seconds,
         )
+        if (
+            type(_feature_shift_samples) is not int
+            or _feature_shift_samples < 0
+            or _feature_shift_samples >= FBANK_FRAME_SHIFT
+        ):
+            raise ValueError("acoustic_feature_shift_invalid")
 
         unit_samples: list[np.ndarray] = []
         with path.open("rb") as handle:
@@ -543,6 +550,9 @@ def extract_unit_embeddings(
                 )
                 start_sample = int(round(float(unit["start"]) * PCM_SAMPLE_RATE))
                 end_sample = int(round(float(unit["end"]) * PCM_SAMPLE_RATE))
+                if _feature_shift_samples:
+                    available_shift = max(0, end_sample - start_sample - 1)
+                    start_sample += min(_feature_shift_samples, available_shift)
                 if (
                     start_sample < 0
                     or end_sample <= start_sample
@@ -799,6 +809,34 @@ def _validate_cluster_support(
     return cluster_sizes
 
 
+def _cluster_unit_confidences(
+    embeddings: np.ndarray,
+    labels: np.ndarray,
+    speaker_count: int,
+) -> list[float]:
+    centroids = np.stack(
+        [np.mean(embeddings[labels == label], axis=0) for label in range(speaker_count)],
+        axis=0,
+    )
+    centroid_norms = np.linalg.norm(centroids, axis=1)
+    if not np.isfinite(centroid_norms).all() or np.any(
+        centroid_norms <= np.finfo(np.float64).eps
+    ):
+        raise _manual_required(ValueError("acoustic_cluster_centroid_invalid"))
+    centroids /= centroid_norms[:, None]
+    similarities = embeddings @ centroids.T
+    if not np.isfinite(similarities).all():
+        raise _manual_required(ValueError("acoustic_cluster_confidence_invalid"))
+    confidences: list[float] = []
+    for index, label in enumerate(labels.tolist()):
+        assigned = float(similarities[index, int(label)])
+        competitors = np.delete(similarities[index], int(label))
+        strongest_competitor = float(np.max(competitors)) if competitors.size else -1.0
+        margin = max(0.0, min(2.0, assigned - strongest_competitor))
+        confidences.append(round(max(0.0, min(1.0, margin / 2.0)), 6))
+    return confidences
+
+
 def spectral_cluster_embeddings(
     base_embeddings: object,
     shifted_embeddings: object,
@@ -825,16 +863,209 @@ def spectral_cluster_embeddings(
         speech_seconds,
         base_count,
     )
+    unit_confidences = _cluster_unit_confidences(
+        base,
+        base_labels,
+        base_count,
+    )
     return {
         "ok": True,
         "status": "PASS",
         "speaker_count": base_count,
         "labels": [int(value) for value in base_labels.tolist()],
         "cluster_sizes": cluster_sizes,
+        "unit_confidences": unit_confidences,
         "eigenvalues": [
             round(float(value), 8)
             for value in eigenvalues[: min(len(eigenvalues), MAX_SPEAKERS + 2)]
         ],
         "stability_pass": True,
         "algorithm_version": ALGORITHM_VERSION,
+    }
+
+
+def build_clustered_segments(
+    words: object,
+    units: object,
+    cluster_result: object,
+) -> list[dict]:
+    """Assign every strict word once and group adjacent acoustic labels."""
+
+    if type(words) is not list or not words:
+        raise _manual_required(ValueError("acoustic_segment_words_invalid"))
+    maximum_end = max(
+        float(item.get("end") or 0.0) if type(item) is dict else 0.0
+        for item in words
+    )
+    validated_words = validate_word_timeline(
+        words,
+        duration_seconds=max(maximum_end, np.finfo(np.float32).eps),
+    )
+    if type(units) is not list or not units:
+        raise _manual_required(ValueError("acoustic_segment_units_invalid"))
+    validated_units = _validated_embedding_units(
+        units,
+        pcm_duration_seconds=max(maximum_end, np.finfo(np.float32).eps),
+    )
+    if type(cluster_result) is not dict:
+        raise _manual_required(ValueError("acoustic_segment_clusters_invalid"))
+    labels = cluster_result.get("labels")
+    confidences = cluster_result.get("unit_confidences")
+    if (
+        type(labels) is not list
+        or type(confidences) is not list
+        or len(labels) != len(validated_units)
+        or len(confidences) != len(validated_units)
+        or any(type(label) is not int or not 0 <= label < MAX_SPEAKERS for label in labels)
+        or any(
+            type(value) not in {int, float}
+            or not math.isfinite(float(value))
+            or not 0.0 <= float(value) <= 1.0
+            for value in confidences
+        )
+    ):
+        raise _manual_required(ValueError("acoustic_segment_clusters_invalid"))
+
+    word_assignments: list[tuple[int, float] | None] = [None] * len(validated_words)
+    for unit_index, unit in enumerate(validated_units):
+        for word_index in unit["word_indexes"]:
+            if (
+                word_index >= len(word_assignments)
+                or word_assignments[word_index] is not None
+            ):
+                raise _manual_required(ValueError("acoustic_segment_coverage_invalid"))
+            word_assignments[word_index] = (
+                int(labels[unit_index]),
+                float(confidences[unit_index]),
+            )
+    if any(item is None for item in word_assignments):
+        raise _manual_required(ValueError("acoustic_segment_coverage_invalid"))
+
+    grouped: list[dict] = []
+    current_words: list[dict] = []
+    current_label = -1
+    current_confidences: list[float] = []
+
+    def flush_current() -> None:
+        nonlocal current_words, current_label, current_confidences
+        if not current_words:
+            return
+        word_identity = ",".join(str(item["index"]) for item in current_words)
+        start = float(current_words[0]["start"])
+        end = float(current_words[-1]["end"])
+        cue_digest = hashlib.sha256(
+            f"{word_identity}|{start:.6f}|{end:.6f}".encode("ascii")
+        ).hexdigest()[:12]
+        try:
+            speaker_id = speaker_cast.normalized_speaker_key(0, current_label)
+        except Exception as exc:
+            raise _manual_required(exc)
+        grouped.append(
+            {
+                "cue_id": f"cue-{len(grouped) + 1:04d}-{cue_digest}",
+                "index": len(grouped) + 1,
+                "start": start,
+                "end": end,
+                "text": " ".join(str(item["word"]) for item in current_words),
+                "speaker": current_label,
+                "speaker_id": speaker_id,
+                "speaker_confidence": round(min(current_confidences), 6),
+                "chunk_index": 0,
+            }
+        )
+        current_words = []
+        current_label = -1
+        current_confidences = []
+
+    for word, assignment in zip(validated_words, word_assignments):
+        if assignment is None:
+            raise _manual_required(ValueError("acoustic_segment_coverage_invalid"))
+        label, confidence = assignment
+        if current_words and label != current_label:
+            flush_current()
+        if not current_words:
+            current_label = label
+        current_words.append(word)
+        current_confidences.append(confidence)
+    flush_current()
+    if (
+        not grouped
+        or sum(len(item["text"].split()) for item in grouped)
+        != sum(len(item["word"].split()) for item in validated_words)
+    ):
+        raise _manual_required(ValueError("acoustic_segment_coverage_invalid"))
+    return grouped
+
+
+def diarize_word_timeline(
+    pcm_path: str,
+    words: object,
+    *,
+    duration_seconds: float,
+    deadline_monotonic: float,
+    stop_requested: Callable[[], bool],
+    session_factory: Callable | None = None,
+) -> dict[str, object]:
+    """Compose strict words, two embedding views, clustering and source cues."""
+
+    validated_words = validate_word_timeline(
+        words,
+        duration_seconds=duration_seconds,
+    )
+    units = build_acoustic_units(
+        validated_words,
+        duration_seconds=duration_seconds,
+    )
+    base = extract_unit_embeddings(
+        pcm_path,
+        units,
+        deadline_monotonic=deadline_monotonic,
+        stop_requested=stop_requested,
+        session_factory=session_factory,
+        _feature_shift_samples=0,
+    )
+    shifted = extract_unit_embeddings(
+        pcm_path,
+        units,
+        deadline_monotonic=deadline_monotonic,
+        stop_requested=stop_requested,
+        session_factory=session_factory,
+        _feature_shift_samples=FBANK_FRAME_SHIFT // 2,
+    )
+    positions = [float(unit["start"]) for unit in units]
+    speech_seconds = [float(unit["original_speech_seconds"]) for unit in units]
+    cluster_result = spectral_cluster_embeddings(
+        {
+            "embeddings": base,
+            "source_positions": positions,
+            "speech_seconds": speech_seconds,
+        },
+        {
+            "embeddings": shifted,
+            "source_positions": positions,
+            "speech_seconds": speech_seconds,
+        },
+    )
+    segments = build_clustered_segments(
+        validated_words,
+        units,
+        cluster_result,
+    )
+    speaker_count = int(cluster_result["speaker_count"])
+    if len({item["speaker_id"] for item in segments}) != speaker_count:
+        raise _manual_required(ValueError("acoustic_segment_speaker_coverage_invalid"))
+    return {
+        "ok": True,
+        "status": "PASS",
+        "provider": "local_wespeaker_resnet34_spectral",
+        "segments": segments,
+        "detected_speaker_count": speaker_count,
+        "model_sha256": MODEL_SHA256,
+        "algorithm_version": ALGORITHM_VERSION,
+        "word_count": len(validated_words),
+        "unit_count": len(units),
+        "embedding_window_count": len(units) * 2,
+        "cluster_sizes": sorted(int(value) for value in cluster_result["cluster_sizes"]),
+        "stability_pass": bool(cluster_result["stability_pass"]),
+        "word_coverage_count": len(validated_words),
     }
