@@ -83,8 +83,9 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
 12. Nếu Deepgram empty và Key4U lần đầu unusable, exact Auto 2 được gọi Key4U
     tối đa `2` lần. HTTP `401` hoặc segment không có timestamp provider phải
     dừng ngay; fallback exact này không được dùng cho Auto multi. Với Auto
-    multi, Deepgram trả `1–2` label mới được vào re-diarization riêng sau
-    final-confirm; request không truyền số speaker và chỉ chấp nhận `3–8` label.
+    multi acoustic, Deepgram chỉ cung cấp strict word timeline, không request
+    diarization; active wrapper không được gọi provider re-diarization/crosswalk
+    hoặc truyền expected-speaker count.
 13. Fixture karaoke có nhạc nền: kiểm evidence cast, không chỉ nhìn hai label.
     Kết quả khóa local là speaker 0 `male/low`, vote `7/8`, dominance `0.875`,
     evidence `21s`; speaker 1 `female/high`, vote `8/10`, dominance `0.800`,
@@ -92,7 +93,7 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
     Filter cũ từng trả sai `high/high`; raw-frame fallback đã bị cấm. Nếu log
     chỉ có label mà không có gender/register/dominance/evidence time, hoặc dùng
     “một nam + một nữ” không qua vote độc lập, FAIL.
-14. Với Auto multi, sidecar phải có `3–16` label thật và terminal proof phải ghi
+14. Với Auto multi, sidecar phải có `3–8` speaker acoustic thật và terminal proof phải ghi
     `auto_detected_speaker_count == auto_distinct_voice_count`; mỗi label giữ
     một voice ID ổn định trong toàn video. Không chấp nhận bịa/gộp label, ép
     giới tính hoặc dùng lại một voice cho hai label.
@@ -101,8 +102,28 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
     standalone chỉ tự giao MP4 rồi receipt; SRT/audio/document tự động phải là
     `0`. Receipt có loại Auto multi, speaker/voice count, giá niêm yết và total;
     admin `charged_xu=0`, wallet/event delta `0`.
-16. Canh regression re-diarization multi: duplicate word annotation không được
-    tăng count/overlap; cùng word/timestamp nhưng khác speaker phải FAIL; mỗi
-    provider label cần ít nhất `2` word riêng và phải xuất hiện trong cue
-    mapping. Busy admission lock, input quá `5 phút` hoặc PCM sai shape phải
-    dừng trước provider call/TTS/mux và giữ `charged_xu=0`.
+16. Canh regression local acoustic: malformed/duplicate/non-monotonic word
+    authority phải FAIL; provider speaker label bị bỏ qua; mọi retained cluster
+    phải có support và tổng embedding windows không vượt cap `1,000`. Speaker
+    high-bound `>8`, busy lock, PCM sai shape, timeout hoặc cancellation phải
+    dừng trước TTS/mux và giữ `charged_xu=0`.
+17. Trước LIVE chạy `SD-MS-L01`: strict word timeline phải giữ nguyên index,
+    start/end của mọi retained word; coverage count bằng word count và không word
+    nào xuất hiện trong hai cue. Zero-duration/malformed item không được tạo cue.
+18. Chạy `SD-MS-L02` bằng exact fixture offline và model thật. Hai process fresh
+    phải cùng đo `18` regions, `87` windows, `174` embeddings, `k=5`, stability
+    `18/18`; model byte mutation hoặc missing notice phải fail trước inference.
+    Đây không phải LIVE PASS và không gọi provider.
+19. Chạy `SD-MS-L03/L04`: legacy/provider sidecar phải force-fresh; chỉ bundle
+    acoustic cùng source, strict timeline, model hash và algorithm version mới
+    được resume, với ASR-call delta `0`. Không đọc raw embedding/PCM trong state.
+20. Chạy `SD-MS-L05`: model preflight phải xong trước transaction. CAS chỉ được
+    đổi chính job `b4cb6d5fe8a7bdfce507` từ attempt/correction `3/2` sang `4/3`;
+    attempt `5`, command lặp và concurrent loser phải no-op, engine-job count giữ nguyên.
+21. LIVE chỉ gửi command recovery exact một lần, không upload lại và không bấm
+    Confirm/status/refresh. Sau đó chỉ đọc durable job/workspace/journal cho tới
+    terminal. Không có MP4 thật rồi receipt thì ghi FAIL/BLOCKED, không ghi PASS.
+22. Final evidence phải có model/algorithm, speaker/unit/window/cluster counts,
+    distinct voice count, per-speaker cue counts, source/translated cue count,
+    drift counters, original `40`/dub `150`, MP4 metrics, hai Telegram message ID,
+    `charged_xu=0`, root-job/transaction/wallet/credit/provider-usage deltas `0`.

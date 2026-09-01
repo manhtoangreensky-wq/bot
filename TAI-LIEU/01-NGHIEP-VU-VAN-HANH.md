@@ -862,3 +862,88 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
   protected `165 passed`; final combined sau mọi self-review `206 passed, 1 baseline
   deselected in 28.88s`;
   full compile/YAML/diff/scope/secret exit `0`.
+
+## Bổ sung SubDub Auto multi local speaker-embedding ONNX — 01/09/2026
+
+- Phạm vi duy nhất là exact state `voice_kind=auto_speaker_gender`,
+  `voice_selection_mode=auto_speaker`, `auto_speaker_lane=multi`. Auto 2-speaker,
+  manual/default, Product Video, PayOS và wallet không dùng backend mới.
+- Authority source mới trên branch là một Deepgram word timeline strict, không
+  request provider diarization. Mỗi word phải có index/start/end hợp lệ; mọi word
+  được gán đúng một lần và giữ nguyên start/end qua acoustic cue, translation,
+  TTS plan và mux. Embedded subtitle/OCR không được thay thế timeline này ở lane
+  acoustic multi.
+- Backend local dùng model
+  `assets/models/subdub_auto_multi/voxceleb_resnet34.onnx`, đúng `26,534,127`
+  bytes, SHA-256 `9FEA6516D7AD6BF0A76C7689F5A49B65D330FAD6DDE96C91BB4435FFBFE056A1`,
+  input `feats [B,T,80]`, output `embs [B,256]`, chỉ
+  `CPUExecutionProvider`. Ba notice/license bắt buộc phải có trước inference;
+  model hoặc notice sai hash/missing thì fail-closed trước TTS/mux.
+- Acoustic planner tách word units ở gap `>350ms`, tối đa `2.5s`; frontend là
+  NumPy fbank 80-bin đối chiếu golden SHA-256 `4CE1C8BE...A7C32`. Embedding dùng
+  cửa sổ `1.5s`, bước `0.75s`, short-region repeat-to-fill và hai view ổn định.
+  Speaker count chỉ được chọn trong `3–8`; không nhận expected-speaker hint và
+  không dùng provider label để ép `k`.
+- Exact-fixture resource gate local đã đo `18` acoustic regions không overlap,
+  `14` speech runs, `87` subsegment windows, `174` embeddings/two views và
+  stable `k=5`; region stability `18/18`, base-window cluster sizes
+  `[17,24,13,20,13]`, region cluster sizes `[2,6,2,7,1]`. Đây là offline
+  resource proof, chưa phải MP4/LIVE PASS.
+- Workspace job cũ không có strict transcript checkpoint. Vì vậy `k=5` resource
+  authority dùng đúng cue timings của job sau khi xóa speaker/text/provider và
+  union overlap; fixture `50` words tách riêng chỉ chứng minh parser/unit/coverage,
+  không được nhận là transcript thật của job. Production full seam bắt buộc được
+  chứng minh lại bằng chính same-job LIVE.
+- Sidecar/resume chỉ hợp lệ khi model hash, algorithm version, source media,
+  strict timeline và acoustic aggregate authority cùng khớp. Legacy/provider
+  sidecar hoặc bundle thiếu acoustic fields phải force-fresh; bundle acoustic
+  hợp lệ được resume mà không gọi ASR lần hai. Chỉ lưu aggregate bounded; cấm
+  lưu embedding, PCM, raw provider payload hoặc transcript vào state.
+- Final recovery được khóa vào chính internal job
+  `b4cb6d5fe8a7bdfce507` / public `#B4CB6D5FE8`, fixture SHA-256
+  `83DE97B744B931E544B569E6E750F8415545F226461BD2E36CFB49225898AD3E`,
+  English, gốc `40%`, lồng `150%`, `charged_xu=0`. Model preflight chạy trước
+  transaction; CAS chỉ cho attempt/correction `3/2 -> 4/3`, giữ cùng row/job/
+  workspace, đánh marker acoustic one-shot. Attempt `5`, duplicate/concurrent
+  loser, output/delivery đã có hoặc charge khác `0` đều bị chặn và không mutation.
+- Các bẫy đã đo và khóa bằng regression: global eigengap từng chọn `k=1/2` rồi
+  tự reject; whole-run embedding làm mất người nói ngắn; overlap bị đếm hai lần;
+  shifted view từng append sai repeated tail; so stability ở window label làm
+  fail giả dù region đồng nhất; typed acoustic evidence từng bị string-coerce/
+  drop. Không sửa bằng fixture hash branch, expected `k`, label override hay nới
+  threshold riêng cho video này.
+- Source/resource hiện đã có `11` commit từ spec/plan tới fixture proof. Gate fresh
+  Task 10: focused direct-impact `281 passed in 10.88s`; resource gate model thật
+  `3 passed` hai process fresh (`22.68s`, `21.31s`); protected exact-two/direct
+  impact replay `78 passed in 513.92s`; full changed-Python compile/diff exit `0`; exact-two
+  hashes vẫn `DE93620F...145B` và `94748DEF...1177E`. Source tests gọi provider
+  `0`, DB/wallet mutation `0`.
+- Protected run đầu có `77 passed + 1` harness failure: comparator cũ gắn lane
+  `multi` nhưng fake ASR không khai báo strict-word interface và không trả word
+  timeline/acoustic result. Production fail-closed đúng tại `AUTO_CAST_UNAVAILABLE`.
+  Chỉ fixture test được cập nhật để exact-two vẫn request diarization/fallback,
+  multi request strict words rồi local acoustics; focused `2 passed in 4.78s`,
+  full replay `78 passed`, không sửa production.
+- Exact diff review đo `4` production files / `2,416` added lines: fixture-specific
+  acoustic branch `0`, expected-speaker hint `0`, provider crosswalk call addition
+  `0`, network import `0`, raw PCM/embedding/payload persistence `0`, wallet
+  mutation `0`; verdict Critical `0`, Important `0`. Tester surface local giữ
+  đúng `4` issue templates và thêm `5` case source/resource/CAS, không tạo issue/
+  Project bên ngoài.
+- Post-rebase lên exact Product Video/main runtime base
+  `47D56E5C78EFEBB5FDED42FEC456B13F84C9A37C`: Git bỏ đúng commit crosswalk
+  đã merge, giữ `12` scoped commits, branch `0 behind/12 ahead`. Focused
+  `281 passed in 529.36s`; protected exact-two/direct impact
+  `78 passed in 530.83s`; real ONNX resource `3 passed in 18.02s`.
+- Resource RED sau checkout: two JSON fixtures có content Git LF nhưng working
+  tree bị `core.autocrlf=true` đổi CRLF, làm SHA mismatch trước inference. Fix
+  chỉ thêm `.gitattributes text eol=lf` cho đúng hai fixture; bytes quay lại exact
+  `C061A165...B802F` và `5F16F84E...71D95F`, resource GREEN `3 passed`.
+  Không đổi JSON data, hash constants, model hay production behavior.
+- Cùng gate hash phát hiện spec approved Markdown cũng bị checkout CRLF. EOL
+  contract được mở rộng đúng một path spec; byte rewrite chỉ thay CRLF→LF và
+  khôi phục exact approved SHA-256 `5A0B0864...A5E5`, nội dung Git không đổi.
+- Trạng thái vận hành hiện tại là `SOURCE_AND_RESOURCE_PASS / NOT_DEPLOYED /
+  LIVE_PENDING`. Chỉ được công nhận LIVE PASS khi **chính** job `#B4CB6D5FE8`
+  giao MP4 thật rồi một receipt, có `3–8` speaker âm học, số distinct voice bằng
+  speaker count, cue timing không lệch và mọi finance delta bằng `0`.

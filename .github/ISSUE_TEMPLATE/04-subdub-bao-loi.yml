@@ -26,14 +26,14 @@ body:
     id: actual
     attributes:
       label: Thực tế
-      description: Ghi exact stage/failure; nếu là UI, ghi lane + kiểu giọng + callback + numeric/preset thực tế; không chỉ ghi HTTP hoặc job id.
+      description: Ghi exact stage/failure; nếu Auto multi, ghi strict-word/acoustic/model/sidecar/CAS/TTS/mux boundary và whether active path called provider crosswalk. Không chỉ ghi HTTP, job id hoặc k.
     validations:
       required: true
   - type: textarea
     id: evidence
     attributes:
       label: Bằng chứng
-      description: Ghi fixture hash, job/workspace, provider safe status, artifact/receipt và wallet delta.
+      description: Ghi fixture hash, same job/attempt/workspace, bounded model/acoustic aggregates, provider-call delta, artifact/receipt và wallet delta. Cấm dán key, raw provider payload, transcript, PCM hoặc embedding.
     validations:
       required: true
   - type: checkboxes
@@ -46,4 +46,6 @@ body:
         - label: Đã ghi charged_xu và wallet/transaction delta
           required: true
         - label: Không chuyển sang case kế tiếp khi case này chưa PASS
+          required: true
+        - label: Không gửi recovery lần hai, không upload/Confirm và không tạo job thay thế
           required: true

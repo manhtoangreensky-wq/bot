@@ -40410,6 +40410,82 @@ def deepgram_word_items(data: dict) -> list[dict]:
         })
     return result
 
+
+def deepgram_acoustic_word_items(
+    data: dict,
+    *,
+    duration_seconds: float,
+) -> list[dict]:
+    if type(duration_seconds) not in {int, float}:
+        return []
+    duration = float(duration_seconds)
+    if not math.isfinite(duration) or duration <= 0.0 or type(data) is not dict:
+        return []
+    results = data.get("results")
+    if type(results) is not dict:
+        return []
+    channels = results.get("channels")
+    if type(channels) is not list or not channels or type(channels[0]) is not dict:
+        return []
+    alternatives = channels[0].get("alternatives")
+    if (
+        type(alternatives) is not list
+        or not alternatives
+        or type(alternatives[0]) is not dict
+    ):
+        return []
+    words = alternatives[0].get("words")
+    if type(words) is not list or not words:
+        return []
+
+    result: list[dict] = []
+    identities: set[tuple[float, float, str]] = set()
+    previous_start = -math.inf
+    for item in words:
+        if type(item) is not dict:
+            return []
+        raw_text = item.get("punctuated_word")
+        if not isinstance(raw_text, str) or not raw_text.strip():
+            raw_text = item.get("word")
+        if not isinstance(raw_text, str):
+            return []
+        word = " ".join(raw_text.split())
+        if not word:
+            return []
+        start_value = item.get("start")
+        end_value = item.get("end")
+        if type(start_value) not in {int, float} or type(end_value) not in {int, float}:
+            return []
+        start = float(start_value)
+        end = float(end_value)
+        if (
+            not math.isfinite(start)
+            or not math.isfinite(end)
+            or start < 0.0
+            or start >= end
+            or end > duration
+            or start < previous_start
+        ):
+            return []
+        identity = (start, end, word.casefold())
+        if identity in identities:
+            return []
+        rounded_start = round(start, 3)
+        rounded_end = round(end, 3)
+        if rounded_start >= rounded_end:
+            return []
+        identities.add(identity)
+        result.append(
+            {
+                "index": len(result),
+                "word": word,
+                "start": rounded_start,
+                "end": rounded_end,
+            }
+        )
+        previous_start = start
+    return result
+
 def deepgram_srt_from_response(data: dict, max_words_per_block: int = 12) -> str:
     words = deepgram_word_items(data)
     if not words:
@@ -64939,6 +65015,7 @@ async def asr_transcribe_audio(
     updated_by="",
     context: ContextTypes.DEFAULT_TYPE | None = None,
     require_diarization: bool = False,
+    require_auto_multi_word_timeline: bool = False,
     allow_two_speaker_key4u_fallback: bool = False,
     allow_multi_speaker_key4u_fallback: bool = False,
     media_duration_seconds: float = 0.0,
@@ -64946,12 +65023,33 @@ async def asr_transcribe_audio(
 ) -> dict:
     del response_format, context
     require_diarization = bool(require_diarization)
+    require_auto_multi_word_timeline = bool(require_auto_multi_word_timeline)
+    if require_diarization and require_auto_multi_word_timeline:
+        return {
+            "ok": False,
+            "status": AUTO_CAST_UNAVAILABLE,
+            "provider": "",
+            "text": "",
+            "segments": [],
+            "word_timeline": [],
+            "detail": "acoustic_word_timeline_conflict",
+        }
     allow_two_speaker_key4u_fallback = bool(
         require_diarization and allow_two_speaker_key4u_fallback
     )
     allow_multi_speaker_key4u_fallback = bool(
         require_diarization and allow_multi_speaker_key4u_fallback
     )
+    if require_auto_multi_word_timeline and not allow_confirmed_product:
+        return {
+            "ok": False,
+            "status": AUTO_CAST_UNAVAILABLE,
+            "provider": "",
+            "text": "",
+            "segments": [],
+            "word_timeline": [],
+            "detail": "auto_multi_acoustic_confirmation_required",
+        }
     if require_diarization and not allow_confirmed_product:
         return {
             "ok": False,
@@ -64960,6 +65058,16 @@ async def asr_transcribe_audio(
             "text": "",
             "segments": [],
             "detail": "auto_speaker_confirmation_required",
+        }
+    if require_auto_multi_word_timeline and not DEEPGRAM_API_KEY:
+        return {
+            "ok": False,
+            "status": AUTO_CAST_UNAVAILABLE,
+            "provider": "",
+            "text": "",
+            "segments": [],
+            "word_timeline": [],
+            "detail": "deepgram_acoustic_word_timeline_unavailable",
         }
     if require_diarization and not DEEPGRAM_API_KEY:
         return {
@@ -64974,7 +65082,7 @@ async def asr_transcribe_audio(
     errors = []
     provider_order = (
         ["deepgram"]
-        if require_diarization
+        if require_diarization or require_auto_multi_word_timeline
         else {
             "key4u": ["key4u"],
             "shopaikey": ["shopaikey"],
@@ -65076,11 +65184,53 @@ async def asr_transcribe_audio(
                     require_diarization=True,
                     timeout_seconds=timeout_seconds,
                 )
+            elif require_auto_multi_word_timeline:
+                result = await deepgram_asr_adapter(
+                    audio_bytes,
+                    content_type,
+                    require_diarization=False,
+                    timeout_seconds=timeout_seconds,
+                )
             else:
                 result = await deepgram_asr_adapter(audio_bytes, content_type)
             transcript = str(result.get("transcript") or "").strip()
             transcript_json = dict(result.get("transcript_json") or {})
             segments = deepgram_segments_from_response(transcript_json)
+            word_timeline = []
+            if result.get("ok") and transcript and require_auto_multi_word_timeline:
+                duration_value = media_duration_seconds
+                if type(duration_value) not in {int, float} or not math.isfinite(
+                    float(duration_value)
+                ) or float(duration_value) <= 0.0:
+                    metadata = transcript_json.get("metadata")
+                    duration_value = (
+                        metadata.get("duration") if type(metadata) is dict else 0.0
+                    )
+                word_timeline = deepgram_acoustic_word_items(
+                    transcript_json,
+                    duration_seconds=duration_value,
+                )
+                if not word_timeline:
+                    save_provider_attempt(
+                        "translation_asr",
+                        {
+                            "called": True,
+                            "provider": "deepgram",
+                            "route": "listen",
+                            "status": AUTO_CAST_UNAVAILABLE,
+                            "error": "ACOUSTIC_WORD_TIMELINE_REQUIRED",
+                        },
+                        updated_by,
+                    )
+                    return {
+                        "ok": False,
+                        "status": AUTO_CAST_UNAVAILABLE,
+                        "provider": "deepgram",
+                        "text": "",
+                        "segments": [],
+                        "word_timeline": [],
+                        "detail": "ACOUSTIC_WORD_TIMELINE_REQUIRED",
+                    }
             if result.get("ok") and transcript and segments:
                 save_provider_attempt(
                     "translation_asr",
@@ -65094,7 +65244,7 @@ async def asr_transcribe_audio(
                     },
                     updated_by,
                 )
-                return {
+                success = {
                     "ok": True,
                     "status": "PASS",
                     "provider": "deepgram",
@@ -65104,6 +65254,9 @@ async def asr_transcribe_audio(
                     "duration_seconds": float(segments[-1]["end"] if segments else 0),
                     "detail": f"chars={len(transcript)}; segments={len(segments)}",
                 }
+                if require_auto_multi_word_timeline:
+                    success["word_timeline"] = word_timeline
+                return success
             status = str(result.get("status") or "FAIL")
             save_provider_attempt(
                 "translation_asr",
@@ -146040,7 +146193,7 @@ async def cmd_subdub_recover_failed_auto_multi(
     usage = (
         "Cách dùng: /subdub_recover_failed_auto_multi "
         "<internal_job_id> <source_sha256> English 40 150 --confirm-paid "
-        "[--confirm-observability-gap]"
+        "[--confirm-observability-gap|--confirm-local-acoustic]"
     )
     ordinary_recovery = bool(
         len(args) == 6 and args[-1] == SUBDUB_FAILED_AUTO_MULTI_RECOVERY_LITERAL
@@ -146050,7 +146203,12 @@ async def cmd_subdub_recover_failed_auto_multi(
         and args[-2] == SUBDUB_FAILED_AUTO_MULTI_RECOVERY_LITERAL
         and args[-1] == SUBDUB_FAILED_AUTO_MULTI_LEGACY_GAP_LITERAL
     )
-    if not ordinary_recovery and not legacy_gap_recovery:
+    acoustic_recovery = bool(
+        len(args) == 7
+        and args[-2] == SUBDUB_FAILED_AUTO_MULTI_RECOVERY_LITERAL
+        and args[-1] == SUBDUB_FAILED_AUTO_MULTI_ACOUSTIC_LITERAL
+    )
+    if not ordinary_recovery and not legacy_gap_recovery and not acoustic_recovery:
         return await update.message.reply_text(usage)
     internal_job_id, source_sha256, target_language, original_raw, dub_raw = args[:5]
     if not original_raw.isdigit() or not dub_raw.isdigit():
@@ -146066,6 +146224,9 @@ async def cmd_subdub_recover_failed_auto_multi(
         dub_volume_percent=int(dub_raw),
         confirm_paid=True,
         allow_legacy_observability_gap=legacy_gap_recovery,
+        **(
+            {"allow_acoustic_recovery": True} if acoustic_recovery else {}
+        ),
     )
     if not claim.get("ok") or not claim.get("claimed"):
         reason = sanitize_log_text(str(claim.get("reason") or "recovery_not_claimed"))[:120]
@@ -232679,6 +232840,11 @@ SUBDUB_AUTO_VOICE_FIELDS = frozenset({
     "auto_quote_exact_known", "auto_quote_billable_words",
     "auto_quote_auto_xu", "auto_quote_subtitle_xu",
     "auto_quote_total_xu", "auto_quote_text_source",
+    "multi_acoustic_backend", "multi_acoustic_model_sha256",
+    "multi_acoustic_algorithm_version", "multi_acoustic_speaker_count",
+    "multi_acoustic_word_count", "multi_acoustic_unit_count",
+    "multi_acoustic_embedding_window_count", "multi_acoustic_cluster_sizes",
+    "multi_acoustic_stability_pass", "multi_acoustic_word_coverage_count",
 })
 
 SUBDUB_AUTO_PROFILE_PRIVATE_FIELDS = frozenset({
@@ -232778,7 +232944,10 @@ def set_video_dubbing_pending(user_id, step: str, **fields) -> dict:
         previous_target = subdub_translation_cache_language_key(state.get("target_language") or "")
         next_target = subdub_translation_cache_language_key(fields.get("target_language") or "")
         translation_target_changed = previous_target != next_target
+    acoustic_fields = auto_multi_speaker.bounded_multi_acoustic_evidence(fields)
     for key, value in fields.items():
+        if key in auto_multi_speaker.MULTI_ACOUSTIC_STATE_FIELDS:
+            continue
         if key in {
             "mode", "process_type", "video_file_id", "source_file_id", "source_file_name",
             "video_processing_mode", "video_file_unique_id", "source_file_unique_id", "source_mime_type",
@@ -232841,6 +233010,7 @@ def set_video_dubbing_pending(user_id, step: str, **fields) -> dict:
             "volume_config_source", "audio_mix_return_step",
         }:
             state[key] = _short_pending_text(value)
+    state.update(acoustic_fields)
     if translation_target_changed:
         state["translated_subtitle_ref"] = ""
         state["translated_subtitle_target_language"] = ""
@@ -244866,14 +245036,22 @@ async def transcribe_media_to_segments(
     require_diarization: bool = False,
     allow_two_speaker_key4u_fallback: bool = False,
     allow_multi_speaker_key4u_fallback: bool = False,
+    require_auto_multi_word_timeline: bool = False,
 ) -> dict:
     require_diarization = bool(require_diarization)
+    require_auto_multi_word_timeline = bool(require_auto_multi_word_timeline)
     source_bytes = b""
     content_type = "application/octet-stream"
     file_name = ""
     media_kind = ""
     source_hash = ""
     checkpoint_path = ""
+    media_duration_for_words = (
+        float(duration_seconds)
+        if type(duration_seconds) in {int, float}
+        and 0.0 < float(duration_seconds) < float("inf")
+        else 0.0
+    )
     if isinstance(file_ref, dict):
         source_bytes = bytes(file_ref.get("bytes") or b"")
         content_type = str(
@@ -244884,12 +245062,18 @@ async def transcribe_media_to_segments(
         ).lower()
         file_name = str(file_ref.get("file_name") or file_ref.get("source_file_name") or "").lower()
         media_kind = str(file_ref.get("media_kind") or file_ref.get("source_media_kind") or "").lower()
-        duration_seconds = int(duration_seconds or _safe_int(file_ref.get("duration_seconds") or file_ref.get("duration") or file_ref.get("source_duration"), 0))
+        raw_duration_seconds = duration_seconds or file_ref.get("duration_seconds") or file_ref.get("duration") or file_ref.get("source_duration")
+        if (
+            type(raw_duration_seconds) in {int, float}
+            and 0.0 < float(raw_duration_seconds) < float("inf")
+        ):
+            media_duration_for_words = float(raw_duration_seconds)
+        duration_seconds = int(_safe_int(raw_duration_seconds, 0))
         source_hash = str(file_ref.get("source_hash") or file_ref.get("source_sha256") or "").strip().lower()
         checkpoint_path = str(file_ref.get("asr_checkpoint_path") or "").strip()
     auto_asr_timeout_seconds = (
         float(subdub_delivery_timeout_seconds_for_duration(duration_seconds))
-        if require_diarization
+        if require_diarization or require_auto_multi_word_timeline
         else 60.0
     )
     if not source_bytes and context is not None and isinstance(file_ref, dict):
@@ -244946,6 +245130,12 @@ async def transcribe_media_to_segments(
                 "ok": False,
                 "detail": f"video_probe_exception:{type(exc).__name__}",
             }
+        probe_duration = source_video_probe.get("duration")
+        if (
+            type(probe_duration) in {int, float}
+            and 0.0 < float(probe_duration) < float("inf")
+        ):
+            media_duration_for_words = float(probe_duration)
         if (
             source_video_probe.get("ok")
             and source_video_probe.get("has_video")
@@ -244981,7 +245171,7 @@ async def transcribe_media_to_segments(
         )
     )
     direct_threshold_seconds = (
-        5 * 60 if require_diarization else SUBDUB_DIRECT_ASR_MAX_SECONDS
+        5 * 60 if require_diarization or require_auto_multi_word_timeline else SUBDUB_DIRECT_ASR_MAX_SECONDS
     )
     if chunk_plan_accepts_metadata:
         long_plan = subdub_long_video_chunk_plan(
@@ -244991,6 +245181,26 @@ async def transcribe_media_to_segments(
         )
     else:
         long_plan = subdub_long_video_chunk_plan(duration_seconds)
+    if (
+        require_auto_multi_word_timeline
+        and int(max_seconds or 0) <= 0
+        and long_plan.get("chunking_enabled")
+    ):
+        return {
+            "output_valid": False,
+            "status": AUTO_CAST_UNAVAILABLE,
+            "detail": "ACOUSTIC_WORD_TIMELINE_REQUIRED",
+            "transcript_text": "",
+            "segments": [],
+            "word_timeline": [],
+            "detected_language": "",
+            "duration_seconds": int(duration_seconds or 0),
+            "confidence": 0.0,
+            "provider": "",
+            "chunk_count": int(long_plan.get("chunk_count") or 0),
+            "chunk_strategy": "acoustic_word_timeline_long_media_guard",
+            "global_timing_preserved": False,
+        }
     if (
         allow_two_speaker_key4u_fallback
         and int(max_seconds or 0) <= 0
@@ -245032,6 +245242,7 @@ async def transcribe_media_to_segments(
             await _emit_asr_progress_once()
             if (
                 not require_diarization
+                and not require_auto_multi_word_timeline
                 and getattr(video_dubbing_transcribe_bytes, "__name__", "") != "video_dubbing_transcribe_bytes"
             ):
                 try:
@@ -245170,6 +245381,7 @@ async def transcribe_media_to_segments(
     try:
         if (
             not require_diarization
+            and not require_auto_multi_word_timeline
             and getattr(video_dubbing_transcribe_bytes, "__name__", "") != "video_dubbing_transcribe_bytes"
         ):
             try:
@@ -245214,6 +245426,12 @@ async def transcribe_media_to_segments(
                         "timeout_seconds": auto_asr_timeout_seconds,
                     }
                     if require_diarization
+                    else {
+                        "require_auto_multi_word_timeline": True,
+                        "media_duration_seconds": float(media_duration_for_words),
+                        "timeout_seconds": auto_asr_timeout_seconds,
+                    }
+                    if require_auto_multi_word_timeline
                     else {}
                 ),
             )
@@ -245232,9 +245450,10 @@ async def transcribe_media_to_segments(
             "duration_seconds": int(duration_seconds or 0),
             "confidence": 0.0,
             "provider": "",
+            **({"word_timeline": []} if require_auto_multi_word_timeline else {}),
         }
     if asr_status == AUTO_CAST_UNAVAILABLE:
-        return {
+        failure = {
             "output_valid": False,
             "status": AUTO_CAST_UNAVAILABLE,
             "detail": sanitize_log_text(str(detail or "auto_cast_unavailable"))[:180],
@@ -245245,8 +245464,11 @@ async def transcribe_media_to_segments(
             "confidence": 0.0,
             "provider": str(provider or ""),
         }
+        if require_auto_multi_word_timeline:
+            failure["word_timeline"] = []
+        return failure
     if asr_status == "deepgram_timeout":
-        return {
+        failure = {
             "output_valid": False,
             "status": "deepgram_timeout",
             "detail": sanitize_log_text(str(detail or "deepgram_timeout"))[:180],
@@ -245257,6 +245479,9 @@ async def transcribe_media_to_segments(
             "confidence": 0.0,
             "provider": str(provider or "deepgram"),
         }
+        if require_auto_multi_word_timeline:
+            failure["word_timeline"] = []
+        return failure
     transcript = str(transcript or "").strip()
     if not transcript or transcript.startswith("❌"):
         return {
@@ -245265,6 +245490,20 @@ async def transcribe_media_to_segments(
             "detail": sanitize_log_text(str(detail or ""))[:180],
             "transcript_text": "",
             "segments": [],
+            "detected_language": "",
+            "duration_seconds": int(duration_seconds or 0),
+            "confidence": 0.0,
+            "provider": str(provider or ""),
+        }
+    word_timeline = list(asr_result.get("word_timeline") or [])
+    if require_auto_multi_word_timeline and not word_timeline:
+        return {
+            "output_valid": False,
+            "status": AUTO_CAST_UNAVAILABLE,
+            "detail": "ACOUSTIC_WORD_TIMELINE_REQUIRED",
+            "transcript_text": "",
+            "segments": [],
+            "word_timeline": [],
             "detected_language": "",
             "duration_seconds": int(duration_seconds or 0),
             "confidence": 0.0,
@@ -245286,7 +245525,7 @@ async def transcribe_media_to_segments(
         if "global_timing_preserved" in asr_result
         else provider_segments
     )
-    return {
+    success = {
         "output_valid": bool(segments),
         "status": "PASS" if segments else "segment_generation_failed",
         "transcript_text": transcript,
@@ -245301,6 +245540,9 @@ async def transcribe_media_to_segments(
         "subtitle_timing_source": timing_source,
         "global_timing_preserved": global_timing_preserved,
     }
+    if require_auto_multi_word_timeline:
+        success["word_timeline"] = word_timeline
+    return success
 
 async def video_dubbing_resolve_source_script(
     source_bytes: bytes,
@@ -245321,9 +245563,13 @@ async def video_dubbing_resolve_source_script(
     require_diarization: bool = False,
     allow_two_speaker_key4u_fallback: bool = False,
     allow_multi_speaker_key4u_fallback: bool = False,
+    require_auto_multi_word_timeline: bool = False,
 ) -> dict:
-    embedded_subtitle, subtitle_detail = await video_dubbing_extract_embedded_subtitle(source_bytes, content_type)
-    if embedded_subtitle:
+    require_auto_multi_word_timeline = bool(require_auto_multi_word_timeline)
+    embedded_subtitle, subtitle_detail = "", ""
+    if not require_auto_multi_word_timeline:
+        embedded_subtitle, subtitle_detail = await video_dubbing_extract_embedded_subtitle(source_bytes, content_type)
+    if embedded_subtitle and not require_auto_multi_word_timeline:
         return {
             "source_kind": "embedded_subtitle",
             "subtitle": embedded_subtitle,
@@ -245332,7 +245578,7 @@ async def video_dubbing_resolve_source_script(
             "detail": subtitle_detail,
             "detected_language": subdub_detect_language_from_text(embedded_subtitle, "auto"),
         }
-    if prefer_visual_subtitles:
+    if prefer_visual_subtitles and not require_auto_multi_word_timeline:
         try:
             visual_result = await asyncio.wait_for(
                 video_dubbing_extract_visual_subtitle(
@@ -245396,18 +245642,29 @@ async def video_dubbing_resolve_source_script(
         progress_callback=progress_callback,
         allow_two_speaker_key4u_fallback=allow_two_speaker_key4u_fallback,
         allow_multi_speaker_key4u_fallback=allow_multi_speaker_key4u_fallback,
-        **({"require_diarization": True} if require_diarization else {}),
+        **(
+            {"require_diarization": True}
+            if require_diarization
+            else {"require_auto_multi_word_timeline": True}
+            if require_auto_multi_word_timeline
+            else {}
+        ),
     )
     if not result.get("output_valid"):
         failure_status = str(result.get("status") or "asr_failed")
-        if require_diarization and failure_status == AUTO_CAST_UNAVAILABLE:
+        if (
+            require_diarization or require_auto_multi_word_timeline
+        ) and failure_status == AUTO_CAST_UNAVAILABLE:
             raise subdub_speaker_cast.AutoCastUnavailable()
         raise RuntimeError(failure_status)
+    word_timeline = list(result.get("word_timeline") or [])
+    if require_auto_multi_word_timeline and not word_timeline:
+        raise subdub_speaker_cast.AutoCastUnavailable()
     transcript = str(result.get("transcript_text") or "").strip()
     subtitle_text = video_dubbing_srt_from_segments(list(result.get("segments") or []))
     if not subtitle_text:
         raise RuntimeError("subtitle_generation_failed")
-    return {
+    source_result = {
         "source_kind": "asr",
         "subtitle": subtitle_text,
         "script": transcript,
@@ -245424,6 +245681,9 @@ async def video_dubbing_resolve_source_script(
         "speech_chunk_count": int(result.get("speech_chunk_count") or 0),
         "subtitle_timing_source": str(result.get("subtitle_timing_source") or ""),
     }
+    if require_auto_multi_word_timeline:
+        source_result["word_timeline"] = word_timeline
+    return source_result
 
 async def video_dubbing_render_video(
     source_bytes: bytes,
@@ -246947,6 +247207,9 @@ async def video_dubbing_prepare_subtitles(
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
     )
     source_bytes_override = state.get("_pipeline_source_bytes_override")
+    exact_acoustic_multi = bool(
+        require_auto_cast and auto_multi_speaker.is_auto_multi_speaker_state(state)
+    )
     if isinstance(source_bytes_override, bytearray):
         source_bytes_override = bytes(source_bytes_override)
     if not isinstance(source_bytes_override, bytes):
@@ -246987,6 +247250,49 @@ async def video_dubbing_prepare_subtitles(
             content_type = override_content_type
         else:
             source_bytes, content_type = await video_dubbing_download_source(context, state)
+    cached_acoustic_segments: list[dict] = []
+    if exact_acoustic_multi:
+        acoustic_evidence = auto_multi_speaker.bounded_multi_acoustic_evidence(state)
+        cached_acoustic_ready = False
+        try:
+            cached_sidecar = subdub_speaker_cast.load_sidecar(
+                str(state.get("speaker_sidecar_path") or ""),
+                expected_sha256=str(state.get("speaker_sidecar_sha256") or ""),
+                workspace=speaker_workspace,
+            )
+            cached_cues = video_dubbing_segments_from_subtitle(source_subtitle)
+            restored_cues = subdub_speaker_cast.restore_cached_cue_ids_from_sidecar(
+                cached_sidecar,
+                cached_cues,
+                media_sha256=hashlib.sha256(bytes(source_bytes)).hexdigest(),
+                subtitle_sha256=subdub_speaker_sidecar_subtitle_sha256(
+                    source_subtitle
+                ),
+            )
+            cached_labels = subdub_speaker_cast.ordered_auto_speaker_labels(
+                cached_sidecar.get("cues") or []
+            )
+            cached_acoustic_ready = bool(
+                acoustic_evidence
+                and restored_cues
+                and len(cached_labels)
+                == acoustic_evidence["multi_acoustic_speaker_count"]
+                and cached_sidecar.get("acoustic")
+                == auto_multi_speaker.acoustic_sidecar_evidence(
+                    acoustic_evidence
+                )
+            )
+            if cached_acoustic_ready:
+                cached_acoustic_segments = list(restored_cues)
+        except (
+            subdub_speaker_cast.AutoCastUnavailable,
+            TypeError,
+            ValueError,
+            OverflowError,
+        ):
+            cached_acoustic_ready = False
+        if not cached_acoustic_ready:
+            source_subtitle = ""
     source_info = {}
     if (
         source_subtitle
@@ -247074,7 +247380,13 @@ async def video_dubbing_prepare_subtitles(
                         else ""
                     )
                 if require_auto_cast and "require_diarization" in resolve_parameters:
-                    resolve_kwargs["require_diarization"] = True
+                    if exact_acoustic_multi:
+                        resolve_kwargs.pop("require_diarization", None)
+                    else:
+                        resolve_kwargs["require_diarization"] = True
+                if exact_acoustic_multi and "require_auto_multi_word_timeline" in resolve_parameters:
+                    resolve_kwargs["require_auto_multi_word_timeline"] = True
+                    resolve_kwargs.pop("require_diarization", None)
                 if (
                     require_auto_cast
                     and "allow_two_speaker_key4u_fallback" in resolve_parameters
@@ -247086,6 +247398,7 @@ async def video_dubbing_prepare_subtitles(
                 if (
                     require_auto_cast
                     and "allow_multi_speaker_key4u_fallback" in resolve_parameters
+                    and not exact_acoustic_multi
                 ):
                     resolve_kwargs["allow_multi_speaker_key4u_fallback"] = bool(
                         auto_multi_speaker.is_auto_multi_speaker_state(state)
@@ -247116,11 +247429,74 @@ async def video_dubbing_prepare_subtitles(
         raise RuntimeError("subtitle_segments_empty")
     if require_auto_cast:
         fresh_auto_asr = str(source_info.get("source_kind") or "") == "asr"
-        if fresh_auto_asr:
+        if fresh_auto_asr and exact_acoustic_multi:
+            word_timeline = list(source_info.get("word_timeline") or [])
+            if not word_timeline:
+                raise subdub_speaker_cast.AutoCastUnavailable()
+            acoustic_prepared = {
+                "state": dict(state),
+                "source_bytes": bytes(source_bytes),
+                "source_segments": list(source_segments),
+                "duration_seconds": float(
+                    source_info.get("duration_seconds") or duration_hint or 0.0
+                ),
+            }
+            pcm_path = await _extract_subdub_auto_pcm(
+                acoustic_prepared,
+                dict(state),
+                channels=1,
+                sample_rate=16_000,
+                sample_format="s16le",
+            )
+            acoustic_result = await auto_multi_speaker.run_local_acoustic_diarization_off_event_loop(
+                Path(pcm_path),
+                word_timeline,
+                duration_seconds=float(
+                    source_info.get("duration_seconds") or duration_hint or 0.0
+                ),
+            )
+            source_segments = list(acoustic_result.get("segments") or [])
+            if not source_segments:
+                raise subdub_speaker_cast.AutoCastUnavailable()
+            source_subtitle = video_dubbing_srt_from_segments(source_segments)
+            source_script = video_dubbing_plain_script(source_subtitle)
+            acoustic_fields = auto_multi_speaker.bounded_multi_acoustic_evidence({
+                "multi_acoustic_backend": acoustic_result.get("provider"),
+                "multi_acoustic_model_sha256": acoustic_result.get("model_sha256"),
+                "multi_acoustic_algorithm_version": acoustic_result.get("algorithm_version"),
+                "multi_acoustic_speaker_count": acoustic_result.get("detected_speaker_count"),
+                "multi_acoustic_word_count": acoustic_result.get("word_count"),
+                "multi_acoustic_unit_count": acoustic_result.get("unit_count"),
+                "multi_acoustic_embedding_window_count": acoustic_result.get("embedding_window_count"),
+                "multi_acoustic_cluster_sizes": acoustic_result.get("cluster_sizes"),
+                "multi_acoustic_stability_pass": acoustic_result.get("stability_pass"),
+                "multi_acoustic_word_coverage_count": acoustic_result.get("word_coverage_count"),
+            })
+            if not acoustic_fields:
+                raise subdub_speaker_cast.AutoCastUnavailable()
+            acoustic_subtitle_ref = set_video_dubbing_artifact(
+                user_id,
+                "source_subtitle",
+                source_subtitle,
+            )
+            state = set_video_dubbing_pending(
+                user_id,
+                state.get("step") or "processing",
+                **video_dubbing_sync_state_fields(
+                    state,
+                    exclude={"subtitle_ref", "source_subtitle_ref"},
+                ),
+                **acoustic_fields,
+                subtitle_ref=acoustic_subtitle_ref,
+                source_subtitle_ref=acoustic_subtitle_ref,
+            )
+        elif fresh_auto_asr:
             source_segments = subdub_canonical_auto_speaker_segments(
                 source_segments,
                 extraction_source="asr",
             )
+        elif exact_acoustic_multi and cached_acoustic_segments:
+            source_segments = list(cached_acoustic_segments)
         else:
             source_segments = subdub_canonical_cues.canonicalize_segments(
                 source_segments,
@@ -247137,6 +247513,13 @@ async def video_dubbing_prepare_subtitles(
                 media_sha256=media_sha256,
                 subtitle_sha256=subtitle_sha256,
             )
+            if exact_acoustic_multi:
+                sidecar_acoustic = auto_multi_speaker.acoustic_sidecar_evidence(
+                    acoustic_fields
+                )
+                if not sidecar_acoustic:
+                    raise subdub_speaker_cast.AutoCastUnavailable()
+                sidecar["acoustic"] = sidecar_acoustic
             receipt = subdub_speaker_cast.persist_sidecar(
                 sidecar,
                 workspace=speaker_workspace,
@@ -247240,6 +247623,24 @@ async def video_dubbing_prepare_subtitles(
             if retimed_segments:
                 output_segments = video_dubbing_qc_segments(retimed_segments, preserve_timestamps=True)
                 output_subtitle = video_dubbing_srt_from_segments(output_segments) or output_subtitle
+    if require_auto_cast and exact_acoustic_multi:
+        acoustic_labels = subdub_speaker_cast.ordered_auto_speaker_labels(source_segments)
+        if not 3 <= len(acoustic_labels) <= 8 or len(output_segments) != len(source_segments):
+            raise subdub_speaker_cast.AutoCastUnavailable()
+        for source_item, output_item in zip(source_segments, output_segments, strict=True):
+            try:
+                identical_timing = (
+                    float(source_item.get("start")) == float(output_item.get("start"))
+                    and float(source_item.get("end")) == float(output_item.get("end"))
+                )
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise subdub_speaker_cast.AutoCastUnavailable() from exc
+            if (
+                source_item.get("cue_id") != output_item.get("cue_id")
+                or source_item.get("speaker_id") != output_item.get("speaker_id")
+                or not identical_timing
+            ):
+                raise subdub_speaker_cast.AutoCastUnavailable()
     timing_validation = subdub_validate_cue_locked_timing(
         source_segments,
         output_segments if needs_translation else source_segments,
@@ -248181,6 +248582,95 @@ SUBDUB_FAILED_AUTO_MULTI_RECOVERY_LITERAL = "--confirm-paid"
 SUBDUB_FAILED_AUTO_MULTI_LEGACY_GAP_LITERAL = (
     "--confirm-observability-gap"
 )
+SUBDUB_FAILED_AUTO_MULTI_ACOUSTIC_LITERAL = "--confirm-local-acoustic"
+SUBDUB_FINAL_ACOUSTIC_JOB_ID = "b4cb6d5fe8a7bdfce507"
+SUBDUB_FINAL_ACOUSTIC_PUBLIC_CODE = "B4CB6D5FE8"
+SUBDUB_FINAL_ACOUSTIC_SOURCE_SHA256 = (
+    "83de97b744b931e544b569e6e750f8415545f226461bd2e36cfb49225898ad3e"
+)
+
+
+def _subdub_multi_acoustic_model_preflight() -> dict:
+    service = auto_multi_speaker.subdub_multi_speaker_embedding_onnx
+    result = dict(service.model_preflight())
+    result["algorithm_version"] = service.ALGORITHM_VERSION
+    return result
+
+
+def _subdub_final_acoustic_recovery_reason(
+    current: dict,
+    *,
+    safe_id: str,
+    owner_user_id,
+    chat_id,
+    source_sha256: str,
+    target_language: str,
+    original_volume_percent: int,
+    dub_volume_percent: int,
+) -> str:
+    attempt_count = int(current.get("auto_multi_recovery_attempt_count") or 0)
+    correction_count = int(
+        current.get("auto_multi_recovery_correction_attempt_count") or 0
+    )
+    if (
+        current.get("auto_multi_acoustic_recovery_used") is True
+        or attempt_count >= 4
+        or correction_count >= 3
+    ):
+        return "recovery_already_used"
+    if (
+        safe_id != SUBDUB_FINAL_ACOUSTIC_JOB_ID
+        or str(current.get("internal_job_id") or current.get("job_id") or "")
+        != SUBDUB_FINAL_ACOUSTIC_JOB_ID
+        or str(current.get("public_code") or "")
+        != SUBDUB_FINAL_ACOUSTIC_PUBLIC_CODE
+        or str(current.get("user_id") or "") != str(owner_user_id)
+        or str(current.get("chat_id") or current.get("user_id") or "")
+        != str(chat_id)
+        or not str(current.get("job_key") or "").endswith(
+            "|subtitle_plus_dub|auto_multi_speaker"
+        )
+        or str(current.get("source_sha256") or "").strip().lower()
+        != SUBDUB_FINAL_ACOUSTIC_SOURCE_SHA256
+        or str(source_sha256 or "").strip().lower()
+        != SUBDUB_FINAL_ACOUSTIC_SOURCE_SHA256
+        or str(current.get("target_language") or "") != "English"
+        or str(target_language or "").strip() != "English"
+        or current.get("original_audio_volume_percent") != 40
+        or current.get("dubbed_voice_volume_percent") != 150
+        or type(original_volume_percent) is not int
+        or original_volume_percent != 40
+        or type(dub_volume_percent) is not int
+        or dub_volume_percent != 150
+        or attempt_count != 3
+        or correction_count != 2
+        or current.get("auto_multi_recovery_crosswalk_correction_used") is not True
+    ):
+        return "acoustic_recovery_not_allowed"
+    false_fields = (
+        "output_sent", "delivery_attempted", "artifact_started",
+        "final_mp4_exists", "output_validated",
+    )
+    artifact_fields = (
+        "final_mp4_path", "final_output_path", "output_path",
+        "output_video_path", "final_video_path", "dub_video_path",
+        "video_delivery_message_id", "final_video_message_id",
+        "delivery_message_id", "telegram_message_id",
+    )
+    if (
+        current.get("status") != "failed_no_charge"
+        or current.get("terminal_state") != "failed_no_charge"
+        or type(current.get("charged_xu")) is not int
+        or current.get("charged_xu") != 0
+        or current.get("charge_status") != "not_charged"
+        or any(
+            field not in current or current.get(field) is not False
+            for field in false_fields
+        )
+        or any(str(current.get(field) or "").strip() for field in artifact_fields)
+    ):
+        return "job_not_safe_to_recover"
+    return ""
 
 
 def _subdub_sha256_file(path: str) -> str:
@@ -248312,12 +248802,41 @@ def claim_subdub_failed_auto_multi_recovery(
     dub_volume_percent: int,
     confirm_paid: bool,
     allow_legacy_observability_gap: bool = False,
+    allow_acoustic_recovery: bool = False,
+    acoustic_preflight=None,
 ) -> dict:
     safe_id = str(internal_job_id or "").strip()
     if not confirm_paid:
         return {"ok": False, "claimed": False, "reason": "literal_confirm_required"}
     if not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", safe_id):
         return {"ok": False, "claimed": False, "reason": "invalid_job_id"}
+    acoustic_preflight_result: dict = {}
+    if allow_acoustic_recovery:
+        preflight = acoustic_preflight or _subdub_multi_acoustic_model_preflight
+        if not callable(preflight):
+            return {
+                "ok": False,
+                "claimed": False,
+                "reason": "acoustic_preflight_failed",
+            }
+        try:
+            acoustic_preflight_result = dict(preflight() or {})
+        except Exception:
+            acoustic_preflight_result = {}
+        service = auto_multi_speaker.subdub_multi_speaker_embedding_onnx
+        if not (
+            acoustic_preflight_result.get("ok") is True
+            and acoustic_preflight_result.get("status") == "PASS"
+            and acoustic_preflight_result.get("model_sha256")
+            == service.MODEL_SHA256
+            and acoustic_preflight_result.get("algorithm_version")
+            == service.ALGORITHM_VERSION
+        ):
+            return {
+                "ok": False,
+                "claimed": False,
+                "reason": "acoustic_preflight_failed",
+            }
     setting_key = _engine_async_job_key(safe_id)
     conn = None
     try:
@@ -248335,6 +248854,24 @@ def claim_subdub_failed_auto_multi_recovery(
         if not isinstance(current, dict):
             conn.rollback()
             return {"ok": False, "claimed": False, "reason": "job_payload_invalid"}
+        if allow_acoustic_recovery:
+            acoustic_reason = _subdub_final_acoustic_recovery_reason(
+                current,
+                safe_id=safe_id,
+                owner_user_id=owner_user_id,
+                chat_id=chat_id,
+                source_sha256=source_sha256,
+                target_language=target_language,
+                original_volume_percent=original_volume_percent,
+                dub_volume_percent=dub_volume_percent,
+            )
+            if acoustic_reason:
+                conn.rollback()
+                return {
+                    "ok": False,
+                    "claimed": False,
+                    "reason": acoustic_reason,
+                }
         if not (
             str(current.get("status") or "") == "failed_no_charge"
             and str(current.get("terminal_state") or "") == "failed_no_charge"
@@ -248362,7 +248899,7 @@ def claim_subdub_failed_auto_multi_recovery(
         if not job_key.endswith("|subtitle_plus_dub|auto_multi_speaker"):
             conn.rollback()
             return {"ok": False, "claimed": False, "reason": "not_auto_multi_combo"}
-        if not (
+        if not allow_acoustic_recovery and not (
             current.get("multi_diarization_attempted") is True
             and str(current.get("multi_diarization_provider") or "")
             == "gemini_transcribe_multi_diarization"
@@ -248510,7 +249047,8 @@ def claim_subdub_failed_auto_multi_recovery(
             return {"ok": False, "claimed": False, "reason": "legacy_observability_override_not_allowed"}
 
         if recovery_attempt_count != 0 and not (
-            empty_http_200_correction
+            allow_acoustic_recovery
+            or empty_http_200_correction
             or mapper_alignment_correction
             or crosswalk_correction
             or legacy_observability_override
@@ -248576,9 +249114,13 @@ def claim_subdub_failed_auto_multi_recovery(
                 "last_error_stage": "",
                 "last_error_safe": "",
                 "auto_multi_recovery": recovery,
-                "auto_multi_recovery_attempt_count": recovery_attempt_count + 1,
+                "auto_multi_recovery_attempt_count": (
+                    4 if allow_acoustic_recovery else recovery_attempt_count + 1
+                ),
                 "auto_multi_recovery_correction_attempt_count": (
-                    2
+                    3
+                    if allow_acoustic_recovery
+                    else 2
                     if crosswalk_correction
                     else 1
                     if (
@@ -248599,6 +249141,17 @@ def claim_subdub_failed_auto_multi_recovery(
                         "auto_multi_recovery_observability_authority": "owner_literal_legacy_gap",
                     }
                     if legacy_observability_override
+                    else {}
+                ),
+                **(
+                    {
+                        "auto_multi_acoustic_recovery_used": True,
+                        "auto_multi_acoustic_backend": "local_wespeaker_resnet34_spectral",
+                        "auto_multi_acoustic_model_sha256": acoustic_preflight_result["model_sha256"],
+                        "auto_multi_acoustic_algorithm_version": acoustic_preflight_result["algorithm_version"],
+                        "auto_multi_acoustic_owner_authority": "owner_literal_final_recovery",
+                    }
+                    if allow_acoustic_recovery
                     else {}
                 ),
                 "updated_at": time.time(),

@@ -14,6 +14,7 @@ import time
 from typing import Any
 
 from services import subdub_multi_speaker_asr_fallback
+from services import subdub_multi_speaker_embedding_onnx
 from services import subdub_multi_speaker_gender_onnx
 from services import subdub_speaker_cast as speaker_cast
 from services import subdub_two_speaker_gender_onnx
@@ -29,6 +30,173 @@ _UNDERCLUSTER_PROVIDER_LABEL_COUNT = 2
 _UNDERCLUSTER_WINDOWS_PER_CUE = 2
 _UNDERCLUSTER_MIN_CUES_PER_REGISTER = 2
 _UNDERCLUSTER_MIN_REGISTER_GAP_HZ = 30.0
+ACOUSTIC_WALL_TIMEOUT_SECONDS = 300.0
+MULTI_ACOUSTIC_STATE_FIELDS = frozenset({
+    "multi_acoustic_backend",
+    "multi_acoustic_model_sha256",
+    "multi_acoustic_algorithm_version",
+    "multi_acoustic_speaker_count",
+    "multi_acoustic_word_count",
+    "multi_acoustic_unit_count",
+    "multi_acoustic_embedding_window_count",
+    "multi_acoustic_cluster_sizes",
+    "multi_acoustic_stability_pass",
+    "multi_acoustic_word_coverage_count",
+})
+
+
+def bounded_multi_acoustic_evidence(
+    source: Mapping[str, object] | None,
+) -> dict[str, object]:
+    """Return one exact typed acoustic evidence bundle or fail closed empty."""
+
+    current = source if isinstance(source, Mapping) else {}
+    count_fields = (
+        "multi_acoustic_speaker_count",
+        "multi_acoustic_word_count",
+        "multi_acoustic_unit_count",
+        "multi_acoustic_embedding_window_count",
+        "multi_acoustic_word_coverage_count",
+    )
+    if any(type(current.get(field)) is not int for field in count_fields):
+        return {}
+    try:
+        speaker_count = int(current.get("multi_acoustic_speaker_count"))
+        word_count = int(current.get("multi_acoustic_word_count"))
+        unit_count = int(current.get("multi_acoustic_unit_count"))
+        window_count = int(current.get("multi_acoustic_embedding_window_count"))
+        coverage_count = int(current.get("multi_acoustic_word_coverage_count"))
+        cluster_sizes = list(current.get("multi_acoustic_cluster_sizes") or [])
+    except (TypeError, ValueError, OverflowError):
+        return {}
+    if (
+        current.get("multi_acoustic_backend")
+        != "local_wespeaker_resnet34_spectral"
+        or current.get("multi_acoustic_model_sha256")
+        != subdub_multi_speaker_embedding_onnx.MODEL_SHA256
+        or current.get("multi_acoustic_algorithm_version")
+        != subdub_multi_speaker_embedding_onnx.ALGORITHM_VERSION
+        or not 3 <= speaker_count <= subdub_multi_speaker_embedding_onnx.MAX_SPEAKERS
+        or not 0 < word_count <= speaker_cast.MAX_SIDECAR_CUES
+        or not subdub_multi_speaker_embedding_onnx.MIN_UNITS
+        <= unit_count
+        <= subdub_multi_speaker_embedding_onnx.MAX_CLUSTER_UNITS
+        or window_count < unit_count * 2
+        or window_count > subdub_multi_speaker_embedding_onnx.MAX_CLUSTER_UNITS * 2
+        or window_count % 2 != 0
+        or coverage_count != word_count
+        or len(cluster_sizes) != speaker_count
+        or any(type(value) is not int or value < 2 for value in cluster_sizes)
+        or sum(cluster_sizes) != window_count // 2
+        or current.get("multi_acoustic_stability_pass") is not True
+    ):
+        return {}
+    return {
+        "multi_acoustic_backend": "local_wespeaker_resnet34_spectral",
+        "multi_acoustic_model_sha256": (
+            subdub_multi_speaker_embedding_onnx.MODEL_SHA256
+        ),
+        "multi_acoustic_algorithm_version": (
+            subdub_multi_speaker_embedding_onnx.ALGORITHM_VERSION
+        ),
+        "multi_acoustic_speaker_count": speaker_count,
+        "multi_acoustic_word_count": word_count,
+        "multi_acoustic_unit_count": unit_count,
+        "multi_acoustic_embedding_window_count": window_count,
+        "multi_acoustic_cluster_sizes": cluster_sizes,
+        "multi_acoustic_stability_pass": True,
+        "multi_acoustic_word_coverage_count": coverage_count,
+    }
+
+
+def acoustic_sidecar_evidence(
+    evidence: Mapping[str, object] | None,
+) -> dict[str, object]:
+    bounded = bounded_multi_acoustic_evidence(evidence)
+    if not bounded:
+        return {}
+    return {
+        "algorithm_version": bounded["multi_acoustic_algorithm_version"],
+        "backend": bounded["multi_acoustic_backend"],
+        "cluster_sizes": list(bounded["multi_acoustic_cluster_sizes"]),
+        "embedding_window_count": bounded[
+            "multi_acoustic_embedding_window_count"
+        ],
+        "model_sha256": bounded["multi_acoustic_model_sha256"],
+        "speaker_count": bounded["multi_acoustic_speaker_count"],
+        "stability_pass": bounded["multi_acoustic_stability_pass"],
+        "unit_count": bounded["multi_acoustic_unit_count"],
+        "word_count": bounded["multi_acoustic_word_count"],
+        "word_coverage_count": bounded["multi_acoustic_word_coverage_count"],
+    }
+
+
+async def run_local_acoustic_diarization_off_event_loop(
+    pcm_path: Path,
+    word_timeline: list[dict],
+    *,
+    duration_seconds: float,
+    acoustic_diarize: Callable = (
+        subdub_multi_speaker_embedding_onnx.diarize_word_timeline
+    ),
+) -> dict[str, object]:
+    """Run the local acoustic engine off-loop and clean transient PCM safely."""
+
+    path = Path(pcm_path)
+    if (
+        not path.is_file()
+        or path.stat().st_size <= 0
+        or type(word_timeline) is not list
+        or not word_timeline
+        or type(duration_seconds) not in {int, float}
+        or not math.isfinite(float(duration_seconds))
+        or float(duration_seconds) <= 0.0
+        or not callable(acoustic_diarize)
+    ):
+        auto_speaker._cleanup_pcm_path(path)
+        raise speaker_cast.AutoCastManualRequired()
+
+    deadline = time.monotonic() + float(ACOUSTIC_WALL_TIMEOUT_SECONDS)
+    stop_event = threading.Event()
+    worker = asyncio.create_task(
+        asyncio.to_thread(
+            acoustic_diarize,
+            str(path),
+            list(word_timeline),
+            duration_seconds=float(duration_seconds),
+            deadline_monotonic=deadline,
+            stop_requested=stop_event.is_set,
+        )
+    )
+    drain_attempted = False
+    try:
+        result = await asyncio.wait_for(
+            asyncio.shield(worker),
+            max(0.0, deadline - time.monotonic()),
+        )
+        if not isinstance(result, Mapping) or result.get("ok") is not True:
+            raise speaker_cast.AutoCastManualRequired()
+        return dict(result)
+    except (asyncio.TimeoutError, TimeoutError) as exc:
+        stop_event.set()
+        await auto_speaker._drain_worker_bounded(worker)
+        drain_attempted = True
+        raise speaker_cast.AutoCastManualRequired() from exc
+    except asyncio.CancelledError:
+        stop_event.set()
+        await auto_speaker._drain_worker_bounded(worker)
+        drain_attempted = True
+        raise
+    except (speaker_cast.AutoCastUnavailable, speaker_cast.AutoCastManualRequired):
+        raise
+    except Exception as exc:
+        raise speaker_cast.AutoCastManualRequired() from exc
+    finally:
+        if not worker.done() and not drain_attempted:
+            stop_event.set()
+            await auto_speaker._drain_worker_bounded(worker)
+        if not auto_speaker._cleanup_pcm_path(path):
+            raise speaker_cast.AutoCastManualRequired()
 
 
 def _multi_diarization_debug_fields(source: Mapping[str, object]) -> dict[str, object]:
@@ -1121,14 +1289,10 @@ async def run_auto_multi_speaker_blackbox(
         )
 
     lane_payload = dict(payload)
-    rediarize_underclustered = lane_payload.pop(
-        "rediarize_underclustered",
-        subdub_multi_speaker_asr_fallback.rediarize_underclustered_segments,
-    )
+    lane_payload.pop("rediarize_underclustered", None)
     base_prepare = lane_payload.get("prepare_subtitles")
 
     async def prepare_multi_subtitles(*args: Any, **kwargs: Any) -> Any:
-        nonlocal cached_pcm_path
         prepared = await auto_speaker._maybe_await(
             base_prepare(*args, **kwargs)
         )
@@ -1138,140 +1302,15 @@ async def run_auto_multi_speaker_blackbox(
             prepared
         )
         prepared_state = auto_speaker._prepared_state(prepared)
+        acoustic_evidence = bounded_multi_acoustic_evidence(prepared_state)
         if (
-            not 1 <= len(labels) < 3
-            or prepared_state.get("auto_exact_resume")
+            not acoustic_evidence
+            or acoustic_evidence["multi_acoustic_speaker_count"] != len(labels)
         ):
-            return prepared
-        if not callable(rediarize_underclustered):
             raise speaker_cast.AutoCastManualRequired()
-        extracted = await extract_filtered_pcm(
-            prepared,
-            dict(prepared_state),
-            channels=subdub_two_speaker_gender_onnx.PCM_CHANNELS,
-            sample_rate=subdub_two_speaker_gender_onnx.PCM_SAMPLE_RATE,
-            sample_format="s16le",
-        )
-        cached_pcm_path = auto_speaker._validated_pcm_path(
-            prepared,
-            extracted,
-        )
-        rediarized = await auto_speaker._maybe_await(
-            rediarize_underclustered(
-                list(prepared.get("source_segments") or []),
-                pcm_path=str(cached_pcm_path),
-                sample_rate=subdub_two_speaker_gender_onnx.PCM_SAMPLE_RATE,
-                channels=subdub_two_speaker_gender_onnx.PCM_CHANNELS,
-                language=str(
-                    prepared_state.get("source_language") or "auto"
-                ),
-                provider_call_allowed=str(
-                    current.get("subdub_final_confirmed") or ""
-                ).strip().lower()
-                in {"1", "true", "yes", "on"},
-            )
-        )
         if isinstance(current, dict):
-            current.update(
-                {
-                    "multi_diarization_attempted": True,
-                    "multi_diarization_provider": str(
-                        rediarized.get("provider")
-                        if isinstance(rediarized, Mapping)
-                        else ""
-                    )[:80],
-                    "multi_diarization_status": str(
-                        rediarized.get("provider_status")
-                        or rediarized.get("status")
-                        if isinstance(rediarized, Mapping)
-                        else speaker_cast.AUTO_CAST_MANUAL_REQUIRED
-                    )[:80],
-                    "multi_diarization_speaker_count": int(
-                        rediarized.get("detected_speaker_count") or 0
-                    )
-                    if isinstance(rediarized, Mapping)
-                    else 0,
-                    "multi_diarization_detail": str(
-                        rediarized.get("detail")
-                        if isinstance(rediarized, Mapping)
-                        else ""
-                    )[:180],
-                    "multi_diarization_http_status": int(
-                        rediarized.get("provider_http_status")
-                        or rediarized.get("http_status")
-                        or 0
-                    )
-                    if isinstance(rediarized, Mapping)
-                    else 0,
-                    "multi_diarization_provider_word_count": int(
-                        rediarized.get("provider_word_count")
-                        or len(rediarized.get("words") or [])
-                        or 0
-                    )
-                    if isinstance(rediarized, Mapping)
-                    else 0,
-                    "multi_diarization_provider_speaker_count": int(
-                        rediarized.get("provider_speaker_count")
-                        or len(rediarized.get("speaker_ids") or [])
-                        or 0
-                    )
-                    if isinstance(rediarized, Mapping)
-                    else 0,
-                    "multi_diarization_mapped_speaker_count": int(
-                        rediarized.get("mapped_speaker_count")
-                        or subdub_multi_speaker_asr_fallback.detected_speaker_count(
-                            rediarized.get("segments") or []
-                        )
-                        or 0
-                    )
-                    if isinstance(rediarized, Mapping)
-                    else 0,
-                    "multi_diarization_raw_annotation_count": int(
-                        rediarized.get("provider_raw_annotation_count") or 0
-                    )
-                    if isinstance(rediarized, Mapping)
-                    else 0,
-                    "multi_diarization_terminal_empty": bool(
-                        isinstance(rediarized, Mapping)
-                        and rediarized.get("provider_terminal_empty") is True
-                    ),
-                    "multi_diarization_parse_rejection": str(
-                        rediarized.get("provider_parse_rejection") or ""
-                    )[:80]
-                    if isinstance(rediarized, Mapping)
-                    else "",
-                    "multi_diarization_dropped_weak_word_count": int(
-                        rediarized.get("provider_dropped_weak_word_count") or 0
-                    )
-                    if isinstance(rediarized, Mapping)
-                    else 0,
-                    "multi_diarization_dropped_weak_speaker_count": int(
-                        rediarized.get("provider_dropped_weak_speaker_count") or 0
-                    )
-                    if isinstance(rediarized, Mapping)
-                    else 0,
-                    "multi_diarization_weak_label_filter_applied": bool(
-                        isinstance(rediarized, Mapping)
-                        and rediarized.get("provider_weak_label_filter_applied") is True
-                    ),
-                }
-            )
-        if not isinstance(rediarized, Mapping) or rediarized.get("ok") is not True:
-            raise speaker_cast.AutoCastManualRequired()
-        refined = _apply_provider_rediarization(prepared, rediarized)
-        if refined is not prepared and isinstance(current, dict):
-            refined_state = auto_speaker._prepared_state(refined)
-            current.update(
-                {
-                    "speaker_sidecar_path": refined_state.get(
-                        "speaker_sidecar_path"
-                    ),
-                    "speaker_sidecar_sha256": refined_state.get(
-                        "speaker_sidecar_sha256"
-                    ),
-                }
-            )
-        return refined
+            current.update(acoustic_evidence)
+        return prepared
 
     observed_casts: dict[str, str] = {}
     base_synthesize = lane_payload.get("synthesize_segments")

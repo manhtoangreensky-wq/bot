@@ -338,17 +338,24 @@ def test_two_speaker_long_media_fails_before_any_asr_provider(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("lane_patch", "expected_fallback"),
     (
-        ({}, True),
-        ({"auto_speaker_lane": "multi"}, False),
+        "lane_patch",
+        "expected_diarization",
+        "expected_fallback",
+        "expected_word_timeline",
+    ),
+    (
+        ({}, True, True, False),
+        ({"auto_speaker_lane": "multi"}, False, False, True),
     ),
 )
-def test_prepare_subtitles_scopes_fallback_to_exact_two_speaker_lane(
+def test_prepare_subtitles_scopes_fallback_to_exact_two_and_words_to_multi(
     monkeypatch,
     tmp_path,
     lane_patch,
+    expected_diarization,
     expected_fallback,
+    expected_word_timeline,
 ):
     captured = []
     source_srt = "1\n00:00:00,000 --> 00:00:01,000\nhello\n"
@@ -357,10 +364,17 @@ def test_prepare_subtitles_scopes_fallback_to_exact_two_speaker_lane(
         *_args,
         require_diarization=False,
         allow_two_speaker_key4u_fallback=False,
+        require_auto_multi_word_timeline=False,
         **_kwargs,
     ):
-        captured.append((require_diarization, allow_two_speaker_key4u_fallback))
-        return {
+        captured.append(
+            (
+                require_diarization,
+                allow_two_speaker_key4u_fallback,
+                require_auto_multi_word_timeline,
+            )
+        )
+        result = {
             "source_kind": "asr",
             "subtitle": source_srt,
             "script": "hello",
@@ -377,8 +391,61 @@ def test_prepare_subtitles_scopes_fallback_to_exact_two_speaker_lane(
             ],
             "detected_language": "en",
         }
+        if require_auto_multi_word_timeline:
+            result["word_timeline"] = [
+                {
+                    "index": index,
+                    "word": f"word{index}",
+                    "start": index * 0.2,
+                    "end": index * 0.2 + 0.1,
+                }
+                for index in range(30)
+            ]
+            result["duration_seconds"] = 6.0
+        return result
+
+    async def fake_extract_pcm(*_args, **_kwargs):
+        pcm_path = tmp_path / "multi-acoustic.pcm"
+        pcm_path.write_bytes(b"\x01\x00" * 8_000)
+        return str(pcm_path)
+
+    async def fake_acoustic(*_args, **_kwargs):
+        return {
+            "ok": True,
+            "status": "PASS",
+            "provider": "local_wespeaker_resnet34_spectral",
+            "segments": [
+                {
+                    "cue_id": f"acoustic-{speaker}",
+                    "index": speaker + 1,
+                    "start": float(speaker * 2),
+                    "end": float((speaker + 1) * 2),
+                    "text": f"speaker {speaker}",
+                    "speaker": speaker,
+                    "speaker_id": f"chunk_00:speaker_{speaker}",
+                    "speaker_confidence": 0.9,
+                    "chunk_index": 0,
+                }
+                for speaker in range(3)
+            ],
+            "detected_speaker_count": 3,
+            "model_sha256": bot.auto_multi_speaker.subdub_multi_speaker_embedding_onnx.MODEL_SHA256,
+            "algorithm_version": bot.auto_multi_speaker.subdub_multi_speaker_embedding_onnx.ALGORITHM_VERSION,
+            "word_count": 30,
+            "unit_count": 6,
+            "embedding_window_count": 12,
+            "cluster_sizes": [2, 2, 2],
+            "stability_pass": True,
+            "word_coverage_count": 30,
+        }
 
     monkeypatch.setattr(bot, "video_dubbing_resolve_source_script", fake_resolve)
+    monkeypatch.setattr(bot, "_extract_subdub_auto_pcm", fake_extract_pcm)
+    monkeypatch.setattr(
+        bot.auto_multi_speaker,
+        "run_local_acoustic_diarization_off_event_loop",
+        fake_acoustic,
+    )
     monkeypatch.setattr(bot, "set_video_dubbing_artifact", lambda *_args: "source-ref")
     monkeypatch.setattr(
         bot,
@@ -409,4 +476,6 @@ def test_prepare_subtitles_scopes_fallback_to_exact_two_speaker_lane(
         )
     )
 
-    assert captured == [(True, expected_fallback)]
+    assert captured == [
+        (expected_diarization, expected_fallback, expected_word_timeline)
+    ]

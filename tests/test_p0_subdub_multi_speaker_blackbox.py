@@ -7,6 +7,7 @@ import importlib.util
 import inspect
 from pathlib import Path
 import sys
+import threading
 import time
 
 import pytest
@@ -525,7 +526,7 @@ def test_shared_classifier_rejects_one_frame_without_multi_relaxation(monkeypatc
     ).parameters
 
 
-def test_multi_adapter_rediarizes_one_underclustered_provider_label_before_gate(
+def test_multi_adapter_rejects_underclustered_without_provider_rediarization(
     tmp_path,
     monkeypatch,
 ):
@@ -629,48 +630,234 @@ def test_multi_adapter_rediarizes_one_underclustered_provider_label_before_gate(
         )
     )
 
-    refined = result["prepared"]
-    assert [item["speaker_id"] for item in refined["source_segments"]] == [
-        "chunk_00:speaker_0",
-        "chunk_00:speaker_1",
-        "chunk_00:speaker_0",
-        "chunk_00:speaker_1",
-        "chunk_00:speaker_2",
-        "chunk_00:speaker_2",
+    assert result["ok"] is False
+    assert result["status"] == speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+    assert captured == {"extract_calls": 0}
+
+
+def _acoustic_multi_prepared(tmp_path: Path) -> dict:
+    raw = [
+        {
+            "index": index + 1,
+            "start": float(index),
+            "end": float(index + 1),
+            "text": f"cue {index + 1}",
+            "speaker": index % 3,
+            "speaker_confidence": 0.9,
+            "speaker_id": f"chunk_00:speaker_{index % 3}",
+            "chunk_index": 0,
+        }
+        for index in range(6)
     ]
-    assert [item["speaker_id"] for item in refined["output_segments"]] == [
-        item["speaker_id"] for item in refined["source_segments"]
-    ]
-    refined_state = refined["state"]
-    assert refined_state["multi_diarization_attempted"] is True
-    assert refined_state["multi_diarization_provider"] == (
-        "gemini_transcribe_multi_diarization"
+    source = bot.subdub_canonical_auto_speaker_segments(
+        raw,
+        extraction_source="local_acoustic",
     )
-    assert refined_state["multi_diarization_status"] == "PASS"
-    assert refined_state["multi_diarization_speaker_count"] == 3
-    refined_sidecar = speaker_cast.load_sidecar(
-        refined_state["speaker_sidecar_path"],
-        expected_sha256=refined_state["speaker_sidecar_sha256"],
-        workspace=str(tmp_path),
+    source_subtitle = bot.video_dubbing_srt_from_segments(source)
+    media_bytes = b"acoustic-source-media"
+    media_sha256 = __import__("hashlib").sha256(media_bytes).hexdigest()
+    subtitle_sha256 = bot.subdub_speaker_sidecar_subtitle_sha256(source_subtitle)
+    sidecar = speaker_cast.build_sidecar(
+        source,
+        media_sha256=media_sha256,
+        subtitle_sha256=subtitle_sha256,
     )
-    assert speaker_cast.ordered_auto_speaker_labels(
-        refined_sidecar["cues"]
-    ) == [
-        "chunk_00:speaker_0",
-        "chunk_00:speaker_1",
-        "chunk_00:speaker_2",
-    ]
-    assert captured == {
-        "extract_calls": 1,
-        "extract_kwargs": {
-            "channels": 2,
-            "sample_rate": 44_100,
-            "sample_format": "s16le",
-        },
-        "rediarize_calls": 1,
-        "rediarize_pcm": str(pcm_path),
-        "provider_call_allowed": True,
+    receipt = speaker_cast.persist_sidecar(sidecar, workspace=str(tmp_path))
+    acoustic = {
+        "multi_acoustic_backend": "local_wespeaker_resnet34_spectral",
+        "multi_acoustic_model_sha256": (
+            "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
+        ),
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-spectral-v1",
+        "multi_acoustic_speaker_count": 3,
+        "multi_acoustic_word_count": 30,
+        "multi_acoustic_unit_count": 6,
+        "multi_acoustic_embedding_window_count": 12,
+        "multi_acoustic_cluster_sizes": [2, 2, 2],
+        "multi_acoustic_stability_pass": True,
+        "multi_acoustic_word_coverage_count": 30,
     }
+    return {
+        "source_bytes": media_bytes,
+        "source_subtitle": source_subtitle,
+        "source_segments": source,
+        "output_segments": [dict(item) for item in source],
+        "media_sha256": media_sha256,
+        "subtitle_sha256": subtitle_sha256,
+        "state": {
+            **EXACT_AUTO_STATE,
+            "auto_speaker_lane": "multi",
+            "_pipeline_workspace": str(tmp_path),
+            "speaker_sidecar_path": receipt["path"],
+            "speaker_sidecar_sha256": receipt["sha256"],
+            **acoustic,
+        },
+    }
+
+
+def test_bounded_acoustic_evidence_accepts_multiple_subsegments_per_unit():
+    multi_module = _multi_module()
+    evidence = {
+        "multi_acoustic_backend": "local_wespeaker_resnet34_spectral",
+        "multi_acoustic_model_sha256": (
+            "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
+        ),
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-spectral-v1",
+        "multi_acoustic_speaker_count": 5,
+        "multi_acoustic_word_count": 147,
+        "multi_acoustic_unit_count": 18,
+        "multi_acoustic_embedding_window_count": 174,
+        "multi_acoustic_cluster_sizes": [17, 24, 13, 20, 13],
+        "multi_acoustic_stability_pass": True,
+        "multi_acoustic_word_coverage_count": 147,
+    }
+
+    assert multi_module.bounded_multi_acoustic_evidence(evidence) == evidence
+
+
+def test_multi_adapter_accepts_acoustic_prepared_without_provider_crosswalk(
+    tmp_path,
+    monkeypatch,
+):
+    multi_module = _multi_module()
+    prepared = _acoustic_multi_prepared(tmp_path)
+    calls = {"provider": 0}
+
+    async def base_prepare(_state, *, require_auto_cast):
+        assert require_auto_cast is True
+        return prepared
+
+    async def forbidden_provider(*_args, **_kwargs):
+        calls["provider"] += 1
+        raise AssertionError("acoustic authority must not call provider crosswalk")
+
+    async def isolated(**kwargs):
+        current = await kwargs["prepare_subtitles"](
+            kwargs["state"],
+            require_auto_cast=True,
+        )
+        return {"ok": True, "status": "fixture", "prepared": current}
+
+    monkeypatch.setattr(multi_module, "_run_isolated_multi_speaker_blackbox", isolated)
+    result = asyncio.run(
+        multi_module.run_auto_multi_speaker_blackbox(
+            lane_mode="subtitle_plus_dub",
+            extract_pcm=lambda *_args, **_kwargs: "unused.pcm",
+            prepare_subtitles=base_prepare,
+            rediarize_underclustered=forbidden_provider,
+            state={**EXACT_AUTO_STATE, "auto_speaker_lane": "multi"},
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["prepared"] is prepared
+    assert calls == {"provider": 0}
+
+
+def test_local_acoustic_helper_runs_off_loop_and_cleans_pcm(tmp_path):
+    multi_module = _multi_module()
+    pcm_path = tmp_path / "acoustic.pcm"
+    pcm_path.write_bytes(b"\x01\x00" * 8_000)
+    captured = {}
+
+    def diarize(path, words, *, duration_seconds, deadline_monotonic, stop_requested):
+        captured.update(
+            {
+                "path": path,
+                "words": list(words),
+                "duration": duration_seconds,
+                "deadline": deadline_monotonic,
+                "stopped": stop_requested(),
+                "thread": threading.get_ident(),
+            }
+        )
+        return {"ok": True, "status": "PASS", "segments": [{"speaker_id": "x"}]}
+
+    caller_thread = threading.get_ident()
+    result = asyncio.run(
+        multi_module.run_local_acoustic_diarization_off_event_loop(
+            pcm_path,
+            [{"index": 0, "word": "hello", "start": 0.0, "end": 0.2}],
+            duration_seconds=1.0,
+            acoustic_diarize=diarize,
+        )
+    )
+
+    assert result["ok"] is True
+    assert captured["path"] == str(pcm_path)
+    assert captured["duration"] == 1.0
+    assert captured["deadline"] > time.monotonic()
+    assert captured["stopped"] is False
+    assert captured["thread"] != caller_thread
+    assert not pcm_path.exists()
+
+
+def test_local_acoustic_helper_timeout_drains_before_pcm_cleanup(tmp_path, monkeypatch):
+    multi_module = _multi_module()
+    pcm_path = tmp_path / "timeout.pcm"
+    pcm_path.write_bytes(b"\x01\x00" * 8_000)
+    worker_exited = threading.Event()
+    observed = {}
+
+    def diarize(_path, _words, *, stop_requested, **_kwargs):
+        while not stop_requested():
+            time.sleep(0.001)
+        observed["pcm_exists_at_exit"] = pcm_path.exists()
+        worker_exited.set()
+        raise speaker_cast.AutoCastManualRequired()
+
+    monkeypatch.setattr(multi_module, "ACOUSTIC_WALL_TIMEOUT_SECONDS", 0.02)
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        asyncio.run(
+            multi_module.run_local_acoustic_diarization_off_event_loop(
+                pcm_path,
+                [{"index": 0, "word": "hello", "start": 0.0, "end": 0.2}],
+                duration_seconds=1.0,
+                acoustic_diarize=diarize,
+            )
+        )
+
+    assert worker_exited.is_set()
+    assert observed["pcm_exists_at_exit"] is True
+    assert not pcm_path.exists()
+
+
+def test_local_acoustic_helper_cancellation_drains_before_pcm_cleanup(tmp_path):
+    multi_module = _multi_module()
+    pcm_path = tmp_path / "cancel.pcm"
+    pcm_path.write_bytes(b"\x01\x00" * 8_000)
+    worker_started = threading.Event()
+    worker_exited = threading.Event()
+    observed = {}
+
+    def diarize(_path, _words, *, stop_requested, **_kwargs):
+        worker_started.set()
+        while not stop_requested():
+            time.sleep(0.001)
+        observed["pcm_exists_at_exit"] = pcm_path.exists()
+        worker_exited.set()
+        raise speaker_cast.AutoCastManualRequired()
+
+    async def scenario():
+        task = asyncio.create_task(
+            multi_module.run_local_acoustic_diarization_off_event_loop(
+                pcm_path,
+                [{"index": 0, "word": "hello", "start": 0.0, "end": 0.2}],
+                duration_seconds=1.0,
+                acoustic_diarize=diarize,
+            )
+        )
+        while not worker_started.is_set():
+            await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+
+    assert worker_exited.is_set()
+    assert observed["pcm_exists_at_exit"] is True
+    assert not pcm_path.exists()
 
 
 def test_multi_classifier_preserves_three_provider_labels_without_invention(

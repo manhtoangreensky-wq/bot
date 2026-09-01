@@ -23,14 +23,14 @@ body:
     id: flow
     attributes:
       label: Flow và stage
-      description: Ghi upload fixture hash, lane, ngôn ngữ, ảnh menu numeric-only (2 layer cùng hàng, không preset), giá trị gốc/lồng, confirm và từng stage ASR/cast/TTS/mux/delivery.
+      description: Ghi fixture hash, lane, ngôn ngữ, numeric gốc/lồng, confirm hoặc same-job recovery, strict word/acoustic stage, TTS/mux/delivery. Với SD-MS-L* ghi model hash, CPU provider, units/windows/k/stability; không dán raw payload/PCM/embedding.
     validations:
       required: true
   - type: textarea
     id: artifact
     attributes:
       label: Artifact và receipt
-      description: Ghi job id, MP4/SRT message id, hash/bytes/codecs/duration/audio, speaker/cast và từng thành phần giá.
+      description: Ghi job id/attempt, MP4/receipt message id, hash/bytes/codecs/duration/audio, speaker/voice/cue/timing aggregates và từng thành phần giá. Job/HTTP 200/model output đơn lẻ không phải PASS.
     validations:
       required: true
   - type: textarea
