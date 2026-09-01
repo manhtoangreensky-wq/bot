@@ -556,6 +556,95 @@ def test_key4u_poll_override_is_used_for_family_task(monkeypatch):
     assert captured["url"] == f"{KEY4U_VN}/kling/v1/videos/text2video/kling_task_123"
 
 
+@pytest.mark.parametrize(
+    ("task_id", "expected_suffix"),
+    [
+        (
+            "task_existing_key4u_scene_2",
+            "veo3.1-fast%3Atask_existing_key4u_scene_2",
+        ),
+        (
+            "veo3.1-fast:task_existing_key4u_scene_2",
+            "veo3.1-fast%3Atask_existing_key4u_scene_2",
+        ),
+    ],
+)
+def test_key4u_official_openai_poll_uses_model_qualified_task_id_once(
+    monkeypatch,
+    task_id,
+    expected_suffix,
+):
+    env = _key4u_env(KEY4U_VIDEO_MODEL="veo3.1-fast")
+    provider = _key4u_provider(env)
+    captured = {}
+
+    def fake_json(url, payload=None, **kwargs):
+        captured.update(
+            {
+                "url": url,
+                "payload": payload,
+                "method": kwargs.get("method"),
+            }
+        )
+        return {
+            "ok": True,
+            "status_code": 200,
+            "body": {
+                "id": "veo3.1-fast:task_existing_key4u_scene_2",
+                "status": "pending",
+                "video_url": None,
+            },
+            "response_shape": {"type": "dict"},
+        }
+
+    monkeypatch.setattr(provider, "_open_json", fake_json)
+    result = provider.poll_video_job(
+        task_id,
+        poll_url_override=f"{KEY4U_VN}/v1/videos/{{task_id}}",
+    )
+
+    assert result.ok is True
+    assert result.status == "queued"
+    assert captured == {
+        "url": f"{KEY4U_VN}/v1/videos/{expected_suffix}",
+        "payload": None,
+        "method": "GET",
+    }
+
+
+@pytest.mark.parametrize(
+    "poll_url",
+    [
+        f"{KEY4U_VN}/v1/video/query?id={{task_id}}",
+        f"{KEY4U_VN}/kling/v1/videos/text2video/{{task_id}}",
+        f"{KEY4U_VN}/minimax/v1/query/video_generation?task_id={{task_id}}",
+        "https://video-proxy.example.com/v1/videos/{task_id}",
+    ],
+)
+def test_key4u_non_official_openai_poll_keeps_raw_task_id(monkeypatch, poll_url):
+    provider = _key4u_provider(_key4u_env(KEY4U_VIDEO_MODEL="veo3.1-fast"))
+    captured = {}
+
+    def fake_json(url, payload=None, **kwargs):
+        captured["url"] = url
+        return {
+            "ok": True,
+            "status_code": 200,
+            "body": {"status": "pending"},
+            "response_shape": {"type": "dict"},
+        }
+
+    monkeypatch.setattr(provider, "_open_json", fake_json)
+    result = provider.poll_video_job(
+        "task_existing_key4u_scene_2",
+        poll_url_override=poll_url,
+    )
+
+    assert result.ok is True
+    assert "veo3.1-fast" not in captured["url"]
+    assert "task_existing_key4u_scene_2" in captured["url"]
+
+
 def test_shopaikey_terminal_quota_payload_preserves_real_blocker(monkeypatch):
     provider = GenericHttpVideoProvider(
         provider_name="shopaikey_video",

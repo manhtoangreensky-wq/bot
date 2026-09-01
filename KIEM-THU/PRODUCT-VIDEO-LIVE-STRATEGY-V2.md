@@ -234,6 +234,21 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     exact `4 passed`; focused `51 passed`; impact `199 passed, 1 baseline
     deselected`; hash/final full compile PASS. Ship this correction, then reinstall
     the same poll-only state; no provider submit.
+  - [-] PR #964 runtime `85cb4482...`, deploy `33501305826` SUCCESS `3m25s`.
+    Snapshot and production pre-start ledger verifiers passed after every stale
+    scene-1 task alias was cleared; production CAS backup SHA `25d54637...`, mode
+    `0600`. Owner worker claimed job `28` once, then stopped inactive after terminal
+    failed-no-charge. Forensic proves no third submit: only poll attempts, poll HTTP
+    `400`, task hash/cap `2/0` unchanged, provider usage/transaction/charged Xu `0`,
+    no artifact/concat/delivery.
+  - [x] Official Key4U OpenAI poll correction is source-ready. Runtime model is
+    `veo3.1-fast`; persisted accepted task is raw `task_...`; official
+    `/v1/videos/{id}` uses model-qualified IDs. The adapter qualifies that raw ID
+    exactly once only on official Key4U OpenAI poll paths. Generic query, Kling,
+    Hailuo, custom proxy and already-composite IDs are locked unchanged. RED
+    `1 failed + 5 passed`; GREEN `6 passed`; focused `52 passed`; broad branch and
+    clean main have the exact same 61 baseline failures, `NEW_FAILURES=0`; compile/
+    hash/diff PASS. Ship once, then poll the same task without provider submit.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 

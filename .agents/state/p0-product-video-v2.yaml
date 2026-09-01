@@ -879,6 +879,35 @@ pv2_r01_job28_scene1_stale_task_ownership:
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
+pv2_r01_job28_key4u_composite_poll_id:
+  phase: SOURCE_READY_TO_SHIP
+  prior_pr: 964
+  prior_merge_sha: 85cb4482149a7965afc76da00ce636db1914b72a
+  prior_deploy_run: 33501305826 SUCCESS in 3m25s
+  runtime_bot_worker: exact SHA; tracked diff 0; owner worker inactive before live
+  alias_clear_production_backup: /opt/toanaas/bot/delete/pv2-r01-job28-scene2-poll-only-production-20260901T182800.json
+  alias_clear_production_backup_sha_mode: 25d54637602b18098257ef56c8567f63027921ab6ec0a255d60024f16c273216 mode 0600
+  prestart_verifier: PASS; scene1 failed taskless; scene2 task hash prefix 925d3315ec8a active pollable; cap 2/0; submit false
+  live_worker: PID 996057 claimed existing job28 once then stopped inactive PID 0
+  live_terminal: failed_no_charge; Key4U poll HTTP 400; artifact concat delivery 0
+  submit_forensic: root submit false HTTP 0; all new attempts phase poll; no third submit
+  finance: wallet 200/0; transactions 0; credit events 1; provider usage 0; charged Xu 0
+  root_cause: official Key4U OpenAI video poll requires model-qualified id while persisted accepted task is raw task_ id
+  runtime_model: veo3.1-fast
+  source_scope: qualify raw task id once only for official Key4U hosts and exact /v1/videos task path
+  protected_routes: composite ids; generic query; Kling; Hailuo; custom proxy
+  source_red: 1 failed and 5 passed in 8.52s
+  exact_green: 6 passed in 4.93s
+  focused_green: 52 passed in 6.38s
+  broad_branch: 371 passed, 1 skipped, 61 failed in 48.17s
+  broad_baseline: 365 passed, 1 skipped, exact same 61 failed in 601.32s; NEW_FAILURES=0
+  strategy_gate: 32 passed and 1 exact fixture SHA baseline deselected in 6.05s
+  locked_engine_hash: PASS in 7.23s
+  full_compile: exit 0
+  diff_check: exit 0
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  live_pass: false
 spec_04i_subdub_auto_two_speaker_addon:
   phase: PENDING_AFTER_SPEC_04H_9
   compatible_media_only: true
@@ -887,9 +916,8 @@ spec_04i_subdub_auto_two_speaker_addon:
   representative_live_target: one unfinished media-compatible Product Video lane
   acceptance: male/female detection; translation; two-voice dub; final MP4; receipt/report; wallet delta 0
 next_action: >-
-  Ship/deploy only the current-scene task ownership correction. Keep Owner worker
-  inactive through exact runtime. Reinstall existing job 28 by backup-safe CAS for
-  poll-only scene2 task; provider submit must remain impossible because global cap
-  is 2/2. Verify scene1 remains taskless before start. Download/validate scene2 if
-  ready, then terminal partial/no-charge. Do not submit again or open another
-  product/SPEC-04I.
+  Ship/deploy only the Key4U official composite poll-id correction. Keep Owner
+  worker inactive through exact runtime. Reinstall existing job 28 by backup-safe
+  alias-clear CAS for poll-only scene2 task; provider submit must remain impossible
+  because global cap is 2/2. Verify scene1 taskless, then poll/download scene2.
+  Do not submit again or open another product/SPEC-04I.

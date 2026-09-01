@@ -1321,7 +1321,21 @@ class GenericHttpVideoProvider:
         if not caps.get("configured"):
             return VideoPollResult(ok=False, provider_name=self.provider_name, provider_task_id=provider_task_id, status="failed", error_code="provider_not_configured")
         poll_url = str(poll_url_override or self._poll_url()).strip()
-        encoded = urllib.parse.quote(str(provider_task_id or ""))
+        poll_task_id = str(provider_task_id or "").strip()
+        parsed_poll_url = urllib.parse.urlsplit(poll_url)
+        poll_task_id_model_qualified = bool(
+            self.provider_name == "key4u_video"
+            and (parsed_poll_url.hostname or "").lower()
+            in {"api.key4u.vn", "api.key4u.shop"}
+            and parsed_poll_url.path.rstrip("/")
+            in {"/v1/videos/{task_id}", "/v1/videos/{id}"}
+            and poll_task_id.startswith("task_")
+            and ":" not in poll_task_id
+            and str(self.env.get(self.model_env) or "").strip()
+        )
+        if poll_task_id_model_qualified:
+            poll_task_id = f"{str(self.env.get(self.model_env) or '').strip()}:{poll_task_id}"
+        encoded = urllib.parse.quote(poll_task_id)
         if "{task_id}" in poll_url:
             url = poll_url.replace("{task_id}", encoded)
         elif "{id}" in poll_url:
@@ -1365,6 +1379,7 @@ class GenericHttpVideoProvider:
             "provider_progress_raw": progress if progress not in (None, "") else "",
             "provider_progress_raw_number": progress_value if progress_value is not None else "",
             "provider_progress_source": "data.progress" if progress not in (None, "") else "none",
+            "poll_task_id_model_qualified": poll_task_id_model_qualified,
             "http_200_not_used_as_progress": True,
             "shopaikey_fail_reason": fail_reason if fail_reason not in (None, "") else "",
             **terminal_error,

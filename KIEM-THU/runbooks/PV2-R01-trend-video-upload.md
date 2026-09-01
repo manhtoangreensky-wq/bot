@@ -724,3 +724,37 @@ self-review disagreement RED `1 failed in 6.23s` -> consensus GREEN `2 passed in
 impact `199 passed, 1 exact baseline deselected in 27.08s`; locked engine hash and
 final full compile PASS. Source verification made no provider call or wallet
 mutation.
+
+## Key4U official model-qualified poll ID RED
+
+PR #964 squash/runtime `85cb4482149a7965afc76da00ce636db1914b72a`;
+deploy `33501305826` SUCCESS in `3m25s`. Bot and Owner worker checkout matched exact
+SHA with tracked diff `0`; bot/web/nginx active and health OK. Snapshot rehearsal,
+production alias-clear CAS and deployed pre-start verifier all passed. Scene 1 was
+failed and taskless; scene 2 retained the existing 37-character task hash prefix
+`925d3315ec8a`, active/pollable; cap `2/0`, submit false, finance unchanged.
+Production backup is `/opt/toanaas/bot/delete/pv2-r01-job28-scene2-poll-only-
+production-20260901T182800.json`, SHA `25d54637...`, mode `0600`.
+
+Owner worker PID `996057` claimed existing job `28` exactly once. It terminalized
+failed-no-charge and was stopped inactive PID `0`. Sanitized terminal forensic
+separates the generic journal label from transport truth: root submit called false,
+submit HTTP `0`, every new attempt has `phase=poll`, Key4U poll HTTP `400`, the
+accepted task hash and authorization cap remain unchanged, provider usage `0`,
+transactions `0`, credit events `1`, wallet `200/0`, charged Xu `0`, and artifact/
+concat/delivery are all `0`. Therefore no third paid submit occurred.
+
+Runtime/backup evidence records model `veo3.1-fast`, interface
+`key4u_google_veo_exclusive`, and a raw `task_...` accepted ID. Key4U's official
+OpenAI query contract is GET `/v1/videos/{id}` and its documented example uses a
+model-qualified ID such as `sora-2:task_...`; polling the raw ID produced the
+measured HTTP `400`. The minimal correction qualifies a raw `task_...` with the
+configured model exactly once, only when provider is Key4U, host is official and
+the path is exact OpenAI `/v1/videos/{task_id|id}`. Already-composite IDs, generic
+query, Kling, Hailuo and custom proxy routes stay unchanged.
+
+RED `1 failed, 5 passed in 8.52s`; exact GREEN `6 passed in 4.93s`; focused Key4U/
+job28 `52 passed in 6.38s`. Broad branch `371 passed, 1 skipped, 61 failed in
+48.17s`; clean main exact selector `365 passed, 1 skipped, same 61 failures in
+601.32s`, so `NEW_FAILURES=0`. Locked engine hash PASS in `7.23s`; full compile and
+diff-check exit `0`. Source verification made no provider call or wallet mutation.
