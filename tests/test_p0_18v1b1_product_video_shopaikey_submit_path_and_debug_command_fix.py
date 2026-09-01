@@ -222,6 +222,129 @@ def test_existing_task_poll_survives_new_submit_eligibility_recheck(monkeypatch,
     assert result["continue_polling"] is True
 
 
+def test_key4u_existing_task_recovers_official_model_poll_contract(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_open(self, url, payload=None, *, method="POST", timeout=90):
+        calls.append((self.provider_name, method, url, payload))
+        assert method == "GET"
+        return {
+            "ok": True,
+            "status_code": 200,
+            "body": {
+                "id": "veo3.1-fast:task_existing_scene_2",
+                "status": "pending",
+                "video_url": None,
+            },
+            "response_shape": {"type": "dict"},
+        }
+
+    monkeypatch.setattr(GenericHttpVideoProvider, "_open_json", fake_open)
+    request = _request()
+    request.metadata.update(
+        {
+            "submit_source": "worker_poll_existing_task",
+            "provider_submit_source": "worker_poll_existing_task",
+            "original_submit_source": "public_user_final_confirm",
+            "public_user_confirmed": True,
+            "invoice_confirmed": True,
+            "recovery_existing_tasks_only": True,
+            "provider_submit_allowed": False,
+            "provider_pending_provider": "key4u_video",
+            "provider_pending_task_id": "task_existing_scene_2",
+            "provider_pending_request_job_id": "job-66",
+            "provider_model_map": {"key4u_video": "veo3.1-fast"},
+            "worker_compatible": True,
+            "admission_enforced": True,
+        }
+    )
+    env = {
+        **_env(),
+        "VIDEO_PROVIDER_CHAIN": "key4u_video",
+        "KEY4U_VIDEO_SUBMIT_URL": "https://api.key4u.vn/v1/videos/generations",
+        "KEY4U_VIDEO_POLL_URL": "https://api.key4u.vn/v1/video/query?id={task_id}",
+        "KEY4U_VEO_VIDEO_ENDPOINT": "https://api.key4u.vn/v1/videos/generations",
+        "KEY4U_VEO_VIDEO_POLL_URL": "https://api.key4u.vn/v1/videos/{task_id}",
+        "KEY4U_VIDEO_MODEL": "veo3.1-fast",
+    }
+
+    result = video_provider_router.run_provider_generation(
+        request,
+        output_dir=str(tmp_path),
+        environ=env,
+        sleep_func=lambda _seconds: None,
+    )
+
+    assert calls == [
+        (
+            "key4u_video",
+            "GET",
+            "https://api.key4u.vn/v1/videos/veo3.1-fast%3Atask_existing_scene_2",
+            None,
+        )
+    ]
+    assert result["provider_submit_called"] is False
+    assert result["provider_poll_called"] is True
+    assert result["poll_existing_task"] is True
+    assert result["continue_polling"] is True
+    assert result["provider_poll_contract_recovered"] is True
+    assert "provider_poll_url_override" not in result
+
+
+def test_existing_task_explicit_poll_override_wins_over_recovered_contract(
+    monkeypatch,
+    tmp_path,
+):
+    calls = []
+
+    def fake_open(self, url, payload=None, *, method="POST", timeout=90):
+        calls.append((self.provider_name, method, url))
+        return _poll_pending(self.provider_name)
+
+    monkeypatch.setattr(GenericHttpVideoProvider, "_open_json", fake_open)
+    request = _request()
+    request.metadata.update(
+        {
+            "submit_source": "worker_poll_existing_task",
+            "provider_submit_source": "worker_poll_existing_task",
+            "recovery_existing_tasks_only": True,
+            "provider_submit_allowed": False,
+            "provider_pending_provider": "key4u_video",
+            "provider_pending_task_id": "task_existing_scene_2",
+            "provider_poll_url_override": (
+                "https://video-proxy.example.com/v1/videos/{task_id}"
+            ),
+            "worker_compatible": True,
+            "admission_enforced": True,
+        }
+    )
+    env = {
+        **_env(),
+        "VIDEO_PROVIDER_CHAIN": "key4u_video",
+        "KEY4U_VEO_VIDEO_ENDPOINT": "https://api.key4u.vn/v1/videos/generations",
+        "KEY4U_VEO_VIDEO_POLL_URL": "https://api.key4u.vn/v1/videos/{task_id}",
+        "KEY4U_VIDEO_MODEL": "veo3.1-fast",
+    }
+
+    result = video_provider_router.run_provider_generation(
+        request,
+        output_dir=str(tmp_path),
+        environ=env,
+        sleep_func=lambda _seconds: None,
+    )
+
+    assert calls == [
+        (
+            "key4u_video",
+            "GET",
+            "https://video-proxy.example.com/v1/videos/task_existing_scene_2",
+        )
+    ]
+    assert result["provider_submit_called"] is False
+    assert result["provider_poll_contract_recovered"] is False
+    assert "provider_poll_url_override" not in result
+
+
 def test_shopaikey_submit_5xx_falls_back_to_key4u(monkeypatch, tmp_path):
     calls = []
 
