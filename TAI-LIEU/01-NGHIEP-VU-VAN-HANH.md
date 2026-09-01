@@ -943,6 +943,17 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 - Cùng gate hash phát hiện spec approved Markdown cũng bị checkout CRLF. EOL
   contract được mở rộng đúng một path spec; byte rewrite chỉ thay CRLF→LF và
   khôi phục exact approved SHA-256 `5A0B0864...A5E5`, nội dung Git không đổi.
+- PR `#967` đã deploy exact runtime `C6A431E2...BA95`; run `33516918998`
+  SUCCESS `3m47s`, services active, health `ok`, NumPy `2.4.6`, ORT `1.29.0`,
+  CPU preflight và hash model/spec/fixtures đều PASS.
+- Pre-CAS read-only cho job `#B4CB6D5FE8` xác nhận attempt `3/2`, no-charge/
+  no-output, nhưng root copies của SHA/language/40/150 là null. Durable authority
+  vẫn đầy đủ/exact trong `auto_multi_recovery`, đúng structure executor đang đọc.
+  Guard correction tối thiểu bắt nested authority; root copies được phép thiếu
+  nhưng nếu hiện diện và mâu thuẫn thì fail-closed. Source path/file SHA vẫn
+  được resolve/hash lại trong transaction trước CAS. RED `2 failed`; GREEN
+  `2 passed`; recovery `56 passed`; protected `48 passed`; compile/diff `0`;
+  chưa gửi command, provider/DB/wallet mutation `0`.
 - Trạng thái vận hành hiện tại là `SOURCE_AND_RESOURCE_PASS / NOT_DEPLOYED /
   LIVE_PENDING`. Chỉ được công nhận LIVE PASS khi **chính** job `#B4CB6D5FE8`
   giao MP4 thật rồi một receipt, có `3–8` speaker âm học, số distinct voice bằng

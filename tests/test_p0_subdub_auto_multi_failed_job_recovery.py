@@ -155,6 +155,14 @@ def _seed_exact_acoustic_job(tmp_path, monkeypatch):
         "auto_multi_recovery_attempt_count": 3,
         "auto_multi_recovery_correction_attempt_count": 2,
         "auto_multi_recovery_crosswalk_correction_used": True,
+        "auto_multi_recovery": {
+            "source_sha256": SOURCE_SHA256,
+            "source_path": str(source),
+            "target_language": "English",
+            "original_volume_percent": 40,
+            "dub_volume_percent": 150,
+            "owner_confirmed_paid": True,
+        },
         "last_error_stage": "AUTO_CAST_MANUAL_REQUIRED",
         "provider_task_id": f"subdub:{ACOUSTIC_JOB_ID}",
     }
@@ -296,6 +304,91 @@ def test_exact_acoustic_recovery_claims_same_job_once_and_blocks_attempt_five(
         ).fetchone()[0]
     )
     assert stored == terminal
+
+
+def test_exact_acoustic_recovery_accepts_nested_durable_selection_authority(
+    tmp_path,
+    monkeypatch,
+):
+    db_path, job, _source = _seed_exact_acoustic_job(tmp_path, monkeypatch)
+    for field in (
+        "source_sha256",
+        "target_language",
+        "original_audio_volume_percent",
+        "dubbed_voice_volume_percent",
+    ):
+        job.pop(field)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE system_settings SET value=? WHERE key=?",
+        (
+            json.dumps(job, ensure_ascii=False),
+            f"engine_async_job:{ACOUSTIC_JOB_ID}",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    claimed = bot.claim_subdub_failed_auto_multi_recovery(
+        ACOUSTIC_JOB_ID,
+        owner_user_id=OWNER_ID,
+        chat_id=OWNER_ID,
+        source_sha256=SOURCE_SHA256,
+        target_language="English",
+        original_volume_percent=40,
+        dub_volume_percent=150,
+        confirm_paid=True,
+        allow_acoustic_recovery=True,
+        acoustic_preflight=exact_acoustic_preflight,
+    )
+
+    assert claimed["ok"] is True
+    assert claimed["claimed"] is True
+    assert claimed["job"]["auto_multi_recovery_attempt_count"] == 4
+    assert claimed["job"]["auto_multi_acoustic_recovery_used"] is True
+
+
+def test_exact_acoustic_recovery_requires_nested_durable_selection_authority(
+    tmp_path,
+    monkeypatch,
+):
+    db_path, job, _source = _seed_exact_acoustic_job(tmp_path, monkeypatch)
+    job.pop("auto_multi_recovery")
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE system_settings SET value=? WHERE key=?",
+        (
+            json.dumps(job, ensure_ascii=False),
+            f"engine_async_job:{ACOUSTIC_JOB_ID}",
+        ),
+    )
+    conn.commit()
+    old_value = conn.execute(
+        "SELECT value FROM system_settings WHERE key=?",
+        (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+    ).fetchone()[0]
+    conn.close()
+
+    claimed = bot.claim_subdub_failed_auto_multi_recovery(
+        ACOUSTIC_JOB_ID,
+        owner_user_id=OWNER_ID,
+        chat_id=OWNER_ID,
+        source_sha256=SOURCE_SHA256,
+        target_language="English",
+        original_volume_percent=40,
+        dub_volume_percent=150,
+        confirm_paid=True,
+        allow_acoustic_recovery=True,
+        acoustic_preflight=exact_acoustic_preflight,
+    )
+
+    assert claimed["ok"] is False
+    assert claimed["reason"] == "acoustic_recovery_not_allowed"
+    stored = sqlite3.connect(db_path).execute(
+        "SELECT value FROM system_settings WHERE key=?",
+        (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+    ).fetchone()[0]
+    assert stored == old_value
 
 
 def test_exact_acoustic_preflight_fails_before_database_transaction(
