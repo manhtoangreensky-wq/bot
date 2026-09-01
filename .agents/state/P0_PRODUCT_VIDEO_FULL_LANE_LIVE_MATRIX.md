@@ -882,6 +882,25 @@ starting the next.
   in 4.93s`; focused Key4U/job28 `52 passed in 6.38s`; broad branch `371 passed,
   1 skipped, 61 failed in 48.17s` vs clean main exact same 61 IDs with `365 passed,
   1 skipped in 601.32s`, `NEW_FAILURES=0`; locked hash/full compile/diff PASS.
+- [-] PR #965 squash/runtime `bbfeca06...`; deploy `33507905216` SUCCESS in
+  `4m14s`; bot and inactive Owner worker exact SHA/clean, services active/health
+  OK. Snapshot and production alias-clear CAS plus deployed verifier passed with
+  scene 1 taskless, scene 2 hash prefix `925d3315ec8a` active/pollable, cap `2/0`,
+  submit false and finance unchanged. Production backup SHA `0ad9b441...`, mode
+  `0600`. Worker PID `1002035` claimed existing job once and terminalized; worker
+  stopped inactive PID `0`. Forensic again proves submit false/HTTP `0`, task/cap/
+  finance unchanged and only poll HTTP `400`; artifact/concat/delivery `0`.
+- [x] Exact live root after #965: persisted-task reconstruction omitted
+  `provider_poll_url_override`, so router used generic
+  `/v1/video/query?id={task_id}`; the adapter's official-path qualification branch
+  was unreachable. Minimal router correction recovers the model-family poll
+  contract from the configured Key4U adapter only when persisted override is
+  absent; explicit/custom override remains authoritative. Safe durable markers
+  record recovered/source/model-qualified booleans without exposing URL. RED
+  `2 failed in 5.50s`; GREEN `2 passed in 5.69s`; final exact chain `8 passed in
+  5.01s`; focused `67 passed in 7.02s`; broad `373 passed, 1 skipped, exact same
+  61 baseline failures in 37.98s`, `NEW_FAILURES=0`; locked hash/direct/full
+  compile/diff PASS. Provider calls and wallet mutations during source gate `0`.
 - [ ] Two distinct scene clips and one final MP4 terminal; otherwise stop at the
   exact new RED and reopen only `SPEC-04H`.
 

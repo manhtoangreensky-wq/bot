@@ -758,3 +758,36 @@ job28 `52 passed in 6.38s`. Broad branch `371 passed, 1 skipped, 61 failed in
 48.17s`; clean main exact selector `365 passed, 1 skipped, same 61 failures in
 601.32s`, so `NEW_FAILURES=0`. Locked engine hash PASS in `7.23s`; full compile and
 diff-check exit `0`. Source verification made no provider call or wallet mutation.
+
+## Existing-task model-family poll contract RED
+
+PR #965 squash/runtime `bbfeca06926b68fb0e9ffd5772ceecdf4d6fd335`;
+deploy `33507905216` SUCCESS in `4m14s`. Bot and inactive Owner worker matched exact
+SHA with tracked diff `0`; bot/web/nginx active and health OK. Snapshot rehearsal,
+production alias-clear CAS and deployed ledger verifier passed. Scene 1 was
+taskless; scene 2 retained accepted task hash prefix `925d3315ec8a`, active/
+pollable; cap `2/0`, submit false, wallet/transactions/usage/charged Xu unchanged.
+Production backup is `/opt/toanaas/bot/delete/pv2-r01-job28-scene2-poll-only-
+production-20260901T193600.json`, SHA `0ad9b441...`, mode `0600`.
+
+Owner worker PID `1002035` claimed existing job `28` once, terminalized and was
+stopped inactive PID `0`. Terminal forensic again proves no third submit: root
+submit called false, submit HTTP `0`, accepted task/cap/finance unchanged, only poll
+HTTP `400`, artifact/concat/delivery `0`.
+
+The composite-ID adapter correction was deployed but its safe marker path was not
+reached. Source trace found the precise boundary: `poll_existing_task` reconstructs
+a synthetic `VideoSubmitResult` from persisted task IDs, but omitted
+`provider_poll_url_override`. The subsequent poll therefore used generic Key4U
+`/v1/video/query?id={task_id}` instead of the configured Google Veo/OpenAI family
+poll contract. The minimal correction derives the model-family contract from the
+current Key4U adapter only when no persisted override exists. An explicit/custom
+override remains authoritative; safe booleans/source markers persist, but the URL
+itself is not exposed in result/debug output.
+
+RED `2 failed in 5.50s`; GREEN `2 passed in 5.69s`; final end-to-end contract chain
+`8 passed in 5.01s`; focused existing-task/Key4U/job28 `67 passed in 7.02s`.
+Broad branch `373 passed, 1 skipped, exact same 61 baseline failures in 37.98s`,
+therefore `NEW_FAILURES=0`. Locked engine hash PASS in `5.05s`; direct and full
+compile plus diff-check exit `0`. Source verification made no provider call or
+wallet mutation.

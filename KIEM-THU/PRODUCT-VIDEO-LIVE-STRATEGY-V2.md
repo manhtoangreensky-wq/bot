@@ -249,6 +249,19 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     `1 failed + 5 passed`; GREEN `6 passed`; focused `52 passed`; broad branch and
     clean main have the exact same 61 baseline failures, `NEW_FAILURES=0`; compile/
     hash/diff PASS. Ship once, then poll the same task without provider submit.
+  - [-] PR #965 runtime `bbfeca06...`, deploy `33507905216` SUCCESS `4m14s`.
+    Snapshot/production CAS and deployed verifier passed; production backup SHA
+    `0ad9b441...`, mode `0600`. Worker PID `1002035` claimed job `28` once, then
+    stopped inactive after terminal failed-no-charge. Submit remains false/HTTP
+    `0`, cap/task/finance unchanged, but poll stayed HTTP `400` and artifact `0`.
+  - [x] Existing-task reconstruction root is now isolated: router discarded the
+    model-family poll override and fell back to generic query, so adapter official
+    qualification never ran. Source recovers the configured Key4U model contract
+    only when persisted override is absent; explicit override wins and URL is not
+    exposed in result. RED `2 failed` -> GREEN `2 passed`; final exact `8 passed`;
+    focused `67 passed`; broad branch keeps the exact same 61 baseline failures,
+    `NEW_FAILURES=0`; hash/full compile/diff PASS. Ship once, then poll only the
+    same accepted task.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 

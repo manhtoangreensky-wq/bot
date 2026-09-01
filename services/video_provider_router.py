@@ -27,6 +27,7 @@ from services.video_provider_base import (
     normalize_provider_status,
     split_provider_chain,
 )
+from services.video_provider_catalog import model_interface_contract
 
 
 DEFAULT_VIDEO_PROVIDER_CHAIN = "shopaikey_video,key4u_video,toanaas_video,veo,kling,generic_http"
@@ -3827,6 +3828,9 @@ def _merge_contract_debug(target: dict[str, Any], raw: dict[str, Any] | None = N
         "contract_block_reason",
         "provider_interface",
         "provider_endpoint_source",
+        "provider_poll_contract_recovered",
+        "provider_poll_endpoint_source",
+        "poll_task_id_model_qualified",
         "provider_submit_url_override_used",
         "model_requires_exclusive_interface",
         "submit_skipped_due_to_contract",
@@ -4848,6 +4852,9 @@ def run_provider_generation(
                     "result_url_primary_path_checked",
                     "result_url_found",
                     "shopaikey_fail_reason",
+                    "provider_poll_contract_recovered",
+                    "provider_poll_endpoint_source",
+                    "poll_task_id_model_qualified",
                 ):
                     if key in raw:
                         current_trace[key] = raw.get(key)
@@ -5038,6 +5045,30 @@ def run_provider_generation(
             return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
 
         if poll_existing_task:
+            persisted_poll_url = str(
+                provider_metadata.get("provider_poll_url_override") or ""
+            ).strip()
+            recovered_poll_url = ""
+            recovered_poll_source = ""
+            if not persisted_poll_url and isinstance(
+                current_adapter, GenericHttpVideoProvider
+            ):
+                adapter_model = str(
+                    current_adapter.env.get(current_adapter.model_env) or ""
+                ).strip()
+                if adapter_model:
+                    recovered_contract = model_interface_contract(
+                        current_adapter.provider_name,
+                        adapter_model,
+                        env=current_adapter.env,
+                    )
+                    recovered_poll_url = str(
+                        recovered_contract.get("provider_poll_url_override") or ""
+                    ).strip()
+                    recovered_poll_source = str(
+                        recovered_contract.get("provider_poll_endpoint_source") or ""
+                    ).strip()
+            effective_poll_url = persisted_poll_url or recovered_poll_url
             _mark_trace(
                 "poll",
                 submit_called=False,
@@ -5057,6 +5088,15 @@ def run_provider_generation(
                     "task_id_field_path": "persisted_result_json.provider_task_ids.0" if pending_task_id else "",
                     "video_id_field_path": "persisted_result_json.provider_video_ids.0" if pending_video_id else "",
                     "submit_response_shape": {"type": "persisted_provider_task"},
+                    "provider_poll_url_override": effective_poll_url,
+                    "provider_poll_contract_recovered": bool(
+                        recovered_poll_url and not persisted_poll_url
+                    ),
+                    "provider_poll_endpoint_source": (
+                        "persisted_result_metadata"
+                        if persisted_poll_url
+                        else recovered_poll_source
+                    ),
                 },
             )
         else:

@@ -908,6 +908,32 @@ pv2_r01_job28_key4u_composite_poll_id:
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
+pv2_r01_job28_existing_task_poll_contract_recovery:
+  phase: SOURCE_READY_TO_SHIP
+  prior_pr: 965
+  prior_merge_sha: bbfeca06926b68fb0e9ffd5772ceecdf4d6fd335
+  prior_deploy_run: 33507905216 SUCCESS in 4m14s
+  runtime_bot_worker: exact SHA; tracked diff 0; owner worker inactive before live
+  production_backup: /opt/toanaas/bot/delete/pv2-r01-job28-scene2-poll-only-production-20260901T193600.json
+  production_backup_sha_mode: 0ad9b4415960232507877460c7d8ebf8ee87fce84aa23774ff5a143004c73d4d mode 0600
+  prestart_verifier: PASS; scene1 taskless; scene2 hash prefix 925d3315ec8a active pollable; cap 2/0; submit false
+  live_worker: PID 1002035 claimed existing job28 once then stopped inactive PID 0
+  live_terminal: failed_no_charge; poll HTTP 400; artifact concat delivery 0
+  submit_forensic: root submit false HTTP 0; no third submit; task/cap/finance unchanged
+  root_cause: persisted-task reconstruction omitted provider_poll_url_override and used generic Key4U query instead of model-family official poll
+  source_scope: recover model-family poll contract only when persisted override absent; explicit override wins; no URL exposed
+  source_red: 2 failed in 5.50s
+  exact_green: 2 passed in 5.69s
+  final_exact_chain: 8 passed in 5.01s
+  focused_green: 67 passed in 7.02s
+  broad_branch: 373 passed, 1 skipped, exact same 61 baseline failures in 37.98s; NEW_FAILURES=0
+  strategy_gate: 27 passed and 1 exact fixture SHA baseline deselected in 5.74s
+  locked_engine_hash: PASS in 5.05s
+  direct_compile_diff: exit 0
+  full_compile: exit 0
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  live_pass: false
 spec_04i_subdub_auto_two_speaker_addon:
   phase: PENDING_AFTER_SPEC_04H_9
   compatible_media_only: true
@@ -916,8 +942,8 @@ spec_04i_subdub_auto_two_speaker_addon:
   representative_live_target: one unfinished media-compatible Product Video lane
   acceptance: male/female detection; translation; two-voice dub; final MP4; receipt/report; wallet delta 0
 next_action: >-
-  Ship/deploy only the Key4U official composite poll-id correction. Keep Owner
-  worker inactive through exact runtime. Reinstall existing job 28 by backup-safe
-  alias-clear CAS for poll-only scene2 task; provider submit must remain impossible
-  because global cap is 2/2. Verify scene1 taskless, then poll/download scene2.
-  Do not submit again or open another product/SPEC-04I.
+  Ship/deploy only the existing-task Key4U poll-contract recovery correction. Keep
+  Owner worker inactive through exact runtime. Reinstall existing job 28 by
+  backup-safe alias-clear CAS for poll-only scene2 task; provider submit must remain
+  impossible because global cap is 2/2. Verify scene1 taskless, then poll/download
+  scene2. Do not submit again or open another product/SPEC-04I.
