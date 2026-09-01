@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import itertools
 import math
 from pathlib import Path
 import threading
@@ -44,6 +45,7 @@ MAX_CLUSTER_UNITS = 1_000
 KMEANS_MAX_ITERATIONS = 30
 SUBSEGMENT_WINDOW_SECONDS = 1.5
 SUBSEGMENT_PERIOD_SECONDS = 0.75
+STABILITY_FEATURE_SHIFT_SAMPLES = 5
 FBANK_FRAME_LENGTH = 400
 FBANK_FRAME_SHIFT = 160
 FBANK_FFT_POINTS = 512
@@ -494,7 +496,7 @@ def diarize_acoustic_regions(
         deadline_monotonic=deadline_monotonic,
         stop_requested=stop_requested,
         session_factory=session_factory,
-        feature_shift_samples=FBANK_FRAME_SHIFT // 2,
+        feature_shift_samples=STABILITY_FEATURE_SHIFT_SAMPLES,
     )
     cluster_result = stable_cluster_acoustic_regions(
         plan,
@@ -592,7 +594,12 @@ def stable_cluster_acoustic_regions(
             "unit_confidences": shifted_confidence,
         },
     )
-    if base_mapped["labels"] != shifted_mapped["labels"]:
+    aligned_shifted_labels = _align_cluster_labels_to_reference(
+        base_mapped["labels"],
+        shifted_mapped["labels"],
+        speaker_count=base_count,
+    )
+    if base_mapped["labels"] != aligned_shifted_labels:
         raise _manual_required(ValueError("acoustic_cluster_unstable"))
     return {
         "speaker_count": base_count,
@@ -609,6 +616,46 @@ def stable_cluster_acoustic_regions(
         ],
         "stability_pass": True,
     }
+
+
+def _align_cluster_labels_to_reference(
+    reference_labels: object,
+    candidate_labels: object,
+    *,
+    speaker_count: int,
+) -> list[int]:
+    """Align numeric cluster IDs without changing the candidate partition."""
+
+    if (
+        type(reference_labels) is not list
+        or type(candidate_labels) is not list
+        or not reference_labels
+        or len(reference_labels) != len(candidate_labels)
+        or type(speaker_count) is not int
+        or not MIN_SPEAKERS <= speaker_count <= MAX_SPEAKERS
+        or any(
+            type(value) is not int or not 0 <= value < speaker_count
+            for value in reference_labels + candidate_labels
+        )
+    ):
+        raise _manual_required(ValueError("acoustic_cluster_alignment_invalid"))
+    best_mapping: tuple[int, ...] | None = None
+    best_score = -1
+    for mapping in itertools.permutations(range(speaker_count)):
+        score = sum(
+            reference == mapping[candidate]
+            for reference, candidate in zip(
+                reference_labels,
+                candidate_labels,
+                strict=True,
+            )
+        )
+        if score > best_score:
+            best_score = score
+            best_mapping = mapping
+    if best_mapping is None:
+        raise _manual_required(ValueError("acoustic_cluster_alignment_invalid"))
+    return [best_mapping[value] for value in candidate_labels]
 
 
 def _fbank_hamming_window() -> np.ndarray:

@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import bot
 import pytest
+from scripts import recover_subdub_final_acoustic_stability as stability_repair
 
 
 OWNER_ID = 7_126_457_028
@@ -537,6 +538,41 @@ def test_exact_acoustic_recovery_concurrent_claim_has_one_cas_winner(
     assert stored["auto_multi_recovery_attempt_count"] == 4
     assert stored["auto_multi_recovery_correction_attempt_count"] == 3
     assert stored["auto_multi_acoustic_recovery_used"] is True
+
+
+def test_stability_repair_rearms_same_fourth_attempt_once(tmp_path, monkeypatch):
+    db_path, job, _source = _seed_exact_acoustic_job(tmp_path, monkeypatch)
+    job.update({
+        "auto_multi_recovery_attempt_count": 4,
+        "auto_multi_recovery_correction_attempt_count": 3,
+        "auto_multi_acoustic_recovery_used": True,
+        "status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "last_error_stage": "AUTO_CAST_MANUAL_REQUIRED",
+    })
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE system_settings SET value=? WHERE key=?",
+        (json.dumps(job, ensure_ascii=False), f"engine_async_job:{ACOUSTIC_JOB_ID}"),
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(stability_repair.app, "db_connect", lambda: sqlite3.connect(db_path))
+    monkeypatch.setattr(stability_repair.app, "ENGINE_ASYNC_MEMORY_JOBS", {})
+    monkeypatch.setattr(stability_repair.app, "SUBTITLE_DUB_PIPELINE_JOBS", {})
+
+    first = stability_repair.claim_same_attempt()
+    second = stability_repair.claim_same_attempt()
+
+    assert first["claimed"] is True
+    assert first["job"]["auto_multi_recovery_attempt_count"] == 4
+    assert first["job"]["auto_multi_recovery_correction_attempt_count"] == 3
+    assert first["job"]["auto_multi_acoustic_stability_repair_used"] is True
+    assert second == {
+        "ok": False,
+        "claimed": False,
+        "reason": "stability_repair_not_allowed",
+    }
 
 
 def test_failed_auto_multi_recovery_cas_keeps_same_job_and_wins_once(
