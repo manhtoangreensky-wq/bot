@@ -1026,6 +1026,30 @@ pv2_r01_job28_v3_replacement_authority:
   taskless_strategy_gate: 8 passed and 1 exact pre-existing PV2-R03 fixture SHA failure
   taskless_guards: V3+ only; exact selected scene; V2/legacy task-required; unanimous taskless rows suppress stale manifest aliases
   taskless_two_scene_contract: ordered [1,2]; distinct versioned keys; pending IDs empty; V2 immutable; V3 2/2; charged 0
+  taskless_pr_merge: 973 / ab267bedd4aa300bf2160be7b8d828009578127c
+  taskless_deploy: 33588541923 SUCCESS in 4m2s
+  taskless_reset_backup: /opt/toanaas/bot/delete/pv2-r01-job28-taskless-v3-reset-production-20260902T112112.json
+  taskless_reset_backup_sha_mode: 9739d756781ffbb213867f6484d38ff38513b96c4c5ba875cca50729acd4a06c mode 0600
+  taskless_reset_state: V2 scenes 1,2 immutable; V3 0/2; scene1 selected; DB/manifest task aliases empty; finance/provider/wallet 0
+  watchdog_live_red: inactive Owner worker caused zero-task eligibility to retain transient stale/read-only blocker; watchdog terminalized 28/32/27 before claim
+  watchdog_side_effects: V3 genuinely 0/2; provider/transaction/wallet/charged/artifact/concat/delivery 0
+  watchdog_source_red: 1 failed, 1 passed, 33 deselected in 528.98s
+  watchdog_strict_scope_red: 3 failed, 37 deselected in 7.77s
+  watchdog_exact_green: 7 passed, 33 deselected in 5.15s
+  watchdog_job28_green: 40 passed in 7.64s
+  watchdog_protected_green: 85 passed in 31.58s
+  watchdog_combined_branch: 220 passed and 2 exact pre-existing comparator failures in 50.98s
+  watchdog_clean_comparator: exact same 2 failure IDs on clean ab267bed in 547.25s; NEW_FAILURES=0
+  watchdog_compile: full bot.py and local_worker/source/test exit 0
+  watchdog_guard: exact untouched authorization pv2-r01-job28-key4u-replacements-v3 plus 28/32/27/request, price 144 and cap 212 waits only on worker disconnected/stale heartbeat/expired lease; every scope mismatch and permanent blocker fails closed
+  watchdog_recovery_cas_rehearsal: PASS; failed rows to queued/queued_for_worker/acknowledged; attempts 40/1; V2 immutable; V3 0/2; scene1 selected; manifest and finance unchanged
+  watchdog_recovery_cas_negative: duplicate replay FAIL_CLOSED; invalid V3 FAIL_CLOSED_BEFORE_BACKUP; provider/wallet 0/0
+  watchdog_final_compile_yaml_diff_secret_scope: exit 0 / PASS
+  watchdog_strategy_gate: 8 passed and 1 exact pre-existing PV2-R03 fixture SHA failure
+  watchdog_post_rebase_base: c8e954a03322f4af8559cf3f6e99178dbd6bfe7a
+  watchdog_post_rebase_combined: 220 passed and 2 exact baseline failures in 924.92s
+  watchdog_post_rebase_clean_main: exact same 2 failure IDs in 856.69s; NEW_FAILURES=0
+  watchdog_post_rebase_compile_strategy_yaml_diff_secret_scope: exit 0 / exact pre-rebase result
   live_pass: false
 spec_04i_subdub_auto_two_speaker_addon:
   phase: PENDING_AFTER_SPEC_04H_9
@@ -1035,8 +1059,8 @@ spec_04i_subdub_auto_two_speaker_addon:
   representative_live_target: one unfinished media-compatible Product Video lane
   acceptance: male/female detection; translation; two-voice dub; final MP4; receipt/report; wallet delta 0
 next_action: >-
-  Ship the exact V3 taskless-authority and stale-manifest suppression seam, deploy and
-  verify runtime SHA. Backup-safe reset current false V3 receipt, restore immutable
-  V2 receipts, and clear every old task/artifact alias in DB plus canonical manifest.
-  Rehearse/prestart verify V3 0/2 with scene1 only, then resume existing 28/32/27;
-  stop after two genuinely new Key4U calls or terminal two-scene MP4. Open nothing else.
+  Ship the exact taskless-V3 transient-worker watchdog seam and verify runtime SHA.
+  Use a new snapshot-first recovery CAS for the already-clean failed job/project/
+  outbox 28/32/27; do not replay the old task-hash reset. Preserve V2 and V3 0/2,
+  scene1 selection, price/cap and charged 0. Start the Owner worker once; stop after
+  two genuinely new Key4U calls or terminal two-scene MP4. Open nothing else.

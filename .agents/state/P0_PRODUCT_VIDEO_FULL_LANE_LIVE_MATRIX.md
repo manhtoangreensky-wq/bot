@@ -989,6 +989,44 @@ starting the next.
   distinct versioned keys, pending IDs empty, V2 immutable and V3 exactly `2/2`.
 - [x] Final strategy gate `8 passed` plus the exact pre-existing PV2-R03 fixture SHA
   failure; taskless correction changes no PV2-R03 file. YAML/diff/secret PASS.
+- [x] PR #973 squash/runtime `ab267bedd4aa300bf2160be7b8d828009578127c`;
+  deploy `33588541923` SUCCESS in `4m2s`; bot/worker exact SHA before recovery and
+  tracked diff `0`. Combined DB + canonical-manifest taskless reset passed with
+  backup `/opt/toanaas/bot/delete/pv2-r01-job28-taskless-v3-reset-production-
+  20260902T112112.json`, SHA `9739d756...`, mode `0600`: V2 `[1,2]` immutable,
+  V3 `0/2`, scene 1 selected, all task/artifact aliases empty, wallet/provider/
+  charged deltas `0/0/0`.
+- [-] Live RED after the clean reset: the bot zero-task watchdog ran while the
+  Owner worker was intentionally inactive and treated its transient stale/read-only
+  worker eligibility as permanent admission failure. It terminalized existing
+  identity `28/32/27` before claim; V3 remains genuinely unused `0/2`, canonical
+  manifest stays taskless, artifact/concat/delivery and all finance deltas stay `0`.
+- [x] Watchdog authority RED `1 failed, 1 passed, 33 deselected in 528.98s`.
+  Strict-scope RED `3 failed, 37 deselected in 7.77s` proved a different V3 ID,
+  identity or self-consistent price/cap could inherit the wait branch. Final exact
+  GREEN is `7 passed, 33 deselected in 5.15s`; full job28 authority is `40 passed
+  in 7.64s`; protected zero-task/outbox is `85 passed in 31.58s`.
+  Combined branch is `220 passed, 2 failed in 50.98s`; clean `ab267bed` reproduces
+  both exact failure IDs in `547.25s`, so `NEW_FAILURES=0`. Only an
+  untouched exact authorization `pv2-r01-job28-key4u-replacements-v3` on identity
+  `28/32/27/VID-20260829-D78AA3`, price `144` and cap `212` may wait through worker
+  disconnected/stale-heartbeat/expired-lease; any scope mismatch, SHA mismatch or
+  permanent provider route block still fails closed.
+  Full `bot.py` compile and changed worker/source/test compile exit `0`.
+- [x] New local snapshot-first recovery CAS compile and isolated SQLite rehearsal
+  PASS: exact failed rows become `queued/queued_for_worker/acknowledged`, attempts
+  remain `40/1`, V2 immutable, V3 `0/2`, scene selection `[1]`, manifest hash and
+  wallet/provider counts unchanged. Duplicate replay and invalid V3 both fail before
+  mutation; provider calls/wallet mutations `0/0`. Production remains untouched.
+- [x] Final strict-scope compile and state gates: full `bot.py`, local worker, queue
+  and changed test compile exit `0`; YAML/diff/secret/forbidden scope clean. Strategy
+  V2 is `8 passed` plus the exact pre-existing PV2-R03 fixture SHA failure; this
+  spec changes no PV2-R03 file.
+- [x] Rebased conflict-free onto SubDub PR #974 main/runtime
+  `c8e954a03322f4af8559cf3f6e99178dbd6bfe7a`. Post-rebase combined gate is
+  `220 passed, 2 failed in 924.92s`; clean exact main reproduced the same two IDs
+  in `856.69s`, `NEW_FAILURES=0`. Full and changed compile exit `0`; Strategy is
+  `8 passed` plus the exact PV2-R03 baseline; YAML/diff/secret/scope clean.
 - [ ] Two distinct scene clips and one final MP4 terminal; otherwise stop at the
   exact new RED and reopen only `SPEC-04H`.
 
