@@ -1028,3 +1028,33 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 - Full `py_compile` cho bot/worker/helper/runner/tests exit `0`; YAML/diff-check
   exit `0`. Production delta chỉ helper Auto Multi + exact-job runner; không có
   provider call, production DB mutation hoặc wallet mutation trong source TDD.
+
+### Live duration repair và Deepgram timeout contract — 02/09/2026
+
+- PR `#979` merge `899a93f5420f47c95fcc88cd4b8de655f7fee8c8`;
+  compile guard `33643563823` SUCCESS `28s`; deploy `33643751951` SUCCESS
+  `3m38s`. VPS exact SHA, tracked diff `0`, bot/web/nginx active, health `ok`,
+  fixed-vocal v2 model/CPU preflight PASS.
+- Owner-authorized duration invocation `a13ecafffd31411d89e6b16837c64742`
+  CAS đúng cùng job lúc `22:29:28`, marker duration true, giữ attempt `4/3`,
+  rồi terminal `failed_no_charge` lúc `22:31:10`. Acoustic/translation/TTS/mux/
+  artifact/delivery đều `0`; `charged_xu=0`; finance `322/0/0/11`, wallet `200/0`.
+- Root mới đo được ở provider receipt `22:31:08`: caller chọn timeout `300s`
+  cho media `134s`, nhưng non-diarization branch của `deepgram_asr_adapter`
+  không forward tham số nên diagnostic dùng default `60s`. Deepgram trả
+  `status=FAIL,error=deepgram_timeout`; adapter đổi thành `deepgram_empty_transcript`
+  và tầng ASR tiếp tục đổi thành unavailable/empty transcript.
+- Correction local forward `timeout_seconds` cho strict-word branch và giữ
+  `deepgram_timeout` xuyên adapter + ASR. Không đổi manual default `60s`, không
+  thêm retry/fallback/provider call. Adapter RED `1 failed in 7.41s`, GREEN
+  `1 passed in 591.21s`; ASR RED `1 failed in 5.53s`, GREEN `1 passed in
+  510.85s`; timeout contract `10 passed + 7 subtests`; direct impact `90 passed
+  + 7 subtests`; combined recovery/Auto Multi `194 passed + 7 subtests`.
+- Một ASR-timeout marker local chỉ hợp lệ khi job có v2 + duration markers,
+  ASR started nhưng mọi downstream/output/charge false, và SQLite receipt exact
+  `deepgram/listen/DEEPGRAM_EMPTY_TRANSCRIPT/deepgram_timeout/22:31:08` do Owner.
+  Marker giữ attempt `4/3`, reset chỉ `asr_started`; sáu receipt mutations và
+  duplicate đều no-op. Full bot/runner/test compile, YAML và diff-check exit `0`;
+  production additions không có retry/fallback/provider call/secret/PayOS/wallet.
+  Production read-only xác nhận receipt `updated_by=7126457028`; query mutation `0`.
+  Correction chưa commit, chưa deploy, chưa live-authorized.

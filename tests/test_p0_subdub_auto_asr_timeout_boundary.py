@@ -219,6 +219,42 @@ class AutoAsrTimeoutBoundaryTests(unittest.TestCase):
         self.assertEqual(result["status"], "deepgram_timeout")
         self.assertEqual(result["ok"], False)
 
+    def test_auto_multi_word_timeline_uses_duration_timeout_and_preserves_timeout_status(self):
+        namespace = _load_deepgram_timeout_surface()
+        adapter = namespace["deepgram_asr_adapter"]
+
+        result = asyncio.run(
+            adapter(
+                b"audio",
+                "audio/wav",
+                require_diarization=False,
+                timeout_seconds=300,
+            )
+        )
+
+        self.assertEqual(_FakeAsyncClient.timeout_values, [300.0])
+        self.assertEqual(result["status"], "deepgram_timeout")
+        self.assertEqual(result["ok"], False)
+
+    def test_non_diarized_adapter_preserves_timeout_error_when_diagnostic_status_is_fail(self):
+        namespace = _load_deepgram_timeout_surface()
+        adapter = namespace["deepgram_asr_adapter"]
+
+        async def timeout_diagnostic(*_args, **_kwargs):
+            return {
+                "status": "FAIL",
+                "http_status": 0,
+                "error": "deepgram_timeout",
+                "transcript": "",
+                "transcript_json": {},
+            }
+
+        namespace["AgentDeepgram"].diagnostic = timeout_diagnostic
+        result = asyncio.run(adapter(b"audio", "audio/wav", timeout_seconds=300))
+
+        self.assertEqual(result["status"], "deepgram_timeout")
+        self.assertEqual(result["ok"], False)
+
     def test_owner_timeout_bands_remain_exact(self):
         timeout_for_duration = _load_timeout_policy()
         cases = (
@@ -258,6 +294,23 @@ class AutoAsrTimeoutBoundaryTests(unittest.TestCase):
             )
         except TypeError as exc:
             self.fail(f"Auto ASR must forward the duration-derived timeout: {exc}")
+
+        self.assertEqual(calls, [300.0])
+        self.assertEqual(result["status"], "deepgram_timeout")
+
+    def test_auto_multi_word_timeline_does_not_relabel_deepgram_timeout(self):
+        asr_transcribe_audio, calls = _load_asr_forwarding_surface()
+
+        result = asyncio.run(
+            asr_transcribe_audio(
+                b"audio",
+                "audio/wav",
+                allow_confirmed_product=True,
+                require_auto_multi_word_timeline=True,
+                media_duration_seconds=133.37542,
+                timeout_seconds=300,
+            )
+        )
 
         self.assertEqual(calls, [300.0])
         self.assertEqual(result["status"], "deepgram_timeout")

@@ -40584,9 +40584,16 @@ async def deepgram_asr_adapter(
             timeout_seconds=timeout_seconds,
         )
     else:
-        diagnostic = await AgentDeepgram.diagnostic(audio_bytes, content_type)
+        diagnostic = await AgentDeepgram.diagnostic(
+            audio_bytes,
+            content_type,
+            timeout_seconds=timeout_seconds,
+        )
     http_status = int(diagnostic.get("http_status") or 0)
-    if str(diagnostic.get("status") or "").upper() == "TIMEOUT":
+    if (
+        str(diagnostic.get("status") or "").upper() == "TIMEOUT"
+        or str(diagnostic.get("error") or "").lower() == "deepgram_timeout"
+    ):
         return {
             "ok": False,
             "status": "deepgram_timeout",
@@ -65272,7 +65279,10 @@ async def asr_transcribe_audio(
                     "segments": [],
                     "detail": str(result.get("detail") or "deepgram_speaker_labels_missing"),
                 }
-            if require_diarization and status == "deepgram_timeout":
+            if (
+                (require_diarization or require_auto_multi_word_timeline)
+                and status == "deepgram_timeout"
+            ):
                 return {
                     "ok": False,
                     "status": "deepgram_timeout",

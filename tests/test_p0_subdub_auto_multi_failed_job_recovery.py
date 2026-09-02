@@ -635,6 +635,65 @@ def _persist_fixed_vocal_job(db_path, job):
         conn.close()
 
 
+def _persist_translation_asr_attempt(db_path, payload):
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """INSERT OR REPLACE INTO system_settings
+               (key,value,note,updated_at,updated_by)
+               VALUES(?,?,?,?,?)""",
+            (
+                "provider_attempt:translation_asr",
+                json.dumps(payload, ensure_ascii=False),
+                str(payload.get("error") or ""),
+                str(payload.get("at") or ""),
+                str(OWNER_ID),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _exact_duration_live_failure(job):
+    return {
+        **job,
+        "status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "lifecycle_state": "failed_no_charge",
+        "current_stage": "failed_no_charge",
+        "progress_stage": "failed_no_charge",
+        "last_error_stage": "AUTO_CAST_MANUAL_REQUIRED",
+        "source_duration_exact": 133.37542,
+        "input_duration": 134,
+        "multi_diarization_attempted": True,
+        "multi_diarization_provider": "gemini_transcribe_multi_diarization",
+        "multi_diarization_status": "PASS",
+        "multi_diarization_detail": "words=147; speakers=4",
+        "multi_diarization_http_status": 200,
+        "multi_diarization_provider_word_count": 147,
+        "multi_diarization_provider_speaker_count": 4,
+        "multi_diarization_mapped_speaker_count": 0,
+        "multi_diarization_raw_annotation_count": 151,
+        "multi_diarization_terminal_empty": False,
+        "multi_diarization_parse_rejection": "",
+        "multi_diarization_dropped_weak_word_count": 1,
+        "multi_diarization_dropped_weak_speaker_count": 1,
+        "multi_diarization_weak_label_filter_applied": True,
+    }
+
+
+def _exact_deepgram_timeout_receipt():
+    return {
+        "called": True,
+        "provider": "deepgram",
+        "route": "listen",
+        "status": "DEEPGRAM_EMPTY_TRANSCRIPT",
+        "error": "deepgram_timeout",
+        "at": "2026-09-02 22:31:08",
+    }
+
+
 def test_fixed_vocal_v2_rearm_keeps_same_fourth_attempt_and_wins_once(
     tmp_path,
     monkeypatch,
@@ -713,31 +772,7 @@ def test_fixed_vocal_v2_duration_repair_rearms_measured_post_live_failure_once(
 
     first = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
     assert first["claimed"] is True
-    failed = {
-        **first["job"],
-        "status": "failed_no_charge",
-        "terminal_state": "failed_no_charge",
-        "lifecycle_state": "failed_no_charge",
-        "current_stage": "failed_no_charge",
-        "progress_stage": "failed_no_charge",
-        "last_error_stage": "AUTO_CAST_MANUAL_REQUIRED",
-        "source_duration_exact": 133.37542,
-        "input_duration": 134,
-        "multi_diarization_attempted": True,
-        "multi_diarization_provider": "gemini_transcribe_multi_diarization",
-        "multi_diarization_status": "PASS",
-        "multi_diarization_detail": "words=147; speakers=4",
-        "multi_diarization_http_status": 200,
-        "multi_diarization_provider_word_count": 147,
-        "multi_diarization_provider_speaker_count": 4,
-        "multi_diarization_mapped_speaker_count": 0,
-        "multi_diarization_raw_annotation_count": 151,
-        "multi_diarization_terminal_empty": False,
-        "multi_diarization_parse_rejection": "",
-        "multi_diarization_dropped_weak_word_count": 1,
-        "multi_diarization_dropped_weak_speaker_count": 1,
-        "multi_diarization_weak_label_filter_applied": True,
-    }
+    failed = _exact_duration_live_failure(first["job"])
     _persist_fixed_vocal_job(db_path, failed)
 
     repair = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
@@ -767,6 +802,119 @@ def test_fixed_vocal_v2_duration_repair_rearms_measured_post_live_failure_once(
     _persist_fixed_vocal_job(db_path, terminal_again)
     duplicate = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
     assert duplicate == {
+        "ok": False,
+        "claimed": False,
+        "reason": "fixed_vocal_v2_rearm_not_allowed",
+    }
+
+
+def test_fixed_vocal_v2_asr_timeout_repair_rearms_measured_timeout_once(
+    tmp_path,
+    monkeypatch,
+):
+    rearm = importlib.import_module("scripts.recover_subdub_fixed_vocal_v2")
+    db_path, _job = _seed_fixed_vocal_v1_terminal(tmp_path, monkeypatch)
+    monkeypatch.setattr(rearm.app, "db_connect", lambda: sqlite3.connect(db_path))
+    monkeypatch.setattr(rearm.app, "ENGINE_ASYNC_MEMORY_JOBS", {})
+    monkeypatch.setattr(rearm.app, "SUBTITLE_DUB_PIPELINE_JOBS", {})
+
+    first = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+    _persist_fixed_vocal_job(db_path, _exact_duration_live_failure(first["job"]))
+    duration = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+    assert duration["claimed"] is True
+    timeout_failure = {
+        **duration["job"],
+        "status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "lifecycle_state": "failed_no_charge",
+        "current_stage": "failed_no_charge",
+        "progress_stage": "failed_no_charge",
+        "last_error_stage": "",
+        "last_error_safe": "",
+        "asr_started": True,
+        "translation_started": False,
+        "tts_started": False,
+        "mux_started": False,
+        "artifact_started": False,
+        "delivery_attempted": False,
+        "final_mp4_exists": False,
+        "output_validated": False,
+        "output_sent": False,
+    }
+    _persist_fixed_vocal_job(db_path, timeout_failure)
+    _persist_translation_asr_attempt(db_path, _exact_deepgram_timeout_receipt())
+
+    repair = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+
+    assert repair["claimed"] is True
+    repaired = repair["job"]
+    assert repaired["auto_multi_recovery_attempt_count"] == 4
+    assert repaired["auto_multi_recovery_correction_attempt_count"] == 3
+    assert repaired["auto_multi_fixed_vocal_v2_recovery_used"] is True
+    assert repaired["auto_multi_fixed_vocal_v2_duration_repair_used"] is True
+    assert repaired["auto_multi_fixed_vocal_v2_asr_timeout_repair_used"] is True
+    assert repaired["auto_multi_fixed_vocal_v2_asr_timeout_repair_authority"] == (
+        "owner_confirmed_same_job_deepgram_timeout"
+    )
+    assert repaired["auto_multi_fixed_vocal_v2_asr_timeout_receipt_at"] == (
+        "2026-09-02 22:31:08"
+    )
+    assert repaired["auto_multi_fixed_vocal_v2_asr_timeout_seconds"] == 300
+    assert repaired["asr_started"] is False
+    terminal_again = {
+        **repaired,
+        "status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "current_stage": "failed_no_charge",
+    }
+    _persist_fixed_vocal_job(db_path, terminal_again)
+    duplicate = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+    assert duplicate == {
+        "ok": False,
+        "claimed": False,
+        "reason": "fixed_vocal_v2_rearm_not_allowed",
+    }
+
+
+@pytest.mark.parametrize(
+    ("receipt_field", "receipt_value"),
+    (
+        ("called", False),
+        ("provider", "key4u_audio"),
+        ("route", "other"),
+        ("status", "PASS"),
+        ("error", "empty transcript"),
+        ("at", "2026-09-02 22:31:09"),
+    ),
+)
+def test_fixed_vocal_v2_asr_timeout_repair_rejects_receipt_mutation(
+    tmp_path,
+    monkeypatch,
+    receipt_field,
+    receipt_value,
+):
+    rearm = importlib.import_module("scripts.recover_subdub_fixed_vocal_v2")
+    db_path, _job = _seed_fixed_vocal_v1_terminal(tmp_path, monkeypatch)
+    monkeypatch.setattr(rearm.app, "db_connect", lambda: sqlite3.connect(db_path))
+    first = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+    _persist_fixed_vocal_job(db_path, _exact_duration_live_failure(first["job"]))
+    duration = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+    timeout_failure = {
+        **duration["job"],
+        "status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "current_stage": "failed_no_charge",
+        "last_error_stage": "",
+        "last_error_safe": "",
+        "asr_started": True,
+    }
+    _persist_fixed_vocal_job(db_path, timeout_failure)
+    receipt = {**_exact_deepgram_timeout_receipt(), receipt_field: receipt_value}
+    _persist_translation_asr_attempt(db_path, receipt)
+
+    repair = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+
+    assert repair == {
         "ok": False,
         "claimed": False,
         "reason": "fixed_vocal_v2_rearm_not_allowed",

@@ -1408,4 +1408,54 @@ fixed_vocal_v2_exact_duration_correction_20260902:
     yaml_diff: exit 0
   current: local source green; correction not committed, pushed, deployed or live-authorized
 
-current_next_action: finish compile/YAML/diff/scope/secret gates and commit local exact-duration correction; wait shared release and Owner approval for exact commit PR/squash/deploy; after exact runtime request fresh authorization for one same-job duration repair only; no upload, Confirm, old command, new job or wallet mutation; LIVE PASS only on MP4 then receipt with charged_xu 0
+fixed_vocal_v2_asr_timeout_correction_20260902:
+  deployed_runtime:
+    pr: 979
+    merge_sha: 899a93f5420f47c95fcc88cd4b8de655f7fee8c8
+    compile_guard: 33643563823 SUCCESS in 28s
+    deploy_run: 33643751951 SUCCESS in 3m38s
+  live_invocation:
+    id: a13ecafffd31411d89e6b16837c64742
+    terminal: failed_no_charge at 22:31:10 +07
+    duration_marker: true; 134.0 to 133.37542; attempts 4/3
+    downstream: acoustic translation TTS mux artifact delivery all absent
+    finance: jobs 322; transactions 0; provider usage 0; credit events 11; wallet 200/0; charged 0
+  provider_receipt:
+    at: 2026-09-02 22:31:08
+    provider: deepgram
+    route: listen
+    status: DEEPGRAM_EMPTY_TRANSCRIPT
+    error: deepgram_timeout
+    updated_by: 7126457028
+  root: caller computed 300s; non-diarized adapter dropped timeout and diagnostic used default 60s; timeout relabelled as empty/unavailable
+  correction:
+    adapter: forward timeout_seconds and preserve error deepgram_timeout
+    asr: preserve deepgram_timeout for strict word timeline as well as diarization
+    retry_or_fallback_added: false
+    rearm: exact receipt + same job marker; attempts remain 4/3; reset only asr_started
+  tdd:
+    adapter_red: 1 failed in 7.41s; actual 60 expected 300
+    adapter_green: 1 passed in 591.21s
+    asr_red: 1 failed in 5.53s; timeout became asr_unavailable
+    asr_green: 1 passed in 510.85s
+    timeout_contract: 10 passed plus 7 subtests
+    direct_impact: 90 passed plus 7 subtests
+    combined: 194 passed plus 7 subtests
+    rearm_red: 1 failed in 5.86s
+    rearm_green: 1 passed in 5.22s
+    rearm_receipts: 7 passed
+    full_compile: exit 0; no output
+    yaml_diff_scope_secret: exit 0; retry fallback provider call additions 0
+  post_main_rebuild:
+    base: 54309814910e469a763bccd511c209bbebe697e5
+    history: one clean local correction commit; 0 behind and 1 ahead; exact-two protected diff empty
+    timeout_contract: 10 passed plus 7 subtests in 2.14s
+    marker_receipts: 7 passed in 622.58s
+    combined: 194 passed plus 7 subtests in 13.09s
+    protected_branch: 50 passed plus 1 byte-lock failure in 1.28s
+    protected_baseline: exact same byte-lock failure and hashes in 2.66s; NEW_FAILURES 0
+    compile: bot, worker, runner and focused tests exit 0 with no output
+    yaml_diff_scope_secret: exit 0; exactly 9 scoped files; retry fallback provider-call and forbidden production additions 0
+  current: clean local source green on latest main; not pushed, deployed or live-authorized; previous exact-head approval does not authorize the rebuilt SHA
+
+current_next_action: request fresh exact-head Owner approval for one PR/squash/deploy; after exact runtime request separate authorization for one same-job ASR-timeout repair only; no upload, Confirm, old command, new job or wallet mutation; LIVE PASS only on MP4 then receipt with charged_xu 0
