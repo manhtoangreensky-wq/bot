@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
+import importlib
 import json
 import sqlite3
 import threading
@@ -573,6 +574,335 @@ def test_stability_repair_rearms_same_fourth_attempt_once(tmp_path, monkeypatch)
         "claimed": False,
         "reason": "stability_repair_not_allowed",
     }
+
+
+def _seed_fixed_vocal_v1_terminal(tmp_path, monkeypatch):
+    db_path, job, _source = _seed_exact_acoustic_job(tmp_path, monkeypatch)
+    job.update(
+        {
+            "auto_multi_recovery_attempt_count": 4,
+            "auto_multi_recovery_correction_attempt_count": 3,
+            "auto_multi_acoustic_recovery_used": True,
+            "auto_multi_acoustic_stability_repair_used": True,
+            "auto_multi_acoustic_backend": "local_wespeaker_resnet34_spectral",
+            "auto_multi_acoustic_model_sha256": ACOUSTIC_MODEL_SHA256,
+            "auto_multi_acoustic_algorithm_version": "wespeaker-resnet34-spectral-v1",
+            "pipeline_started": True,
+            "asr_started": False,
+            "translation_started": False,
+            "tts_started": False,
+            "mux_started": False,
+            "status": "failed_no_charge",
+            "terminal_state": "failed_no_charge",
+            "last_error_stage": "AUTO_CAST_MANUAL_REQUIRED",
+        }
+    )
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE system_settings SET value=? WHERE key=?",
+        (
+            json.dumps(job, ensure_ascii=False),
+            f"engine_async_job:{ACOUSTIC_JOB_ID}",
+        ),
+    )
+    conn.commit()
+    conn.close()
+    return db_path, job
+
+
+def fixed_vocal_v2_preflight():
+    return {
+        "ok": True,
+        "status": "PASS",
+        "model_sha256": ACOUSTIC_MODEL_SHA256,
+        "algorithm_version": ACOUSTIC_ALGORITHM_VERSION,
+        "providers": ["CPUExecutionProvider"],
+    }
+
+
+def test_fixed_vocal_v2_rearm_keeps_same_fourth_attempt_and_wins_once(
+    tmp_path,
+    monkeypatch,
+):
+    rearm = importlib.import_module("scripts.recover_subdub_fixed_vocal_v2")
+    db_path, _job = _seed_fixed_vocal_v1_terminal(tmp_path, monkeypatch)
+    monkeypatch.setattr(rearm.app, "db_connect", lambda: sqlite3.connect(db_path))
+    monkeypatch.setattr(rearm.app, "ENGINE_ASYNC_MEMORY_JOBS", {})
+    monkeypatch.setattr(rearm.app, "SUBTITLE_DUB_PIPELINE_JOBS", {})
+
+    first = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+
+    assert first["claimed"] is True
+    recovered = first["job"]
+    assert recovered["auto_multi_recovery_attempt_count"] == 4
+    assert recovered["auto_multi_recovery_correction_attempt_count"] == 3
+    assert recovered["auto_multi_acoustic_recovery_used"] is True
+    assert recovered["auto_multi_acoustic_stability_repair_used"] is True
+    assert recovered["auto_multi_fixed_vocal_v2_recovery_used"] is True
+    assert recovered["auto_multi_acoustic_backend"] == (
+        "local_wespeaker_resnet34_spectral"
+    )
+    assert recovered["auto_multi_acoustic_algorithm_version"] == (
+        "wespeaker-resnet34-spectral-v1"
+    )
+    assert recovered["status"] == bot.SUBDUB_FAILED_AUTO_MULTI_RECOVERY_STATUS
+    assert recovered["terminal_state"] == ""
+    terminal_again = {
+        **recovered,
+        "status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "lifecycle_state": "failed_no_charge",
+        "current_stage": "failed_no_charge",
+        "progress_stage": "failed_no_charge",
+        "last_error_stage": "AUTO_CAST_MANUAL_REQUIRED",
+    }
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE system_settings SET value=? WHERE key=?",
+        (
+            json.dumps(terminal_again, ensure_ascii=False, separators=(",", ":")),
+            f"engine_async_job:{ACOUSTIC_JOB_ID}",
+        ),
+    )
+    conn.commit()
+    conn.close()
+    second = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+    assert second == {
+        "ok": False,
+        "claimed": False,
+        "reason": "fixed_vocal_v2_rearm_not_allowed",
+    }
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM system_settings").fetchone()[0] == 1
+        stored = json.loads(
+            conn.execute(
+                "SELECT value FROM system_settings WHERE key=?",
+                (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+            ).fetchone()[0]
+        )
+    finally:
+        conn.close()
+    assert stored == terminal_again
+
+
+def test_fixed_vocal_v2_preflight_fails_before_database_access(monkeypatch):
+    rearm = importlib.import_module("scripts.recover_subdub_fixed_vocal_v2")
+    db_calls = []
+
+    def forbidden_db():
+        db_calls.append(True)
+        raise AssertionError("database must not open before fixed-vocal preflight")
+
+    monkeypatch.setattr(rearm.app, "db_connect", forbidden_db)
+    result = rearm.claim_same_attempt(
+        acoustic_preflight=lambda: {"ok": False, "status": "FAIL"}
+    )
+
+    assert result == {
+        "ok": False,
+        "claimed": False,
+        "reason": "fixed_vocal_v2_preflight_failed",
+    }
+    assert db_calls == []
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "already_used",
+        "already_v2",
+        "wrong_public_code",
+        "wrong_owner",
+        "wrong_job_key",
+        "wrong_source",
+        "wrong_backend",
+        "wrong_model",
+        "missing_acoustic_recovery",
+        "missing_stability_repair",
+        "attempt_changed",
+        "charged",
+        "charged_bool",
+        "charge_status_changed",
+        "output_exists",
+        "asr_already_started",
+        "selection_changed",
+        "root_selection_conflict",
+        "v2_evidence_present",
+        "v2_failure_evidence_present",
+    ),
+)
+def test_fixed_vocal_v2_rearm_rejects_mutated_authority_without_write(
+    tmp_path,
+    monkeypatch,
+    mutation,
+):
+    rearm = importlib.import_module("scripts.recover_subdub_fixed_vocal_v2")
+    db_path, job = _seed_fixed_vocal_v1_terminal(tmp_path, monkeypatch)
+    if mutation == "already_used":
+        job["auto_multi_fixed_vocal_v2_recovery_used"] = True
+    elif mutation == "already_v2":
+        job["auto_multi_acoustic_algorithm_version"] = ACOUSTIC_ALGORITHM_VERSION
+    elif mutation == "wrong_public_code":
+        job["public_code"] = "WRONG"
+    elif mutation == "wrong_owner":
+        job["user_id"] = OWNER_ID + 1
+    elif mutation == "wrong_job_key":
+        job["job_key"] = "wrong|route"
+    elif mutation == "wrong_source":
+        job["auto_multi_recovery"]["source_sha256"] = "0" * 64
+    elif mutation == "wrong_backend":
+        job["auto_multi_acoustic_backend"] = "other"
+    elif mutation == "wrong_model":
+        job["auto_multi_acoustic_model_sha256"] = "0" * 64
+    elif mutation == "missing_acoustic_recovery":
+        job["auto_multi_acoustic_recovery_used"] = False
+    elif mutation == "missing_stability_repair":
+        job["auto_multi_acoustic_stability_repair_used"] = False
+    elif mutation == "attempt_changed":
+        job["auto_multi_recovery_attempt_count"] = 5
+    elif mutation == "charged":
+        job["charged_xu"] = 1
+    elif mutation == "charged_bool":
+        job["charged_xu"] = False
+    elif mutation == "charge_status_changed":
+        job["charge_status"] = "charged"
+    elif mutation == "output_exists":
+        job["final_mp4_exists"] = True
+    elif mutation == "asr_already_started":
+        job["asr_started"] = True
+    elif mutation == "selection_changed":
+        job["auto_multi_recovery"]["target_language"] = "Vietnamese"
+    elif mutation == "root_selection_conflict":
+        job["target_language"] = "Vietnamese"
+    elif mutation == "v2_evidence_present":
+        job["multi_acoustic_backend"] = "local_wespeaker_resnet34_fixed_vocal"
+        job["multi_acoustic_algorithm_version"] = ACOUSTIC_ALGORITHM_VERSION
+        job["multi_acoustic_speaker_count"] = 5
+    elif mutation == "v2_failure_evidence_present":
+        job["multi_acoustic_failure_word_count"] = 50
+    conn = sqlite3.connect(db_path)
+    old_value = json.dumps(job, ensure_ascii=False)
+    conn.execute(
+        "UPDATE system_settings SET value=? WHERE key=?",
+        (old_value, f"engine_async_job:{ACOUSTIC_JOB_ID}"),
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(rearm.app, "db_connect", lambda: sqlite3.connect(db_path))
+    monkeypatch.setattr(rearm.app, "ENGINE_ASYNC_MEMORY_JOBS", {})
+    monkeypatch.setattr(rearm.app, "SUBTITLE_DUB_PIPELINE_JOBS", {})
+
+    result = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+
+    assert result == {
+        "ok": False,
+        "claimed": False,
+        "reason": "fixed_vocal_v2_rearm_not_allowed",
+    }
+    stored = sqlite3.connect(db_path).execute(
+        "SELECT value FROM system_settings WHERE key=?",
+        (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+    ).fetchone()[0]
+    assert stored == old_value
+
+
+def test_fixed_vocal_v2_rearm_concurrent_claim_has_one_cas_winner(
+    tmp_path,
+    monkeypatch,
+):
+    rearm = importlib.import_module("scripts.recover_subdub_fixed_vocal_v2")
+    db_path, _job = _seed_fixed_vocal_v1_terminal(tmp_path, monkeypatch)
+    monkeypatch.setattr(rearm.app, "db_connect", lambda: sqlite3.connect(db_path))
+    monkeypatch.setattr(rearm.app, "ENGINE_ASYNC_MEMORY_JOBS", {})
+    monkeypatch.setattr(rearm.app, "SUBTITLE_DUB_PIPELINE_JOBS", {})
+    barrier = threading.Barrier(2)
+
+    def claim():
+        barrier.wait(timeout=5.0)
+        return rearm.claim_same_attempt(
+            acoustic_preflight=fixed_vocal_v2_preflight
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _index: claim(), range(2)))
+
+    winners = [result for result in results if result.get("claimed") is True]
+    losers = [result for result in results if result.get("claimed") is not True]
+    assert len(winners) == 1
+    assert len(losers) == 1
+    assert losers[0]["reason"] in {
+        "fixed_vocal_v2_rearm_not_allowed",
+        "fixed_vocal_v2_rearm_cas_lost",
+    }
+    stored = json.loads(
+        sqlite3.connect(db_path).execute(
+            "SELECT value FROM system_settings WHERE key=?",
+            (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+        ).fetchone()[0]
+    )
+    assert stored["auto_multi_fixed_vocal_v2_recovery_used"] is True
+    assert stored["auto_multi_recovery_attempt_count"] == 4
+
+
+def test_fixed_vocal_v2_runner_enters_existing_handler_once(monkeypatch):
+    rearm = importlib.import_module("scripts.recover_subdub_fixed_vocal_v2")
+    job = {
+        "job_key": (
+            f"{OWNER_ID}|{OWNER_ID}|AgADeSIAAh1tkVQ|"
+            "subtitle_plus_dub|auto_multi_speaker"
+        )
+    }
+    calls = []
+
+    class FakeBot:
+        def __init__(self, token):
+            self.token = token
+
+        async def __aenter__(self):
+            calls.append(("bot_enter",))
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def send_message(self, **_kwargs):
+            return SimpleNamespace(message_id=1)
+
+    async def fake_handler(update, context):
+        calls.append(("handler", update.effective_user.id, list(context.args)))
+
+    def fake_claim(**_kwargs):
+        calls.append(("claim",))
+        return {"ok": True, "claimed": True, "job": job}
+
+    monkeypatch.setattr(rearm, "Bot", FakeBot)
+    monkeypatch.setattr(
+        rearm,
+        "claim_same_attempt",
+        fake_claim,
+    )
+    monkeypatch.setattr(rearm.app, "cmd_subdub_recover_failed_auto_multi", fake_handler)
+
+    asyncio.run(rearm.run())
+
+    assert calls == [
+        ("bot_enter",),
+        ("claim",),
+        (
+            "handler",
+            OWNER_ID,
+            [
+                ACOUSTIC_JOB_ID,
+                SOURCE_SHA256,
+                "English",
+                "40",
+                "150",
+                "--confirm-paid",
+                "--confirm-local-acoustic",
+            ],
+        )
+    ]
 
 
 def test_failed_auto_multi_recovery_cas_keeps_same_job_and_wins_once(

@@ -981,3 +981,20 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 - Lệnh recovery cũ của `#B4CB6D5FE8` đã được dùng và không được gửi lại. Sau
   exact-SHA deploy cần fresh Owner action-time authorization cho đúng một same-job
   continuation; cấm upload/Confirm/job mới. LIVE PASS vẫn đòi MP4 + receipt thật.
+
+### Vận hành one-shot upgrade v1 -> fixed-vocal v2 — 02/09/2026
+
+- PR `#974` merge `c8e954a03322f4af8559cf3f6e99178dbd6bfe7a`; compile guard
+  `33599876207` SUCCESS `27s`; deploy run `33600033108` SUCCESS `3m53s`.
+  VPS exact SHA, tracked diff `0`, bot/web/nginx active/running, health `ok`.
+- Runtime fixed-vocal model preflight PASS với exact model SHA và CPU provider.
+  Job `#B4CB6D5FE8` vẫn lưu v1 cũ, attempt/correction `4/3`, hai marker cũ true,
+  `charged_xu=0`; ASR/translation/TTS/mux/artifact/delivery chưa chạy. Bẫy: code
+  v2 đã deploy không tự làm marker v1 đã consumed chạy lại được.
+- Script rearm mới chỉ hợp lệ cho exact transition v1 -> v2, giữ attempt `4/3`
+  và hai marker cũ, thêm một marker v2. Preflight model/CPU chạy trước DB; duplicate,
+  concurrent loser hoặc bất kỳ mismatch nào đều no-op. Script không được chạy
+  trước fresh Owner authorization sau exact-SHA deploy của chính script.
+- Source TDD hiện tại: initial RED `13 failed`; review RED `4 failed`; final
+  focused GREEN `24 passed`; recovery `75 passed`; protected `331 passed`; full
+  compile exit `0`; provider/production-DB/wallet action `0/0/0`.

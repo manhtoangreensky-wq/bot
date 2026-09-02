@@ -106,6 +106,7 @@ SHA-256 `83DE97B744B931E544B569E6E750F8415545F226461BD2E36CFB49225898AD3E`.
 | `SD-MS-L03` | Legacy sidecar force-fresh | Provider/crosswalk/underclustered sidecar hoặc bundle thiếu acoustic model/algorithm/media/timeline authority không được reuse và không được chuyển thẳng sang TTS |
 | `SD-MS-L04` | Valid acoustic resume | Bundle acoustic đầy đủ, cùng source/timeline/model/algorithm được reuse với ASR call delta `0`; cue/voice/timing authority không đổi |
 | `SD-MS-L05` | Final same-job CAS | Chỉ internal `b4cb6d5fe8a7bdfce507`, exact SHA/English/40/150/no-output/no-charge; attempt `3/2 -> 4/3` đúng một winner; attempt `5`, duplicate và concurrent loser đều no-op |
+| `SD-MS-L06` | Consumed-v1 -> fixed-vocal-v2 rearm | Chính job đang `4/3`, backend/version v1, cả hai marker cũ true, pipeline pre-ASR/no-output/no-charge; exact v2 model/CPU preflight trước DB; thêm đúng một marker v2, giữ `4/3` và durable v1 đến inference; duplicate/mutation/concurrent loser no-op |
 
 Mỗi MP4 phải đo SHA-256/bytes/duration/dimensions/codec và AAC loudness; job id
 hoặc HTTP 200 không được tính PASS. Sửa case tại file này trước khi tạo/sửa
@@ -141,6 +142,12 @@ numeric-label alignment. Model mutation/missing notice, `k>8`, unstable views,
 missing word/speaker coverage, legacy sidecar or wrong-lane dispatch must fail
 before TTS/mux/charge. Offline `k=5` is required for `SD-MS-L02`, but production
 code must not contain a fixture hash branch or hard-coded expected `k`.
+
+Rearm comparator: PR #974 runtime v2 không được tự xóa hai marker v1 đã consumed.
+Chỉ `scripts/recover_subdub_fixed_vocal_v2.py` sau exact deploy và fresh Owner
+authorization được CAS cùng job một lần. FAIL nếu attempt tăng, marker cũ bị xóa,
+backend/version đổi trước inference, ASR/TTS/artifact đã start, hoặc command cũ
+được gửi lại.
 
 Comparator UI bổ sung: `2` lane × `6` kiểu giọng (nữ mặc định, nam mặc định,
 Kho voice, voice riêng, Auto 2, Auto multi) phải cùng callback

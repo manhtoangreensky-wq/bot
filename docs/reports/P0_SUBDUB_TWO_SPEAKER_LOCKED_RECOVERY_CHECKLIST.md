@@ -1757,6 +1757,34 @@ Task contract:
   continuation remains blocked until the deployed SHA is known and Owner gives a
   fresh action-time authorization for the same job only.
 
+### SPEC-11.7 — Deploy fixed-vocal v2 and rearm the consumed v1 job once
+
+- [x] PR `#974` compile guard `33599876207` SUCCESS `27s`; squash merge exact
+  `c8e954a03322f4af8559cf3f6e99178dbd6bfe7a`; Deploy Bot to VPS `#189`, run
+  `33600033108`, SUCCESS `3m53s`. VPS checkout is exact, tracked diff `0`, bot/
+  web/nginx active/running and health `status=ok`.
+- [x] Runtime model preflight is exact fixed-vocal v2, exact model SHA and CPU
+  provider only. Read-only job snapshot remains attempt/correction `4/3`, old
+  backend/version `local_wespeaker_resnet34_spectral` / `...spectral-v1`, both
+  old one-shot markers true, and downstream ASR/TTS/mux/artifact/delivery false.
+  Therefore v2 has not executed on `#B4CB6D5FE8`.
+- [x] Financial/read-only baseline remains engine jobs `322`, transaction/
+  provider usage `0/0`, credit events `1`, wallet `200/0`, charged Xu `0`.
+- [x] New bounded contract keeps attempt `4/3`, preserves both old markers and
+  old backend/version until real inference, requires exact v2 model/CPU preflight
+  before DB access, and adds only `auto_multi_fixed_vocal_v2_recovery_used`.
+  Every identity/source/selection/stage/output/finance/version mismatch and a
+  duplicate claim fails closed without write; concurrent CAS has one winner.
+- [x] Initial RED `13 failed, 57 deselected in 15.31s`; review RED `4 failed,
+  14 passed, 57 deselected in 17.46s`; focused GREEN `24 passed, 57 deselected
+  in 19.31s`; full recovery `75 passed in 12.67s`; protected `331 passed in
+  43.88s`; full bot/worker/script/test compile exit `0`. Provider/production
+  DB/wallet action `0/0/0`.
+- [-] Final docs/scope/hash gate and one local commit remain.
+  This rearm commit requires a separate explicit PR/deploy approval. Only after
+  its exact runtime may Owner authorize running the new script once; old Telegram
+  recovery command remains forbidden.
+
 ### SPEC-11 acceptance
 
 - [B] Owner's later exact same-job order supersedes the old new-upload/standalone

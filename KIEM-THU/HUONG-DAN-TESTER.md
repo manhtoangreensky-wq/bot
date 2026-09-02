@@ -127,7 +127,12 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
     recovery cũ, không upload, không Confirm và không tạo job mới. Sau đó chỉ đọc
     durable job/workspace/journal tới terminal. Không có MP4 thật rồi receipt thì
     ghi FAIL/BLOCKED, không ghi PASS.
-22. Final evidence phải có model/algorithm, speaker/unit/window/cluster counts,
+22. Nếu durable job vẫn ghi `wespeaker-resnet34-spectral-v1` và cả hai one-shot
+    marker cũ đã true, không reset/xóa marker và không gửi command cũ. Trước live
+    phải deploy rồi test `scripts/recover_subdub_fixed_vocal_v2.py`: preflight v2
+    exact model/CPU trước DB; cùng attempt `4/3`; một marker v2; duplicate và mọi
+    mismatch no-op. Chỉ chạy script thật sau fresh Owner authorization.
+23. Final evidence phải có model/algorithm, speaker/unit/window/cluster counts,
     distinct voice count, per-speaker cue counts, source/translated cue count,
     drift counters, original `40`/dub `150`, MP4 metrics, hai Telegram message ID,
     `charged_xu=0`, root-job/transaction/wallet/credit/provider-usage deltas `0`.
