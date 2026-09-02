@@ -1437,12 +1437,85 @@ def test_v3_taskless_watchdog_waits_for_fresh_worker_heartbeat() -> None:
         conn.close()
 
 
+def test_v3_taskless_watchdog_hands_fresh_worker_read_only_state_to_claim(
+    monkeypatch,
+) -> None:
+    conn, now = _taskless_v3_job28_watchdog_db()
+    try:
+        bot_watchdog = video_project_queue.sweep_product_video_zero_task_watchdog(
+            conn,
+            now=now,
+            job_id=28,
+            eligibility_evaluator=lambda *_args: {
+                "ok": False,
+                "eligible_provider_keys": [],
+                "runtime_candidate_keys": [],
+                "final_eligible_provider_count": 0,
+                "worker_admission_block_reason": "",
+                "admission_block_reason": "worker_poll_existing_task_read_only",
+                "provider_submit_block_reason": "worker_poll_existing_task_read_only",
+                "router_skip_reason": "worker_poll_existing_task_read_only",
+            },
+        )
+        waiting_job = video_project_queue.get_video_render_job(conn, 28)
+        waiting_outbox = video_project_queue.get_product_video_dispatch_outbox(
+            conn, job_id=28
+        )
+        waiting = json.loads(waiting_job["result_json"])
+
+        assert bot_watchdog["terminal_failed"] == 0
+        assert waiting_job["status"] == "queued"
+        assert waiting_outbox["dispatch_status"] == "acknowledged"
+        assert waiting["taskless_v3_authority_ready_for_worker_claim"] is True
+        assert waiting["replacement_calls_consumed"] == 0
+        assert waiting["replacement_calls_remaining"] == 2
+
+        monkeypatch.setattr(
+            remote_worker_api,
+            "_product_video_runtime_eligibility",
+            lambda *_args, **_kwargs: {
+                "ok": True,
+                "eligible_provider_keys": ["key4u_video"],
+                "runtime_candidate_keys": ["key4u_video"],
+                "final_eligible_provider_count": 1,
+                "provider_submit_allowed": False,
+                "provider_submit_block_reason": "worker_poll_existing_task_read_only",
+                "worker_local_ready_provider_keys": ["key4u_video"],
+                "contract_valid_provider_chain": ["shopaikey_video", "key4u_video"],
+            },
+        )
+        claimed = remote_worker_api.claim_remote_worker_product_video_job(
+            conn,
+            worker_id="job28-owner-fresh-worker",
+            owner_only=True,
+            now=now + timedelta(seconds=1),
+        )
+        claimed_payload = json.loads(claimed["result_json"])
+        claimed_outbox = video_project_queue.get_product_video_dispatch_outbox(
+            conn, job_id=28
+        )
+
+        assert claimed["id"] == 28
+        assert claimed["status"] == "processing"
+        assert claimed_outbox["dispatch_status"] == "acknowledged"
+        assert claimed_payload["replacement_calls_consumed"] == 0
+        assert claimed_payload["replacement_calls_remaining"] == 2
+        assert claimed_payload["fallback_scene_index"] == 1
+        assert claimed_payload["provider_http_request_sent"] is False
+        assert claimed_payload[
+            "controlled_fallback_replacement_submit_receipts_by_authorization"
+        ][V3_AUTHORIZATION_ID] == {}
+    finally:
+        conn.close()
+
+
 @pytest.mark.parametrize(
     ("include_v3_authority", "worker_reason", "provider_reason"),
     [
         (False, "worker_heartbeat_stale", "worker_heartbeat_stale"),
         (True, "worker_sha_mismatch", "worker_sha_mismatch"),
         (True, "worker_heartbeat_stale", "provider_route_not_ready"),
+        (True, "", "provider_route_not_ready"),
     ],
 )
 def test_taskless_watchdog_without_transient_valid_v3_still_fails_closed(
