@@ -500,11 +500,11 @@ def acoustic_pipeline_segments() -> list[dict]:
 
 def acoustic_state_fields() -> dict:
     return {
-        "multi_acoustic_backend": "local_wespeaker_resnet34_spectral",
+        "multi_acoustic_backend": "local_wespeaker_resnet34_fixed_vocal",
         "multi_acoustic_model_sha256": (
             "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
         ),
-        "multi_acoustic_algorithm_version": "wespeaker-resnet34-spectral-v1",
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
         "multi_acoustic_speaker_count": 3,
         "multi_acoustic_word_count": 30,
         "multi_acoustic_unit_count": 12,
@@ -734,13 +734,13 @@ def test_exact_multi_prepare_runs_local_acoustics_before_translation(
         return {
             "ok": True,
             "status": "PASS",
-            "provider": "local_wespeaker_resnet34_spectral",
+            "provider": "local_wespeaker_resnet34_fixed_vocal",
             "segments": [dict(item) for item in acoustic_segments],
             "detected_speaker_count": 3,
             "model_sha256": (
                 "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
             ),
-            "algorithm_version": "wespeaker-resnet34-spectral-v1",
+            "algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
             "word_count": 30,
             "unit_count": 12,
             "embedding_window_count": 24,
@@ -796,7 +796,7 @@ def test_exact_multi_prepare_runs_local_acoustics_before_translation(
     assert resolve_call[1]["require_auto_multi_word_timeline"] is True
     assert resolve_call[1].get("require_diarization") is None
     assert [item[0] for item in calls] == ["resolve", "extract", "acoustic", "translate"]
-    assert calls[1][1] == {"channels": 1, "sample_rate": 16_000, "sample_format": "s16le"}
+    assert calls[1][1] == {"channels": 2, "sample_rate": 44_100, "sample_format": "s16le"}
     translated_input = calls[3][1]
     assert [item["speaker_id"] for item in translated_input] == [
         "chunk_00:speaker_0",
@@ -827,8 +827,8 @@ def test_exact_multi_prepare_runs_local_acoustics_before_translation(
         "chunk_00:speaker_2",
     ]
     assert sidecar["acoustic"] == {
-        "algorithm_version": "wespeaker-resnet34-spectral-v1",
-        "backend": "local_wespeaker_resnet34_spectral",
+        "algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
+        "backend": "local_wespeaker_resnet34_fixed_vocal",
         "cluster_sizes": [4, 4, 4],
         "embedding_window_count": 24,
         "model_sha256": (

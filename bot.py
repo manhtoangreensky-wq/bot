@@ -247472,8 +247472,8 @@ async def video_dubbing_prepare_subtitles(
             pcm_path = await _extract_subdub_auto_pcm(
                 acoustic_prepared,
                 dict(state),
-                channels=1,
-                sample_rate=16_000,
+                channels=2,
+                sample_rate=44_100,
                 sample_format="s16le",
             )
             acoustic_duration = float(
@@ -248639,7 +248639,7 @@ SUBDUB_FINAL_ACOUSTIC_SOURCE_SHA256 = (
 def _subdub_multi_acoustic_model_preflight() -> dict:
     service = auto_multi_speaker.subdub_multi_speaker_embedding_onnx
     result = dict(service.model_preflight())
-    result["algorithm_version"] = service.ALGORITHM_VERSION
+    result["algorithm_version"] = service.FIXED_VOCAL_ALGORITHM_VERSION
     return result
 
 
@@ -248917,7 +248917,7 @@ def claim_subdub_failed_auto_multi_recovery(
             and acoustic_preflight_result.get("model_sha256")
             == service.MODEL_SHA256
             and acoustic_preflight_result.get("algorithm_version")
-            == service.ALGORITHM_VERSION
+            == service.FIXED_VOCAL_ALGORITHM_VERSION
         ):
             return {
                 "ok": False,
@@ -249233,7 +249233,7 @@ def claim_subdub_failed_auto_multi_recovery(
                 **(
                     {
                         "auto_multi_acoustic_recovery_used": True,
-                        "auto_multi_acoustic_backend": "local_wespeaker_resnet34_spectral",
+                        "auto_multi_acoustic_backend": auto_multi_speaker.subdub_multi_speaker_embedding_onnx.FIXED_VOCAL_PROVIDER,
                         "auto_multi_acoustic_model_sha256": acoustic_preflight_result["model_sha256"],
                         "auto_multi_acoustic_algorithm_version": acoustic_preflight_result["algorithm_version"],
                         "auto_multi_acoustic_owner_authority": "owner_literal_final_recovery",

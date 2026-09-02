@@ -21,7 +21,7 @@ ACOUSTIC_PUBLIC_CODE = "B4CB6D5FE8"
 ACOUSTIC_MODEL_SHA256 = (
     "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
 )
-ACOUSTIC_ALGORITHM_VERSION = "wespeaker-resnet34-spectral-v1"
+ACOUSTIC_ALGORITHM_VERSION = "wespeaker-resnet34-fixed-vocal-v2"
 
 
 def _seed_job(tmp_path, monkeypatch):
@@ -244,7 +244,7 @@ def test_exact_acoustic_recovery_claims_same_job_once_and_blocks_attempt_five(
     assert recovered["auto_multi_recovery_correction_attempt_count"] == 3
     assert recovered["auto_multi_acoustic_recovery_used"] is True
     assert recovered["auto_multi_acoustic_backend"] == (
-        "local_wespeaker_resnet34_spectral"
+        "local_wespeaker_resnet34_fixed_vocal"
     )
     assert recovered["auto_multi_acoustic_model_sha256"] == ACOUSTIC_MODEL_SHA256
     assert recovered["auto_multi_acoustic_algorithm_version"] == (

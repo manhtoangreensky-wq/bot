@@ -71,11 +71,11 @@ def bounded_multi_acoustic_evidence(
         return {}
     if (
         current.get("multi_acoustic_backend")
-        != "local_wespeaker_resnet34_spectral"
+        != subdub_multi_speaker_embedding_onnx.FIXED_VOCAL_PROVIDER
         or current.get("multi_acoustic_model_sha256")
         != subdub_multi_speaker_embedding_onnx.MODEL_SHA256
         or current.get("multi_acoustic_algorithm_version")
-        != subdub_multi_speaker_embedding_onnx.ALGORITHM_VERSION
+        != subdub_multi_speaker_embedding_onnx.FIXED_VOCAL_ALGORITHM_VERSION
         or not 3 <= speaker_count <= subdub_multi_speaker_embedding_onnx.MAX_SPEAKERS
         or not 0 < word_count <= speaker_cast.MAX_SIDECAR_CUES
         or not subdub_multi_speaker_embedding_onnx.MIN_UNITS
@@ -92,12 +92,14 @@ def bounded_multi_acoustic_evidence(
     ):
         return {}
     return {
-        "multi_acoustic_backend": "local_wespeaker_resnet34_spectral",
+        "multi_acoustic_backend": (
+            subdub_multi_speaker_embedding_onnx.FIXED_VOCAL_PROVIDER
+        ),
         "multi_acoustic_model_sha256": (
             subdub_multi_speaker_embedding_onnx.MODEL_SHA256
         ),
         "multi_acoustic_algorithm_version": (
-            subdub_multi_speaker_embedding_onnx.ALGORITHM_VERSION
+            subdub_multi_speaker_embedding_onnx.FIXED_VOCAL_ALGORITHM_VERSION
         ),
         "multi_acoustic_speaker_count": speaker_count,
         "multi_acoustic_word_count": word_count,
@@ -137,7 +139,7 @@ async def run_local_acoustic_diarization_off_event_loop(
     *,
     duration_seconds: float,
     acoustic_diarize: Callable = (
-        subdub_multi_speaker_embedding_onnx.diarize_word_timeline
+        subdub_multi_speaker_embedding_onnx.diarize_fixed_vocal_word_timeline
     ),
 ) -> dict[str, object]:
     """Run the local acoustic engine off-loop and clean transient PCM safely."""

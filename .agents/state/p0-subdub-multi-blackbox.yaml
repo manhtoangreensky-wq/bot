@@ -1265,4 +1265,70 @@ ordered_specs:
       - audit every acceptance line as proven or unresolved
       - mark the goal complete only when no required line remains unresolved
 
-current_next_action: commit and ship the minimal nested-authority guard correction; deploy/read back exact runtime; re-snapshot same job; send exactly one acoustic recovery command for internal job b4cb6d5fe8a7bdfce507; no upload, Confirm, second command or new job; LIVE PASS only on MP4 then receipt with charged_xu 0
+fixed_vocal_authority_v2_20260902:
+  scope: exact Auto Multi only; exact-two production files unchanged
+  live_root: >-
+    Deepgram production ASR passed with 17 SRT blocks, but the old acoustic
+    speaker count depended on ASR/VAD segmentation and terminalized the same
+    job before TTS at AUTO_CAST_MANUAL_REQUIRED.
+  rejected_approaches:
+    pairwise_structural_agreement: 87.3518 percent but ARI only 0.637
+    word_boundary_timelines: independent ASR selected k6 and k5
+    raw_and_uvr_vad: speaker count changed across VAD thresholds
+  authority:
+    provider: local_wespeaker_resnet34_fixed_vocal
+    algorithm: wespeaker-resnet34-fixed-vocal-v2
+    pipeline: stereo 44.1k -> hash-locked UVR vocal -> mono 16k -> fixed 1.5s windows every 0.75s -> percentile plateau -> word mapping
+    energy_percentiles: [42.5, 45.0, 47.5, 50.0]
+    core_partition: exact after numeric-label alignment
+    overlap_dominance: 0.2
+    asr_or_expected_speaker_count_used: false
+  exact_fixture:
+    source_sha256: 83de97b744b931e544b569e6e750f8415545f226461bd2e36cfb49225898ad3e
+    detected_speakers: 5
+    word_count: 50
+    unit_count: 23
+    embedding_window_count: 178
+    cluster_sizes: [9, 18, 26, 25, 11]
+    speaker_unit_counts: [3, 2, 4, 11, 3]
+    overlap_mapped: 19
+    centroid_mapped: 4
+    segments: 11
+    view_cosine_min: 0.990487
+    view_cosine_mean: 0.997246
+    final_resource_gate: 4 passed in 151.18s
+    fixed_vocal_call: 125.07s under the 300s production budget
+  verification:
+    recovery: 57 passed in 8.60s
+    focused_protected: 307 passed in 9.78s
+    cancel_boundary_red: 2 failed because session construction preceded stop check
+    cancel_boundary_green: 4 passed in 5.07s including post-UVR and pre-ONNX boundaries
+    full_compile: exit 0; no output
+    diff_check: exit 0; CRLF warnings only
+    exact_two_cast_sha256: de93620f3f038b5759a53e696c5c85d3553fcee758686df56c70e6b11bac145b
+    exact_two_asr_fallback_sha256: 94748def11c38d76952192a996fa42231d75b39d4d9ecd3407ff671d92e1177e
+    provider_calls: 0
+    db_mutations: 0
+    wallet_mutations: 0
+  post_main_verification:
+    base_sha: ab267bedd4aa300bf2160be7b8d828009578127c
+    branch: fix/p0-subdub-auto-multi-fixed-vocal-v2
+    commit_count: 2
+    divergence: 0 behind; 2 ahead
+    recovery: 57 passed in 529.16s
+    focused_protected: 307 passed in 10.84s
+    real_resource: 4 passed in 165.18s
+    fixed_vocal_call: 139.76s under the 300s production budget
+    full_compile: exit 0; no output
+    yaml_diff_hash_secret: exit 0; no matches
+    provider_calls: 0
+    db_mutations: 0
+    wallet_mutations: 0
+  persistence: bounded counts/hashes/version only; no raw words, PCM, embeddings or centroids
+  current_blocker: >-
+    Shared resources were released and post-main source/resource gates passed.
+    Ship/deploy is now active. The previous same-job recovery literal was already
+    consumed; after exact runtime deployment, a fresh Owner action-time
+    authorization is required before any provider/live continuation.
+
+current_next_action: push branch fix/p0-subdub-auto-multi-fixed-vocal-v2; create one PR/squash/deploy and verify exact VPS runtime; request fresh Owner authorization for one same-job #B4CB6D5FE8 continuation only; no new job, no second recovery command, no wallet mutation; LIVE PASS only on MP4 then receipt with charged_xu 0

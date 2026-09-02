@@ -1717,6 +1717,46 @@ Task contract:
 - [B] LIVE PASS remains pending. No model/resource/test result substitutes for a
   playable MP4 from `#B4CB6D5FE8` followed by one receipt and zero finance/job delta.
 
+### SPEC-11.6 — Fixed-vocal speaker authority after live acoustic instability
+
+- [x] Live/fixture reproduction proved the previous count authority was not
+  stable: independent ASR timelines selected `k=6` and `k=5`; permissive
+  pairwise agreement looked like `87.3518%` but had ARI only `0.637`; raw-mix
+  and UVR VAD also changed count across thresholds. These approaches remain
+  rejected rather than relaxed.
+- [x] Exact Auto Multi now discovers speaker identity independently of ASR:
+  stereo `44.1 kHz` -> hash-locked UVR vocal stem -> mono `16 kHz` -> fixed
+  `1.5s/0.75s` windows -> energy percentiles `42.5/45/47.5/50` -> exact core
+  partition -> hybrid word mapping. It uses no expected speaker count.
+- [x] Exact fixture fixed-vocal evidence: `5` speakers, `50` words, `23` units,
+  `178` embedding views, clusters `[9,18,26,25,11]`, speaker-unit coverage
+  `[3,2,4,11,3]`, `19` overlap mappings, `4` centroid mappings, `11` final
+  segments, cosine min/mean `0.990487/0.997246`.
+- [x] Recovery comparator v2: `57 passed in 8.60s`; focused/protected final:
+  `307 passed in 9.78s`; full real resource gate: `4 passed in 151.18s` with
+  the fixed-vocal call at `125.07s`, below the `300s` production budget.
+- [x] Cancellation review RED found session construction could happen before a
+  stop check (`2 failed`); minimal post-UVR/pre-ONNX checks GREEN `4 passed in
+  5.07s`. Full changed compile exit `0`; diff-check exit `0`.
+- [x] Exact-two production files remain byte-identical:
+  `subdub_speaker_cast.py=DE93620F...AC145B` and
+  `subdub_two_speaker_asr_fallback.py=94748DEF...1177E`.
+- [x] No provider call, DB mutation or wallet mutation. No raw word text, PCM,
+  embedding or centroid is returned/persisted.
+- [B] External blocker only: wait exact shared LIVE/VPS release to rebase/ship.
+  The previous same-job recovery authorization was consumed; after deploy,
+  Owner must freshly authorize one continuation of `#B4CB6D5FE8`. Do not create
+  a new job or reuse/send the old recovery command.
+- [x] Shared release acquired; clean branch `fix/p0-subdub-auto-multi-fixed-vocal-v2`
+  is based on `ab267bedd4aa300bf2160be7b8d828009578127c`, `0 behind/2 ahead`.
+  Post-main recovery `57 passed in 529.16s`; focused/protected `307 passed in
+  10.84s`; real resource `4 passed in 165.18s`; fixed-vocal call `139.76s <
+  300s`; full compile/YAML/diff/hash/secret gates exit `0`. Provider/DB/wallet
+  action remains `0`.
+- [-] Push one PR, squash/deploy and exact VPS runtime readback are active. LIVE
+  continuation remains blocked until the deployed SHA is known and Owner gives a
+  fresh action-time authorization for the same job only.
+
 ### SPEC-11 acceptance
 
 - [B] Owner's later exact same-job order supersedes the old new-upload/standalone

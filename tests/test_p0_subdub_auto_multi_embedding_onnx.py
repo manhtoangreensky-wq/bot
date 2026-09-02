@@ -10,6 +10,7 @@ import pytest
 
 from services import subdub_multi_speaker_embedding_onnx as service
 from services import subdub_speaker_cast as speaker_cast
+from services import subdub_two_speaker_gender_onnx as gender_service
 
 
 @dataclass
@@ -1258,3 +1259,392 @@ def test_two_views_reject_any_region_assignment_difference(monkeypatch):
 
     with pytest.raises(speaker_cast.AutoCastManualRequired):
         service.stable_cluster_acoustic_regions(plan, matrix, matrix)
+
+
+def test_fixed_vocal_authority_requires_percentile_plateau_and_core_identity():
+    count = 20
+    base = np.zeros((count, service.EMBEDDING_DIM), dtype=np.float32)
+    shifted = np.zeros_like(base)
+    for index in range(count):
+        base[index, index % 3] = 1.0
+        shifted[index, index % 3] = 1.0
+    energies = np.arange(count, dtype=np.float32)
+    positions = [index * 0.75 for index in range(count)]
+
+    def clusterer(matrix, selected_positions):
+        labels = np.asarray(
+            [int(round(position / 0.75)) % 3 for position in selected_positions],
+            dtype=np.int64,
+        )
+        return 3, labels, np.arange(len(labels), dtype=np.float64)
+
+    result = service.build_fixed_vocal_authority(
+        base,
+        shifted,
+        energies,
+        positions,
+        clusterer=clusterer,
+    )
+
+    assert result["speaker_count"] == 3
+    assert result["percentile_speaker_counts"] == [3, 3, 3, 3]
+    assert len(result["core_window_indices"]) == 10
+    assert sum(result["cluster_sizes"]) == 10
+    assert result["core_partition_stable"] is True
+    assert "window_embeddings" not in result
+
+
+def test_fixed_vocal_authority_rejects_percentile_k_disagreement():
+    base = np.eye(20, service.EMBEDDING_DIM, dtype=np.float32)
+    energies = np.arange(20, dtype=np.float32)
+    calls = []
+
+    def clusterer(matrix, selected_positions):
+        calls.append(len(matrix))
+        k = 4 if len(calls) == 3 else 3
+        labels = np.asarray([index % k for index in range(len(matrix))], dtype=np.int64)
+        return k, labels, np.arange(len(labels), dtype=np.float64)
+
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        service.build_fixed_vocal_authority(
+            base,
+            base.copy(),
+            energies,
+            [index * 0.75 for index in range(20)],
+            clusterer=clusterer,
+        )
+
+
+def test_fixed_vocal_authority_ignores_unselected_low_energy_view_outlier():
+    base = np.zeros((20, service.EMBEDDING_DIM), dtype=np.float32)
+    shifted = np.zeros_like(base)
+    for index in range(20):
+        base[index, index % 3] = 1.0
+        shifted[index, index % 3] = 1.0
+    shifted[0] = 0.0
+    shifted[0, 7] = 1.0
+    energies = np.arange(20, dtype=np.float32)
+
+    def clusterer(matrix, positions):
+        labels = np.asarray(
+            [int(round(position / 0.75)) % 3 for position in positions],
+            dtype=np.int64,
+        )
+        return 3, labels, np.arange(len(labels), dtype=np.float64)
+
+    result = service.build_fixed_vocal_authority(
+        base,
+        shifted,
+        energies,
+        [index * 0.75 for index in range(20)],
+        clusterer=clusterer,
+    )
+
+    assert result["speaker_count"] == 3
+    assert result["view_cosine_min"] == 1.0
+
+
+def test_fixed_vocal_authority_rejects_selected_high_energy_view_outlier():
+    base = np.zeros((20, service.EMBEDDING_DIM), dtype=np.float32)
+    shifted = np.zeros_like(base)
+    for index in range(20):
+        base[index, index % 3] = 1.0
+        shifted[index, index % 3] = 1.0
+    shifted[-1] = 0.0
+    shifted[-1, 7] = 1.0
+
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        service.build_fixed_vocal_authority(
+            base,
+            shifted,
+            np.arange(20, dtype=np.float32),
+            [index * 0.75 for index in range(20)],
+            clusterer=lambda matrix, positions: (
+                3,
+                np.asarray([index % 3 for index in range(len(matrix))]),
+                np.arange(len(matrix), dtype=np.float64),
+            ),
+        )
+
+
+def test_hybrid_word_mapping_covers_every_unit_and_acoustic_speaker():
+    units = [
+        {
+            "unit_index": index,
+            "word_indexes": [index],
+            "start": index * 1.5,
+            "end": index * 1.5 + 0.5,
+            "original_speech_seconds": 0.5,
+        }
+        for index in range(6)
+    ]
+    centroids = np.eye(3, service.EMBEDDING_DIM, dtype=np.float32)
+    unit_embeddings = np.zeros((6, service.EMBEDDING_DIM), dtype=np.float32)
+    for index, label in enumerate((0, 0, 1, 1, 2, 2)):
+        unit_embeddings[index, label] = 1.0
+    windows = [
+        {"start": index * 1.5, "end": index * 1.5 + 1.5, "speaker": index // 2}
+        for index in range(6)
+    ]
+
+    result = service.map_word_units_to_fixed_vocal_authority(
+        units,
+        unit_embeddings,
+        windows,
+        centroids,
+        speaker_count=3,
+        overlap_dominance_threshold=0.2,
+    )
+
+    assert result["labels"] == [0, 0, 1, 1, 2, 2]
+    assert result["overlap_mapped_count"] == 6
+    assert result["centroid_mapped_count"] == 0
+    assert result["speaker_unit_counts"] == [2, 2, 2]
+    assert len(result["unit_confidences"]) == 6
+
+
+def test_hybrid_word_mapping_rejects_unmapped_acoustic_speaker():
+    units = [
+        {
+            "unit_index": index,
+            "word_indexes": [index],
+            "start": index,
+            "end": index + 0.5,
+            "original_speech_seconds": 0.5,
+        }
+        for index in range(3)
+    ]
+    embeddings = np.zeros((3, service.EMBEDDING_DIM), dtype=np.float32)
+    embeddings[:, 0] = 1.0
+    centroids = np.eye(3, service.EMBEDDING_DIM, dtype=np.float32)
+
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        service.map_word_units_to_fixed_vocal_authority(
+            units,
+            embeddings,
+            [],
+            centroids,
+            speaker_count=3,
+            overlap_dominance_threshold=0.2,
+        )
+
+
+def test_fixed_vocal_diarization_discovers_speakers_before_word_mapping(
+    monkeypatch,
+):
+    words = thirty_acoustic_words()
+    calls = []
+    pcm = np.ones(18 * service.PCM_SAMPLE_RATE, dtype=np.int16)
+
+    monkeypatch.setattr(
+        service,
+        "_load_fixed_vocal_pcm16",
+        lambda *_args, **_kwargs: calls.append("vocal") or pcm,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service,
+        "_fixed_vocal_window_views",
+        lambda *_args, **_kwargs: calls.append("windows") or {
+            "base_embeddings": np.eye(12, service.EMBEDDING_DIM, dtype=np.float32),
+            "shifted_embeddings": np.eye(12, service.EMBEDDING_DIM, dtype=np.float32),
+            "window_energy": np.arange(12, dtype=np.float32),
+            "source_positions": [index * 0.75 for index in range(12)],
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service,
+        "build_fixed_vocal_authority",
+        lambda *_args, **_kwargs: calls.append("authority") or {
+            "speaker_count": 3,
+            "percentile_speaker_counts": [3, 3, 3, 3],
+            "core_window_indices": list(range(6)),
+            "core_windows": [],
+            "core_labels": [0, 0, 1, 1, 2, 2],
+            "cluster_sizes": [2, 2, 2],
+            "centroids": np.eye(3, service.EMBEDDING_DIM, dtype=np.float32),
+            "core_partition_stable": True,
+            "view_cosine_min": 1.0,
+            "view_cosine_mean": 1.0,
+        },
+    )
+    monkeypatch.setattr(
+        service,
+        "_fixed_vocal_unit_embeddings",
+        lambda _pcm, units, **_kwargs: calls.append("unit_embeddings")
+        or np.eye(len(units), service.EMBEDDING_DIM, dtype=np.float32),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service,
+        "map_word_units_to_fixed_vocal_authority",
+        lambda units, *_args, **_kwargs: calls.append("map") or {
+            "labels": [index % 3 for index in range(len(units))],
+            "unit_confidences": [0.8] * len(units),
+            "overlap_mapped_count": len(units),
+            "centroid_mapped_count": 0,
+            "speaker_unit_counts": [10, 10, 10],
+        },
+    )
+
+    result = service.diarize_fixed_vocal_word_timeline(
+        "fixture-stereo.pcm",
+        words,
+        duration_seconds=18.0,
+        deadline_monotonic=10**12,
+        stop_requested=lambda: False,
+    )
+
+    assert calls == ["vocal", "windows", "authority", "unit_embeddings", "map"]
+    assert result["detected_speaker_count"] == 3
+    assert result["word_count"] == 30
+    assert result["word_coverage_count"] == 30
+    assert len({item["speaker_id"] for item in result["segments"]}) == 3
+    assert "centroids" not in result
+    assert "word_timeline" not in result
+
+
+def test_fixed_vocal_loader_reuses_uvr_and_returns_mono_16k(
+    monkeypatch,
+    tmp_path,
+):
+    frames = gender_service.PCM_SAMPLE_RATE
+    indexes = np.arange(frames, dtype=np.float64)
+    signal = (0.4 * np.sin(2.0 * np.pi * 220.0 * indexes / frames))
+    stereo = np.stack((signal, signal), axis=1)
+    source = tmp_path / "stereo.pcm"
+    source.write_bytes(
+        np.clip(stereo * 32768.0, -32768, 32767)
+        .astype("<i2")
+        .tobytes()
+    )
+    fake_model = tmp_path / "uvr.onnx"
+    fake_model.write_bytes(b"uvr")
+    monkeypatch.setattr(
+        gender_service,
+        "_validated_model_paths",
+        lambda: (fake_model, fake_model),
+    )
+    monkeypatch.setattr(
+        gender_service,
+        "_demix_vocals",
+        lambda _np, mix, _session, **_kwargs: mix,
+    )
+
+    result = service._load_fixed_vocal_pcm16(
+        str(source),
+        duration_seconds=1.0,
+        deadline_monotonic=10**12,
+        stop_requested=lambda: False,
+        vocal_session_factory=lambda _path: object(),
+    )
+
+    assert result.dtype == np.int16
+    assert result.shape == (service.PCM_SAMPLE_RATE,)
+    assert np.max(np.abs(result)) > 0
+
+
+def test_fixed_vocal_loader_honors_cancellation_after_uvr_demix(
+    monkeypatch,
+    tmp_path,
+):
+    frames = gender_service.PCM_SAMPLE_RATE
+    stereo = np.full(
+        (frames, gender_service.PCM_CHANNELS),
+        16_000,
+        dtype="<i2",
+    )
+    source = tmp_path / "stereo.pcm"
+    source.write_bytes(stereo.tobytes())
+    fake_model = tmp_path / "uvr.onnx"
+    fake_model.write_bytes(b"uvr")
+    stopped = False
+
+    def demix(_np, mix, _session, **_kwargs):
+        nonlocal stopped
+        stopped = True
+        return mix
+
+    monkeypatch.setattr(
+        gender_service,
+        "_validated_model_paths",
+        lambda: (fake_model, fake_model),
+    )
+    monkeypatch.setattr(gender_service, "_demix_vocals", demix)
+
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        service._load_fixed_vocal_pcm16(
+            str(source),
+            duration_seconds=1.0,
+            deadline_monotonic=10**12,
+            stop_requested=lambda: stopped,
+            vocal_session_factory=lambda _path: object(),
+        )
+
+
+def test_fixed_vocal_window_and_unit_embeddings_are_bounded(
+    monkeypatch,
+    tmp_path,
+):
+    configure_test_assets(monkeypatch, tmp_path)
+    samples = deterministic_fbank_pcm()
+    samples = np.resize(samples, 10 * service.PCM_SAMPLE_RATE).astype(np.int16)
+    expected_windows = 13
+    window_session = EmbeddingFakeSession(
+        embedding_vectors(expected_windows * 2)
+    )
+
+    views = service._fixed_vocal_window_views(
+        samples,
+        deadline_monotonic=10**12,
+        stop_requested=lambda: False,
+        session_factory=lambda *_args, **_kwargs: window_session,
+    )
+
+    assert views["base_embeddings"].shape == (
+        expected_windows,
+        service.EMBEDDING_DIM,
+    )
+    assert views["shifted_embeddings"].shape == views["base_embeddings"].shape
+    assert views["window_energy"].shape == (expected_windows,)
+    assert len(views["source_positions"]) == expected_windows
+    assert len(window_session.run_calls) == expected_windows * 2
+
+    units = embedding_units()
+    unit_session = EmbeddingFakeSession(embedding_vectors(len(units) * 2))
+    mapped = service._fixed_vocal_unit_embeddings(
+        samples,
+        units,
+        deadline_monotonic=10**12,
+        stop_requested=lambda: False,
+        session_factory=lambda *_args, **_kwargs: unit_session,
+    )
+
+    assert mapped.shape == (len(units), service.EMBEDDING_DIM)
+    np.testing.assert_allclose(np.linalg.norm(mapped, axis=1), 1.0, atol=1e-6)
+    assert len(unit_session.run_calls) == len(units) * 2
+
+
+@pytest.mark.parametrize("stage", ("windows", "units"))
+def test_fixed_vocal_embedding_stages_cancel_before_session_creation(stage):
+    samples = np.ones(10 * service.PCM_SAMPLE_RATE, dtype=np.int16)
+    session_calls = []
+
+    kwargs = {
+        "deadline_monotonic": 10**12,
+        "stop_requested": lambda: True,
+        "session_factory": lambda *_args, **_kwargs: session_calls.append(True)
+        or object(),
+    }
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        if stage == "windows":
+            service._fixed_vocal_window_views(samples, **kwargs)
+        else:
+            service._fixed_vocal_unit_embeddings(
+                samples,
+                embedding_units(),
+                **kwargs,
+            )
+
+    assert session_calls == []
