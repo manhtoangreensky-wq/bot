@@ -230,7 +230,7 @@ def _request_for_resolution(resolution, *, seconds, prompt="Product video scene.
     )
 
 
-def test_key4u_veo_normalizes_legacy_videos_endpoint_to_official_json_contract(monkeypatch):
+def test_key4u_veo_normalizes_legacy_videos_endpoint_to_unified_contract(monkeypatch):
     env = _key4u_env(
         KEY4U_VEO_VIDEO_ENDPOINT=f"{KEY4U_VN}/v1/videos",
         KEY4U_VEO_VIDEO_POLL_URL=f"{KEY4U_VN}/v1/videos/{{task_id}}",
@@ -265,23 +265,23 @@ def test_key4u_veo_normalizes_legacy_videos_endpoint_to_official_json_contract(m
 
     assert result.ok is True
     assert resolution["provider_endpoint_source"] == (
-        "normalized:KEY4U_VEO_VIDEO_ENDPOINT"
+        "normalized_unified:KEY4U_VEO_VIDEO_ENDPOINT"
     )
     assert resolution["provider_submit_url_override"] == (
-        f"{KEY4U_VN}/v1/videos/generations"
+        f"{KEY4U_VN}/v1/video/create"
     )
     assert captured == {
-        "url": f"{KEY4U_VN}/v1/videos/generations",
+        "url": f"{KEY4U_VN}/v1/video/create",
         "payload": {
-            "model": "veo_3_1-fast",
+            "model": "veo3.1-fast",
             "prompt": "Product video scene.",
-            "resolution": "1080p",
             "aspect_ratio": "9:16",
-            "duration": 8,
         },
         "method": "POST",
     }
-    assert result.raw["provider_poll_url_override"] == f"{KEY4U_VN}/v1/videos/{{task_id}}"
+    assert result.raw["provider_poll_url_override"] == (
+        f"{KEY4U_VN}/v1/video/query?id={{task_id}}"
+    )
 
 
 def test_key4u_veo_keeps_custom_proxy_videos_endpoint_override(monkeypatch):
@@ -322,7 +322,7 @@ def test_key4u_veo_keeps_custom_proxy_videos_endpoint_override(monkeypatch):
     assert captured["fields"]["model"] == "veo_3_1-fast"
 
 
-def test_key4u_veo_derives_current_official_generation_contract_without_new_env():
+def test_key4u_veo_derives_current_unified_contract_without_new_env():
     env = _key4u_env(KEY4U_BASE_URL=KEY4U_VN)
 
     resolution = resolve_product_video_model(
@@ -339,13 +339,13 @@ def test_key4u_veo_derives_current_official_generation_contract_without_new_env(
     assert resolution["selected_model"] == "veo_3_1-fast"
     assert resolution["provider_interface"] == "key4u_google_veo_exclusive"
     assert resolution["provider_endpoint_source"] == (
-        "derived:key4u_official_videos_generations"
+        "derived:key4u_unified_video_create"
     )
     assert resolution["provider_submit_url_override"] == (
-        f"{KEY4U_VN}/v1/videos/generations"
+        f"{KEY4U_VN}/v1/video/create"
     )
     assert resolution["provider_poll_url_override"] == (
-        f"{KEY4U_VN}/v1/videos/{{task_id}}"
+        f"{KEY4U_VN}/v1/video/query?id={{task_id}}"
     )
     assert resolution["contract_validation_status"] == "ok"
     assert resolution["submit_skipped_due_to_contract"] is False
@@ -368,7 +368,7 @@ def test_key4u_veo_does_not_derive_official_endpoint_without_auth():
     )
 
 
-def test_key4u_veo_derived_official_contract_uses_json_wire_payload(monkeypatch):
+def test_key4u_veo_derived_unified_contract_uses_json_wire_payload(monkeypatch):
     env = _key4u_env(KEY4U_BASE_URL=KEY4U_VN)
     resolution = resolve_product_video_model(
         tier=400,
@@ -403,18 +403,16 @@ def test_key4u_veo_derived_official_contract_uses_json_wire_payload(monkeypatch)
 
     assert result.ok is True
     assert captured == {
-        "url": f"{KEY4U_VN}/v1/videos/generations",
+        "url": f"{KEY4U_VN}/v1/video/create",
         "payload": {
-            "model": "veo_3_1-fast",
+            "model": "veo3.1-fast",
             "prompt": "Product video scene.",
-            "resolution": "1080p",
             "aspect_ratio": "9:16",
-            "duration": 8,
         },
         "method": "POST",
     }
     assert result.raw["provider_poll_url_override"] == (
-        f"{KEY4U_VN}/v1/videos/{{task_id}}"
+        f"{KEY4U_VN}/v1/video/query?id={{task_id}}"
     )
     assert result.raw["provider_http_request_sent"] is True
     assert result.raw["submit_http_status"] == 200

@@ -296,7 +296,7 @@ def test_video_render_debug_handles_partial_failed_job_without_generic_error(mon
             pass
 
 
-def test_key4u_payload_preserves_required_model_prompt_duration_ratio_fields(monkeypatch, tmp_path):
+def test_key4u_unified_veo_payload_uses_documented_fields(monkeypatch, tmp_path):
     captured = {}
 
     def fake_open(self, url, payload=None, *, method="POST", timeout=90):
@@ -315,13 +315,11 @@ def test_key4u_payload_preserves_required_model_prompt_duration_ratio_fields(mon
         sleep_func=lambda _seconds: None,
     )
 
-    assert captured["model"] == "veo3.1-fast"
-    assert captured["prompt"]
-    assert captured["duration"] == 6
-    assert captured["duration_seconds"] == 6
-    assert captured["ratio"] == "9:16"
-    assert captured["aspect_ratio"] == "9:16"
-    assert captured["aspectRatio"] == "9:16"
+    assert captured == {
+        "model": "veo3.1-fast",
+        "prompt": "A realistic product video with natural camera motion",
+        "aspect_ratio": "9:16",
+    }
 
 
 def test_no_fake_placeholder_success(monkeypatch, tmp_path):

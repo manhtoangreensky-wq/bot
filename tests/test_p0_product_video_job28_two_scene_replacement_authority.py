@@ -1268,6 +1268,120 @@ def test_real_replacement_dispatch_uses_only_key4u_and_preserves_exact_scope(
     assert result["provider"] == "key4u_video"
 
 
+def test_v3_job28_key4u_veo_dispatch_uses_unified_contract(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    payload = _taskless_v3_job28_payload()
+    payload.update(
+        {
+            "quality_tier": 400,
+            "selected_provider": "key4u_video",
+            "selected_model": "veo3.1-fast",
+            "selected_family": "google_veo",
+            "selected_payload_adapter": "shopaikey_veo_small_clip",
+            "provider_model_map": {"shopaikey_video": "veo3.1-fast"},
+            "provider_request_defaults": {
+                "shopaikey_video": {
+                    "duration": 8,
+                    "resolution": "720p",
+                    "sound": True,
+                }
+            },
+        }
+    )
+    eligibility = {
+        "worker_local_ready_provider_keys": ["key4u_video"],
+        "contract_valid_provider_chain": ["shopaikey_video", "key4u_video"],
+    }
+    claimed = remote_worker_api.product_video_controlled_fallback_claim_payload(
+        {"id": 28, "project_id": 32},
+        payload,
+        {"project_id": 32},
+        eligibility,
+    )["result"]
+    for key, value in {
+        "KEY4U_VIDEO_ENABLED": "1",
+        "KEY4U_VIDEO_SUBMIT_URL": "https://api.key4u.vn/v1/video/create",
+        "KEY4U_VIDEO_POLL_URL": (
+            "https://api.key4u.vn/v1/video/query?id={task_id}"
+        ),
+        "KEY4U_VIDEO_AUTH_HEADER_NAME": "Authorization",
+        "KEY4U_VIDEO_AUTH_HEADER_VALUE": "Bearer test-key",
+        "KEY4U_VIDEO_MODEL": "veo3.1-fast",
+        "KEY4U_VIDEO_CAPABILITIES": (
+            "text_to_video,scene_video,multi_scene_video"
+        ),
+        "KEY4U_VEO_VIDEO_ENDPOINT": "https://api.key4u.vn/v1/videos",
+        "KEY4U_VEO_VIDEO_POLL_URL": (
+            "https://api.key4u.vn/v1/videos/{task_id}"
+        ),
+        "VIDEO_PROVIDER_CHAIN": "key4u_video",
+        "VIDEO_PROVIDER_MAX_POLL_ATTEMPTS": "1",
+        "VIDEO_PROVIDER_POLL_INTERVAL_SECONDS": "0",
+        "PRODUCT_VIDEO_PROVIDER_SUBMIT_ENABLED": "1",
+    }.items():
+        monkeypatch.setenv(key, value)
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_open_json(self, url, payload=None, *, method="POST", **_kwargs):
+        assert self.provider_name == "key4u_video"
+        calls.append((method, url, payload))
+        if method == "POST":
+            return {
+                "ok": True,
+                "status_code": 200,
+                "body": {"id": "job28-unified-task", "status": "pending"},
+                "response_shape": {"type": "dict"},
+            }
+        return {
+            "ok": True,
+            "status_code": 200,
+            "body": {"id": "job28-unified-task", "status": "pending"},
+            "response_shape": {"type": "dict"},
+        }
+
+    monkeypatch.setattr(GenericHttpVideoProvider, "_open_json", fake_open_json)
+    scene = SimpleNamespace(
+        scene_id=1,
+        video_prompt="replacement scene one unified veo",
+        visual_prompt="replacement scene one unified veo",
+        aspect_ratio="9:16",
+        target_duration_sec=8,
+        _toan_aas_job=claimed,
+    )
+
+    with pytest.raises(connector.RealVideoRenderError) as exc_info:
+        asyncio.run(
+            connector._render_scene_async(
+                scene,
+                str(tmp_path / "rendered-unified-scene-1.mp4"),
+                ["shopaikey_video", "key4u_video"],
+            )
+        )
+
+    assert str(exc_info.value) == "provider_in_progress"
+    assert calls == [
+        (
+            "POST",
+            "https://api.key4u.vn/v1/video/create",
+            {
+                "model": "veo3.1-fast",
+                "prompt": "replacement scene one unified veo",
+                "aspect_ratio": "9:16",
+            },
+        ),
+        (
+            "GET",
+            "https://api.key4u.vn/v1/video/query?id=job28-unified-task",
+            None,
+        ),
+    ]
+    diagnostics = exc_info.value.diagnostics
+    assert diagnostics["provider_http_request_sent"] is True
+    assert diagnostics["provider_task_ids"] == ["job28-unified-task"]
+
+
 def test_v3_taskless_authority_submits_new_key4u_without_polling_old_task(
     monkeypatch,
     tmp_path,
@@ -2884,7 +2998,7 @@ def test_orchestrator_skips_consumed_no_task_scene_and_calls_only_remaining_scen
     assert result["replacement_calls_remaining"] == 1
 
 
-def test_remaining_scene_transition_submits_official_key4u_task_then_polls_only_new_id(
+def test_remaining_scene_transition_submits_unified_key4u_task_then_polls_only_new_id(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -2988,7 +3102,7 @@ def test_remaining_scene_transition_submits_official_key4u_task_then_polls_only_
                 "response_shape": {"type": "dict"},
             }
         assert "old-shopaikey-scene-2" not in url
-        assert url.endswith("/v1/videos/key4u_scene2_new_task")
+        assert url.endswith("/v1/video/query?id=key4u_scene2_new_task")
         return {
             "ok": True,
             "status_code": 200,
@@ -3020,12 +3134,12 @@ def test_remaining_scene_transition_submits_official_key4u_task_then_polls_only_
     assert calls == [
         (
             "POST",
-            "https://api.key4u.vn/v1/videos/generations",
-            "veo_3_1-fast",
+            "https://api.key4u.vn/v1/video/create",
+            "veo3.1-fast",
         ),
         (
             "GET",
-            "https://api.key4u.vn/v1/videos/key4u_scene2_new_task",
+            "https://api.key4u.vn/v1/video/query?id=key4u_scene2_new_task",
             "",
         ),
     ]

@@ -1080,6 +1080,49 @@ starting the next.
   test compile and diff-check exit `0`. The correction wakes only an exact V3-ready
   acknowledged outbox and propagates only the candidate returned by the validated
   controlled-fallback claim; all inverse paths remain fail-closed.
+- [x] PR #978 compile `33637384667` SUCCESS, squash/runtime
+  `833dc6ccd6112c2a92b6e0dde8a49a74b3490bfd`, deploy `33637571154` SUCCESS in
+  `5m0s`. Bot and inactive Owner worker matched exact clean SHA after backup ref
+  `refs/backups/worker-pre-product-video-20260902T135036Z`; services and health OK.
+  Fresh snapshot rehearsal and replay rejection passed. Production CAS backup
+  `/opt/toanaas/bot/delete/pv2-r01-job28-watchdog-recovery-production-
+  20260902T205253.json` has SHA `c8c24164...`, mode `0600`; prestart passed 15/15.
+- [-] One worker start, PID `1121117`, crossed the repaired claim boundary and
+  advanced attempts `40 -> 41`, then scene 1 stopped at Key4U HTTP `404` before a
+  task/receipt. Worker was stopped inactive PID `0`; V3 remained genuinely `0/2`,
+  provider usage/transactions/charged Xu remained `0`, and no artifact/delivery was
+  created. This is a new provider-contract RED, not a retry authorization failure.
+- [x] Official Key4U OpenAPI readback separates Veo unified POST
+  `/v1/video/create` + GET `/v1/video/query?id={task_id}` from Grok POST
+  `/v1/videos/generations`. The old Product Video docs incorrectly classified the
+  Grok path as Veo. Bounded correction normalizes only official Key4U Veo submit
+  endpoints to unified format, sends its documented fields and wire model
+  `veo3.1-fast`, while preserving persisted pricing model `veo_3_1-fast`, custom
+  proxies, and historical OpenAI task polling.
+- [x] Sanitized before/after forensic proves the HTTP `404` was created by this
+  worker cycle: pre-CAS scene/event HTTP was `0`; current scene 1 has exactly one
+  Key4U event at HTTP `404`, no task and no receipt. The worker's base adapter was
+  already configured at `/v1/video/create`, but the model-specific Veo resolver
+  still overrode it to `/v1/videos/generations`. The correction removes only that
+  bad official-host override and derives unified polling only for the newly accepted
+  unified submit; historical OpenAI task polling remains unchanged.
+- [x] Contract RED `1 failed, 19 deselected in 9.14s`; Key4U GREEN `20 passed in
+  7.23s`; existing-task/custom guard `2 passed`; job28 wire guard `2 passed`; focused
+  final `89 passed in 12.04s`. Broad branch `167 passed, 25 failed, 1 skipped in
+  22.30s`; exact
+  clean main had the same 25 IDs plus one obsolete payload assertion, so
+  `NEW_FAILURES=0` and one baseline was closed. Provider/wallet calls in source
+  verification `0/0`.
+- [x] Rebased conflict-free onto SubDub PR #979 main/runtime
+  `899a93f5420f47c95fcc88cd4b8de655f7fee8c8`; the scoped branch is
+  `0 behind / 1 ahead`.
+  Post-rebase focused remains `89 passed in 10.21s`; broad remains `167 passed,
+  25 exact baseline failures, 1 skipped in 24.84s`, `NEW_FAILURES=0`.
+- [x] A separate attempts-`41`/outbox-`2` Key4U-404 CAS now passes isolated
+  rehearsal. Duplicate replay, invalid V3, wrong HTTP and wrong attempts all fail
+  before backup. Script/test SHA are `F62AEF1F...` / `042EC460...`; provider/wallet
+  calls `0/0`. It resets scene primary authority to ShopAIKey only so exact V3 can
+  select Key4U; it never permits ShopAIKey resubmit. Production remains untouched.
 - [ ] Two distinct scene clips and one final MP4 terminal; otherwise stop at the
   exact new RED and reopen only `SPEC-04H`.
 

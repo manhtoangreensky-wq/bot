@@ -355,6 +355,23 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     passed`; protected `224 passed, 1 deselected`; clean main reproduced that exact
     baseline failure, `NEW_FAILURES=0`. Ship only the outbox wake plus validated
     controlled-candidate handoff, then recover the same `28/32/27` once.
+  - [-] PR #978/runtime `833dc6cc...`, deploy `33637571154` SUCCESS `5m0s`;
+    rehearsal/CAS/prestart passed. One worker start crossed claim, then Key4U returned
+    HTTP `404` before task/receipt; V3 stayed `0/2`, provider/finance/artifact deltas
+    stayed `0`, worker stopped inactive.
+  - [x] Current Key4U OpenAPI proves the old docs misclassified Grok
+    `/v1/videos/generations` as Veo. Veo unified uses `/v1/video/create` plus
+    `/v1/video/query`; correction is official-host/new-submit only and preserves
+    existing OpenAI tasks/custom proxies. Before/after forensic proves pre-CAS HTTP
+    `0` became exactly one taskless Key4U `404`; base adapter was unified but the
+    model resolver still applied the Grok override. Focused `89 passed`; broad branch `167
+    passed, 25 failed, 1 skipped`; clean main has the same 25 plus one obsolete
+    payload assertion, `NEW_FAILURES=0`.
+  - [x] Rebased cleanly onto SubDub PR #979 runtime `899a93f5...`; the scoped branch
+    is `0 behind / 1 ahead`. Post-rebase focused `89 passed`; broad
+    `167 passed, exact 25 baseline failures, 1 skipped`, `NEW_FAILURES=0`. New strict
+    attempts-41/outbox-2 CAS rehearsal passes and rejects replay, bad V3, wrong HTTP
+    and wrong attempt counters before backup; production is untouched.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 
@@ -527,7 +544,7 @@ except `Kich ban -> Video`, which uses its locked minimum of five scenes.
 
 | ID | Product / exact owner | Most complex non-manual lane | Why selected | Status |
 |---|---|---|---|---|
-| `PV2-R01` | `video_trend` / `trend_video` | Upload one public trend reference through `vtrend|video_upload`, then select content profile and full Tail | Media intake + trend source + content/profile + Add-on + renderer | IN PROGRESS - full flow/admission GREEN; exact V3 outbox/candidate handoff correction ship/live pending |
+| `PV2-R01` | `video_trend` / `trend_video` | Upload one public trend reference through `vtrend|video_upload`, then select content profile and full Tail | Media intake + trend source + content/profile + Add-on + renderer | IN PROGRESS - full flow/claim GREEN; exact Key4U Veo unified contract correction ship/live pending |
 | `PV2-R02` | `video_ai_real` / `video_ai_canonical` | `vid3|mode|image_video` with mapped scene images, character/style/requirements and full Tail | More material gates than prompt-only/manual | PENDING |
 | `PV2-R03` | `script_image_video` / `script_to_video` | Upload/parse existing script through `vproduct|script_upload`, review a five-scene plan and full Tail | File parsing + long script + scene planning; Owner approved existing 5-scene minimum | PENDING, 5 scenes |
 | `PV2-R04` | `frame_video_local` / `frame_video_render` | Use `framevideo|source|ai`, create/map/order two images, movement/transition/Add-on/full Tail | Most complex Frame source path; exercises image preparation plus mapping and local FFmpeg route | PENDING |
