@@ -965,6 +965,30 @@ starting the next.
   Job28/persistence focused `52 passed in 10.66s`; locked engine/UI `48 passed in
   9.42s`; changed production/test compile and diff-check exit `0`. Ship this exact
   seam before any production reset or worker restart.
+- [x] PR #972 squash/runtime `53d8305b...`; deploy `33542877096` SUCCESS in
+  `3m27s`; bot/worker exact SHA and tracked diff `0`. False-receipt reset rehearsal,
+  production CAS and pre-start verifier all PASS: V2 restored `2/0`, V3 reset `0/2`,
+  only scene 1 selected, identity/price/cap/wallet exact; production reset backup
+  SHA `a279da68...`, mode `0600`.
+- [-] Corrected live resume was hard-stopped before scene 2. Exact forensic showed
+  `submit_invoked_count=0`, `provider_http_request_sent=false`, provider attempts
+  only poll old tasks and no new task was created; therefore V3 still consumed zero
+  genuinely new paid calls. Old task aliases were revived from manifest/ledger and
+  the executor's legacy recovery prerequisite required a task ID, preventing the V3
+  authorization from reaching submit. Worker inactive PID `0`; wallet/transaction/
+  provider-usage/charged/artifact/delivery deltas remain `0`.
+- [x] Taskless V3 RED `1 failed, 1 passed, 26 deselected in 10.50s`; claim-scope
+  RED `1 failed, 28 deselected in 7.35s`; stale-manifest RED `1 failed, 31 deselected
+  in 5.86s`. Final exact taskless/claim/manifest/two-scene/pending suite `7 passed,
+  26 deselected in 5.80s`; focused job28/persistence `59 passed in 11.32s`; locked
+  engine/UI `57 passed in 10.48s`; full bot/local-worker/connector/test compile,
+  diff and secret gates PASS. Taskless semantics require V3+, exact selected scene,
+  exact finance/identity and Key4U candidate; V2/legacy remain task-required. Stale
+  manifest task/artifact aliases are suppressed only when all current rows agree
+  taskless and V3 authorizes that scene. Two-scene mock proves ordered calls `[1,2]`,
+  distinct versioned keys, pending IDs empty, V2 immutable and V3 exactly `2/2`.
+- [x] Final strategy gate `8 passed` plus the exact pre-existing PV2-R03 fixture SHA
+  failure; taskless correction changes no PV2-R03 file. YAML/diff/secret PASS.
 - [ ] Two distinct scene clips and one final MP4 terminal; otherwise stop at the
   exact new RED and reopen only `SPEC-04H`.
 

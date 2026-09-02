@@ -956,7 +956,7 @@ pv2_r01_job28_provider_task_not_exist_terminal:
   required_new_authority: received for exactly two V3 Key4U calls on existing 28/32/27; no new job/upload/confirm/ShopAIKey resubmit
   live_pass: false
 pv2_r01_job28_v3_replacement_authority:
-  phase: SOURCE_LEDGER_NAMESPACE_CORRECTION_READY_TO_SHIP
+  phase: SOURCE_TASKLESS_V3_CORRECTION_READY_TO_SHIP
   authorization_id: pv2-r01-job28-key4u-replacements-v3
   authorization_version: 3
   identity: job 28; project 32; outbox 27; request VID-20260829-D78AA3
@@ -1008,6 +1008,24 @@ pv2_r01_job28_v3_replacement_authority:
   ledger_namespace_focused: 52 passed in 10.66s
   ledger_namespace_locked: 48 passed in 9.42s
   ledger_namespace_compile_diff: exit 0
+  ledger_namespace_pr_merge: 972 / 53d8305ba7a90a2d9a5bb6c7cd1ca32d76a9405b
+  ledger_namespace_deploy: 33542877096 SUCCESS in 3m27s
+  false_receipt_reset_backup: /opt/toanaas/bot/delete/pv2-r01-job28-v3-false-receipt-reset-production-20260902T013030.json
+  false_receipt_reset_backup_sha_mode: a279da68d7048ad9f4c0dc65484c05208533651d68da9d9df0219132f5fabd7d mode 0600
+  false_receipt_reset: V2 2/0 restored; V3 0/2; scene1 only; prestart PASS; finance/provider/wallet unchanged
+  second_live_worker: PID 1042608 then hard-stopped inactive PID 0 before scene2
+  second_live_forensic: submit_invoked_count 0; HTTP request false; attempts poll-only old tasks; genuinely new paid calls 0
+  taskless_root: old task aliases revived from manifest/ledger plus legacy executor requirement for provider task ID prevented V3 submit
+  taskless_red: 1 failed, 1 passed, 26 deselected in 10.50s
+  taskless_claim_scope_red: 1 failed, 28 deselected in 7.35s
+  taskless_manifest_red: 1 failed, 31 deselected in 5.86s
+  taskless_exact_green: 7 passed, 26 deselected in 5.80s
+  taskless_focused_green: 59 passed in 11.32s
+  taskless_locked_green: 57 passed in 10.48s
+  taskless_compile_diff_secret: exit 0 / PASS
+  taskless_strategy_gate: 8 passed and 1 exact pre-existing PV2-R03 fixture SHA failure
+  taskless_guards: V3+ only; exact selected scene; V2/legacy task-required; unanimous taskless rows suppress stale manifest aliases
+  taskless_two_scene_contract: ordered [1,2]; distinct versioned keys; pending IDs empty; V2 immutable; V3 2/2; charged 0
   live_pass: false
 spec_04i_subdub_auto_two_speaker_addon:
   phase: PENDING_AFTER_SPEC_04H_9
@@ -1017,8 +1035,8 @@ spec_04i_subdub_auto_two_speaker_addon:
   representative_live_target: one unfinished media-compatible Product Video lane
   acceptance: male/female detection; translation; two-voice dub; final MP4; receipt/report; wallet delta 0
 next_action: >-
-  Ship the exact ledger namespace merge seam and verify runtime SHA. Then restore
-  immutable V2 receipts from the proven production backup and backup-safe reset only
-  the false V3 scene1 receipt because no new HTTP transport occurred and its task is
-  the old V2 task. Resume existing 28/32/27 under the unchanged cap of two genuinely
-  new Key4U calls; stop after two calls or terminal two-scene MP4. Open nothing else.
+  Ship the exact V3 taskless-authority and stale-manifest suppression seam, deploy and
+  verify runtime SHA. Backup-safe reset current false V3 receipt, restore immutable
+  V2 receipts, and clear every old task/artifact alias in DB plus canonical manifest.
+  Rehearse/prestart verify V3 0/2 with scene1 only, then resume existing 28/32/27;
+  stop after two genuinely new Key4U calls or terminal two-scene MP4. Open nothing else.
