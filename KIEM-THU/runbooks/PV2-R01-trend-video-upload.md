@@ -1062,3 +1062,34 @@ Post-rebase focused claim/inverse coverage was `5 passed in 10.46s`; full job28
 authority plus protected watchdog/outbox was `127 passed in 33.26s`; full `bot.py`
 and changed-file compile exit `0`; YAML/diff/Strategy/secret/forbidden-scope gates
 retain the exact source result.
+
+## V3 acknowledged-outbox wake and controlled-candidate handoff
+
+PR #977 passed compile run `33630623078`, squash-merged as
+`c3167ef2de6e3beada8297a54e724f22dff5613f`, and deploy run `33630731575` was
+SUCCESS in `4m20s`. Bot and inactive Owner worker matched the exact clean SHA;
+bot/web/nginx were active and health was OK. Snapshot rehearsal and duplicate
+replay rejection passed. Production recovery backup
+`/opt/toanaas/bot/delete/pv2-r01-job28-watchdog-recovery-production-
+20260902T195036.json` has SHA
+`33cbbfa054491f41f656f82d57fae2705cbca73d8cabd11a33871cc3a9a2deb1`, mode
+`0600`. Identity `28/32/27`, V2 `[1,2]`, V3 `0/2`, quote `144`, cap `212`, wallet
+`200/0`, transactions/provider usage/charged Xu all remained unchanged.
+
+One worker start at PID `1116240` produced another pre-provider LIVE RED. Every
+exact V3 wait/identity/finance/receipt/scene guard was true and the persisted marker
+`taskless_v3_authority_ready_for_worker_claim` was true, but the outbox remained
+`acknowledged`. After the wake boundary, generic runtime eligibility still replaced
+the validated controlled Key4U candidate with an empty candidate list. The watchdog
+terminalized the same job before claim. Worker was stopped inactive PID `0`; V3
+receipts remained empty `0/2`, provider usage/transactions/charged Xu stayed `0`,
+and no artifact or delivery was created.
+
+The production-aligned RED is `1 failed, 41 deselected in 11.38s`. The minimal
+correction changes only two handoff points: an exact V3-ready acknowledged outbox is
+made immediately claimable, and the claim stage consumes only the candidate already
+returned by the validated controlled-fallback parser. Full authority is `42 passed
+in 5.75s`; protected scheduler/outbox/public-confirm coverage is `224 passed, 1
+deselected in 54.40s`. Exact clean main reproduced the deselected `job_131` failure
+in `569.47s`, so `NEW_FAILURES=0`. Changed source/test compile and diff-check exit
+`0`. No provider call or wallet mutation occurred during source verification.

@@ -1068,6 +1068,18 @@ pv2_r01_job28_v3_replacement_authority:
   watchdog_fresh_claim_post_rebase_focused: 5 passed in 10.46s
   watchdog_fresh_claim_post_rebase_protected: 127 passed in 33.26s
   watchdog_fresh_claim_post_rebase_compile_yaml_diff_strategy_secret_scope: exit 0 / exact source result
+  watchdog_fresh_claim_pr977_merge: c3167ef2de6e3beada8297a54e724f22dff5613f
+  watchdog_fresh_claim_pr977_compile_deploy: 33630623078 SUCCESS / 33630731575 SUCCESS in 4m20s
+  watchdog_fresh_claim_pr977_runtime: bot and inactive Owner worker exact/clean; bot/web/nginx active; health ok
+  watchdog_fresh_claim_pr977_recovery_backup: /opt/toanaas/bot/delete/pv2-r01-job28-watchdog-recovery-production-20260902T195036.json
+  watchdog_fresh_claim_pr977_recovery_sha_mode: 33cbbfa054491f41f656f82d57fae2705cbca73d8cabd11a33871cc3a9a2deb1 mode 0600
+  watchdog_fresh_claim_pr977_live_red: worker PID 1116240; exact V3 ready marker true but acknowledged outbox was not woken and controlled Key4U candidate was dropped; terminal before provider
+  watchdog_fresh_claim_pr977_post_stop: worker inactive PID 0; V3 0/2 receipts empty; provider usage/transactions/charged Xu 0
+  watchdog_fresh_claim_wake_red: 1 failed, 41 deselected in 11.38s
+  watchdog_fresh_claim_wake_green: 42 passed in 5.75s
+  watchdog_fresh_claim_wake_protected: 224 passed, 1 deselected in 54.40s
+  watchdog_fresh_claim_wake_clean_main: exact job_131 failure reproduced in 569.47s; NEW_FAILURES=0
+  watchdog_fresh_claim_wake_compile_diff: exit 0
   live_pass: false
 spec_04i_subdub_auto_two_speaker_addon:
   phase: PENDING_AFTER_SPEC_04H_9
@@ -1077,8 +1089,8 @@ spec_04i_subdub_auto_two_speaker_addon:
   representative_live_target: one unfinished media-compatible Product Video lane
   acceptance: male/female detection; translation; two-voice dub; final MP4; receipt/report; wallet delta 0
 next_action: >-
-  Ship the exact fresh-worker read-only-to-claim handoff seam, rebase onto latest
-  main after SubDub releases, and verify bot plus worker runtime SHA. Use the same
-  snapshot-first watchdog recovery CAS for only 28/32/27, preserve V2 and V3 0/2,
-  scene1 selection, price/cap and charged 0. Start the Owner worker once; stop after
-  two genuinely new Key4U calls or terminal two-scene MP4. Open nothing else.
+  Ship only the exact V3 outbox-wake and controlled-candidate propagation seam,
+  verify bot plus worker runtime SHA, then use the same snapshot-first recovery CAS
+  for only 28/32/27. Preserve V2, V3 0/2, scene1 selection, price/cap and charged 0.
+  Start the Owner worker once; stop after two genuinely new Key4U calls or terminal
+  two-scene MP4. Open nothing else.

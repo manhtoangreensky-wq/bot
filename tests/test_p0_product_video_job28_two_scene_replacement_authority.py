@@ -276,6 +276,7 @@ def _taskless_v3_job28_watchdog_db(
     payload.update(
         {
             "scene_count": 2,
+            "admission_enforced": True,
             "runtime_candidate_keys": ["key4u_video"],
             "preconfirm_candidate_keys": ["key4u_video"],
             "final_eligible_provider_count": 1,
@@ -1465,7 +1466,7 @@ def test_v3_taskless_watchdog_hands_fresh_worker_read_only_state_to_claim(
 
         assert bot_watchdog["terminal_failed"] == 0
         assert waiting_job["status"] == "queued"
-        assert waiting_outbox["dispatch_status"] == "acknowledged"
+        assert waiting_outbox["dispatch_status"] == "retry_wait"
         assert waiting["taskless_v3_authority_ready_for_worker_claim"] is True
         assert waiting["replacement_calls_consumed"] == 0
         assert waiting["replacement_calls_remaining"] == 2
@@ -1474,12 +1475,15 @@ def test_v3_taskless_watchdog_hands_fresh_worker_read_only_state_to_claim(
             remote_worker_api,
             "_product_video_runtime_eligibility",
             lambda *_args, **_kwargs: {
-                "ok": True,
-                "eligible_provider_keys": ["key4u_video"],
-                "runtime_candidate_keys": ["key4u_video"],
-                "final_eligible_provider_count": 1,
+                "ok": False,
+                "eligible_provider_keys": [],
+                "runtime_candidate_keys": [],
+                "final_eligible_provider_count": 0,
                 "provider_submit_allowed": False,
                 "provider_submit_block_reason": "worker_poll_existing_task_read_only",
+                "worker_admission_block_reason": "",
+                "admission_block_reason": "worker_poll_existing_task_read_only",
+                "router_skip_reason": "worker_poll_existing_task_read_only",
                 "worker_local_ready_provider_keys": ["key4u_video"],
                 "contract_valid_provider_chain": ["shopaikey_video", "key4u_video"],
             },
@@ -1490,6 +1494,7 @@ def test_v3_taskless_watchdog_hands_fresh_worker_read_only_state_to_claim(
             owner_only=True,
             now=now + timedelta(seconds=1),
         )
+        assert claimed
         claimed_payload = json.loads(claimed["result_json"])
         claimed_outbox = video_project_queue.get_product_video_dispatch_outbox(
             conn, job_id=28
