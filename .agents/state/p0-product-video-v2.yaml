@@ -1050,6 +1050,24 @@ pv2_r01_job28_v3_replacement_authority:
   watchdog_post_rebase_combined: 220 passed and 2 exact baseline failures in 924.92s
   watchdog_post_rebase_clean_main: exact same 2 failure IDs in 856.69s; NEW_FAILURES=0
   watchdog_post_rebase_compile_strategy_yaml_diff_secret_scope: exit 0 / exact pre-rebase result
+  watchdog_pr975_merge: f507feef5f546211c064c79eb15c310ec8a4d682
+  watchdog_pr975_deploy: 33609379330 SUCCESS in 3m39s
+  watchdog_worker_sync: ab267bed to f507feef via deployed bot checkout; backup refs/backups/worker-pre-product-video-20260902084632; compile/diff 0; inactive PID 0
+  watchdog_runtime_rehearsal: SQLite backup 14184448 bytes mode 0600; CAS PASS; replay fail closed; temp removed
+  watchdog_production_backup: /opt/toanaas/bot/delete/pv2-r01-job28-watchdog-recovery-production-20260902T155114.json
+  watchdog_production_backup_sha_mode: 53dd0c48854fbd133c9a07b5e0f4cdc1a46b97f6d50337f9ade6646bd490b734 mode 0600
+  watchdog_inactive_live_pass: queued/queued_for_worker/acknowledged after more than one scheduler interval; marker true; V3 0/2; scenes pending; manifest 6f2c6947; charged 0
+  watchdog_fresh_worker_live_red: PID 1097461; worker_poll_existing_task_read_only terminal before claim; stopped inactive PID 0; V3 0/2; counts 32/28/27; wallet 200/0; tx/credit/usage 0/1/0; provider/charged 0
+  watchdog_fresh_claim_red: 1 failed, 40 deselected in 994.59s
+  watchdog_fresh_claim_green: 1 passed, 40 deselected in 9.20s
+  watchdog_fresh_claim_inverse: 5 passed, 37 deselected in 13.47s
+  watchdog_fresh_claim_job28: 42 passed in 10.91s
+  watchdog_fresh_claim_protected: 85 passed in 51.23s
+  watchdog_fresh_claim_combined: 222 passed and 2 exact baseline failures in 61.21s; NEW_FAILURES=0
+  watchdog_fresh_claim_post_rebase_base: dd217036577e2627a9bfcf8ce1ed510ba6ebb233
+  watchdog_fresh_claim_post_rebase_focused: 5 passed in 10.46s
+  watchdog_fresh_claim_post_rebase_protected: 127 passed in 33.26s
+  watchdog_fresh_claim_post_rebase_compile_yaml_diff_strategy_secret_scope: exit 0 / exact source result
   live_pass: false
 spec_04i_subdub_auto_two_speaker_addon:
   phase: PENDING_AFTER_SPEC_04H_9
@@ -1059,8 +1077,8 @@ spec_04i_subdub_auto_two_speaker_addon:
   representative_live_target: one unfinished media-compatible Product Video lane
   acceptance: male/female detection; translation; two-voice dub; final MP4; receipt/report; wallet delta 0
 next_action: >-
-  Ship the exact taskless-V3 transient-worker watchdog seam and verify runtime SHA.
-  Use a new snapshot-first recovery CAS for the already-clean failed job/project/
-  outbox 28/32/27; do not replay the old task-hash reset. Preserve V2 and V3 0/2,
+  Ship the exact fresh-worker read-only-to-claim handoff seam, rebase onto latest
+  main after SubDub releases, and verify bot plus worker runtime SHA. Use the same
+  snapshot-first watchdog recovery CAS for only 28/32/27, preserve V2 and V3 0/2,
   scene1 selection, price/cap and charged 0. Start the Owner worker once; stop after
   two genuinely new Key4U calls or terminal two-scene MP4. Open nothing else.

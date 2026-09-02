@@ -1027,6 +1027,39 @@ starting the next.
   `220 passed, 2 failed in 924.92s`; clean exact main reproduced the same two IDs
   in `856.69s`, `NEW_FAILURES=0`. Full and changed compile exit `0`; Strategy is
   `8 passed` plus the exact PV2-R03 baseline; YAML/diff/secret/scope clean.
+- [x] PR #975 squash/runtime `f507feef5f546211c064c79eb15c310ec8a4d682`;
+  deploy run `33609379330` SUCCESS in `3m39s`. The PR legitimately had zero checks
+  because `bot-source-compile.yml` path-filters non-`bot.py` queue/test/docs diffs;
+  the measured local post-rebase compile/protected gates remained authoritative.
+  Bot checkout was exact/clean. Owner worker was safely fast-forwarded from
+  `ab267bed...` to exact runtime using the deployed bot checkout, with backup ref
+  `refs/backups/worker-pre-product-video-20260902084632`; worker compile and tracked
+  diff `0`, service inactive PID `0` before recovery.
+- [x] Exact-runtime VPS rehearsal PASS on SQLite backup `14,184,448` bytes mode
+  `0600`; recovery backup mode `0600`; replay fail-closed. Production CAS then
+  passed with backup `/opt/toanaas/bot/delete/pv2-r01-job28-watchdog-recovery-
+  production-20260902T155114.json`, SHA `53dd0c48...`, mode `0600`. After more than
+  one watchdog interval, job remained `queued/queued_for_worker/acknowledged`,
+  taskless wait marker true, V3 `0/2`, scenes pending, manifest SHA `6f2c6947...`
+  unchanged and charged Xu `0`. Prestart verifier passed all 15 exact checks.
+- [-] Fresh-worker LIVE RED: one worker start at PID `1097461` caused the bot
+  watchdog to terminalize `28/32/27` on `worker_poll_existing_task_read_only`
+  before the worker could claim. Worker was stopped inactive PID `0`; identity
+  counts remained `32/28/27`, V3 `0/2`, wallet `200/0`, transaction/credit/provider
+  usage `0/1/0`, provider transport and charged Xu `0`.
+- [x] Fresh-worker claim-handoff RED `1 failed, 40 deselected in 994.59s` -> GREEN
+  `1 passed, 40 deselected in 9.20s`; focused inverse/claim `5 passed in 13.47s`;
+  full job28 authority `42 passed in 10.91s`; protected watchdog/outbox `85 passed
+  in 51.23s`; combined `222 passed, 2 exact baseline failures in 61.21s`,
+  `NEW_FAILURES=0`. Exact V3 now survives the read-only bot handoff and the actual
+  worker claim path advances acknowledged outbox to a claim, while a permanent
+  provider blocker still terminalizes. Provider/wallet calls during source tests `0`.
+- [x] Rebased conflict-free onto SubDub PR #976 main/runtime
+  `dd217036577e2627a9bfcf8ce1ed510ba6ebb233`; upstream PR #975 was skipped as
+  already applied and only the claim-handoff commit replayed. Post-rebase focused
+  claim/inverse `5 passed in 10.46s`; full authority + protected watchdog/outbox
+  `127 passed in 33.26s`; full and changed compile exit `0`; YAML/diff/Strategy/
+  secret/scope retain the exact source result.
 - [ ] Two distinct scene clips and one final MP4 terminal; otherwise stop at the
   exact new RED and reopen only `SPEC-04H`.
 

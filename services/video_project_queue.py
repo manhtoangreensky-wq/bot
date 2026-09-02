@@ -5686,6 +5686,13 @@ def _product_video_taskless_v3_worker_wait_state(
         worker_reason in PRODUCT_VIDEO_TASKLESS_V3_TRANSIENT_WORKER_BLOCK_REASONS
         and block_reasons.issubset(PRODUCT_VIDEO_TASKLESS_V3_WORKER_WAIT_REASONS)
     )
+    fresh_worker_claim_handoff = bool(
+        not worker_reason
+        and block_reasons
+        and block_reasons.issubset(
+            {"worker_poll_existing_task_read_only", "v3_taskless_replacement_only"}
+        )
+    )
     selected_scene = _as_int(result.get("fallback_scene_index"), 0)
     try:
         # Lazy import keeps the provider-free queue module free of import cycles.
@@ -5785,7 +5792,7 @@ def _product_video_taskless_v3_worker_wait_state(
         == "key4u_video"
     )
     valid = bool(
-        transient_worker_block
+        (transient_worker_block or fresh_worker_claim_handoff)
         and exact_scope
         and identity_valid
         and finance_valid
@@ -5794,10 +5801,14 @@ def _product_video_taskless_v3_worker_wait_state(
     )
     return {
         "taskless_v3_authority_waiting_for_worker": valid,
+        "taskless_v3_authority_ready_for_worker_claim": bool(
+            valid and fresh_worker_claim_handoff
+        ),
         "taskless_v3_worker_wait_reason": worker_reason if valid else "",
         "taskless_v3_selected_scene_index": selected_scene if valid else 0,
         "taskless_v3_worker_wait_contract_checks": {
             "transient_worker_block": transient_worker_block,
+            "fresh_worker_claim_handoff": fresh_worker_claim_handoff,
             "exact_scope": exact_scope,
             "identity_valid": identity_valid,
             "finance_valid": finance_valid,

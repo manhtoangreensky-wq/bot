@@ -1009,3 +1009,56 @@ overlapping file. Post-rebase combined job28/watchdog/outbox/restart coverage is
 IDs in `856.69s`, therefore `NEW_FAILURES=0`. Full `bot.py`, local worker, queue and
 changed-test compile exit `0`; Strategy remains `8 passed` plus the exact PV2-R03
 fixture baseline, and YAML/diff/secret/forbidden-scope gates are clean.
+
+## V3 fresh-worker claim handoff boundary
+
+PR #975 squash-merged exact runtime
+`f507feef5f546211c064c79eb15c310ec8a4d682`; deploy run `33609379330` was SUCCESS
+in `3m39s`. The PR showed zero checks because the existing compile workflow filters
+out changes that do not touch `bot.py`, its compile script or the workflow itself;
+local post-rebase full compile and protected test evidence remained the gate. Bot
+checkout matched exact SHA with tracked diff `0`. The detached Owner worker checkout
+was still `ab267bed...`, so it was advanced from the deployed local bot repository
+only after proving clean status and ancestry. Backup ref
+`refs/backups/worker-pre-product-video-20260902084632` preserves the old SHA; worker
+ended exact `f507feef...`, compile exit `0`, tracked diff `0`, inactive PID `0`.
+
+The VPS SQLite backup API produced a `14,184,448`-byte rehearsal snapshot mode
+`0600`. Exact-runtime CAS rehearsal and replay-fail-closed passed; all temporary
+files were removed. Production recovery then passed with backup
+`/opt/toanaas/bot/delete/pv2-r01-job28-watchdog-recovery-production-
+20260902T155114.json`, SHA `53dd0c48854fbd133c9a07b5e0f4cdc1a46b97f6d50337f9ade6646bd490b734`,
+mode `0600`. After more than one watchdog interval, job/project/outbox stayed
+`queued/queued_for_worker/acknowledged`, exact taskless wait marker was true, V3
+stayed `0/2`, both DB scenes stayed pending, charged Xu stayed `0`, and manifest SHA
+stayed `6f2c69472c56c123fdfa65fd9b5ea34d93a97b59817d5d19d351f7d55c43883b`.
+The read-only prestart verifier passed all 15 checks including scene-1-only claim,
+Key4U runtime/contract readiness, immutable V2 and finance.
+
+One Owner worker start at PID `1097461` produced a new pre-provider LIVE RED. The
+bot watchdog rechecked the now-fresh worker, retained only
+`worker_poll_existing_task_read_only`, and terminalized the taskless job before the
+worker emitted a claim. Worker was stopped inactive PID `0`. Job/project/outbox
+identity counts remained `32/28/27`; V3 remained `0/2`; wallet stayed `200/0`;
+transactions, credit events and provider usage remained `0/1/0`; provider transport,
+artifact/delivery and charged Xu remained `0`.
+
+The integration test now covers the real bot-watchdog-to-worker-claim sequence.
+RED was `1 failed, 40 deselected in 994.59s`. Minimal GREEN was `1 passed, 40
+deselected in 9.20s`; focused inverse plus claim was `5 passed in 13.47s`; full
+job28 authority was `42 passed in 10.91s`; protected watchdog/outbox was `85 passed
+in 51.23s`; combined scope was `222 passed, 2 exact baseline failures in 61.21s`,
+so `NEW_FAILURES=0`. Exact V3 may interpret the read-only marker as a fresh-worker
+claim handoff only when worker blocker is empty and every existing exact identity,
+price, cap, receipt and scene guard passes. Worker-side sweep then moves the
+acknowledged outbox through retry/lease and claims job 28. A permanent provider
+route blocker remains terminal fail-closed. No provider or wallet action occurs in
+the source test.
+
+After SubDub PR #976 deployed, the claim-handoff commit rebased conflict-free onto
+exact main/runtime `dd217036577e2627a9bfcf8ce1ed510ba6ebb233`. Git correctly
+skipped Product Video PR #975 as already upstream and replayed only this new seam.
+Post-rebase focused claim/inverse coverage was `5 passed in 10.46s`; full job28
+authority plus protected watchdog/outbox was `127 passed in 33.26s`; full `bot.py`
+and changed-file compile exit `0`; YAML/diff/Strategy/secret/forbidden-scope gates
+retain the exact source result.

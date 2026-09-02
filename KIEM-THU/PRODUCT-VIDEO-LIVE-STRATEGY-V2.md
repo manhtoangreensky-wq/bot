@@ -332,6 +332,20 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     branch is `220 passed, 2 failed in 924.92s`; clean exact main has the same two
     IDs in `856.69s`, `NEW_FAILURES=0`. Full compile, Strategy/YAML/diff/secret and
     forbidden-scope gates retain the exact pre-rebase result.
+  - [-] PR #975/runtime `f507feef...`, deploy `33609379330` SUCCESS `3m39s`; bot and
+    worker exact/clean after safe worker fast-forward. Exact-runtime rehearsal and
+    production CAS backup SHA `53dd0c48...` mode `0600` passed. Inactive-worker
+    watchdog live PASS held job 28 queued for more than one interval with V3 `0/2`.
+    One fresh-worker start then exposed a second seam: read-only submit source was
+    terminalized before claim, with provider/finance/output deltas `0`.
+  - [x] Fresh-worker claim RED `1 failed in 994.59s` -> GREEN `1 passed in 9.20s`;
+    inverse/claim `5 passed`; job28 `42 passed`; protected `85 passed`; combined
+    `222 passed, 2 exact baseline failures in 61.21s`, `NEW_FAILURES=0`. Only exact
+    V3 turns read-only handoff into worker claim readiness; permanent blockers stay
+    fail-closed. Ship this seam, recover the same job, then continue original `0/2`.
+  - [x] Rebased cleanly onto SubDub PR #976 runtime `dd217036...`; upstream #975
+    skipped as already applied. Post-rebase focused `5 passed`; authority/protected
+    `127 passed`; full compile and YAML/diff/Strategy/secret/scope clean.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 
