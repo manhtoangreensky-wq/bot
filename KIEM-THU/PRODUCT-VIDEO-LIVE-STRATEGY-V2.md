@@ -298,6 +298,17 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     only result. Ledger RED `1 failed, 25 deselected in 651.64s` -> GREEN `1 passed,
     25 deselected in 7.23s`; focused `52 passed`; locked `48 passed`; compile/diff
     PASS. Ship ledger seam before reset/resume; provider/wallet remain `0/0`.
+  - [-] PR #972/runtime `53d8305b...`, deploy `33542877096` SUCCESS `3m27s`;
+    reset CAS restored V2 `2/0`, V3 `0/2`, exact finance and scene1-only claim.
+    Live resume was stopped before scene2: forensic proved submit count `0`, HTTP
+    request false and old-task polls only, so genuinely new paid calls remain `0`.
+    Root is stale manifest/ledger task revival plus legacy task-ID prerequisite.
+  - [x] V3 taskless + claim-scope + stale-manifest REDs reproduced. Final taskless
+    suite `7 passed`; focused `59 passed`; locked `57 passed`; full compile/diff/
+    secret PASS. Only exact V3 selected scenes may submit without old tasks; V2 and
+    legacy remain task-required. Two-scene mock proves ordered distinct-key calls,
+    V2 immutable, V3 `2/2`, pending IDs empty and charged Xu `0`. Ship then reset
+    DB/manifest task aliases before the next live resume.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 

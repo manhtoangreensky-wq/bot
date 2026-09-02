@@ -906,3 +906,42 @@ rewrite V2. Job28/persistence focused tests are `52 passed in 10.66s`; locked en
 UI comparators are `48 passed in 9.42s`; changed production/test compile and diff-
 check exit `0`. No production reset or worker restart is allowed before this seam is
 deployed and the immutable V2 namespace is restored from the proven backup.
+
+## V3 taskless replacement authority
+
+PR #972 squash/runtime `53d8305ba7a90a2d9a5bb6c7cd1ca32d76a9405b`;
+deploy `33542877096` SUCCESS in `3m27s`. Bot and inactive Owner worker matched exact
+SHA with tracked diff `0`. False-receipt reset rehearsal, production CAS and the
+deployed pre-start verifier passed. V2 was restored to immutable `2/0`; V3 reset to
+`0/2`; scene 1 alone was selected; identity, `144/144/144`, `212/212`, wallet
+`200/0`, transactions/provider usage/charged Xu stayed exact. Production backup
+`/opt/toanaas/bot/delete/pv2-r01-job28-v3-false-receipt-reset-production-
+20260902T013030.json` has SHA `a279da68...` and mode `0600`.
+
+The next worker resume was again stopped before scene 2. Exact submit forensic now
+proved `submit_invoked_count=0`, `provider_http_request_sent=false`, and every new
+attempt was only a poll of historical tasks. No genuinely new paid call occurred.
+The old scene task aliases had been revived from manifest/ledger state, and the
+legacy recovery executor required a provider task ID before it would evaluate a
+replacement. That combination guaranteed another old-task poll instead of a V3
+submit even though V3 authorization and its versioned idempotency key were valid.
+
+The correction makes taskless replacement an explicit V3-only contract. A scene may
+submit without an old task only when V3 identity/finance is valid, the scene remains
+authorized, claim selected that exact nested scene row, and Key4U is its candidate.
+V2, non-versioned and unselected scenes still fail closed. Canonical manifest tasks,
+task lists, result URLs and artifact aliases are suppressed only when every current
+DB row agrees the scene is taskless and V3 authorizes it; a V2 payload or disagreeing
+row preserves recovery state.
+
+Taskless RED was `1 failed, 1 passed, 26 deselected in 10.50s`; claim-scope RED was
+`1 failed, 28 deselected in 7.35s`; stale-manifest RED was `1 failed, 31 deselected
+in 5.86s`. Final exact taskless/pending/two-scene suite is `7 passed, 26 deselected
+in 5.80s`; job28/persistence focused is `59 passed in 11.32s`; locked engine/UI is
+`57 passed in 10.48s`. Full `bot.py`, `local_worker.py`, connector and changed-test
+compile, diff-check and secret scan PASS. Two-scene mock output proves calls `[1,2]`
+in receipt order, distinct V3 keys, empty pending IDs, immutable V2 namespace, V3
+exactly `2/2` and charged Xu `0`. No live restart is allowed until this seam is
+deployed and both DB plus canonical manifest are reset to taskless V3 `0/2`.
+Final strategy verification returned `8 passed` plus the exact pre-existing PV2-R03
+fixture SHA failure; no PV2-R03 file is changed by this correction.

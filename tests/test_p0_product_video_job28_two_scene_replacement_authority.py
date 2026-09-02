@@ -195,6 +195,76 @@ def _v3_job28_payload() -> dict:
     return payload
 
 
+def _taskless_v3_job28_payload() -> dict:
+    payload = _v3_job28_payload()
+    task_fields = {
+        "provider_task_id",
+        "provider_video_id",
+        "video_id",
+        "active_task_id",
+        "task_id",
+        "primary_task_id",
+        "winning_task_id",
+        "scene_winner_task",
+        "canonical_task_selected",
+    }
+    for item in payload["scene_tasks"]:
+        for key in task_fields:
+            item[key] = ""
+        item.update(
+            {
+                "provider": "shopaikey_video",
+                "selected_provider": "shopaikey_video",
+                "status": "provider_not_start",
+                "current_scene_status": "provider_not_start",
+                "actual_provider_payload_status": "NOT_START",
+                "provider_status_raw": "NOT_START",
+                "provider_stalled_not_start": True,
+                "provider_scene_stalled": True,
+                "provider_in_progress_stalled": True,
+                "provider_progress_stuck": True,
+                "scene_not_start_elapsed": 900,
+                "provider_wait_elapsed_seconds": 900,
+                "provider_elapsed_seconds": 900,
+                "task_id_present": False,
+                "task_pollable": False,
+                "submit_accepted": False,
+                "exhausted": True,
+                "dispatch_attempted": False,
+                "scene_dispatch_attempted": False,
+                "fallback_task_ids": [],
+                "provider_task_ids": [],
+                "provider_video_ids": [],
+            }
+        )
+    payload["provider_scene_tasks"] = copy.deepcopy(payload["scene_tasks"])
+    for key in task_fields:
+        payload[key] = ""
+    payload.update(
+        {
+            "provider_task_ids": [],
+            "provider_video_ids": [],
+            "provider_pending_task_id": "",
+            "provider_pending_video_id": "",
+            "provider_pending_request_job_id": "",
+            "provider_events": [],
+            "provider_attempts": [],
+            "provider_pending_attempts": [],
+            "scene_active_task_by_index": {},
+            "scene_winner_task_by_index": {},
+            "task_scene_index_map": {},
+            "task_to_scene_index": {},
+            "canonical_candidate_summaries": [],
+            "fallback_scene_index": 1,
+            "fallback_allowed": False,
+            "controlled_fallback_allowed": False,
+            "fallback_provider_candidate": "",
+            "fallback_provider_order": [],
+        }
+    )
+    return payload
+
+
 def _replacement_context(payload: dict, scene_index: int) -> dict:
     assert hasattr(
         video_provider_router,
@@ -1080,6 +1150,481 @@ def test_real_replacement_dispatch_uses_only_key4u_and_preserves_exact_scope(
     assert captured["scope"] == [28, 32, 27, "VID-20260829-D78AA3"]
     assert captured["finance"] == [144, 144, 144, 212, 212]
     assert result["provider"] == "key4u_video"
+
+
+def test_v3_taskless_authority_submits_new_key4u_without_polling_old_task(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    payload = _taskless_v3_job28_payload()
+    eligibility = {
+        "worker_local_ready_provider_keys": ["key4u_video"],
+        "contract_valid_provider_chain": ["shopaikey_video", "key4u_video"],
+    }
+    claim = remote_worker_api.product_video_controlled_fallback_claim_payload(
+        {"id": 28, "project_id": 32},
+        payload,
+        {"project_id": 32},
+        eligibility,
+    )
+
+    assert claim["applied"] is True
+    assert claim["eligible_scene_indexes"] == [1]
+    claimed = claim["result"]
+    captured: dict = {}
+
+    def fake_provider_generation(request, *, output_dir, environ, **_kwargs):
+        captured["provider_chain"] = environ.get("VIDEO_PROVIDER_CHAIN")
+        captured["fallback_idempotency_key"] = request.metadata.get(
+            "fallback_idempotency_key"
+        )
+        captured["pending_task_id"] = request.metadata.get(
+            "provider_pending_task_id"
+        )
+        captured["pending_video_id"] = request.metadata.get(
+            "provider_pending_video_id"
+        )
+        captured["authorization_id"] = request.metadata.get(
+            "replacement_authorization_id"
+        )
+        output = tmp_path / "v3-taskless-scene-1.mp4"
+        output.write_bytes(b"v3-taskless-new-key4u-scene-one")
+        return {
+            "ok": True,
+            "output_path": str(output),
+            "provider": "key4u_video",
+            "provider_task_ids": ["v3-genuinely-new-scene-one-task"],
+            "provider_video_ids": ["v3-genuinely-new-scene-one-task"],
+        }
+
+    monkeypatch.setattr(connector, "run_provider_generation", fake_provider_generation)
+    scene = SimpleNamespace(
+        scene_id=1,
+        video_prompt="V3 taskless replacement scene one",
+        visual_prompt="V3 taskless replacement scene one",
+        aspect_ratio="9:16",
+        target_duration_sec=8,
+        _toan_aas_job=claimed,
+    )
+
+    result = asyncio.run(
+        connector._render_scene_async(
+            scene,
+            str(tmp_path / "rendered-v3-taskless-scene-1.mp4"),
+            ["shopaikey_video", "key4u_video"],
+        )
+    )
+
+    assert result["ok"] is True, result
+    assert result["provider"] == "key4u_video"
+    assert captured["provider_chain"] == "key4u_video"
+    assert captured["authorization_id"] == V3_AUTHORIZATION_ID
+    assert captured["fallback_idempotency_key"] == (
+        connector.product_video_scene_replacement_idempotency_key(
+            28,
+            1,
+            "key4u_video",
+            V3_AUTHORIZATION_ID,
+        )
+    )
+    assert captured["pending_task_id"] == ""
+    assert captured["pending_video_id"] == ""
+    assert set(
+        claimed["controlled_fallback_replacement_submit_receipts_by_authorization"]
+    ) == {AUTHORIZATION_ID, V3_AUTHORIZATION_ID}
+    assert claimed["replacement_calls_consumed"] == 1
+    assert claimed["replacement_calls_remaining"] == 1
+    assert claimed["fallback_scene_index"] == 2
+    assert [
+        bool(item.get("controlled_fallback_allowed"))
+        for item in claimed["scene_tasks"]
+    ] == [False, True]
+
+
+def test_taskless_recovery_without_versioned_authority_still_fails_closed(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    payload = _taskless_v3_job28_payload()
+    payload.pop("controlled_fallback_replacement_authorization", None)
+    payload.pop(
+        "controlled_fallback_replacement_submit_receipts_by_authorization", None
+    )
+    scene = SimpleNamespace(
+        scene_id=1,
+        video_prompt="unauthorized taskless scene",
+        visual_prompt="unauthorized taskless scene",
+        aspect_ratio="9:16",
+        target_duration_sec=8,
+        _toan_aas_job=payload,
+    )
+    monkeypatch.setattr(
+        connector,
+        "run_provider_generation",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("unauthorized provider call")
+        ),
+    )
+
+    with pytest.raises(connector.RealVideoRenderError) as exc:
+        asyncio.run(
+            connector._render_scene_async(
+                scene,
+                str(tmp_path / "unauthorized-taskless.mp4"),
+                ["shopaikey_video", "key4u_video"],
+            )
+        )
+
+    assert str(exc.value) == "scene_provider_task_id_missing"
+
+
+def test_consumed_v2_cannot_replay_through_v3_taskless_semantics() -> None:
+    payload = _taskless_v3_job28_payload()
+    payload["controlled_fallback_replacement_authorization"] = _authorization()
+    payload[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ] = {AUTHORIZATION_ID: {}}
+    payload["replacement_authorization_id"] = AUTHORIZATION_ID
+    payload["replacement_authorization_version"] = 2
+
+    claim = remote_worker_api.product_video_controlled_fallback_claim_payload(
+        {"id": 28, "project_id": 32},
+        payload,
+        {"project_id": 32},
+        {
+            "worker_local_ready_provider_keys": ["key4u_video"],
+            "contract_valid_provider_chain": ["shopaikey_video", "key4u_video"],
+        },
+    )
+
+    assert claim["applied"] is False
+    assert claim["eligible_scene_indexes"] == [1]
+
+
+def test_v3_taskless_authority_does_not_submit_scene_before_claim_selection(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    payload = _taskless_v3_job28_payload()
+    claim = remote_worker_api.product_video_controlled_fallback_claim_payload(
+        {"id": 28, "project_id": 32},
+        payload,
+        {"project_id": 32},
+        {
+            "worker_local_ready_provider_keys": ["key4u_video"],
+            "contract_valid_provider_chain": ["shopaikey_video", "key4u_video"],
+        },
+    )
+    claimed = claim["result"]
+    assert claim["eligible_scene_indexes"] == [1]
+    assert claimed["fallback_scene_index"] == 1
+    assert [
+        bool(item.get("controlled_fallback_allowed"))
+        for item in claimed["scene_tasks"]
+    ] == [True, False]
+    monkeypatch.setattr(
+        connector,
+        "run_provider_generation",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("unselected scene provider call")
+        ),
+    )
+    scene_two = SimpleNamespace(
+        scene_id=2,
+        video_prompt="unselected V3 scene two",
+        visual_prompt="unselected V3 scene two",
+        aspect_ratio="9:16",
+        target_duration_sec=8,
+        _toan_aas_job=claimed,
+    )
+
+    with pytest.raises(connector.RealVideoRenderError) as exc:
+        asyncio.run(
+            connector._render_scene_async(
+                scene_two,
+                str(tmp_path / "unselected-v3-scene-2.mp4"),
+                ["shopaikey_video", "key4u_video"],
+            )
+        )
+
+    assert str(exc.value) == "scene_provider_task_id_missing"
+
+
+def test_v3_taskless_orchestrator_submits_two_scenes_in_receipt_order(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    payload = _taskless_v3_job28_payload()
+    payload.update(
+        {
+            "user_id": 7126457028,
+            "product_type": "video_trend",
+            "quality_tier": 400,
+            "scene_count": 2,
+            "scene_duration_seconds": 8,
+            "expected_duration_seconds": 16,
+            "orchestration_mode": "per_scene_8s",
+            "scene_cards": [
+                {
+                    "scene_index": 1,
+                    "video_prompt": "taskless V3 scene one",
+                    "target_duration_sec": 8,
+                    "aspect_ratio": "9:16",
+                },
+                {
+                    "scene_index": 2,
+                    "video_prompt": "taskless V3 scene two",
+                    "target_duration_sec": 8,
+                    "aspect_ratio": "9:16",
+                },
+            ],
+        }
+    )
+    v2_receipts = copy.deepcopy(
+        payload["controlled_fallback_replacement_submit_receipts_by_authorization"][
+            AUTHORIZATION_ID
+        ]
+    )
+    claim = remote_worker_api.product_video_controlled_fallback_claim_payload(
+        {"id": 28, "project_id": 32},
+        payload,
+        {"project_id": 32},
+        {
+            "worker_local_ready_provider_keys": ["key4u_video"],
+            "contract_valid_provider_chain": ["shopaikey_video", "key4u_video"],
+        },
+    )
+    claimed = claim["result"]
+    claimed["scene_cards"] = payload["scene_cards"]
+    calls: list[tuple[int, str, str, str]] = []
+
+    def fake_provider_generation(request, *, output_dir, environ, **_kwargs):
+        scene_index = int(request.metadata.get("scene_index") or 0)
+        calls.append(
+            (
+                scene_index,
+                str(request.metadata.get("fallback_idempotency_key") or ""),
+                str(request.metadata.get("provider_pending_task_id") or ""),
+                str(environ.get("VIDEO_PROVIDER_CHAIN") or ""),
+            )
+        )
+        output = Path(output_dir) / f"taskless-v3-scene-{scene_index}.mp4"
+        output.write_bytes(f"taskless-v3-scene-{scene_index}".encode("ascii"))
+        return {
+            "ok": True,
+            "provider": "key4u_video",
+            "provider_task_ids": [f"v3-new-task-{scene_index}"],
+            "provider_video_ids": [f"v3-new-task-{scene_index}"],
+            "output_path": str(output),
+            "scene_index": scene_index,
+            "result_url_present": True,
+        }
+
+    final_path = tmp_path / "taskless-v3-final.mp4"
+
+    def fake_finalize(**_kwargs):
+        final_path.write_bytes(b"taskless-v3-two-scene-final")
+        return {
+            "ok": True,
+            "final_video_path": str(final_path),
+            "duration_sec": 16.0,
+            "scene_order": [1, 2],
+        }
+
+    monkeypatch.setattr(connector, "run_provider_generation", fake_provider_generation)
+    monkeypatch.setattr(
+        connector,
+        "_canonical_product_video_workspace",
+        lambda _job: str(tmp_path / "taskless-v3-workspace"),
+    )
+    monkeypatch.setattr(
+        connector.video_final_output,
+        "probe_video",
+        lambda path: {
+            "ok": True,
+            "has_video": True,
+            "has_audio": False,
+            "bytes": Path(path).stat().st_size,
+            "duration": 8.0,
+        },
+    )
+    monkeypatch.setattr(connector, "finalize_multiscene_scene_clips", fake_finalize)
+
+    result = connector._run_per_scene_provider_orchestrator(
+        claimed,
+        str(tmp_path / "discarded"),
+        provider_order=["shopaikey_video", "key4u_video"],
+        provider_events=[],
+        debug_results=[],
+    )
+
+    assert result["ok"] is True, (
+        result,
+        calls,
+        [
+            {
+                key: item.get(key)
+                for key in (
+                    "scene_index",
+                    "status",
+                    "controlled_fallback_allowed",
+                    "fallback_scene_index",
+                    "fallback_provider_candidate",
+                    "provider_task_id",
+                )
+            }
+            for item in claimed["scene_tasks"]
+        ],
+    )
+    assert [item[0] for item in calls] == [1, 2]
+    assert [item[2] for item in calls] == ["", ""]
+    assert [item[3] for item in calls] == ["key4u_video", "key4u_video"]
+    assert [item[1] for item in calls] == [
+        connector.product_video_scene_replacement_idempotency_key(
+            28, scene_index, "key4u_video", V3_AUTHORIZATION_ID
+        )
+        for scene_index in (1, 2)
+    ]
+    all_receipts = result[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ]
+    assert all_receipts[AUTHORIZATION_ID] == v2_receipts
+    assert sorted(all_receipts[V3_AUTHORIZATION_ID]) == ["1", "2"]
+    assert result["replacement_calls_consumed"] == 2
+    assert result["replacement_calls_remaining"] == 0
+    assert result["charged_xu"] == 0
+
+
+def test_v3_taskless_authority_suppresses_stale_manifest_tasks_but_v2_does_not() -> None:
+    payload = _taskless_v3_job28_payload()
+    recovered = [
+        {
+            "scene_index": scene_index,
+            "provider": "key4u_video",
+            "provider_task_id": f"stale-manifest-task-{scene_index}",
+            "provider_video_id": f"stale-manifest-task-{scene_index}",
+            "active_task_id": f"stale-manifest-task-{scene_index}",
+            "task_id": f"stale-manifest-task-{scene_index}",
+            "status": "provider_running",
+            "task_id_present": True,
+            "task_pollable": True,
+            "clip_path": f"stale-manifest-scene-{scene_index}.mp4",
+            "output_path": f"stale-manifest-scene-{scene_index}.mp4",
+            "clip_valid": True,
+            "artifact_valid": True,
+            "result_url_valid": True,
+        }
+        for scene_index in (1, 2)
+    ]
+
+    merged_v3 = connector._merge_manifest_scene_tasks(payload, recovered)
+    assert [
+        str(item.get("provider_task_id") or "")
+        for item in merged_v3["scene_tasks"]
+    ] == ["", ""]
+    assert [
+        bool(item.get("task_id_present")) for item in merged_v3["scene_tasks"]
+    ] == [False, False]
+    assert [str(item.get("output_path") or "") for item in merged_v3["scene_tasks"]] == [
+        "",
+        "",
+    ]
+    assert [bool(item.get("clip_valid")) for item in merged_v3["scene_tasks"]] == [
+        False,
+        False,
+    ]
+
+    v2 = copy.deepcopy(payload)
+    v2["controlled_fallback_replacement_authorization"] = _authorization()
+    v2[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ] = {AUTHORIZATION_ID: {}}
+    merged_v2 = connector._merge_manifest_scene_tasks(v2, recovered)
+    assert [
+        str(item.get("provider_task_id") or "")
+        for item in merged_v2["scene_tasks"]
+    ] == ["stale-manifest-task-1", "stale-manifest-task-2"]
+
+
+def test_v3_taskless_pending_submit_keeps_v2_namespace_and_only_calls_scene_one(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    payload = _taskless_v3_job28_payload()
+    payload.update(
+        {
+            "user_id": 7126457028,
+            "product_type": "video_trend",
+            "scene_count": 2,
+            "orchestration_mode": "per_scene_8s",
+            "scene_cards": [
+                {"scene_index": 1, "video_prompt": "pending V3 scene one"},
+                {"scene_index": 2, "video_prompt": "pending V3 scene two"},
+            ],
+        }
+    )
+    v2_receipts = copy.deepcopy(
+        payload["controlled_fallback_replacement_submit_receipts_by_authorization"][
+            AUTHORIZATION_ID
+        ]
+    )
+    claimed = remote_worker_api.product_video_controlled_fallback_claim_payload(
+        {"id": 28, "project_id": 32},
+        payload,
+        {"project_id": 32},
+        {
+            "worker_local_ready_provider_keys": ["key4u_video"],
+            "contract_valid_provider_chain": ["shopaikey_video", "key4u_video"],
+        },
+    )["result"]
+    claimed["scene_cards"] = payload["scene_cards"]
+    calls: list[int] = []
+
+    def fake_provider_generation(request, **_kwargs):
+        scene_index = int(request.metadata.get("scene_index") or 0)
+        calls.append(scene_index)
+        return {
+            "ok": False,
+            "provider": "key4u_video",
+            "provider_error": "provider_in_progress",
+            "blocker": "provider_in_progress",
+            "continue_polling": True,
+            "provider_submit_called": True,
+            "provider_http_request_sent": True,
+            "provider_submit_http_status": 200,
+            "submit_accepted": True,
+            "provider_task_id_saved": True,
+            "provider_task_ids": ["v3-new-pending-scene-one"],
+            "provider_video_ids": ["v3-new-pending-scene-one"],
+            "task_id_present": True,
+            "task_pollable": True,
+            "status": "provider_running",
+            "actual_provider_payload_status": "queued",
+        }
+
+    monkeypatch.setattr(connector, "run_provider_generation", fake_provider_generation)
+    monkeypatch.setattr(
+        connector,
+        "_canonical_product_video_workspace",
+        lambda _job: str(tmp_path / "taskless-v3-pending-workspace"),
+    )
+
+    result = connector._run_per_scene_provider_orchestrator(
+        claimed,
+        str(tmp_path / "discarded"),
+        provider_order=["shopaikey_video", "key4u_video"],
+        provider_events=[],
+        debug_results=[],
+    )
+
+    all_receipts = result[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ]
+    assert calls == [1]
+    assert result["continue_polling"] is True
+    assert all_receipts[AUTHORIZATION_ID] == v2_receipts
+    assert V3_AUTHORIZATION_ID in all_receipts
+    assert result["charged_xu"] == 0
 
 
 def test_worker_payload_preserves_versioned_replacement_authority() -> None:

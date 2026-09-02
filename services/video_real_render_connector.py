@@ -1632,6 +1632,10 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         scene_index=scene_index,
     )
     replacement_scene_authorized = bool(replacement.get("scene_authorized"))
+    replacement_taskless_authorized = bool(
+        replacement_scene_authorized
+        and _safe_int(replacement.get("authorization_version"), 0) >= 3
+    )
     effective_fallback_count = 0 if replacement_scene_authorized else fallback_count
     source = str(
         job.get("original_submit_source")
@@ -1702,7 +1706,10 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         and exact_quote_preserved
         and public_confirmed
         and invoice_confirmed
-        and _scene_task_has_provider_id(scene_task)
+        and (
+            _scene_task_has_provider_id(scene_task)
+            or replacement_taskless_authorized
+        )
         and effective_fallback_count <= 0
         and not delivered
         and not charged
@@ -1745,7 +1752,10 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         and exact_quote_preserved
         and public_confirmed
         and invoice_confirmed
-        and _scene_task_has_provider_id(scene_task)
+        and (
+            _scene_task_has_provider_id(scene_task)
+            or replacement_taskless_authorized
+        )
         and effective_fallback_count <= 0
         and fallback_chain
         and fallback_chain[0] == "key4u_video"
@@ -3986,7 +3996,23 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
     orchestration_mode = product_video_orchestration_mode(job)
     scene_duration_seconds = product_video_scene_duration_seconds(job)
     request_job_id = product_video_scene_request_id(job, scene_index)
+    taskless_replacement = product_video_controlled_replacement_authorization_context(
+        job,
+        scene_index=scene_index,
+    )
     pending_scene_task = product_video_scene_task_for_index(job, scene_index)
+    if not pending_scene_task and (
+        taskless_replacement.get("scene_authorized")
+        and _safe_int(taskless_replacement.get("authorization_version"), 0) >= 3
+    ):
+        pending_scene_task = next(
+            (
+                dict(item)
+                for item in _existing_scene_tasks(job)
+                if _scene_task_index(item) == scene_index
+            ),
+            {},
+        )
     pending_request_job_id = str(
         pending_scene_task.get("request_job_id")
         or pending_scene_task.get("provider_pending_request_job_id")
@@ -4053,7 +4079,22 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             )
         )
     )
-    pending_policy = product_video_scene_stall_policy(job, pending_scene_task, scene_index) if pending_matches_request else {}
+    taskless_replacement_authorized = bool(
+        recovery_existing_tasks_only
+        and not pending_matches_request
+        and taskless_replacement.get("scene_authorized")
+        and _safe_int(taskless_replacement.get("authorization_version"), 0) >= 3
+        and _safe_int(pending_scene_task.get("fallback_scene_index"), 0)
+        == scene_index
+        and pending_scene_task.get("controlled_fallback_allowed") is True
+        and str(pending_scene_task.get("fallback_provider_candidate") or "")
+        == "key4u_video"
+    )
+    pending_policy = (
+        product_video_scene_stall_policy(job, pending_scene_task, scene_index)
+        if pending_matches_request or taskless_replacement_authorized
+        else {}
+    )
     scene_fallback_order = list(pending_policy.get("fallback_provider_order") or [])
     scene_fallback_allowed = bool(pending_policy.get("fallback_allowed"))
     automatic_fallback_forbidden = _durable_product_video_route_forbids(
@@ -4072,7 +4113,10 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         scene_fallback_allowed = False
     scene_stalled_not_start = bool(pending_policy.get("provider_stalled_not_start"))
     scene_provider_stalled = bool(pending_policy.get("provider_scene_stalled"))
-    fallback_execution_tick_called = bool(pending_matches_request and scene_provider_stalled)
+    fallback_execution_tick_called = bool(
+        (pending_matches_request or taskless_replacement_authorized)
+        and scene_provider_stalled
+    )
     fallback_provider_candidate = str((scene_fallback_order or [""])[0] or "")
     fallback_idempotency_key = str(
         pending_policy.get("fallback_idempotency_key") or ""
@@ -5175,6 +5219,33 @@ def _canonical_product_video_workspace(job: dict | None = None) -> str:
 
 def _merge_manifest_scene_tasks(job: dict, recovered: list[dict[str, Any]]) -> dict:
     """Merge filesystem recovery behind current DB truth, one record per scene."""
+    current_rows = [
+        dict(item)
+        for key in ("scene_tasks", "provider_scene_tasks")
+        for item in ((job or {}).get(key) or [])
+        if isinstance(item, dict)
+    ]
+    rows_by_scene: dict[int, list[dict[str, Any]]] = {}
+    for item in current_rows:
+        index = _scene_task_index(item, 0)
+        if index > 0:
+            rows_by_scene.setdefault(index, []).append(item)
+    taskless_replacement_scenes: set[int] = set()
+    for index, rows in rows_by_scene.items():
+        if not rows or not all(
+            not _scene_task_has_provider_id(item)
+            and item.get("task_id_present") is False
+            for item in rows
+        ):
+            continue
+        context = product_video_controlled_replacement_authorization_context(
+            job,
+            scene_index=index,
+        )
+        if context.get("scene_authorized") and _safe_int(
+            context.get("authorization_version"), 0
+        ) >= 3:
+            taskless_replacement_scenes.add(index)
     records: dict[int, dict[str, Any]] = {}
     for item in list(recovered or []) + _existing_scene_tasks(job):
         if not isinstance(item, dict):
@@ -5186,6 +5257,45 @@ def _merge_manifest_scene_tasks(job: dict, recovered: list[dict[str, Any]]) -> d
         for key, value in item.items():
             if value not in (None, "", [], {}):
                 current[key] = value
+    for index in taskless_replacement_scenes:
+        current = records.get(index)
+        if not current:
+            continue
+        for key in (
+            "provider_task_id",
+            "provider_video_id",
+            "video_id",
+            "active_task_id",
+            "task_id",
+            "primary_task_id",
+            "winning_task_id",
+            "scene_winner_task",
+            "canonical_task_selected",
+            "clip_path",
+            "output_path",
+            "local_path",
+            "final_video_path",
+            "raw_provider_video_path",
+            "result_url",
+            "provider_result_url",
+        ):
+            current[key] = ""
+        for key in ("fallback_task_ids", "provider_task_ids", "provider_video_ids"):
+            current[key] = []
+        for key in (
+            "task_id_present",
+            "task_pollable",
+            "submit_accepted",
+            "clip_valid",
+            "validation_passed",
+            "artifact_valid",
+            "result_url_valid",
+            "download_url_present",
+            "provider_result_url_present",
+        ):
+            current[key] = False
+        for key in ("clip_bytes", "artifact_bytes", "output_bytes"):
+            current[key] = 0
     merged = [records[index] for index in sorted(records)]
     return {
         **dict(job or {}),
