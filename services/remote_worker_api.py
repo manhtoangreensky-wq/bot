@@ -3749,6 +3749,11 @@ def _claim_video_render_candidate(
                             for item in (
                                 runtime_eligibility.get("runtime_candidate_keys")
                                 or runtime_eligibility.get("eligible_provider_keys")
+                                or (
+                                    [result_payload.get("fallback_provider_candidate")]
+                                    if controlled_fallback_claim.get("applied")
+                                    else []
+                                )
                                 or []
                             )
                             if str(item or "").strip()

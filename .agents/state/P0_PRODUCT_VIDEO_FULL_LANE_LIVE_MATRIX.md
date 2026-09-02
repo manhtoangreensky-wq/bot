@@ -1060,6 +1060,26 @@ starting the next.
   claim/inverse `5 passed in 10.46s`; full authority + protected watchdog/outbox
   `127 passed in 33.26s`; full and changed compile exit `0`; YAML/diff/Strategy/
   secret/scope retain the exact source result.
+- [x] PR #977 compile `33630623078` SUCCESS, squash/runtime
+  `c3167ef2de6e3beada8297a54e724f22dff5613f`, deploy `33630731575` SUCCESS in
+  `4m20s`. Bot and inactive Owner worker are exact/clean; bot/web/nginx active and
+  health OK. Exact-runtime snapshot rehearsal and duplicate rejection passed.
+  Production CAS backup `/opt/toanaas/bot/delete/pv2-r01-job28-watchdog-recovery-
+  production-20260902T195036.json` has SHA `33cbbfa0...`, mode `0600`; V3 remained
+  `0/2`, V2 `[1,2]`, quote/cap `144/212`, charged/provider/wallet deltas `0`.
+- [-] The next single worker start, PID `1116240`, still terminalized existing
+  `28/32/27` before provider submit. Forensic proved every exact V3 handoff check
+  true and `taskless_v3_authority_ready_for_worker_claim=true`, but the outbox
+  remained `acknowledged`; after wake, generic runtime eligibility discarded the
+  controlled Key4U candidate. Worker was stopped inactive PID `0`; V3 receipts
+  remained empty `0/2`, provider usage/transactions/charged Xu stayed `0`.
+- [x] Production-aligned wake/candidate RED `1 failed, 41 deselected in 11.38s`;
+  GREEN authority `42 passed in 5.75s`. Protected scheduler/outbox/public-confirm
+  batch `224 passed, 1 deselected in 54.40s`; exact clean main reproduced the
+  deselected `job_131` failure in `569.47s`, so `NEW_FAILURES=0`. Changed source/
+  test compile and diff-check exit `0`. The correction wakes only an exact V3-ready
+  acknowledged outbox and propagates only the candidate returned by the validated
+  controlled-fallback claim; all inverse paths remain fail-closed.
 - [ ] Two distinct scene clips and one final MP4 terminal; otherwise stop at the
   exact new RED and reopen only `SPEC-04H`.
 

@@ -6029,6 +6029,25 @@ def sweep_product_video_zero_task_watchdog(
             outbox,
             eligibility,
         )
+        if (
+            taskless_v3_worker_wait.get(
+                "taskless_v3_authority_ready_for_worker_claim"
+            )
+            and not active_lease
+            and str(outbox.get("dispatch_status") or "") == "acknowledged"
+        ):
+            conn.execute(
+                """UPDATE video_dispatch_outbox
+                      SET dispatch_status='retry_wait',available_at=?,
+                          lease_owner='',lease_expires_at=NULL,last_error='',
+                          terminal_reason='',completed_at=NULL,updated_at=?
+                    WHERE outbox_id=? AND dispatch_status='acknowledged'""",
+                (outbox_current, current, int(outbox["outbox_id"])),
+            )
+            conn.commit()
+            outbox = get_product_video_dispatch_outbox(
+                conn, job_id=int(job["id"])
+            )
         explicit_admission_block = bool(
             eligibility and eligibility.get("ok") is False
             and not taskless_v3_worker_wait.get(

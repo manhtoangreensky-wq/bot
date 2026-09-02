@@ -346,6 +346,15 @@ The completed Tail UI and terminal engine seams remain byte-locked.
   - [x] Rebased cleanly onto SubDub PR #976 runtime `dd217036...`; upstream #975
     skipped as already applied. Post-rebase focused `5 passed`; authority/protected
     `127 passed`; full compile and YAML/diff/Strategy/secret/scope clean.
+  - [-] PR #977 compile/deploy succeeded at exact runtime `c3167ef2...`. Snapshot
+    rehearsal and production CAS preserved V3 `0/2`, but one worker start exposed
+    that the exact ready marker did not wake its acknowledged outbox and generic
+    runtime filtering then dropped the controlled Key4U candidate. Provider/finance/
+    artifact deltas stayed `0`; worker is inactive.
+  - [x] Production-aligned RED `1 failed, 41 deselected` -> authority GREEN `42
+    passed`; protected `224 passed, 1 deselected`; clean main reproduced that exact
+    baseline failure, `NEW_FAILURES=0`. Ship only the outbox wake plus validated
+    controlled-candidate handoff, then recover the same `28/32/27` once.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 
@@ -518,7 +527,7 @@ except `Kich ban -> Video`, which uses its locked minimum of five scenes.
 
 | ID | Product / exact owner | Most complex non-manual lane | Why selected | Status |
 |---|---|---|---|---|
-| `PV2-R01` | `video_trend` / `trend_video` | Upload one public trend reference through `vtrend|video_upload`, then select content profile and full Tail | Media intake + trend source + content/profile + Add-on + renderer | IN PROGRESS - full flow/admission GREEN; one-shot job28 authority repair ship/live pending |
+| `PV2-R01` | `video_trend` / `trend_video` | Upload one public trend reference through `vtrend|video_upload`, then select content profile and full Tail | Media intake + trend source + content/profile + Add-on + renderer | IN PROGRESS - full flow/admission GREEN; exact V3 outbox/candidate handoff correction ship/live pending |
 | `PV2-R02` | `video_ai_real` / `video_ai_canonical` | `vid3|mode|image_video` with mapped scene images, character/style/requirements and full Tail | More material gates than prompt-only/manual | PENDING |
 | `PV2-R03` | `script_image_video` / `script_to_video` | Upload/parse existing script through `vproduct|script_upload`, review a five-scene plan and full Tail | File parsing + long script + scene planning; Owner approved existing 5-scene minimum | PENDING, 5 scenes |
 | `PV2-R04` | `frame_video_local` / `frame_video_render` | Use `framevideo|source|ai`, create/map/order two images, movement/transition/Add-on/full Tail | Most complex Frame source path; exercises image preparation plus mapping and local FFmpeg route | PENDING |
