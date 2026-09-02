@@ -1812,6 +1812,40 @@ Task contract:
   approval, then a fresh runtime-bound authorization
   before the duration repair may continue the same job. No new job/old command.
 
+### SPEC-11.9 — Preserve strict-word Deepgram timeout after duration repair
+
+- [x] PR `#979` exact head `fd57bba...`; compile `33643563823` SUCCESS `28s`;
+  squash runtime `899a93f5420f47c95fcc88cd4b8de655f7fee8c8`; deploy
+  `33643751951` SUCCESS `3m38s`; VPS exact/clean/services/health/model PASS.
+- [x] Duration invocation `a13ecafffd31411d89e6b16837c64742` won the exact
+  CAS, set `134 -> 133.37542`, kept attempts `4/3`, then terminal
+  `failed_no_charge` before acoustic. No downstream/artifact/delivery/charge;
+  finance `322` jobs, tx/provider usage `0/0`, credit events `11`, wallet `200/0`.
+- [x] Provider receipt proves root: caller selected `300s`; non-diarized adapter
+  used diagnostic default `60s`; exact attempt at `22:31:08` is Deepgram/listen,
+  status `DEEPGRAM_EMPTY_TRANSCRIPT`, error `deepgram_timeout`.
+- [x] Adapter timeout RED `1 failed in 7.41s` -> GREEN `1 passed in 591.21s`;
+  ASR propagation RED `1 failed in 5.53s` -> GREEN `1 passed in 510.85s`;
+  full timeout `10 passed + 7 subtests`; direct impact `90 passed + 7 subtests`;
+  combined recovery/Auto Multi `194 passed + 7 subtests`.
+- [x] ASR-timeout rearm RED `1 failed in 5.86s`; GREEN `1 passed in 5.22s`;
+  exact marker selectors `7 passed`. It validates job + provider receipt in one
+  SQLite transaction, including production `updated_by=7126457028`; preserves
+  `4/3`, resets only ASR, adds no retry/fallback.
+- [x] Final combined `194 passed + 7 subtests`; full compile, YAML, diff/scope/
+  secret gates exit `0`; retry/fallback/provider-call additions `0`.
+- [x] Rebuilt as exactly one clean local correction commit on latest
+  `main=54309814910e469a763bccd511c209bbebe697e5`; branch is `0` behind / `1`
+  ahead and protected exact-two diff is empty. Fresh gates: timeout `10 passed +
+  7 subtests`; exact marker/receipt `7 passed`; combined `194 passed + 7
+  subtests`; protected branch `50 passed + 1` byte-lock failure and detached
+  baseline the exact same failure/hashes, so `NEW_FAILURES=0`; full compile,
+  YAML, diff/scope/secret exit `0`.
+- [-] Correction remains local-only and unpushed. The earlier authorization named
+  the pre-rebuild SHA, so PR/deploy require fresh exact-head Owner authorization;
+  future live continuation then requires a separate exact-runtime authorization.
+  No MP4/receipt yet.
+
 ### SPEC-11 acceptance
 
 - [B] Owner's later exact same-job order supersedes the old new-upload/standalone

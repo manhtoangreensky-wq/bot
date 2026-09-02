@@ -21,6 +21,7 @@ PREVIOUS_BACKEND = "local_wespeaker_resnet34_spectral"
 PREVIOUS_ALGORITHM = "wespeaker-resnet34-spectral-v1"
 REARM_MARKER = "auto_multi_fixed_vocal_v2_recovery_used"
 DURATION_REPAIR_MARKER = "auto_multi_fixed_vocal_v2_duration_repair_used"
+ASR_TIMEOUT_REPAIR_MARKER = "auto_multi_fixed_vocal_v2_asr_timeout_repair_used"
 
 
 def _preflight_result(
@@ -74,6 +75,21 @@ def claim_same_attempt(
         old_value = str(row[0] or "")
         current = json.loads(old_value)
         recovery = current.get("auto_multi_recovery")
+        attempt_row = conn.execute(
+            """SELECT value,updated_at,updated_by
+               FROM system_settings
+               WHERE key='provider_attempt:translation_asr'
+               LIMIT 1"""
+        ).fetchone()
+        provider_attempt = {}
+        provider_attempt_updated_at = ""
+        provider_attempt_updated_by = ""
+        if attempt_row:
+            provider_attempt = json.loads(str(attempt_row[0] or "{}"))
+            if type(provider_attempt) is not dict:
+                provider_attempt = {}
+            provider_attempt_updated_at = str(attempt_row[1] or "")
+            provider_attempt_updated_by = str(attempt_row[2] or "")
         false_fields = (
             "asr_started",
             "translation_started",
@@ -176,6 +192,7 @@ def claim_same_attempt(
         initial_rearm = bool(
             current.get(REARM_MARKER) is not True
             and current.get(DURATION_REPAIR_MARKER) is not True
+            and current.get(ASR_TIMEOUT_REPAIR_MARKER) is not True
         )
         duration_repair = bool(
             current.get(REARM_MARKER) is True
@@ -207,6 +224,72 @@ def claim_same_attempt(
             and not duration_authority_conflict
             and not actual_v2_evidence_present
         )
+        exact_timeout_receipt = bool(
+            provider_attempt.get("called") is True
+            and provider_attempt.get("provider") == "deepgram"
+            and provider_attempt.get("route") == "listen"
+            and provider_attempt.get("status") == "DEEPGRAM_EMPTY_TRANSCRIPT"
+            and provider_attempt.get("error") == "deepgram_timeout"
+            and provider_attempt.get("at") == "2026-09-02 22:31:08"
+            and provider_attempt_updated_at == "2026-09-02 22:31:08"
+            and provider_attempt_updated_by == str(OWNER_ID)
+        )
+        asr_timeout_repair = bool(
+            current.get(REARM_MARKER) is True
+            and current.get(DURATION_REPAIR_MARKER) is True
+            and current.get(ASR_TIMEOUT_REPAIR_MARKER) is not True
+            and current.get("auto_multi_fixed_vocal_v2_recovery_authority")
+            == "owner_confirmed_same_job_upgrade"
+            and current.get("auto_multi_fixed_vocal_v2_duration_repair_authority")
+            == "owner_confirmed_same_job_exact_duration"
+            and current.get("auto_multi_fixed_vocal_v2_duration_repair_from_seconds")
+            == 134.0
+            and type(
+                current.get("auto_multi_fixed_vocal_v2_duration_repair_to_seconds")
+            ) in {int, float}
+            and abs(
+                float(
+                    current.get(
+                        "auto_multi_fixed_vocal_v2_duration_repair_to_seconds"
+                    )
+                )
+                - 133.37542
+            )
+            <= 0.00001
+            and current.get("asr_started") is True
+            and current.get("last_error_stage") in {None, ""}
+            and current.get("last_error_safe") in {None, ""}
+            and exact_timeout_receipt
+            and not duration_authority_conflict
+            and not actual_v2_evidence_present
+        )
+        downstream_false_fields = tuple(
+            field for field in false_fields if field != "asr_started"
+        )
+        stage_authority_valid = bool(
+            (
+                asr_timeout_repair
+                and current.get("asr_started") is True
+                and all(
+                    field in current and current.get(field) is False
+                    for field in downstream_false_fields
+                )
+            )
+            or (
+                not asr_timeout_repair
+                and all(
+                    field in current and current.get(field) is False
+                    for field in false_fields
+                )
+            )
+        )
+        failure_authority_valid = bool(
+            (asr_timeout_repair and current.get("last_error_stage") in {None, ""})
+            or (
+                not asr_timeout_repair
+                and current.get("last_error_stage") == "AUTO_CAST_MANUAL_REQUIRED"
+            )
+        )
         allowed = bool(
             type(current) is dict
             and type(recovery) is dict
@@ -226,7 +309,7 @@ def claim_same_attempt(
             and current.get("auto_multi_recovery_correction_attempt_count") == 3
             and current.get("auto_multi_acoustic_recovery_used") is True
             and current.get("auto_multi_acoustic_stability_repair_used") is True
-            and (initial_rearm or duration_repair)
+            and (initial_rearm or duration_repair or asr_timeout_repair)
             and current.get("auto_multi_acoustic_backend") == PREVIOUS_BACKEND
             and current.get("auto_multi_acoustic_model_sha256")
             == service.MODEL_SHA256
@@ -235,14 +318,11 @@ def claim_same_attempt(
             and not root_selection_conflicts
             and not actual_v2_evidence_present
             and current.get("pipeline_started") is True
-            and current.get("last_error_stage") == "AUTO_CAST_MANUAL_REQUIRED"
+            and failure_authority_valid
             and type(current.get("charged_xu")) is int
             and current.get("charged_xu") == 0
             and current.get("charge_status") == "not_charged"
-            and all(
-                field in current and current.get(field) is False
-                for field in false_fields
-            )
+            and stage_authority_valid
             and not any(str(current.get(field) or "").strip() for field in path_fields)
             and recovery.get("owner_confirmed_paid") is True
             and str(recovery.get("source_sha256") or "").lower() == SOURCE_SHA256
@@ -282,6 +362,21 @@ def claim_same_attempt(
                         ),
                     }
                     if duration_repair
+                    else {}
+                ),
+                **(
+                    {
+                        ASR_TIMEOUT_REPAIR_MARKER: True,
+                        "auto_multi_fixed_vocal_v2_asr_timeout_repair_authority": (
+                            "owner_confirmed_same_job_deepgram_timeout"
+                        ),
+                        "auto_multi_fixed_vocal_v2_asr_timeout_receipt_at": (
+                            "2026-09-02 22:31:08"
+                        ),
+                        "auto_multi_fixed_vocal_v2_asr_timeout_seconds": 300,
+                        "asr_started": False,
+                    }
+                    if asr_timeout_repair
                     else {}
                 ),
                 "auto_multi_fixed_vocal_v2_recovery_authority": (

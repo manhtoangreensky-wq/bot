@@ -561,3 +561,17 @@ Local source hiện đo duration RED/GREEN `1 failed -> 1 passed`, repair
 RED/GREEN `1 failed -> 1 passed`, `287` focused PASS; protected `323 passed +
 1` failure baseline-equivalent, `NEW_FAILURES=0`. Correction chưa deploy và
 không được coi là LIVE PASS cho tới khi cùng job giao MP4 rồi receipt.
+
+### Đối chiếu strict-word Deepgram timeout sau runtime 899a93f
+
+| Giả định trước | Bằng chứng live hiện tại | Trạng thái |
+|---|---|---|
+| Caller truyền `300s` thì Deepgram chắc chắn dùng `300s` | Non-diarization adapter bỏ tham số và diagnostic dùng default `60s` | ❌ Không còn đúng |
+| Transcript rỗng chứng minh file không có lời | Receipt exact ghi `error=deepgram_timeout`; unit terminal sau `1m33s`, input/normalization PASS | ❌ Chẩn đoán sai |
+| Timeout giữ nguyên qua mọi tầng | Diagnostic `FAIL/deepgram_timeout` bị đổi thành `deepgram_empty_transcript`, rồi unavailable/empty transcript | ❌ Mất classification |
+| Fix timeout cần retry hoặc fallback | Chỉ forward timeout hiện có và preserve status qua adapter/ASR; retry/fallback additions `0` | ✅ Không cần mở rộng |
+
+Local correction đo adapter RED/GREEN `1 failed -> 1 passed`, ASR RED/GREEN
+`1 failed -> 1 passed`, timeout `10 passed + 7 subtests`, direct impact `90
+passed + 7 subtests`, combined `194 passed + 7 subtests`. Production chưa đổi
+cho tới deploy; cùng job vẫn chưa có MP4/receipt.
