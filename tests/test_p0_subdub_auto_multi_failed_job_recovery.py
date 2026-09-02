@@ -620,6 +620,21 @@ def fixed_vocal_v2_preflight():
     }
 
 
+def _persist_fixed_vocal_job(db_path, job):
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "UPDATE system_settings SET value=? WHERE key=?",
+            (
+                json.dumps(job, ensure_ascii=False),
+                f"engine_async_job:{ACOUSTIC_JOB_ID}",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def test_fixed_vocal_v2_rearm_keeps_same_fourth_attempt_and_wins_once(
     tmp_path,
     monkeypatch,
@@ -684,6 +699,241 @@ def test_fixed_vocal_v2_rearm_keeps_same_fourth_attempt_and_wins_once(
     finally:
         conn.close()
     assert stored == terminal_again
+
+
+def test_fixed_vocal_v2_duration_repair_rearms_measured_post_live_failure_once(
+    tmp_path,
+    monkeypatch,
+):
+    rearm = importlib.import_module("scripts.recover_subdub_fixed_vocal_v2")
+    db_path, _job = _seed_fixed_vocal_v1_terminal(tmp_path, monkeypatch)
+    monkeypatch.setattr(rearm.app, "db_connect", lambda: sqlite3.connect(db_path))
+    monkeypatch.setattr(rearm.app, "ENGINE_ASYNC_MEMORY_JOBS", {})
+    monkeypatch.setattr(rearm.app, "SUBTITLE_DUB_PIPELINE_JOBS", {})
+
+    first = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+    assert first["claimed"] is True
+    failed = {
+        **first["job"],
+        "status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "lifecycle_state": "failed_no_charge",
+        "current_stage": "failed_no_charge",
+        "progress_stage": "failed_no_charge",
+        "last_error_stage": "AUTO_CAST_MANUAL_REQUIRED",
+        "source_duration_exact": 133.37542,
+        "input_duration": 134,
+        "multi_diarization_attempted": True,
+        "multi_diarization_provider": "gemini_transcribe_multi_diarization",
+        "multi_diarization_status": "PASS",
+        "multi_diarization_detail": "words=147; speakers=4",
+        "multi_diarization_http_status": 200,
+        "multi_diarization_provider_word_count": 147,
+        "multi_diarization_provider_speaker_count": 4,
+        "multi_diarization_mapped_speaker_count": 0,
+        "multi_diarization_raw_annotation_count": 151,
+        "multi_diarization_terminal_empty": False,
+        "multi_diarization_parse_rejection": "",
+        "multi_diarization_dropped_weak_word_count": 1,
+        "multi_diarization_dropped_weak_speaker_count": 1,
+        "multi_diarization_weak_label_filter_applied": True,
+    }
+    _persist_fixed_vocal_job(db_path, failed)
+
+    repair = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+
+    assert repair["claimed"] is True
+    repaired = repair["job"]
+    assert repaired["auto_multi_recovery_attempt_count"] == 4
+    assert repaired["auto_multi_recovery_correction_attempt_count"] == 3
+    assert repaired["auto_multi_fixed_vocal_v2_recovery_used"] is True
+    assert repaired["auto_multi_fixed_vocal_v2_duration_repair_used"] is True
+    assert repaired["auto_multi_fixed_vocal_v2_duration_repair_authority"] == (
+        "owner_confirmed_same_job_exact_duration"
+    )
+    assert repaired["auto_multi_fixed_vocal_v2_duration_repair_from_seconds"] == 134.0
+    assert repaired["auto_multi_fixed_vocal_v2_duration_repair_to_seconds"] == (
+        pytest.approx(133.37542)
+    )
+    terminal_again = {
+        **repaired,
+        "status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "lifecycle_state": "failed_no_charge",
+        "current_stage": "failed_no_charge",
+        "progress_stage": "failed_no_charge",
+        "last_error_stage": "AUTO_CAST_MANUAL_REQUIRED",
+    }
+    _persist_fixed_vocal_job(db_path, terminal_again)
+    duplicate = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+    assert duplicate == {
+        "ok": False,
+        "claimed": False,
+        "reason": "fixed_vocal_v2_rearm_not_allowed",
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("source_duration_exact", 133.0),
+        ("input_duration", 133),
+        ("auto_multi_fixed_vocal_v2_duration_repair_used", True),
+        ("multi_diarization_provider_word_count", 146),
+        ("multi_diarization_provider_speaker_count", 5),
+        ("multi_diarization_mapped_speaker_count", 4),
+        ("multi_diarization_raw_annotation_count", 150),
+        ("multi_diarization_parse_rejection", "invalid"),
+        ("asr_started", True),
+        ("translation_started", True),
+        ("output_sent", True),
+        ("charged_xu", 1),
+    ),
+)
+def test_fixed_vocal_v2_duration_repair_rejects_non_exact_live_authority(
+    tmp_path,
+    monkeypatch,
+    field,
+    value,
+):
+    rearm = importlib.import_module("scripts.recover_subdub_fixed_vocal_v2")
+    db_path, _job = _seed_fixed_vocal_v1_terminal(tmp_path, monkeypatch)
+    monkeypatch.setattr(rearm.app, "db_connect", lambda: sqlite3.connect(db_path))
+    monkeypatch.setattr(rearm.app, "ENGINE_ASYNC_MEMORY_JOBS", {})
+    monkeypatch.setattr(rearm.app, "SUBTITLE_DUB_PIPELINE_JOBS", {})
+    first = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+    failed = {
+        **first["job"],
+        "status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "lifecycle_state": "failed_no_charge",
+        "current_stage": "failed_no_charge",
+        "progress_stage": "failed_no_charge",
+        "last_error_stage": "AUTO_CAST_MANUAL_REQUIRED",
+        "source_duration_exact": 133.37542,
+        "input_duration": 134,
+        "multi_diarization_attempted": True,
+        "multi_diarization_provider": "gemini_transcribe_multi_diarization",
+        "multi_diarization_status": "PASS",
+        "multi_diarization_detail": "words=147; speakers=4",
+        "multi_diarization_http_status": 200,
+        "multi_diarization_provider_word_count": 147,
+        "multi_diarization_provider_speaker_count": 4,
+        "multi_diarization_mapped_speaker_count": 0,
+        "multi_diarization_raw_annotation_count": 151,
+        "multi_diarization_terminal_empty": False,
+        "multi_diarization_parse_rejection": "",
+        "multi_diarization_dropped_weak_word_count": 1,
+        "multi_diarization_dropped_weak_speaker_count": 1,
+        "multi_diarization_weak_label_filter_applied": True,
+        field: value,
+    }
+    old_value = json.dumps(failed, ensure_ascii=False)
+    _persist_fixed_vocal_job(db_path, failed)
+
+    repair = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+
+    assert repair == {
+        "ok": False,
+        "claimed": False,
+        "reason": "fixed_vocal_v2_rearm_not_allowed",
+    }
+    stored = sqlite3.connect(db_path).execute(
+        "SELECT value FROM system_settings WHERE key=?",
+        (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+    ).fetchone()[0]
+    assert json.loads(stored) == json.loads(old_value)
+
+
+def test_fixed_vocal_v2_duration_repair_accepts_matching_nested_duration_only(
+    tmp_path,
+    monkeypatch,
+):
+    rearm = importlib.import_module("scripts.recover_subdub_fixed_vocal_v2")
+    db_path, _job = _seed_fixed_vocal_v1_terminal(tmp_path, monkeypatch)
+    monkeypatch.setattr(rearm.app, "db_connect", lambda: sqlite3.connect(db_path))
+    monkeypatch.setattr(rearm.app, "ENGINE_ASYNC_MEMORY_JOBS", {})
+    monkeypatch.setattr(rearm.app, "SUBTITLE_DUB_PIPELINE_JOBS", {})
+    first = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+    failed = {
+        **first["job"],
+        "status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "lifecycle_state": "failed_no_charge",
+        "current_stage": "failed_no_charge",
+        "progress_stage": "failed_no_charge",
+        "last_error_stage": "AUTO_CAST_MANUAL_REQUIRED",
+        "multi_diarization_attempted": True,
+        "multi_diarization_provider": "gemini_transcribe_multi_diarization",
+        "multi_diarization_status": "PASS",
+        "multi_diarization_detail": "words=147; speakers=4",
+        "multi_diarization_http_status": 200,
+        "multi_diarization_provider_word_count": 147,
+        "multi_diarization_provider_speaker_count": 4,
+        "multi_diarization_mapped_speaker_count": 0,
+        "multi_diarization_raw_annotation_count": 151,
+        "multi_diarization_terminal_empty": False,
+        "multi_diarization_parse_rejection": "",
+        "multi_diarization_dropped_weak_word_count": 1,
+        "multi_diarization_dropped_weak_speaker_count": 1,
+        "multi_diarization_weak_label_filter_applied": True,
+        "input_save": {
+            **first["job"]["input_save"],
+            "source_duration_exact": 133.37542,
+            "duration": 134,
+        },
+    }
+    failed.pop("source_duration_exact", None)
+    failed.pop("input_duration", None)
+    _persist_fixed_vocal_job(db_path, failed)
+
+    repair = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+
+    assert repair["claimed"] is True
+    assert repair["job"]["auto_multi_fixed_vocal_v2_duration_repair_used"] is True
+
+
+def test_fixed_vocal_v2_duration_repair_rejects_root_nested_duration_conflict(
+    tmp_path,
+    monkeypatch,
+):
+    rearm = importlib.import_module("scripts.recover_subdub_fixed_vocal_v2")
+    db_path, _job = _seed_fixed_vocal_v1_terminal(tmp_path, monkeypatch)
+    monkeypatch.setattr(rearm.app, "db_connect", lambda: sqlite3.connect(db_path))
+    first = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+    failed = {
+        **first["job"],
+        "status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "last_error_stage": "AUTO_CAST_MANUAL_REQUIRED",
+        "source_duration_exact": 133.37542,
+        "input_duration": 134,
+        "multi_diarization_attempted": True,
+        "multi_diarization_provider": "gemini_transcribe_multi_diarization",
+        "multi_diarization_status": "PASS",
+        "multi_diarization_detail": "words=147; speakers=4",
+        "multi_diarization_http_status": 200,
+        "multi_diarization_provider_word_count": 147,
+        "multi_diarization_provider_speaker_count": 4,
+        "multi_diarization_mapped_speaker_count": 0,
+        "multi_diarization_raw_annotation_count": 151,
+        "multi_diarization_terminal_empty": False,
+        "multi_diarization_parse_rejection": "",
+        "multi_diarization_dropped_weak_word_count": 1,
+        "multi_diarization_dropped_weak_speaker_count": 1,
+        "multi_diarization_weak_label_filter_applied": True,
+        "input_save": {
+            **first["job"]["input_save"],
+            "source_duration_exact": 132.0,
+            "duration": 133,
+        },
+    }
+    _persist_fixed_vocal_job(db_path, failed)
+
+    repair = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+
+    assert repair["claimed"] is False
+    assert repair["reason"] == "fixed_vocal_v2_rearm_not_allowed"
 
 
 def test_fixed_vocal_v2_preflight_fails_before_database_access(monkeypatch):

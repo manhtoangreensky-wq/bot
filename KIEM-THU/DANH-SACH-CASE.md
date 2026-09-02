@@ -107,6 +107,7 @@ SHA-256 `83DE97B744B931E544B569E6E750F8415545F226461BD2E36CFB49225898AD3E`.
 | `SD-MS-L04` | Valid acoustic resume | Bundle acoustic đầy đủ, cùng source/timeline/model/algorithm được reuse với ASR call delta `0`; cue/voice/timing authority không đổi |
 | `SD-MS-L05` | Final same-job CAS | Chỉ internal `b4cb6d5fe8a7bdfce507`, exact SHA/English/40/150/no-output/no-charge; attempt `3/2 -> 4/3` đúng một winner; attempt `5`, duplicate và concurrent loser đều no-op |
 | `SD-MS-L06` | Consumed-v1 -> fixed-vocal-v2 rearm | Chính job đang `4/3`, backend/version v1, cả hai marker cũ true, pipeline pre-ASR/no-output/no-charge; exact v2 model/CPU preflight trước DB; thêm đúng một marker v2, giữ `4/3` và durable v1 đến inference; duplicate/mutation/concurrent loser no-op |
+| `SD-MS-L07` | Exact PCM duration + one duration repair | Live state phải khớp chính job `#B4CB6D5FE8`: source exact `133.37542s`, integer input `134`, v2 marker true, durable historical aggregate `147` words/`4` labels/`151` annotations, mapped `0`, pre-translation/TTS/mux/artifact/no-charge. Acoustic helper phải truyền PCM-frame duration; thêm đúng một duration marker, giữ `4/3`; mọi mutation/duplicate no-op |
 
 Mỗi MP4 phải đo SHA-256/bytes/duration/dimensions/codec và AAC loudness; job id
 hoặc HTTP 200 không được tính PASS. Sửa case tại file này trước khi tạo/sửa
@@ -148,6 +149,12 @@ Chỉ `scripts/recover_subdub_fixed_vocal_v2.py` sau exact deploy và fresh Owne
 authorization được CAS cùng job một lần. FAIL nếu attempt tăng, marker cũ bị xóa,
 backend/version đổi trước inference, ASR/TTS/artifact đã start, hoặc command cũ
 được gửi lại.
+
+Duration comparator: media/PCM duration là authority cho local fixed-vocal, không
+được dùng integer ASR duration khi chênh quá `0.25s`. Case live đo `134.0` so với
+`133.37542`, lệch `0.62458s`. Duration repair chỉ được mở sau v2 marker đã consumed
+và đúng toàn bộ aggregate `147/4/151`, mapped `0`, no-output/no-charge; sai bất kỳ
+field, downstream đã start, charged hoặc lần thứ hai phải FAIL trước CAS.
 
 Comparator UI bổ sung: `2` lane × `6` kiểu giọng (nữ mặc định, nam mặc định,
 Kho voice, voice riêng, Auto 2, Auto multi) phải cùng callback

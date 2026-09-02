@@ -998,3 +998,33 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
 - Source TDD hiện tại: initial RED `13 failed`; review RED `4 failed`; final
   focused GREEN `24 passed`; recovery `75 passed`; protected `331 passed`; full
   compile exit `0`; provider/production-DB/wallet action `0/0/0`.
+
+### Live fixed-vocal v2 và duration correction — 02/09/2026
+
+- PR `#976` merge `dd217036577e2627a9bfcf8ce1ed510ba6ebb233`; compile
+  guard `33615387847` SUCCESS `32s`; deploy `33615508521` SUCCESS `3m44s`.
+  VPS exact SHA, tracked diff `0`, bot/web/nginx active và health `ok`.
+- Owner-authorized invocation `2f1c9a37c0c349268be24ebc397b877f` CAS đúng cùng
+  job `#B4CB6D5FE8`, giữ attempt/correction `4/3`, rồi terminal
+  `failed_no_charge` lúc `17:26:02`. Fresh exact-acoustic path đã tới local
+  acoustic sau strict word-timeline; raw words không được persist. Durable job
+  vẫn giữ aggregate Gemini lịch sử `147` words / `4` provider labels / `151`
+  annotations. Fixed-vocal evidence, translation, TTS, mux, artifact và delivery
+  đều `0`; `charged_xu=0`.
+- Root đo được: media/PCM thật `133.37542s`, nhưng ASR success trả integer
+  duration `134s`. Fixed-vocal loader cho drift tối đa `0.25s`; lệch
+  `0.62458s` nên fail `fixed_vocal_duration_mismatch` sau UVR và trước ONNX
+  evidence. Đây là lỗi duration contract, không phải lỗi speaker count.
+- Correction local chỉ ở Auto Multi helper: duration truyền vào fixed-vocal
+  được đo từ số frame PCM stereo `44.1kHz`, không dùng integer ASR duration.
+  Duration behavior RED `1 failed in 6.68s`, GREEN `1 passed in 7.08s`;
+  duration-repair RED `1 failed in 16.86s`, GREEN `1 passed in 8.85s`;
+  `39` focused repair tests và `287` Auto Multi tests PASS. Protected batch có
+  `323 passed + 1` exact baseline byte-lock failure; clean detached baseline có
+  đúng failure đó trong `580.03s`, nên `NEW_FAILURES=0`.
+- Marker v2 đã consumed; correction thêm đúng một marker duration riêng chỉ cho
+  hậu trạng thái đo trên job này. Chưa deploy, chưa được chạy live. Phải có exact
+  correction SHA deploy và fresh Owner authorization trước lần continuation kế.
+- Full `py_compile` cho bot/worker/helper/runner/tests exit `0`; YAML/diff-check
+  exit `0`. Production delta chỉ helper Auto Multi + exact-job runner; không có
+  provider call, production DB mutation hoặc wallet mutation trong source TDD.

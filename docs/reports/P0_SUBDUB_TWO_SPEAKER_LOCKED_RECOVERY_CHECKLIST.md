@@ -1785,6 +1785,33 @@ Task contract:
   its exact runtime may Owner authorize running the new script once; old Telegram
   recovery command remains forbidden.
 
+### SPEC-11.8 — Correct exact PCM duration after measured v2 live failure
+
+- [x] PR `#976` squash merge `dd217036577e2627a9bfcf8ce1ed510ba6ebb233`;
+  compile guard `33615387847` SUCCESS `32s`; deploy `33615508521` SUCCESS
+  `3m44s`; VPS exact SHA/clean/services/health/model preflight PASS.
+- [x] Owner-authorized invocation `2f1c9a37c0c349268be24ebc397b877f` ran the
+  exact existing job once. Durable terminal is `failed_no_charge`; attempt
+  `4/3`, charged `0`, no artifact/delivery. Fresh strict word-timeline path
+  reached local acoustic; durable historical Gemini aggregate remained
+  `147` words / `4` labels / `151` annotations, while fixed-vocal/translation/
+  TTS/mux evidence remained `0`.
+- [x] Root is empirical: normalized PCM duration `133.37542s`; propagated ASR
+  duration `134.0s`; fixed-vocal tolerance `0.25s`; mismatch `0.62458s` caused
+  `fixed_vocal_duration_mismatch` after UVR, before ONNX speaker evidence.
+- [x] Behavior RED `1 failed in 6.68s` (`134.0` obtained vs `133.37542`
+  expected); helper now derives duration from stereo PCM frames; GREEN `1 passed
+  in 7.08s`. Duration-repair RED `1 failed in 16.86s`; GREEN `1 passed in
+  8.85s`; 11 mutation gates plus duplicate guard are fail-closed.
+- [x] Focused duration repair `39 passed`; Auto Multi combined `287 passed`;
+  provider fallback `50 passed + 1` baseline byte-lock failure. Clean detached
+  baseline reproduces the exact same failure in `580.03s`; `NEW_FAILURES=0`.
+- [x] Full bot/worker/helper/runner/test compile, YAML and diff-check exit `0`.
+  Production paths are limited to the Auto Multi helper and exact-job runner.
+- [-] Correction remains LOCAL-only. It needs one commit, exact PR/deploy
+  approval, then a fresh runtime-bound authorization
+  before the duration repair may continue the same job. No new job/old command.
+
 ### SPEC-11 acceptance
 
 - [B] Owner's later exact same-job order supersedes the old new-upload/standalone

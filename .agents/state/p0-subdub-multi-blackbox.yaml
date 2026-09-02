@@ -1372,4 +1372,40 @@ fixed_vocal_v2_rearm_source_20260902:
     wallet_mutations: 0
   current: source green; local commit pending; rearm not deployed; live not started
 
-current_next_action: finish final scope/hash/docs gates for fix/p0-subdub-fixed-vocal-v2-rearm and commit locally; request explicit Owner approval for that exact commit PR/deploy; after exact runtime request fresh authorization to run scripts/recover_subdub_fixed_vocal_v2.py once for same job B4CB6D5FE8 only; no upload, Confirm, old command, new job or wallet mutation; LIVE PASS only on MP4 then receipt with charged_xu 0
+fixed_vocal_v2_exact_duration_correction_20260902:
+  deployed_runtime:
+    pr: 976
+    merge_sha: dd217036577e2627a9bfcf8ce1ed510ba6ebb233
+    compile_guard: 33615387847 SUCCESS in 32s
+    deploy_run: 33615508521 SUCCESS in 3m44s
+  live_invocation:
+    id: 2f1c9a37c0c349268be24ebc397b877f
+    terminal: failed_no_charge at 17:26:02 +07
+    job: B4CB6D5FE8; attempts 4/3; charged_xu 0
+    upstream: fresh strict word timeline reached local acoustic; raw words not persisted
+    historical_durable_aggregate: Gemini PASS; 147 words; 4 provider labels; 151 raw annotations; mapped 0
+    downstream: acoustic translation TTS mux artifact delivery all absent
+  root:
+    pcm_duration_seconds: 133.37542
+    integer_asr_duration_seconds: 134.0
+    mismatch_seconds: 0.62458
+    allowed_mismatch_seconds: 0.25
+    failure: fixed_vocal_duration_mismatch after UVR before ONNX evidence
+  correction:
+    behavior: Auto Multi helper derives duration from stereo 44.1kHz PCM frames
+    rearm: one exact duration-repair marker; v2 and historical markers preserved; attempts remain 4/3
+    exact_two_changed: false
+  tdd:
+    duration_red: 1 failed in 6.68s; obtained 134.0 expected 133.37542
+    duration_green: 1 passed in 7.08s
+    repair_red: 1 failed in 16.86s; claimed false
+    repair_green: 1 passed in 8.85s
+    repair_mutations: 39 passed total fixed-vocal-v2 selectors
+    auto_multi: 287 passed
+    protected: 50 passed plus 1 exact baseline byte-lock failure
+    baseline: same byte-lock failure in 580.03s; NEW_FAILURES 0
+    full_compile: exit 0; no output
+    yaml_diff: exit 0
+  current: local source green; correction not committed, pushed, deployed or live-authorized
+
+current_next_action: finish compile/YAML/diff/scope/secret gates and commit local exact-duration correction; wait shared release and Owner approval for exact commit PR/squash/deploy; after exact runtime request fresh authorization for one same-job duration repair only; no upload, Confirm, old command, new job or wallet mutation; LIVE PASS only on MP4 then receipt with charged_xu 0
