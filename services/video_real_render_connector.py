@@ -4300,7 +4300,50 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         ):
             if key not in model_context and source.get(key) not in (None, "", [], {}):
                 model_context[key] = source.get(key)
-    if not model_context.get("selected_model"):
+    if scene_fallback_allowed and fallback_provider_candidate == "key4u_video":
+        model_resolution = resolve_product_video_model(
+            tier=_meta_value("tier", "tier_key", "package_xu", "quality_tier") or "basic",
+            provider_chain=[fallback_provider_candidate],
+            scene_count=_scene_count(job),
+            required_capability=required_capability,
+            requires_concat=orchestration_mode == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S,
+        )
+        if (
+            not model_resolution.get("ok")
+            or model_resolution.get("selected_provider") != fallback_provider_candidate
+        ):
+            blocker = str(
+                model_resolution.get("blocker")
+                or model_resolution.get("contract_block_reason")
+                or "key4u_model_contract_missing_no_charge"
+            )
+            raise RealVideoRenderError(
+                blocker,
+                diagnostics={
+                    "ok": False,
+                    "scene_index": scene_index,
+                    "scene_id": scene_index,
+                    "request_job_id": request_job_id,
+                    "provider": fallback_provider_candidate,
+                    "selected_provider": str(
+                        model_resolution.get("selected_provider") or ""
+                    ),
+                    "provider_error": blocker,
+                    "blocker": blocker,
+                    "model_routing_ok": False,
+                    "model_routing_blocker": blocker,
+                    "contract_validation_status": str(
+                        model_resolution.get("contract_validation_status")
+                        or "blocked"
+                    ),
+                    "provider_submit_called": False,
+                    "provider_http_request_sent": False,
+                    "provider_submit_allowed": False,
+                    "no_charge": True,
+                },
+            )
+        model_context = model_metadata_from_resolution(model_resolution)
+    elif not model_context.get("selected_model"):
         model_resolution = resolve_product_video_model(
             tier=_meta_value("tier", "tier_key", "package_xu", "quality_tier") or "basic",
             provider_chain=provider_order,

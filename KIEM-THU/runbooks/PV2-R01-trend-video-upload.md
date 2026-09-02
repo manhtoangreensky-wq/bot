@@ -1150,3 +1150,52 @@ wrong attempts all fail before backup. Its script/test SHA are `F62AEF1F...` and
 only exact V3 selects Key4U, so ShopAIKey cannot be resubmitted. Production remains
 untouched until this source is deployed and the exact-runtime snapshot rehearsal
 passes.
+
+## V3 Key4U model-authority correction
+
+PR #980 was squash-merged/runtime-synced as
+`54309814910e469a763bccd511c209bbebe697e5`; compile run `33652913080` and deploy
+run `33653080637` both succeeded, with deploy duration `3m25s`. A fresh strict
+recovery at current attempts `42` and outbox attempts `3` made exactly one new
+scene-1 Key4U submit. The official host/path accepted the request far enough to
+return a structured HTTP `404` `model_not_found` for wire model `veo3.1-fast`.
+There was no provider task, V3 receipt, clip, concat, artifact or delivery; V3 stayed
+genuinely `0/2`, V2 stayed immutable, and provider usage, transactions and charged
+Xu stayed `0`.
+
+That result supersedes only the prior wire-alias assumption above. The claimed
+fallback scene retained ShopAIKey-oriented `selected_model`, payload adapter and
+provider model/default maps. `_render_scene_async` therefore skipped the existing
+tier resolver and the Key4U adapter fell through to the worker ENV model. The
+minimal correction invokes the existing resolver only when the validated fallback
+candidate is exactly `key4u_video`, with current tier/capability/concat requirements.
+It overlays only that scene's model metadata (`veo_3_1-fast`, duration `8`, resolution
+`1080p`) and preserves the resolved model on the unified wire. Resolver failure or
+provider mismatch raises an exact no-charge blocker before any HTTP call. All
+non-fallback scenes/providers, custom proxies, existing-task polling, authorization,
+pricing, wallet and Tail code remain unchanged.
+
+Production-shaped authority RED was `1 failed in 8.94s`; fail-closed mutation RED
+was `1 failed in 12.84s`; diagnostics RED was `1 failed in 6.56s`. Exact GREEN is
+`2 passed in 6.90s`; focused job28/Key4U/fallback is `89 passed in 11.76s`. The broad
+branch is `182 passed, 12 failed in 29.76s`; an isolated clean `5430981` snapshot is
+`181 passed,` the exact same `12` failures in `644.54s`, so `NEW_FAILURES=0` and the
+extra branch case is the new passing guard. Strategy branch and clean each have
+`8 passed` plus the same PV2-R03 fixture SHA failure. Full compile for bot, both
+workers and changed files exits `0`; diff-check exits `0`; source tests made `0`
+provider calls and `0` wallet mutations.
+
+Read-only VPS preflight confirms `toanaas-bot.service` loads
+`/etc/toanaas/bot.env`, while `toanaas-worker-owner-product-video.service` loads the
+readable `/etc/toanaas-worker.env`. The Key4U auth, enable, submit-route and model
+variable names are all present. No secret value was printed or changed and no
+service was mutated. The next recovery must use a new exact attempts-`42`/outbox-`3`
+snapshot-first CAS; the attempts-`41` script is stale and must not be replayed.
+
+The correction rebased cleanly onto SubDub PR #981/runtime
+`09a06aef40b1c21cc5ab4197c3da18f697e0fbba`. On that base, focused Product Video
+authority is `89 passed in 542.89s`; an isolated clean-main snapshot is `88 passed
+in 543.86s`, with the extra branch case being the new passing fail-closed guard.
+The broad branch remains `182 passed` plus the exact same `12` baseline failures in
+`23.59s`; full bot/workers/changed-file compile and diff-check exit `0`.
+`NEW_FAILURES=0` after integration.

@@ -372,6 +372,23 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     `167 passed, exact 25 baseline failures, 1 skipped`, `NEW_FAILURES=0`. New strict
     attempts-41/outbox-2 CAS rehearsal passes and rejects replay, bad V3, wrong HTTP
     and wrong attempt counters before backup; production is untouched.
+  - [-] PR #980/runtime `543098149...`, deploy `33653080637` SUCCESS `3m25s`.
+    Current attempts-42/outbox-3 bounded rerun reached Key4U but returned HTTP 404
+    `model_not_found` for `/v1/video/create` model `veo3.1-fast`; V3 stayed `0/2`,
+    task/receipt/artifact/delivery and provider/finance side effects stayed `0`.
+  - [x] Exact root is model authority, not missing VPS credentials: the claimed
+    fallback scene inherited ShopAIKey metadata and skipped the tier-400 Key4U
+    resolver. Only a validated Key4U fallback now re-resolves to catalog model
+    `veo_3_1-fast` with `8s/1080p`, preserves that model on the wire, and fails
+    closed before HTTP if resolution is invalid. Focused `89 passed`; broad branch
+    `182 passed + 12` exact baseline failures versus clean `181 passed +` the same
+    `12`, `NEW_FAILURES=0`; compile/diff exit `0`. Read-only VPS preflight confirms
+    worker ENV contains the Key4U auth/enable/route/model namespaces; values and
+    services were not changed.
+  - [x] Rebased cleanly onto SubDub PR #981/runtime `09a06aef...`. Post-rebase
+    focused branch `89 passed` versus clean main `88 passed` (only the new passing
+    guard); broad remains `182 passed +` the same `12` baseline IDs; full compile
+    and diff-check exit `0`. `NEW_FAILURES=0`.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 

@@ -1123,6 +1123,39 @@ starting the next.
   before backup. Script/test SHA are `F62AEF1F...` / `042EC460...`; provider/wallet
   calls `0/0`. It resets scene primary authority to ShopAIKey only so exact V3 can
   select Key4U; it never permits ShopAIKey resubmit. Production remains untouched.
+- [x] PR #980 squash/runtime is
+  `54309814910e469a763bccd511c209bbebe697e5`; compile `33652913080` and deploy
+  `33653080637` succeeded (`3m25s`). Bot and Owner worker matched that exact SHA;
+  bot/web/nginx were active and the bounded Owner worker was stopped inactive.
+- [-] Fresh attempts-`42`/outbox-`3` recovery crossed the same-job claim and made
+  exactly one scene-1 Key4U submit. `/v1/video/create` returned HTTP `404` with safe
+  classification `model_not_found` for wire model `veo3.1-fast`; no task, receipt,
+  clip, concat, delivery, provider-usage row, transaction or Xu charge was created.
+  V2 remains immutable and consumed; V3 remains genuinely `0/2`.
+- [x] Production-shaped tracing proved the claimed scene still contained ShopAIKey
+  model/default metadata. Because `selected_model` was already populated, the render
+  connector skipped the existing tier-400 Key4U resolver and fell through to the
+  worker ENV model. The bounded correction re-resolves only a validated Key4U
+  fallback scene, overlays its existing catalog authority (`veo_3_1-fast`, `8s`,
+  `1080p`) and removes only the outbound underscore-to-dot rewrite. Other providers,
+  non-fallback scenes, V2/V3 authorization, price, wallet and Tail remain unchanged.
+- [x] Authority RED `1 failed in 8.94s`; fail-closed mutation RED `1 failed in
+  12.84s`; diagnostic RED `1 failed in 6.56s`; exact GREEN `2 passed in 6.90s`;
+  focused job28/Key4U/fallback `89 passed in 11.76s`. Broad branch is `182 passed`
+  plus exact `12` baseline failures; clean `5430981` is `181 passed` plus the same
+  `12` IDs, so `NEW_FAILURES=0`. Strategy branch/clean each retain only the exact
+  PV2-R03 fixture SHA failure (`8 passed`); full bot/worker/source/test compile and
+  diff-check exit `0`. Source verification made provider/wallet calls `0/0`.
+- [x] Read-only VPS ENV-path preflight: bot loads `/etc/toanaas/bot.env`; Owner
+  Product Video worker loads readable `/etc/toanaas-worker.env`; Key4U auth, enable,
+  submit-route and model variable names are present. No secret value was read and no
+  ENV/service mutation occurred, so this live RED is not a Railway-to-VPS key gap.
+- [x] Rebased cleanly onto SubDub PR #981 runtime
+  `09a06aef40b1c21cc5ab4197c3da18f697e0fbba`. Post-rebase focused is branch
+  `89 passed in 542.89s` versus clean main `88 passed in 543.86s`; the one extra
+  branch case is the passing fail-closed guard. Broad remains `182 passed` plus the
+  exact same `12` baseline failures; full bot/workers/changed-file compile and
+  diff-check exit `0`, so `NEW_FAILURES=0` after integration.
 - [ ] Two distinct scene clips and one final MP4 terminal; otherwise stop at the
   exact new RED and reopen only `SPEC-04H`.
 

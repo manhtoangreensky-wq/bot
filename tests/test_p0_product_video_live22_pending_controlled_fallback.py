@@ -14,6 +14,23 @@ from services import video_real_render_connector as connector
 from services import video_project_queue as queue
 
 
+def _configure_key4u_veo_contract(monkeypatch) -> None:
+    for key, value in {
+        "KEY4U_VIDEO_ENABLED": "1",
+        "KEY4U_VIDEO_SUBMIT_URL": "https://api.key4u.vn/v1/video/create",
+        "KEY4U_VIDEO_POLL_URL": (
+            "https://api.key4u.vn/v1/video/query?id={task_id}"
+        ),
+        "KEY4U_VIDEO_AUTH_HEADER_NAME": "Authorization",
+        "KEY4U_VIDEO_AUTH_HEADER_VALUE": "Bearer test-key",
+        "KEY4U_VIDEO_MODEL": "veo_3_1-fast",
+        "KEY4U_VIDEO_CAPABILITIES": (
+            "text_to_video,scene_video,multi_scene_video"
+        ),
+    }.items():
+        monkeypatch.setenv(key, value)
+
+
 def _confirmed_exact_quote_job(**overrides):
     job = {
         "id": 22,
@@ -164,6 +181,7 @@ def test_live22_started_at_text_drives_not_start_elapsed(monkeypatch):
 
 
 def test_live22_controlled_scene_fallback_uses_key4u_once(monkeypatch, tmp_path):
+    _configure_key4u_veo_contract(monkeypatch)
     monkeypatch.setenv("VIDEO_PROVIDER_NOT_START_STALL_SECONDS", "60")
     stalled_scene = {
         **_stalled_primary_scene(),
@@ -449,6 +467,7 @@ def test_live28_worker_payload_preserves_controlled_fallback_context(
     monkeypatch,
     tmp_path,
 ):
+    _configure_key4u_veo_contract(monkeypatch)
     fallback_key = connector.product_video_scene_fallback_idempotency_key(
         28,
         1,

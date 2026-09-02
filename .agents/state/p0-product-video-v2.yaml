@@ -1099,6 +1099,34 @@ pv2_r01_job28_v3_replacement_authority:
   key4u_404_recovery_cas: attempts 41; outbox 2; isolated rehearsal PASS; duplicate/invalid-V3/wrong-HTTP/wrong-attempts fail closed before backup; provider/wallet 0/0
   key4u_404_recovery_cas_hashes: script F62AEF1FB6A2ACC21FACCA75F2ABB367981C2DA729DEFCCA8A117B3F70509C04; test 042EC4605E920BDE9B7BEFAA540A45122262FA590E107E73EB8C2424857E2D4A
   live_pass: false
+pv2_r01_job28_key4u_model_authority:
+  phase: SOURCE_READY_TO_SHIP
+  base_sha: 54309814910e469a763bccd511c209bbebe697e5
+  prior_pr_merge: PR 980 / 54309814910e469a763bccd511c209bbebe697e5
+  prior_compile_deploy: 33652913080 SUCCESS / 33653080637 SUCCESS in 3m25s
+  prior_runtime: bot and Owner worker exact 543098149; bot/web/nginx active; worker stopped inactive after one bounded run
+  production_identity: job 28; project 32; outbox 27; request VID-20260829-D78AA3
+  production_live_red: attempts 42; outbox attempts 3; terminal failed_no_charge; one scene1 Key4U POST HTTP 404; no task/receipt/artifact/delivery
+  provider_error: code model_not_found; type new_api_error; host api.key4u.vn; path /v1/video/create; wire model veo3.1-fast
+  authorization_finance: V2 immutable consumed; V3 genuinely 0/2; price 144/144/144; provider cap 212/212; owner charged 0
+  root_cause: controlled fallback inherited ShopAIKey selected_model metadata, skipped Key4U tier-400 resolver and fell through to worker ENV model veo3.1-fast
+  correction_scope: exact validated Key4U fallback scene re-resolves tier authority; model veo_3_1-fast and defaults duration 8/resolution 1080p; unified wire preserves resolved model; all other scenes/providers unchanged
+  fail_closed: unresolved or mismatched Key4U model contract stops before HTTP with provider_error/blocker and no_charge
+  red: production-shaped authority 1 failed in 8.94s; fail-closed mutation 1 failed in 12.84s; diagnostic fields 1 failed in 6.56s
+  exact_green: model authority plus fail-closed 2 passed in 6.90s
+  focused_green: 89 passed in 11.76s
+  broad_branch: 182 passed and exact 12 baseline failures in 29.76s
+  broad_clean_main: 181 passed and exact same 12 failures in 644.54s; NEW_FAILURES=0
+  strategy_branch_baseline: both 8 passed and exact same PV2-R03 fixture SHA failure
+  full_compile: bot.py local_worker.py remote_worker.py changed source/tests exit 0
+  post_rebase_base: 09a06aef40b1c21cc5ab4197c3da18f697e0fbba
+  post_rebase_focused: branch 89 passed in 542.89s; clean main 88 passed in 543.86s; extra branch case is the new passing fail-closed guard
+  post_rebase_broad: 182 passed plus exact same 12 baseline failures in 23.59s; NEW_FAILURES=0
+  post_rebase_compile_diff: full bot/workers/changed files exit 0; diff-check exit 0
+  vps_env_readonly: bot uses /etc/toanaas/bot.env; Owner worker uses readable /etc/toanaas-worker.env; Key4U auth/enable/route/model names all present; values not read or changed
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  live_pass: false
 spec_04i_subdub_auto_two_speaker_addon:
   phase: PENDING_AFTER_SPEC_04H_9
   compatible_media_only: true
@@ -1107,9 +1135,9 @@ spec_04i_subdub_auto_two_speaker_addon:
   representative_live_target: one unfinished media-compatible Product Video lane
   acceptance: male/female detection; translation; two-voice dub; final MP4; receipt/report; wallet delta 0
 next_action: >-
-  After SubDub releases shared resources, read the sanitized production Key4U
-  endpoint/model/error shape, rebase and ship only the unified Veo contract seam.
-  Verify bot plus worker runtime SHA, then use the same snapshot-first recovery CAS
-  for only 28/32/27. Preserve V2, V3 0/2, scene1 selection, price/cap and charged 0.
-  Start the Owner worker once; stop after two genuinely new Key4U calls or terminal
-  two-scene MP4. Open nothing else.
+  Push the post-rebase model-authority commit, create one PR, pass CI, squash merge
+  and deploy exact runtime. Build a fresh snapshot-first CAS for current exact
+  attempts 42/outbox attempts 3;
+  do not reuse the stale attempts-41 script. Preserve V2, genuine V3 0/2, scene1
+  selection, price/cap 144/212 and charged 0. Start the Owner worker once; stop after
+  two genuinely new Key4U calls or terminal two-scene MP4. Open nothing else.
