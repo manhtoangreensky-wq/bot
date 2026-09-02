@@ -93,6 +93,28 @@ PRODUCT_VIDEO_PREMATURE_DISPATCH_FAILURE_REASONS = frozenset(
         "dispatch_not_started_dispatch_outbox_ack_conflict",
     }
 )
+PRODUCT_VIDEO_TASKLESS_V3_TRANSIENT_WORKER_BLOCK_REASONS = frozenset(
+    {
+        "worker_disconnected",
+        "worker_heartbeat_stale",
+        "worker_lease_expired",
+    }
+)
+PRODUCT_VIDEO_TASKLESS_V3_WORKER_WAIT_REASONS = (
+    PRODUCT_VIDEO_TASKLESS_V3_TRANSIENT_WORKER_BLOCK_REASONS
+    | {"worker_poll_existing_task_read_only", "v3_taskless_replacement_only"}
+)
+PRODUCT_VIDEO_TASKLESS_V3_WATCHDOG_WAIT_AUTHORIZATION_ID = (
+    "pv2-r01-job28-key4u-replacements-v3"
+)
+PRODUCT_VIDEO_TASKLESS_V3_WATCHDOG_WAIT_IDENTITY = (
+    28,
+    32,
+    27,
+    "VID-20260829-D78AA3",
+)
+PRODUCT_VIDEO_TASKLESS_V3_WATCHDOG_WAIT_PRICE_XU = 144
+PRODUCT_VIDEO_TASKLESS_V3_WATCHDOG_WAIT_PROVIDER_CAP_XU = 212
 
 _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE: dict[str, Any] = {
     "watchdog_enabled": True,
@@ -5637,6 +5659,154 @@ def product_video_failed_no_charge_terminal_payload(
     }
 
 
+def _product_video_taskless_v3_worker_wait_state(
+    job: dict[str, Any],
+    result: dict[str, Any],
+    project: dict[str, Any],
+    outbox: dict[str, Any],
+    eligibility: dict[str, Any],
+) -> dict[str, Any]:
+    """Keep an untouched V3 replacement queued while its worker is offline."""
+    worker_reason = str(
+        eligibility.get("worker_admission_block_reason") or ""
+    ).strip()
+    block_reasons = {
+        str(eligibility.get(key) or "").strip()
+        for key in (
+            "worker_admission_block_reason",
+            "admission_block_reason",
+            "provider_submit_block_reason",
+            "provider_submit_block_reason_at_candidate_resolver",
+            "reconciliation_reason",
+            "router_skip_reason",
+        )
+        if str(eligibility.get(key) or "").strip()
+    }
+    transient_worker_block = bool(
+        worker_reason in PRODUCT_VIDEO_TASKLESS_V3_TRANSIENT_WORKER_BLOCK_REASONS
+        and block_reasons.issubset(PRODUCT_VIDEO_TASKLESS_V3_WORKER_WAIT_REASONS)
+    )
+    selected_scene = _as_int(result.get("fallback_scene_index"), 0)
+    try:
+        # Lazy import keeps the provider-free queue module free of import cycles.
+        from services import video_provider_router
+
+        authority = video_provider_router.product_video_controlled_replacement_authorization_context(
+            {**job, **result},
+            scene_index=selected_scene,
+        )
+    except Exception:
+        authority = {}
+
+    all_receipts = result.get(
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    )
+    all_receipts = dict(all_receipts) if isinstance(all_receipts, dict) else {}
+    active_receipts = all_receipts.get(str(authority.get("authorization_id") or ""))
+    untouched_authority = bool(
+        isinstance(active_receipts, dict)
+        and not active_receipts
+        and _as_int(authority.get("authorization_version"), 0) >= 3
+        and authority.get("allowed_scene_indexes") == [1, 2]
+        and _as_int(authority.get("per_scene_call_cap"), 0) == 1
+        and _as_int(authority.get("global_call_cap"), 0) == 2
+        and _as_int(authority.get("calls_consumed"), -1) == 0
+        and _as_int(authority.get("calls_remaining"), -1) == 2
+        and _as_int(result.get("replacement_calls_consumed"), -1) == 0
+        and _as_int(result.get("replacement_calls_remaining"), -1) == 2
+    )
+
+    job_id = _as_int(job.get("id") or job.get("job_id"), 0)
+    project_id = _as_int(project.get("project_id") or job.get("project_id"), 0)
+    outbox_id = _as_int(outbox.get("outbox_id"), 0)
+    db_identity = (job_id, project_id, outbox_id)
+    request_id = str(result.get("request_id") or "").strip()
+    identity_valid = bool(
+        all(db_identity)
+        and db_identity
+        == (
+            _as_int(result.get("job_id") or result.get("id"), 0),
+            _as_int(result.get("project_id"), 0),
+            _as_int(
+                result.get("outbox_id") or result.get("dispatch_outbox_id"), 0
+            ),
+        )
+        and _as_int(job.get("project_id"), 0) == project_id
+        and _as_int(project.get("job_id"), 0) == job_id
+        and _as_int(outbox.get("job_id"), 0) == job_id
+        and _as_int(outbox.get("project_id"), 0) == project_id
+    )
+
+    invoice = _json_loads(str(project.get("invoice_json") or ""), {})
+    invoice = dict(invoice) if isinstance(invoice, dict) else {}
+    customer_price = _as_int(result.get("customer_charge_planned_xu"), 0)
+    finance_valid = bool(
+        customer_price > 0
+        and _as_int(result.get("user_visible_price_xu"), -1)
+        == _as_int(result.get("persisted_quoted_price_xu"), -2)
+        == customer_price
+        == _as_int(invoice.get("total_xu") or invoice.get("total"), -3)
+        == _as_int(project.get("total_xu_estimated"), -4)
+        and _as_int(result.get("provider_budget_xu"), -1)
+        == _as_int(result.get("fallback_provider_cost_xu"), -2)
+        > 0
+    )
+    exact_scope = bool(
+        str(authority.get("authorization_id") or "")
+        == PRODUCT_VIDEO_TASKLESS_V3_WATCHDOG_WAIT_AUTHORIZATION_ID
+        and (*db_identity, request_id)
+        == PRODUCT_VIDEO_TASKLESS_V3_WATCHDOG_WAIT_IDENTITY
+        and customer_price == PRODUCT_VIDEO_TASKLESS_V3_WATCHDOG_WAIT_PRICE_XU
+        and _as_int(result.get("provider_budget_xu"), 0)
+        == PRODUCT_VIDEO_TASKLESS_V3_WATCHDOG_WAIT_PROVIDER_CAP_XU
+    )
+
+    scene_rows = [
+        dict(item)
+        for item in result.get("scene_tasks") or []
+        if isinstance(item, dict)
+    ]
+    selected_rows = [
+        item for item in scene_rows if item.get("controlled_fallback_allowed") is True
+    ]
+    selected_row = selected_rows[0] if len(selected_rows) == 1 else {}
+    selected_scene_valid = bool(
+        authority.get("valid") is True
+        and authority.get("scene_authorized") is True
+        and selected_scene == _product_video_scene_task_index(selected_row)
+        and not _product_video_scene_task_identity(selected_row)
+        and selected_row.get("task_id_present") is False
+        and str(selected_row.get("fallback_provider_candidate") or "")
+        == "key4u_video"
+        and list(selected_row.get("fallback_provider_order") or [])
+        == ["key4u_video"]
+        and result.get("controlled_fallback_allowed") is True
+        and str(result.get("fallback_provider_candidate") or "")
+        == "key4u_video"
+    )
+    valid = bool(
+        transient_worker_block
+        and exact_scope
+        and identity_valid
+        and finance_valid
+        and untouched_authority
+        and selected_scene_valid
+    )
+    return {
+        "taskless_v3_authority_waiting_for_worker": valid,
+        "taskless_v3_worker_wait_reason": worker_reason if valid else "",
+        "taskless_v3_selected_scene_index": selected_scene if valid else 0,
+        "taskless_v3_worker_wait_contract_checks": {
+            "transient_worker_block": transient_worker_block,
+            "exact_scope": exact_scope,
+            "identity_valid": identity_valid,
+            "finance_valid": finance_valid,
+            "untouched_authority": untouched_authority,
+            "selected_scene_valid": selected_scene_valid,
+        },
+    }
+
+
 def sweep_product_video_zero_task_watchdog(
     conn: sqlite3.Connection,
     *,
@@ -5841,8 +6011,18 @@ def sweep_product_video_zero_task_watchdog(
                 and bool(outbox.get("last_attempt_at"))
             )
         )
+        taskless_v3_worker_wait = _product_video_taskless_v3_worker_wait_state(
+            job,
+            result,
+            project,
+            outbox,
+            eligibility,
+        )
         explicit_admission_block = bool(
             eligibility and eligibility.get("ok") is False
+            and not taskless_v3_worker_wait.get(
+                "taskless_v3_authority_waiting_for_worker"
+            )
         )
         if (
             not candidates
@@ -5868,6 +6048,7 @@ def sweep_product_video_zero_task_watchdog(
                 {
                     **watchdog,
                     **worker_scan,
+                    **taskless_v3_worker_wait,
                     "status": "queued",
                     "canonical_status": "queued_waiting_for_dispatch",
                     "terminal_state": "",

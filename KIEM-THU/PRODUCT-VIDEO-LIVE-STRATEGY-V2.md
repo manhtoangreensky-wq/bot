@@ -309,6 +309,29 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     legacy remain task-required. Two-scene mock proves ordered distinct-key calls,
     V2 immutable, V3 `2/2`, pending IDs empty and charged Xu `0`. Ship then reset
     DB/manifest task aliases before the next live resume.
+  - [-] PR #973/runtime `ab267bed...` and deploy `33588541923` are terminal SUCCESS.
+    Taskless DB/manifest reset passed with backup SHA `9739d756...`; V2 stayed
+    immutable and V3 stayed `0/2`. Before worker claim, the zero-task watchdog
+    misclassified the intentionally stale worker heartbeat/read-only recovery source
+    as a permanent admission failure and terminalized job 28 with no side effect.
+  - [x] Exact watchdog RED `1 failed, 1 passed in 528.98s`; strict-scope RED
+    `3 failed in 7.77s`; final boundary GREEN `7 passed`; job28 `40 passed`;
+    protected watchdog/outbox `85 passed`; combined
+    `220 passed, 2 failed in 50.98s`; clean `ab267bed` reproduced the exact same two
+    IDs in `547.25s`,
+    `NEW_FAILURES=0`. The minimal gate waits only for exact untouched V3 authority
+    ID, `28/32/27/request`, price `144` and cap `212` during worker disconnected/
+    stale/lease-expired; every scope mismatch and permanent blocker stays fail-closed.
+    Snapshot-first recovery CAS rehearsal PASS with duplicate/invalid-V3 rejection,
+    provider/wallet `0/0`. Ship/deploy, recover only existing `28/32/27`, start worker
+    once and stop at two V3 calls or terminal two-scene MP4.
+  - [x] Final full compile and YAML/diff/secret/scope gates exit `0`. Strategy gate
+    is `8 passed` plus the exact pre-existing PV2-R03 fixture SHA failure; no file in
+    that product/spec changed.
+  - [x] Rebased cleanly onto SubDub PR #974 main/runtime `c8e954a...`. Post-rebase
+    branch is `220 passed, 2 failed in 924.92s`; clean exact main has the same two
+    IDs in `856.69s`, `NEW_FAILURES=0`. Full compile, Strategy/YAML/diff/secret and
+    forbidden-scope gates retain the exact pre-rebase result.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 

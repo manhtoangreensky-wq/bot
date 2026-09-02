@@ -4,6 +4,7 @@ import copy
 import asyncio
 import json
 import sqlite3
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -263,6 +264,120 @@ def _taskless_v3_job28_payload() -> dict:
         }
     )
     return payload
+
+
+def _taskless_v3_job28_watchdog_db(
+    *,
+    include_v3_authority: bool = True,
+) -> tuple[sqlite3.Connection, datetime]:
+    now = datetime(2030, 1, 2, 3, 4, 5)
+    stale = video_project_queue.now_text(now - timedelta(minutes=10))
+    payload = _taskless_v3_job28_payload()
+    payload.update(
+        {
+            "scene_count": 2,
+            "runtime_candidate_keys": ["key4u_video"],
+            "preconfirm_candidate_keys": ["key4u_video"],
+            "final_eligible_provider_count": 1,
+            "provider_elapsed_seconds": 600,
+            "provider_submit_called": False,
+            "provider_http_request_sent": False,
+            "provider_attempts": [],
+            "status": "queued",
+            "terminal_state": "",
+            "final_decision": "retry_dispatch",
+            "continue_polling": True,
+            "fallback_scene_index": 1,
+            "fallback_allowed": True,
+            "controlled_fallback_allowed": True,
+            "fallback_provider_candidate": "key4u_video",
+            "fallback_provider_order": ["key4u_video"],
+            "replacement_authorization_id": V3_AUTHORIZATION_ID,
+            "replacement_authorization_version": 3,
+            "replacement_calls_consumed": 0,
+            "replacement_calls_remaining": 2,
+        }
+    )
+    for item in payload["scene_tasks"]:
+        selected = int(item.get("scene_index") or 0) == 1
+        item.update(
+            {
+                "fallback_scene_index": 1 if selected else 0,
+                "fallback_allowed": selected,
+                "controlled_fallback_allowed": selected,
+                "fallback_provider_candidate": "key4u_video" if selected else "",
+                "fallback_provider_order": ["key4u_video"] if selected else [],
+            }
+        )
+    payload["provider_scene_tasks"] = copy.deepcopy(payload["scene_tasks"])
+    if not include_v3_authority:
+        payload.pop("controlled_fallback_replacement_authorization", None)
+        payload.pop(
+            "controlled_fallback_replacement_submit_receipts_by_authorization",
+            None,
+        )
+        payload.pop("replacement_authorization_id", None)
+        payload.pop("replacement_authorization_version", None)
+        payload.pop("replacement_calls_consumed", None)
+        payload.pop("replacement_calls_remaining", None)
+
+    asset_pack = {
+        "source": "product_video",
+        "render_mode": "real",
+        "provider_call": True,
+        "public_user": True,
+        "public_user_confirmed": True,
+        "product_type": "video_trend",
+        "scene_count": 2,
+    }
+    invoice = {
+        **asset_pack,
+        "subtotal_xu": 160,
+        "discount_xu": 16,
+        "total_xu": 144,
+    }
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    video_project_queue.ensure_video_project_queue_schema(conn)
+    conn.execute(
+        """INSERT INTO video_projects
+              (project_id,project_uuid,user_id,status,profile_id,topic,ratio,
+               asset_pack_json,invoice_json,total_xu_estimated,is_confirmed,job_id,
+               scene_count,video_terminal_state,created_at,updated_at,confirmed_at)
+            VALUES (32,'job28-v3-watchdog',28,'queued_for_worker','video_trend',
+                    'PV2-R01 taskless V3 watchdog','9:16',?,?,144,1,28,2,'',?,?,?)""",
+        (json.dumps(asset_pack), json.dumps(invoice), stale, stale, stale),
+    )
+    conn.execute(
+        """INSERT INTO video_jobs
+              (id,project_id,user_id,job_type,status,priority,attempts,max_attempts,
+               result_json,progress_percent,progress_message,created_at,updated_at)
+            VALUES (28,32,28,'video_render','queued',100,40,3,?,10,
+                    'queued_taskless_v3_replacements',?,?)""",
+        (json.dumps(payload), stale, stale),
+    )
+    conn.execute(
+        """INSERT INTO video_dispatch_outbox
+              (outbox_id,job_id,project_id,scene_indexes_json,owner,dispatch_status,
+               created_at,available_at,attempt_count,last_error,updated_at)
+            VALUES (27,28,32,'[1,2]','owner_product_video','pending',?,?,0,'',?)""",
+        (stale, video_project_queue.product_video_outbox_time_text(now), stale),
+    )
+    conn.execute(
+        """UPDATE video_dispatch_outbox
+              SET dispatch_status='acknowledged',attempt_count=1,last_attempt_at=?
+            WHERE outbox_id=27""",
+        (stale,),
+    )
+    for scene_index in (1, 2):
+        conn.execute(
+            """INSERT INTO video_scenes
+                  (project_id,scene_index,role,scene_status)
+                VALUES (32,?,'product_video_scene','pending')""",
+            (scene_index,),
+        )
+    conn.commit()
+    return conn, now
 
 
 def _replacement_context(payload: dict, scene_index: int) -> dict:
@@ -1239,6 +1354,253 @@ def test_v3_taskless_authority_submits_new_key4u_without_polling_old_task(
         bool(item.get("controlled_fallback_allowed"))
         for item in claimed["scene_tasks"]
     ] == [False, True]
+
+
+def test_v3_taskless_watchdog_waits_for_fresh_worker_heartbeat() -> None:
+    conn, now = _taskless_v3_job28_watchdog_db()
+    try:
+        report = video_project_queue.sweep_product_video_zero_task_watchdog(
+            conn,
+            now=now,
+            job_id=28,
+            eligibility_evaluator=lambda *_args: {
+                "ok": False,
+                "eligible_provider_keys": [],
+                "runtime_candidate_keys": [],
+                "final_eligible_provider_count": 0,
+                "worker_admission_block_reason": "worker_heartbeat_stale",
+                "admission_block_reason": "worker_heartbeat_stale",
+                "provider_submit_block_reason": "worker_poll_existing_task_read_only",
+                "router_skip_reason": "worker_heartbeat_stale",
+            },
+        )
+        job = video_project_queue.get_video_render_job(conn, 28)
+        project = video_project_queue.get_video_project(conn, 32)
+        outbox = video_project_queue.get_product_video_dispatch_outbox(
+            conn, job_id=28
+        )
+        persisted = json.loads(job["result_json"])
+        namespaces = persisted[
+            "controlled_fallback_replacement_submit_receipts_by_authorization"
+        ]
+
+        assert report["terminal_failed"] == 0
+        assert job["status"] == "queued"
+        assert project["status"] == "queued_for_worker"
+        assert outbox["dispatch_status"] == "acknowledged"
+        assert persisted["zero_task_recovery_action"] == "await_due_claim_retry"
+        assert (
+            persisted["provider_submit_block_reason"]
+            == "worker_poll_existing_task_read_only"
+        )
+        assert persisted["continue_polling"] is True
+        assert persisted["terminal_state"] == ""
+        assert persisted["charged_xu"] == 0
+        assert namespaces[AUTHORIZATION_ID].keys() == {"1", "2"}
+        assert namespaces[V3_AUTHORIZATION_ID] == {}
+        assert persisted["replacement_calls_consumed"] == 0
+        assert persisted["replacement_calls_remaining"] == 2
+        assert [
+            row[0]
+            for row in conn.execute(
+                "SELECT scene_status FROM video_scenes WHERE project_id=32 ORDER BY scene_index"
+            ).fetchall()
+        ] == ["pending", "pending"]
+
+        resumed = video_project_queue.sweep_product_video_zero_task_watchdog(
+            conn,
+            now=now + timedelta(seconds=1),
+            job_id=28,
+            eligibility_evaluator=lambda *_args: {
+                "ok": True,
+                "eligible_provider_keys": ["key4u_video"],
+                "runtime_candidate_keys": ["key4u_video"],
+                "final_eligible_provider_count": 1,
+                "provider_submit_allowed": True,
+            },
+        )
+        resumed_job = video_project_queue.get_video_render_job(conn, 28)
+        resumed_outbox = video_project_queue.get_product_video_dispatch_outbox(
+            conn, job_id=28
+        )
+        resumed_payload = json.loads(resumed_job["result_json"])
+
+        assert resumed["terminal_failed"] == 0
+        assert resumed_job["status"] == "queued"
+        assert resumed_outbox["dispatch_status"] == "retry_wait"
+        assert resumed_payload["replacement_calls_consumed"] == 0
+        assert resumed_payload["replacement_calls_remaining"] == 2
+        assert resumed_payload[
+            "controlled_fallback_replacement_submit_receipts_by_authorization"
+        ] == namespaces
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize(
+    ("include_v3_authority", "worker_reason", "provider_reason"),
+    [
+        (False, "worker_heartbeat_stale", "worker_heartbeat_stale"),
+        (True, "worker_sha_mismatch", "worker_sha_mismatch"),
+        (True, "worker_heartbeat_stale", "provider_route_not_ready"),
+    ],
+)
+def test_taskless_watchdog_without_transient_valid_v3_still_fails_closed(
+    include_v3_authority: bool,
+    worker_reason: str,
+    provider_reason: str,
+) -> None:
+    conn, now = _taskless_v3_job28_watchdog_db(
+        include_v3_authority=include_v3_authority
+    )
+    try:
+        report = video_project_queue.sweep_product_video_zero_task_watchdog(
+            conn,
+            now=now,
+            job_id=28,
+            eligibility_evaluator=lambda *_args: {
+                "ok": False,
+                "eligible_provider_keys": [],
+                "runtime_candidate_keys": [],
+                "final_eligible_provider_count": 0,
+                "worker_admission_block_reason": worker_reason,
+                "admission_block_reason": worker_reason,
+                "provider_submit_block_reason": provider_reason,
+                "router_skip_reason": provider_reason,
+            },
+        )
+        job = video_project_queue.get_video_render_job(conn, 28)
+        project = video_project_queue.get_video_project(conn, 32)
+        outbox = video_project_queue.get_product_video_dispatch_outbox(
+            conn, job_id=28
+        )
+        persisted = json.loads(job["result_json"])
+
+        assert report["terminal_failed"] == 1
+        assert job["status"] == "failed"
+        assert project["status"] == "failed"
+        assert outbox["dispatch_status"] == "terminal_failed"
+        assert persisted["terminal_state"] == "failed_no_charge"
+        assert persisted["zero_task_terminal_reason"] == provider_reason
+        assert persisted["provider_http_request_sent"] is False
+        assert persisted["charged_xu"] == 0
+    finally:
+        conn.close()
+
+
+def test_taskless_watchdog_rejects_different_self_consistent_v3_authority() -> None:
+    conn, now = _taskless_v3_job28_watchdog_db()
+    try:
+        job = video_project_queue.get_video_render_job(conn, 28)
+        payload = json.loads(job["result_json"])
+        alternate_id = "different-job28-replacements-v3"
+        payload["controlled_fallback_replacement_authorization"][
+            "authorization_id"
+        ] = alternate_id
+        namespaces = payload[
+            "controlled_fallback_replacement_submit_receipts_by_authorization"
+        ]
+        namespaces[alternate_id] = namespaces.pop(V3_AUTHORIZATION_ID)
+        payload["replacement_authorization_id"] = alternate_id
+        conn.execute(
+            "UPDATE video_jobs SET result_json=? WHERE id=28",
+            (json.dumps(payload),),
+        )
+        conn.commit()
+
+        report = video_project_queue.sweep_product_video_zero_task_watchdog(
+            conn,
+            now=now,
+            job_id=28,
+            eligibility_evaluator=lambda *_args: {
+                "ok": False,
+                "eligible_provider_keys": [],
+                "runtime_candidate_keys": [],
+                "final_eligible_provider_count": 0,
+                "worker_admission_block_reason": "worker_heartbeat_stale",
+                "admission_block_reason": "worker_heartbeat_stale",
+                "provider_submit_block_reason": "worker_poll_existing_task_read_only",
+                "router_skip_reason": "worker_heartbeat_stale",
+            },
+        )
+        failed = video_project_queue.get_video_render_job(conn, 28)
+
+        assert report["terminal_failed"] == 1
+        assert failed["status"] == "failed"
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("mismatch", ["identity", "price"])
+def test_taskless_v3_worker_wait_is_scoped_to_exact_job28_contract(
+    mismatch: str,
+) -> None:
+    conn, _now = _taskless_v3_job28_watchdog_db()
+    try:
+        job = video_project_queue.get_video_render_job(conn, 28)
+        project = video_project_queue.get_video_project(conn, 32)
+        outbox = video_project_queue.get_product_video_dispatch_outbox(
+            conn, job_id=28
+        )
+        payload = json.loads(job["result_json"])
+    finally:
+        conn.close()
+
+    if mismatch == "identity":
+        job.update({"id": 29, "job_id": 29, "project_id": 33})
+        project.update({"project_id": 33, "job_id": 29})
+        outbox.update({"outbox_id": 28, "job_id": 29, "project_id": 33})
+        payload.update(
+            {
+                "id": 29,
+                "job_id": 29,
+                "project_id": 33,
+                "outbox_id": 28,
+                "request_id": "VID-OTHER-REQUEST",
+            }
+        )
+        payload["controlled_fallback_replacement_authorization"].update(
+            {
+                "job_id": 29,
+                "project_id": 33,
+                "outbox_id": 28,
+                "request_id": "VID-OTHER-REQUEST",
+            }
+        )
+    else:
+        project["total_xu_estimated"] = 145
+        project["invoice_json"] = json.dumps({"total_xu": 145})
+        for key in (
+            "user_visible_price_xu",
+            "persisted_quoted_price_xu",
+            "customer_charge_planned_xu",
+        ):
+            payload[key] = 145
+            payload["controlled_fallback_replacement_authorization"][key] = 145
+        payload["provider_budget_xu"] = 213
+        payload["fallback_provider_cost_xu"] = 213
+        payload["controlled_fallback_replacement_authorization"][
+            "provider_budget_xu"
+        ] = 213
+        payload["controlled_fallback_replacement_authorization"][
+            "fallback_provider_cost_xu"
+        ] = 213
+
+    state = video_project_queue._product_video_taskless_v3_worker_wait_state(
+        job,
+        payload,
+        project,
+        outbox,
+        {
+            "ok": False,
+            "worker_admission_block_reason": "worker_heartbeat_stale",
+            "admission_block_reason": "worker_heartbeat_stale",
+            "provider_submit_block_reason": "worker_poll_existing_task_read_only",
+            "router_skip_reason": "worker_heartbeat_stale",
+        },
+    )
+
+    assert state["taskless_v3_authority_waiting_for_worker"] is False
 
 
 def test_taskless_recovery_without_versioned_authority_still_fails_closed(

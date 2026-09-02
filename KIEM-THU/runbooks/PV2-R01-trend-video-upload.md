@@ -945,3 +945,67 @@ exactly `2/2` and charged Xu `0`. No live restart is allowed until this seam is
 deployed and both DB plus canonical manifest are reset to taskless V3 `0/2`.
 Final strategy verification returned `8 passed` plus the exact pre-existing PV2-R03
 fixture SHA failure; no PV2-R03 file is changed by this correction.
+
+## V3 taskless watchdog worker-wait boundary
+
+PR #973 squash/runtime is `ab267bedd4aa300bf2160be7b8d828009578127c`;
+deploy run `33588541923` completed SUCCESS in `4m2s`. Bot and inactive Owner worker
+matched exact SHA with tracked diff `0`. The combined SQLite + canonical-manifest
+taskless reset then passed. Its production backup is
+`/opt/toanaas/bot/delete/pv2-r01-job28-taskless-v3-reset-production-
+20260902T112112.json`, SHA `9739d756781ffbb213867f6484d38ff38513b96c4c5ba875cca50729acd4a06c`,
+mode `0600`. V2 receipt scenes `[1,2]` stayed immutable; V3 stayed `0/2`; scene 1
+alone was selected; DB and manifest task/artifact aliases were empty; wallet,
+transactions, provider usage and charged Xu were unchanged.
+
+The bot zero-task watchdog ran before the intentionally inactive Owner worker could
+publish a fresh heartbeat. Its eligibility recheck had no candidate and retained
+the read-only recovery source, so `ok=false` was treated as a permanent admission
+block. It terminalized existing job/project/outbox `28/32/27` before worker claim.
+No Key4U submit occurred, V3 remains genuinely unused `0/2`, the manifest remains
+taskless, and artifact/concat/delivery remain zero.
+
+The regression test uses the actual SQLite job/project/outbox boundary. RED was
+`1 failed, 1 passed, 33 deselected in 528.98s`: exact V3 was terminalized while the
+non-V3 inverse guard correctly failed closed. A second strict-scope RED was `3 failed,
+37 deselected in 7.77s`: a different self-consistent V3 ID, identity or price/cap
+could still inherit the wait branch. Final GREEN is `7 passed, 33 deselected in
+5.15s`; full job28 authority is `40 passed in 7.64s`; protected zero-task/outbox
+is `85 passed in 31.58s`. Combined branch coverage is `220 passed, 2 failed in
+50.98s`; clean `ab267bed` reproduces both exact IDs in `547.25s`, therefore
+`NEW_FAILURES=0`. Full `bot.py`, local worker, changed source/test compile and
+diff-check exit `0`.
+
+The correction does not reopen generic watchdog behavior. It waits only when the
+existing taskless scene has exact active authorization ID
+`pv2-r01-job28-key4u-replacements-v3`, identity
+`28/32/27/VID-20260829-D78AA3`, immutable receipt namespaces, V3 `0/2`, price `144`,
+cap `212`, zero charge, one selected Key4U scene, and the
+only live blocker is worker disconnected, stale heartbeat or expired lease. The
+historical `worker_poll_existing_task_read_only` marker may accompany that transient
+worker blocker. Missing/malformed/consumed authority, permanent SHA mismatch,
+capability mismatch, permanent provider-route block, finance mismatch or a selected-
+scene mismatch remains terminal fail-closed. Once deployed, use a new backup-safe
+CAS for the already-clean failed rows; do not replay the old task-hash reset script.
+Start the Owner worker once and stop after two genuinely new V3 calls or a terminal
+two-scene MP4.
+
+The new recovery command is separate from the consumed task-hash reset. It requires
+the already-clean manifest, exact failed watchdog state, attempts `40/1`, inactive
+worker and exact deployed bot/worker SHA. Local SQLite rehearsal changed only job,
+project, outbox and two scene statuses; preserved manifest SHA, V2, V3 `0/2`, prices,
+wallet/provider counts and charged Xu. A duplicate invocation and an invalid V3
+fixture both failed before mutation. Production execution remains pending exact
+deploy/runtime readback; rehearsal provider calls and wallet mutations were `0/0`.
+Final strict-scope full `bot.py`, local worker, queue and changed-test compile exit
+`0`; YAML, diff, secret and forbidden-scope gates are clean. Strategy V2 is `8
+passed` plus the exact pre-existing PV2-R03 fixture SHA failure; this correction
+changes no PV2-R03 file.
+
+After SubDub PR #974 deployed, this one Product Video commit rebased conflict-free
+onto exact main/runtime `c8e954a03322f4af8559cf3f6e99178dbd6bfe7a` with no
+overlapping file. Post-rebase combined job28/watchdog/outbox/restart coverage is
+`220 passed, 2 failed in 924.92s`; clean exact main reproduced the same two failure
+IDs in `856.69s`, therefore `NEW_FAILURES=0`. Full `bot.py`, local worker, queue and
+changed-test compile exit `0`; Strategy remains `8 passed` plus the exact PV2-R03
+fixture baseline, and YAML/diff/secret/forbidden-scope gates are clean.
