@@ -54,3 +54,23 @@ On base `ab267bedd4aa300bf2160be7b8d828009578127c`, the clean branch is
 The fixed-vocal exact-fixture call takes `139.76s`, below the `300s` production
 budget. Full compile, YAML, diff, protected hashes, and secret scan exit clean.
 Provider calls, database mutations, and wallet mutations are all zero.
+
+## Consumed-v1 same-job rearm boundary
+
+After PR `#974` deployed fixed-vocal v2 as `c8e954a03322f4af8559cf3f6e99178dbd6bfe7a`,
+the exact durable job still recorded `local_wespeaker_resnet34_spectral` /
+`wespeaker-resnet34-spectral-v1`; both earlier one-shot markers were already true.
+The v2 algorithm therefore had no legal execution edge despite being ready.
+
+`scripts/recover_subdub_fixed_vocal_v2.py` adds one distinct CAS marker for this
+version transition. It requires the exact job/source/Owner/English/40/150 state,
+attempt `4/3`, both historical markers, old backend/version, v2 model/CPU preflight,
+and explicit no-charge/no-output/pre-ASR boundaries. It does not increment attempt,
+clear old markers, rewrite old backend/version, send the old Telegram command, or
+create a job. Any mismatch, duplicate, or concurrent loser remains a no-op. Live
+execution still requires fresh Owner authorization after this script is deployed.
+
+Rearm verification: initial RED `13 failed`; review RED `4 failed`; final focused
+GREEN `24 passed`; full recovery `75 passed`; protected Auto Multi `331 passed`;
+full bot/worker/script/test compile exit `0`. Production/provider/wallet side
+effects during TDD remain zero.

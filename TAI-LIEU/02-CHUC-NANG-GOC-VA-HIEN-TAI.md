@@ -534,3 +534,16 @@ exact-SHA deploy; MP4/receipt của chính `#B4CB6D5FE8` vẫn là gate LIVE ch�
 Post-main evidence trên `ab267bed`: `57` recovery tests PASS, `307` focused/
 protected PASS, `4` real-resource PASS; fixed-vocal call `139.76s < 300s`.
 Production/live vẫn chưa PASS cho tới khi same job giao MP4 rồi receipt `0 Xu`.
+
+### Đối chiếu one-shot version upgrade sau PR #974
+
+| Giả định cũ | Hiện tại đo được | Trạng thái |
+|---|---|---|
+| Deploy algorithm v2 tự làm job v1 chạy lại được | Job vẫn có hai marker cũ đã consumed; runner cũ fail-closed trước pipeline | ❌ Không còn đúng |
+| Xóa/reset marker cũ là đủ | Marker cũ phải giữ làm audit; v2 có marker riêng và chỉ cùng attempt `4/3` | ❌ Bị cấm |
+| Có thể ghi v2 backend/version ngay lúc rearm | Giữ durable v1 cho tới khi inference v2 thật tạo evidence; tránh biến evidence dự kiến thành evidence đã chạy | ✅ Fail-closed |
+| Fresh authorization có thể dùng command cũ | Chỉ script v2 mới sau exact deploy, chạy một lần cho same job; command cũ vẫn forbidden | ❌ Không được reuse |
+
+Runtime read-only trên `c8e954a` chứng minh v2 model/CPU preflight PASS nhưng job
+vẫn v1 và pre-ASR, charged `0`. Source rearm GREEN `24/24`; recovery `75/75`;
+protected `331/331`; full compile exit `0`.
