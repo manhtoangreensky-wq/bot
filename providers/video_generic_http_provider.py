@@ -729,6 +729,23 @@ def _key4u_wire_payload(
         family == "google_veo"
         and urllib.parse.urlparse(
             str(submit_url or metadata.get("provider_submit_url_override") or "")
+        ).path.rstrip("/")
+        == "/v1/video/create"
+    ):
+        model = str(data.get("model") or "")
+        if model == "veo_3_1-fast":
+            model = "veo3.1-fast"
+        return {
+            "model": model,
+            "prompt": str(data.get("prompt") or "")[:4000],
+            "aspect_ratio": str(
+                data.get("aspect_ratio") or data.get("ratio") or "9:16"
+            ),
+        }
+    if (
+        family == "google_veo"
+        and urllib.parse.urlparse(
+            str(submit_url or metadata.get("provider_submit_url_override") or "")
         ).path.rstrip("/").endswith("/v1/videos/generations")
     ):
         return {
@@ -1185,6 +1202,25 @@ class GenericHttpVideoProvider:
             raise VideoProviderContractError("provider_payload_invalid_shape", stage="payload_build", message=str(exc)) from exc
         payload_metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
         submit_url = str(payload_metadata.get("provider_submit_url_override") or self._submit_url()).strip()
+        poll_url_override = str(
+            payload_metadata.get("provider_poll_url_override") or ""
+        ).strip()
+        parsed_submit_url = urllib.parse.urlsplit(submit_url)
+        if (
+            self.provider_name == "key4u_video"
+            and (parsed_submit_url.hostname or "").lower()
+            in {"api.key4u.vn", "api.key4u.shop"}
+            and parsed_submit_url.path.rstrip("/") == "/v1/video/create"
+        ):
+            poll_url_override = urllib.parse.urlunsplit(
+                (
+                    parsed_submit_url.scheme,
+                    parsed_submit_url.netloc,
+                    "/v1/video/query",
+                    "id={task_id}",
+                    "",
+                )
+            )
         if isinstance(payload.get("metadata"), dict):
             clean_metadata = dict(payload["metadata"])
             clean_metadata.pop("provider_submit_url_override", None)
@@ -1234,8 +1270,8 @@ class GenericHttpVideoProvider:
             "provider_interface": str(payload_metadata.get("provider_interface") or ""),
             "provider_endpoint_source": str(payload_metadata.get("provider_endpoint_source") or ""),
             "provider_submit_url_override_used": bool(payload_metadata.get("provider_submit_url_override")),
-            "provider_poll_url_override": str(payload_metadata.get("provider_poll_url_override") or ""),
-            "provider_poll_url_override_used": bool(payload_metadata.get("provider_poll_url_override")),
+            "provider_poll_url_override": poll_url_override,
+            "provider_poll_url_override_used": bool(poll_url_override),
             "poll_url_configured": bool(caps.get("poll_url_configured")),
             "auth_configured": bool(caps.get("auth_configured")),
             "auth_present": bool(str(auth_value or "").strip()),

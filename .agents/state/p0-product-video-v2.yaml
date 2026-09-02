@@ -1080,6 +1080,24 @@ pv2_r01_job28_v3_replacement_authority:
   watchdog_fresh_claim_wake_protected: 224 passed, 1 deselected in 54.40s
   watchdog_fresh_claim_wake_clean_main: exact job_131 failure reproduced in 569.47s; NEW_FAILURES=0
   watchdog_fresh_claim_wake_compile_diff: exit 0
+  watchdog_fresh_claim_pr978_merge: 833dc6ccd6112c2a92b6e0dde8a49a74b3490bfd
+  watchdog_fresh_claim_pr978_compile_deploy: 33637384667 SUCCESS / 33637571154 SUCCESS in 5m0s
+  watchdog_fresh_claim_pr978_worker_sync: c3167ef2 to 833dc6cc; backup refs/backups/worker-pre-product-video-20260902T135036Z; compile/diff 0; inactive PID 0
+  watchdog_fresh_claim_pr978_recovery_backup: /opt/toanaas/bot/delete/pv2-r01-job28-watchdog-recovery-production-20260902T205253.json
+  watchdog_fresh_claim_pr978_recovery_sha_mode: c8c24164e2600169047965e918317f5f12431d81cc618aecee3ecfaca0e5670d mode 0600
+  watchdog_fresh_claim_pr978_prestart: 15/15 PASS; V3 0/2; scene1 only; provider/wallet 0/0
+  watchdog_fresh_claim_pr978_live_red: worker PID 1121117 crossed claim, attempts 40 to 41, scene1 Key4U HTTP 404 before task/receipt; stopped inactive PID 0
+  watchdog_fresh_claim_pr978_live_side_effects: V3 0/2; provider usage 0; transactions 0; charged Xu 0; artifact/delivery 0
+  key4u_unified_contract_root: prior docs mapped Grok /v1/videos/generations to Veo; official Veo unified contract is /v1/video/create plus /v1/video/query
+  key4u_unified_contract_scope: official Key4U hosts and new Veo submit only; persisted price model remains veo_3_1-fast; wire model veo3.1-fast; custom proxy and historical OpenAI poll unchanged
+  key4u_unified_contract_forensic: pre-CAS HTTP 0; current exactly one scene1 Key4U event HTTP 404 without task/receipt; base adapter /v1/video/create but model resolver override /v1/videos/generations
+  key4u_unified_contract_red: 1 failed, 19 deselected in 9.14s
+  key4u_unified_contract_green: Key4U 20 passed; existing-task/custom 2 passed; job28 wire 2 passed; focused final 89 passed in 12.04s
+  key4u_unified_contract_broad: branch 167 passed, 25 failed, 1 skipped in 22.30s; clean main same 25 plus one obsolete payload assertion; NEW_FAILURES=0
+  key4u_unified_contract_post_rebase_base: 899a93f5420f47c95fcc88cd4b8de655f7fee8c8
+  key4u_unified_contract_post_rebase: focused 89 passed in 10.21s; broad 167 passed, exact 25 baseline failures, 1 skipped in 24.84s; NEW_FAILURES=0
+  key4u_404_recovery_cas: attempts 41; outbox 2; isolated rehearsal PASS; duplicate/invalid-V3/wrong-HTTP/wrong-attempts fail closed before backup; provider/wallet 0/0
+  key4u_404_recovery_cas_hashes: script F62AEF1FB6A2ACC21FACCA75F2ABB367981C2DA729DEFCCA8A117B3F70509C04; test 042EC4605E920BDE9B7BEFAA540A45122262FA590E107E73EB8C2424857E2D4A
   live_pass: false
 spec_04i_subdub_auto_two_speaker_addon:
   phase: PENDING_AFTER_SPEC_04H_9
@@ -1089,8 +1107,9 @@ spec_04i_subdub_auto_two_speaker_addon:
   representative_live_target: one unfinished media-compatible Product Video lane
   acceptance: male/female detection; translation; two-voice dub; final MP4; receipt/report; wallet delta 0
 next_action: >-
-  Ship only the exact V3 outbox-wake and controlled-candidate propagation seam,
-  verify bot plus worker runtime SHA, then use the same snapshot-first recovery CAS
+  After SubDub releases shared resources, read the sanitized production Key4U
+  endpoint/model/error shape, rebase and ship only the unified Veo contract seam.
+  Verify bot plus worker runtime SHA, then use the same snapshot-first recovery CAS
   for only 28/32/27. Preserve V2, V3 0/2, scene1 selection, price/cap and charged 0.
   Start the Owner worker once; stop after two genuinely new Key4U calls or terminal
   two-scene MP4. Open nothing else.
