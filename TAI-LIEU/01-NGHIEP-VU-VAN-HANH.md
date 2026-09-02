@@ -958,3 +958,26 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
   LIVE_PENDING`. Chỉ được công nhận LIVE PASS khi **chính** job `#B4CB6D5FE8`
   giao MP4 thật rồi một receipt, có `3–8` speaker âm học, số distinct voice bằng
   speaker count, cue timing không lệch và mọi finance delta bằng `0`.
+
+### Fixed-vocal authority v2 — 02/09/2026
+
+- Live forensic bác bỏ word/VAD speaker-count authority: hai ASR timeline độc
+  lập chọn `k=6` và `k=5`; pairwise agreement `87.3518%` nhưng ARI chỉ `0.637`;
+  raw-mix và UVR VAD cũng đổi `k` theo threshold.
+- Exact Auto Multi v2 tìm speaker trước ASR mapping: stereo `44.1 kHz` -> UVR
+  vocal stem khóa hash -> mono `16 kHz` -> fixed windows `1.5s/0.75s` -> energy
+  percentiles `42.5/45/47.5/50` -> exact core partition -> overlap/centroid word
+  mapping. Không dùng expected speaker count hoặc fixture-specific branch.
+- Exact fixture đo `5` speaker, `50` words, `23` units, `178` embedding views,
+  clusters `[9,18,26,25,11]`, speaker-unit coverage `[3,2,4,11,3]`, `19`
+  overlap mappings, `4` centroid mappings và `11` final segments. Cosine min/
+  mean là `0.990487/0.997246`.
+- Post-main base `ab267bed`: recovery `57 passed in 529.16s`, focused/protected
+  `307 passed in 10.84s`, real resource `4 passed in 165.18s`; fixed-vocal call
+  `139.76s`, dưới wall budget `300s`. Full compile/YAML/diff/hash/secret exit
+  `0`; provider/DB/wallet mutation `0`.
+- Không persist raw word text, PCM, embeddings hoặc centroids. Hai exact-two
+  SHA vẫn `DE93620F...AC145B` và `94748DEF...1177E`.
+- Lệnh recovery cũ của `#B4CB6D5FE8` đã được dùng và không được gửi lại. Sau
+  exact-SHA deploy cần fresh Owner action-time authorization cho đúng một same-job
+  continuation; cấm upload/Confirm/job mới. LIVE PASS vẫn đòi MP4 + receipt thật.

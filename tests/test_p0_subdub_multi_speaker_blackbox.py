@@ -664,11 +664,11 @@ def _acoustic_multi_prepared(tmp_path: Path) -> dict:
     )
     receipt = speaker_cast.persist_sidecar(sidecar, workspace=str(tmp_path))
     acoustic = {
-        "multi_acoustic_backend": "local_wespeaker_resnet34_spectral",
+        "multi_acoustic_backend": "local_wespeaker_resnet34_fixed_vocal",
         "multi_acoustic_model_sha256": (
             "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
         ),
-        "multi_acoustic_algorithm_version": "wespeaker-resnet34-spectral-v1",
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
         "multi_acoustic_speaker_count": 3,
         "multi_acoustic_word_count": 30,
         "multi_acoustic_unit_count": 6,
@@ -698,11 +698,11 @@ def _acoustic_multi_prepared(tmp_path: Path) -> dict:
 def test_bounded_acoustic_evidence_accepts_multiple_subsegments_per_unit():
     multi_module = _multi_module()
     evidence = {
-        "multi_acoustic_backend": "local_wespeaker_resnet34_spectral",
+        "multi_acoustic_backend": "local_wespeaker_resnet34_fixed_vocal",
         "multi_acoustic_model_sha256": (
             "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
         ),
-        "multi_acoustic_algorithm_version": "wespeaker-resnet34-spectral-v1",
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
         "multi_acoustic_speaker_count": 5,
         "multi_acoustic_word_count": 147,
         "multi_acoustic_unit_count": 18,

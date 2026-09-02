@@ -85,7 +85,8 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
     dừng ngay; fallback exact này không được dùng cho Auto multi. Với Auto
     multi acoustic, Deepgram chỉ cung cấp strict word timeline, không request
     diarization; active wrapper không được gọi provider re-diarization/crosswalk
-    hoặc truyền expected-speaker count.
+    hoặc truyền expected-speaker count. ASR words và VAD không được quyết định
+    `k`; fixed-vocal windows phải khám phá speaker trước khi map words.
 13. Fixture karaoke có nhạc nền: kiểm evidence cast, không chỉ nhìn hai label.
     Kết quả khóa local là speaker 0 `male/low`, vote `7/8`, dominance `0.875`,
     evidence `21s`; speaker 1 `female/high`, vote `8/10`, dominance `0.800`,
@@ -110,19 +111,22 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
 17. Trước LIVE chạy `SD-MS-L01`: strict word timeline phải giữ nguyên index,
     start/end của mọi retained word; coverage count bằng word count và không word
     nào xuất hiện trong hai cue. Zero-duration/malformed item không được tạo cue.
-18. Chạy `SD-MS-L02` bằng exact fixture offline và model thật. Hai process fresh
-    phải cùng đo `18` regions, `87` windows, `174` embeddings, `k=5`, stability
-    `18/18`; model byte mutation hoặc missing notice phải fail trước inference.
-    Đây không phải LIVE PASS và không gọi provider.
+18. Chạy `SD-MS-L02` bằng exact fixture offline và model thật. Phải đo `5`
+    speaker, `50` words, `23` units, `178` embedding views, clusters
+    `[9,18,26,25,11]`, speaker-unit coverage `[3,2,4,11,3]`, cosine min
+    `0.990487` và elapsed `<300s`; model byte mutation hoặc missing notice phải
+    fail trước inference. Đây không phải LIVE PASS và không gọi provider.
 19. Chạy `SD-MS-L03/L04`: legacy/provider sidecar phải force-fresh; chỉ bundle
     acoustic cùng source, strict timeline, model hash và algorithm version mới
     được resume, với ASR-call delta `0`. Không đọc raw embedding/PCM trong state.
-20. Chạy `SD-MS-L05`: model preflight phải xong trước transaction. CAS chỉ được
-    đổi chính job `b4cb6d5fe8a7bdfce507` từ attempt/correction `3/2` sang `4/3`;
-    attempt `5`, command lặp và concurrent loser phải no-op, engine-job count giữ nguyên.
-21. LIVE chỉ gửi command recovery exact một lần, không upload lại và không bấm
-    Confirm/status/refresh. Sau đó chỉ đọc durable job/workspace/journal cho tới
-    terminal. Không có MP4 thật rồi receipt thì ghi FAIL/BLOCKED, không ghi PASS.
+20. `SD-MS-L05` giữ bằng chứng lịch sử: model preflight đã hoàn tất trước CAS và
+    chính job chuyển `3/2 -> 4/3` đúng một winner. Marker hiện đã consumed; command
+    cũ, attempt mới không được cấp quyền và concurrent loser đều phải no-op.
+21. Sau exact-SHA deploy, chỉ tiếp tục LIVE khi Owner gửi fresh action-time
+    authorization cho chính job `b4cb6d5fe8a7bdfce507`. Không gửi lại command
+    recovery cũ, không upload, không Confirm và không tạo job mới. Sau đó chỉ đọc
+    durable job/workspace/journal tới terminal. Không có MP4 thật rồi receipt thì
+    ghi FAIL/BLOCKED, không ghi PASS.
 22. Final evidence phải có model/algorithm, speaker/unit/window/cluster counts,
     distinct voice count, per-speaker cue counts, source/translated cue count,
     drift counters, original `40`/dub `150`, MP4 metrics, hai Telegram message ID,

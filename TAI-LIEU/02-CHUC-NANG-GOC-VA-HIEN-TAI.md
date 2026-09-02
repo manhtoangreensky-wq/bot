@@ -520,3 +520,17 @@ Một comparator cũ thiếu strict-word/acoustic fake đã fail đúng producti
 chỉ test harness được cập nhật, focused `2 passed`, production delta không đổi.
 Những số này chỉ chứng minh source/resource. Production vẫn chạy code cũ cho tới
 exact-SHA deploy; MP4/receipt của chính `#B4CB6D5FE8` vẫn là gate LIVE chưa hoàn tất.
+
+### Đối chiếu fixed-vocal speaker authority v2 — 02/09/2026
+
+| Cơ chế trước | Hiện tại đo được | Trạng thái |
+|---|---|---|
+| ASR word segmentation hoặc VAD góp phần quyết định số speaker | `k` được khám phá trên fixed vocal windows trước khi map ASR; hai ASR timeline khác nhau giữ cùng acoustic clusters `[9,18,26,25,11]` | ❌ Không còn đúng |
+| Agreement cặp cao đủ chứng minh ổn định | Agreement `87.3518%` nhưng ARI chỉ `0.637`, nên hướng này đã bị revert | ❌ Chỉ số đẹp giả |
+| Acoustic regions từ word/VAD là authority cuối | Fixed `1.5s/0.75s` windows trên UVR vocal stem, bốn percentile cùng `k=5`, core partition exact | ⚠️ Đã thay authority |
+| Speaker count thay đổi khi ASR segmentation thay đổi | Exact fixture và independent timeline cùng `5` acoustic identities; ASR chỉ thay word-unit mapping | ✅ Đã tách trách nhiệm |
+| Recovery cũ có thể gửi lại sau deploy | Previous literal đã consumed; chỉ fresh Owner authorization cho một same-job continuation sau exact runtime | ❌ Bị cấm |
+
+Post-main evidence trên `ab267bed`: `57` recovery tests PASS, `307` focused/
+protected PASS, `4` real-resource PASS; fixed-vocal call `139.76s < 300s`.
+Production/live vẫn chưa PASS cho tới khi same job giao MP4 rồi receipt `0 Xu`.

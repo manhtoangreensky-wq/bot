@@ -13,6 +13,7 @@ from typing import Callable
 import numpy as np
 
 from services import subdub_speaker_cast as speaker_cast
+from services import subdub_two_speaker_gender_onnx as two_speaker_gender
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +27,8 @@ NOTICE_PATHS = (
 
 MODEL_SHA256 = "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
 ALGORITHM_VERSION = "wespeaker-resnet34-spectral-v1"
+FIXED_VOCAL_ALGORITHM_VERSION = "wespeaker-resnet34-fixed-vocal-v2"
+FIXED_VOCAL_PROVIDER = "local_wespeaker_resnet34_fixed_vocal"
 MODEL_INPUT_NAME = "feats"
 MODEL_OUTPUT_NAME = "embs"
 MEL_BINS = 80
@@ -46,6 +49,9 @@ KMEANS_MAX_ITERATIONS = 30
 SUBSEGMENT_WINDOW_SECONDS = 1.5
 SUBSEGMENT_PERIOD_SECONDS = 0.75
 STABILITY_FEATURE_SHIFT_SAMPLES = 5
+FIXED_VOCAL_ENERGY_PERCENTILES = (42.5, 45.0, 47.5, 50.0)
+MIN_FIXED_VOCAL_VIEW_COSINE = 0.98
+HYBRID_OVERLAP_DOMINANCE = 0.2
 FBANK_FRAME_LENGTH = 400
 FBANK_FRAME_SHIFT = 160
 FBANK_FFT_POINTS = 512
@@ -658,6 +664,286 @@ def _align_cluster_labels_to_reference(
     return [best_mapping[value] for value in candidate_labels]
 
 
+def build_fixed_vocal_authority(
+    base_embeddings: object,
+    shifted_embeddings: object,
+    window_energy: object,
+    source_positions: object,
+    *,
+    clusterer: Callable | None = None,
+) -> dict[str, object]:
+    """Discover speaker identity from fixed vocal windows, never ASR words."""
+
+    try:
+        if not isinstance(base_embeddings, np.ndarray) or not isinstance(
+            shifted_embeddings, np.ndarray
+        ):
+            raise ValueError("fixed_vocal_embeddings_invalid")
+        base = np.asarray(base_embeddings, dtype=np.float64)
+        shifted = np.asarray(shifted_embeddings, dtype=np.float64)
+        energies = np.asarray(window_energy, dtype=np.float64)
+        if (
+            base.ndim != 2
+            or base.shape != shifted.shape
+            or base.shape[1] != EMBEDDING_DIM
+            or not MIN_UNITS <= base.shape[0] <= MAX_CLUSTER_UNITS
+            or energies.shape != (base.shape[0],)
+            or not np.isfinite(base).all()
+            or not np.isfinite(shifted).all()
+            or not np.isfinite(energies).all()
+            or type(source_positions) not in {list, tuple}
+            or len(source_positions) != base.shape[0]
+        ):
+            raise ValueError("fixed_vocal_embeddings_invalid")
+        positions = np.asarray(source_positions, dtype=np.float64)
+        if (
+            not np.isfinite(positions).all()
+            or np.any(positions < 0.0)
+            or len(np.unique(positions)) != len(positions)
+        ):
+            raise ValueError("fixed_vocal_positions_invalid")
+        base_norms = np.linalg.norm(base, axis=1)
+        shifted_norms = np.linalg.norm(shifted, axis=1)
+        if np.any(base_norms <= 0.0) or np.any(shifted_norms <= 0.0):
+            raise ValueError("fixed_vocal_embedding_norm_invalid")
+        base /= base_norms[:, None]
+        shifted /= shifted_norms[:, None]
+        view_cosines = np.sum(base * shifted, axis=1)
+        if not np.isfinite(view_cosines).all():
+            raise ValueError("fixed_vocal_view_unstable")
+        aggregate = base + shifted
+        aggregate_norms = np.linalg.norm(aggregate, axis=1)
+        if np.any(aggregate_norms <= 0.0):
+            raise ValueError("fixed_vocal_embedding_norm_invalid")
+        aggregate /= aggregate_norms[:, None]
+
+        cluster_function = clusterer
+        if cluster_function is None:
+            cluster_function = lambda matrix, selected_positions: _stable_cluster_view(
+                matrix,
+                np.asarray(selected_positions, dtype=np.float64),
+            )
+        if not callable(cluster_function):
+            raise ValueError("fixed_vocal_clusterer_invalid")
+        views: dict[float, dict[str, object]] = {}
+        speaker_counts: list[int] = []
+        for percentile in FIXED_VOCAL_ENERGY_PERCENTILES:
+            threshold = float(np.percentile(energies, percentile))
+            indexes = np.flatnonzero(energies >= threshold).astype(np.int64)
+            if len(indexes) < MIN_SPEAKERS * MIN_CLUSTER_UNITS:
+                raise ValueError("fixed_vocal_window_support_invalid")
+            if float(np.min(view_cosines[indexes])) < MIN_FIXED_VOCAL_VIEW_COSINE:
+                raise ValueError("fixed_vocal_view_unstable")
+            matrix = aggregate[indexes]
+            selected_positions = positions[indexes]
+            speaker_count, labels, _eigenvalues = cluster_function(
+                matrix,
+                selected_positions,
+            )
+            labels = np.asarray(labels, dtype=np.int64)
+            if (
+                type(speaker_count) is not int
+                or not MIN_SPEAKERS <= speaker_count <= MAX_SPEAKERS
+                or labels.shape != (len(indexes),)
+                or np.any(labels < 0)
+                or np.any(labels >= speaker_count)
+            ):
+                raise ValueError("fixed_vocal_cluster_invalid")
+            cluster_sizes = _validate_cluster_support(
+                labels,
+                np.full(len(indexes), SUBSEGMENT_WINDOW_SECONDS),
+                speaker_count,
+            )
+            views[percentile] = {
+                "indexes": indexes,
+                "labels": labels,
+                "speaker_count": speaker_count,
+                "cluster_sizes": cluster_sizes,
+            }
+            speaker_counts.append(speaker_count)
+        if len(set(speaker_counts)) != 1:
+            raise ValueError("fixed_vocal_speaker_count_unstable")
+
+        broad = views[47.5]
+        core = views[50.0]
+        broad_by_index = {
+            int(index): int(label)
+            for index, label in zip(
+                broad["indexes"], broad["labels"], strict=True
+            )
+        }
+        core_labels = [int(value) for value in core["labels"].tolist()]
+        broad_core_labels = [
+            broad_by_index[int(index)] for index in core["indexes"]
+        ]
+        aligned_broad = _align_cluster_labels_to_reference(
+            core_labels,
+            broad_core_labels,
+            speaker_count=speaker_counts[0],
+        )
+        if aligned_broad != core_labels:
+            raise ValueError("fixed_vocal_core_partition_unstable")
+
+        core_matrix = aggregate[core["indexes"]]
+        core_label_array = np.asarray(core_labels, dtype=np.int64)
+        centroids = np.stack(
+            [
+                np.mean(core_matrix[core_label_array == label], axis=0)
+                for label in range(speaker_counts[0])
+            ]
+        )
+        centroid_norms = np.linalg.norm(centroids, axis=1)
+        if np.any(centroid_norms <= 0.0):
+            raise ValueError("fixed_vocal_centroid_invalid")
+        centroids = (centroids / centroid_norms[:, None]).astype(np.float32)
+        core_windows = [
+            {
+                "window_index": int(index),
+                "start": float(positions[int(index)]),
+                "end": float(positions[int(index)] + SUBSEGMENT_WINDOW_SECONDS),
+                "speaker": int(label),
+            }
+            for index, label in zip(
+                core["indexes"], core_labels, strict=True
+            )
+        ]
+        return {
+            "speaker_count": speaker_counts[0],
+            "percentile_speaker_counts": speaker_counts,
+            "core_window_indices": [int(value) for value in core["indexes"]],
+            "core_windows": core_windows,
+            "core_labels": core_labels,
+            "cluster_sizes": list(core["cluster_sizes"]),
+            "centroids": centroids,
+            "core_partition_stable": True,
+            "view_cosine_min": round(
+                float(np.min(view_cosines[core["indexes"]])),
+                6,
+            ),
+            "view_cosine_mean": round(
+                float(np.mean(view_cosines[core["indexes"]])),
+                6,
+            ),
+        }
+    except speaker_cast.AutoCastManualRequired:
+        raise
+    except Exception as exc:
+        raise _manual_required(exc)
+
+
+def map_word_units_to_fixed_vocal_authority(
+    units: object,
+    unit_embeddings: object,
+    core_windows: object,
+    centroids: object,
+    *,
+    speaker_count: int,
+    overlap_dominance_threshold: float = HYBRID_OVERLAP_DOMINANCE,
+) -> dict[str, object]:
+    """Map word units after speaker discovery; words never determine k."""
+
+    try:
+        if type(units) is not list or not units:
+            raise ValueError("fixed_vocal_units_invalid")
+        maximum_end = max(
+            float(item.get("end") or 0.0) if type(item) is dict else 0.0
+            for item in units
+        )
+        validated_units = _validated_embedding_units(
+            units,
+            pcm_duration_seconds=maximum_end,
+        )
+        embeddings = np.asarray(unit_embeddings, dtype=np.float64)
+        centroid_matrix = np.asarray(centroids, dtype=np.float64)
+        if (
+            embeddings.shape != (len(validated_units), EMBEDDING_DIM)
+            or centroid_matrix.shape != (speaker_count, EMBEDDING_DIM)
+            or not np.isfinite(embeddings).all()
+            or not np.isfinite(centroid_matrix).all()
+            or type(speaker_count) is not int
+            or not MIN_SPEAKERS <= speaker_count <= MAX_SPEAKERS
+            or type(overlap_dominance_threshold) not in {int, float}
+            or not 0.0 <= float(overlap_dominance_threshold) <= 1.0
+        ):
+            raise ValueError("fixed_vocal_mapping_invalid")
+        embedding_norms = np.linalg.norm(embeddings, axis=1)
+        centroid_norms = np.linalg.norm(centroid_matrix, axis=1)
+        if np.any(embedding_norms <= 0.0) or np.any(centroid_norms <= 0.0):
+            raise ValueError("fixed_vocal_mapping_invalid")
+        embeddings /= embedding_norms[:, None]
+        centroid_matrix /= centroid_norms[:, None]
+        windows = core_windows if type(core_windows) is list else []
+        validated_windows: list[dict[str, float | int]] = []
+        for window in windows:
+            if type(window) is not dict:
+                raise ValueError("fixed_vocal_windows_invalid")
+            start = float(window.get("start"))
+            end = float(window.get("end"))
+            speaker = window.get("speaker")
+            if (
+                not math.isfinite(start)
+                or not math.isfinite(end)
+                or start < 0.0
+                or start >= end
+                or type(speaker) is not int
+                or not 0 <= speaker < speaker_count
+            ):
+                raise ValueError("fixed_vocal_windows_invalid")
+            validated_windows.append(
+                {"start": start, "end": end, "speaker": speaker}
+            )
+
+        similarities = embeddings @ centroid_matrix.T
+        labels: list[int] = []
+        confidences: list[float] = []
+        overlap_mapped = 0
+        centroid_mapped = 0
+        threshold = float(overlap_dominance_threshold)
+        for unit_index, unit in enumerate(validated_units):
+            overlap_scores = [0.0] * speaker_count
+            for window in validated_windows:
+                overlap = max(
+                    0.0,
+                    min(float(unit["end"]), float(window["end"]))
+                    - max(float(unit["start"]), float(window["start"])),
+                )
+                overlap_scores[int(window["speaker"])] += overlap
+            total_overlap = sum(overlap_scores)
+            ordered_overlap = sorted(overlap_scores, reverse=True)
+            dominance = (
+                (ordered_overlap[0] - ordered_overlap[1]) / total_overlap
+                if total_overlap > 0.0
+                else 0.0
+            )
+            if total_overlap > 0.0 and dominance >= threshold:
+                label = int(np.argmax(overlap_scores))
+                confidence = dominance
+                overlap_mapped += 1
+            else:
+                row = similarities[unit_index]
+                label = int(np.argmax(row))
+                ordered_similarity = np.sort(row)
+                margin = float(ordered_similarity[-1] - ordered_similarity[-2])
+                confidence = max(0.0, min(1.0, margin / 2.0))
+                centroid_mapped += 1
+            labels.append(label)
+            confidences.append(round(confidence, 6))
+        speaker_unit_counts = [labels.count(label) for label in range(speaker_count)]
+        if any(count < 1 for count in speaker_unit_counts):
+            raise ValueError("fixed_vocal_word_speaker_coverage_invalid")
+        return {
+            "labels": labels,
+            "unit_confidences": confidences,
+            "overlap_mapped_count": overlap_mapped,
+            "centroid_mapped_count": centroid_mapped,
+            "speaker_unit_counts": speaker_unit_counts,
+        }
+    except speaker_cast.AutoCastManualRequired:
+        raise
+    except Exception as exc:
+        raise _manual_required(exc)
+
+
 def _fbank_hamming_window() -> np.ndarray:
     global _HAMMING_WINDOW
     if _HAMMING_WINDOW is None:
@@ -795,6 +1081,255 @@ def _embedding_boundary_check(
         raise _manual_required(TimeoutError("acoustic_embedding_timeout"))
     if not callable(stop_requested) or bool(stop_requested()):
         raise _manual_required(RuntimeError("acoustic_embedding_cancelled"))
+
+
+def _normalized_session_embedding(session: object, samples: np.ndarray) -> np.ndarray:
+    features = compute_fbank(samples)
+    output = session.run(
+        [MODEL_OUTPUT_NAME],
+        {MODEL_INPUT_NAME: features[None, :, :]},
+    )
+    if type(output) not in {list, tuple} or len(output) != 1:
+        raise ValueError("acoustic_embedding_output_invalid")
+    array = output[0]
+    if (
+        not isinstance(array, np.ndarray)
+        or array.dtype != np.dtype(np.float32)
+        or array.shape != (1, EMBEDDING_DIM)
+        or not np.isfinite(array).all()
+    ):
+        raise ValueError("acoustic_embedding_output_invalid")
+    row = array[0].astype(np.float32, copy=True)
+    norm = float(np.linalg.norm(row.astype(np.float64)))
+    if not math.isfinite(norm) or norm <= np.finfo(np.float32).eps:
+        raise ValueError("acoustic_embedding_norm_invalid")
+    return np.asarray(row / np.float32(norm), dtype=np.float32)
+
+
+def _load_fixed_vocal_pcm16(
+    stereo_pcm_path: str,
+    *,
+    duration_seconds: float,
+    deadline_monotonic: float,
+    stop_requested: Callable[[], bool],
+    vocal_session_factory: Callable | None = None,
+) -> np.ndarray:
+    """Demix the existing hash-locked UVR vocal stem and resample to mono 16k."""
+
+    if not two_speaker_gender._CLASSIFIER_LOCK.acquire(blocking=False):
+        raise _manual_required(RuntimeError("fixed_vocal_demix_busy"))
+    try:
+        _embedding_boundary_check(
+            deadline_monotonic=deadline_monotonic,
+            stop_requested=stop_requested,
+        )
+        path = Path(str(stereo_pcm_path or ""))
+        if not path.is_file() or type(duration_seconds) not in {int, float}:
+            raise ValueError("fixed_vocal_pcm_invalid")
+        duration = float(duration_seconds)
+        if not math.isfinite(duration) or not 0.0 < duration <= MAX_SOURCE_SECONDS:
+            raise ValueError("fixed_vocal_duration_invalid")
+        pcm_bytes = path.stat().st_size
+        if (
+            pcm_bytes <= 0
+            or pcm_bytes % two_speaker_gender.PCM_FRAME_BYTES
+            or pcm_bytes
+            > int(
+                MAX_SOURCE_SECONDS
+                * two_speaker_gender.PCM_SAMPLE_RATE
+                * two_speaker_gender.PCM_FRAME_BYTES
+            )
+        ):
+            raise ValueError("fixed_vocal_pcm_invalid")
+        frame_count = pcm_bytes // two_speaker_gender.PCM_FRAME_BYTES
+        measured_duration = frame_count / float(two_speaker_gender.PCM_SAMPLE_RATE)
+        if abs(measured_duration - duration) > 0.25:
+            raise ValueError("fixed_vocal_duration_mismatch")
+        raw = np.fromfile(path, dtype="<i2")
+        if raw.size != frame_count * two_speaker_gender.PCM_CHANNELS:
+            raise ValueError("fixed_vocal_pcm_invalid")
+        mix = (
+            raw.reshape(-1, two_speaker_gender.PCM_CHANNELS)
+            .T.astype(np.float32)
+            / np.float32(32768.0)
+        )
+        peak = float(np.max(np.abs(mix)))
+        if not math.isfinite(peak) or peak <= 0.0:
+            raise ValueError("fixed_vocal_pcm_silent")
+        normalized = mix.copy()
+        if peak > 0.9:
+            normalized *= np.float32(0.9 / peak)
+        model_path = two_speaker_gender._validated_model_paths()[0]
+        if vocal_session_factory is not None:
+            if not callable(vocal_session_factory):
+                raise ValueError("fixed_vocal_session_invalid")
+            vocal_session = vocal_session_factory(model_path)
+        else:
+            vocal_session = two_speaker_gender._session(
+                _load_onnxruntime(),
+                model_path,
+            )
+        vocals = two_speaker_gender._demix_vocals(
+            np,
+            normalized,
+            vocal_session,
+            deadline_monotonic=deadline_monotonic,
+            stop_requested=stop_requested,
+        )
+        _embedding_boundary_check(
+            deadline_monotonic=deadline_monotonic,
+            stop_requested=stop_requested,
+        )
+        vocals = np.asarray(vocals, dtype=np.float32) * np.float32(peak)
+        if vocals.shape != mix.shape or not np.isfinite(vocals).all():
+            raise ValueError("fixed_vocal_demix_invalid")
+        mono = np.mean(vocals, axis=0, dtype=np.float32)
+        target_count = int(
+            round(
+                len(mono)
+                * PCM_SAMPLE_RATE
+                / two_speaker_gender.PCM_SAMPLE_RATE
+            )
+        )
+        if len(mono) < 2 or target_count < FBANK_FRAME_LENGTH:
+            raise ValueError("fixed_vocal_resample_invalid")
+        target_positions = (
+            np.arange(target_count, dtype=np.float64)
+            * two_speaker_gender.PCM_SAMPLE_RATE
+            / PCM_SAMPLE_RATE
+        )
+        resampled = np.interp(
+            target_positions,
+            np.arange(len(mono), dtype=np.float64),
+            mono.astype(np.float64),
+        )
+        pcm16 = np.clip(
+            resampled * 32768.0,
+            -32768.0,
+            32767.0,
+        ).astype(np.int16)
+        if not np.any(pcm16):
+            raise ValueError("fixed_vocal_resample_silent")
+        return pcm16
+    except speaker_cast.AutoCastManualRequired:
+        raise
+    except Exception as exc:
+        raise _manual_required(exc)
+    finally:
+        two_speaker_gender._CLASSIFIER_LOCK.release()
+
+
+def _fixed_vocal_window_views(
+    pcm16: object,
+    *,
+    deadline_monotonic: float,
+    stop_requested: Callable[[], bool],
+    session_factory: Callable | None = None,
+) -> dict[str, object]:
+    if not isinstance(pcm16, np.ndarray) or pcm16.dtype != np.dtype(np.int16) or pcm16.ndim != 1:
+        raise _manual_required(ValueError("fixed_vocal_pcm_invalid"))
+    window_samples = int(round(SUBSEGMENT_WINDOW_SECONDS * PCM_SAMPLE_RATE))
+    period_samples = int(round(SUBSEGMENT_PERIOD_SECONDS * PCM_SAMPLE_RATE))
+    if len(pcm16) < window_samples or len(pcm16) > int(MAX_SOURCE_SECONDS * PCM_SAMPLE_RATE):
+        raise _manual_required(ValueError("fixed_vocal_pcm_invalid"))
+    starts = list(range(0, len(pcm16) - window_samples + 1, period_samples))
+    last_start = len(pcm16) - window_samples
+    if not starts or starts[-1] != last_start:
+        starts.append(last_start)
+    if len(starts) > MAX_CLUSTER_UNITS:
+        raise _manual_required(ValueError("fixed_vocal_window_count_invalid"))
+    if not _EMBEDDING_LOCK.acquire(blocking=False):
+        raise _manual_required(RuntimeError("acoustic_embedding_busy"))
+    try:
+        _embedding_boundary_check(
+            deadline_monotonic=deadline_monotonic,
+            stop_requested=stop_requested,
+        )
+        session = _embedding_session(session_factory)
+        views: list[np.ndarray] = []
+        for shift in (0, STABILITY_FEATURE_SHIFT_SAMPLES):
+            rows = []
+            for start in starts:
+                _embedding_boundary_check(
+                    deadline_monotonic=deadline_monotonic,
+                    stop_requested=stop_requested,
+                )
+                samples = pcm16[start : start + window_samples]
+                if shift:
+                    samples = samples[shift:]
+                rows.append(_normalized_session_embedding(session, samples))
+            views.append(np.stack(rows).astype(np.float32, copy=False))
+        energy = []
+        for start in starts:
+            samples = (
+                pcm16[start : start + window_samples].astype(np.float32)
+                / np.float32(32768.0)
+            )
+            rms = float(np.sqrt(np.mean(samples * samples) + 1e-12))
+            energy.append(20.0 * math.log10(max(rms, 1e-12)))
+        return {
+            "base_embeddings": views[0],
+            "shifted_embeddings": views[1],
+            "window_energy": np.asarray(energy, dtype=np.float32),
+            "source_positions": [start / float(PCM_SAMPLE_RATE) for start in starts],
+        }
+    except speaker_cast.AutoCastManualRequired:
+        raise
+    except Exception as exc:
+        raise _manual_required(exc)
+    finally:
+        _EMBEDDING_LOCK.release()
+
+
+def _fixed_vocal_unit_embeddings(
+    pcm16: object,
+    units: object,
+    *,
+    deadline_monotonic: float,
+    stop_requested: Callable[[], bool],
+    session_factory: Callable | None = None,
+) -> np.ndarray:
+    if not isinstance(pcm16, np.ndarray) or pcm16.dtype != np.dtype(np.int16) or pcm16.ndim != 1:
+        raise _manual_required(ValueError("fixed_vocal_pcm_invalid"))
+    validated_units = _validated_embedding_units(
+        units,
+        pcm_duration_seconds=len(pcm16) / float(PCM_SAMPLE_RATE),
+    )
+    if not _EMBEDDING_LOCK.acquire(blocking=False):
+        raise _manual_required(RuntimeError("acoustic_embedding_busy"))
+    try:
+        _embedding_boundary_check(
+            deadline_monotonic=deadline_monotonic,
+            stop_requested=stop_requested,
+        )
+        session = _embedding_session(session_factory)
+        view_rows: list[np.ndarray] = []
+        for shift in (0, STABILITY_FEATURE_SHIFT_SAMPLES):
+            rows = []
+            for unit in validated_units:
+                _embedding_boundary_check(
+                    deadline_monotonic=deadline_monotonic,
+                    stop_requested=stop_requested,
+                )
+                start = int(round(float(unit["start"]) * PCM_SAMPLE_RATE))
+                end = int(round(float(unit["end"]) * PCM_SAMPLE_RATE))
+                samples = pcm16[start:end]
+                if shift:
+                    available = max(0, len(samples) - 1)
+                    samples = samples[min(shift, available) :]
+                rows.append(_normalized_session_embedding(session, samples))
+            view_rows.append(np.stack(rows).astype(np.float32, copy=False))
+        aggregate = view_rows[0] + view_rows[1]
+        norms = np.linalg.norm(aggregate.astype(np.float64), axis=1)
+        if not np.isfinite(norms).all() or np.any(norms <= 0.0):
+            raise ValueError("fixed_vocal_unit_embedding_invalid")
+        return np.asarray(aggregate / norms[:, None], dtype=np.float32)
+    except speaker_cast.AutoCastManualRequired:
+        raise
+    except Exception as exc:
+        raise _manual_required(exc)
+    finally:
+        _EMBEDDING_LOCK.release()
 
 
 def _embedding_session(session_factory: Callable | None):
@@ -1593,4 +2128,93 @@ def diarize_word_timeline(
         ),
         "stability_pass": bool(acoustic["stability_pass"]),
         "word_coverage_count": len(validated_words),
+    }
+
+
+def diarize_fixed_vocal_word_timeline(
+    stereo_pcm_path: str,
+    words: object,
+    *,
+    duration_seconds: float,
+    deadline_monotonic: float,
+    stop_requested: Callable[[], bool],
+    session_factory: Callable | None = None,
+    vocal_session_factory: Callable | None = None,
+) -> dict[str, object]:
+    """Discover speakers from fixed vocal windows, then map strict ASR words."""
+
+    validated_words = validate_word_timeline(
+        words,
+        duration_seconds=duration_seconds,
+    )
+    units = build_acoustic_units(
+        validated_words,
+        duration_seconds=duration_seconds,
+    )
+    vocal_pcm = _load_fixed_vocal_pcm16(
+        stereo_pcm_path,
+        duration_seconds=duration_seconds,
+        deadline_monotonic=deadline_monotonic,
+        stop_requested=stop_requested,
+        vocal_session_factory=vocal_session_factory,
+    )
+    views = _fixed_vocal_window_views(
+        vocal_pcm,
+        deadline_monotonic=deadline_monotonic,
+        stop_requested=stop_requested,
+        session_factory=session_factory,
+    )
+    authority = build_fixed_vocal_authority(
+        views["base_embeddings"],
+        views["shifted_embeddings"],
+        views["window_energy"],
+        views["source_positions"],
+    )
+    unit_embeddings = _fixed_vocal_unit_embeddings(
+        vocal_pcm,
+        units,
+        deadline_monotonic=deadline_monotonic,
+        stop_requested=stop_requested,
+        session_factory=session_factory,
+    )
+    mapping = map_word_units_to_fixed_vocal_authority(
+        units,
+        unit_embeddings,
+        authority["core_windows"],
+        authority["centroids"],
+        speaker_count=int(authority["speaker_count"]),
+        overlap_dominance_threshold=HYBRID_OVERLAP_DOMINANCE,
+    )
+    segments = build_clustered_segments(
+        validated_words,
+        units,
+        {
+            "labels": list(mapping["labels"]),
+            "unit_confidences": list(mapping["unit_confidences"]),
+        },
+    )
+    speaker_count = int(authority["speaker_count"])
+    if len({item["speaker_id"] for item in segments}) != speaker_count:
+        raise _manual_required(
+            ValueError("fixed_vocal_segment_speaker_coverage_invalid")
+        )
+    return {
+        "ok": True,
+        "status": "PASS",
+        "provider": FIXED_VOCAL_PROVIDER,
+        "segments": segments,
+        "detected_speaker_count": speaker_count,
+        "model_sha256": MODEL_SHA256,
+        "algorithm_version": FIXED_VOCAL_ALGORITHM_VERSION,
+        "word_count": len(validated_words),
+        "unit_count": len(units),
+        "embedding_window_count": len(authority["core_window_indices"]) * 2,
+        "cluster_sizes": list(authority["cluster_sizes"]),
+        "stability_pass": True,
+        "word_coverage_count": len(validated_words),
+        "overlap_mapped_count": int(mapping["overlap_mapped_count"]),
+        "centroid_mapped_count": int(mapping["centroid_mapped_count"]),
+        "speaker_unit_counts": list(mapping["speaker_unit_counts"]),
+        "vocal_view_cosine_min": float(authority["view_cosine_min"]),
+        "vocal_view_cosine_mean": float(authority["view_cosine_mean"]),
     }

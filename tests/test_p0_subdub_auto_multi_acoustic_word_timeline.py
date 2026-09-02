@@ -500,11 +500,11 @@ def acoustic_pipeline_segments() -> list[dict]:
 
 def acoustic_state_fields() -> dict:
     return {
-        "multi_acoustic_backend": "local_wespeaker_resnet34_spectral",
+        "multi_acoustic_backend": "local_wespeaker_resnet34_fixed_vocal",
         "multi_acoustic_model_sha256": (
             "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
         ),
-        "multi_acoustic_algorithm_version": "wespeaker-resnet34-spectral-v1",
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
         "multi_acoustic_speaker_count": 3,
         "multi_acoustic_word_count": 30,
         "multi_acoustic_unit_count": 12,
@@ -513,6 +513,103 @@ def acoustic_state_fields() -> dict:
         "multi_acoustic_stability_pass": True,
         "multi_acoustic_word_coverage_count": 30,
     }
+
+
+def test_acoustic_failure_evidence_is_bounded_and_contains_no_raw_words():
+    error = bot.subdub_speaker_cast.AutoCastManualRequired()
+    error.__cause__ = ValueError("acoustic_cluster_unstable")
+    words = acoustic_pipeline_words()
+
+    evidence = bot.subdub_multi_acoustic_failure_evidence(
+        error,
+        words,
+        duration_seconds=12.0,
+    )
+
+    assert evidence == {
+        "multi_acoustic_failure_code": "acoustic_cluster_unstable",
+        "multi_acoustic_failure_word_count": 30,
+        "multi_acoustic_failure_duration_ms": 12_000,
+    }
+    serialized = repr(evidence)
+    assert "word0" not in serialized
+    assert "speaker" not in serialized
+
+
+def test_exact_multi_persists_bounded_failure_evidence_before_reraising(
+    monkeypatch,
+    tmp_path,
+):
+    words = acoustic_pipeline_words()
+    updates = []
+
+    async def resolve(*_args, **_kwargs):
+        return {
+            "source_kind": "asr",
+            "subtitle": "1\n00:00:00,000 --> 00:00:12,000\nsource\n",
+            "script": "source",
+            "asr_provider": "deepgram",
+            "segments": [{"index": 1, "start": 0.0, "end": 12.0, "text": "source"}],
+            "word_timeline": words,
+            "duration_seconds": 12.0,
+        }
+
+    async def extract(*_args, **_kwargs):
+        path = tmp_path / "acoustic.pcm"
+        path.write_bytes(b"\x01\x00" * 8_000)
+        return str(path)
+
+    async def fail(*_args, **_kwargs):
+        error = bot.subdub_speaker_cast.AutoCastManualRequired()
+        error.__cause__ = ValueError("acoustic_cluster_unstable")
+        raise error
+
+    monkeypatch.setattr(bot, "video_dubbing_resolve_source_script", resolve)
+    monkeypatch.setattr(bot, "_extract_subdub_auto_pcm", extract)
+    monkeypatch.setattr(bot.auto_multi_speaker, "run_local_acoustic_diarization_off_event_loop", fail)
+    monkeypatch.setattr(bot, "set_video_dubbing_artifact", lambda *_args: "source-ref")
+    pending = {
+        "_pipeline_job_key": "exact-job-key",
+        "_pipeline_workspace": str(tmp_path),
+    }
+
+    def preserve_pending(_uid, step, **fields):
+        pending.update(fields)
+        pending["step"] = step
+        return dict(pending)
+
+    monkeypatch.setattr(bot, "set_video_dubbing_pending", preserve_pending)
+    monkeypatch.setattr(bot, "update_subtitle_dub_pipeline_job", lambda key, **fields: updates.append((key, fields)) or fields)
+
+    with pytest.raises(bot.subdub_speaker_cast.AutoCastManualRequired):
+        asyncio.run(
+            bot.video_dubbing_prepare_subtitles(
+                None,
+                {
+                    "step": "processing",
+                    "video_processing_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                    "source_file_id": "fixture",
+                    "source_media_type": "video",
+                    "source_mime_type": "video/mp4",
+                    "voice_kind": "auto_speaker_gender",
+                    "voice_selection_mode": "auto_speaker",
+                    "auto_speaker_lane": "multi",
+                    "_pipeline_job_key": "exact-job-key",
+                    "_pipeline_workspace": str(tmp_path),
+                    "_pipeline_source_bytes_override": b"source",
+                    "_pipeline_source_content_type_override": "video/mp4",
+                },
+                7,
+                allow_confirmed_product=True,
+                require_auto_cast=True,
+            )
+        )
+
+    assert updates == [("exact-job-key", {
+        "multi_acoustic_failure_code": "acoustic_cluster_unstable",
+        "multi_acoustic_failure_word_count": 30,
+        "multi_acoustic_failure_duration_ms": 12_000,
+    })]
 
 
 def test_pending_state_preserves_bounded_acoustic_field_types(monkeypatch):
@@ -637,13 +734,13 @@ def test_exact_multi_prepare_runs_local_acoustics_before_translation(
         return {
             "ok": True,
             "status": "PASS",
-            "provider": "local_wespeaker_resnet34_spectral",
+            "provider": "local_wespeaker_resnet34_fixed_vocal",
             "segments": [dict(item) for item in acoustic_segments],
             "detected_speaker_count": 3,
             "model_sha256": (
                 "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
             ),
-            "algorithm_version": "wespeaker-resnet34-spectral-v1",
+            "algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
             "word_count": 30,
             "unit_count": 12,
             "embedding_window_count": 24,
@@ -699,7 +796,7 @@ def test_exact_multi_prepare_runs_local_acoustics_before_translation(
     assert resolve_call[1]["require_auto_multi_word_timeline"] is True
     assert resolve_call[1].get("require_diarization") is None
     assert [item[0] for item in calls] == ["resolve", "extract", "acoustic", "translate"]
-    assert calls[1][1] == {"channels": 1, "sample_rate": 16_000, "sample_format": "s16le"}
+    assert calls[1][1] == {"channels": 2, "sample_rate": 44_100, "sample_format": "s16le"}
     translated_input = calls[3][1]
     assert [item["speaker_id"] for item in translated_input] == [
         "chunk_00:speaker_0",
@@ -730,8 +827,8 @@ def test_exact_multi_prepare_runs_local_acoustics_before_translation(
         "chunk_00:speaker_2",
     ]
     assert sidecar["acoustic"] == {
-        "algorithm_version": "wespeaker-resnet34-spectral-v1",
-        "backend": "local_wespeaker_resnet34_spectral",
+        "algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
+        "backend": "local_wespeaker_resnet34_fixed_vocal",
         "cluster_sizes": [4, 4, 4],
         "embedding_window_count": 24,
         "model_sha256": (

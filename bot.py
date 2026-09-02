@@ -247192,6 +247192,34 @@ async def _subdub_auto_bootstrap_cached_media_source(
     return dict(source_info)
 
 
+def subdub_multi_acoustic_failure_evidence(
+    error: Exception,
+    word_timeline: object,
+    *,
+    duration_seconds: object,
+) -> dict:
+    code = "acoustic_failure_unknown"
+    current: BaseException | None = error
+    for _index in range(6):
+        if current is None:
+            break
+        candidate = str(current or "").strip().lower()
+        if re.fullmatch(r"acoustic_[a-z0-9_]{1,72}", candidate):
+            code = candidate
+            break
+        current = current.__cause__
+    words = word_timeline if type(word_timeline) is list else []
+    try:
+        duration_ms = int(round(float(duration_seconds) * 1000.0))
+    except (TypeError, ValueError, OverflowError):
+        duration_ms = 0
+    return {
+        "multi_acoustic_failure_code": code,
+        "multi_acoustic_failure_word_count": min(len(words), subdub_speaker_cast.MAX_SIDECAR_CUES),
+        "multi_acoustic_failure_duration_ms": max(0, min(duration_ms, 300_000)),
+    }
+
+
 async def video_dubbing_prepare_subtitles(
     context: ContextTypes.DEFAULT_TYPE,
     state: dict,
@@ -247444,17 +247472,35 @@ async def video_dubbing_prepare_subtitles(
             pcm_path = await _extract_subdub_auto_pcm(
                 acoustic_prepared,
                 dict(state),
-                channels=1,
-                sample_rate=16_000,
+                channels=2,
+                sample_rate=44_100,
                 sample_format="s16le",
             )
-            acoustic_result = await auto_multi_speaker.run_local_acoustic_diarization_off_event_loop(
-                Path(pcm_path),
-                word_timeline,
-                duration_seconds=float(
-                    source_info.get("duration_seconds") or duration_hint or 0.0
-                ),
+            acoustic_duration = float(
+                source_info.get("duration_seconds") or duration_hint or 0.0
             )
+            try:
+                acoustic_result = await auto_multi_speaker.run_local_acoustic_diarization_off_event_loop(
+                    Path(pcm_path),
+                    word_timeline,
+                    duration_seconds=acoustic_duration,
+                )
+            except (
+                subdub_speaker_cast.AutoCastUnavailable,
+                subdub_speaker_cast.AutoCastManualRequired,
+            ) as exc:
+                acoustic_failure = subdub_multi_acoustic_failure_evidence(
+                    exc,
+                    word_timeline,
+                    duration_seconds=acoustic_duration,
+                )
+                failure_job_key = str(state.get("_pipeline_job_key") or "")
+                if failure_job_key:
+                    update_subtitle_dub_pipeline_job(
+                        failure_job_key,
+                        **acoustic_failure,
+                    )
+                raise
             source_segments = list(acoustic_result.get("segments") or [])
             if not source_segments:
                 raise subdub_speaker_cast.AutoCastUnavailable()
@@ -248593,7 +248639,7 @@ SUBDUB_FINAL_ACOUSTIC_SOURCE_SHA256 = (
 def _subdub_multi_acoustic_model_preflight() -> dict:
     service = auto_multi_speaker.subdub_multi_speaker_embedding_onnx
     result = dict(service.model_preflight())
-    result["algorithm_version"] = service.ALGORITHM_VERSION
+    result["algorithm_version"] = service.FIXED_VOCAL_ALGORITHM_VERSION
     return result
 
 
@@ -248871,7 +248917,7 @@ def claim_subdub_failed_auto_multi_recovery(
             and acoustic_preflight_result.get("model_sha256")
             == service.MODEL_SHA256
             and acoustic_preflight_result.get("algorithm_version")
-            == service.ALGORITHM_VERSION
+            == service.FIXED_VOCAL_ALGORITHM_VERSION
         ):
             return {
                 "ok": False,
@@ -249187,7 +249233,7 @@ def claim_subdub_failed_auto_multi_recovery(
                 **(
                     {
                         "auto_multi_acoustic_recovery_used": True,
-                        "auto_multi_acoustic_backend": "local_wespeaker_resnet34_spectral",
+                        "auto_multi_acoustic_backend": auto_multi_speaker.subdub_multi_speaker_embedding_onnx.FIXED_VOCAL_PROVIDER,
                         "auto_multi_acoustic_model_sha256": acoustic_preflight_result["model_sha256"],
                         "auto_multi_acoustic_algorithm_version": acoustic_preflight_result["algorithm_version"],
                         "auto_multi_acoustic_owner_authority": "owner_literal_final_recovery",

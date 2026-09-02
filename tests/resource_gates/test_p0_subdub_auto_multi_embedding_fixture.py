@@ -12,6 +12,7 @@ import pytest
 
 from services import subdub_multi_speaker_embedding_onnx as service
 from services import subdub_speaker_cast as speaker_cast
+from services import subdub_two_speaker_gender_onnx as gender_service
 
 
 SOURCE_SHA256 = "83de97b744b931e544b569e6e750f8415545f226461bd2e36cfb49225898ad3e"
@@ -212,6 +213,72 @@ def test_exact_fixture_selects_five_stable_acoustic_speakers(tmp_path):
     assert "pcm_path" not in result
     assert WORD_FIXTURE_SOURCE.endswith("sanitized word timeline")
     assert ACOUSTIC_REGION_SOURCE.endswith("timing-only regions")
+
+
+def test_exact_fixture_fixed_vocal_authority_is_asr_independent(tmp_path):
+    source_value = str(os.environ.get("SUBDUB_MULTI_FIXTURE_PATH") or "").strip()
+    if not source_value:
+        pytest.fail("SUBDUB_MULTI_FIXTURE_PATH is mandatory for this resource gate")
+    source = Path(source_value)
+    assert source.is_file()
+    assert source.stat().st_size == SOURCE_BYTES
+    assert _sha256(source) == SOURCE_SHA256
+    assert service.MODEL_PATH.stat().st_size == 26_534_127
+    assert _sha256(service.MODEL_PATH) == service.MODEL_SHA256
+    assert all(path.is_file() and path.stat().st_size > 0 for path in service.NOTICE_PATHS)
+    gender_service._validated_model_paths()
+    words = _load_strict_words()
+    pcm_path = tmp_path / "exact-fixture-stereo-44100-s16le.pcm"
+    completed = subprocess.run(
+        [
+            _ffmpeg_path(),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-y",
+            "-i",
+            str(source),
+            "-vn",
+            "-ac",
+            "2",
+            "-ar",
+            "44100",
+            "-f",
+            "s16le",
+            str(pcm_path),
+        ],
+        check=False,
+        capture_output=True,
+        timeout=180,
+    )
+    assert completed.returncode == 0, completed.stderr.decode(
+        "utf-8", errors="replace"
+    )[:500]
+
+    result = service.diarize_fixed_vocal_word_timeline(
+        str(pcm_path),
+        words,
+        duration_seconds=SOURCE_DURATION_SECONDS,
+        deadline_monotonic=time.monotonic() + 300.0,
+        stop_requested=lambda: False,
+    )
+
+    assert result["ok"] is True
+    assert result["provider"] == service.FIXED_VOCAL_PROVIDER
+    assert result["algorithm_version"] == service.FIXED_VOCAL_ALGORITHM_VERSION
+    assert result["detected_speaker_count"] == 5
+    assert result["word_count"] == result["word_coverage_count"] == 50
+    assert result["unit_count"] == 23
+    assert result["embedding_window_count"] == 178
+    assert result["cluster_sizes"] == [9, 18, 26, 25, 11]
+    assert result["speaker_unit_counts"] == [3, 2, 4, 11, 3]
+    assert result["overlap_mapped_count"] == 19
+    assert result["centroid_mapped_count"] == 4
+    assert len(result["segments"]) == 11
+    assert len({item["speaker_id"] for item in result["segments"]}) == 5
+    for forbidden in ("centroids", "embeddings", "pcm", "word_timeline"):
+        assert forbidden not in result
 
 
 @pytest.mark.parametrize("mutation", ("model_byte", "missing_notice"))

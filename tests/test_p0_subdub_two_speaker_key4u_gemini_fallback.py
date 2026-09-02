@@ -413,7 +413,7 @@ def test_prepare_subtitles_scopes_fallback_to_exact_two_and_words_to_multi(
         return {
             "ok": True,
             "status": "PASS",
-            "provider": "local_wespeaker_resnet34_spectral",
+            "provider": "local_wespeaker_resnet34_fixed_vocal",
             "segments": [
                 {
                     "cue_id": f"acoustic-{speaker}",
@@ -430,7 +430,7 @@ def test_prepare_subtitles_scopes_fallback_to_exact_two_and_words_to_multi(
             ],
             "detected_speaker_count": 3,
             "model_sha256": bot.auto_multi_speaker.subdub_multi_speaker_embedding_onnx.MODEL_SHA256,
-            "algorithm_version": bot.auto_multi_speaker.subdub_multi_speaker_embedding_onnx.ALGORITHM_VERSION,
+            "algorithm_version": bot.auto_multi_speaker.subdub_multi_speaker_embedding_onnx.FIXED_VOCAL_ALGORITHM_VERSION,
             "word_count": 30,
             "unit_count": 6,
             "embedding_window_count": 12,
