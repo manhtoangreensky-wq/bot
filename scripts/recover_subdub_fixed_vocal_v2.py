@@ -20,6 +20,7 @@ SOURCE_SHA256 = "83de97b744b931e544b569e6e750f8415545f226461bd2e36cfb49225898ad3
 PREVIOUS_BACKEND = "local_wespeaker_resnet34_spectral"
 PREVIOUS_ALGORITHM = "wespeaker-resnet34-spectral-v1"
 REARM_MARKER = "auto_multi_fixed_vocal_v2_recovery_used"
+DURATION_REPAIR_MARKER = "auto_multi_fixed_vocal_v2_duration_repair_used"
 
 
 def _preflight_result(
@@ -142,6 +143,70 @@ def claim_same_attempt(
         actual_v2_evidence_present = any(
             bool(current.get(field)) for field in actual_evidence_fields
         )
+        input_save = current.get("input_save")
+        if type(input_save) is not dict:
+            input_save = {}
+        root_source_duration_exact = current.get("source_duration_exact")
+        nested_source_duration_exact = input_save.get("source_duration_exact")
+        source_duration_exact = (
+            root_source_duration_exact
+            if type(root_source_duration_exact) in {int, float}
+            else nested_source_duration_exact
+        )
+        root_input_duration = current.get("input_duration")
+        nested_input_duration = input_save.get("duration")
+        input_duration = (
+            root_input_duration
+            if type(root_input_duration) is int
+            else nested_input_duration
+        )
+        duration_authority_conflict = bool(
+            type(root_source_duration_exact) in {int, float}
+            and type(nested_source_duration_exact) in {int, float}
+            and abs(
+                float(root_source_duration_exact)
+                - float(nested_source_duration_exact)
+            )
+            > 0.00001
+        ) or bool(
+            type(root_input_duration) is int
+            and type(nested_input_duration) is int
+            and root_input_duration != nested_input_duration
+        )
+        initial_rearm = bool(
+            current.get(REARM_MARKER) is not True
+            and current.get(DURATION_REPAIR_MARKER) is not True
+        )
+        duration_repair = bool(
+            current.get(REARM_MARKER) is True
+            and current.get(DURATION_REPAIR_MARKER) is not True
+            and current.get("auto_multi_fixed_vocal_v2_recovery_authority")
+            == "owner_confirmed_same_job_upgrade"
+            and type(source_duration_exact) in {int, float}
+            and 0.0 < float(source_duration_exact) <= 300.0
+            and abs(float(source_duration_exact) - 133.37542) <= 0.00001
+            and type(input_duration) is int
+            and input_duration == 134
+            and abs(float(input_duration) - float(source_duration_exact)) > 0.25
+            and current.get("multi_diarization_attempted") is True
+            and current.get("multi_diarization_provider")
+            == "gemini_transcribe_multi_diarization"
+            and current.get("multi_diarization_status") == "PASS"
+            and current.get("multi_diarization_detail")
+            == "words=147; speakers=4"
+            and current.get("multi_diarization_http_status") == 200
+            and current.get("multi_diarization_provider_word_count") == 147
+            and current.get("multi_diarization_provider_speaker_count") == 4
+            and current.get("multi_diarization_mapped_speaker_count") == 0
+            and current.get("multi_diarization_raw_annotation_count") == 151
+            and current.get("multi_diarization_terminal_empty") is False
+            and current.get("multi_diarization_parse_rejection") == ""
+            and current.get("multi_diarization_dropped_weak_word_count") == 1
+            and current.get("multi_diarization_dropped_weak_speaker_count") == 1
+            and current.get("multi_diarization_weak_label_filter_applied") is True
+            and not duration_authority_conflict
+            and not actual_v2_evidence_present
+        )
         allowed = bool(
             type(current) is dict
             and type(recovery) is dict
@@ -161,7 +226,7 @@ def claim_same_attempt(
             and current.get("auto_multi_recovery_correction_attempt_count") == 3
             and current.get("auto_multi_acoustic_recovery_used") is True
             and current.get("auto_multi_acoustic_stability_repair_used") is True
-            and current.get(REARM_MARKER) is not True
+            and (initial_rearm or duration_repair)
             and current.get("auto_multi_acoustic_backend") == PREVIOUS_BACKEND
             and current.get("auto_multi_acoustic_model_sha256")
             == service.MODEL_SHA256
@@ -203,6 +268,22 @@ def claim_same_attempt(
                 "last_error_stage": "",
                 "last_error_safe": "",
                 REARM_MARKER: True,
+                **(
+                    {
+                        DURATION_REPAIR_MARKER: True,
+                        "auto_multi_fixed_vocal_v2_duration_repair_authority": (
+                            "owner_confirmed_same_job_exact_duration"
+                        ),
+                        "auto_multi_fixed_vocal_v2_duration_repair_from_seconds": (
+                            float(input_duration)
+                        ),
+                        "auto_multi_fixed_vocal_v2_duration_repair_to_seconds": (
+                            float(source_duration_exact)
+                        ),
+                    }
+                    if duration_repair
+                    else {}
+                ),
                 "auto_multi_fixed_vocal_v2_recovery_authority": (
                     "owner_confirmed_same_job_upgrade"
                 ),

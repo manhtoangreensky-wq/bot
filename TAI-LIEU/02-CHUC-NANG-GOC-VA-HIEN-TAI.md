@@ -547,3 +547,17 @@ Production/live vẫn chưa PASS cho tới khi same job giao MP4 rồi receipt `
 Runtime read-only trên `c8e954a` chứng minh v2 model/CPU preflight PASS nhưng job
 vẫn v1 và pre-ASR, charged `0`. Source rearm GREEN `24/24`; recovery `75/75`;
 protected `331/331`; full compile exit `0`.
+
+### Đối chiếu duration contract sau live runtime dd217036
+
+| Giả định trước | Bằng chứng live hiện tại | Trạng thái |
+|---|---|---|
+| Integer ASR duration đủ chính xác cho fixed-vocal PCM | ASR truyền `134.0s`, PCM stereo đo `133.37542s`; lệch `0.62458s` lớn hơn guard `0.25s` | ❌ Không còn đúng |
+| `AUTO_CAST_MANUAL_REQUIRED` lần này nghĩa là không tìm được speaker | Fresh path đã có strict word-timeline và tới local acoustic; durable aggregate Gemini lịch sử vẫn là `147/4/151`; failure xảy ra sau UVR, trước ONNX evidence vì duration mismatch | ❌ Chẩn đoán cũ quá rộng |
+| Có thể gửi lại runner v2 sau khi sửa | Marker v2 đã true; chỉ một duration-repair marker exact-job mới được phép và vẫn cần fresh authorization | ❌ Bị cấm |
+| Sửa duration cần đổi exact-two hoặc cluster threshold | Correction chỉ đo duration từ PCM frames ở Auto Multi helper; hai exact-two Git blobs giữ nguyên | ✅ Không cần mở rộng |
+
+Local source hiện đo duration RED/GREEN `1 failed -> 1 passed`, repair
+RED/GREEN `1 failed -> 1 passed`, `287` focused PASS; protected `323 passed +
+1` failure baseline-equivalent, `NEW_FAILURES=0`. Correction chưa deploy và
+không được coi là LIVE PASS cho tới khi cùng job giao MP4 rồi receipt.

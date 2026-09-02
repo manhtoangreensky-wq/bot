@@ -158,6 +158,18 @@ async def run_local_acoustic_diarization_off_event_loop(
         auto_speaker._cleanup_pcm_path(path)
         raise speaker_cast.AutoCastManualRequired()
 
+    pcm_bytes = path.stat().st_size
+    pcm_frame_bytes = subdub_two_speaker_gender_onnx.PCM_FRAME_BYTES
+    if pcm_bytes % pcm_frame_bytes:
+        auto_speaker._cleanup_pcm_path(path)
+        raise speaker_cast.AutoCastManualRequired()
+    measured_duration_seconds = pcm_bytes / float(
+        subdub_two_speaker_gender_onnx.PCM_SAMPLE_RATE * pcm_frame_bytes
+    )
+    if not math.isfinite(measured_duration_seconds) or measured_duration_seconds <= 0.0:
+        auto_speaker._cleanup_pcm_path(path)
+        raise speaker_cast.AutoCastManualRequired()
+
     deadline = time.monotonic() + float(ACOUSTIC_WALL_TIMEOUT_SECONDS)
     stop_event = threading.Event()
     worker = asyncio.create_task(
@@ -165,7 +177,7 @@ async def run_local_acoustic_diarization_off_event_loop(
             acoustic_diarize,
             str(path),
             list(word_timeline),
-            duration_seconds=float(duration_seconds),
+            duration_seconds=measured_duration_seconds,
             deadline_monotonic=deadline,
             stop_requested=stop_event.is_set,
         )

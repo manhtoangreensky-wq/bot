@@ -757,7 +757,10 @@ def test_multi_adapter_accepts_acoustic_prepared_without_provider_crosswalk(
 def test_local_acoustic_helper_runs_off_loop_and_cleans_pcm(tmp_path):
     multi_module = _multi_module()
     pcm_path = tmp_path / "acoustic.pcm"
-    pcm_path.write_bytes(b"\x01\x00" * 8_000)
+    exact_duration = 133.37542
+    frame_count = round(exact_duration * 44_100)
+    with pcm_path.open("wb") as handle:
+        handle.truncate(frame_count * 4)
     captured = {}
 
     def diarize(path, words, *, duration_seconds, deadline_monotonic, stop_requested):
@@ -778,14 +781,14 @@ def test_local_acoustic_helper_runs_off_loop_and_cleans_pcm(tmp_path):
         multi_module.run_local_acoustic_diarization_off_event_loop(
             pcm_path,
             [{"index": 0, "word": "hello", "start": 0.0, "end": 0.2}],
-            duration_seconds=1.0,
+            duration_seconds=134.0,
             acoustic_diarize=diarize,
         )
     )
 
     assert result["ok"] is True
     assert captured["path"] == str(pcm_path)
-    assert captured["duration"] == 1.0
+    assert captured["duration"] == pytest.approx(frame_count / 44_100)
     assert captured["deadline"] > time.monotonic()
     assert captured["stopped"] is False
     assert captured["thread"] != caller_thread
