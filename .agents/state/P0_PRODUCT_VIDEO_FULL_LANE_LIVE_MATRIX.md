@@ -1156,6 +1156,34 @@ starting the next.
   branch case is the passing fail-closed guard. Broad remains `182 passed` plus the
   exact same `12` baseline failures; full bot/workers/changed-file compile and
   diff-check exit `0`, so `NEW_FAILURES=0` after integration.
+- [x] PR #982 squash/runtime
+  `095b6c88aa98a42ebbb3fc6535d44d7222e29779`; deploy `33706481637` SUCCESS in
+  `3m34s`; bot/web/nginx active and tracked diff `0`. The inactive Owner worker was
+  fast-forwarded from `5430981` with backup ref
+  `refs/backups/worker-pre-product-video-model-authority-20260903T030530Z`, then
+  compiled and matched exact clean runtime.
+- [-] First exact `42/3` CAS preserved exhausted outbox attempts, so the bot watchdog
+  terminalized job 28 one second later before worker start. No provider call, task,
+  wallet or artifact delta occurred. Stage-2 TDD reset only scheduler attempt `3 ->
+  1`, while job attempts `42`, V2 and V3 provider cap remained unchanged. On a
+  `14,184,448`-byte mode-`0600` snapshot, actual watchdog code kept the job queued,
+  moved outbox to `retry_wait`, and replay failed closed. Production backups are
+  SHA `b612d919...` (DB) and `82355ce0...` (JSON), both mode `0600`.
+- [x] Final prestart passed `15/15`; one worker start PID `1214876` used exact
+  runtime. Scene 1 then submitted model `veo_3_1-fast` to unified Key4U and received
+  HTTP `200` plus a persisted 37-character task. This proves model-authority LIVE
+  GREEN. Operational paid-call accounting is now `1/2` even though the durable V3
+  receipt stayed empty after the following poll failure; scene-1 resubmit is banned.
+- [-] Existing-task reconstruction polled that accepted task through historical
+  `/v1/videos/{task}` and got `provider_poll_http_error`; scene 2 was never submitted,
+  final artifact/delivery remained empty, provider usage/transactions/charged Xu
+  stayed `0`, and the worker was stopped inactive PID `0` before any duplicate.
+- [x] Poll-only RED reproduced actual `/v1/videos/task` versus expected unified
+  `/v1/video/query?id=task` (`1 failed in 12.19s`). Minimal router correction trusts
+  the persisted scene model only when it is exactly `veo_3_1-fast` and the adapter
+  submit is official `/v1/video/create`; it never POSTs. Unified/historical inverse
+  `2 passed`; focused `91 passed`; broad `184 passed` plus the exact same `12`
+  baseline failures, `NEW_FAILURES=0`; full compile and diff-check exit `0`.
 - [ ] Two distinct scene clips and one final MP4 terminal; otherwise stop at the
   exact new RED and reopen only `SPEC-04H`.
 

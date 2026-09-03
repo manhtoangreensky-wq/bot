@@ -389,6 +389,16 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     focused branch `89 passed` versus clean main `88 passed` (only the new passing
     guard); broad remains `182 passed +` the same `12` baseline IDs; full compile
     and diff-check exit `0`. `NEW_FAILURES=0`.
+  - [-] PR #982/runtime `095b6c88...`, deploy `33706481637` SUCCESS `3m34s`.
+    Stage-1 CAS exposed exhausted outbox race before worker start; stage-2 reset only
+    scheduler attempt `3 -> 1`, passed actual-watchdog snapshot and final prestart
+    `15/15`. One exact worker start then produced a real scene-1 Key4U HTTP 200 task
+    with `veo_3_1-fast`; operational call cap is `1/2`, charged Xu remains `0`.
+  - [x] Worker stopped before duplicate when that task was polled through historical
+    `/v1/videos`. Poll-only correction restores unified query only from persisted
+    underscore model + official unified submit; dot-model/history/custom routes stay
+    locked. Exact/inverse `2 passed`; focused `91`; broad `184 +` the same `12`
+    baseline failures; full compile/diff `0`; same-task deploy/live poll still open.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 

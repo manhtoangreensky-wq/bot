@@ -1199,3 +1199,41 @@ in 543.86s`, with the extra branch case being the new passing fail-closed guard.
 The broad branch remains `182 passed` plus the exact same `12` baseline failures in
 `23.59s`; full bot/workers/changed-file compile and diff-check exit `0`.
 `NEW_FAILURES=0` after integration.
+
+## V3 accepted-task unified poll authority
+
+PR #982 squash-merged as `095b6c88aa98a42ebbb3fc6535d44d7222e29779`;
+deploy run `33706481637` succeeded in `3m34s`. Bot/web/nginx were active and the
+inactive Owner worker was advanced from `5430981` to that exact clean runtime after
+creating backup ref
+`refs/backups/worker-pre-product-video-model-authority-20260903T030530Z`.
+
+The first production CAS preserved current outbox attempt `3`, which equaled the
+generic `max_attempts=3`; the bot watchdog therefore terminalized job 28 one second
+after CAS and before worker start. No provider/wallet/artifact action occurred. A
+stage-2 CAS was then written against the exact resulting marker/state. It resets
+only the scheduler attempt `3 -> 1`; job attempt `42`, V2 receipts, V3 `0/2`, price
+`144/144/144`, provider cap `212/212` and charged Xu `0` remain unchanged. Actual
+watchdog code on a `14,184,448`-byte mode-`0600` snapshot preserved
+`queued/queued_for_worker/retry_wait`, with `terminal_failed=0`, SQLite `ok`, and
+replay fail-closed. Production backup SHA values are `b612d919...` for the SQLite
+copy and `82355ce0...` for the stage-2 JSON, both mode `0600`.
+
+Final prestart then passed all `15/15` checks. One worker start, PID `1214876`, sent
+scene 1 to Key4U using model `veo_3_1-fast`; the provider returned HTTP `200` and a
+37-character task was persisted. This real call is operationally call `1/2`, even
+though its durable V3 receipt remained empty when polling failed. It must never be
+resubmitted. Scene 2 was not submitted. Provider usage, transactions and charged Xu
+remained `0`; the worker was stopped inactive PID `0`.
+
+The accepted scene-1 task was reconstructed using the worker ENV dot model and
+therefore polled through historical `/v1/videos/{task}`, producing
+`provider_poll_http_error`. Production-shaped RED was `1 failed in 12.19s` and
+captured that exact URL. The correction reads the persisted scene model and only
+for exact `key4u_video + veo_3_1-fast + official /v1/video/create` restores
+`/v1/video/query?id={task_id}`. It is poll-only and cannot POST. A dot-model inverse
+test proves historical model-qualified `/v1/videos` is unchanged; custom proxies,
+Kling, Hailuo and other products are untouched. Unified/inverse is `2 passed in
+9.00s`; focused is `91 passed in 10.66s`; broad is `184 passed` plus the exact same
+`12` baseline failures in `30.62s`, so `NEW_FAILURES=0`. Full bot/workers/router/
+connector/provider/test compile and diff-check exit `0`.

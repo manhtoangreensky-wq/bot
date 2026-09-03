@@ -1127,6 +1127,33 @@ pv2_r01_job28_key4u_model_authority:
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
+pv2_r01_job28_key4u_unified_poll_authority:
+  phase: SOURCE_READY_TO_SHIP
+  model_authority_pr_runtime: PR 982 / 095b6c88aa98a42ebbb3fc6535d44d7222e29779
+  model_authority_deploy: 33706481637 SUCCESS in 3m34s
+  runtime_services: bot/web/nginx active; bot and Owner worker exact/clean 095b6c88; worker backup ref refs/backups/worker-pre-product-video-model-authority-20260903T030530Z
+  first_cas_race: attempts 42/outbox 3 preserved; bot watchdog terminalized in 1 second before worker start; provider/wallet 0/0
+  first_cas_backups: DB da8a49f019a25469dee8ef228b09706c50a02cf28919e455e68af75fb412f37a; JSON 9e3c31f6f423159d52254a131f4de16da0b044465a0201535697bfd7479863ea; mode 0600
+  watchdog_root: outbox attempt_count 3 equaled max_attempts 3; untouched V3 authority could not enter worker-wait branch
+  stage_two_cas: scheduler attempt 3 to 1 only; job attempts 42 and V3 provider cap unchanged; stage-one marker/runtime/backup chain required
+  stage_two_rehearsal: DB 14184448 bytes mode 0600; actual watchdog kept queued/queued_for_worker/retry_wait; terminal_failed 0; V3 0/2; SQLite ok; replay fail closed
+  stage_two_production_backups: DB b612d91959030de5b7293abd6924ce0d5d4ab3c861e4f79d3afb65740c629a3c; JSON 82355ce02676c7f3685508dd57b3be136725990767c96301df3b2647ae4db3cc; mode 0600
+  final_prestart: 15/15 PASS; scene1 Key4U only; V2 preserved; durable V3 0/2; price 144/144/144; cap 212/212; charged 0
+  live_worker: one start PID 1214876 exact 095b6c88; stopped inactive PID 0 at poll RED
+  live_submit: scene1 Key4U POST /v1/video/create HTTP 200; model veo_3_1-fast; 37-character task accepted and persisted
+  external_call_accounting: one of two Owner-authorized paid calls consumed operationally; durable V3 receipt remained empty because poll failed; scene1 resubmit prohibited
+  live_poll_red: persisted accepted task reconstructed GET /v1/videos/{task}; provider_poll_http_error; no clip/artifact/delivery; scene2 not submitted
+  live_finance: provider usage 0; transactions 0; wallet 200/0; charged_xu 0
+  root_cause: poll reconstruction used worker ENV dot model veo3.1-fast instead of persisted scene model veo_3_1-fast, restoring historical /v1/videos contract for a unified /v1/video/create task
+  correction_scope: poll-only accepted Key4U task with persisted veo_3_1-fast and official unified submit restores /v1/video/query?id={task_id}; no POST; dot-model historical tasks/custom proxies/other families unchanged
+  red: 1 failed in 12.19s; actual GET /v1/videos/task instead of unified query
+  exact_green: unified plus historical inverse 2 passed in 9.00s
+  focused_green: 91 passed in 10.66s
+  broad_green: 184 passed plus exact same 12 baseline failures in 30.62s; NEW_FAILURES=0
+  full_compile_diff: bot.py both workers provider router/connector/provider/test exit 0; diff-check exit 0
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  live_pass: false
 spec_04i_subdub_auto_two_speaker_addon:
   phase: PENDING_AFTER_SPEC_04H_9
   compatible_media_only: true
@@ -1135,9 +1162,9 @@ spec_04i_subdub_auto_two_speaker_addon:
   representative_live_target: one unfinished media-compatible Product Video lane
   acceptance: male/female detection; translation; two-voice dub; final MP4; receipt/report; wallet delta 0
 next_action: >-
-  Push the post-rebase model-authority commit, create one PR, pass CI, squash merge
-  and deploy exact runtime. Build a fresh snapshot-first CAS for current exact
-  attempts 42/outbox attempts 3;
-  do not reuse the stale attempts-41 script. Preserve V2, genuine V3 0/2, scene1
-  selection, price/cap 144/212 and charged 0. Start the Owner worker once; stop after
-  two genuinely new Key4U calls or terminal two-scene MP4. Open nothing else.
+  Commit and ship only the accepted-task unified poll reconstruction, deploy and
+  sync the inactive Owner worker. Recover existing scene1 task poll-only: no scene1
+  resubmit and no new job/outbox/upload/Confirm. Treat the already accepted scene1
+  call as operational call 1/2 even while its durable V3 receipt is empty. Only after
+  scene1 clip validates may scene2 use the one remaining paid call. Stop at two calls
+  or terminal two-scene MP4. Open nothing else.

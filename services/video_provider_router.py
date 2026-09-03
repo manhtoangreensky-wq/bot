@@ -27,7 +27,10 @@ from services.video_provider_base import (
     normalize_provider_status,
     split_provider_chain,
 )
-from services.video_provider_catalog import model_interface_contract
+from services.video_provider_catalog import (
+    model_interface_contract,
+    selected_model_for_provider,
+)
 
 
 DEFAULT_VIDEO_PROVIDER_CHAIN = "shopaikey_video,key4u_video,toanaas_video,veo,kling,generic_http"
@@ -5053,10 +5056,33 @@ def run_provider_generation(
             if not persisted_poll_url and isinstance(
                 current_adapter, GenericHttpVideoProvider
             ):
+                persisted_model = selected_model_for_provider(
+                    provider_metadata,
+                    current_adapter.provider_name,
+                )
+                adapter_submit = urlparse(
+                    str(current_caps.get("submit_url") or "").strip()
+                )
+                if (
+                    current_adapter.provider_name == "key4u_video"
+                    and persisted_model == "veo_3_1-fast"
+                    and (adapter_submit.hostname or "").lower()
+                    in {"api.key4u.vn", "api.key4u.shop"}
+                    and adapter_submit.path.rstrip("/") == "/v1/video/create"
+                ):
+                    recovered_poll_url = (
+                        f"{adapter_submit.scheme}://{adapter_submit.netloc}"
+                        "/v1/video/query?id={task_id}"
+                    )
+                    recovered_poll_source = (
+                        "recovered:key4u_unified_video_query_from_persisted_model"
+                    )
                 adapter_model = str(
-                    current_adapter.env.get(current_adapter.model_env) or ""
+                    persisted_model
+                    or current_adapter.env.get(current_adapter.model_env)
+                    or ""
                 ).strip()
-                if adapter_model:
+                if adapter_model and not recovered_poll_url:
                     recovered_contract = model_interface_contract(
                         current_adapter.provider_name,
                         adapter_model,
