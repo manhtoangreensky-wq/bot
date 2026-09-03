@@ -753,6 +753,58 @@ def test_v3_scene_ledger_merges_partial_active_receipt_without_dropping_v2() -> 
     assert ledger["replacement_calls_remaining"] == 1
 
 
+def test_v3_scene_ledger_reads_durable_namespaces_from_sqlite_result_json_row() -> None:
+    persisted = _v3_job28_payload()
+    receipt = _authorization_receipt(
+        V3_AUTHORIZATION_ID,
+        3,
+        1,
+        task_id="accepted-v3-scene-one-task",
+    )
+    persisted[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ][V3_AUTHORIZATION_ID]["1"] = receipt
+    persisted["controlled_fallback_replacement_authorization"].update(
+        {"calls_consumed": 1, "consumed_scene_indexes": [1]}
+    )
+    partial = copy.deepcopy(persisted)
+    partial[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ] = {V3_AUTHORIZATION_ID: {"1": copy.deepcopy(receipt)}}
+    sqlite_job_row = {
+        "id": 28,
+        "project_id": 32,
+        "scene_count": 2,
+        "result_json": json.dumps(persisted),
+    }
+
+    ledger = video_project_queue.product_video_scene_ledger_state(
+        {},
+        sqlite_job_row,
+        partial,
+    )
+    receipts = ledger[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ]
+
+    assert set(receipts) == {AUTHORIZATION_ID, V3_AUTHORIZATION_ID}
+    assert receipts[AUTHORIZATION_ID] == persisted[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ][AUTHORIZATION_ID]
+    assert receipts[V3_AUTHORIZATION_ID] == {"1": receipt}
+    assert ledger["replacement_calls_consumed"] == 1
+    assert ledger["replacement_calls_remaining"] == 1
+    telemetry = video_project_queue.reconcile_provider_progress_telemetry(
+        sqlite_job_row,
+        partial,
+        now=datetime(2026, 9, 4, 0, 34, 10),
+        refresh_source="defer_provider_polling",
+    )
+    assert telemetry[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ] == receipts
+
+
 def test_replacement_policy_allows_each_scene_once_and_never_exceeds_two_calls() -> None:
     payload = _job28_payload()
     payload["scene_index"] = 1
