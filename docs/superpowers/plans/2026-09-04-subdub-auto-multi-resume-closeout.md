@@ -1,0 +1,295 @@
+# SubDub Auto Multi Resume Closeout Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan task-by-task. This stays single-agent because all steps share one branch, one exact job, and one recovery marker.
+
+**Goal:** Continue the existing checkpoint and make exact job `#B4CB6D5FE8` deliver one real English multi-voice MP4 followed by one receipt, with `3–8` acoustically discovered speakers, source timing preserved, and `charged_xu=0`.
+
+**Architecture:** Keep the deployed fixed-vocal v2 ONNX engine, strict Deepgram word timeline, translation, per-speaker TTS, FFmpeg mux, validation, and delivery pipeline. Complete only the missing `_pipeline_*` context handoff, add one fail-closed same-job context-repair marker if the live snapshot matches, ship one bounded release, then continue only the existing job.
+
+**Tech Stack:** Python, python-telegram-bot, SQLite WAL, Deepgram, ONNX Runtime CPU, existing TTS adapters, FFmpeg, GitHub Actions, Ubuntu VPS/systemd.
+
+**Spec:**
+
+- `C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-mergecheck-fd57-833d\docs\superpowers\specs\2026-09-02-subdub-auto-multi-fixed-vocal-authority.md`
+- `C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-mergecheck-fd57-833d\docs\superpowers\specs\2026-09-01-subdub-auto-multi-local-speaker-embedding-design.md`
+- `C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-mergecheck-fd57-833d\.agents\state\SUBDUB-AUTO-MULTI-RESUME-20260903.md`
+
+## Global Constraints
+
+- Exact internal job: `b4cb6d5fe8a7bdfce507`; public code: `B4CB6D5FE8`.
+- Exact fixture SHA-256: `83DE97B744B931E544B569E6E750F8415545F226461BD2E36CFB49225898AD3E`.
+- Output selection: English, original audio `40%`, dubbed audio `150%`.
+- No upload, no Confirm, no replacement/second job, no old recovery command.
+- `charged_xu` remains integer `0`; wallet credits/spent delta remains `0`.
+- Paid provider call requires fresh action-time Owner confirmation naming the deployed SHA and exact job.
+- Protected exact-two files remain byte-identical to current `origin/main`:
+  - `services/subdub_speaker_cast.py`
+  - `services/subdub_two_speaker_asr_fallback.py`
+- Do not change PayOS, `/naptien`, wallet, Product Video, WebApp, ENV, provider prices, model bytes/hash/license, or exact-two behavior.
+- Only a validated real MP4 plus Telegram video then receipt plus zero-wallet evidence is completion.
+
+## Resume Ledger
+
+### Complete and locked
+
+- [x] Auto 2-speaker combo and standalone are `LOCKED_LIVE_PASS` with real MP4/receipt.
+- [x] Fixed-vocal v2 model/hash/license/CPU-only engine is deployed.
+- [x] Exact fixture offline acoustic evidence discovers stable `k=5`.
+- [x] Exact PCM duration and strict-word Deepgram `300s` timeout corrections are deployed.
+- [x] WIP `216b68d` contains the 9-line private context handoff and its regression.
+
+### Remaining
+
+- [x] Final WIP selector and full acoustic file terminate green: exact selector `1 passed in 603.88s`; full acoustic file `46 passed in 5.84s`.
+- [x] WIP rebased onto `origin/main=ecb99f2`; new HEAD `a7721e8`; exact-two bytes unchanged.
+- [x] Current job state is queried read-only. Identity/selection/markers/no-charge match; source bytes and strict word timeline are absent, so Telegram `file_id` rehydration must be proven before repair.
+- [ ] Context-repair marker is TDD RED/GREEN and CAS/idempotency protected.
+- [ ] One PR merges and exact SHA deploys to the bot/required runner.
+- [ ] The same job runs once and reaches MP4, delivery, receipt, and zero-wallet PASS.
+
+## Review V2 Decisions Accepted on 04/09/2026
+
+- [x] Production authority is read before marker design. Exact job, selection,
+  three consumed repair markers, no-output and no-charge match. Strict word
+  timeline is not persisted. Workspace exists but original and normalized
+  source files have been cleaned.
+- [x] Do not create a lane-proof replacement job. First restore through the
+  existing Telegram `file_id` stored on the same job. Downloaded bytes must
+  hash exactly to `83DE97B...98AD3E` before any DB CAS.
+- [x] Add an offline full-chain context invariant for all four `_pipeline_*`
+  fields at boundaries that actually consume them. Do not patch every text
+  match merely because a field name appears there.
+- [x] Strengthen attribution: the acoustic speaker set must equal the set sent
+  to TTS; every cue has one speaker; each speaker keeps one unique voice.
+- [x] Pin this fixture to post-cluster `k=5`. This is a post-cluster acceptance
+  check and is never an input hint to clustering.
+- [ ] Measure final synthetic voice distinctness with ONNX embeddings using a
+  calibrated within-speaker versus between-speaker separation rule or an
+  existing measured constant; do not invent an absolute cosine threshold.
+- [x] Overlap behavior is already explicit: one speaker per word unit; dominant
+  overlap wins at dominance `>=0.2`, otherwise nearest centroid wins. Final
+  evidence must report overlap/centroid mapping counts.
+- [x] Run provider-stub full-chain rehearsal before live.
+- [ ] Record the previous runtime SHA. If post-deploy model/context/recovery
+  preflight fails, stop recovery and restore that SHA; do not mutate the job.
+
+---
+
+### Task 1: Finish the existing WIP verification
+
+**Files:**
+
+- `C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-mergecheck-fd57-833d\bot.py`
+- `C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-mergecheck-fd57-833d\tests\test_p0_subdub_auto_multi_acoustic_word_timeline.py`
+
+- [x] Observe the already-running selector to terminal. Measured result: `1 passed in 603.88s`. If this selector must be reproduced later, run:
+
+```powershell
+$taskPy = 'C:\Users\toann\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe'
+$env:PYTHONPATH = 'C:\Users\toann\AppData\Local\Temp\payos-pytestdeps'
+& $taskPy -c "import pytest,sys; raise SystemExit(pytest.main(sys.argv[1:]))" -q --noconftest -p no:cacheprovider tests/test_p0_subdub_auto_multi_acoustic_word_timeline.py::test_exact_multi_fresh_asr_preserves_private_pipeline_context_before_acoustic
+```
+
+Expected: `1 passed`; workspace and saved source path reach `_extract_subdub_auto_pcm()`.
+
+- [x] Run the complete acoustic word-timeline file with the same runner. Measured: `46 passed in 5.84s`.
+
+Expected: zero failures for acoustic-before-translation, strict words, duration, sidecar/hash, and context.
+
+- [x] If another boundary fails, record that boundary and write one RED before changing production. No additional failure appeared in the full file.
+
+### Task 2: Rebase the checkpoint instead of rebuilding
+
+- [x] Fetch and measure: pre-rebase divergence was `7 behind / 1 ahead`.
+
+```powershell
+git fetch origin main
+git rev-list --left-right --count origin/main...HEAD
+git diff --name-only origin/main...HEAD
+```
+
+- [x] Rebase the existing commit: completed conflict-free; new HEAD `a7721e8`.
+
+```powershell
+git rebase origin/main
+```
+
+- [x] Verify one commit and clean scope: `0 behind / 1 ahead`; `git diff --check=0`.
+
+```powershell
+git rev-list --left-right --count origin/main...HEAD
+git diff --check origin/main...HEAD
+git diff --exit-code origin/main...HEAD -- services/subdub_speaker_cast.py services/subdub_two_speaker_asr_fallback.py
+```
+
+Expected: `0 1`; diff-check `0`; protected exact-two diff empty. Measured: all three conditions pass on `a7721e8`.
+
+### Task 3: Read exact production failure authority
+
+- [x] Query `engine_async_job:b4cb6d5fe8a7bdfce507` using SQLite read-only/query-only.
+
+Capture: job/fixture/user identity, English/40/150, status/stage/error, attempt/correction, all v2/duration/ASR-timeout markers, ASR/downstream flags, acoustic aggregate fields, output/delivery paths, charge fields, workspace/source path/hash, and provider-attempt receipt.
+
+- [x] Verify source state. Workspace exists, but saved original and normalized
+  files are absent. No matching name/size was found under `/data`, `/opt`,
+  `/var/lib`, `/tmp`, or the searched Owner local roots.
+
+- [x] Verify strict ASR resume authority. No strict word timeline, sidecar,
+  subtitle, cue, TTS, or acoustic evidence persists. The latest Deepgram
+  aggregate says PASS but cannot replace strict words; strict ASR must run again
+  after byte-identical source rehydration.
+
+- [ ] Preflight stored Telegram `file_id` without DB mutation. Download in
+  memory through existing Local Bot API-aware transport and require exact
+  length/hash. If this fails, stop and request the exact fixture; never create
+  a replacement job.
+
+### Task 4: Add one exact same-job context-repair marker
+
+**Files:**
+
+- Modify: `C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-mergecheck-fd57-833d\scripts\recover_subdub_fixed_vocal_v2.py`
+- Test: `C:\Users\toann\Documents\Codex\2026-08-01\sua\work\subdub-mergecheck-fd57-833d\tests\test_p0_subdub_auto_multi_failed_job_recovery.py`
+
+- [x] Write RED tests:
+
+```text
+test_context_repair_rearms_exact_consumed_timeout_job_once
+test_context_repair_rejects_second_claim_and_identity_mismatch
+test_context_repair_rejects_output_charge_or_acoustic_evidence
+test_context_repair_cas_loser_does_not_mutate_job
+```
+
+- [x] RED expected: `3 failed, 5 passed, 103 deselected in 7.86s` because the
+  context-repair branch and source rehydration did not exist.
+
+- [x] Implement one constant `auto_multi_private_pipeline_context_repair_used` and one mutually exclusive branch inside existing `claim_same_attempt()`.
+
+Required success mutation:
+
+```text
+same internal/public job and source path/hash
+attempt/correction stay 4/3
+old v2/duration/ASR-timeout markers remain true
+new context marker becomes true exactly once
+status returns to existing same-job recovery status
+progress stays 5
+reset only the exact stage flag needed for fresh strict-word ASR/context hydration
+charged_xu remains 0
+no provider submit during the claim
+```
+
+Every mismatch/duplicate/CAS loser must leave the stored JSON byte-identical.
+
+- [x] Run the complete failed-job recovery test file. Measured before the four
+  additional source guards: `111 passed in 10.07s`; final combined focused gate
+  includes all `115` recovery cases.
+
+### Task 5: Protected gates
+
+- [x] Auto Multi focused suite:
+
+```powershell
+$taskPy = 'C:\Users\toann\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe'
+$env:PYTHONPATH = 'C:\Users\toann\AppData\Local\Temp\payos-pytestdeps'
+& $taskPy -c "import pytest,sys; raise SystemExit(pytest.main(sys.argv[1:]))" -q --noconftest -p no:cacheprovider tests/test_p0_subdub_auto_multi_acoustic_word_timeline.py tests/test_p0_subdub_auto_multi_embedding_onnx.py tests/test_p0_subdub_auto_multi_failed_job_recovery.py
+```
+
+- [x] Exact-two comparator:
+
+```powershell
+& $taskPy -c "import pytest,sys; raise SystemExit(pytest.main(sys.argv[1:]))" -q --noconftest -p no:cacheprovider tests/test_p0_subdub_per_speaker_auto_gender_cast.py -k 'protected_two_speaker' tests/subdub_service_only/test_p0_subdub_two_speaker_onnx_gender.py
+```
+
+- [x] Real fixture/model gate:
+
+```powershell
+& $taskPy -c "import pytest,sys; raise SystemExit(pytest.main(sys.argv[1:]))" -q --noconftest -p no:cacheprovider tests/resource_gates/test_p0_subdub_auto_multi_embedding_fixture.py
+```
+
+Expected: exact model/hash/CPU PASS, stable `k=5`, no exact-two regression.
+
+- [x] Compile/scope:
+
+```powershell
+& $taskPy -m py_compile bot.py scripts/recover_subdub_fixed_vocal_v2.py tests/test_p0_subdub_auto_multi_acoustic_word_timeline.py tests/test_p0_subdub_auto_multi_failed_job_recovery.py
+git diff --check origin/main...HEAD
+git diff --exit-code origin/main...HEAD -- services/subdub_speaker_cast.py services/subdub_two_speaker_asr_fallback.py
+```
+
+Expected: all exit `0`.
+
+Measured 04/09/2026 after the Review V2 additions:
+
+```text
+context-repair GREEN: 12 passed, 103 deselected in 6.85s
+full recovery: 111 passed in 10.07s before four added source guards
+context + attribution focused: 5 passed in 5.92s
+Auto Multi combined pre-final: 309 passed in 12.93s
+overlap evidence RED: 9 failed in 5.71s
+overlap evidence focused GREEN: 14 passed in 383.36s
+final focused + provider-fallback protected: 365 passed, 1 baseline stale-hash test deselected in 12.36s
+full-chain five-speaker provider-stub rehearsal: 1 passed in 5.39s
+exact-two selected comparator: 46 passed, 241 deselected in 6.39s
+exact-two files: git diff against origin/main empty; both Git blobs identical
+real exact-fixture fixed-vocal gate run 1: 1 passed in 136.87s
+real exact-fixture fixed-vocal gate run 2: 1 passed in 119.25s
+real model-byte / notice negative gates: 2 passed, 2 deselected in 0.89s
+full changed-file py_compile: exit 0, no stderr
+git diff --check: exit 0
+provider calls: 0
+production DB mutations: 0
+wallet mutations: 0
+```
+
+The adjacent multilingual contract run is `10 passed` plus one unrelated
+baseline PR330 failure: that old test requests `TTS_PROVIDER=auto`, while
+current `origin/main` requires an explicit paid TTS provider policy. This
+branch does not modify that function or provider policy.
+
+The existing provider-fallback suite produced `50 passed` plus one stale
+hard-coded exact-two SHA assertion. `origin/main` contains the same stale test,
+while both protected source files are byte-identical to `origin/main`; this is
+baseline-equivalent and not an Auto Multi regression.
+
+### Task 6: One optimized release
+
+- [x] Update measured counts in the resume handoff, blackbox state, current
+  operations/original-vs-current docs, tester guide, and tester case; live PASS
+  remains false.
+- [ ] Create one clean feature commit containing context handoff plus the exact marker.
+- [ ] Push one branch and create one PR reporting RED/GREEN, protected gates, resource gate, compile/diff, provider calls `0`, wallet mutations `0`.
+- [ ] Squash merge only when required CI is `SUCCESS` and merge state is `CLEAN`.
+- [ ] Wait exact-SHA deploy. Verify `/opt/toanaas/bot`, the actual SubDub runner, services, model/hash/license/CPU provider, and runtime SHA.
+
+### Task 7: Continue only the existing job once
+
+- [ ] Immediately before execution, obtain action-time Owner confirmation naming deployed SHA, script, exact job, English/40/150, paid-provider allowance, no new job, and `charged_xu=0`.
+- [ ] Snapshot job/provider/wallet/output counts read-only.
+- [ ] Run deployed `scripts/recover_subdub_fixed_vocal_v2.py` exactly once. Do not send the old Telegram recovery command.
+- [ ] Observe only job `b4cb6d5fe8a7bdfce507` to terminal. No retry click, upload, Confirm, or replacement job.
+- [ ] If live exposes another defect, record its first failing boundary and use one RED → minimal fix → protected gate → deploy → new exact one-shot marker loop. Never mix another subsystem.
+
+### Task 8: Artifact completion audit
+
+- [ ] Acoustic: `speaker_count` is `3..8`; stable acoustic evidence; distinct voice IDs count equals speaker count; no forced pairing or expected-count hint.
+- [ ] Language/timing: English output; every translated/TTS cue maps to one source cue; monotonic original start/end; no cumulative drift; final duration within existing tolerance.
+- [ ] MP4: non-zero valid MP4, H.264 video, AAC audio, readable duration/dimensions, audible distinct dubbed voices, original `40%`, dub `150%`.
+- [ ] Telegram: exactly one video followed by exactly one receipt; automatic SRT/audio/document companions `0`; durable delivery IDs; dedupe holds.
+- [ ] Finance: same job ID; new job count `0`; `charged_xu=0`; wallet credits/spent delta `0`; provider submission count is limited to the authorized same-job continuation.
+- [ ] Only after every item passes, set Auto Multi to `LOCKED_LIVE_PASS` and issue the final evidence report.
+
+## Time Estimate
+
+| Stage | Expected wall time |
+|---|---:|
+| Finish WIP selector + acoustic file | 15–35 minutes |
+| Rebase + post-rebase/exact-two gates | 20–40 minutes |
+| Live-state audit + one-shot marker TDD | 25–50 minutes |
+| Protected/resource/compile review | 25–50 minutes |
+| PR, CI, deploy, runtime readback | 10–25 minutes |
+| Same-job ASR/acoustic/translation/TTS/mux/delivery | 20–60 minutes |
+| **If context loss is the final defect** | **about 2–4 hours total** |
+| Each additional live-only downstream defect | **add 45–90 minutes per bounded loop** |
+
+This lane can be solved technically. Completion cannot be guaranteed by a clock or source tests because external provider latency and live-only downstream defects are empirical, but the plan forbids replacing the job or weakening quality gates and continues until the exact job has a real verified MP4 or a precisely evidenced external blocker.

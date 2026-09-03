@@ -615,3 +615,18 @@ Nút `Tôi đã chuyển khoản / gửi bill` nằm trên QR photo nhưng callb
 Hiện callback sử dụng fallback render tương thích photo, rồi khách mới gửi bill
 để tạo `pending_admin_review`. Không tạo card admin hoặc cộng Xu chỉ từ click;
 card duyệt được tạo sau ảnh bill/TXID để giữ chống fake bill.
+
+### Đối chiếu Auto Multi private context và attribution — 04/09/2026
+
+| Giả định/tài liệu cũ | Hiện tại đo được | Trạng thái |
+|---|---|---|
+| Vá hai pending-state write là đủ giữ context | Bốn `_pipeline_*` field phải còn qua prepare, translation và state trả cho classifier/TTS/mux; full-chain invariant đã đo | ⚠️ Mở rộng gate, không mở rộng production lane |
+| Đếm speaker và voice ID bằng nhau đủ chứng minh lồng đúng người | Tập speaker đi TTS phải bằng tập speaker acoustic; mỗi cue có một speaker và mỗi speaker giữ đúng một voice; terminal proof cần `auto_multi_attribution_verified=true` | ❌ Không còn đủ |
+| Source workspace mất thì phải upload hoặc tạo job khác | Same-job runner có thể dùng stored Telegram `file_id`, nhưng chỉ sau exact size/MIME/SHA và atomic-write preflight trước CAS | ❌ Không tạo job mới |
+| Fixture chỉ cần nằm trong range `3–8` | Range chung vẫn `3–8`, nhưng exact fixture `83DE97B7...` hiện đo ổn định đúng `k=5`; lệch phải forensic | ⚠️ Case acceptance được pin bằng resource evidence |
+| Voice ID khác nhau chứng minh âm giọng khác nhau | ID mapping được gate local; acoustic distinctness của tiếng tổng hợp phải đo trên MP4 thật bằng ngưỡng hiệu chuẩn, chưa có artifact thì chưa được tuyên bố | ⚠️ Chờ LIVE artifact |
+
+Source hiện tại giữ engine ONNX/model/cluster đã triển khai, không làm lại từ đầu.
+Gate local đo `365 passed`, provider-stub full chain `1 passed`, exact fixture
+fixed-vocal `1 passed in 136.87s`, compile/diff sạch; provider/production-DB/
+wallet mutations đều `0`. Đây chưa phải deploy hoặc LIVE PASS.

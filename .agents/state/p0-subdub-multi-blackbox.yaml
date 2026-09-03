@@ -1458,4 +1458,62 @@ fixed_vocal_v2_asr_timeout_correction_20260902:
     yaml_diff_scope_secret: exit 0; exactly 9 scoped files; retry fallback provider-call and forbidden production additions 0
   current: clean local source green on latest main; not pushed, deployed or live-authorized; previous exact-head approval does not authorize the rebuilt SHA
 
-current_next_action: request fresh exact-head Owner approval for one PR/squash/deploy; after exact runtime request separate authorization for one same-job ASR-timeout repair only; no upload, Confirm, old command, new job or wallet mutation; LIVE PASS only on MP4 then receipt with charged_xu 0
+private_pipeline_context_closeout_20260904:
+  git:
+    worktree: work/subdub-mergecheck-fd57-833d
+    branch: fix/p0-subdub-auto-multi-private-pipeline-context
+    base: ecb99f2eebef2813eed8a17353386f1395c407a8
+    checkpoint: a7721e8aa7eb6ed413bb02635149d4fec76f2208
+    divergence_before_final_commit: 0 behind; 1 ahead
+  root: >-
+    fresh strict ASR succeeded, but pending-state persistence removed invocation-only
+    _pipeline workspace/source context before the local acoustic stage
+  correction:
+    context: preserve all four private pipeline fields only for exact Auto Multi across prepare and translation boundaries
+    attribution: acoustic speaker set must equal TTS speaker set; each speaker keeps one distinct voice
+    terminal_proof: requires auto_multi_attribution_verified true
+    source_rehydrate: stored same-job Telegram file_id; exact size/MIME/SHA; atomic source write before CAS
+    recovery_marker: auto_multi_private_pipeline_context_repair_used; attempts remain 4/3
+    job_scope: exact B4CB6D5FE8 only; no upload; no Confirm; no new job
+  tdd:
+    initial_recovery_red: 3 failed; 5 passed; 103 deselected in 7.86s
+    context_repair_green: 12 passed; 103 deselected in 6.85s
+    full_recovery_before_four_extra_source_guards: 111 passed in 10.07s
+    terminal_attribution_red: 1 failed in 5.78s
+    terminal_attribution_green: 2 passed in 442.53s
+    auto_multi_combined_pre_final: 309 passed in 12.93s
+    overlap_evidence_red: 9 failed in 5.71s
+    overlap_evidence_green: 14 passed in 383.36s
+    final_focused_protected: 365 passed; 1 baseline stale-hash test deselected in 12.36s
+    provider_stub_full_chain: 1 passed in 5.39s
+    exact_two_selected: 46 passed; 241 deselected in 6.39s
+    real_fixture_fixed_vocal_run_1: 1 passed in 136.87s
+    real_fixture_fixed_vocal_run_2: 1 passed in 119.25s
+    real_asset_negative: 2 passed; 2 deselected in 0.89s
+    compile: bot; script; adapter; three changed tests exit 0
+    diff_check: exit 0
+    adjacent_language_contract: 10 passed plus 1 unrelated baseline PR330 provider-policy failure
+  exact_fixture:
+    detected_speakers: 5
+    word_coverage: 50/50
+    units: 23
+    embedding_views: 178
+    cluster_sizes: [9, 18, 26, 25, 11]
+    speaker_unit_counts: [3, 2, 4, 11, 3]
+    overlap_mapped: 19
+    centroid_mapped: 4
+    cues: 11
+    durable_terminal_bundle: model algorithm speaker word unit window cluster overlap centroid speaker-unit counts
+  protected:
+    exact_two_source_diff_vs_origin_main: empty
+    provider_fallback_branch: 50 passed plus 1 stale hard-coded SHA failure
+    provider_fallback_baseline_source: origin/main contains the same stale hash assertion
+    new_failures: 0
+  side_effects:
+    provider_calls: 0
+    production_db_mutations: 0
+    wallet_mutations: 0
+    deploy: false
+    live_pass: false
+
+current_next_action: final focused/YAML/scope review then one local commit; rebase and ship only with coordinated shared-resource ownership; after exact runtime request separate action-time authorization for one context-repair script execution on same job only; no upload, Confirm, old command, new job or wallet mutation; LIVE PASS only on real MP4 then receipt with k5 attribution and charged_xu 0

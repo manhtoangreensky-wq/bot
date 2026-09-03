@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from array import array
 import asyncio
+import hashlib
 import importlib
 import importlib.util
 import inspect
@@ -676,6 +677,9 @@ def _acoustic_multi_prepared(tmp_path: Path) -> dict:
         "multi_acoustic_cluster_sizes": [2, 2, 2],
         "multi_acoustic_stability_pass": True,
         "multi_acoustic_word_coverage_count": 30,
+        "multi_acoustic_overlap_mapped_count": 4,
+        "multi_acoustic_centroid_mapped_count": 2,
+        "multi_acoustic_speaker_unit_counts": [2, 2, 2],
     }
     return {
         "source_bytes": media_bytes,
@@ -710,9 +714,49 @@ def test_bounded_acoustic_evidence_accepts_multiple_subsegments_per_unit():
         "multi_acoustic_cluster_sizes": [17, 24, 13, 20, 13],
         "multi_acoustic_stability_pass": True,
         "multi_acoustic_word_coverage_count": 147,
+        "multi_acoustic_overlap_mapped_count": 14,
+        "multi_acoustic_centroid_mapped_count": 4,
+        "multi_acoustic_speaker_unit_counts": [4, 4, 4, 3, 3],
     }
 
     assert multi_module.bounded_multi_acoustic_evidence(evidence) == evidence
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("multi_acoustic_overlap_mapped_count", 15),
+        ("multi_acoustic_centroid_mapped_count", -1),
+        ("multi_acoustic_speaker_unit_counts", [4, 4, 4, 6]),
+        ("multi_acoustic_speaker_unit_counts", [4, 4, 4, 3, 2]),
+        ("multi_acoustic_speaker_unit_counts", [True, 4, 4, 3, 3]),
+    ),
+)
+def test_bounded_acoustic_evidence_rejects_inconsistent_mapping_counts(
+    field,
+    value,
+):
+    multi_module = _multi_module()
+    evidence = {
+        "multi_acoustic_backend": "local_wespeaker_resnet34_fixed_vocal",
+        "multi_acoustic_model_sha256": (
+            "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
+        ),
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
+        "multi_acoustic_speaker_count": 5,
+        "multi_acoustic_word_count": 147,
+        "multi_acoustic_unit_count": 18,
+        "multi_acoustic_embedding_window_count": 174,
+        "multi_acoustic_cluster_sizes": [17, 24, 13, 20, 13],
+        "multi_acoustic_stability_pass": True,
+        "multi_acoustic_word_coverage_count": 147,
+        "multi_acoustic_overlap_mapped_count": 14,
+        "multi_acoustic_centroid_mapped_count": 4,
+        "multi_acoustic_speaker_unit_counts": [4, 4, 4, 3, 3],
+    }
+    evidence[field] = value
+
+    assert multi_module.bounded_multi_acoustic_evidence(evidence) == {}
 
 
 def test_multi_adapter_accepts_acoustic_prepared_without_provider_crosswalk(
@@ -1039,7 +1083,43 @@ def test_multi_adapter_persists_three_distinct_voices_used_by_tts(monkeypatch):
             "provider": "fixture",
         }
 
+    async def prepare_subtitles(*_args, **_kwargs):
+        segments = [
+            {
+                "cue_id": f"cue-{index}",
+                "start": float(index),
+                "end": float(index + 1),
+                "speaker_id": label,
+                "text": label,
+            }
+            for index, label in enumerate(labels)
+        ]
+        return {
+            "source_segments": segments,
+            "output_segments": [dict(item) for item in segments],
+            "state": {
+                **EXACT_AUTO_STATE,
+                "auto_speaker_lane": "multi",
+                "multi_acoustic_speaker_count": 3,
+                "multi_acoustic_backend": "local_wespeaker_resnet34_fixed_vocal",
+                "multi_acoustic_model_sha256": (
+                    multi_module.subdub_multi_speaker_embedding_onnx.MODEL_SHA256
+                ),
+                "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
+                "multi_acoustic_word_count": 30,
+                "multi_acoustic_unit_count": 12,
+                "multi_acoustic_embedding_window_count": 24,
+                "multi_acoustic_cluster_sizes": [4, 4, 4],
+                "multi_acoustic_stability_pass": True,
+                "multi_acoustic_word_coverage_count": 30,
+                "multi_acoustic_overlap_mapped_count": 9,
+                "multi_acoustic_centroid_mapped_count": 3,
+                "multi_acoustic_speaker_unit_counts": [4, 4, 4],
+            },
+        }
+
     async def fake_old_blackbox(**kwargs):
+        await kwargs["prepare_subtitles"]({}, require_auto_cast=True)
         for label, voice_id in zip(labels, voices, strict=True):
             await kwargs["synthesize_segments"](
                 [{"speaker_id": label, "tts_voice_id": voice_id}],
@@ -1054,6 +1134,17 @@ def test_multi_adapter_persists_three_distinct_voices_used_by_tts(monkeypatch):
         }
 
     monkeypatch.setattr(
+        multi_module.auto_speaker,
+        "_validated_classifier_inputs",
+        lambda _prepared: (
+            labels,
+            {
+                label: [(float(index), float(index + 1))]
+                for index, label in enumerate(labels)
+            },
+        ),
+    )
+    monkeypatch.setattr(
         multi_module,
         "_run_isolated_multi_speaker_blackbox",
         fake_old_blackbox,
@@ -1061,6 +1152,7 @@ def test_multi_adapter_persists_three_distinct_voices_used_by_tts(monkeypatch):
     result = asyncio.run(
         multi_module.run_auto_multi_speaker_blackbox(
             extract_pcm=lambda *_args, **_kwargs: "fixture.pcm",
+            prepare_subtitles=prepare_subtitles,
             synthesize_segments=base_synthesize,
             state={**EXACT_AUTO_STATE, "auto_speaker_lane": "multi"},
         )
@@ -1071,7 +1163,97 @@ def test_multi_adapter_persists_three_distinct_voices_used_by_tts(monkeypatch):
     assert result["state"]["auto_detected_speaker_count"] == 3
     assert result["state"]["auto_distinct_voice_count"] == 3
     assert result["state"]["auto_multi_voice_verified"] is True
+    assert result["state"]["auto_multi_attribution_verified"] is True
     assert len(result["state"]["auto_multi_cast_sha256"]) == 64
+
+
+def test_multi_adapter_requires_every_acoustic_speaker_to_reach_tts(monkeypatch):
+    multi_module = _multi_module()
+    acoustic_labels = [f"chunk_00:speaker_{index}" for index in range(5)]
+    synthesized_labels = acoustic_labels[:-1]
+
+    async def prepare_subtitles(*_args, **_kwargs):
+        return {
+            "source_segments": [
+                {
+                    "cue_id": f"cue-{index}",
+                    "start": float(index),
+                    "end": float(index + 1),
+                    "speaker_id": label,
+                    "text": label,
+                }
+                for index, label in enumerate(acoustic_labels)
+            ],
+            "output_segments": [
+                {
+                    "cue_id": f"cue-{index}",
+                    "start": float(index),
+                    "end": float(index + 1),
+                    "speaker_id": label,
+                    "text": label,
+                }
+                for index, label in enumerate(acoustic_labels)
+            ],
+            "state": {
+                **EXACT_AUTO_STATE,
+                "auto_speaker_lane": "multi",
+                "multi_acoustic_speaker_count": 5,
+                "multi_acoustic_backend": "local_wespeaker_resnet34_fixed_vocal",
+                "multi_acoustic_model_sha256": (
+                    multi_module.subdub_multi_speaker_embedding_onnx.MODEL_SHA256
+                ),
+                "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
+                "multi_acoustic_word_count": 50,
+                "multi_acoustic_unit_count": 23,
+                "multi_acoustic_embedding_window_count": 178,
+                "multi_acoustic_cluster_sizes": [9, 18, 26, 25, 11],
+                "multi_acoustic_stability_pass": True,
+                "multi_acoustic_word_coverage_count": 50,
+                "multi_acoustic_overlap_mapped_count": 19,
+                "multi_acoustic_centroid_mapped_count": 4,
+                "multi_acoustic_speaker_unit_counts": [3, 2, 4, 11, 3],
+            },
+        }
+
+    async def base_synthesize(segments, *_args, **_kwargs):
+        return {"chunks": [{"index": 0, "audio": b"audio"}], "provider": "fixture"}
+
+    async def fake_old_blackbox(**kwargs):
+        prepared = await kwargs["prepare_subtitles"]({}, require_auto_cast=True)
+        assert prepared["state"]["multi_acoustic_speaker_count"] == 5
+        for index, label in enumerate(synthesized_labels):
+            await kwargs["synthesize_segments"](
+                [{"speaker_id": label, "tts_voice_id": f"voice-{index}"}],
+                voice_id=f"voice-{index}",
+            )
+        return {
+            "ok": True,
+            "state": {
+                **EXACT_AUTO_STATE,
+                "auto_speaker_lane": "multi",
+                "multi_acoustic_speaker_count": 5,
+            },
+        }
+
+    monkeypatch.setattr(
+        multi_module.auto_speaker,
+        "_validated_classifier_inputs",
+        lambda _prepared: (
+            acoustic_labels,
+            {label: [(float(index), float(index + 1))] for index, label in enumerate(acoustic_labels)},
+        ),
+    )
+    monkeypatch.setattr(multi_module, "_run_isolated_multi_speaker_blackbox", fake_old_blackbox)
+    result = asyncio.run(
+        multi_module.run_auto_multi_speaker_blackbox(
+            extract_pcm=lambda *_args, **_kwargs: "fixture.pcm",
+            prepare_subtitles=prepare_subtitles,
+            synthesize_segments=base_synthesize,
+            state={**EXACT_AUTO_STATE, "auto_speaker_lane": "multi"},
+        )
+    )
+
+    assert result["status"] == "AUTO_CAST_MANUAL_REQUIRED"
 
 
 def test_multi_adapter_fails_closed_when_tts_reuses_one_voice(monkeypatch):
@@ -1119,7 +1301,25 @@ def test_multi_adapter_fails_closed_when_tts_reuses_one_voice(monkeypatch):
 
 
 def test_multi_completion_receipt_names_fixture_lane_casts_and_component_prices():
+    acoustic = {
+        "multi_acoustic_backend": "local_wespeaker_resnet34_fixed_vocal",
+        "multi_acoustic_model_sha256": (
+            "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
+        ),
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
+        "multi_acoustic_speaker_count": 4,
+        "multi_acoustic_word_count": 40,
+        "multi_acoustic_unit_count": 8,
+        "multi_acoustic_embedding_window_count": 16,
+        "multi_acoustic_cluster_sizes": [2, 2, 2, 2],
+        "multi_acoustic_stability_pass": True,
+        "multi_acoustic_word_coverage_count": 40,
+        "multi_acoustic_overlap_mapped_count": 6,
+        "multi_acoustic_centroid_mapped_count": 2,
+        "multi_acoustic_speaker_unit_counts": [2, 2, 2, 2],
+    }
     state = {
+        **acoustic,
         "mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
         "requested_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
         "terminal_state": "delivered",
@@ -1131,6 +1331,7 @@ def test_multi_completion_receipt_names_fixture_lane_casts_and_component_prices(
         "auto_detected_speaker_count": 4,
         "auto_distinct_voice_count": 4,
         "auto_multi_voice_verified": True,
+        "auto_multi_attribution_verified": True,
         "auto_multi_cast_sha256": "c" * 64,
         "auto_exact_actual_auto_xu": 205,
         "auto_exact_actual_subtitle_xu": 161,
@@ -1162,24 +1363,45 @@ def test_multi_completion_receipt_names_fixture_lane_casts_and_component_prices(
 
 
 def test_multi_terminal_job_persists_proof_without_touching_default_auto_lane():
+    acoustic = {
+        "multi_acoustic_backend": "local_wespeaker_resnet34_fixed_vocal",
+        "multi_acoustic_model_sha256": (
+            "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
+        ),
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
+        "multi_acoustic_speaker_count": 4,
+        "multi_acoustic_word_count": 40,
+        "multi_acoustic_unit_count": 8,
+        "multi_acoustic_embedding_window_count": 16,
+        "multi_acoustic_cluster_sizes": [2, 2, 2, 2],
+        "multi_acoustic_stability_pass": True,
+        "multi_acoustic_word_coverage_count": 40,
+        "multi_acoustic_overlap_mapped_count": 6,
+        "multi_acoustic_centroid_mapped_count": 2,
+        "multi_acoustic_speaker_unit_counts": [2, 2, 2, 2],
+    }
     state = {
         **EXACT_AUTO_STATE,
+        **acoustic,
         "auto_speaker_lane": "multi",
         "source_file_name": "test nhiều giọng.mp4",
         "auto_detected_speaker_count": 4,
         "auto_distinct_voice_count": 4,
         "auto_multi_voice_verified": True,
+        "auto_multi_attribution_verified": True,
         "auto_multi_cast_sha256": "c" * 64,
         "auto_exact_actual_auto_xu": 205,
         "auto_exact_actual_subtitle_xu": 161,
         "auto_exact_actual_total_xu": 366,
     }
     expected = {
+        **acoustic,
         "auto_speaker_lane": "multi",
         "source_file_name": "test nhiều giọng.mp4",
         "auto_detected_speaker_count": 4,
         "auto_distinct_voice_count": 4,
         "auto_multi_voice_verified": True,
+        "auto_multi_attribution_verified": True,
         "auto_multi_cast_sha256": "c" * 64,
         "auto_exact_actual_auto_xu": 205,
         "auto_exact_actual_subtitle_xu": 161,
@@ -1190,6 +1412,9 @@ def test_multi_terminal_job_persists_proof_without_touching_default_auto_lane():
     assert bot.subdub_auto_multi_terminal_proof_fields(EXACT_AUTO_STATE) == {}
     assert bot.subdub_auto_multi_terminal_proof_fields(
         {**state, "auto_distinct_voice_count": 2}
+    ) == {}
+    assert bot.subdub_auto_multi_terminal_proof_fields(
+        {key: value for key, value in state.items() if key != "auto_multi_attribution_verified"}
     ) == {}
     pipeline_source = inspect.getsource(
         bot._execute_video_dubbing_pipeline_core
@@ -1371,6 +1596,269 @@ def test_isolated_multi_runner_assigns_and_synthesizes_three_voices(monkeypatch)
     assert result["ok"] is True
     assert len(synthesized_voices) == 3
     assert len(set(synthesized_voices)) == 3
+
+
+def test_provider_stub_full_chain_keeps_five_speakers_through_mux(
+    tmp_path,
+    monkeypatch,
+):
+    multi_module = _multi_module()
+    labels = [f"chunk_00:speaker_{index}" for index in range(5)]
+    source_segments = bot.subdub_canonical_auto_speaker_segments(
+        [
+            {
+                "index": index + 1,
+                "start": float(index),
+                "end": float(index + 1),
+                "text": f"nguoi noi {index % 5}",
+                "speaker": index % 5,
+                "speaker_id": labels[index % 5],
+                "speaker_confidence": 0.95,
+                "chunk_index": 0,
+            }
+            for index in range(10)
+        ],
+        extraction_source="local_acoustic",
+    )
+    output_segments = [
+        {**item, "text": f"English speaker {item['speaker']}"}
+        for item in source_segments
+    ]
+    source_bytes = b"offline-five-speaker-source"
+    source_path = tmp_path / "normalized_source.mp4"
+    source_path.write_bytes(source_bytes)
+    source_subtitle = bot.video_dubbing_srt_from_segments(source_segments)
+    output_subtitle = bot.video_dubbing_srt_from_segments(output_segments)
+    media_sha256 = hashlib.sha256(source_bytes).hexdigest()
+    subtitle_sha256 = bot.subdub_speaker_sidecar_subtitle_sha256(source_subtitle)
+    sidecar = speaker_cast.build_sidecar(
+        source_segments,
+        media_sha256=media_sha256,
+        subtitle_sha256=subtitle_sha256,
+    )
+    sidecar["acoustic"] = {
+        "algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
+        "backend": "local_wespeaker_resnet34_fixed_vocal",
+        "cluster_sizes": [2, 2, 2, 2, 2],
+        "embedding_window_count": 20,
+        "model_sha256": (
+            "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
+        ),
+        "speaker_count": 5,
+        "stability_pass": True,
+        "unit_count": 10,
+        "word_count": 50,
+        "word_coverage_count": 50,
+        "overlap_mapped_count": 8,
+        "centroid_mapped_count": 2,
+        "speaker_unit_counts": [2, 2, 2, 2, 2],
+    }
+    sidecar_receipt = speaker_cast.persist_sidecar(sidecar, workspace=str(tmp_path))
+    pipeline_context = {
+        "_pipeline_workspace": str(tmp_path),
+        "_pipeline_saved_source_path": str(source_path),
+        "_pipeline_source_bytes_override": source_bytes,
+        "_pipeline_source_content_type_override": "video/mp4",
+    }
+    state = {
+        **EXACT_AUTO_STATE,
+        **pipeline_context,
+        "auto_speaker_lane": "multi",
+        "mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        "video_processing_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        "target_language": "English",
+        "translate_requested": "1",
+        "dub_text_source": "translated",
+        "output_type": "video_subtitle",
+        "input_duration": 10,
+        "video_duration": 10,
+        "source_duration": 10,
+        "keep_original_audio": True,
+        "original_audio_volume_percent": 40,
+        "dubbed_voice_volume_percent": 150,
+        "speaker_sidecar_path": sidecar_receipt["path"],
+        "speaker_sidecar_sha256": sidecar_receipt["sha256"],
+        "multi_acoustic_backend": "local_wespeaker_resnet34_fixed_vocal",
+        "multi_acoustic_model_sha256": (
+            "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
+        ),
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
+        "multi_acoustic_speaker_count": 5,
+        "multi_acoustic_word_count": 50,
+        "multi_acoustic_unit_count": 10,
+        "multi_acoustic_embedding_window_count": 20,
+        "multi_acoustic_cluster_sizes": [2, 2, 2, 2, 2],
+        "multi_acoustic_stability_pass": True,
+        "multi_acoustic_word_coverage_count": 50,
+        "multi_acoustic_overlap_mapped_count": 8,
+        "multi_acoustic_centroid_mapped_count": 2,
+        "multi_acoustic_speaker_unit_counts": [2, 2, 2, 2, 2],
+    }
+    prepared = {
+        "state": dict(state),
+        "source_bytes": source_bytes,
+        "content_type": "video/mp4",
+        "source_subtitle": source_subtitle,
+        "source_segments": source_segments,
+        "source_script": "\n".join(item["text"] for item in source_segments),
+        "output_subtitle": output_subtitle,
+        "output_segments": output_segments,
+        "output_script": "\n".join(item["text"] for item in output_segments),
+        "translation_provider": "offline-translation-stub",
+        "asr_provider": "offline-strict-word-stub",
+        "duration_seconds": 10,
+        "media_sha256": media_sha256,
+        "subtitle_sha256": subtitle_sha256,
+    }
+    tts_calls = []
+    render_calls = []
+
+    async def prepare_subtitles(received_state, *, require_auto_cast):
+        assert require_auto_cast is True
+        assert {
+            key: received_state.get(key)
+            for key in pipeline_context
+        } == pipeline_context
+        return prepared
+
+    async def extract_pcm(_prepared, _state, **_kwargs):
+        pcm_path = tmp_path / "five-speaker-classifier.pcm"
+        pcm_path.write_bytes(b"\x00\x00" * 64)
+        return str(pcm_path)
+
+    def classify_speakers(
+        _pcm_path,
+        ranges_by_speaker,
+        *,
+        deadline_monotonic,
+        stop_requested,
+    ):
+        assert deadline_monotonic > time.monotonic()
+        assert stop_requested() is False
+        assert set(ranges_by_speaker) == set(labels)
+        return {
+            label: {
+                "speaker_id": label,
+                "voice_register": "low" if index % 2 == 0 else "high",
+                "confidence": 0.95,
+            }
+            for index, label in enumerate(labels)
+        }
+
+    async def synthesize_segments(segments, **kwargs):
+        assert len(segments) == 1
+        cue = segments[0]
+        assert str(cue["text"]).startswith("English speaker ")
+        tts_calls.append(
+            (cue["cue_id"], cue["speaker_id"], kwargs["voice_id"])
+        )
+        return {
+            "chunks": [
+                {
+                    "cue_id": cue["cue_id"],
+                    "start": cue["start"],
+                    "end": cue["end"],
+                    "audio_duration": 0.75,
+                    "audio_bytes": b"stub-voice-audio",
+                }
+            ],
+            "provider": "offline-tts-stub",
+        }
+
+    async def render_video(source, **kwargs):
+        render_calls.append((bytes(source), dict(kwargs)))
+        return b"\x00\x00\x00\x18ftypmp42-offline-multi", "offline-mux-stub"
+
+    monkeypatch.setattr(
+        multi_module,
+        "classify_multi_speaker_registers",
+        classify_speakers,
+    )
+    result = asyncio.run(
+        multi_module.run_auto_multi_speaker_blackbox(
+            lane_mode=bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+            run_lane_blackbox=bot.subdub_blackboxes.run_subdub_lane_blackbox,
+            runner=bot.subtitle_dub_product_pipeline.run_subdub_pipeline,
+            prepare_subtitles=prepare_subtitles,
+            resolve_voice_id=lambda *_args, **_kwargs: pytest.fail(
+                "Auto Multi must own voice resolution"
+            ),
+            synthesize_segments=synthesize_segments,
+            post_prepare_gate=lambda *_args, **_kwargs: {"continue": True},
+            extract_pcm=extract_pcm,
+            validated_pools={
+                "low": [f"low-{index}" for index in range(5)],
+                "high": [f"high-{index}" for index in range(5)],
+            },
+            required_pool_capacity=5,
+            job_id="offline-provider-stub-rehearsal",
+            mode=bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+            state=state,
+            user_id=7_126_457_028,
+            srt_from_text=bot.video_dubbing_srt_from_text,
+            segments_from_text=bot.video_dubbing_segments_from_text,
+            segments_from_subtitle=bot.video_dubbing_segments_from_subtitle,
+            subtitle_output_items=bot.video_dubbing_subtitle_output_items,
+            parse_voice_speed=lambda _value: 1.0,
+            build_timeline_audio=lambda _chunks, _duration: (
+                b"offline-timeline-audio",
+                "offline-timeline-stub",
+            ),
+            normalize_audio=lambda _audio: (
+                b"offline-normalized-audio",
+                "offline-normalize-stub",
+            ),
+            validate_audio=lambda _audio: {
+                "ok": True,
+                "detail": "offline-audio-qc-stub",
+                "duration": 10.0,
+            },
+            render_video=render_video,
+            video_render_ready=lambda _output_type: True,
+            ffmpeg_ready=lambda: True,
+            dub_mux_enabled=True,
+            is_admin=True,
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["result_type"] == "mp4"
+    assert result["video_output"].startswith(b"\x00\x00\x00\x18ftypmp42")
+    assert result["tts_expected_segments"] == 10
+    assert result["tts_generated_segments"] == 10
+    assert result["tts_dropped_segments"] == 0
+    assert result["cue_locked_timing"] is True
+    assert result["state"]["auto_detected_speaker_count"] == 5
+    assert result["state"]["auto_distinct_voice_count"] == 5
+    assert result["state"]["auto_multi_voice_verified"] is True
+    assert result["state"]["auto_multi_attribution_verified"] is True
+    assert {
+        key: result["state"].get(key)
+        for key in pipeline_context
+    } == pipeline_context
+    assert result["state"]["original_audio_volume_percent"] == 40
+    assert result["state"]["dubbed_voice_volume_percent"] == 150
+    assert len(tts_calls) == 10
+    speaker_to_voices = {
+        speaker_id: {
+            voice_id
+            for _cue_id, observed_speaker, voice_id in tts_calls
+            if observed_speaker == speaker_id
+        }
+        for speaker_id in labels
+    }
+    assert all(len(voice_ids) == 1 for voice_ids in speaker_to_voices.values())
+    assert len({next(iter(voice_ids)) for voice_ids in speaker_to_voices.values()}) == 5
+    assert len({cue_id for cue_id, _speaker_id, _voice_id in tts_calls}) == 10
+    assert {speaker_id for _cue_id, speaker_id, _voice_id in tts_calls} == set(labels)
+    assert len(render_calls) == 1
+    assert render_calls[0][0] == source_bytes
+    assert render_calls[0][1]["keep_original_audio"] is True
+    assert render_calls[0][1]["target_duration_seconds"] == 10.0
+    assert render_calls[0][1]["dubbed_audio"] == b"offline-normalized-audio"
+    assert render_calls[0][1]["subtitle_bytes"].decode("utf-8") == (
+        output_subtitle.strip()
+    )
 
 
 @pytest.mark.parametrize("target_language", ("vi", "ja", "en", "ko", "zh"))

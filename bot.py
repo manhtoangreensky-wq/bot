@@ -232762,9 +232762,12 @@ def subdub_auto_multi_terminal_proof_fields(
     state: dict | None = None,
 ) -> dict:
     current = dict(state or {})
+    acoustic_evidence = auto_multi_speaker.bounded_multi_acoustic_evidence(current)
     if (
         not auto_multi_speaker.is_auto_multi_speaker_state(current)
         or current.get("auto_multi_voice_verified") is not True
+        or current.get("auto_multi_attribution_verified") is not True
+        or not acoustic_evidence
     ):
         return {}
     speaker_count = _safe_int(
@@ -232796,6 +232799,8 @@ def subdub_auto_multi_terminal_proof_fields(
     if (
         not source_file_name
         or not 3 <= speaker_count <= subdub_speaker_cast.MAX_AUTO_SPEAKER_LABELS
+        or acoustic_evidence["multi_acoustic_speaker_count"]
+        != speaker_count
         or distinct_voice_count != speaker_count
         or len(cast_sha256) != 64
         or any(character not in "0123456789abcdef" for character in cast_sha256)
@@ -232803,11 +232808,13 @@ def subdub_auto_multi_terminal_proof_fields(
     ):
         return {}
     return {
+        **acoustic_evidence,
         "auto_speaker_lane": auto_multi_speaker.AUTO_MULTI_SPEAKER_LANE,
         "source_file_name": source_file_name,
         "auto_detected_speaker_count": speaker_count,
         "auto_distinct_voice_count": distinct_voice_count,
         "auto_multi_voice_verified": True,
+        "auto_multi_attribution_verified": True,
         "auto_multi_cast_sha256": cast_sha256,
         "auto_exact_actual_auto_xu": dubbing_xu,
         "auto_exact_actual_subtitle_xu": subtitle_xu,
@@ -232885,6 +232892,9 @@ SUBDUB_AUTO_VOICE_FIELDS = frozenset({
     "multi_acoustic_word_count", "multi_acoustic_unit_count",
     "multi_acoustic_embedding_window_count", "multi_acoustic_cluster_sizes",
     "multi_acoustic_stability_pass", "multi_acoustic_word_coverage_count",
+    "multi_acoustic_overlap_mapped_count",
+    "multi_acoustic_centroid_mapped_count",
+    "multi_acoustic_speaker_unit_counts",
 })
 
 SUBDUB_AUTO_PROFILE_PRIVATE_FIELDS = frozenset({
@@ -247278,6 +247288,11 @@ async def video_dubbing_prepare_subtitles(
     exact_acoustic_multi = bool(
         require_auto_cast and auto_multi_speaker.is_auto_multi_speaker_state(state)
     )
+    exact_multi_pipeline_context = {
+        key: value
+        for key, value in state.items()
+        if exact_acoustic_multi and str(key).startswith("_pipeline_")
+    }
     if isinstance(source_bytes_override, bytearray):
         source_bytes_override = bytes(source_bytes_override)
     if not isinstance(source_bytes_override, bytes):
@@ -247393,6 +247408,8 @@ async def video_dubbing_prepare_subtitles(
             subtitle_ref=subtitle_ref,
             source_subtitle_ref=subtitle_ref,
         )
+        if exact_acoustic_multi:
+            state = {**state, **exact_multi_pipeline_context}
     if not source_subtitle:
         if video_dubbing_is_subtitle_text_source(state, content_type):
             raw_subtitle = source_bytes.decode("utf-8", errors="replace").strip()
@@ -247489,6 +247506,8 @@ async def video_dubbing_prepare_subtitles(
             subtitle_ref=subtitle_ref,
             source_subtitle_ref=subtitle_ref,
         )
+        if exact_acoustic_multi:
+            state = {**state, **exact_multi_pipeline_context}
     source_script = video_dubbing_plain_script(source_subtitle)
     source_segments = list(source_info.get("segments") or []) or video_dubbing_segments_from_subtitle(source_subtitle)
     if not source_segments and source_script:
@@ -247557,6 +247576,9 @@ async def video_dubbing_prepare_subtitles(
                 "multi_acoustic_cluster_sizes": acoustic_result.get("cluster_sizes"),
                 "multi_acoustic_stability_pass": acoustic_result.get("stability_pass"),
                 "multi_acoustic_word_coverage_count": acoustic_result.get("word_coverage_count"),
+                "multi_acoustic_overlap_mapped_count": acoustic_result.get("overlap_mapped_count"),
+                "multi_acoustic_centroid_mapped_count": acoustic_result.get("centroid_mapped_count"),
+                "multi_acoustic_speaker_unit_counts": acoustic_result.get("speaker_unit_counts"),
             })
             if not acoustic_fields:
                 raise subdub_speaker_cast.AutoCastUnavailable()
@@ -247736,6 +247758,8 @@ async def video_dubbing_prepare_subtitles(
     output_script = video_dubbing_plain_script(output_subtitle)
     if not output_script:
         raise RuntimeError("subtitle_script_empty")
+    if exact_acoustic_multi:
+        state = {**state, **exact_multi_pipeline_context}
     return {
         "state": state,
         "source_bytes": source_bytes,

@@ -1110,3 +1110,42 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   2 warnings in 490.21s`; full manual regression `19 passed, 268 deselected,
   2 warnings in 9.44s`. Không gọi PayOS/provider hoặc mutate production trong
   các test.
+
+## SubDub Auto Multi private-context closeout — 04/09/2026
+
+- Phạm vi chỉ là exact Auto Multi và same-job `#B4CB6D5FE8`. Auto 2-speaker
+  vẫn `LOCKED_LIVE_PASS`; hai file authority exact-two có diff rỗng so với
+  `origin/main`.
+- Root live đã đo: strict Deepgram ASR thành công nhưng hai lần ghi pending
+  state loại bỏ invocation-only `_pipeline_*`; acoustic stage vì vậy mất
+  workspace/source và terminal `AUTO_CAST_MANUAL_REQUIRED` ở `5%`, trước
+  translation/TTS/mux/artifact/delivery, `charged_xu=0`.
+- Correction giữ bốn field `_pipeline_workspace`,
+  `_pipeline_saved_source_path`, `_pipeline_source_bytes_override`,
+  `_pipeline_source_content_type_override` qua prepare/translation và trả lại
+  cho classifier/TTS/mux chỉ trong lane Multi. Không persist raw bytes vào DB.
+- Attribution được khóa hai tầng: tập speaker đã đi TTS phải bằng đúng tập
+  speaker acoustic; mỗi speaker giữ một voice riêng xuyên mọi cue. Durable
+  terminal proof chỉ tồn tại khi `auto_multi_attribution_verified=true`.
+- Vì source trong workspace production đã cleanup, runner same-job chỉ được
+  rehydrate từ Telegram `file_id` đã lưu và khớp token trong job key. Exact
+  size, MIME `video/mp4` và fixture SHA-256 phải PASS trước atomic file write
+  và trước CAS. File hiện hữu sai hash, file ID lệch, bytes tải sai hash,
+  duplicate marker và CAS loser đều no-op đối với DB và source.
+- Resource gate thật trên fixture `9,869,032` bytes đo `k=5`, word coverage
+  `50/50`, `23` units, `178` embedding views, clusters `[9,18,26,25,11]`,
+  speaker-unit counts `[3,2,4,11,3]`, overlap mappings `19`, centroid mappings
+  `4`, và `11` cues/`5` speaker IDs; hai lượt temp sạch `1 passed in 136.87s`
+  và `1 passed in 119.25s`. Model-byte/missing-
+  notice negative gate `2 passed in 0.89s`.
+- Full-chain provider-stub rehearsal đi qua `5` acoustic speakers, `10`
+  translated cues, `10` scalar TTS calls, `5` voice riêng, cue-lock và MP4 mux:
+  `1 passed in 5.39s`. Mapping-evidence RED/GREEN là `9 failed in 5.71s` →
+  `14 passed in 383.36s`; final focused/protected gate `365 passed, 1` baseline
+  stale-hash test deselected in `12.36s`; exact-two selected comparator `46
+  passed`; full changed-file compile và diff-check exit `0`.
+- Side effects của toàn local loop: provider calls `0`, production DB mutations
+  `0`, wallet mutations `0`. Trạng thái là `LOCAL_SOURCE_AND_RESOURCE_PASS`;
+  chưa push, chưa deploy và chưa LIVE PASS. Voice acoustic distinctness của
+  MP4 cuối chỉ được đo sau khi có artifact thật bằng ngưỡng hiệu chuẩn; source
+  không bịa cosine threshold.

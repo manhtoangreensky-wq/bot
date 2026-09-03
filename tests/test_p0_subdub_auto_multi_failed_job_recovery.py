@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import importlib
 import json
+from pathlib import Path
 import sqlite3
 import threading
 from types import SimpleNamespace
@@ -694,6 +695,451 @@ def _exact_deepgram_timeout_receipt():
     }
 
 
+def _seed_context_loss_failure(tmp_path, monkeypatch):
+    rearm = importlib.import_module("scripts.recover_subdub_fixed_vocal_v2")
+    db_path, _job = _seed_fixed_vocal_v1_terminal(tmp_path, monkeypatch)
+    monkeypatch.setattr(rearm.app, "db_connect", lambda: sqlite3.connect(db_path))
+    monkeypatch.setattr(
+        rearm.app,
+        "db_connect_readonly",
+        lambda: sqlite3.connect(db_path),
+    )
+    monkeypatch.setattr(rearm.app, "ENGINE_ASYNC_MEMORY_JOBS", {})
+    monkeypatch.setattr(rearm.app, "SUBTITLE_DUB_PIPELINE_JOBS", {})
+
+    initial = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+    _persist_fixed_vocal_job(db_path, _exact_duration_live_failure(initial["job"]))
+    duration = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+    timeout_failure = {
+        **duration["job"],
+        "status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "lifecycle_state": "failed_no_charge",
+        "current_stage": "failed_no_charge",
+        "progress_stage": "failed_no_charge",
+        "last_error_stage": "",
+        "last_error_safe": "",
+        "asr_started": True,
+        "translation_started": False,
+        "tts_started": False,
+        "mux_started": False,
+        "artifact_started": False,
+        "delivery_attempted": False,
+        "final_mp4_exists": False,
+        "output_validated": False,
+        "output_sent": False,
+    }
+    _persist_fixed_vocal_job(db_path, timeout_failure)
+    _persist_translation_asr_attempt(db_path, _exact_deepgram_timeout_receipt())
+    timeout = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+    assert timeout["claimed"] is True
+
+    context_failure = {
+        **timeout["job"],
+        "status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "lifecycle_state": "failed_no_charge",
+        "current_stage": "failed_no_charge",
+        "progress_stage": "failed_no_charge",
+        "last_error_stage": "AUTO_CAST_MANUAL_REQUIRED",
+        "last_error_safe": "manual required",
+        "asr_started": False,
+        "translation_started": False,
+        "tts_started": False,
+        "mux_started": False,
+        "artifact_started": False,
+        "delivery_attempted": False,
+        "final_mp4_exists": False,
+        "output_validated": False,
+        "output_sent": False,
+    }
+    source_file_id = context_failure["job_key"].split("|")[2]
+    context_failure["input_save"] = {
+        **dict(context_failure.get("input_save") or {}),
+        "file_id": source_file_id,
+        "original_filename": "test_nhieu_giong.mp4",
+        "transport_input_size": 9_869_032,
+    }
+    _persist_fixed_vocal_job(db_path, context_failure)
+    _persist_translation_asr_attempt(
+        db_path,
+        {
+            "called": True,
+            "provider": "deepgram",
+            "route": "listen",
+            "status": "PASS",
+            "error": "-",
+            "srt_blocks": 17,
+            "at": "2026-09-03 09:35:38",
+        },
+    )
+    return rearm, db_path, context_failure
+
+
+def test_context_repair_rearms_exact_consumed_timeout_job_once(
+    tmp_path,
+    monkeypatch,
+):
+    rearm, db_path, context_failure = _seed_context_loss_failure(
+        tmp_path,
+        monkeypatch,
+    )
+
+    repair = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+
+    assert repair["claimed"] is True
+    repaired = repair["job"]
+    assert repaired["auto_multi_private_pipeline_context_repair_used"] is True
+    assert repaired["auto_multi_recovery_attempt_count"] == 4
+    assert repaired["auto_multi_recovery_correction_attempt_count"] == 3
+    assert repaired["auto_multi_fixed_vocal_v2_recovery_used"] is True
+    assert repaired["auto_multi_fixed_vocal_v2_duration_repair_used"] is True
+    assert repaired["auto_multi_fixed_vocal_v2_asr_timeout_repair_used"] is True
+    assert repaired["status"] == bot.SUBDUB_FAILED_AUTO_MULTI_RECOVERY_STATUS
+    assert repaired["terminal_state"] == ""
+    assert repaired["asr_started"] is False
+    assert repaired["charged_xu"] == 0
+    assert repaired["charge_status"] == "not_charged"
+    assert repaired["job_key"] == context_failure["job_key"]
+
+    terminal_again = {
+        **repaired,
+        "status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "current_stage": "failed_no_charge",
+    }
+    _persist_fixed_vocal_job(db_path, terminal_again)
+    duplicate = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+    assert duplicate == {
+        "ok": False,
+        "claimed": False,
+        "reason": "fixed_vocal_v2_rearm_not_allowed",
+    }
+
+
+def test_context_repair_rejects_second_claim_and_identity_mismatch(
+    tmp_path,
+    monkeypatch,
+):
+    rearm, db_path, context_failure = _seed_context_loss_failure(
+        tmp_path,
+        monkeypatch,
+    )
+    wrong = {**context_failure, "public_code": "WRONG"}
+    before = json.dumps(wrong, ensure_ascii=False, separators=(",", ":"))
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE system_settings SET value=? WHERE key=?",
+        (before, f"engine_async_job:{ACOUSTIC_JOB_ID}"),
+    )
+    conn.commit()
+    conn.close()
+
+    result = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+
+    assert result["claimed"] is False
+    stored = sqlite3.connect(db_path).execute(
+        "SELECT value FROM system_settings WHERE key=?",
+        (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+    ).fetchone()[0]
+    assert stored == before
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("output_sent", True),
+        ("charged_xu", 1),
+        ("multi_acoustic_speaker_count", 5),
+        ("multi_acoustic_overlap_mapped_count", 19),
+        ("multi_acoustic_failure_word_count", 50),
+    ),
+)
+def test_context_repair_rejects_output_charge_or_acoustic_evidence(
+    tmp_path,
+    monkeypatch,
+    field,
+    value,
+):
+    rearm, db_path, context_failure = _seed_context_loss_failure(
+        tmp_path,
+        monkeypatch,
+    )
+    mutated = {**context_failure, field: value}
+    before = json.dumps(mutated, ensure_ascii=False, separators=(",", ":"))
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE system_settings SET value=? WHERE key=?",
+        (before, f"engine_async_job:{ACOUSTIC_JOB_ID}"),
+    )
+    conn.commit()
+    conn.close()
+
+    result = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+
+    assert result["claimed"] is False
+    stored = sqlite3.connect(db_path).execute(
+        "SELECT value FROM system_settings WHERE key=?",
+        (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+    ).fetchone()[0]
+    assert stored == before
+
+
+def test_context_repair_cas_has_one_winner(tmp_path, monkeypatch):
+    rearm, db_path, _context_failure = _seed_context_loss_failure(
+        tmp_path,
+        monkeypatch,
+    )
+    barrier = threading.Barrier(2)
+
+    def claim():
+        barrier.wait(timeout=5.0)
+        return rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _index: claim(), range(2)))
+
+    winners = [result for result in results if result.get("claimed") is True]
+    losers = [result for result in results if result.get("claimed") is not True]
+    assert len(winners) == 1
+    assert len(losers) == 1
+    assert losers[0]["reason"] in {
+        "fixed_vocal_v2_rearm_not_allowed",
+        "fixed_vocal_v2_rearm_cas_lost",
+    }
+
+
+def test_context_repair_rehydrates_missing_source_from_stored_file_id(
+    tmp_path,
+    monkeypatch,
+):
+    rearm, db_path, context_failure = _seed_context_loss_failure(
+        tmp_path,
+        monkeypatch,
+    )
+    source_path = context_failure["auto_multi_recovery"]["source_path"]
+    source_bytes = b"byte-identical-source-from-stored-file-id"
+    expected_sha256 = hashlib.sha256(source_bytes).hexdigest()
+    context_failure["auto_multi_recovery"]["source_sha256"] = expected_sha256
+    context_failure["source_sha256"] = expected_sha256
+    context_failure["input_save"]["original_source_sha256"] = expected_sha256
+    context_failure["input_save"]["transport_input_size"] = len(source_bytes)
+    _persist_fixed_vocal_job(db_path, context_failure)
+    if Path(source_path).exists():
+        Path(source_path).unlink()
+    before = sqlite3.connect(db_path).execute(
+        "SELECT value FROM system_settings WHERE key=?",
+        (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+    ).fetchone()[0]
+    monkeypatch.setattr(rearm, "SOURCE_SHA256", expected_sha256)
+    monkeypatch.setattr(
+        rearm.app,
+        "_subdub_sha256_file",
+        lambda value: hashlib.sha256(Path(value).read_bytes()).hexdigest(),
+    )
+    calls = []
+
+    async def download(_context, state):
+        calls.append(dict(state))
+        return source_bytes, "video/mp4"
+
+    monkeypatch.setattr(rearm.app, "video_dubbing_download_source", download)
+
+    result = asyncio.run(rearm.ensure_exact_source(SimpleNamespace()))
+
+    assert result["ok"] is True
+    assert result["rehydrated"] is True
+    assert Path(source_path).read_bytes() == source_bytes
+    assert calls[0]["source_file_id"] == context_failure["input_save"]["file_id"]
+    after = sqlite3.connect(db_path).execute(
+        "SELECT value FROM system_settings WHERE key=?",
+        (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+    ).fetchone()[0]
+    assert after == before
+
+
+def test_context_repair_reuses_existing_exact_source_without_download(
+    tmp_path,
+    monkeypatch,
+):
+    rearm, db_path, context_failure = _seed_context_loss_failure(
+        tmp_path,
+        monkeypatch,
+    )
+    source_path = Path(context_failure["auto_multi_recovery"]["source_path"])
+    source_bytes = b"existing-byte-identical-source"
+    expected_sha256 = hashlib.sha256(source_bytes).hexdigest()
+    context_failure["auto_multi_recovery"]["source_sha256"] = expected_sha256
+    context_failure["source_sha256"] = expected_sha256
+    context_failure["input_save"]["original_source_sha256"] = expected_sha256
+    context_failure["input_save"]["transport_input_size"] = len(source_bytes)
+    _persist_fixed_vocal_job(db_path, context_failure)
+    source_path.write_bytes(source_bytes)
+    before = sqlite3.connect(db_path).execute(
+        "SELECT value FROM system_settings WHERE key=?",
+        (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+    ).fetchone()[0]
+    monkeypatch.setattr(rearm, "SOURCE_SHA256", expected_sha256)
+    monkeypatch.setattr(
+        rearm.app,
+        "_subdub_sha256_file",
+        lambda value: hashlib.sha256(Path(value).read_bytes()).hexdigest(),
+    )
+
+    async def unexpected_download(*_args, **_kwargs):
+        raise AssertionError("existing exact source must not be downloaded")
+
+    monkeypatch.setattr(
+        rearm.app,
+        "video_dubbing_download_source",
+        unexpected_download,
+    )
+
+    result = asyncio.run(rearm.ensure_exact_source(SimpleNamespace()))
+
+    assert result == {
+        "ok": True,
+        "rehydrated": False,
+        "path": str(source_path.resolve()),
+    }
+    assert source_path.read_bytes() == source_bytes
+    after = sqlite3.connect(db_path).execute(
+        "SELECT value FROM system_settings WHERE key=?",
+        (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+    ).fetchone()[0]
+    assert after == before
+
+
+def test_context_repair_rejects_existing_wrong_hash_without_overwrite(
+    tmp_path,
+    monkeypatch,
+):
+    rearm, db_path, context_failure = _seed_context_loss_failure(
+        tmp_path,
+        monkeypatch,
+    )
+    source_path = Path(context_failure["auto_multi_recovery"]["source_path"])
+    wrong_bytes = b"existing-source-with-wrong-hash"
+    source_path.write_bytes(wrong_bytes)
+    before = sqlite3.connect(db_path).execute(
+        "SELECT value FROM system_settings WHERE key=?",
+        (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+    ).fetchone()[0]
+    monkeypatch.setattr(
+        rearm.app,
+        "_subdub_sha256_file",
+        lambda value: hashlib.sha256(Path(value).read_bytes()).hexdigest(),
+    )
+
+    async def unexpected_download(*_args, **_kwargs):
+        raise AssertionError("existing wrong source must fail closed")
+
+    monkeypatch.setattr(
+        rearm.app,
+        "video_dubbing_download_source",
+        unexpected_download,
+    )
+
+    result = asyncio.run(rearm.ensure_exact_source(SimpleNamespace()))
+
+    assert result == {
+        "ok": False,
+        "rehydrated": False,
+        "reason": "source_sha256_mismatch",
+    }
+    assert source_path.read_bytes() == wrong_bytes
+    assert not Path(f"{source_path}.rehydrate.tmp").exists()
+    after = sqlite3.connect(db_path).execute(
+        "SELECT value FROM system_settings WHERE key=?",
+        (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+    ).fetchone()[0]
+    assert after == before
+
+
+def test_context_repair_rejects_stored_file_id_mismatch_without_download(
+    tmp_path,
+    monkeypatch,
+):
+    rearm, db_path, context_failure = _seed_context_loss_failure(
+        tmp_path,
+        monkeypatch,
+    )
+    source_path = Path(context_failure["auto_multi_recovery"]["source_path"])
+    source_path.unlink(missing_ok=True)
+    context_failure["input_save"]["file_id"] = "AgAD-wrong-file-id"
+    _persist_fixed_vocal_job(db_path, context_failure)
+    before = sqlite3.connect(db_path).execute(
+        "SELECT value FROM system_settings WHERE key=?",
+        (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+    ).fetchone()[0]
+
+    async def unexpected_download(*_args, **_kwargs):
+        raise AssertionError("mismatched file id must not be downloaded")
+
+    monkeypatch.setattr(
+        rearm.app,
+        "video_dubbing_download_source",
+        unexpected_download,
+    )
+
+    result = asyncio.run(rearm.ensure_exact_source(SimpleNamespace()))
+
+    assert result == {
+        "ok": False,
+        "rehydrated": False,
+        "reason": "source_file_id_invalid",
+    }
+    assert not source_path.exists()
+    assert not Path(f"{source_path}.rehydrate.tmp").exists()
+    after = sqlite3.connect(db_path).execute(
+        "SELECT value FROM system_settings WHERE key=?",
+        (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+    ).fetchone()[0]
+    assert after == before
+
+
+def test_context_repair_rejects_download_hash_mismatch_without_source(
+    tmp_path,
+    monkeypatch,
+):
+    rearm, db_path, context_failure = _seed_context_loss_failure(
+        tmp_path,
+        monkeypatch,
+    )
+    source_path = Path(context_failure["auto_multi_recovery"]["source_path"])
+    source_path.unlink(missing_ok=True)
+    wrong_bytes = b"downloaded-bytes-with-wrong-hash"
+    context_failure["input_save"]["transport_input_size"] = len(wrong_bytes)
+    _persist_fixed_vocal_job(db_path, context_failure)
+    before = sqlite3.connect(db_path).execute(
+        "SELECT value FROM system_settings WHERE key=?",
+        (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+    ).fetchone()[0]
+    calls = []
+
+    async def download(_context, state):
+        calls.append(dict(state))
+        return wrong_bytes, "video/mp4"
+
+    monkeypatch.setattr(rearm.app, "video_dubbing_download_source", download)
+
+    result = asyncio.run(rearm.ensure_exact_source(SimpleNamespace()))
+
+    assert result == {
+        "ok": False,
+        "rehydrated": False,
+        "reason": "source_sha256_mismatch",
+    }
+    assert len(calls) == 1
+    assert not source_path.exists()
+    assert not Path(f"{source_path}.rehydrate.tmp").exists()
+    after = sqlite3.connect(db_path).execute(
+        "SELECT value FROM system_settings WHERE key=?",
+        (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+    ).fetchone()[0]
+    assert after == before
+
+
 def test_fixed_vocal_v2_rearm_keeps_same_fourth_attempt_and_wins_once(
     tmp_path,
     monkeypatch,
@@ -1274,7 +1720,19 @@ def test_fixed_vocal_v2_runner_enters_existing_handler_once(monkeypatch):
         calls.append(("claim",))
         return {"ok": True, "claimed": True, "job": job}
 
-    monkeypatch.setattr(rearm, "Bot", FakeBot)
+    monkeypatch.setattr(
+        rearm.app,
+        "build_telegram_application",
+        lambda: SimpleNamespace(bot=FakeBot("fixture-token")),
+    )
+    async def source_already_available(_telegram_bot):
+        calls.append(("source",))
+        return {
+            "ok": False,
+            "rehydrated": False,
+            "reason": "context_repair_not_allowed",
+        }
+    monkeypatch.setattr(rearm, "ensure_exact_source", source_already_available)
     monkeypatch.setattr(
         rearm,
         "claim_same_attempt",
@@ -1286,6 +1744,7 @@ def test_fixed_vocal_v2_runner_enters_existing_handler_once(monkeypatch):
 
     assert calls == [
         ("bot_enter",),
+        ("source",),
         ("claim",),
         (
             "handler",
