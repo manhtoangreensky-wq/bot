@@ -732,11 +732,8 @@ def _key4u_wire_payload(
         ).path.rstrip("/")
         == "/v1/video/create"
     ):
-        model = str(data.get("model") or "")
-        if model == "veo_3_1-fast":
-            model = "veo3.1-fast"
         return {
-            "model": model,
+            "model": str(data.get("model") or ""),
             "prompt": str(data.get("prompt") or "")[:4000],
             "aspect_ratio": str(
                 data.get("aspect_ratio") or data.get("ratio") or "9:16"

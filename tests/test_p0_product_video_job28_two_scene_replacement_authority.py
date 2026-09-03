@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from providers import video_generic_http_provider
 from providers.video_generic_http_provider import GenericHttpVideoProvider
 from services import (
     remote_worker_api,
@@ -39,6 +40,23 @@ LEGACY_RECEIPT = {
     "blocker": "all_video_providers_submit_failed",
     "recorded_at": "2026-09-01 02:27:07",
 }
+
+
+def _configure_key4u_veo_contract(monkeypatch) -> None:
+    for key, value in {
+        "KEY4U_VIDEO_ENABLED": "1",
+        "KEY4U_VIDEO_SUBMIT_URL": "https://api.key4u.vn/v1/video/create",
+        "KEY4U_VIDEO_POLL_URL": (
+            "https://api.key4u.vn/v1/video/query?id={task_id}"
+        ),
+        "KEY4U_VIDEO_AUTH_HEADER_NAME": "Authorization",
+        "KEY4U_VIDEO_AUTH_HEADER_VALUE": "Bearer test-key",
+        "KEY4U_VIDEO_MODEL": "veo_3_1-fast",
+        "KEY4U_VIDEO_CAPABILITIES": (
+            "text_to_video,scene_video,multi_scene_video"
+        ),
+    }.items():
+        monkeypatch.setenv(key, value)
 
 
 def _authorization() -> dict:
@@ -1177,6 +1195,7 @@ def test_real_replacement_dispatch_uses_only_key4u_and_preserves_exact_scope(
     monkeypatch,
     tmp_path,
 ) -> None:
+    _configure_key4u_veo_contract(monkeypatch)
     payload = _v3_job28_payload()
     eligibility = {
         "worker_local_ready_provider_keys": ["key4u_video"],
@@ -1323,6 +1342,12 @@ def test_v3_job28_key4u_veo_dispatch_uses_unified_contract(
     }.items():
         monkeypatch.setenv(key, value)
     calls: list[tuple[str, str, dict | None]] = []
+    wire_inputs: list[dict] = []
+    original_wire_payload = video_generic_http_provider._key4u_wire_payload
+
+    def capture_wire_payload(payload, *, submit_url=""):
+        wire_inputs.append(copy.deepcopy(payload))
+        return original_wire_payload(payload, submit_url=submit_url)
 
     def fake_open_json(self, url, payload=None, *, method="POST", **_kwargs):
         assert self.provider_name == "key4u_video"
@@ -1341,6 +1366,11 @@ def test_v3_job28_key4u_veo_dispatch_uses_unified_contract(
             "response_shape": {"type": "dict"},
         }
 
+    monkeypatch.setattr(
+        video_generic_http_provider,
+        "_key4u_wire_payload",
+        capture_wire_payload,
+    )
     monkeypatch.setattr(GenericHttpVideoProvider, "_open_json", fake_open_json)
     scene = SimpleNamespace(
         scene_id=1,
@@ -1361,12 +1391,19 @@ def test_v3_job28_key4u_veo_dispatch_uses_unified_contract(
         )
 
     assert str(exc_info.value) == "provider_in_progress"
+    wire_metadata = wire_inputs[0]["metadata"]
+    assert wire_metadata["provider_model_map"]["key4u_video"] == "veo_3_1-fast"
+    assert wire_metadata["provider_request_defaults"]["key4u_video"] == {
+        "duration": 8,
+        "resolution": "1080p",
+    }
+    assert wire_inputs[0]["model"] == "veo_3_1-fast"
     assert calls == [
         (
             "POST",
             "https://api.key4u.vn/v1/video/create",
             {
-                "model": "veo3.1-fast",
+                "model": "veo_3_1-fast",
                 "prompt": "replacement scene one unified veo",
                 "aspect_ratio": "9:16",
             },
@@ -1382,10 +1419,81 @@ def test_v3_job28_key4u_veo_dispatch_uses_unified_contract(
     assert diagnostics["provider_task_ids"] == ["job28-unified-task"]
 
 
+def test_v3_job28_key4u_model_resolution_failure_stops_before_submit(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    payload = _taskless_v3_job28_payload()
+    payload.update(
+        {
+            "quality_tier": 400,
+            "selected_provider": "key4u_video",
+            "selected_model": "veo3.1-fast",
+            "selected_family": "google_veo",
+            "selected_payload_adapter": "shopaikey_veo_small_clip",
+            "provider_model_map": {"shopaikey_video": "veo3.1-fast"},
+        }
+    )
+    claimed = remote_worker_api.product_video_controlled_fallback_claim_payload(
+        {"id": 28, "project_id": 32},
+        payload,
+        {"project_id": 32},
+        {
+            "worker_local_ready_provider_keys": ["key4u_video"],
+            "contract_valid_provider_chain": [
+                "shopaikey_video",
+                "key4u_video",
+            ],
+        },
+    )["result"]
+    monkeypatch.setattr(
+        connector,
+        "resolve_product_video_model",
+        lambda **_kwargs: {
+            "ok": False,
+            "selected_provider": "",
+            "contract_validation_status": "blocked",
+            "blocker": "key4u_model_contract_missing_no_charge",
+        },
+    )
+
+    def reject_submit(*_args, **_kwargs):
+        pytest.fail("provider submit must not run without resolved Key4U authority")
+
+    monkeypatch.setattr(connector, "run_provider_generation", reject_submit)
+    scene = SimpleNamespace(
+        scene_id=1,
+        video_prompt="replacement scene one",
+        visual_prompt="replacement scene one",
+        aspect_ratio="9:16",
+        target_duration_sec=8,
+        _toan_aas_job=claimed,
+    )
+
+    with pytest.raises(connector.RealVideoRenderError) as exc_info:
+        asyncio.run(
+            connector._render_scene_async(
+                scene,
+                str(tmp_path / "must-not-submit.mp4"),
+                ["shopaikey_video", "key4u_video"],
+            )
+        )
+
+    assert str(exc_info.value) == "key4u_model_contract_missing_no_charge"
+    diagnostics = exc_info.value.diagnostics
+    assert diagnostics["provider_error"] == "key4u_model_contract_missing_no_charge"
+    assert diagnostics["blocker"] == "key4u_model_contract_missing_no_charge"
+    assert diagnostics["provider_submit_called"] is False
+    assert diagnostics["provider_http_request_sent"] is False
+    assert diagnostics["provider_submit_allowed"] is False
+    assert diagnostics["no_charge"] is True
+
+
 def test_v3_taskless_authority_submits_new_key4u_without_polling_old_task(
     monkeypatch,
     tmp_path,
 ) -> None:
+    _configure_key4u_veo_contract(monkeypatch)
     payload = _taskless_v3_job28_payload()
     eligibility = {
         "worker_local_ready_provider_keys": ["key4u_video"],
@@ -1908,6 +2016,7 @@ def test_v3_taskless_orchestrator_submits_two_scenes_in_receipt_order(
     monkeypatch,
     tmp_path,
 ) -> None:
+    _configure_key4u_veo_contract(monkeypatch)
     payload = _taskless_v3_job28_payload()
     payload.update(
         {
@@ -2104,6 +2213,7 @@ def test_v3_taskless_pending_submit_keeps_v2_namespace_and_only_calls_scene_one(
     monkeypatch,
     tmp_path,
 ) -> None:
+    _configure_key4u_veo_contract(monkeypatch)
     payload = _taskless_v3_job28_payload()
     payload.update(
         {
@@ -2410,6 +2520,7 @@ def test_real_per_scene_orchestrator_advances_replacement_authority_in_same_tick
     monkeypatch,
     tmp_path,
 ) -> None:
+    _configure_key4u_veo_contract(monkeypatch)
     payload = _job28_payload()
     payload.update(
         {
@@ -2863,6 +2974,7 @@ def test_orchestrator_skips_consumed_no_task_scene_and_calls_only_remaining_scen
     monkeypatch,
     tmp_path,
 ) -> None:
+    _configure_key4u_veo_contract(monkeypatch)
     payload = _job28_payload()
     payload.update(
         {
@@ -3135,7 +3247,7 @@ def test_remaining_scene_transition_submits_unified_key4u_task_then_polls_only_n
         (
             "POST",
             "https://api.key4u.vn/v1/video/create",
-            "veo3.1-fast",
+            "veo_3_1-fast",
         ),
         (
             "GET",

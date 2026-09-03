@@ -273,7 +273,7 @@ def test_key4u_veo_normalizes_legacy_videos_endpoint_to_unified_contract(monkeyp
     assert captured == {
         "url": f"{KEY4U_VN}/v1/video/create",
         "payload": {
-            "model": "veo3.1-fast",
+            "model": "veo_3_1-fast",
             "prompt": "Product video scene.",
             "aspect_ratio": "9:16",
         },
@@ -405,7 +405,7 @@ def test_key4u_veo_derived_unified_contract_uses_json_wire_payload(monkeypatch):
     assert captured == {
         "url": f"{KEY4U_VN}/v1/video/create",
         "payload": {
-            "model": "veo3.1-fast",
+            "model": "veo_3_1-fast",
             "prompt": "Product video scene.",
             "aspect_ratio": "9:16",
         },
