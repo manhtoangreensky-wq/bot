@@ -1128,7 +1128,7 @@ pv2_r01_job28_key4u_model_authority:
   wallet_mutations_during_source_gate: 0
   live_pass: false
 pv2_r01_job28_key4u_unified_poll_authority:
-  phase: SOURCE_READY_TO_SHIP
+  phase: RECEIPT_ROW_SHAPE_SOURCE_GREEN
   model_authority_pr_runtime: PR 982 / 095b6c88aa98a42ebbb3fc6535d44d7222e29779
   model_authority_deploy: 33706481637 SUCCESS in 3m34s
   runtime_services: bot/web/nginx active; bot and Owner worker exact/clean 095b6c88; worker backup ref refs/backups/worker-pre-product-video-model-authority-20260903T030530Z
@@ -1151,6 +1151,17 @@ pv2_r01_job28_key4u_unified_poll_authority:
   focused_green: 91 passed in 10.66s
   broad_green: 184 passed plus exact same 12 baseline failures in 30.62s; NEW_FAILURES=0
   full_compile_diff: bot.py both workers provider router/connector/provider/test exit 0; diff-check exit 0
+  poll_authority_ship: PR 983 / b3c217eb73324e316b62a052b6f86e0ee08c78e4 / deploy 33779100072 SUCCESS
+  worker_sync: exact clean b3c217eb; inactive PID 0; backup ref refs/backups/worker-pre-product-video-unified-poll-20260903T164456Z
+  poll_only_rehearsal: DB 14184448 bytes mode 0600; six negatives and replay fail closed; claim scene1 only; V2 [1,2]; V3 [1]; cap 1/1; SQLite ok
+  poll_only_production_backups: DB 5e9609cb28b241faef331fa2f4075bd195de18d862e8cab77c8b4643af59ceb7; manifest 960a1c72678bad798750ca7ec0c7ad10ac3cde6978010fc7c048b42f9f1e92e7; CAS JSON 67735746cc2ff9c58d0f7bf0f743bbd4eb797eb148d589fa3331bdbbccfa58c8; mode 0600
+  guarded_live_worker: PID 1255055; stopped inactive PID 0 at tick 2
+  guarded_live_result: scene1 provider raw completed; accepted task SHA e0946432 unchanged; scene2 task/receipt absent; artifact/delivery absent; V3 1/1; finance unchanged
+  receipt_row_shape_root: scene ledger read receipt namespaces from direct SQLite row fields while durable namespaces live inside result_json, so first claim/defer dropped immutable V2
+  receipt_row_shape_red: 1 failed in 77.43s; V2 absent from production-shaped SQLite result_json row
+  receipt_row_shape_green: exact plus inverse 2 passed in 5.22s; final authority 47 passed in 5.90s
+  receipt_row_shape_blast_radius: 136 passed plus exact same clean-main RouteEngine29O attempts baseline failure; NEW_FAILURES=0
+  receipt_row_shape_compile_diff: changed source/test exit 0; diff-check exit 0
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
@@ -1162,9 +1173,9 @@ spec_04i_subdub_auto_two_speaker_addon:
   representative_live_target: one unfinished media-compatible Product Video lane
   acceptance: male/female detection; translation; two-voice dub; final MP4; receipt/report; wallet delta 0
 next_action: >-
-  Commit and ship only the accepted-task unified poll reconstruction, deploy and
-  sync the inactive Owner worker. Recover existing scene1 task poll-only: no scene1
-  resubmit and no new job/outbox/upload/Confirm. Treat the already accepted scene1
-  call as operational call 1/2 even while its durable V3 receipt is empty. Only after
-  scene1 clip validates may scene2 use the one remaining paid call. Stop at two calls
-  or terminal two-scene MP4. Open nothing else.
+  Commit and ship only the receipt-row-shape ledger correction, deploy and sync the
+  inactive Owner worker. Restore immutable V2 from the existing mode-0600 backup by
+  a new exact-state snapshot/CAS without changing the scene1 accepted task or V3
+  1/1 cap. Resume scene1 poll/download only; no scene1 resubmit and no new identity,
+  upload, Confirm or ShopAIKey action. Only after scene1 clip validates may scene2
+  use the one remaining paid call. Stop at two calls or terminal two-scene MP4.

@@ -1237,3 +1237,34 @@ Kling, Hailuo and other products are untouched. Unified/inverse is `2 passed in
 9.00s`; focused is `91 passed in 10.66s`; broad is `184 passed` plus the exact same
 `12` baseline failures in `30.62s`, so `NEW_FAILURES=0`. Full bot/workers/router/
 connector/provider/test compile and diff-check exit `0`.
+
+PR #983 shipped that poll authority as runtime
+`b3c217eb73324e316b62a052b6f86e0ee08c78e4`; deploy run `33779100072` succeeded.
+An exact poll-only CAS then passed against a `14,184,448`-byte production snapshot,
+six negative state variants and duplicate replay. It was applied once with DB backup
+SHA `5e9609cb...`, manifest backup SHA `960a1c72...` and CAS JSON backup SHA
+`67735746...`, all mode `0600`. A post-watchdog snapshot retained task SHA
+`e0946432...`, V2 receipts `[1,2]`, V3 scene `[1]`, cap `1/1`, attempts `43/1`,
+submit disabled and zero finance delta.
+
+One guarded worker start at PID `1255055` advanced the accepted scene-1 provider
+state to raw `completed`; scene 2 remained taskless and unreceipted. Before a clip
+was persisted, the first claim/defer cycle dropped the immutable V2 namespace. The
+guard stopped the worker at tick 2, inactive PID `0`. V3 stayed exactly `1/1`, the
+scene-1 task hash was unchanged, artifact/delivery remained empty, wallet remained
+`200/0`, and transactions/provider usage/charged Xu remained `0/0/0`.
+
+The isolated root is row shape: `_product_video_replacement_ledger_fields` read
+receipt fields directly from `job`, while the production SQLite row keeps them in
+`job.result_json`. Existing tests supplied a hydrated flat dict and missed the
+boundary. A production-shaped RED failed on the missing V2 namespace in `77.43s`.
+The minimal correction parses the durable result JSON and overlays direct hydrated
+job fields as the priority layer. Exact plus inverse GREEN is `2 passed in 5.22s`;
+the final job28 authority file is `47 passed in 5.90s`; ledger/claim/poll blast radius
+is `136 passed` plus one exact clean-main RouteEngine29O attempts baseline failure,
+so `NEW_FAILURES=0`. Changed source/test compile and diff-check exit `0`.
+
+Next, ship only this seam. After runtime sync, restore only immutable V2 from the
+existing mode-`0600` evidence through a fresh exact-state rehearsal/CAS, retain the
+accepted scene-1 task and V3 `1/1`, then resume poll/download. Scene 1 must never be
+resubmitted. Scene 2 may consume the last call only after a valid scene-1 clip.

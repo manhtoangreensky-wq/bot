@@ -7349,7 +7349,11 @@ def _product_video_replacement_ledger_fields(
     job: dict[str, Any],
     result: dict[str, Any],
 ) -> dict[str, Any]:
-    persisted_replacement = job.get(
+    persisted_result = _json_loads(job.get("result_json"), {})
+    if not isinstance(persisted_result, dict):
+        persisted_result = {}
+    persisted_job = {**persisted_result, **job}
+    persisted_replacement = persisted_job.get(
         "controlled_fallback_replacement_submit_receipts_by_authorization"
     )
     partial_replacement = result.get(
@@ -7357,7 +7361,7 @@ def _product_video_replacement_ledger_fields(
     )
     authorization = result.get(
         "controlled_fallback_replacement_authorization"
-    ) or job.get("controlled_fallback_replacement_authorization")
+    ) or persisted_job.get("controlled_fallback_replacement_authorization")
     active_authorization_id = str(
         authorization.get("authorization_id") or ""
     ) if isinstance(authorization, dict) else ""
@@ -7395,7 +7399,7 @@ def _product_video_replacement_ledger_fields(
             if isinstance(receipt, dict):
                 active_receipts.setdefault(str(scene), dict(receipt))
     source = {
-        **job,
+        **persisted_job,
         **{
             key: value
             for key, value in result.items()
@@ -7507,8 +7511,8 @@ def _product_video_replacement_ledger_fields(
         if receipt(item)
     ]
     raw_counts = (
-        job.get("fallback_count_by_scene")
-        if isinstance(job.get("fallback_count_by_scene"), dict)
+        persisted_job.get("fallback_count_by_scene")
+        if isinstance(persisted_job.get("fallback_count_by_scene"), dict)
         else result.get("fallback_count_by_scene")
     )
     counts = {

@@ -1184,6 +1184,30 @@ starting the next.
   submit is official `/v1/video/create`; it never POSTs. Unified/historical inverse
   `2 passed`; focused `91 passed`; broad `184 passed` plus the exact same `12`
   baseline failures, `NEW_FAILURES=0`; full compile and diff-check exit `0`.
+- [x] Poll authority shipped as PR #983, squash/runtime
+  `b3c217eb73324e316b62a052b6f86e0ee08c78e4`; deploy run `33779100072`
+  SUCCESS. Bot/web/nginx were active; the inactive Owner worker was synchronized to
+  the same clean SHA with backup ref
+  `refs/backups/worker-pre-product-video-unified-poll-20260903T164456Z`.
+- [x] Exact accepted-task poll-only CAS passed on a `14,184,448`-byte snapshot,
+  six fail-closed negatives and duplicate replay, then applied once to production.
+  DB backup SHA `5e9609cb...`, manifest backup SHA `960a1c72...`, CAS JSON backup
+  SHA `67735746...`, all mode `0600`. Post-watchdog snapshot kept
+  `queued/queued_for_worker/acknowledged`, attempts `43/1`, task SHA
+  `e0946432...`, V2 `[1,2]`, V3 `[1]`, cap `1/1`, submit disabled and finance `0`.
+- [-] One guarded worker start PID `1255055` advanced scene 1's accepted task to
+  provider raw `completed`, without a scene-2 task or receipt. The first
+  claim/defer persistence cycle dropped immutable V2 namespace `[1,2]` because the
+  scene ledger read direct SQLite row fields instead of its `result_json`; the guard
+  stopped the worker at tick 2. Worker is inactive PID `0`; V3 remains scene 1 only
+  at `1/1`, artifact/delivery `0`, wallet `200/0`, transactions/provider usage/
+  charged Xu `0/0/0`.
+- [x] Production-shaped receipt-row RED failed exactly on missing V2 in `77.43s`.
+  The minimal ledger correction parses durable `job.result_json` while preserving
+  direct hydrated fields as the priority layer. Exact + inverse GREEN `2 passed in
+  5.22s`; final job28 authority `47 passed in 5.90s`; ledger/claim/poll blast radius
+  `136 passed` plus one exact clean-main attempts baseline failure, so
+  `NEW_FAILURES=0`; changed source/test compile and diff-check exit `0`.
 - [ ] Two distinct scene clips and one final MP4 terminal; otherwise stop at the
   exact new RED and reopen only `SPEC-04H`.
 
