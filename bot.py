@@ -43583,7 +43583,8 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
                 f"{account_copy['topup_verified_base']}\n"
                 f"{copy['common_no_charge']}"
             )
-        return await query.edit_message_text(
+        return await safe_edit_query_message(
+            query,
             await_bill_text,
             parse_mode="HTML",
             reply_markup=manual_method_keyboard(uid, lang),

@@ -178,7 +178,7 @@ fail male/male hoặc female/female là forced pairing và phải FAIL case.
 | ID | Bước kiểm thử | PASS bắt buộc |
 |---|---|---|
 | `TOPUP-MANUAL-01` | `/naptien` → `Nạp thủ công` → VND → 50k → ACB/VietQR | Có đúng một QR/hướng dẫn hiển thị `50.000đ`, Xu dự kiến và nội dung chuyển khoản; chọn mệnh giá không tạo `payos_orders` |
-| `TOPUP-MANUAL-02` | Bấm gửi bill rồi gửi một ảnh bill | Có đúng một `pending_deposits` row ở `pending_admin_review`; credits và `manual_deposit` credit event dương vẫn `0`; admin nhận deposit id |
+| `TOPUP-MANUAL-02` | Trên QR dạng **ảnh**, bấm `Tôi đã chuyển khoản / gửi bill` rồi gửi một ảnh bill | Click phải hiện prompt gửi bill, không hiện generic top-up error; sau ảnh bill có đúng một `pending_deposits` row ở `pending_admin_review`; credits và `manual_deposit` credit event dương vẫn `0`; admin nhận deposit id/card duyệt |
 | `TOPUP-MANUAL-03` | Gửi lại cùng ảnh bill | Không tạo hàng thứ hai; trả `duplicate_file_unique_id`; không cộng Xu |
 | `TOPUP-MANUAL-04` | Admin bấm Duyệt dự kiến rồi xác nhận một lần | Bước đầu chưa cộng; bước xác nhận đổi đúng deposit id sang `approved`, ghi `approved_xu/approved_by/approved_at` và tạo đúng một `manual_deposit` event |
 | `TOPUP-MANUAL-05` | Admin bấm xác nhận lại hoặc xác nhận amount giả | Không tạo credit event thứ hai; hàng đã approved không bị duyệt lại |

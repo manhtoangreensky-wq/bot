@@ -607,3 +607,11 @@ zero-row CAS rollback toàn bộ và không cộng Xu; khi CAS thắng, metadata
 bị bỏ qua bởi điều kiện status cũ. Test `test_manual_approval_keeps_post_approval_metadata`
 đã đo đúng `payment_market=VN`, `domestic_eligibility=1` và
 `successful_topup_ordinal=7` trên `deposit_id=1`.
+
+#### Chỗ UI QR cũ không còn đúng — 04/09/2026
+
+Nút `Tôi đã chuyển khoản / gửi bill` nằm trên QR photo nhưng callback cũ cố
+`edit_message_text` trên chính photo, khiến Telegram từ chối với `BadRequest`.
+Hiện callback sử dụng fallback render tương thích photo, rồi khách mới gửi bill
+để tạo `pending_admin_review`. Không tạo card admin hoặc cộng Xu chỉ từ click;
+card duyệt được tạo sau ảnh bill/TXID để giữ chống fake bill.
