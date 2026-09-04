@@ -3305,7 +3305,12 @@ def product_video_controlled_fallback_claim_payload(
     from services import video_real_render_connector
 
     policy = video_real_render_connector.product_video_scene_stall_policy(
-        {**job, **payload, "provider_order": provider_order},
+        {
+            **job,
+            **payload,
+            "provider_order": provider_order,
+            "fallback_scene_index": fallback_scene_index,
+        },
         target,
         fallback_scene_index,
     )

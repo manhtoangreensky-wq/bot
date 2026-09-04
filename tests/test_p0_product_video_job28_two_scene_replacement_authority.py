@@ -1838,6 +1838,136 @@ def test_v4_taskless_watchdog_waits_with_exact_scope_and_preserves_history() -> 
         conn.close()
 
 
+def test_v4_completed_scene_one_claims_only_stale_taskless_scene_two(
+    tmp_path,
+) -> None:
+    payload = _taskless_v3_job28_payload()
+    scene_one_task = "key4u-v4-scene-one-task-accepted"
+    scene_one_clip = tmp_path / "provider_scene_001.mp4"
+    scene_one_clip.write_bytes(b"v4-scene-one-real-provider-clip")
+    authorization = payload["controlled_fallback_replacement_authorization"]
+    authorization.update(
+        {
+            "authorization_id": V4_AUTHORIZATION_ID,
+            "authorization_version": 4,
+            "state": "active",
+            "calls_consumed": 1,
+            "consumed_scene_indexes": [1],
+        }
+    )
+    namespaces = payload[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ]
+    namespaces[V3_AUTHORIZATION_ID]["1"] = _authorization_receipt(
+        V3_AUTHORIZATION_ID,
+        3,
+        1,
+        task_id="expired-v3-scene-one-task",
+    )
+    namespaces[V4_AUTHORIZATION_ID] = {
+        "1": _authorization_receipt(
+            V4_AUTHORIZATION_ID,
+            4,
+            1,
+            task_id=scene_one_task,
+        )
+    }
+    for scene in payload["scene_tasks"]:
+        if int(scene.get("scene_index") or 0) == 1:
+            scene.update(
+                {
+                    "provider": "key4u_video",
+                    "selected_provider": "key4u_video",
+                    "provider_task_id": scene_one_task,
+                    "active_task_id": scene_one_task,
+                    "task_id_present": True,
+                    "task_pollable": True,
+                    "submit_accepted": True,
+                    "status": "provider_running",
+                    "actual_provider_payload_status": "queued",
+                    "clip_path": str(scene_one_clip),
+                    "clip_valid": True,
+                    "result_url_valid": True,
+                    "clip_bytes": scene_one_clip.stat().st_size,
+                    "fallback_count": 2,
+                    "provider_fallback_count": 2,
+                }
+            )
+        else:
+            scene.update(
+                {
+                    "provider": "key4u_video",
+                    "selected_provider": "key4u_video",
+                    "status": "provider_stalled_not_start",
+                    "current_scene_status": "provider_stalled_not_start",
+                    "actual_provider_payload_status": "blocked_no_charge",
+                    "failure_reason": "replacement_accepted_task_poll_only",
+                    "provider_task_id": "",
+                    "active_task_id": "",
+                    "task_id_present": False,
+                    "task_pollable": False,
+                    "submit_accepted": False,
+                    "fallback_count": 0,
+                    "provider_fallback_count": 0,
+                    "fallback_allowed": False,
+                    "controlled_fallback_allowed": False,
+                    "fallback_provider_candidate": "shopaikey_video",
+                    "fallback_provider_order": ["shopaikey_video"],
+                    "fallback_scene_index": 2,
+                    "dispatch_attempted": True,
+                }
+            )
+    payload["provider_scene_tasks"] = copy.deepcopy(payload["scene_tasks"])
+    payload.update(
+        {
+            "fallback_scene_index": 0,
+            "fallback_allowed": False,
+            "controlled_fallback_allowed": False,
+            "fallback_provider_candidate": "",
+            "fallback_provider_order": [],
+            "replacement_authorization_id": V4_AUTHORIZATION_ID,
+            "replacement_authorization_version": 4,
+            "replacement_calls_consumed": 1,
+            "replacement_calls_remaining": 1,
+        }
+    )
+
+    claim = remote_worker_api.product_video_controlled_fallback_claim_payload(
+        {"id": 28, "project_id": 32},
+        payload,
+        {"project_id": 32},
+        {
+            "worker_local_ready_provider_keys": [
+                "shopaikey_video",
+                "key4u_video",
+            ],
+            "contract_valid_provider_chain": [
+                "key4u_video",
+                "shopaikey_video",
+            ],
+        },
+    )
+
+    assert claim["applied"] is True
+    assert claim["eligible_scene_indexes"] == [2]
+    assert claim["poll_only_scene_indexes"] == []
+    claimed = claim["result"]
+    selected = next(
+        scene
+        for scene in claimed["scene_tasks"]
+        if int(scene.get("scene_index") or 0) == 2
+    )
+    assert selected["controlled_fallback_allowed"] is True
+    assert selected["fallback_provider_candidate"] == "key4u_video"
+    assert selected["fallback_provider_order"] == ["key4u_video"]
+    assert selected["fallback_scene_index"] == 2
+    assert claimed["replacement_calls_consumed"] == 1
+    assert claimed["replacement_calls_remaining"] == 1
+    assert sorted(namespaces[AUTHORIZATION_ID]) == ["1", "2"]
+    assert sorted(namespaces[V3_AUTHORIZATION_ID]) == ["1"]
+    assert sorted(namespaces[V4_AUTHORIZATION_ID]) == ["1"]
+
+
 def test_v3_taskless_watchdog_hands_fresh_worker_read_only_state_to_claim(
     monkeypatch,
 ) -> None:

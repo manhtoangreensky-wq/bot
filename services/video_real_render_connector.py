@@ -1636,6 +1636,11 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         replacement_scene_authorized
         and _safe_int(replacement.get("authorization_version"), 0) >= 3
     )
+    replacement_taskless_selected = bool(
+        replacement_taskless_authorized
+        and not _scene_task_has_provider_id(scene_task)
+        and _safe_int(job.get("fallback_scene_index"), 0) == scene_index
+    )
     effective_fallback_count = 0 if replacement_scene_authorized else fallback_count
     source = str(
         job.get("original_submit_source")
@@ -1700,7 +1705,10 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         and job.get("quote_consistent") is not False
     )
     runtime_fallback_candidate_recovered = False
-    if (
+    if replacement_taskless_selected:
+        fallback_chain = ["key4u_video"]
+        runtime_fallback_candidate_recovered = True
+    elif (
         automatic_fallback_forbidden
         and not fallback_chain
         and exact_quote_preserved
@@ -1763,7 +1771,7 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         and not charged
     )
     fallback_allowed = bool(
-        stalled
+        (stalled or replacement_taskless_selected)
         and public_confirmed
         and invoice_confirmed
         and effective_fallback_count <= 0
@@ -1779,7 +1787,7 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
             replacement.get("block_reason")
             or "automatic_fallback_forbidden"
         )
-    elif not stalled:
+    elif not (stalled or replacement_taskless_selected):
         if is_not_start:
             fallback_block_reason = "not_start_under_threshold"
         elif running_active and elapsed >= running_threshold and not provider_progress_stuck:
@@ -1800,7 +1808,7 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         fallback_block_reason = "no_fallback_provider"
     else:
         fallback_block_reason = ""
-    fallbackable_blocker = bool(stalled)
+    fallbackable_blocker = bool(stalled or replacement_taskless_selected)
     fallback_eligibility_reason = "eligible" if fallback_allowed else fallback_block_reason
     threshold = not_start_threshold if is_not_start else (running_threshold if running_stalled else total_threshold)
     fallback_provider = str((fallback_chain or [""])[0] or "")
@@ -1851,7 +1859,7 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         ),
         "fallback_due_to_in_progress_stall": bool(running_stalled and fallback_allowed),
         "scene_total_timeout": bool(timed_out),
-        "fallback_scene_index": max(1, _safe_int(scene_index, 1)) if stalled else 0,
+        "fallback_scene_index": max(1, _safe_int(scene_index, 1)) if (stalled or replacement_taskless_selected) else 0,
         "fallback_allowed": fallback_allowed,
         "automatic_fallback_forbidden": automatic_fallback_forbidden,
         "controlled_fallback_allowed": controlled_fallback_allowed,

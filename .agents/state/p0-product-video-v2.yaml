@@ -1,5 +1,5 @@
 task_id: P0_PRODUCT_VIDEO_V2_PV2_R01
-phase: PV2_R01_JOB28_RECEIPT_LOCKED_WAITING_REPLACEMENT_AUTH
+phase: PV2_R01_JOB28_V4_SCENE2_CLAIM_SOURCE_GREEN
 pointer: V2-03/PV2-R01
 base_sha: 3d16cf60511318d2c5eb7c799ecbee8c07631c1b
 goal: Restore the complete existing content flow for all four Video Trend lanes, then live the most complex upload lane once at tier 400 with two real scenes, strict subtitle/transition Add-ons, durable MP4 receipt, customer report and zero Owner wallet mutation.
@@ -1185,6 +1185,51 @@ pv2_r01_job28_key4u_unified_poll_authority:
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
+pv2_r01_job28_v4_scene2_claim:
+  runtime_sha: 08744e57c09fe0d9796473889309ff39ab523309
+  worker_pid_stopped: 1306282
+  worker_state_after_stop: inactive
+  v4_scene1_task_sha256: 0eef7bddc8f09d3e0a65bdc9d23419d01fbf0ddbccbd427fdf29885fc353d68a
+  v4_scene1_clip: provider_scene_001.mp4
+  v4_scene1_clip_bytes: 2173014
+  v4_calls_consumed_remaining: [1, 1]
+  scene2_task_present: false
+  finance_after_stop:
+    charged_xu: 0
+    transactions: 0
+    provider_usage: 0
+    wallet: [200, 0]
+  root_cause: >-
+    The remaining taskless scene was valid under exact V4, but its stale
+    key4u/blocked-no-charge row was neither a stalled task nor a fresh provider
+    candidate. Claim therefore returned applied=false even though authorization
+    context returned scene_authorized=true.
+  correction_scope:
+    - pass the selected remaining scene index into the canonical fallback policy
+    - treat only a selected V3+ authorized scene with no provider task ID as taskless
+    - force that exact taskless candidate to key4u_video
+    - preserve every existing task as poll-only
+  red: 1 failed in 0.71s
+  review_red: 1 failed and 6 passed; existing accepted task attempted POST before final task-ID guard
+  exact_green: 7 passed in 5.95s
+  full_authority_green: 50 passed in 5.94s
+  protected_green: 96 passed in 9.51s
+  compile: bot.py and changed runtime/test files exit 0
+  diff_check: exit 0
+  production_shape_query_only:
+    applied: true
+    eligible_scene_indexes: [2]
+    provider: key4u_video
+    calls_consumed_remaining: [1, 1]
+    charged_xu: 0
+    db_total_changes: 0
+  post_rebase_base: cfd21c843e7ef0888a0baf53f69a43c5c968c033
+  post_rebase_pre_evidence_amend_head: d2fa55d342cc2ad3bf0b5c42908f59c3426ef316
+  post_rebase_gate: 105 passed in 10.19s
+  post_rebase_compile_diff: bot.py, workers and changed files exit 0; diff-check exit 0
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  live_pass: false
 spec_04i_subdub_auto_two_speaker_addon:
   phase: PENDING_AFTER_SPEC_04H_9
   compatible_media_only: true
@@ -1193,9 +1238,9 @@ spec_04i_subdub_auto_two_speaker_addon:
   representative_live_target: one unfinished media-compatible Product Video lane
   acceptance: male/female detection; translation; two-voice dub; final MP4; receipt/report; wallet delta 0
 next_action: >-
-  Commit and ship only the exact V4 watchdog allowlist, deploy and sync the inactive
-  Owner worker. Install V4 0/2 through snapshot/rehearsal/CAS, preserving immutable
-  V2 and V3 history while clearing only the expired scene1 task/artifact aliases.
-  Resume the same job: submit scene1 once, download immediately, then submit scene2
-  once, stitch/deliver and stop at two calls or terminal two-scene MP4. No new
-  identity, upload, Confirm, ShopAIKey action or price/wallet change.
+  Commit and ship only the V4 scene-2 taskless claim seam, deploy and synchronize
+  the inactive Owner worker. Revalidate the same production row in query-only mode,
+  then resume existing job 28 once. Scene 1 is immutable and must never be submitted
+  again; scene 2 may consume the final V4 call. Stop after that call or terminal
+  two-scene MP4, then validate stitch, Add-ons, delivery and zero-Xu finance before
+  locking PV2-R01 and opening SPEC-04H.9.

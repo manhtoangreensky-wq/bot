@@ -1321,3 +1321,43 @@ because the taskless wait gate allowed only exact V3. The minimal correction add
 only exact V4 to that allowlist. Exact plus strict-scope inverses are `6 passed in
 5.08s`; full authority/protected watchdog is `82 passed in 10.74s`; full compile
 and diff-check exit `0`.
+
+## V4 scene-2 taskless claim authority
+
+PR #986 deployed exact runtime `08744e57c09fe0d9796473889309ff39ab523309`.
+The first V4 submit produced scene-1 task SHA `0eef7bdd...` and the real validated
+`provider_scene_001.mp4` clip with `2,173,014` bytes. V4 remained `1/2`; scene 2
+had no task, receipt or clip. Charged Xu, transactions and provider-usage rows were
+all `0`, and the Owner wallet remained `200/0`.
+
+Worker PID `1306282` then repeatedly returned `provider_in_progress` without a
+second call. It was stopped inactive at an unlocked boundary. Query-only production
+forensic showed the authorization parser correctly returned scene 2 as authorized,
+but the claim resolver returned `applied=false`. The taskless scene retained stale
+`key4u_video` and `blocked_no_charge` labels. The canonical policy consequently
+treated it as neither stalled nor eligible for Key4U, even though V4 had one exact
+scene-2 slot left.
+
+The correction is confined to that claim seam. Claim passes its selected remaining
+scene into the canonical policy. Only a selected V3+ authorization with valid scope,
+finance, call cap and no provider task ID can use taskless dispatch; its candidate is
+the authorized `key4u_video`. Any existing task remains poll-only.
+
+Production-shaped RED was `1 failed in 0.71s`. Initial review caught a real safety
+regression where an existing task could POST again (`1 failed, 6 passed`), so the
+final task-ID guard was added before acceptance. Final exact comparators are
+`7 passed in 5.95s`; full authority is `50 passed in 5.94s`; protected claim,
+watchdog, ledger and spend safety is `96 passed in 9.51s`. Full `bot.py` compile,
+changed runtime/test compile and diff-check exit `0`. The patched code evaluated
+against the live SQLite row in query-only mode returns `eligible=[2]`,
+`applied=true`, Key4U candidate, V4 `1/1`, charged `0` and `db_total_changes=0`.
+The commit rebased without overlap onto exact main
+`cfd21c843e7ef0888a0baf53f69a43c5c968c033`; pre-evidence-amend HEAD is
+`d2fa55d342cc2ad3bf0b5c42908f59c3426ef316`. Post-rebase combined verification is
+`105 passed in 10.19s`; exact bot/workers/changed-file compile and diff-check exit
+`0`.
+
+Next, ship only this seam. After exact runtime and inactive-worker synchronization,
+resume the same job once. Scene 1 cannot be resubmitted; scene 2 may consume the one
+remaining V4 call. Stop after that call or terminal two-scene MP4, then verify stitch,
+subtitle/transition Add-ons, Telegram delivery and zero-Xu finance.
