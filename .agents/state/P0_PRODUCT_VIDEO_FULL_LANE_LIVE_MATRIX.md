@@ -1254,6 +1254,31 @@ starting the next.
   taskless-wait ID. Minimal allowlist adds only exact V4. Exact plus unknown-ID and
   permanent/transient inverse GREEN `6 passed in 5.08s`; full authority/protected
   watchdog gate `82 passed in 10.74s`; full compile/diff exit `0`.
+- [x] PR #986 deployed runtime `08744e57c09fe0d9796473889309ff39ab523309`.
+  V4 production consumed only scene 1: task SHA `0eef7bdd...`; validated clip
+  `provider_scene_001.mp4` is `2,173,014` bytes. Scene 2 remained taskless, V4
+  stayed `1/2`, finance stayed charged/transactions/provider-usage `0/0/0`, and
+  wallet stayed `200/0`.
+- [-] Worker PID `1306282` repeatedly returned `provider_in_progress` after scene 1
+  completed. It was stopped inactive at an unlocked boundary before scene 2 or a
+  second call. Production read-only context proved scene 2 authorized, but claim
+  still returned `applied=false`: the taskless row retained stale provider/status
+  labels and the policy required a stall while excluding Key4U as current provider.
+- [x] Scene-2 claim RED is `1 failed in 0.71s`. First GREEN review caught an
+  accepted-task resubmit regression (`1 failed, 6 passed`); the final task-ID guard
+  keeps every existing task poll-only. Final exact comparators are `7 passed`, full
+  authority is `50 passed`, and protected claim/watchdog/ledger/spend safety is
+  `96 passed`. Full `bot.py` compile, changed runtime/test compile and diff-check
+  exit `0`; source verification made provider/wallet mutations `0/0`.
+- [x] Patched code against the live SQLite row in query-only mode returns only
+  `eligible=[2]`, `applied=true`, Key4U candidate, V4 cap `1/1`, charged `0`, and
+  `db_total_changes=0`.
+- [x] Rebased without overlap onto exact main `cfd21c843e7ef0888a0baf53f69a43c5c968c033`;
+  pre-evidence-amend HEAD `d2fa55d`. Post-rebase combined gate is `105 passed in
+  10.19s`; exact `bot.py`, workers and changed-file compile plus diff-check exit `0`.
+- [ ] Ship/deploy only this scene-2 claim seam, synchronize the inactive Owner
+  worker, then resume the same job under V4. Stop after the one remaining call or
+  a terminal two-scene MP4; never resubmit scene 1 or ShopAIKey.
 - [ ] Two distinct scene clips and one final MP4 terminal; otherwise stop at the
   exact new RED and reopen only `SPEC-04H`.
 
@@ -1333,6 +1358,7 @@ Each row needs a different scenario or fixture, exact request/project/job/outbox
 
 | Time (Asia/Saigon) | Spec | Evidence | Result |
 |---|---|---|---|
+| 2026-09-04 | SPEC-04H.8 V4 scene-2 claim | Runtime `08744e57`; scene-1 clip `2,173,014` bytes; V4 `1/2`; worker stopped before scene 2; RED `1 failed`; final authority `50 passed`; protected `96 passed`; post-rebase `105 passed`; production-shaped query-only claim `eligible=[2]`, `applied=true`, DB changes `0` | SOURCE PASS; one PR/deploy/same-job resume still open |
 | 2026-08-31 | PV2-R01 job28 provider-authority loop | PR #943 runtime synced; query preflight PASS; Owner start attempts 8->40 then worker stopped; both scenes wrongly opened to Key4U metadata; side effects 0; RED 2 failed -> GREEN 2 passed; focused 33; protected 165 | SOURCE GREEN; ship/deploy/new CAS still open |
 | 2026-08-30 | PV2-R01 job28 authority-repair RED/GREEN | PR #934 -> `ef81f6a...`; deploy `33290296142` SUCCESS; worker generation `4ab7fd...`; live blocker recovery `3/3`; RED 1 failed -> GREEN 1 passed; protected 242 and final 251 passed | SOURCE PASS; one repair ship/live still open |
 | 2026-08-28 | SPEC-04G ship/runtime | PR #917 -> `d5dc300...`; compile/deploy SUCCESS; bot+worker exact SHA | PASS |
