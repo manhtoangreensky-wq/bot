@@ -1128,7 +1128,7 @@ pv2_r01_job28_key4u_model_authority:
   wallet_mutations_during_source_gate: 0
   live_pass: false
 pv2_r01_job28_key4u_unified_poll_authority:
-  phase: CLAIM_TRACE_RECEIPT_SOURCE_GREEN
+  phase: V4_WATCHDOG_SOURCE_GREEN
   model_authority_pr_runtime: PR 982 / 095b6c88aa98a42ebbb3fc6535d44d7222e29779
   model_authority_deploy: 33706481637 SUCCESS in 3m34s
   runtime_services: bot/web/nginx active; bot and Owner worker exact/clean 095b6c88; worker backup ref refs/backups/worker-pre-product-video-model-authority-20260903T030530Z
@@ -1172,6 +1172,16 @@ pv2_r01_job28_key4u_unified_poll_authority:
   claim_trace_red: 1 failed in 5.39s on missing controlled_fallback_replacement_authorization
   claim_trace_green: exact plus inverse 3 passed in 5.09s; final full authority 48 passed in 6.35s; Strategy V2 9 passed in 5.83s; protected claim/watchdog/ledger/job28 114 passed in 15.74s
   claim_trace_baseline: three unrelated debug assertions fail identically on clean main; NEW_FAILURES=0
+  claim_trace_ship: PR 985 / 259bce40c095309b87a73a518a83904a6d6022ce / deploy 33833696318 SUCCESS in 4m17s
+  claim_trace_worker_sync: exact clean 259bce40; inactive; backup ref refs/backups/worker-pre-product-video-claim-trace-20260904T034008Z
+  claim_trace_public_path: before/after claim, worker payload and after fail/defer all preserve V2 [1,2], V3 [1], cap 1/1; SQLite ok
+  live_receipt_green: PID 1295567 preserved V2/V3 through repeated claim/defer; scene2 task/receipt absent; finance unchanged
+  scene1_provider_terminal: query HTTP 200, completed, progress 100, top-level video_url parsed, raw task not model-qualified
+  scene1_download_blocker: signed flow-content.google URL expired 2026-09-03 22:01:27 +07; download HTTP 403 Forbidden; no-cache returns same expired URL
+  scene1_content_endpoint: official raw /content HTTP 403; model-qualified /content HTTP 400; no documented refresh endpoint
+  v4_owner_authorization: exact two new paid Key4U calls, one scene1 expired-link replacement and one scene2 replacement; V3 immutable 1/2 and no replay; identity 28/32/27; quote 144/144/144; cap 212/212; charged 0
+  v4_watchdog_red: 1 failed in 5.11s because taskless wait allowed only exact V3 ID
+  v4_watchdog_green: exact plus strict-scope inverses 6 passed in 5.08s; authority/protected watchdog 82 passed in 10.74s; compile/diff 0
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
@@ -1183,9 +1193,9 @@ spec_04i_subdub_auto_two_speaker_addon:
   representative_live_target: one unfinished media-compatible Product Video lane
   acceptance: male/female detection; translation; two-voice dub; final MP4; receipt/report; wallet delta 0
 next_action: >-
-  Commit and ship only the claim-trace durable receipt correction, deploy and sync
-  the inactive Owner worker. Restore immutable V2 through a fresh exact-state
-  snapshot/CAS without changing scene1 task or V3 1/1 cap. Resume scene1
-  poll/download only; no scene1 resubmit and no new identity, upload, Confirm or
-  ShopAIKey action. Only after scene1 clip validates may scene2 use the last paid
-  call. Stop at two calls or terminal two-scene MP4.
+  Commit and ship only the exact V4 watchdog allowlist, deploy and sync the inactive
+  Owner worker. Install V4 0/2 through snapshot/rehearsal/CAS, preserving immutable
+  V2 and V3 history while clearing only the expired scene1 task/artifact aliases.
+  Resume the same job: submit scene1 once, download immediately, then submit scene2
+  once, stitch/deliver and stop at two calls or terminal two-scene MP4. No new
+  identity, upload, Confirm, ShopAIKey action or price/wallet change.

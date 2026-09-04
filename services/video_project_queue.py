@@ -107,6 +107,9 @@ PRODUCT_VIDEO_TASKLESS_V3_WORKER_WAIT_REASONS = (
 PRODUCT_VIDEO_TASKLESS_V3_WATCHDOG_WAIT_AUTHORIZATION_ID = (
     "pv2-r01-job28-key4u-replacements-v3"
 )
+PRODUCT_VIDEO_TASKLESS_V4_WATCHDOG_WAIT_AUTHORIZATION_ID = (
+    "pv2-r01-job28-key4u-replacements-v4"
+)
 PRODUCT_VIDEO_TASKLESS_V3_WATCHDOG_WAIT_IDENTITY = (
     28,
     32,
@@ -5666,7 +5669,7 @@ def _product_video_taskless_v3_worker_wait_state(
     outbox: dict[str, Any],
     eligibility: dict[str, Any],
 ) -> dict[str, Any]:
-    """Keep an untouched V3 replacement queued while its worker is offline."""
+    """Keep an exact untouched V3+ replacement queued while its worker is offline."""
     worker_reason = str(
         eligibility.get("worker_admission_block_reason") or ""
     ).strip()
@@ -5760,7 +5763,10 @@ def _product_video_taskless_v3_worker_wait_state(
     )
     exact_scope = bool(
         str(authority.get("authorization_id") or "")
-        == PRODUCT_VIDEO_TASKLESS_V3_WATCHDOG_WAIT_AUTHORIZATION_ID
+        in {
+            PRODUCT_VIDEO_TASKLESS_V3_WATCHDOG_WAIT_AUTHORIZATION_ID,
+            PRODUCT_VIDEO_TASKLESS_V4_WATCHDOG_WAIT_AUTHORIZATION_ID,
+        }
         and (*db_identity, request_id)
         == PRODUCT_VIDEO_TASKLESS_V3_WATCHDOG_WAIT_IDENTITY
         and customer_price == PRODUCT_VIDEO_TASKLESS_V3_WATCHDOG_WAIT_PRICE_XU

@@ -22,6 +22,7 @@ from services import (
 
 AUTHORIZATION_ID = "pv2-r01-job28-key4u-replacements-v2"
 V3_AUTHORIZATION_ID = "pv2-r01-job28-key4u-replacements-v3"
+V4_AUTHORIZATION_ID = "pv2-r01-job28-key4u-replacements-v4"
 LEGACY_RECEIPT = {
     "scene_index": 1,
     "provider": "key4u_video",
@@ -1755,6 +1756,84 @@ def test_v3_taskless_watchdog_waits_for_fresh_worker_heartbeat() -> None:
         assert resumed_payload[
             "controlled_fallback_replacement_submit_receipts_by_authorization"
         ] == namespaces
+    finally:
+        conn.close()
+
+
+def test_v4_taskless_watchdog_waits_with_exact_scope_and_preserves_history() -> None:
+    conn, now = _taskless_v3_job28_watchdog_db()
+    try:
+        job = video_project_queue.get_video_render_job(conn, 28)
+        payload = json.loads(job["result_json"])
+        authorization = payload["controlled_fallback_replacement_authorization"]
+        authorization.update(
+            {
+                "authorization_id": V4_AUTHORIZATION_ID,
+                "authorization_version": 4,
+                "state": "active",
+                "calls_consumed": 0,
+                "consumed_scene_indexes": [],
+            }
+        )
+        namespaces = payload[
+            "controlled_fallback_replacement_submit_receipts_by_authorization"
+        ]
+        namespaces[V3_AUTHORIZATION_ID]["1"] = _authorization_receipt(
+            V3_AUTHORIZATION_ID,
+            3,
+            1,
+            task_id="expired-v3-scene-one-task",
+        )
+        namespaces[V4_AUTHORIZATION_ID] = {}
+        payload.update(
+            {
+                "replacement_authorization_id": V4_AUTHORIZATION_ID,
+                "replacement_authorization_version": 4,
+                "replacement_calls_consumed": 0,
+                "replacement_calls_remaining": 2,
+            }
+        )
+        conn.execute(
+            "UPDATE video_jobs SET result_json=? WHERE id=28",
+            (json.dumps(payload),),
+        )
+        conn.commit()
+
+        report = video_project_queue.sweep_product_video_zero_task_watchdog(
+            conn,
+            now=now,
+            job_id=28,
+            eligibility_evaluator=lambda *_args: {
+                "ok": False,
+                "eligible_provider_keys": [],
+                "runtime_candidate_keys": [],
+                "final_eligible_provider_count": 0,
+                "worker_admission_block_reason": "worker_disconnected",
+                "admission_block_reason": "worker_disconnected",
+                "provider_submit_block_reason": "worker_disconnected",
+                "router_skip_reason": "worker_disconnected",
+            },
+        )
+        persisted_job = video_project_queue.get_video_render_job(conn, 28)
+        persisted = json.loads(persisted_job["result_json"])
+        persisted_namespaces = persisted[
+            "controlled_fallback_replacement_submit_receipts_by_authorization"
+        ]
+
+        assert report["terminal_failed"] == 0
+        assert persisted_job["status"] == "queued"
+        assert persisted["taskless_v3_authority_waiting_for_worker"] is True
+        assert persisted["replacement_authorization_id"] == V4_AUTHORIZATION_ID
+        assert persisted["replacement_authorization_version"] == 4
+        assert persisted["replacement_calls_consumed"] == 0
+        assert persisted["replacement_calls_remaining"] == 2
+        assert set(persisted_namespaces) == {
+            AUTHORIZATION_ID,
+            V3_AUTHORIZATION_ID,
+            V4_AUTHORIZATION_ID,
+        }
+        assert sorted(persisted_namespaces[V3_AUTHORIZATION_ID]) == ["1"]
+        assert persisted_namespaces[V4_AUTHORIZATION_ID] == {}
     finally:
         conn.close()
 

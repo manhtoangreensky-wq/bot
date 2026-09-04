@@ -1297,3 +1297,27 @@ whitelisted `_controlled_fallback_durable_internal_fields(payload)`. Injected
 5.09s`; final full authority is `48 passed in 6.35s`; Strategy V2 is `9 passed in
 5.83s`; protected claim/watchdog/ledger/job28 is `114 passed in 15.74s`. Three
 unrelated debug assertions fail identically on clean main, so `NEW_FAILURES=0`.
+
+PR #985 shipped claim-trace preservation as runtime
+`259bce40c095309b87a73a518a83904a6d6022ce`; deploy run `33833696318` succeeded
+in `4m17s`. Bot and inactive Owner worker matched that exact clean SHA. An exact
+public-path snapshot proved V2 `[1,2]`, V3 `[1]` and cap `1/1` survive before claim,
+after claim trace, in the worker payload and after fail/defer. Live PID `1295567`
+then kept the same namespaces over repeated cycles; scene 2 and finance were untouched.
+
+The remaining scene-1 boundary is external result retention. Key4U query is HTTP
+`200`, status `completed`, progress `100`; the adapter correctly parses top-level
+`video_url` and uses the raw task. The signed `flow-content.google` URL expired at
+`2026-09-03 22:01:27 +07` and returns `403 Forbidden`. A no-cache query returns the
+same URL. Official `/v1/videos/{id}/content` returned `403` for the raw task and
+`400` for the model-qualified form; official docs expose no refresh endpoint. These
+checks made zero paid submit calls and zero DB/wallet mutations.
+
+Owner therefore authorized V4 with exactly two new Key4U calls: one expired-link
+replacement for scene 1 and one replacement for scene 2. V3 remains immutable at
+`1/2` and cannot replay; existing identity `28/32/27`, quote `144/144/144`, provider
+cap `212/212` and charged Xu `0` remain fixed. V4 watchdog RED failed `1` in `5.11s`
+because the taskless wait gate allowed only exact V3. The minimal correction adds
+only exact V4 to that allowlist. Exact plus strict-scope inverses are `6 passed in
+5.08s`; full authority/protected watchdog is `82 passed in 10.74s`; full compile
+and diff-check exit `0`.
