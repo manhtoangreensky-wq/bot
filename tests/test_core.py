@@ -9898,6 +9898,56 @@ def test_manual_method_qr_preserves_amount_and_does_not_create_deposit(monkeypat
     assert "500 Xu" in context.bot.photos[0]["caption"]
 
 
+def test_manual_await_bill_from_qr_photo_falls_back_to_bill_prompt(monkeypatch):
+    monkeypatch.setattr(bot, "USER_BILL_STATE", {})
+    monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    bot.set_manual_bill_state(
+        123,
+        order_code="MANUAL",
+        pkg_key="50k",
+        amount=50000,
+        amount_vnd=50000,
+        base_xu=500,
+        expected_xu=500,
+        xu=500,
+        method="bank_acb",
+        currency="VND",
+        step="await_payment",
+    )
+    replies = []
+    edit_attempts = []
+
+    class PhotoMessage:
+        photo = [SimpleNamespace(file_id="qr-file")]
+        chat_id = 123
+
+        async def reply_text(self, text, **kwargs):
+            replies.append((text, kwargs))
+
+    class PhotoQuery:
+        data = "manual|await_bill|123"
+        from_user = SimpleNamespace(id=123)
+        message = PhotoMessage()
+
+        async def answer(self, *args, **kwargs):
+            return None
+
+        async def edit_message_text(self, *args, **kwargs):
+            edit_attempts.append((args, kwargs))
+            raise Exception("BadRequest: There is no text in the message to edit")
+
+    asyncio.run(
+        bot.handle_manual_package_choice(
+            SimpleNamespace(callback_query=PhotoQuery()),
+            SimpleNamespace(args=[], bot=SimpleNamespace()),
+        )
+    )
+
+    assert len(edit_attempts) == 1
+    assert replies and "Gửi bill/TXID nạp thủ công" in replies[0][0]
+    assert bot.get_active_manual_bill_state(123)["step"] == "await_bill"
+
+
 def test_manual_menu_bonus_text_no_zalopay_momo():
     text = bot.manual_payment_menu_text()
     assert "PayOS hoặc QR ngân hàng Việt Nam/ACB/VietQR" in text

@@ -1094,3 +1094,19 @@ status lần hai có thể trả zero-row rồi làm mất ngầm `payment_marke
 `payment_market=VN`, `domestic_eligibility=1`, `successful_topup_ordinal=7`.
 Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.00s`.
 `py_compile bot.py local_worker.py` thoát `0`, `git diff --check` thoát `0`.
+
+#### Hotfix callback QR-photo gửi bill — 04/09/2026
+
+- QR manual được Telegram gửi bằng `send_photo` kèm caption và nút. Callback
+  `manual|await_bill|<uid>` vì vậy xuất phát từ message ảnh, không phải text.
+- Forensic VPS lúc `14:01:42 +07` đo được `BadRequest: There is no text in the
+  message to edit` tại `handle_manual_package_choice`; generic error đã che
+  traceback nên khách không nhận prompt gửi bill. Đây là lỗi render callback,
+  không phải PayOS, ví Xu hay thiếu lệnh duyệt admin.
+- Hotfix dùng fallback render hiện hữu cho photo callback: giữ QR và trả một
+  prompt gửi bill mới; state vẫn là `await_bill`. Chỉ khi ảnh bill/TXID được
+  nhận mới tạo `pending_admin_review` và gửi card duyệt cho admin.
+- RED `1 failed in 424.99s`; GREEN callback + bill + duplicate `3 passed,
+  2 warnings in 490.21s`; full manual regression `19 passed, 268 deselected,
+  2 warnings in 9.44s`. Không gọi PayOS/provider hoặc mutate production trong
+  các test.
