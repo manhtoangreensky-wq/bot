@@ -94,10 +94,13 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
     Filter cũ từng trả sai `high/high`; raw-frame fallback đã bị cấm. Nếu log
     chỉ có label mà không có gender/register/dominance/evidence time, hoặc dùng
     “một nam + một nữ” không qua vote độc lập, FAIL.
-14. Với Auto multi, sidecar phải có `3–8` speaker acoustic thật và terminal proof phải ghi
-    `auto_detected_speaker_count == auto_distinct_voice_count`; mỗi label giữ
-    một voice ID ổn định trong toàn video. Không chấp nhận bịa/gộp label, ép
-    giới tính hoặc dùng lại một voice cho hai label.
+14. Với Auto multi, range chung là `3–8` speaker acoustic thật nhưng fixture
+    `83DE97B7...` phải ra đúng `5`. Terminal proof phải ghi
+    `auto_detected_speaker_count == auto_distinct_voice_count` và
+    `auto_multi_attribution_verified=true`; mỗi cue có đúng một speaker, tập
+    speaker của cue bằng tập acoustic, mỗi label giữ một voice ID ổn định trong
+    toàn video. Không chấp nhận bịa/gộp label, ép giới tính, bỏ speaker khỏi TTS
+    hoặc dùng lại một voice cho hai label.
 15. Auto multi dùng cùng cue-lock đã chứng minh: từng start/end nguồn bất biến,
     cue sau không đợi cue trước, final duration bằng nguồn. Cả combo và
     standalone chỉ tự giao MP4 rồi receipt; SRT/audio/document tự động phải là
@@ -136,3 +139,8 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
     distinct voice count, per-speaker cue counts, source/translated cue count,
     drift counters, original `40`/dub `150`, MP4 metrics, hai Telegram message ID,
     `charged_xu=0`, root-job/transaction/wallet/credit/provider-usage deltas `0`.
+24. Với context-repair same-job, kiểm bốn `_pipeline_*` field tới classifier/TTS/
+    mux. Nếu source đã cleanup, runner chỉ được tải stored `file_id` khớp job-key;
+    size `9,869,032`, MIME `video/mp4` và SHA fixture phải khớp trước ghi file và
+    trước CAS. Sai hash/file ID, duplicate marker hoặc CAS loser phải dừng, không
+    gửi command cũ, không tạo job mới và không ghi đè source.

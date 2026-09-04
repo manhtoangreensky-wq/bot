@@ -512,6 +512,9 @@ def acoustic_state_fields() -> dict:
         "multi_acoustic_cluster_sizes": [4, 4, 4],
         "multi_acoustic_stability_pass": True,
         "multi_acoustic_word_coverage_count": 30,
+        "multi_acoustic_overlap_mapped_count": 9,
+        "multi_acoustic_centroid_mapped_count": 3,
+        "multi_acoustic_speaker_unit_counts": [4, 4, 4],
     }
 
 
@@ -665,6 +668,7 @@ def test_exact_multi_prepare_runs_local_acoustics_before_translation(
     tmp_path,
 ):
     source_bytes = b"exact-multi-source"
+    source_path = str(tmp_path / "normalized_source.mp4")
     source_srt = "1\n00:00:00,000 --> 00:00:12,000\nsource words\n"
     words = acoustic_pipeline_words()
     acoustic_segments = acoustic_pipeline_segments()
@@ -684,8 +688,14 @@ def test_exact_multi_prepare_runs_local_acoustics_before_translation(
         "voice_selection_mode": "auto_speaker",
         "auto_speaker_lane": "multi",
         "_pipeline_workspace": str(tmp_path),
+        "_pipeline_saved_source_path": source_path,
         "_pipeline_source_bytes_override": source_bytes,
         "_pipeline_source_content_type_override": "video/mp4",
+    }
+    exact_pipeline_context = {
+        key: value
+        for key, value in pending_state.items()
+        if key.startswith("_pipeline_")
     }
 
     async def resolve(
@@ -747,6 +757,9 @@ def test_exact_multi_prepare_runs_local_acoustics_before_translation(
             "cluster_sizes": [4, 4, 4],
             "stability_pass": True,
             "word_coverage_count": 30,
+            "overlap_mapped_count": 9,
+            "centroid_mapped_count": 3,
+            "speaker_unit_counts": [4, 4, 4],
         }
 
     async def translate(segments, target_language, **_kwargs):
@@ -760,8 +773,12 @@ def test_exact_multi_prepare_runs_local_acoustics_before_translation(
         }
 
     def pending(_user_id, step, **fields):
-        pending_state.update(fields)
-        pending_state["step"] = step
+        persisted = {**pending_state, **fields, "step": step}
+        for key in tuple(persisted):
+            if key.startswith("_pipeline_"):
+                persisted.pop(key)
+        pending_state.clear()
+        pending_state.update(persisted)
         return dict(pending_state)
 
     def artifact(_user_id, kind, value):
@@ -816,6 +833,10 @@ def test_exact_multi_prepare_runs_local_acoustics_before_translation(
     assert source_artifacts[-1][2] == prepared["source_subtitle"]
     assert prepared["state"]["subtitle_ref"] == source_artifacts[-1][0]
     assert prepared["state"]["source_subtitle_ref"] == source_artifacts[-1][0]
+    assert {
+        key: prepared["state"].get(key)
+        for key in exact_pipeline_context
+    } == exact_pipeline_context
     sidecar = bot.subdub_speaker_cast.load_sidecar(
         prepared["state"]["speaker_sidecar_path"],
         expected_sha256=prepared["state"]["speaker_sidecar_sha256"],
@@ -839,10 +860,115 @@ def test_exact_multi_prepare_runs_local_acoustics_before_translation(
         "unit_count": 12,
         "word_count": 30,
         "word_coverage_count": 30,
+        "overlap_mapped_count": 9,
+        "centroid_mapped_count": 3,
+        "speaker_unit_counts": [4, 4, 4],
     }
     assert "embeddings" not in sidecar
     assert "pcm" not in sidecar
     assert hashlib.sha256(source_bytes).hexdigest() == sidecar["media_sha256"]
+
+
+def test_exact_multi_fresh_asr_preserves_private_pipeline_context_before_acoustic(
+    monkeypatch,
+    tmp_path,
+):
+    source_bytes = b"fresh-auto-multi-source"
+    source_path = str(tmp_path / "normalized_source.mp4")
+    captured = []
+
+    class AcousticBoundaryReached(Exception):
+        pass
+
+    async def resolve(
+        *_args,
+        require_auto_multi_word_timeline=False,
+        require_diarization=False,
+        **_kwargs,
+    ):
+        assert require_auto_multi_word_timeline is True
+        assert require_diarization is False
+        return {
+            "source_kind": "asr",
+            "subtitle": "1\n00:00:00,000 --> 00:00:12,000\nsource words\n",
+            "script": "source words",
+            "asr_provider": "deepgram",
+            "segments": [
+                {
+                    "index": 1,
+                    "start": 0.0,
+                    "end": 12.0,
+                    "text": "source words",
+                }
+            ],
+            "word_timeline": acoustic_pipeline_words(),
+            "duration_seconds": 12,
+        }
+
+    async def extract_pcm(prepared, received_state, **_kwargs):
+        captured.append(
+            {
+                "prepared_workspace": (prepared.get("state") or {}).get(
+                    "_pipeline_workspace"
+                ),
+                "received_workspace": received_state.get("_pipeline_workspace"),
+                "prepared_source_path": (prepared.get("state") or {}).get(
+                    "_pipeline_saved_source_path"
+                ),
+                "received_source_path": received_state.get(
+                    "_pipeline_saved_source_path"
+                ),
+            }
+        )
+        raise AcousticBoundaryReached()
+
+    monkeypatch.setattr(bot, "USER_PENDING", {})
+    monkeypatch.setattr(bot, "video_dubbing_resolve_source_script", resolve)
+    monkeypatch.setattr(bot, "_extract_subdub_auto_pcm", extract_pcm)
+    monkeypatch.setattr(
+        bot,
+        "set_video_dubbing_artifact",
+        lambda *_args: "source-subtitle-ref",
+    )
+
+    state = {
+        "step": "processing",
+        "video_processing_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        "mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        "source_file_id": "fixture",
+        "source_media_type": "video",
+        "source_mime_type": "video/mp4",
+        "source_duration": 12,
+        "target_language": "English",
+        "translate_requested": "1",
+        "voice_kind": "auto_speaker_gender",
+        "voice_selection_mode": "auto_speaker",
+        "auto_speaker_lane": "multi",
+        "_pipeline_workspace": str(tmp_path),
+        "_pipeline_saved_source_path": source_path,
+        "_pipeline_source_bytes_override": source_bytes,
+        "_pipeline_source_content_type_override": "video/mp4",
+    }
+
+    with pytest.raises(AcousticBoundaryReached):
+        asyncio.run(
+            bot.video_dubbing_prepare_subtitles(
+                None,
+                state,
+                7126457028,
+                allow_confirmed_product=True,
+                require_auto_cast=True,
+            )
+        )
+
+    assert captured == [
+        {
+            "prepared_workspace": str(tmp_path),
+            "received_workspace": str(tmp_path),
+            "prepared_source_path": source_path,
+            "received_source_path": source_path,
+        }
+    ]
 
 
 @pytest.mark.parametrize(

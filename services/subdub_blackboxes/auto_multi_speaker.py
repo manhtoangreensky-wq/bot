@@ -42,6 +42,9 @@ MULTI_ACOUSTIC_STATE_FIELDS = frozenset({
     "multi_acoustic_cluster_sizes",
     "multi_acoustic_stability_pass",
     "multi_acoustic_word_coverage_count",
+    "multi_acoustic_overlap_mapped_count",
+    "multi_acoustic_centroid_mapped_count",
+    "multi_acoustic_speaker_unit_counts",
 })
 
 
@@ -57,6 +60,8 @@ def bounded_multi_acoustic_evidence(
         "multi_acoustic_unit_count",
         "multi_acoustic_embedding_window_count",
         "multi_acoustic_word_coverage_count",
+        "multi_acoustic_overlap_mapped_count",
+        "multi_acoustic_centroid_mapped_count",
     )
     if any(type(current.get(field)) is not int for field in count_fields):
         return {}
@@ -66,7 +71,12 @@ def bounded_multi_acoustic_evidence(
         unit_count = int(current.get("multi_acoustic_unit_count"))
         window_count = int(current.get("multi_acoustic_embedding_window_count"))
         coverage_count = int(current.get("multi_acoustic_word_coverage_count"))
+        overlap_count = int(current.get("multi_acoustic_overlap_mapped_count"))
+        centroid_count = int(current.get("multi_acoustic_centroid_mapped_count"))
         cluster_sizes = list(current.get("multi_acoustic_cluster_sizes") or [])
+        speaker_unit_counts = list(
+            current.get("multi_acoustic_speaker_unit_counts") or []
+        )
     except (TypeError, ValueError, OverflowError):
         return {}
     if (
@@ -85,9 +95,18 @@ def bounded_multi_acoustic_evidence(
         or window_count > subdub_multi_speaker_embedding_onnx.MAX_CLUSTER_UNITS * 2
         or window_count % 2 != 0
         or coverage_count != word_count
+        or overlap_count < 0
+        or centroid_count < 0
+        or overlap_count + centroid_count != unit_count
         or len(cluster_sizes) != speaker_count
         or any(type(value) is not int or value < 2 for value in cluster_sizes)
         or sum(cluster_sizes) != window_count // 2
+        or len(speaker_unit_counts) != speaker_count
+        or any(
+            type(value) is not int or value < 1
+            for value in speaker_unit_counts
+        )
+        or sum(speaker_unit_counts) != unit_count
         or current.get("multi_acoustic_stability_pass") is not True
     ):
         return {}
@@ -108,6 +127,9 @@ def bounded_multi_acoustic_evidence(
         "multi_acoustic_cluster_sizes": cluster_sizes,
         "multi_acoustic_stability_pass": True,
         "multi_acoustic_word_coverage_count": coverage_count,
+        "multi_acoustic_overlap_mapped_count": overlap_count,
+        "multi_acoustic_centroid_mapped_count": centroid_count,
+        "multi_acoustic_speaker_unit_counts": speaker_unit_counts,
     }
 
 
@@ -130,6 +152,15 @@ def acoustic_sidecar_evidence(
         "unit_count": bounded["multi_acoustic_unit_count"],
         "word_count": bounded["multi_acoustic_word_count"],
         "word_coverage_count": bounded["multi_acoustic_word_coverage_count"],
+        "overlap_mapped_count": bounded[
+            "multi_acoustic_overlap_mapped_count"
+        ],
+        "centroid_mapped_count": bounded[
+            "multi_acoustic_centroid_mapped_count"
+        ],
+        "speaker_unit_counts": list(
+            bounded["multi_acoustic_speaker_unit_counts"]
+        ),
     }
 
 
@@ -1305,6 +1336,7 @@ async def run_auto_multi_speaker_blackbox(
     lane_payload = dict(payload)
     lane_payload.pop("rediarize_underclustered", None)
     base_prepare = lane_payload.get("prepare_subtitles")
+    acoustic_speaker_ids: set[str] = set()
 
     async def prepare_multi_subtitles(*args: Any, **kwargs: Any) -> Any:
         prepared = await auto_speaker._maybe_await(
@@ -1322,6 +1354,8 @@ async def run_auto_multi_speaker_blackbox(
             or acoustic_evidence["multi_acoustic_speaker_count"] != len(labels)
         ):
             raise speaker_cast.AutoCastManualRequired()
+        acoustic_speaker_ids.clear()
+        acoustic_speaker_ids.update(labels)
         if isinstance(current, dict):
             current.update(acoustic_evidence)
         return prepared
@@ -1390,6 +1424,7 @@ async def run_auto_multi_speaker_blackbox(
             if (
                 not 3 <= speaker_count <= speaker_cast.MAX_AUTO_SPEAKER_LABELS
                 or distinct_voice_count != speaker_count
+                or set(observed_casts) != acoustic_speaker_ids
             ):
                 return _multi_manual_required_result(
                     current,
@@ -1404,6 +1439,7 @@ async def run_auto_multi_speaker_blackbox(
                 "auto_detected_speaker_count": speaker_count,
                 "auto_distinct_voice_count": distinct_voice_count,
                 "auto_multi_voice_verified": True,
+                "auto_multi_attribution_verified": True,
                 "auto_multi_cast_sha256": hashlib.sha256(
                     cast_payload
                 ).hexdigest(),

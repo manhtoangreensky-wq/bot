@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import os
+from pathlib import Path
 import sqlite3
 from types import SimpleNamespace
 from typing import Callable
-
-from telegram import Bot
 
 import bot as app
 
@@ -22,6 +23,213 @@ PREVIOUS_ALGORITHM = "wespeaker-resnet34-spectral-v1"
 REARM_MARKER = "auto_multi_fixed_vocal_v2_recovery_used"
 DURATION_REPAIR_MARKER = "auto_multi_fixed_vocal_v2_duration_repair_used"
 ASR_TIMEOUT_REPAIR_MARKER = "auto_multi_fixed_vocal_v2_asr_timeout_repair_used"
+CONTEXT_REPAIR_MARKER = "auto_multi_private_pipeline_context_repair_used"
+
+
+def _context_repair_candidate(current: dict) -> bool:
+    if type(current) is not dict:
+        return False
+    service = app.auto_multi_speaker.subdub_multi_speaker_embedding_onnx
+    recovery = current.get("auto_multi_recovery")
+    input_save = current.get("input_save")
+    if type(recovery) is not dict or type(input_save) is not dict:
+        return False
+    root_source_sha256 = current.get("source_sha256")
+    root_target_language = current.get("target_language")
+    root_original_volume = current.get("original_audio_volume_percent")
+    root_dub_volume = current.get("dubbed_voice_volume_percent")
+    root_conflict = bool(
+        root_source_sha256 not in {None, ""}
+        and (
+            type(root_source_sha256) is not str
+            or root_source_sha256.strip().lower() != SOURCE_SHA256
+        )
+    ) or bool(
+        root_target_language not in {None, ""}
+        and root_target_language != "English"
+    ) or bool(
+        root_original_volume is not None
+        and (type(root_original_volume) is not int or root_original_volume != 40)
+    ) or bool(
+        root_dub_volume is not None
+        and (type(root_dub_volume) is not int or root_dub_volume != 150)
+    )
+    actual_evidence = any(
+        bool(current.get(field))
+        for field in (
+            "multi_acoustic_backend",
+            "multi_acoustic_model_sha256",
+            "multi_acoustic_algorithm_version",
+            "multi_acoustic_speaker_count",
+            "multi_acoustic_word_count",
+            "multi_acoustic_unit_count",
+            "multi_acoustic_embedding_window_count",
+            "multi_acoustic_cluster_sizes",
+            "multi_acoustic_stability_pass",
+            "multi_acoustic_word_coverage_count",
+            "multi_acoustic_overlap_mapped_count",
+            "multi_acoustic_centroid_mapped_count",
+            "multi_acoustic_speaker_unit_counts",
+            "multi_acoustic_failure_code",
+            "multi_acoustic_failure_word_count",
+            "multi_acoustic_failure_duration_ms",
+        )
+    )
+    false_fields = (
+        "asr_started",
+        "translation_started",
+        "tts_started",
+        "mux_started",
+        "artifact_started",
+        "delivery_attempted",
+        "final_mp4_exists",
+        "output_validated",
+        "output_sent",
+    )
+    output_fields = (
+        "final_mp4_path",
+        "final_output_path",
+        "output_path",
+        "output_video_path",
+        "final_video_path",
+        "dub_video_path",
+        "video_delivery_message_id",
+        "final_video_message_id",
+        "delivery_message_id",
+        "telegram_message_id",
+    )
+    return bool(
+        current.get(REARM_MARKER) is True
+        and current.get(DURATION_REPAIR_MARKER) is True
+        and current.get(ASR_TIMEOUT_REPAIR_MARKER) is True
+        and current.get(CONTEXT_REPAIR_MARKER) is not True
+        and current.get("auto_multi_fixed_vocal_v2_recovery_authority")
+        == "owner_confirmed_same_job_upgrade"
+        and current.get("auto_multi_fixed_vocal_v2_duration_repair_authority")
+        == "owner_confirmed_same_job_exact_duration"
+        and current.get("auto_multi_fixed_vocal_v2_asr_timeout_repair_authority")
+        == "owner_confirmed_same_job_deepgram_timeout"
+        and str(current.get("internal_job_id") or current.get("job_id") or "")
+        == JOB_ID
+        and current.get("public_code") == PUBLIC_CODE
+        and str(current.get("user_id") or "") == str(OWNER_ID)
+        and str(current.get("chat_id") or current.get("user_id") or "")
+        == str(OWNER_ID)
+        and str(current.get("job_key") or "").endswith(
+            "|subtitle_plus_dub|auto_multi_speaker"
+        )
+        and current.get("status") == "failed_no_charge"
+        and current.get("terminal_state") == "failed_no_charge"
+        and current.get("auto_multi_recovery_attempt_count") == 4
+        and current.get("auto_multi_recovery_correction_attempt_count") == 3
+        and current.get("auto_multi_acoustic_recovery_used") is True
+        and current.get("auto_multi_acoustic_stability_repair_used") is True
+        and current.get("auto_multi_acoustic_backend") == PREVIOUS_BACKEND
+        and current.get("auto_multi_acoustic_model_sha256") == service.MODEL_SHA256
+        and current.get("auto_multi_acoustic_algorithm_version")
+        == PREVIOUS_ALGORITHM
+        and current.get("pipeline_started") is True
+        and current.get("last_error_stage") == "AUTO_CAST_MANUAL_REQUIRED"
+        and type(current.get("charged_xu")) is int
+        and current.get("charged_xu") == 0
+        and current.get("charge_status") == "not_charged"
+        and all(field in current and current.get(field) is False for field in false_fields)
+        and not any(str(current.get(field) or "").strip() for field in output_fields)
+        and recovery.get("owner_confirmed_paid") is True
+        and str(recovery.get("source_sha256") or "").lower() == SOURCE_SHA256
+        and recovery.get("target_language") == "English"
+        and recovery.get("original_volume_percent") == 40
+        and recovery.get("dub_volume_percent") == 150
+        and not root_conflict
+        and not actual_evidence
+    )
+
+
+def _load_context_repair_job_readonly() -> dict:
+    conn = None
+    try:
+        conn = app.db_connect_readonly()
+        row = conn.execute(
+            "SELECT value FROM system_settings WHERE key=? LIMIT 1",
+            (app._engine_async_job_key(JOB_ID),),
+        ).fetchone()
+        current = json.loads(str(row[0] or "{}")) if row else {}
+        return current if _context_repair_candidate(current) else {}
+    except (json.JSONDecodeError, OSError, sqlite3.Error, TypeError, ValueError):
+        return {}
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+async def ensure_exact_source(telegram_bot) -> dict:
+    """Rehydrate the exact same-job source before CAS without touching DB."""
+
+    current = _load_context_repair_job_readonly()
+    if not current:
+        return {"ok": False, "rehydrated": False, "reason": "context_repair_not_allowed"}
+    recovery = dict(current.get("auto_multi_recovery") or {})
+    input_save = dict(current.get("input_save") or {})
+    workspace = str(current.get("workspace") or "").strip()
+    safety = app.subtitle_dub_workspace_path_safety(workspace)
+    workspace_resolved = str(
+        safety.get("resolved_path") or os.path.abspath(workspace)
+    )
+    source_path = str(recovery.get("source_path") or "").strip()
+    source_resolved = os.path.abspath(source_path)
+    if (
+        not safety.get("allowed")
+        or not os.path.isdir(workspace_resolved)
+        or not app._workspace_path_is_descendant(source_resolved, workspace_resolved)
+        or os.path.basename(source_resolved) != os.path.basename(source_path)
+    ):
+        return {"ok": False, "rehydrated": False, "reason": "source_path_unsafe"}
+    if os.path.isfile(source_resolved):
+        if (
+            os.path.getsize(source_resolved) > 0
+            and app._subdub_sha256_file(source_resolved) == SOURCE_SHA256
+        ):
+            return {"ok": True, "rehydrated": False, "path": source_resolved}
+        return {"ok": False, "rehydrated": False, "reason": "source_sha256_mismatch"}
+    job_parts = str(current.get("job_key") or "").split("|")
+    job_file_id = job_parts[2] if len(job_parts) >= 4 else ""
+    stored_file_id = str(input_save.get("file_id") or "").strip()
+    expected_size = int(
+        input_save.get("transport_input_size")
+        or current.get("input_size_bytes")
+        or 0
+    )
+    if not stored_file_id or stored_file_id != job_file_id or expected_size <= 0:
+        return {"ok": False, "rehydrated": False, "reason": "source_file_id_invalid"}
+    source_bytes, content_type = await app.video_dubbing_download_source(
+        SimpleNamespace(bot=telegram_bot),
+        {
+            "source_file_id": stored_file_id,
+            "video_file_id": stored_file_id,
+            "source_file_name": os.path.basename(source_resolved),
+            "source_file_size": expected_size,
+            "video_file_size": expected_size,
+            "source_mime_type": "video/mp4",
+            "_pipeline_is_admin": True,
+        },
+    )
+    digest = hashlib.sha256(source_bytes).hexdigest()
+    if (
+        content_type != "video/mp4"
+        or len(source_bytes) != expected_size
+        or digest != SOURCE_SHA256
+    ):
+        return {"ok": False, "rehydrated": False, "reason": "source_sha256_mismatch"}
+    temporary = Path(source_resolved + ".rehydrate.tmp")
+    try:
+        temporary.write_bytes(source_bytes)
+        if temporary.stat().st_size != expected_size or app._subdub_sha256_file(str(temporary)) != SOURCE_SHA256:
+            raise OSError("source_rehydrate_verify_failed")
+        os.replace(str(temporary), source_resolved)
+    except OSError:
+        temporary.unlink(missing_ok=True)
+        return {"ok": False, "rehydrated": False, "reason": "source_rehydrate_write_failed"}
+    return {"ok": True, "rehydrated": True, "path": source_resolved}
 
 
 def _preflight_result(
@@ -152,6 +360,9 @@ def claim_same_attempt(
             "multi_acoustic_cluster_sizes",
             "multi_acoustic_stability_pass",
             "multi_acoustic_word_coverage_count",
+            "multi_acoustic_overlap_mapped_count",
+            "multi_acoustic_centroid_mapped_count",
+            "multi_acoustic_speaker_unit_counts",
             "multi_acoustic_failure_code",
             "multi_acoustic_failure_word_count",
             "multi_acoustic_failure_duration_ms",
@@ -263,6 +474,7 @@ def claim_same_attempt(
             and not duration_authority_conflict
             and not actual_v2_evidence_present
         )
+        context_repair = _context_repair_candidate(current)
         downstream_false_fields = tuple(
             field for field in false_fields if field != "asr_started"
         )
@@ -309,7 +521,12 @@ def claim_same_attempt(
             and current.get("auto_multi_recovery_correction_attempt_count") == 3
             and current.get("auto_multi_acoustic_recovery_used") is True
             and current.get("auto_multi_acoustic_stability_repair_used") is True
-            and (initial_rearm or duration_repair or asr_timeout_repair)
+            and (
+                initial_rearm
+                or duration_repair
+                or asr_timeout_repair
+                or context_repair
+            )
             and current.get("auto_multi_acoustic_backend") == PREVIOUS_BACKEND
             and current.get("auto_multi_acoustic_model_sha256")
             == service.MODEL_SHA256
@@ -362,6 +579,20 @@ def claim_same_attempt(
                         ),
                     }
                     if duration_repair
+                    else {}
+                ),
+                **(
+                    {
+                        CONTEXT_REPAIR_MARKER: True,
+                        "auto_multi_private_pipeline_context_repair_authority": (
+                            "owner_confirmed_same_job_private_pipeline_context"
+                        ),
+                        "auto_multi_private_pipeline_context_repair_claimed_at": (
+                            app.time.time()
+                        ),
+                        "asr_started": False,
+                    }
+                    if context_repair
                     else {}
                 ),
                 **(
@@ -442,7 +673,11 @@ def claim_same_attempt(
 
 
 async def run() -> None:
-    async with Bot(token=app.TELEGRAM_TOKEN) as telegram_bot:
+    application = app.build_telegram_application()
+    async with application.bot as telegram_bot:
+        source = await ensure_exact_source(telegram_bot)
+        if not source.get("ok") and source.get("reason") != "context_repair_not_allowed":
+            raise RuntimeError(str(source.get("reason") or "source_rehydrate_failed"))
         claim = claim_same_attempt()
         if not claim.get("claimed"):
             raise RuntimeError(
