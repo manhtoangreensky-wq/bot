@@ -805,6 +805,53 @@ def test_v3_scene_ledger_reads_durable_namespaces_from_sqlite_result_json_row() 
     ] == receipts
 
 
+def test_worker_claim_trace_keeps_sanitized_v2_v3_receipt_namespaces() -> None:
+    conn, _ = _taskless_v3_job28_watchdog_db()
+    try:
+        row = video_project_queue.get_video_render_job(conn, 28)
+        payload = json.loads(row["result_json"])
+        payload["controlled_fallback_replacement_authorization"][
+            "api_key"
+        ] = "must-not-persist"
+        payload[
+            "controlled_fallback_replacement_submit_receipts_by_authorization"
+        ][AUTHORIZATION_ID]["1"][
+            "authorization_header"
+        ] = "sensitive-header-must-not-persist"
+        conn.execute(
+            "UPDATE video_jobs SET result_json=? WHERE id=28",
+            (json.dumps(payload),),
+        )
+        conn.commit()
+
+        remote_worker_api.stamp_worker_claim_trace(
+            conn,
+            job_id=28,
+            worker_id="job28-owner-claim-trace",
+            service_mode="owner_product_video",
+        )
+        persisted = json.loads(
+            video_project_queue.get_video_render_job(conn, 28)["result_json"]
+        )
+        authorization = persisted[
+            "controlled_fallback_replacement_authorization"
+        ]
+        namespaces = persisted[
+            "controlled_fallback_replacement_submit_receipts_by_authorization"
+        ]
+
+        assert set(namespaces) == {AUTHORIZATION_ID, V3_AUTHORIZATION_ID}
+        assert set(namespaces[AUTHORIZATION_ID]) == {"1", "2"}
+        assert namespaces[V3_AUTHORIZATION_ID] == {}
+        assert authorization["authorization_id"] == V3_AUTHORIZATION_ID
+        assert "api_key" not in authorization
+        assert "authorization_header" not in namespaces[AUTHORIZATION_ID]["1"]
+        assert persisted["worker_claim_status"] == "claimed"
+        assert persisted["worker_service_mode"] == "owner_product_video"
+    finally:
+        conn.close()
+
+
 def test_replacement_policy_allows_each_scene_once_and_never_exceeds_two_calls() -> None:
     payload = _job28_payload()
     payload["scene_index"] = 1

@@ -1208,6 +1208,30 @@ starting the next.
   5.22s`; final job28 authority `47 passed in 5.90s`; ledger/claim/poll blast radius
   `136 passed` plus one exact clean-main attempts baseline failure, so
   `NEW_FAILURES=0`; changed source/test compile and diff-check exit `0`.
+- [x] Receipt-row correction shipped as PR #984, squash/runtime
+  `6a30db5bfb099c52195e755afccf3a45f9826ca8`; deploy run `33788585436`
+  SUCCESS in `3m28s`. Bot and inactive Owner worker were synchronized to that exact
+  clean SHA; worker backup ref is
+  `refs/backups/worker-pre-product-video-receipt-row-20260903T181242Z`.
+- [x] Immutable V2 restore rehearsal passed on a `14,184,448`-byte snapshot with six
+  fail-closed negatives and replay rejection. Production CAS changed only the
+  namespace map; DB backup SHA `7c5fe649...`, manifest backup SHA `6b5c28cc...`,
+  CAS JSON backup SHA `99c8bf2c...`, all mode `0600`. Post-watchdog runtime verifier
+  kept V2+V3 through ledger and telemetry, attempts `43/1`, V3 cap `1/1`, scene-1
+  task SHA `e0946432...`, scene 2 taskless and finance unchanged.
+- [-] Guarded resume PID `1288614` again dropped V2 before a clip; guard stopped it
+  at tick 2/inactive PID `0`, before scene 2 or any new paid call. Exact snapshot
+  claim then fail/defer retained V2+V3, isolating the later writer to
+  `stamp_worker_claim_trace`: its generic secret filter removed every key containing
+  `authorization`, including the sanitized durable authority/receipt maps.
+- [x] Claim-trace RED failed exactly on missing durable authorization in `5.39s`.
+  Minimal fix reapplies only `_controlled_fallback_durable_internal_fields(payload)`
+  after generic secret stripping. `api_key` and bearer header remain absent. Exact
+  plus inverse GREEN `3 passed in 5.09s`; final full authority `48 passed in
+  6.35s`; Strategy V2 `9 passed in 5.83s`; protected claim/watchdog/ledger/job28
+  `114 passed in 15.74s`; three
+  unrelated debug assertions reproduce on clean main,
+  so `NEW_FAILURES=0`.
 - [ ] Two distinct scene clips and one final MP4 terminal; otherwise stop at the
   exact new RED and reopen only `SPEC-04H`.
 
