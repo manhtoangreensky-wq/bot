@@ -630,3 +630,17 @@ Source hiện tại giữ engine ONNX/model/cluster đã triển khai, không l�
 Gate local đo `365 passed`, provider-stub full chain `1 passed`, exact fixture
 fixed-vocal `1 passed in 136.87s`, compile/diff sạch; provider/production-DB/
 wallet mutations đều `0`. Đây chưa phải deploy hoặc LIVE PASS.
+
+### Đối chiếu Telegram file identity sau live runtime b5a97285
+
+| Giả định cũ | Hiện tại đo được | Trạng thái |
+|---|---|---|
+| Token thứ ba của SubDub `job_key` là Telegram `file_id` | Token này là `file_unique_id` dài `15`, chỉ dùng idempotency và không gọi `get_file` được | ❌ Sai authority |
+| Chỉ lưu `input_save.file_id` là đủ | Intake phải lưu song song full downloadable `file_id` và stable `file_unique_id` | ⚠️ Tách hai vai trò |
+| Recovery có thể gán unique ID cho cả bốn field ID | `source/video_file_id` chỉ nhận full ID distinct; `source/video_file_unique_id` phải khớp job key | ❌ Bị cấm |
+| Nếu recovery cũ chứa ID sai thì ưu tiên nó | Alias bằng unique ID bị bỏ; resolver dùng full ID tốt còn lại, nhưng nhiều full IDs mâu thuẫn phải fail-closed | ✅ Zero-loss migration |
+
+One-shot invocation `8dfa559e...` đã chứng minh lỗi trước CAS/provider và không
+tiêu context marker. Vì full ID lịch sử không còn trong `20` DB backups hoặc `2`
+job backups, chính job cần byte-identical artifact restore dưới authorization mới
+sau khi correction được deploy; không tạo replacement job.

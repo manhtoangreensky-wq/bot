@@ -24,6 +24,9 @@ ACOUSTIC_MODEL_SHA256 = (
     "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
 )
 ACOUSTIC_ALGORITHM_VERSION = "wespeaker-resnet34-fixed-vocal-v2"
+DOWNLOADABLE_FILE_ID = (
+    "BAACAgQAAxkBAAIBQWf-subdub-auto-multi-downloadable-file-id"
+)
 
 
 def _seed_job(tmp_path, monkeypatch):
@@ -37,6 +40,7 @@ def _seed_job(tmp_path, monkeypatch):
         f"{OWNER_ID}|{OWNER_ID}|AgAD9CsAAkGRoVQ|"
         "subtitle_plus_dub|auto_multi_speaker"
     )
+    source_file_unique_id = job_key.split("|")[2]
     job = {
         "feature": "subtitle_dub",
         "internal_job_id": JOB_ID,
@@ -59,6 +63,8 @@ def _seed_job(tmp_path, monkeypatch):
             "path": str(source),
             "size": len(source_bytes),
             "content_type": "video/mp4",
+            "file_id": DOWNLOADABLE_FILE_ID,
+            "file_unique_id": source_file_unique_id,
         },
         "auto_exact_session_nonce": "recovery-session-1",
         "multi_diarization_attempted": True,
@@ -115,6 +121,7 @@ def _seed_exact_acoustic_job(tmp_path, monkeypatch):
         f"{OWNER_ID}|{OWNER_ID}|AgADeSIAAh1tkVQ|"
         "subtitle_plus_dub|auto_multi_speaker"
     )
+    source_file_unique_id = job_key.split("|")[2]
     job = {
         "feature": "subtitle_dub",
         "internal_job_id": ACOUSTIC_JOB_ID,
@@ -140,6 +147,8 @@ def _seed_exact_acoustic_job(tmp_path, monkeypatch):
             "path": str(source),
             "size": source.stat().st_size,
             "content_type": "video/mp4",
+            "file_id": DOWNLOADABLE_FILE_ID,
+            "file_unique_id": source_file_unique_id,
         },
         "source_sha256": SOURCE_SHA256,
         "target_language": "English",
@@ -161,6 +170,8 @@ def _seed_exact_acoustic_job(tmp_path, monkeypatch):
         "auto_multi_recovery": {
             "source_sha256": SOURCE_SHA256,
             "source_path": str(source),
+            "source_file_id": DOWNLOADABLE_FILE_ID,
+            "source_file_unique_id": source_file_unique_id,
             "target_language": "English",
             "original_volume_percent": 40,
             "dub_volume_percent": 150,
@@ -251,6 +262,12 @@ def test_exact_acoustic_recovery_claims_same_job_once_and_blocks_attempt_five(
     assert recovered["auto_multi_acoustic_model_sha256"] == ACOUSTIC_MODEL_SHA256
     assert recovered["auto_multi_acoustic_algorithm_version"] == (
         ACOUSTIC_ALGORITHM_VERSION
+    )
+    assert recovered["auto_multi_recovery"]["source_file_id"] == (
+        DOWNLOADABLE_FILE_ID
+    )
+    assert recovered["auto_multi_recovery"]["source_file_unique_id"] == (
+        job["job_key"].split("|")[2]
     )
     after_count = sqlite3.connect(db_path).execute(
         "SELECT COUNT(*) FROM system_settings"
@@ -753,12 +770,18 @@ def _seed_context_loss_failure(tmp_path, monkeypatch):
         "output_validated": False,
         "output_sent": False,
     }
-    source_file_id = context_failure["job_key"].split("|")[2]
+    source_file_unique_id = context_failure["job_key"].split("|")[2]
     context_failure["input_save"] = {
         **dict(context_failure.get("input_save") or {}),
-        "file_id": source_file_id,
+        "file_id": DOWNLOADABLE_FILE_ID,
+        "file_unique_id": source_file_unique_id,
         "original_filename": "test_nhieu_giong.mp4",
         "transport_input_size": 9_869_032,
+    }
+    context_failure["auto_multi_recovery"] = {
+        **dict(context_failure.get("auto_multi_recovery") or {}),
+        "source_file_id": DOWNLOADABLE_FILE_ID,
+        "source_file_unique_id": source_file_unique_id,
     }
     _persist_fixed_vocal_job(db_path, context_failure)
     _persist_translation_asr_attempt(
@@ -951,6 +974,7 @@ def test_context_repair_rehydrates_missing_source_from_stored_file_id(
     assert result["rehydrated"] is True
     assert Path(source_path).read_bytes() == source_bytes
     assert calls[0]["source_file_id"] == context_failure["input_save"]["file_id"]
+    assert calls[0]["source_file_id"] != context_failure["job_key"].split("|")[2]
     after = sqlite3.connect(db_path).execute(
         "SELECT value FROM system_settings WHERE key=?",
         (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
@@ -1066,7 +1090,9 @@ def test_context_repair_rejects_stored_file_id_mismatch_without_download(
     )
     source_path = Path(context_failure["auto_multi_recovery"]["source_path"])
     source_path.unlink(missing_ok=True)
-    context_failure["input_save"]["file_id"] = "AgAD-wrong-file-id"
+    context_failure["auto_multi_recovery"]["source_file_unique_id"] = (
+        "AgAD-wrong-unique-id"
+    )
     _persist_fixed_vocal_job(db_path, context_failure)
     before = sqlite3.connect(db_path).execute(
         "SELECT value FROM system_settings WHERE key=?",
@@ -2394,6 +2420,8 @@ def test_failed_auto_multi_recovery_state_is_exact_and_not_receipt_resume(
     job["auto_multi_recovery"] = {
         "source_sha256": source_sha256,
         "source_path": str(source),
+        "source_file_id": DOWNLOADABLE_FILE_ID,
+        "source_file_unique_id": job["job_key"].split("|")[2],
         "target_language": "English",
         "original_volume_percent": 40,
         "dub_volume_percent": 150,
@@ -2413,10 +2441,163 @@ def test_failed_auto_multi_recovery_state_is_exact_and_not_receipt_resume(
     assert state["original_audio_volume_percent"] == 40
     assert state["dubbed_voice_volume_percent"] == 150
     assert state["subdub_final_confirmed"] is True
+    assert state["source_file_id"] == DOWNLOADABLE_FILE_ID
+    assert state["video_file_id"] == DOWNLOADABLE_FILE_ID
+    assert state["source_file_unique_id"] == job["job_key"].split("|")[2]
+    assert state["video_file_unique_id"] == job["job_key"].split("|")[2]
     assert state["_pipeline_source_path_override"] == str(source)
     assert state["_pipeline_workspace"] == job["workspace"]
     assert state["auto_exact_resume"] is False
     assert "auto_exact_receipt" not in state
+
+
+def test_failed_auto_multi_recovery_state_never_promotes_unique_id_to_file_id(
+    tmp_path,
+    monkeypatch,
+):
+    _db_path, job, source, source_sha256 = _seed_job(tmp_path, monkeypatch)
+    unique_id = job["job_key"].split("|")[2]
+    job["input_save"]["file_id"] = unique_id
+    job["auto_multi_recovery"] = {
+        "source_sha256": source_sha256,
+        "source_path": str(source),
+        "target_language": "English",
+        "original_volume_percent": 40,
+        "dub_volume_percent": 150,
+        "owner_confirmed_paid": True,
+    }
+
+    state = bot.subdub_failed_auto_multi_recovery_state(job)
+
+    assert state["source_file_unique_id"] == unique_id
+    assert state["video_file_unique_id"] == unique_id
+    assert state["source_file_id"] == ""
+    assert state["video_file_id"] == ""
+
+
+def test_failed_auto_multi_recovery_state_skips_legacy_unique_id_alias(
+    tmp_path,
+    monkeypatch,
+):
+    _db_path, job, source, source_sha256 = _seed_job(tmp_path, monkeypatch)
+    unique_id = job["job_key"].split("|")[2]
+    job["auto_multi_recovery"] = {
+        "source_sha256": source_sha256,
+        "source_path": str(source),
+        "source_file_id": unique_id,
+        "source_file_unique_id": unique_id,
+        "target_language": "English",
+        "original_volume_percent": 40,
+        "dub_volume_percent": 150,
+        "owner_confirmed_paid": True,
+    }
+
+    state = bot.subdub_failed_auto_multi_recovery_state(job)
+
+    assert state["source_file_id"] == DOWNLOADABLE_FILE_ID
+    assert state["video_file_id"] == DOWNLOADABLE_FILE_ID
+    assert state["source_file_unique_id"] == unique_id
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        {"source_file_unique_id": "different-unique-id"},
+        {"source_file_unique_id": ["not", "text"]},
+        {"source_file_id": ["not", "text"]},
+        {"source_file_id": "conflicting-downloadable-id"},
+    ),
+)
+def test_recovery_file_identity_rejects_mismatch_type_and_conflict(mutation):
+    unique_id = "AgAD-authoritative-unique"
+    current = {
+        "job_key": f"1|1|{unique_id}|subtitle_plus_dub|auto_multi_speaker",
+        "input_save": {
+            "file_id": DOWNLOADABLE_FILE_ID,
+            "file_unique_id": unique_id,
+        },
+    }
+
+    assert bot._subdub_recovery_file_identity(current, mutation) == ("", "")
+
+
+def test_context_repair_skips_legacy_unique_id_alias_for_download(
+    tmp_path,
+    monkeypatch,
+):
+    rearm, db_path, context_failure = _seed_context_loss_failure(
+        tmp_path,
+        monkeypatch,
+    )
+    unique_id = context_failure["job_key"].split("|")[2]
+    source_path = Path(context_failure["auto_multi_recovery"]["source_path"])
+    source_path.unlink(missing_ok=True)
+    source_bytes = b"source-after-legacy-unique-id-alias"
+    expected_sha256 = hashlib.sha256(source_bytes).hexdigest()
+    context_failure["auto_multi_recovery"].update(
+        {
+            "source_sha256": expected_sha256,
+            "source_file_id": unique_id,
+            "source_file_unique_id": unique_id,
+        }
+    )
+    context_failure["source_sha256"] = expected_sha256
+    context_failure["input_save"]["file_id"] = DOWNLOADABLE_FILE_ID
+    context_failure["input_save"]["transport_input_size"] = len(source_bytes)
+    _persist_fixed_vocal_job(db_path, context_failure)
+    monkeypatch.setattr(rearm, "SOURCE_SHA256", expected_sha256)
+    monkeypatch.setattr(
+        rearm.app,
+        "_subdub_sha256_file",
+        lambda value: hashlib.sha256(Path(value).read_bytes()).hexdigest(),
+    )
+    calls = []
+
+    async def download(_context, state):
+        calls.append(dict(state))
+        return source_bytes, "video/mp4"
+
+    monkeypatch.setattr(rearm.app, "video_dubbing_download_source", download)
+
+    result = asyncio.run(rearm.ensure_exact_source(SimpleNamespace()))
+
+    assert result["ok"] is True
+    assert result["rehydrated"] is True
+    assert calls[0]["source_file_id"] == DOWNLOADABLE_FILE_ID
+    assert source_path.read_bytes() == source_bytes
+
+
+def test_saved_input_preserves_downloadable_and_unique_file_ids(
+    tmp_path,
+    monkeypatch,
+):
+    source_bytes = b"downloaded-telegram-source"
+
+    async def download(_context, state):
+        assert state["source_file_id"] == DOWNLOADABLE_FILE_ID
+        assert state["source_file_unique_id"] == "AgAD-unique-source"
+        return source_bytes, "video/mp4"
+
+    monkeypatch.setattr(bot, "video_dubbing_download_source", download)
+
+    result = asyncio.run(
+        bot.video_dubbing_save_input_for_pipeline(
+            SimpleNamespace(bot=SimpleNamespace()),
+            {
+                "source_file_id": DOWNLOADABLE_FILE_ID,
+                "source_file_unique_id": "AgAD-unique-source",
+                "source_file_name": "fixture.mp4",
+                "source_mime_type": "video/mp4",
+                "source_file_size": len(source_bytes),
+            },
+            str(tmp_path),
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["file_id"] == DOWNLOADABLE_FILE_ID
+    assert result["file_unique_id"] == "AgAD-unique-source"
+    assert result["source_bytes"] == source_bytes
 
 
 def test_failed_auto_multi_executor_passes_same_recovery_job_to_wrapper(

@@ -68,9 +68,9 @@ Review V2 additions now implemented and locally measured:
 - every acoustic speaker must appear in TTS, one speaker keeps one voice, and
   all voices are distinct before the attribution proof can be persisted;
 - terminal proof now requires `auto_multi_attribution_verified=true`;
-- missing same-job source is rehydrated only through the stored Telegram
-  `file_id`, with exact size, MIME and fixture SHA verified before atomic write
-  and before the DB CAS;
+- missing same-job source is rehydrated only through a stored downloadable
+  Telegram `file_id`; `job_key` separately anchors `file_unique_id`. Exact size,
+  MIME and fixture SHA are verified before atomic write and before the DB CAS;
 - existing correct source is reused; wrong existing hash, mismatched file ID,
   wrong downloaded hash, duplicate marker and CAS loser all fail without DB
   mutation or source overwrite;
@@ -119,6 +119,28 @@ The exact fixture gate proves `k=5`, word coverage `50/50`, `23` units, `178`
 6. Only claim completion after a real MP4, one Telegram video followed by one
    receipt, stable distinct speakers/voices, cue/timing evidence, and zero Xu
    financial delta are measured.
+
+## Runtime `b5a97285` live RED and current correction
+
+- PR `#990` merged/deployed exact SHA
+  `b5a972850a5bf441d44a50c4a445f342088a3165`; workflow `33903797590`
+  SUCCESS. VPS checkout/model/services/health preflight passed.
+- Exact one-shot invocation `8dfa559e6a034a9081b63669f28ad805` exited `1`
+  before CAS/provider at Telegram `get_file`: persisted `input_save.file_id`
+  was actually the same 15-character `file_unique_id` stored in `job_key`.
+- Context marker remains unused; job `#B4CB6D5FE8` remains failed/no-charge;
+  job/provider/transaction/credit/wallet/output deltas are all zero.
+- Read-only search of `20` startup DB backups, `2` exact job JSON backups,
+  journal and Local Bot API cache found no full downloadable file ID or source.
+- Local correction branch `fix/p0-subdub-auto-multi-downloadable-source-id`
+  starts at deployed `b5a97285`. It preserves both identities separately and
+  fail-closes malformed/conflicting aliases.
+- Measured source gates: recovery `124 passed`; direct impact `373 passed` plus
+  one known baseline test deselected; exact-two `46 passed`. Compile/diff/docs
+  gates exit `0`; YAML parse passes. Local commit remains to create.
+- Never rerun invocation `8dfa559e...`. After deploy, the exact same job needs
+  fresh Owner authorization for byte-identical fixture restore and one new unit;
+  no Telegram command, Confirm, upload flow or replacement job.
 
 ## PayOS handoff boundary
 
