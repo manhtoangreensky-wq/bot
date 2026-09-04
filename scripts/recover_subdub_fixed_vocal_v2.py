@@ -191,15 +191,22 @@ async def ensure_exact_source(telegram_bot) -> dict:
         ):
             return {"ok": True, "rehydrated": False, "path": source_resolved}
         return {"ok": False, "rehydrated": False, "reason": "source_sha256_mismatch"}
-    job_parts = str(current.get("job_key") or "").split("|")
-    job_file_id = job_parts[2] if len(job_parts) >= 4 else ""
-    stored_file_id = str(input_save.get("file_id") or "").strip()
+    stored_file_unique_id, stored_file_id = (
+        app._subdub_recovery_file_identity(current, recovery)
+    )
+    input_file_id = str(input_save.get("file_id") or "").strip()
     expected_size = int(
         input_save.get("transport_input_size")
         or current.get("input_size_bytes")
         or 0
     )
-    if not stored_file_id or stored_file_id != job_file_id or expected_size <= 0:
+    if (
+        not stored_file_unique_id
+        or not stored_file_id
+        or stored_file_id == stored_file_unique_id
+        or input_file_id not in {"", stored_file_unique_id, stored_file_id}
+        or expected_size <= 0
+    ):
         return {"ok": False, "rehydrated": False, "reason": "source_file_id_invalid"}
     source_bytes, content_type = await app.video_dubbing_download_source(
         SimpleNamespace(bot=telegram_bot),

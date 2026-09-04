@@ -1149,3 +1149,30 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   chưa push, chưa deploy và chưa LIVE PASS. Voice acoustic distinctness của
   MP4 cuối chỉ được đo sau khi có artifact thật bằng ngưỡng hiệu chuẩn; source
   không bịa cosine threshold.
+
+### Live RED downloadable Telegram identity — 05/09/2026
+
+- PR `#990` deploy exact runtime `b5a972850a5bf441d44a50c4a445f342088a3165`;
+  deploy run `33903797590` SUCCESS `3m42s`; VPS tracked diff `0`, services/health
+  active/ok và fixed-vocal preflight chọn đúng `CPUExecutionProvider`.
+- Owner-authorized unit
+  `toanaas-subdub-private-context-b4cb6d5fe8-b5a97285.service`, invocation
+  `8dfa559e6a034a9081b63669f28ad805`, terminal exit `1` trước CAS tại Telegram
+  `get_file` với `telegram_download_failed:api`. Context marker chưa dùng;
+  ASR/translation/TTS/mux/artifact/delivery đều false.
+- Root đo được: `subtitle_dub_pipeline_job_key()` dùng `file_unique_id` để
+  idempotency. Recovery cũ lại lấy token này làm `source_file_id`, rồi ghi đè
+  `input_save.file_id`. Durable job vì vậy chỉ còn cùng unique ID dài `15` ký tự,
+  không còn full Telegram `file_id` có thể download.
+- Forensic read-only kiểm `20` startup DB backups, `2` exact-job JSON backups,
+  journal và Local Bot API exact-size cache; không tìm thấy full file ID hoặc
+  source `9,869,032` bytes. Không suy diễn file đã chết từ lỗi transport; authority
+  đơn giản là full ID không còn được persist ở bất kỳ nguồn đo nào.
+- Correction local lưu riêng `file_id` và `file_unique_id`; job key chỉ khớp
+  unique ID, Telegram chỉ nhận full ID distinct/nonempty. Legacy alias, ID sai
+  type hoặc nhiều full IDs mâu thuẫn đều fail-closed.
+- TDD: contract RED/GREEN `4 failed -> 5 passed`; legacy RED/GREEN `2 failed ->
+  5 passed`; type RED/GREEN `2 failed + 2 passed -> 6 passed`; full recovery
+  `124 passed`; direct impact `373 passed + 1` baseline test deselected;
+  exact-two `46 passed`. Provider/DB/job/transaction/wallet/credit delta trong
+  live RED đều `0`; Owner credits/spent vẫn `200/0`, `charged_xu=0`.

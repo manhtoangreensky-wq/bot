@@ -241187,6 +241187,9 @@ async def video_dubbing_save_input_for_pipeline(
     result = {
         "ok": False,
         "file_id": str(state.get("video_file_id") or state.get("source_file_id") or ""),
+        "file_unique_id": str(
+            state.get("video_file_unique_id") or state.get("source_file_unique_id") or ""
+        ),
         "path": "",
         "exists": False,
         "size": 0,
@@ -248835,6 +248838,69 @@ def _subdub_sha256_file(path: str) -> str:
     return digest.hexdigest()
 
 
+def _subdub_recovery_file_identity(
+    current: dict,
+    recovery: dict,
+) -> tuple[str, str]:
+    if type(current) is not dict or type(recovery) is not dict:
+        return "", ""
+    parts = str(current.get("job_key") or "").split("|")
+    job_source_unique_id = parts[2] if len(parts) >= 4 else ""
+    if not job_source_unique_id:
+        return "", ""
+    input_save = current.get("input_save")
+    if type(input_save) is not dict:
+        input_save = {}
+
+    def normalized_text_values(values: tuple) -> list[str] | None:
+        result: list[str] = []
+        for value in values:
+            if value in (None, ""):
+                continue
+            if type(value) is not str or not value.strip():
+                return None
+            result.append(value.strip())
+        return result
+
+    explicit_unique_values = normalized_text_values(
+        (
+            recovery.get("source_file_unique_id"),
+            input_save.get("file_unique_id"),
+            current.get("source_file_unique_id"),
+            current.get("video_file_unique_id"),
+        )
+    )
+    if explicit_unique_values is None:
+        return "", ""
+    explicit_unique_ids = {
+        value
+        for value in explicit_unique_values
+    }
+    if any(value != job_source_unique_id for value in explicit_unique_ids):
+        return "", ""
+    downloadable_values = normalized_text_values(
+        (
+            recovery.get("source_file_id"),
+            input_save.get("file_id"),
+            current.get("source_file_id"),
+            current.get("video_file_id"),
+        )
+    )
+    if downloadable_values is None:
+        return "", ""
+    downloadable_ids = {
+        value
+        for value in downloadable_values
+        if value != job_source_unique_id
+    }
+    if len(downloadable_ids) > 1:
+        return "", ""
+    return (
+        job_source_unique_id,
+        next(iter(downloadable_ids), ""),
+    )
+
+
 def subdub_failed_auto_multi_recovery_state(job: dict | None = None) -> dict:
     current = dict(job or {})
     recovery = dict(current.get("auto_multi_recovery") or {})
@@ -248873,12 +248939,14 @@ def subdub_failed_auto_multi_recovery_state(job: dict | None = None) -> dict:
     internal_job_id = str(
         current.get("internal_job_id") or current.get("job_id") or ""
     ).strip()
-    parts = job_key.split("|")
-    source_file_id = parts[2] if len(parts) >= 4 else ""
+    source_file_unique_id, source_file_id = _subdub_recovery_file_identity(
+        current,
+        recovery,
+    )
     owner_id = str(current.get("user_id") or "").strip()
     chat_id = str(current.get("chat_id") or owner_id).strip()
     session_nonce = str(current.get("auto_exact_session_nonce") or "").strip()
-    if not all((job_key, internal_job_id, source_file_id, owner_id, chat_id, session_nonce)):
+    if not all((job_key, internal_job_id, source_file_unique_id, owner_id, chat_id, session_nonce)):
         return {}
     return {
         "mode": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
@@ -248893,8 +248961,8 @@ def subdub_failed_auto_multi_recovery_state(job: dict | None = None) -> dict:
         "source_content_type": "video/mp4",
         "source_file_id": source_file_id,
         "video_file_id": source_file_id,
-        "source_file_unique_id": source_file_id,
-        "video_file_unique_id": source_file_id,
+        "source_file_unique_id": source_file_unique_id,
+        "video_file_unique_id": source_file_unique_id,
         "source_file_name": os.path.basename(source_resolved),
         "source_file_size": int(os.path.getsize(source_resolved)),
         "video_file_size": int(os.path.getsize(source_resolved)),
@@ -249243,9 +249311,21 @@ def claim_subdub_failed_auto_multi_recovery(
         ):
             conn.rollback()
             return {"ok": False, "claimed": False, "reason": "selection_mismatch"}
+        prior_recovery = current.get("auto_multi_recovery")
+        if type(prior_recovery) is not dict:
+            prior_recovery = {}
+        source_file_unique_id, source_file_id = _subdub_recovery_file_identity(
+            current,
+            prior_recovery,
+        )
+        if not source_file_unique_id:
+            conn.rollback()
+            return {"ok": False, "claimed": False, "reason": "source_file_unique_id_mismatch"}
         recovery = {
             "source_sha256": actual_sha256,
             "source_path": source_resolved,
+            "source_file_id": source_file_id,
+            "source_file_unique_id": source_file_unique_id,
             "target_language": "English",
             "original_volume_percent": 40,
             "dub_volume_percent": 150,

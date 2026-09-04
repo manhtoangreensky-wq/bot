@@ -42,7 +42,7 @@
 
 - [x] Final WIP selector and full acoustic file terminate green: exact selector `1 passed in 603.88s`; full acoustic file `46 passed in 5.84s`.
 - [x] WIP rebased onto `origin/main=ecb99f2`; new HEAD `a7721e8`; exact-two bytes unchanged.
-- [x] Current job state is queried read-only. Identity/selection/markers/no-charge match; source bytes and strict word timeline are absent, so Telegram `file_id` rehydration must be proven before repair.
+- [x] Current job state is queried read-only. Identity/selection/markers/no-charge match; source bytes and strict word timeline are absent. Live later proved the legacy job persisted only `file_unique_id`, not a downloadable Telegram `file_id`.
 - [ ] Context-repair marker is TDD RED/GREEN and CAS/idempotency protected.
 - [ ] One PR merges and exact SHA deploys to the bot/required runner.
 - [ ] The same job runs once and reaches MP4, delivery, receipt, and zero-wallet PASS.
@@ -139,10 +139,13 @@ Capture: job/fixture/user identity, English/40/150, status/stage/error, attempt/
   aggregate says PASS but cannot replace strict words; strict ASR must run again
   after byte-identical source rehydration.
 
-- [ ] Preflight stored Telegram `file_id` without DB mutation. Download in
-  memory through existing Local Bot API-aware transport and require exact
-  length/hash. If this fails, stop and request the exact fixture; never create
-  a replacement job.
+- [x] Preflight stored Telegram identity without DB mutation. Runtime
+  `b5a97285...` one-shot failed at Telegram `get_file` before CAS because the
+  15-character `file_unique_id` had been persisted as `file_id`. Marker,
+  provider usage, job count and wallet remained unchanged.
+- [x] TDD-separate the two authorities: `job_key` matches `file_unique_id`;
+  only a distinct full `file_id` may be sent to Telegram download. Missing,
+  conflicting or non-string identities fail closed.
 
 ### Task 4: Add one exact same-job context-repair marker
 

@@ -1516,4 +1516,48 @@ private_pipeline_context_closeout_20260904:
     deploy: false
     live_pass: false
 
-current_next_action: final focused/YAML/scope review then one local commit; rebase and ship only with coordinated shared-resource ownership; after exact runtime request separate action-time authorization for one context-repair script execution on same job only; no upload, Confirm, old command, new job or wallet mutation; LIVE PASS only on real MP4 then receipt with k5 attribution and charged_xu 0
+downloadable_source_identity_correction_20260905:
+  deployed_red:
+    runtime: b5a972850a5bf441d44a50c4a445f342088a3165
+    unit: toanaas-subdub-private-context-b4cb6d5fe8-b5a97285.service
+    invocation: 8dfa559e6a034a9081b63669f28ad805
+    result: exit 1 before CAS
+    blocker: telegram_download_failed:api at get_file
+    durable_reason: job_key and input_save.file_id both held the same 15-character file_unique_id
+    context_marker_used: false
+    provider_calls: 0
+    job_count_delta: 0
+    transactions_delta: 0
+    provider_usage_delta: 0
+    credit_event_delta: 0
+    wallet_delta: 0
+    charged_xu: 0
+    backup: /opt/toanaas/bot/delete/subdub-b4cb6d5fe8-private-context-preclaim-20260904T182251Z.json
+    backup_mode: 600
+    backup_sha256: 3f8d1e105dd89a8ff6a108f27e3554f027b728c0e613752bf29b3a6fed9989ff
+  forensic:
+    startup_db_backups_checked: 20
+    exact_job_json_backups_checked: 2
+    full_file_id_found: false
+    local_bot_api_exact_size_cache_found: false
+  correction:
+    intake: persist file_id and file_unique_id separately
+    job_key_authority: file_unique_id only
+    download_authority: distinct nonempty full file_id only
+    legacy_alias: unique ID must never be promoted to downloadable ID
+    conflict_or_wrong_type: fail closed
+  tdd:
+    contract_red: 4 failed in 19.29s
+    contract_green: 5 passed in 479.48s
+    legacy_red: 2 failed in 7.51s
+    legacy_green: 5 passed in 429.50s
+    type_red: 2 failed and 2 passed in 865.65s
+    type_green: 6 passed in 383.86s
+    recovery_full: 124 passed in 9.77s
+    direct_impact: 373 passed and 1 baseline-stale test deselected in 13.12s
+    exact_two: 46 passed and 241 deselected in 5.06s
+    compile: bot.py local_worker.py recovery script and changed test exit 0
+    yaml_diff_exact_two: exit 0
+  live_pass: false
+
+current_next_action: create one local commit and correction PR; deploy only after Owner production gate; current job has no recoverable full Telegram file_id, so any next same-job execution needs fresh Owner authorization for byte-identical fixture artifact restore plus one new exact unit; never reuse invocation 8dfa559e6a034a9081b63669f28ad805

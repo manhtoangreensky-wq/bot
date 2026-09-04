@@ -140,7 +140,8 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
     drift counters, original `40`/dub `150`, MP4 metrics, hai Telegram message ID,
     `charged_xu=0`, root-job/transaction/wallet/credit/provider-usage deltas `0`.
 24. Với context-repair same-job, kiểm bốn `_pipeline_*` field tới classifier/TTS/
-    mux. Nếu source đã cleanup, runner chỉ được tải stored `file_id` khớp job-key;
-    size `9,869,032`, MIME `video/mp4` và SHA fixture phải khớp trước ghi file và
-    trước CAS. Sai hash/file ID, duplicate marker hoặc CAS loser phải dừng, không
-    gửi command cũ, không tạo job mới và không ghi đè source.
+    mux. `job_key` chứa `file_unique_id` dùng idempotency; nó không download được.
+    Runner chỉ được gọi Telegram bằng full `file_id` lưu riêng, nonempty và khác
+    unique ID. Size `9,869,032`, MIME `video/mp4` và SHA fixture phải khớp trước
+    ghi file/CAS. Sai hash, unique ID lệch, full ID thiếu/mâu thuẫn/sai type,
+    duplicate marker hoặc CAS loser phải dừng, không command cũ/job mới/overwrite.
