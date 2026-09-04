@@ -1232,6 +1232,28 @@ starting the next.
   `114 passed in 15.74s`; three
   unrelated debug assertions reproduce on clean main,
   so `NEW_FAILURES=0`.
+- [x] Claim-trace correction shipped as PR #985, squash/runtime
+  `259bce40c095309b87a73a518a83904a6d6022ce`; deploy run `33833696318`
+  SUCCESS in `4m17s`. Bot and inactive Owner worker were synchronized to exact
+  clean SHA with backup ref
+  `refs/backups/worker-pre-product-video-claim-trace-20260904T034008Z`.
+- [x] Exact public-path snapshot `claim -> trace -> worker payload -> fail/defer`
+  preserved V2 `[1,2]`, V3 `[1]` and cap `1/1` at all four stages. Guarded live
+  PID `1295567` then retained those namespaces across repeated claim/defer cycles;
+  scene 2 remained unsubmitted and finance stayed zero.
+- [-] Scene 1 provider task is genuinely `completed/100`; unified adapter poll is
+  HTTP `200`, reads top-level `video_url`, and never model-qualifies the task. The
+  signed `flow-content.google` URL expired at `2026-09-03 22:01:27 +07`; download is
+  HTTP `403 Forbidden`. No-cache query returns the exact same expired URL. Official
+  `/v1/videos/{id}/content` returns `403` for raw and `400` for model-qualified ID;
+  no documented refresh endpoint exists. Paid submits during these probes `0`.
+- [x] Owner authorized exact V4: two new Key4U calls, one replacement for expired
+  scene 1 and one for scene 2; V3 stays immutable at `1/2` and cannot replay. Existing
+  identity `28/32/27`, quote `144/144/144`, cap `212/212`, charged Xu `0` remain.
+- [x] V4 watchdog RED `1 failed in 5.11s`: exact V4 was rejected by the V3-only
+  taskless-wait ID. Minimal allowlist adds only exact V4. Exact plus unknown-ID and
+  permanent/transient inverse GREEN `6 passed in 5.08s`; full authority/protected
+  watchdog gate `82 passed in 10.74s`; full compile/diff exit `0`.
 - [ ] Two distinct scene clips and one final MP4 terminal; otherwise stop at the
   exact new RED and reopen only `SPEC-04H`.
 
