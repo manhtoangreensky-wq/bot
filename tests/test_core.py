@@ -9777,6 +9777,68 @@ def test_manual_topup_menu_methods(monkeypatch):
     assert "🪙 USDT TRC20" not in labels
 
 
+def test_manual_package_choice_does_not_create_payos_order(monkeypatch, tmp_path):
+    db_path = tmp_path / "manual-entry.db"
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    monkeypatch.setattr(bot, "USER_BILL_STATE", {})
+    bot.init_db()
+
+    class FakeQuery:
+        data = "manual|start|50k|123"
+        from_user = SimpleNamespace(id=123, first_name="Customer")
+        message = SimpleNamespace(chat_id=123)
+
+        async def answer(self, *args, **kwargs):
+            return None
+
+        async def edit_message_text(self, *args, **kwargs):
+            return None
+
+    asyncio.run(
+        bot.handle_manual_package_choice(
+            SimpleNamespace(callback_query=FakeQuery()),
+            SimpleNamespace(args=[], bot=SimpleNamespace()),
+        )
+    )
+
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM payos_orders").fetchone()[0] == 0
+    finally:
+        conn.close()
+    assert bot.get_active_manual_bill_state(123)["pkg_key"] == "50k"
+
+
+def test_manual_command_does_not_create_payos_order(monkeypatch, tmp_path):
+    db_path = tmp_path / "manual-command-entry.db"
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    monkeypatch.setattr(bot, "USER_BILL_STATE", {})
+    bot.init_db()
+    replies = []
+
+    async def reply_text(text, **_kwargs):
+        replies.append(text)
+
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=123, first_name="Customer"),
+        message=SimpleNamespace(reply_text=reply_text),
+    )
+    asyncio.run(
+        bot.cmd_thanhtoan_thucong(
+            update,
+            SimpleNamespace(args=["50k"]),
+        )
+    )
+
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM payos_orders").fetchone()[0] == 0
+    finally:
+        conn.close()
+    assert bot.get_active_manual_bill_state(123)["pkg_key"] == "50k"
+    assert replies
+
+
 def test_manual_bank_qr_asset_send_and_missing_no_crash(monkeypatch, tmp_path):
     class FakeBot:
         def __init__(self):
@@ -9802,6 +9864,38 @@ def test_manual_bank_qr_asset_send_and_missing_no_crash(monkeypatch, tmp_path):
     monkeypatch.setattr(bot, "MANUAL_BANK_QR_PATH", str(tmp_path / "missing.jpg"))
     assert asyncio.run(bot.send_manual_method_qr(context, 1, 1, "bank_acb")) is False
     assert alerts and "missing manual payment QR asset" in alerts[0][1]
+
+
+def test_manual_method_qr_preserves_amount_and_does_not_create_deposit(monkeypatch, tmp_path):
+    qr_path = tmp_path / "bank.jpg"
+    qr_path.write_bytes(b"qr")
+    monkeypatch.setattr(bot, "MANUAL_BANK_QR_PATH", str(qr_path))
+    monkeypatch.setattr(bot, "USER_BILL_STATE", {})
+    bot.set_manual_bill_state(
+        123,
+        order_code="MANUAL",
+        pkg_key="50k",
+        amount=50000,
+        amount_vnd=50000,
+        base_xu=500,
+        expected_xu=500,
+        xu=500,
+        method="bank_acb",
+        currency="VND",
+    )
+
+    class FakeBot:
+        def __init__(self):
+            self.photos = []
+
+        async def send_photo(self, **kwargs):
+            self.photos.append(kwargs)
+
+    context = SimpleNamespace(bot=FakeBot())
+    assert asyncio.run(bot.send_manual_method_qr(context, 123, 123, "bank_acb")) is True
+    assert len(context.bot.photos) == 1
+    assert "50.000" in context.bot.photos[0]["caption"]
+    assert "500 Xu" in context.bot.photos[0]["caption"]
 
 
 def test_manual_menu_bonus_text_no_zalopay_momo():
@@ -10033,6 +10127,53 @@ def test_manual_bill_upload_creates_pending_review_without_credit(monkeypatch, t
     assert replies and "Đã gửi bill" in replies[0]
 
 
+def test_duplicate_manual_bill_file_is_idempotent_without_credit(monkeypatch, tmp_path):
+    db_path = tmp_path / "manual-duplicate-photo.db"
+    _create_manual_deposit_test_db(db_path)
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE credit_events (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, delta INTEGER, balance_after INTEGER, event_type TEXT, ref_id TEXT, note TEXT, created_at TEXT)"
+    )
+    conn.commit()
+    conn.close()
+    state = {
+        "currency": "VND",
+        "method": "bank_acb",
+        "amount": 50000,
+        "amount_vnd": 50000,
+        "base_xu": 500,
+        "bonus_xu": 0,
+        "expected_xu": 500,
+        "xu": 500,
+        "foreign_manual": False,
+    }
+    user = SimpleNamespace(id=123, first_name="Customer")
+    first = bot.create_manual_pending_deposit(
+        user,
+        state,
+        file_id="bill-1",
+        file_unique_id="same-photo",
+    )
+    second = bot.create_manual_pending_deposit(
+        user,
+        state,
+        file_id="bill-1",
+        file_unique_id="same-photo",
+    )
+    assert first["ok"] is True
+    assert second["ok"] is False
+    assert second["reason"] == "duplicate_file_unique_id"
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM pending_deposits").fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM credit_events WHERE event_type='manual_deposit' AND delta>0"
+        ).fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
 def test_manual_approve_requires_second_confirmation(monkeypatch, tmp_path):
     db_path = tmp_path / "manual-approve.db"
     _create_manual_deposit_test_db(db_path)
@@ -10065,6 +10206,223 @@ def test_manual_approve_requires_second_confirmation(monkeypatch, tmp_path):
     state = bot.get_manual_approval_state(999)
     assert state and state["deposit_id"] == 1 and state["step"] == "await_amount"
     assert any("chưa cộng Xu" in item for item in replies)
+
+
+def test_manual_approval_is_one_time_and_deposit_scoped(monkeypatch, tmp_path):
+    db_path = tmp_path / "manual-approval-once.db"
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    bot.init_db()
+    bot.get_user(123)
+    conn = sqlite3.connect(db_path)
+    conn.execute("UPDATE users SET credits=0, has_deposited=0, total_paid_vnd=0 WHERE user_id='123'")
+    conn.execute(
+        "INSERT INTO pending_deposits(user_id,status,xu,expected_xu,amount_vnd,method,submitted_at) VALUES('123','pending_admin_review',500,500,50000,'bank_acb','2026-09-03 10:00:00')"
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(bot, "is_admin_user", lambda uid: uid == 999)
+    replies = []
+    sent = []
+
+    async def reply_text(text, **_kwargs):
+        replies.append(text)
+
+    class FakeBot:
+        async def send_message(self, **kwargs):
+            sent.append(kwargs)
+
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=999),
+        message=SimpleNamespace(reply_text=reply_text),
+    )
+    context = SimpleNamespace(args=["1", "500"], bot=FakeBot())
+    asyncio.run(bot.cmd_duyet(update, context))
+    asyncio.run(bot.cmd_duyet(update, context))
+
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute("SELECT credits FROM users WHERE user_id='123'").fetchone()[0] == 500
+        assert conn.execute(
+            "SELECT COUNT(*) FROM credit_events WHERE event_type='manual_deposit' AND ref_id='1'"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT status,approved_xu FROM pending_deposits WHERE id=1"
+        ).fetchone() == ("approved", 500)
+    finally:
+        conn.close()
+    assert len(sent) >= 1
+    assert replies
+
+
+def test_manual_approval_zero_row_status_update_does_not_credit(monkeypatch, tmp_path):
+    db_path = tmp_path / "manual-approval-zero-row.db"
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    bot.init_db()
+    bot.get_user(123)
+    conn = sqlite3.connect(db_path)
+    conn.execute("UPDATE users SET credits=0, has_deposited=0, total_paid_vnd=0 WHERE user_id='123'")
+    conn.execute(
+        "INSERT INTO pending_deposits(user_id,status,xu,expected_xu,amount_vnd,method,submitted_at) VALUES('123','pending_admin_review',500,500,50000,'bank_acb','2026-09-03 10:00:00')"
+    )
+    conn.commit()
+    conn.close()
+
+    class ZeroRowCursor:
+        def __init__(self, cursor):
+            self._cursor = cursor
+            self.rowcount = -1
+
+        def execute(self, sql, params=()):
+            if "UPDATE pending_deposits" in str(sql) and "SET status='approved'" in str(sql):
+                self.rowcount = 0
+                return self
+            result = self._cursor.execute(sql, params)
+            self.rowcount = result.rowcount
+            return self
+
+        def fetchone(self):
+            return self._cursor.fetchone()
+
+        def fetchall(self):
+            return self._cursor.fetchall()
+
+        def __getattr__(self, name):
+            return getattr(self._cursor, name)
+
+    class ZeroRowConnection:
+        def __init__(self, path):
+            self._conn = sqlite3.connect(path)
+
+        def cursor(self):
+            return ZeroRowCursor(self._conn.cursor())
+
+        def execute(self, *args, **kwargs):
+            return self._conn.execute(*args, **kwargs)
+
+        def __getattr__(self, name):
+            return getattr(self._conn, name)
+
+    monkeypatch.setattr(bot, "db_connect", lambda: ZeroRowConnection(str(db_path)))
+    monkeypatch.setattr(bot, "is_admin_user", lambda uid: uid == 999)
+    replies = []
+    sent = []
+
+    async def reply_text(text, **_kwargs):
+        replies.append(text)
+
+    class FakeBot:
+        async def send_message(self, **kwargs):
+            sent.append(kwargs)
+
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=999),
+        message=SimpleNamespace(reply_text=reply_text),
+    )
+    asyncio.run(bot.cmd_duyet(update, SimpleNamespace(args=["1", "500"], bot=FakeBot())))
+
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute("SELECT credits FROM users WHERE user_id='123'").fetchone()[0] == 0
+        assert conn.execute("SELECT status FROM pending_deposits WHERE id=1").fetchone()[0] == "pending_admin_review"
+        assert conn.execute(
+            "SELECT COUNT(*) FROM credit_events WHERE event_type='manual_deposit' AND ref_id='1'"
+        ).fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_manual_approval_keeps_post_approval_metadata(monkeypatch, tmp_path):
+    db_path = tmp_path / "manual-approval-metadata.db"
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    bot.init_db()
+    bot.get_user(123)
+    conn = sqlite3.connect(db_path)
+    conn.execute("UPDATE users SET credits=0, has_deposited=0, total_paid_vnd=0 WHERE user_id='123'")
+    conn.execute(
+        "INSERT INTO pending_deposits(user_id,status,xu,expected_xu,amount_vnd,method,submitted_at) VALUES('123','pending_admin_review',500,500,50000,'bank_acb','2026-09-03 10:00:00')"
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(bot, "is_admin_user", lambda uid: uid == 999)
+    monkeypatch.setattr(
+        bot,
+        "apply_automatic_topup_promotion_conn",
+        lambda *args, **kwargs: {
+            "bonus_xu": 0,
+            "promotion_id": "",
+            "label": "",
+            "successful_topup_ordinal": 7,
+            "domestic_eligibility": True,
+        },
+    )
+
+    async def reply_text(*args, **kwargs):
+        return None
+
+    class FakeBot:
+        async def send_message(self, **kwargs):
+            return None
+
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=999),
+        message=SimpleNamespace(reply_text=reply_text),
+    )
+    asyncio.run(bot.cmd_duyet(update, SimpleNamespace(args=["1", "500"], bot=FakeBot())))
+
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT status,approved_xu,payment_market,domestic_eligibility,successful_topup_ordinal,extra_xu_percent_bonus_applied FROM pending_deposits WHERE id=1"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row == ("approved", 500, "VN", 1, 7, 0)
+
+
+def test_manual_reject_is_deposit_scoped_and_no_charge(monkeypatch, tmp_path):
+    db_path = tmp_path / "manual-reject.db"
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    bot.init_db()
+    bot.get_user(123)
+    conn = sqlite3.connect(db_path)
+    conn.execute("UPDATE users SET credits=0, has_deposited=0, total_paid_vnd=0 WHERE user_id='123'")
+    conn.executemany(
+        "INSERT INTO pending_deposits(user_id,status,xu,expected_xu,amount_vnd,method,submitted_at) VALUES(?,?,?,?,?,?,?)",
+        [
+            ("123", "pending_admin_review", 500, 500, 50000, "bank_acb", "2026-09-03 10:00:00"),
+            ("123", "pending_admin_review", 1000, 1000, 100000, "bank_acb", "2026-09-03 10:01:00"),
+        ],
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(bot, "is_admin_user", lambda uid: uid == 999)
+    replies = []
+    sent = []
+
+    async def reply_text(text, **_kwargs):
+        replies.append(text)
+
+    class FakeBot:
+        async def send_message(self, **kwargs):
+            sent.append(kwargs)
+
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=999),
+        message=SimpleNamespace(reply_text=reply_text),
+    )
+    asyncio.run(bot.cmd_tuchoi(update, SimpleNamespace(args=["1"], bot=FakeBot())))
+
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute("SELECT status FROM pending_deposits WHERE id=1").fetchone()[0] == "rejected"
+        assert conn.execute("SELECT status FROM pending_deposits WHERE id=2").fetchone()[0] == "pending_admin_review"
+        assert conn.execute("SELECT credits FROM users WHERE user_id='123'").fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM credit_events WHERE event_type='manual_deposit' AND delta>0"
+        ).fetchone()[0] == 0
+    finally:
+        conn.close()
+    assert sent and replies
 
 
 def test_manual_international_topup_fixed_rates_and_bonus_guards(monkeypatch):
