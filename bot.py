@@ -18715,6 +18715,7 @@ def create_manual_pending_deposit(user, state: dict, file_id: str = "", file_uni
     fixed_rate_vnd = int(payment.get("fixed_rate_vnd") or (foreign_topup_rate_vnd(currency) if foreign_manual else 1))
     transfer_content = str(payment.get("transfer_content") or f"AAS {uid} MANUAL")
     tx_hash = str(tx_hash or "").strip()[:240]
+    file_unique_id = str(file_unique_id or "").strip()[:240]
     conn = db_connect()
     try:
         if tx_hash:
@@ -18724,6 +18725,13 @@ def create_manual_pending_deposit(user, state: dict, file_id: str = "", file_uni
             ).fetchone()
             if duplicate:
                 return {"ok": False, "reason": "duplicate_tx_hash", "duplicate_id": int(duplicate[0]), "duplicate_user_id": str(duplicate[1]), "status": str(duplicate[2])}
+        if file_unique_id:
+            duplicate = conn.execute(
+                "SELECT id,user_id,status FROM pending_deposits WHERE lower(file_unique_id)=lower(?) AND status<>'rejected' LIMIT 1",
+                (file_unique_id,),
+            ).fetchone()
+            if duplicate:
+                return {"ok": False, "reason": "duplicate_file_unique_id", "duplicate_id": int(duplicate[0]), "duplicate_user_id": str(duplicate[1]), "status": str(duplicate[2])}
         cursor = conn.cursor()
         cursor.execute(
             """INSERT INTO pending_deposits
@@ -43589,21 +43597,19 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
         get_user(uid, query.from_user.first_name or "Manual payment user")
         package_credit = calculate_package_credit_for_user(uid, amount)
         base_xu = int(package_credit.get("base_xu") or pkg["xu"])
-        launch_preview = int(package_credit.get("launch_bonus_xu") or 0)
         xu = int(package_credit.get("total_xu") or base_xu)
-        order_code = generate_order_code()
-        create_order(
-            order_code,
+        set_manual_bill_state(
             uid,
-            amount,
-            xu,
+            order_code="MANUAL",
+            amount=amount,
+            xu=xu,
+            pkg_key=pkg_key,
+            currency="VND",
+            foreign_manual=False,
+            step="select_method",
             base_xu=base_xu,
-            launch_bonus_xu=launch_preview,
-            package_amount_vnd=amount,
-            order_type="manual_topup",
-            metadata_json=payos_manual_topup_order_metadata("manual_bank_acb_vnd", "VND"),
+            expected_xu=xu,
         )
-        set_manual_bill_state(uid, order_code=order_code, amount=amount, xu=xu, pkg_key=pkg_key)
         return await query.edit_message_text(manual_payment_menu_text(uid, get_user_language(uid)), parse_mode="HTML", reply_markup=manual_payment_menu_keyboard(uid, get_user_language(uid)))
     set_manual_bill_state(uid, order_code="MANUAL")
     return await query.edit_message_text(
@@ -212924,7 +212930,6 @@ async def cmd_thanhtoan_thucong(update: Update, context: ContextTypes.DEFAULT_TY
     amount = 0
     xu = 0
     base_xu = 0
-    launch_preview = 0
     if context.args:
         pkg_key = context.args[0].lower()
         if pkg_key in PAYMENT_PACKAGES:
@@ -212932,22 +212937,20 @@ async def cmd_thanhtoan_thucong(update: Update, context: ContextTypes.DEFAULT_TY
             amount = pkg["amount"]
             package_credit = calculate_package_credit_for_user(uid, amount)
             base_xu = int(package_credit.get("base_xu") or pkg["xu"])
-            launch_preview = int(package_credit.get("launch_bonus_xu") or 0)
             xu = int(package_credit.get("total_xu") or base_xu)
-    order_code = generate_order_code()
     if amount and xu:
-        create_order(
-            order_code,
+        set_manual_bill_state(
             uid,
-            amount,
-            xu,
+            order_code="MANUAL",
+            amount=amount,
+            xu=xu,
+            pkg_key=pkg_key,
+            currency="VND",
+            foreign_manual=False,
+            step="select_method",
             base_xu=base_xu,
-            launch_bonus_xu=launch_preview,
-            package_amount_vnd=amount,
-            order_type="manual_topup",
-            metadata_json=payos_manual_topup_order_metadata("manual_bank_acb_vnd", "VND"),
+            expected_xu=xu,
         )
-        set_manual_bill_state(uid, order_code=order_code, amount=amount, xu=xu, pkg_key=pkg_key)
     else:
         set_manual_bill_state(uid, order_code="MANUAL")
     await update.message.reply_text(
@@ -226447,6 +226450,33 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         pending_deposit_id = int(pending_order[0])
         target_id = str(pending_order[1])
+        if int(amount) <= 0:
+            lookup_conn.rollback()
+            lookup_conn.close()
+            approval_conn = None
+            return await update.message.reply_text(
+                "⚠️ Số Xu duyệt phải lớn hơn 0.",
+            )
+        approval_cursor = lookup_c.execute(
+            """UPDATE pending_deposits
+               SET status='approved', approved_xu=?, admin_note=?, approved_by=?, approved_at=?, updated_at=?
+               WHERE id=? AND status IN ('pending','pending_admin_review')""",
+            (
+                int(amount),
+                admin_adjustment_reason,
+                str(update.effective_user.id),
+                now_text(),
+                now_text(),
+                pending_deposit_id,
+            ),
+        )
+        if int(approval_cursor.rowcount or 0) != 1:
+            lookup_conn.rollback()
+            lookup_conn.close()
+            approval_conn = None
+            return await update.message.reply_text(
+                "⚠️ Bill vừa được xử lý bởi một admin khác; Xu chưa cộng thêm.",
+            )
         foreign_manual = bool(int(pending_order[5] or 0))
         payment_context = {
             "currency": str(pending_order[6] or "VND").upper(),
@@ -226571,13 +226601,12 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             promo_result = {"bonus_xu": 0, "code": "", "status": "deferred_for_auto_promotion"}
         c.execute(
-            """UPDATE pending_deposits SET status='approved',approved_xu=?,admin_note=?,approved_by=?,approved_at=?,updated_at=?,
+            """UPDATE pending_deposits SET
                user_market_snapshot=?,payment_market=?,payment_transaction_id=?,domestic_eligibility=?,
                successful_topup_ordinal=?,first_bonus_applied=?,launch_bonus_applied=0,
                rank_topup_reward_applied=0,extra_xu_percent_bonus_applied=0
-               WHERE id=? AND status IN ('pending','pending_admin_review')""",
+               WHERE id=? AND status='approved'""",
             (
-                int(amount), admin_adjustment_reason, str(update.effective_user.id), now_text(), now_text(),
                 str(user_market_snapshot.get("user_market") or ""), payment_market_snapshot,
                 payment_transaction_id, int(bool(auto_promotion.get("domestic_eligibility"))),
                 int(auto_promotion.get("successful_topup_ordinal") or 0),

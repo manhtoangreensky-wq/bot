@@ -1058,3 +1058,39 @@ Nguồn tiến độ duy nhất: [P0_PRODUCT_VIDEO_FULL_LANE_LIVE_MATRIX.md](../
   production additions không có retry/fallback/provider call/secret/PayOS/wallet.
   Production read-only xác nhận receipt `updated_by=7126457028`; query mutation `0`.
   Correction chưa commit, chưa deploy, chưa live-authorized.
+
+### Quy trình nạp thủ công QR và admin duyệt — 04/09/2026
+
+- Luồng khách hiện tại là: `/naptien` → `Nạp thủ công` → chọn `VND` → chọn
+  mệnh giá (`10k`, `20k`, `50k`, `100k`, `200k` hoặc `500k`) → chọn kênh
+  `ACB/VietQR` hoặc kênh manual đang mở → bot gửi một ảnh QR/hướng dẫn có số
+  tiền, Xu dự kiến và nội dung chuyển khoản.
+- Chọn mệnh giá manual chỉ lưu bản nháp ngắn hạn trong `USER_BILL_STATE`;
+  không tạo `payos_orders`. Test callback và `/thucong 50k` đo được
+  `2 passed, 1 warning in 523.59s`, cả hai DB tạm đều có `payos_orders=0`.
+- Khách bấm `Tôi đã chuyển khoản / gửi bill`, rồi gửi ảnh bill. Bot ghi đúng
+  một hàng `pending_deposits` với `status=pending_admin_review`; lúc này
+  `users.credits` không tăng và không có `manual_deposit` credit event dương.
+  Test bill + duplicate file đo được `2 passed, 1 warning in 7.21s`; file lặp
+  trả `duplicate_file_unique_id` và không tạo hàng thứ hai.
+- Admin nhận ảnh bill kèm mã `deposit_id`, user, phương thức, số tiền và Xu.
+  Nút `Duyệt đúng Xu dự kiến` chỉ mở bước xác nhận, chưa cộng Xu. Nút xác nhận
+  thứ hai chạy transaction `BEGIN IMMEDIATE`, đọc lại đúng `deposit_id`, ghi
+  `approved_xu/approved_by/approved_at`, đổi hàng sang `approved` và tạo đúng
+  một `manual_deposit` credit event. Test approval/reject và risk comparator đo
+  được `47 passed, 1 warning in 27.19s`.
+- Nút từ chối chỉ đổi đúng hàng được chọn sang `rejected`, thông báo khách và
+  không tạo credit event manual. Một hàng khác của cùng user vẫn giữ pending.
+- Không cộng Xu từ ảnh bill/TXID tự động; chỉ admin xác nhận sau khi đối soát
+  giao dịch thật. Các test trên dùng SQLite tạm; chưa gọi PayOS thật, chưa
+  mutate ví production và chưa deploy đợt sửa này.
+
+#### Bổ sung kiểm tra metadata sau CAS duyệt — 04/09/2026
+
+Sau khi status được CAS sang `approved` ở đầu transaction, bước ghi metadata
+được khóa theo đúng `deposit_id` và `status='approved'`; không còn một UPDATE
+status lần hai có thể trả zero-row rồi làm mất ngầm `payment_market` hoặc
+`successful_topup_ordinal`. Regression metadata xác nhận cùng hàng giữ
+`payment_market=VN`, `domestic_eligibility=1`, `successful_topup_ordinal=7`.
+Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.00s`.
+`py_compile bot.py local_worker.py` thoát `0`, `git diff --check` thoát `0`.

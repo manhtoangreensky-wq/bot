@@ -575,3 +575,35 @@ Local correction đo adapter RED/GREEN `1 failed -> 1 passed`, ASR RED/GREEN
 `1 failed -> 1 passed`, timeout `10 passed + 7 subtests`, direct impact `90
 passed + 7 subtests`, combined `194 passed + 7 subtests`. Production chưa đổi
 cho tới deploy; cùng job vẫn chưa có MP4/receipt.
+
+### Đối chiếu chức năng nạp thủ công QR
+
+| Chức năng gốc | Hiện trạng đo được | Trạng thái |
+|---|---|---|
+| Chọn mệnh giá rồi chọn nguồn thanh toán manual | Callback `manual|start|<pkg>|<uid>` và `/thucong <pkg>` lưu draft trong `USER_BILL_STATE`; không tạo `payos_orders` (`2 passed`, cả hai count `0`) | ✅ Còn dùng |
+| Hiển thị QR/hướng dẫn theo số tiền và phương thức | Một `send_photo` chứa amount/Xu/nội dung chuyển khoản; QR thiếu file thì trả lỗi no-charge (`2 passed`) | ✅ Còn dùng |
+| Khách gửi bill để admin đối soát | Ảnh bill tạo `pending_deposits.status=pending_admin_review`, giữ credits và manual credit event dương bằng `0`; duplicate `file_unique_id` bị chặn (`2 passed`) | ✅ Còn dùng |
+| Admin duyệt bill rồi mới cộng Xu | Bước đầu chỉ tạo confirmation; bước hai transaction theo `deposit_id` tạo đúng một `manual_deposit` event và đổi `approved`; batch `47 passed` | ✅ Còn dùng |
+| Admin từ chối bill | `manual|reject|<deposit_id>` chỉ đổi đúng hàng sang `rejected`, hàng khác không đổi, credit manual `0` | ✅ Còn dùng |
+
+#### Chỗ tài liệu cũ không còn đúng
+
+- Nhánh manual package cũ từng gọi `create_order(... order_type="manual_topup")`
+  ngay khi khách mới chọn mệnh giá. Điều đó tạo hàng `payos_orders` trước khi
+  có bill thực tế; RED đo được `payos_orders=1`. Hiện đã tách đúng: draft
+  manual không tạo PayOS order, deposit chỉ tạo sau ảnh bill/TXID.
+- Chỉ kiểm tra `tx_hash` không đủ cho ảnh bill vì Telegram có thể gửi lại cùng
+  `file_unique_id`. RED đo được lần gửi thứ hai vẫn `ok=true`; hiện guard trả
+  `duplicate_file_unique_id` trước INSERT.
+- `admin approve` phải gắn với `deposit_id`, không dùng pending mới nhất theo
+  user khi có nhiều bill. Test deposit-scope giữ hàng thứ hai pending và chỉ
+  một credit event cho hàng thứ nhất.
+
+#### Bổ sung sau review transaction — 04/09/2026
+
+Bản hiện tại tách rõ hai bước trong cùng `BEGIN IMMEDIATE`: CAS status/approved
+fields một lần, sau đó cập nhật metadata trên chính hàng đã `approved`. Vì vậy
+zero-row CAS rollback toàn bộ và không cộng Xu; khi CAS thắng, metadata không
+bị bỏ qua bởi điều kiện status cũ. Test `test_manual_approval_keeps_post_approval_metadata`
+đã đo đúng `payment_market=VN`, `domestic_eligibility=1` và
+`successful_topup_ordinal=7` trên `deposit_id=1`.
