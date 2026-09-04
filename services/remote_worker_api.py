@@ -4383,7 +4383,9 @@ def stamp_worker_claim_trace(
     if not isinstance(payload, dict):
         payload = {}
     payload.update(trace)
-    conn.execute("UPDATE video_jobs SET result_json=? WHERE id=?", (_json_dumps(strip_secret_fields(payload)), int(job_id)))
+    sanitized = strip_secret_fields(payload)
+    sanitized.update(_controlled_fallback_durable_internal_fields(payload))
+    conn.execute("UPDATE video_jobs SET result_json=? WHERE id=?", (_json_dumps(sanitized), int(job_id)))
     conn.commit()
     return trace
 

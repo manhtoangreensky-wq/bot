@@ -1128,7 +1128,7 @@ pv2_r01_job28_key4u_model_authority:
   wallet_mutations_during_source_gate: 0
   live_pass: false
 pv2_r01_job28_key4u_unified_poll_authority:
-  phase: RECEIPT_ROW_SHAPE_SOURCE_GREEN
+  phase: CLAIM_TRACE_RECEIPT_SOURCE_GREEN
   model_authority_pr_runtime: PR 982 / 095b6c88aa98a42ebbb3fc6535d44d7222e29779
   model_authority_deploy: 33706481637 SUCCESS in 3m34s
   runtime_services: bot/web/nginx active; bot and Owner worker exact/clean 095b6c88; worker backup ref refs/backups/worker-pre-product-video-model-authority-20260903T030530Z
@@ -1162,6 +1162,16 @@ pv2_r01_job28_key4u_unified_poll_authority:
   receipt_row_shape_green: exact plus inverse 2 passed in 5.22s; final authority 47 passed in 5.90s
   receipt_row_shape_blast_radius: 136 passed plus exact same clean-main RouteEngine29O attempts baseline failure; NEW_FAILURES=0
   receipt_row_shape_compile_diff: changed source/test exit 0; diff-check exit 0
+  receipt_row_shape_ship: PR 984 / 6a30db5bfb099c52195e755afccf3a45f9826ca8 / deploy 33788585436 SUCCESS in 3m28s
+  receipt_row_shape_worker_sync: exact clean 6a30db5b; inactive PID 0; backup ref refs/backups/worker-pre-product-video-receipt-row-20260903T181242Z
+  immutable_v2_restore: rehearsal DB 14184448 bytes; six negatives and replay fail closed; production changed only namespace map
+  immutable_v2_restore_backups: DB 7c5fe6496a51f8ac55aca18a66f49429cf2a46cc4412cb7ca15effe65e748562; manifest 6b5c28ccaef028fa7acc95b953b853e42e249c65e1c383cd1957a485d19777e2; CAS JSON 99c8bf2ce9d6ce7166e1f9df1cb980add34b39083071550ad6b7413bfec16f78; mode 0600
+  immutable_v2_post_watchdog: ledger and telemetry V2+V3; attempts 43/1; cap 1/1; scene1 task e0946432; scene2 taskless; finance 0
+  second_guarded_resume: PID 1288614 stopped tick 2 inactive PID 0; V2 dropped; no scene2 task/receipt, paid call, artifact, delivery or finance delta
+  claim_trace_root: generic strip_secret_fields removed all keys containing authorization during stamp_worker_claim_trace, including sanitized durable V2/V3 authority and receipts
+  claim_trace_red: 1 failed in 5.39s on missing controlled_fallback_replacement_authorization
+  claim_trace_green: exact plus inverse 3 passed in 5.09s; final full authority 48 passed in 6.35s; Strategy V2 9 passed in 5.83s; protected claim/watchdog/ledger/job28 114 passed in 15.74s
+  claim_trace_baseline: three unrelated debug assertions fail identically on clean main; NEW_FAILURES=0
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
@@ -1173,9 +1183,9 @@ spec_04i_subdub_auto_two_speaker_addon:
   representative_live_target: one unfinished media-compatible Product Video lane
   acceptance: male/female detection; translation; two-voice dub; final MP4; receipt/report; wallet delta 0
 next_action: >-
-  Commit and ship only the receipt-row-shape ledger correction, deploy and sync the
-  inactive Owner worker. Restore immutable V2 from the existing mode-0600 backup by
-  a new exact-state snapshot/CAS without changing the scene1 accepted task or V3
-  1/1 cap. Resume scene1 poll/download only; no scene1 resubmit and no new identity,
-  upload, Confirm or ShopAIKey action. Only after scene1 clip validates may scene2
-  use the one remaining paid call. Stop at two calls or terminal two-scene MP4.
+  Commit and ship only the claim-trace durable receipt correction, deploy and sync
+  the inactive Owner worker. Restore immutable V2 through a fresh exact-state
+  snapshot/CAS without changing scene1 task or V3 1/1 cap. Resume scene1
+  poll/download only; no scene1 resubmit and no new identity, upload, Confirm or
+  ShopAIKey action. Only after scene1 clip validates may scene2 use the last paid
+  call. Stop at two calls or terminal two-scene MP4.

@@ -1268,3 +1268,32 @@ Next, ship only this seam. After runtime sync, restore only immutable V2 from th
 existing mode-`0600` evidence through a fresh exact-state rehearsal/CAS, retain the
 accepted scene-1 task and V3 `1/1`, then resume poll/download. Scene 1 must never be
 resubmitted. Scene 2 may consume the last call only after a valid scene-1 clip.
+
+PR #984 shipped the row-shape fix as runtime
+`6a30db5bfb099c52195e755afccf3a45f9826ca8`; deploy run `33788585436` succeeded
+in `3m28s`. The inactive Owner worker was synchronized to the same clean SHA with
+backup ref `refs/backups/worker-pre-product-video-receipt-row-20260903T181242Z`.
+
+An immutable-V2 restore rehearsal then passed on a `14,184,448`-byte snapshot, six
+negative variants and duplicate replay. Production CAS changed only the namespace
+map, with DB backup SHA `7c5fe649...`, manifest backup SHA `6b5c28cc...` and CAS
+JSON backup SHA `99c8bf2c...`, all mode `0600`. Post-watchdog verification proved
+V2+V3 survived both ledger and telemetry, attempts remained `43/1`, V3 remained
+`1/1`, scene-1 task SHA remained `e0946432...`, scene 2 remained taskless, and all
+finance evidence remained zero.
+
+Guarded resume PID `1288614` nevertheless lost V2 again before a clip and was
+stopped at tick 2, inactive PID `0`, before scene 2 or another paid call. Replaying
+actual claim and fail/defer against SQLite snapshots retained V2+V3 at every stage.
+The remaining writer was `stamp_worker_claim_trace`: it serialized the whole job
+through the generic secret filter, whose `authorization` marker removed not just
+secrets but both sanitized durable authority/receipt keys. The worker diagnostics
+therefore later contained only active V3.
+
+The claim-trace RED failed on missing durable authorization in `5.39s`. The minimal
+fix applies generic secret stripping first and then restores only the existing
+whitelisted `_controlled_fallback_durable_internal_fields(payload)`. Injected
+`api_key` and bearer header remain absent. Exact plus inverse GREEN is `3 passed in
+5.09s`; final full authority is `48 passed in 6.35s`; Strategy V2 is `9 passed in
+5.83s`; protected claim/watchdog/ledger/job28 is `114 passed in 15.74s`. Three
+unrelated debug assertions fail identically on clean main, so `NEW_FAILURES=0`.
