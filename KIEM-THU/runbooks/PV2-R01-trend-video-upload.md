@@ -1361,3 +1361,34 @@ Next, ship only this seam. After exact runtime and inactive-worker synchronizati
 resume the same job once. Scene 1 cannot be resubmitted; scene 2 may consume the one
 remaining V4 call. Stop after that call or terminal two-scene MP4, then verify stitch,
 subtitle/transition Add-ons, Telegram delivery and zero-Xu finance.
+
+## V4 durable scene-1 clip reuse before scene-2 submit
+
+PR #988 shipped the scene-2 claim as runtime
+`c85c4534d6cd9dc8a4b74a302d4f0966f0fde4ca`; compile run `33846348378`
+succeeded in `31s` and deploy run `33846425477` succeeded in `4m6s`. Runtime later
+advanced through SubDub-only descendants to `9715b6f0`; PR #988 remains an ancestor
+and the Product Video services did not change.
+
+Two guarded worker generations, PIDs `1369034` and `1404119`, authenticated and
+claimed job 28 but produced no scene-2 HTTP request, task or receipt. Both were
+stopped inactive. V4 remained `1/1`; charged Xu, transactions and provider usage
+remained `0`; wallet remained `200/0`.
+
+A provider-blocked, query-only executor probe against the production row showed the
+claim correctly returned `eligible=[2]`, but the orchestrator's first provider
+invocation was scene 1 with its existing task. Scene 1's valid artifact is persisted
+under `clip_path`, while `_scene_output_from_payload` only inspected output/local/
+final/raw paths. It therefore failed to reuse the clip and never reached scene 2.
+
+The production correction adds only `clip_path` to that existing validated path
+lookup. Claim-to-orchestrator RED was `1 failed in 0.67s`, with calls `[1,2]`
+instead of `[2]`. Exact GREEN is `1 passed in 612.40s`; protected authority, claim,
+watchdog, ledger and spend-safety coverage is `97 passed in 8.62s`. Source tests made
+zero provider calls and zero wallet mutations.
+
+The commit rebased cleanly onto exact main
+`2e96de81b1332b38c140c2c2e41e36d34afb95d1`; pre-evidence-amend HEAD is
+`6337dcfae1a98bc427459f6c9603fe50f9dccc2e`. Post-rebase authority/protected/docs
+verification is `106 passed in 9.38s`; full bot/worker/changed-file compile and
+diff-check exit `0`.

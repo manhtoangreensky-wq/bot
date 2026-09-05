@@ -1276,9 +1276,30 @@ starting the next.
 - [x] Rebased without overlap onto exact main `cfd21c843e7ef0888a0baf53f69a43c5c968c033`;
   pre-evidence-amend HEAD `d2fa55d`. Post-rebase combined gate is `105 passed in
   10.19s`; exact `bot.py`, workers and changed-file compile plus diff-check exit `0`.
-- [ ] Ship/deploy only this scene-2 claim seam, synchronize the inactive Owner
-  worker, then resume the same job under V4. Stop after the one remaining call or
-  a terminal two-scene MP4; never resubmit scene 1 or ShopAIKey.
+- [x] Scene-2 claim shipped as PR #988, squash/runtime
+  `c85c4534d6cd9dc8a4b74a302d4f0966f0fde4ca`; compile guard
+  `33846348378` SUCCESS in `31s`; deploy `33846425477` SUCCESS in `4m6s`.
+  Runtime later advanced by SubDub-only descendants to `9715b6f0`; PR #988 remains
+  an ancestor and none of the four Product Video services changed.
+- [-] Owner workers `1369034` and `1404119` reached authenticated claim but made no
+  scene-2 HTTP request: V4 stayed `1/1`, scene-2 task/receipt remained absent,
+  charged/transactions/provider-usage stayed `0/0/0`, wallet stayed `200/0`.
+  Both workers were stopped inactive before any new paid call.
+- [x] Query-only executor probe on the production row proved claim `eligible=[2]`
+  but the first provider invocation was scene 1 with its existing task. The durable
+  artifact was stored only as `clip_path`; `_scene_output_from_payload` ignored that
+  canonical field and repolled scene 1 instead of advancing to scene 2.
+- [x] Full claim-to-orchestrator RED was `1 failed in 0.67s` with calls `[1,2]`
+  instead of `[2]`. Minimal production change adds only `clip_path` to the existing
+  validated file lookup. Exact GREEN is `1 passed in 612.40s`; authority/protected
+  claim/watchdog/ledger/spend gate is `97 passed in 8.62s`.
+- [x] Rebased cleanly onto exact main `2e96de81b1332b38c140c2c2e41e36d34afb95d1`;
+  pre-evidence-amend HEAD `6337dcfa`. Post-rebase combined authority/protected/docs
+  gate is `106 passed in 9.38s`; full bot/worker/changed-file compile and diff-check
+  exit `0`.
+- [ ] Ship/deploy only this `clip_path` seam, synchronize the inactive Owner worker,
+  then resume the same job under V4. Stop after the one remaining call or a terminal
+  two-scene MP4; never resubmit scene 1 or ShopAIKey.
 - [ ] Two distinct scene clips and one final MP4 terminal; otherwise stop at the
   exact new RED and reopen only `SPEC-04H`.
 
