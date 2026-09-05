@@ -1970,3 +1970,101 @@ def test_multi_pcm_contract_reuses_stereo_onnx_source_without_filter_grid(
             77.0,
         )
     ]
+
+
+def test_multi_pcm_uses_original_source_instead_of_normalized_render_copy(
+    tmp_path,
+    monkeypatch,
+):
+    original = tmp_path / "original-av1-aac.mp4"
+    normalized = tmp_path / "normalized-h264-aac.mp4"
+    original.write_bytes(b"original")
+    normalized.write_bytes(b"normalized")
+    calls = []
+
+    monkeypatch.setattr(
+        bot,
+        "subtitle_dub_workspace_path_safety",
+        lambda _workspace: {"allowed": True},
+    )
+    monkeypatch.setattr(bot, "frame_video_ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(
+        bot.subdub_media_preflight,
+        "timeout_for_stage",
+        lambda *_args, **_kwargs: 77.0,
+    )
+
+    async def fake_run(command, timeout):
+        calls.append((list(command), timeout))
+        Path(command[-1]).write_bytes(b"\0\0" * 8_000)
+        return True, "ok"
+
+    monkeypatch.setattr(bot, "run_subdub_ffmpeg_command", fake_run)
+    state = {
+        **EXACT_AUTO_STATE,
+        "auto_speaker_lane": "multi",
+        "_pipeline_workspace": str(tmp_path),
+        "_pipeline_source_path_override": str(original),
+        "_pipeline_saved_source_path": str(normalized),
+    }
+
+    result = asyncio.run(
+        bot._extract_subdub_auto_pcm(
+            {"state": state, "duration_seconds": 12},
+            state,
+            channels=2,
+            sample_rate=44_100,
+            sample_format="s16le",
+        )
+    )
+
+    assert result == str(tmp_path / "auto_speaker_44100_stereo_s16le.pcm")
+    assert calls[0][0][3] == str(original)
+
+
+def test_non_multi_pcm_keeps_normalized_saved_source_priority(
+    tmp_path,
+    monkeypatch,
+):
+    original = tmp_path / "original.mp4"
+    normalized = tmp_path / "normalized.mp4"
+    original.write_bytes(b"original")
+    normalized.write_bytes(b"normalized")
+    calls = []
+
+    monkeypatch.setattr(
+        bot,
+        "subtitle_dub_workspace_path_safety",
+        lambda _workspace: {"allowed": True},
+    )
+    monkeypatch.setattr(bot, "frame_video_ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(
+        bot.subdub_media_preflight,
+        "timeout_for_stage",
+        lambda *_args, **_kwargs: 77.0,
+    )
+
+    async def fake_run(command, timeout):
+        calls.append((list(command), timeout))
+        Path(command[-1]).write_bytes(b"\0\0" * 8_000)
+        return True, "ok"
+
+    monkeypatch.setattr(bot, "run_subdub_ffmpeg_command", fake_run)
+    state = {
+        **EXACT_AUTO_STATE,
+        "_pipeline_workspace": str(tmp_path),
+        "_pipeline_source_path_override": str(original),
+        "_pipeline_saved_source_path": str(normalized),
+    }
+
+    asyncio.run(
+        bot._extract_subdub_auto_pcm(
+            {"state": state, "duration_seconds": 12},
+            state,
+            channels=2,
+            sample_rate=44_100,
+            sample_format="s16le",
+        )
+    )
+
+    assert calls[0][0][3] == str(normalized)

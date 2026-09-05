@@ -249975,11 +249975,23 @@ async def _extract_subdub_auto_pcm(
     if not bool(subtitle_dub_workspace_path_safety(workspace).get("allowed")):
         raise subdub_speaker_cast.AutoCastUnavailable()
     workspace = os.path.abspath(workspace)
-    saved_source = str(
-        prepared_state.get("_pipeline_saved_source_path")
-        or (state or {}).get("_pipeline_saved_source_path")
+    exact_acoustic_multi = bool(
+        auto_multi_speaker.is_auto_multi_speaker_state(prepared_state)
+        or auto_multi_speaker.is_auto_multi_speaker_state(state or {})
+    )
+    original_acoustic_source = str(
+        prepared_state.get("_pipeline_source_path_override")
+        or (state or {}).get("_pipeline_source_path_override")
         or ""
     ).strip()
+    if exact_acoustic_multi and original_acoustic_source:
+        saved_source = original_acoustic_source
+    else:
+        saved_source = str(
+            prepared_state.get("_pipeline_saved_source_path")
+            or (state or {}).get("_pipeline_saved_source_path")
+            or ""
+        ).strip()
     source_path = ""
     if (
         saved_source
@@ -249989,6 +250001,8 @@ async def _extract_subdub_auto_pcm(
     ):
         source_path = os.path.abspath(saved_source)
     else:
+        if exact_acoustic_multi and original_acoustic_source:
+            raise subdub_speaker_cast.AutoCastUnavailable()
         source_bytes = (prepared or {}).get("source_bytes")
         if not isinstance(source_bytes, (bytes, bytearray)) or not source_bytes:
             raise subdub_speaker_cast.AutoCastUnavailable()
@@ -250346,6 +250360,12 @@ async def _execute_video_dubbing_pipeline_core(
     if input_save.get("ok") and input_save.get("source_bytes"):
         state = {
             **state,
+            **(
+                {"_pipeline_source_path_override": str(input_save.get("path") or "")}
+                if auto_multi_speaker.is_auto_multi_speaker_state(state)
+                and str(input_save.get("path") or "")
+                else {}
+            ),
             "_pipeline_source_bytes_override": bytes(input_save.get("source_bytes") or b""),
             "_pipeline_source_content_type_override": str(input_save.get("content_type") or state.get("source_mime_type") or "video/mp4"),
             "_pipeline_saved_source_path": str(

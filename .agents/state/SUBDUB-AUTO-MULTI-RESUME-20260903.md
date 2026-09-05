@@ -142,6 +142,26 @@ The exact fixture gate proves `k=5`, word coverage `50/50`, `23` units, `178`
   fresh Owner authorization for byte-identical fixture restore and one new unit;
   no Telegram command, Confirm, upload flow or replacement job.
 
+## Runtime `9715b6f0` live RED and original-acoustic correction
+
+- Exact fixture was restored atomically to the same workspace, mode `600`,
+  `9,869,032` bytes, SHA `83DE97B7...98AD3E`.
+- Authorized unit invocation `648943c375da47659795fb6314040dc3` reached
+  Deepgram PASS (`145` words), then terminalized before translation/TTS/mux with
+  `multi_acoustic_failure_code=acoustic_failure_unknown`.
+- Direct local traceback on the same job normalized source proved
+  `fixed_vocal_speaker_count_unstable`. Normalization changed audio
+  `44.1kHz -> 48kHz -> 44.1kHz`; direct original-source acoustic execution
+  returned exact `k=5`, `50` words, `23` units, `178` views, clusters
+  `[9,18,26,25,11]`, speaker units `[3,2,4,11,3]`, overlap/centroid `19/4`.
+- Minimal correction keeps normalized media for ASR/render, but exact Auto Multi
+  speaker extraction reads the original hash-locked source path. Non-Multi PCM
+  extraction keeps normalized-path priority.
+- RED/isolation was `1 failed, 1 passed`; focused GREEN `3 passed`. No provider,
+  production DB, wallet, job or Telegram mutation occurred in the source loop.
+- Direct impact `375 passed / 1` known baseline deselected; exact-two `46
+  passed`; full compile/YAML/diff exit `0`.
+
 ## PayOS handoff boundary
 
 This checkpoint is independent of the manual-top-up/PayOS task. Do not mix its
