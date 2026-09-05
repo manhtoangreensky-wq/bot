@@ -1295,3 +1295,16 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   production/wallet.
 - Forensic này dùng `4` Deepgram calls được Owner cho phép riêng job: D/E toàn
   file và targeted vocal/original; cả bốn không ghi receipt/job/wallet/delivery.
+
+### Auto Multi đã tạo MP4 thật, còn chốt delivery adapter — 05/09/2026
+
+- Runtime `e129a2d2` tạo MP4 thật `18,171,909` bytes, H.264/AAC, `134.0s`,
+  dịch English và sinh đủ `21/21` cue. Acoustic raw `5`, speech-supported `4`,
+  coverage `145/145`; đo ONNX trên output cho bốn speaker có separation margin
+  `0.194492`, PASS distinctness.
+- Lỗi còn lại không thuộc ASR/TTS/mux: recovery message chỉ có `reply_text`,
+  nên shared delivery không thấy `reply_video`/`reply_document` và chưa gọi
+  Telegram gửi video. Job vẫn `failed_no_charge`, Xu `0`.
+- Correction chỉ thêm Bot media adapter và one-shot delivery-only CAS cho MP4
+  đã validated. Nó không chạy lại provider/pipeline, không tạo job, và giữ thứ
+  tự bắt buộc: một MP4 rồi một receipt, không file phụ tự động.

@@ -2295,7 +2295,23 @@ def test_fixed_vocal_v2_runner_enters_existing_handler_once(monkeypatch):
         async def send_message(self, **_kwargs):
             return SimpleNamespace(message_id=1)
 
+        async def send_video(self, **kwargs):
+            calls.append(("send_video", kwargs["chat_id"]))
+            return SimpleNamespace(message_id=2)
+
+        async def send_document(self, **kwargs):
+            calls.append(("send_document", kwargs["chat_id"], kwargs["filename"]))
+            return SimpleNamespace(message_id=3)
+
     async def fake_handler(update, context):
+        await update.message.reply_video(
+            video=b"video",
+            filename="multi.mp4",
+        )
+        await update.message.reply_document(
+            document=b"video",
+            filename="multi.mp4",
+        )
         calls.append(("handler", update.effective_user.id, list(context.args)))
 
     def fake_claim(**_kwargs):
@@ -2317,6 +2333,12 @@ def test_fixed_vocal_v2_runner_enters_existing_handler_once(monkeypatch):
     monkeypatch.setattr(rearm, "ensure_exact_source", source_already_available)
     monkeypatch.setattr(
         rearm,
+        "deliver_existing_artifact",
+        lambda _telegram_bot: asyncio.sleep(0, result={}),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        rearm,
         "claim_same_attempt",
         fake_claim,
     )
@@ -2328,6 +2350,8 @@ def test_fixed_vocal_v2_runner_enters_existing_handler_once(monkeypatch):
         ("bot_enter",),
         ("source",),
         ("claim",),
+        ("send_video", OWNER_ID),
+        ("send_document", OWNER_ID, "multi.mp4"),
         (
             "handler",
             OWNER_ID,
@@ -2341,6 +2365,316 @@ def test_fixed_vocal_v2_runner_enters_existing_handler_once(monkeypatch):
                 "--confirm-local-acoustic",
             ],
         )
+    ]
+
+
+def test_speech_supported_delivery_claim_is_exact_cas_and_never_reprocesses(
+    tmp_path,
+    monkeypatch,
+):
+    rearm = importlib.import_module("scripts.recover_subdub_fixed_vocal_v2")
+    workspace = tmp_path / ACOUSTIC_JOB_ID
+    workspace.mkdir()
+    artifact = workspace / "final.mp4"
+    artifact.write_bytes(b"validated-multi-mp4")
+    job_key = (
+        f"{OWNER_ID}|{OWNER_ID}|AgADeSIAAh1tkVQ|"
+        "subtitle_plus_dub|auto_multi_speaker"
+    )
+    job = {
+        "feature": "subtitle_dub",
+        "internal_job_id": ACOUSTIC_JOB_ID,
+        "job_id": ACOUSTIC_JOB_ID,
+        "public_code": ACOUSTIC_PUBLIC_CODE,
+        "job_key": job_key,
+        "user_id": OWNER_ID,
+        "chat_id": OWNER_ID,
+        "status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "lifecycle_state": "delivery",
+        "current_stage": "delivery",
+        "progress_stage": "delivery",
+        "progress_percent": 5,
+        "charge_status": "not_charged",
+        "charged_xu": 0,
+        "output_sent": False,
+        "delivery_attempted": True,
+        "delivery_attempts": 1,
+        "delivery_attempt_uncertain": False,
+        "delivery_message_id": "",
+        "video_delivery_message_id": "",
+        "final_mp4_delivered": False,
+        "terminal_public_outcome_sent": False,
+        "public_error_sent": False,
+        "workspace": str(workspace),
+        "canonical_final_artifact_path": str(artifact),
+        "canonical_final_artifact_bytes": artifact.stat().st_size,
+        "final_mp4_exists": True,
+        "final_mp4_validated": True,
+        "output_validated": True,
+        "output_validation": {
+            "ok": True,
+            "container": "mp4",
+            "video_codec": "h264",
+            "audio_codec": "aac",
+            "has_video": True,
+            "has_audio": True,
+            "size": artifact.stat().st_size,
+            "duration": 134.0,
+        },
+        "last_error_stage": "delivery",
+        "last_technical_error": "missing_valid_delivered_mp4",
+        "success_blocked_reason": "missing_valid_delivered_mp4",
+        "auto_multi_pending_lane_repair_used": True,
+        "auto_multi_speech_supported_repair_used": True,
+        "auto_multi_speech_supported_repair_authority": (
+            "owner_confirmed_same_job_speech_supported_speakers"
+        ),
+        "auto_multi_recovery": {
+            "source_sha256": SOURCE_SHA256,
+            "target_language": "English",
+            "original_volume_percent": 40,
+            "dub_volume_percent": 150,
+            "owner_confirmed_paid": True,
+        },
+    }
+    db_path = tmp_path / "delivery-repair.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """CREATE TABLE system_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            note TEXT,
+            updated_at TEXT,
+            updated_by TEXT
+        )"""
+    )
+    conn.execute(
+        "INSERT INTO system_settings(key,value,note,updated_at,updated_by) VALUES(?,?,?,?,?)",
+        (
+            f"engine_async_job:{ACOUSTIC_JOB_ID}",
+            json.dumps(job, ensure_ascii=False),
+            "fixture",
+            "2026-09-05 23:01:54",
+            str(OWNER_ID),
+        ),
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(rearm.app, "db_connect", lambda: sqlite3.connect(db_path))
+    monkeypatch.setattr(
+        rearm.app,
+        "subtitle_dub_workspace_path_safety",
+        lambda _workspace: {
+            "allowed": True,
+            "resolved_path": str(workspace),
+        },
+    )
+    monkeypatch.setattr(rearm.app, "ENGINE_ASYNC_MEMORY_JOBS", {})
+    monkeypatch.setattr(rearm.app, "SUBTITLE_DUB_PIPELINE_JOBS", {})
+
+    assert rearm._existing_artifact_delivery_candidate(job) == str(artifact)
+    for mutation in (
+        {"internal_job_id": "wrong-job"},
+        {"public_code": "WRONG"},
+        {"delivery_attempt_uncertain": True},
+        {"output_sent": True},
+        {"charged_xu": 1},
+        {"video_delivery_message_id": "already-sent"},
+        {rearm.DELIVERY_REPAIR_MARKER: True},
+        {"canonical_final_artifact_bytes": artifact.stat().st_size + 1},
+        {
+            "output_validation": {
+                **job["output_validation"],
+                "audio_codec": "mp3",
+            }
+        },
+    ):
+        assert rearm._existing_artifact_delivery_candidate(
+            {**job, **mutation}
+        ) == ""
+    first = rearm.claim_existing_artifact_delivery()
+    assert first["claimed"] is True
+    assert first["job"][rearm.DELIVERY_REPAIR_MARKER] is True
+    assert first["job"]["terminal_state"] == ""
+    assert first["job"]["status"] == "retrying_delivery"
+    assert first["job"]["voice_kind"] == "auto_speaker_gender"
+    assert first["job"]["voice_selection_mode"] == "auto_speaker"
+    assert first["job"]["auto_speaker_lane"] == "multi"
+    stored_after_first = sqlite3.connect(db_path).execute(
+        "SELECT value FROM system_settings WHERE key=?",
+        (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+    ).fetchone()[0]
+
+    second = rearm.claim_existing_artifact_delivery()
+    stored_after_second = sqlite3.connect(db_path).execute(
+        "SELECT value FROM system_settings WHERE key=?",
+        (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+    ).fetchone()[0]
+    assert second["claimed"] is False
+    assert stored_after_second == stored_after_first
+
+
+def test_delivery_only_path_sends_one_video_then_one_receipt_without_pipeline(
+    monkeypatch,
+):
+    rearm = importlib.import_module("scripts.recover_subdub_fixed_vocal_v2")
+    calls = []
+    job_key = (
+        f"{OWNER_ID}|{OWNER_ID}|AgADeSIAAh1tkVQ|"
+        "subtitle_plus_dub|auto_multi_speaker"
+    )
+    claimed_job = {
+        "job_key": job_key,
+        "job_id": ACOUSTIC_JOB_ID,
+        "internal_job_id": ACOUSTIC_JOB_ID,
+        "mode": "subtitle_plus_dub",
+        "voice_kind": "auto_speaker_gender",
+        "voice_selection_mode": "auto_speaker",
+        "auto_speaker_lane": "multi",
+    }
+
+    class FakeBot:
+        async def send_message(self, **kwargs):
+            calls.append(("receipt", kwargs["chat_id"]))
+            return SimpleNamespace(message_id=902)
+
+        async def send_video(self, **kwargs):
+            calls.append(("video", kwargs["chat_id"]))
+            return SimpleNamespace(message_id=901)
+
+        async def send_document(self, **kwargs):
+            raise AssertionError("small validated MP4 must be a video")
+
+    monkeypatch.setattr(
+        rearm,
+        "claim_existing_artifact_delivery",
+        lambda: {"ok": True, "claimed": True, "job": dict(claimed_job)},
+        raising=False,
+    )
+
+    async def recover_delivery(query, _context, received_key, received_job, _lang):
+        assert received_key == job_key
+        assert received_job["lookup_store_hit"] == "engine_async_direct"
+        await query.message.reply_video(video=b"mp4", filename="multi.mp4")
+        rearm.app.SUBTITLE_DUB_PIPELINE_JOBS[job_key] = {
+            **received_job,
+            "video_delivery_message_id": "901",
+            "final_mp4_delivered": True,
+            "output_sent": True,
+        }
+        return dict(rearm.app.SUBTITLE_DUB_PIPELINE_JOBS[job_key])
+
+    async def send_receipt(message, received_key, _text, reply_markup=None):
+        assert received_key == job_key
+        assert reply_markup is None
+        return await message.reply_text("receipt")
+
+    monkeypatch.setattr(
+        rearm.app,
+        "subdub_recover_existing_mp4_delivery",
+        recover_delivery,
+    )
+    monkeypatch.setattr(
+        rearm.app,
+        "subdub_confirmed_video_delivery_message_id",
+        lambda payload: str(payload.get("video_delivery_message_id") or ""),
+    )
+    monkeypatch.setattr(
+        rearm.app,
+        "video_dubbing_receipt_text",
+        lambda *_args, **_kwargs: "receipt",
+    )
+
+    async def finalize_panel(
+        _query,
+        _context,
+        received_key,
+        _job_id,
+        _lang,
+        _result,
+    ):
+        assert received_key == job_key
+        calls.append(("panel_edit", OWNER_ID))
+        rearm.app.SUBTITLE_DUB_PIPELINE_JOBS[job_key].update(
+            {
+                "status_panel_terminal_edit_confirmed": True,
+                "status_panel_terminalized": True,
+            }
+        )
+        return SimpleNamespace(message_id=900)
+
+    monkeypatch.setattr(
+        rearm.app,
+        "subdub_finalize_delivered_panel",
+        finalize_panel,
+    )
+    monkeypatch.setattr(
+        rearm.app,
+        "subdub_send_success_receipt_once",
+        send_receipt,
+    )
+    monkeypatch.setattr(rearm.app, "SUBTITLE_DUB_PIPELINE_JOBS", {})
+
+    result = asyncio.run(rearm.deliver_existing_artifact(FakeBot()))
+
+    assert result["delivered"] is True
+    assert result["video_delivery_message_id"] == "901"
+    assert calls == [
+        ("video", OWNER_ID),
+        ("panel_edit", OWNER_ID),
+        ("receipt", OWNER_ID),
+    ]
+
+
+def test_recovery_message_does_not_forward_wrapper_filename_to_send_video():
+    rearm = importlib.import_module("scripts.recover_subdub_fixed_vocal_v2")
+    calls = []
+
+    class StrictBot:
+        async def send_video(
+            self,
+            *,
+            chat_id,
+            video,
+            caption=None,
+            supports_streaming=None,
+            read_timeout=None,
+            write_timeout=None,
+            connect_timeout=None,
+            pool_timeout=None,
+        ):
+            calls.append(
+                {
+                    "chat_id": chat_id,
+                    "video": video,
+                    "caption": caption,
+                    "supports_streaming": supports_streaming,
+                }
+            )
+            return SimpleNamespace(message_id=901)
+
+    message = rearm._RecoveryMessage(StrictBot())
+    result = asyncio.run(
+        message.reply_video(
+            video=b"mp4",
+            filename="toan_aas_multi.mp4",
+            caption="done",
+            read_timeout=60,
+            write_timeout=60,
+            connect_timeout=30,
+            pool_timeout=30,
+        )
+    )
+
+    assert result.message_id == 901
+    assert calls == [
+        {
+            "chat_id": OWNER_ID,
+            "video": b"mp4",
+            "caption": "done",
+            "supports_streaming": True,
+        }
     ]
 
 

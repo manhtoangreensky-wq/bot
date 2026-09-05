@@ -1782,4 +1782,38 @@ speech_supported_speaker_authority_20260905:
     wallet_mutations: 0
   live_pass: false
 
-current_next_action: commit and rebase; post-rebase gate; PR squash deploy v3; one same-job continuation; observe translation TTS mux artifact receipt
+speech_supported_artifact_delivery_20260905:
+  deployed_runtime:
+    pr: 998
+    merge_sha: e129a2d27bcb4c91dcc8c72446c82fd74b40ed69
+    deploy_run: 33975619245 SUCCESS in 3m54s
+    services: bot web nginx active; tracked source diff 0
+    model: wespeaker-resnet34-fixed-vocal-v3; exact hash; CPUExecutionProvider
+  live_invocation:
+    id: 22784da7ec724de59b1fe1dffef64d97
+    result: artifact PASS; delivery adapter RED; failed_no_charge
+    progress: crossed 5 percent; ASR acoustic translation TTS mux validation complete
+    tts: 21 expected; 21 generated; 0 dropped; cue locked
+    artifact: 18171909 bytes; mp4; h264; aac; 854x480; 30fps; 48kHz stereo; 134.0 seconds
+    acoustic: raw 5; speech supported 4; word coverage 145/145; units 35; cues 21
+    audio_distinctness: four speakers; 12 sampled cues; min within 0.571435; max between 0.376944; margin 0.194492; PASS
+    failure: recovery synthetic message had reply_text only; no reply_video or reply_document; Telegram video send not attempted
+    finance: root jobs 322; wallet 200/0; transactions 0; credit events 12; provider usage rows 0; charged_xu 0
+  correction:
+    branch: fix/p0-subdub-auto-multi-recovery-delivery-adapter
+    base: e129a2d27bcb4c91dcc8c72446c82fd74b40ed69
+    scope: exact recovery adapter and delivery-only CAS; generic Auto Multi engine unchanged
+    marker: auto_multi_speech_supported_delivery_repair_used
+    provider_replay: forbidden
+    job_creation: forbidden
+    output_order: exactly one video then one receipt
+  verification:
+    red: 3 failed for missing media adapter CAS and delivery order
+    green: 3 passed
+    bot_signature_red_green: 1 failed then 1 passed
+    recovery_full: 148 passed
+    protected_delivery: 7 passed
+    baseline_impact: 65 passed; 1 skipped; 4 exact unchanged-main failures; NEW_FAILURES 0
+  current: source green; compile and diff pending; not pushed or deployed; existing MP4 not delivered
+
+current_next_action: commit push PR; exact-SHA deploy; one delivery-only invocation; audit Telegram video receipt and zero financial delta
