@@ -1725,4 +1725,61 @@ pending_multi_lane_repair_20260905:
     wallet_mutations: 0
   live_pass: false
 
-current_next_action: full gate compile docs; follow-up PR squash deploy; one same-job continuation; observe to artifact and receipt
+previous_next_action_after_pending_lane: full gate compile docs; follow-up PR squash deploy; one same-job continuation; observe to artifact and receipt
+
+speech_supported_speaker_authority_20260905:
+  runtime_red:
+    runtime: 319fa19e9d53effe585f08fffc652955598d8911
+    failure: fixed_vocal_word_speaker_coverage_invalid
+    downstream_started: false
+    charged_xu: 0
+  timing_d:
+    sha256: 7f571a38b78bd75f18307f3f41e52cd0926bae92b39a7fd32051e88da6ccf82c
+    words: 145
+    units: 35
+    raw_speaker_count: 5
+    raw_speaker_unit_counts: [0, 9, 9, 11, 6]
+    raw_overlap_speaker_unit_counts: [0, 7, 8, 10, 4]
+  timing_e:
+    sha256: 2321cd6f65fcc2e93ba067ed363efac4abc801c14fecefb02357b253e1531830
+    words: 145
+    units: 34
+    raw_speaker_count: 5
+    raw_speaker_unit_counts: [0, 8, 9, 11, 6]
+  targeted_asr:
+    regions: 5
+    combined_seconds: 13
+    vocal_stem: deepgram_empty_transcript
+    original_audio: deepgram_empty_transcript
+    historical_gemini_speakers: 4
+  rejected:
+    - retry whole-file Deepgram; consecutive D and E both lack raw cluster 0 words
+    - force constrained assignment; would invent speech identity
+    - lower acoustic cluster thresholds
+  correction:
+    algorithm: wespeaker-resnet34-fixed-vocal-v3
+    raw_authority: retain all acoustic clusters and counts for audit
+    speech_authority: require at least one dominant-overlap word-unit per effective speaker
+    dropped_cluster: raw label 0; centroid-only; no ASR speech
+    word_coverage: every word preserved exactly once; remap only among supported centroids
+    minimum_effective_speakers: 3
+    fixture_branch: false
+    marker: auto_multi_speech_supported_repair_used
+    attempts_preserved: 4/3
+    production_payload_candidate: true
+  verification:
+    mapper_red: 1 failed
+    focused: 11 passed
+    generic_raw_label_matrix: 7 passed; raw counts 4-8; dropped labels may be at any position
+    full_auto_multi: 368 passed
+    exact_two: 37 passed
+    full_chain_speech_counts: [3, 4, 5, 6, 7, 8]
+    real_resource: 6 passed in 369.68 seconds
+    compile_yaml_diff_scope_secret: exit 0
+    provider_calls_in_code_tests: 0
+    authorized_live_diagnostic_provider_calls: 4
+    diagnostic_production_db_mutations: 0
+    wallet_mutations: 0
+  live_pass: false
+
+current_next_action: commit and rebase; post-rebase gate; PR squash deploy v3; one same-job continuation; observe translation TTS mux artifact receipt

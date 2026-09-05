@@ -47,6 +47,14 @@ MULTI_ACOUSTIC_STATE_FIELDS = frozenset({
     "multi_acoustic_overlap_mapped_count",
     "multi_acoustic_centroid_mapped_count",
     "multi_acoustic_speaker_unit_counts",
+    "multi_acoustic_raw_speaker_count",
+    "multi_acoustic_raw_embedding_window_count",
+    "multi_acoustic_raw_cluster_sizes",
+    "multi_acoustic_raw_speaker_unit_counts",
+    "multi_acoustic_raw_overlap_speaker_unit_counts",
+    "multi_acoustic_speech_supported_speaker_labels",
+    "multi_acoustic_dropped_non_speech_speaker_labels",
+    "multi_acoustic_dropped_non_speech_speaker_count",
 })
 
 
@@ -72,6 +80,19 @@ def bounded_multi_acoustic_evidence(
     """Return one exact typed acoustic evidence bundle or fail closed empty."""
 
     current = source if isinstance(source, Mapping) else {}
+    raw_fields = (
+        "multi_acoustic_raw_speaker_count",
+        "multi_acoustic_raw_embedding_window_count",
+        "multi_acoustic_raw_cluster_sizes",
+        "multi_acoustic_raw_speaker_unit_counts",
+        "multi_acoustic_raw_overlap_speaker_unit_counts",
+        "multi_acoustic_speech_supported_speaker_labels",
+        "multi_acoustic_dropped_non_speech_speaker_labels",
+        "multi_acoustic_dropped_non_speech_speaker_count",
+    )
+    raw_evidence_present = any(field in current for field in raw_fields)
+    if raw_evidence_present and not all(field in current for field in raw_fields):
+        return {}
     count_fields = (
         "multi_acoustic_speaker_count",
         "multi_acoustic_word_count",
@@ -91,9 +112,48 @@ def bounded_multi_acoustic_evidence(
         coverage_count = int(current.get("multi_acoustic_word_coverage_count"))
         overlap_count = int(current.get("multi_acoustic_overlap_mapped_count"))
         centroid_count = int(current.get("multi_acoustic_centroid_mapped_count"))
+        raw_speaker_value = current.get("multi_acoustic_raw_speaker_count")
+        raw_window_value = current.get("multi_acoustic_raw_embedding_window_count")
+        dropped_value = current.get(
+            "multi_acoustic_dropped_non_speech_speaker_count"
+        )
+        if raw_speaker_value is None:
+            raw_speaker_value = speaker_count
+        if raw_window_value is None:
+            raw_window_value = window_count
+        if dropped_value is None:
+            dropped_value = 0
+        if any(
+            type(value) is not int
+            for value in (raw_speaker_value, raw_window_value, dropped_value)
+        ):
+            return {}
+        raw_speaker_count = int(raw_speaker_value)
+        raw_window_count = int(
+            raw_window_value
+        )
+        dropped_count = int(dropped_value)
         cluster_sizes = list(current.get("multi_acoustic_cluster_sizes") or [])
         speaker_unit_counts = list(
             current.get("multi_acoustic_speaker_unit_counts") or []
+        )
+        raw_cluster_sizes = list(
+            current.get("multi_acoustic_raw_cluster_sizes") or cluster_sizes
+        )
+        raw_speaker_unit_counts = list(
+            current.get("multi_acoustic_raw_speaker_unit_counts")
+            or speaker_unit_counts
+        )
+        raw_overlap_speaker_unit_counts = list(
+            current.get("multi_acoustic_raw_overlap_speaker_unit_counts")
+            or raw_speaker_unit_counts
+        )
+        supported_labels = list(
+            current.get("multi_acoustic_speech_supported_speaker_labels")
+            or range(speaker_count)
+        )
+        dropped_labels = list(
+            current.get("multi_acoustic_dropped_non_speech_speaker_labels") or []
         )
     except (TypeError, ValueError, OverflowError):
         return {}
@@ -105,6 +165,8 @@ def bounded_multi_acoustic_evidence(
         or current.get("multi_acoustic_algorithm_version")
         != subdub_multi_speaker_embedding_onnx.FIXED_VOCAL_ALGORITHM_VERSION
         or not 3 <= speaker_count <= subdub_multi_speaker_embedding_onnx.MAX_SPEAKERS
+        or not speaker_count <= raw_speaker_count <= subdub_multi_speaker_embedding_onnx.MAX_SPEAKERS
+        or dropped_count != raw_speaker_count - speaker_count
         or not 0 < word_count <= speaker_cast.MAX_SIDECAR_CUES
         or not subdub_multi_speaker_embedding_onnx.MIN_UNITS
         <= unit_count
@@ -119,16 +181,50 @@ def bounded_multi_acoustic_evidence(
         or len(cluster_sizes) != speaker_count
         or any(type(value) is not int or value < 2 for value in cluster_sizes)
         or sum(cluster_sizes) != window_count // 2
+        or len(raw_cluster_sizes) != raw_speaker_count
+        or any(type(value) is not int or value < 2 for value in raw_cluster_sizes)
+        or raw_window_count % 2 != 0
+        or sum(raw_cluster_sizes) != raw_window_count // 2
         or len(speaker_unit_counts) != speaker_count
         or any(
             type(value) is not int or value < 1
             for value in speaker_unit_counts
         )
         or sum(speaker_unit_counts) != unit_count
+        or len(raw_speaker_unit_counts) != raw_speaker_count
+        or any(type(value) is not int or value < 0 for value in raw_speaker_unit_counts)
+        or sum(raw_speaker_unit_counts) != unit_count
+        or len(raw_overlap_speaker_unit_counts) != raw_speaker_count
+        or any(
+            type(value) is not int or value < 0
+            for value in raw_overlap_speaker_unit_counts
+        )
+        or any(
+            overlap_count_for_speaker > raw_count
+            for overlap_count_for_speaker, raw_count in zip(
+                raw_overlap_speaker_unit_counts,
+                raw_speaker_unit_counts,
+                strict=True,
+            )
+        )
+        or len(supported_labels) != speaker_count
+        or supported_labels != sorted(set(supported_labels))
+        or any(type(value) is not int or not 0 <= value < raw_speaker_count for value in supported_labels)
+        or dropped_labels != [
+            label for label in range(raw_speaker_count) if label not in supported_labels
+        ]
+        or len(dropped_labels) != dropped_count
+        or cluster_sizes != [raw_cluster_sizes[label] for label in supported_labels]
+        or supported_labels != [
+            label
+            for label, count in enumerate(raw_overlap_speaker_unit_counts)
+            if count > 0
+        ]
+        or any(raw_overlap_speaker_unit_counts[label] != 0 for label in dropped_labels)
         or current.get("multi_acoustic_stability_pass") is not True
     ):
         return {}
-    return {
+    result = {
         "multi_acoustic_backend": (
             subdub_multi_speaker_embedding_onnx.FIXED_VOCAL_PROVIDER
         ),
@@ -149,6 +245,20 @@ def bounded_multi_acoustic_evidence(
         "multi_acoustic_centroid_mapped_count": centroid_count,
         "multi_acoustic_speaker_unit_counts": speaker_unit_counts,
     }
+    if raw_evidence_present:
+        result.update(
+            {
+                "multi_acoustic_raw_speaker_count": raw_speaker_count,
+                "multi_acoustic_raw_embedding_window_count": raw_window_count,
+                "multi_acoustic_raw_cluster_sizes": raw_cluster_sizes,
+                "multi_acoustic_raw_speaker_unit_counts": raw_speaker_unit_counts,
+                "multi_acoustic_raw_overlap_speaker_unit_counts": raw_overlap_speaker_unit_counts,
+                "multi_acoustic_speech_supported_speaker_labels": supported_labels,
+                "multi_acoustic_dropped_non_speech_speaker_labels": dropped_labels,
+                "multi_acoustic_dropped_non_speech_speaker_count": dropped_count,
+            }
+        )
+    return result
 
 
 def acoustic_sidecar_evidence(
@@ -157,7 +267,7 @@ def acoustic_sidecar_evidence(
     bounded = bounded_multi_acoustic_evidence(evidence)
     if not bounded:
         return {}
-    return {
+    result = {
         "algorithm_version": bounded["multi_acoustic_algorithm_version"],
         "backend": bounded["multi_acoustic_backend"],
         "cluster_sizes": list(bounded["multi_acoustic_cluster_sizes"]),
@@ -180,6 +290,31 @@ def acoustic_sidecar_evidence(
             bounded["multi_acoustic_speaker_unit_counts"]
         ),
     }
+    if "multi_acoustic_raw_speaker_count" in bounded:
+        result.update(
+            {
+                "raw_speaker_count": bounded["multi_acoustic_raw_speaker_count"],
+                "raw_embedding_window_count": bounded[
+                    "multi_acoustic_raw_embedding_window_count"
+                ],
+                "raw_cluster_sizes": list(
+                    bounded["multi_acoustic_raw_cluster_sizes"]
+                ),
+                "raw_speaker_unit_counts": list(
+                    bounded["multi_acoustic_raw_speaker_unit_counts"]
+                ),
+                "raw_overlap_speaker_unit_counts": list(
+                    bounded["multi_acoustic_raw_overlap_speaker_unit_counts"]
+                ),
+                "speech_supported_speaker_labels": list(
+                    bounded["multi_acoustic_speech_supported_speaker_labels"]
+                ),
+                "dropped_non_speech_speaker_labels": list(
+                    bounded["multi_acoustic_dropped_non_speech_speaker_labels"]
+                ),
+            }
+        )
+    return result
 
 
 async def run_local_acoustic_diarization_off_event_loop(

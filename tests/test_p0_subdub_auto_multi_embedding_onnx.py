@@ -1429,6 +1429,81 @@ def test_hybrid_word_mapping_rejects_unmapped_acoustic_speaker():
         )
 
 
+@pytest.mark.parametrize(
+    ("raw_speaker_count", "speech_supported_raw_labels"),
+    (
+        (4, (1, 2, 3)),
+        (4, (0, 1, 2, 3)),
+        (5, (0, 2, 3, 4)),
+        (6, (1, 2, 3, 4, 5)),
+        (7, (0, 1, 3, 4, 5, 6)),
+        (8, (0, 1, 2, 4, 5, 6, 7)),
+        (8, (0, 1, 2, 3, 4, 5, 6, 7)),
+    ),
+)
+def test_hybrid_word_mapping_uses_speech_support_independent_of_raw_label_position(
+    raw_speaker_count,
+    speech_supported_raw_labels,
+):
+    raw_labels = list(speech_supported_raw_labels) * 2
+    units = [
+        {
+            "unit_index": index,
+            "word_indexes": [index],
+            "start": index,
+            "end": index + 0.5,
+            "original_speech_seconds": 0.5,
+        }
+        for index in range(len(raw_labels))
+    ]
+    embeddings = np.zeros((len(raw_labels), service.EMBEDDING_DIM), dtype=np.float32)
+    for index, raw_label in enumerate(raw_labels):
+        embeddings[index, raw_label] = 1.0
+    centroids = np.eye(
+        raw_speaker_count,
+        service.EMBEDDING_DIM,
+        dtype=np.float32,
+    )
+    windows = [
+        {
+            "start": index,
+            "end": index + 0.5,
+            "speaker": raw_label,
+        }
+        for index, raw_label in enumerate(raw_labels)
+    ]
+
+    result = service.map_word_units_to_fixed_vocal_authority(
+        units,
+        embeddings,
+        windows,
+        centroids,
+        speaker_count=raw_speaker_count,
+        overlap_dominance_threshold=0.2,
+    )
+
+    effective_speaker_count = len(speech_supported_raw_labels)
+    expected_effective_labels = list(range(effective_speaker_count)) * 2
+    expected_raw_counts = [
+        2 if label in speech_supported_raw_labels else 0
+        for label in range(raw_speaker_count)
+    ]
+    assert result["labels"] == expected_effective_labels
+    assert result["speaker_count"] == effective_speaker_count
+    assert result["raw_speaker_count"] == raw_speaker_count
+    assert result["speech_supported_speaker_labels"] == list(
+        speech_supported_raw_labels
+    )
+    assert result["dropped_non_speech_speaker_labels"] == [
+        label
+        for label in range(raw_speaker_count)
+        if label not in speech_supported_raw_labels
+    ]
+    assert result["raw_speaker_unit_counts"] == expected_raw_counts
+    assert result["raw_overlap_speaker_unit_counts"] == expected_raw_counts
+    assert result["speaker_unit_counts"] == [2] * effective_speaker_count
+
+
 def test_fixed_vocal_diarization_discovers_speakers_before_word_mapping(
     monkeypatch,
 ):
@@ -1485,6 +1560,12 @@ def test_fixed_vocal_diarization_discovers_speakers_before_word_mapping(
             "overlap_mapped_count": len(units),
             "centroid_mapped_count": 0,
             "speaker_unit_counts": [10, 10, 10],
+            "speaker_count": 3,
+            "raw_speaker_count": 3,
+            "speech_supported_speaker_labels": [0, 1, 2],
+            "dropped_non_speech_speaker_labels": [],
+            "raw_speaker_unit_counts": [10, 10, 10],
+            "raw_overlap_speaker_unit_counts": [10, 10, 10],
         },
     )
 

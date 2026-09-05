@@ -94,13 +94,18 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
     Filter cũ từng trả sai `high/high`; raw-frame fallback đã bị cấm. Nếu log
     chỉ có label mà không có gender/register/dominance/evidence time, hoặc dùng
     “một nam + một nữ” không qua vote độc lập, FAIL.
-14. Với Auto multi, range chung là `3–8` speaker acoustic thật nhưng fixture
-    `83DE97B7...` phải ra đúng `5`. Terminal proof phải ghi
+14. Với Auto multi, range chung là `3–8` speaker có speech support. Fixture
+    `83DE97B7...` phải ghi raw acoustic `5` nhưng effective speech speakers `4`.
+    Raw label `0` không có overlap word support và targeted ASR trên vocal/gốc
+    đều empty nên không được tạo voice. Terminal proof phải ghi
     `auto_detected_speaker_count == auto_distinct_voice_count` và
     `auto_multi_attribution_verified=true`; mỗi cue có đúng một speaker, tập
     speaker của cue bằng tập acoustic, mỗi label giữ một voice ID ổn định trong
     toàn video. Không chấp nhận bịa/gộp label, ép giới tính, bỏ speaker khỏi TTS
-    hoặc dùng lại một voice cho hai label.
+    hoặc dùng lại một voice cho hai label. Raw/effective counts phải tách riêng.
+    Bắt buộc chạy thêm ma trận không-fixture: raw count `4..8`, noise/phi-lời ở
+    cả label đầu, giữa, cuối hoặc nhiều label; rồi full-chain cho từng effective
+    count `3..8`. Không được có nhánh theo SHA/job/duration/raw label/k cụ thể.
 15. Auto multi dùng cùng cue-lock đã chứng minh: từng start/end nguồn bất biến,
     cue sau không đợi cue trước, final duration bằng nguồn. Cả combo và
     standalone chỉ tự giao MP4 rồi receipt; SRT/audio/document tự động phải là
@@ -114,11 +119,11 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
 17. Trước LIVE chạy `SD-MS-L01`: strict word timeline phải giữ nguyên index,
     start/end của mọi retained word; coverage count bằng word count và không word
     nào xuất hiện trong hai cue. Zero-duration/malformed item không được tạo cue.
-18. Chạy `SD-MS-L02` bằng exact fixture offline và model thật. Phải đo `5`
-    speaker, `50` words, `23` units, `178` embedding views, clusters
-    `[9,18,26,25,11]`, speaker-unit coverage `[3,2,4,11,3]`, cosine min
-    `0.990487` và elapsed `<300s`; model byte mutation hoặc missing notice phải
-    fail trước inference. Đây không phải LIVE PASS và không gọi provider.
+18. Chạy `SD-MS-L02` bằng exact fixture offline và model thật. Phải đo raw `5`
+    clusters, `178` embedding views `[9,18,26,25,11]`; effective `4` speech
+    speakers từ raw labels `[1,2,3,4]`, raw label 0 overlap support `0`; word
+    coverage không mất. Model-byte mutation hoặc missing notice phải fail trước
+    inference. Đây không phải LIVE PASS và không gọi provider.
 19. Chạy `SD-MS-L03/L04`: legacy/provider sidecar phải force-fresh; chỉ bundle
     acoustic cùng source, strict timeline, model hash và algorithm version mới
     được resume, với ASR-call delta `0`. Không đọc raw embedding/PCM trong state.
@@ -147,12 +152,14 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
     duplicate marker hoặc CAS loser phải dừng, không command cũ/job mới/overwrite.
 25. Exact Auto Multi phải tách nguồn theo mục đích: ASR/render dùng normalized
     video, speaker embedding dùng original hash-locked audio. FAIL nếu PCM acoustic
-    lấy normalized copy đã resample; exact original fixture phải ra `k=5`. Lane
+    lấy normalized copy đã resample; exact original fixture phải giữ raw `k=5`
+    và tính effective speech count từ word-overlap support. Lane
     khác và Auto 2-speaker giữ nguyên saved-source priority.
 26. Kiểm timeout Auto Multi bằng duration PCM thật, không theo tên/codec/fixture:
     `1s` và `75s` dùng floor `300s`, `133.37542s` dùng `534s`, direct limit
     `300s` dùng cap `1200s`. Chạy timing-only regression `145` words; provider
-    có thể lệch timestamp nhưng vẫn phải giữ coverage, `k=5` cho fixture và đủ
+    có thể lệch timestamp nhưng vẫn phải giữ coverage, raw `k=5` và effective
+    speech count ổn định cho fixture, đủ
     cue→speaker. Nếu timeout phải thấy `acoustic_runtime_timeout`; nếu engine
     fail `fixed_vocal_*` phải giữ đúng mã đó, không chấp nhận
     `acoustic_failure_unknown`.
@@ -165,3 +172,7 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
     có `voice_kind`, `voice_selection_mode` và `auto_speaker_lane=multi`. Nếu
     thiếu lane marker, extractor sẽ âm thầm rơi về normalized source; coi là
     FAIL dù các `_pipeline_*` field còn đủ.
+29. Kiểm speech support: raw cluster chỉ có centroid-assigned word nhưng không có
+    dominant-overlap word-unit không được tính là người nói. Phải giữ raw cluster
+    audit, drop nó khỏi effective voice set, remap các word không mất, và fail nếu
+    sau lọc còn dưới 3 speaker. Fixture D: raw `5`, effective `4`, 145/145 words.

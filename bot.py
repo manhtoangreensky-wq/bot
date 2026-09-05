@@ -247582,6 +247582,14 @@ async def video_dubbing_prepare_subtitles(
                 "multi_acoustic_overlap_mapped_count": acoustic_result.get("overlap_mapped_count"),
                 "multi_acoustic_centroid_mapped_count": acoustic_result.get("centroid_mapped_count"),
                 "multi_acoustic_speaker_unit_counts": acoustic_result.get("speaker_unit_counts"),
+                "multi_acoustic_raw_speaker_count": acoustic_result.get("raw_speaker_count"),
+                "multi_acoustic_raw_embedding_window_count": acoustic_result.get("raw_embedding_window_count"),
+                "multi_acoustic_raw_cluster_sizes": acoustic_result.get("raw_cluster_sizes"),
+                "multi_acoustic_raw_speaker_unit_counts": acoustic_result.get("raw_speaker_unit_counts"),
+                "multi_acoustic_raw_overlap_speaker_unit_counts": acoustic_result.get("raw_overlap_speaker_unit_counts"),
+                "multi_acoustic_speech_supported_speaker_labels": acoustic_result.get("speech_supported_speaker_labels"),
+                "multi_acoustic_dropped_non_speech_speaker_labels": acoustic_result.get("dropped_non_speech_speaker_labels"),
+                "multi_acoustic_dropped_non_speech_speaker_count": len(acoustic_result.get("dropped_non_speech_speaker_labels") or []),
             })
             if not acoustic_fields:
                 raise subdub_speaker_cast.AutoCastUnavailable()

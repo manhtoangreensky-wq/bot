@@ -23,7 +23,7 @@ ACOUSTIC_PUBLIC_CODE = "B4CB6D5FE8"
 ACOUSTIC_MODEL_SHA256 = (
     "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
 )
-ACOUSTIC_ALGORITHM_VERSION = "wespeaker-resnet34-fixed-vocal-v2"
+ACOUSTIC_ALGORITHM_VERSION = "wespeaker-resnet34-fixed-vocal-v3"
 DOWNLOADABLE_FILE_ID = (
     "BAACAgQAAxkBAAIBQWf-subdub-auto-multi-downloadable-file-id"
 )
@@ -1259,6 +1259,118 @@ def test_pending_multi_lane_repair_rejects_mutated_authority_without_write(
     value,
 ):
     rearm, db_path, failure = _seed_pending_multi_lane_failure(
+        tmp_path,
+        monkeypatch,
+    )
+    mutated = {**failure, field: value}
+    before = json.dumps(mutated, ensure_ascii=False, separators=(",", ":"))
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE system_settings SET value=? WHERE key=?",
+        (before, f"engine_async_job:{ACOUSTIC_JOB_ID}"),
+    )
+    conn.commit()
+    conn.close()
+
+    result = rearm.claim_same_attempt(
+        acoustic_preflight=fixed_vocal_v2_preflight
+    )
+
+    assert result["claimed"] is False
+    stored = sqlite3.connect(db_path).execute(
+        "SELECT value FROM system_settings WHERE key=?",
+        (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+    ).fetchone()[0]
+    assert stored == before
+
+
+def _seed_speech_supported_failure(tmp_path, monkeypatch):
+    rearm, db_path, _failure = _seed_pending_multi_lane_failure(
+        tmp_path,
+        monkeypatch,
+    )
+    lane = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+    assert lane["claimed"] is True
+    failure = {
+        **lane["job"],
+        "status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "lifecycle_state": "failed_no_charge",
+        "current_stage": "failed_no_charge",
+        "progress_stage": "failed_no_charge",
+        "last_error_stage": "AUTO_CAST_MANUAL_REQUIRED",
+        "last_error_safe": "manual required",
+        "asr_started": False,
+        "translation_started": False,
+        "tts_started": False,
+        "mux_started": False,
+        "artifact_started": False,
+        "delivery_attempted": False,
+        "final_mp4_exists": False,
+        "output_validated": False,
+        "output_sent": False,
+        "multi_acoustic_failure_code": "fixed_vocal_word_speaker_coverage_invalid",
+        "multi_acoustic_failure_word_count": 145,
+        "multi_acoustic_failure_duration_ms": 134_000,
+    }
+    _persist_fixed_vocal_job(db_path, failure)
+    return rearm, db_path, failure
+
+
+def test_speech_supported_repair_rearms_consumed_pending_lane_job_once(
+    tmp_path,
+    monkeypatch,
+):
+    rearm, db_path, _failure = _seed_speech_supported_failure(
+        tmp_path,
+        monkeypatch,
+    )
+
+    repaired = rearm.claim_same_attempt(
+        acoustic_preflight=fixed_vocal_v2_preflight
+    )
+
+    assert repaired["claimed"] is True
+    job = repaired["job"]
+    assert job["auto_multi_speech_supported_repair_used"] is True
+    assert job["auto_multi_pending_lane_repair_used"] is True
+    assert job["auto_multi_acoustic_full_media_duration_repair_used"] is True
+    assert job["auto_multi_recovery_attempt_count"] == 4
+    assert job["auto_multi_recovery_correction_attempt_count"] == 3
+    assert job["status"] == bot.SUBDUB_FAILED_AUTO_MULTI_RECOVERY_STATUS
+    assert job["terminal_state"] == ""
+    assert job["multi_acoustic_failure_code"] == ""
+    assert job["charged_xu"] == 0
+
+    duplicate_state = {
+        **job,
+        "status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "current_stage": "failed_no_charge",
+    }
+    _persist_fixed_vocal_job(db_path, duplicate_state)
+    duplicate = rearm.claim_same_attempt(
+        acoustic_preflight=fixed_vocal_v2_preflight
+    )
+    assert duplicate["claimed"] is False
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("charged_xu", 1),
+        ("output_sent", True),
+        ("auto_multi_pending_lane_repair_authority", "wrong"),
+        ("multi_acoustic_failure_code", "fixed_vocal_speaker_count_unstable"),
+    ],
+)
+def test_speech_supported_repair_rejects_mutated_authority_without_write(
+    tmp_path,
+    monkeypatch,
+    field,
+    value,
+):
+    rearm, db_path, failure = _seed_speech_supported_failure(
         tmp_path,
         monkeypatch,
     )

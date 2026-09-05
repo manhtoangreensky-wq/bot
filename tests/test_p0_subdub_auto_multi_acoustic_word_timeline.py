@@ -504,7 +504,7 @@ def acoustic_state_fields() -> dict:
         "multi_acoustic_model_sha256": (
             "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
         ),
-        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
         "multi_acoustic_speaker_count": 3,
         "multi_acoustic_word_count": 30,
         "multi_acoustic_unit_count": 12,
@@ -779,7 +779,7 @@ def test_exact_multi_prepare_runs_local_acoustics_before_translation(
             "model_sha256": (
                 "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
             ),
-            "algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
+            "algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
             "word_count": 30,
             "unit_count": 12,
             "embedding_window_count": 24,
@@ -877,7 +877,7 @@ def test_exact_multi_prepare_runs_local_acoustics_before_translation(
         "chunk_00:speaker_2",
     ]
     assert sidecar["acoustic"] == {
-        "algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
+        "algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
         "backend": "local_wespeaker_resnet34_fixed_vocal",
         "cluster_sizes": [4, 4, 4],
         "embedding_window_count": 24,
@@ -892,6 +892,13 @@ def test_exact_multi_prepare_runs_local_acoustics_before_translation(
         "overlap_mapped_count": 9,
         "centroid_mapped_count": 3,
         "speaker_unit_counts": [4, 4, 4],
+        "raw_speaker_count": 3,
+        "raw_embedding_window_count": 24,
+        "raw_cluster_sizes": [4, 4, 4],
+        "raw_speaker_unit_counts": [4, 4, 4],
+        "raw_overlap_speaker_unit_counts": [4, 4, 4],
+        "speech_supported_speaker_labels": [0, 1, 2],
+        "dropped_non_speech_speaker_labels": [],
     }
     assert "embeddings" not in sidecar
     assert "pcm" not in sidecar
