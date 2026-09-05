@@ -1816,4 +1816,31 @@ speech_supported_artifact_delivery_20260905:
     baseline_impact: 65 passed; 1 skipped; 4 exact unchanged-main failures; NEW_FAILURES 0
   current: source green; compile and diff pending; not pushed or deployed; existing MP4 not delivered
 
-current_next_action: commit push PR; exact-SHA deploy; one delivery-only invocation; audit Telegram video receipt and zero financial delta
+delivery_lineage_followup_20260906:
+  deployed_runtime:
+    pr: 999
+    merge_sha: f3ca9df871bc266a89346739ce9d877c6756bd37
+    deploy_run: 33979562459 SUCCESS in 5m36s
+    source: exact SHA; tracked diff 0; bot web nginx active
+  preflight_result:
+    action: fail closed before Telegram
+    blocker: root failure snapshot lost job_key selection and speech-supported marker
+    side_effects: delivery marker 0; Telegram 0; receipt 0; provider 0; job delta 0; wallet delta 0
+  retained_authority:
+    manifest: exact job user chat source SHA no prior delivery
+    cache: English; source and translated SRT hashes
+    sidecar: fixed-vocal v3 model and processing SHA; raw 5; speech 4; coverage 145/145
+    artifact: 18171909 bytes; sha256 07fdfe65b01cc4fe4d6e3e0e60e004d69f0fa7633bb75c552d4da8372443c7f0
+  correction:
+    job_key: reconstruct exact user chat file_unique_id and Auto Multi suffix
+    lineage: require DB manifest cache sidecar and actual SRT content hashes to agree
+    pricing: 189 words; dubbing 95 Xu; subtitle 86 Xu; total 181 Xu; charged 0; wallet 200
+    replay: ASR translation TTS mux provider and new job forbidden
+  verification:
+    lineage_red_green: 1 failed then 1 passed
+    lost_job_key_red_green: 1 failed then focused PASS
+    metadata_mutations: 10 blocked
+    recovery_full: 149 passed
+  current: local follow-up dirty; compile and diff pending; no Telegram delivery yet
+
+current_next_action: compile diff; follow-up commit PR deploy; one delivery-only invocation; final audit
