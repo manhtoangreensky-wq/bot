@@ -145,3 +145,7 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
     unique ID. Size `9,869,032`, MIME `video/mp4` và SHA fixture phải khớp trước
     ghi file/CAS. Sai hash, unique ID lệch, full ID thiếu/mâu thuẫn/sai type,
     duplicate marker hoặc CAS loser phải dừng, không command cũ/job mới/overwrite.
+25. Exact Auto Multi phải tách nguồn theo mục đích: ASR/render dùng normalized
+    video, speaker embedding dùng original hash-locked audio. FAIL nếu PCM acoustic
+    lấy normalized copy đã resample; exact original fixture phải ra `k=5`. Lane
+    khác và Auto 2-speaker giữ nguyên saved-source priority.

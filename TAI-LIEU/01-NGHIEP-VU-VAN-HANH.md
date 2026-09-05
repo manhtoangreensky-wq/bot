@@ -1176,3 +1176,24 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   `124 passed`; direct impact `373 passed + 1` baseline test deselected;
   exact-two `46 passed`. Provider/DB/job/transaction/wallet/credit delta trong
   live RED đều `0`; Owner credits/spent vẫn `200/0`, `charged_xu=0`.
+
+### Live RED normalized acoustic source — 05/09/2026
+
+- PR `#991` deploy runtime `9715b6f0a7436347fd1b3a8023fe89bc8bbf3938`.
+  Exact fixture được restore mode `600`, đúng `9,869,032` bytes/SHA
+  `83DE97B7...98AD3E`; invocation `648943c375da47659795fb6314040dc3`
+  CAS đúng một lần và Deepgram PASS `145` words.
+- Job sau đó fail trước translation/TTS/mux. Direct traceback trên chính
+  `normalized_source.mp4` là `fixed_vocal_speaker_count_unstable`.
+- Original source giữ AAC `44.1kHz`; normalization AV1→H.264 đã resample audio
+  lên `48kHz`, rồi acoustic extractor resample lại `44.1kHz`. Hai lần resample
+  làm bốn fixed-vocal stability views không còn đồng ý về speaker count.
+- Direct original-source diagnostic PASS exact `k=5`, `50` words, `23` units,
+  `178` views, clusters `[9,18,26,25,11]`, speaker units `[3,2,4,11,3]`,
+  overlap/centroid `19/4`.
+- Correction chỉ đổi input của exact Auto Multi acoustic: dùng original
+  hash-locked source. ASR/render vẫn dùng normalized video; non-Multi và exact-two
+  giữ saved normalized path. RED/isolation `1 failed + 1 passed`; GREEN
+  `3 passed in 471.43s`. `charged_xu=0`; không job mới.
+- Direct impact `375 passed + 1` known baseline deselected; exact-two `46
+  passed`; full compile/YAML/diff exit `0`.

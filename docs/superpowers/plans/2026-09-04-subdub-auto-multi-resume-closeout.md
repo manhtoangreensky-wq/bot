@@ -250,6 +250,13 @@ baseline PR330 failure: that old test requests `TTS_PROVIDER=auto`, while
 current `origin/main` requires an explicit paid TTS provider policy. This
 branch does not modify that function or provider policy.
 
+Live runtime `9715b6f0` proved the next boundary: Deepgram passed `145` words,
+but normalized-source PCM raised `fixed_vocal_speaker_count_unstable` before
+translation. The exact original source returned stable `k=5`. The correction
+therefore changes only exact Auto Multi acoustic PCM input to original source;
+normalized media remains the ASR/render authority and all other lanes retain
+their current saved-source priority.
+
 The existing provider-fallback suite produced `50 passed` plus one stale
 hard-coded exact-two SHA assertion. `origin/main` contains the same stale test,
 while both protected source files are byte-identical to `origin/main`; this is

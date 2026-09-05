@@ -644,3 +644,12 @@ One-shot invocation `8dfa559e...` đã chứng minh lỗi trước CAS/provider 
 tiêu context marker. Vì full ID lịch sử không còn trong `20` DB backups hoặc `2`
 job backups, chính job cần byte-identical artifact restore dưới authorization mới
 sau khi correction được deploy; không tạo replacement job.
+
+### Đối chiếu nguồn audio cho Auto Multi acoustic sau runtime 9715b6f0
+
+| Giả định cũ | Hiện tại đo được | Trạng thái |
+|---|---|---|
+| Normalized video phù hợp cho cả render và speaker embedding | Audio normalized bị resample `44.1→48kHz`; resample lại `48→44.1kHz` làm fixed-vocal speaker count unstable | ❌ Không còn đúng |
+| Dịch/TTS fail ở 5% | Deepgram đã PASS `145` words; failure nằm sau ASR và trước translation tại acoustic owner | ❌ UI terminal che stage thật |
+| Cần thay pipeline dịch/TTS bằng lane khác | Translation, per-cue TTS, mux và delivery đã là shared pipeline; chỉ acoustic input path cần sửa | ✅ Giữ shared lane |
+| Original source không cần sau normalization | Exact Auto Multi acoustic phải dùng original hash-locked audio; normalized copy vẫn dành cho ASR/render | ⚠️ Tách source theo mục đích |

@@ -1560,4 +1560,40 @@ downloadable_source_identity_correction_20260905:
     yaml_diff_exact_two: exit 0
   live_pass: false
 
-current_next_action: create one local commit and correction PR; deploy only after Owner production gate; current job has no recoverable full Telegram file_id, so any next same-job execution needs fresh Owner authorization for byte-identical fixture artifact restore plus one new exact unit; never reuse invocation 8dfa559e6a034a9081b63669f28ad805
+original_acoustic_source_correction_20260905:
+  runtime_red:
+    runtime: 9715b6f0a7436347fd1b3a8023fe89bc8bbf3938
+    unit_invocation: 648943c375da47659795fb6314040dc3
+    exact_fixture_restored: true
+    deepgram_status: PASS
+    strict_word_count: 145
+    terminal: failed_no_charge before translation TTS mux artifact delivery
+    acoustic_failure_code: acoustic_failure_unknown
+    charged_xu: 0
+  root:
+    normalized_audio_path: 48kHz AAC converted back to 44.1kHz PCM
+    normalized_result: fixed_vocal_speaker_count_unstable
+    original_audio_path: hash-locked 44.1kHz AAC source
+    original_result: k5 PASS
+  original_measured:
+    speaker_count: 5
+    word_count: 50
+    unit_count: 23
+    embedding_views: 178
+    cluster_sizes: [9, 18, 26, 25, 11]
+    speaker_unit_counts: [3, 2, 4, 11, 3]
+    overlap_mapped: 19
+    centroid_mapped: 4
+  correction:
+    auto_multi_acoustic_input: original hash-locked source path
+    asr_render_input: normalized source remains unchanged
+    non_multi_input: normalized path priority unchanged
+  tdd:
+    red_isolation: 1 failed and 1 passed in 8.39s
+    focused_green: 3 passed in 471.43s
+    direct_impact: 375 passed and 1 baseline-stale test deselected in 15.22s
+    exact_two: 46 passed and 241 deselected in 8.71s
+    compile_yaml_diff: exit 0
+  live_pass: false
+
+current_next_action: create one correction commit then automatic PR/merge/deploy; continue same job only, never create replacement job or rerun prior invocations
