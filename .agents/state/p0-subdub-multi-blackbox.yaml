@@ -1654,4 +1654,41 @@ acoustic_runtime_budget_correction_20260905:
     wallet_mutations: 0
   live_pass: false
 
-current_next_action: final review and commit; auto push PR squash deploy; one new exact same-job unit only; observe to artifact and receipt
+previous_next_action_after_runtime_budget: final review and commit; auto push PR squash deploy; one new exact same-job unit only; observe to artifact and receipt
+
+full_original_media_duration_correction_20260905:
+  deployed_red:
+    pr: 995
+    merge_sha: f4fe665388715df276081aab999598f36ff07386
+    deploy_run: 33948594192 SUCCESS in 3m52s
+    invocation: 614e31ec478742a1a28bfafb045da420
+    reached_progress: 35 percent transcribing
+    terminal: failed_no_charge before translation TTS mux artifact delivery
+    cause: fixed_vocal_speaker_count_unstable
+    charged_xu: 0
+  root:
+    strict_last_word_end_seconds: 126.505
+    full_original_media_seconds: 133.37542
+    truncated_pcm_result: fixed_vocal_speaker_count_unstable in 115.134 seconds
+    full_pcm_repeat_results_seconds: [121.628, 116.797, 130.717]
+    full_pcm_authority: k5; 37 units; clusters 9 18 26 25 11
+    defect: recovery prepare used last speech end as media extraction duration and removed the trailing acoustic evidence
+  correction:
+    scope: exact Auto Multi behavior for every valid video; no fixture job or expected-k branch
+    behavior: ffprobe selected original source and extract full media duration PCM
+    non_multi: source priority and duration unchanged
+    marker: auto_multi_acoustic_full_media_duration_repair_used
+    attempts_preserved: 4/3
+    production_payload_candidate: true
+  verification:
+    red: 1 failed because original media was not probed
+    pcm_green: 5 passed
+    auto_multi: 345 passed
+    exact_two: 37 passed
+    real_resource: 5 passed in 255.02 seconds
+    languages_preserved: [vi, ja, en, ko, zh]
+    provider_calls_in_source_loop: 0
+    wallet_mutations: 0
+  live_pass: false
+
+current_next_action: final compile docs diff; follow-up PR squash deploy; one new exact same-job continuation; observe to artifact and receipt

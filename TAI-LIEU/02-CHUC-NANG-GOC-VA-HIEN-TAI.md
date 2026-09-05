@@ -668,3 +668,15 @@ Correction không đổi clustering threshold, model, translation, TTS, mux,
 delivery, pricing/wallet hoặc exact-two. Local evidence: timeout/observability
 `8 passed`, Auto Multi `338 passed`, exact-two `37 passed`, resource thật `5
 passed`; LIVE artifact của chính `#B4CB6D5FE8` vẫn là gate cuối.
+
+### Đối chiếu Auto Multi full media duration sau PR #995
+
+| Giả định/tài liệu cũ | Bằng chứng hiện tại | Trạng thái |
+|---|---|---|
+| Word/cue cuối có thể làm duration acoustic input | Cue cuối `126.505s`, media `133.37542s`; cắt theo cue tái hiện chính xác `fixed_vocal_speaker_count_unstable` | ❌ Sai authority |
+| Dùng original source là đủ | Original đúng nhưng vẫn fail nếu chỉ giải mã đến last-speech end | ⚠️ Cần đủ media duration |
+| Lỗi nằm ở translation/TTS vì UI dừng `5%` | Failure xảy ra trước translation/TTS/mux; truncated PCM fail, full PCM PASS 3/3 | ❌ UI không phải stage authority |
+| Sửa cần hard-code fixture duration | Production ffprobe chính selected original source của từng video; không có exact SHA/job/k | ✅ Tổng quát mọi video hợp lệ |
+
+Follow-up chỉ đổi PCM extraction boundary và một exact-job rearm marker. Không
+đổi ASR text, translation languages, voice mapping, mux, delivery hoặc tiền.

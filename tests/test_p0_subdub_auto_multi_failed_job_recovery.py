@@ -1047,6 +1047,129 @@ def test_acoustic_runtime_budget_repair_rejects_mutated_authority_without_write(
     assert stored == before
 
 
+def _seed_full_media_duration_failure(tmp_path, monkeypatch):
+    rearm, db_path, failure = _seed_acoustic_runtime_budget_failure(
+        tmp_path,
+        monkeypatch,
+    )
+    budget = rearm.claim_same_attempt(
+        acoustic_preflight=fixed_vocal_v2_preflight
+    )
+    assert budget["claimed"] is True
+    full_duration_failure = {
+        **budget["job"],
+        "status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "lifecycle_state": "failed_no_charge",
+        "current_stage": "failed_no_charge",
+        "progress_stage": "failed_no_charge",
+        "last_error_stage": "AUTO_CAST_MANUAL_REQUIRED",
+        "last_error_safe": "manual required",
+        "asr_started": False,
+        "translation_started": False,
+        "tts_started": False,
+        "mux_started": False,
+        "artifact_started": False,
+        "delivery_attempted": False,
+        "final_mp4_exists": False,
+        "output_validated": False,
+        "output_sent": False,
+        "input_duration": 134,
+        "multi_acoustic_failure_code": "fixed_vocal_speaker_count_unstable",
+        "multi_acoustic_failure_word_count": 145,
+        "multi_acoustic_failure_duration_ms": 134_000,
+        "input_save": {
+            **dict(budget["job"].get("input_save") or {}),
+            "source_duration_exact": 133.37542,
+        },
+    }
+    _persist_fixed_vocal_job(db_path, full_duration_failure)
+    return rearm, db_path, full_duration_failure, failure
+
+
+def test_full_media_duration_repair_rearms_consumed_budget_job_once(
+    tmp_path,
+    monkeypatch,
+):
+    rearm, db_path, failure, original_failure = _seed_full_media_duration_failure(
+        tmp_path,
+        monkeypatch,
+    )
+
+    repaired = rearm.claim_same_attempt(
+        acoustic_preflight=fixed_vocal_v2_preflight
+    )
+
+    assert repaired["claimed"] is True
+    job = repaired["job"]
+    assert job["auto_multi_acoustic_full_media_duration_repair_used"] is True
+    assert job["auto_multi_acoustic_runtime_budget_repair_used"] is True
+    assert job["auto_multi_original_acoustic_source_repair_used"] is True
+    assert job["auto_multi_private_pipeline_context_repair_used"] is True
+    assert job["auto_multi_recovery_attempt_count"] == 4
+    assert job["auto_multi_recovery_correction_attempt_count"] == 3
+    assert job["status"] == bot.SUBDUB_FAILED_AUTO_MULTI_RECOVERY_STATUS
+    assert job["terminal_state"] == ""
+    assert job["multi_acoustic_failure_code"] == ""
+    assert job["multi_acoustic_failure_word_count"] == 0
+    assert job["multi_acoustic_failure_duration_ms"] == 0
+    assert job["charged_xu"] == 0
+    assert failure["job_key"] == original_failure["job_key"]
+
+    duplicate_state = {
+        **job,
+        "status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "current_stage": "failed_no_charge",
+    }
+    _persist_fixed_vocal_job(db_path, duplicate_state)
+    duplicate = rearm.claim_same_attempt(
+        acoustic_preflight=fixed_vocal_v2_preflight
+    )
+    assert duplicate["claimed"] is False
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("charged_xu", 1),
+        ("output_sent", True),
+        ("input_duration", 133),
+        ("multi_acoustic_failure_word_count", 144),
+    ],
+)
+def test_full_media_duration_repair_rejects_mutated_authority_without_write(
+    tmp_path,
+    monkeypatch,
+    field,
+    value,
+):
+    rearm, db_path, failure, _original_failure = _seed_full_media_duration_failure(
+        tmp_path,
+        monkeypatch,
+    )
+    mutated = {**failure, field: value}
+    before = json.dumps(mutated, ensure_ascii=False, separators=(",", ":"))
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE system_settings SET value=? WHERE key=?",
+        (before, f"engine_async_job:{ACOUSTIC_JOB_ID}"),
+    )
+    conn.commit()
+    conn.close()
+
+    result = rearm.claim_same_attempt(
+        acoustic_preflight=fixed_vocal_v2_preflight
+    )
+
+    assert result["claimed"] is False
+    stored = sqlite3.connect(db_path).execute(
+        "SELECT value FROM system_settings WHERE key=?",
+        (f"engine_async_job:{ACOUSTIC_JOB_ID}",),
+    ).fetchone()[0]
+    assert stored == before
+
+
 def test_context_repair_rejects_second_claim_and_identity_mismatch(
     tmp_path,
     monkeypatch,

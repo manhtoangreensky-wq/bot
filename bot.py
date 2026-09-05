@@ -250014,6 +250014,31 @@ async def _extract_subdub_auto_pcm(
     ffmpeg = frame_video_ffmpeg_path()
     if not ffmpeg:
         raise subdub_speaker_cast.AutoCastUnavailable()
+    source_duration_override = 0.0
+    if exact_acoustic_multi and original_acoustic_source:
+        try:
+            ffprobe = ffprobe_path_for_ffmpeg(ffmpeg)
+            probe = (
+                await asyncio.to_thread(
+                    video_local_validation.probe_video_file,
+                    source_path,
+                    ffprobe_path=ffprobe,
+                    timeout=60,
+                )
+                if ffprobe
+                else {}
+            )
+            candidate_duration = float((probe or {}).get("duration") or 0.0)
+            if (
+                bool((probe or {}).get("ok"))
+                and math.isfinite(candidate_duration)
+                and candidate_duration > 0.0
+            ):
+                source_duration_override = candidate_duration
+        except (OSError, TypeError, ValueError, OverflowError):
+            source_duration_override = 0.0
+        if source_duration_override <= 0.0:
+            raise subdub_speaker_cast.AutoCastUnavailable()
     pcm_path = os.path.join(
         workspace,
         f"auto_speaker_{int(sample_rate)}_{channel_label}_{sample_format}.pcm",
@@ -250043,7 +250068,7 @@ async def _extract_subdub_auto_pcm(
             if not math.isfinite(segment_end) or segment_end <= 0.0:
                 raise subdub_speaker_cast.AutoCastUnavailable()
             cue_end_seconds = max(cue_end_seconds, segment_end)
-    requested_seconds = max(raw_duration, cue_end_seconds)
+    requested_seconds = max(raw_duration, cue_end_seconds, source_duration_override)
     bounded_seconds = (
         min(float(SUBDUB_AUTO_PCM_MAX_SECONDS), max(1.0, requested_seconds))
         if math.isfinite(requested_seconds) and requested_seconds > 0.0

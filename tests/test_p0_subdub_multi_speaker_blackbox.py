@@ -2047,6 +2047,12 @@ def test_multi_pcm_uses_original_source_instead_of_normalized_render_copy(
         lambda _workspace: {"allowed": True},
     )
     monkeypatch.setattr(bot, "frame_video_ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(bot, "ffprobe_path_for_ffmpeg", lambda _ffmpeg: "ffprobe")
+    monkeypatch.setattr(
+        bot.video_local_validation,
+        "probe_video_file",
+        lambda _path, **_kwargs: {"ok": True, "duration": 12.0},
+    )
     monkeypatch.setattr(
         bot.subdub_media_preflight,
         "timeout_for_stage",
@@ -2079,6 +2085,118 @@ def test_multi_pcm_uses_original_source_instead_of_normalized_render_copy(
 
     assert result == str(tmp_path / "auto_speaker_44100_stereo_s16le.pcm")
     assert calls[0][0][3] == str(original)
+
+
+def test_multi_pcm_uses_full_original_media_duration_not_last_cue_end(
+    tmp_path,
+    monkeypatch,
+):
+    original = tmp_path / "original-full-duration.mp4"
+    normalized = tmp_path / "normalized-render.mp4"
+    original.write_bytes(b"original")
+    normalized.write_bytes(b"normalized")
+    calls = []
+    probes = []
+
+    monkeypatch.setattr(
+        bot,
+        "subtitle_dub_workspace_path_safety",
+        lambda _workspace: {"allowed": True},
+    )
+    monkeypatch.setattr(bot, "frame_video_ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(bot, "ffprobe_path_for_ffmpeg", lambda _ffmpeg: "ffprobe")
+    monkeypatch.setattr(
+        bot.video_local_validation,
+        "probe_video_file",
+        lambda path, **kwargs: probes.append((str(path), kwargs))
+        or {"ok": True, "duration": 20.5},
+    )
+    monkeypatch.setattr(
+        bot.subdub_media_preflight,
+        "timeout_for_stage",
+        lambda *_args, **_kwargs: 77.0,
+    )
+
+    async def fake_run(command, timeout):
+        calls.append((list(command), timeout))
+        Path(command[-1]).write_bytes(b"\0\0" * 8_000)
+        return True, "ok"
+
+    monkeypatch.setattr(bot, "run_subdub_ffmpeg_command", fake_run)
+    state = {
+        **EXACT_AUTO_STATE,
+        "auto_speaker_lane": "multi",
+        "_pipeline_workspace": str(tmp_path),
+        "_pipeline_source_path_override": str(original),
+        "_pipeline_saved_source_path": str(normalized),
+    }
+
+    result = asyncio.run(
+        bot._extract_subdub_auto_pcm(
+            {
+                "state": state,
+                "duration_seconds": 12,
+                "source_segments": [
+                    {"start": 0.0, "end": 10.0, "text": "last cue"}
+                ],
+            },
+            state,
+            channels=2,
+            sample_rate=44_100,
+            sample_format="s16le",
+        )
+    )
+
+    assert result == str(tmp_path / "auto_speaker_44100_stereo_s16le.pcm")
+    assert probes and probes[0][0] == str(original)
+    command = calls[0][0]
+    assert command[command.index("-t") + 1] == "20.5"
+
+
+def test_multi_pcm_fails_closed_before_extract_when_media_duration_probe_fails(
+    tmp_path,
+    monkeypatch,
+):
+    original = tmp_path / "original-unprobeable.mp4"
+    original.write_bytes(b"original")
+    calls = []
+    monkeypatch.setattr(
+        bot,
+        "subtitle_dub_workspace_path_safety",
+        lambda _workspace: {"allowed": True},
+    )
+    monkeypatch.setattr(bot, "frame_video_ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(bot, "ffprobe_path_for_ffmpeg", lambda _ffmpeg: "ffprobe")
+    monkeypatch.setattr(
+        bot.video_local_validation,
+        "probe_video_file",
+        lambda *_args, **_kwargs: {"ok": False, "reason": "ffprobe_failed"},
+    )
+
+    async def forbidden_run(*_args, **_kwargs):
+        calls.append(True)
+        return True, "unexpected"
+
+    monkeypatch.setattr(bot, "run_subdub_ffmpeg_command", forbidden_run)
+    state = {
+        **EXACT_AUTO_STATE,
+        "auto_speaker_lane": "multi",
+        "_pipeline_workspace": str(tmp_path),
+        "_pipeline_source_path_override": str(original),
+    }
+
+    with pytest.raises(bot.subdub_speaker_cast.AutoCastUnavailable):
+        asyncio.run(
+            bot._extract_subdub_auto_pcm(
+                {"state": state, "duration_seconds": 12},
+                state,
+                channels=2,
+                sample_rate=44_100,
+                sample_format="s16le",
+            )
+        )
+
+    assert calls == []
 
 
 def test_non_multi_pcm_keeps_normalized_saved_source_priority(

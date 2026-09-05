@@ -1235,3 +1235,23 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   job `#B4CB6D5FE8` được CAS bởi marker runtime-budget mới sau exact-SHA deploy;
   attempts vẫn `4/3`, marker cũ giữ nguyên, không upload/Confirm/job mới và
   `charged_xu=0`.
+
+### Auto Multi phải dùng đủ duration media, không cắt ở lời cuối — 05/09/2026
+
+- PR `#995` deploy runtime `f4fe665388715df276081aab999598f36ff07386`.
+  Same-job recovery reached `35%` then fail no-charge với cause mới đo được
+  `fixed_vocal_speaker_count_unstable`; translation/TTS/mux/artifact chưa chạy.
+- Strict timeline kết thúc ở `126.505s`, trong khi original media dài
+  `133.37542s`. Recovery state không mang duration media vào prepare, nên helper
+  cũ dùng cue cuối làm `ffmpeg -t`, cắt mất `6.87042s` acoustic tail.
+- Exact reproduction: PCM `126.505s` fail cùng cause trong `115.134s`; PCM full
+  chạy liên tiếp ba lần đều `k=5/37 units` trong `121.628/116.797/130.717s`.
+  Đây là root cause, không phải translation, TTS, provider diarization, model
+  nondeterminism hay threshold.
+- Correction chỉ trong exact Auto Multi: ffprobe original source đã chọn rồi
+  extract PCM theo full media duration. Nó áp dụng cho mọi video hợp lệ, không
+  có SHA/job/expected-k branch. Non-Multi và exact-two giữ nguyên.
+- RED/GREEN `1 failed -> 5 passed`; Auto Multi `345 passed`; exact-two `37
+  passed`; resource thật `5 passed in 255.02s`; các target `vi/ja/en/ko/zh`
+  vẫn được giữ qua adapter. Marker same-job mới giữ `4/3`, mọi prior marker và
+  `charged_xu=0`.
