@@ -656,6 +656,10 @@ def test_pending_state_preserves_bounded_acoustic_field_types(monkeypatch):
     for field, expected in acoustic_state_fields().items():
         assert state[field] == expected
         assert type(state[field]) is type(expected)
+    assert state["voice_kind"] == "auto_speaker_gender"
+    assert state["voice_selection_mode"] == "auto_speaker"
+    assert state["auto_speaker_lane"] == "multi"
+    assert bot.auto_multi_speaker.is_auto_multi_speaker_state(state) is True
 
 
 @pytest.mark.parametrize(
@@ -899,6 +903,7 @@ def test_exact_multi_fresh_asr_preserves_private_pipeline_context_before_acousti
     tmp_path,
 ):
     source_bytes = b"fresh-auto-multi-source"
+    original_source_path = str(tmp_path / "original_source.mp4")
     source_path = str(tmp_path / "normalized_source.mp4")
     captured = []
 
@@ -943,6 +948,16 @@ def test_exact_multi_fresh_asr_preserves_private_pipeline_context_before_acousti
                 "received_source_path": received_state.get(
                     "_pipeline_saved_source_path"
                 ),
+                "prepared_original_source_path": (prepared.get("state") or {}).get(
+                    "_pipeline_source_path_override"
+                ),
+                "received_original_source_path": received_state.get(
+                    "_pipeline_source_path_override"
+                ),
+                "prepared_lane": (prepared.get("state") or {}).get(
+                    "auto_speaker_lane"
+                ),
+                "received_lane": received_state.get("auto_speaker_lane"),
             }
         )
         raise AcousticBoundaryReached()
@@ -970,6 +985,7 @@ def test_exact_multi_fresh_asr_preserves_private_pipeline_context_before_acousti
         "voice_selection_mode": "auto_speaker",
         "auto_speaker_lane": "multi",
         "_pipeline_workspace": str(tmp_path),
+        "_pipeline_source_path_override": original_source_path,
         "_pipeline_saved_source_path": source_path,
         "_pipeline_source_bytes_override": source_bytes,
         "_pipeline_source_content_type_override": "video/mp4",
@@ -992,6 +1008,10 @@ def test_exact_multi_fresh_asr_preserves_private_pipeline_context_before_acousti
             "received_workspace": str(tmp_path),
             "prepared_source_path": source_path,
             "received_source_path": source_path,
+            "prepared_original_source_path": original_source_path,
+            "received_original_source_path": original_source_path,
+            "prepared_lane": "multi",
+            "received_lane": "multi",
         }
     ]
 

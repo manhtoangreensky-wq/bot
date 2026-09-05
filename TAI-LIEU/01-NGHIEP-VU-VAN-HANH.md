@@ -1255,3 +1255,19 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   passed`; resource thật `5 passed in 255.02s`; các target `vi/ja/en/ko/zh`
   vẫn được giữ qua adapter. Marker same-job mới giữ `4/3`, mọi prior marker và
   `charged_xu=0`.
+
+### Pending state phải giữ marker lane Auto Multi — 05/09/2026
+
+- Sau PR `#996`, full-duration logic đã deploy nhưng live vẫn fail cùng cause.
+  Diagnostic chạy qua prepare thật đo command vẫn là normalized source
+  `-t 126.505`, chứng minh nhánh mới chưa được chọn.
+- `set_video_dubbing_pending()` có whitelist `voice_selection_mode` nhưng thiếu
+  `auto_speaker_lane`. Pending write làm state mất marker `multi`; extractor vì
+  vậy dùng đường non-Multi (normalized + cue end), bỏ qua original/full media.
+- Sửa đúng một field trong whitelist. Diagnostic sau candidate dùng original
+  source `-t 133.375` và acoustic PASS. Real-store RED/GREEN là
+  `KeyError auto_speaker_lane -> 1 passed`; context/marker focused `7 passed`;
+  full Auto Multi `350 passed`.
+- Marker recovery mới chỉ cho chính live aggregate hiện tại, giữ attempts `4/3`,
+  prior markers, no-output/no-charge. Không thay engine, threshold, ngôn ngữ,
+  TTS/mux/delivery, exact-two hoặc wallet.

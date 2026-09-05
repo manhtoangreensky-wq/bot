@@ -680,3 +680,14 @@ passed`; LIVE artifact của chính `#B4CB6D5FE8` vẫn là gate cuối.
 
 Follow-up chỉ đổi PCM extraction boundary và một exact-job rearm marker. Không
 đổi ASR text, translation languages, voice mapping, mux, delivery hoặc tiền.
+
+### Đối chiếu pending Auto Multi lane marker sau PR #996
+
+| Giả định/tài liệu cũ | Bằng chứng hiện tại | Trạng thái |
+|---|---|---|
+| Giữ `_pipeline_*` là đủ nhận dạng lane | Pending whitelist bỏ `auto_speaker_lane`; `voice_selection_mode` một mình không thỏa `is_auto_multi_speaker_state` | ❌ Thiếu marker công khai |
+| Full-duration code deploy thì chắc chắn chạy | Diagnostic thật sau pending vẫn chọn normalized + `126.505s`, nên nhánh exact Multi không chạy | ❌ Code có nhưng route sai |
+| Cần sửa engine acoustic | Chỉ thêm marker lane làm diagnostic đổi sang original + `133.375s` và acoustic PASS | ✅ Engine giữ nguyên |
+
+Correction là một field whitelist, áp dụng cho mọi Auto Multi state, không chứa
+fixture/job/k. Exact-job script chỉ là CAS recovery cho live đã consumed marker.

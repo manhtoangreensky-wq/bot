@@ -233,3 +233,27 @@ state, files, PRs, jobs, provider receipts or wallet evidence into PayOS work.
   prior marker; duplicate and charge/output/duration/word mutation are no-op.
 - Next: final compile/docs/diff → one follow-up PR/deploy → one same-job
   continuation. No upload/Confirm/new job/old command.
+
+## Pending Auto Multi lane marker closeout — 05/09/2026
+
+- PR `#996` merged/deployed exact
+  `3f87f5e4184c8b4753923f0227caeb8b7de3b649`; deploy `33954073514`
+  SUCCESS `4m08s`. Same-job continuation consumed full-duration marker but
+  again failed with `fixed_vocal_speaker_count_unstable`, no downstream/output,
+  `charged_xu=0`.
+- Full production-boundary diagnostic with real `set_video_dubbing_pending()`
+  captured the actual command: normalized source + `-t 126.505`. Root is the
+  pending whitelist: it persists `voice_selection_mode` but omits
+  `auto_speaker_lane`. After the pending write, state is no longer recognized as
+  Auto Multi, so original-source and full-duration branches never execute.
+- One-line production correction adds `auto_speaker_lane` to the existing
+  pending whitelist. No engine/threshold/provider/translation/TTS/mux change.
+- Causal diagnostic after only that candidate change captures original source +
+  `-t 133.375` and reaches acoustic PASS before the intentional translation
+  stop. Before candidate it captured normalized + `-t 126.505` and failed.
+- TDD real pending store RED: `KeyError auto_speaker_lane`; GREEN `1 passed`.
+  Context + marker focused `7 passed`. New marker is
+  `auto_multi_pending_lane_repair_used`; attempts remain `4/3`, prior markers
+  stay true, duplicate/mutation no-op.
+- Next: full gate/compile → one follow-up PR/deploy → same job once → artifact.
+- Full Auto Multi gate after the final marker is `350 passed`.

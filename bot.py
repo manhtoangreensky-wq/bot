@@ -233018,7 +233018,7 @@ def set_video_dubbing_pending(user_id, step: str, **fields) -> dict:
             "source_ref", "subtitle_ref", "source_subtitle_ref", "translated_subtitle_ref",
             "translated_subtitle_target_language", "translated_subtitle_source_hash",
             "speaker_sidecar_path", "speaker_sidecar_sha256",
-            "voice_selection_mode", "auto_exact_receipt_version",
+            "voice_selection_mode", "auto_speaker_lane", "auto_exact_receipt_version",
             "auto_exact_media_sha256", "auto_exact_subtitle_sha256",
             "auto_exact_sidecar_sha256", "auto_exact_timeline_signature",
             "auto_exact_actual_billable_words", "auto_exact_actual_auto_xu",
