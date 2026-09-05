@@ -201,3 +201,35 @@ state, files, PRs, jobs, provider receipts or wallet evidence into PayOS work.
   script invocation → observe through MP4 + exactly one Telegram video and one
   receipt. No upload/Confirm/new job/old command; Owner provider authority is
   limited to this job and `charged_xu=0`.
+
+## Full original media-duration correction after PR #995 LIVE RED
+
+- PR `#995` merged as `f4fe665388715df276081aab999598f36ff07386`;
+  deploy run `33948594192` SUCCESS in `3m52s`; bot checkout exact SHA, tracked
+  tree clean, bot/web/nginx active, model preflight PASS on CPU with hash
+  `9fea6516...056a1`.
+- Setup-only unit without `PYTHONPATH` exited before importing `bot`; marker,
+  provider, job and wallet deltas were `0`. Actual unit invocation
+  `614e31ec478742a1a28bfafb045da420` consumed the runtime-budget marker, reached
+  `35%`, then terminalized `failed_no_charge` before translation/TTS/mux with
+  the newly preserved cause `fixed_vocal_speaker_count_unstable`; Xu stayed `0`.
+- Root reproduced exactly: strict words end at `126.505s`; recovery state has
+  no media duration before prepare, so `_extract_subdub_auto_pcm()` used last
+  cue end and cut original PCM to `126.505s`. That PCM reproduces the same
+  failure in `115.134s`. Full original PCM is `133.37542s` and three consecutive
+  runs PASS `k=5/37 units` in `121.628s`, `116.797s`, and `130.717s`.
+- Minimal generic correction: only exact Auto Multi probes the selected original
+  source with ffprobe and uses the full media duration for PCM extraction.
+  Non-Multi source priority and duration remain unchanged; no fixture/job/k
+  condition exists in the engine.
+- Core RED/GREEN: `1 failed` because no original-media probe occurred, then
+  `5 passed` covering full duration, probe fail-closed, original-over-normalized,
+  stereo contract, and non-Multi unchanged. Fresh Auto Multi regression `345 passed`; exact-two
+  `37 passed`; real resource/model gate `5 passed in 255.02s`; multi-language
+  preservation for `vi/ja/en/ko/zh` remains inside the green suite.
+- New exact same-job marker:
+  `auto_multi_acoustic_full_media_duration_repair_used`; current production
+  payload candidate evaluates `true`. It preserves attempts `4/3` and every
+  prior marker; duplicate and charge/output/duration/word mutation are no-op.
+- Next: final compile/docs/diff → one follow-up PR/deploy → one same-job
+  continuation. No upload/Confirm/new job/old command.

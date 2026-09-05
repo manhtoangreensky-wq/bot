@@ -294,6 +294,23 @@ baseline-equivalent and not an Auto Multi regression.
   GREEN `5 passed`; Auto Multi `338 passed`; exact-two `37 passed`; resource
   `5 passed in 255.84s`; full compile/diff-check exit `0`.
 
+### Task 5D: Full original media-duration correction — 05/09/2026
+
+- [x] PR `#995` merged/deployed exact `f4fe6653`; same-job invocation reached
+  `35%` then emitted the now-visible `fixed_vocal_speaker_count_unstable` before
+  translation/TTS/mux, `charged_xu=0`.
+- [x] Reproduce the exact boundary: strict last word `126.505s`; original media
+  `133.37542s`; truncated PCM fails in `115.134s`; full PCM passes three
+  consecutive runs in `121.628/116.797/130.717s` with unchanged `k=5/37`.
+- [x] TDD the generic fix: exact Auto Multi probes its selected original source
+  and extracts full media duration. Non-Multi stays unchanged; no exact SHA,
+  job, fixture duration or expected speaker count exists in production.
+- [x] Add one new exact-job CAS marker for this measured live RED; retain every
+  prior marker and attempts `4/3`; duplicate/mutation/CAS loser no-op.
+- [x] Fresh gates: PCM `5 passed`; Auto Multi `345 passed`; exact-two `37
+  passed`; real resource `5 passed in 255.02s`; target language preservation
+  covers `vi/ja/en/ko/zh`.
+
 ### Task 6: One optimized release
 
 - [x] Update measured counts in the resume handoff, blackbox state, current

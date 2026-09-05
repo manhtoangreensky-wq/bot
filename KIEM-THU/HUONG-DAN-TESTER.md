@@ -156,3 +156,8 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
     cue→speaker. Nếu timeout phải thấy `acoustic_runtime_timeout`; nếu engine
     fail `fixed_vocal_*` phải giữ đúng mã đó, không chấp nhận
     `acoustic_failure_unknown`.
+27. Kiểm duration nguồn acoustic tách khỏi speech timeline. Với fixture, lời
+    cuối kết thúc `126.505s` nhưng original media dài `133.37542s`; command
+    extract phải dùng full media duration. FAIL nếu PCM dừng ở cue cuối, kể cả
+    khi đúng original file. Chạy comparator non-Multi để chắc lane khác không bị
+    probe/đổi duration.
