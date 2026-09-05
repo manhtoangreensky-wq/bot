@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import html
 import json
 import math
 import os
@@ -70,6 +71,220 @@ class _RecoveryMessage:
         )
 
 
+def _workspace_artifact_lineage(current: dict, workspace: str, path: str) -> bool:
+    """Validate a compact workspace manifest when the root failure snapshot lost fields."""
+
+    try:
+        root = Path(str(workspace or "").strip()).resolve(strict=True)
+        artifact = Path(str(path or "").strip()).resolve(strict=True)
+        manifest_path = (root / "manifest.json").resolve(strict=True)
+        cache_path = (root / "auto_exact_cache.json").resolve(strict=True)
+        sidecar_path = (root / "speaker_cast.sidecar.json").resolve(strict=True)
+        if any(candidate.parent != root for candidate in (
+            artifact,
+            manifest_path,
+            cache_path,
+            sidecar_path,
+        )):
+            return False
+        if any(
+            candidate.stat().st_size > 2 * 1024 * 1024
+            for candidate in (manifest_path, cache_path, sidecar_path)
+        ):
+            return False
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        cache = json.loads(cache_path.read_text(encoding="utf-8"))
+        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    except (OSError, RuntimeError, TypeError, ValueError, json.JSONDecodeError):
+        return False
+    if not isinstance(manifest, dict) or not isinstance(cache, dict) or not isinstance(sidecar, dict):
+        return False
+    manifest_delivery = manifest.get("delivery")
+    manifest_input = manifest.get("input_save")
+    acoustic = sidecar.get("acoustic")
+    service = app.auto_multi_speaker.subdub_multi_speaker_embedding_onnx
+    if not isinstance(manifest_delivery, dict) or not isinstance(manifest_input, dict) or not isinstance(acoustic, dict):
+        return False
+    current_input = current.get("input_save")
+    if not isinstance(current_input, dict):
+        current_input = {}
+    expected_unique_id = str(current_input.get("file_unique_id") or "").strip()
+    processing_sha256 = str(
+        current_input.get("processing_source_sha256") or ""
+    ).strip().lower()
+    acoustic_speaker_count = acoustic.get("speaker_count")
+    acoustic_word_count = acoustic.get("word_count")
+    try:
+        source_subtitle_path = (
+            root / str(cache.get("source_file") or "")
+        ).resolve(strict=True)
+        translated_subtitle_path = (
+            root / str(cache.get("translated_file") or "")
+        ).resolve(strict=True)
+        if (
+            source_subtitle_path.parent != root
+            or translated_subtitle_path.parent != root
+            or source_subtitle_path.stat().st_size > 2 * 1024 * 1024
+            or translated_subtitle_path.stat().st_size > 2 * 1024 * 1024
+        ):
+            return False
+        source_subtitle = source_subtitle_path.read_text(encoding="utf-8")
+        translated_subtitle = translated_subtitle_path.read_text(encoding="utf-8")
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return False
+    return bool(
+        manifest.get("job_id") == JOB_ID
+        and str(manifest.get("user_id") or "") == str(OWNER_ID)
+        and str(manifest.get("chat_id") or "") == str(OWNER_ID)
+        and manifest.get("mode") == "subtitle_plus_dub"
+        and manifest.get("status") == "failed"
+        and manifest.get("terminal_state") == "failed_no_charge"
+        and manifest.get("output_sent_once") is False
+        and str(Path(str(manifest.get("final_mp4") or "")).resolve()) == str(artifact)
+        and all(manifest_delivery.get(field) == 0 for field in ("video", "video_document", "audio", "documents"))
+        and str(manifest_input.get("file_unique_id") or "").strip() == expected_unique_id
+        and bool(expected_unique_id)
+        and str(manifest_input.get("original_source_sha256") or "").strip().lower() == SOURCE_SHA256
+        and str(current_input.get("original_source_sha256") or "").strip().lower() == SOURCE_SHA256
+        and len(processing_sha256) == 64
+        and str(manifest_input.get("processing_source_sha256") or "").strip().lower()
+        == processing_sha256
+        and str(sidecar.get("media_sha256") or "").strip().lower()
+        == processing_sha256
+        and cache.get("target_language") == "English"
+        and str(cache.get("source_subtitle_sha256") or "").strip().lower()
+        == str(sidecar.get("subtitle_sha256") or "").strip().lower()
+        and str(cache.get("source_subtitle_sha256") or "").strip().lower()
+        == app._subdub_auto_text_sha256(source_subtitle)
+        and str(cache.get("translated_subtitle_sha256") or "").strip().lower()
+        == app._subdub_auto_text_sha256(translated_subtitle)
+        and acoustic.get("algorithm_version") == service.FIXED_VOCAL_ALGORITHM_VERSION
+        and acoustic.get("backend") == "local_wespeaker_resnet34_fixed_vocal"
+        and acoustic.get("model_sha256") == service.MODEL_SHA256
+        and type(acoustic_speaker_count) is int
+        and 3 <= acoustic_speaker_count <= 8
+        and type(acoustic_word_count) is int
+        and acoustic_word_count > 0
+        and acoustic.get("word_coverage_count") == acoustic_word_count
+        and acoustic.get("stability_pass") is True
+    )
+
+
+def _workspace_receipt_evidence(current: dict) -> dict:
+    """Rebuild bounded public receipt values from the exact retained workspace."""
+
+    workspace = str(current.get("workspace") or "").strip()
+    path = str(current.get("canonical_final_artifact_path") or "").strip()
+    if not _workspace_artifact_lineage(current, workspace, path):
+        return {}
+    try:
+        root = Path(workspace)
+        manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+        sidecar = json.loads(
+            (root / "speaker_cast.sidecar.json").read_text(encoding="utf-8")
+        )
+        translated = (root / "auto_exact_translated.srt").read_text(
+            encoding="utf-8"
+        )
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    acoustic = sidecar.get("acoustic")
+    manifest_input = manifest.get("input_save")
+    if not isinstance(acoustic, dict) or not isinstance(manifest_input, dict):
+        return {}
+    segments = app.video_dubbing_segments_from_subtitle(translated)
+    selected_text = "\n".join(
+        str(item.get("text") or "").strip()
+        for item in segments
+        if isinstance(item, dict) and str(item.get("text") or "").strip()
+    )
+    if not segments or not selected_text:
+        return {}
+    billable_words = app.subdub_auto_word_pricing.count_billable_words(
+        selected_text
+    )
+    auto_xu = app.subdub_auto_word_pricing.auto_voice_component_xu(
+        billable_words
+    )
+    subtitle_chars = len(app.video_dubbing_plain_script(translated))
+    invoice = app._video_dubbing_manual_invoice_breakdown(
+        {
+            "mode": "subtitle_plus_dub",
+            "video_processing_mode": "subtitle_plus_dub",
+            "target_language": "English",
+            "billing_chars": subtitle_chars,
+        }
+    )
+    subtitle_xu = int(invoice.get("translation_xu") or 0)
+    speaker_count = acoustic.get("speaker_count")
+    raw_speaker_count = acoustic.get("raw_speaker_count")
+    if (
+        type(billable_words) is not int
+        or billable_words <= 0
+        or type(auto_xu) is not int
+        or auto_xu <= 0
+        or subtitle_chars <= 0
+        or subtitle_xu <= 0
+        or type(speaker_count) is not int
+        or not 3 <= speaker_count <= 8
+        or type(raw_speaker_count) is not int
+        or not speaker_count <= raw_speaker_count <= 8
+    ):
+        return {}
+    balance = app._subdub_auto_read_balance_xu(OWNER_ID)
+    if type(balance) is not int or balance < 0:
+        return {}
+    source_name = str(manifest_input.get("original_filename") or "").strip()
+    if not source_name:
+        source_name = os.path.basename(str(manifest.get("source") or ""))
+    if not source_name:
+        return {}
+    return {
+        "target_language": "English",
+        "source_file_name": source_name[:180],
+        "original_audio_volume_percent": 40,
+        "dubbed_voice_volume_percent": 150,
+        "auto_detected_speaker_count": speaker_count,
+        "auto_distinct_voice_count": speaker_count,
+        "multi_acoustic_raw_speaker_count": raw_speaker_count,
+        "multi_acoustic_speaker_count": speaker_count,
+        "multi_acoustic_word_count": int(acoustic.get("word_count") or 0),
+        "multi_acoustic_word_coverage_count": int(
+            acoustic.get("word_coverage_count") or 0
+        ),
+        "auto_exact_actual_billable_words": billable_words,
+        "auto_exact_actual_auto_xu": auto_xu,
+        "auto_exact_actual_subtitle_xu": subtitle_xu,
+        "auto_exact_actual_total_xu": auto_xu + subtitle_xu,
+        "final_price_xu": auto_xu + subtitle_xu,
+        "account_balance_xu": balance,
+    }
+
+
+def _existing_artifact_receipt_text(current: dict) -> str:
+    evidence = _workspace_receipt_evidence(current)
+    if not evidence:
+        return ""
+    return (
+        "✅ <b>Đã hoàn tất</b>\n\n"
+        f"• Mã xử lý: <code>#{PUBLIC_CODE}</code>\n"
+        "• Kết quả: <b>Video combo phụ đề - lồng tiếng</b>\n"
+        f"• Ngôn ngữ dịch: <b>{html.escape(str(evidence['target_language']))}</b>\n"
+        "• Loại lồng tiếng: <b>Tự động nhiều giọng</b>\n"
+        f"• Tệp nguồn: <b>{html.escape(str(evidence['source_file_name']))}</b>\n"
+        f"• Số người nói nhận diện: <b>{evidence['auto_detected_speaker_count']}</b>\n"
+        f"• Số giọng lồng tiếng đã dùng: <b>{evidence['auto_distinct_voice_count']}</b>\n"
+        f"• Âm gốc: <b>{evidence['original_audio_volume_percent']}%</b>\n"
+        f"• Lồng tiếng: <b>{evidence['dubbed_voice_volume_percent']}%</b>\n"
+        f"• Giá phụ đề: <b>{evidence['auto_exact_actual_subtitle_xu']} Xu</b>\n"
+        f"• Giá lồng tiếng: <b>{evidence['auto_exact_actual_auto_xu']} Xu</b>\n"
+        f"• Giá: <b>{evidence['auto_exact_actual_total_xu']} Xu</b>\n"
+        "• Đã trừ: <b>0 Xu</b>\n"
+        f"• Tài khoản còn: <b>{evidence['account_balance_xu']} Xu</b>\n"
+        "• Trạng thái: <b>Đã gửi video</b>"
+    )
+
+
 def _existing_artifact_delivery_candidate(current: dict) -> str:
     """Accept only the exact unsent, validated MP4 from the consumed recovery."""
 
@@ -77,7 +292,7 @@ def _existing_artifact_delivery_candidate(current: dict) -> str:
         return ""
     recovery = current.get("auto_multi_recovery")
     validation = current.get("output_validation")
-    if type(recovery) is not dict or type(validation) is not dict:
+    if type(validation) is not dict:
         return ""
     workspace = str(current.get("workspace") or "").strip()
     path = str(current.get("canonical_final_artifact_path") or "").strip()
@@ -103,6 +318,15 @@ def _existing_artifact_delivery_candidate(current: dict) -> str:
         "receipt_message_id",
         "subdub_success_message_id",
     )
+    lineage = _workspace_artifact_lineage(current, workspace, resolved_path)
+    recovery_selection_valid = bool(
+        isinstance(recovery, dict)
+        and recovery.get("owner_confirmed_paid") is True
+        and str(recovery.get("source_sha256") or "").lower() == SOURCE_SHA256
+        and recovery.get("target_language") == "English"
+        and recovery.get("original_volume_percent") == 40
+        and recovery.get("dub_volume_percent") == 150
+    )
     return (
         resolved_path
         if (
@@ -112,15 +336,24 @@ def _existing_artifact_delivery_candidate(current: dict) -> str:
             and str(current.get("user_id") or "") == str(OWNER_ID)
             and str(current.get("chat_id") or current.get("user_id") or "")
             == str(OWNER_ID)
-            and str(current.get("job_key") or "").endswith(
-                "|subtitle_plus_dub|auto_multi_speaker"
+            and (
+                str(current.get("job_key") or "").endswith(
+                    "|subtitle_plus_dub|auto_multi_speaker"
+                )
+                or lineage
             )
             and current.get("status") == "failed_no_charge"
             and current.get("terminal_state") == "failed_no_charge"
-            and current.get(SPEECH_SUPPORTED_REPAIR_MARKER) is True
             and current.get(DELIVERY_REPAIR_MARKER) is not True
-            and current.get("auto_multi_speech_supported_repair_authority")
-            == "owner_confirmed_same_job_speech_supported_speakers"
+            and (
+                (
+                    current.get(SPEECH_SUPPORTED_REPAIR_MARKER) is True
+                    and current.get(DELIVERY_REPAIR_MARKER) is not True
+                    and current.get("auto_multi_speech_supported_repair_authority")
+                    == "owner_confirmed_same_job_speech_supported_speakers"
+                )
+                or lineage
+            )
             and current.get("last_error_stage") == "delivery"
             and current.get("last_technical_error")
             == "missing_valid_delivered_mp4"
@@ -129,7 +362,7 @@ def _existing_artifact_delivery_candidate(current: dict) -> str:
             and current.get("delivery_attempted") is True
             and current.get("delivery_attempts") == 1
             and current.get("delivery_attempt_uncertain") is not True
-            and current.get("output_sent") is False
+            and current.get("output_sent") in (False, None)
             and current.get("final_mp4_delivered") is False
             and current.get("terminal_public_outcome_sent") is False
             and current.get("public_error_sent") is False
@@ -137,11 +370,7 @@ def _existing_artifact_delivery_candidate(current: dict) -> str:
             and type(current.get("charged_xu")) is int
             and current.get("charged_xu") == 0
             and current.get("charge_status") == "not_charged"
-            and recovery.get("owner_confirmed_paid") is True
-            and str(recovery.get("source_sha256") or "").lower() == SOURCE_SHA256
-            and recovery.get("target_language") == "English"
-            and recovery.get("original_volume_percent") == 40
-            and recovery.get("dub_volume_percent") == 150
+            and (recovery_selection_valid or lineage)
             and safety.get("allowed") is True
             and app._workspace_path_is_descendant(
                 resolved_path,
@@ -190,8 +419,32 @@ def claim_existing_artifact_delivery() -> dict:
                 "claimed": False,
                 "reason": "existing_artifact_delivery_not_allowed",
             }
+        lineage = _workspace_artifact_lineage(
+            current,
+            str(current.get("workspace") or ""),
+            path,
+        )
+        receipt_evidence = _workspace_receipt_evidence(current) if lineage else {}
+        source_unique_id = str(
+            (current.get("input_save") or {}).get("file_unique_id") or ""
+        ).strip()
+        job_key = str(current.get("job_key") or "").strip()
+        if not job_key and source_unique_id and receipt_evidence:
+            job_key = (
+                f"{OWNER_ID}|{OWNER_ID}|{source_unique_id}|"
+                "subtitle_plus_dub|auto_multi_speaker"
+            )
+        if not job_key.endswith("|subtitle_plus_dub|auto_multi_speaker"):
+            conn.rollback()
+            return {
+                "ok": False,
+                "claimed": False,
+                "reason": "existing_artifact_job_key_missing",
+            }
         current.update(
             {
+                **receipt_evidence,
+                "job_key": job_key,
                 "status": "retrying_delivery",
                 "terminal_state": "",
                 "lifecycle_state": "delivery",
@@ -302,7 +555,11 @@ async def deliver_existing_artifact(telegram_bot) -> dict:
     if panel is None:
         raise RuntimeError("existing_artifact_terminal_panel_unconfirmed")
     latest = dict(app.SUBTITLE_DUB_PIPELINE_JOBS.get(job_key) or latest)
-    receipt_text = app.video_dubbing_receipt_text(latest, latest, "vi")
+    receipt_text = _existing_artifact_receipt_text(latest)
+    if not receipt_text:
+        receipt_text = app.video_dubbing_receipt_text(latest, latest, "vi")
+    if not receipt_text:
+        raise RuntimeError("existing_artifact_receipt_evidence_invalid")
     receipt = await app.subdub_send_success_receipt_once(
         message,
         job_key,
@@ -1163,6 +1420,7 @@ def claim_same_attempt(
             )
             and current.get("status") == "failed_no_charge"
             and current.get("terminal_state") == "failed_no_charge"
+            and current.get(DELIVERY_REPAIR_MARKER) is not True
             and current.get("auto_multi_recovery_attempt_count") == 4
             and current.get("auto_multi_recovery_correction_attempt_count") == 3
             and current.get("auto_multi_acoustic_recovery_used") is True

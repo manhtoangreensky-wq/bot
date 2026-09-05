@@ -713,3 +713,4 @@ fixture chỉ là regression evidence, không phải điều kiện điều khi�
 | Recovery command có `reply_text` là đủ để dùng pipeline | Pipeline tạo MP4 validated nhưng delivery engine cần `reply_video`/`reply_document`; không có method thì không hề gọi Telegram media API | ❌ Không còn đúng |
 | Delivery lỗi phải chạy lại ASR/TTS/mux | MP4 `18,171,909` bytes đã H.264/AAC PASS; chỉ cần CAS delivery-only và chống replay provider | ❌ Tốn phí và tạo rủi ro trùng |
 | Có MP4 trên đĩa đồng nghĩa đã LIVE PASS | Chưa có Telegram video message ID và receipt ID thì vẫn chưa PASS | ✅ Giữ fail-closed |
+| Root job luôn giữ đủ marker/selection sau terminal failure | Failure debug snapshot có thể chỉ giữ artifact/output fields và làm mất job-key/marker | ❌ Phải đối chiếu DB + manifest + cache + sidecar + SRT trước delivery-only |

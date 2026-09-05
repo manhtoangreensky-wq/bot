@@ -1308,3 +1308,8 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
 - Correction chỉ thêm Bot media adapter và one-shot delivery-only CAS cho MP4
   đã validated. Nó không chạy lại provider/pipeline, không tạo job, và giữ thứ
   tự bắt buộc: một MP4 rồi một receipt, không file phụ tự động.
+- Deploy `f3ca9df8` vẫn dừng an toàn trước Telegram vì failure snapshot đã rút
+  gọn mất job-key/selection/marker. Follow-up chỉ nhận lineage khi DB,
+  manifest, English cache, fixed-vocal v3 sidecar và nội dung hai SRT cùng hash;
+  sai một trong `10` mutation đều bị chặn. Receipt được tính lại từ dữ liệu thật:
+  `189` từ, `95 Xu` lồng tiếng + `86 Xu` phụ đề = `181 Xu`; Owner vẫn `0 Xu`.

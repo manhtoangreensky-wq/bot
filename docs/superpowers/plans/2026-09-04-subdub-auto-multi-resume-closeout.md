@@ -391,6 +391,19 @@ baseline-equivalent and not an Auto Multi regression.
   already exit `0`), run it once, then audit the exact video
   and receipt IDs, delivery order, companion-file count and finance deltas.
 
+#### Preflight after PR #999 deploy
+
+- [x] Deploy `f3ca9df871bc266a89346739ce9d877c6756bd37` via run
+  `33979562459` SUCCESS; exact checkout/services/tracked diff verified.
+- [x] Stop before Telegram because root failure snapshot lost job-key/selection/
+  marker fields; no side effect occurred.
+- [x] TDD a bounded lineage reconstruction from DB + manifest + cache + sidecar
+  + actual SRT hashes. It reconstructs only the exact job key, never a job.
+- [x] Recalculate receipt from the retained English SRT with current pricing:
+  `189` words, `95 + 86 = 181 Xu`, charged `0`, wallet `200`.
+- [x] Verify ten lineage mutations fail closed and full recovery is `149 passed`.
+- [ ] Ship the follow-up and execute one delivery-only invocation.
+
 ### Task 8: Artifact completion audit
 
 - [ ] Acoustic: `speaker_count` is `3..8`; stable acoustic evidence; distinct voice IDs count equals speaker count; no forced pairing or expected-count hint.

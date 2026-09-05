@@ -334,3 +334,30 @@ state, files, PRs, jobs, provider receipts or wallet evidence into PayOS work.
 
 Current next action: commit/push/PR → exact-SHA deploy → one delivery-only
 execution → verify exactly one MP4 then one receipt and zero financial delta.
+
+### Deploy `f3ca9df8` preflight exposed lost-root-lineage guard
+
+- PR `#999` merged as `f3ca9df871bc266a89346739ce9d877c6756bd37`;
+  deploy run `33979562459` SUCCESS in `5m36s`; checkout exact, tracked diff
+  `0`, bot/web/nginx active.
+- Pre-delivery readback correctly stopped before Telegram: the generic failure
+  snapshot retained the validated MP4 but dropped `job_key`, selection and the
+  consumed speech-supported marker from the root job. The first delivery-only
+  candidate therefore returned false; no delivery marker, Telegram message,
+  receipt, provider call, job or wallet mutation occurred.
+- Durable workspace authority remains complete and mutually linked: manifest
+  exact job/user/chat/no-delivery/source SHA; cache English plus source and
+  translated SRT hashes; sidecar fixed-vocal v3 model/processing SHA, raw `5`,
+  speech-supported `4`, `145/145`; MP4 exact `18,171,909` bytes and SHA
+  `07fdfe65...43c7f0`.
+- Follow-up local correction reconstructs only the lost `job_key` from the
+  exact `file_unique_id`, requires DB/manifest/cache/sidecar/SRT content hashes
+  to agree, and recalculates receipt price using current source functions:
+  `189` English words, dubbing `95 Xu`, subtitle/translation `86 Xu`, total
+  `181 Xu`, Owner charge `0`, wallet `200`.
+- TDD: lost-lineage candidate RED `1 failed`; GREEN `1 passed`; lost-job-key
+  CAS RED `1 failed`; GREEN included in focused lineage; ten metadata mutation
+  guards PASS; full recovery now `149 passed`.
+
+Current next action: compile/diff → amend/push follow-up commit → PR/deploy →
+one delivery-only invocation; never replay ASR/translation/TTS/mux.

@@ -2515,6 +2515,225 @@ def test_speech_supported_delivery_claim_is_exact_cas_and_never_reprocesses(
     assert stored_after_second == stored_after_first
 
 
+def test_delivery_candidate_reconstructs_lost_recovery_lineage_from_workspace_manifest(
+    tmp_path,
+    monkeypatch,
+):
+    rearm = importlib.import_module("scripts.recover_subdub_fixed_vocal_v2")
+    workspace = tmp_path / ACOUSTIC_JOB_ID
+    workspace.mkdir()
+    artifact = workspace / "final.mp4"
+    artifact.write_bytes(b"validated-multi-mp4")
+    source_subtitle = "1\n00:00:00,000 --> 00:00:01,000\nXin chao\n"
+    translated_subtitle = "1\n00:00:00,000 --> 00:00:01,000\nHello world\n"
+    source_subtitle_sha256 = bot._subdub_auto_text_sha256(source_subtitle)
+    translated_subtitle_sha256 = bot._subdub_auto_text_sha256(
+        translated_subtitle
+    )
+    processing_source_sha256 = "b" * 64
+    (workspace / "manifest.json").write_text(
+        json.dumps(
+            {
+                "job_id": ACOUSTIC_JOB_ID,
+                "user_id": OWNER_ID,
+                "chat_id": OWNER_ID,
+                "mode": "subtitle_plus_dub",
+                "status": "failed",
+                "terminal_state": "failed_no_charge",
+                "output_sent_once": False,
+                "final_mp4": str(artifact),
+                "delivery": {"video": 0, "video_document": 0, "audio": 0, "documents": 0},
+                "input_save": {
+                    "file_unique_id": "AgADeSIAAh1tkVQ",
+                    "original_filename": "test many speakers.mp4",
+                    "original_source_sha256": SOURCE_SHA256,
+                    "processing_source_sha256": processing_source_sha256,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (workspace / "auto_exact_cache.json").write_text(
+        json.dumps(
+            {
+                "target_language": "English",
+                "source_file": "auto_exact_source.srt",
+                "translated_file": "auto_exact_translated.srt",
+                "source_subtitle_sha256": source_subtitle_sha256,
+                "translated_subtitle_sha256": translated_subtitle_sha256,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (workspace / "auto_exact_source.srt").write_text(
+        source_subtitle,
+        encoding="utf-8",
+    )
+    (workspace / "auto_exact_translated.srt").write_text(
+        translated_subtitle,
+        encoding="utf-8",
+    )
+    (workspace / "speaker_cast.sidecar.json").write_text(
+        json.dumps(
+            {
+                "media_sha256": processing_source_sha256,
+                "subtitle_sha256": source_subtitle_sha256,
+                "acoustic": {
+                    "algorithm_version": ACOUSTIC_ALGORITHM_VERSION,
+                    "backend": "local_wespeaker_resnet34_fixed_vocal",
+                    "model_sha256": ACOUSTIC_MODEL_SHA256,
+                    "speaker_count": 4,
+                    "raw_speaker_count": 5,
+                    "word_count": 145,
+                    "word_coverage_count": 145,
+                    "stability_pass": True,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    job = {
+        "internal_job_id": ACOUSTIC_JOB_ID,
+        "job_id": ACOUSTIC_JOB_ID,
+        "public_code": ACOUSTIC_PUBLIC_CODE,
+        "user_id": OWNER_ID,
+        "chat_id": OWNER_ID,
+        "status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "mode": "subtitle_plus_dub",
+        "mapped_mode": "subtitle_plus_dub",
+        "workspace": str(workspace),
+        "input_save": {
+            "file_unique_id": "AgADeSIAAh1tkVQ",
+            "original_source_sha256": SOURCE_SHA256,
+            "processing_source_sha256": processing_source_sha256,
+        },
+        "canonical_final_artifact_path": str(artifact),
+        "canonical_final_artifact_bytes": artifact.stat().st_size,
+        "final_mp4_exists": True,
+        "final_mp4_validated": True,
+        "output_validated": True,
+        "output_validation": {
+            "ok": True,
+            "container": "mp4",
+            "video_codec": "h264",
+            "audio_codec": "aac",
+            "has_video": True,
+            "has_audio": True,
+            "size": artifact.stat().st_size,
+            "duration": 134.0,
+        },
+        "last_error_stage": "delivery",
+        "last_technical_error": "missing_valid_delivered_mp4",
+        "success_blocked_reason": "missing_valid_delivered_mp4",
+        "delivery_attempted": True,
+        "delivery_attempts": 1,
+        "output_sent": False,
+        "final_mp4_delivered": False,
+        "terminal_public_outcome_sent": False,
+        "public_error_sent": False,
+        "charged_xu": 0,
+        "charge_status": "not_charged",
+    }
+    monkeypatch.setattr(
+        rearm.app,
+        "subtitle_dub_workspace_path_safety",
+        lambda _workspace: {"allowed": True, "resolved_path": str(workspace)},
+    )
+    monkeypatch.setattr(
+        rearm.app,
+        "_subdub_auto_read_balance_xu",
+        lambda _owner_id: 200,
+    )
+
+    assert rearm._existing_artifact_delivery_candidate(job) == str(artifact)
+    receipt_evidence = rearm._workspace_receipt_evidence(job)
+    assert receipt_evidence["target_language"] == "English"
+    assert receipt_evidence["auto_detected_speaker_count"] == 4
+    assert receipt_evidence["auto_distinct_voice_count"] == 4
+    assert receipt_evidence["account_balance_xu"] == 200
+    assert receipt_evidence["auto_exact_actual_total_xu"] > 0
+    receipt_text = rearm._existing_artifact_receipt_text(job)
+    assert "Tự động nhiều giọng" in receipt_text
+    assert "Số người nói nhận diện: <b>4</b>" in receipt_text
+    assert "Đã trừ: <b>0 Xu</b>" in receipt_text
+    metadata_paths = {
+        "manifest": workspace / "manifest.json",
+        "cache": workspace / "auto_exact_cache.json",
+        "sidecar": workspace / "speaker_cast.sidecar.json",
+    }
+    metadata = {
+        name: json.loads(path.read_text(encoding="utf-8"))
+        for name, path in metadata_paths.items()
+    }
+    mutations = (
+        ("manifest", lambda value: value.update({"job_id": "wrong-job"})),
+        ("manifest", lambda value: value.update({"output_sent_once": True})),
+        ("manifest", lambda value: value["delivery"].update({"video": 1})),
+        (
+            "manifest",
+            lambda value: value["input_save"].update(
+                {"original_source_sha256": "0" * 64}
+            ),
+        ),
+        ("cache", lambda value: value.update({"target_language": "French"})),
+        (
+            "cache",
+            lambda value: value.update({"source_subtitle_sha256": "0" * 64}),
+        ),
+        ("sidecar", lambda value: value.update({"media_sha256": "0" * 64})),
+        (
+            "sidecar",
+            lambda value: value["acoustic"].update(
+                {"model_sha256": "0" * 64}
+            ),
+        ),
+        ("sidecar", lambda value: value["acoustic"].update({"speaker_count": 2})),
+        (
+            "sidecar",
+            lambda value: value["acoustic"].update(
+                {"word_coverage_count": 144}
+            ),
+        ),
+    )
+    for name, mutate in mutations:
+        changed = json.loads(json.dumps(metadata[name]))
+        mutate(changed)
+        metadata_paths[name].write_text(json.dumps(changed), encoding="utf-8")
+        assert rearm._existing_artifact_delivery_candidate(job) == ""
+        metadata_paths[name].write_text(
+            json.dumps(metadata[name]),
+            encoding="utf-8",
+        )
+    db_path = tmp_path / "lost-lineage-claim.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE system_settings (key TEXT PRIMARY KEY, value TEXT, note TEXT, updated_at TEXT, updated_by TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO system_settings(key,value,note,updated_at,updated_by) VALUES(?,?,?,?,?)",
+        (
+            f"engine_async_job:{ACOUSTIC_JOB_ID}",
+            json.dumps(job, ensure_ascii=False),
+            "fixture",
+            "2026-09-05 23:01:54",
+            str(OWNER_ID),
+        ),
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(rearm.app, "db_connect", lambda: sqlite3.connect(db_path))
+    monkeypatch.setattr(rearm.app, "ENGINE_ASYNC_MEMORY_JOBS", {})
+    monkeypatch.setattr(rearm.app, "SUBTITLE_DUB_PIPELINE_JOBS", {})
+
+    claimed = rearm.claim_existing_artifact_delivery()
+    assert claimed["claimed"] is True
+    assert claimed["job"]["job_key"].endswith(
+        "|subtitle_plus_dub|auto_multi_speaker"
+    )
+    assert claimed["job"]["auto_speaker_lane"] == "multi"
+
+
 def test_delivery_only_path_sends_one_video_then_one_receipt_without_pipeline(
     monkeypatch,
 ):
@@ -2584,6 +2803,11 @@ def test_delivery_only_path_sends_one_video_then_one_receipt_without_pipeline(
         rearm.app,
         "video_dubbing_receipt_text",
         lambda *_args, **_kwargs: "receipt",
+    )
+    monkeypatch.setattr(
+        rearm,
+        "_existing_artifact_receipt_text",
+        lambda _job: "receipt",
     )
 
     async def finalize_panel(
