@@ -839,6 +839,60 @@ def test_local_acoustic_helper_runs_off_loop_and_cleans_pcm(tmp_path):
     assert not pcm_path.exists()
 
 
+@pytest.mark.parametrize(
+    ("duration_seconds", "expected_timeout_seconds"),
+    [
+        (1.0, 300.0),
+        (75.0, 300.0),
+        (133.37542, 534.0),
+        (300.0, 1200.0),
+    ],
+)
+def test_auto_multi_acoustic_timeout_scales_with_supported_video_duration(
+    duration_seconds,
+    expected_timeout_seconds,
+):
+    multi_module = _multi_module()
+
+    assert multi_module.acoustic_timeout_seconds_for_duration(duration_seconds) == (
+        expected_timeout_seconds
+    )
+
+
+def test_local_acoustic_helper_uses_duration_scaled_deadline(tmp_path, monkeypatch):
+    multi_module = _multi_module()
+    pcm_path = tmp_path / "duration-scaled.pcm"
+    exact_duration = 133.37542
+    frame_count = round(exact_duration * 44_100)
+    with pcm_path.open("wb") as handle:
+        handle.truncate(frame_count * 4)
+    captured = {}
+
+    def diarize(_path, _words, *, deadline_monotonic, **_kwargs):
+        captured["budget"] = deadline_monotonic - time.monotonic()
+        return {"ok": True, "status": "PASS", "segments": [{"speaker_id": "x"}]}
+
+    real_wait_for = asyncio.wait_for
+
+    async def capture_wait_for(awaitable, timeout):
+        captured["timeout"] = timeout
+        return await real_wait_for(awaitable, timeout)
+
+    monkeypatch.setattr(multi_module.asyncio, "wait_for", capture_wait_for)
+    result = asyncio.run(
+        multi_module.run_local_acoustic_diarization_off_event_loop(
+            pcm_path,
+            [{"index": 0, "word": "hello", "start": 0.0, "end": 0.2}],
+            duration_seconds=exact_duration,
+            acoustic_diarize=diarize,
+        )
+    )
+
+    assert result["ok"] is True
+    assert captured["timeout"] == pytest.approx(534.0, abs=0.05)
+    assert captured["budget"] == pytest.approx(534.0, abs=0.05)
+
+
 def test_local_acoustic_helper_timeout_drains_before_pcm_cleanup(tmp_path, monkeypatch):
     multi_module = _multi_module()
     pcm_path = tmp_path / "timeout.pcm"
@@ -853,8 +907,12 @@ def test_local_acoustic_helper_timeout_drains_before_pcm_cleanup(tmp_path, monke
         worker_exited.set()
         raise speaker_cast.AutoCastManualRequired()
 
-    monkeypatch.setattr(multi_module, "ACOUSTIC_WALL_TIMEOUT_SECONDS", 0.02)
-    with pytest.raises(speaker_cast.AutoCastManualRequired):
+    monkeypatch.setattr(
+        multi_module,
+        "acoustic_timeout_seconds_for_duration",
+        lambda _duration: 0.02,
+    )
+    with pytest.raises(speaker_cast.AutoCastManualRequired) as raised:
         asyncio.run(
             multi_module.run_local_acoustic_diarization_off_event_loop(
                 pcm_path,
@@ -864,6 +922,7 @@ def test_local_acoustic_helper_timeout_drains_before_pcm_cleanup(tmp_path, monke
             )
         )
 
+    assert str(raised.value.__cause__) == "acoustic_runtime_timeout"
     assert worker_exited.is_set()
     assert observed["pcm_exists_at_exit"] is True
     assert not pcm_path.exists()

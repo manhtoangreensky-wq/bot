@@ -268,13 +268,41 @@ hard-coded exact-two SHA assertion. `origin/main` contains the same stale test,
 while both protected source files are byte-identical to `origin/main`; this is
 baseline-equivalent and not an Auto Multi regression.
 
+### Task 5C: Runtime-budget and variable-timeline closeout — 05/09/2026
+
+- [x] Capture two fresh strict timing-only variants without raw word text.
+  Both have `145` words; hashes are `8ad855ec...2737de8` and
+  `948b4f94...df42af`; exactly `3` rows differ by at most `80ms`.
+- [x] Run exact original-source acoustic with the actual timing: `k=5`, `37`
+  units, `178` embedding views, clusters `[9,18,26,25,11]`, speaker-unit
+  counts `[2,9,9,11,6]`, overlap/centroid `29/8`, `23` cues and complete five-
+  speaker coverage.
+- [x] Run the production async wrapper twice. Both variants PASS; measured wall
+  times are `247s` and `156s` for a `133.37542s` source. The old fixed `300s`
+  budget is therefore not a reliable policy across the supported `0..300s`
+  direct lane.
+- [x] TDD a generic measured-PCM timeout policy: floor `300s`,
+  `ceil(duration*4)`, cap `1200s`. No fixture hash, exact job, expected `k`,
+  codec or provider-label condition exists in production.
+- [x] Preserve bounded `acoustic_*` and `fixed_vocal_*` cause codes; timeout is
+  `acoustic_runtime_timeout`, so another failure cannot collapse to the same
+  unhelpful `acoustic_failure_unknown`.
+- [x] Add one exact-job CAS marker solely to permit the already-authorized
+  same-job continuation after deploy. Attempts stay `4/3`; every prior marker
+  stays true; duplicate and identity/charge/output/failure mutations are no-op.
+- [x] Evidence: RED `7 failed, 1 passed`; focused GREEN `8 passed`; marker
+  GREEN `5 passed`; Auto Multi `338 passed`; exact-two `37 passed`; resource
+  `5 passed in 255.84s`; full compile/diff-check exit `0`.
+
 ### Task 6: One optimized release
 
 - [x] Update measured counts in the resume handoff, blackbox state, current
   operations/original-vs-current docs, tester guide, and tester case; live PASS
   remains false.
 - [ ] Create one clean feature commit containing context handoff plus the exact marker.
-- [ ] Push one branch and create one PR reporting RED/GREEN, protected gates, resource gate, compile/diff, provider calls `0`, wallet mutations `0`.
+- [ ] Push one branch and create one PR reporting RED/GREEN, protected gates,
+  resource gate, compile/diff, exactly `2` authorized diagnostic Deepgram calls,
+  production job mutations `0`, and wallet mutations `0`.
 - [ ] Squash merge only when required CI is `SUCCESS` and merge state is `CLEAN`.
 - [ ] Wait exact-SHA deploy. Verify `/opt/toanaas/bot`, the actual SubDub runner, services, model/hash/license/CPU provider, and runtime SHA.
 

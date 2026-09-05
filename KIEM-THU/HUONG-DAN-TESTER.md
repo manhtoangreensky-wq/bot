@@ -149,3 +149,10 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
     video, speaker embedding dùng original hash-locked audio. FAIL nếu PCM acoustic
     lấy normalized copy đã resample; exact original fixture phải ra `k=5`. Lane
     khác và Auto 2-speaker giữ nguyên saved-source priority.
+26. Kiểm timeout Auto Multi bằng duration PCM thật, không theo tên/codec/fixture:
+    `1s` và `75s` dùng floor `300s`, `133.37542s` dùng `534s`, direct limit
+    `300s` dùng cap `1200s`. Chạy timing-only regression `145` words; provider
+    có thể lệch timestamp nhưng vẫn phải giữ coverage, `k=5` cho fixture và đủ
+    cue→speaker. Nếu timeout phải thấy `acoustic_runtime_timeout`; nếu engine
+    fail `fixed_vocal_*` phải giữ đúng mã đó, không chấp nhận
+    `acoustic_failure_unknown`.

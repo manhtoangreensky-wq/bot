@@ -653,3 +653,18 @@ sau khi correction được deploy; không tạo replacement job.
 | Dịch/TTS fail ở 5% | Deepgram đã PASS `145` words; failure nằm sau ASR và trước translation tại acoustic owner | ❌ UI terminal che stage thật |
 | Cần thay pipeline dịch/TTS bằng lane khác | Translation, per-cue TTS, mux và delivery đã là shared pipeline; chỉ acoustic input path cần sửa | ✅ Giữ shared lane |
 | Original source không cần sau normalization | Exact Auto Multi acoustic phải dùng original hash-locked audio; normalized copy vẫn dành cho ASR/render | ⚠️ Tách source theo mục đích |
+
+### Đối chiếu Auto Multi acoustic runtime budget sau runtime a0c45d4
+
+| Giả định/tài liệu cũ | Hiện tại đo được | Trạng thái |
+|---|---|---|
+| Budget acoustic cố định `300s` đủ cho mọi video Auto Multi | Wrapper dùng `247s` cho source `133.37542s`; direct lane hỗ trợ tới `300s`, nên budget phải suy ra từ PCM duration và có cap | ❌ Không còn đúng |
+| `acoustic_failure_unknown` nghĩa là engine không có cause | Bộ lọc chỉ nhận `acoustic_*`, trong khi engine phát sinh cả `fixed_vocal_*`; cause hợp lệ bị bỏ | ❌ Sai observability |
+| Cùng video luôn cho đúng một Deepgram timeline | Hai call đều `145` words nhưng timing hash khác; `3` timestamp rows lệch tối đa `80ms` | ❌ Provider timing có biến thiên |
+| Fix cho job mẫu cần hard-code SHA hoặc `k=5` | Production chỉ dùng measured PCM duration; range engine vẫn `3–8`. `k=5` chỉ là acceptance của fixture regression | ✅ Không fixture branch |
+| PASS một timeline đủ chứng minh mapping bền | Hai timing-only variants đều qua exact wrapper với `k=5`, `37` units, `23` cues và đủ năm speaker; resource gate giữ một variant không chứa lời thoại | ⚠️ Bắt buộc comparator biến thiên |
+
+Correction không đổi clustering threshold, model, translation, TTS, mux,
+delivery, pricing/wallet hoặc exact-two. Local evidence: timeout/observability
+`8 passed`, Auto Multi `338 passed`, exact-two `37 passed`, resource thật `5
+passed`; LIVE artifact của chính `#B4CB6D5FE8` vẫn là gate cuối.
