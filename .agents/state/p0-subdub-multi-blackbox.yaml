@@ -1691,4 +1691,38 @@ full_original_media_duration_correction_20260905:
     wallet_mutations: 0
   live_pass: false
 
-current_next_action: final compile docs diff; follow-up PR squash deploy; one new exact same-job continuation; observe to artifact and receipt
+previous_next_action_after_full_duration: final compile docs diff; follow-up PR squash deploy; one new exact same-job continuation; observe to artifact and receipt
+
+pending_multi_lane_repair_20260905:
+  deployed_red:
+    pr: 996
+    runtime: 3f87f5e4184c8b4753923f0227caeb8b7de3b649
+    deploy_run: 33954073514 SUCCESS in 4m08s
+    terminal: fixed_vocal_speaker_count_unstable before downstream
+    charged_xu: 0
+  production_boundary_before:
+    source: normalized_source.mp4
+    extract_seconds: 126.505
+    result: AUTO_CAST_UNAVAILABLE after fixed vocal instability
+  root: set_video_dubbing_pending whitelist persisted voice_selection_mode but dropped auto_speaker_lane
+  correction:
+    production_lines: 1
+    behavior: persist auto_speaker_lane in existing pending whitelist
+    marker: auto_multi_pending_lane_repair_used
+    attempts_preserved: 4/3
+    protected: engine thresholds provider translation TTS mux exact-two unchanged
+  production_boundary_after:
+    source: original hash-locked source
+    extract_seconds: 133.375
+    result: acoustic PASS then intentional stop before translation
+  tdd:
+    red: KeyError auto_speaker_lane
+    green: 1 passed
+    focused_context_marker: 7 passed
+    full_auto_multi: 350 passed
+    provider_calls: 0
+    production_db_mutations: 0
+    wallet_mutations: 0
+  live_pass: false
+
+current_next_action: full gate compile docs; follow-up PR squash deploy; one same-job continuation; observe to artifact and receipt

@@ -311,6 +311,18 @@ baseline-equivalent and not an Auto Multi regression.
   passed`; real resource `5 passed in 255.02s`; target language preservation
   covers `vi/ja/en/ko/zh`.
 
+### Task 5E: Preserve the Auto Multi lane across pending writes — 05/09/2026
+
+- [x] PR `#996` live RED still selected normalized source at `126.505s`.
+- [x] Full prepare diagnostic with real pending storage proved
+  `auto_speaker_lane` was dropped; private context alone was insufficient.
+- [x] TDD one-line whitelist fix: RED `KeyError auto_speaker_lane`; GREEN `1
+  passed`; context + marker focused `7 passed`; full Auto Multi `350 passed`.
+- [x] Candidate full production boundary selects original source at `133.375s`
+  and reaches acoustic PASS before intentional translation stop.
+- [x] Add one exact-job CAS marker; attempts `4/3`, prior markers and no-charge
+  authority preserved; duplicates/mutations no-op.
+
 ### Task 6: One optimized release
 
 - [x] Update measured counts in the resume handoff, blackbox state, current

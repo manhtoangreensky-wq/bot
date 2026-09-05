@@ -161,3 +161,7 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
     extract phải dùng full media duration. FAIL nếu PCM dừng ở cue cuối, kể cả
     khi đúng original file. Chạy comparator non-Multi để chắc lane khác không bị
     probe/đổi duration.
+28. Kiểm marker lane qua pending state: sau ASR/persist subtitle, state vẫn phải
+    có `voice_kind`, `voice_selection_mode` và `auto_speaker_lane=multi`. Nếu
+    thiếu lane marker, extractor sẽ âm thầm rơi về normalized source; coi là
+    FAIL dù các `_pipeline_*` field còn đủ.
