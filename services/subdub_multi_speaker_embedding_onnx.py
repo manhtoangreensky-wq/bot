@@ -27,7 +27,7 @@ NOTICE_PATHS = (
 
 MODEL_SHA256 = "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
 ALGORITHM_VERSION = "wespeaker-resnet34-spectral-v1"
-FIXED_VOCAL_ALGORITHM_VERSION = "wespeaker-resnet34-fixed-vocal-v2"
+FIXED_VOCAL_ALGORITHM_VERSION = "wespeaker-resnet34-fixed-vocal-v3"
 FIXED_VOCAL_PROVIDER = "local_wespeaker_resnet34_fixed_vocal"
 MODEL_INPUT_NAME = "feats"
 MODEL_OUTPUT_NAME = "embs"
@@ -840,7 +840,7 @@ def map_word_units_to_fixed_vocal_authority(
     speaker_count: int,
     overlap_dominance_threshold: float = HYBRID_OVERLAP_DOMINANCE,
 ) -> dict[str, object]:
-    """Map word units after speaker discovery; words never determine k."""
+    """Map words after raw clustering and retain only speech-backed speakers."""
 
     try:
         if type(units) is not list or not units:
@@ -895,6 +895,7 @@ def map_word_units_to_fixed_vocal_authority(
 
         similarities = embeddings @ centroid_matrix.T
         labels: list[int] = []
+        methods: list[str] = []
         confidences: list[float] = []
         overlap_mapped = 0
         centroid_mapped = 0
@@ -919,6 +920,7 @@ def map_word_units_to_fixed_vocal_authority(
                 label = int(np.argmax(overlap_scores))
                 confidence = dominance
                 overlap_mapped += 1
+                method = "overlap"
             else:
                 row = similarities[unit_index]
                 label = int(np.argmax(row))
@@ -926,17 +928,59 @@ def map_word_units_to_fixed_vocal_authority(
                 margin = float(ordered_similarity[-1] - ordered_similarity[-2])
                 confidence = max(0.0, min(1.0, margin / 2.0))
                 centroid_mapped += 1
+                method = "centroid"
             labels.append(label)
+            methods.append(method)
             confidences.append(round(confidence, 6))
-        speaker_unit_counts = [labels.count(label) for label in range(speaker_count)]
-        if any(count < 1 for count in speaker_unit_counts):
+        raw_speaker_unit_counts = [
+            labels.count(label) for label in range(speaker_count)
+        ]
+        raw_overlap_speaker_unit_counts = [
+            sum(
+                label == speaker and method == "overlap"
+                for label, method in zip(labels, methods, strict=True)
+            )
+            for speaker in range(speaker_count)
+        ]
+        supported_labels = [
+            label
+            for label, count in enumerate(raw_overlap_speaker_unit_counts)
+            if count > 0
+        ]
+        if len(supported_labels) < MIN_SPEAKERS:
             raise ValueError("fixed_vocal_word_speaker_coverage_invalid")
+        dropped_labels = [
+            label for label in range(speaker_count) if label not in supported_labels
+        ]
+        label_map = {
+            raw_label: effective_label
+            for effective_label, raw_label in enumerate(supported_labels)
+        }
+        reassigned_raw_labels = list(labels)
+        for unit_index, raw_label in enumerate(labels):
+            if raw_label in label_map:
+                continue
+            supported_similarities = similarities[unit_index, supported_labels]
+            reassigned_raw_labels[unit_index] = supported_labels[
+                int(np.argmax(supported_similarities))
+            ]
+        effective_labels = [label_map[label] for label in reassigned_raw_labels]
+        speaker_unit_counts = [
+            effective_labels.count(label)
+            for label in range(len(supported_labels))
+        ]
         return {
-            "labels": labels,
+            "labels": effective_labels,
             "unit_confidences": confidences,
             "overlap_mapped_count": overlap_mapped,
             "centroid_mapped_count": centroid_mapped,
             "speaker_unit_counts": speaker_unit_counts,
+            "speaker_count": len(supported_labels),
+            "raw_speaker_count": speaker_count,
+            "speech_supported_speaker_labels": supported_labels,
+            "dropped_non_speech_speaker_labels": dropped_labels,
+            "raw_speaker_unit_counts": raw_speaker_unit_counts,
+            "raw_overlap_speaker_unit_counts": raw_overlap_speaker_unit_counts,
         }
     except speaker_cast.AutoCastManualRequired:
         raise
@@ -2193,7 +2237,8 @@ def diarize_fixed_vocal_word_timeline(
             "unit_confidences": list(mapping["unit_confidences"]),
         },
     )
-    speaker_count = int(authority["speaker_count"])
+    raw_speaker_count = int(authority["speaker_count"])
+    speaker_count = int(mapping["speaker_count"])
     if len({item["speaker_id"] for item in segments}) != speaker_count:
         raise _manual_required(
             ValueError("fixed_vocal_segment_speaker_coverage_invalid")
@@ -2208,13 +2253,32 @@ def diarize_fixed_vocal_word_timeline(
         "algorithm_version": FIXED_VOCAL_ALGORITHM_VERSION,
         "word_count": len(validated_words),
         "unit_count": len(units),
-        "embedding_window_count": len(authority["core_window_indices"]) * 2,
-        "cluster_sizes": list(authority["cluster_sizes"]),
+        "embedding_window_count": sum(
+            int(authority["cluster_sizes"][raw_label])
+            for raw_label in mapping["speech_supported_speaker_labels"]
+        ) * 2,
+        "cluster_sizes": [
+            int(authority["cluster_sizes"][raw_label])
+            for raw_label in mapping["speech_supported_speaker_labels"]
+        ],
         "stability_pass": True,
         "word_coverage_count": len(validated_words),
         "overlap_mapped_count": int(mapping["overlap_mapped_count"]),
         "centroid_mapped_count": int(mapping["centroid_mapped_count"]),
         "speaker_unit_counts": list(mapping["speaker_unit_counts"]),
+        "raw_speaker_count": raw_speaker_count,
+        "raw_embedding_window_count": len(authority["core_window_indices"]) * 2,
+        "raw_cluster_sizes": list(authority["cluster_sizes"]),
+        "raw_speaker_unit_counts": list(mapping["raw_speaker_unit_counts"]),
+        "raw_overlap_speaker_unit_counts": list(
+            mapping["raw_overlap_speaker_unit_counts"]
+        ),
+        "speech_supported_speaker_labels": list(
+            mapping["speech_supported_speaker_labels"]
+        ),
+        "dropped_non_speech_speaker_labels": list(
+            mapping["dropped_non_speech_speaker_labels"]
+        ),
         "vocal_view_cosine_min": float(authority["view_cosine_min"]),
         "vocal_view_cosine_mean": float(authority["view_cosine_mean"]),
     }

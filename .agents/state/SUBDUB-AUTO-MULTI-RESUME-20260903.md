@@ -257,3 +257,46 @@ state, files, PRs, jobs, provider receipts or wallet evidence into PayOS work.
   stay true, duplicate/mutation no-op.
 - Next: full gate/compile → one follow-up PR/deploy → same job once → artifact.
 - Full Auto Multi gate after the final marker is `350 passed`.
+
+## Speech-supported speaker authority — 05/09/2026
+
+- Runtime `319fa19e9d53effe585f08fffc652955598d8911` with pending-lane fix
+  reached full original PCM but same-job terminalized at the deeper boundary
+  `fixed_vocal_word_speaker_coverage_invalid`; no translation/TTS/mux/output,
+  `charged_xu=0`.
+- Fresh timing D `7f571a38...ccf82c` and E `2321cd6f...31830` reproduce raw
+  acoustic `k=5` but raw speaker-unit counts `[0,9,9,11,6]` and
+  `[0,8,9,11,6]`. Raw cluster 0 has `9` core windows but dominant-overlap word
+  support `0`; the other raw clusters have overlap support `[7,8,10,4]`.
+- Targeted Deepgram ASR over the five missing-cluster ranges on both the UVR
+  vocal stem and original mono audio returns `deepgram_empty_transcript` for all
+  `13s`. Historical Gemini evidence also reported `4` speakers. Therefore raw
+  cluster 0 is non-speech/music acoustic structure, not a person to dub.
+- Rejected approaches: repeated whole-file Deepgram (D and E both fail),
+  constrained re-assignment to raw cluster 0 (would invent a speaker), and
+  lowering clustering thresholds.
+- Fixed-vocal v3 keeps two authorities: raw acoustic clusters for audit and
+  speech-supported speakers for voice creation. A raw label must have at least
+  one dominant-overlap word-unit; centroid-only labels are removed from the
+  effective set. Every word remains exactly once and units assigned to a removed
+  raw label are remapped by centroid only among supported labels. Fewer than `3`
+  effective speakers still fails closed.
+- Exact fixture result is now raw `5` → speech-supported `4`, not five people.
+  Generic mapping is verified across raw counts `4..8`, with dropped labels at
+  arbitrary positions, and the offline full chain is verified for every
+  effective speech count `3..8`; no fixture hash/job/expected-k/label-position
+  branch exists in production.
+- Evidence: mapper RED `1 failed`; generic label matrix `7 passed`; full Auto
+  Multi `368 passed`; exact-two `37 passed`; real resource `6 passed in
+  369.68s`; offline full-chain `6 passed`; marker payload candidate `true`. New
+  marker:
+  `auto_multi_speech_supported_repair_used`, attempts remain `4/3`.
+- Final changed-file `py_compile`, YAML parse (`42` top-level keys),
+  `git diff --check`, protected exact-two/model diff, fixture-literal scan and
+  secret scan all exit `0` before commit.
+- Live forensic used `4` authorized diagnostic Deepgram calls for this exact
+  job: whole-file D/E plus targeted vocal/original. They wrote no provider
+  receipt, job state, wallet or delivery data. Code/resource tests used `0`.
+- Total authorized diagnostic calls across the current timing/acoustic forensic
+  sequence are `7`: initial A/B `2`, whole-file mapping C/D/E `3`, and targeted
+  vocal/original `2`. Recovery invocations are accounted separately.

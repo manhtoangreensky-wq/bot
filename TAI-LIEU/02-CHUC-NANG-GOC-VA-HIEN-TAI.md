@@ -691,3 +691,19 @@ Follow-up chỉ đổi PCM extraction boundary và một exact-job rearm marker.
 
 Correction là một field whitelist, áp dụng cho mọi Auto Multi state, không chứa
 fixture/job/k. Exact-job script chỉ là CAS recovery cho live đã consumed marker.
+
+### Đối chiếu raw acoustic cluster và speech speaker — 05/09/2026
+
+| Giả định/tài liệu cũ | Bằng chứng hiện tại | Trạng thái |
+|---|---|---|
+| Raw acoustic `k=5` đồng nghĩa video có 5 người nói | Raw label 0 có 9 core windows nhưng overlap word support 0; targeted ASR vocal/gốc đều empty | ❌ Không còn đúng |
+| Bắt mọi raw cluster phải có word sẽ bảo vệ attribution | Nó làm cả lane fail khi nhạc nền tạo cluster phi lời | ❌ Quá chặt sai tầng |
+| Gán một word gần nhất cho missing cluster | Assignment loss có thể nhỏ nhưng targeted ASR chứng minh không có lời; gán sẽ bịa người nói | ❌ Bị cấm |
+| Retry Deepgram sẽ tự hồi phục | Hai fresh calls D/E liên tiếp đều thiếu raw label 0 | ❌ Không triệt để |
+| Effective count nên lấy từ speech support | Raw audit giữ `5`; effective `4`, mọi 145 words giữ nguyên và 4 voice map ổn định | ✅ Authority đúng |
+
+Fixed-vocal v3 không dùng expected speaker count, provider label hoặc fixture
+hash. Nó chỉ loại cluster có zero dominant-overlap word support; dưới 3 effective
+speakers vẫn fail-closed. Ma trận độc lập đã PASS raw count `4..8` với label
+phi-lời ở nhiều vị trí và full-chain toàn bộ effective count `3..8`; vì vậy
+fixture chỉ là regression evidence, không phải điều kiện điều khiển production.

@@ -33,6 +33,7 @@ ACOUSTIC_FULL_MEDIA_DURATION_REPAIR_MARKER = (
     "auto_multi_acoustic_full_media_duration_repair_used"
 )
 PENDING_MULTI_LANE_REPAIR_MARKER = "auto_multi_pending_lane_repair_used"
+SPEECH_SUPPORTED_REPAIR_MARKER = "auto_multi_speech_supported_repair_used"
 
 
 def _context_repair_candidate(current: dict) -> bool:
@@ -466,6 +467,24 @@ def _pending_multi_lane_repair_candidate(current: dict) -> bool:
     return _acoustic_full_media_duration_repair_candidate(prior)
 
 
+def _speech_supported_repair_candidate(current: dict) -> bool:
+    if type(current) is not dict:
+        return False
+    if (
+        current.get(PENDING_MULTI_LANE_REPAIR_MARKER) is not True
+        or current.get(SPEECH_SUPPORTED_REPAIR_MARKER) is True
+        or current.get("auto_multi_pending_lane_repair_authority")
+        != "owner_confirmed_same_job_preserve_multi_lane"
+        or current.get("multi_acoustic_failure_code")
+        != "fixed_vocal_word_speaker_coverage_invalid"
+    ):
+        return False
+    prior = dict(current)
+    prior[PENDING_MULTI_LANE_REPAIR_MARKER] = False
+    prior["multi_acoustic_failure_code"] = "fixed_vocal_speaker_count_unstable"
+    return _pending_multi_lane_repair_candidate(prior)
+
+
 def _load_context_repair_job_readonly() -> dict:
     conn = None
     try:
@@ -811,6 +830,7 @@ def claim_same_attempt(
             _acoustic_full_media_duration_repair_candidate(current)
         )
         pending_multi_lane_repair = _pending_multi_lane_repair_candidate(current)
+        speech_supported_repair = _speech_supported_repair_candidate(current)
         downstream_false_fields = tuple(
             field for field in false_fields if field != "asr_started"
         )
@@ -866,6 +886,7 @@ def claim_same_attempt(
                 or acoustic_runtime_budget_repair
                 or acoustic_full_media_duration_repair
                 or pending_multi_lane_repair
+                or speech_supported_repair
             )
             and current.get("auto_multi_acoustic_backend") == PREVIOUS_BACKEND
             and current.get("auto_multi_acoustic_model_sha256")
@@ -878,6 +899,7 @@ def claim_same_attempt(
                 or acoustic_runtime_budget_repair
                 or acoustic_full_media_duration_repair
                 or pending_multi_lane_repair
+                or speech_supported_repair
                 or not actual_v2_evidence_present
             )
             and current.get("pipeline_started") is True
@@ -1005,6 +1027,23 @@ def claim_same_attempt(
                         "asr_started": False,
                     }
                     if pending_multi_lane_repair
+                    else {}
+                ),
+                **(
+                    {
+                        SPEECH_SUPPORTED_REPAIR_MARKER: True,
+                        "auto_multi_speech_supported_repair_authority": (
+                            "owner_confirmed_same_job_speech_supported_speakers"
+                        ),
+                        "auto_multi_speech_supported_repair_claimed_at": (
+                            app.time.time()
+                        ),
+                        "multi_acoustic_failure_code": "",
+                        "multi_acoustic_failure_word_count": 0,
+                        "multi_acoustic_failure_duration_ms": 0,
+                        "asr_started": False,
+                    }
+                    if speech_supported_repair
                     else {}
                 ),
                 **(

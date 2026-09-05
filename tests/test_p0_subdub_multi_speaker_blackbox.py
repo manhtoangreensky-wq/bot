@@ -669,7 +669,7 @@ def _acoustic_multi_prepared(tmp_path: Path) -> dict:
         "multi_acoustic_model_sha256": (
             "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
         ),
-        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
         "multi_acoustic_speaker_count": 3,
         "multi_acoustic_word_count": 30,
         "multi_acoustic_unit_count": 6,
@@ -706,7 +706,7 @@ def test_bounded_acoustic_evidence_accepts_multiple_subsegments_per_unit():
         "multi_acoustic_model_sha256": (
             "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
         ),
-        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
         "multi_acoustic_speaker_count": 5,
         "multi_acoustic_word_count": 147,
         "multi_acoustic_unit_count": 18,
@@ -720,6 +720,46 @@ def test_bounded_acoustic_evidence_accepts_multiple_subsegments_per_unit():
     }
 
     assert multi_module.bounded_multi_acoustic_evidence(evidence) == evidence
+
+
+def test_bounded_acoustic_evidence_preserves_raw_and_speech_supported_counts():
+    multi_module = _multi_module()
+    evidence = {
+        "multi_acoustic_backend": "local_wespeaker_resnet34_fixed_vocal",
+        "multi_acoustic_model_sha256": (
+            "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
+        ),
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
+        "multi_acoustic_speaker_count": 4,
+        "multi_acoustic_word_count": 145,
+        "multi_acoustic_unit_count": 35,
+        "multi_acoustic_embedding_window_count": 160,
+        "multi_acoustic_cluster_sizes": [18, 26, 25, 11],
+        "multi_acoustic_stability_pass": True,
+        "multi_acoustic_word_coverage_count": 145,
+        "multi_acoustic_overlap_mapped_count": 29,
+        "multi_acoustic_centroid_mapped_count": 6,
+        "multi_acoustic_speaker_unit_counts": [9, 9, 11, 6],
+        "multi_acoustic_raw_speaker_count": 5,
+        "multi_acoustic_raw_embedding_window_count": 178,
+        "multi_acoustic_raw_cluster_sizes": [9, 18, 26, 25, 11],
+        "multi_acoustic_raw_speaker_unit_counts": [0, 9, 9, 11, 6],
+        "multi_acoustic_raw_overlap_speaker_unit_counts": [0, 9, 9, 11, 6],
+        "multi_acoustic_speech_supported_speaker_labels": [1, 2, 3, 4],
+        "multi_acoustic_dropped_non_speech_speaker_labels": [0],
+        "multi_acoustic_dropped_non_speech_speaker_count": 1,
+    }
+
+    assert multi_module.bounded_multi_acoustic_evidence(evidence) == evidence
+    sidecar = multi_module.acoustic_sidecar_evidence(evidence)
+    assert sidecar["speaker_count"] == 4
+    assert sidecar["raw_speaker_count"] == 5
+    assert sidecar["speech_supported_speaker_labels"] == [1, 2, 3, 4]
+    assert sidecar["dropped_non_speech_speaker_labels"] == [0]
+
+    partial = dict(evidence)
+    partial.pop("multi_acoustic_raw_overlap_speaker_unit_counts")
+    assert multi_module.bounded_multi_acoustic_evidence(partial) == {}
 
 
 @pytest.mark.parametrize(
@@ -742,7 +782,7 @@ def test_bounded_acoustic_evidence_rejects_inconsistent_mapping_counts(
         "multi_acoustic_model_sha256": (
             "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
         ),
-        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
         "multi_acoustic_speaker_count": 5,
         "multi_acoustic_word_count": 147,
         "multi_acoustic_unit_count": 18,
@@ -1164,7 +1204,7 @@ def test_multi_adapter_persists_three_distinct_voices_used_by_tts(monkeypatch):
                 "multi_acoustic_model_sha256": (
                     multi_module.subdub_multi_speaker_embedding_onnx.MODEL_SHA256
                 ),
-                "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
+                "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
                 "multi_acoustic_word_count": 30,
                 "multi_acoustic_unit_count": 12,
                 "multi_acoustic_embedding_window_count": 24,
@@ -1261,7 +1301,7 @@ def test_multi_adapter_requires_every_acoustic_speaker_to_reach_tts(monkeypatch)
                 "multi_acoustic_model_sha256": (
                     multi_module.subdub_multi_speaker_embedding_onnx.MODEL_SHA256
                 ),
-                "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
+                "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
                 "multi_acoustic_word_count": 50,
                 "multi_acoustic_unit_count": 23,
                 "multi_acoustic_embedding_window_count": 178,
@@ -1365,7 +1405,7 @@ def test_multi_completion_receipt_names_fixture_lane_casts_and_component_prices(
         "multi_acoustic_model_sha256": (
             "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
         ),
-        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
         "multi_acoustic_speaker_count": 4,
         "multi_acoustic_word_count": 40,
         "multi_acoustic_unit_count": 8,
@@ -1427,7 +1467,7 @@ def test_multi_terminal_job_persists_proof_without_touching_default_auto_lane():
         "multi_acoustic_model_sha256": (
             "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
         ),
-        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
         "multi_acoustic_speaker_count": 4,
         "multi_acoustic_word_count": 40,
         "multi_acoustic_unit_count": 8,
@@ -1657,25 +1697,27 @@ def test_isolated_multi_runner_assigns_and_synthesizes_three_voices(monkeypatch)
     assert len(set(synthesized_voices)) == 3
 
 
-def test_provider_stub_full_chain_keeps_five_speakers_through_mux(
+@pytest.mark.parametrize("speaker_count", tuple(range(3, 9)))
+def test_provider_stub_full_chain_keeps_speech_speakers_through_mux(
     tmp_path,
     monkeypatch,
+    speaker_count,
 ):
     multi_module = _multi_module()
-    labels = [f"chunk_00:speaker_{index}" for index in range(5)]
+    labels = [f"chunk_00:speaker_{index}" for index in range(speaker_count)]
     source_segments = bot.subdub_canonical_auto_speaker_segments(
         [
             {
                 "index": index + 1,
                 "start": float(index),
                 "end": float(index + 1),
-                "text": f"nguoi noi {index % 5}",
-                "speaker": index % 5,
-                "speaker_id": labels[index % 5],
+                "text": f"nguoi noi {index % speaker_count}",
+                "speaker": index % speaker_count,
+                "speaker_id": labels[index % speaker_count],
                 "speaker_confidence": 0.95,
                 "chunk_index": 0,
             }
-            for index in range(10)
+            for index in range(speaker_count * 2)
         ],
         extraction_source="local_acoustic",
     )
@@ -1683,7 +1725,7 @@ def test_provider_stub_full_chain_keeps_five_speakers_through_mux(
         {**item, "text": f"English speaker {item['speaker']}"}
         for item in source_segments
     ]
-    source_bytes = b"offline-five-speaker-source"
+    source_bytes = f"offline-{speaker_count}-speaker-source".encode("ascii")
     source_path = tmp_path / "normalized_source.mp4"
     source_path.write_bytes(source_bytes)
     source_subtitle = bot.video_dubbing_srt_from_segments(source_segments)
@@ -1696,21 +1738,21 @@ def test_provider_stub_full_chain_keeps_five_speakers_through_mux(
         subtitle_sha256=subtitle_sha256,
     )
     sidecar["acoustic"] = {
-        "algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
+        "algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
         "backend": "local_wespeaker_resnet34_fixed_vocal",
-        "cluster_sizes": [2, 2, 2, 2, 2],
-        "embedding_window_count": 20,
+        "cluster_sizes": [2] * speaker_count,
+        "embedding_window_count": speaker_count * 4,
         "model_sha256": (
             "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
         ),
-        "speaker_count": 5,
+        "speaker_count": speaker_count,
         "stability_pass": True,
-        "unit_count": 10,
-        "word_count": 50,
-        "word_coverage_count": 50,
-        "overlap_mapped_count": 8,
+        "unit_count": speaker_count * 2,
+        "word_count": speaker_count * 10,
+        "word_coverage_count": speaker_count * 10,
+        "overlap_mapped_count": speaker_count * 2 - 2,
         "centroid_mapped_count": 2,
-        "speaker_unit_counts": [2, 2, 2, 2, 2],
+        "speaker_unit_counts": [2] * speaker_count,
     }
     sidecar_receipt = speaker_cast.persist_sidecar(sidecar, workspace=str(tmp_path))
     pipeline_context = {
@@ -1729,9 +1771,9 @@ def test_provider_stub_full_chain_keeps_five_speakers_through_mux(
         "translate_requested": "1",
         "dub_text_source": "translated",
         "output_type": "video_subtitle",
-        "input_duration": 10,
-        "video_duration": 10,
-        "source_duration": 10,
+        "input_duration": speaker_count * 2,
+        "video_duration": speaker_count * 2,
+        "source_duration": speaker_count * 2,
         "keep_original_audio": True,
         "original_audio_volume_percent": 40,
         "dubbed_voice_volume_percent": 150,
@@ -1741,17 +1783,17 @@ def test_provider_stub_full_chain_keeps_five_speakers_through_mux(
         "multi_acoustic_model_sha256": (
             "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
         ),
-        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v2",
-        "multi_acoustic_speaker_count": 5,
-        "multi_acoustic_word_count": 50,
-        "multi_acoustic_unit_count": 10,
-        "multi_acoustic_embedding_window_count": 20,
-        "multi_acoustic_cluster_sizes": [2, 2, 2, 2, 2],
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
+        "multi_acoustic_speaker_count": speaker_count,
+        "multi_acoustic_word_count": speaker_count * 10,
+        "multi_acoustic_unit_count": speaker_count * 2,
+        "multi_acoustic_embedding_window_count": speaker_count * 4,
+        "multi_acoustic_cluster_sizes": [2] * speaker_count,
         "multi_acoustic_stability_pass": True,
-        "multi_acoustic_word_coverage_count": 50,
-        "multi_acoustic_overlap_mapped_count": 8,
+        "multi_acoustic_word_coverage_count": speaker_count * 10,
+        "multi_acoustic_overlap_mapped_count": speaker_count * 2 - 2,
         "multi_acoustic_centroid_mapped_count": 2,
-        "multi_acoustic_speaker_unit_counts": [2, 2, 2, 2, 2],
+        "multi_acoustic_speaker_unit_counts": [2] * speaker_count,
     }
     prepared = {
         "state": dict(state),
@@ -1765,7 +1807,7 @@ def test_provider_stub_full_chain_keeps_five_speakers_through_mux(
         "output_script": "\n".join(item["text"] for item in output_segments),
         "translation_provider": "offline-translation-stub",
         "asr_provider": "offline-strict-word-stub",
-        "duration_seconds": 10,
+        "duration_seconds": speaker_count * 2,
         "media_sha256": media_sha256,
         "subtitle_sha256": subtitle_sha256,
     }
@@ -1846,10 +1888,10 @@ def test_provider_stub_full_chain_keeps_five_speakers_through_mux(
             post_prepare_gate=lambda *_args, **_kwargs: {"continue": True},
             extract_pcm=extract_pcm,
             validated_pools={
-                "low": [f"low-{index}" for index in range(5)],
-                "high": [f"high-{index}" for index in range(5)],
+                "low": [f"low-{index}" for index in range(speaker_count)],
+                "high": [f"high-{index}" for index in range(speaker_count)],
             },
-            required_pool_capacity=5,
+            required_pool_capacity=speaker_count,
             job_id="offline-provider-stub-rehearsal",
             mode=bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
             state=state,
@@ -1870,7 +1912,7 @@ def test_provider_stub_full_chain_keeps_five_speakers_through_mux(
             validate_audio=lambda _audio: {
                 "ok": True,
                 "detail": "offline-audio-qc-stub",
-                "duration": 10.0,
+                "duration": float(speaker_count * 2),
             },
             render_video=render_video,
             video_render_ready=lambda _output_type: True,
@@ -1883,12 +1925,12 @@ def test_provider_stub_full_chain_keeps_five_speakers_through_mux(
     assert result["ok"] is True
     assert result["result_type"] == "mp4"
     assert result["video_output"].startswith(b"\x00\x00\x00\x18ftypmp42")
-    assert result["tts_expected_segments"] == 10
-    assert result["tts_generated_segments"] == 10
+    assert result["tts_expected_segments"] == speaker_count * 2
+    assert result["tts_generated_segments"] == speaker_count * 2
     assert result["tts_dropped_segments"] == 0
     assert result["cue_locked_timing"] is True
-    assert result["state"]["auto_detected_speaker_count"] == 5
-    assert result["state"]["auto_distinct_voice_count"] == 5
+    assert result["state"]["auto_detected_speaker_count"] == speaker_count
+    assert result["state"]["auto_distinct_voice_count"] == speaker_count
     assert result["state"]["auto_multi_voice_verified"] is True
     assert result["state"]["auto_multi_attribution_verified"] is True
     assert {
@@ -1897,7 +1939,7 @@ def test_provider_stub_full_chain_keeps_five_speakers_through_mux(
     } == pipeline_context
     assert result["state"]["original_audio_volume_percent"] == 40
     assert result["state"]["dubbed_voice_volume_percent"] == 150
-    assert len(tts_calls) == 10
+    assert len(tts_calls) == speaker_count * 2
     speaker_to_voices = {
         speaker_id: {
             voice_id
@@ -1907,13 +1949,13 @@ def test_provider_stub_full_chain_keeps_five_speakers_through_mux(
         for speaker_id in labels
     }
     assert all(len(voice_ids) == 1 for voice_ids in speaker_to_voices.values())
-    assert len({next(iter(voice_ids)) for voice_ids in speaker_to_voices.values()}) == 5
-    assert len({cue_id for cue_id, _speaker_id, _voice_id in tts_calls}) == 10
+    assert len({next(iter(voice_ids)) for voice_ids in speaker_to_voices.values()}) == speaker_count
+    assert len({cue_id for cue_id, _speaker_id, _voice_id in tts_calls}) == speaker_count * 2
     assert {speaker_id for _cue_id, speaker_id, _voice_id in tts_calls} == set(labels)
     assert len(render_calls) == 1
     assert render_calls[0][0] == source_bytes
     assert render_calls[0][1]["keep_original_audio"] is True
-    assert render_calls[0][1]["target_duration_seconds"] == 10.0
+    assert render_calls[0][1]["target_duration_seconds"] == float(speaker_count * 2)
     assert render_calls[0][1]["dubbed_audio"] == b"offline-normalized-audio"
     assert render_calls[0][1]["subtitle_bytes"].decode("utf-8") == (
         output_subtitle.strip()

@@ -1271,3 +1271,27 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
 - Marker recovery mới chỉ cho chính live aggregate hiện tại, giữ attempts `4/3`,
   prior markers, no-output/no-charge. Không thay engine, threshold, ngôn ngữ,
   TTS/mux/delivery, exact-two hoặc wallet.
+
+### Auto Multi phân biệt raw acoustic cluster và người nói thật — 05/09/2026
+
+- Runtime `319fa19e` đã chọn original/full PCM đúng nhưng dừng tại
+  `fixed_vocal_word_speaker_coverage_invalid`. Hai timing fresh D/E đều raw
+  `k=5`; raw label 0 có `0` word-unit, trong khi bốn label còn lại có
+  `[9,9,11,6]` hoặc `[8,9,11,6]` units.
+- Raw label 0 có `9` acoustic core windows nhưng dominant-overlap word support
+  bằng `0`. Targeted ASR trên cả UVR vocal stem và original audio ở `5` vùng,
+  tổng `13s`, đều `deepgram_empty_transcript`. Gemini lịch sử cũng đo `4`
+  speaker. Đây là cluster nhạc/phi lời, không phải người thứ năm.
+- Fixed-vocal v3 giữ raw `k=5` làm audit, nhưng effective speech speakers là
+  `4`. Chỉ cluster có word-unit dominant-overlap mới tạo voice; centroid-only
+  cluster bị loại. Không mất word: mọi unit còn đúng một speaker và chỉ remap
+  trong tập speech-supported. Nếu còn dưới `3` speaker thì fail-closed.
+- Fixture không còn pin “5 người/5 voice”. AC đúng là raw `5`, effective `4`,
+  bốn voice distinct; lane chung vẫn `3–8` người nói và không có fixture branch.
+- Mapper RED `1 failed`; generic raw-label matrix `7 passed` trên raw count
+  `4..8`; full Auto Multi `368 passed`; exact-two `37 passed`; full-chain
+  offline PASS cho toàn bộ effective speaker count `3..8`; resource thật `6
+  passed in 369.68s`. Source tests không gọi provider hay mutate
+  production/wallet.
+- Forensic này dùng `4` Deepgram calls được Owner cho phép riêng job: D/E toàn
+  file và targeted vocal/original; cả bốn không ghi receipt/job/wallet/delivery.

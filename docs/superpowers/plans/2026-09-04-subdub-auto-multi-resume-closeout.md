@@ -4,7 +4,7 @@
 
 **Goal:** Continue the existing checkpoint and make exact job `#B4CB6D5FE8` deliver one real English multi-voice MP4 followed by one receipt, with `3–8` acoustically discovered speakers, source timing preserved, and `charged_xu=0`.
 
-**Architecture:** Keep the deployed fixed-vocal v2 ONNX engine, strict Deepgram word timeline, translation, per-speaker TTS, FFmpeg mux, validation, and delivery pipeline. Complete only the missing `_pipeline_*` context handoff, add one fail-closed same-job context-repair marker if the live snapshot matches, ship one bounded release, then continue only the existing job.
+**Architecture:** Continue the fixed-vocal v3 ONNX engine, strict Deepgram word timeline, translation, per-speaker TTS, FFmpeg mux, validation, and delivery pipeline. Raw acoustic clusters remain audit evidence; only clusters with dominant-overlap word support create voices. Complete only measured same-job recovery boundaries, then continue the existing job.
 
 **Tech Stack:** Python, python-telegram-bot, SQLite WAL, Deepgram, ONNX Runtime CPU, existing TTS adapters, FFmpeg, GitHub Actions, Ubuntu VPS/systemd.
 
@@ -33,8 +33,8 @@
 ### Complete and locked
 
 - [x] Auto 2-speaker combo and standalone are `LOCKED_LIVE_PASS` with real MP4/receipt.
-- [x] Fixed-vocal v2 model/hash/license/CPU-only engine is deployed.
-- [x] Exact fixture offline acoustic evidence discovers stable `k=5`.
+- [x] Fixed-vocal model/hash/license/CPU-only engine is deployed; v3 source is pending release.
+- [x] Exact fixture offline acoustic evidence discovers raw `k=5`; live D/E and targeted ASR prove only `4` speech-supported clusters.
 - [x] Exact PCM duration and strict-word Deepgram `300s` timeout corrections are deployed.
 - [x] WIP `216b68d` contains the 9-line private context handoff and its regression.
 
@@ -61,8 +61,10 @@
   match merely because a field name appears there.
 - [x] Strengthen attribution: the acoustic speaker set must equal the set sent
   to TTS; every cue has one speaker; each speaker keeps one unique voice.
-- [x] Pin this fixture to post-cluster `k=5`. This is a post-cluster acceptance
-  check and is never an input hint to clustering.
+- [x] Superseded 05/09: retain raw post-cluster `k=5` for audit, but require
+  speech-supported `k=4` for this fixture. Raw label 0 has zero dominant-overlap
+  word support and targeted vocal/original ASR both return empty; it must not
+  create a fifth voice. This remains evidence, never a clustering hint.
 - [ ] Measure final synthetic voice distinctness with ONNX embeddings using a
   calibrated within-speaker versus between-speaker separation rule or an
   existing measured constant; do not invent an absolute cosine threshold.
@@ -323,6 +325,29 @@ baseline-equivalent and not an Auto Multi regression.
 - [x] Add one exact-job CAS marker; attempts `4/3`, prior markers and no-charge
   authority preserved; duplicates/mutations no-op.
 
+### Task 5F: Speech-supported speaker authority — 05/09/2026
+
+- [x] Capture failing timing D/E: both raw `k=5`, but raw label 0 has zero
+  word-unit coverage; four labels retain real coverage.
+- [x] Targeted ASR over five missing-cluster regions on both vocal stem and
+  original audio returns empty; historical Gemini count is `4`. This supersedes
+  the earlier fixture-level “5 speakers/5 voices” acceptance.
+- [x] Reject whole-file retry, forced assignment, and threshold relaxation.
+- [x] Implement fixed-vocal v3: retain raw clusters for audit; require dominant
+  overlap word support for effective speaker identity; drop centroid-only raw
+  cluster, preserve every word and remap only among supported centroids; fail
+  when fewer than `3` effective speakers remain.
+- [x] Verify the offline full chain for every supported effective count `3..8`
+  and the mapper matrix across raw counts `4..8`, including zero, one and
+  multiple dropped labels at nonzero positions. Exact fixture raw `5` →
+  effective `4`; no job/SHA/expected-k/label-position production branch.
+- [x] Evidence: mapper RED `1 failed`; generic label matrix `7 passed`; focused
+  Auto Multi `368 passed`; exact-two `37 passed`; real resource `6 passed in
+  369.68s`; offline full chain `6 passed` for effective counts `3..8`; final
+  changed-file compile/YAML/diff/protected/scope/secret gates exit `0`.
+- [x] Add same-job marker `auto_multi_speech_supported_repair_used`; current
+  payload candidate is true; attempts remain `4/3` and prior markers persist.
+
 ### Task 6: One optimized release
 
 - [x] Update measured counts in the resume handoff, blackbox state, current
@@ -330,8 +355,10 @@ baseline-equivalent and not an Auto Multi regression.
   remains false.
 - [ ] Create one clean feature commit containing context handoff plus the exact marker.
 - [ ] Push one branch and create one PR reporting RED/GREEN, protected gates,
-  resource gate, compile/diff, exactly `2` authorized diagnostic Deepgram calls,
-  production job mutations `0`, and wallet mutations `0`.
+  resource gate, compile/diff, and all `7` authorized diagnostic Deepgram calls
+  in this forensic sequence (`2` initial timing, `3` mapping D/E/C, `2`
+  targeted vocal/original), production job mutations `0`, and wallet mutations
+  `0`.
 - [ ] Squash merge only when required CI is `SUCCESS` and merge state is `CLEAN`.
 - [ ] Wait exact-SHA deploy. Verify `/opt/toanaas/bot`, the actual SubDub runner, services, model/hash/license/CPU provider, and runtime SHA.
 

@@ -38,6 +38,14 @@ ACTUAL_TIMING_FIXTURE_PATH = (
     / "fixtures"
     / "subdub_auto_multi_actual_timing_145.json"
 )
+MISSING_SPEECH_CLUSTER_TIMING_SHA256 = (
+    "7f571a38b78bd75f18307f3f41e52cd0926bae92b39a7fd32051e88da6ccf82c"
+)
+MISSING_SPEECH_CLUSTER_TIMING_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "subdub_auto_multi_missing_speech_cluster_timing_145.json"
+)
 ACOUSTIC_REGION_SOURCE = (
     "existing #B4CB6D5FE8 Deepgram sidecar sanitized to timing-only regions"
 )
@@ -97,6 +105,20 @@ def _load_actual_timing_words() -> list[dict]:
     )
     assert validated == words
     return validated
+
+
+def _load_missing_speech_cluster_words() -> list[dict]:
+    assert _sha256(MISSING_SPEECH_CLUSTER_TIMING_PATH) == (
+        MISSING_SPEECH_CLUSTER_TIMING_SHA256
+    )
+    words = json.loads(
+        MISSING_SPEECH_CLUSTER_TIMING_PATH.read_text(encoding="utf-8")
+    )
+    assert type(words) is list and len(words) == 145
+    return service.validate_word_timeline(
+        words,
+        duration_seconds=SOURCE_DURATION_SECONDS,
+    )
 
 
 def _ffmpeg_path() -> str:
@@ -294,16 +316,23 @@ def test_exact_fixture_fixed_vocal_authority_is_asr_independent(tmp_path):
     assert result["ok"] is True
     assert result["provider"] == service.FIXED_VOCAL_PROVIDER
     assert result["algorithm_version"] == service.FIXED_VOCAL_ALGORITHM_VERSION
-    assert result["detected_speaker_count"] == 5
+    assert result["raw_speaker_count"] == 5
+    assert result["detected_speaker_count"] == 4
     assert result["word_count"] == result["word_coverage_count"] == 50
     assert result["unit_count"] == 23
-    assert result["embedding_window_count"] == 178
-    assert result["cluster_sizes"] == [9, 18, 26, 25, 11]
-    assert result["speaker_unit_counts"] == [3, 2, 4, 11, 3]
+    assert result["embedding_window_count"] == 160
+    assert result["raw_embedding_window_count"] == 178
+    assert result["cluster_sizes"] == [18, 26, 25, 11]
+    assert result["raw_cluster_sizes"] == [9, 18, 26, 25, 11]
+    assert result["speaker_unit_counts"] == [4, 4, 12, 3]
+    assert result["raw_speaker_unit_counts"] == [3, 2, 4, 11, 3]
+    assert result["raw_overlap_speaker_unit_counts"] == [0, 1, 4, 11, 3]
+    assert result["speech_supported_speaker_labels"] == [1, 2, 3, 4]
+    assert result["dropped_non_speech_speaker_labels"] == [0]
     assert result["overlap_mapped_count"] == 19
     assert result["centroid_mapped_count"] == 4
-    assert len(result["segments"]) == 11
-    assert len({item["speaker_id"] for item in result["segments"]}) == 5
+    assert len(result["segments"]) == 9
+    assert len({item["speaker_id"] for item in result["segments"]}) == 4
     for forbidden in ("centroids", "embeddings", "pcm", "word_timeline"):
         assert forbidden not in result
 
@@ -354,16 +383,69 @@ def test_exact_fixture_fixed_vocal_accepts_actual_145_word_timing(tmp_path):
     )
 
     assert result["ok"] is True
-    assert result["detected_speaker_count"] == 5
+    assert result["raw_speaker_count"] == 5
+    assert result["detected_speaker_count"] == 4
     assert result["word_count"] == result["word_coverage_count"] == 145
     assert result["unit_count"] == 37
-    assert result["embedding_window_count"] == 178
-    assert result["cluster_sizes"] == [9, 18, 26, 25, 11]
-    assert result["speaker_unit_counts"] == [2, 9, 9, 11, 6]
+    assert result["embedding_window_count"] == 160
+    assert result["raw_embedding_window_count"] == 178
+    assert result["cluster_sizes"] == [18, 26, 25, 11]
+    assert result["raw_cluster_sizes"] == [9, 18, 26, 25, 11]
+    assert result["speaker_unit_counts"] == [11, 9, 11, 6]
+    assert result["raw_speaker_unit_counts"] == [2, 9, 9, 11, 6]
+    assert result["raw_overlap_speaker_unit_counts"] == [0, 7, 8, 10, 4]
+    assert result["speech_supported_speaker_labels"] == [1, 2, 3, 4]
+    assert result["dropped_non_speech_speaker_labels"] == [0]
     assert result["overlap_mapped_count"] == 29
     assert result["centroid_mapped_count"] == 8
     assert len(result["segments"]) == 23
-    assert len({item["speaker_id"] for item in result["segments"]}) == 5
+    assert len({item["speaker_id"] for item in result["segments"]}) == 4
+
+
+def test_exact_fixture_drops_raw_cluster_without_speech_supported_words(tmp_path):
+    source_value = str(os.environ.get("SUBDUB_MULTI_FIXTURE_PATH") or "").strip()
+    if not source_value:
+        pytest.fail("SUBDUB_MULTI_FIXTURE_PATH is mandatory for this resource gate")
+    source = Path(source_value)
+    assert source.is_file()
+    assert source.stat().st_size == SOURCE_BYTES
+    assert _sha256(source) == SOURCE_SHA256
+    words = _load_missing_speech_cluster_words()
+    pcm_path = tmp_path / "missing-speech-cluster-stereo-44100-s16le.pcm"
+    completed = subprocess.run(
+        [
+            _ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-nostdin",
+            "-y", "-i", str(source), "-vn", "-ac", "2", "-ar", "44100",
+            "-f", "s16le", str(pcm_path),
+        ],
+        check=False,
+        capture_output=True,
+        timeout=180,
+    )
+    assert completed.returncode == 0, completed.stderr.decode(
+        "utf-8", errors="replace"
+    )[:500]
+
+    result = service.diarize_fixed_vocal_word_timeline(
+        str(pcm_path),
+        words,
+        duration_seconds=SOURCE_DURATION_SECONDS,
+        deadline_monotonic=time.monotonic() + 540.0,
+        stop_requested=lambda: False,
+    )
+
+    assert result["ok"] is True
+    assert result["raw_speaker_count"] == 5
+    assert result["detected_speaker_count"] == 4
+    assert result["speech_supported_speaker_labels"] == [1, 2, 3, 4]
+    assert result["dropped_non_speech_speaker_labels"] == [0]
+    assert result["raw_cluster_sizes"] == [9, 18, 26, 25, 11]
+    assert result["cluster_sizes"] == [18, 26, 25, 11]
+    assert result["raw_speaker_unit_counts"] == [0, 9, 9, 11, 6]
+    assert result["raw_overlap_speaker_unit_counts"] == [0, 7, 8, 10, 4]
+    assert result["speaker_unit_counts"] == [9, 9, 11, 6]
+    assert result["word_count"] == result["word_coverage_count"] == 145
+    assert len({item["speaker_id"] for item in result["segments"]}) == 4
 
 
 @pytest.mark.parametrize("mutation", ("model_byte", "missing_notice"))

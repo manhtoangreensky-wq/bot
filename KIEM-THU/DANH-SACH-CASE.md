@@ -95,14 +95,14 @@ SHA-256 `83DE97B744B931E544B569E6E750F8415545F226461BD2E36CFB49225898AD3E`.
 |---|---|---|---|---|
 | SD-2S-01 | Phụ đề + Lồng tiếng | English; Tự động 2 giọng; numeric UI chỉ 2 layer cùng hàng; nhập gốc 40%, lồng 150%; không preset | Chỉ tự gửi MP4 rồi receipt; SRT/audio/sidecar nội bộ; mọi cue dịch/TTS giữ start-end gốc, đo source/target rate + duration thật, drift 0; đúng 2 labels; speaker 0 male/low, speaker 1 female/high từ UVR+PANNs vote độc lập; giá phụ đề + lồng tiếng + total; admin 0 Xu; wallet delta 0 | `empty_transcript`; Key4U first response unavailable; httpx sync-stream/AsyncClient; cue sau bị đẩy bởi audio trước; video bị kéo dài; auto SRT dư; backing music làm whole-window cast manual; filter cũ trả sai high/high; raw-frame fallback bị cấm; model/hash/license/onnxruntime thiếu; FAIL nếu >2 Key4U attempts; preset grid quay lại |
 | SD-2S-02 | Lồng tiếng video | Cùng fixture; Tự động 2 giọng; cùng numeric UI; gốc 40%, lồng 150%; không preset | MP4 + receipt; đúng 2 labels/cast; dubbing list price >0; admin 0 Xu; wallet delta 0 | Lane combo PASS nhưng standalone hồi quy; audio UI khác combo |
-| SD-MS-01 | Phụ đề + Lồng tiếng / Tự động nhiều giọng — same-job continuation `#B4CB6D5FE8` | Chỉ fixture SHA `83DE97B...`; English; numeric gốc 40%, lồng 150%; không gửi lại recovery command đã consumed; chỉ fresh Owner authorization sau exact runtime; không upload/Confirm/job mới | Chính job giao MP4 → receipt, file phụ 0; exact fixture fixed-vocal phải ra `k=5` (`3–8` chỉ là range chung); mỗi cue đúng một speaker, tập speaker của cue bằng tập acoustic, mỗi speaker giữ đúng một voice và năm voice phân biệt; không invented/merged label hoặc forced gender; mọi word/cue giữ start-end gốc, drift 0 và duration nguồn; giá >0 nhưng admin 0 Xu; job/transaction/wallet delta 0 | FAIL nếu active path gọi provider crosswalk/re-diarization hoặc nhận expected speaker count; ASR/VAD quyết định `k`; strict word timeline thiếu/sai; private `_pipeline_*` mất ở bất kỳ prepare/translation/TTS/mux boundary; legacy sidecar được resume; model/hash/license/CPU provider sai; command cũ/lần hai; raw PCM/embedding/centroid/provider payload bị persist; SRT tự gửi; speaker thiếu cue TTS hoặc voice ID dùng lại; cue sau trễ; exact-two comparator/hash đổi |
+| SD-MS-01 | Phụ đề + Lồng tiếng / Tự động nhiều giọng — same-job continuation `#B4CB6D5FE8` | Chỉ fixture SHA `83DE97B...`; English; numeric gốc 40%, lồng 150%; không gửi lại recovery command đã consumed; chỉ fresh Owner authorization sau exact runtime; không upload/Confirm/job mới | Chính job giao MP4 → receipt, file phụ 0; raw fixed-vocal audit `k=5` nhưng speech-supported count phải là `4` vì cluster raw 0 không có overlap word support và targeted ASR gốc/vocal đều empty; mỗi cue đúng một speaker, tập speaker cue bằng tập speech-supported acoustic, mỗi speaker giữ đúng một voice và bốn voice phân biệt; mọi word/cue giữ start-end, drift 0, full media duration; giá >0 nhưng admin 0 Xu; job/transaction/wallet delta 0 | FAIL nếu active path gọi provider crosswalk/re-diarization hoặc nhận expected speaker count; coi centroid-only cluster là người nói; strict word timeline thiếu/sai; private context/lane marker mất; legacy sidecar resume; model/hash/license/CPU sai; command cũ/lần hai; raw payload persist; SRT tự gửi; speaker thiếu cue TTS hoặc voice ID dùng lại; cue sau trễ; exact-two đổi |
 
 ### SubDub Auto multi — source/resource cases trước LIVE
 
 | ID | Bằng chứng phải chạy | PASS bắt buộc |
 |---|---|---|
 | `SD-MS-L01` | Strict word timeline | Deepgram nondiarized word list nonempty; runtime malformed/zero-duration/duplicate bị reject; resource sanitation ghi đúng `48` upstream zero-duration rows đã drop; mọi retained word giữ index/start/end và được cue coverage đúng `1` lần |
-| `SD-MS-L02` | Real fixed-vocal acoustic fixture | Model `26,534,127` bytes/SHA `9FEA6516...056A1`, CPU-only; UVR vocal fixed windows give `5` speakers, `50` words, `23` units, `178` embedding views, clusters `[9,18,26,25,11]`, coverage `[3,2,4,11,3]`, cosine min `0.990487`; call `139.76s < 300s` |
+| `SD-MS-L02` | Real fixed-vocal acoustic fixture | Model `26,534,127` bytes/SHA `9FEA6516...056A1`, CPU-only; UVR fixed windows retain raw `k=5`, `178` views/clusters `[9,18,26,25,11]`; speech support keeps raw labels `[1,2,3,4]` as effective `k=4`, drops raw label `0` with overlap support `0`, and preserves every word |
 | `SD-MS-L03` | Legacy sidecar force-fresh | Provider/crosswalk/underclustered sidecar hoặc bundle thiếu acoustic model/algorithm/media/timeline authority không được reuse và không được chuyển thẳng sang TTS |
 | `SD-MS-L04` | Valid acoustic resume | Bundle acoustic đầy đủ, cùng source/timeline/model/algorithm được reuse với ASR call delta `0`; cue/voice/timing authority không đổi |
 | `SD-MS-L05` | Final same-job CAS | Chỉ internal `b4cb6d5fe8a7bdfce507`, exact SHA/English/40/150/no-output/no-charge; attempt `3/2 -> 4/3` đúng một winner; attempt `5`, duplicate và concurrent loser đều no-op |
@@ -114,6 +114,7 @@ SHA-256 `83DE97B744B931E544B569E6E750F8415545F226461BD2E36CFB49225898AD3E`.
 | `SD-MS-L11` | Duration-scaled acoustic budget + provider timing variance | Mọi direct Auto Multi source hợp lệ `0–300s` dùng budget từ measured PCM `max(300, ceil(duration×4))`, cap `1200s`; timeout ghi `acoustic_runtime_timeout`, cause `fixed_vocal_*` không bị đổi thành unknown. Hai strict timing-only variants cùng video (`145` words, `3` rows lệch tối đa `80ms`) đều phải map `37` units → `23` cues, đủ `5` speaker trên fixture; production không chứa job/SHA/expected-k branch |
 | `SD-MS-L12` | Full original media duration | Acoustic PCM phải giải mã đủ duration ffprobe của selected original source, không được dừng ở last word/cue. Fixture: cue end `126.505s` phải không cắt media `133.37542s`; truncated PCM phải tái hiện fail và full PCM phải lặp PASS `k=5`. Non-Multi/exact-two không đổi |
 | `SD-MS-L13` | Pending lane identity | Real `set_video_dubbing_pending()` phải giữ đồng thời `voice_kind=auto_speaker_gender`, `voice_selection_mode=auto_speaker`, `auto_speaker_lane=multi` và toàn private context. Sau pending, extractor phải vẫn chọn original/full duration; FAIL nếu rơi về normalized/non-Multi |
+| `SD-MS-L14` | Speech-supported speaker authority, không fixture-specific | Raw acoustic cluster count và effective speech-speaker count phải tách riêng. Chỉ raw cluster có ít nhất một word-unit được gán bằng dominant acoustic overlap mới được tạo voice; centroid-only raw cluster bị drop, các word vẫn giữ 100% và remap theo centroid trong tập supported. Nếu còn <3 speech speakers thì fail-closed. Fixture D phải raw `5` → speech `4`, raw overlap counts `[0,7,8,10,4]`. Ma trận generic phải PASS raw `4..8`, dropped label ở đầu/giữa/cuối/nhiều vị trí và full-chain effective `3..8`; production không được chứa job/SHA/duration/label/k fixture branch |
 
 Mỗi MP4 phải đo SHA-256/bytes/duration/dimensions/codec và AAC loudness; job id
 hoặc HTTP 200 không được tính PASS. Sửa case tại file này trước khi tạo/sửa
@@ -141,14 +142,16 @@ must still cover every cue; a cue whose only evidence is the filtered label must
 FAIL. Two strong labels remain `speaker_count_out_of_range`; missing fields,
 unbounded weak fraction and conflicting identity require distinct rejection.
 
-Fixed-vocal comparator 02/09/2026 supersedes word/VAD-region speaker-count
+Fixed-vocal comparator 05/09/2026 supersedes word/VAD-region speaker-count
 authority for the active Auto Multi path. Speaker count is `3–8`, selected before
 ASR word mapping from fixed vocal windows without hint. Four energy percentile
 views must agree on `k`; the `47.5/50` core partition must match exactly after
 numeric-label alignment. Model mutation/missing notice, `k>8`, unstable views,
 missing word/speaker coverage, legacy sidecar or wrong-lane dispatch must fail
-before TTS/mux/charge. Offline `k=5` is required for `SD-MS-L02`, but production
-code must not contain a fixture hash branch or hard-coded expected `k`.
+before TTS/mux/charge. Raw `k=5` is retained for audit, but effective voices are
+the `4` clusters with dominant-overlap word support; centroid-only raw cluster 0
+is non-speech and cannot create a voice. Production code contains no fixture hash
+branch or hard-coded expected `k`.
 
 Rearm comparator: PR #974 runtime v2 không được tự xóa hai marker v1 đã consumed.
 Chỉ `scripts/recover_subdub_fixed_vocal_v2.py` sau exact deploy và fresh Owner
