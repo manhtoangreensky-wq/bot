@@ -247257,7 +247257,7 @@ def subdub_multi_acoustic_failure_evidence(
         if current is None:
             break
         candidate = str(current or "").strip().lower()
-        if re.fullmatch(r"acoustic_[a-z0-9_]{1,72}", candidate):
+        if re.fullmatch(r"(?:acoustic|fixed_vocal)_[a-z0-9_]{1,72}", candidate):
             code = candidate
             break
         current = current.__cause__

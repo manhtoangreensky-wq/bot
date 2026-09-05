@@ -1202,3 +1202,36 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   `134000ms`, attempts `4/3`, downstream/output false, charge `0`. Marker
   RED/GREEN `1 failed -> 1 passed`; full recovery `125 passed`; direct impact
   `376 passed`; duplicate no-op.
+
+### Auto Multi acoustic runtime budget và lỗi `5%` — 05/09/2026
+
+- Runtime `a0c45d4d6b222bc747c71202eb228f67c72b94a6` đã dùng original source nhưng
+  same-job invocation vẫn terminal `failed_no_charge` ở `5%`, strict ASR `145`
+  words, trước translation/TTS/mux/artifact/delivery. Durable evidence chỉ ghi
+  `acoustic_failure_unknown`, vì bộ lọc cũ chỉ nhận mã `acoustic_*` và làm mất
+  các cause hợp lệ `fixed_vocal_*` của chính engine.
+- Hai Deepgram diagnostic read-only trên cùng normalized source đều trả `145`
+  words nhưng timing-only SHA khác nhau: `8AD855EC...2737DE8` và
+  `948B4F94...DF42AF`; đúng `3/145` hàng timestamp khác, delta lớn nhất `80ms`.
+  Cả hai chạy original acoustic source và đều PASS `k=5`, `37` units, `178`
+  embedding views, clusters `[9,18,26,25,11]`, speaker-unit counts
+  `[2,9,9,11,6]`, overlap/centroid `29/8`, `23` cues và đủ `5` speaker. Nội
+  dung từ không được persist; fixture regression chỉ giữ index/timing và token
+  `wordNNN`.
+- Async wrapper thật có một lượt PASS `247s` wall trên video `133.37542s`, tức
+  dùng hơn `82%` budget cố định `300s`; một fresh-ASR wrapper khác PASS `156s`.
+  Budget cố định vì vậy không bao phủ ổn định toàn direct lane tối đa `300s`.
+  Correction dùng chính duration đo từ stereo PCM: `max(300, ceil(duration*4))`,
+  cap `1200s`; không đọc fixture SHA, job ID, codec hay expected speaker count.
+  Timeout giờ có cause `acoustic_runtime_timeout`; các cause an toàn
+  `acoustic_*` và `fixed_vocal_*` đều được giữ để lần fail không còn thành
+  `unknown`.
+- TDD timeout/observability RED `7 failed, 1 passed` rồi GREEN `8 passed`.
+  Same-job marker RED/GREEN `1 failed, 4 passed` → `5 passed`; duplicate,
+  charged/output mutation và wrong failure aggregate đều no-op. Auto Multi
+  regression `338 passed`; exact-two comparator `37 passed`; real model/source
+  resource gate `5 passed in 255.84s`; full compile và diff-check exit `0`.
+- Đây là `SOURCE_AND_RESOURCE_PASS`, chưa phải deploy hoặc LIVE PASS. Chỉ cùng
+  job `#B4CB6D5FE8` được CAS bởi marker runtime-budget mới sau exact-SHA deploy;
+  attempts vẫn `4/3`, marker cũ giữ nguyên, không upload/Confirm/job mới và
+  `charged_xu=0`.

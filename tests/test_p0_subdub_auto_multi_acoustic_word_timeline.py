@@ -539,6 +539,31 @@ def test_acoustic_failure_evidence_is_bounded_and_contains_no_raw_words():
     assert "speaker" not in serialized
 
 
+@pytest.mark.parametrize(
+    ("cause_code", "expected_code"),
+    [
+        ("fixed_vocal_speaker_count_unstable", "fixed_vocal_speaker_count_unstable"),
+        ("acoustic_embedding_timeout", "acoustic_embedding_timeout"),
+    ],
+)
+def test_acoustic_failure_evidence_preserves_safe_engine_cause_codes(
+    cause_code,
+    expected_code,
+):
+    error = bot.subdub_speaker_cast.AutoCastManualRequired()
+    inner = bot.subdub_speaker_cast.AutoCastManualRequired()
+    inner.__cause__ = ValueError(cause_code)
+    error.__cause__ = inner
+
+    evidence = bot.subdub_multi_acoustic_failure_evidence(
+        error,
+        acoustic_pipeline_words(),
+        duration_seconds=12.0,
+    )
+
+    assert evidence["multi_acoustic_failure_code"] == expected_code
+
+
 def test_exact_multi_persists_bounded_failure_evidence_before_reraising(
     monkeypatch,
     tmp_path,

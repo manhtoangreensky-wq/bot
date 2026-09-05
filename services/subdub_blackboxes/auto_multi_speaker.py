@@ -31,6 +31,8 @@ _UNDERCLUSTER_WINDOWS_PER_CUE = 2
 _UNDERCLUSTER_MIN_CUES_PER_REGISTER = 2
 _UNDERCLUSTER_MIN_REGISTER_GAP_HZ = 30.0
 ACOUSTIC_WALL_TIMEOUT_SECONDS = 300.0
+ACOUSTIC_TIMEOUT_PER_SOURCE_SECOND = 4.0
+ACOUSTIC_TIMEOUT_MAX_SECONDS = 1_200.0
 MULTI_ACOUSTIC_STATE_FIELDS = frozenset({
     "multi_acoustic_backend",
     "multi_acoustic_model_sha256",
@@ -46,6 +48,22 @@ MULTI_ACOUSTIC_STATE_FIELDS = frozenset({
     "multi_acoustic_centroid_mapped_count",
     "multi_acoustic_speaker_unit_counts",
 })
+
+
+def acoustic_timeout_seconds_for_duration(duration_seconds: object) -> float:
+    """Scale the CPU acoustic budget across the supported direct-video lane."""
+
+    try:
+        duration = float(duration_seconds)
+    except (TypeError, ValueError, OverflowError):
+        duration = 0.0
+    floor = float(ACOUSTIC_WALL_TIMEOUT_SECONDS)
+    if not math.isfinite(duration) or duration <= 0.0:
+        return floor
+    return min(
+        float(ACOUSTIC_TIMEOUT_MAX_SECONDS),
+        max(floor, float(math.ceil(duration * ACOUSTIC_TIMEOUT_PER_SOURCE_SECOND))),
+    )
 
 
 def bounded_multi_acoustic_evidence(
@@ -201,7 +219,10 @@ async def run_local_acoustic_diarization_off_event_loop(
         auto_speaker._cleanup_pcm_path(path)
         raise speaker_cast.AutoCastManualRequired()
 
-    deadline = time.monotonic() + float(ACOUSTIC_WALL_TIMEOUT_SECONDS)
+    timeout_seconds = acoustic_timeout_seconds_for_duration(
+        measured_duration_seconds
+    )
+    deadline = time.monotonic() + timeout_seconds
     stop_event = threading.Event()
     worker = asyncio.create_task(
         asyncio.to_thread(
@@ -226,7 +247,9 @@ async def run_local_acoustic_diarization_off_event_loop(
         stop_event.set()
         await auto_speaker._drain_worker_bounded(worker)
         drain_attempted = True
-        raise speaker_cast.AutoCastManualRequired() from exc
+        raise speaker_cast.AutoCastManualRequired() from RuntimeError(
+            "acoustic_runtime_timeout"
+        )
     except asyncio.CancelledError:
         stop_event.set()
         await auto_speaker._drain_worker_bounded(worker)

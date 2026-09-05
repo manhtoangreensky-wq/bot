@@ -1608,4 +1608,50 @@ original_acoustic_source_correction_20260905:
     attempt_and_correction_unchanged: 4/3
     duplicate: blocked
 
-current_next_action: compile/YAML/diff then one rearm commit and automatic PR/merge/deploy; start one new same-job unit only, never create replacement job or rerun prior invocations
+previous_next_action: compile/YAML/diff then one rearm commit and automatic PR/merge/deploy; start one new same-job unit only, never create replacement job or rerun prior invocations
+
+acoustic_runtime_budget_correction_20260905:
+  base_runtime: a0c45d4d6b222bc747c71202eb228f67c72b94a6
+  prior_live:
+    public_job: B4CB6D5FE8
+    terminal: failed_no_charge at 5 percent
+    strict_word_count: 145
+    acoustic_failure_code: acoustic_failure_unknown
+    downstream_started: false
+    charged_xu: 0
+  diagnostic_a:
+    timing_sha256: 8ad855ec9dc38c53f0d482a2427f22c3c16cf9fc31a5e19a09ea9deca2737de8
+    wrapper_wall_seconds: 247
+    detected_speakers: 5
+    units: 37
+    cues: 23
+  diagnostic_b:
+    timing_sha256: 948b4f940fc747aa01bd07d81c8e37a04d823aca41638099bc67c5845ddf42af
+    rows_changed_vs_a: 3 of 145
+    max_timing_delta_ms: 80
+    wrapper_wall_seconds: 156
+    detected_speakers: 5
+    units: 37
+    cues: 23
+  correction:
+    scope: every supported direct Auto Multi video; no fixture or job production branch
+    timeout: max 300 seconds floor; ceil duration times 4; 1200 seconds cap
+    duration_authority: measured stereo PCM frames
+    error_codes: preserve acoustic_* and fixed_vocal_*; timeout acoustic_runtime_timeout
+    marker: auto_multi_acoustic_runtime_budget_repair_used
+    attempts_preserved: 4/3
+  verification:
+    red: 7 failed and 1 passed
+    focused_green: 8 passed
+    marker_green: 5 passed
+    auto_multi: 338 passed
+    exact_two: 37 passed
+    real_resource: 5 passed in 255.84 seconds
+    compile: exit 0
+    diff_check: exit 0
+    provider_calls: 2 diagnostic Deepgram calls authorized only for exact job
+    production_job_mutations: 0
+    wallet_mutations: 0
+  live_pass: false
+
+current_next_action: final review and commit; auto push PR squash deploy; one new exact same-job unit only; observe to artifact and receipt

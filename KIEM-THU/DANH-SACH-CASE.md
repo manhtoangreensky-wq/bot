@@ -111,6 +111,7 @@ SHA-256 `83DE97B744B931E544B569E6E750F8415545F226461BD2E36CFB49225898AD3E`.
 | `SD-MS-L08` | Strict-word Deepgram timeout + one ASR-timeout repair | Caller `134s` phải dùng timeout `300s` ở non-diarization strict-word branch và preserve `deepgram_timeout` xuyên adapter/ASR; manual default vẫn `60s`. Same-job repair chỉ nhận exact receipt `22:31:08`, v2+duration markers, ASR started, downstream/output/charge 0; thêm đúng một marker, giữ `4/3`, reset chỉ ASR; receipt mutation/duplicate no-op |
 | `SD-MS-L09` | Private pipeline context + same-job source rehydrate | Bốn field `_pipeline_workspace`, `_pipeline_saved_source_path`, `_pipeline_source_bytes_override`, `_pipeline_source_content_type_override` còn nguyên qua prepare/translation và tới classifier/TTS/mux. `job_key` phải khớp stored Telegram `file_unique_id`; downloadable `file_id` phải được lưu riêng, nonempty và không được bằng unique ID. Exact size/MIME/SHA phải PASS trước atomic write và trước CAS. Existing wrong hash, unique-ID mismatch, conflicting/non-string ID, download hash mismatch, marker duplicate và CAS loser đều không ghi DB/không overwrite source |
 | `SD-MS-L10` | Original acoustic source authority | Normalized H.264 copy vẫn dùng cho ASR/render; exact Auto Multi fixed-vocal PCM phải đọc original hash-locked source để tránh resample `44.1kHz→48kHz→44.1kHz` làm speaker-count instability. Exact original phải lặp `k=5`; non-Multi/exact-two vẫn dùng saved normalized path như cũ |
+| `SD-MS-L11` | Duration-scaled acoustic budget + provider timing variance | Mọi direct Auto Multi source hợp lệ `0–300s` dùng budget từ measured PCM `max(300, ceil(duration×4))`, cap `1200s`; timeout ghi `acoustic_runtime_timeout`, cause `fixed_vocal_*` không bị đổi thành unknown. Hai strict timing-only variants cùng video (`145` words, `3` rows lệch tối đa `80ms`) đều phải map `37` units → `23` cues, đủ `5` speaker trên fixture; production không chứa job/SHA/expected-k branch |
 
 Mỗi MP4 phải đo SHA-256/bytes/duration/dimensions/codec và AAC loudness; job id
 hoặc HTTP 200 không được tính PASS. Sửa case tại file này trước khi tạo/sửa
@@ -164,6 +165,13 @@ không được kích hoạt Key4U/Gemini fallback. Strict-word branch phải fo
 duration-derived `300s`; manual request không truyền scope vẫn giữ `60s`. ASR-timeout
 repair phải kiểm tra cùng transaction cả job và exact global provider receipt;
 missing/stale/wrong provider/route/status/error/time/updated_by đều FAIL trước CAS.
+
+Acoustic runtime comparator: không dùng timeout cố định cho workload tuyến tính
+theo media duration. Với video ngắn, floor vẫn `300s`; với `133.37542s`, budget
+phải là `534s`; với direct limit `300s`, cap là `1200s`. Timeout/cancellation
+vẫn drain thread trước cleanup. Một failure `fixed_vocal_*` hoặc
+`acoustic_runtime_timeout` phải được persist bằng mã bounded, không raw words,
+timestamps, PCM, embedding hay provider payload.
 
 Comparator UI bổ sung: `2` lane × `6` kiểu giọng (nữ mặc định, nam mặc định,
 Kho voice, voice riêng, Auto 2, Auto multi) phải cùng callback

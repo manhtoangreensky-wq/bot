@@ -171,3 +171,33 @@ The exact fixture gate proves `k=5`, word coverage `50/50`, `23` units, `178`
 
 This checkpoint is independent of the manual-top-up/PayOS task. Do not mix its
 state, files, PRs, jobs, provider receipts or wallet evidence into PayOS work.
+
+## Acoustic runtime-budget correction — 05/09/2026
+
+- Base/runtime before correction: `a0c45d4d6b222bc747c71202eb228f67c72b94a6`.
+- Exact prior live still ended `failed_no_charge` at `5%`, `145` words, before
+  translation/TTS/mux/artifact/delivery, with `acoustic_failure_unknown` and
+  `charged_xu=0`.
+- Read-only diagnostic A: timing SHA `8ad855ec...2737de8`, acoustic PASS `k=5`,
+  `37` units, `23` cues. Cached-timing production wrapper PASS in `247s` wall.
+- Read-only diagnostic B: timing SHA `948b4f94...df42af`, `3/145` timing rows
+  changed by at most `80ms`; fresh-ASR production wrapper PASS in `156s`, same
+  `k=5/37/23` authority. Raw text/provider payload was not persisted.
+- Root correction is generic for every supported direct Auto Multi source:
+  derive acoustic timeout from measured PCM duration with floor `300s`, factor
+  `4`, cap `1200s` over the engine's `300s` source limit. No job/SHA/expected-k
+  production branch and no clustering threshold change.
+- Observability correction preserves bounded `fixed_vocal_*` as well as
+  `acoustic_*`; timeout emits `acoustic_runtime_timeout`.
+- Same-job correction marker:
+  `auto_multi_acoustic_runtime_budget_repair_used`. It requires every prior
+  marker, exact current failure aggregate and no-output/no-charge authority;
+  attempts stay `4/3`, duplicate/mutation/CAS loser are no-op.
+- Measured source evidence: TDD RED `7 failed, 1 passed`; focused GREEN `8
+  passed`; marker RED/GREEN `1 failed, 4 passed` → `5 passed`; Auto Multi `338
+  passed`; exact-two `37 passed`; real resource `5 passed in 255.84s`; full
+  compile/diff-check `0`.
+- Next: final review/commit → push/PR/squash/deploy exact SHA → one same-job
+  script invocation → observe through MP4 + exactly one Telegram video and one
+  receipt. No upload/Confirm/new job/old command; Owner provider authority is
+  limited to this job and `charged_xu=0`.

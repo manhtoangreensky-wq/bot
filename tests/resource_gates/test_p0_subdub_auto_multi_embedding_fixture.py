@@ -30,6 +30,14 @@ WORD_FIXTURE_PATH = (
     / "fixtures"
     / "subdub_auto_multi_fixture_words.json"
 )
+ACTUAL_TIMING_FIXTURE_SHA256 = (
+    "8ad855ec9dc38c53f0d482a2427f22c3c16cf9fc31a5e19a09ea9deca2737de8"
+)
+ACTUAL_TIMING_FIXTURE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "subdub_auto_multi_actual_timing_145.json"
+)
 ACOUSTIC_REGION_SOURCE = (
     "existing #B4CB6D5FE8 Deepgram sidecar sanitized to timing-only regions"
 )
@@ -63,6 +71,25 @@ def _load_strict_words() -> list[dict]:
         type(item) is dict
         and set(item) == {"index", "word", "start", "end"}
         for item in words
+    )
+    validated = service.validate_word_timeline(
+        words,
+        duration_seconds=SOURCE_DURATION_SECONDS,
+    )
+    assert validated == words
+    return validated
+
+
+def _load_actual_timing_words() -> list[dict]:
+    assert _sha256(ACTUAL_TIMING_FIXTURE_PATH) == ACTUAL_TIMING_FIXTURE_SHA256
+    words = json.loads(ACTUAL_TIMING_FIXTURE_PATH.read_text(encoding="utf-8"))
+    assert type(words) is list and len(words) == 145
+    assert all(
+        type(item) is dict
+        and set(item) == {"index", "word", "start", "end"}
+        and item["index"] == index
+        and item["word"] == f"word{index:03d}"
+        for index, item in enumerate(words)
     )
     validated = service.validate_word_timeline(
         words,
@@ -279,6 +306,64 @@ def test_exact_fixture_fixed_vocal_authority_is_asr_independent(tmp_path):
     assert len({item["speaker_id"] for item in result["segments"]}) == 5
     for forbidden in ("centroids", "embeddings", "pcm", "word_timeline"):
         assert forbidden not in result
+
+
+def test_exact_fixture_fixed_vocal_accepts_actual_145_word_timing(tmp_path):
+    source_value = str(os.environ.get("SUBDUB_MULTI_FIXTURE_PATH") or "").strip()
+    if not source_value:
+        pytest.fail("SUBDUB_MULTI_FIXTURE_PATH is mandatory for this resource gate")
+    source = Path(source_value)
+    assert source.is_file()
+    assert source.stat().st_size == SOURCE_BYTES
+    assert _sha256(source) == SOURCE_SHA256
+    words = _load_actual_timing_words()
+    pcm_path = tmp_path / "actual-timing-stereo-44100-s16le.pcm"
+    completed = subprocess.run(
+        [
+            _ffmpeg_path(),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-y",
+            "-i",
+            str(source),
+            "-vn",
+            "-ac",
+            "2",
+            "-ar",
+            "44100",
+            "-f",
+            "s16le",
+            str(pcm_path),
+        ],
+        check=False,
+        capture_output=True,
+        timeout=180,
+    )
+    assert completed.returncode == 0, completed.stderr.decode(
+        "utf-8", errors="replace"
+    )[:500]
+
+    result = service.diarize_fixed_vocal_word_timeline(
+        str(pcm_path),
+        words,
+        duration_seconds=SOURCE_DURATION_SECONDS,
+        deadline_monotonic=time.monotonic() + 540.0,
+        stop_requested=lambda: False,
+    )
+
+    assert result["ok"] is True
+    assert result["detected_speaker_count"] == 5
+    assert result["word_count"] == result["word_coverage_count"] == 145
+    assert result["unit_count"] == 37
+    assert result["embedding_window_count"] == 178
+    assert result["cluster_sizes"] == [9, 18, 26, 25, 11]
+    assert result["speaker_unit_counts"] == [2, 9, 9, 11, 6]
+    assert result["overlap_mapped_count"] == 29
+    assert result["centroid_mapped_count"] == 8
+    assert len(result["segments"]) == 23
+    assert len({item["speaker_id"] for item in result["segments"]}) == 5
 
 
 @pytest.mark.parametrize("mutation", ("model_byte", "missing_notice"))
