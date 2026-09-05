@@ -707,3 +707,9 @@ hash. Nó chỉ loại cluster có zero dominant-overlap word support; dưới 3
 speakers vẫn fail-closed. Ma trận độc lập đã PASS raw count `4..8` với label
 phi-lời ở nhiều vị trí và full-chain toàn bộ effective count `3..8`; vì vậy
 fixture chỉ là regression evidence, không phải điều kiện điều khiển production.
+
+| Giả định/tài liệu cũ | Bằng chứng hiện tại | Trạng thái |
+|---|---|---|
+| Recovery command có `reply_text` là đủ để dùng pipeline | Pipeline tạo MP4 validated nhưng delivery engine cần `reply_video`/`reply_document`; không có method thì không hề gọi Telegram media API | ❌ Không còn đúng |
+| Delivery lỗi phải chạy lại ASR/TTS/mux | MP4 `18,171,909` bytes đã H.264/AAC PASS; chỉ cần CAS delivery-only và chống replay provider | ❌ Tốn phí và tạo rủi ro trùng |
+| Có MP4 trên đĩa đồng nghĩa đã LIVE PASS | Chưa có Telegram video message ID và receipt ID thì vẫn chưa PASS | ✅ Giữ fail-closed |

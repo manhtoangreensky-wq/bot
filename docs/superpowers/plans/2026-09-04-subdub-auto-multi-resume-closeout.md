@@ -370,6 +370,27 @@ baseline-equivalent and not an Auto Multi regression.
 - [ ] Observe only job `b4cb6d5fe8a7bdfce507` to terminal. No retry click, upload, Confirm, or replacement job.
 - [ ] If live exposes another defect, record its first failing boundary and use one RED → minimal fix → protected gate → deploy → new exact one-shot marker loop. Never mix another subsystem.
 
+#### Measured continuation on runtime `e129a2d2`
+
+- [x] Exact job crossed the historical 5% failure and completed strict ASR,
+  raw `5` / speech-supported `4` acoustic attribution, English translation,
+  `21/21` TTS, cue-locked mux and MP4 validation.
+- [x] Real MP4 exists: `18,171,909` bytes, H.264/AAC, `854x480`, `30fps`,
+  `48kHz` stereo, `134.0s`.
+- [x] Independent WeSpeaker audit proves four output voices are distinct:
+  minimum within-speaker cosine `0.571435` > maximum between-speaker cosine
+  `0.376944`, margin `0.194492`.
+- [x] Isolate the terminal RED to the recovery message adapter: it had
+  `reply_text` but no `reply_video`/`reply_document`, so no Telegram video call
+  occurred and no public failure message was sent.
+- [x] TDD a delivery-only CAS path reusing the validated artifact, with no
+  provider/pipeline replay: RED `3 failed`; GREEN `3 passed`; signature RED →
+  GREEN `1 failed` → `1 passed`; full recovery `148 passed`; protected `7
+  passed`.
+- [ ] Ship this delivery-only adapter (local compile/diff/YAML/scope/secret gates
+  already exit `0`), run it once, then audit the exact video
+  and receipt IDs, delivery order, companion-file count and finance deltas.
+
 ### Task 8: Artifact completion audit
 
 - [ ] Acoustic: `speaker_count` is `3..8`; stable acoustic evidence; distinct voice IDs count equals speaker count; no forced pairing or expected-count hint.

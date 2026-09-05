@@ -300,3 +300,37 @@ state, files, PRs, jobs, provider receipts or wallet evidence into PayOS work.
 - Total authorized diagnostic calls across the current timing/acoustic forensic
   sequence are `7`: initial A/B `2`, whole-file mapping C/D/E `3`, and targeted
   vocal/original `2`. Recovery invocations are accounted separately.
+
+## Runtime `e129a2d2` artifact PASS / delivery-adapter RED — 05/09/2026
+
+- PR `#998` merged exact SHA
+  `e129a2d27bcb4c91dcc8c72446c82fd74b40ed69`; deploy run `33975619245`
+  SUCCESS in `3m54s`. VPS checkout exact SHA; tracked diff `0`; bot/web/nginx
+  active; fixed-vocal v3 model SHA `9fea6516...056a1` on CPU provider.
+- Exact one-shot invocation `22784da7ec724de59b1fe1dffef64d97` consumed
+  `auto_multi_speech_supported_repair_used`, crossed the old `5%` boundary and
+  completed strict ASR, acoustic, English translation, `21/21` TTS cues,
+  cue-lock, mux and validation. It created `final.mp4`, `18,171,909` bytes,
+  H.264/AAC, `854x480`, `30fps`, `48kHz` stereo, `134.0s`.
+- Acoustic sidecar is raw `5` / speech-supported `4`, `145/145` words,
+  `35` units, `21` final cues. Independent output-audio audit selected `3`
+  long cues per speaker: four speakers, minimum within-speaker cosine
+  `0.571435`, maximum between-speaker cosine `0.376944`, separation margin
+  `0.194492`; distinctness PASS.
+- Delivery alone failed: the exact recovery script's synthetic message exposed
+  only `reply_text`; shared delivery requires `reply_video` or
+  `reply_document`. Therefore Telegram send was never attempted and the job
+  ended `failed_no_charge` with `missing_valid_delivered_mp4`; no public failure
+  message was sent. Root jobs `322`, wallet `200/0`, transactions `0`, credit
+  events `12`, provider usage rows `0`, charged Xu `0`.
+- Current branch `fix/p0-subdub-auto-multi-recovery-delivery-adapter` starts at
+  exact deployed main `e129a2d2`. Minimal correction adds the missing Bot media
+  adapter plus a one-shot CAS delivery-only marker. It reuses only the existing
+  validated MP4 and explicitly does not invoke ASR, translation, TTS, mux,
+  upload, Confirm or a new job.
+- TDD: adapter/CAS/order RED `3 failed`; GREEN `3 passed`; Bot signature RED
+  `1 failed` at unexpected `filename`; GREEN `1 passed`; full recovery `148
+  passed`; protected delivery/receipt/no-provider-replay `7 passed`.
+
+Current next action: commit/push/PR → exact-SHA deploy → one delivery-only
+execution → verify exactly one MP4 then one receipt and zero financial delta.

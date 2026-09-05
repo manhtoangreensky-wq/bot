@@ -34,6 +34,296 @@ ACOUSTIC_FULL_MEDIA_DURATION_REPAIR_MARKER = (
 )
 PENDING_MULTI_LANE_REPAIR_MARKER = "auto_multi_pending_lane_repair_used"
 SPEECH_SUPPORTED_REPAIR_MARKER = "auto_multi_speech_supported_repair_used"
+DELIVERY_REPAIR_MARKER = "auto_multi_speech_supported_delivery_repair_used"
+
+
+class _RecoveryMessage:
+    """Expose the Telegram media methods used by the shared delivery path."""
+
+    def __init__(self, telegram_bot):
+        self._telegram_bot = telegram_bot
+        self.chat_id = OWNER_ID
+
+    async def reply_text(self, text, **kwargs):
+        return await self._telegram_bot.send_message(
+            chat_id=self.chat_id,
+            text=text,
+            **kwargs,
+        )
+
+    async def reply_video(self, **kwargs):
+        return await self._telegram_bot.send_video(
+            chat_id=self.chat_id,
+            video=kwargs.get("video"),
+            caption=kwargs.get("caption"),
+            supports_streaming=True,
+            read_timeout=kwargs.get("read_timeout"),
+            write_timeout=kwargs.get("write_timeout"),
+            connect_timeout=kwargs.get("connect_timeout"),
+            pool_timeout=kwargs.get("pool_timeout"),
+        )
+
+    async def reply_document(self, **kwargs):
+        return await self._telegram_bot.send_document(
+            chat_id=self.chat_id,
+            **kwargs,
+        )
+
+
+def _existing_artifact_delivery_candidate(current: dict) -> str:
+    """Accept only the exact unsent, validated MP4 from the consumed recovery."""
+
+    if type(current) is not dict:
+        return ""
+    recovery = current.get("auto_multi_recovery")
+    validation = current.get("output_validation")
+    if type(recovery) is not dict or type(validation) is not dict:
+        return ""
+    workspace = str(current.get("workspace") or "").strip()
+    path = str(current.get("canonical_final_artifact_path") or "").strip()
+    safety = app.subtitle_dub_workspace_path_safety(workspace)
+    resolved_workspace = str(safety.get("resolved_path") or os.path.abspath(workspace))
+    try:
+        resolved_path = os.path.abspath(path)
+        actual_size = os.path.getsize(resolved_path)
+    except OSError:
+        return ""
+    expected_size = current.get("canonical_final_artifact_bytes")
+    duration = validation.get("actual_duration") or validation.get("duration")
+    try:
+        duration = float(duration)
+    except (TypeError, ValueError, OverflowError):
+        return ""
+    delivery_ids = (
+        "delivery_message_id",
+        "video_delivery_message_id",
+        "final_video_message_id",
+        "subdub_final_video_message_id",
+        "telegram_message_id",
+        "receipt_message_id",
+        "subdub_success_message_id",
+    )
+    return (
+        resolved_path
+        if (
+            str(current.get("internal_job_id") or current.get("job_id") or "")
+            == JOB_ID
+            and current.get("public_code") == PUBLIC_CODE
+            and str(current.get("user_id") or "") == str(OWNER_ID)
+            and str(current.get("chat_id") or current.get("user_id") or "")
+            == str(OWNER_ID)
+            and str(current.get("job_key") or "").endswith(
+                "|subtitle_plus_dub|auto_multi_speaker"
+            )
+            and current.get("status") == "failed_no_charge"
+            and current.get("terminal_state") == "failed_no_charge"
+            and current.get(SPEECH_SUPPORTED_REPAIR_MARKER) is True
+            and current.get(DELIVERY_REPAIR_MARKER) is not True
+            and current.get("auto_multi_speech_supported_repair_authority")
+            == "owner_confirmed_same_job_speech_supported_speakers"
+            and current.get("last_error_stage") == "delivery"
+            and current.get("last_technical_error")
+            == "missing_valid_delivered_mp4"
+            and current.get("success_blocked_reason")
+            == "missing_valid_delivered_mp4"
+            and current.get("delivery_attempted") is True
+            and current.get("delivery_attempts") == 1
+            and current.get("delivery_attempt_uncertain") is not True
+            and current.get("output_sent") is False
+            and current.get("final_mp4_delivered") is False
+            and current.get("terminal_public_outcome_sent") is False
+            and current.get("public_error_sent") is False
+            and not any(str(current.get(field) or "").strip() for field in delivery_ids)
+            and type(current.get("charged_xu")) is int
+            and current.get("charged_xu") == 0
+            and current.get("charge_status") == "not_charged"
+            and recovery.get("owner_confirmed_paid") is True
+            and str(recovery.get("source_sha256") or "").lower() == SOURCE_SHA256
+            and recovery.get("target_language") == "English"
+            and recovery.get("original_volume_percent") == 40
+            and recovery.get("dub_volume_percent") == 150
+            and safety.get("allowed") is True
+            and app._workspace_path_is_descendant(
+                resolved_path,
+                resolved_workspace,
+            )
+            and os.path.basename(resolved_path) == "final.mp4"
+            and type(expected_size) is int
+            and expected_size == actual_size
+            and actual_size > 0
+            and current.get("final_mp4_exists") is True
+            and current.get("final_mp4_validated") is True
+            and current.get("output_validated") is True
+            and validation.get("ok") is True
+            and validation.get("container") == "mp4"
+            and validation.get("video_codec") == "h264"
+            and validation.get("audio_codec") == "aac"
+            and validation.get("has_video") is True
+            and validation.get("has_audio") is True
+            and validation.get("size") == actual_size
+            and math.isfinite(duration)
+            and duration > 0.0
+        )
+        else ""
+    )
+
+
+def claim_existing_artifact_delivery() -> dict:
+    """CAS the exact generated MP4 into one delivery-only retry."""
+
+    conn = None
+    try:
+        conn = app.db_connect()
+        conn.execute("BEGIN IMMEDIATE")
+        key = app._engine_async_job_key(JOB_ID)
+        row = conn.execute(
+            "SELECT value FROM system_settings WHERE key=? LIMIT 1",
+            (key,),
+        ).fetchone()
+        old_value = str(row[0] or "") if row else ""
+        current = json.loads(old_value) if old_value else {}
+        path = _existing_artifact_delivery_candidate(current)
+        if not path:
+            conn.rollback()
+            return {
+                "ok": False,
+                "claimed": False,
+                "reason": "existing_artifact_delivery_not_allowed",
+            }
+        current.update(
+            {
+                "status": "retrying_delivery",
+                "terminal_state": "",
+                "lifecycle_state": "delivery",
+                "current_stage": "delivery",
+                "progress_stage": "delivery",
+                "progress_percent": 95,
+                "last_error_stage": "",
+                "last_error_safe": "",
+                "last_technical_error": "",
+                "success_blocked_reason": "",
+                "delivery_reason": "",
+                "terminal_public_outcome_type": "",
+                "terminal_public_outcome_sent": False,
+                "voice_kind": "auto_speaker_gender",
+                "voice_selection_mode": "auto_speaker",
+                "auto_speaker_lane": "multi",
+                "lookup_store_hit": "engine_async_direct",
+                DELIVERY_REPAIR_MARKER: True,
+                "auto_multi_speech_supported_delivery_repair_authority": (
+                    "existing_validated_mp4_no_provider_replay"
+                ),
+                "auto_multi_speech_supported_delivery_repair_claimed_at": (
+                    app.time.time()
+                ),
+                "updated_at": app.time.time(),
+            }
+        )
+        new_value = json.dumps(current, ensure_ascii=False, separators=(",", ":"))
+        cursor = conn.execute(
+            """UPDATE system_settings
+               SET value=?,note=?,updated_at=?,updated_by=?
+               WHERE key=? AND value=?""",
+            (
+                new_value,
+                "SubDub existing validated MP4 delivery-only retry",
+                app.now_text(),
+                str(OWNER_ID),
+                key,
+                old_value,
+            ),
+        )
+        if int(cursor.rowcount or 0) != 1:
+            conn.rollback()
+            return {
+                "ok": False,
+                "claimed": False,
+                "reason": "existing_artifact_delivery_cas_lost",
+            }
+        conn.commit()
+        app.ENGINE_ASYNC_MEMORY_JOBS[JOB_ID] = dict(current)
+        app.SUBTITLE_DUB_PIPELINE_JOBS[str(current.get("job_key") or "")] = dict(
+            current
+        )
+        return {
+            "ok": True,
+            "claimed": True,
+            "job": dict(current),
+            "path": path,
+        }
+    except (json.JSONDecodeError, OSError, sqlite3.Error, TypeError, ValueError):
+        if conn is not None:
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
+        return {
+            "ok": False,
+            "claimed": False,
+            "reason": "existing_artifact_delivery_cas_error",
+        }
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+async def deliver_existing_artifact(telegram_bot) -> dict:
+    """Deliver an already validated MP4 without ASR, translation, TTS or mux."""
+
+    claim = claim_existing_artifact_delivery()
+    if not claim.get("claimed"):
+        return {}
+    current = dict(claim.get("job") or {})
+    job_key = str(current.get("job_key") or "")
+    current["lookup_store_hit"] = "engine_async_direct"
+    app.SUBTITLE_DUB_PIPELINE_JOBS[job_key] = dict(current)
+    message = _RecoveryMessage(telegram_bot)
+    query = SimpleNamespace(message=message)
+    context = SimpleNamespace(bot=telegram_bot)
+    delivered = await app.subdub_recover_existing_mp4_delivery(
+        query,
+        context,
+        job_key,
+        current,
+        "vi",
+    )
+    message_id = app.subdub_confirmed_video_delivery_message_id(delivered)
+    if not message_id:
+        raise RuntimeError("existing_artifact_delivery_unconfirmed")
+    latest = dict(app.SUBTITLE_DUB_PIPELINE_JOBS.get(job_key) or delivered)
+    panel = await app.subdub_finalize_delivered_panel(
+        query,
+        context,
+        job_key,
+        str(latest.get("internal_job_id") or latest.get("job_id") or JOB_ID),
+        "vi",
+        latest,
+    )
+    if panel is None:
+        raise RuntimeError("existing_artifact_terminal_panel_unconfirmed")
+    latest = dict(app.SUBTITLE_DUB_PIPELINE_JOBS.get(job_key) or latest)
+    receipt_text = app.video_dubbing_receipt_text(latest, latest, "vi")
+    receipt = await app.subdub_send_success_receipt_once(
+        message,
+        job_key,
+        receipt_text,
+    )
+    latest = dict(app.SUBTITLE_DUB_PIPELINE_JOBS.get(job_key) or latest)
+    receipt_id = str(
+        latest.get("receipt_message_id")
+        or latest.get("subdub_success_message_id")
+        or app.telegram_delivery_message_id(receipt)
+        or ""
+    )
+    if not receipt_id:
+        raise RuntimeError("existing_artifact_receipt_unconfirmed")
+    return {
+        **latest,
+        "ok": True,
+        "delivered": True,
+        "video_delivery_message_id": message_id,
+        "receipt_message_id": receipt_id,
+    }
 
 
 def _context_repair_candidate(current: dict) -> bool:
@@ -1126,6 +1416,9 @@ def claim_same_attempt(
 async def run() -> None:
     application = app.build_telegram_application()
     async with application.bot as telegram_bot:
+        delivered = await deliver_existing_artifact(telegram_bot)
+        if delivered.get("delivered"):
+            return
         source = await ensure_exact_source(telegram_bot)
         if not source.get("ok") and source.get("reason") != "context_repair_not_allowed":
             raise RuntimeError(str(source.get("reason") or "source_rehydrate_failed"))
@@ -1135,16 +1428,9 @@ async def run() -> None:
                 str(claim.get("reason") or "fixed_vocal_v2_rearm_failed")
             )
 
-        async def reply_text(text, **kwargs):
-            return await telegram_bot.send_message(
-                chat_id=OWNER_ID,
-                text=text,
-                **kwargs,
-            )
-
         update = SimpleNamespace(
             effective_user=SimpleNamespace(id=OWNER_ID),
-            message=SimpleNamespace(chat_id=OWNER_ID, reply_text=reply_text),
+            message=_RecoveryMessage(telegram_bot),
         )
         context = SimpleNamespace(
             args=[
