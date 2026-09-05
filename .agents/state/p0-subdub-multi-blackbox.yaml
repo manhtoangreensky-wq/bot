@@ -1594,6 +1594,18 @@ original_acoustic_source_correction_20260905:
     direct_impact: 375 passed and 1 baseline-stale test deselected in 15.22s
     exact_two: 46 passed and 241 deselected in 8.71s
     compile_yaml_diff: exit 0
+    rearm_red: 1 failed in 8.24s
+    rearm_green: 1 passed in 5.05s
+    marker_subset: 15 passed and 110 deselected in 6.18s
+    recovery_full_after_marker: 125 passed in 9.46s
+    direct_impact_after_marker: 376 passed and 1 baseline-stale test deselected in 13.23s
+    exact_two_after_marker: 46 passed and 241 deselected in 5.19s
   live_pass: false
 
-current_next_action: create one correction commit then automatic PR/merge/deploy; continue same job only, never create replacement job or rerun prior invocations
+  rearm:
+    marker: auto_multi_original_acoustic_source_repair_used
+    exact_live_authority: acoustic_failure_unknown; 145 words; 134000 ms; context marker consumed; downstream/output false; charged 0
+    attempt_and_correction_unchanged: 4/3
+    duplicate: blocked
+
+current_next_action: compile/YAML/diff then one rearm commit and automatic PR/merge/deploy; start one new same-job unit only, never create replacement job or rerun prior invocations

@@ -1197,3 +1197,8 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   `3 passed in 471.43s`. `charged_xu=0`; không job mới.
 - Direct impact `375 passed + 1` known baseline deselected; exact-two `46
   passed`; full compile/YAML/diff exit `0`.
+- Cùng job đã consume context marker nên correction có marker original-source
+  riêng, chỉ nhận exact aggregate `acoustic_failure_unknown`, `145` words,
+  `134000ms`, attempts `4/3`, downstream/output false, charge `0`. Marker
+  RED/GREEN `1 failed -> 1 passed`; full recovery `125 passed`; direct impact
+  `376 passed`; duplicate no-op.

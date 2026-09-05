@@ -161,6 +161,11 @@ The exact fixture gate proves `k=5`, word coverage `50/50`, `23` units, `178`
   production DB, wallet, job or Telegram mutation occurred in the source loop.
 - Direct impact `375 passed / 1` known baseline deselected; exact-two `46
   passed`; full compile/YAML/diff exit `0`.
+- Original-source same-job rearm adds one marker only for exact live aggregate
+  `acoustic_failure_unknown/145 words/134000ms`, keeps attempts `4/3`, preserves
+  context marker and blocks duplicates. RED/GREEN `1 failed -> 1 passed`;
+  marker subset `15 passed`, full recovery `125 passed`, direct impact `376
+  passed`, exact-two `46 passed`.
 
 ## PayOS handoff boundary
 

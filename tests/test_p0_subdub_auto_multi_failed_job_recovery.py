@@ -840,6 +840,66 @@ def test_context_repair_rearms_exact_consumed_timeout_job_once(
     }
 
 
+def test_original_source_repair_rearms_consumed_context_job_once(
+    tmp_path,
+    monkeypatch,
+):
+    rearm, db_path, context_failure = _seed_context_loss_failure(
+        tmp_path,
+        monkeypatch,
+    )
+    context = rearm.claim_same_attempt(acoustic_preflight=fixed_vocal_v2_preflight)
+    assert context["claimed"] is True
+    failed = {
+        **context["job"],
+        "status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "lifecycle_state": "failed_no_charge",
+        "current_stage": "failed_no_charge",
+        "progress_stage": "failed_no_charge",
+        "last_error_stage": "AUTO_CAST_MANUAL_REQUIRED",
+        "last_error_safe": "manual required",
+        "asr_started": False,
+        "translation_started": False,
+        "tts_started": False,
+        "mux_started": False,
+        "artifact_started": False,
+        "delivery_attempted": False,
+        "final_mp4_exists": False,
+        "output_validated": False,
+        "output_sent": False,
+        "multi_acoustic_failure_code": "acoustic_failure_unknown",
+        "multi_acoustic_failure_word_count": 145,
+        "multi_acoustic_failure_duration_ms": 134_000,
+    }
+    _persist_fixed_vocal_job(db_path, failed)
+
+    repaired = rearm.claim_same_attempt(
+        acoustic_preflight=fixed_vocal_v2_preflight
+    )
+
+    assert repaired["claimed"] is True
+    assert repaired["job"]["auto_multi_original_acoustic_source_repair_used"] is True
+    assert repaired["job"]["auto_multi_private_pipeline_context_repair_used"] is True
+    assert repaired["job"]["auto_multi_recovery_attempt_count"] == 4
+    assert repaired["job"]["auto_multi_recovery_correction_attempt_count"] == 3
+    assert repaired["job"]["status"] == bot.SUBDUB_FAILED_AUTO_MULTI_RECOVERY_STATUS
+    assert repaired["job"]["terminal_state"] == ""
+    assert repaired["job"]["charged_xu"] == 0
+
+    duplicate_state = {
+        **repaired["job"],
+        "status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "current_stage": "failed_no_charge",
+    }
+    _persist_fixed_vocal_job(db_path, duplicate_state)
+    duplicate = rearm.claim_same_attempt(
+        acoustic_preflight=fixed_vocal_v2_preflight
+    )
+    assert duplicate["claimed"] is False
+
+
 def test_context_repair_rejects_second_claim_and_identity_mismatch(
     tmp_path,
     monkeypatch,
