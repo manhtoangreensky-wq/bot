@@ -1968,6 +1968,205 @@ def test_v4_completed_scene_one_claims_only_stale_taskless_scene_two(
     assert sorted(namespaces[V4_AUTHORIZATION_ID]) == ["1"]
 
 
+def test_v4_orchestrator_reuses_durable_clip_path_before_scene_two_submit(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _configure_key4u_veo_contract(monkeypatch)
+    payload = _taskless_v3_job28_payload()
+    authorization = payload["controlled_fallback_replacement_authorization"]
+    authorization.update(
+        {
+            "authorization_id": V4_AUTHORIZATION_ID,
+            "authorization_version": 4,
+            "state": "active",
+            "calls_consumed": 0,
+            "consumed_scene_indexes": [],
+        }
+    )
+    namespaces = payload[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ]
+    namespaces[V3_AUTHORIZATION_ID]["1"] = _authorization_receipt(
+        V3_AUTHORIZATION_ID,
+        3,
+        1,
+        task_id="expired-v3-scene-one-task",
+    )
+    namespaces[V4_AUTHORIZATION_ID] = {}
+    submitted = _replacement_submit_diagnostics(
+        payload,
+        scene_index=1,
+        task_id="key4u-v4-scene-one-task-accepted",
+    )
+    persisted, _ = remote_worker_api._controlled_fallback_submit_receipt(submitted)
+    scene_one_clip = tmp_path / "provider_scene_001.mp4"
+    scene_one_clip.write_bytes(b"v4-scene-one-real-provider-clip")
+    connector._record_replacement_scene_result_for_next_scene(
+        persisted,
+        1,
+        {
+            "ok": True,
+            "provider": "key4u_video",
+            "provider_task_ids": ["key4u-v4-scene-one-task-accepted"],
+            "output_path": str(scene_one_clip),
+        },
+    )
+    for scene in persisted["scene_tasks"]:
+        if int(scene.get("scene_index") or 0) == 1:
+            scene["clip_path"] = str(scene_one_clip)
+            scene.pop("output_path", None)
+            scene.update(
+                {
+                    "status": "provider_running",
+                    "actual_provider_payload_status": "queued",
+                    "clip_valid": True,
+                    "result_url_valid": True,
+                    "clip_bytes": scene_one_clip.stat().st_size,
+                }
+            )
+        else:
+            scene.update(
+                {
+                    "provider": "key4u_video",
+                    "selected_provider": "key4u_video",
+                    "status": "provider_stalled_not_start",
+                    "current_scene_status": "provider_stalled_not_start",
+                    "actual_provider_payload_status": "blocked_no_charge",
+                    "failure_reason": "replacement_accepted_task_poll_only",
+                    "provider_task_id": "",
+                    "active_task_id": "",
+                    "task_id_present": False,
+                    "task_pollable": False,
+                    "submit_accepted": False,
+                    "fallback_count": 0,
+                    "provider_fallback_count": 0,
+                    "fallback_allowed": False,
+                    "controlled_fallback_allowed": False,
+                    "fallback_provider_candidate": "shopaikey_video",
+                    "fallback_provider_order": ["shopaikey_video"],
+                    "fallback_scene_index": 2,
+                    "dispatch_attempted": True,
+                }
+            )
+    persisted["provider_scene_tasks"] = copy.deepcopy(persisted["scene_tasks"])
+    persisted.update(
+        {
+            "user_id": 7126457028,
+            "product_type": "video_trend",
+            "quality_tier": 400,
+            "scene_count": 2,
+            "scene_duration_seconds": 8,
+            "expected_duration_seconds": 16,
+            "orchestration_mode": "per_scene_8s",
+            "scene_cards": [
+                {
+                    "scene_index": 1,
+                    "video_prompt": "V4 durable scene one",
+                    "target_duration_sec": 8,
+                    "aspect_ratio": "9:16",
+                },
+                {
+                    "scene_index": 2,
+                    "video_prompt": "V4 remaining scene two",
+                    "target_duration_sec": 8,
+                    "aspect_ratio": "9:16",
+                },
+            ],
+            "fallback_scene_index": 0,
+            "fallback_allowed": False,
+            "controlled_fallback_allowed": False,
+            "fallback_provider_candidate": "",
+            "fallback_provider_order": [],
+            "replacement_authorization_id": V4_AUTHORIZATION_ID,
+            "replacement_authorization_version": 4,
+            "replacement_calls_consumed": 1,
+            "replacement_calls_remaining": 1,
+        }
+    )
+    claim = remote_worker_api.product_video_controlled_fallback_claim_payload(
+        {"id": 28, "project_id": 32},
+        persisted,
+        {"project_id": 32},
+        {
+            "worker_local_ready_provider_keys": [
+                "shopaikey_video",
+                "key4u_video",
+            ],
+            "contract_valid_provider_chain": [
+                "key4u_video",
+                "shopaikey_video",
+            ],
+        },
+    )
+    claimed = claim["result"]
+    calls: list[int] = []
+
+    def fake_provider_generation(request, *, output_dir, **_kwargs):
+        scene_index = int(request.metadata.get("scene_index") or 0)
+        calls.append(scene_index)
+        output = Path(output_dir) / f"v4-scene-{scene_index}.mp4"
+        output.write_bytes(f"v4-scene-{scene_index}".encode("ascii"))
+        return {
+            "ok": True,
+            "provider": "key4u_video",
+            "provider_task_ids": [f"key4u-v4-task-{scene_index}"],
+            "provider_video_ids": [f"key4u-v4-task-{scene_index}"],
+            "output_path": str(output),
+            "scene_index": scene_index,
+            "result_url_present": True,
+        }
+
+    final_path = tmp_path / "v4-final.mp4"
+
+    def fake_finalize(**_kwargs):
+        final_path.write_bytes(b"v4-two-scene-final")
+        return {
+            "ok": True,
+            "final_video_path": str(final_path),
+            "duration_sec": 16.0,
+            "scene_order": [1, 2],
+        }
+
+    monkeypatch.setattr(connector, "run_provider_generation", fake_provider_generation)
+    monkeypatch.setattr(
+        connector,
+        "_canonical_product_video_workspace",
+        lambda _job: str(tmp_path / "v4-workspace"),
+    )
+    monkeypatch.setattr(
+        connector.video_final_output,
+        "probe_video",
+        lambda path: {
+            "ok": True,
+            "has_video": True,
+            "has_audio": False,
+            "bytes": Path(path).stat().st_size,
+            "duration": 8.0,
+        },
+    )
+    monkeypatch.setattr(connector, "finalize_multiscene_scene_clips", fake_finalize)
+
+    result = connector._run_per_scene_provider_orchestrator(
+        claimed,
+        str(tmp_path / "unused"),
+        provider_order=["key4u_video", "shopaikey_video"],
+        provider_events=[],
+        debug_results=[],
+    )
+
+    assert claim["eligible_scene_indexes"] == [2]
+    assert calls == [2]
+    assert result["ok"] is True
+    assert sorted(
+        result["controlled_fallback_replacement_submit_receipts_by_authorization"]
+        [V4_AUTHORIZATION_ID]
+    ) == ["1", "2"]
+    assert result["replacement_calls_consumed"] == 2
+    assert result["replacement_calls_remaining"] == 0
+    assert result["charged_xu"] == 0
+
+
 def test_v3_taskless_watchdog_hands_fresh_worker_read_only_state_to_claim(
     monkeypatch,
 ) -> None:

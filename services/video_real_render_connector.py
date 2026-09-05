@@ -5246,7 +5246,7 @@ def _provider_event_from_payload(job: dict | None, scene_index: int, payload: di
 
 def _scene_output_from_payload(payload: dict[str, Any] | None = None) -> str:
     payload = dict(payload or {})
-    for key in ("output_path", "local_path", "final_video_path", "raw_provider_video_path"):
+    for key in ("clip_path", "output_path", "local_path", "final_video_path", "raw_provider_video_path"):
         text = str(payload.get(key) or "").strip()
         if text and os.path.isfile(text) and os.path.getsize(text) > 0:
             return text

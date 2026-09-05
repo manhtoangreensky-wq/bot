@@ -1,5 +1,5 @@
 task_id: P0_PRODUCT_VIDEO_V2_PV2_R01
-phase: PV2_R01_JOB28_V4_SCENE2_CLAIM_SOURCE_GREEN
+phase: PV2_R01_JOB28_V4_SCENE2_EXECUTOR_SOURCE_GREEN
 pointer: V2-03/PV2-R01
 base_sha: 3d16cf60511318d2c5eb7c799ecbee8c07631c1b
 goal: Restore the complete existing content flow for all four Video Trend lanes, then live the most complex upload lane once at tier 400 with two real scenes, strict subtitle/transition Add-ons, durable MP4 receipt, customer report and zero Owner wallet mutation.
@@ -1230,6 +1230,50 @@ pv2_r01_job28_v4_scene2_claim:
   provider_calls_during_source_gate: 0
   wallet_mutations_during_source_gate: 0
   live_pass: false
+pv2_r01_job28_v4_scene2_executor:
+  claim_ship:
+    pr: 988
+    merge_sha: c85c4534d6cd9dc8a4b74a302d4f0966f0fde4ca
+    compile_run: 33846348378 SUCCESS in 31s
+    deploy_run: 33846425477 SUCCESS in 4m6s
+  current_runtime_sha: 9715b6f0a7436347fd1b3a8023fe89bc8bbf3938
+  claim_fix_is_ancestor: true
+  product_video_service_diff_since_claim_ship: 0
+  live_workers_stopped: [1369034, 1404119]
+  live_call_state:
+    v4_calls_consumed_remaining: [1, 1]
+    scene2_task_present: false
+    scene2_receipt_present: false
+    provider_http_request_sent: false
+    provider_submit_http_status: 0
+    charged_xu: 0
+    transactions: 0
+    provider_usage: 0
+    wallet: [200, 0]
+  root_cause: >-
+    Claim selected only scene 2, but the orchestrator ignored scene 1's valid
+    durable clip because it was stored under clip_path rather than output_path.
+    It therefore entered the scene-1 provider boundary first and never reached
+    the authorized scene-2 submit.
+  production_query_only_probe:
+    claim_applied: true
+    eligible_scene_indexes: [2]
+    provider_invocation_scene_indexes: [1]
+    scene1_pending_task_present: true
+    db_total_changes: 0
+  correction_scope:
+    - add clip_path to the existing scene artifact path lookup
+    - preserve all validation, authorization, provider, receipt and finance logic
+  red: 1 failed in 0.67s; actual calls [1,2], expected [2]
+  exact_green: 1 passed in 612.40s
+  protected_green: 97 passed in 8.62s
+  post_rebase_base: 2e96de81b1332b38c140c2c2e41e36d34afb95d1
+  post_rebase_pre_evidence_amend_head: 6337dcfae1a98bc427459f6c9603fe50f9dccc2e
+  post_rebase_gate: 106 passed in 9.38s
+  post_rebase_compile_diff: bot.py, worker and changed files exit 0; diff-check exit 0
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  live_pass: false
 spec_04i_subdub_auto_two_speaker_addon:
   phase: PENDING_AFTER_SPEC_04H_9
   compatible_media_only: true
@@ -1238,9 +1282,9 @@ spec_04i_subdub_auto_two_speaker_addon:
   representative_live_target: one unfinished media-compatible Product Video lane
   acceptance: male/female detection; translation; two-voice dub; final MP4; receipt/report; wallet delta 0
 next_action: >-
-  Commit and ship only the V4 scene-2 taskless claim seam, deploy and synchronize
-  the inactive Owner worker. Revalidate the same production row in query-only mode,
-  then resume existing job 28 once. Scene 1 is immutable and must never be submitted
-  again; scene 2 may consume the final V4 call. Stop after that call or terminal
-  two-scene MP4, then validate stitch, Add-ons, delivery and zero-Xu finance before
-  locking PV2-R01 and opening SPEC-04H.9.
+  Commit and ship only the one-line durable clip_path executor seam, deploy and
+  synchronize the inactive Owner worker. Revalidate the same production row in
+  query-only mode, then resume existing job 28 once. Scene 1 is immutable and must
+  never be submitted again; scene 2 may consume the final V4 call. Stop after that
+  call or terminal two-scene MP4, then validate stitch, Add-ons, delivery and zero-Xu
+  finance before locking PV2-R01 and opening SPEC-04H.9.
