@@ -24,6 +24,7 @@ REARM_MARKER = "auto_multi_fixed_vocal_v2_recovery_used"
 DURATION_REPAIR_MARKER = "auto_multi_fixed_vocal_v2_duration_repair_used"
 ASR_TIMEOUT_REPAIR_MARKER = "auto_multi_fixed_vocal_v2_asr_timeout_repair_used"
 CONTEXT_REPAIR_MARKER = "auto_multi_private_pipeline_context_repair_used"
+ORIGINAL_SOURCE_REPAIR_MARKER = "auto_multi_original_acoustic_source_repair_used"
 
 
 def _context_repair_candidate(current: dict) -> bool:
@@ -54,6 +55,8 @@ def _context_repair_candidate(current: dict) -> bool:
         root_dub_volume is not None
         and (type(root_dub_volume) is not int or root_dub_volume != 150)
     )
+
+
     actual_evidence = any(
         bool(current.get(field))
         for field in (
@@ -142,6 +145,101 @@ def _context_repair_candidate(current: dict) -> bool:
         and recovery.get("dub_volume_percent") == 150
         and not root_conflict
         and not actual_evidence
+    )
+
+
+def _original_source_repair_candidate(current: dict) -> bool:
+    if type(current) is not dict:
+        return False
+    service = app.auto_multi_speaker.subdub_multi_speaker_embedding_onnx
+    recovery = current.get("auto_multi_recovery")
+    if type(recovery) is not dict:
+        return False
+    success_evidence = any(
+        bool(current.get(field))
+        for field in (
+            "multi_acoustic_backend",
+            "multi_acoustic_model_sha256",
+            "multi_acoustic_algorithm_version",
+            "multi_acoustic_speaker_count",
+            "multi_acoustic_word_count",
+            "multi_acoustic_unit_count",
+            "multi_acoustic_embedding_window_count",
+            "multi_acoustic_cluster_sizes",
+            "multi_acoustic_stability_pass",
+            "multi_acoustic_word_coverage_count",
+            "multi_acoustic_overlap_mapped_count",
+            "multi_acoustic_centroid_mapped_count",
+            "multi_acoustic_speaker_unit_counts",
+        )
+    )
+    false_fields = (
+        "asr_started",
+        "translation_started",
+        "tts_started",
+        "mux_started",
+        "artifact_started",
+        "delivery_attempted",
+        "final_mp4_exists",
+        "output_validated",
+        "output_sent",
+    )
+    output_fields = (
+        "final_mp4_path",
+        "final_output_path",
+        "output_path",
+        "output_video_path",
+        "final_video_path",
+        "dub_video_path",
+        "video_delivery_message_id",
+        "final_video_message_id",
+        "delivery_message_id",
+        "telegram_message_id",
+    )
+    return bool(
+        current.get(REARM_MARKER) is True
+        and current.get(DURATION_REPAIR_MARKER) is True
+        and current.get(ASR_TIMEOUT_REPAIR_MARKER) is True
+        and current.get(CONTEXT_REPAIR_MARKER) is True
+        and current.get(ORIGINAL_SOURCE_REPAIR_MARKER) is not True
+        and current.get("auto_multi_private_pipeline_context_repair_authority")
+        == "owner_confirmed_same_job_private_pipeline_context"
+        and str(current.get("internal_job_id") or current.get("job_id") or "")
+        == JOB_ID
+        and current.get("public_code") == PUBLIC_CODE
+        and str(current.get("user_id") or "") == str(OWNER_ID)
+        and str(current.get("chat_id") or current.get("user_id") or "")
+        == str(OWNER_ID)
+        and str(current.get("job_key") or "").endswith(
+            "|subtitle_plus_dub|auto_multi_speaker"
+        )
+        and current.get("status") == "failed_no_charge"
+        and current.get("terminal_state") == "failed_no_charge"
+        and current.get("auto_multi_recovery_attempt_count") == 4
+        and current.get("auto_multi_recovery_correction_attempt_count") == 3
+        and current.get("auto_multi_acoustic_recovery_used") is True
+        and current.get("auto_multi_acoustic_stability_repair_used") is True
+        and current.get("auto_multi_acoustic_backend") == PREVIOUS_BACKEND
+        and current.get("auto_multi_acoustic_model_sha256") == service.MODEL_SHA256
+        and current.get("auto_multi_acoustic_algorithm_version")
+        == PREVIOUS_ALGORITHM
+        and current.get("pipeline_started") is True
+        and current.get("last_error_stage") == "AUTO_CAST_MANUAL_REQUIRED"
+        and current.get("multi_acoustic_failure_code")
+        == "acoustic_failure_unknown"
+        and current.get("multi_acoustic_failure_word_count") == 145
+        and current.get("multi_acoustic_failure_duration_ms") == 134_000
+        and type(current.get("charged_xu")) is int
+        and current.get("charged_xu") == 0
+        and current.get("charge_status") == "not_charged"
+        and all(field in current and current.get(field) is False for field in false_fields)
+        and not any(str(current.get(field) or "").strip() for field in output_fields)
+        and recovery.get("owner_confirmed_paid") is True
+        and str(recovery.get("source_sha256") or "").lower() == SOURCE_SHA256
+        and recovery.get("target_language") == "English"
+        and recovery.get("original_volume_percent") == 40
+        and recovery.get("dub_volume_percent") == 150
+        and not success_evidence
     )
 
 
@@ -482,6 +580,7 @@ def claim_same_attempt(
             and not actual_v2_evidence_present
         )
         context_repair = _context_repair_candidate(current)
+        original_source_repair = _original_source_repair_candidate(current)
         downstream_false_fields = tuple(
             field for field in false_fields if field != "asr_started"
         )
@@ -533,6 +632,7 @@ def claim_same_attempt(
                 or duration_repair
                 or asr_timeout_repair
                 or context_repair
+                or original_source_repair
             )
             and current.get("auto_multi_acoustic_backend") == PREVIOUS_BACKEND
             and current.get("auto_multi_acoustic_model_sha256")
@@ -540,7 +640,7 @@ def claim_same_attempt(
             and current.get("auto_multi_acoustic_algorithm_version")
             == PREVIOUS_ALGORITHM
             and not root_selection_conflicts
-            and not actual_v2_evidence_present
+            and (original_source_repair or not actual_v2_evidence_present)
             and current.get("pipeline_started") is True
             and failure_authority_valid
             and type(current.get("charged_xu")) is int
@@ -600,6 +700,23 @@ def claim_same_attempt(
                         "asr_started": False,
                     }
                     if context_repair
+                    else {}
+                ),
+                **(
+                    {
+                        ORIGINAL_SOURCE_REPAIR_MARKER: True,
+                        "auto_multi_original_acoustic_source_repair_authority": (
+                            "owner_confirmed_same_job_original_acoustic_source"
+                        ),
+                        "auto_multi_original_acoustic_source_repair_claimed_at": (
+                            app.time.time()
+                        ),
+                        "multi_acoustic_failure_code": "",
+                        "multi_acoustic_failure_word_count": 0,
+                        "multi_acoustic_failure_duration_ms": 0,
+                        "asr_started": False,
+                    }
+                    if original_source_repair
                     else {}
                 ),
                 **(

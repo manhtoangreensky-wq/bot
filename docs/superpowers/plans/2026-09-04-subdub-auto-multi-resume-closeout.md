@@ -257,6 +257,12 @@ therefore changes only exact Auto Multi acoustic PCM input to original source;
 normalized media remains the ASR/render authority and all other lanes retain
 their current saved-source priority.
 
+Because the context marker was consumed by that live RED, continuation uses a
+separate original-source marker. It accepts only the exact measured aggregate
+`acoustic_failure_unknown`, `145` words, `134000ms`, attempts `4/3`, all
+downstream/output flags false and `charged_xu=0`; it preserves prior markers,
+does not increment attempts and blocks duplicate claims.
+
 The existing provider-fallback suite produced `50 passed` plus one stale
 hard-coded exact-two SHA assertion. `origin/main` contains the same stale test,
 while both protected source files are byte-identical to `origin/main`; this is
