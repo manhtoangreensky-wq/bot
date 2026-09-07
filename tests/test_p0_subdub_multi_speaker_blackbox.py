@@ -1444,6 +1444,8 @@ def test_multi_adapter_persists_three_distinct_voices_used_by_tts(monkeypatch):
     assert result["state"]["auto_multi_voice_verified"] is True
     assert result["state"]["auto_multi_attribution_verified"] is True
     assert len(result["state"]["auto_multi_cast_sha256"]) == 64
+    assert result["state"]["multi_acoustic_speaker_count"] == 3
+    assert result["state"]["multi_acoustic_word_coverage_count"] == 30
 
 
 def test_multi_adapter_requires_every_acoustic_speaker_to_reach_tts(monkeypatch):
