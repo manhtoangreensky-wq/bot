@@ -1345,3 +1345,11 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   diff-check exit `0`.
   LIVE v4 vẫn chỉ PASS sau exact-SHA deploy, một execution cùng job và
   MP4/Telegram/receipt/zero-Xu readback.
+- Live trên `bd146166` đo được failure duy nhất
+  `fixed_vocal_gender_partition_unstable` trước translation/TTS/mux: đủ `5/5`
+  speaker, `145/145` word, register `[high,low,low,high,low]`, nhưng
+  base/shift `0.915254` trong khi base/aggregate `1.0`. Correction giữ nguyên
+  threshold `0.95`, chỉ đổi chốt thành pairwise quorum 2/3; không pair nào đạt
+  thì vẫn fail-closed. Focused `453 passed`, exact-two `51 passed`, exact
+  resource `9 passed in 398.34s`; job/provider/wallet delta trong source loop
+  đều `0`.
