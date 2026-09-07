@@ -1360,3 +1360,37 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   timeout nên receipt chưa gửi. Fix cuối chỉ giữ acoustic evidence trong result
   state và cung cấp closeout provider-free: CAS proof, sửa đúng panel cũ, gửi
   một receipt; cấm chạy lại ASR/translation/TTS/mux/video.
+
+### SubDub public access và speaker continuity — 07/09/2026
+
+- Runtime `165d34def67a6781ca6e51130c31de3174e9c809` được kiểm tra read-only:
+  bốn lane canonical `subtitle_create`, `subtitle_translate`, `dub` và
+  `subtitle_plus_dub` đều có `public_flag_enabled=true`,
+  `effective_ready=true`, `blockers=[]`; user non-admin được
+  `allowed_public` sau final Confirm. Auto 2 và Auto Multi đều có capacity/menu/
+  route thật. Không có gate chỉ-Owner cần mở thêm.
+- Job khách `#66C9613DF7` đã đi qua access với
+  `gate_matrix.access_status=allowed_public`, rồi fail `5%` ở acoustic với
+  `fixed_vocal_demix_busy`; `charged_xu=0`. Vì vậy biểu hiện “Owner chạy, khách
+  fail” là tranh chấp local acoustic lock, không phải ngôn ngữ hoặc quyền.
+- Correction chỉ trong Auto Multi: job đến sau chờ khóa tối đa `1200s`; khi có
+  khóa mới nhận đầy đủ processing budget `300..1200s`. Hết thời gian/cancel vẫn
+  fail-closed và cleanup như cũ, không chạy song song hai model.
+- Speaker partition ưu tiên acoustic identity ổn định qua ba view; register
+  `high/low` được chốt theo majority strong-gender evidence của cùng identity.
+  Một window nhiễu không còn tách cùng nhân vật thành nữ ở cảnh trước và nam ở
+  cảnh sau; hai người cùng register vẫn giữ hai acoustic identity khác nhau.
+- Bằng chứng local: continuity/concurrency `4 passed`; embedding `123 passed`;
+  gender/provider fallback `56 passed`; exact-two comparator `41 passed`; exact
+  fixture `9 passed in 414.89s` và final fixture selector `1 passed in 133.54s`;
+  compile/diff-check exit `0`. Provider calls, production DB writes và wallet
+  mutations trong source loop đều `0`. Chưa deploy/LIVE test bản correction.
+- Rà soát sâu ngày 08/09 đo được một seam riêng: identity candidate đã bị
+  từ chối vì số register không khớp gender allocation nhưng code vẫn có thể
+  lấy register của candidate đó để gắn vào label của gender partition. RED
+  terminal đúng là `AUTO_CAST_MANUAL_REQUIRED`; guard tối thiểu chỉ cho dùng
+  identity-register sau khi chính identity partition được chọn, GREEN
+  `5 passed`. Exact fixture vẫn giữ nguyên `5` speaker và
+  `[high,low,low,high,low]`, selector `1 passed in 131.23s`; Auto 2 protected
+  `34 + 10 passed`, public four-lane `12 passed`, compile/diff/scope/secret
+  đều exit `0`.

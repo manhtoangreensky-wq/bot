@@ -203,3 +203,13 @@ fail male/male hoặc female/female là forced pairing và phải FAIL case.
 
 Các case trên phải chạy bằng SQLite tạm trước khi live. Không dùng ảnh bill giả
 để tuyên bố tiền đã vào; chỉ Owner/admin đối soát giao dịch thật mới được duyệt.
+
+## SubDub public + Auto Multi continuity — acceptance cases 07/09/2026
+
+| ID | Bước kiểm thử | PASS bắt buộc |
+|---|---|---|
+| `SD-PUBLIC-ALL-01` | Dùng một user không phải admin đi vào từng lane SubDub | `subtitle_create`, `subtitle_translate`, `dub`, `subtitle_plus_dub` đều mở draft; sau đúng một final Confirm phải `allowed_public`, `effective_ready=true`, `blockers=[]`. Auto 2 và Auto Multi cùng hiện trong voice menu khi capacity true. |
+| `SD-MS-CONT-01` | Hai job Auto Multi hợp lệ đến gần nhau; một người xuất hiện qua nhiều cảnh và có một gender-window outlier | Job sau chờ bounded, không fail `fixed_vocal_demix_busy` ở `5%`; processing budget bắt đầu sau khi lấy khóa. Cùng acoustic identity giữ một `high/low` register và một voice; outlier không đổi nữ thành nam; hai người cùng register vẫn là hai speaker/voice distinct. Identity candidate bị quorum/allocation từ chối tuyệt đối không được cho mượn register sang label của gender partition. |
+
+FAIL nếu test gọi provider, chạy hai local model song song, thay đổi exact-two,
+hoặc hết timeout mà không fail-closed/cleanup.

@@ -478,3 +478,49 @@ receipt/zero-Xu verification. `LIVE_PASS=NO` until that evidence exists.
 Current next action: compile/diff → one proof-closeout PR/deploy → restore exact
 source only → run provider-free closeout once → verify new receipt and complete
 terminal evidence. No ASR/translation/TTS/mux/video replay and no new job.
+
+### Public access và continuity follow-up — 2026-09-07
+
+- Runtime read-only trên SHA `165d34def67a6781ca6e51130c31de3174e9c809` xác nhận
+  cả `4/4` lane canonical của SubDub (`subtitle_create`, `subtitle_translate`,
+  `dub`, `subtitle_plus_dub`) đều `public_flag_enabled=true`,
+  `effective_ready=true`, `blockers=[]`; user non-admin nhận
+  `allowed_public` sau final Confirm. Auto 2 và Auto Multi capacity/menu/route
+  cũng đang mở. Không cần mở thêm một gate chỉ-Owner.
+- Job khách `#66C9613DF7` đã qua `gate_matrix.access_status=allowed_public` và
+  dừng ở `5%` với `fixed_vocal_demix_busy`, trước translation/TTS; `charged_xu=0`.
+  Đây là tranh chấp local acoustic lock, không phải ngôn ngữ hay quyền.
+- Local correction trên branch `fix/p0-subdub-auto-multi-acoustic-view-quorum`
+  (HEAD sau rebase `9142a05c8f1d30aac6a2a53f570945ceb56709df`) chỉ chạm Auto
+  Multi: serialize fixed-vocal work, chờ lock tối đa `1200s`, cấp lại full
+  processing budget sau khi lock được giữ, và giữ register theo acoustic
+  identity-majority để một window nhiễu không đổi nữ↔nam giữa các cảnh.
+  Hai người cùng register vẫn là hai speaker distinct.
+- Evidence mới: continuity/concurrency `4 passed`; Auto Multi embedding `123
+  passed`; provider/gender fallback `56 passed`; exact-two `41 passed`; exact
+  fixture `1 passed in 135.31s` sau rebase; compile/diff-check `0`. Không gọi
+  provider, không tạo job, không mutation DB/wallet trong source loop.
+- Chưa tạo PR/merge/deploy vì GitHub CLI token hết hạn và Codex Browser đang
+  `Sign in`; branch đã push lease-safe và trang compare báo `Able to merge`,
+  `1 commit / 6 files`. Cần đăng nhập đúng tài khoản Codex rồi mới tạo PR và
+  xin chốt deploy; không dùng nhầm tài khoản khác.
+
+### Rejected identity/register isolation — 2026-09-08
+
+- Deep local probe trên exact fixture xác nhận voice allocator hiện hữu giữ
+  đúng một voice hash cho mỗi speaker; lỗi còn lại nằm trước TTS ở acoustic
+  label/register authority.
+- Root code: identity candidate có đủ majority register nhưng không khớp số
+  register của gender allocation nên không được chọn; nhánh cũ vẫn tái sử dụng
+  `identity_registers` với label của partition khác, có thể làm nữ/nam gắn sai
+  hoặc fail ở acoustic gate.
+- RED mới terminal `1 failed` tại `AUTO_CAST_MANUAL_REQUIRED`; production fix
+  chỉ thêm guard `identity_partition_selected`; GREEN continuity `5 passed`,
+  embedding `123 passed`, provider/gender fallback `56 passed`; protected Auto
+  2 core/recovery `34 + 10 passed`; public four-lane selectors `12 passed`.
+- Exact fixture SHA `83DE97B7...AD3E` sau fix giữ label cũ, `5` speaker và
+  register `[high,low,low,high,low]`; resource selector `1 passed in 131.23s`.
+  Provider calls, DB/job/wallet mutation và deploy trong loop này đều `0`.
+  Changed-file compile và full `py_compile bot.py` đều exit `0`; diff/scope/
+  secret checks exit `0`. Một test public TTS không liên quan có stale fake
+  signature và fail y hệt trên hai file diff-empty; không sửa ngoài scope.

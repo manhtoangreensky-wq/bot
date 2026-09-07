@@ -37,6 +37,7 @@ _UNDERCLUSTER_MIN_REGISTER_GAP_HZ = 30.0
 ACOUSTIC_WALL_TIMEOUT_SECONDS = 300.0
 ACOUSTIC_TIMEOUT_PER_SOURCE_SECOND = 4.0
 ACOUSTIC_TIMEOUT_MAX_SECONDS = 1_200.0
+ACOUSTIC_QUEUE_WAIT_TIMEOUT_SECONDS = 1_200.0
 MULTI_ACOUSTIC_STATE_FIELDS = frozenset({
     "multi_acoustic_backend",
     "multi_acoustic_model_sha256",
@@ -548,17 +549,50 @@ async def run_local_acoustic_diarization_off_event_loop(
     timeout_seconds = acoustic_timeout_seconds_for_duration(
         measured_duration_seconds
     )
-    deadline = time.monotonic() + timeout_seconds
     stop_event = threading.Event()
-    worker = asyncio.create_task(
-        asyncio.to_thread(
-            acoustic_diarize,
-            str(path),
-            list(word_timeline),
-            duration_seconds=measured_duration_seconds,
-            deadline_monotonic=deadline,
+    queued_default_runner = bool(
+        acoustic_diarize
+        is subdub_multi_speaker_embedding_onnx.diarize_fixed_vocal_word_timeline
+    )
+
+    def run_acoustic() -> dict[str, object]:
+        if not queued_default_runner:
+            return acoustic_diarize(
+                str(path),
+                list(word_timeline),
+                duration_seconds=measured_duration_seconds,
+                deadline_monotonic=time.monotonic() + timeout_seconds,
+                stop_requested=stop_event.is_set,
+            )
+        lock = subdub_multi_speaker_embedding_onnx._FIXED_VOCAL_PIPELINE_LOCK
+        subdub_multi_speaker_embedding_onnx._acquire_runtime_lock(
+            lock,
+            deadline_monotonic=(
+                time.monotonic() + ACOUSTIC_QUEUE_WAIT_TIMEOUT_SECONDS
+            ),
             stop_requested=stop_event.is_set,
+            timeout_code="fixed_vocal_pipeline_wait_timeout",
         )
+        try:
+            return (
+                subdub_multi_speaker_embedding_onnx
+                ._diarize_fixed_vocal_word_timeline_owned(
+                    str(path),
+                    list(word_timeline),
+                    duration_seconds=measured_duration_seconds,
+                    deadline_monotonic=time.monotonic() + timeout_seconds,
+                    stop_requested=stop_event.is_set,
+                )
+            )
+        finally:
+            lock.release()
+
+    overall_timeout = timeout_seconds + (
+        ACOUSTIC_QUEUE_WAIT_TIMEOUT_SECONDS if queued_default_runner else 0.0
+    )
+    deadline = time.monotonic() + overall_timeout
+    worker = asyncio.create_task(
+        asyncio.to_thread(run_acoustic)
     )
     drain_attempted = False
     drain_finished = False
