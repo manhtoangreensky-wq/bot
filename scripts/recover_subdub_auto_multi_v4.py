@@ -26,6 +26,8 @@ SOURCE_BYTES = 9_869_032
 SOURCE_BASENAME = "auto_multi_v4_original_source.mp4"
 V4_REPAIR_MARKER = "auto_multi_five_speaker_gender_aspect_v4_recovery_used"
 V4_REPAIR_AUTHORITY = "owner_confirmed_same_job_five_speaker_gender_aspect"
+V4_QUORUM_REPAIR_MARKER = "auto_multi_acoustic_view_quorum_repair_used"
+V4_QUORUM_REPAIR_AUTHORITY = "owner_confirmed_same_job_acoustic_view_quorum"
 
 _RESET_FALSE_FIELDS = (
     "asr_started",
@@ -130,10 +132,81 @@ def new_session_nonce() -> str:
     return secrets.token_hex(12)
 
 
-def v4_recovery_candidate(current: dict) -> bool:
-    """Recognize only the exact delivered v3 four-speaker job to correct."""
+def _v4_quorum_repair_candidate(current: dict) -> bool:
+    """Recognize only the exact v4 live RED caused by missing view quorum."""
 
-    if type(current) is not dict or current.get(V4_REPAIR_MARKER) is True:
+    if type(current) is not dict:
+        return False
+    recovery = current.get("auto_multi_recovery")
+    history = current.get("auto_multi_v3_delivery_history")
+    source_path = validated_v4_source_path(current)
+    if type(recovery) is not dict or type(history) is not dict:
+        return False
+    return bool(
+        source_path
+        and current.get(V4_REPAIR_MARKER) is True
+        and current.get(V4_QUORUM_REPAIR_MARKER) is not True
+        and current.get("auto_multi_v4_recovery_authority")
+        == V4_REPAIR_AUTHORITY
+        and str(current.get("internal_job_id") or current.get("job_id") or "")
+        == JOB_ID
+        and current.get("public_code") == PUBLIC_CODE
+        and str(current.get("user_id") or "") == str(OWNER_ID)
+        and str(current.get("chat_id") or current.get("user_id") or "")
+        == str(OWNER_ID)
+        and str(current.get("job_key") or "").endswith(
+            "|subtitle_plus_dub|auto_multi_speaker"
+        )
+        and current.get("status") == "failed_no_charge"
+        and current.get("terminal_state") == "failed_no_charge"
+        and current.get("charge_status") == "not_charged"
+        and current.get("charged_xu") == 0
+        and current.get("asr_route_called") is True
+        and current.get("asr_started") is False
+        and current.get("translation_started") is False
+        and current.get("tts_started") is False
+        and current.get("mux_started") is False
+        and current.get("artifact_started") is False
+        and current.get("delivery_attempted") is False
+        and current.get("delivery_attempt_uncertain") is not True
+        and current.get("output_sent") is False
+        and current.get("final_mp4_delivered") is False
+        and current.get("multi_acoustic_failure_code")
+        == "fixed_vocal_gender_partition_unstable"
+        and current.get("multi_acoustic_failure_word_count") == 145
+        and current.get("multi_acoustic_failure_duration_ms") == 134_000
+        and current.get("target_language") == "English"
+        and current.get("original_audio_volume_percent") == 40
+        and current.get("dubbed_voice_volume_percent") == 150
+        and current.get("voice_kind") == "auto_speaker_gender"
+        and current.get("voice_selection_mode") == "auto_speaker"
+        and current.get("auto_speaker_lane") == "multi"
+        and recovery.get("source_path") == source_path
+        and recovery.get("source_sha256") == SOURCE_SHA256
+        and recovery.get("target_language") == "English"
+        and recovery.get("original_volume_percent") == 40
+        and recovery.get("dub_volume_percent") == 150
+        and recovery.get("owner_confirmed_paid") is True
+        and str(current.get("auto_multi_v3_video_delivery_message_id") or "")
+        == str(history.get("video_message_id") or "")
+        and str(current.get("auto_multi_v3_receipt_message_id") or "")
+        == str(history.get("receipt_message_id") or "")
+        and str(history.get("video_message_id") or "")
+        and str(history.get("receipt_message_id") or "")
+    )
+
+
+def v4_recovery_candidate(current: dict) -> bool:
+    """Recognize only the exact delivered v3 or one exact v4 quorum RED."""
+
+    if _v4_quorum_repair_candidate(current):
+        return True
+
+    if (
+        type(current) is not dict
+        or current.get(V4_REPAIR_MARKER) is True
+        or current.get(V4_QUORUM_REPAIR_MARKER) is True
+    ):
         return False
     input_save = current.get("input_save")
     validation = current.get("output_validation")
@@ -410,9 +483,14 @@ def claim_v4_same_job(
             return {"ok": False, "claimed": False, "reason": "job_not_found"}
         old_value = str(row[0] or "")
         current = json.loads(old_value)
+        is_quorum_repair = _v4_quorum_repair_candidate(current)
         if (
             type(current) is not dict
-            or current.get(V4_REPAIR_MARKER) is True
+            or (
+                current.get(V4_REPAIR_MARKER) is True
+                and not is_quorum_repair
+            )
+            or current.get(V4_QUORUM_REPAIR_MARKER) is True
             or not v4_recovery_candidate(current)
         ):
             conn.rollback()
@@ -430,35 +508,51 @@ def claim_v4_same_job(
                 "reason": "v4_source_missing",
             }
 
-        rejected_path = str(
-            current.get("canonical_final_artifact_path")
-            or current.get("final_mp4_path")
-            or ""
-        ).strip()
-        old_video_message_id = str(
-            current.get("video_delivery_message_id") or ""
-        ).strip()
-        old_receipt_message_id = str(
-            current.get("receipt_message_id") or ""
-        ).strip()
-        old_delivered_at = str(
-            current.get("subdub_delivered_at")
-            or current.get("delivered_at")
-            or ""
-        ).strip()
-        old_video_sha256 = str(
-            current.get("video_delivery_sha256") or ""
-        ).strip().lower()
-        old_video_size = current.get("video_delivery_size_bytes")
-        old_video_duration = current.get("video_delivery_duration_seconds")
-        delivery_history = {
-            "video_message_id": old_video_message_id,
-            "receipt_message_id": old_receipt_message_id,
-            "video_sha256": old_video_sha256,
-            "video_size_bytes": old_video_size,
-            "video_duration_seconds": old_video_duration,
-            "delivered_at": old_delivered_at,
-        }
+        if is_quorum_repair:
+            rejected_path = str(
+                current.get("auto_multi_v3_rejected_artifact_path") or ""
+            ).strip()
+            old_video_message_id = str(
+                current.get("auto_multi_v3_video_delivery_message_id") or ""
+            ).strip()
+            old_receipt_message_id = str(
+                current.get("auto_multi_v3_receipt_message_id") or ""
+            ).strip()
+            old_delivered_at = str(
+                current.get("auto_multi_v3_delivered_at") or ""
+            ).strip()
+            delivery_history = dict(
+                current.get("auto_multi_v3_delivery_history") or {}
+            )
+        else:
+            rejected_path = str(
+                current.get("canonical_final_artifact_path")
+                or current.get("final_mp4_path")
+                or ""
+            ).strip()
+            old_video_message_id = str(
+                current.get("video_delivery_message_id") or ""
+            ).strip()
+            old_receipt_message_id = str(
+                current.get("receipt_message_id") or ""
+            ).strip()
+            old_delivered_at = str(
+                current.get("subdub_delivered_at")
+                or current.get("delivered_at")
+                or ""
+            ).strip()
+            delivery_history = {
+                "video_message_id": old_video_message_id,
+                "receipt_message_id": old_receipt_message_id,
+                "video_sha256": str(
+                    current.get("video_delivery_sha256") or ""
+                ).strip().lower(),
+                "video_size_bytes": current.get("video_delivery_size_bytes"),
+                "video_duration_seconds": current.get(
+                    "video_delivery_duration_seconds"
+                ),
+                "delivered_at": old_delivered_at,
+            }
         input_save = dict(current.get("input_save") or {})
         source_unique_id = str(input_save.get("file_unique_id") or "").strip()
         for field in tuple(current):
@@ -476,6 +570,9 @@ def claim_v4_same_job(
                 "last_error_safe": "",
                 "last_technical_error": "",
                 "success_blocked_reason": "",
+                "multi_acoustic_failure_code": "",
+                "multi_acoustic_failure_word_count": 0,
+                "multi_acoustic_failure_duration_ms": 0,
                 "charge_status": "not_charged",
                 "delivery_attempts": 0,
                 "output_validation": {},
@@ -501,6 +598,19 @@ def claim_v4_same_job(
                 "auto_multi_v4_target_algorithm": (
                     app.auto_multi_speaker.subdub_multi_speaker_embedding_onnx
                     .FIXED_VOCAL_ALGORITHM_VERSION
+                ),
+                **(
+                    {
+                        V4_QUORUM_REPAIR_MARKER: True,
+                        "auto_multi_acoustic_view_quorum_repair_authority": (
+                            V4_QUORUM_REPAIR_AUTHORITY
+                        ),
+                        "auto_multi_acoustic_view_quorum_repair_claimed_at": (
+                            app.time.time()
+                        ),
+                    }
+                    if is_quorum_repair
+                    else {}
                 ),
                 "auto_multi_recovery": {
                     "source_path": source_path,

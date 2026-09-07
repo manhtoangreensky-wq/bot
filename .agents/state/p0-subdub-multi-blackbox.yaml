@@ -1884,3 +1884,41 @@ auto_multi_v4_five_speaker_gender_aspect_20260907:
   live_pass: false
 
 current_next_action: commit; fetch/rebase latest main; rerun focused compile diff; push one PR squash deploy exact runtime; restore exact fixture; run v4 recovery once; verify MP4 Telegram receipt five speakers geometry and zero Xu
+
+auto_multi_v4_acoustic_view_quorum_20260907:
+  runtime_red:
+    pr: 1001
+    merge_sha: bd1461666c474e765e4ce505b767a4359b6e73c0
+    deploy_run: 34086789018 SUCCESS in 5m31s
+    invocation: 0ffe6be7ad3b4ef784b510b770956b6e
+    terminal: failed_no_charge at 5 percent
+    failure: fixed_vocal_gender_partition_unstable
+    downstream_started: false
+    charged_xu: 0
+  measured_authority:
+    raw_effective_speakers: 5/5
+    word_coverage: 145/145
+    registers: [high, low, low, high, low]
+    base_shift_agreement: 0.915254
+    base_aggregate_agreement: 1.0
+  correction:
+    threshold: 0.95 unchanged
+    acceptance: at least one aligned pair among base shifted aggregate reaches threshold
+    no_pair: fail closed with fixed_vocal_gender_partition_unstable
+    marker: auto_multi_acoustic_view_quorum_repair_used
+    same_job_only: true
+    third_execution: forbidden
+  verification:
+    quorum_red: 1 failed and 1 passed
+    quorum_green: 2 passed
+    repair_marker_red: 2 failed
+    repair_marker_green: 2 passed
+    focused_auto_multi: 453 passed in 15.65s
+    exact_two_locked: 51 passed in 5.04s
+    exact_fixture_resource: 9 passed in 398.34s
+    provider_calls_in_source_loop: 0
+    production_job_mutations_in_source_loop: 0
+    wallet_mutations: 0
+  live_pass: false
+
+current_next_action_after_view_quorum: compile and diff; one PR squash deploy; exact one quorum repair on same job; verify MP4 Telegram receipt five speakers geometry and charged zero

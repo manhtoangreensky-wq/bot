@@ -723,3 +723,4 @@ fixture chỉ là regression evidence, không phải điều kiện điều khi�
 | Có MP4 v3 bốn voice thì có thể giao lại | Production row đã delivered v3 với video message `28112`, receipt `28113`, artifact `18,171,909` bytes; v4 runner lưu IDs dưới history và chặn legacy delivery | ❌ Không còn đúng |
 | Geometry chỉ cần renderer trả bytes | v4 preflight cần ffprobe trước pipeline; final probe phải giữ `854x480` display ratio, rotation `0`; portrait bị fail-closed | ❌ Không còn đúng |
 | Một execution recovery cũ đủ cho mọi correction | v4 dùng CAS marker riêng, cùng internal job, source SHA/bytes mới, nonce mới; không tạo job thứ hai và không replay command cũ | ❌ Không còn đúng |
+| Cả hai so sánh base/shift và base/aggregate đều phải đạt `0.95` | Live có base/aggregate `1.0`, đủ `5/5` speaker và đúng register nhưng shifted perturbation `0.915254`; pairwise quorum 2/3 giữ nguyên threshold và vẫn chặn khi không pair nào đạt | ❌ Chốt all-view quá cứng gây fail giả ở 5% |

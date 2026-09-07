@@ -442,7 +442,7 @@ def test_exact_fixture_fixed_vocal_accepts_actual_145_word_timing(tmp_path):
     assert final_segments[0]["voice_register"] == "high"
 
 
-def test_exact_fixture_fails_closed_when_timing_makes_speech_partition_unstable(
+def test_exact_fixture_accepts_timing_when_two_acoustic_views_have_quorum(
     tmp_path,
 ):
     source_value = str(os.environ.get("SUBDUB_MULTI_FIXTURE_PATH") or "").strip()
@@ -468,20 +468,26 @@ def test_exact_fixture_fails_closed_when_timing_makes_speech_partition_unstable(
         "utf-8", errors="replace"
     )[:500]
 
-    with pytest.raises(speaker_cast.AutoCastManualRequired) as error:
-        service.diarize_fixed_vocal_word_timeline(
-            str(pcm_path),
-            words,
-            duration_seconds=SOURCE_DURATION_SECONDS,
-            deadline_monotonic=time.monotonic() + 540.0,
-            stop_requested=lambda: False,
-        )
+    result = service.diarize_fixed_vocal_word_timeline(
+        str(pcm_path),
+        words,
+        duration_seconds=SOURCE_DURATION_SECONDS,
+        deadline_monotonic=time.monotonic() + 540.0,
+        stop_requested=lambda: False,
+    )
 
-    cause = error.value
-    while getattr(cause, "__cause__", None) is not None:
-        cause = cause.__cause__
-    assert isinstance(cause, ValueError)
-    assert str(cause) == "fixed_vocal_gender_partition_unstable"
+    assert result["ok"] is True
+    assert result["raw_speaker_count"] == 5
+    assert result["detected_speaker_count"] == 5
+    assert result["word_count"] == result["word_coverage_count"] == 145
+    assert result["speaker_registers"] == ["high", "low", "low", "high", "low"]
+    assert result["female_speaker_count"] == 2
+    assert result["male_speaker_count"] == 3
+    assert result["speech_partition_base_shift_agreement"] == pytest.approx(
+        0.915254,
+        abs=1e-6,
+    )
+    assert result["speech_partition_base_aggregate_agreement"] == 1.0
 
 
 @pytest.mark.parametrize("mutation", ("model_byte", "missing_notice"))

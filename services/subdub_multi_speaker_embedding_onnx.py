@@ -1086,18 +1086,33 @@ def build_gender_constrained_speech_authority(
         )
         shift_agreement = float(np.mean(base_labels == shifted_labels))
         aggregate_agreement = float(np.mean(base_labels == aggregate_labels))
-        if (
-            shift_agreement < SPEECH_PARTITION_MIN_AGREEMENT
-            or aggregate_agreement < SPEECH_PARTITION_MIN_AGREEMENT
-        ):
+        shift_aggregate_agreement = float(
+            np.mean(shifted_labels == aggregate_labels)
+        )
+        quorum_candidates = []
+        if aggregate_agreement >= SPEECH_PARTITION_MIN_AGREEMENT:
+            quorum_candidates.append(
+                (aggregate_agreement, 2, aggregate_labels, aggregate)
+            )
+        if shift_aggregate_agreement >= SPEECH_PARTITION_MIN_AGREEMENT:
+            quorum_candidates.append(
+                (shift_aggregate_agreement, 1, aggregate_labels, aggregate)
+            )
+        if shift_agreement >= SPEECH_PARTITION_MIN_AGREEMENT:
+            quorum_candidates.append((shift_agreement, 0, base_labels, base))
+        if not quorum_candidates:
             raise ValueError("fixed_vocal_gender_partition_unstable")
+        _agreement, _priority, quorum_labels, quorum_embeddings = max(
+            quorum_candidates,
+            key=lambda item: (item[0], item[1]),
+        )
         canonical_labels = _canonical_cluster_labels(
-            aggregate_labels,
+            quorum_labels,
             positions,
         )
         old_to_canonical: dict[int, int] = {}
         for old, canonical in zip(
-            aggregate_labels.tolist(),
+            quorum_labels.tolist(),
             canonical_labels.tolist(),
             strict=True,
         ):
@@ -1117,7 +1132,7 @@ def build_gender_constrained_speech_authority(
                 if register == "high"
                 else 1.0 - float(probability)
                 for label, probability in zip(
-                    aggregate_labels.tolist(),
+                    quorum_labels.tolist(),
                     probabilities.tolist(),
                     strict=True,
                 )
@@ -1140,7 +1155,7 @@ def build_gender_constrained_speech_authority(
             for label in range(speaker_count)
         ]
         confidences = _cluster_unit_confidences(
-            aggregate,
+            quorum_embeddings,
             canonical_labels,
             speaker_count,
         )
@@ -1155,6 +1170,10 @@ def build_gender_constrained_speech_authority(
             "male_speaker_count": registers.count("low"),
             "base_shift_agreement": round(shift_agreement, 6),
             "base_aggregate_agreement": round(aggregate_agreement, 6),
+            "shift_aggregate_agreement": round(
+                shift_aggregate_agreement,
+                6,
+            ),
             "view_cosine_min": round(float(np.min(view_cosines)), 6),
             "view_cosine_mean": round(float(np.mean(view_cosines)), 6),
             "allocation_scores": [

@@ -422,3 +422,31 @@ one delivery-only invocation; never replay ASR/translation/TTS/mux.
   `DEPLOY=NO`, `LIVE_PASS=NO`. Next: final combined gates and review → commit/
   PR/deploy → restore exact source → read-only candidate PASS → execute the v4
   runner exactly once → validate corrected MP4/Telegram receipt/zero-Xu state.
+
+### V4 live RED and acoustic-view quorum correction — 2026-09-07
+
+- PR `#1001` merged as `bd1461666c474e765e4ce505b767a4359b6e73c0`;
+  deploy run `34086789018` SUCCESS in `5m31s`; VPS checkout/tree exact,
+  bot/web/nginx active and gender model CPU preflight PASS.
+- Exact fixture was restored to the same job workspace with `9,869,032` bytes,
+  SHA `83DE97B7...AD3E`, mode `600`. Invocation
+  `0ffe6be7ad3b4ef784b510b770956b6e` crossed 5% then failed before
+  translation/TTS/mux/artifact/delivery with
+  `fixed_vocal_gender_partition_unstable`; same job, `charged_xu=0`.
+- Measured root: raw/effective speaker count `5/5`, coverage `145/145`,
+  registers `[high,low,low,high,low]`; base/aggregate agreement `1.0`, while
+  the shifted perturbation alone was `0.915254`. Requiring both comparisons
+  above `0.95` rejected an otherwise exact 2-of-3 acoustic consensus.
+- Minimal correction keeps the `0.95` threshold and accepts only a pairwise
+  2-of-3 view quorum; if no pair reaches `0.95`, it still fails closed. A
+  second exact CAS marker is permitted only for this measured failure, before
+  downstream/provider output, preserving v3 history and forbidding any third
+  execution.
+- TDD quorum RED `1 failed / 1 passed`, GREEN `2 passed`; repair-marker RED
+  `2 failed`, GREEN `2 passed`; full focused `453 passed`; exact-two protected
+  `51 passed`; full exact-fixture resource `9 passed in 398.34s`; provider,
+  new-job and wallet mutations during source correction remain `0`.
+
+Current next action: compile/diff → one correction commit/PR/deploy → exact
+quorum-repair candidate PASS → one same-job continuation → artifact/Telegram/
+receipt/zero-Xu verification. `LIVE_PASS=NO` until that evidence exists.

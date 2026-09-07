@@ -4183,6 +4183,64 @@ def _v3_delivery_state_for_v4_recovery():
     }
 
 
+def _v4_gender_partition_failed_state():
+    current = _v3_delivery_state_for_v4_recovery()
+    current.update(
+        {
+            "status": "failed_no_charge",
+            "terminal_state": "failed_no_charge",
+            "lifecycle_state": "failed_no_charge",
+            "current_stage": "failed_no_charge",
+            "progress_stage": "failed_no_charge",
+            "progress_percent": 5,
+            "charge_status": "not_charged",
+            "output_sent": False,
+            "final_mp4_delivered": False,
+            "delivery_attempted": False,
+            "delivery_attempt_uncertain": False,
+            "asr_route_called": True,
+            "asr_started": False,
+            "translation_started": False,
+            "tts_started": False,
+            "mux_started": False,
+            "artifact_started": False,
+            "output_validation": {},
+            "video_delivery_message_id": "",
+            "receipt_message_id": "",
+            "subdub_success_message_id": "",
+            "auto_multi_five_speaker_gender_aspect_v4_recovery_used": True,
+            "auto_multi_v4_recovery_authority": (
+                "owner_confirmed_same_job_five_speaker_gender_aspect"
+            ),
+            "multi_acoustic_failure_code": (
+                "fixed_vocal_gender_partition_unstable"
+            ),
+            "multi_acoustic_failure_word_count": 145,
+            "multi_acoustic_failure_duration_ms": 134_000,
+            "auto_multi_v3_video_delivery_message_id": "old-video-1",
+            "auto_multi_v3_receipt_message_id": "old-receipt-1",
+            "auto_multi_v3_delivered_at": "2026-09-06 12:00:00",
+            "auto_multi_v3_delivery_history": {
+                "video_message_id": "old-video-1",
+                "receipt_message_id": "old-receipt-1",
+                "video_sha256": "0" * 64,
+                "video_size_bytes": 18_171_909,
+                "video_duration_seconds": 134.0,
+                "delivered_at": "2026-09-06 12:00:00",
+            },
+            "auto_multi_recovery": {
+                "source_path": "auto_multi_v4_original_source.mp4",
+                "source_sha256": SOURCE_SHA256,
+                "target_language": "English",
+                "original_volume_percent": 40,
+                "dub_volume_percent": 150,
+                "owner_confirmed_paid": True,
+            },
+        }
+    )
+    return current
+
+
 def test_v4_recovery_accepts_only_exact_delivered_four_speaker_job(
     monkeypatch,
 ):
@@ -4204,6 +4262,95 @@ def test_v4_recovery_accepts_only_exact_delivered_four_speaker_job(
         {v4.V4_REPAIR_MARKER: True},
     ):
         assert v4.v4_recovery_candidate({**current, **mutation}) is False
+
+
+def test_v4_recovery_accepts_one_exact_gender_partition_quorum_repair(
+    monkeypatch,
+):
+    v4 = _v4_recovery_module()
+    current = _v4_gender_partition_failed_state()
+    monkeypatch.setattr(
+        v4,
+        "validated_v4_source_path",
+        lambda _current: "auto_multi_v4_original_source.mp4",
+    )
+
+    assert v4.v4_recovery_candidate(current) is True
+    for mutation in (
+        {"charged_xu": 1},
+        {"multi_acoustic_failure_code": "other"},
+        {"translation_started": True},
+        {"auto_multi_v4_recovery_authority": "other"},
+        {"auto_multi_acoustic_view_quorum_repair_used": True},
+    ):
+        assert v4.v4_recovery_candidate({**current, **mutation}) is False
+
+
+def test_v4_quorum_repair_claim_preserves_v3_history_and_is_one_shot(
+    tmp_path,
+    monkeypatch,
+):
+    v4 = _v4_recovery_module()
+    current = _v4_gender_partition_failed_state()
+    source = tmp_path / v4.SOURCE_BASENAME
+    source.write_bytes(b"exact-source-fixture")
+    current["workspace"] = str(tmp_path)
+    current["auto_multi_recovery"]["source_path"] = str(source)
+    db_path = tmp_path / "v4-quorum-repair.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE system_settings (key TEXT PRIMARY KEY, value TEXT, note TEXT, updated_at TEXT, updated_by TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO system_settings(key,value,note,updated_at,updated_by) VALUES(?,?,?,?,?)",
+        (
+            f"engine_async_job:{ACOUSTIC_JOB_ID}",
+            json.dumps(current, ensure_ascii=False),
+            "fixture",
+            "2026-09-07 13:00:00",
+            str(OWNER_ID),
+        ),
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(v4.app, "db_connect", lambda: sqlite3.connect(db_path))
+    monkeypatch.setattr(v4.app, "ENGINE_ASYNC_MEMORY_JOBS", {})
+    monkeypatch.setattr(v4.app, "SUBTITLE_DUB_PIPELINE_JOBS", {})
+    monkeypatch.setattr(
+        v4,
+        "v4_preflight_result",
+        lambda **_kwargs: {"ok": True},
+    )
+    monkeypatch.setattr(
+        v4,
+        "validated_v4_source_path",
+        lambda _current: str(source),
+    )
+    monkeypatch.setattr(v4, "new_session_nonce", lambda: "quorum-repair-nonce")
+
+    first = v4.claim_v4_same_job()
+
+    assert first["claimed"] is True, first
+    job = first["job"]
+    assert job["internal_job_id"] == ACOUSTIC_JOB_ID
+    assert job["auto_multi_acoustic_view_quorum_repair_used"] is True
+    assert job["auto_multi_acoustic_view_quorum_repair_authority"] == (
+        "owner_confirmed_same_job_acoustic_view_quorum"
+    )
+    assert job["auto_multi_v3_video_delivery_message_id"] == "old-video-1"
+    assert job["auto_multi_v3_receipt_message_id"] == "old-receipt-1"
+    assert job["auto_multi_v3_delivery_history"]["video_message_id"] == (
+        "old-video-1"
+    )
+    assert job["status"] == bot.SUBDUB_FAILED_AUTO_MULTI_RECOVERY_STATUS
+    assert job["multi_acoustic_failure_code"] == ""
+    assert job["charged_xu"] == 0
+    conn = sqlite3.connect(db_path)
+    assert conn.execute("SELECT COUNT(*) FROM system_settings").fetchone()[0] == 1
+    conn.close()
+
+    duplicate = v4.claim_v4_same_job()
+    assert duplicate["claimed"] is False
 
 
 def test_v4_recovery_source_requires_exact_workspace_size_and_sha(

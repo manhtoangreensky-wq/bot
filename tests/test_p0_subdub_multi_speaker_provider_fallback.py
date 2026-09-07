@@ -1997,6 +1997,80 @@ def test_gender_constrained_authority_selects_stable_one_female_two_male():
     assert result["base_aggregate_agreement"] == 1.0
 
 
+def test_gender_constrained_authority_accepts_two_of_three_view_quorum(
+    monkeypatch,
+):
+    service = auto_multi_speaker.subdub_multi_speaker_embedding_onnx
+    base_labels = np.asarray(
+        [0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2],
+        dtype=np.int64,
+    )
+    shifted_labels = np.asarray(
+        [0, 0, 1, 1, 1, 1, 2, 1, 2, 2, 2, 2],
+        dtype=np.int64,
+    )
+    calls = iter((base_labels, shifted_labels, base_labels))
+    monkeypatch.setattr(
+        service,
+        "_gender_partition_for_allocation",
+        lambda *_args, **_kwargs: next(calls).copy(),
+    )
+    embeddings = np.zeros((12, 256), dtype=np.float32)
+    for index, label in enumerate(base_labels):
+        embeddings[index, int(label)] = 1.0
+
+    result = service.build_gender_constrained_speech_authority(
+        embeddings,
+        embeddings.copy(),
+        np.arange(12, dtype=np.float64),
+        np.full(12, 1.5, dtype=np.float64),
+        [0.99] * 2 + [0.01] * 10,
+        speaker_count=3,
+    )
+
+    assert result["speaker_count"] == 3
+    assert result["speaker_registers"] == ["high", "low", "low"]
+    assert result["base_shift_agreement"] < 0.95
+    assert result["base_aggregate_agreement"] == 1.0
+
+
+def test_gender_constrained_authority_rejects_when_no_view_pair_has_quorum(
+    monkeypatch,
+):
+    service = auto_multi_speaker.subdub_multi_speaker_embedding_onnx
+    base_labels = np.asarray([0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2])
+    partitions = iter(
+        (
+            base_labels,
+            np.asarray([0, 0, 1, 1, 1, 2, 2, 2, 1, 1, 2, 2]),
+            np.asarray([0, 0, 1, 1, 2, 1, 2, 1, 2, 1, 2, 2]),
+        )
+    )
+    monkeypatch.setattr(
+        service,
+        "_gender_partition_for_allocation",
+        lambda *_args, **_kwargs: next(partitions).copy(),
+    )
+    embeddings = np.zeros((12, 256), dtype=np.float32)
+    for index, label in enumerate(base_labels):
+        embeddings[index, int(label)] = 1.0
+
+    with pytest.raises(speaker_cast.AutoCastManualRequired) as error:
+        service.build_gender_constrained_speech_authority(
+            embeddings,
+            embeddings.copy(),
+            np.arange(12, dtype=np.float64),
+            np.full(12, 1.5, dtype=np.float64),
+            [0.99] * 2 + [0.01] * 10,
+            speaker_count=3,
+        )
+
+    cause = error.value
+    while getattr(cause, "__cause__", None) is not None:
+        cause = cause.__cause__
+    assert str(cause) == "fixed_vocal_gender_partition_unstable"
+
+
 def test_multi_gender_classifier_rejects_two_labels_without_inference(
     tmp_path,
     monkeypatch,
