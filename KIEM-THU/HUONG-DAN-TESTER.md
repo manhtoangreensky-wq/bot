@@ -152,8 +152,9 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
     duplicate marker hoặc CAS loser phải dừng, không command cũ/job mới/overwrite.
 25. Exact Auto Multi phải tách nguồn theo mục đích: ASR/render dùng normalized
     video, speaker embedding dùng original hash-locked audio. FAIL nếu PCM acoustic
-    lấy normalized copy đã resample; exact original fixture phải giữ raw `k=5`
-    và tính effective speech count từ word-overlap support. Lane
+    lấy normalized copy đã resample; exact original fixture phải giữ raw và
+    effective `k=5`, coverage `145/145`, registers `[high,low,low,high,low]`.
+    Lane
     khác và Auto 2-speaker giữ nguyên saved-source priority.
 26. Kiểm timeout Auto Multi bằng duration PCM thật, không theo tên/codec/fixture:
     `1s` và `75s` dùng floor `300s`, `133.37542s` dùng `534s`, direct limit
@@ -172,7 +173,16 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
     có `voice_kind`, `voice_selection_mode` và `auto_speaker_lane=multi`. Nếu
     thiếu lane marker, extractor sẽ âm thầm rơi về normalized source; coi là
     FAIL dù các `_pipeline_*` field còn đủ.
-29. Kiểm speech support: raw cluster chỉ có centroid-assigned word nhưng không có
-    dominant-overlap word-unit không được tính là người nói. Phải giữ raw cluster
-    audit, drop nó khỏi effective voice set, remap các word không mất, và fail nếu
-    sau lọc còn dưới 3 speaker. Fixture D: raw `5`, effective `4`, 145/145 words.
+29. Kiểm v4 speaker authority: full fixed-vocal acoustic chọn số speaker độc lập
+    ASR; speech-only 1.5s/0.75s windows chỉ dùng ASR để map word. Base/shift/
+    aggregate agreement phải ≥`0.95`, mọi cluster có ≥`2` windows, `k=3..8`
+    đều giữ đủ speaker/voice và coverage `100%`. Fixture chính: raw/effective
+    `5/5`, final cue `126.005–126.505` là `high`; kết quả `5→4` là FAIL.
+30. Kiểm geometry Auto Multi trước delivery: ffprobe phải sẵn sàng trước pipeline;
+    final MP4 phải giữ display aspect nguồn, rotation `0`, H.264/AAC, duration
+    khớp nguồn. Fixture chính phải ra landscape `854x480` hoặc cùng tỷ lệ; output
+    `720x1280` phải fail-closed và không được gửi.
+31. Job `#B4CB6D5FE8` đã có delivery v3 bốn speaker. V4 runner phải lưu message/
+    receipt v3 làm superseded history, tuyệt đối không gửi lại artifact đó, restore
+    exact source SHA/bytes vào cùng workspace, CAS cùng internal job đúng một lần,
+    rồi chạy full v4. Không tạo job, không dùng command recovery cũ, không đổi Xu.

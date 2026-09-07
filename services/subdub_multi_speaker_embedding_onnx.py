@@ -13,6 +13,7 @@ from typing import Callable
 import numpy as np
 
 from services import subdub_speaker_cast as speaker_cast
+from services import subdub_multi_speaker_gender_onnx as multi_gender
 from services import subdub_two_speaker_gender_onnx as two_speaker_gender
 
 
@@ -27,7 +28,7 @@ NOTICE_PATHS = (
 
 MODEL_SHA256 = "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
 ALGORITHM_VERSION = "wespeaker-resnet34-spectral-v1"
-FIXED_VOCAL_ALGORITHM_VERSION = "wespeaker-resnet34-fixed-vocal-v3"
+FIXED_VOCAL_ALGORITHM_VERSION = "wespeaker-resnet34-fixed-vocal-v4"
 FIXED_VOCAL_PROVIDER = "local_wespeaker_resnet34_fixed_vocal"
 MODEL_INPUT_NAME = "feats"
 MODEL_OUTPUT_NAME = "embs"
@@ -52,6 +53,8 @@ STABILITY_FEATURE_SHIFT_SAMPLES = 5
 FIXED_VOCAL_ENERGY_PERCENTILES = (42.5, 45.0, 47.5, 50.0)
 MIN_FIXED_VOCAL_VIEW_COSINE = 0.98
 HYBRID_OVERLAP_DOMINANCE = 0.2
+SPEECH_PARTITION_MIN_AGREEMENT = 0.95
+GENDER_PARTITION_MAX_AMBIGUOUS_FRACTION = 0.25
 FBANK_FRAME_LENGTH = 400
 FBANK_FRAME_SHIFT = 160
 FBANK_FFT_POINTS = 512
@@ -831,6 +834,342 @@ def build_fixed_vocal_authority(
         raise _manual_required(exc)
 
 
+def _fixed_count_window_partition(
+    embeddings: np.ndarray,
+    source_positions: np.ndarray,
+    speaker_count: int,
+) -> np.ndarray:
+    matrix = np.asarray(embeddings, dtype=np.float64)
+    norms = np.linalg.norm(matrix, axis=1)
+    if (
+        matrix.ndim != 2
+        or matrix.shape[0] < speaker_count * MIN_CLUSTER_UNITS
+        or not np.isfinite(matrix).all()
+        or not np.isfinite(norms).all()
+        or np.any(norms <= np.finfo(np.float64).eps)
+    ):
+        raise ValueError("fixed_vocal_speech_windows_invalid")
+    matrix = matrix / norms[:, None]
+    pruned = _pruned_similarity(matrix)
+    laplacian = np.diag(np.sum(np.abs(pruned), axis=1)) - pruned
+    eigenvalues, eigenvectors = np.linalg.eigh(laplacian)
+    if not np.isfinite(eigenvalues).all() or not np.isfinite(eigenvectors).all():
+        raise ValueError("fixed_vocal_speech_partition_invalid")
+    try:
+        labels = _deterministic_kmeans(
+            eigenvectors[:, :speaker_count],
+            speaker_count,
+            source_positions,
+        )
+        if any(
+            int(np.count_nonzero(labels == label)) < MIN_CLUSTER_UNITS
+            for label in range(speaker_count)
+        ):
+            raise ValueError("fixed_vocal_speech_cluster_unsupported")
+        return labels
+    except ValueError as exc:
+        if str(exc) != "fixed_vocal_speech_cluster_unsupported":
+            raise
+        # Repeated/orthogonal embeddings can make the spectral eigenspace
+        # non-unique even though the original acoustic vectors are separable.
+        # Keep spectral clustering authoritative when stable, and use the
+        # deterministic original-space partition only for that degeneracy.
+        return _deterministic_kmeans(matrix, speaker_count, source_positions)
+
+
+def _gender_partition_for_allocation(
+    embeddings: np.ndarray,
+    source_positions: np.ndarray,
+    female_probabilities: np.ndarray,
+    *,
+    speaker_count: int,
+    female_count: int,
+) -> np.ndarray:
+    matrix = np.asarray(embeddings, dtype=np.float64)
+    norms = np.linalg.norm(matrix, axis=1)
+    if (
+        matrix.ndim != 2
+        or matrix.shape[1] != EMBEDDING_DIM
+        or source_positions.shape != (len(matrix),)
+        or female_probabilities.shape != (len(matrix),)
+        or not np.isfinite(matrix).all()
+        or not np.isfinite(norms).all()
+        or np.any(norms <= np.finfo(np.float64).eps)
+        or not 0 <= female_count <= speaker_count
+    ):
+        raise ValueError("fixed_vocal_gender_partition_invalid")
+    matrix = matrix / norms[:, None]
+    male_count = speaker_count - female_count
+    threshold = float(multi_gender.MULTI_GENDER_STRONG_CONFIDENCE)
+    female_indexes = np.flatnonzero(female_probabilities >= threshold)
+    male_indexes = np.flatnonzero(female_probabilities <= 1.0 - threshold)
+    ambiguous_indexes = np.flatnonzero(
+        (female_probabilities > 1.0 - threshold)
+        & (female_probabilities < threshold)
+    )
+    labels = np.full(len(matrix), -1, dtype=np.int64)
+
+    def assign_group(indexes: np.ndarray, count: int, offset: int) -> None:
+        if count == 0:
+            if len(indexes):
+                raise ValueError("fixed_vocal_gender_allocation_invalid")
+            return
+        if len(indexes) < count * MIN_CLUSTER_UNITS:
+            raise ValueError("fixed_vocal_gender_support_invalid")
+        group_labels = (
+            np.zeros(len(indexes), dtype=np.int64)
+            if count == 1
+            else _fixed_count_window_partition(
+                matrix[indexes],
+                source_positions[indexes],
+                count,
+            )
+        )
+        labels[indexes] = group_labels + offset
+
+    assign_group(female_indexes, female_count, 0)
+    assign_group(male_indexes, male_count, female_count)
+    if np.any(labels[np.concatenate((female_indexes, male_indexes))] < 0):
+        raise ValueError("fixed_vocal_gender_partition_invalid")
+    centroids = []
+    for label in range(speaker_count):
+        members = matrix[labels == label]
+        if len(members) < MIN_CLUSTER_UNITS:
+            raise ValueError("fixed_vocal_gender_cluster_unsupported")
+        centroid = np.mean(members, axis=0)
+        norm = float(np.linalg.norm(centroid))
+        if not math.isfinite(norm) or norm <= np.finfo(np.float64).eps:
+            raise ValueError("fixed_vocal_gender_centroid_invalid")
+        centroids.append(centroid / norm)
+    centroid_matrix = np.stack(centroids)
+    if len(ambiguous_indexes):
+        labels[ambiguous_indexes] = np.argmax(
+            matrix[ambiguous_indexes] @ centroid_matrix.T,
+            axis=1,
+        )
+    if np.any(labels < 0) or len(set(labels.tolist())) != speaker_count:
+        raise ValueError("fixed_vocal_gender_partition_invalid")
+    return labels
+
+
+def _gender_partition_score(
+    embeddings: np.ndarray,
+    labels: np.ndarray,
+    speaker_count: int,
+) -> float:
+    matrix = np.asarray(embeddings, dtype=np.float64)
+    matrix /= np.linalg.norm(matrix, axis=1)[:, None]
+    centroids = np.stack(
+        [np.mean(matrix[labels == label], axis=0) for label in range(speaker_count)]
+    )
+    centroids /= np.linalg.norm(centroids, axis=1)[:, None]
+    score = float(np.mean(np.sum(matrix * centroids[labels], axis=1)))
+    if not math.isfinite(score):
+        raise ValueError("fixed_vocal_gender_score_invalid")
+    return score
+
+
+def build_gender_constrained_speech_authority(
+    base_embeddings: object,
+    shifted_embeddings: object,
+    source_positions: object,
+    speech_seconds: object,
+    female_probabilities: object,
+    *,
+    speaker_count: int,
+) -> dict[str, object]:
+    """Choose a stable acoustic partition without mixing strong registers."""
+
+    try:
+        base = np.asarray(base_embeddings, dtype=np.float64)
+        shifted = np.asarray(shifted_embeddings, dtype=np.float64)
+        positions = np.asarray(source_positions, dtype=np.float64)
+        speech = np.asarray(speech_seconds, dtype=np.float64)
+        probabilities = np.asarray(female_probabilities, dtype=np.float64)
+        if (
+            base.ndim != 2
+            or base.shape != shifted.shape
+            or base.shape[1] != EMBEDDING_DIM
+            or positions.shape != (len(base),)
+            or speech.shape != (len(base),)
+            or probabilities.shape != (len(base),)
+            or type(speaker_count) is not int
+            or not MIN_SPEAKERS <= speaker_count <= MAX_SPEAKERS
+            or not np.isfinite(base).all()
+            or not np.isfinite(shifted).all()
+            or not np.isfinite(positions).all()
+            or not np.isfinite(speech).all()
+            or not np.isfinite(probabilities).all()
+            or np.any(speech <= 0.0)
+            or np.any(probabilities < 0.0)
+            or np.any(probabilities > 1.0)
+        ):
+            raise ValueError("fixed_vocal_gender_authority_invalid")
+        base /= np.linalg.norm(base, axis=1)[:, None]
+        shifted /= np.linalg.norm(shifted, axis=1)[:, None]
+        view_cosines = np.sum(base * shifted, axis=1)
+        if (
+            not np.isfinite(view_cosines).all()
+            or float(np.min(view_cosines)) < MIN_FIXED_VOCAL_VIEW_COSINE
+        ):
+            raise ValueError("fixed_vocal_gender_view_unstable")
+        aggregate = base + shifted
+        aggregate /= np.linalg.norm(aggregate, axis=1)[:, None]
+        threshold = float(multi_gender.MULTI_GENDER_STRONG_CONFIDENCE)
+        female_indexes = np.flatnonzero(probabilities >= threshold)
+        male_indexes = np.flatnonzero(probabilities <= 1.0 - threshold)
+        ambiguous_count = len(base) - len(female_indexes) - len(male_indexes)
+        if (
+            ambiguous_count / len(base)
+            > GENDER_PARTITION_MAX_AMBIGUOUS_FRACTION
+        ):
+            raise ValueError("fixed_vocal_gender_ambiguity_invalid")
+        if len(female_indexes) < MIN_CLUSTER_UNITS:
+            allocations = [(0, speaker_count)]
+        elif len(male_indexes) < MIN_CLUSTER_UNITS:
+            allocations = [(speaker_count, 0)]
+        else:
+            allocations = [
+                (female_count, speaker_count - female_count)
+                for female_count in range(1, speaker_count)
+                if len(female_indexes) >= female_count * MIN_CLUSTER_UNITS
+                and len(male_indexes)
+                >= (speaker_count - female_count) * MIN_CLUSTER_UNITS
+            ]
+        if not allocations:
+            raise ValueError("fixed_vocal_gender_allocation_invalid")
+        view_candidates: list[list[tuple[float, int, np.ndarray]]] = []
+        for matrix in (base, shifted, aggregate):
+            candidates: list[tuple[float, int, np.ndarray]] = []
+            for female_count, _male_count in allocations:
+                try:
+                    labels = _gender_partition_for_allocation(
+                        matrix,
+                        positions,
+                        probabilities,
+                        speaker_count=speaker_count,
+                        female_count=female_count,
+                    )
+                    _validate_cluster_support(labels, speech, speaker_count)
+                    score = _gender_partition_score(
+                        matrix,
+                        labels,
+                        speaker_count,
+                    )
+                except Exception:
+                    continue
+                candidates.append((score, female_count, labels))
+            if not candidates:
+                raise ValueError("fixed_vocal_gender_allocation_invalid")
+            candidates.sort(key=lambda item: (-item[0], item[1]))
+            view_candidates.append(candidates)
+        selected_female_counts = [items[0][1] for items in view_candidates]
+        if len(set(selected_female_counts)) != 1:
+            raise ValueError("fixed_vocal_gender_allocation_unstable")
+        female_count = selected_female_counts[0]
+        base_labels = view_candidates[0][0][2]
+        shifted_labels = np.asarray(
+            _align_cluster_labels_to_reference(
+                base_labels.tolist(),
+                view_candidates[1][0][2].tolist(),
+                speaker_count=speaker_count,
+            ),
+            dtype=np.int64,
+        )
+        aggregate_labels = np.asarray(
+            _align_cluster_labels_to_reference(
+                base_labels.tolist(),
+                view_candidates[2][0][2].tolist(),
+                speaker_count=speaker_count,
+            ),
+            dtype=np.int64,
+        )
+        shift_agreement = float(np.mean(base_labels == shifted_labels))
+        aggregate_agreement = float(np.mean(base_labels == aggregate_labels))
+        if (
+            shift_agreement < SPEECH_PARTITION_MIN_AGREEMENT
+            or aggregate_agreement < SPEECH_PARTITION_MIN_AGREEMENT
+        ):
+            raise ValueError("fixed_vocal_gender_partition_unstable")
+        canonical_labels = _canonical_cluster_labels(
+            aggregate_labels,
+            positions,
+        )
+        old_to_canonical: dict[int, int] = {}
+        for old, canonical in zip(
+            aggregate_labels.tolist(),
+            canonical_labels.tolist(),
+            strict=True,
+        ):
+            if old in old_to_canonical and old_to_canonical[old] != canonical:
+                raise ValueError("fixed_vocal_gender_label_invalid")
+            old_to_canonical[old] = canonical
+        base_registers = [
+            "high" if label < female_count else "low"
+            for label in range(speaker_count)
+        ]
+        registers = [""] * speaker_count
+        register_confidences = [0.0] * speaker_count
+        for old_label, register in enumerate(base_registers):
+            canonical = old_to_canonical[old_label]
+            evidence = [
+                float(probability)
+                if register == "high"
+                else 1.0 - float(probability)
+                for label, probability in zip(
+                    aggregate_labels.tolist(),
+                    probabilities.tolist(),
+                    strict=True,
+                )
+                if label == old_label
+                and (
+                    probability >= threshold
+                    if register == "high"
+                    else probability <= 1.0 - threshold
+                )
+            ]
+            if len(evidence) < MIN_CLUSTER_UNITS:
+                raise ValueError("fixed_vocal_gender_evidence_invalid")
+            registers[canonical] = register
+            register_confidences[canonical] = round(
+                float(np.median(evidence)),
+                6,
+            )
+        cluster_sizes = [
+            int(np.count_nonzero(canonical_labels == label))
+            for label in range(speaker_count)
+        ]
+        confidences = _cluster_unit_confidences(
+            aggregate,
+            canonical_labels,
+            speaker_count,
+        )
+        return {
+            "speaker_count": speaker_count,
+            "labels": canonical_labels.tolist(),
+            "unit_confidences": confidences,
+            "cluster_sizes": cluster_sizes,
+            "speaker_registers": registers,
+            "speaker_register_confidences": register_confidences,
+            "female_speaker_count": registers.count("high"),
+            "male_speaker_count": registers.count("low"),
+            "base_shift_agreement": round(shift_agreement, 6),
+            "base_aggregate_agreement": round(aggregate_agreement, 6),
+            "view_cosine_min": round(float(np.min(view_cosines)), 6),
+            "view_cosine_mean": round(float(np.mean(view_cosines)), 6),
+            "allocation_scores": [
+                round(items[0][0], 6) for items in view_candidates
+            ],
+            "ambiguous_window_count": ambiguous_count,
+            "gender_model_sha256": multi_gender.MULTI_GENDER_MODEL_SHA256,
+            "partition_stable": True,
+        }
+    except speaker_cast.AutoCastManualRequired:
+        raise
+    except Exception as exc:
+        raise _manual_required(exc)
+
+
 def map_word_units_to_fixed_vocal_authority(
     units: object,
     unit_embeddings: object,
@@ -1269,11 +1608,22 @@ def _fixed_vocal_window_views(
     deadline_monotonic: float,
     stop_requested: Callable[[], bool],
     session_factory: Callable | None = None,
+    window_seconds: float = SUBSEGMENT_WINDOW_SECONDS,
+    period_seconds: float = SUBSEGMENT_PERIOD_SECONDS,
 ) -> dict[str, object]:
     if not isinstance(pcm16, np.ndarray) or pcm16.dtype != np.dtype(np.int16) or pcm16.ndim != 1:
         raise _manual_required(ValueError("fixed_vocal_pcm_invalid"))
-    window_samples = int(round(SUBSEGMENT_WINDOW_SECONDS * PCM_SAMPLE_RATE))
-    period_samples = int(round(SUBSEGMENT_PERIOD_SECONDS * PCM_SAMPLE_RATE))
+    if (
+        type(window_seconds) not in {int, float}
+        or type(period_seconds) not in {int, float}
+        or not math.isfinite(float(window_seconds))
+        or not math.isfinite(float(period_seconds))
+        or not UNIT_MIN_FEATURE_SECONDS <= float(window_seconds) <= SUBSEGMENT_WINDOW_SECONDS
+        or not 0.0 < float(period_seconds) <= float(window_seconds)
+    ):
+        raise _manual_required(ValueError("fixed_vocal_window_shape_invalid"))
+    window_samples = int(round(float(window_seconds) * PCM_SAMPLE_RATE))
+    period_samples = int(round(float(period_seconds) * PCM_SAMPLE_RATE))
     if len(pcm16) < window_samples or len(pcm16) > int(MAX_SOURCE_SECONDS * PCM_SAMPLE_RATE):
         raise _manual_required(ValueError("fixed_vocal_pcm_invalid"))
     starts = list(range(0, len(pcm16) - window_samples + 1, period_samples))
@@ -1316,6 +1666,8 @@ def _fixed_vocal_window_views(
             "shifted_embeddings": views[1],
             "window_energy": np.asarray(energy, dtype=np.float32),
             "source_positions": [start / float(PCM_SAMPLE_RATE) for start in starts],
+            "window_seconds": float(window_seconds),
+            "period_seconds": float(period_seconds),
         }
     except speaker_cast.AutoCastManualRequired:
         raise
@@ -1325,6 +1677,118 @@ def _fixed_vocal_window_views(
         _EMBEDDING_LOCK.release()
 
 
+def _fixed_vocal_speech_window_views(
+    pcm16: object,
+    words: list[dict],
+    *,
+    duration_seconds: float,
+    deadline_monotonic: float,
+    stop_requested: Callable[[], bool],
+    session_factory: Callable | None = None,
+) -> dict[str, object]:
+    """Embed speech-compacted windows without re-reading or re-demixing PCM."""
+
+    if (
+        not isinstance(pcm16, np.ndarray)
+        or pcm16.dtype != np.dtype(np.int16)
+        or pcm16.ndim != 1
+        or not np.any(pcm16)
+    ):
+        raise _manual_required(ValueError("fixed_vocal_pcm_invalid"))
+    regions = [
+        {
+            "index": index,
+            "start": float(word["start"]),
+            "end": float(word["end"]),
+        }
+        for index, word in enumerate(words)
+    ]
+    plan = build_acoustic_subsegment_plan(
+        regions,
+        duration_seconds=duration_seconds,
+    )
+    region_samples: dict[int, np.ndarray] = {}
+    for region in plan["regions"]:
+        start = int(round(float(region["start"]) * PCM_SAMPLE_RATE))
+        end = int(round(float(region["end"]) * PCM_SAMPLE_RATE))
+        if start < 0 or end <= start or end > len(pcm16):
+            raise _manual_required(ValueError("fixed_vocal_speech_range_invalid"))
+        samples = pcm16[start:end].copy()
+        if not np.any(samples):
+            raise _manual_required(ValueError("fixed_vocal_speech_energy_invalid"))
+        region_samples[int(region["index"])] = samples
+    run_samples = {
+        int(run["run_index"]): np.concatenate(
+            [region_samples[int(index)] for index in run["region_indexes"]]
+        )
+        for run in plan["runs"]
+    }
+    target_samples = int(round(SUBSEGMENT_WINDOW_SECONDS * PCM_SAMPLE_RATE))
+    windows: list[np.ndarray] = []
+    for window in plan["windows"]:
+        signal = run_samples[int(window["run_index"])]
+        start = int(
+            round(float(window["speech_start_seconds"]) * PCM_SAMPLE_RATE)
+        )
+        end = int(round(float(window["speech_end_seconds"]) * PCM_SAMPLE_RATE))
+        if start < 0 or end <= start or end > len(signal):
+            raise _manual_required(ValueError("fixed_vocal_speech_window_invalid"))
+        samples = np.resize(signal[start:end], target_samples).astype(
+            np.int16,
+            copy=False,
+        )
+        if not np.any(samples):
+            raise _manual_required(ValueError("fixed_vocal_speech_energy_invalid"))
+        windows.append(samples)
+    if not _EMBEDDING_LOCK.acquire(blocking=False):
+        raise _manual_required(RuntimeError("acoustic_embedding_busy"))
+    try:
+        session = _embedding_session(session_factory)
+        views: list[np.ndarray] = []
+        for shift in (0, STABILITY_FEATURE_SHIFT_SAMPLES):
+            rows: list[np.ndarray] = []
+            for samples in windows:
+                _embedding_boundary_check(
+                    deadline_monotonic=deadline_monotonic,
+                    stop_requested=stop_requested,
+                )
+                available = max(0, len(samples) - 1)
+                shifted_samples = samples[min(shift, available) :] if shift else samples
+                rows.append(
+                    _normalized_session_embedding(session, shifted_samples)
+                )
+            views.append(np.stack(rows).astype(np.float32, copy=False))
+    except speaker_cast.AutoCastManualRequired:
+        raise
+    except Exception as exc:
+        raise _manual_required(exc)
+    finally:
+        _EMBEDDING_LOCK.release()
+    positions = np.asarray(
+        [
+            float(window["source_position"]) + index * 1e-9
+            for index, window in enumerate(plan["windows"])
+        ],
+        dtype=np.float64,
+    )
+    speech_seconds = np.asarray(
+        [
+            float(window["speech_end_seconds"])
+            - float(window["speech_start_seconds"])
+            for window in plan["windows"]
+        ],
+        dtype=np.float64,
+    )
+    return {
+        "plan": plan,
+        "base_embeddings": views[0],
+        "shifted_embeddings": views[1],
+        "source_positions": positions,
+        "speech_seconds": speech_seconds,
+        "window_samples": windows,
+    }
+
+
 def _fixed_vocal_unit_embeddings(
     pcm16: object,
     units: object,
@@ -1332,12 +1796,15 @@ def _fixed_vocal_unit_embeddings(
     deadline_monotonic: float,
     stop_requested: Callable[[], bool],
     session_factory: Callable | None = None,
+    pad_short_units: bool = False,
+    minimum_units: int = MIN_UNITS,
 ) -> np.ndarray:
     if not isinstance(pcm16, np.ndarray) or pcm16.dtype != np.dtype(np.int16) or pcm16.ndim != 1:
         raise _manual_required(ValueError("fixed_vocal_pcm_invalid"))
     validated_units = _validated_embedding_units(
         units,
         pcm_duration_seconds=len(pcm16) / float(PCM_SAMPLE_RATE),
+        minimum_units=minimum_units,
     )
     if not _EMBEDDING_LOCK.acquire(blocking=False):
         raise _manual_required(RuntimeError("acoustic_embedding_busy"))
@@ -1361,6 +1828,18 @@ def _fixed_vocal_unit_embeddings(
                 if shift:
                     available = max(0, len(samples) - 1)
                     samples = samples[min(shift, available) :]
+                if pad_short_units and len(samples) < int(
+                    UNIT_MIN_FEATURE_SECONDS * PCM_SAMPLE_RATE
+                ):
+                    samples = np.pad(
+                        samples,
+                        (
+                            0,
+                            int(UNIT_MIN_FEATURE_SECONDS * PCM_SAMPLE_RATE)
+                            - len(samples),
+                        ),
+                        mode="constant",
+                    ).astype(np.int16, copy=False)
                 rows.append(_normalized_session_embedding(session, samples))
             view_rows.append(np.stack(rows).astype(np.float32, copy=False))
         aggregate = view_rows[0] + view_rows[1]
@@ -1397,10 +1876,13 @@ def _validated_embedding_units(
     units: object,
     *,
     pcm_duration_seconds: float,
+    minimum_units: int = MIN_UNITS,
 ) -> list[dict]:
     if (
         type(units) is not list
-        or not MIN_UNITS <= len(units) <= speaker_cast.MAX_SIDECAR_CUES
+        or type(minimum_units) is not int
+        or not 1 <= minimum_units <= MIN_UNITS
+        or not minimum_units <= len(units) <= speaker_cast.MAX_SIDECAR_CUES
     ):
         raise _manual_required(ValueError("acoustic_embedding_units_invalid"))
     validated: list[dict] = []
@@ -1999,8 +2481,16 @@ def build_clustered_segments(
     words: object,
     units: object,
     cluster_result: object,
+    *,
+    word_labels: object | None = None,
+    word_confidences: object | None = None,
 ) -> list[dict]:
-    """Assign every strict word once and group adjacent acoustic labels."""
+    """Assign every strict word once and group adjacent acoustic labels.
+
+    Unit labels remain the compatibility default.  Auto Multi may provide a
+    validated word-level assignment so a coarse embedding unit can be split at
+    an actual speaker boundary without changing any source timestamps.
+    """
 
     if type(words) is not list or not words:
         raise _manual_required(ValueError("acoustic_segment_words_invalid"))
@@ -2051,6 +2541,40 @@ def build_clustered_segments(
             )
     if any(item is None for item in word_assignments):
         raise _manual_required(ValueError("acoustic_segment_coverage_invalid"))
+    if word_labels is not None:
+        if (
+            type(word_labels) is not list
+            or len(word_labels) != len(validated_words)
+            or any(
+                type(label) is not int
+                or not 0 <= label < MAX_SPEAKERS
+                for label in word_labels
+            )
+        ):
+            raise _manual_required(ValueError("acoustic_segment_word_labels_invalid"))
+        if word_confidences is None:
+            normalized_word_confidences = [0.0] * len(validated_words)
+        elif (
+            type(word_confidences) is not list
+            or len(word_confidences) != len(validated_words)
+            or any(
+                type(value) not in {int, float}
+                or not math.isfinite(float(value))
+                or not 0.0 <= float(value) <= 1.0
+                for value in word_confidences
+            )
+        ):
+            raise _manual_required(
+                ValueError("acoustic_segment_word_confidences_invalid")
+            )
+        else:
+            normalized_word_confidences = [
+                float(value) for value in word_confidences
+            ]
+        word_assignments = [
+            (int(label), normalized_word_confidences[index])
+            for index, label in enumerate(word_labels)
+        ]
 
     grouped: list[dict] = []
     current_words: list[dict] = []
@@ -2185,7 +2709,7 @@ def diarize_fixed_vocal_word_timeline(
     session_factory: Callable | None = None,
     vocal_session_factory: Callable | None = None,
 ) -> dict[str, object]:
-    """Discover speakers from fixed vocal windows, then map strict ASR words."""
+    """Discover speakers on short vocal windows, then attribute every word."""
 
     validated_words = validate_word_timeline(
         words,
@@ -2202,18 +2726,94 @@ def diarize_fixed_vocal_word_timeline(
         stop_requested=stop_requested,
         vocal_session_factory=vocal_session_factory,
     )
-    views = _fixed_vocal_window_views(
+    raw_views = _fixed_vocal_window_views(
         vocal_pcm,
         deadline_monotonic=deadline_monotonic,
         stop_requested=stop_requested,
         session_factory=session_factory,
     )
-    authority = build_fixed_vocal_authority(
-        views["base_embeddings"],
-        views["shifted_embeddings"],
-        views["window_energy"],
-        views["source_positions"],
+    raw_authority = build_fixed_vocal_authority(
+        raw_views["base_embeddings"],
+        raw_views["shifted_embeddings"],
+        raw_views["window_energy"],
+        raw_views["source_positions"],
     )
+    speech_views = _fixed_vocal_speech_window_views(
+        vocal_pcm,
+        validated_words,
+        duration_seconds=duration_seconds,
+        deadline_monotonic=deadline_monotonic,
+        stop_requested=stop_requested,
+        session_factory=session_factory,
+    )
+    female_probabilities = (
+        multi_gender.classify_vocal_window_gender_probabilities(
+            speech_views["window_samples"],
+            deadline_monotonic=deadline_monotonic,
+            stop_requested=stop_requested,
+        )
+    )
+    authority = build_gender_constrained_speech_authority(
+        speech_views["base_embeddings"],
+        speech_views["shifted_embeddings"],
+        speech_views["source_positions"],
+        speech_views["speech_seconds"],
+        female_probabilities,
+        speaker_count=int(raw_authority["speaker_count"]),
+    )
+    speaker_count = int(authority["speaker_count"])
+    word_mapping = map_subsegment_clusters_to_regions(
+        speech_views["plan"],
+        {
+            "speaker_count": speaker_count,
+            "labels": list(authority["labels"]),
+            "unit_confidences": list(authority["unit_confidences"]),
+        },
+    )
+    word_labels = list(word_mapping["labels"])
+    word_confidences = list(word_mapping["unit_confidences"])
+    word_units = [
+        {
+            "unit_index": index,
+            "word_indexes": [index],
+            "start": float(word["start"]),
+            "end": float(word["end"]),
+            "original_speech_seconds": float(word["end"])
+            - float(word["start"]),
+        }
+        for index, word in enumerate(validated_words)
+    ]
+    unit_labels: list[int] = []
+    for unit in units:
+        indexes = [int(index) for index in unit["word_indexes"]]
+        effective_values = [word_labels[index] for index in indexes]
+        effective_counts = {
+            label: effective_values.count(label) for label in set(effective_values)
+        }
+        unit_labels.append(
+            min(
+                effective_counts,
+                key=lambda label: (-effective_counts[label], label),
+            )
+        )
+    segments = build_clustered_segments(
+        validated_words,
+        word_units,
+        {"labels": word_labels, "unit_confidences": word_confidences},
+        word_labels=word_labels,
+        word_confidences=word_confidences,
+    )
+    for segment in segments:
+        label = int(segment["speaker"])
+        segment["voice_register"] = authority["speaker_registers"][label]
+    if len({item["speaker_id"] for item in segments}) != speaker_count:
+        raise _manual_required(
+            ValueError("fixed_vocal_segment_speaker_coverage_invalid")
+        )
+    if any(word_labels.count(label) < 1 for label in range(speaker_count)):
+        raise _manual_required(
+            ValueError("fixed_vocal_word_speaker_coverage_invalid")
+        )
     unit_embeddings = _fixed_vocal_unit_embeddings(
         vocal_pcm,
         units,
@@ -2221,28 +2821,32 @@ def diarize_fixed_vocal_word_timeline(
         stop_requested=stop_requested,
         session_factory=session_factory,
     )
-    mapping = map_word_units_to_fixed_vocal_authority(
+    raw_mapping = map_word_units_to_fixed_vocal_authority(
         units,
         unit_embeddings,
-        authority["core_windows"],
-        authority["centroids"],
-        speaker_count=int(authority["speaker_count"]),
-        overlap_dominance_threshold=HYBRID_OVERLAP_DOMINANCE,
+        raw_authority["core_windows"],
+        raw_authority["centroids"],
+        speaker_count=int(raw_authority["speaker_count"]),
     )
-    segments = build_clustered_segments(
-        validated_words,
-        units,
-        {
-            "labels": list(mapping["labels"]),
-            "unit_confidences": list(mapping["unit_confidences"]),
-        },
+    selected_indexes = np.asarray(
+        raw_authority["core_window_indices"],
+        dtype=np.int64,
     )
-    raw_speaker_count = int(authority["speaker_count"])
-    speaker_count = int(mapping["speaker_count"])
-    if len({item["speaker_id"] for item in segments}) != speaker_count:
-        raise _manual_required(
-            ValueError("fixed_vocal_segment_speaker_coverage_invalid")
-        )
+    base_selected = np.asarray(raw_views["base_embeddings"], dtype=np.float64)[
+        selected_indexes
+    ]
+    shifted_selected = np.asarray(
+        raw_views["shifted_embeddings"], dtype=np.float64
+    )[selected_indexes]
+    base_selected /= np.linalg.norm(base_selected, axis=1)[:, None]
+    shifted_selected /= np.linalg.norm(shifted_selected, axis=1)[:, None]
+    view_cosines = np.sum(base_selected * shifted_selected, axis=1)
+    raw_speaker_count = int(raw_authority["speaker_count"])
+    effective_cluster_sizes = list(authority["cluster_sizes"])
+    unit_overlap_count = len(units)
+    unit_centroid_count = 0
+    support_labels = list(range(speaker_count))
+    dropped_labels: list[int] = []
     return {
         "ok": True,
         "status": "PASS",
@@ -2253,32 +2857,48 @@ def diarize_fixed_vocal_word_timeline(
         "algorithm_version": FIXED_VOCAL_ALGORITHM_VERSION,
         "word_count": len(validated_words),
         "unit_count": len(units),
-        "embedding_window_count": sum(
-            int(authority["cluster_sizes"][raw_label])
-            for raw_label in mapping["speech_supported_speaker_labels"]
-        ) * 2,
-        "cluster_sizes": [
-            int(authority["cluster_sizes"][raw_label])
-            for raw_label in mapping["speech_supported_speaker_labels"]
-        ],
+        "embedding_window_count": sum(effective_cluster_sizes) * 2,
+        "cluster_sizes": effective_cluster_sizes,
         "stability_pass": True,
         "word_coverage_count": len(validated_words),
-        "overlap_mapped_count": int(mapping["overlap_mapped_count"]),
-        "centroid_mapped_count": int(mapping["centroid_mapped_count"]),
-        "speaker_unit_counts": list(mapping["speaker_unit_counts"]),
+        "overlap_mapped_count": unit_overlap_count,
+        "centroid_mapped_count": unit_centroid_count,
+        "speaker_unit_counts": [
+            unit_labels.count(label) for label in range(speaker_count)
+        ],
         "raw_speaker_count": raw_speaker_count,
-        "raw_embedding_window_count": len(authority["core_window_indices"]) * 2,
-        "raw_cluster_sizes": list(authority["cluster_sizes"]),
-        "raw_speaker_unit_counts": list(mapping["raw_speaker_unit_counts"]),
+        "raw_embedding_window_count": len(raw_authority["core_window_indices"]) * 2,
+        "raw_cluster_sizes": list(raw_authority["cluster_sizes"]),
+        "raw_speaker_unit_counts": list(raw_mapping["raw_speaker_unit_counts"]),
         "raw_overlap_speaker_unit_counts": list(
-            mapping["raw_overlap_speaker_unit_counts"]
+            raw_mapping["raw_overlap_speaker_unit_counts"]
         ),
-        "speech_supported_speaker_labels": list(
-            mapping["speech_supported_speaker_labels"]
+        "speech_supported_speaker_labels": support_labels,
+        "dropped_non_speech_speaker_labels": dropped_labels,
+        "speech_window_partition_stable": bool(authority["partition_stable"]),
+        "speech_window_count": len(authority["labels"]),
+        "speech_window_overlap_threshold_seconds": 0.0,
+        "speaker_count_authority_asr_independent": True,
+        "word_attribution_uses_asr_timeline": True,
+        "word_overlap_mapped_count": len(validated_words),
+        "word_fallback_mapped_count": 0,
+        "word_centroid_mapped_count": 0,
+        "speech_partition_base_shift_agreement": float(
+            authority["base_shift_agreement"]
         ),
-        "dropped_non_speech_speaker_labels": list(
-            mapping["dropped_non_speech_speaker_labels"]
+        "speech_partition_base_aggregate_agreement": float(
+            authority["base_aggregate_agreement"]
         ),
-        "vocal_view_cosine_min": float(authority["view_cosine_min"]),
-        "vocal_view_cosine_mean": float(authority["view_cosine_mean"]),
+        "speaker_registers": list(authority["speaker_registers"]),
+        "speaker_register_confidences": list(
+            authority["speaker_register_confidences"]
+        ),
+        "female_speaker_count": int(authority["female_speaker_count"]),
+        "male_speaker_count": int(authority["male_speaker_count"]),
+        "gender_model_sha256": str(authority["gender_model_sha256"]),
+        "gender_ambiguous_window_count": int(
+            authority["ambiguous_window_count"]
+        ),
+        "vocal_view_cosine_min": round(float(np.min(view_cosines)), 6),
+        "vocal_view_cosine_mean": round(float(np.mean(view_cosines)), 6),
     }

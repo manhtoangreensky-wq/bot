@@ -51,7 +51,6 @@ EXPECTED_WORDS = [
     {"index": 1, "word": "world", "start": 0.5, "end": 0.9},
 ]
 
-
 def test_acoustic_word_extractor_uses_strict_text_and_times_without_speaker_labels():
     assert bot.deepgram_acoustic_word_items(
         deepgram_payload(),
@@ -504,7 +503,7 @@ def acoustic_state_fields() -> dict:
         "multi_acoustic_model_sha256": (
             "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
         ),
-        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v4",
         "multi_acoustic_speaker_count": 3,
         "multi_acoustic_word_count": 30,
         "multi_acoustic_unit_count": 12,
@@ -515,6 +514,16 @@ def acoustic_state_fields() -> dict:
         "multi_acoustic_overlap_mapped_count": 9,
         "multi_acoustic_centroid_mapped_count": 3,
         "multi_acoustic_speaker_unit_counts": [4, 4, 4],
+        "multi_acoustic_speaker_registers": ["high", "low", "low"],
+        "multi_acoustic_speaker_register_confidences": [0.99, 0.98, 0.97],
+        "multi_acoustic_female_speaker_count": 1,
+        "multi_acoustic_male_speaker_count": 2,
+        "multi_acoustic_gender_model_sha256": (
+            bot.auto_multi_speaker.subdub_multi_speaker_gender_onnx.MULTI_GENDER_MODEL_SHA256
+        ),
+        "multi_acoustic_gender_ambiguous_window_count": 0,
+        "multi_acoustic_speaker_count_authority_asr_independent": True,
+        "multi_acoustic_word_attribution_uses_asr_timeline": True,
     }
 
 
@@ -701,6 +710,10 @@ def test_exact_multi_prepare_runs_local_acoustics_before_translation(
     source_srt = "1\n00:00:00,000 --> 00:00:12,000\nsource words\n"
     words = acoustic_pipeline_words()
     acoustic_segments = acoustic_pipeline_segments()
+    for segment in acoustic_segments:
+        segment["voice_register"] = (
+            "high" if segment["speaker"] == 0 else "low"
+        )
     calls = []
     artifacts = []
     pending_state = {
@@ -779,7 +792,7 @@ def test_exact_multi_prepare_runs_local_acoustics_before_translation(
             "model_sha256": (
                 "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
             ),
-            "algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
+            "algorithm_version": "wespeaker-resnet34-fixed-vocal-v4",
             "word_count": 30,
             "unit_count": 12,
             "embedding_window_count": 24,
@@ -789,6 +802,19 @@ def test_exact_multi_prepare_runs_local_acoustics_before_translation(
             "overlap_mapped_count": 9,
             "centroid_mapped_count": 3,
             "speaker_unit_counts": [4, 4, 4],
+            "speaker_registers": ["high", "low", "low"],
+            "speaker_register_confidences": [0.99, 0.98, 0.97],
+            "female_speaker_count": 1,
+            "male_speaker_count": 2,
+                "gender_model_sha256": (
+                    bot.auto_multi_speaker.subdub_multi_speaker_gender_onnx.MULTI_GENDER_MODEL_SHA256
+            ),
+            "gender_ambiguous_window_count": 0,
+            "speaker_count_authority_asr_independent": True,
+            "word_attribution_uses_asr_timeline": True,
+            "word_overlap_mapped_count": 30,
+            "word_fallback_mapped_count": 0,
+            "word_centroid_mapped_count": 0,
         }
 
     async def translate(segments, target_language, **_kwargs):
@@ -857,6 +883,29 @@ def test_exact_multi_prepare_runs_local_acoustics_before_translation(
     assert prepared["state"]["multi_acoustic_speaker_count"] == 3
     assert prepared["state"]["multi_acoustic_word_coverage_count"] == 30
     assert prepared["state"]["multi_acoustic_cluster_sizes"] == [4, 4, 4]
+    assert prepared["state"]["multi_acoustic_word_overlap_mapped_count"] == 30
+    assert prepared["state"]["multi_acoustic_word_fallback_mapped_count"] == 0
+    assert prepared["state"]["multi_acoustic_word_centroid_mapped_count"] == 0
+    assert prepared["state"]["multi_acoustic_speaker_registers"] == [
+        "high",
+        "low",
+        "low",
+    ]
+    assert prepared["state"]["multi_acoustic_speaker_register_confidences"] == [
+        0.99,
+        0.98,
+        0.97,
+    ]
+    assert prepared["state"]["multi_acoustic_female_speaker_count"] == 1
+    assert prepared["state"]["multi_acoustic_male_speaker_count"] == 2
+    assert prepared["state"]["multi_acoustic_gender_model_sha256"] == (
+        bot.auto_multi_speaker.subdub_multi_speaker_gender_onnx.MULTI_GENDER_MODEL_SHA256
+    )
+    assert prepared["state"]["multi_acoustic_speaker_count_authority_asr_independent"] is True
+    assert prepared["state"]["multi_acoustic_word_attribution_uses_asr_timeline"] is True
+    assert [
+        item["voice_register"] for item in prepared["source_segments"]
+    ] == ["high", "low", "low"]
     source_artifacts = [item for item in artifacts if item[1] == "source_subtitle"]
     assert len(source_artifacts) == 2
     assert source_artifacts[-1][2] == prepared["source_subtitle"]
@@ -876,8 +925,13 @@ def test_exact_multi_prepare_runs_local_acoustics_before_translation(
         "chunk_00:speaker_1",
         "chunk_00:speaker_2",
     ]
+    assert [item["voice_register"] for item in sidecar["cues"]] == [
+        "high",
+        "low",
+        "low",
+    ]
     assert sidecar["acoustic"] == {
-        "algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
+        "algorithm_version": "wespeaker-resnet34-fixed-vocal-v4",
         "backend": "local_wespeaker_resnet34_fixed_vocal",
         "cluster_sizes": [4, 4, 4],
         "embedding_window_count": 24,
@@ -892,6 +946,17 @@ def test_exact_multi_prepare_runs_local_acoustics_before_translation(
         "overlap_mapped_count": 9,
         "centroid_mapped_count": 3,
         "speaker_unit_counts": [4, 4, 4],
+        "word_overlap_mapped_count": 30,
+        "word_fallback_mapped_count": 0,
+        "word_centroid_mapped_count": 0,
+        "speaker_registers": ["high", "low", "low"],
+        "speaker_register_confidences": [0.99, 0.98, 0.97],
+        "female_speaker_count": 1,
+        "male_speaker_count": 2,
+        "gender_model_sha256": bot.auto_multi_speaker.subdub_multi_speaker_gender_onnx.MULTI_GENDER_MODEL_SHA256,
+        "gender_ambiguous_window_count": 0,
+        "speaker_count_authority_asr_independent": True,
+        "word_attribution_uses_asr_timeline": True,
         "raw_speaker_count": 3,
         "raw_embedding_window_count": 24,
         "raw_cluster_sizes": [4, 4, 4],

@@ -317,22 +317,35 @@ def test_exact_fixture_fixed_vocal_authority_is_asr_independent(tmp_path):
     assert result["provider"] == service.FIXED_VOCAL_PROVIDER
     assert result["algorithm_version"] == service.FIXED_VOCAL_ALGORITHM_VERSION
     assert result["raw_speaker_count"] == 5
-    assert result["detected_speaker_count"] == 4
+    assert result["detected_speaker_count"] == 5
     assert result["word_count"] == result["word_coverage_count"] == 50
     assert result["unit_count"] == 23
-    assert result["embedding_window_count"] == 160
+    assert result["embedding_window_count"] == 80
     assert result["raw_embedding_window_count"] == 178
-    assert result["cluster_sizes"] == [18, 26, 25, 11]
+    assert sum(result["cluster_sizes"]) == result["embedding_window_count"] // 2
     assert result["raw_cluster_sizes"] == [9, 18, 26, 25, 11]
-    assert result["speaker_unit_counts"] == [4, 4, 12, 3]
-    assert result["raw_speaker_unit_counts"] == [3, 2, 4, 11, 3]
-    assert result["raw_overlap_speaker_unit_counts"] == [0, 1, 4, 11, 3]
-    assert result["speech_supported_speaker_labels"] == [1, 2, 3, 4]
-    assert result["dropped_non_speech_speaker_labels"] == [0]
-    assert result["overlap_mapped_count"] == 19
-    assert result["centroid_mapped_count"] == 4
-    assert len(result["segments"]) == 9
-    assert len({item["speaker_id"] for item in result["segments"]}) == 4
+    assert sum(result["speaker_unit_counts"]) == result["unit_count"]
+    assert sum(result["raw_speaker_unit_counts"]) == result["unit_count"]
+    assert len(result["raw_overlap_speaker_unit_counts"]) == 5
+    assert result["speech_supported_speaker_labels"] == [0, 1, 2, 3, 4]
+    assert result["dropped_non_speech_speaker_labels"] == []
+    assert result["overlap_mapped_count"] + result["centroid_mapped_count"] == 23
+    assert (
+        result["word_overlap_mapped_count"]
+        + result["word_centroid_mapped_count"]
+        + result["word_fallback_mapped_count"]
+        == 50
+    )
+    assert result["speech_window_count"] == 40
+    assert result["speech_window_overlap_threshold_seconds"] == 0.0
+    assert result["speech_window_partition_stable"] is True
+    assert result["speaker_count_authority_asr_independent"] is True
+    assert result["word_attribution_uses_asr_timeline"] is True
+    assert result["speaker_registers"].count("high") >= 1
+    assert result["speaker_registers"].count("low") >= 1
+    assert len(result["segments"]) >= result["detected_speaker_count"]
+    assert all(item["start"] < item["end"] for item in result["segments"])
+    assert len({item["speaker_id"] for item in result["segments"]}) == 5
     for forbidden in ("centroids", "embeddings", "pcm", "word_timeline"):
         assert forbidden not in result
 
@@ -384,25 +397,54 @@ def test_exact_fixture_fixed_vocal_accepts_actual_145_word_timing(tmp_path):
 
     assert result["ok"] is True
     assert result["raw_speaker_count"] == 5
-    assert result["detected_speaker_count"] == 4
+    assert result["detected_speaker_count"] == 5
     assert result["word_count"] == result["word_coverage_count"] == 145
     assert result["unit_count"] == 37
-    assert result["embedding_window_count"] == 160
+    assert result["embedding_window_count"] == 120
     assert result["raw_embedding_window_count"] == 178
-    assert result["cluster_sizes"] == [18, 26, 25, 11]
+    assert result["cluster_sizes"] == [16, 12, 13, 11, 8]
     assert result["raw_cluster_sizes"] == [9, 18, 26, 25, 11]
-    assert result["speaker_unit_counts"] == [11, 9, 11, 6]
-    assert result["raw_speaker_unit_counts"] == [2, 9, 9, 11, 6]
-    assert result["raw_overlap_speaker_unit_counts"] == [0, 7, 8, 10, 4]
-    assert result["speech_supported_speaker_labels"] == [1, 2, 3, 4]
-    assert result["dropped_non_speech_speaker_labels"] == [0]
-    assert result["overlap_mapped_count"] == 29
-    assert result["centroid_mapped_count"] == 8
-    assert len(result["segments"]) == 23
-    assert len({item["speaker_id"] for item in result["segments"]}) == 4
+    assert sum(result["speaker_unit_counts"]) == result["unit_count"]
+    assert sum(result["raw_speaker_unit_counts"]) == result["unit_count"]
+    assert len(result["raw_overlap_speaker_unit_counts"]) == 5
+    assert result["speech_supported_speaker_labels"] == [0, 1, 2, 3, 4]
+    assert result["dropped_non_speech_speaker_labels"] == []
+    assert result["overlap_mapped_count"] + result["centroid_mapped_count"] == 37
+    assert (
+        result["word_overlap_mapped_count"]
+        + result["word_centroid_mapped_count"]
+        + result["word_fallback_mapped_count"]
+        == 145
+    )
+    assert result["speech_window_count"] == 60
+    assert result["speech_window_overlap_threshold_seconds"] == 0.0
+    assert result["speech_window_partition_stable"] is True
+    assert result["speaker_count_authority_asr_independent"] is True
+    assert result["word_attribution_uses_asr_timeline"] is True
+    assert result["speaker_registers"] == ["high", "low", "low", "high", "low"]
+    assert result["female_speaker_count"] == 2
+    assert result["male_speaker_count"] == 3
+    assert result["gender_model_sha256"] == (
+        service.multi_gender.MULTI_GENDER_MODEL_SHA256
+    )
+    assert result["speech_partition_base_shift_agreement"] >= 0.95
+    assert result["speech_partition_base_aggregate_agreement"] >= 0.95
+    assert len(result["segments"]) >= 20
+    assert len({item["speaker_id"] for item in result["segments"]}) == 5
+    final_segments = [
+        item
+        for item in result["segments"]
+        if item["start"] == pytest.approx(126.005)
+        and item["end"] == pytest.approx(126.505)
+    ]
+    assert len(final_segments) == 1
+    assert final_segments[0]["text"] == "word144"
+    assert final_segments[0]["voice_register"] == "high"
 
 
-def test_exact_fixture_drops_raw_cluster_without_speech_supported_words(tmp_path):
+def test_exact_fixture_fails_closed_when_timing_makes_speech_partition_unstable(
+    tmp_path,
+):
     source_value = str(os.environ.get("SUBDUB_MULTI_FIXTURE_PATH") or "").strip()
     if not source_value:
         pytest.fail("SUBDUB_MULTI_FIXTURE_PATH is mandatory for this resource gate")
@@ -426,26 +468,20 @@ def test_exact_fixture_drops_raw_cluster_without_speech_supported_words(tmp_path
         "utf-8", errors="replace"
     )[:500]
 
-    result = service.diarize_fixed_vocal_word_timeline(
-        str(pcm_path),
-        words,
-        duration_seconds=SOURCE_DURATION_SECONDS,
-        deadline_monotonic=time.monotonic() + 540.0,
-        stop_requested=lambda: False,
-    )
+    with pytest.raises(speaker_cast.AutoCastManualRequired) as error:
+        service.diarize_fixed_vocal_word_timeline(
+            str(pcm_path),
+            words,
+            duration_seconds=SOURCE_DURATION_SECONDS,
+            deadline_monotonic=time.monotonic() + 540.0,
+            stop_requested=lambda: False,
+        )
 
-    assert result["ok"] is True
-    assert result["raw_speaker_count"] == 5
-    assert result["detected_speaker_count"] == 4
-    assert result["speech_supported_speaker_labels"] == [1, 2, 3, 4]
-    assert result["dropped_non_speech_speaker_labels"] == [0]
-    assert result["raw_cluster_sizes"] == [9, 18, 26, 25, 11]
-    assert result["cluster_sizes"] == [18, 26, 25, 11]
-    assert result["raw_speaker_unit_counts"] == [0, 9, 9, 11, 6]
-    assert result["raw_overlap_speaker_unit_counts"] == [0, 7, 8, 10, 4]
-    assert result["speaker_unit_counts"] == [9, 9, 11, 6]
-    assert result["word_count"] == result["word_coverage_count"] == 145
-    assert len({item["speaker_id"] for item in result["segments"]}) == 4
+    cause = error.value
+    while getattr(cause, "__cause__", None) is not None:
+        cause = cause.__cause__
+    assert isinstance(cause, ValueError)
+    assert str(cause) == "fixed_vocal_gender_partition_unstable"
 
 
 @pytest.mark.parametrize("mutation", ("model_byte", "missing_notice"))
@@ -480,3 +516,60 @@ def test_real_acoustic_assets_fail_before_inference(monkeypatch, tmp_path, mutat
         / "subdub_auto_multi"
         / "voxceleb_resnet34.onnx"
     ) == service.MODEL_SHA256
+
+
+def test_multi_gender_model_asset_and_cpu_schema_are_hash_locked():
+    result = service.multi_gender.multi_gender_model_preflight()
+
+    assert result == {
+        "ok": True,
+        "model_sha256": service.multi_gender.MULTI_GENDER_MODEL_SHA256,
+        "model_bytes": 670_311,
+        "providers": ["CPUExecutionProvider"],
+    }
+    assert _sha256(service.multi_gender.MULTI_GENDER_MODEL_PATH) == (
+        "e98f8bc6d7960a8a2169368fe4533636903e712790e96dbff81b679ede5de252"
+    )
+    assert service.multi_gender.MULTI_GENDER_LICENSE_PATH.is_file()
+    assert service.multi_gender.MULTI_GENDER_NOTICE_PATH.is_file()
+
+
+@pytest.mark.parametrize("mutation", ("model_byte", "missing_license"))
+def test_multi_gender_assets_fail_before_session_creation(
+    monkeypatch,
+    tmp_path,
+    mutation,
+):
+    model_copy = tmp_path / service.multi_gender.MULTI_GENDER_MODEL_PATH.name
+    model_copy.write_bytes(service.multi_gender.MULTI_GENDER_MODEL_PATH.read_bytes())
+    license_copy = tmp_path / service.multi_gender.MULTI_GENDER_LICENSE_PATH.name
+    license_copy.write_bytes(
+        service.multi_gender.MULTI_GENDER_LICENSE_PATH.read_bytes()
+    )
+    notice_copy = tmp_path / service.multi_gender.MULTI_GENDER_NOTICE_PATH.name
+    notice_copy.write_bytes(service.multi_gender.MULTI_GENDER_NOTICE_PATH.read_bytes())
+    if mutation == "model_byte":
+        payload = bytearray(model_copy.read_bytes())
+        payload[len(payload) // 2] ^= 0x01
+        model_copy.write_bytes(payload)
+    else:
+        license_copy.unlink()
+    monkeypatch.setattr(service.multi_gender, "MULTI_GENDER_MODEL_PATH", model_copy)
+    monkeypatch.setattr(
+        service.multi_gender,
+        "MULTI_GENDER_LICENSE_PATH",
+        license_copy,
+    )
+    monkeypatch.setattr(
+        service.multi_gender,
+        "MULTI_GENDER_NOTICE_PATH",
+        notice_copy,
+    )
+    calls = []
+
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        service.multi_gender.multi_gender_model_preflight(
+            session_factory=lambda *_args, **_kwargs: calls.append(True)
+        )
+
+    assert calls == []

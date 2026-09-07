@@ -1533,15 +1533,62 @@ def test_fixed_vocal_diarization_discovers_speakers_before_word_mapping(
         "build_fixed_vocal_authority",
         lambda *_args, **_kwargs: calls.append("authority") or {
             "speaker_count": 3,
-            "percentile_speaker_counts": [3, 3, 3, 3],
             "core_window_indices": list(range(6)),
-            "core_windows": [],
-            "core_labels": [0, 0, 1, 1, 2, 2],
+            "core_windows": [
+                {"start": index * 0.75, "end": index * 0.75 + 1.5, "speaker": index % 3}
+                for index in range(6)
+            ],
             "cluster_sizes": [2, 2, 2],
             "centroids": np.eye(3, service.EMBEDDING_DIM, dtype=np.float32),
             "core_partition_stable": True,
             "view_cosine_min": 1.0,
             "view_cosine_mean": 1.0,
+        },
+    )
+    monkeypatch.setattr(
+        service,
+        "_fixed_vocal_speech_window_views",
+        lambda *_args, **_kwargs: calls.append("speech_windows") or {
+            "plan": {"regions": [], "windows": []},
+            "base_embeddings": np.eye(6, service.EMBEDDING_DIM, dtype=np.float32),
+            "shifted_embeddings": np.eye(6, service.EMBEDDING_DIM, dtype=np.float32),
+            "source_positions": np.arange(6, dtype=np.float64),
+            "speech_seconds": np.ones(6, dtype=np.float64),
+            "window_samples": [np.ones(8_000, dtype=np.int16)] * 6,
+        },
+    )
+    monkeypatch.setattr(
+        service.multi_gender,
+        "classify_vocal_window_gender_probabilities",
+        lambda *_args, **_kwargs: calls.append("gender")
+        or [0.99, 0.99, 0.01, 0.01, 0.01, 0.01],
+    )
+    monkeypatch.setattr(
+        service,
+        "build_gender_constrained_speech_authority",
+        lambda *_args, **_kwargs: calls.append("speech_authority") or {
+            "speaker_count": 3,
+            "labels": [0, 0, 1, 1, 2, 2],
+            "unit_confidences": [0.8] * 6,
+            "cluster_sizes": [2, 2, 2],
+            "speaker_registers": ["high", "low", "low"],
+            "speaker_register_confidences": [0.99, 0.99, 0.99],
+            "female_speaker_count": 1,
+            "male_speaker_count": 2,
+            "base_shift_agreement": 1.0,
+            "base_aggregate_agreement": 1.0,
+            "ambiguous_window_count": 0,
+            "gender_model_sha256": service.multi_gender.MULTI_GENDER_MODEL_SHA256,
+            "partition_stable": True,
+        },
+    )
+    monkeypatch.setattr(
+        service,
+        "map_subsegment_clusters_to_regions",
+        lambda *_args, **_kwargs: calls.append("map") or {
+            "labels": [index % 3 for index in range(30)],
+            "unit_confidences": [0.8] * 30,
+            "speaker_count": 3,
         },
     )
     monkeypatch.setattr(
@@ -1554,16 +1601,7 @@ def test_fixed_vocal_diarization_discovers_speakers_before_word_mapping(
     monkeypatch.setattr(
         service,
         "map_word_units_to_fixed_vocal_authority",
-        lambda units, *_args, **_kwargs: calls.append("map") or {
-            "labels": [index % 3 for index in range(len(units))],
-            "unit_confidences": [0.8] * len(units),
-            "overlap_mapped_count": len(units),
-            "centroid_mapped_count": 0,
-            "speaker_unit_counts": [10, 10, 10],
-            "speaker_count": 3,
-            "raw_speaker_count": 3,
-            "speech_supported_speaker_labels": [0, 1, 2],
-            "dropped_non_speech_speaker_labels": [],
+        lambda units, *_args, **_kwargs: calls.append("raw_map") or {
             "raw_speaker_unit_counts": [10, 10, 10],
             "raw_overlap_speaker_unit_counts": [10, 10, 10],
         },
@@ -1577,13 +1615,58 @@ def test_fixed_vocal_diarization_discovers_speakers_before_word_mapping(
         stop_requested=lambda: False,
     )
 
-    assert calls == ["vocal", "windows", "authority", "unit_embeddings", "map"]
+    assert calls == [
+        "vocal",
+        "windows",
+        "authority",
+        "speech_windows",
+        "gender",
+        "speech_authority",
+        "map",
+        "unit_embeddings",
+        "raw_map",
+    ]
     assert result["detected_speaker_count"] == 3
     assert result["word_count"] == 30
     assert result["word_coverage_count"] == 30
     assert len({item["speaker_id"] for item in result["segments"]}) == 3
     assert "centroids" not in result
     assert "word_timeline" not in result
+
+
+@pytest.mark.parametrize("speaker_count", range(3, 9))
+def test_gender_constrained_authority_supports_generic_three_to_eight_speakers(
+    speaker_count,
+):
+    female_count = max(1, speaker_count // 2)
+    labels = [label for label in range(speaker_count) for _ in range(3)]
+    base = np.zeros((len(labels), service.EMBEDDING_DIM), dtype=np.float32)
+    for index, label in enumerate(labels):
+        base[index, label] = 1.0
+    shifted = base.copy()
+    probabilities = [
+        0.99 if label < female_count else 0.01 for label in labels
+    ]
+
+    result = service.build_gender_constrained_speech_authority(
+        base,
+        shifted,
+        np.arange(len(labels), dtype=np.float64),
+        np.full(len(labels), 1.5, dtype=np.float64),
+        probabilities,
+        speaker_count=speaker_count,
+    )
+
+    assert result["speaker_count"] == speaker_count
+    assert result["cluster_sizes"] == [3] * speaker_count
+    assert result["female_speaker_count"] == female_count
+    assert result["male_speaker_count"] == speaker_count - female_count
+    assert result["speaker_registers"].count("high") == female_count
+    assert result["speaker_registers"].count("low") == (
+        speaker_count - female_count
+    )
+    assert result["base_shift_agreement"] == 1.0
+    assert result["base_aggregate_agreement"] == 1.0
 
 
 def test_fixed_vocal_loader_reuses_uvr_and_returns_mono_16k(

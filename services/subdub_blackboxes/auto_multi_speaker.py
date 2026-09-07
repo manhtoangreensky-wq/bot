@@ -9,6 +9,9 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import shutil
+import subprocess
+import tempfile
 import threading
 import time
 from typing import Any
@@ -16,6 +19,7 @@ from typing import Any
 from services import subdub_multi_speaker_asr_fallback
 from services import subdub_multi_speaker_embedding_onnx
 from services import subdub_multi_speaker_gender_onnx
+from services import subdub_media_preflight
 from services import subdub_speaker_cast as speaker_cast
 from services import subdub_two_speaker_gender_onnx
 
@@ -46,6 +50,17 @@ MULTI_ACOUSTIC_STATE_FIELDS = frozenset({
     "multi_acoustic_word_coverage_count",
     "multi_acoustic_overlap_mapped_count",
     "multi_acoustic_centroid_mapped_count",
+    "multi_acoustic_word_overlap_mapped_count",
+    "multi_acoustic_word_fallback_mapped_count",
+    "multi_acoustic_word_centroid_mapped_count",
+    "multi_acoustic_speaker_count_authority_asr_independent",
+    "multi_acoustic_word_attribution_uses_asr_timeline",
+    "multi_acoustic_speaker_registers",
+    "multi_acoustic_speaker_register_confidences",
+    "multi_acoustic_female_speaker_count",
+    "multi_acoustic_male_speaker_count",
+    "multi_acoustic_gender_model_sha256",
+    "multi_acoustic_gender_ambiguous_window_count",
     "multi_acoustic_speaker_unit_counts",
     "multi_acoustic_raw_speaker_count",
     "multi_acoustic_raw_embedding_window_count",
@@ -92,6 +107,21 @@ def bounded_multi_acoustic_evidence(
     )
     raw_evidence_present = any(field in current for field in raw_fields)
     if raw_evidence_present and not all(field in current for field in raw_fields):
+        return {}
+    register_fields = (
+        "multi_acoustic_speaker_registers",
+        "multi_acoustic_speaker_register_confidences",
+        "multi_acoustic_female_speaker_count",
+        "multi_acoustic_male_speaker_count",
+        "multi_acoustic_gender_model_sha256",
+        "multi_acoustic_gender_ambiguous_window_count",
+        "multi_acoustic_speaker_count_authority_asr_independent",
+        "multi_acoustic_word_attribution_uses_asr_timeline",
+    )
+    register_evidence_present = any(field in current for field in register_fields)
+    if register_evidence_present and not all(
+        field in current for field in register_fields
+    ):
         return {}
     count_fields = (
         "multi_acoustic_speaker_count",
@@ -155,6 +185,17 @@ def bounded_multi_acoustic_evidence(
         dropped_labels = list(
             current.get("multi_acoustic_dropped_non_speech_speaker_labels") or []
         )
+        speaker_registers = list(
+            current.get("multi_acoustic_speaker_registers") or []
+        )
+        register_confidences = list(
+            current.get("multi_acoustic_speaker_register_confidences") or []
+        )
+        female_count = current.get("multi_acoustic_female_speaker_count")
+        male_count = current.get("multi_acoustic_male_speaker_count")
+        ambiguous_window_count = current.get(
+            "multi_acoustic_gender_ambiguous_window_count"
+        )
     except (TypeError, ValueError, OverflowError):
         return {}
     if (
@@ -214,13 +255,38 @@ def bounded_multi_acoustic_evidence(
             label for label in range(raw_speaker_count) if label not in supported_labels
         ]
         or len(dropped_labels) != dropped_count
-        or cluster_sizes != [raw_cluster_sizes[label] for label in supported_labels]
-        or supported_labels != [
-            label
-            for label, count in enumerate(raw_overlap_speaker_unit_counts)
-            if count > 0
-        ]
         or any(raw_overlap_speaker_unit_counts[label] != 0 for label in dropped_labels)
+        or (
+            register_evidence_present
+            and (
+                len(speaker_registers) != speaker_count
+                or any(value not in {"low", "high"} for value in speaker_registers)
+                or len(register_confidences) != speaker_count
+                or any(
+                    type(value) not in {int, float}
+                    or not math.isfinite(float(value))
+                    or not 0.0 <= float(value) <= 1.0
+                    for value in register_confidences
+                )
+                or type(female_count) is not int
+                or type(male_count) is not int
+                or int(female_count) != speaker_registers.count("high")
+                or int(male_count) != speaker_registers.count("low")
+                or int(female_count) + int(male_count) != speaker_count
+                or current.get("multi_acoustic_gender_model_sha256")
+                != subdub_multi_speaker_gender_onnx.MULTI_GENDER_MODEL_SHA256
+                or type(ambiguous_window_count) is not int
+                or not 0 <= int(ambiguous_window_count) <= window_count // 2
+                or current.get(
+                    "multi_acoustic_speaker_count_authority_asr_independent"
+                )
+                is not True
+                or current.get(
+                    "multi_acoustic_word_attribution_uses_asr_timeline"
+                )
+                is not True
+            )
+        )
         or current.get("multi_acoustic_stability_pass") is not True
     ):
         return {}
@@ -245,6 +311,32 @@ def bounded_multi_acoustic_evidence(
         "multi_acoustic_centroid_mapped_count": centroid_count,
         "multi_acoustic_speaker_unit_counts": speaker_unit_counts,
     }
+    if register_evidence_present:
+        result.update(
+            {
+                "multi_acoustic_speaker_registers": speaker_registers,
+                "multi_acoustic_speaker_register_confidences": [
+                    round(float(value), 6) for value in register_confidences
+                ],
+                "multi_acoustic_female_speaker_count": int(female_count),
+                "multi_acoustic_male_speaker_count": int(male_count),
+                "multi_acoustic_gender_model_sha256": (
+                    subdub_multi_speaker_gender_onnx.MULTI_GENDER_MODEL_SHA256
+                ),
+                "multi_acoustic_gender_ambiguous_window_count": int(
+                    ambiguous_window_count
+                ),
+                "multi_acoustic_speaker_count_authority_asr_independent": True,
+                "multi_acoustic_word_attribution_uses_asr_timeline": True,
+            }
+        )
+    for field in (
+        "multi_acoustic_word_overlap_mapped_count",
+        "multi_acoustic_word_fallback_mapped_count",
+        "multi_acoustic_word_centroid_mapped_count",
+    ):
+        if type(current.get(field)) is int and int(current[field]) >= 0:
+            result[field] = int(current[field])
     if raw_evidence_present:
         result.update(
             {
@@ -314,6 +406,105 @@ def acoustic_sidecar_evidence(
                 ),
             }
         )
+    optional_mapping = {
+        "word_overlap_mapped_count": "multi_acoustic_word_overlap_mapped_count",
+        "word_fallback_mapped_count": "multi_acoustic_word_fallback_mapped_count",
+        "word_centroid_mapped_count": "multi_acoustic_word_centroid_mapped_count",
+        "speaker_registers": "multi_acoustic_speaker_registers",
+        "speaker_register_confidences": (
+            "multi_acoustic_speaker_register_confidences"
+        ),
+        "female_speaker_count": "multi_acoustic_female_speaker_count",
+        "male_speaker_count": "multi_acoustic_male_speaker_count",
+        "gender_model_sha256": "multi_acoustic_gender_model_sha256",
+        "gender_ambiguous_window_count": (
+            "multi_acoustic_gender_ambiguous_window_count"
+        ),
+        "speaker_count_authority_asr_independent": (
+            "multi_acoustic_speaker_count_authority_asr_independent"
+        ),
+        "word_attribution_uses_asr_timeline": (
+            "multi_acoustic_word_attribution_uses_asr_timeline"
+        ),
+    }
+    for target, source in optional_mapping.items():
+        if source in bounded:
+            value = bounded[source]
+            result[target] = list(value) if isinstance(value, list) else value
+    return result
+
+
+def acoustic_register_classifications(
+    prepared: Mapping[str, object],
+    labels: list[str],
+) -> dict[str, dict[str, object]]:
+    """Recover exact per-speaker registers measured in the acoustic pass."""
+
+    state = auto_speaker._prepared_state(prepared)
+    bounded = bounded_multi_acoustic_evidence(state)
+    registers = bounded.get("multi_acoustic_speaker_registers")
+    confidences = bounded.get("multi_acoustic_speaker_register_confidences")
+    register_fields = (
+        "multi_acoustic_speaker_registers",
+        "multi_acoustic_speaker_register_confidences",
+        "multi_acoustic_female_speaker_count",
+        "multi_acoustic_male_speaker_count",
+        "multi_acoustic_gender_model_sha256",
+        "multi_acoustic_gender_ambiguous_window_count",
+        "multi_acoustic_speaker_count_authority_asr_independent",
+        "multi_acoustic_word_attribution_uses_asr_timeline",
+    )
+    if any(field in state for field in register_fields) and not bounded:
+        raise speaker_cast.AutoCastManualRequired()
+    if not isinstance(registers, list) or not isinstance(confidences, list):
+        source_segments = prepared.get("source_segments")
+        if not isinstance(source_segments, list) or not source_segments:
+            return {}
+        registers = []
+        confidences = []
+        for label in labels:
+            values = {
+                str(segment.get("voice_register") or "")
+                for segment in source_segments
+                if isinstance(segment, Mapping)
+                and segment.get("speaker_id") == label
+            }
+            if len(values) != 1 or next(iter(values)) not in {"low", "high"}:
+                return {}
+            registers.append(next(iter(values)))
+            confidences.append(
+                subdub_multi_speaker_gender_onnx.MULTI_GENDER_STRONG_CONFIDENCE
+            )
+    if len(labels) != len(registers) or len(labels) != len(confidences):
+        raise speaker_cast.AutoCastManualRequired()
+    result: dict[str, dict[str, object]] = {}
+    for expected_index, label in enumerate(labels):
+        chunk_index, speaker_index, canonical = (
+            speaker_cast.validated_speaker_identity({"speaker_id": label})
+        )
+        if chunk_index != 0 or speaker_index != expected_index or canonical != label:
+            raise speaker_cast.AutoCastManualRequired()
+        register = registers[expected_index]
+        confidence = confidences[expected_index]
+        if register not in {"low", "high"}:
+            raise speaker_cast.AutoCastManualRequired()
+        try:
+            confidence_value = float(confidence)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise speaker_cast.AutoCastManualRequired() from exc
+        if (
+            not math.isfinite(confidence_value)
+            or confidence_value < speaker_cast.MIN_REGISTER_CONFIDENCE
+            or confidence_value > 1.0
+        ):
+            raise speaker_cast.AutoCastManualRequired()
+        result[label] = {
+            "speaker_id": label,
+            "voice_register": register,
+            "voice_gender": "male" if register == "low" else "female",
+            "confidence": round(confidence_value, 6),
+            "reason": "classified_multi_acoustic_gender_onnx",
+        }
     return result
 
 
@@ -370,6 +561,7 @@ async def run_local_acoustic_diarization_off_event_loop(
         )
     )
     drain_attempted = False
+    drain_finished = False
     try:
         result = await asyncio.wait_for(
             asyncio.shield(worker),
@@ -380,14 +572,14 @@ async def run_local_acoustic_diarization_off_event_loop(
         return dict(result)
     except (asyncio.TimeoutError, TimeoutError) as exc:
         stop_event.set()
-        await auto_speaker._drain_worker_bounded(worker)
+        drain_finished = await auto_speaker._drain_worker_bounded(worker)
         drain_attempted = True
         raise speaker_cast.AutoCastManualRequired() from RuntimeError(
             "acoustic_runtime_timeout"
         )
     except asyncio.CancelledError:
         stop_event.set()
-        await auto_speaker._drain_worker_bounded(worker)
+        drain_finished = await auto_speaker._drain_worker_bounded(worker)
         drain_attempted = True
         raise
     except (speaker_cast.AutoCastUnavailable, speaker_cast.AutoCastManualRequired):
@@ -397,9 +589,16 @@ async def run_local_acoustic_diarization_off_event_loop(
     finally:
         if not worker.done() and not drain_attempted:
             stop_event.set()
-            await auto_speaker._drain_worker_bounded(worker)
-        if not auto_speaker._cleanup_pcm_path(path):
-            raise speaker_cast.AutoCastManualRequired()
+            drain_finished = await auto_speaker._drain_worker_bounded(worker)
+        if worker.done() or drain_finished:
+            if not auto_speaker._cleanup_pcm_path(path):
+                raise speaker_cast.AutoCastManualRequired()
+        else:
+            worker.add_done_callback(
+                lambda _worker, pending_path=path: (
+                    auto_speaker._cleanup_pcm_path(pending_path)
+                )
+            )
 
 
 def _multi_diarization_debug_fields(source: Mapping[str, object]) -> dict[str, object]:
@@ -1091,6 +1290,147 @@ def is_auto_multi_speaker_state(
     )
 
 
+def validate_auto_multi_output_geometry(
+    source_probe: Mapping[str, object] | None,
+    output_probe: Mapping[str, object] | None,
+) -> dict[str, object]:
+    """Require the rendered Auto Multi video to keep source display geometry."""
+
+    source = source_probe if isinstance(source_probe, Mapping) else {}
+    output = output_probe if isinstance(output_probe, Mapping) else {}
+
+    def dimension(probe: Mapping[str, object], field: str) -> int:
+        value = probe.get(field)
+        if type(value) is not int or value <= 0:
+            return 0
+        return int(value)
+
+    source_width = dimension(source, "display_width") or dimension(
+        source,
+        "width",
+    )
+    source_height = dimension(source, "display_height") or dimension(
+        source,
+        "height",
+    )
+    output_width = dimension(output, "display_width") or dimension(
+        output,
+        "width",
+    )
+    output_height = dimension(output, "display_height") or dimension(
+        output,
+        "height",
+    )
+    evidence = {
+        "source_display_width": source_width,
+        "source_display_height": source_height,
+        "output_display_width": output_width,
+        "output_display_height": output_height,
+        "output_rotation": output.get("rotation"),
+    }
+    if (
+        source.get("ok") is not True
+        or source.get("has_video") is not True
+        or not source_width
+        or not source_height
+    ):
+        return {
+            **evidence,
+            "ok": False,
+            "detail": "auto_multi_source_geometry_invalid",
+        }
+    if (
+        output.get("ok") is not True
+        or output.get("has_video") is not True
+        or not output_width
+        or not output_height
+    ):
+        return {
+            **evidence,
+            "ok": False,
+            "detail": "auto_multi_output_geometry_invalid",
+        }
+    if type(output.get("rotation")) is not int or output.get("rotation") != 0:
+        return {
+            **evidence,
+            "ok": False,
+            "detail": "auto_multi_output_rotation_metadata",
+        }
+    source_ratio = source_width / source_height
+    output_ratio = output_width / output_height
+    if abs(source_ratio - output_ratio) > 0.03:
+        return {
+            **evidence,
+            "ok": False,
+            "detail": "auto_multi_output_aspect_mismatch",
+        }
+    return {**evidence, "ok": True, "detail": "ok"}
+
+
+def probe_auto_multi_video_bytes(video_bytes: bytes) -> dict[str, object]:
+    """Probe one local Auto Multi artifact without importing the bot module."""
+
+    payload = bytes(video_bytes or b"")
+    ffprobe = shutil.which("ffprobe") or ""
+    if not payload or not ffprobe:
+        return {
+            "ok": False,
+            "detail": "auto_multi_ffprobe_unavailable",
+            "has_video": False,
+        }
+    try:
+        with tempfile.TemporaryDirectory(prefix="toanaas_auto_multi_probe_") as tmpdir:
+            path = Path(tmpdir) / "probe.mp4"
+            path.write_bytes(payload)
+            completed = subprocess.run(
+                [
+                    ffprobe,
+                    "-v",
+                    "error",
+                    "-print_format",
+                    "json",
+                    "-show_entries",
+                    (
+                        "format=format_name,duration,start_time,size:"
+                        "stream=index,codec_type,codec_name,profile,pix_fmt,"
+                        "width,height,avg_frame_rate,r_frame_rate,time_base,"
+                        "start_time,duration,sample_rate,channels,channel_layout:"
+                        "stream_tags=rotate:stream_side_data=rotation"
+                    ),
+                    str(path),
+                ],
+                check=False,
+                capture_output=True,
+                timeout=60,
+            )
+        if completed.returncode != 0:
+            return {
+                "ok": False,
+                "detail": "auto_multi_ffprobe_failed",
+                "has_video": False,
+            }
+        decoded = json.loads(completed.stdout.decode("utf-8", errors="strict"))
+        return subdub_media_preflight.parse_ffprobe_payload(
+            decoded,
+            size_bytes=len(payload),
+        )
+    except (OSError, subprocess.SubprocessError, UnicodeError, ValueError):
+        return {
+            "ok": False,
+            "detail": "auto_multi_ffprobe_failed",
+            "has_video": False,
+        }
+
+
+async def probe_auto_multi_video_bytes_off_event_loop(
+    video_bytes: bytes,
+) -> dict[str, object]:
+    return await asyncio.to_thread(
+        probe_auto_multi_video_bytes,
+        bytes(video_bytes or b""),
+    )
+
+
 def classify_multi_speaker_registers(
     pcm_path: str,
     ranges_by_speaker: dict[str, list[tuple[float, float]]],
@@ -1103,12 +1443,15 @@ def classify_multi_speaker_registers(
         or not 3 <= len(ranges_by_speaker) <= speaker_cast.MAX_AUTO_SPEAKER_LABELS
     ):
         raise speaker_cast.AutoCastManualRequired()
-    return subdub_multi_speaker_gender_onnx.classify_multi_speaker_genders(
-        pcm_path,
-        ranges_by_speaker,
-        deadline_monotonic=deadline_monotonic,
-        stop_requested=stop_requested,
-    )
+    try:
+        return subdub_multi_speaker_gender_onnx.classify_multi_speaker_genders(
+            pcm_path,
+            ranges_by_speaker,
+            deadline_monotonic=deadline_monotonic,
+            stop_requested=stop_requested,
+        )
+    except speaker_cast.AutoCastManualRequired:
+        raise speaker_cast.AutoCastManualRequired()
 
 
 async def _classify_multi_off_event_loop(
@@ -1181,21 +1524,23 @@ async def _run_multi_speaker_preflight(
         labels, ranges_by_speaker = auto_speaker._validated_classifier_inputs(
             prepared
         )
-        extracted = await auto_speaker._maybe_await(
-            extract_pcm(
-                prepared,
-                current,
-                channels=subdub_two_speaker_gender_onnx.PCM_CHANNELS,
-                sample_rate=subdub_two_speaker_gender_onnx.PCM_SAMPLE_RATE,
-                sample_format="s16le",
+        classifications = acoustic_register_classifications(prepared, labels)
+        if not classifications:
+            extracted = await auto_speaker._maybe_await(
+                extract_pcm(
+                    prepared,
+                    current,
+                    channels=subdub_two_speaker_gender_onnx.PCM_CHANNELS,
+                    sample_rate=subdub_two_speaker_gender_onnx.PCM_SAMPLE_RATE,
+                    sample_format="s16le",
+                )
             )
-        )
-        pcm_path = auto_speaker._validated_pcm_path(prepared, extracted)
-        classifications = await _classify_multi_off_event_loop(
-            pcm_path,
-            ranges_by_speaker,
-            classify_speakers,
-        )
+            pcm_path = auto_speaker._validated_pcm_path(prepared, extracted)
+            classifications = await _classify_multi_off_event_loop(
+                pcm_path,
+                ranges_by_speaker,
+                classify_speakers,
+            )
         result = {
             "ok": True,
             "status": auto_speaker.AUTO_SPEAKER_PREFLIGHT_READY,
@@ -1459,6 +1804,11 @@ async def run_auto_multi_speaker_blackbox(
             "lane_mode": str(current.get("mode") or current.get("lane_mode") or ""),
             "public_copy_key": "voice_auto_manual_required",
         }
+    if not callable(payload.get("probe_video")) and not shutil.which("ffprobe"):
+        return _multi_manual_required_result(
+            current,
+            speaker_cast.AutoCastUnavailable(),
+        )
 
     cached_pcm_path: Path | None = None
 
@@ -1493,6 +1843,8 @@ async def run_auto_multi_speaker_blackbox(
 
     lane_payload = dict(payload)
     lane_payload.pop("rediarize_underclustered", None)
+    source_video_probe = lane_payload.pop("source_video_probe", None)
+    probe_video = lane_payload.pop("probe_video", None)
     base_prepare = lane_payload.get("prepare_subtitles")
     acoustic_speaker_ids: set[str] = set()
 
@@ -1576,6 +1928,55 @@ async def run_auto_multi_speaker_blackbox(
         and isinstance(result_state, Mapping)
     ):
         proof_fields: dict[str, object] = {}
+        video_output = result.get("video_output")
+        if video_output:
+            async def geometry_probe(payload: bytes) -> object:
+                if callable(probe_video):
+                    return await auto_speaker._maybe_await(probe_video(payload))
+                return await probe_auto_multi_video_bytes_off_event_loop(payload)
+
+            try:
+                if not isinstance(source_video_probe, Mapping):
+                    source_video_probe = await geometry_probe(
+                        bytes(result.get("source_bytes") or b"")
+                    )
+                output_probe = await geometry_probe(bytes(video_output))
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                return _multi_manual_required_result(
+                    current,
+                    speaker_cast.AutoCastManualRequired(),
+                )
+            geometry = validate_auto_multi_output_geometry(
+                source_video_probe,
+                output_probe,
+            )
+            if geometry.get("ok") is not True:
+                return _multi_manual_required_result(
+                    current,
+                    speaker_cast.AutoCastManualRequired(),
+                )
+            proof_fields.update(
+                {
+                    "auto_multi_geometry_verified": True,
+                    "auto_multi_source_display_width": geometry[
+                        "source_display_width"
+                    ],
+                    "auto_multi_source_display_height": geometry[
+                        "source_display_height"
+                    ],
+                    "auto_multi_output_display_width": geometry[
+                        "output_display_width"
+                    ],
+                    "auto_multi_output_display_height": geometry[
+                        "output_display_height"
+                    ],
+                    "auto_multi_output_rotation": geometry[
+                        "output_rotation"
+                    ],
+                }
+            )
         if callable(base_synthesize):
             speaker_count = len(observed_casts)
             distinct_voice_count = len(set(observed_casts.values()))
@@ -1593,15 +1994,17 @@ async def run_auto_multi_speaker_blackbox(
                 ensure_ascii=False,
                 separators=(",", ":"),
             ).encode("utf-8")
-            proof_fields = {
-                "auto_detected_speaker_count": speaker_count,
-                "auto_distinct_voice_count": distinct_voice_count,
-                "auto_multi_voice_verified": True,
-                "auto_multi_attribution_verified": True,
-                "auto_multi_cast_sha256": hashlib.sha256(
-                    cast_payload
-                ).hexdigest(),
-            }
+            proof_fields.update(
+                {
+                    "auto_detected_speaker_count": speaker_count,
+                    "auto_distinct_voice_count": distinct_voice_count,
+                    "auto_multi_voice_verified": True,
+                    "auto_multi_attribution_verified": True,
+                    "auto_multi_cast_sha256": hashlib.sha256(
+                        cast_payload
+                    ).hexdigest(),
+                }
+            )
         exact_fields = {
             key: value
             for key, value in current.items()

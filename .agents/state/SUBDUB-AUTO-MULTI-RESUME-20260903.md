@@ -361,3 +361,64 @@ execution → verify exactly one MP4 then one receipt and zero financial delta.
 
 Current next action: compile/diff → amend/push follow-up commit → PR/deploy →
 one delivery-only invocation; never replay ASR/translation/TTS/mux.
+
+## Auto Multi v4 five-speaker/gender/aspect local continuation — 2026-09-07
+
+- Scope remains only Auto Multi for exact job `#B4CB6D5FE8`, fixture SHA
+  `83DE97B744B931E544B569E6E750F8415545F226461BD2E36CFB49225898AD3E`,
+  English, original `40%`, dub `150%`, `charged_xu=0`; no new job, upload,
+  Confirm, old recovery command or provider replay.
+- Local branch is `fix/p0-subdub-auto-multi-five-speaker-gender-aspect` at
+  base `aea17efc7d996d6efdc8ae04fdcfa6c03babc5c7`; current worktree is
+  intentionally dirty with the existing v4 WIP only. Exact-two protected
+  modules remain diff-empty.
+- v4 keeps raw fixed-vocal speaker count independent from ASR, partitions
+  speech-supported windows with bounded gender evidence, maps each word at
+  word granularity, persists one register per speaker and requires distinct
+  speaker/voice attribution before terminal proof. The final cue at
+  `126.005–126.505` is measured as `high`; the prior v3 four-speaker result is
+  not accepted as Multi PASS.
+- The remaining local RED was a synthetic generic `k=5..8` spectral
+  eigenspace degeneracy with repeated orthogonal vectors, not a fixture
+  authority failure. The minimal production correction keeps stable spectral
+  clustering as primary and falls back only when its labels are explicitly
+  under-supported to deterministic original-space K-means. Direct contract
+  execution now passes `k=3..8`, cluster size `3` each, correct high/low
+  allocation, and `base/shift` plus `base/aggregate` agreement `1.0`.
+- Fresh local evidence after that correction: full focused Auto Multi
+  `449 passed`; terminal/recovery persistence `7 passed`; exact-two protected
+  `51 passed`; renderer/volume/language/media regression `64 passed`; real
+  fixture resource gate `9 passed in 410.72s`;
+  changed-module/full-core `py_compile` exit `0`; `git diff --check` exit `0`;
+  model hash
+  `E98F8BC6D7960A8A2169368FE4533636903E712790E96DBFF81B679EDE5DE252`;
+  strong-PANN/weak-pitch keeps PANN, weak-PANN/robust-pitch selects pitch,
+  strong source conflict fails closed. The exact source probes as AV1/AAC,
+  `854x480`, rotation `0`, duration `133.37542s`; production FFmpeg renderer
+  created a local H.264/AAC yuv420p MP4, `16,927,256` bytes, same geometry and
+  duration, SHA `0a143785...59226`.
+- Geometry RED was `9 failed`; GREEN `9 passed`. Auto Multi now preflights
+  ffprobe before pipeline, probes off the event loop, rejects changed display
+  aspect or rotation metadata before delivery and persists source/output
+  geometry proof. Stubborn acoustic worker cleanup RED `1 failed`; GREEN
+  `3 passed`, deferring PCM unlink until a detached worker is terminal.
+- Production read-only truth changed after the earlier handoff: the v3 MP4 was
+  already delivered. The same row is `delivered/admin_free`, raw speaker `5`,
+  effective speaker/voice `4/4`, charged `0`, old video and receipt present.
+  Workspace remains, but `final.mp4` and the exact 9,869,032-byte source are
+  absent; only the 23,310,949-byte normalized source remains and Telegram has
+  only `file_unique_id`, not a downloadable `file_id`.
+- New runner `scripts/recover_subdub_auto_multi_v4.py` never calls legacy
+  delivery. Before execution the exact fixture must be restored to the same
+  workspace and hash-checked. Its one-shot CAS stores the old v3 video/receipt
+  IDs as superseded history, clears only active v3 acoustic/output/delivery
+  dedupe fields, creates a fresh correction nonce and runs the current full v4
+  pipeline on the same internal job. RED `3 failed`; focused source/candidate/
+  CAS/runner GREEN `4 passed`; the fresh terminal/recovery persistence gate is
+  `7 passed` and the full focused Auto Multi gate is `449 passed` after the
+  subsequent delivered-snapshot hardening.
+- Side effects remain `PROVIDER_CALLS=0` after the authorized Deepgram one-shot,
+  production `DB_MUTATIONS=0`, `JOB_MUTATIONS=0`, `WALLET_MUTATIONS=0`,
+  `DEPLOY=NO`, `LIVE_PASS=NO`. Next: final combined gates and review → commit/
+  PR/deploy → restore exact source → read-only candidate PASS → execute the v4
+  runner exactly once → validate corrected MP4/Telegram receipt/zero-Xu state.

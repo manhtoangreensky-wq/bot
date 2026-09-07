@@ -714,3 +714,12 @@ fixture chỉ là regression evidence, không phải điều kiện điều khi�
 | Delivery lỗi phải chạy lại ASR/TTS/mux | MP4 `18,171,909` bytes đã H.264/AAC PASS; chỉ cần CAS delivery-only và chống replay provider | ❌ Tốn phí và tạo rủi ro trùng |
 | Có MP4 trên đĩa đồng nghĩa đã LIVE PASS | Chưa có Telegram video message ID và receipt ID thì vẫn chưa PASS | ✅ Giữ fail-closed |
 | Root job luôn giữ đủ marker/selection sau terminal failure | Failure debug snapshot có thể chỉ giữ artifact/output fields và làm mất job-key/marker | ❌ Phải đối chiếu DB + manifest + cache + sidecar + SRT trước delivery-only |
+
+### Đối chiếu v4 sau cleanup — 07/09/2026
+
+| Ghi trong tài liệu/case cũ | Hiện tại đo được | Trạng thái |
+|---|---|---|
+| Fixture raw `k=5` nhưng effective `k=4` là acceptance | v4 resource gate yêu cầu raw/effective `5/5`, supported labels `[0,1,2,3,4]`, registers `[high,low,low,high,low]`, coverage `145/145` | ⚠️ Cũ là lịch sử v3, không dùng cho v4 |
+| Có MP4 v3 bốn voice thì có thể giao lại | Production row đã delivered v3 với video message `28112`, receipt `28113`, artifact `18,171,909` bytes; v4 runner lưu IDs dưới history và chặn legacy delivery | ❌ Không còn đúng |
+| Geometry chỉ cần renderer trả bytes | v4 preflight cần ffprobe trước pipeline; final probe phải giữ `854x480` display ratio, rotation `0`; portrait bị fail-closed | ❌ Không còn đúng |
+| Một execution recovery cũ đủ cho mọi correction | v4 dùng CAS marker riêng, cùng internal job, source SHA/bytes mới, nonce mới; không tạo job thứ hai và không replay command cũ | ❌ Không còn đúng |

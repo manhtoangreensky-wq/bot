@@ -1843,4 +1843,44 @@ delivery_lineage_followup_20260906:
     recovery_full: 149 passed
   current: local follow-up dirty; compile and diff pending; no Telegram delivery yet
 
-current_next_action: compile diff; follow-up commit PR deploy; one delivery-only invocation; final audit
+auto_multi_v4_five_speaker_gender_aspect_20260907:
+  scope: SubDub Auto Multi only; exact-two remains locked and diff-empty
+  job:
+    public_id: B4CB6D5FE8
+    internal_id: b4cb6d5fe8a7bdfce507
+    same_job_only: true
+    create_new_job: false
+    charged_xu_required: 0
+  fixture:
+    bytes: 9869032
+    sha256: 83DE97B744B931E544B569E6E750F8415545F226461BD2E36CFB49225898AD3E
+    language: English
+    original_volume_percent: 40
+    dubbing_volume_percent: 150
+  acceptance:
+    raw_effective_speakers: 5/5
+    distinct_voices: 5
+    registers: [high, low, low, high, low]
+    final_cue: 126.005-126.505 high
+    word_coverage: 145/145
+    output: MP4 H.264/AAC with source display aspect and rotation 0
+    delivery: one new Telegram video then one new receipt
+  local_verification:
+    terminal_recovery: 7 passed and 265 deselected in 7.27s
+    focused_auto_multi: 449 passed in 15.94s
+    exact_two_locked: 51 passed in 5.07s
+    exact_fixture_resource: 9 passed in 410.72s
+    full_compile: exit 0 with no output
+    diff_check: exit 0
+    protected_diff: exit 0
+    gender_model_bytes: 670311
+    gender_model_sha256: E98F8BC6D7960A8A2169368FE4533636903E712790E96DBFF81B679EDE5DE252
+  side_effects_before_live:
+    provider_calls: 0
+    production_db_mutations: 0
+    job_mutations: 0
+    wallet_mutations: 0
+  status: local_verified_pending_commit_pr_deploy_live
+  live_pass: false
+
+current_next_action: commit; fetch/rebase latest main; rerun focused compile diff; push one PR squash deploy exact runtime; restore exact fixture; run v4 recovery once; verify MP4 Telegram receipt five speakers geometry and zero Xu
