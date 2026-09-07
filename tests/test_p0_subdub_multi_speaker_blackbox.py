@@ -669,7 +669,7 @@ def _acoustic_multi_prepared(tmp_path: Path) -> dict:
         "multi_acoustic_model_sha256": (
             "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
         ),
-        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v4",
         "multi_acoustic_speaker_count": 3,
         "multi_acoustic_word_count": 30,
         "multi_acoustic_unit_count": 6,
@@ -706,7 +706,7 @@ def test_bounded_acoustic_evidence_accepts_multiple_subsegments_per_unit():
         "multi_acoustic_model_sha256": (
             "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
         ),
-        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v4",
         "multi_acoustic_speaker_count": 5,
         "multi_acoustic_word_count": 147,
         "multi_acoustic_unit_count": 18,
@@ -729,7 +729,7 @@ def test_bounded_acoustic_evidence_preserves_raw_and_speech_supported_counts():
         "multi_acoustic_model_sha256": (
             "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
         ),
-        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v4",
         "multi_acoustic_speaker_count": 4,
         "multi_acoustic_word_count": 145,
         "multi_acoustic_unit_count": 35,
@@ -782,7 +782,7 @@ def test_bounded_acoustic_evidence_rejects_inconsistent_mapping_counts(
         "multi_acoustic_model_sha256": (
             "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
         ),
-        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v4",
         "multi_acoustic_speaker_count": 5,
         "multi_acoustic_word_count": 147,
         "multi_acoustic_unit_count": 18,
@@ -1006,6 +1006,60 @@ def test_local_acoustic_helper_cancellation_drains_before_pcm_cleanup(tmp_path):
     assert not pcm_path.exists()
 
 
+def test_local_acoustic_helper_defers_cleanup_until_stubborn_worker_exits(
+    tmp_path,
+    monkeypatch,
+):
+    multi_module = _multi_module()
+    pcm_path = tmp_path / "stubborn-timeout.pcm"
+    pcm_path.write_bytes(b"\x01\x00" * 8_000)
+    worker_started = threading.Event()
+    release_worker = threading.Event()
+    worker_exited = threading.Event()
+    observed = {}
+
+    def diarize(_path, _words, **_kwargs):
+        worker_started.set()
+        release_worker.wait(timeout=5.0)
+        observed["pcm_exists_at_exit"] = pcm_path.exists()
+        worker_exited.set()
+        raise speaker_cast.AutoCastManualRequired()
+
+    async def detached(worker):
+        worker.add_done_callback(multi_module.auto_speaker._consume_detached_worker)
+        return False
+
+    monkeypatch.setattr(
+        multi_module,
+        "acoustic_timeout_seconds_for_duration",
+        lambda _duration: 0.02,
+    )
+    monkeypatch.setattr(
+        multi_module.auto_speaker,
+        "_drain_worker_bounded",
+        detached,
+    )
+
+    async def scenario():
+        with pytest.raises(speaker_cast.AutoCastManualRequired):
+            await multi_module.run_local_acoustic_diarization_off_event_loop(
+                pcm_path,
+                [{"index": 0, "word": "hello", "start": 0.0, "end": 0.2}],
+                duration_seconds=1.0,
+                acoustic_diarize=diarize,
+            )
+        assert worker_started.is_set()
+        assert pcm_path.exists()
+        release_worker.set()
+        while not worker_exited.is_set() or pcm_path.exists():
+            await asyncio.sleep(0.001)
+
+    asyncio.run(scenario())
+
+    assert observed["pcm_exists_at_exit"] is True
+    assert not pcm_path.exists()
+
+
 def test_multi_classifier_preserves_three_provider_labels_without_invention(
     monkeypatch,
 ):
@@ -1084,6 +1138,132 @@ def test_multi_classifier_preserves_three_provider_labels_without_invention(
             deadline_monotonic=10**12,
             stop_requested=lambda: False,
         )
+
+
+def test_bounded_evidence_keeps_unit_counters_separate_from_word_counters():
+    multi_module = _multi_module()
+    evidence = {
+        "multi_acoustic_backend": (
+            multi_module.subdub_multi_speaker_embedding_onnx.FIXED_VOCAL_PROVIDER
+        ),
+        "multi_acoustic_model_sha256": (
+            multi_module.subdub_multi_speaker_embedding_onnx.MODEL_SHA256
+        ),
+        "multi_acoustic_algorithm_version": (
+            multi_module.subdub_multi_speaker_embedding_onnx.FIXED_VOCAL_ALGORITHM_VERSION
+        ),
+        "multi_acoustic_speaker_count": 5,
+        "multi_acoustic_word_count": 145,
+        "multi_acoustic_unit_count": 37,
+        "multi_acoustic_embedding_window_count": 178,
+        "multi_acoustic_cluster_sizes": [9, 18, 26, 25, 11],
+        "multi_acoustic_stability_pass": True,
+        "multi_acoustic_word_coverage_count": 145,
+        "multi_acoustic_overlap_mapped_count": 31,
+        "multi_acoustic_centroid_mapped_count": 6,
+        "multi_acoustic_word_overlap_mapped_count": 112,
+        "multi_acoustic_word_centroid_mapped_count": 33,
+        "multi_acoustic_speaker_unit_counts": [9, 7, 6, 6, 9],
+        "multi_acoustic_raw_speaker_count": 5,
+        "multi_acoustic_raw_embedding_window_count": 178,
+        "multi_acoustic_raw_cluster_sizes": [9, 18, 26, 25, 11],
+        "multi_acoustic_raw_speaker_unit_counts": [9, 7, 6, 6, 9],
+        "multi_acoustic_raw_overlap_speaker_unit_counts": [3, 6, 5, 5, 6],
+        "multi_acoustic_speech_supported_speaker_labels": [0, 1, 2, 3, 4],
+        "multi_acoustic_dropped_non_speech_speaker_labels": [],
+        "multi_acoustic_dropped_non_speech_speaker_count": 0,
+    }
+
+    bounded = multi_module.bounded_multi_acoustic_evidence(evidence)
+
+    assert bounded["multi_acoustic_overlap_mapped_count"] == 31
+    assert bounded["multi_acoustic_centroid_mapped_count"] == 6
+    assert bounded["multi_acoustic_word_overlap_mapped_count"] == 112
+    assert bounded["multi_acoustic_word_centroid_mapped_count"] == 33
+
+
+def test_multi_preflight_reuses_acoustic_registers_without_second_pcm_pass(
+    monkeypatch,
+):
+    multi_module = _multi_module()
+    labels = [f"chunk_00:speaker_{index}" for index in range(3)]
+    evidence = {
+        "multi_acoustic_backend": (
+            multi_module.subdub_multi_speaker_embedding_onnx.FIXED_VOCAL_PROVIDER
+        ),
+        "multi_acoustic_model_sha256": (
+            multi_module.subdub_multi_speaker_embedding_onnx.MODEL_SHA256
+        ),
+        "multi_acoustic_algorithm_version": (
+            multi_module.subdub_multi_speaker_embedding_onnx.FIXED_VOCAL_ALGORITHM_VERSION
+        ),
+        "multi_acoustic_speaker_count": 3,
+        "multi_acoustic_word_count": 6,
+        "multi_acoustic_unit_count": 6,
+        "multi_acoustic_embedding_window_count": 12,
+        "multi_acoustic_cluster_sizes": [2, 2, 2],
+        "multi_acoustic_stability_pass": True,
+        "multi_acoustic_word_coverage_count": 6,
+        "multi_acoustic_overlap_mapped_count": 6,
+        "multi_acoustic_centroid_mapped_count": 0,
+        "multi_acoustic_speaker_unit_counts": [2, 2, 2],
+    }
+    prepared = {
+        "state": evidence,
+        "source_segments": [
+            {
+                "speaker_id": label,
+                "voice_register": "high" if index == 0 else "low",
+            }
+            for index, label in enumerate(labels)
+        ],
+    }
+    monkeypatch.setattr(
+        multi_module.auto_speaker,
+        "_validated_classifier_inputs",
+        lambda _prepared: (
+            labels,
+            {label: [(index * 2.0, index * 2.0 + 1.0)] for index, label in enumerate(labels)},
+        ),
+    )
+
+    result = asyncio.run(
+        multi_module._run_multi_speaker_preflight(
+            {**EXACT_AUTO_STATE, "auto_speaker_lane": "multi"},
+            prepare_subtitles=lambda *_args, **_kwargs: prepared,
+            post_prepare_gate=lambda *_args, **_kwargs: {"continue": True},
+            extract_pcm=lambda *_args, **_kwargs: pytest.fail(
+                "acoustic register evidence must skip the second PCM pass"
+            ),
+            classify_speakers=lambda *_args, **_kwargs: pytest.fail(
+                "acoustic register evidence must skip the legacy classifier"
+            ),
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["speaker_labels"] == labels
+    assert [
+        result["classifications"][label]["voice_register"] for label in labels
+    ] == ["high", "low", "low"]
+
+
+def test_multi_preflight_fails_closed_on_partial_register_evidence():
+    multi_module = _multi_module()
+    labels = [f"chunk_00:speaker_{index}" for index in range(3)]
+    prepared = {
+        "state": {
+            "multi_acoustic_speaker_count": 3,
+            "multi_acoustic_speaker_registers": ["high", "low"],
+        },
+        "source_segments": [
+            {"speaker_id": label, "voice_register": "low"}
+            for label in labels
+        ],
+    }
+
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        multi_module.acoustic_register_classifications(prepared, labels)
 
 
 def test_multi_gender_classifier_rejects_single_cue_labels_before_inference(
@@ -1204,7 +1384,7 @@ def test_multi_adapter_persists_three_distinct_voices_used_by_tts(monkeypatch):
                 "multi_acoustic_model_sha256": (
                     multi_module.subdub_multi_speaker_embedding_onnx.MODEL_SHA256
                 ),
-                "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
+                "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v4",
                 "multi_acoustic_word_count": 30,
                 "multi_acoustic_unit_count": 12,
                 "multi_acoustic_embedding_window_count": 24,
@@ -1301,7 +1481,7 @@ def test_multi_adapter_requires_every_acoustic_speaker_to_reach_tts(monkeypatch)
                 "multi_acoustic_model_sha256": (
                     multi_module.subdub_multi_speaker_embedding_onnx.MODEL_SHA256
                 ),
-                "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
+                "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v4",
                 "multi_acoustic_word_count": 50,
                 "multi_acoustic_unit_count": 23,
                 "multi_acoustic_embedding_window_count": 178,
@@ -1405,17 +1585,27 @@ def test_multi_completion_receipt_names_fixture_lane_casts_and_component_prices(
         "multi_acoustic_model_sha256": (
             "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
         ),
-        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
-        "multi_acoustic_speaker_count": 4,
-        "multi_acoustic_word_count": 40,
-        "multi_acoustic_unit_count": 8,
-        "multi_acoustic_embedding_window_count": 16,
-        "multi_acoustic_cluster_sizes": [2, 2, 2, 2],
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v4",
+        "multi_acoustic_speaker_count": 5,
+        "multi_acoustic_word_count": 50,
+        "multi_acoustic_unit_count": 10,
+        "multi_acoustic_embedding_window_count": 20,
+        "multi_acoustic_cluster_sizes": [2, 2, 2, 2, 2],
         "multi_acoustic_stability_pass": True,
-        "multi_acoustic_word_coverage_count": 40,
-        "multi_acoustic_overlap_mapped_count": 6,
+        "multi_acoustic_word_coverage_count": 50,
+        "multi_acoustic_overlap_mapped_count": 8,
         "multi_acoustic_centroid_mapped_count": 2,
-        "multi_acoustic_speaker_unit_counts": [2, 2, 2, 2],
+        "multi_acoustic_speaker_unit_counts": [2, 2, 2, 2, 2],
+        "multi_acoustic_speaker_registers": ["high", "low", "low", "high", "low"],
+        "multi_acoustic_speaker_register_confidences": [0.99, 0.98, 0.97, 0.96, 0.95],
+        "multi_acoustic_female_speaker_count": 2,
+        "multi_acoustic_male_speaker_count": 3,
+        "multi_acoustic_gender_model_sha256": (
+            bot.auto_multi_speaker.subdub_multi_speaker_gender_onnx.MULTI_GENDER_MODEL_SHA256
+        ),
+        "multi_acoustic_gender_ambiguous_window_count": 0,
+        "multi_acoustic_speaker_count_authority_asr_independent": True,
+        "multi_acoustic_word_attribution_uses_asr_timeline": True,
     }
     state = {
         **acoustic,
@@ -1427,10 +1617,16 @@ def test_multi_completion_receipt_names_fixture_lane_casts_and_component_prices(
         "voice_selection_mode": "auto_speaker",
         "auto_speaker_lane": "multi",
         "source_file_name": "test nhiều giọng.mp4",
-        "auto_detected_speaker_count": 4,
-        "auto_distinct_voice_count": 4,
+        "auto_detected_speaker_count": 5,
+        "auto_distinct_voice_count": 5,
         "auto_multi_voice_verified": True,
         "auto_multi_attribution_verified": True,
+        "auto_multi_geometry_verified": True,
+        "auto_multi_source_display_width": 854,
+        "auto_multi_source_display_height": 480,
+        "auto_multi_output_display_width": 1280,
+        "auto_multi_output_display_height": 720,
+        "auto_multi_output_rotation": 0,
         "auto_multi_cast_sha256": "c" * 64,
         "auto_exact_actual_auto_xu": 205,
         "auto_exact_actual_subtitle_xu": 161,
@@ -1454,8 +1650,8 @@ def test_multi_completion_receipt_names_fixture_lane_casts_and_component_prices(
 
     assert "Tệp nguồn: <b>test nhiều giọng.mp4</b>" in text
     assert "Loại lồng tiếng: <b>Tự động nhiều giọng</b>" in text
-    assert "Số người nói nhận diện: <b>4</b>" in text
-    assert "Số giọng lồng tiếng đã dùng: <b>4</b>" in text
+    assert "Số người nói nhận diện: <b>5</b>" in text
+    assert "Số giọng lồng tiếng đã dùng: <b>5</b>" in text
     assert "Giá phụ đề: <b>161 Xu</b>" in text
     assert "Giá lồng tiếng: <b>205 Xu</b>" in text
     assert "Giá: <b>366 Xu</b>" in text
@@ -1467,27 +1663,43 @@ def test_multi_terminal_job_persists_proof_without_touching_default_auto_lane():
         "multi_acoustic_model_sha256": (
             "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
         ),
-        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
-        "multi_acoustic_speaker_count": 4,
-        "multi_acoustic_word_count": 40,
-        "multi_acoustic_unit_count": 8,
-        "multi_acoustic_embedding_window_count": 16,
-        "multi_acoustic_cluster_sizes": [2, 2, 2, 2],
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v4",
+        "multi_acoustic_speaker_count": 5,
+        "multi_acoustic_word_count": 50,
+        "multi_acoustic_unit_count": 10,
+        "multi_acoustic_embedding_window_count": 20,
+        "multi_acoustic_cluster_sizes": [2, 2, 2, 2, 2],
         "multi_acoustic_stability_pass": True,
-        "multi_acoustic_word_coverage_count": 40,
-        "multi_acoustic_overlap_mapped_count": 6,
+        "multi_acoustic_word_coverage_count": 50,
+        "multi_acoustic_overlap_mapped_count": 8,
         "multi_acoustic_centroid_mapped_count": 2,
-        "multi_acoustic_speaker_unit_counts": [2, 2, 2, 2],
+        "multi_acoustic_speaker_unit_counts": [2, 2, 2, 2, 2],
+        "multi_acoustic_speaker_registers": ["high", "low", "low", "high", "low"],
+        "multi_acoustic_speaker_register_confidences": [0.99, 0.98, 0.97, 0.96, 0.95],
+        "multi_acoustic_female_speaker_count": 2,
+        "multi_acoustic_male_speaker_count": 3,
+        "multi_acoustic_gender_model_sha256": (
+            bot.auto_multi_speaker.subdub_multi_speaker_gender_onnx.MULTI_GENDER_MODEL_SHA256
+        ),
+        "multi_acoustic_gender_ambiguous_window_count": 0,
+        "multi_acoustic_speaker_count_authority_asr_independent": True,
+        "multi_acoustic_word_attribution_uses_asr_timeline": True,
     }
     state = {
         **EXACT_AUTO_STATE,
         **acoustic,
         "auto_speaker_lane": "multi",
         "source_file_name": "test nhiều giọng.mp4",
-        "auto_detected_speaker_count": 4,
-        "auto_distinct_voice_count": 4,
+        "auto_detected_speaker_count": 5,
+        "auto_distinct_voice_count": 5,
         "auto_multi_voice_verified": True,
         "auto_multi_attribution_verified": True,
+        "auto_multi_geometry_verified": True,
+        "auto_multi_source_display_width": 854,
+        "auto_multi_source_display_height": 480,
+        "auto_multi_output_display_width": 1280,
+        "auto_multi_output_display_height": 720,
+        "auto_multi_output_rotation": 0,
         "auto_multi_cast_sha256": "c" * 64,
         "auto_exact_actual_auto_xu": 205,
         "auto_exact_actual_subtitle_xu": 161,
@@ -1497,10 +1709,16 @@ def test_multi_terminal_job_persists_proof_without_touching_default_auto_lane():
         **acoustic,
         "auto_speaker_lane": "multi",
         "source_file_name": "test nhiều giọng.mp4",
-        "auto_detected_speaker_count": 4,
-        "auto_distinct_voice_count": 4,
+        "auto_detected_speaker_count": 5,
+        "auto_distinct_voice_count": 5,
         "auto_multi_voice_verified": True,
         "auto_multi_attribution_verified": True,
+        "auto_multi_geometry_verified": True,
+        "auto_multi_source_display_width": 854,
+        "auto_multi_source_display_height": 480,
+        "auto_multi_output_display_width": 1280,
+        "auto_multi_output_display_height": 720,
+        "auto_multi_output_rotation": 0,
         "auto_multi_cast_sha256": "c" * 64,
         "auto_exact_actual_auto_xu": 205,
         "auto_exact_actual_subtitle_xu": 161,
@@ -1515,11 +1733,25 @@ def test_multi_terminal_job_persists_proof_without_touching_default_auto_lane():
     assert bot.subdub_auto_multi_terminal_proof_fields(
         {key: value for key, value in state.items() if key != "auto_multi_attribution_verified"}
     ) == {}
+    assert bot.subdub_auto_multi_terminal_proof_fields(
+        {**state, "auto_multi_geometry_verified": False}
+    ) == {}
+    assert bot.subdub_auto_multi_terminal_proof_fields(
+        {
+            key: value
+            for key, value in state.items()
+            if key != "multi_acoustic_speaker_registers"
+        }
+    ) == {}
     pipeline_source = inspect.getsource(
         bot._execute_video_dubbing_pipeline_core
     )
     assert pipeline_source.count(
         "**subdub_auto_multi_terminal_proof_fields(state)"
+    ) == 1
+    durable_source = inspect.getsource(bot.execute_video_dubbing_pipeline)
+    assert durable_source.count(
+        "**subdub_auto_multi_terminal_proof_fields(result_state)"
     ) == 1
 
 
@@ -1738,7 +1970,7 @@ def test_provider_stub_full_chain_keeps_speech_speakers_through_mux(
         subtitle_sha256=subtitle_sha256,
     )
     sidecar["acoustic"] = {
-        "algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
+        "algorithm_version": "wespeaker-resnet34-fixed-vocal-v4",
         "backend": "local_wespeaker_resnet34_fixed_vocal",
         "cluster_sizes": [2] * speaker_count,
         "embedding_window_count": speaker_count * 4,
@@ -1783,7 +2015,7 @@ def test_provider_stub_full_chain_keeps_speech_speakers_through_mux(
         "multi_acoustic_model_sha256": (
             "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
         ),
-        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v4",
         "multi_acoustic_speaker_count": speaker_count,
         "multi_acoustic_word_count": speaker_count * 10,
         "multi_acoustic_unit_count": speaker_count * 2,
@@ -1915,6 +2147,20 @@ def test_provider_stub_full_chain_keeps_speech_speakers_through_mux(
                 "duration": float(speaker_count * 2),
             },
             render_video=render_video,
+            source_video_probe={
+                "ok": True,
+                "has_video": True,
+                "display_width": 854,
+                "display_height": 480,
+                "rotation": 0,
+            },
+            probe_video=lambda _payload: {
+                "ok": True,
+                "has_video": True,
+                "display_width": 1280,
+                "display_height": 720,
+                "rotation": 0,
+            },
             video_render_ready=lambda _output_type: True,
             ffmpeg_ready=lambda: True,
             dub_mux_enabled=True,
@@ -1933,6 +2179,12 @@ def test_provider_stub_full_chain_keeps_speech_speakers_through_mux(
     assert result["state"]["auto_distinct_voice_count"] == speaker_count
     assert result["state"]["auto_multi_voice_verified"] is True
     assert result["state"]["auto_multi_attribution_verified"] is True
+    assert result["state"]["auto_multi_geometry_verified"] is True
+    assert result["state"]["auto_multi_source_display_width"] == 854
+    assert result["state"]["auto_multi_source_display_height"] == 480
+    assert result["state"]["auto_multi_output_display_width"] == 1280
+    assert result["state"]["auto_multi_output_display_height"] == 720
+    assert result["state"]["auto_multi_output_rotation"] == 0
     assert {
         key: result["state"].get(key)
         for key in pipeline_context
@@ -1960,6 +2212,157 @@ def test_provider_stub_full_chain_keeps_speech_speakers_through_mux(
     assert render_calls[0][1]["subtitle_bytes"].decode("utf-8") == (
         output_subtitle.strip()
     )
+
+
+@pytest.mark.parametrize(
+    ("output_probe", "expected_ok", "expected_detail"),
+    (
+        (
+            {
+                "ok": True,
+                "has_video": True,
+                "display_width": 1280,
+                "display_height": 720,
+                "rotation": 0,
+            },
+            True,
+            "ok",
+        ),
+        (
+            {
+                "ok": True,
+                "has_video": True,
+                "display_width": 720,
+                "display_height": 1280,
+                "rotation": 0,
+            },
+            False,
+            "auto_multi_output_aspect_mismatch",
+        ),
+        (
+            {
+                "ok": True,
+                "has_video": True,
+                "display_width": 1280,
+                "display_height": 720,
+                "rotation": 90,
+            },
+            False,
+            "auto_multi_output_rotation_metadata",
+        ),
+    ),
+)
+def test_multi_output_geometry_preserves_display_aspect_without_rotation(
+    output_probe,
+    expected_ok,
+    expected_detail,
+):
+    multi_module = _multi_module()
+
+    result = multi_module.validate_auto_multi_output_geometry(
+        {
+            "ok": True,
+            "has_video": True,
+            "display_width": 854,
+            "display_height": 480,
+            "rotation": 0,
+        },
+        output_probe,
+    )
+
+    assert result["ok"] is expected_ok
+    assert result["detail"] == expected_detail
+
+
+def test_multi_default_geometry_probe_runs_off_event_loop(monkeypatch):
+    multi_module = _multi_module()
+    event_loop_thread = threading.get_ident()
+    monkeypatch.setattr(
+        multi_module,
+        "probe_auto_multi_video_bytes",
+        lambda _payload: {"worker_thread": threading.get_ident()},
+    )
+
+    result = asyncio.run(
+        multi_module.probe_auto_multi_video_bytes_off_event_loop(b"video")
+    )
+
+    assert result["worker_thread"] != event_loop_thread
+
+
+def test_multi_default_geometry_probe_requires_ffprobe_before_pipeline(
+    monkeypatch,
+):
+    multi_module = _multi_module()
+    monkeypatch.setattr(multi_module.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(
+        multi_module,
+        "_run_isolated_multi_speaker_blackbox",
+        lambda **_kwargs: pytest.fail(
+            "missing ffprobe must stop before Auto Multi pipeline"
+        ),
+    )
+
+    result = asyncio.run(
+        multi_module.run_auto_multi_speaker_blackbox(
+            extract_pcm=lambda *_args, **_kwargs: "unused.pcm",
+            state={**EXACT_AUTO_STATE, "auto_speaker_lane": "multi"},
+        )
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+
+
+def test_multi_full_blackbox_rejects_wrong_output_aspect_before_delivery(
+    monkeypatch,
+):
+    multi_module = _multi_module()
+
+    async def rendered(**_kwargs):
+        return {
+            "ok": True,
+            "status": "OK",
+            "state": {**EXACT_AUTO_STATE, "auto_speaker_lane": "multi"},
+            "source_bytes": b"source-video",
+            "video_output": b"portrait-output",
+        }
+
+    monkeypatch.setattr(
+        multi_module,
+        "_run_isolated_multi_speaker_blackbox",
+        rendered,
+    )
+    probes = iter(
+        (
+            {
+                "ok": True,
+                "has_video": True,
+                "display_width": 854,
+                "display_height": 480,
+                "rotation": 0,
+            },
+            {
+                "ok": True,
+                "has_video": True,
+                "display_width": 720,
+                "display_height": 1280,
+                "rotation": 0,
+            },
+        )
+    )
+
+    result = asyncio.run(
+        multi_module.run_auto_multi_speaker_blackbox(
+            extract_pcm=lambda *_args, **_kwargs: "unused.pcm",
+            probe_video=lambda _payload: next(probes),
+            state={**EXACT_AUTO_STATE, "auto_speaker_lane": "multi"},
+        )
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+    assert result["public_copy_key"] == "voice_auto_manual_required"
 
 
 @pytest.mark.parametrize("target_language", ("vi", "ja", "en", "ko", "zh"))

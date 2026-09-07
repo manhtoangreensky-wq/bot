@@ -23,7 +23,7 @@ ACOUSTIC_PUBLIC_CODE = "B4CB6D5FE8"
 ACOUSTIC_MODEL_SHA256 = (
     "9fea6516d7ad6bf0a76c7689f5a49b65d330fad6dde96c91bb4435ffbfe056a1"
 )
-ACOUSTIC_ALGORITHM_VERSION = "wespeaker-resnet34-fixed-vocal-v3"
+ACOUSTIC_ALGORITHM_VERSION = "wespeaker-resnet34-fixed-vocal-v4"
 DOWNLOADABLE_FILE_ID = (
     "BAACAgQAAxkBAAIBQWf-subdub-auto-multi-downloadable-file-id"
 )
@@ -4064,3 +4064,583 @@ def test_failed_auto_multi_recovery_real_progress_edit_failure_sends_no_new_pane
     assert len(edit_attempts) == 3
     assert persisted_panel_ids == ["902", "902", "902"]
     assert "SubDub recovery chưa tạo được MP4" in edit_attempts[-1]
+
+
+def _v4_recovery_module():
+    return importlib.import_module("scripts.recover_subdub_auto_multi_v4")
+
+
+def _v3_delivery_state_for_v4_recovery():
+    return {
+        "feature": "subtitle_dub",
+        "internal_job_id": ACOUSTIC_JOB_ID,
+        "job_id": ACOUSTIC_JOB_ID,
+        "public_code": ACOUSTIC_PUBLIC_CODE,
+        "job_key": (
+            f"{OWNER_ID}|{OWNER_ID}|AgADeSIAAh1tkVQ|"
+            "subtitle_plus_dub|auto_multi_speaker"
+        ),
+        "user_id": OWNER_ID,
+        "chat_id": OWNER_ID,
+        "status": "delivered",
+        "terminal_state": "delivered",
+        "lifecycle_state": "delivery",
+        "current_stage": "delivery",
+        "progress_stage": "delivery",
+        "progress_percent": 95,
+        "charge_status": "admin_free",
+        "charged_xu": 0,
+        "output_sent": True,
+        "delivery_attempted": True,
+        "delivery_attempts": 1,
+        "delivery_attempt_uncertain": False,
+        "final_mp4_delivered": True,
+        "terminal_public_outcome_sent": True,
+        "public_error_sent": False,
+        "public_failure_sent": True,
+        "public_error_sent_count": 2,
+        "public_failure_sent_count": 1,
+        "video_delivery_message_id": "old-video-1",
+        "receipt_message_id": "old-receipt-1",
+        "subdub_success_message_id": "old-receipt-1",
+        "subdub_delivery_started_at": 1_777_777_777.0,
+        "subdub_delivered_at": "2026-09-06 12:00:00",
+        "delivered_at": "2026-09-06 12:00:00",
+        "receipt_sent_once": True,
+        "receipt_send_state": "sent",
+        "receipt_send_attempted": True,
+        "terminal_public_outcome_type": "success",
+        "delivery_success": True,
+        "delivery_succeeded": True,
+        "public_success_sent": True,
+        "delivery_started": True,
+        "delivery_status": "not_started",
+        "delivery_method": "failed",
+        "delivery_recovery_started": True,
+        "delivery_recovery_succeeded": True,
+        "duplicate_delivery_prevented": False,
+        "duplicate_success_prevented": False,
+        "output_validated_before_success": True,
+        "video_delivery_file_id": "old-file-id",
+        "video_delivery_filename": "old-v3.mp4",
+        "video_delivery_mime_type": "video/mp4",
+        "video_delivery_sha256": "0" * 64,
+        "video_delivery_size_bytes": 18_171_909,
+        "video_delivery_duration_seconds": 134.0,
+        "panel_final_message_id": "old-panel-final",
+        "panel_final_percent": 100,
+        "panel_finalized": True,
+        "status_panel_message_id": "old-panel-1",
+        "status_panel_chat_id": str(OWNER_ID),
+        "status_panel_terminal_edit_confirmed": True,
+        "status_panel_terminalized": True,
+        "refresh_stopped_after_terminal": True,
+        "auto_exact_receipt": {
+            "claim_state": "admin_free",
+            "settled_at": "2026-09-06 12:00:00",
+        },
+        "canonical_final_artifact_path": "old-v3-final.mp4",
+        "canonical_final_artifact_bytes": 18_171_909,
+        "final_mp4_exists": True,
+        "final_mp4_validated": True,
+        "output_validated": True,
+        "output_validation": {
+            "ok": True,
+            "container": "mp4",
+            "video_codec": "h264",
+            "audio_codec": "aac",
+            "has_video": True,
+            "has_audio": True,
+            "size": 18_171_909,
+            "duration": 134.0,
+        },
+        "last_error_stage": "",
+        "last_technical_error": "",
+        "success_blocked_reason": "",
+        "multi_acoustic_algorithm_version": "wespeaker-resnet34-fixed-vocal-v3",
+        "multi_acoustic_raw_speaker_count": 5,
+        "multi_acoustic_speaker_count": 4,
+        "auto_detected_speaker_count": 4,
+        "auto_distinct_voice_count": 4,
+        "auto_multi_voice_verified": None,
+        "auto_multi_attribution_verified": None,
+        "target_language": "English",
+        "original_audio_volume_percent": 40,
+        "dubbed_voice_volume_percent": 150,
+        "voice_kind": "auto_speaker_gender",
+        "voice_selection_mode": "auto_speaker",
+        "auto_speaker_lane": "multi",
+        "auto_exact_session_nonce": None,
+        "input_save": {
+            "file_unique_id": "AgADeSIAAh1tkVQ",
+            "original_source_sha256": SOURCE_SHA256,
+            "transport_input_size": 9_869_032,
+            "input_size_bytes": 9_869_032,
+            "content_type": "video/mp4",
+            "duration": 134,
+            "source_duration_exact": 133.37542,
+        },
+    }
+
+
+def test_v4_recovery_accepts_only_exact_delivered_four_speaker_job(
+    monkeypatch,
+):
+    v4 = _v4_recovery_module()
+    current = _v3_delivery_state_for_v4_recovery()
+    monkeypatch.setattr(
+        v4,
+        "validated_v4_source_path",
+        lambda _current: "auto_multi_v4_original_source.mp4",
+    )
+
+    assert v4.v4_recovery_candidate(current) is True
+    for mutation in (
+        {"internal_job_id": "other"},
+        {"charged_xu": 1},
+        {"output_sent": False},
+        {"status": "failed_no_charge"},
+        {"auto_detected_speaker_count": 5},
+        {v4.V4_REPAIR_MARKER: True},
+    ):
+        assert v4.v4_recovery_candidate({**current, **mutation}) is False
+
+
+def test_v4_recovery_source_requires_exact_workspace_size_and_sha(
+    tmp_path,
+    monkeypatch,
+):
+    v4 = _v4_recovery_module()
+    payload = b"byte-identical-v4-source"
+    source = tmp_path / v4.SOURCE_BASENAME
+    source.write_bytes(payload)
+    monkeypatch.setattr(v4, "SOURCE_BYTES", len(payload))
+    monkeypatch.setattr(v4, "SOURCE_SHA256", hashlib.sha256(payload).hexdigest())
+    monkeypatch.setattr(
+        v4.app,
+        "subtitle_dub_workspace_path_safety",
+        lambda _workspace: {
+            "allowed": True,
+            "resolved_path": str(tmp_path),
+        },
+    )
+
+    assert v4.validated_v4_source_path({"workspace": str(tmp_path)}) == str(
+        source.resolve()
+    )
+    source.write_bytes(payload + b"wrong")
+    assert v4.validated_v4_source_path({"workspace": str(tmp_path)}) == ""
+
+
+def test_v4_recovery_preflight_requires_both_models_cpu_and_ffprobe(
+    monkeypatch,
+):
+    v4 = _v4_recovery_module()
+    acoustic = fixed_vocal_v2_preflight()
+    gender = {
+        "ok": True,
+        "model_sha256": (
+            v4.app.auto_multi_speaker.subdub_multi_speaker_gender_onnx
+            .MULTI_GENDER_MODEL_SHA256
+        ),
+        "model_bytes": 670_311,
+        "providers": ["CPUExecutionProvider"],
+    }
+    monkeypatch.setattr(v4.shutil, "which", lambda name: f"/{name}")
+
+    assert v4.v4_preflight_result(
+        acoustic_preflight=lambda: acoustic,
+        gender_preflight=lambda: gender,
+    )["ok"] is True
+    assert v4.v4_preflight_result(
+        acoustic_preflight=lambda: acoustic,
+        gender_preflight=lambda: {**gender, "model_sha256": "0" * 64},
+    ) == {}
+    monkeypatch.setattr(v4.shutil, "which", lambda _name: None)
+    assert v4.v4_preflight_result(
+        acoustic_preflight=lambda: acoustic,
+        gender_preflight=lambda: gender,
+    ) == {}
+
+
+def test_v4_recovery_claim_clears_old_output_and_is_one_shot(
+    tmp_path,
+    monkeypatch,
+):
+    v4 = _v4_recovery_module()
+    current = _v3_delivery_state_for_v4_recovery()
+    source = tmp_path / v4.SOURCE_BASENAME
+    source.write_bytes(b"exact-source-fixture")
+    current["workspace"] = str(tmp_path)
+    db_path = tmp_path / "v4-recovery.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE system_settings (key TEXT PRIMARY KEY, value TEXT, note TEXT, updated_at TEXT, updated_by TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO system_settings(key,value,note,updated_at,updated_by) VALUES(?,?,?,?,?)",
+        (
+            f"engine_async_job:{ACOUSTIC_JOB_ID}",
+            json.dumps(current, ensure_ascii=False),
+            "fixture",
+            "2026-09-07 01:00:00",
+            str(OWNER_ID),
+        ),
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(v4.app, "db_connect", lambda: sqlite3.connect(db_path))
+    monkeypatch.setattr(v4.app, "ENGINE_ASYNC_MEMORY_JOBS", {})
+    monkeypatch.setattr(v4.app, "SUBTITLE_DUB_PIPELINE_JOBS", {})
+    monkeypatch.setattr(
+        v4.app,
+        "subtitle_dub_workspace_path_safety",
+        lambda _workspace: {
+            "allowed": True,
+            "resolved_path": str(tmp_path),
+        },
+    )
+    monkeypatch.setattr(
+        v4.app,
+        "_subdub_sha256_file",
+        lambda _path: SOURCE_SHA256,
+    )
+    monkeypatch.setattr(v4, "v4_recovery_candidate", lambda _current: True)
+    monkeypatch.setattr(
+        v4,
+        "new_session_nonce",
+        lambda: "v4-new-session-nonce",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        v4,
+        "validated_v4_source_path",
+        lambda _current: str(source),
+    )
+
+    first = v4.claim_v4_same_job(
+        acoustic_preflight=fixed_vocal_v2_preflight
+    )
+
+    assert first["claimed"] is True
+    job = first["job"]
+    assert job["internal_job_id"] == ACOUSTIC_JOB_ID
+    assert "auto_multi_recovery_attempt_count" not in job
+    assert "auto_multi_recovery_correction_attempt_count" not in job
+    assert job[v4.V4_REPAIR_MARKER] is True
+    assert job["auto_multi_v4_recovery_authority"] == (
+        "owner_confirmed_same_job_five_speaker_gender_aspect"
+    )
+    assert job["status"] == bot.SUBDUB_FAILED_AUTO_MULTI_RECOVERY_STATUS
+    assert job["asr_started"] is False
+    assert job["translation_started"] is False
+    assert job["tts_started"] is False
+    assert job["mux_started"] is False
+    assert job["artifact_started"] is False
+    assert job["delivery_attempted"] is False
+    assert job["final_mp4_exists"] is False
+    assert job["output_validated"] is False
+    assert job["output_sent"] is False
+    assert job["canonical_final_artifact_path"] == ""
+    assert job["output_validation"] == {}
+    assert job["auto_multi_v3_rejected_artifact_path"] == "old-v3-final.mp4"
+    assert job["auto_multi_v3_video_delivery_message_id"] == "old-video-1"
+    assert job["auto_multi_v3_receipt_message_id"] == "old-receipt-1"
+    assert job["auto_multi_v3_delivered_at"] == "2026-09-06 12:00:00"
+    assert job["subdub_success_message_id"] == ""
+    assert job["subdub_delivery_started_at"] == ""
+    assert job["subdub_delivered_at"] == ""
+    assert job["delivered_at"] == ""
+    assert job["receipt_sent_once"] is False
+    assert job["receipt_send_state"] == ""
+    assert job["terminal_public_outcome_type"] == ""
+    assert job["delivery_success"] is False
+    assert job["delivery_succeeded"] is False
+    assert job["public_success_sent"] is False
+    assert job["public_failure_sent"] is False
+    assert job["public_error_sent_count"] == 0
+    assert job["public_failure_sent_count"] == 0
+    assert job["delivery_started"] is False
+    assert job["delivery_status"] == ""
+    assert job["delivery_method"] == ""
+    assert job["delivery_recovery_started"] is False
+    assert job["delivery_recovery_succeeded"] is False
+    assert job["output_validated_before_success"] is False
+    assert job["video_delivery_file_id"] == ""
+    assert job["video_delivery_sha256"] == ""
+    assert job["video_delivery_size_bytes"] == 0
+    assert job["video_delivery_duration_seconds"] == 0.0
+    assert job["panel_final_message_id"] == ""
+    assert job["panel_final_percent"] == 0
+    assert job["panel_finalized"] is False
+    assert job["status_panel_message_id"] == "old-panel-1"
+    assert job["status_panel_chat_id"] == str(OWNER_ID)
+    assert job["status_panel_terminal_edit_confirmed"] is False
+    assert job["status_panel_terminalized"] is False
+    assert job["auto_exact_receipt"] == {}
+    assert job["auto_multi_v3_delivery_history"] == {
+        "video_message_id": "old-video-1",
+        "receipt_message_id": "old-receipt-1",
+        "video_sha256": "0" * 64,
+        "video_size_bytes": 18_171_909,
+        "video_duration_seconds": 134.0,
+        "delivered_at": "2026-09-06 12:00:00",
+    }
+    assert job["auto_multi_recovery"]["source_path"] == str(source)
+    assert job["auto_multi_recovery"]["source_sha256"] == SOURCE_SHA256
+    assert job["auto_exact_session_nonce"] == "v4-new-session-nonce"
+    assert job["charge_status"] == "not_charged"
+    recovered_state = bot.subdub_failed_auto_multi_recovery_state(job)
+    assert recovered_state["_pipeline_job_id"] == ACOUSTIC_JOB_ID
+    assert recovered_state["_pipeline_source_path_override"] == str(source)
+    assert recovered_state["auto_speaker_lane"] == "multi"
+    assert job["charged_xu"] == 0
+
+    duplicate = v4.claim_v4_same_job(
+        acoustic_preflight=fixed_vocal_v2_preflight
+    )
+    assert duplicate["claimed"] is False
+
+
+def test_v4_runner_never_calls_legacy_delivery_and_enters_handler_once(
+    monkeypatch,
+):
+    v4 = _v4_recovery_module()
+    calls = []
+    job = {
+        **_v3_delivery_state_for_v4_recovery(),
+        v4.V4_REPAIR_MARKER: True,
+        "status": bot.SUBDUB_FAILED_AUTO_MULTI_RECOVERY_STATUS,
+        "terminal_state": "",
+    }
+
+    class FakeBot:
+        async def __aenter__(self):
+            calls.append("bot_enter")
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    async def handler(update, context):
+        calls.append(("handler", update.effective_user.id, list(context.args)))
+
+    monkeypatch.setattr(
+        v4.app,
+        "build_telegram_application",
+        lambda: SimpleNamespace(bot=FakeBot()),
+    )
+    monkeypatch.setattr(
+        v4.legacy,
+        "deliver_existing_artifact",
+        lambda *_args, **_kwargs: pytest.fail("v4 must never deliver v3 artifact"),
+    )
+    monkeypatch.setattr(
+        v4,
+        "ensure_exact_source",
+        lambda _bot: asyncio.sleep(
+            0,
+            result={
+                "ok": True,
+                "rehydrated": False,
+                "path": "auto_multi_v4_original_source.mp4",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        v4,
+        "claim_v4_same_job",
+        lambda **_kwargs: {"ok": True, "claimed": True, "job": job},
+    )
+    monkeypatch.setattr(
+        v4,
+        "read_v4_terminal_job",
+        lambda: {
+            **job,
+            "status": "delivered",
+            "terminal_state": "delivered",
+            "charged_xu": 0,
+            "final_mp4_validated": True,
+            "final_mp4_delivered": True,
+            "output_validated": True,
+            "video_delivery_message_id": "v4-video",
+            "receipt_message_id": "v4-receipt",
+            "auto_detected_speaker_count": 5,
+            "auto_distinct_voice_count": 5,
+            "auto_multi_voice_verified": True,
+            "auto_multi_attribution_verified": True,
+            "auto_multi_geometry_verified": True,
+            "auto_multi_cast_sha256": "c" * 64,
+            "auto_multi_source_display_width": 854,
+            "auto_multi_source_display_height": 480,
+            "auto_multi_output_display_width": 854,
+            "auto_multi_output_display_height": 480,
+            "auto_multi_output_rotation": 0,
+            "multi_acoustic_raw_speaker_count": 5,
+            "multi_acoustic_speaker_count": 5,
+            "multi_acoustic_word_count": 145,
+            "multi_acoustic_word_coverage_count": 145,
+            "multi_acoustic_female_speaker_count": 2,
+            "multi_acoustic_male_speaker_count": 3,
+            "multi_acoustic_gender_model_sha256": (
+                v4.app.auto_multi_speaker.subdub_multi_speaker_gender_onnx
+                .MULTI_GENDER_MODEL_SHA256
+            ),
+            "multi_acoustic_speaker_registers": [
+                "high",
+                "low",
+                "low",
+                "high",
+                "low",
+            ],
+            "canonical_final_artifact_path": "",
+            "video_delivery_sha256": "a" * 64,
+            "video_delivery_size_bytes": 1_234_567,
+            "video_delivery_duration_seconds": 133.37542,
+            "output_validation": {
+                "ok": True,
+                "container": "mp4",
+                "video_codec": "h264",
+                "audio_codec": "aac",
+                "has_video": True,
+                "has_audio": True,
+                "size": 1_234_567,
+                "duration": 133.37542,
+            },
+        },
+    )
+    monkeypatch.setattr(v4.app, "cmd_subdub_recover_failed_auto_multi", handler)
+
+    asyncio.run(v4.run())
+
+    assert calls == [
+        "bot_enter",
+        (
+            "handler",
+            OWNER_ID,
+            [
+                ACOUSTIC_JOB_ID,
+                SOURCE_SHA256,
+                "English",
+                "40",
+                "150",
+                "--confirm-paid",
+                "--confirm-local-acoustic",
+            ],
+        ),
+    ]
+
+
+def test_v4_runner_raises_when_handler_does_not_produce_terminal_evidence(
+    monkeypatch,
+):
+    v4 = _v4_recovery_module()
+    job = {
+        **_v3_delivery_state_for_v4_recovery(),
+        v4.V4_REPAIR_MARKER: True,
+        "status": bot.SUBDUB_FAILED_AUTO_MULTI_RECOVERY_STATUS,
+        "terminal_state": "",
+    }
+
+    class FakeBot:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    async def handler(_update, _context):
+        return {"ok": False, "status": "FINAL_VIDEO_NOT_CREATED"}
+
+    monkeypatch.setattr(
+        v4.app,
+        "build_telegram_application",
+        lambda: SimpleNamespace(bot=FakeBot()),
+    )
+    monkeypatch.setattr(
+        v4,
+        "ensure_exact_source",
+        lambda _bot: asyncio.sleep(
+            0,
+            result={"ok": True, "rehydrated": False, "path": "fixture"},
+        ),
+    )
+    monkeypatch.setattr(
+        v4,
+        "claim_v4_same_job",
+        lambda **_kwargs: {"ok": True, "claimed": True, "job": job},
+    )
+    monkeypatch.setattr(v4.app, "cmd_subdub_recover_failed_auto_multi", handler)
+    monkeypatch.setattr(v4, "read_v4_terminal_job", lambda: job)
+
+    with pytest.raises(RuntimeError, match="v4_terminal_evidence_missing"):
+        asyncio.run(v4.run())
+
+
+def test_v4_terminal_verifier_accepts_cleaned_workspace_delivery_authority():
+    v4 = _v4_recovery_module()
+    terminal = {
+        "internal_job_id": ACOUSTIC_JOB_ID,
+        "status": "delivered",
+        "terminal_state": "delivered",
+        "charged_xu": 0,
+        "final_mp4_validated": True,
+        "final_mp4_delivered": True,
+        "output_validated": True,
+        "video_delivery_message_id": "v4-video",
+        "receipt_message_id": "v4-receipt",
+        "auto_detected_speaker_count": 5,
+        "auto_distinct_voice_count": 5,
+        "auto_multi_voice_verified": True,
+        "auto_multi_attribution_verified": True,
+        "auto_multi_geometry_verified": True,
+        "auto_multi_cast_sha256": "c" * 64,
+        "auto_multi_source_display_width": 854,
+        "auto_multi_source_display_height": 480,
+        "auto_multi_output_display_width": 854,
+        "auto_multi_output_display_height": 480,
+        "auto_multi_output_rotation": 0,
+        "multi_acoustic_raw_speaker_count": 5,
+        "multi_acoustic_speaker_count": 5,
+        "multi_acoustic_word_count": 145,
+        "multi_acoustic_word_coverage_count": 145,
+        "multi_acoustic_female_speaker_count": 2,
+        "multi_acoustic_male_speaker_count": 3,
+        "multi_acoustic_gender_model_sha256": (
+            v4.app.auto_multi_speaker.subdub_multi_speaker_gender_onnx
+            .MULTI_GENDER_MODEL_SHA256
+        ),
+        "multi_acoustic_speaker_registers": [
+            "high",
+            "low",
+            "low",
+            "high",
+            "low",
+        ],
+        "video_delivery_sha256": "b" * 64,
+        "video_delivery_size_bytes": 18_000_000,
+        "video_delivery_duration_seconds": 133.37542,
+        "canonical_final_artifact_path": "",
+        "output_validation": {
+            "ok": True,
+            "container": "mp4",
+            "video_codec": "h264",
+            "audio_codec": "aac",
+            "has_video": True,
+            "has_audio": True,
+            "size": 18_000_000,
+            "duration": 133.37542,
+        },
+    }
+
+    assert v4.verify_v4_terminal_job(terminal)["ok"] is True
+    for mutation in (
+        {"charged_xu": 1},
+        {"video_delivery_message_id": ""},
+        {"receipt_message_id": ""},
+        {"auto_detected_speaker_count": 4},
+        {"auto_multi_geometry_verified": False},
+        {"video_delivery_sha256": ""},
+        {"video_delivery_size_bytes": 0},
+    ):
+        assert v4.verify_v4_terminal_job({**terminal, **mutation})["ok"] is False

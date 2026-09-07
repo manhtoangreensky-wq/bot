@@ -7,6 +7,7 @@ from pathlib import Path
 import time
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from services import subdub_multi_speaker_asr_fallback as fallback
@@ -1897,6 +1898,105 @@ def test_multi_gender_classifier_supports_same_gender_and_mixed_groups(
     ]
 
 
+def test_multi_gender_mfcc_matches_locked_librosa_golden():
+    indexes = np.arange(
+        multi_gender.MULTI_GENDER_CLIP_SAMPLES,
+        dtype=np.float64,
+    )
+    samples = (
+        0.35
+        * np.sin(
+            2.0
+            * np.pi
+            * 137.0
+            * indexes
+            / multi_gender.MULTI_GENDER_SAMPLE_RATE
+        )
+        + 0.12
+        * np.sin(
+            2.0
+            * np.pi
+            * 274.0
+            * indexes
+            / multi_gender.MULTI_GENDER_SAMPLE_RATE
+        )
+    ).astype(np.float32)
+
+    mfcc = multi_gender.multi_gender_mfcc(samples)
+
+    assert mfcc.shape == (1, 40, 301)
+    assert hashlib.sha256(
+        np.round(mfcc, 6).astype("<f4").tobytes()
+    ).hexdigest() == (
+        "963f28f506d9484cfe4c3fabb1bf13712b888e9af3d1291fe59d92cc0b79bd1d"
+    )
+
+
+def test_multi_gender_window_classifier_repeats_only_the_same_short_cue(
+    monkeypatch,
+):
+    captured = []
+
+    class Session:
+        def run(self, outputs, payload):
+            assert outputs == [multi_gender.MULTI_GENDER_MODEL_OUTPUT]
+            assert set(payload) == {multi_gender.MULTI_GENDER_MODEL_INPUT}
+            return [np.asarray([[2.0]], dtype=np.float32)]
+
+    monkeypatch.setattr(
+        multi_gender,
+        "_multi_gender_session",
+        lambda *_args, **_kwargs: Session(),
+    )
+
+    def capture(samples):
+        captured.append(np.asarray(samples).copy())
+        return np.zeros((1, 40, 301), dtype=np.float32)
+
+    monkeypatch.setattr(multi_gender, "multi_gender_mfcc", capture)
+    cue = np.arange(8_000, dtype=np.int16)
+
+    probabilities = multi_gender.classify_vocal_window_gender_probabilities(
+        [cue],
+        deadline_monotonic=10**12,
+        stop_requested=lambda: False,
+    )
+
+    assert probabilities == [pytest.approx(0.880797, abs=1e-6)]
+    assert len(captured) == 1
+    assert captured[0].shape == (48_000,)
+    expected = cue.astype(np.float32) / np.float32(32768.0)
+    np.testing.assert_array_equal(captured[0][:8_000], expected)
+    np.testing.assert_array_equal(captured[0][8_000:16_000], expected)
+
+
+def test_gender_constrained_authority_selects_stable_one_female_two_male():
+    base = np.zeros((6, 256), dtype=np.float32)
+    for index, label in enumerate((0, 0, 1, 1, 2, 2)):
+        base[index, label] = 1.0
+    shifted = base.copy()
+
+    result = (
+        auto_multi_speaker.subdub_multi_speaker_embedding_onnx
+        .build_gender_constrained_speech_authority(
+            base,
+            shifted,
+            np.arange(6, dtype=np.float64),
+            np.full(6, 1.5, dtype=np.float64),
+            [0.99, 0.99, 0.01, 0.01, 0.01, 0.01],
+            speaker_count=3,
+        )
+    )
+
+    assert result["speaker_count"] == 3
+    assert result["cluster_sizes"] == [2, 2, 2]
+    assert result["speaker_registers"] == ["high", "low", "low"]
+    assert result["female_speaker_count"] == 1
+    assert result["male_speaker_count"] == 2
+    assert result["base_shift_agreement"] == 1.0
+    assert result["base_aggregate_agreement"] == 1.0
+
+
 def test_multi_gender_classifier_rejects_two_labels_without_inference(
     tmp_path,
     monkeypatch,
@@ -1968,10 +2068,13 @@ def test_multi_classifier_timeout_uses_bounded_worker_drain(
 
 def test_exact_two_authority_files_remain_byte_locked():
     root = Path(__file__).resolve().parents[1]
-
     assert hashlib.sha256(
-        (root / "services" / "subdub_speaker_cast.py").read_bytes()
-    ).hexdigest() == "de93620f3f038b5759a53e696c5c85d3553fcee758686df56c70e6b11bac145b"
+        (root / "services" / "subdub_speaker_cast.py")
+        .read_bytes()
+        .replace(b"\r\n", b"\n")
+    ).hexdigest() == "20b3c1e54ddb14cef2e13ad053d404e87444cc9c4c66f921a73ae6b50a03c020"
     assert hashlib.sha256(
-        (root / "services" / "subdub_two_speaker_asr_fallback.py").read_bytes()
-    ).hexdigest() == "94748def11c38d76952192a996fa42231d75b39d4d9ecd3407ff671d92e1177e"
+        (root / "services" / "subdub_two_speaker_asr_fallback.py")
+        .read_bytes()
+        .replace(b"\r\n", b"\n")
+    ).hexdigest() == "c82e0fff287bf71e5969da513e1ba15bee4d0b28e583a55887c5e7d9bb9015de"

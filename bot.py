@@ -232767,7 +232767,10 @@ def subdub_auto_multi_terminal_proof_fields(
         not auto_multi_speaker.is_auto_multi_speaker_state(current)
         or current.get("auto_multi_voice_verified") is not True
         or current.get("auto_multi_attribution_verified") is not True
+        or current.get("auto_multi_geometry_verified") is not True
         or not acoustic_evidence
+        or "multi_acoustic_speaker_registers" not in acoustic_evidence
+        or "multi_acoustic_gender_model_sha256" not in acoustic_evidence
     ):
         return {}
     speaker_count = _safe_int(
@@ -232784,6 +232787,11 @@ def subdub_auto_multi_terminal_proof_fields(
     source_file_name = os.path.basename(
         str(current.get("source_file_name") or "").strip()
     )[:180]
+    source_width = _safe_int(current.get("auto_multi_source_display_width"), 0)
+    source_height = _safe_int(current.get("auto_multi_source_display_height"), 0)
+    output_width = _safe_int(current.get("auto_multi_output_display_width"), 0)
+    output_height = _safe_int(current.get("auto_multi_output_display_height"), 0)
+    output_rotation = _safe_int(current.get("auto_multi_output_rotation"), -1)
     dubbing_xu = max(
         0,
         _safe_int(current.get("auto_exact_actual_auto_xu"), 0),
@@ -232802,6 +232810,13 @@ def subdub_auto_multi_terminal_proof_fields(
         or acoustic_evidence["multi_acoustic_speaker_count"]
         != speaker_count
         or distinct_voice_count != speaker_count
+        or not subdub_aspect_ratio_close(
+            source_width,
+            source_height,
+            output_width,
+            output_height,
+        )
+        or output_rotation != 0
         or len(cast_sha256) != 64
         or any(character not in "0123456789abcdef" for character in cast_sha256)
         or total_xu != dubbing_xu + subtitle_xu
@@ -232815,6 +232830,12 @@ def subdub_auto_multi_terminal_proof_fields(
         "auto_distinct_voice_count": distinct_voice_count,
         "auto_multi_voice_verified": True,
         "auto_multi_attribution_verified": True,
+        "auto_multi_geometry_verified": True,
+        "auto_multi_source_display_width": source_width,
+        "auto_multi_source_display_height": source_height,
+        "auto_multi_output_display_width": output_width,
+        "auto_multi_output_display_height": output_height,
+        "auto_multi_output_rotation": output_rotation,
         "auto_multi_cast_sha256": cast_sha256,
         "auto_exact_actual_auto_xu": dubbing_xu,
         "auto_exact_actual_subtitle_xu": subtitle_xu,
@@ -247582,6 +247603,17 @@ async def video_dubbing_prepare_subtitles(
                 "multi_acoustic_overlap_mapped_count": acoustic_result.get("overlap_mapped_count"),
                 "multi_acoustic_centroid_mapped_count": acoustic_result.get("centroid_mapped_count"),
                 "multi_acoustic_speaker_unit_counts": acoustic_result.get("speaker_unit_counts"),
+                "multi_acoustic_word_overlap_mapped_count": acoustic_result.get("word_overlap_mapped_count"),
+                "multi_acoustic_word_fallback_mapped_count": acoustic_result.get("word_fallback_mapped_count"),
+                "multi_acoustic_word_centroid_mapped_count": acoustic_result.get("word_centroid_mapped_count"),
+                "multi_acoustic_speaker_count_authority_asr_independent": acoustic_result.get("speaker_count_authority_asr_independent"),
+                "multi_acoustic_word_attribution_uses_asr_timeline": acoustic_result.get("word_attribution_uses_asr_timeline"),
+                "multi_acoustic_speaker_registers": acoustic_result.get("speaker_registers"),
+                "multi_acoustic_speaker_register_confidences": acoustic_result.get("speaker_register_confidences"),
+                "multi_acoustic_female_speaker_count": acoustic_result.get("female_speaker_count"),
+                "multi_acoustic_male_speaker_count": acoustic_result.get("male_speaker_count"),
+                "multi_acoustic_gender_model_sha256": acoustic_result.get("gender_model_sha256"),
+                "multi_acoustic_gender_ambiguous_window_count": acoustic_result.get("gender_ambiguous_window_count"),
                 "multi_acoustic_raw_speaker_count": acoustic_result.get("raw_speaker_count"),
                 "multi_acoustic_raw_embedding_window_count": acoustic_result.get("raw_embedding_window_count"),
                 "multi_acoustic_raw_cluster_sizes": acoustic_result.get("raw_cluster_sizes"),
@@ -252506,6 +252538,7 @@ async def execute_video_dubbing_pipeline(
             **debug_job,
             **input_save_fields,
             **multi_diarization,
+            **subdub_auto_multi_terminal_proof_fields(result_state),
             "job_id": job.get("job_id"),
             "workspace": workspace,
             "manifest": os.path.join(workspace, "manifest.json"),

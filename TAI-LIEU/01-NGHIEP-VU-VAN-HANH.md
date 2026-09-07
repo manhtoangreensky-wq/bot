@@ -1313,3 +1313,35 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   manifest, English cache, fixed-vocal v3 sidecar và nội dung hai SRT cùng hash;
   sai một trong `10` mutation đều bị chặn. Receipt được tính lại từ dữ liệu thật:
   `189` từ, `95 Xu` lồng tiếng + `86 Xu` phụ đề = `181 Xu`; Owner vẫn `0 Xu`.
+
+### Auto Multi v4 — five-speaker, gender và geometry correction — 07/09/2026
+
+- Lịch sử v3 phía trên vẫn đúng cho artifact đã giao: production row của chính
+  `#B4CB6D5FE8` hiện `delivered/admin_free`, raw acoustic `5`, effective speaker/
+  voice `4/4`, MP4 message và receipt đã có, `charged_xu=0`. Artifact đó không
+  còn là acceptance cho v4 và không được giao lại bởi runner mới.
+- V4 giữ speaker-count authority độc lập ASR trên full fixed-vocal audio, nhưng
+  map từng word bằng speech-only windows `1.5s/0.75s`, sau đó partition theo
+  local gender ONNX. Exact fixture đạt raw/effective `5/5`, coverage `145/145`,
+  registers `[high,low,low,high,low]`; cue cuối `126.005–126.505` là `high`.
+- Gender ONNX là CPU-only, `670,311` bytes, SHA-256
+  `E98F8BC6D7960A8A2169368FE4533636903E712790E96DBFF81B679EDE5DE252`.
+  Model chỉ là register-routing evidence; partition không ổn định phải
+  fail-closed, không đoán giới tính.
+- Generic gate chạy `k=3..8`; spectral partition vẫn là primary, deterministic
+  original-space K-means chỉ được dùng khi eigenspace spectral sinh cluster
+  thiếu support. Không hạ threshold và không có fixture/job branch trong engine.
+- Geometry bắt buộc preflight `ffprobe` trước pipeline, probe off event loop và
+  so display aspect sau mux. Local production renderer trên exact source tạo
+  MP4 H.264/AAC yuv420p `16,927,256` bytes, `854x480`, rotation `0`,
+  `133.37542s`, SHA `0A143785...59226`; portrait `720x1280` bị chặn.
+- Runner v4 mới chỉ cho cùng internal job. Exact source phải được restore vào
+  workspace, đúng `9,869,032` bytes/SHA `83DE97B7...AD3E`, rồi CAS một lần.
+  Nó lưu video/receipt v3 dưới history, clear active v3 proof/dedupe, không gọi
+  legacy delivery, không tạo job và không đổi Xu.
+- Bằng chứng source cuối trước PR: Auto Multi focused `449 passed`; terminal/
+  recovery persistence `7 passed`; exact-two `51 passed`; renderer/language/
+  volume `64 passed`; exact resource `9 passed in 410.72s`; full compile và
+  diff-check exit `0`.
+  LIVE v4 vẫn chỉ PASS sau exact-SHA deploy, một execution cùng job và
+  MP4/Telegram/receipt/zero-Xu readback.
