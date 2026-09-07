@@ -2010,11 +2010,13 @@ async def run_auto_multi_speaker_blackbox(
             for key, value in current.items()
             if isinstance(key, str) and key.startswith("auto_exact_")
         }
+        acoustic_fields = bounded_multi_acoustic_evidence(current)
         if proof_fields or exact_fields:
             result = {
                 **result,
                 "state": {
                     **dict(result_state),
+                    **acoustic_fields,
                     **exact_fields,
                     **proof_fields,
                 },

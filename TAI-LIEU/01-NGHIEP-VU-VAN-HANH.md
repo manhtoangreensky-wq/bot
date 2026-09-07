@@ -1353,3 +1353,10 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   thì vẫn fail-closed. Focused `453 passed`, exact-two `51 passed`, exact
   resource `9 passed in 398.34s`; job/provider/wallet delta trong source loop
   đều `0`.
+- Runtime `4c8e8eba` đã giao MP4 v4 mới qua Telegram message `28129`:
+  `18,277,796` bytes, SHA `D72EE09B...C91C8`, H.264/AAC, `854x480`, rotation
+  `0`, `134.0s`; TTS QC `21/21`, dropped `0`, `charged_xu=0`. Process chỉ
+  fail hậu kiểm vì result state bỏ sót acoustic proof và status-panel edit
+  timeout nên receipt chưa gửi. Fix cuối chỉ giữ acoustic evidence trong result
+  state và cung cấp closeout provider-free: CAS proof, sửa đúng panel cũ, gửi
+  một receipt; cấm chạy lại ASR/translation/TTS/mux/video.

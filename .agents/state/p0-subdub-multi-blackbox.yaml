@@ -1922,3 +1922,49 @@ auto_multi_v4_acoustic_view_quorum_20260907:
   live_pass: false
 
 current_next_action_after_view_quorum: compile and diff; one PR squash deploy; exact one quorum repair on same job; verify MP4 Telegram receipt five speakers geometry and charged zero
+
+auto_multi_v4_delivery_proof_closeout_20260907:
+  runtime:
+    merge_sha: 4c8e8ebaef2e49d9fb82c03db90b2954f6e7fa1c
+    deploy_run: 34092384011 SUCCESS
+    invocation: baf19627da7843838f8b2bb8d86199e1
+    same_job: b4cb6d5fe8a7bdfce507
+    terminal_db: delivered
+    process_exit: 1 after delivery because terminal proof was incomplete
+  artifact:
+    telegram_video_message_id: 28129
+    bytes: 18277796
+    sha256: D72EE09B65D6D0142099F0F21DC6BD871846D1D4A6DA2CADEAED191CF76C91C8
+    container: mp4
+    video_codec: h264
+    audio_codec: aac
+    display: 854x480
+    rotation: 0
+    duration_seconds: 134.0
+    old_v3_video_receipt: 28112/28113 retained as history
+  tts:
+    qc_rows_ok: 21/21
+    dropped: 0
+  root:
+    production: validated acoustic evidence remained in mutable current but was omitted from successful result state
+    receipt: stored status-panel edit timed out; receipt remained unsent and no replacement table was created
+  correction:
+    general: merge bounded acoustic evidence into successful Auto Multi result state
+    exact_closeout: provider-free acoustic proof recompute then same-row CAS existing-panel edit and receipt-only send
+    marker: auto_multi_v4_delivery_proof_closeout_used
+    provider_replay: forbidden
+    video_resend: forbidden
+    new_job: forbidden
+  verification:
+    propagation_red: KeyError multi_acoustic_speaker_count
+    propagation_green: 1 passed
+    closeout_focused: 5 passed
+    full_focused: 457 passed in 16.42s
+    exact_two_locked: 51 passed in 5.29s
+    post_quorum_resource: 9 passed in 398.34s
+  finance:
+    charged_xu: 0
+    wallet_mutations: 0
+  live_pass: false until receipt and terminal proof readback
+
+current_next_action_after_delivery_proof: compile diff one PR deploy; restore exact source; run provider-free closeout once; verify five-speaker proof new receipt no companion and zero financial delta

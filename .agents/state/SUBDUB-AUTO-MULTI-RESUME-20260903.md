@@ -450,3 +450,31 @@ one delivery-only invocation; never replay ASR/translation/TTS/mux.
 Current next action: compile/diff → one correction commit/PR/deploy → exact
 quorum-repair candidate PASS → one same-job continuation → artifact/Telegram/
 receipt/zero-Xu verification. `LIVE_PASS=NO` until that evidence exists.
+
+### V4 artifact delivered; proof/receipt closeout — 2026-09-07
+
+- PR `#1002` merged as `4c8e8ebaef2e49d9fb82c03db90b2954f6e7fa1c`;
+  deploy `34092384011` SUCCESS. Invocation
+  `baf19627da7843838f8b2bb8d86199e1` crossed acoustic, translation, TTS,
+  mux and delivery on the same job. Telegram video message is `28129`; MP4 is
+  `18,277,796` bytes, SHA `D72EE09B65D6D0142099F0F21DC6BD871846D1D4A6DA2CADEAED191CF76C91C8`,
+  H.264/AAC, `854x480`, rotation `0`, duration `134.0s`; `charged_xu=0`.
+- Durable TTS QC retains `21/21` rows with `ok=true`, dropped `0`. No SRT,
+  audio or document companion was delivered. Old v3 video/receipt IDs remain
+  history `28112/28113`; the v4 video ID is distinct.
+- The process exited `1` only after delivery: successful multi wrapper kept
+  acoustic evidence in its mutable `current` map but omitted it when returning
+  `result.state`; the final durable helper therefore received incomplete proof.
+  A Telegram status-panel edit also timed out, so the receipt correctly stayed
+  unsent rather than creating another status table.
+- Minimal general fix merges the already-validated acoustic bundle into the
+  successful result state. RED was `KeyError multi_acoustic_speaker_count`;
+  GREEN `1 passed`. Exact-job closeout is provider-free: recompute acoustic
+  proof from exact source plus locked timing hash, CAS it once, edit the same
+  panel and send only the missing receipt; it has no video-send or pipeline
+  replay path. Closeout focused `5 passed`; full focused `457 passed`; exact-two
+  protected `51 passed`; previous post-quorum resource `9 passed in 398.34s`.
+
+Current next action: compile/diff → one proof-closeout PR/deploy → restore exact
+source only → run provider-free closeout once → verify new receipt and complete
+terminal evidence. No ASR/translation/TTS/mux/video replay and no new job.

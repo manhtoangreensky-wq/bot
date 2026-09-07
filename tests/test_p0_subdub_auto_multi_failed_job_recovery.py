@@ -4791,3 +4791,328 @@ def test_v4_terminal_verifier_accepts_cleaned_workspace_delivery_authority():
         {"video_delivery_size_bytes": 0},
     ):
         assert v4.verify_v4_terminal_job({**terminal, **mutation})["ok"] is False
+
+
+def _v4_closeout_module():
+    return importlib.import_module("scripts.closeout_subdub_auto_multi_v4")
+
+
+def _v4_delivered_without_receipt_state():
+    current = _v4_gender_partition_failed_state()
+    current.update(
+        {
+            "status": "delivered",
+            "terminal_state": "delivered",
+            "lifecycle_state": "delivered",
+            "current_stage": "delivered",
+            "progress_stage": "delivered",
+            "progress_percent": 100,
+            "charge_status": "admin_free",
+            "output_sent": True,
+            "final_mp4_validated": True,
+            "final_mp4_delivered": True,
+            "output_validated": True,
+            "delivery_attempted": True,
+            "delivery_attempt_uncertain": False,
+            "video_delivery_message_id": "new-v4-video",
+            "video_delivery_sha256": "d" * 64,
+            "video_delivery_size_bytes": 18_277_796,
+            "video_delivery_duration_seconds": 134.0,
+            "receipt_message_id": "",
+            "subdub_success_message_id": "",
+            "receipt_sent_once": False,
+            "receipt_send_uncertain": False,
+            "auto_multi_acoustic_view_quorum_repair_used": True,
+            "auto_multi_acoustic_view_quorum_repair_authority": (
+                "owner_confirmed_same_job_acoustic_view_quorum"
+            ),
+            "status_panel_message_id": "28128",
+            "status_panel_chat_id": str(OWNER_ID),
+            "source_file_name": "test nhiều giọng.mp4",
+            "auto_exact_actual_auto_xu": 97,
+            "auto_exact_actual_subtitle_xu": 86,
+            "auto_exact_actual_total_xu": 183,
+            "tts_cue_qc": [{"ok": True, "audio_bytes": 1_000}] * 21,
+            "input_save": {
+                **current["input_save"],
+                "source_duration_exact": 133.37542,
+                "media_preflight": {
+                    "ok": True,
+                    "has_video": True,
+                    "has_audio": True,
+                    "display_width": 854,
+                    "display_height": 480,
+                    "rotation": 0,
+                },
+            },
+            "output_validation": {
+                "ok": True,
+                "container": "mp4",
+                "video_codec": "h264",
+                "audio_codec": "aac",
+                "has_video": True,
+                "has_audio": True,
+                "display_width": 854,
+                "display_height": 480,
+                "rotation": 0,
+                "size": 18_277_796,
+                "actual_duration": 134.0,
+            },
+            "auto_exact_receipt": {
+                "internal_job_id": ACOUSTIC_JOB_ID,
+                "owner_user_id": str(OWNER_ID),
+                "claim_state": "admin_free",
+                "consumed": True,
+                "sidecar_sha256": "f" * 64,
+                "actual_auto_xu": 97,
+                "actual_subtitle_xu": 86,
+                "actual_total_xu": 183,
+            },
+        }
+    )
+    return current
+
+
+def _v4_closeout_acoustic_result():
+    labels = [f"chunk_00:speaker_{index}" for index in range(5)]
+    segments = [
+        {
+            "cue_id": f"cue-{index}",
+            "start": float(index),
+            "end": float(index) + 0.5,
+            "speaker": index,
+            "speaker_id": label,
+            "voice_register": ["high", "low", "low", "high", "low"][index],
+            "text": f"word{index}",
+        }
+        for index, label in enumerate(labels)
+    ]
+    segments.append(
+        {
+            "cue_id": "cue-final",
+            "start": 126.005,
+            "end": 126.505,
+            "speaker": 3,
+            "speaker_id": labels[3],
+            "voice_register": "high",
+            "text": "word144",
+        }
+    )
+    service = bot.auto_multi_speaker.subdub_multi_speaker_embedding_onnx
+    return {
+        "ok": True,
+        "provider": service.FIXED_VOCAL_PROVIDER,
+        "model_sha256": service.MODEL_SHA256,
+        "algorithm_version": service.FIXED_VOCAL_ALGORITHM_VERSION,
+        "segments": segments,
+        "raw_speaker_count": 5,
+        "detected_speaker_count": 5,
+        "word_count": 145,
+        "word_coverage_count": 145,
+        "unit_count": 35,
+        "embedding_window_count": 118,
+        "cluster_sizes": [16, 11, 13, 12, 7],
+        "stability_pass": True,
+        "overlap_mapped_count": 35,
+        "centroid_mapped_count": 0,
+        "speaker_unit_counts": [8, 6, 11, 5, 5],
+        "word_overlap_mapped_count": 145,
+        "word_fallback_mapped_count": 0,
+        "word_centroid_mapped_count": 0,
+        "speaker_count_authority_asr_independent": True,
+        "word_attribution_uses_asr_timeline": True,
+        "speaker_registers": ["high", "low", "low", "high", "low"],
+        "speaker_register_confidences": [0.99, 0.98, 0.97, 0.96, 0.95],
+        "female_speaker_count": 2,
+        "male_speaker_count": 3,
+        "gender_model_sha256": (
+            bot.auto_multi_speaker.subdub_multi_speaker_gender_onnx
+            .MULTI_GENDER_MODEL_SHA256
+        ),
+        "gender_ambiguous_window_count": 0,
+        "raw_embedding_window_count": 178,
+        "raw_cluster_sizes": [9, 18, 26, 25, 11],
+        "raw_speaker_unit_counts": [0, 9, 9, 11, 6],
+        "raw_overlap_speaker_unit_counts": [0, 7, 8, 10, 4],
+        "speech_supported_speaker_labels": [0, 1, 2, 3, 4],
+        "dropped_non_speech_speaker_labels": [],
+        "speech_partition_base_shift_agreement": 0.915254,
+        "speech_partition_base_aggregate_agreement": 1.0,
+    }
+
+
+def test_v4_delivery_closeout_accepts_only_new_video_without_receipt(
+    monkeypatch,
+):
+    closeout = _v4_closeout_module()
+    current = _v4_delivered_without_receipt_state()
+    monkeypatch.setattr(
+        closeout.v4,
+        "validated_v4_source_path",
+        lambda _current: "exact-v4-source.mp4",
+    )
+
+    assert closeout.v4_delivery_closeout_candidate(current) is True
+    for mutation in (
+        {"charged_xu": 1},
+        {"video_delivery_message_id": "old-video-1"},
+        {"receipt_message_id": "already-sent"},
+        {"receipt_send_uncertain": True},
+        {"auto_multi_acoustic_view_quorum_repair_used": False},
+        {"video_delivery_size_bytes": 0},
+    ):
+        assert closeout.v4_delivery_closeout_candidate(
+            {**current, **mutation}
+        ) is False
+
+
+def test_v4_closeout_reconstructs_five_voice_terminal_proof(monkeypatch):
+    closeout = _v4_closeout_module()
+    current = _v4_delivered_without_receipt_state()
+    monkeypatch.setattr(closeout, "_delivery_authority", lambda _current: True)
+    pools = {
+        "low": [f"low-{index}" for index in range(8)],
+        "high": [f"high-{index}" for index in range(8)],
+    }
+
+    proof = closeout.v4_closeout_proof_fields(
+        current,
+        _v4_closeout_acoustic_result(),
+        voice_pools=pools,
+    )
+
+    assert proof["multi_acoustic_raw_speaker_count"] == 5
+    assert proof["multi_acoustic_speaker_count"] == 5
+    assert proof["multi_acoustic_word_coverage_count"] == 145
+    assert proof["multi_acoustic_speaker_registers"] == [
+        "high",
+        "low",
+        "low",
+        "high",
+        "low",
+    ]
+    assert proof["auto_detected_speaker_count"] == 5
+    assert proof["auto_distinct_voice_count"] == 5
+    assert len(set(proof["auto_multi_voice_id_hashes"])) == 5
+    assert proof["auto_multi_final_cue_register"] == "high"
+    assert proof["tts_expected_segments"] == 21
+    assert proof["tts_generated_segments"] == 21
+    assert proof["tts_dropped_segments"] == 0
+    assert proof["auto_multi_source_display_width"] == 854
+    assert proof["auto_multi_output_display_width"] == 854
+    assert proof["auto_multi_output_rotation"] == 0
+
+
+def test_v4_closeout_claim_updates_same_row_once(tmp_path, monkeypatch):
+    closeout = _v4_closeout_module()
+    current = _v4_delivered_without_receipt_state()
+    db_path = tmp_path / "v4-closeout.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE system_settings (key TEXT PRIMARY KEY, value TEXT, note TEXT, updated_at TEXT, updated_by TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO system_settings(key,value,note,updated_at,updated_by) VALUES(?,?,?,?,?)",
+        (
+            f"engine_async_job:{ACOUSTIC_JOB_ID}",
+            json.dumps(current),
+            "fixture",
+            "2026-09-07 14:00:00",
+            str(OWNER_ID),
+        ),
+    )
+    conn.commit()
+    conn.close()
+    proof = {
+        "auto_detected_speaker_count": 5,
+        "auto_distinct_voice_count": 5,
+        "auto_multi_voice_verified": True,
+    }
+    monkeypatch.setattr(closeout.v4, "read_v4_terminal_job", lambda: current)
+    monkeypatch.setattr(
+        closeout,
+        "v4_delivery_closeout_candidate",
+        lambda item: item.get(closeout.CLOSEOUT_MARKER) is not True,
+    )
+    monkeypatch.setattr(
+        closeout,
+        "v4_closeout_proof_fields",
+        lambda *_args, **_kwargs: proof,
+    )
+    monkeypatch.setattr(closeout.app, "ENGINE_ASYNC_MEMORY_JOBS", {})
+    monkeypatch.setattr(closeout.app, "SUBTITLE_DUB_PIPELINE_JOBS", {})
+
+    claimed = closeout.claim_v4_closeout_proof(
+        _v4_closeout_acoustic_result(),
+        connection_factory=lambda: sqlite3.connect(db_path),
+    )
+
+    assert claimed["claimed"] is True
+    assert claimed["job"][closeout.CLOSEOUT_MARKER] is True
+    assert claimed["job"]["auto_multi_v4_delivery_proof_closeout_authority"] == (
+        closeout.CLOSEOUT_AUTHORITY
+    )
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute("SELECT value FROM system_settings").fetchall()
+    conn.close()
+    assert len(rows) == 1
+    persisted = json.loads(rows[0][0])
+    assert persisted["video_delivery_message_id"] == "new-v4-video"
+    assert persisted[closeout.CLOSEOUT_MARKER] is True
+
+
+def test_v4_closeout_edits_existing_panel_then_sends_receipt_without_video(
+    monkeypatch,
+):
+    closeout = _v4_closeout_module()
+    job = _v4_delivered_without_receipt_state()
+    job[closeout.CLOSEOUT_MARKER] = True
+    actions = []
+    memory = dict(job)
+
+    class FakeBot:
+        async def edit_message_text(self, **kwargs):
+            actions.append(("edit_panel", kwargs["message_id"]))
+            return SimpleNamespace(message_id=kwargs["message_id"])
+
+        async def send_message(self, **kwargs):
+            actions.append(("send_receipt", kwargs["chat_id"]))
+            return SimpleNamespace(message_id=28130)
+
+        async def send_video(self, **_kwargs):
+            pytest.fail("closeout must never send the video again")
+
+    monkeypatch.setattr(
+        closeout,
+        "v4_delivery_closeout_candidate",
+        lambda _current: True,
+    )
+
+    def update_job(job_key, **fields):
+        assert job_key == job["job_key"]
+        memory.update(fields)
+        closeout.app.SUBTITLE_DUB_PIPELINE_JOBS[job_key] = dict(memory)
+        return dict(memory)
+
+    async def send_receipt(message, job_key, _text, reply_markup=None):
+        del reply_markup
+        sent = await message.reply_text("receipt", parse_mode="HTML")
+        update_job(
+            job_key,
+            receipt_message_id=str(sent.message_id),
+            subdub_success_message_id=str(sent.message_id),
+            receipt_sent_once=True,
+        )
+        return sent
+
+    monkeypatch.setattr(closeout.app, "update_subtitle_dub_pipeline_job", update_job)
+    monkeypatch.setattr(closeout.app, "video_dubbing_receipt_text", lambda *_args: "receipt")
+    monkeypatch.setattr(closeout.app, "video_dubbing_receipt_keyboard", lambda *_args: None)
+    monkeypatch.setattr(closeout.app, "subdub_send_success_receipt_once", send_receipt)
+    monkeypatch.setattr(closeout.v4, "read_v4_terminal_job", lambda: dict(memory))
+
+    final = asyncio.run(closeout.finalize_v4_panel_and_receipt(FakeBot(), job))
+
+    assert actions == [("edit_panel", int(job["status_panel_message_id"])), ("send_receipt", OWNER_ID)]
+    assert final["video_delivery_message_id"] == "new-v4-video"
+    assert final["receipt_message_id"] == "28130"
