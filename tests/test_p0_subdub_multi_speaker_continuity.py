@@ -105,6 +105,126 @@ def test_rejected_identity_partition_cannot_remap_gender_partition_registers(
     assert result["speaker_registers"] == ["high", "low", "low"]
 
 
+def test_three_views_use_majority_then_aggregate_tiebreak_without_global_quorum(
+    monkeypatch,
+):
+    """Distributed boundary jitter must not reject a complete 2-of-3 vote."""
+
+    expected = np.repeat(np.arange(5), 12)
+    matrix = np.zeros((60, embedding.EMBEDDING_DIM), dtype=np.float32)
+    for index, identity in enumerate(expected):
+        matrix[index, identity] = 1.0
+    base_view = expected.copy()
+    shifted_view = expected.copy()
+    aggregate_view = expected.copy()
+    base_view[[25, 37]] = [3, 4]
+    shifted_view[[26, 38]] = [4, 2]
+    aggregate_view[[27, 39]] = [3, 2]
+    base_view[50] = 2
+    shifted_view[50] = 3
+    assert len({base_view[50], shifted_view[50], aggregate_view[50]}) == 3
+    views = [base_view, shifted_view, aggregate_view]
+    call_index = 0
+
+    def gender_partition(*_args, female_count, **_kwargs):
+        nonlocal call_index
+        if female_count != 2:
+            raise ValueError("unsupported_test_allocation")
+        result = views[call_index]
+        call_index += 1
+        return result
+
+    monkeypatch.setattr(
+        embedding,
+        "_gender_partition_for_allocation",
+        gender_partition,
+    )
+    monkeypatch.setattr(
+        embedding,
+        "_gender_partition_score",
+        lambda *_args, **_kwargs: 1.0,
+    )
+    monkeypatch.setattr(
+        embedding,
+        "_fixed_count_window_partition",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("identity_candidate_unavailable")
+        ),
+    )
+
+    result = embedding.build_gender_constrained_speech_authority(
+        matrix,
+        matrix.copy(),
+        np.arange(60, dtype=np.float64),
+        np.full(60, 1.5, dtype=np.float64),
+        [0.99] * 24 + [0.01] * 36,
+        speaker_count=5,
+    )
+
+    assert result["labels"] == expected.tolist()
+    assert result["labels"][50] == aggregate_view[50]
+    assert result["speaker_registers"] == ["high", "high", "low", "low", "low"]
+
+
+def test_three_views_fail_when_consensus_drops_speaker_support(monkeypatch):
+    expected = np.asarray([0] + [1] * 9 + [2] * 10)
+    matrix = np.zeros((20, embedding.EMBEDDING_DIM), dtype=np.float32)
+    for index, identity in enumerate(expected):
+        matrix[index, identity] = 1.0
+    base_view = expected.copy()
+    shifted_view = expected.copy()
+    aggregate_view = expected.copy()
+    base_view[1] = 0
+    shifted_view[2] = 0
+    aggregate_view[3] = 0
+    views = [
+        base_view,
+        shifted_view,
+        aggregate_view,
+    ]
+    call_index = 0
+
+    def gender_partition(*_args, female_count, **_kwargs):
+        nonlocal call_index
+        if female_count != 1:
+            raise ValueError("unsupported_test_allocation")
+        result = views[call_index]
+        call_index += 1
+        return result
+
+    monkeypatch.setattr(
+        embedding,
+        "_gender_partition_for_allocation",
+        gender_partition,
+    )
+    monkeypatch.setattr(
+        embedding,
+        "_gender_partition_score",
+        lambda *_args, **_kwargs: 1.0,
+    )
+    monkeypatch.setattr(
+        embedding,
+        "_fixed_count_window_partition",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("identity_candidate_unavailable")
+        ),
+    )
+
+    with pytest.raises(speaker_cast.AutoCastManualRequired) as error:
+        embedding.build_gender_constrained_speech_authority(
+            matrix,
+            matrix.copy(),
+            np.arange(20, dtype=np.float64),
+            np.full(20, 1.5, dtype=np.float64),
+            [0.99] * 2 + [0.01] * 18,
+            speaker_count=3,
+        )
+    cause = error.value
+    while getattr(cause, "__cause__", None) is not None:
+        cause = cause.__cause__
+    assert str(cause) == "acoustic_cluster_unsupported"
+
+
 def test_auto_multi_runtime_lock_waits_for_previous_job_instead_of_busy_fail():
     lock = threading.Lock()
     assert lock.acquire(blocking=False)

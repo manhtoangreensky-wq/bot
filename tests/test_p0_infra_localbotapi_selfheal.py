@@ -6,10 +6,12 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
 import tarfile
+import time
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -182,6 +184,143 @@ def test_cleanup_fails_closed_before_any_remove_when_fuser_is_missing():
     assert "MINIMUM_FREE_MIB:-3072" in text
     assert 'exec 9<>"$LOCK_FILE"' in text
     assert "O_NOFOLLOW" in text
+
+
+def test_cleanup_never_removes_localbot_state_binlogs():
+    text = _release_text("bin/toanaas-localbotapi-cleanup")
+    guard = 'case "${path##*/}" in'
+    protected = "*.binlog*) return 0 ;;"
+
+    assert guard in text
+    assert protected in text
+    assert text.index(guard) < text.index('if fuser -- "$path"')
+
+
+def test_cleanup_execution_preserves_all_binlog_suffixes(tmp_path):
+    bash = shutil.which("bash")
+    if not bash and os.name == "nt":
+        candidates = (
+            Path(os.environ.get("ProgramFiles", "C:/Program Files"))
+            / "Git"
+            / "bin"
+            / "bash.exe",
+            Path(os.environ.get("ProgramFiles", "C:/Program Files"))
+            / "Git"
+            / "usr"
+            / "bin"
+            / "bash.exe",
+        )
+        bash = next((str(path) for path in candidates if path.is_file()), None)
+    if not bash:
+        pytest.skip("POSIX bash is required for the cleanup execution contract")
+    stub_bin = tmp_path / "bin"
+    stub_bin.mkdir()
+    (stub_bin / "fuser").write_text(
+        "#!/usr/bin/env bash\nexit 1\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    (stub_bin / "flock").write_text(
+        "#!/usr/bin/env bash\nexit 0\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    (stub_bin / "python3").write_text(
+        '#!/usr/bin/env bash\nlock="${@: -1}"\n: >"$lock"\nchmod 600 "$lock"\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    (stub_bin / "fuser").chmod(0o700)
+    (stub_bin / "flock").chmod(0o700)
+    (stub_bin / "python3").chmod(0o700)
+
+    def shell_path(path: Path) -> str:
+        resolved = path.resolve().as_posix()
+        if os.name == "nt" and len(resolved) >= 3 and resolved[1:3] == ":/":
+            return f"/{resolved[0].lower()}{resolved[2:]}"
+        return resolved
+
+    test_env = dict(os.environ)
+
+    data = tmp_path / "data"
+    nested = data / "bot-session"
+    nested.mkdir(parents=True)
+    protected = [
+        data / "tqueue.binlog",
+        data / "webhooks_db.binlog.17",
+        nested / "td.binlog-1",
+        nested / "td.binlog_tmp",
+    ]
+    stale = data / "stale-download.mp4"
+    for path in [*protected, stale]:
+        path.write_bytes(b"state-or-artifact")
+        os.utime(path, (time.time() - 7_200, time.time() - 7_200))
+
+    source = _release_text("bin/toanaas-localbotapi-cleanup")
+    script = tmp_path / "cleanup"
+    production_data = 'readonly DATA_DIR="/opt/toanaas-telegram-bot-api/data"'
+    production_lock = (
+        'readonly LOCK_FILE="/run/lock/toanaas-localbotapi-cleanup.lock"'
+    )
+    test_data = f'readonly DATA_DIR="{data.as_posix()}"'
+    test_lock = f'readonly LOCK_FILE="{(tmp_path / "cleanup.lock").as_posix()}"'
+    assert source.count(production_data) == 1
+    assert source.count(production_lock) == 1
+    rewritten = source.replace(production_data, test_data).replace(
+        production_lock,
+        test_lock,
+    )
+    assert test_data in rewritten and test_lock in rewritten
+    assert "/opt/toanaas-telegram-bot-api/data" not in rewritten
+    assert "/run/lock/toanaas-localbotapi-cleanup.lock" not in rewritten
+    script.write_text(
+        rewritten,
+        encoding="utf-8",
+        newline="\n",
+    )
+    script.chmod(0o700)
+    retention = subprocess.run(
+        [
+            bash,
+            "-c",
+            f'PATH="{shell_path(stub_bin)}:$PATH" "{shell_path(script)}"',
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={
+            **test_env,
+            "RETENTION_MINUTES": "1",
+            "MAX_DATA_MIB": "1024",
+            "MINIMUM_FREE_MIB": "0",
+        },
+    )
+    assert retention.returncode == 0, retention.stderr
+    assert not stale.exists()
+    assert all(path.is_file() for path in protected)
+
+    pressure_artifact = data / "fresh-download.mp4"
+    pressure_artifact.write_bytes(b"artifact")
+    pressure = subprocess.run(
+        [
+            bash,
+            "-c",
+            f'PATH="{shell_path(stub_bin)}:$PATH" "{shell_path(script)}"',
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={
+            **test_env,
+            "RETENTION_MINUTES": "999999",
+            "MAX_DATA_MIB": "0",
+            "MINIMUM_FREE_MIB": "0",
+        },
+    )
+    assert pressure.returncode != 0
+    assert "storage_limits_unsatisfied=true" in pressure.stderr
+    assert not pressure_artifact.exists()
+    assert all(path.is_file() for path in protected)
 
 
 def test_reconcile_is_locked_and_rolls_back_only_the_localbot_service():

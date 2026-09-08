@@ -43,6 +43,12 @@ safe_remove() {
         printf 'localbotapi_cleanup cross_device=true\n' >&2
         return 1
     }
+    # Telegram Bot API rotates these durable state files itself.  A binlog can
+    # be closed briefly between rotations, so fuser alone cannot distinguish it
+    # from a stale downloaded artifact.  Removing it makes the next GC fatal.
+    case "${path##*/}" in
+        *.binlog*) return 0 ;;
+    esac
 
     if fuser -- "$path" >/dev/null 2>&1; then
         return 0

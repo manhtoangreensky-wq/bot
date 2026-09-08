@@ -701,9 +701,11 @@ def test_pending_state_rejects_invalid_acoustic_field_values(
     assert field not in state
 
 
+@pytest.mark.parametrize("allow_admin", (False, True))
 def test_exact_multi_prepare_runs_local_acoustics_before_translation(
     monkeypatch,
     tmp_path,
+    allow_admin,
 ):
     source_bytes = b"exact-multi-source"
     source_path = str(tmp_path / "normalized_source.mp4")
@@ -858,6 +860,7 @@ def test_exact_multi_prepare_runs_local_acoustics_before_translation(
             None,
             dict(pending_state),
             7126457028,
+            allow_admin=allow_admin,
             allow_confirmed_product=True,
             require_auto_cast=True,
         )
