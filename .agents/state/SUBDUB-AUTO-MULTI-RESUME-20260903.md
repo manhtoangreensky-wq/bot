@@ -574,3 +574,28 @@ terminal evidence. No ASR/translation/TTS/mux/video replay and no new job.
 - Evidence: source RED `1 failed`; source GREEN `1 passed`; product-info/parity
   `8 passed`; i18n/continuity/embedding `136 passed`; full changed-file compile
   exit `0`. Provider/new-job/production DB/wallet delta remains `0`.
+
+### Admin route + customer exact-price resume parity — 2026-09-08
+
+- The live `menu|admin` callback calls `localized_menu_content()`. That function
+  had no `action == "admin"` branch, so even an authenticated administrator was
+  rendered back to the main menu. The bounded correction routes only that
+  admin-only action to the existing Admin Control Center.
+- Customer job `#8B6C0B0D1B` reached the same Auto Multi preparation used by
+  admin: acoustic `k=5`, `145/145` words and exact quote `222 Xu`. After the
+  customer confirmed, cached resume failed with `AUTO_EXACT_RECEIPT_INVALID`.
+- All signed media, subtitle and sidecar hashes matched. The only byte-level
+  difference was cue 2 ending at `16254 ms` after SRT serialization versus the
+  signed sidecar authority at `16255 ms`.
+- Cached resume now accepts only SRT quantization drift of at most `1 ms`,
+  restores start/end and source timing from the already hash-verified sidecar,
+  then runs the existing strict cue-id and sidecar validation. Drift above
+  `1 ms` remains fail-closed.
+- The loader proof returns all `26` cached cues with
+  `asr_provider=cached_auto_exact_receipt` and an empty translation provider;
+  it does not replay ASR or translation. No Auto 2, acoustic/voice algorithm,
+  provider routing, pricing, wallet or payment code is changed.
+- Final focused + protected gate: `173 passed in 7.61s`; changed-file compile
+  exit `0`; diff/scope/secret checks exit `0`. The three legacy exact-resume
+  selectors, Admin compact `13 <= 12`, and two i18n/export selectors reproduce
+  identically on detached `origin/main`; `NEW_FAILURES=0`.

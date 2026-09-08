@@ -1440,3 +1440,23 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   Presentation + parity `8 passed`; i18n/continuity/embedding `136 passed`;
   changed-file `py_compile` exit `0`. Source loop gọi provider `0`, tạo job
   `0`, ghi production DB/ví `0`.
+
+### Admin Control Center và customer exact-resume — 08/09/2026
+
+- Nút `🔐 Admin` đi qua `localized_menu_content()`, không đi qua nhánh admin
+  cũ trong `menu_content()`. Thiếu route tại đúng dispatcher này khiến admin
+  quay về menu chính. Route mới chỉ áp dụng khi `action=admin` và `is_admin`.
+- Job khách `#8B6C0B0D1B` đã hoàn tất Auto Multi preparation với acoustic `k=5`,
+  word coverage `145/145`, rồi tạo exact quote `222 Xu`. Sau một lần xác nhận,
+  receipt chuyển sang resume nhưng dừng no-charge tại
+  `auto_exact_cached_resume_invalid`.
+- Workspace còn đủ cache và mọi hash đều đúng. SRT round-trip làm một cue lệch
+  `1 ms` so với timing trong signed speaker sidecar. Resume mới dùng sidecar
+  đã xác minh hash làm timing authority khi drift không quá `1 ms`, rồi vẫn
+  chạy strict cue-id/sidecar matcher. Drift lớn hơn vẫn bị từ chối.
+- Cached loader trả `26` cue và đánh dấu ASR là
+  `cached_auto_exact_receipt`; translation provider rỗng. Vì vậy customer đi
+  tiếp từ prepared state hiện hữu, không trả phí hoặc làm lại ASR/translation.
+- Gate cuối đo `173 passed in 7.61s`; changed-file compile và diff-check cùng
+  exit `0`. Các failure ngoài scope đều tái hiện cùng selector/kết quả trên
+  detached `origin/main`, nên `NEW_FAILURES=0`.
