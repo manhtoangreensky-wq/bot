@@ -1415,3 +1415,28 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   TQueue GC sau đó báo `Failed to unlink old binlog`, container thoát, systemd
   tạo khoảng trống `10s`, và bot nhận `502 Bad Gateway`. Cleanup mới bảo vệ
   mọi `*.binlog*` trước `fuser`/`rm`; không đổi Telegram handler.
+
+### SubDub catalog và public fresh-source parity — 08/09/2026
+
+- Catalog khách nhìn thấy có đúng `4` lane đang hoạt động:
+  `subtitle_create`, `subtitle_translate`, `dub`, `subtitle_plus_dub`. Kết quả
+  chính của lane video là MP4; lane có phụ đề cho tải SRT tại màn kết quả.
+- Màn chọn giọng ghi tách biệt giọng nữ mặc định, giọng nam mặc định, Kho
+  giọng, giọng riêng, Auto 2-speaker và Auto Multi `3–8` speaker. Copy cũ
+  “tối đa 16” đã bị loại vì không khớp fixed-vocal runtime `MIN=3/MAX=8`.
+  Cùng catalog được dùng cho admin và khách; chỉ access/settlement được phép
+  khác nhau.
+- Job khách `#76EAF3A29A` qua `allowed_public`, tải đúng fixture
+  `9,869,032` bytes/SHA `83DE97B7...AD3E`, rồi fail `5%` với
+  `fixed_vocal_gender_partition_unstable` trước ASR. Fresh public flow đã
+  normalize AV1/44.1kHz thành H.264/48kHz nhưng acoustic path trỏ vào bản
+  normalized. Correction lưu riêng `original_source_for_acoustic.mp4` trong
+  cùng workspace và chỉ Auto Multi acoustic dùng file gốc; ASR/render vẫn dùng
+  `normalized_source.mp4`. Auto 2 và các lane khác giữ nguyên.
+- Job khách `#E937B761F8` không phải acoustic failure: nó đã qua ASR +
+  translation đến `60%`, sinh exact quote `247` từ / `226 Xu`, sau đó hết hạn
+  exact-price confirmation; terminal `failed_no_charge`, `charged_xu=0`.
+- TDD public-source: RED `1 failed` do thiếu helper/path; GREEN `1 passed`.
+  Presentation + parity `8 passed`; i18n/continuity/embedding `136 passed`;
+  changed-file `py_compile` exit `0`. Source loop gọi provider `0`, tạo job
+  `0`, ghi production DB/ví `0`.

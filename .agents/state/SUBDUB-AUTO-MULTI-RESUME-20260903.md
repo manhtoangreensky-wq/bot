@@ -553,3 +553,24 @@ terminal evidence. No ASR/translation/TTS/mux/video replay and no new job.
   `*.binlog*` trước fuser/rm; không đổi Telegram handler.
 - Side effects trong source loop: provider calls `0`, new jobs `0`,
   production DB/wallet mutation `0`.
+
+### Public fresh normalization + product information — 2026-09-08
+
+- Runtime before this follow-up: `752ce070cf6b73052ed00388bdb19c2c6b5edd22`.
+- Job `#76EAF3A29A` is the exact new public acoustic RED: `allowed_public`,
+  input SHA `83DE97B7...AD3E`, terminal `5%`
+  `fixed_vocal_gender_partition_unstable`, before ASR and no charge.
+- Root: fresh normalization retained the original hash but reused a path later
+  occupied by normalized media. The local acoustic override therefore read
+  normalized H.264/48kHz instead of the original AV1/AAC 44.1kHz bytes.
+- Minimal generic correction persists `original_source_for_acoustic.mp4` only
+  when normalization occurs; Auto Multi acoustic uses it while ASR/render use
+  `normalized_source.mp4`. No admin/user/job/SHA condition and no Auto 2 diff.
+- Job `#E937B761F8` is separate: ASR/translation reached `60%`, exact quote was
+  `247` words / `226 Xu`, then confirmation expired; terminal/no-charge.
+- Presentation now states all `4` lanes, Auto 2 exact `2`, Auto Multi `3–8`,
+  every voice choice, primary MP4 and result-screen SRT across `17` locale
+  copy rows. Admin/customer catalog equality is regression-tested.
+- Evidence: source RED `1 failed`; source GREEN `1 passed`; product-info/parity
+  `8 passed`; i18n/continuity/embedding `136 passed`; full changed-file compile
+  exit `0`. Provider/new-job/production DB/wallet delta remains `0`.

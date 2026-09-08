@@ -739,3 +739,17 @@ fixture chỉ là regression evidence, không phải điều kiện điều khi�
 | Admin và khách cần hai thuật toán Auto Multi khác nhau | Job khách `#E061920890` đã qua `allowed_public` và vào cùng local acoustic engine; comparator `allow_admin=False/True` cho cùng call order/output | ❌ Dùng một executor, chỉ khác gate/settlement |
 | Không có pairwise global quorum `0.95` thì mọi acoustic evidence đều vô dụng | Ba view có thể lệch ở các boundary khác nhau nhưng vẫn đồng thuận theo từng window; per-window consensus chỉ hợp lệ khi khớp từng view `≥0.95` và hậu kiểm support/gender PASS | ⚠️ Giữ fail-closed nhưng không fail giả |
 | `fuser` đủ bảo vệ mọi file trong Local Bot API data khỏi cleanup | Durable binlog có thể đóng ngắn giữa rotation; cleanup coi nó là artifact cũ, lần TQueue GC sau làm process fatal và callback nhận `502` | ❌ `*.binlog*` phải tuyệt đối do Local Bot API sở hữu |
+
+### Đối chiếu thông tin SubDub và nguồn acoustic của khách — 08/09/2026
+
+| Giả định/copy cũ | Bằng chứng hiện tại | Trạng thái |
+|---|---|---|
+| Auto nhận tối đa `16` người nói | Auto 2 dùng đúng `2`; fixed-vocal Auto Multi hỗ trợ `3–8` speaker (`MIN_SPEAKERS=3`, `MAX_SPEAKERS=8`) | ❌ Copy cũ đã bỏ |
+| Menu chỉ cần ghi “chọn loại nội dung” | Runtime có đúng `4` lane public và nhiều kiểu giọng; khách cần biết MP4 là kết quả chính, SRT tải ở màn kết quả | ⚠️ Đã đồng bộ catalog |
+| Admin và khách cần catalog khác nhau | `localized_menu_content(..., is_admin=False/True)` cho cùng text/callback map; chỉ gate/settlement khác | ❌ Không tách presentation |
+| Có `source_sha256` gốc là acoustic chắc chắn đọc file gốc | Job `#76EAF3A29A` giữ hash gốc nhưng path override trỏ vào file normalized nên vẫn fail `fixed_vocal_gender_partition_unstable` | ❌ Phải giữ path bytes gốc |
+| Mọi job khách dừng đều là lỗi acoustic | `#E937B761F8` đã qua ASR/translation và chỉ hết hạn xác nhận exact quote | ❌ Phân loại theo durable state |
+
+Correction giữ hai source authority trong cùng workspace: bản gốc chỉ cho
+Auto Multi acoustic; bản normalized cho ASR/render. Không chứa user/job/SHA
+fixture branch và không đổi Auto 2, provider routing, giá hay logic ví.

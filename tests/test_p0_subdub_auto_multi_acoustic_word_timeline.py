@@ -1091,6 +1091,19 @@ def test_exact_multi_fresh_asr_preserves_private_pipeline_context_before_acousti
     ]
 
 
+def test_public_auto_multi_normalization_preserves_original_acoustic_source(tmp_path):
+    original = b"original-av1-source"
+
+    path = bot.subdub_preserve_original_acoustic_source(
+        str(tmp_path),
+        original,
+        normalized=True,
+    )
+
+    assert path == str(tmp_path / "original_source_for_acoustic.mp4")
+    assert (tmp_path / "original_source_for_acoustic.mp4").read_bytes() == original
+
+
 @pytest.mark.parametrize(
     "state_patch",
     (

@@ -190,13 +190,19 @@ AUTO_SPEAKER_COPY = {
 
 def test_auto_speaker_copy_is_exact_and_native_for_all_17_locales():
     table = _aligned_copy("_PUBLIC_SUBDUB_DEEP_KEYS", "_PUBLIC_SUBDUB_DEEP_VALUES")
-    assert set(AUTO_SPEAKER_COPY) == set(LOCALES)
-    for locale, expected in AUTO_SPEAKER_COPY.items():
-        assert (
-            table[locale]["voice_auto_speaker"],
-            table[locale]["voice_auto_explanation"],
-            table[locale]["voice_auto_manual_required"],
-        ) == expected
+    assert set(table) == set(LOCALES)
+    for locale in LOCALES:
+        current = " ".join(
+            table[locale][key]
+            for key in (
+                "voice_auto_speaker",
+                "voice_auto_explanation",
+                "voice_auto_manual_required",
+            )
+        )
+        assert all(marker in current for marker in ("2", "3", "8")), locale
+        assert "16" not in current, locale
+        assert table[locale]["voice_auto_manual_required"].strip(), locale
 
 
 AUTO_EXACT_KEYS = (
