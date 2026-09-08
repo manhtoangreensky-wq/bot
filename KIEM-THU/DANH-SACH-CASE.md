@@ -210,6 +210,8 @@ Các case trên phải chạy bằng SQLite tạm trước khi live. Không dùn
 |---|---|---|
 | `SD-PUBLIC-ALL-01` | Dùng một user không phải admin đi vào từng lane SubDub | `subtitle_create`, `subtitle_translate`, `dub`, `subtitle_plus_dub` đều mở draft; sau đúng một final Confirm phải `allowed_public`, `effective_ready=true`, `blockers=[]`. Auto 2 và Auto Multi cùng hiện trong voice menu khi capacity true. |
 | `SD-MS-CONT-01` | Hai job Auto Multi hợp lệ đến gần nhau; một người xuất hiện qua nhiều cảnh và có một gender-window outlier | Job sau chờ bounded, không fail `fixed_vocal_demix_busy` ở `5%`; processing budget bắt đầu sau khi lấy khóa. Cùng acoustic identity giữ một `high/low` register và một voice; outlier không đổi nữ thành nam; hai người cùng register vẫn là hai speaker/voice distinct. Identity candidate bị quorum/allocation từ chối tuyệt đối không được cho mượn register sang label của gender partition. |
+| `SD-MS-CONT-02` | Cùng payload Auto Multi chạy qua account admin và account khách; ba acoustic view có boundary jitter phân tán | Sau gate/Confirm, cả hai account dùng chung ASR → local acoustic → translation executor. Nếu không cặp view nào đạt global `0.95`, per-window 2/3 consensus chỉ hợp lệ khi consensus khớp từng view `≥0.95`; 3-way tie dùng aggregate view; vẫn phải đủ speaker/support/gender evidence. |
+| `SD-UI-LBAPI-01` | Cleanup timer chạy khi Local Bot API đang quản lý `tqueue.binlog`, `webhooks_db.binlog` hoặc per-bot `td.binlog` | Mọi `*.binlog*` bị loại khỏi cleanup trước `fuser`/`rm`; container không chết ở TQueue GC; callback không nhận khoảng trống `502` do cleanup. |
 
 FAIL nếu test gọi provider, chạy hai local model song song, thay đổi exact-two,
 hoặc hết timeout mà không fail-closed/cleanup.

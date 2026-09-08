@@ -1148,12 +1148,37 @@ def build_gender_constrained_speech_authority(
             )
         if shift_agreement >= SPEECH_PARTITION_MIN_AGREEMENT:
             quorum_candidates.append((shift_agreement, 0, base_labels, base))
-        if not quorum_candidates:
-            raise ValueError("fixed_vocal_gender_partition_unstable")
-        _agreement, _priority, quorum_labels, quorum_embeddings = max(
-            quorum_candidates,
-            key=lambda item: (item[0], item[1]),
-        )
+        if quorum_candidates:
+            _agreement, _priority, quorum_labels, quorum_embeddings = max(
+                quorum_candidates,
+                key=lambda item: (item[0], item[1]),
+            )
+        else:
+            consensus_labels = []
+            for votes in zip(
+                base_labels.tolist(),
+                shifted_labels.tolist(),
+                aggregate_labels.tolist(),
+                strict=True,
+            ):
+                counts = {label: votes.count(label) for label in set(votes)}
+                label = min(counts, key=lambda value: (-counts[value], value))
+                if counts[label] < 2:
+                    label = votes[2]
+                consensus_labels.append(label)
+            quorum_labels = np.asarray(consensus_labels, dtype=np.int64)
+            if any(
+                float(np.mean(quorum_labels == view_labels))
+                < SPEECH_PARTITION_MIN_AGREEMENT
+                for view_labels in (
+                    base_labels,
+                    shifted_labels,
+                    aggregate_labels,
+                )
+            ):
+                raise ValueError("fixed_vocal_gender_partition_unstable")
+            _validate_cluster_support(quorum_labels, speech, speaker_count)
+            quorum_embeddings = aggregate
         canonical_labels = _canonical_cluster_labels(
             quorum_labels,
             positions,

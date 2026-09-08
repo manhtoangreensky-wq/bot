@@ -524,3 +524,32 @@ terminal evidence. No ASR/translation/TTS/mux/video replay and no new job.
   Changed-file compile và full `py_compile bot.py` đều exit `0`; diff/scope/
   secret checks exit `0`. Một test public TTS không liên quan có stale fake
   signature và fail y hệt trên hai file diff-empty; không sửa ngoài scope.
+
+### Customer acoustic consensus + Local Bot API binlog — 2026-09-08
+
+- PR `#1004` merged `af4119ef074d2b87214640d41126078a7ecbd626`.
+  Bot deploy workflow hết health deadline trước khi startup xong, nhưng direct
+  readback xác nhận checkout exact/clean, bot/web/nginx active, health HTTP 200
+  và VPS continuity test `5 passed`.
+- Fresh customer job `#E061920890` dùng exact fixture SHA
+  `83DE97B7...AD3E`, qua `allowed_public`, strict ASR `145` words và UI
+  từng đạt `35%`; nó terminal `failed_no_charge` với
+  `fixed_vocal_gender_partition_unstable`, trước translation/TTS/mux,
+  `charged_xu=0`. Queue fix đã hoạt động: blocker không còn
+  `fixed_vocal_demix_busy`.
+- RED mới chứng minh ba valid view có thể lệch ở các boundary khác nhau nên
+  không pair nào đạt global `0.95` dù mỗi window có 2/3 authority. Fallback
+  chỉ chạy khi consensus khớp từng view `≥0.95`; majority 2/3 thắng,
+  three-way tie dùng aggregate; cluster support và gender evidence vẫn
+  fail-closed.
+  Existing divergent-view negative comparator vẫn PASS.
+- Account-neutral comparator chạy cùng payload với
+  `allow_admin=False/True`: cả hai đi ASR → acoustic → translation và cho
+  cùng speaker/register state, `2 passed`. Không có customer-only algorithm.
+- Callback delay tại `13:15:47` là Local Bot API container exit: cleanup có
+  thể xóa durable `tqueue.binlog`/`webhooks_db.binlog`/`td.binlog` khi file
+  đóng ngắn giữa rotation; vòng TQueue GC sau báo `Failed to unlink old
+  binlog`, systemd restart sau 10 giây và bot nhận `502`. Fix loại toàn bộ
+  `*.binlog*` trước fuser/rm; không đổi Telegram handler.
+- Side effects trong source loop: provider calls `0`, new jobs `0`,
+  production DB/wallet mutation `0`.

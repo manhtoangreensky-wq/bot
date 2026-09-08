@@ -1394,3 +1394,24 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   `[high,low,low,high,low]`, selector `1 passed in 131.23s`; Auto 2 protected
   `34 + 10 passed`, public four-lane `12 passed`, compile/diff/scope/secret
   đều exit `0`.
+
+### Public job acoustic consensus và Local Bot API callback — 08/09/2026
+
+- Sau runtime `af4119ef`, job khách `#E061920890` dùng đúng fixture SHA
+  `83DE97B7...AD3E`, qua `allowed_public`, strict ASR `145` words và UI từng
+  hiện `35%`; terminal sau đó là `failed_no_charge` với
+  `fixed_vocal_gender_partition_unstable`, trước translation/TTS/mux và
+  `charged_xu=0`. Đây không phải account gate hay lock-busy cũ.
+- Admin và khách vẫn gọi cùng executor. Comparator chạy cùng payload với
+  `allow_admin=False/True` đạt `2 passed`; khác biệt chỉ là access/settlement,
+  không có thuật toán acoustic riêng theo account.
+- Khi cả ba view chọn cùng gender allocation nhưng boundary jitter phân tán
+  khiến không cặp nào đạt global agreement `0.95`, engine chỉ nhận consensus
+  khi consensus khớp từng view `≥0.95`. Mỗi window lấy majority `2/3`;
+  three-way tie dùng aggregate view; cluster support và gender evidence vẫn
+  fail-closed. Existing divergent-view comparator vẫn phải FAIL.
+- Nút callback delay lúc `13:15:47` có root độc lập: cleanup timer có thể xóa
+  durable Local Bot API `*.binlog*` khi file đóng ngắn giữa hai lần rotation.
+  TQueue GC sau đó báo `Failed to unlink old binlog`, container thoát, systemd
+  tạo khoảng trống `10s`, và bot nhận `502 Bad Gateway`. Cleanup mới bảo vệ
+  mọi `*.binlog*` trước `fuser`/`rm`; không đổi Telegram handler.

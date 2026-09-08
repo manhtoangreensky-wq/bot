@@ -100,6 +100,9 @@ The health, reconcile, certificate, and cleanup timers are sandboxed. Cleanup
 runs every 15 minutes, retains normal artifacts for 120 minutes, keeps Local
 Bot API data at or below 6144 MiB, requires at least 3072 MiB free, and fails
 closed before enumeration if `fuser` or another guard tool is unavailable.
+Cleanup never removes Telegram Bot API durable `*.binlog*` state;
+those files may be closed briefly during rotation and must remain owned by the
+Telegram Bot API process itself.
 The legacy unsafe cleanup timer is disabled only after the new release passes.
 
 ## Railway production limits
