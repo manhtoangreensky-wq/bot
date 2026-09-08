@@ -135112,9 +135112,9 @@ def help_text_for_user(user_id) -> str:
         "• Tạo giọng đọc từ văn bản, bóc băng giọng nói thành chữ, chọn voice, tạo voice riêng, tạo nhạc nền hoặc bài hát ngắn.\n"
         "• Bản nghe thử là preview ngắn; bản đầy đủ chỉ xử lý sau bước xác nhận nếu có phí.\n\n"
         "<b>5. Phụ đề / Dịch / Lồng tiếng</b>\n"
-        "• Tạo phụ đề từ video hoặc audio.\n"
-        "• Dịch nội dung sang ngôn ngữ khác.\n"
-        "• Lồng tiếng cho video theo ngôn ngữ/giọng đã chọn.\n\n"
+        "• 4 lane đang hoạt động: Tạo phụ đề tự động, Dịch phụ đề video, Lồng tiếng video và Phụ đề + Lồng tiếng.\n"
+        "• Chọn giọng mặc định, Kho giọng, giọng riêng, Tự động 2 người nói hoặc Tự động nhiều giọng cho 3–8 người nói.\n"
+        "• Kết quả chính là MP4; khi có phụ đề, SRT tải tại màn kết quả. Mỗi bước có phí hiển thị giá và yêu cầu xác nhận trước khi xử lý.\n\n"
         "<b>6. Xu, nạp tiền và ưu đãi</b>\n"
         "• 1 Xu = 100đ. Ví dụ 1.000 Xu tương đương 100.000đ.\n"
         "• Dùng <code>/pricing</code> hoặc <code>/banggia</code> để xem giá.\n"
@@ -135171,7 +135171,9 @@ def help_text_for_user_i18n(user_id) -> str:
         "• <code>/video</code> — video menu\n"
         "• <code>/product_video</code> — product video entry\n"
         "• <code>/media_factory</code> — video/media content workflow\n"
-        "• <code>/subdub</code> — subtitle and dubbing menu\n\n"
+        "• <code>/subdub</code> — Auto subtitles, Translate video subtitles, Video dubbing, and Subtitles + dubbing.\n"
+        "• Voice choices: default, saved, custom, Auto 2 speakers, or Auto multi for 3–8 speakers.\n"
+        "• The primary result is MP4; SRT is available on the result screen when subtitles are used.\n\n"
         "<b>Translation / audio</b>\n"
         "• <code>/translate</code> — translation menu or one-time translation\n"
         "• <code>/translate_voice</code> — translate voice/audio when enabled\n\n"
@@ -233784,24 +233786,13 @@ def subtitle_plus_dub_voice_text(
 
 
 def subdub_auto_voice_choice(lang: str = "vi") -> tuple[str, str]:
-    normalized_lang = normalize_user_language(lang)
-    label = {
-        "vi": "👥 Tự động 2 giọng",
-        "en": "👥 Auto 2 speakers",
-    }.get(
-        normalized_lang,
-        public_subdub_deep_copy(normalized_lang)["voice_auto_speaker"],
-    )
-    return label, "videodub|voice|auto_speaker_gender"
+    copy = public_subdub_deep_copy(normalize_user_language(lang))
+    return copy["voice_auto_speaker"], "videodub|voice|auto_speaker_gender"
 
 
 def subdub_auto_multi_voice_choice(lang: str = "vi") -> tuple[str, str]:
-    label = (
-        "👥 Tự động nhiều giọng"
-        if normalize_user_language(lang) == "vi"
-        else "👥 Auto multiple speakers"
-    )
-    return label, "videodub|voice|auto_multi_speaker"
+    copy = public_subdub_deep_copy(normalize_user_language(lang))
+    return copy["voice_auto_multi_speaker"], "videodub|voice|auto_multi_speaker"
 
 def subtitle_plus_dub_voice_keyboard(
     lang: str = "vi",
@@ -233810,6 +233801,7 @@ def subtitle_plus_dub_voice_keyboard(
     include_auto: bool = True,
 ) -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
+    copy = public_subdub_deep_copy(normalize_user_language(lang))
     state = dict(state or {})
     back = ("⬅️ Quay lại" if is_vi else "⬅️ Back", "videodub|combo_back_subtitle_ready")
     if subtitle_plus_dub_no_subtitle_subpath(state) == VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB:
@@ -233817,10 +233809,10 @@ def subtitle_plus_dub_voice_keyboard(
     elif str(state.get("flow_type") or "") == VIDEO_DUBBING_FLOW_HAS_SUBTITLE and not state.get("subtitle_ref"):
         back = ("⬅️ Ngôn ngữ" if is_vi else "⬅️ Language", "videodub|back_voice")
     items = [
-        ("👩 Giọng nữ mặc định" if is_vi else "👩 Default female", "videodub|voice|default_female"),
-        ("👨 Giọng nam mặc định" if is_vi else "👨 Default male", "videodub|voice|default_male"),
-        ("📚 Kho voice" if is_vi else "📚 Voice vault", "videodub|voice_saved"),
-        ("🎙 Tạo voice riêng" if is_vi else "🎙 Create custom voice", "videodub|voice_library"),
+        (copy["voice_default_female"], "videodub|voice|default_female"),
+        (copy["voice_default_male"], "videodub|voice|default_male"),
+        (copy["saved_voice"], "videodub|voice_saved"),
+        (copy["voice_custom_create"], "videodub|voice_library"),
     ]
     markup = video_v6_keyboard(
         items,
@@ -234775,6 +234767,7 @@ def video_dubbing_pricing_text(lang: str = "vi") -> str:
         f"• {copy['pricing_dub_default']}: <b>{dub_rate:g} Xu / character</b>\n"
         f"• {copy['pricing_dub_saved']}: <b>{custom_rate:g} Xu / character</b>\n"
         f"• {copy['voice_auto_speaker']}: {copy['voice_auto_price_rule']}\n"
+        f"• {copy['voice_auto_multi_speaker']}: {copy['voice_auto_price_rule']}\n"
         f"• {copy['combo']}: {copy['translate']} + {copy['dub']}\n\n"
         f"{copy['pricing_manual_discount']}\n"
         f"{copy['confirm']}"
@@ -235248,10 +235241,10 @@ def video_dubbing_voice_keyboard(
     if subtitle_plus_dub_is_active(state) and str((state or {}).get("active_flow") or "") == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB:
         return subtitle_plus_dub_voice_keyboard(lang, state, include_auto=include_auto)
     items = [
-        (f"👩 {copy['voice']}", "videodub|voice|default_female"),
-        (f"👨 {copy['voice']}", "videodub|voice|default_male"),
+        (copy["voice_default_female"], "videodub|voice|default_female"),
+        (copy["voice_default_male"], "videodub|voice|default_male"),
         (copy["saved_voice"], "videodub|voice_saved"),
-        ("🎙 Tạo voice riêng" if normalize_user_language(lang) == "vi" else "🎙 Create custom voice", "videodub|voice_create"),
+        (copy["voice_custom_create"], "videodub|voice_create"),
     ]
     markup = video_v6_keyboard(
         items,
@@ -235971,7 +235964,12 @@ def video_dubbing_confirm_text(state: dict | None = None, lang: str = "vi") -> s
             if mix_lines:
                 lines.extend(mix_lines.splitlines())
             lines.append(f"• speed: <b>{html.escape(speed)}</b>")
-        lines.append(f"• {copy['output']}: MP4" + (" · SRT" if mode != VIDEO_SUBTITLE_MODE_DUB else ""))
+        output_label = (
+            "MP4"
+            if mode == VIDEO_SUBTITLE_MODE_DUB
+            else copy["output_mp4_srt"]
+        )
+        lines.append(f"• {copy['output']}: {output_label}")
         if mode == VIDEO_SUBTITLE_MODE_CREATE:
             lines.append("• 0 Xu")
         else:
@@ -241040,6 +241038,20 @@ def write_subtitle_dub_pipeline_artifact(workspace: str, filename: str, data: by
     with open(path, "wb") as handle:
         handle.write(bytes(data))
     return path
+
+def subdub_preserve_original_acoustic_source(
+    workspace: str,
+    source_bytes: bytes,
+    *,
+    normalized: bool,
+) -> str:
+    if not normalized or not source_bytes:
+        return ""
+    return write_subtitle_dub_pipeline_artifact(
+        workspace,
+        "original_source_for_acoustic.mp4",
+        bytes(source_bytes),
+    )
 
 def video_dubbing_sync_state_fields(state: dict | None = None, *, exclude: set[str] | None = None) -> dict:
     skipped = {
@@ -249653,6 +249665,11 @@ def subdub_auto_exact_confirmation_text(
 ) -> str:
     copy = public_subdub_deep_copy(normalize_user_language(lang))
     receipt = dict(job.get("auto_exact_receipt") or job.get("receipt") or {})
+    lane_label = (
+        copy["voice_auto_multi_speaker"]
+        if auto_multi_speaker.is_auto_multi_speaker_state(job)
+        else copy["voice_auto_speaker"]
+    )
     words = int(receipt.get("actual_billable_words") or 0)
     auto_xu = int(receipt.get("actual_auto_xu") or 0)
     subtitle_xu = int(receipt.get("actual_subtitle_xu") or 0)
@@ -249660,6 +249677,7 @@ def subdub_auto_exact_confirmation_text(
     lines = [
         str(copy["voice_auto_exact_required"]),
         "",
+        f"• {copy['voice']}: <b>{lane_label}</b>",
         f"• {copy['voice_auto_billable_words']}: <b>{words}</b>",
         f"• {copy['dub']}: <b>{auto_xu} Xu</b>",
     ]
@@ -250281,6 +250299,7 @@ async def _execute_video_dubbing_pipeline_core(
         and not exact_resume_requested
         and str(input_save.get("content_type") or "").lower().startswith("video/")
     ):
+        original_source_bytes_for_acoustic = bytes(input_save.get("source_bytes") or b"")
         media_preflight = await subdub_normalize_video_bytes_if_needed(
             bytes(input_save.get("source_bytes") or b""),
             content_type=str(input_save.get("content_type") or "video/mp4"),
@@ -250306,6 +250325,13 @@ async def _execute_video_dubbing_pipeline_core(
                     "normalized_source.mp4",
                     input_save["source_bytes"],
                 )
+                original_acoustic_path = subdub_preserve_original_acoustic_source(
+                    workspace,
+                    original_source_bytes_for_acoustic,
+                    normalized=True,
+                )
+                if original_acoustic_path:
+                    input_save["original_source_path"] = original_acoustic_path
                 input_save["normalized_path"] = normalized_path
         elif not media_preflight.get("ok"):
             blocker = str(media_preflight.get("blocker") or "media_normalization_failed")
@@ -250426,9 +250452,9 @@ async def _execute_video_dubbing_pipeline_core(
         state = {
             **state,
             **(
-                {"_pipeline_source_path_override": str(input_save.get("path") or "")}
+                {"_pipeline_source_path_override": str(input_save.get("original_source_path") or input_save.get("path") or "")}
                 if auto_multi_speaker.is_auto_multi_speaker_state(state)
-                and str(input_save.get("path") or "")
+                and str(input_save.get("original_source_path") or input_save.get("path") or "")
                 else {}
             ),
             "_pipeline_source_bytes_override": bytes(input_save.get("source_bytes") or b""),

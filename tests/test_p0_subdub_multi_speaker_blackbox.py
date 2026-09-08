@@ -350,7 +350,7 @@ def test_voice_menus_place_named_two_and_multi_auto_choices_on_one_row(
     ]
     assert [button.text for button in auto_row] == [
         "👥 Tự động 2 giọng",
-        "👥 Tự động nhiều giọng",
+        "👥 Tự động nhiều giọng (3–8)",
     ]
 
 
@@ -386,7 +386,7 @@ def test_old_and_multi_states_select_different_blackboxes(monkeypatch):
         (EXACT_AUTO_STATE, "👥 Tự động 2 giọng"),
         (
             {**EXACT_AUTO_STATE, "auto_speaker_lane": "multi"},
-            "👥 Tự động nhiều giọng",
+            "👥 Tự động nhiều giọng (3–8)",
         ),
     ),
 )
