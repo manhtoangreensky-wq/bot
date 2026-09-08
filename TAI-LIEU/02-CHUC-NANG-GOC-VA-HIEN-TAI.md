@@ -725,3 +725,14 @@ fixture chỉ là regression evidence, không phải điều kiện điều khi�
 | Một execution recovery cũ đủ cho mọi correction | v4 dùng CAS marker riêng, cùng internal job, source SHA/bytes mới, nonce mới; không tạo job thứ hai và không replay command cũ | ❌ Không còn đúng |
 | Cả hai so sánh base/shift và base/aggregate đều phải đạt `0.95` | Live có base/aggregate `1.0`, đủ `5/5` speaker và đúng register nhưng shifted perturbation `0.915254`; pairwise quorum 2/3 giữ nguyên threshold và vẫn chặn khi không pair nào đạt | ❌ Chốt all-view quá cứng gây fail giả ở 5% |
 | Video đã gửi thì snapshot debug cuối luôn giữ đủ acoustic/cast proof và receipt | V4 message `28129` đã gửi nhưng mutable acoustic bundle không được merge vào `result.state`; status-panel timeout khiến receipt bị chặn an toàn | ❌ Cần durable proof merge và receipt-only closeout, tuyệt đối không render/gửi video lại |
+
+### Đối chiếu public access và continuity Auto Multi — 07/09/2026
+
+| Giả định cũ | Bằng chứng hiện tại | Trạng thái |
+|---|---|---|
+| Owner chạy được nhưng khách fail nghĩa là SubDub còn khóa theo tài khoản | Runtime read-only cho user non-admin: cả `4/4` lane canonical đều `allowed_public` sau Confirm; Auto Multi menu/route/capacity đều true | ❌ Không còn đúng |
+| Job khách `#66C9613DF7` fail `5%` do ngôn ngữ | Job đã qua `allowed_public`; blocker chính xác là `fixed_vocal_demix_busy`, trước translation/TTS, và `charged_xu=0` | ❌ Không phải ngôn ngữ |
+| Local acoustic lock bận thì fail ngay là an toàn | Với public concurrency, fail tức thì làm khách thứ hai rơi ở `5%`; correction chờ bounded tối đa `1200s`, rồi mới cấp đủ processing budget | ⚠️ Phải xếp hàng fail-closed |
+| Gender của từng window có thể quyết định luôn speaker identity | Một outlier window có thể bẻ cùng nhân vật sang register khác; correction lấy acoustic identity ổn định trước, rồi majority strong-gender evidence chốt một register cho identity đó | ❌ Gây đổi nữ/nam giữa cảnh |
+| Hai nhân vật cùng nữ hoặc cùng nam có thể gộp để ổn định giọng | Test mới giữ hai acoustic identity khác nhau dù cùng register; voice allocator hiện hữu tiếp tục cấp voice distinct theo speaker | ✅ Không gộp người |
+| Identity candidate bị từ chối vẫn có thể cung cấp register cho gender labels | RED tái hiện candidate `2 high/1 low` bị từ chối nhưng register rò sang partition `1 high/2 low`, làm case hợp lệ fail-closed | ❌ Register chỉ được dùng khi cùng partition thật sự được chọn |

@@ -63,6 +63,8 @@ FBANK_FFT_BINS = FBANK_FFT_POINTS // 2
 _HAMMING_WINDOW: np.ndarray | None = None
 _MEL_FILTER_MATRIX: np.ndarray | None = None
 _EMBEDDING_LOCK = threading.Lock()
+_FIXED_VOCAL_PIPELINE_LOCK = threading.Lock()
+_RUNTIME_LOCK_POLL_SECONDS = 0.05
 _REAL_SESSION = None
 
 
@@ -1067,6 +1069,52 @@ def build_gender_constrained_speech_authority(
         if len(set(selected_female_counts)) != 1:
             raise ValueError("fixed_vocal_gender_allocation_unstable")
         female_count = selected_female_counts[0]
+        identity_views = []
+        for matrix in (base, shifted, aggregate):
+            try:
+                identity_labels = _fixed_count_window_partition(
+                    matrix,
+                    positions,
+                    speaker_count,
+                )
+                _validate_cluster_support(
+                    identity_labels,
+                    speech,
+                    speaker_count,
+                )
+                identity_views.append(identity_labels)
+            except Exception:
+                identity_views = []
+                break
+        identity_labels: np.ndarray | None = None
+        if identity_views:
+            identity_base = identity_views[0]
+            identity_shifted = np.asarray(
+                _align_cluster_labels_to_reference(
+                    identity_base.tolist(),
+                    identity_views[1].tolist(),
+                    speaker_count=speaker_count,
+                ),
+                dtype=np.int64,
+            )
+            identity_aggregate = np.asarray(
+                _align_cluster_labels_to_reference(
+                    identity_base.tolist(),
+                    identity_views[2].tolist(),
+                    speaker_count=speaker_count,
+                ),
+                dtype=np.int64,
+            )
+            if (
+                float(np.mean(identity_base == identity_shifted))
+                >= SPEECH_PARTITION_MIN_AGREEMENT
+                and float(np.mean(identity_base == identity_aggregate))
+                >= SPEECH_PARTITION_MIN_AGREEMENT
+            ):
+                identity_labels = _canonical_cluster_labels(
+                    identity_base,
+                    positions,
+                )
         base_labels = view_candidates[0][0][2]
         shifted_labels = np.asarray(
             _align_cluster_labels_to_reference(
@@ -1110,6 +1158,50 @@ def build_gender_constrained_speech_authority(
             quorum_labels,
             positions,
         )
+        identity_partition_selected = False
+        identity_continuity_repaired = False
+        identity_gender_outlier_window_count = 0
+        if identity_labels is not None:
+            identity_registers = []
+            for label in range(speaker_count):
+                probabilities_for_identity = probabilities[
+                    identity_labels == label
+                ]
+                if len(probabilities_for_identity) < MIN_CLUSTER_UNITS:
+                    identity_registers = []
+                    break
+                female_votes = int(
+                    np.count_nonzero(probabilities_for_identity >= threshold)
+                )
+                male_votes = int(
+                    np.count_nonzero(
+                        probabilities_for_identity <= 1.0 - threshold
+                    )
+                )
+                if female_votes == male_votes:
+                    identity_registers = []
+                    break
+                register = "high" if female_votes > male_votes else "low"
+                identity_registers.append(register)
+                identity_gender_outlier_window_count += int(
+                    np.count_nonzero(
+                        probabilities_for_identity <= 1.0 - threshold
+                        if register == "high"
+                        else probabilities_for_identity >= threshold
+                    )
+                )
+            if (
+                len(identity_registers) == speaker_count
+                and identity_registers.count("high") == female_count
+            ):
+                canonical_labels = identity_labels
+                quorum_labels = identity_labels
+                quorum_embeddings = aggregate
+                identity_partition_selected = True
+                identity_continuity_repaired = bool(
+                    not np.array_equal(canonical_labels, base_labels)
+                    or identity_gender_outlier_window_count
+                )
         old_to_canonical: dict[int, int] = {}
         for old, canonical in zip(
             quorum_labels.tolist(),
@@ -1119,10 +1211,14 @@ def build_gender_constrained_speech_authority(
             if old in old_to_canonical and old_to_canonical[old] != canonical:
                 raise ValueError("fixed_vocal_gender_label_invalid")
             old_to_canonical[old] = canonical
-        base_registers = [
-            "high" if label < female_count else "low"
-            for label in range(speaker_count)
-        ]
+        base_registers = (
+            identity_registers
+            if identity_partition_selected
+            else [
+                "high" if label < female_count else "low"
+                for label in range(speaker_count)
+            ]
+        )
         registers = [""] * speaker_count
         register_confidences = [0.0] * speaker_count
         for old_label, register in enumerate(base_registers):
@@ -1182,6 +1278,10 @@ def build_gender_constrained_speech_authority(
             "ambiguous_window_count": ambiguous_count,
             "gender_model_sha256": multi_gender.MULTI_GENDER_MODEL_SHA256,
             "partition_stable": True,
+            "identity_continuity_repaired": identity_continuity_repaired,
+            "identity_gender_outlier_window_count": (
+                identity_gender_outlier_window_count
+            ),
         }
     except speaker_cast.AutoCastManualRequired:
         raise
@@ -1485,6 +1585,39 @@ def _embedding_boundary_check(
         raise _manual_required(RuntimeError("acoustic_embedding_cancelled"))
 
 
+def _acquire_runtime_lock(
+    lock: object,
+    *,
+    deadline_monotonic: float,
+    stop_requested: Callable[[], bool],
+    timeout_code: str,
+) -> None:
+    """Wait cooperatively for shared local inference instead of failing at 5%."""
+
+    if not callable(getattr(lock, "acquire", None)) or not callable(stop_requested):
+        raise _manual_required(ValueError("acoustic_runtime_lock_invalid"))
+    if type(deadline_monotonic) not in {int, float}:
+        raise _manual_required(ValueError("acoustic_deadline_invalid"))
+    deadline = float(deadline_monotonic)
+    if not math.isfinite(deadline):
+        raise _manual_required(ValueError("acoustic_deadline_invalid"))
+    while True:
+        if bool(stop_requested()):
+            raise _manual_required(RuntimeError("acoustic_embedding_cancelled"))
+        remaining = deadline - time.monotonic()
+        if remaining <= 0.0:
+            raise _manual_required(TimeoutError(str(timeout_code or "acoustic_runtime_lock_timeout")))
+        wait_seconds = min(_RUNTIME_LOCK_POLL_SECONDS, remaining)
+        try:
+            acquired = bool(lock.acquire(timeout=wait_seconds))
+        except TypeError:
+            acquired = bool(lock.acquire(blocking=False))
+            if not acquired:
+                time.sleep(wait_seconds)
+        if acquired:
+            return
+
+
 def _normalized_session_embedding(session: object, samples: np.ndarray) -> np.ndarray:
     features = compute_fbank(samples)
     output = session.run(
@@ -1518,8 +1651,12 @@ def _load_fixed_vocal_pcm16(
 ) -> np.ndarray:
     """Demix the existing hash-locked UVR vocal stem and resample to mono 16k."""
 
-    if not two_speaker_gender._CLASSIFIER_LOCK.acquire(blocking=False):
-        raise _manual_required(RuntimeError("fixed_vocal_demix_busy"))
+    _acquire_runtime_lock(
+        two_speaker_gender._CLASSIFIER_LOCK,
+        deadline_monotonic=deadline_monotonic,
+        stop_requested=stop_requested,
+        timeout_code="fixed_vocal_demix_timeout",
+    )
     try:
         _embedding_boundary_check(
             deadline_monotonic=deadline_monotonic,
@@ -2719,6 +2856,38 @@ def diarize_word_timeline(
 
 
 def diarize_fixed_vocal_word_timeline(
+    stereo_pcm_path: str,
+    words: object,
+    *,
+    duration_seconds: float,
+    deadline_monotonic: float,
+    stop_requested: Callable[[], bool],
+    session_factory: Callable | None = None,
+    vocal_session_factory: Callable | None = None,
+) -> dict[str, object]:
+    """Serialize the bounded local acoustic engine across concurrent public jobs."""
+
+    _acquire_runtime_lock(
+        _FIXED_VOCAL_PIPELINE_LOCK,
+        deadline_monotonic=deadline_monotonic,
+        stop_requested=stop_requested,
+        timeout_code="fixed_vocal_pipeline_wait_timeout",
+    )
+    try:
+        return _diarize_fixed_vocal_word_timeline_owned(
+            stereo_pcm_path,
+            words,
+            duration_seconds=duration_seconds,
+            deadline_monotonic=deadline_monotonic,
+            stop_requested=stop_requested,
+            session_factory=session_factory,
+            vocal_session_factory=vocal_session_factory,
+        )
+    finally:
+        _FIXED_VOCAL_PIPELINE_LOCK.release()
+
+
+def _diarize_fixed_vocal_word_timeline_owned(
     stereo_pcm_path: str,
     words: object,
     *,
