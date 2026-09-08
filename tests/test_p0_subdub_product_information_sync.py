@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+
 import bot
+import pytest
+from services import subdub_speaker_cast
 from services.pricing_guide_content import (
     PUBLIC_COPY_LOCALES,
     public_subdub_auto_pricing_line,
@@ -154,3 +159,126 @@ def test_subdub_catalog_is_identical_for_admin_and_customer():
 
     assert admin_text == customer_text
     assert _button_map(admin_markup) == _button_map(customer_markup)
+
+
+def test_customer_exact_resume_restores_one_ms_srt_quantization_from_sidecar():
+    sidecar = {
+        "cues": [
+            {
+                "cue_id": "cue-0002-live",
+                "start_ms": 14_475,
+                "end_ms": 16_255,
+            }
+        ]
+    }
+    cached = [{"start": 14.475, "end": 16.254, "text": "cached"}]
+
+    restored = bot.subdub_restore_auto_exact_cached_timing(sidecar, cached)
+
+    assert restored == [
+        {
+            "start": 14.475,
+            "end": 16.255,
+            "start_ms": 14_475,
+            "end_ms": 16_255,
+            "source_start_ms": 14_475,
+            "source_end_ms": 16_255,
+            "text": "cached",
+        }
+    ]
+
+
+def test_customer_exact_resume_rejects_more_than_one_ms_timing_change():
+    sidecar = {
+        "cues": [
+            {
+                "cue_id": "cue-0002-live",
+                "start_ms": 14_475,
+                "end_ms": 16_257,
+            }
+        ]
+    }
+    cached = [{"start": 14.475, "end": 16.254, "text": "cached"}]
+
+    with pytest.raises(subdub_speaker_cast.AutoCastUnavailable):
+        bot.subdub_restore_auto_exact_cached_timing(sidecar, cached)
+
+
+def test_customer_exact_resume_loader_uses_signed_timing_with_one_ms_drift(
+    monkeypatch,
+    tmp_path,
+):
+    source_media = b"normalized-customer-media"
+    source_srt = "1\n00:00:14,475 --> 00:00:16,254\ncached\n"
+    media_path = tmp_path / "normalized_source.mp4"
+    source_path = tmp_path / "auto_exact_source.srt"
+    metadata_path = tmp_path / "auto_exact_cache.json"
+    media_path.write_bytes(source_media)
+    source_path.write_text(source_srt, encoding="utf-8")
+    sidecar = subdub_speaker_cast.build_sidecar(
+        [
+            {
+                "cue_id": "cue-0001-signed",
+                "start": 14.475,
+                "end": 16.255,
+                "source_start_ms": 14_475,
+                "source_end_ms": 16_255,
+                "text": "cached",
+                "speaker": 0,
+                "chunk_index": 0,
+                "speaker_id": "chunk_00:speaker_0",
+                "speaker_confidence": 0.99,
+            }
+        ],
+        media_sha256=hashlib.sha256(source_media).hexdigest(),
+        subtitle_sha256=bot.subdub_speaker_sidecar_subtitle_sha256(source_srt),
+    )
+    sidecar_receipt = subdub_speaker_cast.persist_sidecar(
+        sidecar,
+        workspace=str(tmp_path),
+    )
+    stored_cache = {
+        "version": bot.SUBDUB_AUTO_EXACT_RECEIPT_VERSION,
+        "source_file": source_path.name,
+        "translated_file": "",
+        "source_media_file": media_path.name,
+        "source_subtitle_sha256": bot._subdub_auto_text_sha256(source_srt),
+        "translated_subtitle_sha256": "",
+        "dub_text_source": "source",
+        "target_language": "original",
+    }
+    metadata_path.write_text(
+        json.dumps(stored_cache, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    cache = {**stored_cache, "metadata_file": metadata_path.name}
+    receipt = {
+        "version": bot.SUBDUB_AUTO_EXACT_RECEIPT_VERSION,
+        "media_sha256": hashlib.sha256(source_media).hexdigest(),
+    }
+    state = {
+        "_pipeline_workspace": str(tmp_path),
+        "speaker_sidecar_path": sidecar_receipt["path"],
+        "speaker_sidecar_sha256": sidecar_receipt["sha256"],
+        "source_mime_type": "video/mp4",
+        "target_language": "original",
+    }
+    monkeypatch.setattr(
+        bot,
+        "subtitle_dub_workspace_path_safety",
+        lambda _workspace: {"allowed": True},
+    )
+
+    prepared = bot._subdub_auto_load_cached_prepared(
+        {
+            "workspace": str(tmp_path),
+            "auto_exact_cache": cache,
+            "auto_exact_receipt": receipt,
+        },
+        state,
+    )
+
+    assert prepared["asr_provider"] == "cached_auto_exact_receipt"
+    assert prepared["translation_provider"] == ""
+    assert prepared["source_segments"][0]["cue_id"] == "cue-0001-signed"
+    assert prepared["source_segments"][0]["end"] == 16.255

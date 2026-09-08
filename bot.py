@@ -134717,6 +134717,8 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
         return guide_section_text_i18n(section, lang), guide_keyboard(section, lang)
     if action == "admin_broadcast_lite" and is_admin:
         return broadcast_lite_admin_menu_text(), broadcast_lite_admin_menu_keyboard()
+    if action == "admin" and is_admin:
+        return menu_text_admin(), menu_nav_keyboard("admin", True)
     if action in ADMIN_MENU_PAGE_HANDLERS:
         return ADMIN_MENU_PAGE_HANDLERS[action]()
     if action == "doc_tools":
@@ -248441,6 +248443,44 @@ def _subdub_auto_workspace_file(workspace: str, filename: str) -> str:
     return path
 
 
+def subdub_restore_auto_exact_cached_timing(
+    sidecar: dict,
+    cues: list[dict],
+) -> list[dict]:
+    entries = list((sidecar or {}).get("cues") or [])
+    source = list(cues or [])
+    if not source or len(source) != len(entries):
+        raise subdub_speaker_cast.AutoCastUnavailable()
+    restored = []
+    for cue, entry in zip(source, entries, strict=True):
+        if not isinstance(cue, dict) or not isinstance(entry, dict):
+            raise subdub_speaker_cast.AutoCastUnavailable()
+        try:
+            source_start_ms = int(round(float(cue.get("start") or 0.0) * 1000.0))
+            source_end_ms = int(round(float(cue.get("end") or 0.0) * 1000.0))
+            stored_start_ms = int(entry.get("start_ms"))
+            stored_end_ms = int(entry.get("end_ms"))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise subdub_speaker_cast.AutoCastUnavailable() from exc
+        if (
+            stored_start_ms < 0
+            or stored_end_ms <= stored_start_ms
+            or abs(source_start_ms - stored_start_ms) > 1
+            or abs(source_end_ms - stored_end_ms) > 1
+        ):
+            raise subdub_speaker_cast.AutoCastUnavailable()
+        restored.append({
+            **cue,
+            "start": stored_start_ms / 1000.0,
+            "end": stored_end_ms / 1000.0,
+            "start_ms": stored_start_ms,
+            "end_ms": stored_end_ms,
+            "source_start_ms": stored_start_ms,
+            "source_end_ms": stored_end_ms,
+        })
+    return restored
+
+
 def _subdub_auto_load_cached_prepared(job: dict, state: dict) -> dict:
     """Rehydrate the same workspace without Telegram, ASR, or translation I/O."""
 
@@ -248529,6 +248569,10 @@ def _subdub_auto_load_cached_prepared(job: dict, state: dict) -> dict:
         sidecar_path,
         expected_sha256=sidecar_sha256,
         workspace=workspace,
+    )
+    source_segments = subdub_restore_auto_exact_cached_timing(
+        sidecar,
+        source_segments,
     )
     source_segments = subdub_speaker_cast.restore_cached_cue_ids_from_sidecar(
         sidecar,

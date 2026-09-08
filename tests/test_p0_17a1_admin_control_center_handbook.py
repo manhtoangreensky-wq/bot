@@ -58,6 +58,24 @@ def test_admin_main_menu_no_giant_command_dump():
     assert "ShopAIKey / Provider" not in text
 
 
+def test_localized_admin_callback_opens_admin_control_center():
+    text, markup = bot.localized_menu_content(
+        "admin",
+        True,
+        "vi",
+        user_id=bot.ADMIN_ID,
+    )
+
+    assert text == bot.menu_text_admin()
+    callbacks = [
+        button.callback_data
+        for row in markup.inline_keyboard
+        for button in row
+    ]
+    assert "menu|admin_users" in callbacks
+    assert "menu|admin_provider_worker" in callbacks
+
+
 def test_admin_user_wallet_page_has_purpose_and_commands():
     text = bot.admin_module_page_text("users")
 

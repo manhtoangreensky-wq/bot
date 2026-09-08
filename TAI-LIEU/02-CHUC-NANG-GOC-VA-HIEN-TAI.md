@@ -753,3 +753,15 @@ fixture chỉ là regression evidence, không phải điều kiện điều khi�
 Correction giữ hai source authority trong cùng workspace: bản gốc chỉ cho
 Auto Multi acoustic; bản normalized cho ASR/render. Không chứa user/job/SHA
 fixture branch và không đổi Auto 2, provider routing, giá hay logic ví.
+
+### Đối chiếu Admin route và customer exact-resume — 08/09/2026
+
+| Giả định cũ | Bằng chứng hiện tại | Trạng thái |
+|---|---|---|
+| Có nhánh admin trong `menu_content()` thì nút `menu|admin` sẽ mở Admin Control Center | Callback live luôn gọi `localized_menu_content()`; dispatcher này trước đó thiếu đúng nhánh `action=admin` và rơi về main menu | ❌ Phải route tại dispatcher live |
+| Exact cache và sidecar phải có timestamp tuyệt đối giống nhau đến từng ms | SRT serialize/parse của job khách tạo `16254 ms`, trong khi signed sidecar hợp lệ giữ `16255 ms`; toàn bộ hash khác đều khớp | ⚠️ Cho phép đúng sai số lượng tử hóa `1 ms` |
+| Khách fail exact-resume thì cần chạy lại ASR/translation hoặc dùng pipeline riêng | Loader có thể khôi phục timing/cue ID từ sidecar đã xác minh và trả cùng prepared state với `asr_provider=cached_auto_exact_receipt`, không translation replay | ❌ Dùng chung pipeline, không replay |
+| Nới timing đồng nghĩa bỏ fail-closed | Chỉ drift `<=1 ms` được restore; `>1 ms`, sai số cue, thiếu entry hoặc sai hash vẫn bị từ chối bởi các guard hiện hữu | ✅ Integrity giữ nguyên |
+
+Correction không thay Admin engine, Auto 2, acoustic/voice, provider routing,
+giá, settlement, PayOS hay ví Xu.

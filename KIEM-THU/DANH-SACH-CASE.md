@@ -216,6 +216,8 @@ Các case trên phải chạy bằng SQLite tạm trước khi live. Không dùn
 | `SD-PUBLIC-SOURCE-01` | User thường gửi video cần normalize rồi chọn Auto Multi | Workspace giữ hai file khác nhau: `original_source_for_acoustic.mp4` byte-identical với upload và `normalized_source.mp4` cho ASR/render; `_pipeline_source_path_override` trỏ file gốc, `_pipeline_saved_source_path` trỏ file normalized. Không thay Auto 2. |
 | `SD-PUBLIC-JOB-01` | Đọc job `#76EAF3A29A` | `allowed_public`, nguồn đúng `9,869,032` bytes/SHA `83DE97B7...AD3E`; historical failure `fixed_vocal_gender_partition_unstable` trước ASR phải được regression public-source bắt lại. |
 | `SD-PUBLIC-JOB-02` | Đọc job `#E937B761F8` | Phân loại là exact-price confirmation expired sau ASR/translation `60%`, không gán nhầm acoustic failure; `charged_xu=0`. |
+| `SD-ADMIN-ROUTE-01` | Admin bấm nút `🔐 Admin` qua callback `menu|admin` | `localized_menu_content("admin", True, ...)` trả đúng Admin Control Center và các callback module quản trị; user thường vẫn không được mở admin. |
+| `SD-CUSTOMER-RESUME-01` | Khách xác nhận exact quote sau Auto Multi preparation; cached SRT lệch signed sidecar đúng `1 ms` do serialize | Loader khôi phục toàn bộ timing/cue ID từ sidecar đã xác minh hash, không gọi lại ASR/translation và tiếp tục cùng prepared state. Lệch `>1 ms`, thiếu cue hoặc sai hash phải fail-closed. |
 
 FAIL nếu test gọi provider, chạy hai local model song song, thay đổi exact-two,
 hoặc hết timeout mà không fail-closed/cleanup.
