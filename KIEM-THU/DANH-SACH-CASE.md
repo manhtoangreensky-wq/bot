@@ -219,6 +219,7 @@ Các case trên phải chạy bằng SQLite tạm trước khi live. Không dùn
 | `SD-ADMIN-ROUTE-01` | Admin bấm nút `🔐 Admin` qua callback `menu|admin` | `localized_menu_content("admin", True, ...)` trả đúng Admin Control Center và các callback module quản trị; user thường vẫn không được mở admin. |
 | `SD-CUSTOMER-RESUME-01` | Khách xác nhận exact quote sau Auto Multi preparation; cached SRT lệch signed sidecar đúng `1 ms` do serialize | Loader khôi phục toàn bộ timing/cue ID từ sidecar đã xác minh hash, không gọi lại ASR/translation và tiếp tục cùng prepared state. Lệch `>1 ms`, thiếu cue hoặc sai hash phải fail-closed. |
 | `SD-CUSTOMER-RESUME-02` | Customer Auto Multi `5` speaker xác nhận exact quote; resume state đi qua JSON durable boundary | Chín mảng acoustic đã validation vẫn còn hoặc được khôi phục từ signed sidecar; `bounded_multi_acoustic_evidence` PASS, register `[high,low,low,high,low]`, không chạy lại acoustic/ASR/translation. Sidecar semantic sai hoặc scalar xung đột phải fail-closed; non-Multi không gọi helper. |
+| `SD-ONE-CONFIRM-01` | User khách đã bấm Confirm cuối của SubDub; exact price được tính sau ASR/dịch | Không hiện/đòi Confirm lần hai: `subdub_final_confirmed` claim receipt đúng một lần, kiểm balance, rồi chạy thẳng TTS → mux → MP4/receipt. Admin và khách dùng cùng pipeline; khác biệt duy nhất là settlement. |
 
 FAIL nếu test gọi provider, chạy hai local model song song, thay đổi exact-two,
 hoặc hết timeout mà không fail-closed/cleanup.

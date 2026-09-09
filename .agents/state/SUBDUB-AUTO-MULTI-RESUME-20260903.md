@@ -617,3 +617,19 @@ terminal evidence. No ASR/translation/TTS/mux/video replay and no new job.
   sidecar acoustic bundle is revalidated against current model/algorithm
   constants and every pre-existing scalar must match. Semantic tampering remains
   fail-closed; non-Multi and Auto 2 do not enter the restore branch.
+
+### One-confirm customer contract — 2026-09-09
+
+- Customer final Confirm is the sole price confirmation. Once
+  `subdub_final_confirmed` is true, exact words/price are computed, balance is
+  checked, the receipt is claimed once and the same pipeline continues to TTS,
+  mux and delivery.
+- The prior Admin-only bypass caused customer jobs to pause for a second exact
+  price confirmation. The bounded correction applies the same bypass condition
+  to every final-confirmed account; Admin differs only in settlement (`0 Xu`).
+- No second confirmation, new job, ASR/translation replay or provider fallback
+  is introduced. Insufficient balance, invalid receipt or missing evidence still
+  fail closed before paid work.
+- Regression evidence: customer one-confirm `1 passed in 4.88s`; combined
+  customer/Admin/Auto Multi protected gate `177 passed in 7.77s`; changed
+  `bot.py` compile exit `0`.
