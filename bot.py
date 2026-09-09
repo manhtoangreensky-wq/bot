@@ -248394,12 +248394,11 @@ async def _subdub_auto_post_prepare_gate(prepared: dict, state: dict) -> dict:
         quoted_total_xu=state.get("auto_quote_total_xu"),
         actual_total_xu=actual_total_xu,
     )
-    admin_exact_reconfirmation_bypassed = bool(
-        state.get("_pipeline_is_admin")
-        and subdub_final_confirmed_state(state)
+    final_confirmation_authorizes_exact_receipt = bool(
+        subdub_final_confirmed_state(state)
         and decision.get("exact_confirmation_required")
     )
-    if admin_exact_reconfirmation_bypassed:
+    if final_confirmation_authorizes_exact_receipt:
         decision["exact_confirmation_required"] = False
     exact_fields = {
         "auto_exact_receipt_version": SUBDUB_AUTO_EXACT_RECEIPT_VERSION,
@@ -248477,7 +248476,7 @@ async def _subdub_auto_post_prepare_gate(prepared: dict, state: dict) -> dict:
             durable,
             reason=(
                 "auto_exact_initial_confirmation_claimed"
-                if admin_exact_reconfirmation_bypassed
+                if final_confirmation_authorizes_exact_receipt
                 else "auto_exact_known_receipt_claimed"
             ),
         ):

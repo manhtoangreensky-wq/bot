@@ -1475,3 +1475,18 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   bundle từ sidecar đã kiểm SHA rồi chạy lại toàn bộ semantic validation và
   đối chiếu các scalar đã lưu. Không replay ASR/translation/acoustic. Auto 2,
   Admin engine, giá, provider routing và ví không đổi.
+
+### Quy tắc một lần xác nhận giá cho khách — 09/09/2026
+
+- Khách chỉ xác nhận ở nút Confirm cuối của flow. Sau khi ASR/dịch tính ra giá
+  exact, hệ thống không hỏi lại: nó kiểm số dư, claim receipt/CAS một lần và
+  chạy thẳng TTS → mux → giao MP4.
+- Điều kiện kỹ thuật dùng chung Admin/customer là
+  `subdub_final_confirmed_state(state)`. Admin chỉ khác ở settlement miễn phí;
+  khách vẫn dùng cùng acoustic/voice/TTS/mux executor và bị charge sau delivery
+  theo receipt.
+- Không bấm lại, không tạo job thay thế và không replay ASR/dịch. Receipt sai,
+  thiếu cache, thiếu balance hoặc thiếu artifact vẫn dừng fail-closed.
+- Regression mới: customer one-confirm `1 passed in 4.88s`; protected gate
+  `177 passed in 7.42s`; compile exit `0`. Hai selector legacy exact-resume
+  vẫn là baseline failure trên `origin/main`, không phải regression mới.

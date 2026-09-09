@@ -774,3 +774,12 @@ giá, settlement, PayOS hay ví Xu.
 | Có thể chạy lại acoustic/ASR để bù state mất | Cache còn `26/26` cue và signed sidecar đủ bundle; chạy lại vừa tốn thời gian vừa có thể đổi speaker | ❌ Phải reuse authority cũ |
 | Khôi phục mảng từ JSON bất kỳ là đủ | Chỉ acoustic bundle từ sidecar đã SHA-verify, semantic-validate với runtime constants và khớp mọi scalar hiện hữu mới được nhận | ✅ Fail-closed |
 | Fix customer cần thay thuật toán Admin hoặc Auto 2 | Chỉ serializer/loader của customer exact-price seam thay đổi; non-Multi short-circuit trước helper | ❌ Không đụng luồng đã khóa |
+
+### Đối chiếu quy tắc Confirm khách — 09/09/2026
+
+| Giả định cũ | Bằng chứng hiện tại | Trạng thái |
+|---|---|---|
+| Admin có thể bỏ exact-price prompt nhưng khách phải xác nhận lại | Cùng `subdub_final_confirmed_state` đã được khách xác nhận ở edge trước đó; prompt thứ hai chỉ là điều kiện Admin-only cũ | ❌ Đã sửa |
+| Bỏ prompt thứ hai nghĩa là bỏ kiểm giá hoặc kiểm Xu | Exact word/price vẫn được tính, balance vẫn kiểm trước claim; receipt/CAS và settlement không đổi | ✅ Giữ an toàn |
+| Admin và khách chạy hai executor khác nhau | Cả hai vào cùng pipeline; chỉ `is_admin` quyết định settlement | ✅ Parity |
+| Có thể gửi lại Confirm nhiều lần | Receipt claim `consumed`/CAS và marker hiện hữu chặn duplicate; one-confirm regression đã PASS | ✅ Idempotent |

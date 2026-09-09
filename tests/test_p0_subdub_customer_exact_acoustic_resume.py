@@ -1,11 +1,83 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 
 import pytest
 
 import bot
+
+
+def test_customer_final_confirmation_claims_exact_receipt_without_second_prompt(
+    monkeypatch,
+):
+    persisted = []
+    receipt = {
+        "session_nonce": "customerfinal1234",
+        "consumed": False,
+        "claim_state": "unconsumed",
+    }
+    state = {
+        "_pipeline_is_admin": False,
+        "_pipeline_job_key": "customer-one-confirm-key",
+        "_pipeline_job_id": "customer-one-confirm-job",
+        "_pipeline_owner_user_id": "7714990570",
+        "_pipeline_chat_id": "7714990570",
+        "subdub_final_confirmed": True,
+        "auto_quote_exact_known": False,
+        "auto_quote_billable_words": None,
+        "auto_quote_total_xu": None,
+    }
+    prepared = {
+        "state": dict(state),
+        "output_segments": [{"text": "translated words"}],
+    }
+
+    monkeypatch.setattr(bot, "subdub_auto_speaker_route_enabled", lambda _state: True)
+    monkeypatch.setattr(
+        bot.subtitle_dub_product_pipeline,
+        "resolve_subdub_dub_audio_policy",
+        lambda _state, _prepared: {
+            "tts_segments": [{"text": "translated words"}],
+        },
+    )
+    monkeypatch.setattr(bot, "_subdub_auto_actual_components", lambda *_args: (247, 124, 101))
+    monkeypatch.setattr(bot, "_subdub_auto_read_balance_xu", lambda _user_id: 2700)
+    monkeypatch.setattr(
+        bot.subdub_auto_word_pricing,
+        "auto_exact_confirmation_state",
+        lambda **_kwargs: {"exact_confirmation_required": True},
+    )
+    monkeypatch.setattr(
+        bot,
+        "_subdub_auto_build_exact_receipt",
+        lambda *_args, **_kwargs: {
+            "ok": True,
+            "receipt": receipt,
+            "cache": {},
+            "resume_state": {"subdub_final_confirmed": True},
+        },
+    )
+    monkeypatch.setattr(
+        bot,
+        "update_subtitle_dub_pipeline_job",
+        lambda job_key, **fields: {"job_key": job_key, **fields},
+    )
+
+    def persist(job_key, snapshot=None, *, reason=""):
+        persisted.append((job_key, dict(snapshot or {}), reason))
+        return True
+
+    monkeypatch.setattr(bot, "persist_subtitle_dub_pipeline_job_snapshot", persist)
+
+    result = asyncio.run(bot._subdub_auto_post_prepare_gate(prepared, state))
+
+    assert result == {"continue": True}
+    assert state["auto_exact_receipt"]["consumed"] is True
+    assert state["auto_exact_receipt"]["claim_state"] == "resuming"
+    assert state["auto_exact_receipt_confirmed"] is True
+    assert persisted[-1][2] == "auto_exact_initial_confirmation_claimed"
 
 
 def _valid_acoustic_state() -> dict:
