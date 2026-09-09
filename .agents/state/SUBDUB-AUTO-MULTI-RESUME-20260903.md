@@ -599,3 +599,21 @@ terminal evidence. No ASR/translation/TTS/mux/video replay and no new job.
   exit `0`; diff/scope/secret checks exit `0`. The three legacy exact-resume
   selectors, Admin compact `13 <= 12`, and two i18n/export selectors reproduce
   identically on detached `origin/main`; `NEW_FAILURES=0`.
+
+### Customer exact-confirm acoustic bundle continuity — 2026-09-09
+
+- Public job `#9F5AECE9AD` reached exact-price with local acoustic `5` speakers,
+  registers `[high,low,low,high,low]`, coverage `145/145`, `26` source cues,
+  `26` translated cues and quote `227 Xu`. The customer confirmed once.
+- It then failed no-charge at `5%` with `AUTO_CAST_MANUAL_REQUIRED`; ASR,
+  translation, TTS and mux flags in the terminal snapshot were reset/false,
+  output bytes `0`, charged Xu `0`.
+- Root is the exact-confirm serialization seam: `_subdub_auto_resume_state()`
+  retained scalars but discarded nine validated acoustic arrays, including
+  cluster sizes, unit counts, supported labels, speaker registers and register
+  confidences. Admin does not pause through this customer exact-price seam.
+- Correction persists only `bounded_multi_acoustic_evidence()` and rehydrates
+  missing structured fields from the already hash-verified sidecar. The full
+  sidecar acoustic bundle is revalidated against current model/algorithm
+  constants and every pre-existing scalar must match. Semantic tampering remains
+  fail-closed; non-Multi and Auto 2 do not enter the restore branch.

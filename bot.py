@@ -248009,6 +248009,62 @@ def _subdub_auto_read_balance_xu(user_id) -> int | None:
             conn.close()
 
 
+SUBDUB_AUTO_MULTI_ACOUSTIC_SIDECAR_TO_STATE = {
+    "algorithm_version": "multi_acoustic_algorithm_version",
+    "backend": "multi_acoustic_backend",
+    "cluster_sizes": "multi_acoustic_cluster_sizes",
+    "embedding_window_count": "multi_acoustic_embedding_window_count",
+    "model_sha256": "multi_acoustic_model_sha256",
+    "speaker_count": "multi_acoustic_speaker_count",
+    "stability_pass": "multi_acoustic_stability_pass",
+    "unit_count": "multi_acoustic_unit_count",
+    "word_count": "multi_acoustic_word_count",
+    "word_coverage_count": "multi_acoustic_word_coverage_count",
+    "overlap_mapped_count": "multi_acoustic_overlap_mapped_count",
+    "centroid_mapped_count": "multi_acoustic_centroid_mapped_count",
+    "speaker_unit_counts": "multi_acoustic_speaker_unit_counts",
+    "raw_speaker_count": "multi_acoustic_raw_speaker_count",
+    "raw_embedding_window_count": "multi_acoustic_raw_embedding_window_count",
+    "raw_cluster_sizes": "multi_acoustic_raw_cluster_sizes",
+    "raw_speaker_unit_counts": "multi_acoustic_raw_speaker_unit_counts",
+    "raw_overlap_speaker_unit_counts": "multi_acoustic_raw_overlap_speaker_unit_counts",
+    "speech_supported_speaker_labels": "multi_acoustic_speech_supported_speaker_labels",
+    "dropped_non_speech_speaker_labels": "multi_acoustic_dropped_non_speech_speaker_labels",
+    "word_overlap_mapped_count": "multi_acoustic_word_overlap_mapped_count",
+    "word_fallback_mapped_count": "multi_acoustic_word_fallback_mapped_count",
+    "word_centroid_mapped_count": "multi_acoustic_word_centroid_mapped_count",
+    "speaker_registers": "multi_acoustic_speaker_registers",
+    "speaker_register_confidences": "multi_acoustic_speaker_register_confidences",
+    "female_speaker_count": "multi_acoustic_female_speaker_count",
+    "male_speaker_count": "multi_acoustic_male_speaker_count",
+    "gender_model_sha256": "multi_acoustic_gender_model_sha256",
+    "gender_ambiguous_window_count": "multi_acoustic_gender_ambiguous_window_count",
+    "speaker_count_authority_asr_independent": "multi_acoustic_speaker_count_authority_asr_independent",
+    "word_attribution_uses_asr_timeline": "multi_acoustic_word_attribution_uses_asr_timeline",
+}
+
+
+def subdub_auto_multi_acoustic_state_from_sidecar(sidecar: dict) -> dict:
+    acoustic = (sidecar or {}).get("acoustic")
+    if not isinstance(acoustic, dict):
+        raise subdub_speaker_cast.AutoCastUnavailable()
+    candidate = {
+        state_key: list(value) if isinstance(value, list) else value
+        for sidecar_key, state_key in SUBDUB_AUTO_MULTI_ACOUSTIC_SIDECAR_TO_STATE.items()
+        if (value := acoustic.get(sidecar_key)) is not None
+    }
+    dropped = acoustic.get("dropped_non_speech_speaker_labels")
+    if isinstance(dropped, list):
+        candidate["multi_acoustic_dropped_non_speech_speaker_count"] = len(dropped)
+    bounded = auto_multi_speaker.bounded_multi_acoustic_evidence(candidate)
+    if (
+        not bounded
+        or auto_multi_speaker.acoustic_sidecar_evidence(bounded) != acoustic
+    ):
+        raise subdub_speaker_cast.AutoCastUnavailable()
+    return bounded
+
+
 def _subdub_auto_resume_state(state: dict) -> dict:
     excluded = {
         "speaker_classifications",
@@ -248028,6 +248084,11 @@ def _subdub_auto_resume_state(state: dict) -> dict:
             continue
         if isinstance(value, (str, int, float, bool)) or value is None:
             safe[str(key)] = value
+    if (
+        str(state.get("auto_speaker_lane") or "").strip().lower() == "multi"
+        and auto_multi_speaker.is_auto_multi_speaker_state(state)
+    ):
+        safe.update(auto_multi_speaker.bounded_multi_acoustic_evidence(state))
     return safe
 
 
@@ -248570,6 +248631,19 @@ def _subdub_auto_load_cached_prepared(job: dict, state: dict) -> dict:
         expected_sha256=sidecar_sha256,
         workspace=workspace,
     )
+    acoustic_resume_state = {}
+    if (
+        str(state.get("auto_speaker_lane") or "").strip().lower() == "multi"
+        and auto_multi_speaker.is_auto_multi_speaker_state(state)
+    ):
+        acoustic_resume_state = subdub_auto_multi_acoustic_state_from_sidecar(
+            sidecar
+        )
+        if any(
+            key in state and state.get(key) != value
+            for key, value in acoustic_resume_state.items()
+        ):
+            raise subdub_speaker_cast.AutoCastUnavailable()
     source_segments = subdub_restore_auto_exact_cached_timing(
         sidecar,
         source_segments,
@@ -248601,6 +248675,7 @@ def _subdub_auto_load_cached_prepared(job: dict, state: dict) -> dict:
             raise subdub_speaker_cast.AutoCastUnavailable()
     resumed_state = {
         **state,
+        **acoustic_resume_state,
         "_pipeline_workspace": workspace,
         "_pipeline_saved_source_path": media_path,
         "_pipeline_source_bytes_override": source_bytes,

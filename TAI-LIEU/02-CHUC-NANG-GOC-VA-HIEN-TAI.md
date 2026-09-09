@@ -765,3 +765,12 @@ fixture branch và không đổi Auto 2, provider routing, giá hay logic ví.
 
 Correction không thay Admin engine, Auto 2, acoustic/voice, provider routing,
 giá, settlement, PayOS hay ví Xu.
+
+### Đối chiếu customer exact-confirm acoustic state — 09/09/2026
+
+| Giả định cũ | Bằng chứng hiện tại | Trạng thái |
+|---|---|---|
+| Sidecar đủ `5` speaker thì customer resume chắc chắn giống Admin | Job `#9F5AECE9AD` giữ sidecar hợp lệ nhưng exact resume state mất chín mảng acoustic do serializer chỉ nhận scalar; classifier trả manual-required | ❌ Durable boundary chưa parity |
+| Có thể chạy lại acoustic/ASR để bù state mất | Cache còn `26/26` cue và signed sidecar đủ bundle; chạy lại vừa tốn thời gian vừa có thể đổi speaker | ❌ Phải reuse authority cũ |
+| Khôi phục mảng từ JSON bất kỳ là đủ | Chỉ acoustic bundle từ sidecar đã SHA-verify, semantic-validate với runtime constants và khớp mọi scalar hiện hữu mới được nhận | ✅ Fail-closed |
+| Fix customer cần thay thuật toán Admin hoặc Auto 2 | Chỉ serializer/loader của customer exact-price seam thay đổi; non-Multi short-circuit trước helper | ❌ Không đụng luồng đã khóa |
