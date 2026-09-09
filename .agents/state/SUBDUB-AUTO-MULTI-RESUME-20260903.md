@@ -633,3 +633,32 @@ terminal evidence. No ASR/translation/TTS/mux/video replay and no new job.
 - Regression evidence: customer one-confirm `1 passed in 4.88s`; combined
   customer/Admin/Auto Multi protected gate `177 passed in 7.77s`; changed
   `bot.py` compile exit `0`.
+
+### Final customer one-confirm LIVE closeout — 2026-09-09
+
+- Status: `LOCKED_LIVE_PASS`. Do not reopen, rearm, replay, reconfirm, resend,
+  or charge the completed proof job.
+- PR `#1009` was squash-merged and deployed as runtime
+  `92f2e41b10821dea231b50f0f1c93148529c5bb1`; deploy run `34366937616`
+  succeeded. Runtime readback during the proof matched that SHA.
+- Fresh customer job `#A866975622` / `a866975622647f768a73` moved on the same
+  durable record from `transcribing/35%` to `generating_voice/65%` and then
+  `delivered/100%`. It never persisted or rendered
+  `awaiting_auto_exact_confirmation` after the customer's one final Confirm.
+- At `65%`, the exact-price boundary measured
+  `subdub_final_confirmed=True`, receipt `consumed=1`,
+  `claim_state=resuming`, exact price `240 Xu`, and `not_charged`. No second
+  Confirm or Codex action was needed.
+- Terminal alias `DUB-1A160D9A` delivered a validated MP4: `16,640,532` bytes,
+  `video/mp4`, `134.0s`, SHA-256
+  `81d9e37af5c8266b64ea588bf388e7fdb402be3fff1e629c51e78d84e9d96393`.
+- Acoustic/TTS proof is `5` detected speakers, `5` distinct voices,
+  `26/26` TTS segments generated and `0` dropped.
+- Telegram sent video message `28234` followed by receipt message `28235`;
+  `receipt_sent_once=1` and `success_sent_count=1`.
+- Delivery-first settlement then charged exactly `240 Xu`. The settlement
+  reference has exactly one credit event (`delta=-240`), ending balance
+  `1958 Xu`; terminal error is empty.
+- Source, CI, deploy/runtime behavior, fresh customer one-confirm flow, MP4
+  validation, receipt delivery and exactly-once settlement are all PASS.
+  `LIVE_PASS=YES`, `BLOCKERS=NONE`.
