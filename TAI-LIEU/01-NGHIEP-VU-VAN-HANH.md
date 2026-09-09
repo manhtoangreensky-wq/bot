@@ -1460,3 +1460,18 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
 - Gate cuối đo `173 passed in 7.61s`; changed-file compile và diff-check cùng
   exit `0`. Các failure ngoài scope đều tái hiện cùng selector/kết quả trên
   detached `origin/main`, nên `NEW_FAILURES=0`.
+
+### Customer Auto Multi sau exact-price Confirm — 09/09/2026
+
+- Job khách `#9F5AECE9AD` đã qua public gate, acoustic `5` speaker,
+  `[high,low,low,high,low]`, word coverage `145/145`, ASR + dịch và exact quote
+  `227 Xu`. Sau một Confirm, job rơi về `5%`/`AUTO_CAST_MANUAL_REQUIRED`, chưa
+  TTS/mux, MP4 `0` bytes và charged Xu `0`.
+- Cache không mất: source/translated cùng `26` cue, sidecar `26` cue và đủ `5`
+  label. Phần mất là chín mảng acoustic trong `auto_exact_resume_state` vì
+  serializer trước đây chỉ giữ scalar. Classifier vì thế không thể tái lập
+  register dù sidecar vẫn đúng.
+- Customer resume nay giữ acoustic bundle đã bounded; với job cũ, loader lấy
+  bundle từ sidecar đã kiểm SHA rồi chạy lại toàn bộ semantic validation và
+  đối chiếu các scalar đã lưu. Không replay ASR/translation/acoustic. Auto 2,
+  Admin engine, giá, provider routing và ví không đổi.
