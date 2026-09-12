@@ -1519,11 +1519,15 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   Deepgram lưu metadata duration dạng số nguyên `181s`, nhưng word timeline
   được so với bound chính xác của media. Correction trước chỉ cho tail `0.099s`,
   nên chênh `0.433667s` vẫn bị loại dù là rounding hợp lệ.
-- Parser hiện chỉ mở rộng bound khi metadata duration là số nguyên làm tròn,
-  chênh với media `<0.5s`; word cuối vẫn bị clamp về duration media. Metadata
-  lẻ, chênh `>=0.5s`, thứ tự sai, NaN hoặc duplicate vẫn fail-closed. Không có
-  nhánh theo fixture, account hay job.
-- Bằng chứng source mới: parser `53 passed`, protected Auto Multi/Auto 2/
+- Parser chỉ dùng provider duration khi đó là số hữu hạn và chênh với media
+  `<0.5s`; word cuối vẫn bị clamp về duration media. Metadata chênh `>=0.5s`,
+  thứ tự sai, NaN hoặc duplicate vẫn fail-closed. Không có nhánh theo fixture,
+  account hay job.
+- Mỗi reject giờ lưu đúng một reason aggregate như `past_duration`,
+  `decreasing_start` hoặc `duplicate_identity`, cùng index/count; không lưu raw
+  word, nội dung hay timestamp. Nhờ vậy lỗi live kế tiếp không còn bị gom mù
+  thành một mã chung.
+- Bằng chứng source mới: parser `56 passed`, protected Auto Multi/Auto 2/
   customer resume `230 passed`; compile và diff-check phải chạy lại trước PR.
   LIVE job sau correction này chưa chạy vì chưa được deploy; không ghi PASS
   production trước khi có MP4 thật.

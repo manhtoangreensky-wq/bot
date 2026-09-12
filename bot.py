@@ -40423,86 +40423,119 @@ def deepgram_acoustic_word_items(
     data: dict,
     *,
     duration_seconds: float,
+    diagnostics: dict | None = None,
 ) -> list[dict]:
+    diagnostic = diagnostics if type(diagnostics) is dict else None
+
+    def reject(
+        reason: str,
+        *,
+        word_index: int = -1,
+        provider_word_count: int = 0,
+    ) -> list[dict]:
+        if diagnostic is not None:
+            diagnostic.clear()
+            diagnostic.update({
+                "reason": str(reason or "unknown")[:80],
+                "rejected_word_index": int(word_index),
+                "provider_word_count": max(0, int(provider_word_count)),
+            })
+        return []
+
     tail_tolerance_seconds = 0.099
     if type(duration_seconds) not in {int, float}:
-        return []
+        return reject("invalid_duration")
     duration = float(duration_seconds)
-    if not math.isfinite(duration) or duration <= 0.0 or type(data) is not dict:
-        return []
+    if not math.isfinite(duration) or duration <= 0.0:
+        return reject("invalid_duration")
+    if type(data) is not dict:
+        return reject("payload_not_dict")
     results = data.get("results")
     if type(results) is not dict:
-        return []
+        return reject("results_not_dict")
     metadata = data.get("metadata")
     provider_duration = 0.0
     if isinstance(metadata, dict):
         raw_provider_duration = metadata.get("duration")
-        try:
+        if type(raw_provider_duration) in {int, float}:
             candidate_duration = float(raw_provider_duration)
-        except (TypeError, ValueError, OverflowError):
-            candidate_duration = 0.0
-        if (
-            math.isfinite(candidate_duration)
-            and candidate_duration > duration
-            and abs(candidate_duration - round(candidate_duration)) <= 1e-6
-            and candidate_duration - duration < 0.5
-        ):
-            provider_duration = candidate_duration
-            tail_tolerance_seconds = max(
-                tail_tolerance_seconds,
-                min(0.5, provider_duration - duration + 0.01),
-            )
+            if (
+                math.isfinite(candidate_duration)
+                and candidate_duration >= duration
+                and abs(candidate_duration - round(candidate_duration)) <= 1e-6
+                and candidate_duration - duration < 0.5
+            ):
+                provider_duration = candidate_duration
+    validation_duration = max(duration, provider_duration)
     channels = results.get("channels")
     if type(channels) is not list or not channels or type(channels[0]) is not dict:
-        return []
+        return reject("channels_invalid")
     alternatives = channels[0].get("alternatives")
     if (
         type(alternatives) is not list
         or not alternatives
         or type(alternatives[0]) is not dict
     ):
-        return []
+        return reject("alternatives_invalid")
     words = alternatives[0].get("words")
     if type(words) is not list or not words:
-        return []
+        return reject("words_empty")
 
     result: list[dict] = []
     identities: set[tuple[float, float, str]] = set()
     previous_start = -math.inf
-    for item in words:
+    word_count = len(words)
+    for word_index, item in enumerate(words):
         if type(item) is not dict:
-            return []
+            return reject(
+                "word_not_dict",
+                word_index=word_index,
+                provider_word_count=word_count,
+            )
         raw_text = item.get("punctuated_word")
         if not isinstance(raw_text, str) or not raw_text.strip():
             raw_text = item.get("word")
         if not isinstance(raw_text, str):
-            return []
+            return reject(
+                "word_text_invalid",
+                word_index=word_index,
+                provider_word_count=word_count,
+            )
         word = " ".join(raw_text.split())
         if not word:
-            return []
+            return reject(
+                "word_text_empty",
+                word_index=word_index,
+                provider_word_count=word_count,
+            )
         start_value = item.get("start")
         end_value = item.get("end")
         if type(start_value) not in {int, float} or type(end_value) not in {int, float}:
-            return []
+            return reject(
+                "word_time_type_invalid",
+                word_index=word_index,
+                provider_word_count=word_count,
+            )
         start = float(start_value)
         end = float(end_value)
-        if (
-            not math.isfinite(start)
-            or not math.isfinite(end)
-            or start < 0.0
-            or start >= end
-            or end > duration + tail_tolerance_seconds
-            or start < previous_start
-        ):
-            return []
+        if not math.isfinite(start) or not math.isfinite(end):
+            return reject("word_time_nonfinite", word_index=word_index, provider_word_count=word_count)
+        if start < 0.0:
+            return reject("negative_start", word_index=word_index, provider_word_count=word_count)
+        if start >= end:
+            return reject("nonpositive_duration", word_index=word_index, provider_word_count=word_count)
+        if end > validation_duration + tail_tolerance_seconds:
+            return reject("past_duration", word_index=word_index, provider_word_count=word_count)
+        if start < previous_start:
+            return reject("decreasing_start", word_index=word_index, provider_word_count=word_count)
         bounded_end = min(end, duration)
         identity = (start, bounded_end, word.casefold())
         if identity in identities:
-            return []
+            return reject("duplicate_identity", word_index=word_index, provider_word_count=word_count)
         rounded_start = round(start, 3)
         rounded_end = round(bounded_end, 3)
         if rounded_start >= rounded_end:
-            return []
+            return reject("rounded_duration_empty", word_index=word_index, provider_word_count=word_count)
         identities.add(identity)
         result.append(
             {
@@ -40513,6 +40546,13 @@ def deepgram_acoustic_word_items(
             }
         )
         previous_start = start
+    if diagnostic is not None:
+        diagnostic.clear()
+        diagnostic.update({
+            "reason": "",
+            "rejected_word_index": -1,
+            "provider_word_count": word_count,
+        })
     return result
 
 def deepgram_srt_from_response(data: dict, max_words_per_block: int = 12) -> str:
@@ -65241,11 +65281,18 @@ async def asr_transcribe_audio(
                     duration_value = (
                         metadata.get("duration") if type(metadata) is dict else 0.0
                     )
+                parse_diagnostics: dict = {}
                 word_timeline = deepgram_acoustic_word_items(
                     transcript_json,
                     duration_seconds=duration_value,
+                    diagnostics=parse_diagnostics,
                 )
                 if not word_timeline:
+                    rejection_reason = re.sub(
+                        r"[^a-z0-9_]+",
+                        "_",
+                        str(parse_diagnostics.get("reason") or "unknown").lower(),
+                    ).strip("_")[:80]
                     save_provider_attempt(
                         "translation_asr",
                         {
@@ -65253,7 +65300,9 @@ async def asr_transcribe_audio(
                             "provider": "deepgram",
                             "route": "listen",
                             "status": AUTO_CAST_UNAVAILABLE,
-                            "error": "ACOUSTIC_WORD_TIMELINE_REQUIRED",
+                            "error": f"ACOUSTIC_WORD_TIMELINE_REQUIRED:{rejection_reason}",
+                            "rejected_word_index": int(parse_diagnostics.get("rejected_word_index") or 0),
+                            "provider_word_count": int(parse_diagnostics.get("provider_word_count") or 0),
                         },
                         updated_by,
                     )

@@ -633,3 +633,27 @@ terminal evidence. No ASR/translation/TTS/mux/video replay and no new job.
 - Regression evidence: customer one-confirm `1 passed in 4.88s`; combined
   customer/Admin/Auto Multi protected gate `177 passed in 7.77s`; changed
   `bot.py` compile exit `0`.
+
+### Post-deploy media-generalization correction — 2026-09-12
+
+- PR `#1010` merged as `f1b4b419bac15396e4af2911f7041bba278657f7`; deploy run
+  `34696615829` succeeded and VPS checkout/service readback matched the SHA.
+- Three fresh Auto Multi attempts on the same non-fixture source (two
+  `allowed_admin`, one `allowed_public`) still failed at `5%`. The first
+  parser correction handled a `+0.084s` tail, but the provider also reported
+  duration as rounded integer `181s` while normalized audio measured
+  `180.566333s`; that `0.433667s` difference caused the next failure.
+- Fresh post-deploy job `#3AF963F281` confirmed the remaining failure was
+  `ACOUSTIC_WORD_TIMELINE_REQUIRED`, with no ASR/translation/TTS/mux start and
+  `charged_xu=0`. Runtime was verified as `f1b4b419`, so this was not a stale
+  service checkout.
+- Local correction branch `fix/p0-subdub-auto-multi-provider-duration-bound`
+  now accepts only finite provider duration metadata within `<0.5s` of the
+  measured media duration, clamps word ends to media duration, and records
+  bounded rejection reason/index/count without raw transcript data.
+- Post-rebase local evidence: parser `56 passed`; protected Auto Multi,
+  Auto 2, customer resume `230 passed`; `py_compile bot.py` exit `0`;
+  `git diff --check` exit `0`. No provider call, job creation, DB mutation or
+  wallet mutation was made by the local correction.
+- `LIVE_PASS=NO` for this correction until a fresh Admin and a fresh public
+  Auto Multi job both pass through acoustic, translation/TTS, mux and MP4.
