@@ -58,6 +58,21 @@ def test_acoustic_word_extractor_uses_strict_text_and_times_without_speaker_labe
     ) == EXPECTED_WORDS
 
 
+def test_acoustic_word_extractor_clamps_measured_codec_tail_rounding():
+    payload = deepgram_payload()
+    words = payload["results"]["channels"][0]["alternatives"][0]["words"]
+    words[-1]["start"] = 179.989
+    words[-1]["end"] = 180.629
+
+    assert bot.deepgram_acoustic_word_items(
+        payload,
+        duration_seconds=180.545,
+    ) == [
+        EXPECTED_WORDS[0],
+        {"index": 1, "word": "world", "start": 179.989, "end": 180.545},
+    ]
+
+
 @pytest.mark.parametrize(
     "mutation",
     (
