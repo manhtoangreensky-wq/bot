@@ -73,6 +73,48 @@ def test_acoustic_word_extractor_clamps_measured_codec_tail_rounding():
     ]
 
 
+def test_acoustic_word_extractor_uses_bounded_provider_duration_tail():
+    payload = deepgram_payload()
+    payload["metadata"]["duration"] = 181.0
+    words = payload["results"]["channels"][0]["alternatives"][0]["words"]
+    words[-1]["start"] = 180.2
+    words[-1]["end"] = 180.9
+
+    assert bot.deepgram_acoustic_word_items(
+        payload,
+        duration_seconds=180.566333,
+    ) == [
+        EXPECTED_WORDS[0],
+        {"index": 1, "word": "world", "start": 180.2, "end": 180.566},
+    ]
+
+
+def test_acoustic_word_extractor_rejects_provider_tail_beyond_half_second():
+    payload = deepgram_payload()
+    payload["metadata"]["duration"] = 181.0
+    words = payload["results"]["channels"][0]["alternatives"][0]["words"]
+    words[-1]["start"] = 180.7
+    words[-1]["end"] = 181.1
+
+    assert bot.deepgram_acoustic_word_items(
+        payload,
+        duration_seconds=180.566333,
+    ) == []
+
+
+def test_acoustic_word_extractor_does_not_trust_fractional_provider_duration():
+    payload = deepgram_payload()
+    payload["metadata"]["duration"] = 180.9
+    words = payload["results"]["channels"][0]["alternatives"][0]["words"]
+    words[-1]["start"] = 180.5
+    words[-1]["end"] = 180.8
+
+    assert bot.deepgram_acoustic_word_items(
+        payload,
+        duration_seconds=180.566333,
+    ) == []
+
+
 @pytest.mark.parametrize(
     "mutation",
     (
@@ -201,6 +243,39 @@ def test_acoustic_word_routing_uses_confirmed_nondiarized_deepgram(monkeypatch):
     assert all("speaker" not in item for item in result["word_timeline"])
 
 
+def test_acoustic_word_routing_accepts_provider_integer_duration_rounding(monkeypatch):
+    configure_deepgram_route(monkeypatch)
+    payload = deepgram_payload()
+    payload["metadata"]["duration"] = 181.0
+    words = payload["results"]["channels"][0]["alternatives"][0]["words"]
+    words[-1]["start"] = 180.2
+    words[-1]["end"] = 180.9
+
+    async def fake_deepgram(*_args, **_kwargs):
+        return {
+            "ok": True,
+            "status": "PASS",
+            "transcript": "Hello world",
+            "transcript_json": payload,
+            "http_status": 200,
+            "detail": "fixture",
+        }
+
+    monkeypatch.setattr(bot, "deepgram_asr_adapter", fake_deepgram)
+    result = asyncio.run(
+        bot.asr_transcribe_audio(
+            b"wav",
+            "audio/wav",
+            allow_confirmed_product=True,
+            require_auto_multi_word_timeline=True,
+            media_duration_seconds=180.566333,
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["word_timeline"][-1]["end"] == 180.566
+
+
 def test_acoustic_word_routing_requires_confirmation_before_provider(monkeypatch):
     configure_deepgram_route(monkeypatch)
 
@@ -251,6 +326,48 @@ def test_acoustic_word_routing_rejects_missing_strict_words(monkeypatch):
     assert result["provider"] == "deepgram"
     assert result["word_timeline"] == []
     assert result["detail"] == "ACOUSTIC_WORD_TIMELINE_REQUIRED"
+
+
+def test_acoustic_word_routing_persists_bounded_rejection_reason(monkeypatch):
+    configure_deepgram_route(monkeypatch)
+    payload = deepgram_payload()
+    payload["results"]["channels"][0]["alternatives"][0]["words"][1]["start"] = 0.05
+    attempts = []
+
+    async def fake_deepgram(*_args, **_kwargs):
+        return {
+            "ok": True,
+            "status": "PASS",
+            "transcript": "Hello world",
+            "transcript_json": payload,
+            "http_status": 200,
+            "detail": "fixture",
+        }
+
+    monkeypatch.setattr(bot, "deepgram_asr_adapter", fake_deepgram)
+    monkeypatch.setattr(
+        bot,
+        "save_provider_attempt",
+        lambda kind, attempt, _updated_by: attempts.append((kind, attempt)),
+    )
+    result = asyncio.run(
+        bot.asr_transcribe_audio(
+            b"wav",
+            "audio/wav",
+            allow_confirmed_product=True,
+            require_auto_multi_word_timeline=True,
+            media_duration_seconds=2.0,
+        )
+    )
+
+    assert result["ok"] is False
+    assert attempts[-1][1]["error"] == (
+        "ACOUSTIC_WORD_TIMELINE_REQUIRED:decreasing_start"
+    )
+    assert attempts[-1][1]["rejected_word_index"] == 1
+    assert attempts[-1][1]["provider_word_count"] == 2
+    assert "Hello" not in str(attempts[-1])
+    assert "world" not in str(attempts[-1])
 
 
 def test_acoustic_word_routing_rejects_conflicting_authorities(monkeypatch):

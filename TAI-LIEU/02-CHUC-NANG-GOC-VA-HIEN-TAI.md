@@ -783,3 +783,11 @@ giá, settlement, PayOS hay ví Xu.
 | Bỏ prompt thứ hai nghĩa là bỏ kiểm giá hoặc kiểm Xu | Exact word/price vẫn được tính, balance vẫn kiểm trước claim; receipt/CAS và settlement không đổi | ✅ Giữ an toàn |
 | Admin và khách chạy hai executor khác nhau | Cả hai vào cùng pipeline; chỉ `is_admin` quyết định settlement | ✅ Parity |
 | Có thể gửi lại Confirm nhiều lần | Receipt claim `consumed`/CAS và marker hiện hữu chặn duplicate; one-confirm regression đã PASS | ✅ Idempotent |
+
+### Auto Multi duration metadata — 12/09/2026
+
+| Giả định cũ | Bằng chứng hiện tại | Trạng thái |
+|---|---|---|
+| Provider duration và media duration luôn cùng độ chính xác | Job `#3AF963F281` đo media `180.545s`, normalized audio `180.566333s`, còn provider metadata `181s`; parser strict cũ loại toàn bộ word timeline | ❌ Không còn đúng |
+| Gặp sai khác duration thì bỏ cả timeline | Metadata số nguyên làm tròn với chênh `<0.5s` được dùng làm bound kiểm tra, word cuối vẫn clamp về media duration; chênh `>=0.5s` vẫn fail-closed | ✅ Đã sửa có giới hạn |
+| Mã `ACOUSTIC_WORD_TIMELINE_REQUIRED` đủ để vận hành | Reject hiện lưu thêm reason/index/count aggregate, không lưu raw transcript, text hoặc timestamp | ⚠️ Cần dùng field chẩn đoán mới |

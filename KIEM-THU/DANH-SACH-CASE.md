@@ -222,6 +222,7 @@ Các case trên phải chạy bằng SQLite tạm trước khi live. Không dùn
 | `SD-ONE-CONFIRM-01` | User khách đã bấm Confirm cuối của SubDub; exact price được tính sau ASR/dịch | Không hiện/đòi Confirm lần hai: `subdub_final_confirmed` claim receipt đúng một lần, kiểm balance, rồi chạy thẳng TTS → mux → MP4/receipt. Admin và khách dùng cùng pipeline; khác biệt duy nhất là settlement. |
 
 | `SD-AUTO-MULTI-TAIL-01` | Gửi video đã normalize có duration ffprobe `180.545s`; Deepgram word cuối kết thúc `180.629s` (`+0.084s`) | Auto Multi không được rơi về `AUTO_CAST_MANUAL_REQUIRED` ở `5%`. Parser phải clamp word cuối về `180.545s`; timeline overrun `>=0.100s`, NaN, đảo thứ tự hoặc duplicate vẫn phải fail-closed. Không gọi provider thêm trong unit test, không charge, không tạo job mới. |
+| `SD-AUTO-MULTI-PROVIDER-DURATION-01` | Auto Multi nhận media `180.545s`, normalized audio `180.566333s`, provider metadata `duration=181s`, word cuối `end=180.900s` | Word timeline phải được chấp nhận và clamp về `180.566s`, cho phép pipeline đi qua acoustic; metadata chênh `>=0.5s`, word vượt bound sau tolerance, NaN, giảm thời gian hoặc duplicate phải bị từ chối an toàn. Nếu reject, receipt chỉ lưu reason/index/count aggregate, tuyệt đối không raw word/text/timestamp. Không tạo job mới trong unit test và không charge. |
 
 FAIL nếu test gọi provider, chạy hai local model song song, thay đổi exact-two,
 hoặc hết timeout mà không fail-closed/cleanup.
