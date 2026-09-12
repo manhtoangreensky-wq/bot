@@ -221,5 +221,7 @@ Các case trên phải chạy bằng SQLite tạm trước khi live. Không dùn
 | `SD-CUSTOMER-RESUME-02` | Customer Auto Multi `5` speaker xác nhận exact quote; resume state đi qua JSON durable boundary | Chín mảng acoustic đã validation vẫn còn hoặc được khôi phục từ signed sidecar; `bounded_multi_acoustic_evidence` PASS, register `[high,low,low,high,low]`, không chạy lại acoustic/ASR/translation. Sidecar semantic sai hoặc scalar xung đột phải fail-closed; non-Multi không gọi helper. |
 | `SD-ONE-CONFIRM-01` | User khách đã bấm Confirm cuối của SubDub; exact price được tính sau ASR/dịch | Không hiện/đòi Confirm lần hai: `subdub_final_confirmed` claim receipt đúng một lần, kiểm balance, rồi chạy thẳng TTS → mux → MP4/receipt. Admin và khách dùng cùng pipeline; khác biệt duy nhất là settlement. |
 
+| `SD-AUTO-MULTI-TAIL-01` | Gửi video đã normalize có duration ffprobe `180.545s`; Deepgram word cuối kết thúc `180.629s` (`+0.084s`) | Auto Multi không được rơi về `AUTO_CAST_MANUAL_REQUIRED` ở `5%`. Parser phải clamp word cuối về `180.545s`; timeline overrun `>=0.100s`, NaN, đảo thứ tự hoặc duplicate vẫn phải fail-closed. Không gọi provider thêm trong unit test, không charge, không tạo job mới. |
+
 FAIL nếu test gọi provider, chạy hai local model song song, thay đổi exact-two,
 hoặc hết timeout mà không fail-closed/cleanup.

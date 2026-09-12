@@ -1490,3 +1490,22 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
 - Regression mới: customer one-confirm `1 passed in 4.88s`; protected gate
   `177 passed in 7.42s`; compile exit `0`. Hai selector legacy exact-resume
   vẫn là baseline failure trên `origin/main`, không phải regression mới.
+
+### Auto Multi: làm tròn đuôi timeline của media — 12/09/2026
+
+- Ba lần chạy Auto Multi trên cùng video `180.545s`, codec nguồn `AV1`,
+  `1080x1920`, đều dừng ở `5%` với `AUTO_CAST_MANUAL_REQUIRED`; một lần
+  chạy từ tài khoản `allowed_public` cũng tái hiện y hệt. Đây không phải lỗi
+  quyền hay số dư: cả ba job có `charged_xu=0` và `gate_blockers=[]`.
+- Bằng chứng Deepgram lưu trong `provider_attempt:translation_asr` là
+  `ACOUSTIC_WORD_TIMELINE_REQUIRED`. Word cuối có `end=180.629s`, trong khi
+  ffprobe media là `180.545s`; chênh lệch đo được `0.084s` do rounding/container
+  tail. Parser strict cũ loại toàn bộ timeline thay vì kẹp word cuối về thời
+  lượng media.
+- Quy tắc hiện tại: chỉ cho phép tail overrun nhỏ hơn `0.099s`, kẹp `end` về
+  duration thật; overrun `0.100s` trở lên, NaN, đảo thứ tự, trùng identity hoặc
+  timestamp lỗi vẫn fail-closed. Không có nhánh theo fixture/hash/job.
+- TDD đo được: RED `1 failed` ở case `0.084s`; GREEN parser `20 passed`;
+  protected Auto Multi/Auto 2/customer-resume `281 passed`; `py_compile bot.py`
+  exit `0`; `git diff --check` exit `0`. Đây là source/CI evidence, chưa phải
+  LIVE evidence cho tới khi Owner cho phép deploy và chạy một job mới.

@@ -40424,6 +40424,7 @@ def deepgram_acoustic_word_items(
     *,
     duration_seconds: float,
 ) -> list[dict]:
+    tail_tolerance_seconds = 0.099
     if type(duration_seconds) not in {int, float}:
         return []
     duration = float(duration_seconds)
@@ -40471,15 +40472,16 @@ def deepgram_acoustic_word_items(
             or not math.isfinite(end)
             or start < 0.0
             or start >= end
-            or end > duration
+            or end > duration + tail_tolerance_seconds
             or start < previous_start
         ):
             return []
-        identity = (start, end, word.casefold())
+        bounded_end = min(end, duration)
+        identity = (start, bounded_end, word.casefold())
         if identity in identities:
             return []
         rounded_start = round(start, 3)
-        rounded_end = round(end, 3)
+        rounded_end = round(bounded_end, 3)
         if rounded_start >= rounded_end:
             return []
         identities.add(identity)
