@@ -40433,6 +40433,25 @@ def deepgram_acoustic_word_items(
     results = data.get("results")
     if type(results) is not dict:
         return []
+    metadata = data.get("metadata")
+    provider_duration = 0.0
+    if isinstance(metadata, dict):
+        raw_provider_duration = metadata.get("duration")
+        try:
+            candidate_duration = float(raw_provider_duration)
+        except (TypeError, ValueError, OverflowError):
+            candidate_duration = 0.0
+        if (
+            math.isfinite(candidate_duration)
+            and candidate_duration > duration
+            and abs(candidate_duration - round(candidate_duration)) <= 1e-6
+            and candidate_duration - duration < 0.5
+        ):
+            provider_duration = candidate_duration
+            tail_tolerance_seconds = max(
+                tail_tolerance_seconds,
+                min(0.5, provider_duration - duration + 0.01),
+            )
     channels = results.get("channels")
     if type(channels) is not list or not channels or type(channels[0]) is not dict:
         return []
