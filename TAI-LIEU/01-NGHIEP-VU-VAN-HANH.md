@@ -1574,6 +1574,29 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   không upload, không tạo/retry job, không gọi provider bổ sung và chờ Owner tự
   live-test sau deploy.
 
+### Auto Multi bounded adjacent-word overlap — 13/09/2026
+
+- Job post-deploy `#5B542A4380` chạy trên runtime `6977d8bc`, source dọc
+  `1080x1920`, rotation `0`, AV1 được normalize H.264/AAC đúng quy trình.
+  Deepgram PASS `53` khối phụ đề; lỗi không còn ở parser duration.
+- Durable failure ghi `multi_acoustic_failure_code=acoustic_word_time_invalid`,
+  `multi_acoustic_failure_word_count=629`, trước translation/TTS/mux/output và
+  `charged_xu=0`. Vì parser đã kiểm type, finite, start tăng, positive duration
+  và clamp end về media, điều kiện khác biệt duy nhất ở ONNX validator là cấm
+  `start < previous_end`: provider word kề nhau chồng nhẹ bị loại cả timeline.
+- Engine Auto Multi hiện cho phép adjacent word/acoustic unit overlap tối đa
+  `0.35s`, đúng cùng biên `UNIT_SPLIT_GAP_SECONDS`; overlap lớn hơn, start đảo,
+  end ngoài duration, NaN hoặc duplicate vẫn fail-closed. Grouping dùng union
+  end để không cắt mất word cuối; speech-compaction và PCM window dùng hợp các
+  interval nên phần overlap chỉ được tính/đọc một lần, còn cue end phủ đủ word.
+- Geometry dọc không tham gia lỗi này: job dừng trước geometry/mux. Không đổi
+  Auto 2, render aspect, voice assignment, translation, pricing hoặc settlement.
+- TDD thực đo: RED bounded overlap `2 failed`; GREEN exact + excessive-overlap
+  guard `3 passed`; full ONNX `132 passed`; parser/blackbox/embedding/recovery/
+  continuity `431 passed`; exact model/fixture resource `9 passed in 406.53s`;
+  Auto 2 comparator `34 passed`. Compile/diff vẫn exit `0`; không provider/job/
+  retry/wallet mutation trong source verification.
+
 ### Auto Multi rounded-duration equality — 13/09/2026 (đã supersede)
 
 - Job `#E1B3795806` chạy sau runtime `ef43813b`, nhận đúng source SHA-256

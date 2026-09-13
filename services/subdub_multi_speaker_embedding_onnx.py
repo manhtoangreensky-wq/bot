@@ -38,6 +38,7 @@ PCM_SAMPLE_RATE = 16_000
 PCM_BYTES_PER_SAMPLE = 2
 UNIT_MAX_SECONDS = 2.5
 UNIT_SPLIT_GAP_SECONDS = 0.35
+WORD_OVERLAP_TOLERANCE_SECONDS = 0.35
 UNIT_MIN_FEATURE_SECONDS = 0.5
 MIN_UNITS = 6
 MIN_SPEAKERS = 3
@@ -216,7 +217,7 @@ def validate_word_timeline(
                 or start >= end
                 or end > duration
                 or start < previous_start
-                or start < previous_end
+                or start < previous_end - WORD_OVERLAP_TOLERANCE_SECONDS
             ):
                 raise ValueError("acoustic_word_time_invalid")
             identity = (start, end, word.casefold())
@@ -232,7 +233,7 @@ def validate_word_timeline(
                 }
             )
             previous_start = start
-            previous_end = end
+            previous_end = max(previous_end, end)
         return validated
     except speaker_cast.AutoCastManualRequired:
         raise
@@ -253,7 +254,8 @@ def build_acoustic_units(
     for item in validated:
         if current:
             gap = round(
-                float(item["start"]) - float(current[-1]["end"]),
+                float(item["start"])
+                - max(float(existing["end"]) for existing in current),
                 6,
             )
             proposed_duration = float(item["end"]) - float(current[0]["start"])
@@ -274,10 +276,14 @@ def build_acoustic_units(
     for unit_index, items in enumerate(grouped):
         word_indexes = [int(item["index"]) for item in items]
         covered_indexes.extend(word_indexes)
-        original_speech_seconds = round(
-            sum(float(item["end"]) - float(item["start"]) for item in items),
-            6,
-        )
+        original_speech_seconds = 0.0
+        covered_until = -math.inf
+        for item in items:
+            start = float(item["start"])
+            end = float(item["end"])
+            original_speech_seconds += max(0.0, end - max(start, covered_until))
+            covered_until = max(covered_until, end)
+        original_speech_seconds = round(original_speech_seconds, 6)
         if not math.isfinite(original_speech_seconds) or original_speech_seconds <= 0.0:
             raise _manual_required(ValueError("acoustic_unit_speech_invalid"))
         units.append(
@@ -285,7 +291,7 @@ def build_acoustic_units(
                 "unit_index": unit_index,
                 "word_indexes": word_indexes,
                 "start": float(items[0]["start"]),
-                "end": float(items[-1]["end"]),
+                "end": max(float(item["end"]) for item in items),
                 "original_speech_seconds": original_speech_seconds,
             }
         )
@@ -329,17 +335,19 @@ def build_acoustic_subsegment_plan(
             or start >= end
             or end > float(duration_seconds)
             or start < previous_start
-            or start < previous_end
+            or start < previous_end - WORD_OVERLAP_TOLERANCE_SECONDS
         ):
             raise _manual_required(ValueError("acoustic_region_time_invalid"))
         validated.append({"index": index, "start": start, "end": end})
         previous_start = start
-        previous_end = end
+        previous_end = max(previous_end, end)
 
     grouped: list[list[dict]] = []
     current: list[dict] = []
     for item in validated:
-        if current and item["start"] - current[-1]["end"] > UNIT_SPLIT_GAP_SECONDS:
+        if current and item["start"] - max(
+            float(existing["end"]) for existing in current
+        ) > UNIT_SPLIT_GAP_SECONDS:
             grouped.append(current)
             current = []
         current.append(item)
@@ -352,20 +360,55 @@ def build_acoustic_subsegment_plan(
     runs: list[dict] = []
     windows: list[dict] = []
     for run_index, items in enumerate(grouped):
+        source_segments: list[dict[str, float]] = []
+        for item in items:
+            start = float(item["start"])
+            end = float(item["end"])
+            if source_segments and start <= source_segments[-1]["source_end"]:
+                source_segments[-1]["source_end"] = max(
+                    source_segments[-1]["source_end"],
+                    end,
+                )
+            else:
+                source_segments.append(
+                    {
+                        "source_start": start,
+                        "source_end": end,
+                    }
+                )
         speech_cursor = 0.0
+        for segment in source_segments:
+            segment["speech_start"] = speech_cursor
+            speech_cursor += segment["source_end"] - segment["source_start"]
+            segment["speech_end"] = speech_cursor
+
+        def compact_position(source_time: float) -> float:
+            for segment in source_segments:
+                if source_time < segment["source_start"]:
+                    return float(segment["speech_start"])
+                if source_time <= segment["source_end"]:
+                    return float(
+                        segment["speech_start"]
+                        + source_time
+                        - segment["source_start"]
+                    )
+            return float(speech_cursor)
+
         region_indexes = []
         for item in items:
-            speech_seconds = item["end"] - item["start"]
+            speech_start = compact_position(float(item["start"]))
+            speech_end = compact_position(float(item["end"]))
+            if speech_end <= speech_start:
+                raise _manual_required(ValueError("acoustic_region_compaction_invalid"))
             mapped_regions.append(
                 {
                     **item,
                     "run_index": run_index,
-                    "speech_start_seconds": round(speech_cursor, 6),
-                    "speech_end_seconds": round(speech_cursor + speech_seconds, 6),
+                    "speech_start_seconds": round(speech_start, 6),
+                    "speech_end_seconds": round(speech_end, 6),
                 }
             )
             region_indexes.append(item["index"])
-            speech_cursor += speech_seconds
         run_seconds = round(speech_cursor, 6)
         runs.append(
             {
@@ -407,6 +450,36 @@ def build_acoustic_subsegment_plan(
         "runs": runs,
         "windows": windows,
     }
+
+
+def _compact_run_samples(
+    run: object,
+    *,
+    region_samples: dict[int, np.ndarray],
+    region_bounds: dict[int, tuple[int, int]],
+) -> np.ndarray:
+    if type(run) is not dict:
+        raise ValueError("acoustic_run_invalid")
+    indexes = run.get("region_indexes")
+    if type(indexes) is not list or not indexes:
+        raise ValueError("acoustic_run_invalid")
+    parts: list[np.ndarray] = []
+    covered_end = -1
+    for raw_index in indexes:
+        index = int(raw_index)
+        if index not in region_samples or index not in region_bounds:
+            raise ValueError("acoustic_run_invalid")
+        start, end = region_bounds[index]
+        samples = region_samples[index]
+        if end <= start or len(samples) != end - start:
+            raise ValueError("acoustic_pcm_range_invalid")
+        unique_start = max(start, covered_end)
+        if unique_start < end:
+            parts.append(samples[unique_start - start :])
+        covered_end = max(covered_end, end)
+    if not parts:
+        raise ValueError("acoustic_run_empty")
+    return np.concatenate(parts).astype(np.int16, copy=False)
 
 
 def map_subsegment_clusters_to_regions(
@@ -1889,6 +1962,7 @@ def _fixed_vocal_speech_window_views(
         duration_seconds=duration_seconds,
     )
     region_samples: dict[int, np.ndarray] = {}
+    region_bounds: dict[int, tuple[int, int]] = {}
     for region in plan["regions"]:
         start = int(round(float(region["start"]) * PCM_SAMPLE_RATE))
         end = int(round(float(region["end"]) * PCM_SAMPLE_RATE))
@@ -1898,9 +1972,12 @@ def _fixed_vocal_speech_window_views(
         if not np.any(samples):
             raise _manual_required(ValueError("fixed_vocal_speech_energy_invalid"))
         region_samples[int(region["index"])] = samples
+        region_bounds[int(region["index"])] = (start, end)
     run_samples = {
-        int(run["run_index"]): np.concatenate(
-            [region_samples[int(index)] for index in run["region_indexes"]]
+        int(run["run_index"]): _compact_run_samples(
+            run,
+            region_samples=region_samples,
+            region_bounds=region_bounds,
         )
         for run in plan["runs"]
     }
@@ -2098,7 +2175,7 @@ def _validated_embedding_units(
             or not math.isfinite(speech_seconds)
             or start < 0.0
             or start >= end
-            or start < previous_end
+            or start < previous_end - WORD_OVERLAP_TOLERANCE_SECONDS
             or end > pcm_duration_seconds + 1e-6
             or speech_seconds <= 0.0
             or speech_seconds > end - start + 1e-6
@@ -2113,7 +2190,7 @@ def _validated_embedding_units(
                 "original_speech_seconds": speech_seconds,
             }
         )
-        previous_end = end
+        previous_end = max(previous_end, end)
     return validated
 
 
@@ -2287,6 +2364,7 @@ def extract_acoustic_subsegment_embeddings(
             raise ValueError("acoustic_pcm_size_invalid")
         sample_count = pcm_bytes // PCM_BYTES_PER_SAMPLE
         region_samples: dict[int, np.ndarray] = {}
+        region_bounds: dict[int, tuple[int, int]] = {}
         with path.open("rb") as handle:
             for region in regions:
                 _embedding_boundary_check(
@@ -2304,14 +2382,16 @@ def extract_acoustic_subsegment_embeddings(
                 if len(samples) != end - start or not np.any(samples):
                     raise ValueError("acoustic_pcm_energy_invalid")
                 region_samples[index] = samples
+                region_bounds[index] = (start, end)
         run_samples: dict[int, np.ndarray] = {}
         for run in runs:
             run_index = int(run["run_index"])
-            indexes = list(run["region_indexes"])
-            if not indexes or run_index in run_samples:
+            if run_index in run_samples:
                 raise ValueError("acoustic_run_invalid")
-            run_samples[run_index] = np.concatenate(
-                [region_samples[int(index)] for index in indexes]
+            run_samples[run_index] = _compact_run_samples(
+                run,
+                region_samples=region_samples,
+                region_bounds=region_bounds,
             )
         session = _embedding_session(session_factory)
         rows = []
@@ -2768,7 +2848,7 @@ def build_clustered_segments(
             return
         word_identity = ",".join(str(item["index"]) for item in current_words)
         start = float(current_words[0]["start"])
-        end = float(current_words[-1]["end"])
+        end = max(float(item["end"]) for item in current_words)
         cue_digest = hashlib.sha256(
             f"{word_identity}|{start:.6f}|{end:.6f}".encode("ascii")
         ).hexdigest()[:12]
