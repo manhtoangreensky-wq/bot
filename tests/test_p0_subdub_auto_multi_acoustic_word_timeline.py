@@ -89,6 +89,22 @@ def test_acoustic_word_extractor_uses_bounded_provider_duration_tail():
     ]
 
 
+def test_acoustic_word_extractor_clamps_bounded_terminal_provider_tail():
+    payload = deepgram_payload()
+    payload["metadata"]["duration"] = 181.0
+    words = payload["results"]["channels"][0]["alternatives"][0]["words"]
+    words[-1]["start"] = 180.2
+    words[-1]["end"] = 181.7
+
+    assert bot.deepgram_acoustic_word_items(
+        payload,
+        duration_seconds=180.566333,
+    ) == [
+        EXPECTED_WORDS[0],
+        {"index": 1, "word": "world", "start": 180.2, "end": 180.566},
+    ]
+
+
 def test_acoustic_word_extractor_rejects_provider_tail_beyond_half_second():
     payload = deepgram_payload()
     payload["metadata"]["duration"] = 181.0
@@ -250,6 +266,39 @@ def test_acoustic_word_routing_accepts_provider_integer_duration_rounding(monkey
     words = payload["results"]["channels"][0]["alternatives"][0]["words"]
     words[-1]["start"] = 180.2
     words[-1]["end"] = 180.9
+
+    async def fake_deepgram(*_args, **_kwargs):
+        return {
+            "ok": True,
+            "status": "PASS",
+            "transcript": "Hello world",
+            "transcript_json": payload,
+            "http_status": 200,
+            "detail": "fixture",
+        }
+
+    monkeypatch.setattr(bot, "deepgram_asr_adapter", fake_deepgram)
+    result = asyncio.run(
+        bot.asr_transcribe_audio(
+            b"wav",
+            "audio/wav",
+            allow_confirmed_product=True,
+            require_auto_multi_word_timeline=True,
+            media_duration_seconds=180.566333,
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["word_timeline"][-1]["end"] == 180.566
+
+
+def test_acoustic_word_routing_accepts_bounded_terminal_word_overlap(monkeypatch):
+    configure_deepgram_route(monkeypatch)
+    payload = deepgram_payload()
+    payload["metadata"]["duration"] = 181.0
+    words = payload["results"]["channels"][0]["alternatives"][0]["words"]
+    words[-1]["start"] = 180.2
+    words[-1]["end"] = 181.7
 
     async def fake_deepgram(*_args, **_kwargs):
         return {
