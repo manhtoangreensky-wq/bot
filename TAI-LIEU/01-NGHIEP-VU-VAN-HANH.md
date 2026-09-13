@@ -1551,3 +1551,23 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   exit `0`, `py_compile local_worker.py` exit `0`, `git diff --check` exit `0`.
   Sau lần fail này không có live test, provider call, job mới, DB hoặc wallet
   mutation; LIVE_PASS vẫn chưa được công nhận.
+
+### Auto Multi rounded-duration equality — 13/09/2026
+
+- Job `#E1B3795806` chạy sau runtime `ef43813b`, nhận đúng source SHA-256
+  `1193542C...FA3F3` nhưng vẫn terminal `failed_no_charge` ở `5%` trước
+  translation/TTS/mux; `charged_xu=0`.
+- Provider attempt xác nhận `629` words, reject đúng terminal index `628` với
+  `ACOUSTIC_WORD_TIMELINE_REQUIRED:past_duration`. Job truyền duration đã làm
+  tròn `181s`, bằng đúng provider metadata `181s`; parser đã công nhận metadata
+  bằng điều kiện `>=` nhưng nhánh terminal lại yêu cầu `>`, nên loại sai tail.
+- Contract sửa chỉ cho terminal word bắt đầu trong duration, kết thúc qua EOF,
+  provider duration nguyên hữu hạn nằm trong biên `<0.5s` và span `<=2.5s`.
+  Trường hợp provider duration bằng duration làm tròn được clamp; word không
+  phải cuối vượt biên, word bắt đầu ngoài media, timestamp hỏng, đảo thứ tự và
+  duplicate vẫn fail-closed.
+- TDD thực đo: production-shaped RED `1 failed`; GREEN `1 passed`; parser
+  `59 passed`; Auto Multi parser/blackbox/embedding/recovery `412 passed`;
+  compile `bot.py`, `local_worker.py` và test thay đổi exit `0`; diff-check
+  exit `0`. Owner tự thực hiện live test tiếp theo; đợt sửa không upload,
+  không tạo/retry job và không gọi provider bổ sung nên chưa ghi `LIVE PASS`.

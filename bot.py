@@ -40528,7 +40528,7 @@ def deepgram_acoustic_word_items(
             word_index == word_count - 1
             and start < duration
             and end > duration
-            and provider_duration > duration
+            and provider_duration >= duration
             and end - start <= 2.5
         )
         if (

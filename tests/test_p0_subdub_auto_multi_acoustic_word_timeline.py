@@ -105,6 +105,22 @@ def test_acoustic_word_extractor_clamps_bounded_terminal_provider_tail():
     ]
 
 
+def test_acoustic_word_extractor_clamps_terminal_tail_when_provider_duration_equals_rounded_media():
+    payload = deepgram_payload()
+    payload["metadata"]["duration"] = 181.0
+    words = payload["results"]["channels"][0]["alternatives"][0]["words"]
+    words[-1]["start"] = 180.2
+    words[-1]["end"] = 181.7
+
+    assert bot.deepgram_acoustic_word_items(
+        payload,
+        duration_seconds=181.0,
+    ) == [
+        EXPECTED_WORDS[0],
+        {"index": 1, "word": "world", "start": 180.2, "end": 181.0},
+    ]
+
+
 def test_acoustic_word_extractor_rejects_provider_tail_beyond_half_second():
     payload = deepgram_payload()
     payload["metadata"]["duration"] = 181.0
@@ -149,7 +165,7 @@ def test_acoustic_word_extractor_does_not_trust_fractional_provider_duration():
         "negative_start",
         "nonpositive_duration",
         "decreasing_start",
-        "past_source_duration",
+        "nonterminal_past_source_duration",
         "duplicate_identity",
         "invalid_source_duration",
     ),
@@ -190,8 +206,8 @@ def test_acoustic_word_extractor_rejects_entire_malformed_timeline(mutation):
         words[0]["end"] = words[0]["start"]
     elif mutation == "decreasing_start":
         words[1]["start"] = 0.05
-    elif mutation == "past_source_duration":
-        words[1]["end"] = 2.1
+    elif mutation == "nonterminal_past_source_duration":
+        words[0]["end"] = 2.1
     elif mutation == "duplicate_identity":
         words.append(dict(words[1]))
     else:
