@@ -121,7 +121,23 @@ def test_acoustic_word_extractor_clamps_terminal_tail_when_provider_duration_equ
     ]
 
 
-def test_acoustic_word_extractor_rejects_provider_tail_beyond_half_second():
+def test_acoustic_word_extractor_clamps_measured_terminal_overlap_without_integer_provider_duration():
+    payload = deepgram_payload()
+    payload["metadata"]["duration"] = 180.566333
+    words = payload["results"]["channels"][0]["alternatives"][0]["words"]
+    words[-1]["start"] = 180.2
+    words[-1]["end"] = 182.4
+
+    assert bot.deepgram_acoustic_word_items(
+        payload,
+        duration_seconds=180.566333,
+    ) == [
+        EXPECTED_WORDS[0],
+        {"index": 1, "word": "world", "start": 180.2, "end": 180.566},
+    ]
+
+
+def test_acoustic_word_extractor_rejects_terminal_start_outside_media_even_with_integer_provider_duration():
     payload = deepgram_payload()
     payload["metadata"]["duration"] = 181.0
     words = payload["results"]["channels"][0]["alternatives"][0]["words"]
@@ -134,12 +150,25 @@ def test_acoustic_word_extractor_rejects_provider_tail_beyond_half_second():
     ) == []
 
 
-def test_acoustic_word_extractor_does_not_trust_fractional_provider_duration():
+def test_acoustic_word_extractor_rejects_terminal_start_outside_media_even_with_fractional_provider_duration():
     payload = deepgram_payload()
     payload["metadata"]["duration"] = 180.9
     words = payload["results"]["channels"][0]["alternatives"][0]["words"]
-    words[-1]["start"] = 180.5
+    words[-1]["start"] = 180.7
     words[-1]["end"] = 180.8
+
+    assert bot.deepgram_acoustic_word_items(
+        payload,
+        duration_seconds=180.566333,
+    ) == []
+
+
+def test_acoustic_word_extractor_rejects_terminal_overlap_far_beyond_media():
+    payload = deepgram_payload()
+    payload["metadata"]["duration"] = 180.9
+    words = payload["results"]["channels"][0]["alternatives"][0]["words"]
+    words[-1]["start"] = 174.0
+    words[-1]["end"] = 190.0
 
     assert bot.deepgram_acoustic_word_items(
         payload,
@@ -315,6 +344,39 @@ def test_acoustic_word_routing_accepts_bounded_terminal_word_overlap(monkeypatch
     words = payload["results"]["channels"][0]["alternatives"][0]["words"]
     words[-1]["start"] = 180.2
     words[-1]["end"] = 181.7
+
+    async def fake_deepgram(*_args, **_kwargs):
+        return {
+            "ok": True,
+            "status": "PASS",
+            "transcript": "Hello world",
+            "transcript_json": payload,
+            "http_status": 200,
+            "detail": "fixture",
+        }
+
+    monkeypatch.setattr(bot, "deepgram_asr_adapter", fake_deepgram)
+    result = asyncio.run(
+        bot.asr_transcribe_audio(
+            b"wav",
+            "audio/wav",
+            allow_confirmed_product=True,
+            require_auto_multi_word_timeline=True,
+            media_duration_seconds=180.566333,
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["word_timeline"][-1]["end"] == 180.566
+
+
+def test_acoustic_word_routing_accepts_measured_terminal_overlap_with_fractional_provider_duration(monkeypatch):
+    configure_deepgram_route(monkeypatch)
+    payload = deepgram_payload()
+    payload["metadata"]["duration"] = 180.566333
+    words = payload["results"]["channels"][0]["alternatives"][0]["words"]
+    words[-1]["start"] = 180.2
+    words[-1]["end"] = 182.4
 
     async def fake_deepgram(*_args, **_kwargs):
         return {

@@ -1541,18 +1541,40 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
 - Provider attempt aggregate ghi `ACOUSTIC_WORD_TIMELINE_REQUIRED:past_duration`,
   word index `628` trên tổng `629`. Đây là từ cuối bắt đầu trong thời lượng
   media nhưng đuôi timestamp vượt bound làm tròn; parser cũ loại cả timeline.
-- Quy tắc hiện tại chỉ nới đúng trường hợp terminal word giao cắt EOF khi
-  provider duration là số nguyên đã xác minh lớn hơn media, độ dài word không
-  quá `2.5s`; `end` luôn kẹp về media duration. Từ giữa timeline, từ bắt đầu
-  ngoài media, metadata phân số, span bất thường, NaN, đảo thứ tự và duplicate
-  vẫn fail-closed.
+- Quy tắc hiện tại chỉ nới đúng trường hợp terminal word giao cắt phần media đo
+  được: `start < media_duration < end`, span timestamp của word không quá `2.5s`;
+  provider-duration metadata không được dùng để chặn trường hợp này vì có thể
+  phân số hoặc bị làm tròn. `end` luôn kẹp về media duration. Từ giữa timeline,
+  từ bắt đầu ngoài media, span vượt `2.5s`, NaN, đảo thứ tự và duplicate vẫn
+  fail-closed.
 - Regression đo được: parser/ASR `58 passed in 5.08s`, bộ Auto Multi
   parser/blackbox/embedding/recovery `411 passed in 15.74s`, `py_compile bot.py`
   exit `0`, `py_compile local_worker.py` exit `0`, `git diff --check` exit `0`.
   Sau lần fail này không có live test, provider call, job mới, DB hoặc wallet
   mutation; LIVE_PASS vẫn chưa được công nhận.
 
-### Auto Multi rounded-duration equality — 13/09/2026
+### Auto Multi measured terminal-overlap correction — 13/09/2026
+
+- Sau deploy `8ff8422f`, job mới `#AAC3C1FFC7` vẫn terminal
+  `failed_no_charge` ở `5%`; process thực tế chạy từ `/opt/toanaas/bot` với
+  checkout đúng SHA, nên không phải stale runtime. Source nhận đủ cùng video
+  `50,129,262` bytes/SHA `1193542C...FA3F3`, `charged_xu=0`.
+- Provider attempt vẫn ghi `629` words, reject terminal index `628` với
+  `ACOUSTIC_WORD_TIMELINE_REQUIRED:past_duration`. Đối chiếu process/service
+  cho thấy parser đã sửa toán tử `>=`, nhưng terminal guard vẫn phụ thuộc
+  provider-duration được công nhận và giới hạn span thô `2.5s`; điều này không
+  bao phủ response có duration phân số hoặc đuôi timestamp dài nhưng phần giao
+  trong media hợp lệ.
+- Bản sửa hiện tại giữ nguyên mọi guard ngoài terminal: chỉ bỏ điều kiện phụ
+  thuộc provider metadata, giữ span word tối đa `2.5s` rồi clamp.
+  Không tự dời word bắt đầu sau EOF và không bỏ/đổi word giữa timeline.
+- TDD mới: RED production-shaped `1 failed`; các case terminal metadata phân số,
+  tail không được provider-duration công nhận và tail vượt span `2.5s` được
+  kiểm tra riêng. Đợt này
+  không upload, không tạo/retry job, không gọi provider bổ sung và chờ Owner tự
+  live-test sau deploy.
+
+### Auto Multi rounded-duration equality — 13/09/2026 (đã supersede)
 
 - Job `#E1B3795806` chạy sau runtime `ef43813b`, nhận đúng source SHA-256
   `1193542C...FA3F3` nhưng vẫn terminal `failed_no_charge` ở `5%` trước
@@ -1561,11 +1583,12 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   `ACOUSTIC_WORD_TIMELINE_REQUIRED:past_duration`. Job truyền duration đã làm
   tròn `181s`, bằng đúng provider metadata `181s`; parser đã công nhận metadata
   bằng điều kiện `>=` nhưng nhánh terminal lại yêu cầu `>`, nên loại sai tail.
-- Contract sửa chỉ cho terminal word bắt đầu trong duration, kết thúc qua EOF,
-  provider duration nguyên hữu hạn nằm trong biên `<0.5s` và span `<=2.5s`.
-  Trường hợp provider duration bằng duration làm tròn được clamp; word không
-  phải cuối vượt biên, word bắt đầu ngoài media, timestamp hỏng, đảo thứ tự và
-  duplicate vẫn fail-closed.
+- Bản vá trung gian chỉ cho terminal word bắt đầu trong duration, yêu cầu
+  provider duration nguyên hữu hạn và span thô `<=2.5s`; nó vẫn fail ở job mới
+  `#AAC3C1FFC7` nên không được coi là đủ.
+- Quy tắc đã supersede ở mục kế tiếp: dùng phần giao terminal với media đo được,
+  không phụ thuộc metadata provider nhưng vẫn giữ span timestamp `<=2.5s`; word
+  giữa/ngoài media và span quá biên vẫn bị fail-closed.
 - TDD thực đo: production-shaped RED `1 failed`; GREEN `1 passed`; parser
   `59 passed`; Auto Multi parser/blackbox/embedding/recovery `412 passed`;
   compile `bot.py`, `local_worker.py` và test thay đổi exit `0`; diff-check
