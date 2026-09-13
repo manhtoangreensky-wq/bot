@@ -40524,7 +40524,17 @@ def deepgram_acoustic_word_items(
             return reject("negative_start", word_index=word_index, provider_word_count=word_count)
         if start >= end:
             return reject("nonpositive_duration", word_index=word_index, provider_word_count=word_count)
-        if end > validation_duration + tail_tolerance_seconds:
+        terminal_word_crosses_media_end = bool(
+            word_index == word_count - 1
+            and start < duration
+            and end > duration
+            and provider_duration > duration
+            and end - start <= 2.5
+        )
+        if (
+            end > validation_duration + tail_tolerance_seconds
+            and not terminal_word_crosses_media_end
+        ):
             return reject("past_duration", word_index=word_index, provider_word_count=word_count)
         if start < previous_start:
             return reject("decreasing_start", word_index=word_index, provider_word_count=word_count)

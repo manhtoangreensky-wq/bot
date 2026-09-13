@@ -1531,3 +1531,23 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   customer resume `230 passed`; compile và diff-check phải chạy lại trước PR.
   LIVE job sau correction này chưa chạy vì chưa được deploy; không ghi PASS
   production trước khi có MP4 thật.
+
+### Auto Multi terminal-word duration guard — 13/09/2026
+
+- Job mới nhất `#B1CED79982` nhận đủ source `50,129,262` bytes qua Local Bot
+  API, nhưng dừng ở `5%` trước TTS/mux/delivery với
+  `AUTO_CAST_MANUAL_REQUIRED`. Không thiếu Xu, không thiếu quyền và không tạo
+  MP4; `charged_xu=0`.
+- Provider attempt aggregate ghi `ACOUSTIC_WORD_TIMELINE_REQUIRED:past_duration`,
+  word index `628` trên tổng `629`. Đây là từ cuối bắt đầu trong thời lượng
+  media nhưng đuôi timestamp vượt bound làm tròn; parser cũ loại cả timeline.
+- Quy tắc hiện tại chỉ nới đúng trường hợp terminal word giao cắt EOF khi
+  provider duration là số nguyên đã xác minh lớn hơn media, độ dài word không
+  quá `2.5s`; `end` luôn kẹp về media duration. Từ giữa timeline, từ bắt đầu
+  ngoài media, metadata phân số, span bất thường, NaN, đảo thứ tự và duplicate
+  vẫn fail-closed.
+- Regression đo được: parser/ASR `58 passed in 5.08s`, bộ Auto Multi
+  parser/blackbox/embedding/recovery `411 passed in 15.74s`, `py_compile bot.py`
+  exit `0`, `py_compile local_worker.py` exit `0`, `git diff --check` exit `0`.
+  Sau lần fail này không có live test, provider call, job mới, DB hoặc wallet
+  mutation; LIVE_PASS vẫn chưa được công nhận.
