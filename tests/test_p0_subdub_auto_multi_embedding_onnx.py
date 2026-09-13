@@ -263,6 +263,31 @@ def test_acoustic_word_timeline_accepts_bounded_adjacent_overlap_without_double_
     }
 
 
+def test_acoustic_word_timeline_accepts_monotonic_overlapping_speech_without_double_counting():
+    words = [
+        {"index": 0, "word": "one", "start": 0.0, "end": 1.2},
+        {"index": 1, "word": "two", "start": 0.2, "end": 0.5},
+        {"index": 2, "word": "three", "start": 2.0, "end": 2.2},
+        {"index": 3, "word": "four", "start": 3.0, "end": 3.2},
+        {"index": 4, "word": "five", "start": 4.0, "end": 4.2},
+        {"index": 5, "word": "six", "start": 5.0, "end": 5.2},
+        {"index": 6, "word": "seven", "start": 6.0, "end": 6.2},
+        {"index": 7, "word": "eight", "start": 7.0, "end": 7.2},
+    ]
+
+    validated = service.validate_word_timeline(words, duration_seconds=8.0)
+    units = service.build_acoustic_units(validated, duration_seconds=8.0)
+
+    assert validated == words
+    assert units[0] == {
+        "unit_index": 0,
+        "word_indexes": [0, 1],
+        "start": 0.0,
+        "end": 1.2,
+        "original_speech_seconds": 1.2,
+    }
+
+
 def test_acoustic_unit_end_covers_late_ending_word_in_bounded_overlap():
     words = [
         {"index": 0, "word": "a", "start": 0.0, "end": 1.0},
@@ -329,11 +354,11 @@ def test_clustered_segment_end_covers_late_ending_overlapped_word():
     assert segments[0]["end"] == 1.0
 
 
-def test_acoustic_embedding_units_accept_bounded_overlap_at_unit_boundary():
+def test_acoustic_embedding_units_accept_monotonic_overlap_at_unit_boundary():
     words = [
         {"index": 0, "word": "a", "start": 0.0, "end": 0.8},
         {"index": 1, "word": "b", "start": 0.9, "end": 2.0},
-        {"index": 2, "word": "c", "start": 1.8, "end": 2.6},
+        {"index": 2, "word": "c", "start": 1.0, "end": 2.6},
         {"index": 3, "word": "d", "start": 3.1, "end": 3.3},
         {"index": 4, "word": "e", "start": 3.8, "end": 4.0},
         {"index": 5, "word": "f", "start": 4.5, "end": 4.7},
@@ -344,7 +369,7 @@ def test_acoustic_embedding_units_accept_bounded_overlap_at_unit_boundary():
     units = service.build_acoustic_units(words, duration_seconds=7.0)
 
     assert units[0]["end"] == 2.0
-    assert units[1]["start"] == 1.8
+    assert units[1]["start"] == 1.0
     assert service._validated_embedding_units(
         units,
         pcm_duration_seconds=7.0,
@@ -401,7 +426,7 @@ def test_short_acoustic_unit_keeps_original_timing_for_later_zero_padding():
         "empty_text",
         "bool_time",
         "nan_time",
-        "overlap",
+        "decreasing_start",
         "past_duration",
         "duplicate_identity",
     ),
@@ -424,9 +449,8 @@ def test_acoustic_word_timeline_rejects_malformed_or_unsupported_input(mutation)
         words[2]["start"] = True
     elif mutation == "nan_time":
         words[2]["end"] = math.nan
-    elif mutation == "overlap":
-        words[1]["end"] = 1.2
-        words[2]["start"] = 0.7
+    elif mutation == "decreasing_start":
+        words[2]["start"] = 0.1
     elif mutation == "past_duration":
         words[-1]["end"] = 5.1
     else:
@@ -1194,15 +1218,17 @@ def test_acoustic_subsegment_plan_uses_union_end_when_deciding_the_next_run():
     assert plan["runs"][0]["region_indexes"] == [0, 1, 2]
 
 
-def test_acoustic_subsegment_plan_rejects_excessive_overlapping_regions():
-    with pytest.raises(speaker_cast.AutoCastManualRequired):
-        service.build_acoustic_subsegment_plan(
-            [
-                {"index": 0, "start": 0.0, "end": 1.0},
-                {"index": 1, "start": 0.6, "end": 1.5},
-            ],
-            duration_seconds=2.0,
-        )
+def test_acoustic_subsegment_plan_accepts_monotonic_overlapping_regions_once():
+    plan = service.build_acoustic_subsegment_plan(
+        [
+            {"index": 0, "start": 0.0, "end": 1.0},
+            {"index": 1, "start": 0.2, "end": 1.5},
+        ],
+        duration_seconds=2.0,
+    )
+
+    assert plan["run_count"] == 1
+    assert plan["runs"][0]["speech_seconds"] == 1.5
 
 
 def test_region_labels_use_nearest_subsegment_center_without_majority_override():
@@ -1265,7 +1291,7 @@ def test_subsegment_embedding_runner_executes_every_planned_window(
     np.testing.assert_allclose(np.linalg.norm(result, axis=1), 1.0, atol=1e-6)
 
 
-def test_subsegment_embedding_runner_does_not_duplicate_bounded_overlap_audio(
+def test_subsegment_embedding_runner_does_not_duplicate_monotonic_overlap_audio(
     monkeypatch,
     tmp_path,
 ):
@@ -1279,7 +1305,7 @@ def test_subsegment_embedding_runner_does_not_duplicate_bounded_overlap_audio(
     plan = service.build_acoustic_subsegment_plan(
         [
             {"index": 0, "start": 0.0, "end": 1.0},
-            {"index": 1, "start": 0.8, "end": 1.5},
+            {"index": 1, "start": 0.2, "end": 1.5},
             {"index": 2, "start": 1.7, "end": 2.0},
         ],
         duration_seconds=3.0,
