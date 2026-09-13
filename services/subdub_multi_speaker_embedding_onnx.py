@@ -38,7 +38,6 @@ PCM_SAMPLE_RATE = 16_000
 PCM_BYTES_PER_SAMPLE = 2
 UNIT_MAX_SECONDS = 2.5
 UNIT_SPLIT_GAP_SECONDS = 0.35
-WORD_OVERLAP_TOLERANCE_SECONDS = 0.35
 UNIT_MIN_FEATURE_SECONDS = 0.5
 MIN_UNITS = 6
 MIN_SPEAKERS = 3
@@ -189,7 +188,6 @@ def validate_word_timeline(
         validated: list[dict] = []
         identities: set[tuple[float, float, str]] = set()
         previous_start = -math.inf
-        previous_end = -math.inf
         for expected_index, item in enumerate(words):
             if type(item) is not dict or type(item.get("index")) is not int:
                 raise ValueError("acoustic_word_record_invalid")
@@ -210,6 +208,9 @@ def validate_word_timeline(
                 raise ValueError("acoustic_word_time_invalid")
             start = float(start_value)
             end = float(end_value)
+            # Concurrent speakers can produce legitimately overlapping words.
+            # Start order plus exact identity stays authoritative; downstream
+            # run compaction consumes the overlapping PCM interval only once.
             if (
                 not math.isfinite(start)
                 or not math.isfinite(end)
@@ -217,7 +218,6 @@ def validate_word_timeline(
                 or start >= end
                 or end > duration
                 or start < previous_start
-                or start < previous_end - WORD_OVERLAP_TOLERANCE_SECONDS
             ):
                 raise ValueError("acoustic_word_time_invalid")
             identity = (start, end, word.casefold())
@@ -233,7 +233,6 @@ def validate_word_timeline(
                 }
             )
             previous_start = start
-            previous_end = max(previous_end, end)
         return validated
     except speaker_cast.AutoCastManualRequired:
         raise
@@ -318,7 +317,6 @@ def build_acoustic_subsegment_plan(
         raise _manual_required(ValueError("acoustic_regions_invalid"))
     validated = []
     previous_start = -math.inf
-    previous_end = -math.inf
     for index, raw in enumerate(regions):
         if type(raw) is not dict or raw.get("index") != index:
             raise _manual_required(ValueError("acoustic_region_index_invalid"))
@@ -335,12 +333,10 @@ def build_acoustic_subsegment_plan(
             or start >= end
             or end > float(duration_seconds)
             or start < previous_start
-            or start < previous_end - WORD_OVERLAP_TOLERANCE_SECONDS
         ):
             raise _manual_required(ValueError("acoustic_region_time_invalid"))
         validated.append({"index": index, "start": start, "end": end})
         previous_start = start
-        previous_end = max(previous_end, end)
 
     grouped: list[list[dict]] = []
     current: list[dict] = []
@@ -2144,7 +2140,7 @@ def _validated_embedding_units(
     ):
         raise _manual_required(ValueError("acoustic_embedding_units_invalid"))
     validated: list[dict] = []
-    previous_end = -math.inf
+    previous_start = -math.inf
     for expected_index, item in enumerate(units):
         if type(item) is not dict or type(item.get("unit_index")) is not int:
             raise _manual_required(ValueError("acoustic_embedding_unit_invalid"))
@@ -2175,7 +2171,7 @@ def _validated_embedding_units(
             or not math.isfinite(speech_seconds)
             or start < 0.0
             or start >= end
-            or start < previous_end - WORD_OVERLAP_TOLERANCE_SECONDS
+            or start < previous_start
             or end > pcm_duration_seconds + 1e-6
             or speech_seconds <= 0.0
             or speech_seconds > end - start + 1e-6
@@ -2190,7 +2186,7 @@ def _validated_embedding_units(
                 "original_speech_seconds": speech_seconds,
             }
         )
-        previous_end = max(previous_end, end)
+        previous_start = start
     return validated
 
 
