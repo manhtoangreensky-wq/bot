@@ -28,6 +28,23 @@
 - Do not change PayOS, `/naptien`, wallet, Product Video, WebApp, ENV, provider prices, model bytes/hash/license, or exact-two behavior.
 - Only a validated real MP4 plus Telegram video then receipt plus zero-wallet evidence is completion.
 
+## Current Recovery Gate — 14/09/2026
+
+This section supersedes the old release/recovery TODOs below; completed historical evidence remains unchanged.
+
+- [x] PR `#1016`, source commit `5b0c8477`, squash merge `0c3b44935f9604692af04a322595e7573b103517`.
+- [x] Deploy run `34778027560` succeeded in `3m43s`; Telegram restarted on build `0c3b449` at `02:36:38`.
+- [x] Ordinary comparator `#AF5ADC1080` delivered MP4 and receipt.
+- [x] Fresh Auto Multi `#A5F1F9CB0A` is LIVE RED: it returned from `5%` to manual voice selection; no MP4 evidence. Therefore PR `#1016` is not LIVE PASS.
+- [x] Make `subdub_job_debug_text()` render actual newlines and expose only persisted safe fields `last_error_stage`, `multi_acoustic_failure_code`, `multi_acoustic_failure_word_count`, and `multi_acoustic_failure_duration_ms` for the existing job. Do not expose transcript, provider payload, token, path, or media bytes.
+- [x] Verify the compact diagnostic against an in-memory failed Auto Multi record: expected one readable message, no literal `\\n`, no raw HTML tags, and exact safe acoustic code/count/duration. Measured: `2 passed in 0.38s`; full `py_compile bot.py` exit `0`.
+- [ ] Deploy the diagnostic and query only existing job `#A5F1F9CB0A`; do not create, retry, rearm, upload, Confirm, charge, or call a provider.
+- [ ] Write exactly one RED reproducing the measured failure code; make one minimal Auto Multi-only correction. No threshold or fallback change is allowed without that RED.
+- [ ] Run `tests/test_p0_subdub_auto_multi_embedding_onnx.py`, `tests/test_p0_subdub_multi_speaker_blackbox.py`, and the two locked Auto 2 service files. Expected: zero failures; compile/diff/secret checks exit `0`.
+- [ ] One PR/squash/deploy for the measured correction. One Owner-created post-deploy Auto Multi job must reach ASR, acoustic, translation, TTS, mux, valid MP4 and receipt before `LIVE_PASS=YES`.
+
+Estimated remaining time after the existing job exposes its safe failure code: `45–90 minutes` for one bounded RED/GREEN/release loop; external provider/runtime time is not counted as source work.
+
 ## Resume Ledger
 
 ### Complete and locked
