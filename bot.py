@@ -145438,7 +145438,7 @@ def subdub_job_debug_text(job: dict | None = None, arg: str = "") -> str:
         return _safe_int(value, default)
     blocker = str(job.get("input_save_blocker") or job.get("pipeline_blocker") or job.get("no_charge_reason") or "")
     telegram_failed = bool("telegram_download_failed" in blocker or blocker == "large_telegram_download_unsupported")
-    text = "\\n".join([
+    text = "\n".join([
         "🛠 <b>SUBDUB JOB DEBUG</b>",
         "",
         f"• public_code: <code>{esc(job.get('public_code'))}</code>",
@@ -145467,6 +145467,10 @@ def subdub_job_debug_text(job: dict | None = None, arg: str = "") -> str:
         f"• success_sent_count: <code>{intval(job.get('success_sent_count'))}</code>",
         f"• status_panel_terminalized: <code>{yes_no(job.get('status_panel_terminalized'))}</code>",
         f"• refresh_stopped_after_terminal: <code>{yes_no(job.get('refresh_stopped_after_terminal'))}</code>",
+        f"• last_error_stage: <code>{esc(job.get('last_error_stage'))}</code>",
+        f"• multi_acoustic_failure_code: <code>{esc(job.get('multi_acoustic_failure_code'))}</code>",
+        f"• multi_acoustic_failure_word_count: <code>{intval(job.get('multi_acoustic_failure_word_count'))}</code>",
+        f"• multi_acoustic_failure_duration_ms: <code>{intval(job.get('multi_acoustic_failure_duration_ms'))}</code>",
         f"• bad_request_classification: <code>{esc(job.get('bad_request_classification') or subdub_classify_bad_request(blocker, stage=job.get('last_error_stage') or job.get('stage') or '', job=job))}</code>",
     ])
     return text[:3400]
