@@ -145028,8 +145028,8 @@ def subtitle_dub_job_status_text(job: dict) -> str:
     if not job:
         return "⚠️ Chưa có subtitle/dub internal job. Pipeline hiện xử lý immediate khi có media thật."
     return (
-        engine_async_status_text(job, admin=True)
-        + "\\n"
+        engine_async_status_text(job, admin=True).replace("\\n", "\n")
+        + "\n"
         + f"• SRT blocks: <code>{int(job.get('srt_blocks') or 0)}</code>\n"
         + f"• Audio bytes: <code>{int(job.get('audio_bytes') or 0)}</code>\n"
         + f"• Video bytes: <code>{int(job.get('video_bytes') or 0)}</code>\n"
@@ -145042,7 +145042,7 @@ def subtitle_dub_debug_text(job: dict) -> str:
     if job.get("_lookup_missing"):
         searched = ", ".join(job.get("searched") or []) or "-"
         stores = ", ".join(job.get("lookup_stores_checked") or []) or "-"
-        return "\\n".join([
+        return "\n".join([
             "⚠️ <b>Chưa có subtitle/dub job để debug.</b>",
             "",
             f"• input: <code>{html.escape(str(job.get('lookup_input') or '-'))}</code>",
@@ -145079,7 +145079,7 @@ def subtitle_dub_debug_text(job: dict) -> str:
         normalized = text.replace("\\", "/").rstrip("/")
         name = normalized.rsplit("/", 1)[-1] if "/" in normalized else normalized
         return html.escape(name or "path_hidden")
-    return "\\n".join([
+    return "\n".join([
         "🛠 <b>SUBTITLE/DUB DEBUG</b>",
         "",
         f"• job: <code>{esc(job.get('internal_job_id'))}</code>",
@@ -146235,7 +146235,8 @@ async def cmd_subdub_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def subdub_admin_debug_chunks(text: str, limit: int = 3200) -> list[str]:
     safe_limit = max(800, min(3600, int(limit or 3200)))
-    plain = re.sub(r"<br\s*/?>", "\\n", str(text or ""), flags=re.IGNORECASE)
+    normalized = str(text or "").replace("\\n", "\n")
+    plain = re.sub(r"<br\s*/?>", "\n", normalized, flags=re.IGNORECASE)
     plain = html.unescape(re.sub(r"<[^>]+>", "", plain)).strip()
     if not plain:
         plain = "no recent SubDub job"
@@ -235536,6 +235537,11 @@ def subdub_auto_manual_required_recovery(
         if pending_state.get("pending_action") == "video_dubbing"
         else video_dubbing_sync_state_fields(state)
     )
+    auto_multi_maintenance = bool(
+        auto_multi_speaker.is_auto_multi_speaker_state(recovery_base)
+        or recovery_base.get("auto_multi_maintenance_guard") is True
+        or state.get("auto_multi_maintenance_guard") is True
+    )
     cleaned = reset_subdub_voice_selection(recovery_base, selecting_auto=False)
     _persist_subdub_voice_reset(user_id, cleaned)
     same_lane_mode = normalize_video_translate_mode(mode)
@@ -235543,6 +235549,39 @@ def subdub_auto_manual_required_recovery(
         same_lane_mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
         or str(cleaned.get("active_flow") or "") == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB
     )
+    if auto_multi_maintenance:
+        recovered = set_video_dubbing_pending(
+            user_id,
+            "guarded",
+            processing="0",
+            auto_multi_maintenance_guard=True,
+        )
+        recovered = {**recovered, "auto_multi_maintenance_guard": True}
+        if normalize_user_language(lang) == "vi":
+            maintenance_text = (
+                "🔧 Hệ thống đang bảo trì/nâng cấp tính năng Tự động nhiều giọng. "
+                "Video chưa được tạo và hệ thống chưa trừ Xu. Anh/chị vui lòng thử lại sau."
+            )
+        else:
+            maintenance_text = (
+                "🔧 Automatic multi-speaker dubbing is under maintenance. "
+                "The video was not created and no Xu was charged. Please try again later."
+            )
+        return {
+            "ok": False,
+            "status": "AUTO_CAST_MANUAL_REQUIRED",
+            "reason": "AUTO_CAST_MANUAL_REQUIRED",
+            "lane_mode": same_lane_mode,
+            "public_copy_key": "auto_multi_maintenance",
+            "text": maintenance_text,
+            "reply_markup": (
+                subtitle_plus_dub_clean_failure_keyboard(lang)
+                if combo_lane
+                else video_dubbing_guard_keyboard(lang, admin=False)
+            ),
+            "state": recovered,
+            "charge_status": "not_charged",
+        }
     step = "choosing_voice" if combo_lane else "voice"
     recovered = set_video_dubbing_pending(
         user_id,
