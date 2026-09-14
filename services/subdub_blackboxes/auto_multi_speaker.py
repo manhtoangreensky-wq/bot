@@ -546,6 +546,28 @@ async def run_local_acoustic_diarization_off_event_loop(
         auto_speaker._cleanup_pcm_path(path)
         raise speaker_cast.AutoCastManualRequired()
 
+    declared_duration_seconds = float(duration_seconds)
+    duration_rounding_gap = declared_duration_seconds - measured_duration_seconds
+    acoustic_word_timeline = [
+        dict(item) if type(item) is dict else item for item in word_timeline
+    ]
+    if -1e-6 <= duration_rounding_gap <= 0.5 + 1e-6:
+        for item in acoustic_word_timeline:
+            if type(item) is not dict:
+                continue
+            start_value = item.get("start")
+            end_value = item.get("end")
+            if (
+                type(start_value) in {int, float}
+                and type(end_value) in {int, float}
+                and math.isfinite(float(start_value))
+                and math.isfinite(float(end_value))
+                and float(start_value) < measured_duration_seconds < float(end_value)
+                and float(end_value) - float(start_value) <= 2.5 + 1e-6
+                and float(end_value) <= declared_duration_seconds + 1e-6
+            ):
+                item["end"] = measured_duration_seconds
+
     timeout_seconds = acoustic_timeout_seconds_for_duration(
         measured_duration_seconds
     )
@@ -559,7 +581,7 @@ async def run_local_acoustic_diarization_off_event_loop(
         if not queued_default_runner:
             return acoustic_diarize(
                 str(path),
-                list(word_timeline),
+                list(acoustic_word_timeline),
                 duration_seconds=measured_duration_seconds,
                 deadline_monotonic=time.monotonic() + timeout_seconds,
                 stop_requested=stop_event.is_set,
@@ -578,7 +600,7 @@ async def run_local_acoustic_diarization_off_event_loop(
                 subdub_multi_speaker_embedding_onnx
                 ._diarize_fixed_vocal_word_timeline_owned(
                     str(path),
-                    list(word_timeline),
+                    list(acoustic_word_timeline),
                     duration_seconds=measured_duration_seconds,
                     deadline_monotonic=time.monotonic() + timeout_seconds,
                     stop_requested=stop_event.is_set,
