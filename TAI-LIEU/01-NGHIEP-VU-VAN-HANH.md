@@ -1617,3 +1617,22 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   compile `bot.py`, `local_worker.py` và test thay đổi exit `0`; diff-check
   exit `0`. Owner tự thực hiện live test tiếp theo; đợt sửa không upload,
   không tạo/retry job và không gọi provider bổ sung nên chưa ghi `LIVE PASS`.
+
+### Auto Multi measured-PCM tail repair — 14/09/2026
+
+- Diagnostic PR `#1017` merged as `1705db02cc79aef28f61875e9b8fbfaae20b86eb`;
+  deploy run `34803158214` succeeded. Read-only debug of job `#A5F1F9CB0A`
+  recorded `acoustic_word_time_invalid`, `629` words and declared duration
+  `181000ms`; input save was `yes`, MP4 was `no`, and `charged_xu=0`.
+- The selected source measures `180.545s` in ffprobe/audio PCM while orchestration
+  supplies rounded `181s`. The correction branch runner copies the timeline and
+  clamps only words that cross the measured PCM EOF when the declared/measured
+  rounding gap is at most `0.5s` and the word span is at most `2.5s`; word starts
+  outside measured media, long spans, malformed records, reversed time and
+  duplicates remain fail-closed. Original timeline objects are not mutated.
+- Local evidence for this correction: ONNX `136 passed`, blackbox `68 passed`,
+  continuity `7 passed`, recovery `162 passed`, provider-fallback `56 passed`,
+  exact-two comparator `3 passed` (`284` deselected); changed-file compile and
+  `git diff --check` exit `0`. Provider, production DB and wallet mutations are
+  `0`; this is source evidence only until an Owner-authorized live job produces
+  a real MP4 and Telegram receipt.

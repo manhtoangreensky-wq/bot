@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import hashlib
 import math
@@ -11,6 +12,7 @@ import pytest
 from services import subdub_multi_speaker_embedding_onnx as service
 from services import subdub_speaker_cast as speaker_cast
 from services import subdub_two_speaker_gender_onnx as gender_service
+from services.subdub_blackboxes import auto_multi_speaker
 
 
 @dataclass
@@ -286,6 +288,105 @@ def test_acoustic_word_timeline_accepts_monotonic_overlapping_speech_without_dou
         "end": 1.2,
         "original_speech_seconds": 1.2,
     }
+
+
+def test_local_acoustic_runner_clamps_rounded_terminal_word_tail_to_measured_pcm(
+    tmp_path,
+):
+    pcm_path = tmp_path / "rounded-terminal-tail.pcm"
+    measured_duration = 1.6
+    frame_count = round(measured_duration * 44_100)
+    with pcm_path.open("wb") as handle:
+        handle.truncate(frame_count * 4)
+    words = [
+        {"index": 0, "word": "hello", "start": 0.1, "end": 0.4},
+        {"index": 1, "word": "tail", "start": 1.2, "end": 1.8},
+    ]
+    captured = {}
+
+    def diarize(_path, received_words, *, duration_seconds, **_kwargs):
+        captured["words"] = service.validate_word_timeline(
+            received_words,
+            duration_seconds=duration_seconds,
+        )
+        captured["duration_seconds"] = duration_seconds
+        return {"ok": True, "status": "PASS"}
+
+    result = asyncio.run(
+        auto_multi_speaker.run_local_acoustic_diarization_off_event_loop(
+            pcm_path,
+            words,
+            duration_seconds=2.0,
+            acoustic_diarize=diarize,
+        )
+    )
+
+    assert result == {"ok": True, "status": "PASS"}
+    assert captured["duration_seconds"] == pytest.approx(measured_duration)
+    assert captured["words"][-1]["end"] == pytest.approx(measured_duration)
+    assert words[-1]["end"] == 1.8
+
+
+def test_local_acoustic_runner_rejects_word_starting_outside_measured_pcm(tmp_path):
+    pcm_path = tmp_path / "outside-measured-pcm.pcm"
+    measured_duration = 1.6
+    frame_count = round(measured_duration * 44_100)
+    with pcm_path.open("wb") as handle:
+        handle.truncate(frame_count * 4)
+    words = [
+        {"index": 0, "word": "hello", "start": 0.1, "end": 0.4},
+        {"index": 1, "word": "outside", "start": 1.7, "end": 1.9},
+    ]
+
+    def diarize(_path, received_words, *, duration_seconds, **_kwargs):
+        service.validate_word_timeline(
+            received_words,
+            duration_seconds=duration_seconds,
+        )
+        return {"ok": True, "status": "PASS"}
+
+    with pytest.raises(speaker_cast.AutoCastManualRequired) as raised:
+        asyncio.run(
+            auto_multi_speaker.run_local_acoustic_diarization_off_event_loop(
+                pcm_path,
+                words,
+                duration_seconds=2.0,
+                acoustic_diarize=diarize,
+            )
+        )
+
+    assert str(raised.value.__cause__) == "acoustic_word_time_invalid"
+
+
+def test_local_acoustic_runner_rejects_unbounded_terminal_word_span(tmp_path):
+    pcm_path = tmp_path / "unbounded-terminal-span.pcm"
+    measured_duration = 2.6
+    frame_count = round(measured_duration * 44_100)
+    with pcm_path.open("wb") as handle:
+        handle.truncate(frame_count * 4)
+    words = [
+        {"index": 0, "word": "hello", "start": 0.1, "end": 0.4},
+        {"index": 1, "word": "unbounded", "start": 0.1, "end": 2.8},
+    ]
+
+    def diarize(_path, received_words, *, duration_seconds, **_kwargs):
+        service.validate_word_timeline(
+            received_words,
+            duration_seconds=duration_seconds,
+        )
+        return {"ok": True, "status": "PASS"}
+
+    with pytest.raises(speaker_cast.AutoCastManualRequired) as raised:
+        asyncio.run(
+            auto_multi_speaker.run_local_acoustic_diarization_off_event_loop(
+                pcm_path,
+                words,
+                duration_seconds=3.0,
+                acoustic_diarize=diarize,
+            )
+        )
+
+    assert str(raised.value.__cause__) == "acoustic_word_time_invalid"
 
 
 def test_acoustic_unit_end_covers_late_ending_word_in_bounded_overlap():

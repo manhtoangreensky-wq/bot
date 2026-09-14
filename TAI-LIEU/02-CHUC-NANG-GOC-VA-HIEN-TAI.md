@@ -794,3 +794,16 @@ giá, settlement, PayOS hay ví Xu.
 | Terminal word có đuôi timestamp vượt bound thì phải bỏ toàn bộ timeline | Job `#B1CED79982`, `#E1B3795806` và `#AAC3C1FFC7` đều có `629` words, reject ở terminal index `628`; duration provider có thể phân số hoặc làm tròn và không được dùng làm điều kiện bắt buộc. Nếu terminal word giao cắt media (`start < media_duration < end`) với span timestamp `<=2.5s`, hệ thống kẹp `end` về media duration; word giữa/ngoài media hoặc span `>2.5s` vẫn bị chặn | ✅ Guard theo ngữ nghĩa, không theo fixture |
 | Timestamp word kề nhau phải tuyệt đối không overlap | Job dọc `#5B542A4380` đã qua Deepgram với `53` khối nhưng ONNX loại `629` words bằng `acoustic_word_time_invalid`; parser cho monotonic start còn validator cấm mọi `start < previous_end` | ❌ Validator chấp nhận adjacent overlap `<=0.35s`; unit/group end và speech/PCM compaction dùng union interval, overlap lớn hơn vẫn fail-closed |
 | Video dọc làm Auto Multi fail ở 5% | Source `1080x1920`, rotation `0` đã normalize; job fail trước geometry/mux tại validator word timeline | ❌ Không liên quan tỷ lệ màn hình |
+
+### Auto Multi measured-PCM tail repair — 14/09/2026
+
+| Giả định trước | Bằng chứng và quy tắc hiện tại | Trạng thái |
+|---|---|---|
+| Duration orchestration làm tròn có thể dùng trực tiếp cho local acoustic | Job `#A5F1F9CB0A` ghi `181000ms`/`629` words nhưng source audio PCM đo `180.545s`; validator phát `acoustic_word_time_invalid` trước translation/TTS/mux | ❌ Không còn đúng |
+| Có thể bỏ toàn bộ timeline khi chỉ phần đuôi vượt EOF do rounding | Runner Auto Multi giữ nguyên start/index/text, kẹp các word giao cắt EOF khi gap declared–measured `<=0.5s` và span `<=2.5s`; word bắt đầu ngoài EOF, span dài, malformed/reversed/duplicate vẫn fail-closed | ✅ Sửa đúng boundary, không nới chung |
+| Sửa duration phải đổi model, clustering, Auto 2 hoặc pricing | Correction chỉ nằm ở `services/subdub_blackboxes/auto_multi_speaker.py`; model, validator core, Auto 2, translation/TTS/mux/delivery và settlement không đổi | ✅ Cô lập |
+
+Evidence source: ONNX `136`, blackbox `68`, continuity `7`, recovery `162`,
+provider-fallback `56`, exact-two `3` passed; changed-file compile và
+`git diff --check` exit `0`. Chưa có live MP4/receipt cho correction nên chưa
+được ghi `LIVE PASS`.
