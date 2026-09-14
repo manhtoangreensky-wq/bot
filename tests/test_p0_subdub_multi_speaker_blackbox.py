@@ -2367,6 +2367,93 @@ def test_multi_full_blackbox_rejects_wrong_output_aspect_before_delivery(
     assert result["public_copy_key"] == "voice_auto_manual_required"
 
 
+@pytest.mark.parametrize(
+    ("mode", "active_flow"),
+    (
+        ("dub", "dub_audio"),
+        ("subtitle_plus_dub", "subtitle_plus_dub"),
+    ),
+)
+def test_auto_multi_failure_returns_plain_maintenance_without_manual_voice_picker(
+    mode,
+    active_flow,
+):
+    user_id = 98_410 if mode == "dub" else 98_411
+    state = {
+        "pending_action": "video_dubbing",
+        "mode": mode,
+        "process_type": mode,
+        "video_processing_mode": mode,
+        "active_flow": active_flow,
+        "voice_kind": "auto_speaker_gender",
+        "voice_selection_mode": "auto_speaker",
+        "auto_speaker_lane": "multi",
+        "processing": "1",
+    }
+    bot.USER_PENDING[bot.video_dubbing_pending_key(user_id)] = dict(state)
+    try:
+        result = bot.subdub_auto_manual_required_recovery(
+            user_id,
+            state,
+            mode=mode,
+            lang="vi",
+        )
+    finally:
+        bot.USER_PENDING.pop(bot.video_dubbing_pending_key(user_id), None)
+
+    callbacks = _callbacks(result["reply_markup"])
+    assert result["status"] == speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+    assert result["public_copy_key"] == "auto_multi_maintenance"
+    assert "Hệ thống đang bảo trì/nâng cấp" in result["text"]
+    assert "chọn giọng" not in result["text"].lower()
+    assert "\\n" not in result["text"]
+    assert "\n" not in result["text"]
+    assert "<" not in result["text"]
+    assert ">" not in result["text"]
+    assert not any(callback.startswith("videodub|voice|") for callback in callbacks)
+    assert "menu|main" in callbacks
+    assert result["state"]["step"] == "guarded"
+    assert result["state"]["auto_multi_maintenance_guard"] is True
+    assert result["charge_status"] == "not_charged"
+
+    repeated = bot.subdub_auto_manual_required_recovery(
+        user_id,
+        result["state"],
+        mode=mode,
+        lang="vi",
+    )
+    assert repeated["public_copy_key"] == "auto_multi_maintenance"
+    assert repeated["text"] == result["text"]
+    assert not any(
+        callback.startswith("videodub|voice|")
+        for callback in _callbacks(repeated["reply_markup"])
+    )
+
+
+def test_subdub_admin_debug_surfaces_use_real_lines_without_raw_html():
+    job = {
+        "feature": "subtitle_dub",
+        "internal_job_id": "debug-job",
+        "job_id": "debug-job",
+        "status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "mode": "subtitle_plus_dub",
+        "last_error_safe": "maintenance",
+    }
+
+    compact_status = bot.subtitle_dub_job_status_text(job)
+    debug_chunks = bot.subdub_admin_debug_chunks(
+        bot.subtitle_dub_debug_text(job)
+    )
+
+    assert "\\n" not in compact_status
+    assert "\n• SRT blocks:" in compact_status
+    assert debug_chunks
+    assert all("\\n" not in chunk for chunk in debug_chunks)
+    assert all("<" not in chunk and ">" not in chunk for chunk in debug_chunks)
+    assert "SUBTITLE/DUB DEBUG" in "\n".join(debug_chunks)
+
+
 @pytest.mark.parametrize("target_language", ("vi", "ja", "en", "ko", "zh"))
 def test_multi_adapter_preserves_translation_target_language(
     monkeypatch,
