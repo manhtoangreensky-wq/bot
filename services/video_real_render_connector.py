@@ -88,6 +88,9 @@ PRODUCT_VIDEO_LOGO_MARGIN_Y_RATIO = 0.035
 PROVIDER_VIDEO_SOURCE = "provider"
 PROVIDER_REQUIRED_PRODUCT_TYPES = {
     "video_ai_prompt",
+    "video_ai_image",
+    "video_ai_video_reference",
+    "video_ai_real",
     "prompt_vault_to_video",
     "self_shot_scene_change",
     "self_shot_cinematic_transform",
@@ -99,6 +102,8 @@ PROVIDER_REQUIRED_PRODUCT_TYPES = {
     "trend_video",
     "multi_scene_film",
     "video_long",
+    "video_idea",
+    "video_idea_to_product",
 }
 PROVIDER_REQUIRED_CAPABILITIES = {
     "text_to_video",

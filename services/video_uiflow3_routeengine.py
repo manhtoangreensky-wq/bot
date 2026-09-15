@@ -44,11 +44,14 @@ BRAND_POSITIONS = frozenset(
 PRODUCT_TYPE_BY_PARENT = {
     "script_image_video": "script_to_video",
     "self_shot_scene_change": "self_shot_scene_change",
+    "self_shot_cinematic_transform": "self_shot_cinematic_transform",
     "video_trend": "video_trend",
     "video_storyboard": "storyboard_prompt",
     "storyboard_prompt": "storyboard_prompt",
     "multi_scene_film": "multi_scene_film",
+    "video_long": "multi_scene_film",
     "video_idea": "video_idea_to_product",
+    "video_local_edit": "video_local_edit",
 }
 ACTIVE_DRAFT_STATUSES = (
     "draft_planning",

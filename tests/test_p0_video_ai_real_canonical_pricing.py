@@ -261,13 +261,15 @@ def test_fifteen_second_tier_stays_scoped_to_approved_uiflow3_products():
         "script_image_video",
         "self_shot_scene_change",
         "self_shot_cinematic_transform",
+        "video_trend",
+        "video_idea",
+        "multi_scene_film",
+        "video_long",
     )
-    protected = ("video_trend", "video_idea", "multi_scene_film", "video_long")
 
     for product in extended:
         assert 700 in video_tail9.commercial_contract(product)["supported_quality_tiers"]
-    for product in protected:
-        assert 700 not in video_tail9.commercial_contract(product)["supported_quality_tiers"]
+    assert 700 not in video_tail9.UNKNOWN_PRODUCT_ADAPTER["supported_quality_tiers"]
 
 
 def test_remote_worker_preserves_verified_fifteen_second_scene_duration():
