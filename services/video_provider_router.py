@@ -384,6 +384,14 @@ def product_video_submit_switch_detail(env: dict[str, str] | None = None) -> dic
 PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM = "public_user_final_confirm"
 PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE = "public_confirmed_fallback_once"
 PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_SCENE_FALLBACK_ONCE = "public_confirmed_scene_fallback_once"
+PRODUCT_VIDEO_SUBMIT_SOURCE_OWNER_AUTHORIZED_LIVE_ACCEPTANCE = "owner_authorized_live_acceptance"
+OWNER_AUTHORIZED_LIVE_ACCEPTANCE = "owner_authorized_live_acceptance"
+ACCEPTANCE_BYPASS_SCOPE_PROBATION_LIVENESS_ONLY = "probation_liveness_only"
+CANONICAL_ACCEPTANCE_PRODUCT_TYPE = "video_ai_prompt"
+CANONICAL_ACCEPTANCE_PROVIDER = "shopaikey_video"
+CANONICAL_ACCEPTANCE_CAPABILITY = "text_to_video"
+CANONICAL_ACCEPTANCE_TIER = "veo31_fast_8"
+CANONICAL_ACCEPTANCE_RUNTIME_SHA = "d2c2d1e1a82d7bf1452ea51030380f8f00d5990c"
 PRODUCT_VIDEO_CONTRACT_REJECT_BLOCKERS = {
     "key4u_model_requires_exclusive_interface_no_endpoint",
     "key4u_model_contract_missing_no_charge",
@@ -412,6 +420,9 @@ def normalize_product_video_submit_source(value: Any = "") -> str:
         "public_fallback_once": PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE,
         "public_confirmed_scene_fallback_once": PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_SCENE_FALLBACK_ONCE,
         "public_scene_fallback_once": PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_SCENE_FALLBACK_ONCE,
+        "owner_authorized_live_acceptance": OWNER_AUTHORIZED_LIVE_ACCEPTANCE,
+        "owner_authorized_acceptance": OWNER_AUTHORIZED_LIVE_ACCEPTANCE,
+        "owner_acceptance": OWNER_AUTHORIZED_LIVE_ACCEPTANCE,
         "poll_existing_task": PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK,
         "worker_poll": PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK,
         "worker_poll_existing": PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK,
@@ -459,6 +470,8 @@ def product_video_freeze_truth(
         source_kind = normalized_source
     elif normalized_source in PRODUCT_VIDEO_PUBLIC_FLOW_SOURCES:
         source_kind = "public_final_confirm"
+    elif normalized_source == OWNER_AUTHORIZED_LIVE_ACCEPTANCE:
+        source_kind = OWNER_AUTHORIZED_LIVE_ACCEPTANCE
     elif normalized_source == PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK:
         source_kind = "worker_poll_existing_task"
     elif normalized_source in PRODUCT_VIDEO_HIDDEN_SUBMIT_SOURCES:
@@ -486,6 +499,7 @@ def product_video_freeze_truth(
     )
     public_provider_freeze = bool(
         explicit_public_env_name
+        or _context_bool("public_provider_freeze")
         or _context_bool("explicit_public_provider_freeze")
         or _context_bool("runtime_public_provider_freeze")
     )
@@ -588,7 +602,21 @@ def product_video_freeze_truth(
     public_live_allowed = not bool(public_blocker_code)
     blocker_code = public_blocker_code
     blocker_source = public_blocker_source
-    if source_kind not in {"public_preflight", "public_invoice", "public_final_confirm"}:
+    if source_kind == OWNER_AUTHORIZED_LIVE_ACCEPTANCE:
+        if provider_spend_freeze:
+            blocker_code = "provider_spend_freeze_active"
+            blocker_source = "runtime:provider_spend_freeze"
+        elif provider_freeze:
+            blocker_code = "provider_freeze_active"
+            blocker_source = "runtime:provider_freeze"
+        elif public_provider_freeze:
+            blocker_code = "public_provider_freeze_active"
+            blocker_source = public_provider_freeze_source or "runtime:public_provider_freeze"
+        elif not public_submit_enabled:
+            blocker_code = "public_provider_submit_disabled"
+            blocker_source = "runtime:public_submit_switch"
+        public_live_allowed = not bool(blocker_code)
+    elif source_kind not in {"public_preflight", "public_invoice", "public_final_confirm"}:
         if source_kind == "worker_poll_existing_task":
             blocker_code = "worker_poll_existing_task_read_only"
             blocker_source = "source:worker_poll_existing_task"
@@ -650,6 +678,11 @@ def product_video_provider_submit_source_policy(
         or metadata.get("entry_source")
         or ""
     )
+    owner_auth = metadata.get("owner_acceptance_auth")
+    if owner_auth and isinstance(owner_auth, dict) and bool(owner_auth.get("owner_authorized")):
+        auth_valid, _, _ = validate_owner_acceptance_authorization(owner_auth)
+        if auth_valid and source not in PRODUCT_VIDEO_HIDDEN_SUBMIT_SOURCES:
+            source = OWNER_AUTHORIZED_LIVE_ACCEPTANCE
     if not source and (
         metadata.get("public_user_confirmed")
         or metadata.get("interactive_product")
@@ -667,6 +700,7 @@ def product_video_provider_submit_source_policy(
             PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
             PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE,
             PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_SCENE_FALLBACK_ONCE,
+            OWNER_AUTHORIZED_LIVE_ACCEPTANCE,
         }
     )
     if poll_existing_task or source == PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK:
@@ -683,6 +717,22 @@ def product_video_provider_submit_source_policy(
             "public_user_confirmed": public_user_confirmed,
             "provider_submit_allowed": False,
             "provider_submit_block_reason": "hidden_submit_source_blocked",
+            "poll_existing_task_allowed": False,
+        }
+    if source == OWNER_AUTHORIZED_LIVE_ACCEPTANCE:
+        if not public_submit_enabled:
+            return {
+                "submit_source": source,
+                "public_user_confirmed": True,
+                "provider_submit_allowed": False,
+                "provider_submit_block_reason": "public_provider_submit_disabled",
+                "poll_existing_task_allowed": False,
+            }
+        return {
+            "submit_source": source,
+            "public_user_confirmed": True,
+            "provider_submit_allowed": True,
+            "provider_submit_block_reason": "",
             "poll_existing_task_allowed": False,
         }
     if source not in {
@@ -2671,6 +2721,8 @@ def product_video_public_provider_route_decision(
     status: dict[str, Any] | None = None,
     chain: list[str] | tuple[str, ...] | str | None = None,
     degraded_providers: dict[str, dict[str, Any]] | None = None,
+    owner_acceptance_auth: dict[str, Any] | None = None,
+    acceptance_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = dict(status or {})
     if isinstance(chain, str):
@@ -2685,6 +2737,14 @@ def product_video_public_provider_route_decision(
         if isinstance(item, dict)
     }
     degraded = {str(key).strip(): dict(value or {}) for key, value in (degraded_providers or {}).items()}
+    acceptance_valid = False
+    acceptance_blocker = ""
+    verified_acceptance: dict[str, Any] = {}
+    if owner_acceptance_auth is not None:
+        acceptance_valid, acceptance_blocker, verified_acceptance = validate_owner_acceptance_authorization(
+            owner_acceptance_auth,
+            context=acceptance_context or {},
+        )
     skipped: list[dict[str, Any]] = []
     eligible: list[str] = []
     route_ready_order: list[str] = []
@@ -2692,6 +2752,11 @@ def product_video_public_provider_route_decision(
     degraded_skipped = False
     health_skipped = False
     for provider in configured_chain:
+        if acceptance_valid:
+            pinned = verified_acceptance.get("pinned_provider") or CANONICAL_ACCEPTANCE_PROVIDER
+            if provider != pinned:
+                skipped.append({"provider": provider, "reason": "acceptance_lane_pinned_to_other_provider"})
+                continue
         item = provider_items.get(provider, {})
         degrade_state = degraded.get(provider) or {}
         configured = bool(item.get("configured", True if not provider_items else False))
@@ -2723,19 +2788,22 @@ def product_video_public_provider_route_decision(
             )
             continue
         if "live_healthy" in degrade_state and not bool(degrade_state.get("live_healthy")):
-            health_skipped = True
-            health_status = str(degrade_state.get("health_status") or "unknown").strip().lower()
-            reason = "provider_live_health_unknown" if health_status in {"", "unknown"} else "provider_live_health_unhealthy"
-            skipped.append(
-                {
-                    "provider": provider,
-                    "reason": reason,
-                    "health_status": health_status or "unknown",
-                    "last_valid_scene_at": str(degrade_state.get("last_valid_scene_at") or ""),
-                    "recent_stalled_jobs": list(degrade_state.get("recent_stalled_jobs") or []),
-                }
-            )
-            continue
+            if acceptance_valid and provider == (verified_acceptance.get("pinned_provider") or CANONICAL_ACCEPTANCE_PROVIDER):
+                pass
+            else:
+                health_skipped = True
+                health_status = str(degrade_state.get("health_status") or "unknown").strip().lower()
+                reason = "provider_live_health_unknown" if health_status in {"", "unknown"} else "provider_live_health_unhealthy"
+                skipped.append(
+                    {
+                        "provider": provider,
+                        "reason": reason,
+                        "health_status": health_status or "unknown",
+                        "last_valid_scene_at": str(degrade_state.get("last_valid_scene_at") or ""),
+                        "recent_stalled_jobs": list(degrade_state.get("recent_stalled_jobs") or []),
+                    }
+                )
+                continue
         eligible.append(provider)
         if bool(degrade_state.get("live_healthy")):
             live_healthy_order.append(provider)
@@ -2747,14 +2815,25 @@ def product_video_public_provider_route_decision(
         scene_count=1,
         require_live_health=True,
         allow_legacy_missing_health=True,
+        owner_acceptance_auth=owner_acceptance_auth,
+        acceptance_context=acceptance_context,
     )
     eligible = list(eligibility.get("eligible_provider_keys") or [])
     selected = eligible[0] if eligible else ""
     route_blocker = "" if selected else (
-        "no_healthy_video_provider_no_charge"
-        if degraded_skipped or health_skipped
-        else "product_video_no_public_mp4_provider"
+        acceptance_blocker
+        if owner_acceptance_auth is not None and not acceptance_valid
+        else (
+            "no_healthy_video_provider_no_charge"
+            if degraded_skipped or health_skipped
+            else "product_video_no_public_mp4_provider"
+        )
     )
+    primary_reason = "default_order"
+    if acceptance_valid and selected:
+        primary_reason = "owner_authorized_acceptance_lane"
+    elif (degraded_skipped or health_skipped) and selected:
+        primary_reason = "health_aware_degraded_provider_skipped"
     return {
         **eligibility,
         "ok": bool(selected),
@@ -2772,8 +2851,12 @@ def product_video_public_provider_route_decision(
         "eligibility_blocker": str(eligibility.get("blocker") or ""),
         "public_message": PUBLIC_NO_VIDEO_PROVIDER_COPY if not selected else "",
         "effective_primary_for_low_basic": selected,
-        "primary_selected_due_to_health": "health_aware_degraded_provider_skipped" if (degraded_skipped or health_skipped) and selected else "default_order",
+        "primary_selected_due_to_health": primary_reason,
         "provider_submit_count": 0,
+        "owner_acceptance_valid": acceptance_valid,
+        "acceptance_lane_active": acceptance_valid,
+        "pinned_provider": verified_acceptance.get("pinned_provider", "") if acceptance_valid else "",
+        "owner_acceptance_block_reason": acceptance_blocker if not acceptance_valid and owner_acceptance_auth else "",
     }
 
 
@@ -3042,6 +3125,117 @@ def product_video_provider_freeze_probation_policy(
     }
 
 
+def validate_owner_acceptance_authorization(
+    auth: dict[str, Any] | None,
+    context: dict[str, Any] | None = None,
+    *,
+    environ: dict[str, str] | None = None,
+    current_time: float | None = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Validate Owner-authorized acceptance lane for a single controlled live job.
+
+    Enforces server-side trusted identity, one-time use, provider pinning, product pinning,
+    runtime SHA binding, and spend ceiling.
+    """
+    if not isinstance(auth, dict) or not auth:
+        return False, "owner_acceptance_auth_missing", {}
+
+    if not bool(auth.get("owner_authorized")):
+        return False, "owner_authorization_flag_missing", {}
+
+    auth_type = str(auth.get("acceptance_type") or auth.get("canonical_name") or auth.get("name") or "").strip()
+    if auth_type not in {
+        OWNER_AUTHORIZED_LIVE_ACCEPTANCE,
+        "owner_authorized_acceptance",
+        "owner_authorized_live_acceptance_lane",
+    }:
+        return False, "owner_acceptance_type_invalid", {}
+
+    if bool(auth.get("consumed")):
+        return False, "owner_acceptance_already_consumed", {}
+
+    now = float(current_time if current_time is not None else time.time())
+    expires_at = auth.get("expires_at")
+    if expires_at is not None:
+        try:
+            if float(expires_at) <= now:
+                return False, "owner_acceptance_expired", {}
+        except Exception:
+            return False, "owner_acceptance_expiry_invalid", {}
+
+    ctx = dict(context or {})
+
+    # 1. User binding
+    auth_user_id = auth.get("user_id")
+    # 1. User binding
+    auth_user_id = auth.get("user_id")
+    if auth_user_id is not None:
+        ctx_user_id = ctx.get("user_id")
+        if ctx_user_id is not None and str(ctx_user_id).strip() != str(auth_user_id).strip():
+            return False, "owner_acceptance_user_mismatch", {}
+
+    # 2. Job / Project binding
+    auth_job_id = auth.get("job_id")
+    if auth_job_id is not None:
+        ctx_job_id = ctx.get("job_id")
+        if ctx_job_id is not None and str(ctx_job_id).strip() != str(auth_job_id).strip():
+            return False, "owner_acceptance_job_mismatch", {}
+
+    auth_project_id = auth.get("project_id")
+    if auth_project_id is not None:
+        ctx_project_id = ctx.get("project_id")
+        if ctx_project_id is not None and str(ctx_project_id).strip() != str(auth_project_id).strip():
+            return False, "owner_acceptance_project_mismatch", {}
+
+    # 3. Product type pinning
+    pinned_product = str(auth.get("product_type") or CANONICAL_ACCEPTANCE_PRODUCT_TYPE).strip()
+    if pinned_product != CANONICAL_ACCEPTANCE_PRODUCT_TYPE and not auth.get("allow_other_product"):
+        return False, "owner_acceptance_product_mismatch", {}
+    ctx_product = str(ctx.get("product_type") or "").strip()
+    if ctx_product and ctx_product != pinned_product:
+        return False, "owner_acceptance_product_mismatch", {}
+
+    # 4. Provider pinning (shopaikey_video only for first lane)
+    pinned_provider = str(auth.get("provider") or CANONICAL_ACCEPTANCE_PROVIDER).strip()
+    if pinned_provider != CANONICAL_ACCEPTANCE_PROVIDER and not auth.get("allow_secondary_provider"):
+        return False, "owner_acceptance_provider_mismatch", {}
+    ctx_provider = str(ctx.get("provider") or ctx.get("selected_provider") or "").strip()
+    if ctx_provider and ctx_provider != pinned_provider:
+        return False, "owner_acceptance_provider_mismatch", {}
+
+    # 5. Capability pinning
+    pinned_capability = str(auth.get("capability") or auth.get("required_capability") or "").strip()
+    ctx_capability = str(ctx.get("required_capability") or ctx.get("capability") or "").strip()
+    if pinned_capability and ctx_capability and ctx_capability != pinned_capability:
+        return False, "owner_acceptance_capability_mismatch", {}
+
+    # 6. Runtime SHA binding
+    auth_runtime_sha = str(auth.get("runtime_sha") or auth.get("authorized_runtime_sha") or "").strip()
+    if auth_runtime_sha:
+        ctx_sha = str(ctx.get("runtime_sha") or CANONICAL_ACCEPTANCE_RUNTIME_SHA).strip()
+        if ctx_sha and not (ctx_sha.startswith(auth_runtime_sha) or auth_runtime_sha.startswith(ctx_sha)):
+            return False, "owner_acceptance_runtime_sha_mismatch", {}
+
+    # 7. Spend bound check
+    max_spend = auth.get("max_provider_spend")
+    if max_spend is not None:
+        try:
+            max_spend_num = float(max_spend)
+            estimated_cost = float(ctx.get("estimated_provider_cost") or ctx.get("spend_amount") or ctx.get("quote_xu") or 0.0)
+            if estimated_cost > max_spend_num:
+                return False, "owner_acceptance_spend_limit_exceeded", {}
+        except Exception:
+            pass
+
+    verified = dict(auth)
+    verified["verified"] = True
+    verified["pinned_provider"] = pinned_provider
+    verified["pinned_product"] = pinned_product
+    verified["bypass_scope"] = ACCEPTANCE_BYPASS_SCOPE_PROBATION_LIVENESS_ONLY
+    verified["paid_fallback_allowed"] = False
+    return True, "", verified
+
+
 def product_video_provider_eligibility_snapshot(
     *,
     status: dict[str, Any] | None = None,
@@ -3066,6 +3260,8 @@ def product_video_provider_eligibility_snapshot(
     global_hard_block_reason: str = "",
     environ: dict[str, str] | None = None,
     persisted_snapshot_id: str = "",
+    owner_acceptance_auth: dict[str, Any] | None = None,
+    acceptance_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return the single Product Video admission decision used by UI and runtime.
 
@@ -3074,6 +3270,18 @@ def product_video_provider_eligibility_snapshot(
     """
     env = dict(environ or os.environ)
     payload = dict(status or provider_status_payload(env))
+    acceptance_valid = False
+    acceptance_blocker = ""
+    verified_acceptance: dict[str, Any] = {}
+    if owner_acceptance_auth is not None:
+        acceptance_valid, acceptance_blocker, verified_acceptance = validate_owner_acceptance_authorization(
+            owner_acceptance_auth,
+            context=acceptance_context or {
+                "job_id": current_job_id,
+                "required_capability": required_capability,
+            },
+            environ=env,
+        )
     if isinstance(chain, str):
         configured_chain = split_provider_chain(chain)
     elif chain is None:
@@ -3171,6 +3379,13 @@ def product_video_provider_eligibility_snapshot(
         hard_reasons: list[str] = []
         route_reasons: list[str] = []
         probation_reasons: list[str] = []
+        if acceptance_valid:
+            pinned = verified_acceptance.get("pinned_provider") or CANONICAL_ACCEPTANCE_PROVIDER
+            if provider != pinned:
+                hard_reasons.append("acceptance_lane_pinned_to_other_provider")
+                route_reasons.append("acceptance_lane_pinned_to_other_provider")
+        elif owner_acceptance_auth is not None and not acceptance_valid:
+            hard_reasons.append(f"owner_acceptance_invalid_{acceptance_blocker}")
         if global_hard_block_reason:
             hard_reasons.append(str(global_hard_block_reason))
         if external_hard_blocks.get(provider):
@@ -3236,9 +3451,15 @@ def product_video_provider_eligibility_snapshot(
                 else:
                     hard_reasons.append("provider_health_degraded")
             elif health_state.get("probation") or state_name == "probation":
-                probation_reasons.append("provider_health_probation")
+                if acceptance_valid and provider == (verified_acceptance.get("pinned_provider") or CANONICAL_ACCEPTANCE_PROVIDER):
+                    pass
+                else:
+                    probation_reasons.append("provider_health_probation")
             elif not bool(health_state.get("live_healthy")):
-                probation_reasons.append("provider_fresh_validated_success_required")
+                if acceptance_valid and provider == (verified_acceptance.get("pinned_provider") or CANONICAL_ACCEPTANCE_PROVIDER):
+                    pass
+                else:
+                    probation_reasons.append("provider_fresh_validated_success_required")
             elif max(1, int(scene_count or 1)) > 1 and not bool(
                 health_state.get("multi_scene_eligible", health_state.get("live_healthy"))
             ):
@@ -3255,21 +3476,36 @@ def product_video_provider_eligibility_snapshot(
         elif not hard_reasons and probation_reasons:
             probation_candidates.append(provider)
 
-    probation_admission_allowed = bool(
-        public_confirm_probation_allowed
-        and probation_candidates
-    )
-    selected_probation = probation_candidates[:1] if probation_admission_allowed else []
-    eligible = list(healthy_candidates or selected_probation)
-    if healthy_candidates:
-        eligibility_state = "healthy"
-        admission_mode = "healthy"
-    elif probation_candidates:
-        eligibility_state = "probation"
-        admission_mode = "public_confirmed_probation" if selected_probation else "probation_pending_final_confirm"
+    if acceptance_valid:
+        pinned = verified_acceptance.get("pinned_provider") or CANONICAL_ACCEPTANCE_PROVIDER
+        if pinned in healthy_candidates:
+            eligible = [pinned]
+            eligibility_state = "probation"
+            admission_mode = "owner_authorized_acceptance"
+            probation_admission_allowed = True
+            selected_probation = [pinned]
+        else:
+            eligible = []
+            eligibility_state = "blocked"
+            admission_mode = "blocked"
+            probation_admission_allowed = False
+            selected_probation = []
     else:
-        eligibility_state = "blocked"
-        admission_mode = "blocked"
+        probation_admission_allowed = bool(
+            public_confirm_probation_allowed
+            and probation_candidates
+        )
+        selected_probation = probation_candidates[:1] if probation_admission_allowed else []
+        eligible = list(healthy_candidates or selected_probation)
+        if healthy_candidates:
+            eligibility_state = "healthy"
+            admission_mode = "healthy"
+        elif probation_candidates:
+            eligibility_state = "probation"
+            admission_mode = "public_confirmed_probation" if selected_probation else "probation_pending_final_confirm"
+        else:
+            eligibility_state = "blocked"
+            admission_mode = "blocked"
     first_probation = probation_candidates[0] if probation_candidates else ""
     first_hard_blocked = next(
         (provider for provider in configured_chain if hard_block_reason_map.get(provider)),
@@ -3357,6 +3593,10 @@ def product_video_provider_eligibility_snapshot(
             hard_block_reason
             or (probation_context_reject_reason if probation_candidates else "no_eligible_product_video_provider")
         ),
+        "owner_acceptance_valid": acceptance_valid,
+        "acceptance_lane_active": acceptance_valid,
+        "pinned_provider": verified_acceptance.get("pinned_provider", "") if acceptance_valid else "",
+        "owner_acceptance_block_reason": acceptance_blocker if not acceptance_valid and owner_acceptance_auth else "",
     }
 
 
@@ -4016,22 +4256,76 @@ def _missing_submit_config_blocker_from_status(status: dict[str, Any], required_
     }
 
 
-def run_provider_generation(
+def _run_provider_generation_impl(
     request: VideoGenerationRequest,
     *,
     output_dir: str,
     environ: dict[str, str] | None = None,
     sleep_func=time.sleep,
+    allow_pending_result: bool | None = None,
+    **kwargs: Any,
 ) -> dict[str, Any]:
     env = dict(environ or os.environ)
     status = provider_status_payload(env)
+    metadata = dict(request.metadata or {})
+    owner_acceptance_auth = metadata.get("owner_acceptance_auth")
+    acceptance_valid = False
+    acceptance_blocker = ""
+    verified_acceptance: dict[str, Any] = {}
+    if owner_acceptance_auth is not None:
+        acceptance_valid, acceptance_blocker, verified_acceptance = validate_owner_acceptance_authorization(
+            owner_acceptance_auth,
+            context={
+                "user_id": getattr(request, "user_id", None) or metadata.get("user_id"),
+                "job_id": request.job_id or metadata.get("job_id"),
+                "project_id": metadata.get("project_id"),
+                "product_type": request.product_type or metadata.get("product_type"),
+                "provider": metadata.get("provider") or metadata.get("selected_provider"),
+                "required_capability": request.required_capability,
+                "runtime_sha": metadata.get("runtime_sha") or CANONICAL_ACCEPTANCE_RUNTIME_SHA,
+                "estimated_provider_cost": metadata.get("estimated_provider_cost") or metadata.get("spend_amount") or metadata.get("quote_xu") or 0.0,
+            },
+            environ=env,
+        )
+        if not acceptance_valid:
+            if isinstance(owner_acceptance_auth, dict):
+                owner_acceptance_auth["consumed"] = True
+            return {
+                "ok": False,
+                "provider_attempted": False,
+                "provider_submit_called": False,
+                "external_provider_spend_prevented": True,
+                "paid_submit_allowed": False,
+                "paid_submit_blocked_reason": acceptance_blocker,
+                "provider_error": acceptance_blocker,
+                "blocker": acceptance_blocker,
+                "owner_acceptance_auth_valid": False,
+                "owner_acceptance_block_reason": acceptance_blocker,
+                "owner_acceptance_consumed": True,
+                "provider_status": "blocked_no_charge",
+                "terminal_state": "blocked_no_charge",
+                "status": "failed_no_charge",
+                "charge": 0,
+                "charged_xu": 0,
+                "no_charge": True,
+                "public_message": PUBLIC_PRODUCT_VIDEO_SUBMIT_BLOCKED_COPY,
+                "provider_readiness": status,
+            }
     required_capability_original = str(request.required_capability or "").strip()
     normalized_capability_candidates = capability_options(required_capability_original)
     candidate_adapters = provider_candidate_adapters(request.required_capability, env, status)
-    adapter = candidate_adapters[0] if candidate_adapters else None
-    provider_candidates = [item.provider_name for item in candidate_adapters]
-    initial_primary_provider = adapter.provider_name if adapter else ""
-    initial_fallback_provider = next((name for name in provider_candidates if name and name != initial_primary_provider), "")
+    if acceptance_valid:
+        pinned_provider = verified_acceptance.get("pinned_provider") or CANONICAL_ACCEPTANCE_PROVIDER
+        candidate_adapters = [item for item in candidate_adapters if item.provider_name == pinned_provider][:1]
+        adapter = candidate_adapters[0] if candidate_adapters else None
+        provider_candidates = [item.provider_name for item in candidate_adapters]
+        initial_primary_provider = adapter.provider_name if adapter else ""
+        initial_fallback_provider = ""
+    else:
+        adapter = candidate_adapters[0] if candidate_adapters else None
+        provider_candidates = [item.provider_name for item in candidate_adapters]
+        initial_primary_provider = adapter.provider_name if adapter else ""
+        initial_fallback_provider = next((name for name in provider_candidates if name and name != initial_primary_provider), "")
     configured_chain = list(status.get("configured_providers") or status.get("effective_provider_chain") or status.get("provider_chain") or [])
     skipped_provider_reasons = [
         {
@@ -4055,13 +4349,15 @@ def run_provider_generation(
         and bool(configured_status_items.get("shopaikey_video", {}).get("credit_ok"))
         for item in configured_status_items.values()
     )
-    allow_pending_result = bool(
-        (request.metadata or {}).get("product_video")
-        or (request.metadata or {}).get("allow_provider_pending")
-        or (request.metadata or {}).get("interactive_product")
-    )
-    metadata = dict(request.metadata or {})
-    is_product_video = bool(metadata.get("product_video") or metadata.get("interactive_product") or allow_pending_result)
+    if allow_pending_result is None:
+        if "allow_provider_pending" in (request.metadata or {}):
+            allow_pending_result = bool((request.metadata or {}).get("allow_provider_pending"))
+        else:
+            allow_pending_result = bool(
+                (request.metadata or {}).get("product_video")
+                or (request.metadata or {}).get("interactive_product")
+            )
+    is_product_video = bool(metadata.get("product_video") or metadata.get("interactive_product") or (request.metadata or {}).get("product_video"))
     submit_switch = product_video_submit_switch_detail(env)
     submit_switch_enabled = bool(submit_switch.get("resolved"))
     submit_enabled = submit_switch_enabled
@@ -4178,6 +4474,7 @@ def run_provider_generation(
             global_hard_block_reason=str(runtime_freeze_truth.get("blocker_code") or ""),
             environ=env,
             persisted_snapshot_id=str(persisted_eligibility_snapshot.get("provider_eligibility_snapshot_id") or ""),
+            owner_acceptance_auth=owner_acceptance_auth,
         )
         runtime_candidates = list(runtime_eligibility_snapshot.get("eligible_provider_keys") or [])
         runtime_eligibility_snapshot["preconfirm_candidate_keys"] = persisted_preconfirm_candidates
@@ -4190,6 +4487,10 @@ def run_provider_generation(
             candidate_adapters = [
                 item for item in candidate_adapters if item.provider_name == existing_provider
             ][:1]
+        elif acceptance_valid:
+            candidate_adapters = [
+                item for item in candidate_adapters if item.provider_name == (verified_acceptance.get("pinned_provider") or CANONICAL_ACCEPTANCE_PROVIDER)
+            ][:1]
         else:
             candidate_adapters = [
                 item for item in candidate_adapters if item.provider_name in runtime_candidates
@@ -4197,19 +4498,26 @@ def run_provider_generation(
         adapter = candidate_adapters[0] if candidate_adapters else None
         provider_candidates = [item.provider_name for item in candidate_adapters]
         initial_primary_provider = adapter.provider_name if adapter else ""
-        initial_fallback_provider = next((name for name in provider_candidates if name and name != initial_primary_provider), "")
+        initial_fallback_provider = "" if acceptance_valid else next((name for name in provider_candidates if name and name != initial_primary_provider), "")
     try:
         current_fallback_count = int(metadata.get("fallback_count") or metadata.get("provider_fallback_count") or 0)
     except Exception:
         current_fallback_count = 0
-    if is_product_video and candidate_adapters:
+    if acceptance_valid:
+        pinned_provider = verified_acceptance.get("pinned_provider") or CANONICAL_ACCEPTANCE_PROVIDER
+        candidate_adapters = [item for item in candidate_adapters if item.provider_name == pinned_provider][:1]
+        adapter = candidate_adapters[0] if candidate_adapters else None
+        provider_candidates = [item.provider_name for item in candidate_adapters]
+        initial_primary_provider = adapter.provider_name if adapter else ""
+        initial_fallback_provider = ""
+    elif is_product_video and candidate_adapters:
         max_provider_attempts = 1 if current_fallback_count >= 1 else 2
         candidate_adapters = candidate_adapters[:max_provider_attempts]
         adapter = candidate_adapters[0] if candidate_adapters else None
         provider_candidates = [item.provider_name for item in candidate_adapters]
         initial_primary_provider = adapter.provider_name if adapter else ""
         initial_fallback_provider = next((name for name in provider_candidates if name and name != initial_primary_provider), "")
-    if is_product_video and len(candidate_adapters) > 1:
+    if is_product_video and not acceptance_valid and len(candidate_adapters) > 1:
         # Candidate adapters have already passed readiness, capability and
         # contract filtering. This lets the persisted job quote authorize one
         # in-budget fallback without asking the customer to confirm twice.
@@ -4235,6 +4543,11 @@ def run_provider_generation(
     ).hexdigest()[:24]
     base_debug = {
         "provider_router_called": True,
+        "owner_authorized_live_acceptance": acceptance_valid,
+        "acceptance_lane_active": acceptance_valid,
+        "owner_acceptance_valid": acceptance_valid,
+        "pinned_provider": verified_acceptance.get("pinned_provider", "") if acceptance_valid else "",
+        "paid_fallback_enabled": False if acceptance_valid else True,
         "product_video_freeze_truth": dict(runtime_freeze_truth),
         "provider_freeze": bool(runtime_freeze_truth.get("provider_freeze")),
         "provider_spend_freeze": bool(runtime_freeze_truth.get("provider_spend_freeze")),
@@ -5914,3 +6227,29 @@ def run_provider_generation(
         "provider_status": "not_attempted",
         "provider_readiness": status,
     }
+
+
+def run_provider_generation(
+    request: VideoGenerationRequest,
+    *,
+    output_dir: str,
+    environ: dict[str, str] | None = None,
+    sleep_func=time.sleep,
+    allow_pending_result: bool | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    res = _run_provider_generation_impl(
+        request,
+        output_dir=output_dir,
+        environ=environ,
+        sleep_func=sleep_func,
+        allow_pending_result=allow_pending_result,
+        **kwargs,
+    )
+    metadata = dict(request.metadata or {})
+    owner_auth = metadata.get("owner_acceptance_auth")
+    if isinstance(owner_auth, dict) and bool(owner_auth.get("owner_authorized")):
+        owner_auth["consumed"] = True
+        res["owner_acceptance_consumed"] = True
+    return res
+
