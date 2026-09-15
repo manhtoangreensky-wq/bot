@@ -27,6 +27,11 @@ VIDEO_PROVIDER_CAPABILITIES = {
     "scene_video",
 }
 
+BLOCKER_AMBIGUOUS_SUBMIT = "provider_submit_outcome_ambiguous_no_charge"
+SUBMIT_OUTCOME_ACCEPTED = "accepted"
+SUBMIT_OUTCOME_AMBIGUOUS = "provider_submit_outcome_ambiguous_no_charge"
+SUBMIT_OUTCOME_PRE_SEND_FAILURE = "submit_failed_pre_send"
+
 
 @dataclass(slots=True)
 class VideoGenerationRequest:
