@@ -95,6 +95,10 @@ PROVIDER_REQUIRED_PRODUCT_TYPES = {
     "script_image_video",
     "storyboard_prompt",
     "storyboard_to_video",
+    "video_trend",
+    "trend_video",
+    "multi_scene_film",
+    "video_long",
 }
 PROVIDER_REQUIRED_CAPABILITIES = {
     "text_to_video",

@@ -100,6 +100,9 @@ LEGACY_LOCKED_QUALITY_TIERS = tuple(
 MULTI_SCENE_QUALITY_TIERS = tuple(
     tier_id for tier_id in CANONICAL_QUALITY_TIERS if tier_id not in {200, 700}
 )
+TREND_QUALITY_TIERS = tuple(
+    tier_id for tier_id in CANONICAL_QUALITY_TIERS if tier_id != 400
+)
 UIFLOW3_EXTENDED_QUALITY_TIERS = CANONICAL_QUALITY_TIERS
 
 
@@ -146,6 +149,7 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "required_capability": "video_to_video",
         "input_type": "source_video",
         "worker_owner": "product_video",
+        "supported_quality_tiers": UIFLOW3_EXTENDED_QUALITY_TIERS,
     },
     "script_image_video": {
         "flow_owner": "scene3",
@@ -158,7 +162,7 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "worker_owner": "product_video",
         "minimum_scene_count": 5,
         "supports_single_scene": False,
-        "supported_quality_tiers": MULTI_SCENE_QUALITY_TIERS,
+        "supported_quality_tiers": UIFLOW3_EXTENDED_QUALITY_TIERS,
     },
     "storyboard_prompt": {
         "flow_owner": "storyboard",
@@ -171,7 +175,7 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "worker_owner": "product_video",
         "minimum_scene_count": 2,
         "supports_single_scene": False,
-        "supported_quality_tiers": MULTI_SCENE_QUALITY_TIERS,
+        "supported_quality_tiers": UIFLOW3_EXTENDED_QUALITY_TIERS,
     },
     "video_trend": {
         "flow_owner": "trend",
@@ -182,6 +186,7 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "required_capability": "text_to_video",
         "input_type": "trend_prompt",
         "worker_owner": "product_video",
+        "supported_quality_tiers": TREND_QUALITY_TIERS,
     },
     "frame_video_local": {
         "flow_owner": "frame_video",
@@ -229,6 +234,7 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "required_capability": "text_to_video",
         "input_type": "idea_preset",
         "worker_owner": "product_video",
+        "supported_quality_tiers": UIFLOW3_EXTENDED_QUALITY_TIERS,
     },
     "multi_scene_film": {
         "flow_owner": "scene3",
@@ -241,7 +247,7 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "worker_owner": "product_video",
         "scene_duration_seconds": 300,
         "maximum_scene_count": 20,
-        "supported_quality_tiers": LEGACY_LOCKED_QUALITY_TIERS,
+        "supported_quality_tiers": UIFLOW3_EXTENDED_QUALITY_TIERS,
         "execution_enabled": True,
         "execution_blocker": "",
     },
@@ -257,7 +263,7 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "input_type": "long_form_plan",
         "worker_owner": "product_video",
         "maximum_scene_count": 20,
-        "supported_quality_tiers": LEGACY_LOCKED_QUALITY_TIERS,
+        "supported_quality_tiers": UIFLOW3_EXTENDED_QUALITY_TIERS,
         "execution_enabled": False,
         "execution_blocker": "long_video_under_upgrade",
     },
@@ -270,6 +276,7 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "required_capability": "video_to_video",
         "input_type": "source_video",
         "worker_owner": "video_edit",
+        "supported_quality_tiers": UIFLOW3_EXTENDED_QUALITY_TIERS,
     },
 }
 
@@ -332,7 +339,7 @@ def adapter_for(product_type: str) -> dict[str, Any]:
     result.setdefault("minimum_scene_count", 1)
     result.setdefault("maximum_scene_count", 20)
     result.setdefault("supports_single_scene", True)
-    result.setdefault("supported_quality_tiers", LEGACY_LOCKED_QUALITY_TIERS)
+    result.setdefault("supported_quality_tiers", UIFLOW3_EXTENDED_QUALITY_TIERS)
     result.setdefault("pricing_mode", "canonical")
     result.setdefault("required_capability", "text_to_video")
     result.setdefault("input_type", "text_prompt")
