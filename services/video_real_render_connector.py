@@ -91,6 +91,8 @@ PROVIDER_REQUIRED_PRODUCT_TYPES = {
     "prompt_vault_to_video",
     "self_shot_scene_change",
     "self_shot_cinematic_transform",
+    "script_to_video",
+    "script_image_video",
 }
 PROVIDER_REQUIRED_CAPABILITIES = {
     "text_to_video",
@@ -1005,7 +1007,7 @@ def _route_requires_provider(
     orchestration = str(orchestration_mode or "").strip().lower().replace("-", "_")
     if (
         not explicit_local_renderer
-        and adapter in {"text_to_video", "text_to_video_or_scene_engine", "text_to_video_or_scene_video"}
+        and adapter in {"text_to_video", "text_to_video_or_scene_engine", "text_to_video_or_scene_video", "script_scene_engine"}
         and orchestration in {"per_scene_8s", "scene_orchestrator", "per_scene"}
     ):
         return True
@@ -6439,7 +6441,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         or job.get("validated_local_renderer_route")
     )
     product_contract_requires_provider = bool(
-        engine_adapter in {"text_to_video", "text_to_video_or_scene_engine", "text_to_video_or_scene_video"}
+        engine_adapter in {"text_to_video", "text_to_video_or_scene_engine", "text_to_video_or_scene_video", "script_scene_engine"}
         and orchestration_contract in {"per_scene_8s", "scene_orchestrator", "per_scene"}
         and not explicit_local_renderer
     )

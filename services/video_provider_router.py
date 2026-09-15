@@ -81,6 +81,7 @@ PRODUCT_VIDEO_PROVIDER_REQUIRED_TYPES = {
     "video_ai_image",
     "video_ai_video_reference",
     "script_to_video",
+    "script_image_video",
     "storyboard_prompt",
     "self_shot_scene_change",
     "self_shot_cinematic_transform",
@@ -95,6 +96,7 @@ PRODUCT_VIDEO_PROVIDER_ADAPTERS = {
     "text_to_video",
     "text_to_video_or_scene_engine",
     "text_to_video_or_scene_video",
+    "script_scene_engine",
 }
 PRODUCT_VIDEO_PER_SCENE_MODES = {"per_scene", "per_scene_8s", "scene_orchestrator"}
 PRODUCT_VIDEO_LOCAL_EXECUTION_MODES = {"local_image_sequence", "local_slideshow"}
