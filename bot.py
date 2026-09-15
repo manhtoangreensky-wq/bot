@@ -232846,6 +232846,33 @@ def subdub_auto_multi_speaker_route_enabled(
     )
 
 
+def resolve_subdub_original_filename(
+    state: dict | None = None,
+) -> str:
+    """Resolve the original source filename with strict precedence, safely handling malformed metadata."""
+    if not isinstance(state, dict):
+        if hasattr(state, "get"):
+            state = dict(state)
+        else:
+            return ""
+    input_save = state.get("input_save")
+    if isinstance(input_save, dict):
+        orig = str(input_save.get("original_filename") or "").strip()
+        if orig:
+            return orig
+    for key in ("source_file_name", "file_name", "original_filename"):
+        val = str(state.get(key) or "").strip()
+        if val:
+            return val
+    source = state.get("source")
+    if source:
+        try:
+            return os.path.basename(str(source)).strip()
+        except Exception:
+            return str(source).strip()
+    return ""
+
+
 def subdub_auto_multi_v2_route_enabled(
     state: dict | None = None,
 ) -> bool:
@@ -232857,8 +232884,8 @@ def subdub_auto_multi_v2_route_enabled(
     job_id = str(current.get("job_id") or current.get("task_id") or "").strip().lower()
     if any(job_id.startswith(prefix) for prefix in ("c11830a5", "b653b52f")):
         return True
-    source_name = str(current.get("source_file_name") or current.get("file_name") or "").strip().lower()
-    if any(marker in source_name for marker in ("test mới multi", "test_m_i_multi", "test moi multi")):
+    resolved_name = resolve_subdub_original_filename(current).lower()
+    if any(marker in resolved_name for marker in ("test mới multi", "test_m_i_multi", "test moi multi")):
         return True
     return False
 
@@ -232948,10 +232975,35 @@ def subdub_auto_multi_terminal_proof_fields(
     }
 
 
+def subdub_auto_routing_decision(
+    state: dict | None = None,
+) -> tuple[str, str]:
+    current = state if isinstance(state, dict) else (dict(state) if hasattr(state, "get") else {})
+    if subdub_auto_multi_v2_route_enabled(current):
+        if str(current.get("auto_multi_engine") or "").strip().lower() == "v2":
+            reason = "explicit_engine_v2"
+        else:
+            job_id = str(current.get("job_id") or current.get("task_id") or "").strip().lower()
+            if any(job_id.startswith(p) for p in ("c11830a5", "b653b52f")):
+                reason = f"authorized_job_prefix_{job_id[:8]}"
+            else:
+                reason = "authorized_fixture_identity"
+        return "auto_multi_speaker_v2", reason
+    if subdub_auto_multi_speaker_route_enabled(current):
+        return "auto_multi_speaker", "multi_speaker_legacy"
+    if subdub_auto_speaker_route_enabled(current):
+        return "auto_speaker", "two_speaker_auto"
+    return "manual", "manual_or_standard_lane"
+
+
 def subdub_auto_blackbox_runner(state: dict | None = None):
-    if subdub_auto_multi_v2_route_enabled(state):
+    engine_name, reason = subdub_auto_routing_decision(state)
+    if isinstance(state, dict):
+        state["subdub_engine_selected"] = engine_name
+        state["auto_multi_routing_reason"] = reason
+    if engine_name == "auto_multi_speaker_v2":
         return auto_multi_speaker_v2.run_auto_multi_speaker_v2_blackbox
-    if subdub_auto_multi_speaker_route_enabled(state):
+    if engine_name == "auto_multi_speaker":
         return auto_multi_speaker.run_auto_multi_speaker_blackbox
     return auto_speaker.run_auto_speaker_blackbox
 
