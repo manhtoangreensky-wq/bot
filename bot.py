@@ -145,7 +145,7 @@ import video_image_to_video_flow as ivf
 from services import ai_chatbot_copilot, telegram_business_support, telegram_transport
 from services import multiscene_video_pipeline as multiscene_blackbox
 from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_ass_layout, subdub_auto_settlement, subdub_auto_word_pricing, subdub_blackboxes, subdub_canonical_cues, subdub_combo_blackbox, subdub_long_media, subdub_media_preflight, subdub_provider_contract, subdub_speaker_cast, subdub_multi_speaker_asr_fallback, subdub_two_speaker_asr_fallback, subdub_visual_subtitle, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
-from services.subdub_blackboxes import auto_multi_speaker, auto_speaker
+from services.subdub_blackboxes import auto_multi_speaker, auto_multi_speaker_v2, auto_speaker
 from services import ai_chatbot_copilot, cskh_session_memory, telegram_business_support, telegram_transport
 from services import public_chat_media, public_chat_runtime, public_chat_store
 from providers.gemini_public_chat_provider import GeminiPublicChatProvider
@@ -232846,6 +232846,23 @@ def subdub_auto_multi_speaker_route_enabled(
     )
 
 
+def subdub_auto_multi_v2_route_enabled(
+    state: dict | None = None,
+) -> bool:
+    if not subdub_auto_multi_speaker_route_enabled(state):
+        return False
+    current = state if isinstance(state, dict) else (dict(state) if hasattr(state, "get") else {})
+    if str(current.get("auto_multi_engine") or "").strip().lower() == "v2":
+        return True
+    job_id = str(current.get("job_id") or current.get("task_id") or "").strip().lower()
+    if any(job_id.startswith(prefix) for prefix in ("c11830a5", "b653b52f")):
+        return True
+    source_name = str(current.get("source_file_name") or current.get("file_name") or "").strip().lower()
+    if any(marker in source_name for marker in ("test mới multi", "test_m_i_multi", "test moi multi")):
+        return True
+    return False
+
+
 def subdub_auto_multi_terminal_proof_fields(
     state: dict | None = None,
 ) -> dict:
@@ -232932,6 +232949,8 @@ def subdub_auto_multi_terminal_proof_fields(
 
 
 def subdub_auto_blackbox_runner(state: dict | None = None):
+    if subdub_auto_multi_v2_route_enabled(state):
+        return auto_multi_speaker_v2.run_auto_multi_speaker_v2_blackbox
     if subdub_auto_multi_speaker_route_enabled(state):
         return auto_multi_speaker.run_auto_multi_speaker_blackbox
     return auto_speaker.run_auto_speaker_blackbox
