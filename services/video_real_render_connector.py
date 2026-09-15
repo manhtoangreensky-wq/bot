@@ -93,6 +93,8 @@ PROVIDER_REQUIRED_PRODUCT_TYPES = {
     "self_shot_cinematic_transform",
     "script_to_video",
     "script_image_video",
+    "storyboard_prompt",
+    "storyboard_to_video",
 }
 PROVIDER_REQUIRED_CAPABILITIES = {
     "text_to_video",
@@ -1007,7 +1009,7 @@ def _route_requires_provider(
     orchestration = str(orchestration_mode or "").strip().lower().replace("-", "_")
     if (
         not explicit_local_renderer
-        and adapter in {"text_to_video", "text_to_video_or_scene_engine", "text_to_video_or_scene_video", "script_scene_engine"}
+        and adapter in {"text_to_video", "text_to_video_or_scene_engine", "text_to_video_or_scene_video", "script_scene_engine", "storyboard_scene_image_video_engine"}
         and orchestration in {"per_scene_8s", "scene_orchestrator", "per_scene"}
     ):
         return True
