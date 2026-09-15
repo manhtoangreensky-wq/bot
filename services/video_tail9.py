@@ -295,7 +295,15 @@ PRODUCT_ADAPTER_ALIASES = {
 
 VIDEO_AI_REAL_MODE_PRODUCTS = {
     "prompt_video": "video_ai_prompt",
+    "text_prompt": "video_ai_prompt",
     "image_video": "video_ai_image",
+    "ai_image_menu": "video_ai_image",
+    "image_prompts": "video_ai_image",
+    "video_video": "video_ai_video_reference",
+    "video_reference": "video_ai_video_reference",
+    "ai_video_menu": "video_ai_video_reference",
+    "reference_video": "video_ai_video_reference",
+    "awaiting_reference_video": "video_ai_video_reference",
 }
 
 
@@ -440,7 +448,10 @@ def status_contract(product_type: str) -> dict[str, Any]:
     contract = commercial_contract(product_type)
     product_stages = {
         "video_ai_real": ("planning", "preparing_assets", "rendering_scenes", "composing"),
-        "video_trend": ("locking_trend", "rendering_scenes", "composing", "validating_mp4"),
+        "video_ai_prompt": ("planning", "refining_prompt", "rendering_scenes", "composing"),
+        "video_ai_image": ("analyzing_keyframe_images", "planning_motion", "rendering_scenes", "composing"),
+        "video_ai_video_reference": ("analyzing_reference_video", "extracting_motion_style", "rendering_scenes", "composing"),
+        "video_trend": ("searching_viral_trends", "locking_trend", "rendering_scenes", "composing", "validating_mp4"),
         "script_image_video": ("locking_script", "rendering_scenes", "composing", "validating_mp4"),
         "storyboard_prompt": ("locking_storyboard", "preparing_images", "animating_scenes", "composing"),
         "self_shot_scene_change": (
@@ -466,6 +477,9 @@ def status_contract(product_type: str) -> dict[str, Any]:
         ),
         "frame_video_local": ("preparing_images", "rendering_transitions", "mixing_audio", "validating_mp4"),
         "multi_scene_film": ("locking_long_plan", "preparing_chapters", "rendering_chapters", "composing"),
+        "video_long": ("locking_long_plan", "preparing_chapters", "rendering_chapters", "composing", "validating_mp4"),
+        "video_idea": ("synthesizing_hook_ideas", "scripting_scenes", "rendering_scenes", "composing", "validating_mp4"),
+        "video_local_edit": ("analyzing_source_video", "processing_ffmpeg_operations", "mixing_audio", "validating_mp4"),
     }
     return {
         "product_type": contract["product_type"],
