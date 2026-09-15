@@ -312,9 +312,18 @@ def build_post_production_manifest(state: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def compile_render_contract(state: Mapping[str, Any]) -> dict[str, Any]:
-    if _text(state.get("parent_product")) != "video_ai_real":
+    parent_product = _text(state.get("parent_product"))
+    allowed_parents = {
+        "video_ai_real",
+        "script_image_video",
+        "video_trend",
+        "storyboard_prompt",
+        "multi_scene_film",
+        "video_long",
+    }
+    if parent_product not in allowed_parents:
         raise ValueError("video_ai_real_prompt_contract_required")
-    if _text(state.get("entry_mode")) not in {"prompt_video", "image_video"}:
+    if parent_product == "video_ai_real" and _text(state.get("entry_mode")) not in {"prompt_video", "image_video"}:
         raise ValueError("video_ai_real_prompt_contract_required")
     scenes = [dict(item) for item in state.get("scenes") or [] if isinstance(item, Mapping)]
     if not scenes:

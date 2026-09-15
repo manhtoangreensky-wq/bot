@@ -77941,9 +77941,8 @@ def video_ai_real_uses_inline_requirements(state: dict) -> bool:
     return str(state.get("parent_product") or "") in {
         "video_ai_real",
         "storyboard_prompt",
-        "multi_scene_film",
-        "video_long",
     }
+
 
 def video_ai_real_pilot_requirements_payload(state: dict) -> tuple[str, InlineKeyboardMarkup]:
     scene3_state = video_ai_real_pilot_scene3_field_state(state)
@@ -77959,7 +77958,7 @@ def video_ai_real_pilot_requirements_payload(state: dict) -> tuple[str, InlineKe
             )
             for key, label in values
         ]
-        requirement_buttons.append(("✨ Tự động gợi ý nhanh", "vid3|pilot_requirement_auto"))
+        requirement_buttons.append(("✨ Tự động gợi ý", "vid3|pilot_requirement_auto"))
         for offset in range(0, len(requirement_buttons), 2):
             rows.append(requirement_buttons[offset:offset + 2])
     else:
@@ -77971,13 +77970,8 @@ def video_ai_real_pilot_requirements_payload(state: dict) -> tuple[str, InlineKe
                 )
                 for key, label in values[offset:offset + 2]
             ])
-        auto_label = (
-            "✨ Tự động gợi ý nhanh"
-            if str(state.get("parent_product") or "") == "multi_scene_film"
-            else "✨ Tự động gợi ý"
-        )
         rows.extend([
-            [(auto_label, "vid3|pilot_requirement_auto")],
+            [("✨ Tự động gợi ý", "vid3|pilot_requirement_auto")],
             [("👁 Xem mục đã chọn", "vid3|pilot_requirement_view")],
         ])
     rows.extend([
@@ -77993,21 +77987,18 @@ def video_ai_real_pilot_requirements_payload(state: dict) -> tuple[str, InlineKe
             selected_lines.append(
                 f"• {label}: {html.escape(video_scene3_entry_label(entry))}"
             )
-        selected_copy = "\n".join(selected_lines) if selected_lines else "Chưa thêm"
-        return (
-            "🔒 Yêu cầu cần giữ nguyên\n\n"
-            "Chọn đúng chi tiết phải nhất quán giữa các cảnh. Mỗi lần hiển thị 5 gợi ý; "
-            "có thể đổi sang nhóm khác hoặc tự nhập. Bối cảnh/kiến trúc được chọn tại đây "
-            "và không hỏi lại ở màn Nhân vật.\n\n"
-            f"Đã chọn: {selected_copy}",
-            video_uiflow3_keyboard(rows),
+        selected_copy = "\n".join(selected_lines) if selected_lines else "• Chưa thêm"
+        selection_copy = "Đã chọn:\n" + selected_copy
+    else:
+        selection_copy = (
+            "Đã chọn: "
+            + video_scene3_summary(entries, VIDEO_AI_REAL_PILOT_REQUIREMENT_CATEGORIES)
         )
     return (
         "🔒 Yêu cầu cần giữ nguyên\n\n"
-        "Chọn đúng chi tiết phải nhất quán giữa các cảnh. Mỗi lần hiển thị 5 gợi ý; "
-        "có thể đổi sang nhóm khác hoặc tự nhập. Bối cảnh/kiến trúc được chọn tại đây "
-        "và không hỏi lại ở màn Nhân vật.\n\n"
-        f"Đã chọn: {video_scene3_summary(entries, VIDEO_AI_REAL_PILOT_REQUIREMENT_CATEGORIES)}",
+        "Chọn đúng chi tiết phải nhất quán giữa các cảnh. Mỗi lần hiển thị 5 gợi ý; có thể đổi sang nhóm khác hoặc tự nhập. "
+        "Bối cảnh/kiến trúc được chọn tại đây và không hỏi lại ở màn Nhân vật.\n\n"
+        f"{selection_copy}",
         video_uiflow3_keyboard(rows),
     )
 
@@ -83363,6 +83354,28 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                 state = save_video_uiflow3_state(context, state)
                 await query.answer()
                 return await video_storyboard_finish_entity_bridge(
+                    query,
+                    user_id,
+                    context,
+                    state,
+                    get_user_language(user_id) or "vi",
+                )
+            if video_script_entity_bridge_marker(state):
+                state = video_ai_real_build_quick_plan(state, bible_only=True)
+                state = save_video_uiflow3_state(context, state)
+                await query.answer()
+                return await video_script_finish_entity_bridge(
+                    query,
+                    user_id,
+                    context,
+                    state,
+                    get_user_language(user_id) or "vi",
+                )
+            if video_trend_entity_bridge_marker(state):
+                state = video_ai_real_build_quick_plan(state, bible_only=True)
+                state = save_video_uiflow3_state(context, state)
+                await query.answer()
+                return await video_trend_finish_entity_bridge(
                     query,
                     user_id,
                     context,
