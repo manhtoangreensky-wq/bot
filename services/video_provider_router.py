@@ -316,22 +316,33 @@ def _first_nonempty_value(*values: Any) -> str:
 
 def _metadata_existing_provider_task(metadata: dict[str, Any]) -> tuple[str, str, str]:
     metadata = dict(metadata or {})
+    persisted = metadata.get("persisted_result_json")
+    if not isinstance(persisted, dict):
+        persisted = metadata.get("result_json") if isinstance(metadata.get("result_json"), dict) else {}
     provider = _first_nonempty_value(
         metadata.get("provider_pending_provider"),
         metadata.get("selected_provider"),
         metadata.get("selected_provider_before_submit"),
         metadata.get("provider"),
+        persisted.get("provider"),
+        persisted.get("provider_name"),
+        persisted.get("selected_provider"),
     )
     task_id = _first_nonempty_value(
         metadata.get("provider_pending_task_id"),
         metadata.get("provider_task_id"),
         metadata.get("provider_job_id"),
         metadata.get("provider_task_ids"),
+        persisted.get("provider_task_ids"),
+        persisted.get("provider_task_id"),
+        persisted.get("provider_job_id"),
     )
     video_id = _first_nonempty_value(
         metadata.get("provider_pending_video_id"),
         metadata.get("provider_video_id"),
         metadata.get("provider_video_ids"),
+        persisted.get("provider_video_ids"),
+        persisted.get("provider_video_id"),
     )
     return provider, task_id, video_id
 
@@ -749,6 +760,8 @@ def product_video_submit_response_truth(
     provider_video_id: Any = "",
     transport_http: Any = 0,
     task_pollable: Any = None,
+    is_timeout: Any = False,
+    ambiguous_submit: Any = False,
 ) -> dict[str, Any]:
     """Reconcile transport and provider acceptance without losing a paid task."""
     task_id_present = bool(str(provider_task_id or provider_video_id or "").strip())
@@ -761,17 +774,25 @@ def product_video_submit_response_truth(
     effective_accepted = bool(provider_accepted_raw or task_pollable_value)
     transport_anomaly = bool(http_status >= 400 or (http_status and not 200 <= http_status < 300))
     ignored = bool(transport_anomaly and task_pollable_value)
+    ambiguous = bool(not effective_accepted and (is_timeout or ambiguous_submit or http_status in {408, 504, 524}))
+    if effective_accepted:
+        outcome = "accepted"
+    elif ambiguous:
+        outcome = "provider_submit_outcome_ambiguous_no_charge"
+    else:
+        outcome = "submit_failed_no_task"
     return {
         "transport_http": http_status,
         "provider_accepted": provider_accepted_raw,
         "provider_accepted_raw": provider_accepted_raw,
         "task_id_present": task_id_present,
         "task_pollable": task_pollable_value,
-        "effective_submit_outcome": "accepted" if effective_accepted else "submit_failed_no_task",
+        "effective_submit_outcome": outcome,
         "effective_submit_accepted": effective_accepted,
         "transport_anomaly": transport_anomaly,
         "transport_anomaly_ignored_due_to_valid_task": ignored,
         "duplicate_submit_prevented": bool(effective_accepted and task_pollable_value),
+        "submit_outcome_ambiguous": ambiguous,
     }
 
 
@@ -1333,6 +1354,17 @@ def _product_video_paid_fallback_blocked(
     env: dict[str, str] | None,
     metadata: dict[str, Any] | None,
 ) -> bool:
+    clean = str(blocker or "").strip()
+    # Ambiguous submit timeouts, task-already-present, and poll timeouts on in-flight tasks MUST NEVER fallback to another paid provider.
+    if clean in {
+        "provider_submit_outcome_ambiguous_no_charge",
+        "ambiguous_submit_timeout",
+        "provider_submit_timeout",
+        "provider_poll_timeout",
+        "provider_task_id_present_resubmit_forbidden",
+        "provider_task_already_exists",
+    }:
+        return True
     # A confirmed customer quote never authorizes a more expensive fallback,
     # regardless of whether the legacy retry-confirmation switch is enabled.
     if product_video_public_confirm_context(metadata).get("fallback_requires_new_price"):
@@ -1342,9 +1374,9 @@ def _product_video_paid_fallback_blocked(
     # Missing submit config is a local setup check, not a provider credit spend.
     # Let the chain inspect the next provider so admin diagnostics can report
     # the exact all-config-missing state without triggering a paid retry path.
-    if str(blocker or "").strip() == "provider_config_missing_at_submit":
+    if clean == "provider_config_missing_at_submit":
         return False
-    if str(blocker or "").strip() in PRODUCT_VIDEO_CONTRACT_REJECT_BLOCKERS:
+    if clean in PRODUCT_VIDEO_CONTRACT_REJECT_BLOCKERS:
         return False
     if product_video_controlled_fallback_allowed(blocker, metadata):
         return False
@@ -5142,6 +5174,24 @@ def run_provider_generation(
                     "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
                 }
                 blocker = str(exc_payload.get("blocker") or "provider_unhandled_exception")
+                is_timeout = isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.lower() or "timeout" in str(exc).lower()
+                if is_timeout or blocker in {"provider_submit_outcome_ambiguous_no_charge", "provider_timeout", "provider_submit_timeout"}:
+                    blocker = "provider_submit_outcome_ambiguous_no_charge"
+                    exc_payload["blocker"] = blocker
+                    exc_payload["provider_error"] = blocker
+                    exc_payload["provider_submit_outcome"] = blocker
+                    exc_payload["fallback_allowed"] = False
+                    exc_payload["auto_resubmit_allowed"] = False
+                    exc_payload["paid_submit_allowed"] = False
+                    exc_payload["no_charge"] = True
+                    exc_payload["charge"] = 0
+                    exc_payload["ambiguous_submit_prevented_duplicate_paid_call"] = True
+                    _record_failure(blocker, exc_payload, submit_failure=True)
+                    exc_payload["provider_attempts"] = _copy_attempt_traces()
+                    exc_payload["provider_fallback_attempts"] = list(attempt_failures)
+                    exc_payload["fallback_provider_attempts"] = list(attempt_failures)
+                    exc_payload["provider_fallback_attempted"] = False
+                    return exc_payload
                 if attempt_index + 1 < len(candidate_adapters):
                     _record_failure(blocker, exc_payload, submit_failure=True)
                     if is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata):
@@ -5162,12 +5212,21 @@ def run_provider_generation(
             or (submit.raw or {}).get("provider_http_request_sent")
             or (submit.raw or {}).get("http_request_sent")
         )
+        is_ambiguous_submit = bool(
+            submit.error_code in {"provider_submit_outcome_ambiguous_no_charge", "provider_timeout", "provider_submit_timeout"}
+            or (submit.raw or {}).get("is_timeout")
+            or (submit.raw or {}).get("ambiguous_submit")
+            or str((submit.raw or {}).get("exception_class") or "") in {"TimeoutError", "socket.timeout"}
+            or submit_http_status in {408, 504, 524}
+        )
         submit_truth = product_video_submit_response_truth(
             provider_accepted=submit.ok,
             provider_task_id=submit.provider_task_id,
             provider_video_id=submit.provider_video_id,
             transport_http=submit_http_status,
             task_pollable=(submit.raw or {}).get("task_pollable"),
+            is_timeout=is_ambiguous_submit,
+            ambiguous_submit=is_ambiguous_submit,
         )
         _mark_trace(
             "poll" if poll_existing_task else "submit",
@@ -5189,6 +5248,34 @@ def run_provider_generation(
         )
         if not submit_truth["effective_submit_accepted"]:
             blocker = submit.error_code or "provider_submit_failed"
+            if is_ambiguous_submit or blocker == "provider_submit_outcome_ambiguous_no_charge":
+                blocker = "provider_submit_outcome_ambiguous_no_charge"
+                _record_failure(blocker, submit.raw, submit_failure=True)
+                final_blocker = blocker
+                payload = {
+                    "ok": False,
+                    **_attempt_base(),
+                    "fallback_used": False,
+                    "fallback_reason": "",
+                    "provider_fallback_attempted": False,
+                    "provider_submit_called": submit_called_flag,
+                    "provider_submit_http_status": submit_http_status,
+                    "submit_accepted": False,
+                    **submit_truth,
+                    "fallback_allowed": False,
+                    "auto_resubmit_allowed": False,
+                    "poll_allowed": False,
+                    "provider_error": final_blocker,
+                    "blocker": final_blocker,
+                    "provider_status": "ambiguous_timeout",
+                    "provider_task_ids": [],
+                    "provider_readiness": status,
+                    "no_charge": True,
+                    "charge": 0,
+                    "paid_submit_allowed": False,
+                    "ambiguous_submit_prevented_duplicate_paid_call": True,
+                }
+                return _merge_contract_debug(payload, submit.raw)
             if attempt_index + 1 < len(candidate_adapters):
                 _record_failure(blocker, submit.raw, submit_failure=True)
                 if is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata):
@@ -5504,6 +5591,40 @@ def run_provider_generation(
                     payload["provider_attempts"] = _copy_attempt_traces()
                     return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
                 blocker = "provider_timeout"
+                if submit.provider_task_id or submit_truth.get("effective_submit_accepted"):
+                    _record_failure(blocker)
+                    payload = {
+                        "ok": False,
+                        **_attempt_base(),
+                        "fallback_used": attempt_index > 0,
+                        "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
+                        "provider_submit_called": submit_called_flag,
+                        "provider_submit_http_status": submit_http_status,
+                        "provider_task_id_saved": bool(submit.provider_task_id),
+                        "submit_accepted": True,
+                        "provider_poll_called": True,
+                        "poll_allowed": True,
+                        "poll_skipped_reason": "",
+                        "provider_error": blocker,
+                        "blocker": blocker,
+                        "provider_status": "timeout",
+                        "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
+                        "provider_readiness": status,
+                        "fallback_allowed": False,
+                        "auto_resubmit_allowed": False,
+                        "no_charge": True,
+                        "charge": 0,
+                    }
+                    if is_product_video:
+                        payload.update({
+                            "status": "failed_no_charge",
+                            "terminal_state": "failed_no_charge",
+                            "public_message": PUBLIC_PRODUCT_VIDEO_TERMINAL_FAILURE_COPY,
+                            "no_charge": True,
+                            "charge": 0,
+                            "charged_xu": 0,
+                        })
+                    return _merge_contract_debug(payload, submit.raw)
                 if attempt_index + 1 < len(candidate_adapters):
                     _record_failure(blocker)
                     if is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata):
@@ -5515,7 +5636,7 @@ def run_provider_generation(
                     **_attempt_base(),
                     "fallback_used": attempt_index > 0,
                     "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
-                        "provider_submit_called": submit_called_flag,
+                    "provider_submit_called": submit_called_flag,
                     "provider_submit_http_status": submit_http_status,
                     "provider_task_id_saved": bool(submit.provider_task_id),
                     "submit_accepted": True,
@@ -5690,7 +5811,7 @@ def run_provider_generation(
                         "provider_error_message_safe": artifact.error_message or blocker,
                     },
                 )
-                if is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata):
+                if is_product_video:
                     return _paid_fallback_requires_confirmation_payload(
                         blocker,
                         {

@@ -364,11 +364,20 @@ def _provider_terminal_error_debug(payload: Any) -> dict[str, Any]:
     }
 
 
-def _submit_error_classification(status_code: int, error: Any = "") -> tuple[str, bool, bool]:
+def _submit_error_classification(status_code: int, error: Any = "", raw: dict[str, Any] | None = None) -> tuple[str, bool, bool]:
+    raw_dict = dict(raw or {})
+    if raw_dict.get("is_timeout") or raw_dict.get("ambiguous_submit") or str(error or "") in {"TimeoutError", "socket.timeout"} or "timed out" in str(error or "").lower():
+        return "provider_submit_outcome_ambiguous_no_charge", False, False
+    if raw_dict.get("is_dns_error") or str(error or "") == "gaierror" or "getaddrinfo failed" in str(error or "").lower():
+        return "provider_submit_dns_failed", False, False
+    if raw_dict.get("is_connection_refused") or str(error or "") == "ConnectionRefusedError" or "connection refused" in str(error or "").lower():
+        return "provider_submit_connection_refused", False, False
     try:
         status = int(status_code or 0)
     except Exception:
         status = 0
+    if status in {408, 504, 524}:
+        return "provider_submit_outcome_ambiguous_no_charge", False, False
     error_text = str(error or "").lower()
     if any(marker in error_text for marker in ("get_channel_failed", "no available channel", "no channel")):
         return "provider_capacity_unavailable", True, True
@@ -1048,6 +1057,9 @@ class GenericHttpVideoProvider:
                 return {"ok": False, "status_code": int(exc.code), "body": parsed, "error": "http_error_invalid_json", "response_shape": _response_shape(parsed)}
             return {"ok": False, "status_code": int(exc.code), "body": parsed, "error": "http_error", "response_shape": _response_shape(parsed)}
         except Exception as exc:
+            is_timeout = isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.lower() or "timeout" in str(exc).lower()
+            is_dns = "gaierror" in type(exc).__name__.lower() or "getaddrinfo" in str(exc).lower()
+            is_refused = isinstance(exc, ConnectionRefusedError) or "connectionrefused" in type(exc).__name__.lower()
             return {
                 "ok": False,
                 "status_code": 0,
@@ -1056,6 +1068,12 @@ class GenericHttpVideoProvider:
                 "exception_class": type(exc).__name__,
                 "exception_message_safe": _safe_exception_message(exc),
                 "response_shape": _response_shape({}),
+                "is_timeout": is_timeout,
+                "ambiguous_submit": is_timeout,
+                "is_dns_error": is_dns,
+                "is_connection_refused": is_refused,
+                "pre_send_failure": bool(is_dns or is_refused),
+                "provider_http_request_sent": bool(is_timeout),
             }
 
     def _open_multipart_form(self, url: str, fields: dict[str, Any], *, timeout: int = 90) -> dict[str, Any]:
@@ -1112,6 +1130,9 @@ class GenericHttpVideoProvider:
                 "response_shape": _response_shape(parsed),
             }
         except Exception as exc:
+            is_timeout = isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.lower() or "timeout" in str(exc).lower()
+            is_dns = "gaierror" in type(exc).__name__.lower() or "getaddrinfo" in str(exc).lower()
+            is_refused = isinstance(exc, ConnectionRefusedError) or "connectionrefused" in type(exc).__name__.lower()
             return {
                 "ok": False,
                 "status_code": 0,
@@ -1120,6 +1141,12 @@ class GenericHttpVideoProvider:
                 "exception_class": type(exc).__name__,
                 "exception_message_safe": _safe_exception_message(exc),
                 "response_shape": _response_shape({}),
+                "is_timeout": is_timeout,
+                "ambiguous_submit": is_timeout,
+                "is_dns_error": is_dns,
+                "is_connection_refused": is_refused,
+                "pre_send_failure": bool(is_dns or is_refused),
+                "provider_http_request_sent": bool(is_timeout),
             }
 
     def submit_video_job(self, request: VideoGenerationRequest) -> VideoSubmitResult:
@@ -1303,7 +1330,7 @@ class GenericHttpVideoProvider:
             raw_debug["exception_message_safe"] = result.get("exception_message_safe") or ""
         error_probe = result.get("error") or _safe_provider_error_message(body)
         if result.get("error") in {"invalid_json", "http_error_invalid_json"}:
-            blocker, retriable, is_5xx = _submit_error_classification(int(result.get("status_code") or 0), error_probe)
+            blocker, retriable, is_5xx = _submit_error_classification(int(result.get("status_code") or 0), error_probe, result)
             if is_5xx:
                 raw_debug["provider_submit_blocker"] = blocker
                 raw_debug["provider_submit_http_5xx"] = True
@@ -1312,10 +1339,15 @@ class GenericHttpVideoProvider:
             raw_debug["provider_submit_blocker"] = "provider_submit_response_invalid_json"
             return VideoSubmitResult(ok=False, provider_name=self.provider_name, provider_status="failed", error_code="provider_submit_response_invalid_json", raw=raw_debug)
         if not result.get("ok"):
-            blocker, retriable, is_5xx = _submit_error_classification(int(result.get("status_code") or 0), error_probe)
+            blocker, retriable, is_5xx = _submit_error_classification(int(result.get("status_code") or 0), error_probe, result)
             raw_debug["provider_submit_blocker"] = blocker
             raw_debug["provider_submit_http_5xx"] = bool(is_5xx)
             raw_debug["provider_submit_retriable"] = bool(retriable)
+            raw_debug["is_timeout"] = bool(result.get("is_timeout"))
+            raw_debug["ambiguous_submit"] = bool(result.get("ambiguous_submit") or blocker == "provider_submit_outcome_ambiguous_no_charge")
+            raw_debug["pre_send_failure"] = bool(result.get("pre_send_failure"))
+            if result.get("provider_http_request_sent") is not None:
+                raw_debug["provider_http_request_sent"] = bool(result.get("provider_http_request_sent"))
             # Some gateways report a transport error after accepting a task.
             # Preserve a parsed task id so the orchestration layer can poll it
             # exactly once instead of paying for a duplicate submission.
@@ -1325,7 +1357,7 @@ class GenericHttpVideoProvider:
                 provider_name=self.provider_name,
                 provider_task_id=task_id,
                 provider_video_id=video_id,
-                provider_status=status or "failed",
+                provider_status="ambiguous_timeout" if blocker == "provider_submit_outcome_ambiguous_no_charge" else (status or "failed"),
                 error_code=blocker,
                 raw=raw_debug,
             )
