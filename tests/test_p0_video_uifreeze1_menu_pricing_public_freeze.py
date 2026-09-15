@@ -43,7 +43,7 @@ def test_long_video_opens_catalog_but_keeps_execution_locked() -> None:
     assert "multi_scene_film" in video_uifreeze1.PUBLIC_EXECUTION_LOCKED_PRODUCTS
     report = video_uifreeze1.catalog_report("multi_scene_film", scene_count=1)
     assert report["ok"] is True
-    assert report["tier_ids"] == [400, 500, 600, 200, 300, 800, 1000, 1200, 1500]
+    assert report["tier_ids"] == [400, 500, 600, 200, 300, 700, 800, 1000, 1200, 1500]
 
 
 def test_storyboard_catalog_keeps_compatible_image_video_packages_visible() -> None:
