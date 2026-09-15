@@ -91,6 +91,8 @@ PRODUCT_VIDEO_PROVIDER_REQUIRED_TYPES = {
     "video_long",
     "video_selfshot",
     "prompt_video",
+    "video_idea",
+    "video_idea_to_product",
 }
 PRODUCT_VIDEO_PROVIDER_ADAPTERS = {
     "text_to_video",
