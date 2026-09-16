@@ -289,6 +289,75 @@ def test_v2_post_prepare_uses_outer_route_and_srt_when_inner_segments_are_stale(
     assert prepared["state"]["subdub_engine_selected"] == "auto_multi_speaker_v2"
 
 
+def test_multi_prepare_contract_reports_exact_bijection_failure():
+    source_segments = _source_segments(3, 3)
+    output_segments = [
+        {**segment, "text": f"translated cue {index + 1}"}
+        for index, segment in enumerate(source_segments)
+    ]
+    output_segments[1] = {
+        **output_segments[1],
+        "cue_id": "wrong-cue-id",
+        "speaker_id": "chunk_00:speaker_2",
+        "start": 9.0,
+    }
+
+    contract = bot._subdub_auto_multi_prepare_contract(
+        source_segments,
+        output_segments,
+        ["chunk_00:speaker_0", "chunk_00:speaker_1", "chunk_00:speaker_2"],
+    )
+
+    assert contract == {
+        "auto_multi_prepare_contract_status": "identity_mismatch",
+        "auto_multi_prepare_source_count": 3,
+        "auto_multi_prepare_output_count": 3,
+        "auto_multi_prepare_speaker_count": 3,
+        "auto_multi_prepare_cue_id_mismatch_count": 1,
+        "auto_multi_prepare_speaker_mismatch_count": 1,
+        "auto_multi_prepare_timing_mismatch_count": 1,
+        "auto_multi_prepare_empty_text_count": 0,
+    }
+
+
+def test_v2_empty_selection_records_bounded_gate_provenance(monkeypatch):
+    source_segments = _source_segments(3, 3)
+    state = {
+        "subdub_engine_selected": "auto_multi_speaker_v2",
+        "voice_kind": "auto_speaker_gender",
+        "voice_selection_mode": "auto_speaker",
+        "auto_speaker_lane": "multi",
+        "target_language": "English",
+        "translate_requested": "1",
+        "_pipeline_job_key": "v2-gate-provenance-key",
+    }
+    prepared = {
+        "state": dict(state),
+        "source_segments": source_segments,
+        "output_segments": [],
+        "source_subtitle": bot.video_dubbing_srt_from_segments(source_segments),
+        "output_subtitle": "",
+    }
+    captured: dict = {}
+
+    monkeypatch.setattr(bot, "subdub_auto_speaker_route_enabled", lambda _state: True)
+    monkeypatch.setattr(
+        bot,
+        "update_subtitle_dub_pipeline_job",
+        lambda _job_key, **fields: captured.update(fields) or fields,
+    )
+
+    result = asyncio.run(bot._subdub_auto_post_prepare_gate(prepared, state))
+
+    assert result == {"ok": False, "status": "AUTO_CAST_MANUAL_REQUIRED"}
+    assert captured["auto_multi_gate_status"] == "selection_empty"
+    assert captured["auto_multi_gate_source_count"] == 3
+    assert captured["auto_multi_gate_output_count"] == 0
+    assert captured["auto_multi_gate_parsed_output_count"] == 0
+    assert captured["auto_multi_gate_selected_count"] == 0
+    assert captured["auto_multi_gate_selected_text_chars"] == 0
+
+
 @pytest.mark.parametrize("corruption", ("truncated", "extra", "blank"))
 def test_v2_post_prepare_recovery_fails_closed_on_incomplete_translation(
     corruption,
