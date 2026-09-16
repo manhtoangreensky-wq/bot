@@ -633,6 +633,7 @@ def validate_final_video_output(
     result: dict | None = None,
     require_audio: bool = False,
     allow_admin_test: bool = False,
+    expected_ratio: str = "",
     ffprobe: str = "",
 ) -> dict[str, Any]:
     payload = dict(result or {})
@@ -641,6 +642,43 @@ def validate_final_video_output(
     probe = probe_video(path or str(payload.get("final_video_path") or ""), ffprobe=ffprobe)
     if not probe.get("ok"):
         return probe
+    target_ratio = str(
+        expected_ratio
+        or payload.get("expected_ratio")
+        or payload.get("requested_ratio")
+        or payload.get("aspect_ratio")
+        or payload.get("ratio")
+        or ((payload.get("metadata") or {}) if isinstance(payload.get("metadata"), dict) else {}).get("ratio")
+        or ""
+    ).strip()
+    if target_ratio:
+        normalized_ratio = target_ratio.lower().replace("/", ":").replace("x", ":")
+        expected_orientation = ""
+        if normalized_ratio in {"9:16", "portrait", "vertical"} or normalized_ratio.startswith("9:16"):
+            expected_orientation = "portrait"
+        elif normalized_ratio in {"16:9", "landscape", "horizontal"} or normalized_ratio.startswith("16:9"):
+            expected_orientation = "landscape"
+
+        if expected_orientation:
+            width = int(probe.get("width") or 0)
+            height = int(probe.get("height") or 0)
+            if width > 0 and height > 0:
+                if width > height:
+                    actual_orientation = "landscape"
+                elif height > width:
+                    actual_orientation = "portrait"
+                else:
+                    actual_orientation = "square"
+
+                if expected_orientation != actual_orientation:
+                    return {
+                        **probe,
+                        "ok": False,
+                        "reason": "geometry_mismatch_rejected",
+                        "geometry_orientation": actual_orientation,
+                        "expected_orientation": expected_orientation,
+                        "requested_ratio": target_ratio,
+                    }
     if require_audio and not probe.get("has_audio"):
         return {**probe, "ok": False, "reason": "output_no_audio_stream"}
     return {**probe, "ok": True, "terminal_state": "final_delivered"}

@@ -9235,6 +9235,7 @@ def complete_video_job(
             result=payload,
             require_audio=bool((_json_loads(str(project.get("addon_plan_json") or ""), {}) or {}).get("voice_enabled")),
             allow_admin_test=allow_admin_test,
+            expected_ratio=str(payload.get("expected_ratio") or payload.get("requested_ratio") or payload.get("aspect_ratio") or payload.get("ratio") or project.get("ratio") or project.get("aspect_ratio") or ""),
         )
         payload["final_output_validation"] = validation
         if not validation.get("ok"):
