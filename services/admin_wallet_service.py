@@ -65,8 +65,11 @@ def compute_credit_request_fingerprint(
     reference: str = "",
 ) -> str:
     """Derive deterministic SHA256 request fingerprint from canonical request fields."""
+    norm_user = str(user_id or "").strip()
+    if norm_user.startswith("telegram-"):
+        norm_user = norm_user[len("telegram-"):].strip()
     normalized = (
-        f"{str(user_id).strip()}|"
+        f"{norm_user}|"
         f"{int(amount_xu)}|"
         f"{str(reason or '').strip()}|"
         f"{str(reference or '').strip()}"
@@ -257,6 +260,8 @@ def process_internal_wallet_credit_in_tx(
 ) -> tuple[bool, dict[str, Any], int]:
     """Process an admin wallet credit inside an existing active SQLite transaction."""
     clean_user_id = str(user_id or "").strip()
+    if clean_user_id.startswith("telegram-"):
+        clean_user_id = clean_user_id[len("telegram-"):].strip()
     if not clean_user_id:
         return False, {
             "ok": False,
@@ -446,6 +451,8 @@ def execute_admin_wallet_credit(
 
             if existing and existing[3] == "completed":
                 clean_uid = str(user_id or "").strip()
+                if clean_uid.startswith("telegram-"):
+                    clean_uid = clean_uid[len("telegram-"):].strip()
                 fp = compute_credit_request_fingerprint(clean_uid, int(amount_xu), reason, reference)
                 if existing[0] == fp:
                     receipt_str = str(existing[1] or "")

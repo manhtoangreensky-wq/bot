@@ -745,3 +745,38 @@ def test_fastapi_admin_wallet_credit_end_to_end(tmp_path: Path, monkeypatch):
     assert resp3.status_code == 409
     data3 = resp3.json()
     assert data3["error_code"] == "IDEMPOTENCY_KEY_CONFLICT"
+
+
+def test_internal_wallet_credit_canonical_user_id_prefix_normalized(test_db: str):
+    """Canonical user ID with 'telegram-' prefix is normalized and credits the numeric user account."""
+    key = "key_telegram_prefix_norm"
+    ok, res, status = execute_admin_wallet_credit(
+        user_id="telegram-1001",
+        amount_xu=300,
+        idempotency_key=key,
+        reason="Test telegram prefix",
+        reference="REF-TG-001",
+        db_path=test_db,
+    )
+    assert ok is True
+    assert status == 200
+    assert res["data"]["user_id"] == "1001"
+    assert res["data"]["amount_xu"] == 300
+    assert res["data"]["balance_after"] == 800  # 500 initial + 300
+    assert res["data"]["replayed"] is False
+
+    # Replay using raw user_id (without prefix) matches fingerprint and replays idempotently
+    ok2, res2, status2 = execute_admin_wallet_credit(
+        user_id="1001",
+        amount_xu=300,
+        idempotency_key=key,
+        reason="Test telegram prefix",
+        reference="REF-TG-001",
+        db_path=test_db,
+    )
+    assert ok2 is True
+    assert status2 == 200
+    assert res2["data"]["replayed"] is True
+    assert res2["data"]["ledger_event_id"] == res["data"]["ledger_event_id"]
+    assert res2["data"]["balance_after"] == 800
+
