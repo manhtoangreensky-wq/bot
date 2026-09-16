@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
 import html
 import json
 import logging
@@ -68,22 +69,25 @@ def get_canonical_db_path() -> str:
     ).strip()
 
 
-def get_db_connection(conn=None):
+def get_db_connection(conn=None, *, db_path: str | None = None):
     if conn is not None:
         return conn, False
-    db_path = get_canonical_db_path()
-    parent_dir = os.path.dirname(os.path.abspath(db_path))
+    target_path = str(db_path or get_canonical_db_path()).strip()
+    parent_dir = os.path.dirname(os.path.abspath(target_path))
     if parent_dir:
         os.makedirs(parent_dir, exist_ok=True)
-    connection = sqlite3.connect(db_path, timeout=30.0)
-    connection.execute("PRAGMA journal_mode=WAL")
+    connection = sqlite3.connect(target_path, timeout=30.0)
     connection.execute("PRAGMA busy_timeout=30000")
+    try:
+        connection.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.OperationalError:
+        pass
     connection.row_factory = sqlite3.Row
     return connection, True
 
 
-def ensure_video_trace_schema(conn=None) -> None:
-    c, should_close = get_db_connection(conn)
+def ensure_video_trace_schema(conn=None, *, db_path: str | None = None) -> None:
+    c, should_close = get_db_connection(conn, db_path=db_path)
     caller_transaction_active = bool(c.in_transaction)
     try:
         c.execute("""
@@ -1096,3 +1100,210 @@ def record_video_confirm_precheck_result(
     finally:
         if should_close:
             connection.close()
+
+
+# ---------------------------------------------------------------------------
+# SPEC-02C: Owner Acceptance Token Durable State Management
+# ---------------------------------------------------------------------------
+
+STAGE_OAT_CLAIMED = "CLAIMED"
+STAGE_OAT_CONSUMED = "CONSUMED"
+STAGE_OAT_CONSUMED_SUCCESS = "CONSUMED_SUCCESS"
+STAGE_OAT_CONSUMED_FAILED = "CONSUMED_FAILED"
+STAGE_OAT_CONSUMED_AMBIGUOUS = "CONSUMED_AMBIGUOUS"
+
+
+def compute_owner_acceptance_token_fingerprint(auth: dict[str, Any] | None) -> str:
+    """Compute deterministic SHA-256 fingerprint for an owner acceptance authorization token."""
+    if not isinstance(auth, dict) or not auth:
+        return ""
+    user_id = str(auth.get("user_id") if auth.get("user_id") is not None else "").strip()
+    project_id = str(auth.get("project_id") if auth.get("project_id") is not None else "").strip()
+    job_id = str(auth.get("job_id") if auth.get("job_id") is not None else "").strip()
+    product_type = str(auth.get("product_type") or "video_ai_prompt").strip()
+    capability = str(auth.get("capability") or auth.get("required_capability") or "").strip()
+    tier = str(auth.get("tier") or auth.get("selected_model") or auth.get("model") or "").strip()
+    provider = str(auth.get("provider") or "shopaikey_video").strip()
+    runtime_sha = str(auth.get("runtime_sha") or auth.get("authorized_runtime_sha") or "").strip()
+    max_spend = str(auth.get("max_provider_spend") if auth.get("max_provider_spend") is not None else "").strip()
+    max_spend_unit = str(auth.get("max_provider_spend_unit") or "").strip().upper()
+    nonce = str(auth.get("nonce") or auth.get("token_id") or auth.get("created_at") or "").strip()
+
+    canonical_tuples = [
+        ("capability", capability),
+        ("job_id", job_id),
+        ("max_provider_spend", max_spend),
+        ("max_provider_spend_unit", max_spend_unit),
+        ("nonce", nonce),
+        ("product_type", product_type),
+        ("project_id", project_id),
+        ("provider", provider),
+        ("runtime_sha", runtime_sha),
+        ("tier", tier),
+        ("user_id", user_id),
+    ]
+    canonical_repr = json.dumps(canonical_tuples, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(canonical_repr.encode("utf-8")).hexdigest()
+
+
+def is_owner_acceptance_token_claimed_or_consumed(
+    token_fingerprint: str,
+    conn: sqlite3.Connection | None = None,
+    *,
+    db_path: str | None = None,
+) -> bool:
+    """Check whether an owner acceptance token has already been claimed or consumed in persistent storage."""
+    clean_fp = str(token_fingerprint or "").strip()
+    if not clean_fp:
+        return False
+    token_request_id = f"OAT-{clean_fp}"
+    try:
+        ensure_video_trace_schema(conn, db_path=db_path)
+        c, should_close = get_db_connection(conn, db_path=db_path)
+        try:
+            cursor = c.execute(
+                "SELECT current_stage FROM video_request_traces WHERE request_id = ? LIMIT 1",
+                (token_request_id,),
+            )
+            row = cursor.fetchone()
+            return row is not None
+        finally:
+            if should_close:
+                c.close()
+    except Exception as exc:
+        logger.warning("Failed to check owner acceptance token persistence: %s", exc)
+        return False
+
+
+def claim_owner_acceptance_token(
+    auth: dict[str, Any],
+    conn: sqlite3.Connection | None = None,
+    *,
+    db_path: str | None = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Atomically claim an Owner acceptance authorization token in durable SQLite storage.
+
+    Uses SQLite PRIMARY KEY constraint on request_id for hardware-level atomic CAS.
+    Returns (success, blocker_code, details).
+    """
+    if not isinstance(auth, dict) or not auth:
+        return False, "owner_acceptance_auth_missing", {}
+    fingerprint = compute_owner_acceptance_token_fingerprint(auth)
+    if not fingerprint:
+        return False, "owner_acceptance_fingerprint_uncomputable", {}
+
+    token_request_id = f"OAT-{fingerprint}"
+    ensure_video_trace_schema(conn, db_path=db_path)
+    c, should_close = get_db_connection(conn, db_path=db_path)
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    raw_user_id = auth.get("user_id")
+    try:
+        clean_user_id = int(raw_user_id) if raw_user_id is not None else 0
+    except (ValueError, TypeError):
+        clean_user_id = 0
+
+    raw_job_id = auth.get("job_id")
+    try:
+        clean_job_id = int(raw_job_id) if raw_job_id is not None else None
+    except (ValueError, TypeError):
+        clean_job_id = None
+
+    raw_proj_id = auth.get("project_id")
+    try:
+        clean_proj_id = int(raw_proj_id) if raw_proj_id is not None else None
+    except (ValueError, TypeError):
+        clean_proj_id = None
+
+    payload = {
+        "token_fingerprint": fingerprint,
+        "claimed_at": now_iso,
+        "auth": {k: v for k, v in auth.items() if k not in ("token", "api_key", "secret")},
+        "stage": STAGE_OAT_CLAIMED,
+    }
+
+    try:
+        c.execute(
+            """
+            INSERT INTO video_request_traces (
+                request_id,
+                job_id,
+                project_id,
+                confirm_attempt_key,
+                owner_user_id,
+                product_type,
+                current_stage,
+                trace_payload_json,
+                created_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                token_request_id,
+                clean_job_id,
+                clean_proj_id,
+                token_request_id,
+                clean_user_id,
+                str(auth.get("product_type") or "video_ai_prompt"),
+                STAGE_OAT_CLAIMED,
+                json.dumps(payload),
+                now_iso,
+                now_iso,
+            ),
+        )
+        c.commit()
+        return True, "", {"token_fingerprint": fingerprint, "stage": STAGE_OAT_CLAIMED}
+    except sqlite3.IntegrityError:
+        return False, "owner_acceptance_already_consumed", {"token_fingerprint": fingerprint}
+    except Exception as exc:
+        logger.error("Durable owner acceptance claim error: %s", exc)
+        return False, "owner_acceptance_claim_failed", {"error": str(exc)}
+    finally:
+        if should_close:
+            c.close()
+
+
+def finalize_owner_acceptance_token(
+    token_fingerprint: str,
+    stage: str = STAGE_OAT_CONSUMED,
+    conn: sqlite3.Connection | None = None,
+    *,
+    db_path: str | None = None,
+    provider_task_id: str = "",
+) -> bool:
+    """Transition a claimed owner acceptance token to final CONSUMED stage."""
+    clean_fp = str(token_fingerprint or "").strip()
+    if not clean_fp:
+        return False
+    token_request_id = f"OAT-{clean_fp}"
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    try:
+        ensure_video_trace_schema(conn, db_path=db_path)
+        c, should_close = get_db_connection(conn, db_path=db_path)
+        try:
+            if provider_task_id:
+                c.execute(
+                    """
+                    UPDATE video_request_traces
+                    SET current_stage = ?, provider_task_id = ?, updated_at = ?
+                    WHERE request_id = ?
+                    """,
+                    (stage, provider_task_id, now_iso, token_request_id),
+                )
+            else:
+                c.execute(
+                    """
+                    UPDATE video_request_traces
+                    SET current_stage = ?, updated_at = ?
+                    WHERE request_id = ?
+                    """,
+                    (stage, now_iso, token_request_id),
+                )
+            c.commit()
+            return True
+        finally:
+            if should_close:
+                c.close()
+    except Exception as exc:
+        logger.warning("Failed to finalize owner acceptance token %s: %s", clean_fp, exc)
+        return False
+

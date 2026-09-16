@@ -36,7 +36,20 @@ from services.video_provider_base import (
 )
 
 
-CANONICAL_ACCEPTANCE_RUNTIME_SHA = "d2c2d1e1a82d7bf1452ea51030380f8f00d5990c"
+try:
+    from services.remote_worker_api import resolve_runtime_sha
+    CURRENT_TEST_RUNTIME_SHA = resolve_runtime_sha() or "8dc3cdef83dbb4d19a45f2b4e079dc3ac8adbc71"
+except Exception:
+    CURRENT_TEST_RUNTIME_SHA = "8dc3cdef83dbb4d19a45f2b4e079dc3ac8adbc71"
+
+CANONICAL_ACCEPTANCE_RUNTIME_SHA = CURRENT_TEST_RUNTIME_SHA
+
+
+@pytest.fixture(autouse=True)
+def isolate_test_db(tmp_path, monkeypatch):
+    test_db = str(tmp_path / "test_spec02.db")
+    monkeypatch.setenv("DB_PATH", test_db)
+    monkeypatch.setenv("SQLITE_DB_PATH", test_db)
 
 
 class MockVideoProvider:
@@ -153,7 +166,8 @@ def _base_valid_auth(*, job_id=101, user_id=12345, project_id=501):
         "user_id": user_id,
         "project_id": project_id,
         "runtime_sha": CANONICAL_ACCEPTANCE_RUNTIME_SHA,
-        "max_provider_spend": 80.0,
+        "max_provider_spend": 1.00,
+        "max_provider_spend_unit": "USD",
         "consumed": False,
         "expires_at": time.time() + 3600,
     }
@@ -393,9 +407,10 @@ def test_11_capability_mismatch_still_blocks_acceptance_job():
 def test_12_over_budget_still_blocks_acceptance_job():
     """Scenario 12: Estimated provider spend exceeding authorization ceiling is blocked."""
     auth = _base_valid_auth()
-    auth["max_provider_spend"] = 50.0  # limit 50 Xu
+    auth["max_provider_spend"] = 0.50
+    auth["max_provider_spend_unit"] = "USD"
     valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(
-        auth, context={"estimated_provider_cost": 80.0}
+        auth, context={"estimated_provider_cost": 0.80, "estimated_provider_cost_unit": "USD"}
     )
     assert valid is False
     assert reason == "owner_acceptance_spend_limit_exceeded"

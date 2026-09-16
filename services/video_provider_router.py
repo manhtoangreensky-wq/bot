@@ -31,6 +31,17 @@ from services.video_provider_catalog import (
     model_interface_contract,
     selected_model_for_provider,
 )
+from services.video_trace_state import (
+    STAGE_OAT_CLAIMED,
+    STAGE_OAT_CONSUMED,
+    STAGE_OAT_CONSUMED_AMBIGUOUS,
+    STAGE_OAT_CONSUMED_FAILED,
+    STAGE_OAT_CONSUMED_SUCCESS,
+    claim_owner_acceptance_token,
+    compute_owner_acceptance_token_fingerprint,
+    finalize_owner_acceptance_token,
+    is_owner_acceptance_token_claimed_or_consumed,
+)
 
 
 DEFAULT_VIDEO_PROVIDER_CHAIN = "shopaikey_video,key4u_video,toanaas_video,veo,kling,generic_http"
@@ -391,7 +402,10 @@ CANONICAL_ACCEPTANCE_PRODUCT_TYPE = "video_ai_prompt"
 CANONICAL_ACCEPTANCE_PROVIDER = "shopaikey_video"
 CANONICAL_ACCEPTANCE_CAPABILITY = "text_to_video"
 CANONICAL_ACCEPTANCE_TIER = "veo31_fast_8"
-CANONICAL_ACCEPTANCE_RUNTIME_SHA = "d2c2d1e1a82d7bf1452ea51030380f8f00d5990c"
+CANONICAL_ACCEPTANCE_SPEND_UNIT = "USD"
+CANONICAL_ACCEPTANCE_MAX_SPEND = 1.00
+LEGACY_STALE_ACCEPTANCE_RUNTIME_SHA = "d2c2d1e1a82d7bf1452ea51030380f8f00d5990c"
+CANONICAL_ACCEPTANCE_RUNTIME_SHA = ""
 PRODUCT_VIDEO_CONTRACT_REJECT_BLOCKERS = {
     "key4u_model_requires_exclusive_interface_no_endpoint",
     "key4u_model_contract_missing_no_charge",
@@ -3131,11 +3145,13 @@ def validate_owner_acceptance_authorization(
     *,
     environ: dict[str, str] | None = None,
     current_time: float | None = None,
+    db_path: str | None = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Validate Owner-authorized acceptance lane for a single controlled live job.
 
-    Enforces server-side trusted identity, one-time use, provider pinning, product pinning,
-    runtime SHA binding, and spend ceiling.
+    Enforces server-side trusted identity, durable one-time use, provider pinning,
+    product pinning, strict tier binding, dynamic runtime SHA authority, and currency-safe
+    spend ceiling.
     """
     if not isinstance(auth, dict) or not auth:
         return False, "owner_acceptance_auth_missing", {}
@@ -3163,10 +3179,15 @@ def validate_owner_acceptance_authorization(
         except Exception:
             return False, "owner_acceptance_expiry_invalid", {}
 
+    # Durable persistent claim check (SPEC-02C: ONE_TIME_USE_DURABLE=YES)
+    fingerprint = compute_owner_acceptance_token_fingerprint(auth)
+    env = dict(environ or os.environ)
+    effective_db_path = db_path or env.get("DB_PATH") or env.get("SQLITE_DB_PATH")
+    if is_owner_acceptance_token_claimed_or_consumed(fingerprint, db_path=effective_db_path):
+        return False, "owner_acceptance_already_consumed", {}
+
     ctx = dict(context or {})
 
-    # 1. User binding
-    auth_user_id = auth.get("user_id")
     # 1. User binding
     auth_user_id = auth.get("user_id")
     if auth_user_id is not None:
@@ -3209,28 +3230,79 @@ def validate_owner_acceptance_authorization(
     if pinned_capability and ctx_capability and ctx_capability != pinned_capability:
         return False, "owner_acceptance_capability_mismatch", {}
 
-    # 6. Runtime SHA binding
-    auth_runtime_sha = str(auth.get("runtime_sha") or auth.get("authorized_runtime_sha") or "").strip()
-    if auth_runtime_sha:
-        ctx_sha = str(ctx.get("runtime_sha") or CANONICAL_ACCEPTANCE_RUNTIME_SHA).strip()
-        if ctx_sha and not (ctx_sha.startswith(auth_runtime_sha) or auth_runtime_sha.startswith(ctx_sha)):
-            return False, "owner_acceptance_runtime_sha_mismatch", {}
+    # 6. Tier binding (SPEC-02C: CROSS_TIER_REUSE=NO)
+    auth_tier = str(auth.get("tier") or auth.get("selected_model") or auth.get("model") or "").strip()
+    ctx_tier = str(ctx.get("tier") or ctx.get("selected_model") or ctx.get("model") or "").strip()
+    if auth_tier:
+        if ctx_tier and ctx_tier != auth_tier:
+            return False, "owner_acceptance_tier_mismatch", {}
+    elif ctx_tier:
+        return False, "owner_acceptance_tier_missing", {}
 
-    # 7. Spend bound check
+    # 7. Runtime SHA authority & fail-closed (SPEC-02C: RUNTIME_SHA_SOURCE=CURRENT_RUNTIME_DYNAMIC)
+    auth_runtime_sha = str(auth.get("runtime_sha") or auth.get("authorized_runtime_sha") or "").strip()
+    if not auth_runtime_sha:
+        return False, "owner_acceptance_runtime_sha_missing", {}
+
+    ctx_sha = str(ctx.get("runtime_sha") or "").strip()
+    if not ctx_sha:
+        try:
+            from services.remote_worker_api import resolve_runtime_sha
+            ctx_sha = resolve_runtime_sha(environ=env)
+        except Exception:
+            ctx_sha = ""
+    if not ctx_sha:
+        return False, "owner_acceptance_runtime_sha_unresolvable", {}
+
+    if not (ctx_sha.startswith(auth_runtime_sha) or auth_runtime_sha.startswith(ctx_sha)):
+        return False, "owner_acceptance_runtime_sha_mismatch", {}
+
+    # 8. Spend bound & currency unit contract (SPEC-02C: CROSS_UNIT_COMPARISON=NO)
     max_spend = auth.get("max_provider_spend")
     if max_spend is not None:
+        auth_spend_unit = str(auth.get("max_provider_spend_unit") or "").strip().upper()
+        if not auth_spend_unit:
+            return False, "owner_acceptance_spend_unit_missing", {}
+
+        ctx_spend_unit = str(
+            ctx.get("estimated_provider_cost_unit")
+            or ctx.get("provider_cost_unit")
+            or ctx.get("spend_unit")
+            or ctx.get("currency")
+            or ""
+        ).strip().upper()
+
+        if not ctx_spend_unit:
+            if ctx.get("estimated_provider_cost") is not None or ctx.get("spend_amount") is not None:
+                return False, "owner_acceptance_spend_unit_missing", {}
+            ctx_spend_unit = auth_spend_unit
+
+        if auth_spend_unit != ctx_spend_unit:
+            return False, "owner_acceptance_spend_unit_mismatch", {}
+
         try:
             max_spend_num = float(max_spend)
-            estimated_cost = float(ctx.get("estimated_provider_cost") or ctx.get("spend_amount") or ctx.get("quote_xu") or 0.0)
+            estimated_cost = float(
+                ctx.get("estimated_provider_cost")
+                if ctx.get("estimated_provider_cost") is not None
+                else (ctx.get("spend_amount") if ctx.get("spend_amount") is not None else 0.0)
+            )
             if estimated_cost > max_spend_num:
                 return False, "owner_acceptance_spend_limit_exceeded", {}
-        except Exception:
-            pass
+        except (ValueError, TypeError):
+            return False, "owner_acceptance_spend_invalid", {}
+    else:
+        auth_spend_unit = ""
 
     verified = dict(auth)
     verified["verified"] = True
+    verified["token_fingerprint"] = fingerprint
     verified["pinned_provider"] = pinned_provider
     verified["pinned_product"] = pinned_product
+    verified["pinned_tier"] = auth_tier or CANONICAL_ACCEPTANCE_TIER
+    verified["runtime_sha"] = ctx_sha
+    verified["max_provider_spend"] = float(max_spend) if max_spend is not None else None
+    verified["max_provider_spend_unit"] = auth_spend_unit
     verified["bypass_scope"] = ACCEPTANCE_BYPASS_SCOPE_PROBATION_LIVENESS_ONLY
     verified["paid_fallback_allowed"] = False
     return True, "", verified
@@ -4282,14 +4354,14 @@ def _run_provider_generation_impl(
                 "product_type": request.product_type or metadata.get("product_type"),
                 "provider": metadata.get("provider") or metadata.get("selected_provider"),
                 "required_capability": request.required_capability,
-                "runtime_sha": metadata.get("runtime_sha") or CANONICAL_ACCEPTANCE_RUNTIME_SHA,
-                "estimated_provider_cost": metadata.get("estimated_provider_cost") or metadata.get("spend_amount") or metadata.get("quote_xu") or 0.0,
+                "tier": metadata.get("tier") or metadata.get("selected_model") or metadata.get("model") or getattr(request, "tier", ""),
+                "runtime_sha": metadata.get("runtime_sha"),
+                "estimated_provider_cost": metadata.get("estimated_provider_cost") or metadata.get("spend_amount") or 0.70,
+                "estimated_provider_cost_unit": metadata.get("estimated_provider_cost_unit") or metadata.get("provider_cost_unit") or "USD",
             },
             environ=env,
         )
         if not acceptance_valid:
-            if isinstance(owner_acceptance_auth, dict):
-                owner_acceptance_auth["consumed"] = True
             return {
                 "ok": False,
                 "provider_attempted": False,
@@ -4301,7 +4373,7 @@ def _run_provider_generation_impl(
                 "blocker": acceptance_blocker,
                 "owner_acceptance_auth_valid": False,
                 "owner_acceptance_block_reason": acceptance_blocker,
-                "owner_acceptance_consumed": True,
+                "owner_acceptance_consumed": False,
                 "provider_status": "blocked_no_charge",
                 "terminal_state": "blocked_no_charge",
                 "status": "failed_no_charge",
@@ -5476,10 +5548,59 @@ def _run_provider_generation_impl(
                 },
             )
         else:
+            if acceptance_valid and verified_acceptance:
+                claim_ok, claim_blocker, _ = claim_owner_acceptance_token(
+                    verified_acceptance,
+                    db_path=env.get("DB_PATH") or env.get("SQLITE_DB_PATH"),
+                )
+                if not claim_ok:
+                    if isinstance(owner_acceptance_auth, dict):
+                        owner_acceptance_auth["consumed"] = True
+                    return {
+                        "ok": False,
+                        "provider_attempted": False,
+                        "provider_submit_called": False,
+                        "external_provider_spend_prevented": True,
+                        "paid_submit_allowed": False,
+                        "paid_submit_blocked_reason": claim_blocker,
+                        "provider_error": claim_blocker,
+                        "blocker": claim_blocker,
+                        "owner_acceptance_auth_valid": False,
+                        "owner_acceptance_block_reason": claim_blocker,
+                        "owner_acceptance_consumed": True,
+                        "provider_status": "blocked_no_charge",
+                        "terminal_state": "blocked_no_charge",
+                        "status": "failed_no_charge",
+                        "charge": 0,
+                        "charged_xu": 0,
+                        "no_charge": True,
+                        "public_message": PUBLIC_PRODUCT_VIDEO_SUBMIT_BLOCKED_COPY,
+                        "provider_readiness": status,
+                    }
+                if isinstance(owner_acceptance_auth, dict):
+                    owner_acceptance_auth["consumed"] = True
             try:
                 _mark_trace("submit", submit_called=True)
                 submit = current_adapter.submit_video_job(provider_request)
+                if acceptance_valid and verified_acceptance:
+                    token_fp = verified_acceptance.get("token_fingerprint") or ""
+                    final_stage = STAGE_OAT_CONSUMED_SUCCESS if submit.ok else STAGE_OAT_CONSUMED_FAILED
+                    finalize_owner_acceptance_token(
+                        token_fp,
+                        stage=final_stage,
+                        db_path=env.get("DB_PATH") or env.get("SQLITE_DB_PATH"),
+                        provider_task_id=str(submit.provider_task_id or submit.provider_video_id or ""),
+                    )
             except Exception as exc:
+                if acceptance_valid and verified_acceptance:
+                    token_fp = verified_acceptance.get("token_fingerprint") or ""
+                    is_timeout_early = isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.lower() or "timeout" in str(exc).lower()
+                    exc_stage = STAGE_OAT_CONSUMED_AMBIGUOUS if is_timeout_early else STAGE_OAT_CONSUMED_FAILED
+                    finalize_owner_acceptance_token(
+                        token_fp,
+                        stage=exc_stage,
+                        db_path=env.get("DB_PATH") or env.get("SQLITE_DB_PATH"),
+                    )
                 exc_payload = {
                     **_attempt_base(),
                     **provider_exception_result(exc, provider=current_adapter.provider_name, stage="submit_request", status=status),
