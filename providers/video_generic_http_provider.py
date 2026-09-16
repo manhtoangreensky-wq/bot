@@ -781,6 +781,26 @@ def _key4u_openai_video_fields(payload: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _shopaikey_wire_payload(
+    payload: dict[str, Any],
+    *,
+    submit_url: str = "",
+) -> dict[str, Any]:
+    data = dict(payload or {})
+    ratio = str(
+        data.get("aspect_ratio")
+        or data.get("aspectRatio")
+        or data.get("ratio")
+        or ""
+    ).strip()
+    if ratio:
+        data["aspect_ratio"] = ratio
+        data["aspectRatio"] = ratio
+        if not data.get("ratio"):
+            data["ratio"] = ratio
+    return data
+
+
 def build_shopaikey_video_payload(request: VideoGenerationRequest, env: dict[str, str] | os._Environ[str] | None = None) -> dict[str, Any]:
     data = _base_video_payload(request, env)
     model = str(
@@ -1251,11 +1271,12 @@ class GenericHttpVideoProvider:
             clean_metadata.pop("provider_poll_url_override", None)
             payload["metadata"] = clean_metadata
         auth_name, auth_value = self._auth_header()
-        wire_payload = (
-            _key4u_wire_payload(payload, submit_url=submit_url)
-            if self.provider_name == "key4u_video"
-            else payload
-        )
+        if self.provider_name == "key4u_video":
+            wire_payload = _key4u_wire_payload(payload, submit_url=submit_url)
+        elif self.provider_name == "shopaikey_video":
+            wire_payload = _shopaikey_wire_payload(payload, submit_url=submit_url)
+        else:
+            wire_payload = payload
         if (
             self.provider_name == "key4u_video"
             and str(payload_metadata.get("provider_interface") or "") == "key4u_google_veo_exclusive"
