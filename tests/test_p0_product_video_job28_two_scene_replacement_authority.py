@@ -18,6 +18,7 @@ from services import (
     video_real_render_connector as connector,
     video_project_queue,
 )
+from services.video_provider_base import VideoArtifactResult, VideoGenerationRequest
 
 
 AUTHORIZATION_ID = "pv2-r01-job28-key4u-replacements-v2"
@@ -2351,6 +2352,297 @@ def test_v4_scene_two_pending_task_persists_transport_receipt(
         normalized, scene_index=2
     )
     assert replay["scene_authorized"] is False
+
+
+def test_existing_key4u_completed_task_keeps_poll_only_state_after_download_error(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _configure_key4u_veo_contract(monkeypatch)
+    monkeypatch.setenv("PRODUCT_VIDEO_PROVIDER_SUBMIT_ENABLED", "1")
+    monkeypatch.setenv("REAL_PROVIDER_SMOKE_ENABLED", "1")
+    monkeypatch.setenv("VIDEO_PROVIDER_CHAIN", "key4u_video")
+    monkeypatch.setenv("VIDEO_PROVIDER_MAX_POLL_ATTEMPTS", "1")
+    monkeypatch.setenv("VIDEO_PROVIDER_POLL_INTERVAL_SECONDS", "0")
+
+    def fake_open_json(self, url, payload=None, *, method="GET", **_kwargs):
+        del self, url, payload
+        assert method == "GET"
+        return {
+            "ok": True,
+            "status_code": 200,
+            "body": {
+                "id": "key4u_existing_scene_one_task",
+                "status": "completed",
+                "progress": 100,
+                "video_url": "https://provider.example/existing-scene-one.mp4",
+            },
+            "response_shape": {"type": "dict"},
+        }
+
+    monkeypatch.setattr(GenericHttpVideoProvider, "_open_json", fake_open_json)
+    monkeypatch.setattr(
+        video_generic_http_provider,
+        "materialize_video_url",
+        lambda *args, **kwargs: VideoArtifactResult(
+            ok=False,
+            error_code="provider_download_failed",
+            error_message="HTTPError",
+        ),
+    )
+    request = VideoGenerationRequest(
+        job_id="28-1",
+        product_type="video_trend",
+        video_flow_type="video_trend",
+        prompt="existing completed scene one",
+        ratio="9:16",
+        duration_seconds=8,
+        required_capability="multi_scene_video",
+        metadata={
+            "scene_index": 1,
+            "product_video": True,
+            "allow_provider_pending": True,
+            "recovery_existing_tasks_only": True,
+            "provider_pending_provider": "key4u_video",
+            "provider_pending_task_id": "key4u_existing_scene_one_task",
+            "provider_pending_request_job_id": "28-1",
+            "provider_submit_source": "worker_poll_existing_task",
+            "submit_source": "worker_poll_existing_task",
+            "current_source": "worker_poll_existing_task",
+            "public_user_confirmed": True,
+            "invoice_confirmed": True,
+            "provider_submit_accepted_before": True,
+            "selected_provider": "key4u_video",
+            "selected_model": "veo_3_1-fast",
+            "provider_model_map": {"key4u_video": "veo_3_1-fast"},
+            "configured_provider_chain": ["key4u_video"],
+            "runtime_candidate_keys": ["key4u_video"],
+            "preconfirm_candidate_keys": ["key4u_video"],
+            "scene_count": 2,
+        },
+    )
+
+    result = video_provider_router.run_provider_generation(
+        request,
+        output_dir=str(tmp_path),
+        sleep_func=lambda _seconds: None,
+    )
+
+    assert result["ok"] is False, result
+    assert result.get("continue_polling") is True, result
+    assert result["terminal_state"] == "final_rendering"
+    assert result["provider_error"] == "provider_in_progress"
+    assert result["provider_poll_blocker"] == "provider_download_failed"
+    assert result["provider_task_ids"] == ["key4u_existing_scene_one_task"]
+    assert result["provider_submit_called"] is False
+    assert result["provider_submit_already_exists"] is True
+    assert result["external_provider_spend_prevented"] is True
+    assert result["artifact_download_retryable"] is True
+    assert result["artifact_download_retry_count"] == 1
+    assert result["artifact_download_retry_limit"] == 2
+    assert result["artifact_download_retry_scene_index"] == 1
+
+    exhausted_request = copy.deepcopy(request)
+    exhausted_request.metadata["artifact_download_retry_count"] = 2
+    exhausted_request.metadata["artifact_download_retry_scene_index"] = 1
+    exhausted = video_provider_router.run_provider_generation(
+        exhausted_request,
+        output_dir=str(tmp_path),
+        sleep_func=lambda _seconds: None,
+    )
+
+    assert exhausted.get("continue_polling") is not True
+    assert exhausted["terminal_state"] == "failed_no_charge"
+    assert exhausted["provider_error"] == "provider_download_failed"
+    assert exhausted["provider_submit_called"] is False
+
+    other_scene_request = copy.deepcopy(exhausted_request)
+    other_scene_request.metadata["artifact_download_retry_scene_index"] = 2
+    other_scene = video_provider_router.run_provider_generation(
+        other_scene_request,
+        output_dir=str(tmp_path),
+        sleep_func=lambda _seconds: None,
+    )
+
+    assert other_scene["continue_polling"] is True
+    assert other_scene["artifact_download_retry_scene_index"] == 1
+    assert other_scene["artifact_download_retry_count"] == 1
+
+
+def test_orchestrator_preserves_bounded_artifact_download_retry_state(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    scene_one_clip = tmp_path / "provider_scene_001.mp4"
+    scene_one_clip.write_bytes(b"durable-scene-one")
+    job = {
+        "id": 28,
+        "job_id": 28,
+        "user_id": 7126457028,
+        "product_type": "video_trend",
+        "scene_count": 2,
+        "scene_duration_seconds": 8,
+        "expected_duration_seconds": 16,
+        "ratio": "9:16",
+        "scene_cards": [
+            {
+                "scene_index": 1,
+                "video_prompt": "durable scene one",
+                "target_duration_sec": 8,
+                "aspect_ratio": "9:16",
+            },
+            {
+                "scene_index": 2,
+                "video_prompt": "poll-only scene two",
+                "target_duration_sec": 8,
+                "aspect_ratio": "9:16",
+            },
+        ],
+        "scene_tasks": [
+            {
+                "scene_index": 1,
+                "provider": "key4u_video",
+                "provider_task_id": "key4u_existing_scene_one_task",
+                "task_id_present": True,
+                "clip_path": str(scene_one_clip),
+                "clip_valid": True,
+                "status": "scene_clip_validated",
+            },
+            {
+                "scene_index": 2,
+                "provider": "key4u_video",
+                "provider_task_id": "key4u_existing_scene_two_task",
+                "task_id_present": True,
+                "task_pollable": True,
+                "submit_accepted": True,
+                "status": "provider_running",
+            },
+        ],
+    }
+
+    async def fake_render(scene, raw_path, provider_order):
+        del raw_path, provider_order
+        assert int(scene.scene_id) == 2
+        raise connector.RealVideoRenderError(
+            "provider_in_progress",
+            diagnostics={
+                "scene_index": 2,
+                "status": "provider_running",
+                "continue_polling": True,
+                "provider_error": "provider_in_progress",
+                "blocker": "provider_in_progress",
+                "provider_submit_called": False,
+                "provider_task_id_saved": True,
+                "provider_task_ids": ["key4u_existing_scene_two_task"],
+                "task_id_present": True,
+                "artifact_download_retryable": True,
+                "artifact_download_error": "provider_download_failed",
+                "artifact_download_retry_count": 1,
+                "artifact_download_retry_limit": 2,
+                "artifact_download_retry_scene_index": 2,
+                "no_charge": True,
+            },
+        )
+
+    monkeypatch.setattr(connector, "_render_scene_async", fake_render)
+    monkeypatch.setattr(
+        connector,
+        "_canonical_product_video_workspace",
+        lambda _job: str(tmp_path / "bounded-download-retry"),
+    )
+
+    result = connector._run_per_scene_provider_orchestrator(
+        job,
+        str(tmp_path / "unused"),
+        provider_order=["key4u_video"],
+        provider_events=[],
+        debug_results=[],
+    )
+
+    assert result["continue_polling"] is True
+    assert result["artifact_download_retryable"] is True
+    assert result["artifact_download_error"] == "provider_download_failed"
+    assert result["artifact_download_retry_count"] == 1
+    assert result["artifact_download_retry_limit"] == 2
+    assert result["artifact_download_retry_scene_index"] == 2
+
+
+def test_render_scene_forwards_persisted_artifact_download_retry_state(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    task_id = "key4u-existing-retry-scene-one-task"
+    job = _taskless_v3_job28_payload()
+    scene_one = next(
+        item
+        for item in job["scene_tasks"]
+        if int(item.get("scene_index") or 0) == 1
+    )
+    scene_one.update(
+        {
+            "provider": "key4u_video",
+            "selected_provider": "key4u_video",
+            "selected_model": "veo_3_1-fast",
+            "provider_task_id": task_id,
+            "active_task_id": task_id,
+            "task_id_present": True,
+            "task_pollable": True,
+            "submit_accepted": True,
+            "status": "provider_running",
+        }
+    )
+    job["provider_scene_tasks"] = copy.deepcopy(job["scene_tasks"])
+    job.update(
+        {
+            "product_type": "video_trend",
+            "scene_count": 2,
+            "scene_duration_seconds": 8,
+            "expected_duration_seconds": 16,
+            "provider_order": ["key4u_video"],
+            "artifact_download_retry_count": 1,
+            "artifact_download_retry_limit": 2,
+            "artifact_download_retry_scene_index": 1,
+        }
+    )
+    captured: dict = {}
+
+    def fake_provider_generation(request, **_kwargs):
+        captured.update(request.metadata)
+        return {
+            "ok": False,
+            "continue_polling": True,
+            "terminal_state": "final_rendering",
+            "provider_error": "provider_in_progress",
+            "blocker": "provider_in_progress",
+            "provider_submit_called": False,
+            "provider_task_id_saved": True,
+            "provider_task_ids": [task_id],
+            "task_id_present": True,
+            "no_charge": True,
+        }
+
+    monkeypatch.setattr(connector, "run_provider_generation", fake_provider_generation)
+    scene = SimpleNamespace(
+        scene_id=1,
+        video_prompt="poll existing artifact",
+        visual_prompt="poll existing artifact",
+        aspect_ratio="9:16",
+        target_duration_sec=8,
+        _toan_aas_job=job,
+    )
+
+    with pytest.raises(connector.RealVideoRenderError):
+        asyncio.run(
+            connector._render_scene_async(
+                scene,
+                str(tmp_path / "retry-scene-one.mp4"),
+                ["key4u_video"],
+            )
+        )
+
+    assert captured["artifact_download_retry_count"] == 1
+    assert captured["artifact_download_retry_limit"] == 2
+    assert captured["artifact_download_retry_scene_index"] == 1
 
 
 def test_v3_taskless_watchdog_hands_fresh_worker_read_only_state_to_claim(

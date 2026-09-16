@@ -6260,6 +6260,67 @@ def _run_provider_generation_impl(
                 blocker=blocker,
                 safe_error=str(artifact.error_message or blocker)[:220],
             )
+            current_retry_scene_index = _int_metadata(
+                metadata.get("scene_index"),
+                0,
+            )
+            prior_retry_scene_index = _int_metadata(
+                metadata.get("artifact_download_retry_scene_index"),
+                0,
+            )
+            prior_download_retries = (
+                _int_metadata(metadata.get("artifact_download_retry_count"), 0)
+                if prior_retry_scene_index in {0, current_retry_scene_index}
+                else 0
+            )
+            artifact_retry_limit = max(
+                1,
+                min(
+                    3,
+                    _env_int(
+                        env,
+                        "PRODUCT_VIDEO_ARTIFACT_DOWNLOAD_RETRY_LIMIT",
+                        2,
+                    ),
+                ),
+            )
+            artifact_retryable = bool(
+                is_product_video
+                and poll_existing_task
+                and current_adapter.provider_name == "key4u_video"
+                and bool(submit.provider_task_id or submit.provider_video_id)
+                and blocker == "provider_download_failed"
+                and prior_download_retries < artifact_retry_limit
+                and normalize_provider_status(
+                    poll_result.status,
+                    has_result_url=True,
+                )
+                in {"succeeded", "completed"}
+            )
+            if artifact_retryable:
+                _record_failure(
+                    blocker,
+                    {
+                        **(getattr(poll_result, "raw", {}) or {}),
+                        "provider_result_blocker": blocker,
+                        "result_url_present": True,
+                        "download_content_type": artifact.content_type,
+                        "downloaded_file_size": artifact.bytes,
+                        "provider_error_message_safe": artifact.error_message or blocker,
+                    },
+                    submit_failure=False,
+                )
+                pending = _provider_pending_payload(
+                    submit,
+                    poll_result,
+                    poll_blocker=blocker,
+                )
+                pending["artifact_download_retryable"] = True
+                pending["artifact_download_error"] = blocker
+                pending["artifact_download_retry_count"] = prior_download_retries + 1
+                pending["artifact_download_retry_limit"] = artifact_retry_limit
+                pending["artifact_download_retry_scene_index"] = current_retry_scene_index
+                return pending
             if attempt_index + 1 < len(candidate_adapters):
                 _record_failure(
                     blocker,
