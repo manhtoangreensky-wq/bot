@@ -236148,15 +236148,14 @@ def _subdub_auto_v2_restore_prepared_selection(
     prepared: dict,
     state: dict,
 ) -> dict:
-    """Restore a lost translated segment list from its prepared SRT authority."""
+    """Canonicalize a stale translated segment list from its prepared SRT authority."""
 
     current = dict(prepared or {})
     if str((state or {}).get("subdub_engine_selected") or "") != "auto_multi_speaker_v2":
         return current
     source_segments = list(current.get("source_segments") or [])
-    output_segments = list(current.get("output_segments") or [])
     output_subtitle = str(current.get("output_subtitle") or "").strip()
-    if output_segments or not source_segments or not output_subtitle:
+    if not source_segments or not output_subtitle:
         return current
     parsed_output = video_dubbing_segments_from_subtitle(output_subtitle)
     if len(parsed_output) != len(source_segments):
@@ -248817,7 +248816,16 @@ async def _subdub_auto_post_prepare_gate(prepared: dict, state: dict) -> dict:
     if not subdub_auto_speaker_route_enabled(state):
         return {"ok": False, "status": "AUTO_CAST_MANUAL_REQUIRED"}
     prepared = prepared if isinstance(prepared, dict) else dict(prepared or {})
-    prepared_state = dict(prepared.get("state") or state or {})
+    prepared_state = {
+        **dict(state or {}),
+        **dict(prepared.get("state") or {}),
+    }
+    prepared_state["subdub_engine_selected"] = str(
+        (state or {}).get("subdub_engine_selected")
+        or prepared_state.get("subdub_engine_selected")
+        or ""
+    )
+    prepared["state"] = prepared_state
     normalized_prepared = _subdub_auto_v2_restore_prepared_selection(
         prepared,
         prepared_state,
