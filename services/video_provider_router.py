@@ -38,8 +38,10 @@ from services.video_trace_state import (
     STAGE_OAT_CONSUMED_FAILED,
     STAGE_OAT_CONSUMED_SUCCESS,
     claim_owner_acceptance_token,
+    compute_owner_acceptance_attempt_fingerprint,
     compute_owner_acceptance_token_fingerprint,
     finalize_owner_acceptance_token,
+    is_owner_acceptance_attempt_claimed_or_consumed,
     is_owner_acceptance_token_claimed_or_consumed,
 )
 
@@ -3179,12 +3181,15 @@ def validate_owner_acceptance_authorization(
         except Exception:
             return False, "owner_acceptance_expiry_invalid", {}
 
-    # Durable persistent claim check (SPEC-02C: ONE_TIME_USE_DURABLE=YES)
+    # Durable persistent claim check (SPEC-02C & SPEC-02D: ONE_TIME_USE_DURABLE=YES, SINGLE_JOB_ATTEMPT=YES)
     fingerprint = compute_owner_acceptance_token_fingerprint(auth)
+    attempt_fingerprint = compute_owner_acceptance_attempt_fingerprint(auth)
     env = dict(environ or os.environ)
     effective_db_path = db_path or env.get("DB_PATH") or env.get("SQLITE_DB_PATH")
     if is_owner_acceptance_token_claimed_or_consumed(fingerprint, db_path=effective_db_path):
-        return False, "owner_acceptance_already_consumed", {}
+        return False, "owner_acceptance_already_consumed", {"token_fingerprint": fingerprint}
+    if is_owner_acceptance_attempt_claimed_or_consumed(attempt_fingerprint, db_path=effective_db_path):
+        return False, "owner_acceptance_already_consumed", {"attempt_fingerprint": attempt_fingerprint}
 
     ctx = dict(context or {})
 

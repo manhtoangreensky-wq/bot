@@ -1175,6 +1175,66 @@ def is_owner_acceptance_token_claimed_or_consumed(
         return False
 
 
+def compute_owner_acceptance_attempt_fingerprint(auth: dict[str, Any] | None) -> str:
+    """Compute deterministic SHA-256 fingerprint for the owner acceptance job attempt.
+
+    Excludes random/ephemeral fields (nonce, token_id, created_at, max_provider_spend)
+    so that one acceptance job cannot execute more than one durable attempt by changing nonces.
+    """
+    if not isinstance(auth, dict) or not auth:
+        return ""
+    user_id = str(auth.get("user_id") if auth.get("user_id") is not None else "").strip()
+    project_id = str(auth.get("project_id") if auth.get("project_id") is not None else "").strip()
+    job_id = str(auth.get("job_id") if auth.get("job_id") is not None else "").strip()
+    product_type = str(auth.get("product_type") or "video_ai_prompt").strip()
+    capability = str(auth.get("capability") or auth.get("required_capability") or "").strip()
+    tier = str(auth.get("tier") or auth.get("selected_model") or auth.get("model") or "").strip()
+    provider = str(auth.get("provider") or "shopaikey_video").strip()
+    runtime_sha = str(auth.get("runtime_sha") or auth.get("authorized_runtime_sha") or "").strip()
+
+    canonical_tuples = [
+        ("capability", capability),
+        ("job_id", job_id),
+        ("product_type", product_type),
+        ("project_id", project_id),
+        ("provider", provider),
+        ("runtime_sha", runtime_sha),
+        ("tier", tier),
+        ("user_id", user_id),
+    ]
+    canonical_repr = json.dumps(canonical_tuples, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(canonical_repr.encode("utf-8")).hexdigest()
+
+
+def is_owner_acceptance_attempt_claimed_or_consumed(
+    attempt_fingerprint: str,
+    conn: sqlite3.Connection | None = None,
+    *,
+    db_path: str | None = None,
+) -> bool:
+    """Check whether an owner acceptance job attempt has already been claimed or consumed in persistent storage."""
+    clean_fp = str(attempt_fingerprint or "").strip()
+    if not clean_fp:
+        return False
+    confirm_attempt_key = f"OAA-{clean_fp}"
+    try:
+        ensure_video_trace_schema(conn, db_path=db_path)
+        c, should_close = get_db_connection(conn, db_path=db_path)
+        try:
+            cursor = c.execute(
+                "SELECT current_stage FROM video_request_traces WHERE confirm_attempt_key = ? LIMIT 1",
+                (confirm_attempt_key,),
+            )
+            row = cursor.fetchone()
+            return row is not None
+        finally:
+            if should_close:
+                c.close()
+    except Exception as exc:
+        logger.warning("Failed to check owner acceptance attempt persistence: %s", exc)
+        return False
+
+
 def claim_owner_acceptance_token(
     auth: dict[str, Any],
     conn: sqlite3.Connection | None = None,
@@ -1183,7 +1243,8 @@ def claim_owner_acceptance_token(
 ) -> tuple[bool, str, dict[str, Any]]:
     """Atomically claim an Owner acceptance authorization token in durable SQLite storage.
 
-    Uses SQLite PRIMARY KEY constraint on request_id for hardware-level atomic CAS.
+    Uses SQLite PRIMARY KEY on request_id (token uniqueness) and UNIQUE INDEX on
+    confirm_attempt_key (job acceptance attempt uniqueness) for hardware-level atomic CAS.
     Returns (success, blocker_code, details).
     """
     if not isinstance(auth, dict) or not auth:
@@ -1191,8 +1252,12 @@ def claim_owner_acceptance_token(
     fingerprint = compute_owner_acceptance_token_fingerprint(auth)
     if not fingerprint:
         return False, "owner_acceptance_fingerprint_uncomputable", {}
+    attempt_fingerprint = compute_owner_acceptance_attempt_fingerprint(auth)
+    if not attempt_fingerprint:
+        return False, "owner_acceptance_attempt_fingerprint_uncomputable", {}
 
     token_request_id = f"OAT-{fingerprint}"
+    confirm_attempt_key = f"OAA-{attempt_fingerprint}"
     ensure_video_trace_schema(conn, db_path=db_path)
     c, should_close = get_db_connection(conn, db_path=db_path)
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -1216,6 +1281,8 @@ def claim_owner_acceptance_token(
 
     payload = {
         "token_fingerprint": fingerprint,
+        "attempt_fingerprint": attempt_fingerprint,
+        "confirm_attempt_key": confirm_attempt_key,
         "claimed_at": now_iso,
         "auth": {k: v for k, v in auth.items() if k not in ("token", "api_key", "secret")},
         "stage": STAGE_OAT_CLAIMED,
@@ -1241,7 +1308,7 @@ def claim_owner_acceptance_token(
                 token_request_id,
                 clean_job_id,
                 clean_proj_id,
-                token_request_id,
+                confirm_attempt_key,
                 clean_user_id,
                 str(auth.get("product_type") or "video_ai_prompt"),
                 STAGE_OAT_CLAIMED,
@@ -1251,9 +1318,18 @@ def claim_owner_acceptance_token(
             ),
         )
         c.commit()
-        return True, "", {"token_fingerprint": fingerprint, "stage": STAGE_OAT_CLAIMED}
+        return True, "", {
+            "token_fingerprint": fingerprint,
+            "attempt_fingerprint": attempt_fingerprint,
+            "confirm_attempt_key": confirm_attempt_key,
+            "stage": STAGE_OAT_CLAIMED,
+        }
     except sqlite3.IntegrityError:
-        return False, "owner_acceptance_already_consumed", {"token_fingerprint": fingerprint}
+        return False, "owner_acceptance_already_consumed", {
+            "token_fingerprint": fingerprint,
+            "attempt_fingerprint": attempt_fingerprint,
+            "confirm_attempt_key": confirm_attempt_key,
+        }
     except Exception as exc:
         logger.error("Durable owner acceptance claim error: %s", exc)
         return False, "owner_acceptance_claim_failed", {"error": str(exc)}
