@@ -327,7 +327,7 @@ def test_09_router_validation_rejects_second_nonce_on_claimed_attempt(isolate_te
 # 8. DURABLE CLAIM BEFORE PROVIDER SUBMIT GATE
 # ==============================================================================
 
-def test_10_attempt_collision_aborts_before_provider_submit(monkeypatch, isolate_test_db):
+def test_10_attempt_collision_aborts_before_provider_submit(monkeypatch, tmp_path, isolate_test_db):
     """Verify DURABLE_CLAIM_BEFORE_PROVIDER_SUBMIT=YES: second nonce attempt results in PROVIDER_SUBMIT=0."""
     # First token claims job attempt 1001
     auth_first = _make_auth(job_id=1001, nonce="nonce-first-1001")
@@ -338,42 +338,47 @@ def test_10_attempt_collision_aborts_before_provider_submit(monkeypatch, isolate
     mock_adapter = MockVideoProvider("shopaikey_video")
     monkeypatch.setattr(
         video_provider_router,
-        "get_video_provider_adapter",
-        lambda name, **kwargs: mock_adapter if name == "shopaikey_video" else None,
+        "load_video_provider_adapters",
+        lambda env=None: [mock_adapter],
+    )
+    monkeypatch.setattr(
+        video_provider_router,
+        "provider_status_payload",
+        lambda env=None: {
+            "configured": True,
+            "credit_ok": True,
+            "provider_chain": ["shopaikey_video"],
+            "effective_provider_chain": ["shopaikey_video"],
+            "providers": [{"provider": "shopaikey_video", "configured": True, "credit_ok": True, "capabilities": ["text_to_video"]}],
+        },
     )
 
     # Now attempt execution with auth_second (same job, different nonce)
     auth_second = _make_auth(job_id=1001, nonce="nonce-second-1001")
     req = VideoGenerationRequest(
+        job_id="1001",
         product_type="video_ai_prompt",
         prompt="A single job attempt test prompt",
-        user_id=12345,
-        project_id="501",
+        required_capability="text_to_video",
         metadata={
-            "job_id": "1001",
+            "product_video": True,
+            "job_id": 1001,
+            "user_id": 12345,
             "owner_acceptance_auth": auth_second,
             "selected_model": "veo31_fast_8",
+            "tier": "veo31_fast_8",
+            "provider": "shopaikey_video",
+            "runtime_sha": _current_runtime(),
+            "estimated_provider_cost": 0.70,
+            "estimated_provider_cost_unit": "USD",
         },
     )
 
-    res = video_provider_router.run_provider_generation(
-        req,
-        provider_name="shopaikey_video",
-        session={
-            "draft": {
-                "b14_queue_job": {
-                    "id": 1001,
-                    "user_id": 12345,
-                    "project_id": 501,
-                    "product_type": "video_ai_prompt",
-                    "render_spec": {"model": "veo31_fast_8"},
-                }
-            }
-        },
-    )
+    res = video_provider_router.run_provider_generation(req, output_dir=str(tmp_path))
 
-    assert res["status"] == "blocked"
+    assert res["ok"] is False
     assert res["blocker"] == "owner_acceptance_already_consumed"
+    assert res["provider_submit_called"] is False
     assert mock_adapter.submit_calls == 0  # PROVIDER_SUBMIT=0
 
 
@@ -381,19 +386,18 @@ def test_10_attempt_collision_aborts_before_provider_submit(monkeypatch, isolate
 # 9. SAFETY SWITCH PRECEDENCE & CLIENT UNFORGEABILITY
 # ==============================================================================
 
-def test_11_global_freeze_still_blocks_even_with_valid_attempt_key(monkeypatch):
+def test_11_global_freeze_still_blocks_even_with_valid_attempt_key(monkeypatch, tmp_path):
     """Verify global freeze blocks before attempt claim."""
     monkeypatch.setenv("VIDEO_AI_PROVIDER_FREEZE", "1")
     auth = _make_auth(job_id=1101, nonce="nonce-freeze")
     req = VideoGenerationRequest(
+        job_id="1101",
         product_type="video_ai_prompt",
         prompt="Freeze test",
-        user_id=12345,
-        project_id="501",
-        metadata={"job_id": "1101", "owner_acceptance_auth": auth, "selected_model": "veo31_fast_8"},
+        metadata={"job_id": 1101, "owner_acceptance_auth": auth, "selected_model": "veo31_fast_8"},
     )
-    res = video_provider_router.run_provider_generation(req, provider_name="shopaikey_video")
-    assert res["status"] == "blocked"
+    res = video_provider_router.run_provider_generation(req, provider_name="shopaikey_video", output_dir=str(tmp_path))
+    assert res["ok"] is False
     assert res["blocker"] == "provider_freeze"
 
 
