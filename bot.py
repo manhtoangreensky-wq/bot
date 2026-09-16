@@ -277251,6 +277251,65 @@ async def api_internal_admin_wallet_credit(request: Request):
     return JSONResponse(status_code=status_code, content=result)
 
 
+@fastapi_app.post("/internal/v1/admin/wallet/compensate")
+async def api_internal_admin_wallet_compensate(request: Request):
+    """Canonical Bot Core admin wallet compensation endpoint.
+
+    Provides append-only, idempotent, and atomic Xu compensation semantics.
+    """
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+        if not isinstance(payload, dict):
+            raise ValueError("Payload must be an object")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    from services.admin_wallet_service import (
+        verify_internal_admin_wallet_auth,
+        execute_admin_wallet_compensation,
+    )
+
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path="/internal/v1/admin/wallet/compensate",
+        body_bytes=raw_body,
+    )
+    if not auth_ok:
+        raise HTTPException(
+            status_code=auth_status,
+            detail={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    if "amount" in payload or "amount_xu" in payload or "delta_xu" in payload:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "ok": False,
+                "error_code": "ARBITRARY_AMOUNT_NOT_PERMITTED",
+                "message": "Arbitrary amount input is not permitted; compensation delta is strictly derived from source event",
+            },
+        )
+
+    source_ledger_event_id = payload.get("source_ledger_event_id")
+    idempotency_key = str(payload.get("idempotency_key") or "").strip()
+    reason = str(payload.get("reason") or payload.get("reference") or "").strip()
+    actor_id = str(request.headers.get("x-toan-aas-actor-id") or payload.get("actor_id") or "").strip()
+
+    ok, result, status_code = execute_admin_wallet_compensation(
+        source_ledger_event_id=source_ledger_event_id,
+        idempotency_key=idempotency_key,
+        reason=reason,
+        actor_id=actor_id,
+        db_path=DB_FILE,
+    )
+    return JSONResponse(status_code=status_code, content=result)
+
+
 # ─── ENTRY POINT ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     uvicorn.run(

@@ -56,6 +56,59 @@ def ensure_admin_wallet_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_admin_wallet_idem_key ON admin_wallet_idempotency(idempotency_key)"
     )
+    ensure_admin_wallet_compensation_schema(conn)
+
+
+def ensure_admin_wallet_compensation_schema(conn: sqlite3.Connection) -> None:
+    """Ensure the durable admin wallet compensation schema exists.
+
+    Additive-only migration: does not alter existing tables.
+    Safe to invoke repeatedly across process startups and test setups.
+    """
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS admin_wallet_compensations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            source_ledger_event_id INTEGER NOT NULL UNIQUE,
+            request_fingerprint TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            delta_xu INTEGER NOT NULL,
+            reason TEXT DEFAULT '',
+            actor_id TEXT DEFAULT '',
+            compensation_ledger_event_id INTEGER,
+            balance_after INTEGER,
+            status TEXT NOT NULL DEFAULT 'completed',
+            created_at DATETIME NOT NULL
+        )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_admin_wallet_comp_idem_key ON admin_wallet_compensations(idempotency_key)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_admin_wallet_comp_source_id ON admin_wallet_compensations(source_ledger_event_id)"
+    )
+
+
+ALLOWED_COMPENSABLE_EVENT_TYPES: set[str] = {
+    "admin_web_manual_topup",
+    "admin_wallet_credit",
+    "manual_deposit",
+    "admin_add",
+}
+
+
+def compute_compensation_request_fingerprint(
+    source_ledger_event_id: int,
+    reason: str = "",
+    actor_id: str = "",
+) -> str:
+    """Derive deterministic SHA256 request fingerprint for admin wallet compensation."""
+    normalized = (
+        f"{int(source_ledger_event_id)}|"
+        f"{str(reason or '').strip()}|"
+        f"{str(actor_id or '').strip()}"
+    )
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def compute_credit_request_fingerprint(
@@ -490,6 +543,367 @@ def execute_admin_wallet_credit(
     except Exception as exc:
         conn.rollback()
         logger.error(f"Transaction failed during admin wallet credit: {exc}", exc_info=True)
+        return False, {
+            "ok": False,
+            "error_code": "TRANSACTION_FAILED",
+            "message": f"Database transaction error: {str(exc)}",
+        }, 500
+    finally:
+        conn.close()
+
+
+def process_internal_wallet_compensation_in_tx(
+    conn: sqlite3.Connection,
+    source_ledger_event_id: Any,
+    idempotency_key: str,
+    reason: str = "",
+    actor_id: str = "",
+    now_str: str | None = None,
+) -> tuple[bool, dict[str, Any], int]:
+    """Process an admin wallet compensation inside an existing active SQLite transaction.
+
+    Validates:
+    - idempotency_key is present and unique
+    - source_ledger_event_id exists, has positive delta, belongs to existing user
+    - source_ledger_event_id is of an allowed compensable admin event type
+    - source_ledger_event_id has not already been compensated
+    - target user balance is sufficient (no resulting negative balance)
+
+    Appends:
+    - users.credits (-source_event.delta)
+    - credit_events (event_type='admin_wallet_compensation', delta=-source_event.delta)
+    - admin_wallet_compensations (durable idempotency record)
+    - usage_events (best-effort)
+    - audit_logs (best-effort)
+
+    Returns:
+        (ok, result_dict, http_status_code)
+    """
+    clean_key = str(idempotency_key or "").strip()
+    if not clean_key:
+        return False, {
+            "ok": False,
+            "error_code": "MISSING_IDEMPOTENCY_KEY",
+            "message": "idempotency_key is required",
+        }, 400
+
+    try:
+        source_id = int(source_ledger_event_id)
+        if source_id <= 0:
+            raise ValueError()
+    except (TypeError, ValueError):
+        return False, {
+            "ok": False,
+            "error_code": "INVALID_SOURCE_EVENT_ID",
+            "message": "source_ledger_event_id must be a positive integer",
+        }, 400
+
+    ensure_admin_wallet_compensation_schema(conn)
+    c = conn.cursor()
+
+    clean_actor = str(actor_id or "").strip()
+    clean_reason = str(reason or "").strip()
+    fp = compute_compensation_request_fingerprint(source_id, clean_reason, clean_actor)
+    ts = str(now_str or utc_now_text())
+
+    # 1. Check Idempotency by key
+    c.execute(
+        """SELECT request_fingerprint, source_ledger_event_id, user_id, delta_xu,
+                  compensation_ledger_event_id, balance_after, status
+        FROM admin_wallet_compensations WHERE idempotency_key = ?""",
+        (clean_key,),
+    )
+    existing_key = c.fetchone()
+    if existing_key:
+        ex_fp, ex_source_id, ex_uid, ex_delta, ex_comp_id, ex_bal, ex_status = existing_key
+        if ex_fp == fp:
+            receipt_str = str(ex_comp_id or "")
+            return True, {
+                "ok": True,
+                "data": {
+                    "source_ledger_event_id": int(ex_source_id),
+                    "compensation_ledger_event_id": int(ex_comp_id or 0),
+                    "tx_id": receipt_str,
+                    "user_id": str(ex_uid),
+                    "delta_xu": int(ex_delta),
+                    "balance_after": int(ex_bal or 0),
+                    "replayed": True,
+                },
+                "source_ledger_event_id": int(ex_source_id),
+                "compensation_ledger_event_id": int(ex_comp_id or 0),
+                "tx_id": receipt_str,
+                "user_id": str(ex_uid),
+                "delta_xu": int(ex_delta),
+                "balance_after": int(ex_bal or 0),
+                "replayed": True,
+            }, 200
+        else:
+            return False, {
+                "ok": False,
+                "error_code": "IDEMPOTENCY_KEY_CONFLICT",
+                "message": "Idempotency key has already been used with different request parameters",
+            }, 409
+
+    # 2. Check if source_ledger_event_id already compensated under another key
+    c.execute(
+        """SELECT idempotency_key, compensation_ledger_event_id
+        FROM admin_wallet_compensations WHERE source_ledger_event_id = ?""",
+        (source_id,),
+    )
+    existing_source = c.fetchone()
+    if existing_source:
+        return False, {
+            "ok": False,
+            "error_code": "SOURCE_EVENT_ALREADY_COMPENSATED",
+            "message": f"Source ledger event {source_id} has already been compensated by key '{existing_source[0]}'",
+        }, 409
+
+    # 3. Read & Validate Source Event from credit_events
+    c.execute(
+        "SELECT id, user_id, delta, balance_after, event_type FROM credit_events WHERE id = ?",
+        (source_id,),
+    )
+    source_row = c.fetchone()
+    if not source_row:
+        return False, {
+            "ok": False,
+            "error_code": "SOURCE_EVENT_NOT_FOUND",
+            "message": f"Source ledger event {source_id} does not exist in Bot Core",
+        }, 404
+
+    _, source_uid_raw, source_delta_raw, _, source_type_raw = source_row
+    source_uid = str(source_uid_raw or "").strip()
+    source_delta = int(source_delta_raw or 0)
+    source_type = str(source_type_raw or "").strip()
+
+    if source_delta <= 0:
+        return False, {
+            "ok": False,
+            "error_code": "INVALID_SOURCE_EVENT_DELTA",
+            "message": f"Source ledger event {source_id} delta ({source_delta}) is not positive",
+        }, 400
+
+    if source_type not in ALLOWED_COMPENSABLE_EVENT_TYPES:
+        return False, {
+            "ok": False,
+            "error_code": "NON_COMPENSABLE_EVENT_TYPE",
+            "message": f"Source event type '{source_type}' is not an allowed compensable administrative credit event type",
+        }, 400
+
+    # 4. Validate Target User & Balance Safety
+    c.execute("SELECT credits FROM users WHERE user_id = ?", (source_uid,))
+    user_row = c.fetchone()
+    if not user_row:
+        return False, {
+            "ok": False,
+            "error_code": "ACCOUNT_NOT_FOUND",
+            "message": f"User {source_uid} does not exist in Bot Core",
+        }, 404
+
+    current_credits = int(user_row[0] or 0)
+    compensation_delta = -source_delta
+    if current_credits < source_delta:
+        return False, {
+            "ok": False,
+            "error_code": "INSUFFICIENT_BALANCE",
+            "message": f"User {source_uid} current balance ({current_credits} Xu) is insufficient to compensate {source_delta} Xu",
+        }, 400
+
+    new_balance = current_credits + compensation_delta
+    admin_actor = clean_actor or os.environ.get("ADMIN_ID") or DEFAULT_ADMIN_ID
+    ref_id = f"compensation:event:{source_id}"
+    comp_note = clean_reason or f"Administrative compensation for event {source_id}"
+
+    # 5. Apply Decrement to users.credits
+    c.execute(
+        "UPDATE users SET credits = credits + ? WHERE user_id = ?",
+        (compensation_delta, source_uid),
+    )
+
+    # 6. Append New Event to credit_events (Source remains completely immutable)
+    c.execute(
+        """INSERT INTO credit_events
+        (user_id, delta, balance_after, event_type, ref_id, note, created_at)
+        VALUES (?, ?, ?, 'admin_wallet_compensation', ?, ?, ?)""",
+        (source_uid, compensation_delta, new_balance, ref_id, comp_note, ts),
+    )
+    comp_ledger_id = int(c.lastrowid)
+
+    # 7. Record Best-Effort usage_events & audit_logs
+    try:
+        c.execute(
+            """INSERT INTO usage_events
+            (user_id, event_type, tool_name, status, xu_delta, detail, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                source_uid,
+                "xu_debit",
+                "credits",
+                "admin_wallet_compensation",
+                compensation_delta,
+                f"admin_wallet_compensation; ref={ref_id}; {comp_note}",
+                ts,
+            ),
+        )
+    except Exception:
+        pass
+
+    try:
+        c.execute(
+            """INSERT INTO audit_logs
+            (actor_id, actor_type, action, object_type, object_id, before_json, after_json, note, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                admin_actor,
+                "admin",
+                "credit.compensated",
+                "user",
+                source_uid,
+                json.dumps({"credits": current_credits}),
+                json.dumps({
+                    "delta": compensation_delta,
+                    "credits": new_balance,
+                    "source_ledger_event_id": source_id,
+                    "compensation_ledger_event_id": comp_ledger_id,
+                }),
+                str(comp_note)[:1200],
+                ts,
+            ),
+        )
+    except Exception:
+        pass
+
+    # 8. Record Durable Compensation Idempotency Row
+    c.execute(
+        """INSERT INTO admin_wallet_compensations
+        (idempotency_key, source_ledger_event_id, request_fingerprint, user_id,
+         delta_xu, reason, actor_id, compensation_ledger_event_id, balance_after,
+         status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?)""",
+        (
+            clean_key,
+            source_id,
+            fp,
+            source_uid,
+            compensation_delta,
+            clean_reason,
+            clean_actor,
+            comp_ledger_id,
+            new_balance,
+            ts,
+        ),
+    )
+
+    receipt_str = str(comp_ledger_id)
+    return True, {
+        "ok": True,
+        "data": {
+            "source_ledger_event_id": source_id,
+            "compensation_ledger_event_id": comp_ledger_id,
+            "tx_id": receipt_str,
+            "user_id": source_uid,
+            "delta_xu": compensation_delta,
+            "balance_after": new_balance,
+            "replayed": False,
+        },
+        "source_ledger_event_id": source_id,
+        "compensation_ledger_event_id": comp_ledger_id,
+        "tx_id": receipt_str,
+        "user_id": source_uid,
+        "delta_xu": compensation_delta,
+        "balance_after": new_balance,
+        "replayed": False,
+    }, 200
+
+
+def execute_admin_wallet_compensation(
+    source_ledger_event_id: Any,
+    idempotency_key: str,
+    reason: str = "",
+    actor_id: str = "",
+    db_path: str = "",
+) -> tuple[bool, dict[str, Any], int]:
+    """Execute admin wallet compensation with immediate transaction management."""
+    target_db = db_path or os.environ.get("DB_FILE") or "toandaas_system.db"
+    conn = sqlite3.connect(target_db, timeout=30.0)
+    conn.isolation_level = None
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        ok, result, status_code = process_internal_wallet_compensation_in_tx(
+            conn=conn,
+            source_ledger_event_id=source_ledger_event_id,
+            idempotency_key=idempotency_key,
+            reason=reason,
+            actor_id=actor_id,
+        )
+        if ok:
+            conn.execute("COMMIT")
+        else:
+            conn.execute("ROLLBACK")
+        return ok, result, status_code
+    except sqlite3.IntegrityError as exc:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        if "UNIQUE constraint failed" in str(exc):
+            try:
+                c = conn.cursor()
+                c.execute(
+                    """SELECT request_fingerprint, source_ledger_event_id, user_id, delta_xu,
+                              compensation_ledger_event_id, balance_after, status
+                    FROM admin_wallet_compensations WHERE idempotency_key = ?""",
+                    (str(idempotency_key or "").strip(),),
+                )
+                existing = c.fetchone()
+                if existing and existing[6] == "completed":
+                    fp = compute_compensation_request_fingerprint(int(source_ledger_event_id), reason, actor_id)
+                    if existing[0] == fp:
+                        receipt_str = str(existing[4] or "")
+                        return True, {
+                            "ok": True,
+                            "data": {
+                                "source_ledger_event_id": int(existing[1]),
+                                "compensation_ledger_event_id": int(existing[4] or 0),
+                                "tx_id": receipt_str,
+                                "user_id": str(existing[2]),
+                                "delta_xu": int(existing[3]),
+                                "balance_after": int(existing[5] or 0),
+                                "replayed": True,
+                            },
+                            "source_ledger_event_id": int(existing[1]),
+                            "compensation_ledger_event_id": int(existing[4] or 0),
+                            "tx_id": receipt_str,
+                            "user_id": str(existing[2]),
+                            "delta_xu": int(existing[3]),
+                            "balance_after": int(existing[5] or 0),
+                            "replayed": True,
+                        }, 200
+                    else:
+                        return False, {
+                            "ok": False,
+                            "error_code": "IDEMPOTENCY_KEY_CONFLICT",
+                            "message": "Idempotency key has already been used with different request parameters",
+                        }, 409
+            except Exception:
+                pass
+            return False, {
+                "ok": False,
+                "error_code": "CONCURRENT_REQUEST_CONFLICT",
+                "message": "Concurrent request conflict on idempotency key or source event",
+            }, 409
+        logger.error(f"IntegrityError during admin wallet compensation: {exc}", exc_info=True)
+        return False, {
+            "ok": False,
+            "error_code": "TRANSACTION_FAILED",
+            "message": f"Database transaction error: {str(exc)}",
+        }, 500
+    except Exception as exc:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        logger.error(f"Transaction failed during admin wallet compensation: {exc}", exc_info=True)
         return False, {
             "ok": False,
             "error_code": "TRANSACTION_FAILED",
