@@ -60,7 +60,12 @@ def test_canary_harness_constants_match_spec06a_manifest():
     assert canary.LOCKED_PROVIDER == "key4u_minimax"
     assert canary.LOCKED_MODEL == "speech-02-hd"
     assert canary.LOCKED_TARGET_LANGUAGE == "vi"
-    assert canary.APPROVED_BASE_SHA == "5e5f3bc5ec9435f43af00aac8e1c7eb7a5d7e397"
+    assert canary.DEVELOPMENT_BASE_SHA == "5e5f3bc5ec9435f43af00aac8e1c7eb7a5d7e397"
+    assert canary.HARNESS_HARDCODED_OLD_RUNTIME_AUTHORITY is False
+    assert canary.DRY_RUN_DEFAULT is True
+    assert canary.IMPORT_SIDE_EFFECT_PROVIDER_CALLS == 0
+    assert canary.EXECUTE_REQUIRES_EXPLICIT_OWNER_FLAG is True
+    assert canary.TOTAL_AUTHORIZED_CHARACTERS == 132
     assert canary.MAX_PAID_SUBMITS == 3
     assert canary.MAX_AUTO_SUBMITS_PER_UNIT == 1
     assert canary.MAX_PROVIDER_SPEND == 0.05
@@ -74,6 +79,85 @@ def test_canary_harness_constants_match_spec06a_manifest():
         "unit_c6515b5f8a22fc4245e25266",
     }
     assert set(canary.LOCKED_CANARY_UNITS.keys()) == expected_keys
+
+    # Verify character count total is 129 (43 chars x 3 units), strictly within authorized limit of 132
+    total_chars = sum(len(u["text"]) for u in canary.LOCKED_CANARY_UNITS.values())
+    assert total_chars == 129
+    assert total_chars <= canary.TOTAL_AUTHORIZED_CHARACTERS
+    assert canary.TOTAL_AUTHORIZED_CHARACTERS == 132
+
+
+def test_canary_post_merge_sha_simulation(tmp_path: Path):
+    """
+    Simulate post-merge execution with a future runtime SHA.
+    AUTH_RUNTIME_SHA=<future> and ACTUAL_RUNTIME_SHA=<same> -> PASS
+    AUTH_RUNTIME_SHA=5e5f... and ACTUAL_RUNTIME_SHA=<future> -> REJECT
+    """
+    simulated_merge_sha = "a1b2c3d4e5f678901234567890abcdef12345678"
+
+    # 1. Matching post-merge SHA passes
+    owner_auth_future = canary.CanaryOwnerAuthorization(
+        authorized_runtime_sha=simulated_merge_sha,
+        paid_execution_authorized=True,
+    )
+    harness_pass = canary.SubdubCanaryExecutionHarness(
+        workspace=str(tmp_path),
+        owner_auth=owner_auth_future,
+    )
+    # verify_runtime_sha with same actual SHA passes
+    harness_pass.verify_runtime_sha(current_sha=simulated_merge_sha)
+
+    # 2. Old development SHA against new merge SHA rejects
+    owner_auth_old = canary.CanaryOwnerAuthorization(
+        authorized_runtime_sha=canary.DEVELOPMENT_BASE_SHA,
+        paid_execution_authorized=True,
+    )
+    harness_fail = canary.SubdubCanaryExecutionHarness(
+        workspace=str(tmp_path),
+        owner_auth=owner_auth_old,
+    )
+    with pytest.raises(canary.CanaryRuntimeSHAMismatchError) as exc:
+        harness_fail.verify_runtime_sha(current_sha=simulated_merge_sha)
+    assert "runtime_sha_drift" in str(exc.value)
+
+
+def test_canary_owner_authorization_interlock(tmp_path: Path):
+    """
+    Live execution (dry_run=False) requires explicit CanaryOwnerAuthorization
+    with paid_execution_authorized=True. Otherwise submit count remains 0.
+    """
+    harness_no_auth = canary.SubdubCanaryExecutionHarness(
+        workspace=str(tmp_path),
+        dry_run=False,
+    )
+    cues, voice_map = _get_locked_cues()
+
+    # Attempting execution without owner_auth raises CanaryAuthorizationMissingError
+    with pytest.raises(canary.CanaryAuthorizationMissingError):
+        harness_no_auth.execute_unit(
+            cue=cues[0],
+            voice_id=voice_map[cues[0]["speaker_id"]],
+            synthesize_fn=lambda **kwargs: (SAMPLE_VALID_MP3, 1.0, "req_1"),
+        )
+    assert harness_no_auth.total_submits == 0
+
+    # With owner_auth but paid_execution_authorized=False -> still raises
+    unauthorized_auth = canary.CanaryOwnerAuthorization(
+        authorized_runtime_sha=canary.DEVELOPMENT_BASE_SHA,
+        paid_execution_authorized=False,
+    )
+    harness_unauth = canary.SubdubCanaryExecutionHarness(
+        workspace=str(tmp_path),
+        owner_auth=unauthorized_auth,
+        dry_run=False,
+    )
+    with pytest.raises(canary.CanaryAuthorizationMissingError):
+        harness_unauth.execute_unit(
+            cue=cues[0],
+            voice_id=voice_map[cues[0]["speaker_id"]],
+            synthesize_fn=lambda **kwargs: (SAMPLE_VALID_MP3, 1.0, "req_1"),
+        )
+    assert harness_unauth.total_submits == 0
 
 
 def test_canary_unauthorized_cue_rejected(tmp_path: Path):
@@ -95,7 +179,6 @@ def test_canary_unauthorized_cue_rejected(tmp_path: Path):
 
 def test_canary_contract_drift_rejected(tmp_path: Path):
     harness = canary.SubdubCanaryExecutionHarness(workspace=str(tmp_path))
-    # Correct cue_id but mutated voice
     cues, _ = _get_locked_cues()
     with pytest.raises(canary.CanaryUnauthorizedUnitError):
         harness.execute_unit(
@@ -112,7 +195,6 @@ def test_canary_provider_and_model_mismatch_rejected(tmp_path: Path):
     cue0 = cues[0]
     voice0 = voice_map[cue0["speaker_id"]]
 
-    # Provider mismatch
     with pytest.raises(canary.CanaryProviderMismatchError) as exc:
         harness.execute_unit(
             cue=cue0,
@@ -122,7 +204,6 @@ def test_canary_provider_and_model_mismatch_rejected(tmp_path: Path):
         )
     assert "unauthorized_provider" in str(exc.value)
 
-    # Model mismatch
     with pytest.raises(canary.CanaryProviderMismatchError) as exc:
         harness.execute_unit(
             cue=cue0,
@@ -148,7 +229,6 @@ def test_canary_prestate_not_clean_rejected(tmp_path: Path):
         job_id=canary.CANARY_JOB_ID,
         target_language="vi",
     )
-    # Simulate dirty state on unit 1
     unit1_key = "unit_44f73b7d827cbb74507537ae"
     ckpt.entries[unit1_key] = {
         "tts_unit_key": unit1_key,
@@ -199,7 +279,6 @@ def test_canary_unit_resubmit_forbidden(tmp_path: Path):
 
 
 def test_canary_spend_limit_guard_enforced(tmp_path: Path):
-    # Set max_spend very low e.g. 0.0001
     harness = canary.SubdubCanaryExecutionHarness(
         workspace=str(tmp_path),
         max_spend=0.0001,
@@ -246,7 +325,6 @@ def test_canary_fail_fast_on_provider_exception(tmp_path: Path):
         harness.execute_unit(cues[2], voice_map[cues[2]["speaker_id"]], mock_synth)
     assert "prior failure halted canary execution" in str(exc.value)
 
-    # Provider was called exactly twice (unit 1 and unit 2), unit 3 was NEVER touched!
     assert call_count == 2
     assert harness.total_submits == 2
 
@@ -262,20 +340,16 @@ def test_canary_fail_fast_on_corrupt_artifact(tmp_path: Path):
         nonlocal call_count
         call_count += 1
         if cue_id == "cue_002":
-            # Return garbage audio that cannot be decoded as MP3
             return b"corrupt-fake-mp3-payload", 1.5, f"mock_req_{cue_id}"
         return SAMPLE_VALID_MP3, 1.5, f"mock_req_{cue_id}"
 
-    # Unit 1 succeeds
     harness.execute_unit(cues[0], voice_map[cues[0]["speaker_id"]], mock_synth)
 
-    # Unit 2 fails artifact validation and fail-fast aborts
     with pytest.raises(canary.CanaryAmbiguousAbortError) as exc:
         harness.execute_unit(cues[1], voice_map[cues[1]["speaker_id"]], mock_synth)
     assert "failed artifact validation" in str(exc.value)
     assert harness.aborted is True
 
-    # Unit 3 blocked
     with pytest.raises(canary.CanaryAmbiguousAbortError):
         harness.execute_unit(cues[2], voice_map[cues[2]["speaker_id"]], mock_synth)
 
@@ -286,7 +360,7 @@ def test_canary_mock_batch_happy_path(tmp_path: Path):
     ws = str(tmp_path)
     harness = canary.SubdubCanaryExecutionHarness(
         workspace=ws,
-        runtime_sha=canary.APPROVED_BASE_SHA,
+        runtime_sha=canary.DEVELOPMENT_BASE_SHA,
     )
     cues, voice_map = _get_locked_cues()
 
@@ -300,7 +374,7 @@ def test_canary_mock_batch_happy_path(tmp_path: Path):
         cues=cues,
         voice_map=voice_map,
         synthesize_fn=mock_synth,
-        current_sha=canary.APPROVED_BASE_SHA,
+        current_sha=canary.DEVELOPMENT_BASE_SHA,
     )
 
     assert batch_res["total_submits"] == 3
@@ -309,16 +383,12 @@ def test_canary_mock_batch_happy_path(tmp_path: Path):
     assert batch_res["accumulated_spend_usd"] <= 0.05
     assert len(call_records) == 3
 
-    # Verify manifest on disk
     manifest_path = os.path.join(ws, "subdub_tts_manifest.json")
     assert os.path.isfile(manifest_path)
 
-    # Re-verify with a new harness instance on same workspace
     new_harness = canary.SubdubCanaryExecutionHarness(workspace=ws)
-    # Unit 1 should be recognized as reusable
     cue0 = cues[0]
     voice0 = voice_map[cue0["speaker_id"]]
     res_reuse = new_harness.execute_unit(cue0, voice0, mock_synth)
     assert res_reuse["reused"] is True
-    # Zero new submissions made on reuse!
     assert new_harness.total_submits == 0

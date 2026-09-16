@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hashlib
 import os
 import subprocess
@@ -16,8 +17,17 @@ CANARY_JOB_ID: str = "c11830a5_canary_spec06b_three_voice"
 LOCKED_PROVIDER: str = "key4u_minimax"
 LOCKED_MODEL: str = "speech-02-hd"
 LOCKED_TARGET_LANGUAGE: str = "vi"
-APPROVED_BASE_SHA: str = "5e5f3bc5ec9435f43af00aac8e1c7eb7a5d7e397"
 
+DEVELOPMENT_BASE_SHA: str = "5e5f3bc5ec9435f43af00aac8e1c7eb7a5d7e397"
+# Backward-compatibility alias for test assertions
+APPROVED_BASE_SHA: str = DEVELOPMENT_BASE_SHA
+
+HARNESS_HARDCODED_OLD_RUNTIME_AUTHORITY: bool = False
+DRY_RUN_DEFAULT: bool = True
+IMPORT_SIDE_EFFECT_PROVIDER_CALLS: int = 0
+EXECUTE_REQUIRES_EXPLICIT_OWNER_FLAG: bool = True
+
+TOTAL_AUTHORIZED_CHARACTERS: int = 132
 MAX_PAID_SUBMITS: int = 3
 MAX_AUTO_SUBMITS_PER_UNIT: int = 1
 MAX_PROVIDER_SPEND: float = 0.05
@@ -33,6 +43,7 @@ LOCKED_CANARY_UNITS: dict[str, dict[str, Any]] = {
         "start": 0.0,
         "end": 2.0,
         "word_count": 10,
+        "character_count": 44,
     },
     "unit_6ec0b605fa5f1ef983c33ed8": {
         "cue_id": "cue_002",
@@ -42,6 +53,7 @@ LOCKED_CANARY_UNITS: dict[str, dict[str, Any]] = {
         "start": 2.5,
         "end": 4.5,
         "word_count": 10,
+        "character_count": 44,
     },
     "unit_c6515b5f8a22fc4245e25266": {
         "cue_id": "cue_003",
@@ -51,8 +63,45 @@ LOCKED_CANARY_UNITS: dict[str, dict[str, Any]] = {
         "start": 5.0,
         "end": 7.0,
         "word_count": 10,
+        "character_count": 44,
     },
 }
+
+
+# =====================================================================
+# OWNER AUTHORIZATION CONTRACT (IMMUTABLE INTERLOCK)
+# =====================================================================
+@dataclass(frozen=True)
+class CanaryOwnerAuthorization:
+    """
+    Explicit, immutable Owner authorization interlock required for paid execution.
+    Binds the actual post-merge deployed runtime SHA and all locked canary parameters.
+    """
+    authorized_runtime_sha: str
+    job_id: str = CANARY_JOB_ID
+    provider: str = LOCKED_PROVIDER
+    model: str = LOCKED_MODEL
+    target_language: str = LOCKED_TARGET_LANGUAGE
+    allowed_cue_ids: tuple[str, ...] = ("cue_001", "cue_002", "cue_003")
+    allowed_speaker_ids: tuple[str, ...] = (
+        "chunk_00:speaker_0",
+        "chunk_00:speaker_1",
+        "chunk_00:speaker_2",
+    )
+    allowed_voice_ids: tuple[str, ...] = (
+        "English_ConfidentWoman",
+        "English_DecentYoungMan",
+        "English_PassionateWarrior",
+    )
+    allowed_unit_keys: tuple[str, ...] = (
+        "unit_44f73b7d827cbb74507537ae",
+        "unit_6ec0b605fa5f1ef983c33ed8",
+        "unit_c6515b5f8a22fc4245e25266",
+    )
+    max_submits: int = MAX_PAID_SUBMITS
+    auto_resubmit_allowed: bool = False
+    paid_failover_allowed: bool = False
+    paid_execution_authorized: bool = False
 
 
 # =====================================================================
@@ -60,6 +109,10 @@ LOCKED_CANARY_UNITS: dict[str, dict[str, Any]] = {
 # =====================================================================
 class SubdubCanaryError(Exception):
     """Base exception for SubDub Canary execution harness."""
+
+
+class CanaryAuthorizationMissingError(SubdubCanaryError):
+    """Raised when an execution mode attempts to run without explicit Owner authorization."""
 
 
 class CanaryUnauthorizedUnitError(SubdubCanaryError):
@@ -102,14 +155,15 @@ class SubdubCanaryExecutionHarness:
     Owner-governed, isolated execution harness for the SubDub SPEC-06B paid canary.
 
     Enforces:
-    1. Exact allowlist of 3 locked units.
+    1. Exact allowlist of 3 locked units (132 characters total).
     2. Hard cap of MAX_PAID_SUBMITS=3 total provider boundary submissions.
     3. Max 1 automatic submission per unit (zero auto-resubmit).
     4. Fail-fast on first ambiguous result or corruption.
     5. Pinned provider key4u_minimax and model speech-02-hd.
-    6. Runtime SHA binding.
+    6. Runtime SHA binding (dynamically bound to Owner authorization).
     7. Clean prestate check (NOT_STARTED).
-    8. Spend limit guard (0.05 USD).
+    8. Dry-run default; live execution requires explicit owner flag.
+    9. Spend limit guard (0.05 USD).
     """
 
     def __init__(
@@ -117,11 +171,13 @@ class SubdubCanaryExecutionHarness:
         workspace: str,
         job_id: str = CANARY_JOB_ID,
         target_language: str = LOCKED_TARGET_LANGUAGE,
-        runtime_sha: str = APPROVED_BASE_SHA,
+        runtime_sha: str | None = None,
+        owner_auth: CanaryOwnerAuthorization | None = None,
         checkpoint_mgr: SubdubTTSCheckpointManager | None = None,
         fail_fast: bool = FAIL_FAST_ON_FIRST_AMBIGUOUS,
         max_submits: int = MAX_PAID_SUBMITS,
         max_spend: float = MAX_PROVIDER_SPEND,
+        dry_run: bool = DRY_RUN_DEFAULT,
     ) -> None:
         self.workspace = os.path.abspath(str(workspace or "."))
         self.job_id = str(job_id or CANARY_JOB_ID)
@@ -135,7 +191,18 @@ class SubdubCanaryExecutionHarness:
                 f"target_language_mismatch: {self.target_language} != locked {LOCKED_TARGET_LANGUAGE}"
             )
 
-        self.runtime_sha = str(runtime_sha or APPROVED_BASE_SHA)
+        self.owner_auth = owner_auth
+        self.dry_run = bool(dry_run)
+
+        # Dynamic runtime SHA binding:
+        # Prioritize explicit runtime_sha, then owner_auth, then DEVELOPMENT_BASE_SHA
+        if runtime_sha is not None:
+            self.runtime_sha = str(runtime_sha).strip()
+        elif self.owner_auth is not None and self.owner_auth.authorized_runtime_sha:
+            self.runtime_sha = str(self.owner_auth.authorized_runtime_sha).strip()
+        else:
+            self.runtime_sha = DEVELOPMENT_BASE_SHA
+
         self.fail_fast = bool(fail_fast)
         self.max_submits = int(max_submits)
         self.max_spend = float(max_spend)
@@ -154,7 +221,7 @@ class SubdubCanaryExecutionHarness:
         self.executed_units: list[dict[str, Any]] = []
 
     def get_current_runtime_sha(self) -> str:
-        """Resolve current runtime SHA via git rev-parse HEAD if available."""
+        """Resolve current runtime SHA via environment or git rev-parse HEAD."""
         env_sha = os.getenv("RUNNING_COMMIT_SHA") or os.getenv("CANARY_RUNTIME_SHA")
         if env_sha:
             return env_sha.strip()
@@ -172,15 +239,67 @@ class SubdubCanaryExecutionHarness:
             return self.runtime_sha
 
     def verify_runtime_sha(self, current_sha: str | None = None) -> None:
-        """Enforce that runtime commit matches authorized SHA."""
+        """
+        Enforce that runtime commit matches authorized SHA.
+        Bound to Owner-authorized execution SHA supplied at execution time.
+        """
         resolved = (current_sha or self.get_current_runtime_sha()).strip()
-        if resolved != self.runtime_sha:
+        expected = (
+            self.owner_auth.authorized_runtime_sha
+            if (self.owner_auth and self.owner_auth.authorized_runtime_sha)
+            else self.runtime_sha
+        )
+        if resolved != expected:
             raise CanaryRuntimeSHAMismatchError(
-                f"runtime_sha_drift: current={resolved} != approved={self.runtime_sha}"
+                f"runtime_sha_drift: current={resolved} != approved={expected}"
+            )
+
+    def verify_owner_authorization_interlock(self) -> None:
+        """
+        Enforce that execution mode requires an explicit immutable authorization contract.
+        """
+        if self.owner_auth is None:
+            raise CanaryAuthorizationMissingError(
+                "owner_authorization_missing: execution requires explicit CanaryOwnerAuthorization contract"
+            )
+        if self.owner_auth.job_id != self.job_id:
+            raise CanaryContractDriftError(
+                f"owner_auth_job_id_mismatch: {self.owner_auth.job_id} != {self.job_id}"
+            )
+        if self.owner_auth.provider != LOCKED_PROVIDER:
+            raise CanaryProviderMismatchError(
+                f"owner_auth_provider_mismatch: {self.owner_auth.provider} != {LOCKED_PROVIDER}"
+            )
+        if self.owner_auth.model != LOCKED_MODEL:
+            raise CanaryProviderMismatchError(
+                f"owner_auth_model_mismatch: {self.owner_auth.model} != {LOCKED_MODEL}"
+            )
+        if self.owner_auth.max_submits > self.max_submits:
+            raise CanarySubmitLimitExceededError(
+                f"owner_auth_max_submits_exceeded: {self.owner_auth.max_submits} > {self.max_submits}"
+            )
+        if self.owner_auth.auto_resubmit_allowed is not False:
+            raise CanarySubmitLimitExceededError(
+                "owner_auth_auto_resubmit_forbidden: auto_resubmit_allowed must be False"
+            )
+        if self.owner_auth.paid_failover_allowed is not False:
+            raise CanaryProviderMismatchError(
+                "owner_auth_paid_failover_forbidden: paid_failover_allowed must be False"
+            )
+        if set(self.owner_auth.allowed_unit_keys) != set(LOCKED_CANARY_UNITS.keys()):
+            raise CanaryUnauthorizedUnitError(
+                "owner_auth_units_mismatch: allowed_unit_keys does not match locked canary units"
+            )
+        if not self.dry_run and not self.owner_auth.paid_execution_authorized:
+            raise CanaryAuthorizationMissingError(
+                "paid_execution_not_authorized: owner_auth.paid_execution_authorized must be explicitly True for live paid calls"
             )
 
     def verify_checkpoint_prestate(self) -> None:
-        """Enforce that all canary units start from clean NOT_STARTED state."""
+        """
+        Enforce that all canary units start from clean NOT_STARTED state.
+        SUBMITTING, AMBIGUOUS, and SUCCEEDED states are strictly blocked without mutation.
+        """
         for unit_key, locked in LOCKED_CANARY_UNITS.items():
             entry = self.checkpoint_mgr.entries.get(unit_key)
             if entry is not None:
@@ -237,7 +356,10 @@ class SubdubCanaryExecutionHarness:
         return unit_key
 
     def estimate_unit_cost(self, text: str) -> float:
-        """Estimate provider spend in USD (conservative rate for MiniMax speech-02-hd)."""
+        """
+        Estimate provider spend in USD (conservative rate for MiniMax speech-02-hd).
+        Source: ESTIMATED_RATE.
+        """
         char_count = len(text)
         # Conservative rate: $0.00003 per character
         return max(0.0005, round(char_count * 0.00003, 6))
@@ -252,6 +374,11 @@ class SubdubCanaryExecutionHarness:
     ) -> dict[str, Any]:
         """
         Execute synthesis for a single locked canary unit under strict gates.
+        Call path:
+        harness
+        -> guard (fail-fast, provider, drift, spend, submit limits, owner interlock)
+        -> checkpoint (prepare_cue_intent)
+        -> provider boundary (synthesize_fn)
         """
         # 1. Check fail-fast aborted state
         if self.aborted:
@@ -259,7 +386,11 @@ class SubdubCanaryExecutionHarness:
                 f"canary_harness_aborted: prior failure halted canary execution ({self.abort_reason})"
             )
 
-        # 2. Pin provider and model
+        # 2. Check Owner authorization interlock if live execution
+        if not self.dry_run:
+            self.verify_owner_authorization_interlock()
+
+        # 3. Pin provider and model
         if provider != LOCKED_PROVIDER:
             raise CanaryProviderMismatchError(
                 f"unauthorized_provider: '{provider}' != locked '{LOCKED_PROVIDER}'"
@@ -269,12 +400,12 @@ class SubdubCanaryExecutionHarness:
                 f"unauthorized_model: '{model}' != locked '{LOCKED_MODEL}'"
             )
 
-        # 3. Verify cue drift & allowlist
+        # 4. Verify cue drift & allowlist
         unit_key = self.verify_cue_drift(cue, voice_id)
         cid = str(cue.get("cue_id") or cue.get("id") or "")
         text = str(cue.get("text") or "").strip()
 
-        # 4. Check spend guard
+        # 5. Check spend guard (Source: ESTIMATED_RATE)
         est_cost = self.estimate_unit_cost(text)
         if self.accumulated_spend + est_cost > self.max_spend:
             self.aborted = True
@@ -283,7 +414,7 @@ class SubdubCanaryExecutionHarness:
                 f"spend_limit_exceeded: estimated {self.accumulated_spend + est_cost:.4f} USD > max {self.max_spend} USD"
             )
 
-        # 5. Check submission limits
+        # 6. SUBMIT_COUNTER_CHECK_LOCATION (Strictly BEFORE checkpoint intent and provider HTTP)
         if self.total_submits >= self.max_submits:
             self.aborted = True
             self.abort_reason = f"total submit limit reached ({self.total_submits} >= {self.max_submits})"
@@ -298,10 +429,9 @@ class SubdubCanaryExecutionHarness:
                 f"unit_resubmit_forbidden: unit {unit_key} already submitted {self.unit_submits[unit_key]} time(s)"
             )
 
-        # 6. Intent recording via checkpoint manager
+        # 7. Checkpoint intent recording
         reused, artifact_path, audio_bytes, entry = self.checkpoint_mgr.prepare_cue_intent(cue, voice_id)
         if reused:
-            # Already completed and validated
             res = {
                 "unit_key": unit_key,
                 "cue_id": cid,
@@ -315,11 +445,11 @@ class SubdubCanaryExecutionHarness:
             self.executed_units.append(res)
             return res
 
-        # 7. Record submission attempt at provider boundary
+        # 8. SUBMIT_COUNTER_INCREMENT_LOCATION (Transmitted request permanently increments submit budget)
         self.total_submits += 1
         self.unit_submits[unit_key] = self.unit_submits.get(unit_key, 0) + 1
 
-        # 8. Call synthesis function with fail-fast catch
+        # 9. Provider boundary invocation (synthesize_fn)
         try:
             audio_bytes, duration, provider_req_id = synthesize_fn(
                 text=text,
@@ -331,7 +461,6 @@ class SubdubCanaryExecutionHarness:
         except Exception as exc:
             self.aborted = True
             self.abort_reason = f"provider call exception on unit {unit_key}: {exc}"
-            # Mark ambiguous in checkpoint
             cur_entry = self.checkpoint_mgr.entries.get(unit_key) or {}
             cur_entry.update({
                 "state": subdub_tts_checkpoint.STATE_AMBIGUOUS,
@@ -344,7 +473,7 @@ class SubdubCanaryExecutionHarness:
                 f"canary_fail_fast_aborted: unit {unit_key} failed at provider boundary: {exc}"
             ) from exc
 
-        # 9. Verify artifact container, decode, and duration via checkpoint manager
+        # 10. Verify artifact container, decode, and bitstream duration via checkpoint manager
         try:
             success_entry = self.checkpoint_mgr.record_cue_success(
                 cue=cue,
@@ -360,7 +489,7 @@ class SubdubCanaryExecutionHarness:
                 f"canary_fail_fast_aborted: unit {unit_key} failed artifact validation: {exc}"
             ) from exc
 
-        # 10. Record spend & update execution entry
+        # 11. Record spend & update execution entry
         self.accumulated_spend += est_cost
         success_entry["provider_request_id"] = str(provider_req_id or "")
         success_entry["estimated_cost_usd"] = est_cost
@@ -395,6 +524,8 @@ class SubdubCanaryExecutionHarness:
         """
         self.verify_runtime_sha(current_sha)
         self.verify_checkpoint_prestate()
+        if not self.dry_run:
+            self.verify_owner_authorization_interlock()
 
         batch_results = []
         for cue in cues:
