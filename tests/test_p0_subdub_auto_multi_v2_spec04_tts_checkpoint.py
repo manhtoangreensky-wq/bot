@@ -17,6 +17,11 @@ import bot
 from services import subdub_speaker_cast as speaker_cast
 from services import subdub_tts_checkpoint
 from services.subdub_blackboxes import auto_multi_speaker_v2, auto_speaker
+import base64
+
+SAMPLE_VALID_MP3 = base64.b64decode(
+    "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYyLjEyLjEwMQAAAAAAAAAAAAAA//sQxAAABHQTVVSQgDCmCa83GiACAAGtOUAAAVk6PVBQCAYJAfB8HwfKAgCAYRB8H9QIOxOH+INwBJP2wGA4HA4AAAAAACiJKpkUZAjpAkgWo/eFAfATG/AilC+oGhL8JA0qCgAYMAD/+xLEAoPFWB0gHeAAKKSDpIK8AAXMCQC8QASGAOB4Z+72pmMDlmHEESYMAH5gQgYGBSBMYF4DxZq0lflI8wEwETAAA2MDYIQzblDTLrF3ML8H0wWQHTALAtMCUB8wIwG0T59JA5JIAAr/+xDEAoAEtENSuZKAEJcGpuuYMARhEdKhTBbpmtFc+iKq+RLMu79/N5ZP4GFfx4sXwMd+FVAMXYXAAAAmEoRic8ySQagdXkkSQpUtPJRJFBQFYxhTvEt0qC3EqkxBTUUzLjEwMKqqqg=="
+)
 
 
 def _sync(fn):
@@ -150,7 +155,7 @@ def test_checkpoint_manager_save_and_reload(tmp_path: Path):
     assert data == b""
     assert entry is None
 
-    audio = b"dummy_mp3_bytes_12345"
+    audio = SAMPLE_VALID_MP3
     res = mgr.record_cue_success(
         cue,
         "voice_01",
@@ -202,7 +207,7 @@ def test_checkpoint_manager_corrupted_artifact_detected(tmp_path: Path):
     )
     cue = {"cue_id": "cue_001", "speaker_id": "spk_0", "text": "Câu 1", "start": 0.0, "end": 2.0}
     mgr.prepare_cue_intent(cue, "voice_01")
-    res = mgr.record_cue_success(cue, "voice_01", b"original_audio", duration=2.0)
+    res = mgr.record_cue_success(cue, "voice_01", SAMPLE_VALID_MP3, duration=2.0)
     art_path = res["artifact_path"]
 
     with open(art_path, "wb") as f:
@@ -227,7 +232,7 @@ def test_checkpoint_manager_quote_mismatch_rejected(tmp_path: Path):
     )
     cue = {"cue_id": "cue_001", "speaker_id": "spk_0", "text": "Câu 1", "start": 0.0, "end": 2.0}
     mgr.prepare_cue_intent(cue, "voice_01")
-    mgr.record_cue_success(cue, "voice_01", b"audio", duration=2.0)
+    mgr.record_cue_success(cue, "voice_01", SAMPLE_VALID_MP3, duration=2.0)
 
     with pytest.raises(subdub_tts_checkpoint.SubdubTTSQuoteMismatchError):
         subdub_tts_checkpoint.SubdubTTSCheckpointManager(
@@ -247,7 +252,7 @@ def test_checkpoint_manager_contract_drift_rejected(tmp_path: Path):
     )
     cue_v1 = {"cue_id": "cue_001", "speaker_id": "spk_0", "text": "Text A", "start": 0.0, "end": 2.0}
     mgr.prepare_cue_intent(cue_v1, "voice_01")
-    mgr.record_cue_success(cue_v1, "voice_01", b"audio", duration=2.0)
+    mgr.record_cue_success(cue_v1, "voice_01", SAMPLE_VALID_MP3, duration=2.0)
 
     cue_v2 = {"cue_id": "cue_001", "speaker_id": "spk_0", "text": "Text MODIFIED", "start": 0.0, "end": 2.0}
     with pytest.raises(subdub_tts_checkpoint.SubdubTTSContractMismatchError):
@@ -263,7 +268,7 @@ async def test_auto_multi_v2_spec04_happy_path_68_cues(monkeypatch, tmp_path: Pa
     ws, state, cues, pools, assigned_voices = _setup_multi_v2_fixture(monkeypatch, tmp_path, "job_happy_68")
 
     provider_call_count = 0
-    sample_mp3 = b"ID3\x03\x00\x00\x00\x00\x00#TSSE\x00\x00\x00\x0f\x00\x00\x03Lavf58.76.100" + b"\x00" * 200
+    sample_mp3 = SAMPLE_VALID_MP3
 
     async def mock_synthesize_segments(segments, *args, **kwargs):
         nonlocal provider_call_count
@@ -329,7 +334,7 @@ async def test_auto_multi_v2_spec04_partial_resume_skips_prior_cues(monkeypatch,
     ws, state, cues, pools, assigned_voices = _setup_multi_v2_fixture(monkeypatch, tmp_path, "job_resume_partial")
 
     provider_call_count = 0
-    sample_mp3 = b"ID3\x03\x00\x00\x00\x00\x00#TSSE\x00\x00\x00\x0f\x00\x00\x03Lavf58.76.100" + b"\x00" * 200
+    sample_mp3 = SAMPLE_VALID_MP3
 
     # Simulate cues 1..27 were completed in run 1
     mgr = subdub_tts_checkpoint.SubdubTTSCheckpointManager(
@@ -467,7 +472,7 @@ async def test_auto_multi_v2_spec04_corrupted_artifact_fail_closed(monkeypatch, 
     )
     v0 = assigned_voices[cues[0]["speaker_id"]]
     mgr.prepare_cue_intent(cues[0], v0)
-    res = mgr.record_cue_success(cues[0], v0, b"audio_valid_content", duration=2.0)
+    res = mgr.record_cue_success(cues[0], v0, SAMPLE_VALID_MP3, duration=2.0)
     with open(res["artifact_path"], "wb") as f:
         f.write(b"corrupted_bad_hash")
 
@@ -516,7 +521,7 @@ async def test_auto_multi_v2_spec04_contract_drift_fail_closed(monkeypatch, tmp_
     )
     v0 = assigned_voices[cues[0]["speaker_id"]]
     mgr.prepare_cue_intent(cues[0], v0)
-    mgr.record_cue_success(cues[0], v0, b"audio_valid", duration=2.0)
+    mgr.record_cue_success(cues[0], v0, SAMPLE_VALID_MP3, duration=2.0)
 
     # Now modify cue 1's text in the pipeline input
     cues[0]["text"] = "Lời thoại đã bị thay đổi không còn khớp hợp đồng cũ"

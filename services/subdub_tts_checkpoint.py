@@ -6,6 +6,8 @@ import os
 import time
 from typing import Any, Mapping
 
+from services import subdub_tts_artifact_validator
+
 
 class SubdubTTSCheckpointError(Exception):
     """Base exception for TTS checkpoint errors."""
@@ -189,6 +191,12 @@ class SubdubTTSCheckpointManager:
                     raise SubdubTTSArtifactCorruptionError(
                         f"artifact_hash_mismatch for cue {cid}: {actual_hash} != {expected_hash}"
                     )
+                # Independent container/decode/duration validation on reuse
+                validation_res = subdub_tts_artifact_validator.validate_tts_audio_artifact(path)
+                if not validation_res.ok:
+                    raise SubdubTTSArtifactCorruptionError(
+                        f"reused_artifact_invalid for cue {cid}: status={validation_res.status} detail={validation_res.detail}"
+                    )
                 return True, path, data, dict(entry)
 
             if state in (STATE_SUBMITTING, STATE_AMBIGUOUS):
@@ -238,6 +246,33 @@ class SubdubTTSCheckpointManager:
             os.fsync(f.fileno())
         os.replace(tmp_artifact, artifact_path)
 
+        # Independent audio container, decode, and bitstream duration validation BEFORE SUCCEEDED
+        validation_res = subdub_tts_artifact_validator.validate_tts_audio_artifact(artifact_path)
+        if not validation_res.ok:
+            # SUCCEEDED_BEFORE_DECODE = NO! State must NOT become SUCCEEDED.
+            entry = self.entries.get(unit_key) or {
+                "tts_unit_key": unit_key,
+                "cue_id": cid,
+                "speaker_id": str(cue.get("speaker_id") or ""),
+                "voice_id": voice_id,
+                "text_hash": hashlib.sha256(str(cue.get("text") or "").strip().encode("utf-8")).hexdigest(),
+                "target_language": self.target_language,
+            }
+            entry.update({
+                "state": STATE_AMBIGUOUS,
+                "completed_at": None,
+                "artifact_path": artifact_path,
+                "artifact_sha256": hashlib.sha256(audio_bytes).hexdigest(),
+                "validation_status": validation_res.status,
+                "validation_detail": validation_res.detail,
+            })
+            self.entries[unit_key] = entry
+            self.cue_id_to_unit_key[cid] = unit_key
+            self._save_manifest_atomic()
+            raise SubdubTTSArtifactCorruptionError(
+                f"artifact_validation_failed for cue {cid}: status={validation_res.status} detail={validation_res.detail}"
+            )
+
         artifact_sha256 = hashlib.sha256(audio_bytes).hexdigest()
         entry = self.entries.get(unit_key) or {
             "tts_unit_key": unit_key,
@@ -252,14 +287,18 @@ class SubdubTTSCheckpointManager:
             for item in chunks_meta:
                 clean_item = {k: v for k, v in item.items() if k != "audio_bytes"}
                 clean_chunks_meta.append(clean_item)
+        canonical_duration = float(validation_res.duration if validation_res.duration > 0 else (duration or 0.0))
         entry.update({
             "state": STATE_SUCCEEDED,
             "completed_at": time.time(),
             "artifact_path": artifact_path,
             "artifact_sha256": artifact_sha256,
-            "duration": float(duration or 0.0),
+            "duration": canonical_duration,
             "provider_label": str(provider_label or ""),
             "chunks_meta": clean_chunks_meta,
+            "validation_status": validation_res.status,
+            "validation_container": validation_res.container,
+            "validation_codec": validation_res.codec,
         })
         self.entries[unit_key] = entry
         self.cue_id_to_unit_key[cid] = unit_key

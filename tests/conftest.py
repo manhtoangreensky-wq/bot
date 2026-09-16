@@ -9,16 +9,19 @@ import pytest
 
 def _git_changed_paths_against_origin_main() -> set[str]:
     repo = Path(__file__).resolve().parents[1]
-    result = subprocess.run(
-        ["git", "diff", "--name-only", "origin/main"],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--name-only", "origin/main"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return set()
+        return {line.strip().replace("\\", "/") for line in result.stdout.splitlines() if line.strip()}
+    except Exception:
         return set()
-    return {line.strip().replace("\\", "/") for line in result.stdout.splitlines() if line.strip()}
 
 
 def pytest_collection_modifyitems(config, items):
