@@ -248349,7 +248349,10 @@ async def video_dubbing_prepare_subtitles(
             output_segments,
             acoustic_labels,
         )
-        _subdub_auto_record_multi_diagnostics(state, **prepare_contract)
+        _subdub_auto_record_multi_diagnostics(
+            {**dict(state or {}), **exact_multi_pipeline_context},
+            **prepare_contract,
+        )
         if prepare_contract["auto_multi_prepare_contract_status"] != "pass":
             raise subdub_speaker_cast.AutoCastUnavailable()
     timing_validation = subdub_validate_cue_locked_timing(
