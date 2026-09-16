@@ -1345,6 +1345,8 @@ COBALT_API_URL_RAW  = _env("COBALT_API_URL")
 COBALT_API_URL      = COBALT_API_URL_RAW
 COBALT_API_KEY      = _env("COBALT_API_KEY")
 PORT                = int(_env("PORT", "8000"))
+BOT_PORT            = int(_env("BOT_PORT", str(PORT)))
+BOT_BIND_ADDRESS    = _env("BOT_BIND_ADDRESS", "127.0.0.1").strip() or "127.0.0.1"
 BOT_USERNAME        = _env("BOT_USERNAME", "toanaasbot")
 OFFICIAL_TELEGRAM_URL = _env("OFFICIAL_TELEGRAM_URL", "https://t.me/toanaasbot")
 SUPPORT_TELEGRAM_URL  = _env("SUPPORT_TELEGRAM_URL", "https://t.me/toanaas")
@@ -277434,8 +277436,8 @@ async def api_internal_admin_wallet_compensate(request: Request):
 if __name__ == "__main__":
     uvicorn.run(
         "bot:fastapi_app",
-        host="0.0.0.0",
-        port=PORT,
+        host=BOT_BIND_ADDRESS,
+        port=BOT_PORT,
         log_level="info"
     )
 
