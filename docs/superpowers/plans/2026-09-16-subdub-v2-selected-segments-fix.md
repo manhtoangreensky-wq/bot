@@ -132,3 +132,19 @@ Pre-final-rebase full-suite comparison on the reviewed tree:
   `88 passed, 241 deselected`; compile: exit `0`.
 - [ ] Deploy provenance once, then use exactly one new Multi V2 job to identify
   the failing predicate and apply the final minimal behavioral correction.
+
+## SPEC-50/65/80/90/100 — Ordered live closure
+
+- [x] `SPEC-50` prepare contract: live job `064C597F35` proved `71/71` cues,
+  `3` speakers, zero cue-id/speaker/text errors and exactly one timing mismatch.
+- [x] Root cause: strict Multi prepare used exact float equality while V2's
+  established cue invariant permits `1ms` serialization rounding.
+- [x] Minimal correction: reuse
+  `MULTI_V2_CUE_ROUNDING_TOLERANCE_SECONDS` for prepare timing comparison.
+- [x] RED: sub-millisecond rounding returned `identity_mismatch`. GREEN:
+  focused `2 passed`; complete V2 suite `78 passed`; protected V1/customer/
+  Auto 2 comparator `88 passed, 241 deselected`.
+- [ ] `SPEC-65`: exact cache/receipt/voice assignment and TTS start live PASS.
+- [ ] `SPEC-80`: all TTS artifacts valid and mux starts live PASS.
+- [ ] `SPEC-90`: final MP4 container/video/audio/duration validation PASS.
+- [ ] `SPEC-100`: Telegram MP4, exactly one receipt, charge only after delivery.
