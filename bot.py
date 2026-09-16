@@ -3424,6 +3424,8 @@ def init_db():
     conn.execute("PRAGMA journal_mode=WAL")
     video_trend_catalog.ensure_schema(conn)
     video_editengine1.ensure_schema(conn)
+    from services.admin_wallet_service import ensure_admin_wallet_schema
+    ensure_admin_wallet_schema(conn)
     c = conn.cursor()
     c.execute("""CREATE TABLE IF NOT EXISTS users (
         user_id TEXT PRIMARY KEY,
@@ -277004,6 +277006,65 @@ async def webhook_payos(request: Request):
             logger.error(f"Notify error: {e}")
 
     return JSONResponse({"code": "00", "desc": "success"})
+
+
+@fastapi_app.post("/internal/v1/admin/wallet/credit")
+async def api_internal_admin_wallet_credit(request: Request):
+    """Canonical Bot Core admin wallet credit endpoint (SPEC-B).
+
+    Provides idempotent, atomic Xu credit semantics for internal admin topup approvals.
+    """
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+        if not isinstance(payload, dict):
+            raise ValueError("Payload must be an object")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    from services.admin_wallet_service import (
+        verify_internal_admin_wallet_auth,
+        execute_admin_wallet_credit,
+    )
+
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path="/internal/v1/admin/wallet/credit",
+        body_bytes=raw_body,
+    )
+    if not auth_ok:
+        raise HTTPException(
+            status_code=auth_status,
+            detail={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    user_id = str(
+        payload.get("canonical_user_id")
+        or payload.get("user_id")
+        or payload.get("target_account_id")
+        or ""
+    ).strip()
+    amount_xu = payload.get("amount_xu") if "amount_xu" in payload else payload.get("amount")
+    idempotency_key = str(payload.get("idempotency_key") or "").strip()
+    reason = str(payload.get("reason") or payload.get("reference") or "").strip()
+    reference = str(payload.get("reference") or payload.get("reason") or "").strip()
+    actor_id = str(request.headers.get("x-toan-aas-actor-id") or payload.get("actor_id") or "").strip()
+
+    ok, result, status_code = execute_admin_wallet_credit(
+        user_id=user_id,
+        amount_xu=amount_xu,
+        idempotency_key=idempotency_key,
+        reason=reason,
+        reference=reference,
+        actor_id=actor_id,
+        db_path=DB_FILE,
+    )
+    return JSONResponse(status_code=status_code, content=result)
+
 
 # ─── ENTRY POINT ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
