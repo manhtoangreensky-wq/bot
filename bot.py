@@ -277297,8 +277297,41 @@ async def api_internal_admin_wallet_compensate(request: Request):
 
     source_ledger_event_id = payload.get("source_ledger_event_id")
     idempotency_key = str(payload.get("idempotency_key") or "").strip()
-    reason = str(payload.get("reason") or payload.get("reference") or "").strip()
-    actor_id = str(request.headers.get("x-toan-aas-actor-id") or payload.get("actor_id") or "").strip()
+
+    raw_reason = payload.get("reason")
+    if raw_reason is None or not str(raw_reason).strip():
+        return JSONResponse(
+            status_code=400,
+            content={
+                "ok": False,
+                "error_code": "MISSING_REASON",
+                "message": "reason is required and cannot be blank",
+            },
+        )
+    reason = str(raw_reason).strip()
+
+    raw_actor_id = payload.get("actor_id")
+    if raw_actor_id is None or not str(raw_actor_id).strip():
+        return JSONResponse(
+            status_code=400,
+            content={
+                "ok": False,
+                "error_code": "MISSING_ACTOR_ID",
+                "message": "actor_id is required and cannot be blank",
+            },
+        )
+    actor_id = str(raw_actor_id).strip()
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
+    if header_actor and header_actor != actor_id:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "ok": False,
+                "error_code": "ACTOR_ID_MISMATCH",
+                "message": "Header actor_id does not match signed payload actor_id",
+            },
+        )
 
     ok, result, status_code = execute_admin_wallet_compensation(
         source_ledger_event_id=source_ledger_event_id,

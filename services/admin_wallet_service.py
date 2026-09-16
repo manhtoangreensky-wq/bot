@@ -91,9 +91,6 @@ def ensure_admin_wallet_compensation_schema(conn: sqlite3.Connection) -> None:
 
 ALLOWED_COMPENSABLE_EVENT_TYPES: set[str] = {
     "admin_web_manual_topup",
-    "admin_wallet_credit",
-    "manual_deposit",
-    "admin_add",
 }
 
 
@@ -598,11 +595,25 @@ def process_internal_wallet_compensation_in_tx(
             "message": "source_ledger_event_id must be a positive integer",
         }, 400
 
+    clean_reason = str(reason or "").strip()
+    if not clean_reason:
+        return False, {
+            "ok": False,
+            "error_code": "MISSING_REASON",
+            "message": "reason is required and cannot be blank",
+        }, 400
+
+    clean_actor = str(actor_id or "").strip()
+    if not clean_actor:
+        return False, {
+            "ok": False,
+            "error_code": "MISSING_ACTOR_ID",
+            "message": "actor_id is required and cannot be blank",
+        }, 400
+
     ensure_admin_wallet_compensation_schema(conn)
     c = conn.cursor()
 
-    clean_actor = str(actor_id or "").strip()
-    clean_reason = str(reason or "").strip()
     fp = compute_compensation_request_fingerprint(source_id, clean_reason, clean_actor)
     ts = str(now_str or utc_now_text())
 
@@ -710,9 +721,9 @@ def process_internal_wallet_compensation_in_tx(
         }, 400
 
     new_balance = current_credits + compensation_delta
-    admin_actor = clean_actor or os.environ.get("ADMIN_ID") or DEFAULT_ADMIN_ID
+    admin_actor = clean_actor
     ref_id = f"compensation:event:{source_id}"
-    comp_note = clean_reason or f"Administrative compensation for event {source_id}"
+    comp_note = clean_reason
 
     # 5. Apply Decrement to users.credits
     c.execute(

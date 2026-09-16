@@ -33,6 +33,7 @@ from services.admin_wallet_service import (
     process_internal_wallet_compensation_in_tx,
     execute_admin_wallet_compensation,
     execute_admin_wallet_credit,
+    ALLOWED_COMPENSABLE_EVENT_TYPES,
 )
 import bot
 
@@ -199,6 +200,7 @@ def test_compensation_rejects_arbitrary_negative_amount_input(monkeypatch, test_
         "idempotency_key": "comp-key-arbitrary-amount",
         "amount_xu": -50,
         "reason": "arbitrary attempt",
+        "actor_id": "admin-tester",
     }).encode("utf-8")
     headers = make_auth_headers(body, token="test-token", hmac_secret="test-secret")
 
@@ -675,7 +677,7 @@ def test_event19_simulation(tmp_path: Path):
     ok, res, status = execute_admin_wallet_compensation(
         source_ledger_event_id=19,
         idempotency_key="admin:wallet:compensation:event19:simulation",
-        reason="Administrative compensation for test probe event 19",
+        reason="Administrative compensation for unauthorized test probe event 19",
         actor_id="owner-authorized-admin",
         db_path=str(sim_db),
     )
@@ -689,7 +691,7 @@ def test_event19_simulation(tmp_path: Path):
     ok_rep, res_rep, status_rep = execute_admin_wallet_compensation(
         source_ledger_event_id=19,
         idempotency_key="admin:wallet:compensation:event19:simulation",
-        reason="Administrative compensation for test probe event 19",
+        reason="Administrative compensation for unauthorized test probe event 19",
         actor_id="owner-authorized-admin",
         db_path=str(sim_db),
     )
@@ -717,4 +719,304 @@ def test_event19_simulation(tmp_path: Path):
     comp_event_count = cur.fetchone()[0]
     assert comp_event_count == 1
 
+    cur.execute("SELECT actor_id, reason FROM admin_wallet_compensations WHERE source_ledger_event_id = 19")
+    rec = cur.fetchone()
+    assert rec is not None
+    assert rec[0] == "owner-authorized-admin"
+    assert rec[1] == "Administrative compensation for unauthorized test probe event 19"
+    assert bool(rec[0] and rec[0].strip())
+    assert bool(rec[1] and rec[1].strip())
+
     conn.close()
+
+
+
+# ---------------------------------------------------------------------------
+# Section 16: Contract Hardening Tests (Actor / Reason / Allowlist Boundaries)
+# ---------------------------------------------------------------------------
+
+def test_compensation_missing_reason_fails_closed(monkeypatch, test_db):
+    """Missing or blank reason fails closed with 400 MISSING_REASON and wallet delta = 0."""
+    monkeypatch.setattr(bot, "DB_FILE", test_db)
+    monkeypatch.setenv("CORE_BRIDGE_TOKEN", "test-token")
+    monkeypatch.setenv("CORE_BRIDGE_HMAC_SECRET", "test-secret")
+
+    client = TestClient(bot.fastapi_app)
+
+    # 1. HTTP endpoint missing reason
+    body_missing = json.dumps({
+        "source_ledger_event_id": 19,
+        "idempotency_key": "comp-key-no-reason",
+        "actor_id": "admin-tester",
+    }).encode("utf-8")
+    headers = make_auth_headers(body_missing, token="test-token", hmac_secret="test-secret", actor_id="admin-tester")
+    resp = client.post("/internal/v1/admin/wallet/compensate", content=body_missing, headers=headers)
+    assert resp.status_code == 400
+    assert resp.json()["error_code"] == "MISSING_REASON"
+
+    # 2. HTTP endpoint blank reason
+    body_blank = json.dumps({
+        "source_ledger_event_id": 19,
+        "idempotency_key": "comp-key-blank-reason",
+        "reason": "   ",
+        "actor_id": "admin-tester",
+    }).encode("utf-8")
+    headers = make_auth_headers(body_blank, token="test-token", hmac_secret="test-secret", actor_id="admin-tester")
+    resp = client.post("/internal/v1/admin/wallet/compensate", content=body_blank, headers=headers)
+    assert resp.status_code == 400
+    assert resp.json()["error_code"] == "MISSING_REASON"
+
+    # 3. Direct service call with empty reason
+    ok, res, status = execute_admin_wallet_compensation(
+        source_ledger_event_id=19,
+        idempotency_key="comp-key-srv-no-reason",
+        reason="",
+        actor_id="admin-tester",
+        db_path=test_db,
+    )
+    assert not ok
+    assert status == 400
+    assert res["error_code"] == "MISSING_REASON"
+
+    # 4. Verify wallet balance unchanged and 0 compensations stored
+    conn = sqlite3.connect(test_db)
+    cur = conn.cursor()
+    cur.execute("SELECT credits FROM users WHERE user_id = '1001'")
+    assert cur.fetchone()[0] == 500
+    cur.execute("SELECT COUNT(*) FROM admin_wallet_compensations")
+    assert cur.fetchone()[0] == 0
+    cur.execute("SELECT COUNT(*) FROM credit_events WHERE event_type = 'admin_wallet_compensation'")
+    assert cur.fetchone()[0] == 0
+    conn.close()
+
+
+def test_compensation_missing_actor_id_fails_closed(monkeypatch, test_db):
+    """Missing or blank actor_id fails closed with 400 MISSING_ACTOR_ID and wallet delta = 0."""
+    monkeypatch.setattr(bot, "DB_FILE", test_db)
+    monkeypatch.setenv("CORE_BRIDGE_TOKEN", "test-token")
+    monkeypatch.setenv("CORE_BRIDGE_HMAC_SECRET", "test-secret")
+
+    client = TestClient(bot.fastapi_app)
+
+    # 1. HTTP endpoint missing actor_id
+    body_missing = json.dumps({
+        "source_ledger_event_id": 19,
+        "idempotency_key": "comp-key-no-actor",
+        "reason": "Valid reason",
+    }).encode("utf-8")
+    headers = make_auth_headers(body_missing, token="test-token", hmac_secret="test-secret")
+    resp = client.post("/internal/v1/admin/wallet/compensate", content=body_missing, headers=headers)
+    assert resp.status_code == 400
+    assert resp.json()["error_code"] == "MISSING_ACTOR_ID"
+
+    # 2. HTTP endpoint blank actor_id
+    body_blank = json.dumps({
+        "source_ledger_event_id": 19,
+        "idempotency_key": "comp-key-blank-actor",
+        "reason": "Valid reason",
+        "actor_id": "   ",
+    }).encode("utf-8")
+    headers = make_auth_headers(body_blank, token="test-token", hmac_secret="test-secret")
+    resp = client.post("/internal/v1/admin/wallet/compensate", content=body_blank, headers=headers)
+    assert resp.status_code == 400
+    assert resp.json()["error_code"] == "MISSING_ACTOR_ID"
+
+    # 3. Direct service call with empty actor_id
+    ok, res, status = execute_admin_wallet_compensation(
+        source_ledger_event_id=19,
+        idempotency_key="comp-key-srv-no-actor",
+        reason="Valid reason",
+        actor_id="",
+        db_path=test_db,
+    )
+    assert not ok
+    assert status == 400
+    assert res["error_code"] == "MISSING_ACTOR_ID"
+
+    # 4. Verify wallet balance unchanged and 0 compensations stored
+    conn = sqlite3.connect(test_db)
+    cur = conn.cursor()
+    cur.execute("SELECT credits FROM users WHERE user_id = '1001'")
+    assert cur.fetchone()[0] == 500
+    cur.execute("SELECT COUNT(*) FROM admin_wallet_compensations")
+    assert cur.fetchone()[0] == 0
+    cur.execute("SELECT COUNT(*) FROM credit_events WHERE event_type = 'admin_wallet_compensation'")
+    assert cur.fetchone()[0] == 0
+    conn.close()
+
+
+def test_compensation_actor_id_is_bound_to_signed_payload(monkeypatch, test_db):
+    """actor_id is cryptographically bound to signed payload; header mismatch is rejected with 400."""
+    monkeypatch.setattr(bot, "DB_FILE", test_db)
+    monkeypatch.setenv("CORE_BRIDGE_TOKEN", "test-token")
+    monkeypatch.setenv("CORE_BRIDGE_HMAC_SECRET", "test-secret")
+
+    client = TestClient(bot.fastapi_app)
+
+    # 1. Header actor_id mismatches payload actor_id -> rejected
+    body = json.dumps({
+        "source_ledger_event_id": 19,
+        "idempotency_key": "comp-key-actor-binding-fail",
+        "reason": "Audit bound actor",
+        "actor_id": "signed-owner-actor",
+    }).encode("utf-8")
+    headers = make_auth_headers(
+        body,
+        token="test-token",
+        hmac_secret="test-secret",
+        actor_id="different-untrusted-actor",
+    )
+    resp = client.post("/internal/v1/admin/wallet/compensate", content=body, headers=headers)
+    assert resp.status_code == 400
+    assert resp.json()["error_code"] == "ACTOR_ID_MISMATCH"
+
+    # 2. Matching header actor_id -> passes and persists exact signed payload actor_id
+    headers_matching = make_auth_headers(
+        body,
+        token="test-token",
+        hmac_secret="test-secret",
+        actor_id="signed-owner-actor",
+    )
+    resp2 = client.post("/internal/v1/admin/wallet/compensate", content=body, headers=headers_matching)
+    assert resp2.status_code == 200
+    data = resp2.json()
+    assert data["ok"] is True
+
+    # 3. Verify durable row has exact signed payload actor_id and reason (Section 8 receipt assertion)
+    conn = sqlite3.connect(test_db)
+    cur = conn.cursor()
+    cur.execute("SELECT actor_id, reason FROM admin_wallet_compensations WHERE idempotency_key = 'comp-key-actor-binding-fail'")
+    row = cur.fetchone()
+    assert row is not None
+    assert row[0] == "signed-owner-actor"
+    assert row[1] == "Audit bound actor"
+    assert bool(row[0].strip())
+    assert bool(row[1].strip())
+    conn.close()
+
+
+def test_compensation_does_not_fallback_to_default_admin_actor(monkeypatch, test_db):
+    """Compensation never falls back to ADMIN_ID or DEFAULT_ADMIN_ID when actor_id is missing or explicit."""
+    monkeypatch.setattr(bot, "DB_FILE", test_db)
+    monkeypatch.setenv("CORE_BRIDGE_TOKEN", "test-token")
+    monkeypatch.setenv("CORE_BRIDGE_HMAC_SECRET", "test-secret")
+    monkeypatch.setenv("ADMIN_ID", "fallback-env-admin")
+
+    client = TestClient(bot.fastapi_app)
+
+    # 1. Omitting actor_id must NOT fall back to fallback-env-admin
+    body_missing = json.dumps({
+        "source_ledger_event_id": 19,
+        "idempotency_key": "comp-key-fallback-attempt",
+        "reason": "Testing fallback guard",
+    }).encode("utf-8")
+    headers = make_auth_headers(body_missing, token="test-token", hmac_secret="test-secret")
+    resp = client.post("/internal/v1/admin/wallet/compensate", content=body_missing, headers=headers)
+    assert resp.status_code == 400
+    assert resp.json()["error_code"] == "MISSING_ACTOR_ID"
+
+    # 2. Providing explicit actor_id records explicit actor_id, never fallback-env-admin
+    body_explicit = json.dumps({
+        "source_ledger_event_id": 19,
+        "idempotency_key": "comp-key-explicit-actor",
+        "reason": "Explicit actor test",
+        "actor_id": "strictly-authorized-actor",
+    }).encode("utf-8")
+    headers_exp = make_auth_headers(body_explicit, token="test-token", hmac_secret="test-secret", actor_id="strictly-authorized-actor")
+    resp2 = client.post("/internal/v1/admin/wallet/compensate", content=body_explicit, headers=headers_exp)
+    assert resp2.status_code == 200
+
+    conn = sqlite3.connect(test_db)
+    cur = conn.cursor()
+    cur.execute("SELECT actor_id FROM admin_wallet_compensations WHERE idempotency_key = 'comp-key-explicit-actor'")
+    durable_actor = cur.fetchone()[0]
+    assert durable_actor == "strictly-authorized-actor"
+    assert durable_actor != "fallback-env-admin"
+    assert durable_actor != "admin"
+    conn.close()
+
+
+def test_compensation_does_not_use_reference_as_reason(monkeypatch, test_db):
+    """payload['reference'] is NEVER substituted for reason; reason must be explicit."""
+    monkeypatch.setattr(bot, "DB_FILE", test_db)
+    monkeypatch.setenv("CORE_BRIDGE_TOKEN", "test-token")
+    monkeypatch.setenv("CORE_BRIDGE_HMAC_SECRET", "test-secret")
+
+    client = TestClient(bot.fastapi_app)
+
+    # 1. Payload with reference but missing reason fails closed
+    body = json.dumps({
+        "source_ledger_event_id": 19,
+        "idempotency_key": "comp-key-ref-as-reason-attempt",
+        "reference": "should-not-become-reason",
+        "actor_id": "test-admin",
+    }).encode("utf-8")
+    headers = make_auth_headers(body, token="test-token", hmac_secret="test-secret", actor_id="test-admin")
+    resp = client.post("/internal/v1/admin/wallet/compensate", content=body, headers=headers)
+    assert resp.status_code == 400
+    assert resp.json()["error_code"] == "MISSING_REASON"
+
+    # 2. Payload with both explicit reason and reference stores the exact reason
+    body_with_both = json.dumps({
+        "source_ledger_event_id": 19,
+        "idempotency_key": "comp-key-both-ref-and-reason",
+        "reference": "some-ref-value",
+        "reason": "explicit-audit-reason-string",
+        "actor_id": "test-admin",
+    }).encode("utf-8")
+    headers_both = make_auth_headers(body_with_both, token="test-token", hmac_secret="test-secret", actor_id="test-admin")
+    resp2 = client.post("/internal/v1/admin/wallet/compensate", content=body_with_both, headers=headers_both)
+    assert resp2.status_code == 200
+
+    conn = sqlite3.connect(test_db)
+    cur = conn.cursor()
+    cur.execute("SELECT reason FROM admin_wallet_compensations WHERE idempotency_key = 'comp-key-both-ref-and-reason'")
+    durable_reason = cur.fetchone()[0]
+    assert durable_reason == "explicit-audit-reason-string"
+    assert durable_reason != "some-ref-value"
+    conn.close()
+
+
+def test_positive_non_admin_event_is_not_compensable(test_db):
+    """Positive source event with non-allowed event_type (e.g. trial_grant) fails closed with 400 NON_COMPENSABLE_EVENT_TYPE."""
+    conn = sqlite3.connect(test_db)
+    conn.execute(
+        """INSERT INTO credit_events (id, user_id, delta, balance_after, event_type, ref_id, note, created_at)
+        VALUES (777, '1001', 100, 600, 'trial_grant', 'trial:probe:777', 'Trial grant bonus', '2026-09-16 12:00:00')"""
+    )
+    conn.execute("UPDATE users SET credits = 600 WHERE user_id = '1001'")
+    conn.commit()
+    conn.close()
+
+    ok, res, status = execute_admin_wallet_compensation(
+        source_ledger_event_id=777,
+        idempotency_key="comp-key-trial-grant-target",
+        reason="Attempting to compensate trial grant",
+        actor_id="admin-auditor",
+        db_path=test_db,
+    )
+    assert not ok
+    assert status == 400
+    assert res["error_code"] == "NON_COMPENSABLE_EVENT_TYPE"
+
+    # Verify wallet delta = 0
+    conn = sqlite3.connect(test_db)
+    cur = conn.cursor()
+    cur.execute("SELECT credits FROM users WHERE user_id = '1001'")
+    assert cur.fetchone()[0] == 600
+
+    # Verify 0 compensation rows
+    cur.execute("SELECT COUNT(*) FROM admin_wallet_compensations WHERE source_ledger_event_id = 777")
+    assert cur.fetchone()[0] == 0
+    cur.execute("SELECT COUNT(*) FROM credit_events WHERE ref_id = 'compensation:event:777'")
+    assert cur.fetchone()[0] == 0
+    conn.close()
+
+
+def test_initial_compensable_event_allowlist_is_bounded():
+    """Initial compensable event type allowlist is bounded strictly to admin_web_manual_topup."""
+    assert ALLOWED_COMPENSABLE_EVENT_TYPES == {"admin_web_manual_topup"}
+    assert "admin_wallet_credit" not in ALLOWED_COMPENSABLE_EVENT_TYPES
+    assert "manual_deposit" not in ALLOWED_COMPENSABLE_EVENT_TYPES
+    assert "admin_add" not in ALLOWED_COMPENSABLE_EVENT_TYPES
+    assert "trial_grant" not in ALLOWED_COMPENSABLE_EVENT_TYPES
