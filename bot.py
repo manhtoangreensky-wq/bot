@@ -3685,7 +3685,8 @@ def init_db():
         xu_cost INTEGER DEFAULT 0,
         admin_only INTEGER DEFAULT 1,
         worker_id TEXT,
-        updated_at TEXT
+        updated_at TEXT,
+        provider_task_id TEXT DEFAULT ''
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS frame_video_jobs (
         job_id TEXT PRIMARY KEY,
@@ -5360,6 +5361,17 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_plan_purchases_status ON plan_purchases(status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_local_worker_jobs_status ON local_worker_jobs(status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_local_worker_jobs_created ON local_worker_jobs(created_at)")
+    for col, col_type in [
+        ("provider_task_id", "TEXT DEFAULT ''"),
+    ]:
+        try:
+            c.execute(f"ALTER TABLE local_worker_jobs ADD COLUMN {col} {col_type}")
+        except Exception:
+            pass
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_local_worker_jobs_provider_task_id ON local_worker_jobs(provider_task_id)")
+    except Exception:
+        pass
     c.execute("CREATE INDEX IF NOT EXISTS idx_workflow_image_assets_user ON workflow_image_assets(user_id, created_at)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_feedback_category ON feedback(category)")
@@ -46263,7 +46275,7 @@ def local_worker_job_from_row(row) -> dict:
         "id", "user_id", "command", "job_type", "status", "provider",
         "input_file_id", "output_file_id", "output_url", "error_short",
         "created_at", "started_at", "finished_at", "xu_cost", "admin_only",
-        "worker_id", "updated_at",
+        "worker_id", "updated_at", "provider_task_id",
     ]
     return {fields[i]: row[i] if i < len(row) else "" for i in range(len(fields))}
 
@@ -46275,6 +46287,7 @@ def create_local_worker_job(
     input_file_id="",
     xu_cost=0,
     admin_only=True,
+    provider_task_id="",
 ) -> int:
     job_type = str(job_type or "").strip()
     if job_type not in LOCAL_WORKER_JOB_TYPES:
@@ -46285,8 +46298,8 @@ def create_local_worker_job(
         now = now_text()
         c.execute(
             """INSERT INTO local_worker_jobs
-            (user_id, command, job_type, status, provider, input_file_id, created_at, xu_cost, admin_only, updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (user_id, command, job_type, status, provider, input_file_id, created_at, xu_cost, admin_only, updated_at, provider_task_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 str(user_id or ""),
                 str(command or ""),
@@ -46298,6 +46311,7 @@ def create_local_worker_job(
                 int(xu_cost or 0),
                 1 if admin_only else 0,
                 now,
+                str(provider_task_id or ""),
             ),
         )
         conn.commit()
@@ -46312,7 +46326,7 @@ def get_local_worker_job(job_id, *, conn=None) -> dict:
         c = conn.cursor()
         c.execute(
             """SELECT id,user_id,command,job_type,status,provider,input_file_id,output_file_id,output_url,
-                      error_short,created_at,started_at,finished_at,xu_cost,admin_only,worker_id,updated_at
+                      error_short,created_at,started_at,finished_at,xu_cost,admin_only,worker_id,updated_at,provider_task_id
                FROM local_worker_jobs WHERE id=?""",
             (str(job_id),),
         )
@@ -46331,9 +46345,32 @@ def get_local_worker_job_readonly(job_id, *, conn=None) -> dict:
         c = conn.cursor()
         c.execute(
             """SELECT id,user_id,command,job_type,status,provider,input_file_id,output_file_id,output_url,
-                      error_short,created_at,started_at,finished_at,xu_cost,admin_only,worker_id,updated_at
+                      error_short,created_at,started_at,finished_at,xu_cost,admin_only,worker_id,updated_at,provider_task_id
                FROM local_worker_jobs WHERE id=?""",
             (str(job_id),),
+        )
+        return local_worker_job_from_row(c.fetchone())
+    finally:
+        if owns_connection:
+            conn.close()
+
+
+def get_local_worker_job_by_provider_task_id(provider_task_id, *, conn=None) -> dict:
+    """Find a local worker job by external provider task ID."""
+    task_id = str(provider_task_id or "").strip()
+    if not task_id:
+        return {}
+    owns_connection = conn is None
+    conn = conn or db_connect_readonly()
+    try:
+        c = conn.cursor()
+        c.execute(
+            """SELECT id,user_id,command,job_type,status,provider,input_file_id,output_file_id,output_url,
+                      error_short,created_at,started_at,finished_at,xu_cost,admin_only,worker_id,updated_at,provider_task_id
+               FROM local_worker_jobs
+               WHERE provider_task_id=?
+               ORDER BY id DESC LIMIT 1""",
+            (task_id,),
         )
         return local_worker_job_from_row(c.fetchone())
     finally:
@@ -46349,7 +46386,7 @@ def get_latest_video_editor_job(user_id) -> dict:
         c = conn.cursor()
         c.execute(
             """SELECT id,user_id,command,job_type,status,provider,input_file_id,output_file_id,output_url,
-                      error_short,created_at,started_at,finished_at,xu_cost,admin_only,worker_id,updated_at
+                      error_short,created_at,started_at,finished_at,xu_cost,admin_only,worker_id,updated_at,provider_task_id
                FROM local_worker_jobs
                WHERE user_id=? AND job_type=?
                ORDER BY id DESC
@@ -46366,7 +46403,7 @@ def list_local_worker_jobs(limit: int = 10) -> list[dict]:
         c = conn.cursor()
         c.execute(
             """SELECT id,user_id,command,job_type,status,provider,input_file_id,output_file_id,output_url,
-                      error_short,created_at,started_at,finished_at,xu_cost,admin_only,worker_id,updated_at
+                      error_short,created_at,started_at,finished_at,xu_cost,admin_only,worker_id,updated_at,provider_task_id
                FROM local_worker_jobs
                ORDER BY id DESC
                LIMIT ?""",
@@ -46403,6 +46440,7 @@ def update_local_worker_job(
     output_file_id: str = "",
     output_url: str = "",
     *,
+    provider_task_id: str | None = None,
     conn=None,
 ) -> dict:
     status = str(status or "").strip().lower()
@@ -46432,6 +46470,18 @@ def update_local_worker_job(
     )
     if frame_receipt_replay_blocker:
         raise ValueError(frame_receipt_replay_blocker)
+    existing_provider_task_id = str(job.get("provider_task_id") or "").strip()
+    if not existing_provider_task_id:
+        try:
+            parsed_err = json.loads(str(job.get("error_short") or "") or "{}")
+            if isinstance(parsed_err, dict) and parsed_err.get("aiedit1"):
+                existing_provider_task_id = str(parsed_err.get("provider_task_id") or "").strip()
+        except Exception:
+            pass
+    if provider_task_id is not None and str(provider_task_id).strip():
+        effective_provider_task_id = str(provider_task_id).strip()
+    else:
+        effective_provider_task_id = existing_provider_task_id
     now = now_text()
     job_type = str(job.get("job_type") or "")
     detail_limit = 128 * 1024 if job_type == "video_local_edit" else 4000 if job_type == "video_ai_edit" else 500
@@ -46452,13 +46502,14 @@ def update_local_worker_job(
             started_at,
             finished_at,
             now,
+            effective_provider_task_id,
             str(job_id),
         )
         if frame_cas:
             cursor = conn.execute(
                 """UPDATE local_worker_jobs
                    SET status=?, worker_id=?, error_short=?, output_file_id=?, output_url=?,
-                       started_at=?, finished_at=?, updated_at=?
+                       started_at=?, finished_at=?, updated_at=?, provider_task_id=?
                    WHERE id=? AND status=? AND worker_id=?""",
                 params
                 + (
@@ -46470,7 +46521,7 @@ def update_local_worker_job(
             cursor = conn.execute(
                 """UPDATE local_worker_jobs
                    SET status=?, worker_id=?, error_short=?, output_file_id=?, output_url=?,
-                       started_at=?, finished_at=?, updated_at=?
+                       started_at=?, finished_at=?, updated_at=?, provider_task_id=?
                    WHERE id=?""",
                 params,
             )
@@ -258204,12 +258255,22 @@ def video_ai_edit_job_progress(job: dict) -> dict:
 
 def _persist_video_ai_edit_progress(job_id: int, progress: dict) -> None:
     payload = json.dumps(progress, ensure_ascii=False, separators=(",", ":"))
+    task_id = str(progress.get("provider_task_id") or "").strip()
     conn = db_connect()
     try:
-        conn.execute(
-            "UPDATE local_worker_jobs SET error_short=?, updated_at=? WHERE id=? AND job_type='video_ai_edit'",
-            (payload[:4000], now_text(), int(job_id)),
-        )
+        if task_id:
+            conn.execute(
+                """UPDATE local_worker_jobs
+                   SET error_short=?, updated_at=?,
+                       provider_task_id=CASE WHEN provider_task_id IS NULL OR provider_task_id='' THEN ? ELSE provider_task_id END
+                   WHERE id=? AND job_type='video_ai_edit'""",
+                (payload[:4000], now_text(), task_id, int(job_id)),
+            )
+        else:
+            conn.execute(
+                "UPDATE local_worker_jobs SET error_short=?, updated_at=? WHERE id=? AND job_type='video_ai_edit'",
+                (payload[:4000], now_text(), int(job_id)),
+            )
         conn.commit()
     finally:
         conn.close()

@@ -174,6 +174,17 @@ def admin_status_payload(feature: dict[str, Any], *, last_job: dict[str, Any] | 
     }
 
 
+def resolve_provider_task_id(job: dict[str, Any] | None) -> str:
+    """Resolve provider task ID preferring canonical field over legacy error_short."""
+    if not job or not isinstance(job, dict):
+        return ""
+    direct = str(job.get("provider_task_id") or "").strip()
+    if direct:
+        return direct
+    progress = parse_progress(job.get("error_short"))
+    return str(progress.get("provider_task_id") or "").strip()
+
+
 def job_debug_payload(job: dict[str, Any]) -> dict[str, Any]:
     raw_input = str(job.get("input_file_id") or "")
     try:
@@ -193,7 +204,7 @@ def job_debug_payload(job: dict[str, Any]) -> dict[str, Any]:
         "model": source.get("model"),
         "interface": source.get("interface"),
         "submit_source": source.get("submit_source"),
-        "task_id": mask_task_id(str(progress.get("provider_task_id") or "")),
+        "task_id": mask_task_id(resolve_provider_task_id(job)),
         "poll_count": int(progress.get("poll_count") or 0),
         "result_url_present": bool(progress.get("result_url_present")),
         "validation": progress.get("validation"),
@@ -207,4 +218,5 @@ def job_debug_payload(job: dict[str, Any]) -> dict[str, Any]:
 __all__ = [
     "PUBLIC_STAGE_LABELS", "STAGE_ORDER", "admin_status_payload", "job_debug_payload",
     "parse_progress", "progress_json", "public_status_text", "reconcile_progress",
+    "resolve_provider_task_id",
 ]
