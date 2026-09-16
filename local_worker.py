@@ -4339,6 +4339,8 @@ def run_video_ai_edit(job: dict) -> None:
     }
     output_file_id = ""
     result_url = ""
+    recovered_task_id = video_ai_edit_status.resolve_provider_task_id(job)
+    provider_task_id = recovered_task_id
     try:
         payload = json.loads(str(job.get("input_file_id") or "") or "{}")
         if not isinstance(payload, dict) or not payload.get("aiedit1_contract"):
@@ -4349,12 +4351,20 @@ def run_video_ai_edit(job: dict) -> None:
         )
         deadline_monotonic = time.monotonic() + render_timeout
         lane = str(payload.get("execution_lane") or "local").strip().lower()
-        policy = video_ai_edit_provider.submit_source_policy(
-            str(payload.get("submit_source") or ""),
-            public_user_confirmed=bool(payload.get("public_user_confirmed")),
-            lane=lane,
-            env=os.environ,
-        )
+        if recovered_task_id:
+            policy = video_ai_edit_provider.submit_source_policy(
+                video_ai_edit_provider.POLL_EXISTING_TASK_SOURCE,
+                public_user_confirmed=True,
+                lane=lane,
+                env=os.environ,
+            )
+        else:
+            policy = video_ai_edit_provider.submit_source_policy(
+                str(payload.get("submit_source") or ""),
+                public_user_confirmed=bool(payload.get("public_user_confirmed")),
+                lane=lane,
+                env=os.environ,
+            )
         if not policy.get("allowed"):
             raise video_ai_edit_provider.AiEditProviderError(str(policy.get("reason") or "ai_edit_submit_blocked"))
         source_file_id = str(payload.get("source_file_id") or "")
@@ -4405,7 +4415,6 @@ def run_video_ai_edit(job: dict) -> None:
         provider_name = "local_ffmpeg"
         model = "local_enhancement"
         poll_count = 0
-        provider_task_id = ""
         fallback_count = 0
         if lane == "local":
             plan = _aiedit_local_plan(payload, source_path)
@@ -4431,50 +4440,68 @@ def run_video_ai_edit(job: dict) -> None:
             ready = _aiedit_ready_provider_configs(payload)
             if not ready:
                 raise video_ai_edit_provider.AiEditProviderError("ai_edit_video_to_video_provider_unavailable")
-            preprocessed_path = workspace / "provider_input.mp4"
-            video_ai_edit_validation.preprocess_source_video(
-                source_path,
-                str(preprocessed_path),
-                workspace=workspace,
-                ffmpeg_path=ffmpeg,
-                ffprobe_path=ffprobe,
-                target_duration_seconds=int(payload.get("target_duration_seconds") or 0),
-                preserve_audio=bool(payload.get("preserve_source_audio", True)),
-                env=os.environ,
-                timeout=render_timeout,
-                deadline_monotonic=deadline_monotonic,
-            )
             primary = ready[0]
             provider_name, model = primary.provider_name, primary.model
-            try:
-                provider_result = _aiedit_submit_and_wait(
-                    job_id,
-                    payload,
+            if recovered_task_id:
+                def on_poll_recovered(status: dict) -> None:
+                    _aiedit_progress(
+                        job_id,
+                        "ai_processing",
+                        provider_task_id=recovered_task_id,
+                        provider_status=str(status.get("status") or "running"),
+                        poll_count=int(status.get("poll_count") or 0),
+                        result_url_present=bool(status.get("result_url_present")),
+                    )
+
+                provider_result = video_ai_edit_provider.wait_for_result(
                     primary,
-                    str(preprocessed_path),
+                    recovered_task_id,
+                    progress=on_poll_recovered,
                     deadline_monotonic=deadline_monotonic,
                 )
-            except video_ai_edit_provider.AiEditProviderError as primary_error:
-                fallback = ready[1] if len(ready) > 1 else None
-                decision = video_ai_edit_provider.controlled_fallback_decision(
-                    public_confirm_provenance=bool(payload.get("public_user_confirmed")),
-                    primary_status="failed" if primary_error.reason not in {"provider_poll_timeout"} else "timeout_waiting",
-                    primary_task_alive=False,
-                    fallback_count=0,
-                    candidate=fallback,
-                )
-                if not decision.get("allowed"):
-                    raise
-                fallback_count = 1
-                provider_name, model = fallback.provider_name, fallback.model
-                provider_result = _aiedit_submit_and_wait(
-                    job_id,
-                    payload,
-                    fallback,
+            else:
+                preprocessed_path = workspace / "provider_input.mp4"
+                video_ai_edit_validation.preprocess_source_video(
+                    source_path,
                     str(preprocessed_path),
+                    workspace=workspace,
+                    ffmpeg_path=ffmpeg,
+                    ffprobe_path=ffprobe,
+                    target_duration_seconds=int(payload.get("target_duration_seconds") or 0),
+                    preserve_audio=bool(payload.get("preserve_source_audio", True)),
+                    env=os.environ,
+                    timeout=render_timeout,
                     deadline_monotonic=deadline_monotonic,
                 )
-            provider_task_id = str(provider_result.get("provider_task_id") or "")
+                try:
+                    provider_result = _aiedit_submit_and_wait(
+                        job_id,
+                        payload,
+                        primary,
+                        str(preprocessed_path),
+                        deadline_monotonic=deadline_monotonic,
+                    )
+                except video_ai_edit_provider.AiEditProviderError as primary_error:
+                    fallback = ready[1] if len(ready) > 1 else None
+                    decision = video_ai_edit_provider.controlled_fallback_decision(
+                        public_confirm_provenance=bool(payload.get("public_user_confirmed")),
+                        primary_status="failed" if primary_error.reason not in {"provider_poll_timeout"} else "timeout_waiting",
+                        primary_task_alive=False,
+                        fallback_count=0,
+                        candidate=fallback,
+                    )
+                    if not decision.get("allowed"):
+                        raise
+                    fallback_count = 1
+                    provider_name, model = fallback.provider_name, fallback.model
+                    provider_result = _aiedit_submit_and_wait(
+                        job_id,
+                        payload,
+                        fallback,
+                        str(preprocessed_path),
+                        deadline_monotonic=deadline_monotonic,
+                    )
+                provider_task_id = str(provider_result.get("provider_task_id") or "")
             poll_count = int(provider_result.get("poll_count") or 0)
             result_url = str(provider_result.get("result_url") or "")
             if not result_url:
@@ -4551,7 +4578,15 @@ def run_video_ai_edit(job: dict) -> None:
             "cleanup": "pending",
         }
     except (video_ai_edit_provider.AiEditProviderError, video_ai_edit_validation.AiEditValidationError) as exc:
-        terminal["reason"] = str(getattr(exc, "reason", str(exc)))[:160]
+        exc_reason = str(getattr(exc, "reason", str(exc)))[:160]
+        if exc_reason == "provider_poll_timeout" and provider_task_id:
+            terminal_status = "running"
+            terminal["stage"] = "ai_processing"
+            terminal["provider_status"] = "timeout_waiting"
+            terminal["reason"] = "provider_poll_timeout"
+            terminal["provider_task_id"] = provider_task_id
+        else:
+            terminal["reason"] = exc_reason
     except Exception as exc:
         raw_reason = first_line(str(exc))
         failure_reason = (
@@ -4564,9 +4599,11 @@ def run_video_ai_edit(job: dict) -> None:
             terminal["stage"] = "delivery_unknown"
             terminal["delivery"] = "unknown"
     finally:
+        if provider_task_id and "provider_task_id" not in terminal:
+            terminal["provider_task_id"] = provider_task_id
         cleanup = cleanup_job_workspace(workspace) if workspace else {"ok": True, "removed": False}
         terminal["cleanup"] = "done" if cleanup.get("ok") else "failed"
-        if not cleanup.get("ok") and terminal_status != "succeeded":
+        if not cleanup.get("ok") and terminal_status not in {"succeeded", "running"}:
             cleanup_reason = str(cleanup.get("reason") or "cleanup_failed")[:160]
             if str(terminal.get("stage") or "") == "delivery_unknown":
                 terminal["cleanup_reason"] = cleanup_reason

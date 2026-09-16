@@ -46380,6 +46380,114 @@ def get_local_worker_job_by_provider_task_id(provider_task_id, *, conn=None) -> 
             conn.close()
 
 
+def find_recoverable_video_ai_edit_jobs(*, conn=None, limit: int = 10) -> list[dict]:
+    """Find nonterminal running video_ai_edit jobs that have a provider task ID."""
+    owns_connection = conn is None
+    conn = conn or db_connect_readonly()
+    try:
+        c = conn.cursor()
+        c.execute(
+            """SELECT id,user_id,command,job_type,status,provider,input_file_id,output_file_id,output_url,
+                      error_short,created_at,started_at,finished_at,xu_cost,admin_only,worker_id,updated_at,provider_task_id
+               FROM local_worker_jobs
+               WHERE job_type='video_ai_edit'
+                 AND status NOT IN ('succeeded', 'failed', 'cancelled')
+                 AND (
+                     (provider_task_id IS NOT NULL AND provider_task_id != '')
+                     OR (error_short LIKE '%"provider_task_id"%' AND error_short LIKE '%"aiedit1"%')
+                 )
+               ORDER BY id ASC
+               LIMIT ?""",
+            (max(1, int(limit or 10)),),
+        )
+        rows = c.fetchall()
+        jobs = []
+        for r in rows:
+            job = local_worker_job_from_row(r)
+            if video_ai_edit_status.is_recoverable_video_ai_edit_job(job):
+                jobs.append(job)
+        return jobs
+    finally:
+        if owns_connection:
+            conn.close()
+
+
+def claim_recoverable_video_ai_edit_job(
+    *,
+    worker_id: str = "local_worker",
+    lease_seconds: int = 600,
+    conn=None,
+) -> dict:
+    """Atomically claim one recoverable running video_ai_edit job for a worker.
+    Populates canonical provider_task_id column from legacy error_short if needed,
+    and updates worker_id and updated_at atomically to guarantee single-worker ownership.
+    """
+    owns_connection = conn is None
+    conn = conn or db_connect()
+    try:
+        now = now_text()
+        c = conn.cursor()
+        c.execute(
+            """SELECT id,user_id,command,job_type,status,provider,input_file_id,output_file_id,output_url,
+                      error_short,created_at,started_at,finished_at,xu_cost,admin_only,worker_id,updated_at,provider_task_id
+               FROM local_worker_jobs
+               WHERE job_type='video_ai_edit'
+                 AND status NOT IN ('succeeded', 'failed', 'cancelled')
+                 AND (
+                     (provider_task_id IS NOT NULL AND provider_task_id != '')
+                     OR (error_short LIKE '%"provider_task_id"%' AND error_short LIKE '%"aiedit1"%')
+                 )
+               ORDER BY id ASC
+               LIMIT 10""",
+        )
+        rows = c.fetchall()
+        for r in rows:
+            job = local_worker_job_from_row(r)
+            if not video_ai_edit_status.is_recoverable_video_ai_edit_job(job):
+                continue
+            existing_worker = str(job.get("worker_id") or "").strip()
+            if existing_worker and existing_worker != worker_id:
+                updated_at_val = str(job.get("updated_at") or job.get("started_at") or "")
+                if updated_at_val:
+                    try:
+                        up_dt = datetime.strptime(updated_at_val[:19], "%Y-%m-%d %H:%M:%S")
+                        now_dt = datetime.strptime(now[:19], "%Y-%m-%d %H:%M:%S")
+                        if (now_dt - up_dt).total_seconds() < lease_seconds:
+                            continue
+                    except Exception:
+                        pass
+            job_id = job["id"]
+            canonical_task_id = video_ai_edit_status.resolve_provider_task_id(job)
+            current_status = job.get("status")
+            orig_worker = job.get("worker_id")
+            if orig_worker is not None and str(orig_worker).strip():
+                c.execute(
+                    """UPDATE local_worker_jobs
+                       SET worker_id=?, updated_at=?,
+                           provider_task_id=CASE WHEN provider_task_id IS NULL OR provider_task_id='' THEN ? ELSE provider_task_id END
+                       WHERE id=? AND status=? AND worker_id=?""",
+                    (worker_id, now, canonical_task_id, job_id, current_status, str(orig_worker)),
+                )
+            else:
+                c.execute(
+                    """UPDATE local_worker_jobs
+                       SET worker_id=?, updated_at=?,
+                           provider_task_id=CASE WHEN provider_task_id IS NULL OR provider_task_id='' THEN ? ELSE provider_task_id END
+                       WHERE id=? AND status=? AND (worker_id IS NULL OR worker_id='')""",
+                    (worker_id, now, canonical_task_id, job_id, current_status),
+                )
+            if c.rowcount > 0:
+                if owns_connection:
+                    conn.commit()
+                return get_local_worker_job(job_id, conn=conn)
+        if owns_connection:
+            conn.commit()
+        return {}
+    finally:
+        if owns_connection:
+            conn.close()
+
+
 def get_latest_video_editor_job(user_id) -> dict:
     """Return the requesting user's newest canonical local Video Edit job."""
 
@@ -46484,6 +46592,13 @@ def update_local_worker_job(
         effective_provider_task_id = str(provider_task_id).strip()
     else:
         effective_provider_task_id = existing_provider_task_id
+    if not effective_provider_task_id and error_short:
+        try:
+            parsed_new_err = json.loads(str(error_short or "") or "{}")
+            if isinstance(parsed_new_err, dict) and parsed_new_err.get("aiedit1"):
+                effective_provider_task_id = str(parsed_new_err.get("provider_task_id") or "").strip()
+        except Exception:
+            pass
     now = now_text()
     job_type = str(job.get("job_type") or "")
     detail_limit = 128 * 1024 if job_type == "video_local_edit" else 4000 if job_type == "video_ai_edit" else 500
@@ -271391,16 +271506,31 @@ async def internal_worker_poll(request: Request):
         if worker_scope == "video_edit_only":
             conn.commit()
             return {"ok": True, "enabled": True, "poll_enabled": True, "job": None}
+        recoverable_job = claim_recoverable_video_ai_edit_job(
+            worker_id=worker_id,
+            lease_seconds=lease_seconds,
+            conn=conn,
+        )
+        if recoverable_job:
+            conn.commit()
+            return {
+                "ok": True,
+                "enabled": True,
+                "poll_enabled": True,
+                "max_job_seconds": LOCAL_WORKER_MAX_JOB_SECONDS,
+                "job": recoverable_job,
+            }
         c = conn.cursor()
         c.execute(
             """SELECT id,user_id,command,job_type,status,provider,input_file_id,output_file_id,output_url,
-                      error_short,created_at,started_at,finished_at,xu_cost,admin_only,worker_id,updated_at
+                      error_short,created_at,started_at,finished_at,xu_cost,admin_only,worker_id,updated_at,provider_task_id
                FROM local_worker_jobs
                WHERE status='queued' AND job_type<>?
                ORDER BY id ASC
                LIMIT 1""",
             (video_editengine1.WORKER_JOB_TYPE,),
         )
+
         row = c.fetchone()
         if not row:
             conn.commit()
