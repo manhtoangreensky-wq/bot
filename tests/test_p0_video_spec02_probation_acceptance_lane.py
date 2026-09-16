@@ -165,7 +165,7 @@ def _base_valid_auth(*, job_id=101, user_id=12345, project_id=501):
         "job_id": job_id,
         "user_id": user_id,
         "project_id": project_id,
-        "runtime_sha": CANONICAL_ACCEPTANCE_RUNTIME_SHA,
+        "runtime_sha": resolve_runtime_sha() or CANONICAL_ACCEPTANCE_RUNTIME_SHA,
         "max_provider_spend": 1.00,
         "max_provider_spend_unit": "USD",
         "consumed": False,
