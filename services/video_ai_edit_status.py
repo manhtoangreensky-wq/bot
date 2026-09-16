@@ -185,6 +185,21 @@ def resolve_provider_task_id(job: dict[str, Any] | None) -> str:
     return str(progress.get("provider_task_id") or "").strip()
 
 
+def is_recoverable_video_ai_edit_job(job: dict[str, Any] | None) -> bool:
+    """Check if a video_ai_edit job is in a nonterminal running state with a recoverable provider task ID."""
+    if not job or not isinstance(job, dict):
+        return False
+    if str(job.get("job_type") or "").strip() != "video_ai_edit":
+        return False
+    status = str(job.get("status") or "").strip().lower()
+    if status in {"succeeded", "failed", "cancelled", "completed"}:
+        return False
+    if status not in {"running", "processing"}:
+        return False
+    task_id = resolve_provider_task_id(job)
+    return bool(task_id)
+
+
 def job_debug_payload(job: dict[str, Any]) -> dict[str, Any]:
     raw_input = str(job.get("input_file_id") or "")
     try:
@@ -217,6 +232,6 @@ def job_debug_payload(job: dict[str, Any]) -> dict[str, Any]:
 
 __all__ = [
     "PUBLIC_STAGE_LABELS", "STAGE_ORDER", "admin_status_payload", "job_debug_payload",
-    "parse_progress", "progress_json", "public_status_text", "reconcile_progress",
-    "resolve_provider_task_id",
+    "is_recoverable_video_ai_edit_job", "parse_progress", "progress_json",
+    "public_status_text", "reconcile_progress", "resolve_provider_task_id",
 ]
