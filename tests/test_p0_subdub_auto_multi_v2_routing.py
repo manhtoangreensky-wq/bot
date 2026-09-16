@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 import bot
 from services.subdub_blackboxes import auto_multi_speaker_v2, auto_multi_speaker, auto_speaker
 
@@ -116,3 +116,57 @@ def test_routing_k_two_speaker_protected_auto2_unchanged():
     assert bot.subdub_auto_multi_v2_route_enabled(state) is False
     assert bot.subdub_auto_blackbox_runner(state) == auto_speaker.run_auto_speaker_blackbox
     assert state.get("subdub_engine_selected") == "auto_speaker"
+
+
+def test_routing_l_historical_job_50bff_reconstructed_state():
+    state = _base_multi_state(
+        job_id="50bff8620870539176fa",
+        source="/tmp/toan_aas_pipeline/50bff8620870539176fa/test_m_i_multi.mp4",
+        input_save={"original_filename": "test mới multi.mp4"},
+        mode="subtitle_plus_dub",
+        target_language=None,
+    )
+    assert bot.subdub_auto_multi_v2_route_enabled(state) is True
+    engine_name, reason = bot.subdub_auto_routing_decision(state)
+    assert engine_name == "auto_multi_speaker_v2"
+    assert reason == "authorized_fixture_identity"
+    assert bot.subdub_auto_blackbox_runner(state) == auto_multi_speaker_v2.run_auto_multi_speaker_v2_blackbox
+    assert state.get("subdub_engine_selected") == "auto_multi_speaker_v2"
+
+
+def test_routing_m_target_language_separation_none_vs_vi():
+    state_none = _base_multi_state(
+        job_id="50bff8620870539176fa",
+        input_save={"original_filename": "test mới multi.mp4"},
+        target_language=None,
+    )
+    state_vi = _base_multi_state(
+        job_id="50bff8620870539176fa",
+        input_save={"original_filename": "test mới multi.mp4"},
+        target_language="vi",
+    )
+    assert bot.subdub_auto_multi_v2_route_enabled(state_none) is True
+    assert bot.subdub_auto_multi_v2_route_enabled(state_vi) is True
+    assert bot.subdub_auto_routing_decision(state_none)[0] == "auto_multi_speaker_v2"
+    assert bot.subdub_auto_routing_decision(state_vi)[0] == "auto_multi_speaker_v2"
+
+
+def test_routing_n_malformed_input_save_type():
+    state = _base_multi_state(job_id="ffff9999000011112222", input_save="not_a_dict")
+    assert bot.resolve_subdub_original_filename(state) == ""
+    assert bot.subdub_auto_multi_v2_route_enabled(state) is False
+    engine_name, reason = bot.subdub_auto_routing_decision(state)
+    assert engine_name == "auto_multi_speaker"
+    assert bot.subdub_auto_blackbox_runner(state) == auto_multi_speaker.run_auto_multi_speaker_blackbox
+
+
+def test_routing_o_unrelated_unicode_filename_no_cutover():
+    state = _base_multi_state(
+        job_id="ffff9999000011112222",
+        input_save={"original_filename": "hội_thảo_khoa_học_2026.mp4"},
+    )
+    assert bot.subdub_auto_multi_v2_route_enabled(state) is False
+    engine_name, reason = bot.subdub_auto_routing_decision(state)
+    assert engine_name == "auto_multi_speaker"
+    assert bot.subdub_auto_blackbox_runner(state) == auto_multi_speaker.run_auto_multi_speaker_blackbox
+

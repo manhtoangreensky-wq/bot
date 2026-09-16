@@ -13,6 +13,7 @@ from typing import Any
 
 from services import subdub_media_preflight
 from services import subdub_speaker_cast as speaker_cast
+from services import subdub_tts_checkpoint
 from services.subdub_blackboxes import auto_multi_speaker
 from services.subdub_blackboxes import auto_speaker
 
@@ -38,6 +39,7 @@ AUTO_MULTI_V2_FAILURE_STAGES = frozenset({
     "cue_assignment",
     "voice_policy",
     "tts_scalar",
+    "tts_checkpoint",
     "lane_runner",
     "output_validation",
     "unknown",
@@ -48,6 +50,10 @@ AUTO_MULTI_V2_FAILURE_CODES = frozenset({
     "auto_cast_manual_required",
     "voice_pool_capacity_insufficient",
     "scalar_audio_missing",
+    "tts_ambiguous_submission",
+    "tts_artifact_corruption",
+    "tts_contract_mismatch",
+    "tts_quote_mismatch",
 })
 
 
@@ -72,6 +78,7 @@ def _bounded_auto_multi_v2_failure(
     return {
         "auto_multi_failure_stage": bounded_stage,
         "auto_multi_failure_code": bounded_code,
+        "auto_multi_failure_detail": str(error),
     }
 
 
@@ -460,15 +467,94 @@ async def _run_isolated_multi_speaker_v2_blackbox(
             if compatibility_voice != expected_selected_signature[0][1]:
                 raise speaker_cast.AutoCastManualRequired()
 
+            ws = str(
+                current.get("_pipeline_workspace")
+                or current.get("workspace")
+                or (annotated_prepared.get("_pipeline_workspace") if isinstance(annotated_prepared, dict) else "")
+                or (annotated_prepared.get("workspace") if isinstance(annotated_prepared, dict) else "")
+                or ""
+            )
+            if not ws:
+                import tempfile
+                ws = tempfile.mkdtemp(prefix="subdub_tts_ws_")
+            job_id = str(
+                current.get("job_id")
+                or current.get("_pipeline_job_id")
+                or payload.get("job_id")
+                or "subdub_auto_multi_v2"
+            )
+            target_lang = str(current.get("target_language") or "vi")
+            quote_fp = str(current.get("quote_fingerprint") or current.get("confirmed_quote_id") or "")
+
+            try:
+                checkpoint_mgr = subdub_tts_checkpoint.SubdubTTSCheckpointManager(
+                    workspace=ws,
+                    job_id=job_id,
+                    target_language=target_lang,
+                    quote_fingerprint=quote_fp,
+                )
+            except subdub_tts_checkpoint.SubdubTTSQuoteMismatchError as exc:
+                record_owned_failure(exc, stage="tts_checkpoint", code="tts_quote_mismatch")
+                raise
+            except subdub_tts_checkpoint.SubdubTTSContractMismatchError as exc:
+                record_owned_failure(exc, stage="tts_checkpoint", code="tts_contract_mismatch")
+                raise
+            except subdub_tts_checkpoint.SubdubTTSCheckpointError as exc:
+                record_owned_failure(exc, stage="tts_checkpoint", code="tts_ambiguous_submission")
+                raise
+
             chunks: list[dict[str, Any]] = []
             provider_labels: list[str] = []
             scalar_result_count = 0
             for cue in selected:
+                cue_voice_id = str(cue["tts_voice_id"])
+                try:
+                    is_reused, artifact_path, cached_bytes, entry = checkpoint_mgr.prepare_cue_intent(
+                        cue, cue_voice_id
+                    )
+                except subdub_tts_checkpoint.SubdubTTSAmbiguousSubmissionError as exc:
+                    record_owned_failure(exc, stage="tts_checkpoint", code="tts_ambiguous_submission")
+                    raise
+                except subdub_tts_checkpoint.SubdubTTSArtifactCorruptionError as exc:
+                    record_owned_failure(exc, stage="tts_checkpoint", code="tts_artifact_corruption")
+                    raise
+                except subdub_tts_checkpoint.SubdubTTSContractMismatchError as exc:
+                    record_owned_failure(exc, stage="tts_checkpoint", code="tts_contract_mismatch")
+                    raise
+                except subdub_tts_checkpoint.SubdubTTSQuoteMismatchError as exc:
+                    record_owned_failure(exc, stage="tts_checkpoint", code="tts_quote_mismatch")
+                    raise
+                except subdub_tts_checkpoint.SubdubTTSCheckpointError as exc:
+                    record_owned_failure(exc, stage="tts_checkpoint", code="tts_ambiguous_submission")
+                    raise
+
+                if is_reused and entry is not None:
+                    reconstructed_chunks = checkpoint_mgr.reconstruct_chunks(cue, entry, cached_bytes)
+                    provider_label = str(entry.get("provider_label") or "")
+                    scalar_chunks, verified_provider = auto_speaker._validated_scalar_result(
+                        {"chunks": reconstructed_chunks, "provider": provider_label},
+                        cue,
+                    )
+                    chunks.extend(scalar_chunks)
+                    provider_labels.append(verified_provider)
+                    scalar_result_count += 1
+                    continue
+
                 scalar_kwargs = dict(kwargs)
-                scalar_kwargs["voice_id"] = cue["tts_voice_id"]
-                scalar_result = await auto_speaker._maybe_await(
-                    synthesize_segments([cue], *args, **scalar_kwargs)
-                )
+                scalar_kwargs["voice_id"] = cue_voice_id
+                try:
+                    scalar_result = await auto_speaker._maybe_await(
+                        synthesize_segments([cue], *args, **scalar_kwargs)
+                    )
+                except Exception as net_exc:
+                    checkpoint_mgr.record_cue_ambiguous(cue, cue_voice_id, net_exc)
+                    record_owned_failure(
+                        net_exc,
+                        stage="tts_checkpoint",
+                        code="tts_ambiguous_submission",
+                    )
+                    raise
+
                 try:
                     scalar_chunks, provider_label = (
                         auto_speaker._validated_scalar_result(scalar_result, cue)
@@ -477,6 +563,7 @@ async def _run_isolated_multi_speaker_v2_blackbox(
                     speaker_cast.AutoCastUnavailable,
                     speaker_cast.AutoCastManualRequired,
                 ) as exc:
+                    checkpoint_mgr.record_cue_ambiguous(cue, cue_voice_id, exc)
                     raw_chunks = (
                         scalar_result.get("chunks")
                         if isinstance(scalar_result, Mapping)
@@ -505,9 +592,25 @@ async def _run_isolated_multi_speaker_v2_blackbox(
                         ),
                     )
                     raise
+
+                primary_audio = bytes(scalar_chunks[0].get("audio_bytes") or b"")
+                primary_dur = float(
+                    scalar_chunks[0].get("audio_duration")
+                    or scalar_chunks[0].get("raw_audio_duration")
+                    or 0.0
+                )
+                checkpoint_mgr.record_cue_success(
+                    cue,
+                    cue_voice_id,
+                    primary_audio,
+                    duration=primary_dur,
+                    provider_label=provider_label,
+                    chunks_meta=scalar_chunks,
+                )
                 chunks.extend(scalar_chunks)
                 provider_labels.append(provider_label)
                 scalar_result_count += 1
+
             if scalar_result_count != len(selected):
                 raise speaker_cast.AutoCastUnavailable()
             return {
@@ -519,8 +622,10 @@ async def _run_isolated_multi_speaker_v2_blackbox(
         except (
             speaker_cast.AutoCastUnavailable,
             speaker_cast.AutoCastManualRequired,
+            subdub_tts_checkpoint.SubdubTTSCheckpointError,
         ) as exc:
-            record_owned_failure(exc, stage="tts_scalar")
+            if not failure_slot:
+                record_owned_failure(exc, stage="tts_scalar")
             raise
 
     lane_payload = dict(payload)
@@ -545,6 +650,7 @@ async def _run_isolated_multi_speaker_v2_blackbox(
     except (
         speaker_cast.AutoCastUnavailable,
         speaker_cast.AutoCastManualRequired,
+        subdub_tts_checkpoint.SubdubTTSCheckpointError,
     ) as exc:
         return owned_failure_result(exc)
     except Exception:
