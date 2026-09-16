@@ -73,6 +73,21 @@ _KEY4U_EXCLUSIVE_ENDPOINT_ENVS = {
         "KEY4U_VEO_VIDEO_SUBMIT_URL",
     ),
 }
+_KEY4U_EXCLUSIVE_I2V_ENDPOINT_ENVS = {
+    "kling": (
+        "KEY4U_KLING_I2V_ENDPOINT",
+        "KEY4U_KLING_IMAGE2VIDEO_ENDPOINT",
+        "KEY4U_KLING_I2V_SUBMIT_URL",
+        "KEY4U_KLING_IMAGE2VIDEO_SUBMIT_URL",
+        "KEY4U_KELING_I2V_ENDPOINT",
+    ),
+    "keling": (
+        "KEY4U_KELING_I2V_ENDPOINT",
+        "KEY4U_KLING_I2V_ENDPOINT",
+        "KEY4U_KELING_IMAGE2VIDEO_SUBMIT_URL",
+        "KEY4U_KLING_IMAGE2VIDEO_SUBMIT_URL",
+    ),
+}
 _KEY4U_EXCLUSIVE_POLL_ENVS = {
     "kling": ("KEY4U_KLING_VIDEO_POLL_URL", "KEY4U_KLING_POLL_URL", "KEY4U_KELING_VIDEO_POLL_URL"),
     "keling": ("KEY4U_KELING_VIDEO_POLL_URL", "KEY4U_KLING_VIDEO_POLL_URL"),
@@ -266,6 +281,7 @@ def model_interface_contract(
     provider: str,
     model: str,
     *,
+    capability: str = "",
     env: dict[str, str] | os._Environ[str] | None = None,
     catalog: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -291,7 +307,37 @@ def model_interface_contract(
     if provider_name != "key4u_video":
         return base
     if family in {"kling", "keling"}:
-        submit_url, submit_source = _first_endpoint(data, _KEY4U_EXCLUSIVE_ENDPOINT_ENVS.get(family, _KEY4U_EXCLUSIVE_ENDPOINT_ENVS["kling"]))
+        norm_cap = str(capability or "").strip().lower().replace("-", "_")
+        if norm_cap == "image_to_video":
+            submit_url, submit_source = _first_endpoint(
+                data,
+                _KEY4U_EXCLUSIVE_I2V_ENDPOINT_ENVS.get(family, _KEY4U_EXCLUSIVE_I2V_ENDPOINT_ENVS["kling"]),
+            )
+            if not submit_url:
+                base_submit_url, base_source = _first_endpoint(
+                    data,
+                    _KEY4U_EXCLUSIVE_ENDPOINT_ENVS.get(family, _KEY4U_EXCLUSIVE_ENDPOINT_ENVS["kling"]),
+                )
+                if base_submit_url:
+                    parsed = urllib.parse.urlsplit(base_submit_url)
+                    path = parsed.path.rstrip("/")
+                    if path.endswith("/text2video"):
+                        new_path = path[:-10] + "image2video"
+                    elif path.endswith("/videos"):
+                        new_path = path + "/image2video"
+                    elif not path.endswith("/image2video"):
+                        new_path = path + "/videos/image2video"
+                    else:
+                        new_path = path
+                    submit_url = urllib.parse.urlunsplit(
+                        (parsed.scheme, parsed.netloc, new_path, parsed.query, parsed.fragment)
+                    )
+                    submit_source = f"normalized_i2v:{base_source}"
+        else:
+            submit_url, submit_source = _first_endpoint(
+                data,
+                _KEY4U_EXCLUSIVE_ENDPOINT_ENVS.get(family, _KEY4U_EXCLUSIVE_ENDPOINT_ENVS["kling"]),
+            )
         poll_url, poll_source = _first_endpoint(data, _KEY4U_EXCLUSIVE_POLL_ENVS.get(family, ()))
         base.update(
             {
@@ -822,12 +868,14 @@ def enrich_metadata_with_model_contract(
     provider: str,
     model: str,
     *,
+    capability: str = "",
     env: dict[str, str] | os._Environ[str] | None = None,
 ) -> dict[str, Any]:
     meta = dict(metadata or {})
     contract = payload_contract_for_model(provider, model)
     cfg = provider_model_config(provider, model)
-    interface = model_interface_contract(provider, model, env=env)
+    cap = capability or str(meta.get("required_capability") or meta.get("capability") or "")
+    interface = model_interface_contract(provider, model, capability=cap, env=env)
     meta.update(
         {
             "selected_provider": str(provider or "").strip().lower(),
@@ -870,7 +918,13 @@ def enforce_payload_contract(
 ) -> dict[str, Any]:
     data = dict(payload or {})
     contract = payload_contract_for_model(provider, model)
-    metadata = enrich_metadata_with_model_contract(data.get("metadata") if isinstance(data.get("metadata"), dict) else {}, provider, model, env=env)
+    metadata = enrich_metadata_with_model_contract(
+        data.get("metadata") if isinstance(data.get("metadata"), dict) else {},
+        provider,
+        model,
+        capability=str(data.get("capability") or ""),
+        env=env,
+    )
     if contract:
         allowed = set(str(item) for item in (contract.get("allowed_fields") or []) if str(item))
         model_capabilities = set(normalize_capability_values(contract.get("capabilities") or []))

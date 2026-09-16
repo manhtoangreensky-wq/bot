@@ -7,6 +7,7 @@ submit -> poll -> result_url without hardcoding a vendor-specific SDK.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -14,6 +15,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 from services.video_provider_base import (
@@ -656,8 +658,111 @@ def _shopaikey_selected_clip_seconds(request: VideoGenerationRequest, env: dict[
     return max(1, min(8, configured))
 
 
+def serialize_local_image_for_provider_wire(
+    image_input: Any,
+    *,
+    max_bytes: int = 10 * 1024 * 1024,
+) -> str:
+    """Serializes local image file to base64 for provider wire transmission.
+
+    Reachable remote URLs and data URIs are preserved as-is. Fails closed
+    (no charge) if image is missing, empty, or exceeds worker size limit.
+    Raw local filesystem paths are NEVER sent on the wire.
+    """
+    if isinstance(image_input, (list, tuple)):
+        items = [x for x in image_input if x]
+        if not items:
+            raise VideoProviderContractError(
+                "provider_image_input_missing_or_invalid",
+                stage="payload_build",
+                debug={"blocker": "provider_image_input_missing_or_invalid", "no_charge": True},
+            )
+        image_input = items[0]
+
+    if isinstance(image_input, dict):
+        image_input = (
+            image_input.get("url")
+            or image_input.get("image_url")
+            or image_input.get("path")
+            or image_input.get("image_path")
+            or image_input.get("image")
+            or ""
+        )
+
+    val = str(image_input or "").strip()
+    if not val:
+        raise VideoProviderContractError(
+            "provider_image_input_missing_or_invalid",
+            stage="payload_build",
+            debug={"blocker": "provider_image_input_missing_or_invalid", "no_charge": True},
+        )
+
+    if val.startswith(("http://", "https://", "data:image/")):
+        return val
+
+    path = Path(val)
+    try:
+        exists = path.is_file()
+    except Exception:
+        exists = False
+
+    if not exists:
+        has_path_delims = ("/" in val or "\\" in val)
+        has_ext = any(val.lower().endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"))
+        if not has_path_delims and not has_ext and len(val) >= 64:
+            try:
+                base64.b64decode(val, validate=True)
+                return val
+            except Exception:
+                pass
+        raise VideoProviderContractError(
+            "provider_image_input_missing_or_invalid",
+            stage="payload_build",
+            debug={"blocker": "provider_image_input_missing_or_invalid", "no_charge": True},
+        )
+
+    try:
+        size = path.stat().st_size
+    except Exception as exc:
+        raise VideoProviderContractError(
+            "provider_image_input_missing_or_invalid",
+            stage="payload_build",
+            debug={"blocker": "provider_image_input_missing_or_invalid", "no_charge": True},
+        ) from exc
+
+    if size == 0:
+        raise VideoProviderContractError(
+            "provider_image_input_empty",
+            stage="payload_build",
+            debug={"blocker": "provider_image_input_empty", "no_charge": True},
+        )
+    if size > max_bytes:
+        raise VideoProviderContractError(
+            "provider_image_input_too_large",
+            stage="payload_build",
+            debug={
+                "blocker": "provider_image_input_too_large",
+                "file_size": size,
+                "max_bytes": max_bytes,
+                "no_charge": True,
+            },
+        )
+
+    try:
+        content = path.read_bytes()
+    except Exception as exc:
+        raise VideoProviderContractError(
+            "provider_image_input_missing_or_invalid",
+            stage="payload_build",
+            debug={"blocker": "provider_image_input_missing_or_invalid", "no_charge": True},
+        ) from exc
+
+    return base64.b64encode(content).decode("ascii")
+
+
 def build_key4u_video_payload(request: VideoGenerationRequest, env: dict[str, str] | os._Environ[str] | None = None) -> dict[str, Any]:
     data = _base_video_payload(request, env)
+    capability = str(request.required_capability or data.get("capability") or "").strip().lower().replace("-", "_")
     model = str(
         selected_model_for_provider(request.metadata, "key4u_video")
         or (env or os.environ).get("KEY4U_VIDEO_MODEL")
@@ -671,7 +776,7 @@ def build_key4u_video_payload(request: VideoGenerationRequest, env: dict[str, st
                 stage="payload_build",
                 debug={"provider": "key4u_video", "model": model, "blocker": MODEL_UNKNOWN, "no_charge": True},
             )
-        interface = model_interface_contract("key4u_video", model, env=env)
+        interface = model_interface_contract("key4u_video", model, capability=capability, env=env)
         if interface.get("contract_validation_status") == "blocked":
             raise VideoProviderContractError(
                 str(interface.get("contract_block_reason") or "provider_contract_missing_no_charge"),
@@ -687,8 +792,16 @@ def build_key4u_video_payload(request: VideoGenerationRequest, env: dict[str, st
                 },
             )
         data["model"] = model
-        data["metadata"] = enrich_metadata_with_model_contract(data.get("metadata"), "key4u_video", model, env=env)
+        data["metadata"] = enrich_metadata_with_model_contract(data.get("metadata"), "key4u_video", model, capability=capability, env=env)
         data = _apply_selected_request_defaults(data, request, "key4u_video")
+        if capability == "image_to_video" and not data.get("image_paths") and not data.get("storyboard"):
+            req_meta = request.metadata if isinstance(request.metadata, dict) else {}
+            if req_meta.get("image_path"):
+                data["image_paths"] = [req_meta["image_path"]]
+            elif req_meta.get("image_url"):
+                data["image_paths"] = [req_meta["image_url"]]
+            elif req_meta.get("image"):
+                data["image_paths"] = [req_meta["image"]]
         data = enforce_payload_contract("key4u_video", model, data, env=env)
     return data
 
@@ -703,27 +816,99 @@ def _key4u_wire_payload(
     family = str(metadata.get("selected_family") or "").strip().lower()
     defaults = metadata.get("selected_request_defaults")
     defaults = defaults if isinstance(defaults, dict) else {}
+    capability = str(data.get("capability") or metadata.get("required_capability") or "").strip().lower().replace("-", "_")
+    parsed_submit_url = urllib.parse.urlsplit(str(submit_url or ""))
+    is_i2v = capability == "image_to_video" or parsed_submit_url.path.rstrip("/").endswith("/image2video")
+
     if family in {"kling", "keling"}:
-        raw_sound = data.get("sound") if data.get("sound") is not None else defaults.get("sound")
-        sound_enabled = str(raw_sound or "").strip().lower() not in {
-            "",
-            "0",
-            "false",
-            "off",
-            "no",
-            "none",
-        }
-        return {
-            "model_name": str(data.get("model_name") or defaults.get("model_name") or "kling-v3"),
-            "prompt": str(data.get("prompt") or "")[:500],
-            "negative_prompt": str(data.get("negative_prompt") or "")[:200],
-            "cfg_scale": 0.5,
-            "mode": str(data.get("mode") or defaults.get("mode") or "std"),
-            "aspect_ratio": str(data.get("aspect_ratio") or data.get("ratio") or "9:16"),
-            "duration": int(data.get("duration") or data.get("duration_seconds") or 5),
-            "callback_url": "",
-            "sound": "on" if sound_enabled else "off",
-        }
+        if is_i2v:
+            # 1. Model identifier mapping check
+            # Official documented models include kling-v3, kling-v2-6, kling-v2-5-turbo, kling-v2-5-pro, kling-v2-1, kling-3.0-turbo
+            # Internal alias 'kling-video' must NOT be sent directly on wire if unmapped.
+            model_candidate = str(data.get("model_name") or defaults.get("model_name") or "").strip()
+            if not model_candidate or model_candidate == "kling-video":
+                raise VideoProviderContractError(
+                    "I2V_MODEL_IDENTIFIER_MAPPING_GAP",
+                    stage="payload_build",
+                    debug={
+                        "provider": "key4u_video",
+                        "model": str(data.get("model") or "kling-video"),
+                        "model_name": model_candidate or "unmapped",
+                        "blocker": "I2V_MODEL_IDENTIFIER_MAPPING_GAP",
+                        "no_charge": True,
+                    },
+                )
+            resolved_model_name = model_candidate
+
+            # 2. Extract and serialize source image
+            image_src = (
+                data.get("image")
+                or data.get("image_paths")
+                or data.get("storyboard")
+                or data.get("image_url")
+                or metadata.get("image_path")
+                or metadata.get("image_url")
+                or metadata.get("image")
+            )
+            serialized_image = serialize_local_image_for_provider_wire(image_src)
+
+            # 3. Ratio mapping (preserve SPEC-PV01: 9:16, 16:9, 1:1)
+            ratio = str(data.get("aspect_ratio") or data.get("ratio") or "9:16").strip()
+            if ratio in {"9/16", "9x16"}:
+                ratio = "9:16"
+            elif ratio in {"16/9", "16x9"}:
+                ratio = "16:9"
+            elif ratio in {"1/1", "1x1"}:
+                ratio = "1:1"
+
+            # 4. Duration validation (Kling supports 5s, 10s)
+            duration = int(data.get("duration") or data.get("duration_seconds") or defaults.get("duration") or 5)
+            if duration not in {5, 10}:
+                raise VideoProviderContractError(
+                    "provider_duration_unsupported_no_charge",
+                    stage="payload_build",
+                    debug={
+                        "provider": "key4u_video",
+                        "model": resolved_model_name,
+                        "duration": duration,
+                        "supported_durations": [5, 10],
+                        "blocker": "provider_duration_unsupported_no_charge",
+                        "no_charge": True,
+                    },
+                )
+
+            wire = {
+                "model_name": resolved_model_name,
+                "image": serialized_image,
+                "prompt": str(data.get("prompt") or "")[:500],
+                "aspect_ratio": ratio,
+                "duration": duration,
+            }
+            mode = str(data.get("mode") or defaults.get("mode") or "").strip()
+            if mode:
+                wire["mode"] = mode
+            return wire
+        else:
+            raw_sound = data.get("sound") if data.get("sound") is not None else defaults.get("sound")
+            sound_enabled = str(raw_sound or "").strip().lower() not in {
+                "",
+                "0",
+                "false",
+                "off",
+                "no",
+                "none",
+            }
+            return {
+                "model_name": str(data.get("model_name") or defaults.get("model_name") or "kling-v3"),
+                "prompt": str(data.get("prompt") or "")[:500],
+                "negative_prompt": str(data.get("negative_prompt") or "")[:200],
+                "cfg_scale": 0.5,
+                "mode": str(data.get("mode") or defaults.get("mode") or "std"),
+                "aspect_ratio": str(data.get("aspect_ratio") or data.get("ratio") or "9:16"),
+                "duration": int(data.get("duration") or data.get("duration_seconds") or 5),
+                "callback_url": "",
+                "sound": "on" if sound_enabled else "off",
+            }
     if family == "minimax_hailuo":
         wire = {
             "model": str(data.get("model") or ""),
@@ -1265,18 +1450,63 @@ class GenericHttpVideoProvider:
                     "",
                 )
             )
+        if (
+            self.provider_name == "key4u_video"
+            and str(payload.get("capability") or "").strip().lower() == "image_to_video"
+            and str(payload_metadata.get("selected_family") or "").strip().lower() in {"kling", "keling"}
+        ):
+            if parsed_submit_url.path.rstrip("/").endswith("/text2video"):
+                submit_url = urllib.parse.urlunsplit(
+                    (
+                        parsed_submit_url.scheme,
+                        parsed_submit_url.netloc,
+                        parsed_submit_url.path.rstrip("/")[:-10] + "image2video",
+                        parsed_submit_url.query,
+                        parsed_submit_url.fragment,
+                    )
+                )
         if isinstance(payload.get("metadata"), dict):
             clean_metadata = dict(payload["metadata"])
             clean_metadata.pop("provider_submit_url_override", None)
             clean_metadata.pop("provider_poll_url_override", None)
             payload["metadata"] = clean_metadata
         auth_name, auth_value = self._auth_header()
-        if self.provider_name == "key4u_video":
-            wire_payload = _key4u_wire_payload(payload, submit_url=submit_url)
-        elif self.provider_name == "shopaikey_video":
-            wire_payload = _shopaikey_wire_payload(payload, submit_url=submit_url)
-        else:
-            wire_payload = payload
+        try:
+            if self.provider_name == "key4u_video":
+                wire_payload = _key4u_wire_payload(payload, submit_url=submit_url)
+            elif self.provider_name == "shopaikey_video":
+                wire_payload = _shopaikey_wire_payload(payload, submit_url=submit_url)
+            else:
+                wire_payload = payload
+        except VideoProviderContractError as exc:
+            raw_debug = {
+                "smoke_stage": exc.stage or "payload_build",
+                "provider": self.provider_name,
+                "selected_provider_before_submit": self.provider_name,
+                "submit_provider_key": self.provider_name,
+                "provider_submit_blocker": exc.blocker,
+                "blocker": exc.blocker,
+                "contract_validation_status": "blocked",
+                "contract_block_reason": exc.blocker,
+                "submit_skipped_due_to_contract": True,
+                "contract_reject_consumed_fallback": False,
+                "submit_accepted": False,
+                "poll_allowed": False,
+                "poll_skipped_reason": "submit_skipped_due_to_contract",
+                "http_status": 0,
+                "submit_http_status": 0,
+                "provider_submit_http_status": 0,
+                "provider_response_http_status": 0,
+                "no_charge": True,
+                **dict(exc.debug or {}),
+            }
+            return VideoSubmitResult(
+                ok=False,
+                provider_name=self.provider_name,
+                provider_status="contract_blocked",
+                error_code=exc.blocker,
+                raw=raw_debug,
+            )
         if (
             self.provider_name == "key4u_video"
             and str(payload_metadata.get("provider_interface") or "") == "key4u_google_veo_exclusive"
