@@ -1202,8 +1202,165 @@ def compute_owner_acceptance_attempt_fingerprint(auth: dict[str, Any] | None) ->
         ("tier", tier),
         ("user_id", user_id),
     ]
+    recovery_ref = str(
+        auth.get("recovery_previous_attempt_key")
+        or auth.get("previous_attempt_reference")
+        or auth.get("previous_attempt_key")
+        or ""
+    ).strip()
+    if recovery_ref:
+        canonical_tuples.append(("recovery_previous_attempt_key", recovery_ref))
+    recovery_gen = str(auth.get("recovery_generation_id") or auth.get("recovery_generation") or "").strip()
+    if recovery_gen:
+        canonical_tuples.append(("recovery_generation_id", recovery_gen))
     canonical_repr = json.dumps(canonical_tuples, separators=(",", ":"), sort_keys=True)
     return hashlib.sha256(canonical_repr.encode("utf-8")).hexdigest()
+
+
+def validate_owner_acceptance_recovery_eligibility(
+    auth: dict[str, Any],
+    conn: sqlite3.Connection | None = None,
+    *,
+    db_path: str | None = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Validate whether an owner acceptance recovery attempt satisfies the fail-closed pre-network recovery contract.
+
+    Contract Invariants (SPEC-03B1):
+    1. Previous attempt must exist in durable storage.
+    2. Previous attempt must have stage=CONSUMED_FAILED.
+    3. Hard reject if previous attempt has current_stage=CONSUMED_AMBIGUOUS (AMBIGUOUS_ATTEMPT_RECOVERY_RESUBMIT=NO).
+    4. Hard reject if previous attempt had provider_http_request_sent=True (TRANSMITTED_ATTEMPT_RECOVERY_RESUBMIT=NO).
+    5. Hard reject if previous attempt had provider_task_id present (TASK_ID_PRESENT_RECOVERY_RESUBMIT=NO).
+    6. Hard reject if previous attempt had provider_submit_count > 0.
+    7. Hard reject if previous attempt had user charge > 0.
+    8. Bound identities (user_id, job_id, project_id) must match.
+    """
+    if not isinstance(auth, dict) or not auth:
+        return False, "owner_acceptance_auth_missing", {}
+    recovery_ref = str(
+        auth.get("recovery_previous_attempt_key")
+        or auth.get("previous_attempt_reference")
+        or auth.get("previous_attempt_key")
+        or ""
+    ).strip()
+    if not recovery_ref:
+        return False, "recovery_reference_missing", {}
+
+    try:
+        ensure_video_trace_schema(conn, db_path=db_path)
+        c, should_close = get_db_connection(conn, db_path=db_path)
+        try:
+            candidates = [recovery_ref]
+            if not recovery_ref.startswith("OAA-") and not recovery_ref.startswith("OAT-"):
+                candidates.extend([f"OAA-{recovery_ref}", f"OAT-{recovery_ref}"])
+            placeholders = ",".join(["?"] * len(candidates))
+            query = f"""
+                SELECT request_id, job_id, project_id, confirm_attempt_key,
+                       provider_task_id, owner_user_id, product_type,
+                       current_stage, internal_blocker_code, trace_payload_json,
+                       created_at, updated_at
+                FROM video_request_traces
+                WHERE confirm_attempt_key IN ({placeholders}) OR request_id IN ({placeholders})
+                ORDER BY created_at DESC LIMIT 1
+            """
+            cursor = c.execute(query, tuple(candidates + candidates))
+            row = cursor.fetchone()
+            if row is None:
+                return False, "recovery_previous_attempt_not_found", {"previous_reference": recovery_ref}
+
+            prev = dict(row)
+            prev_stage = str(prev.get("current_stage") or "").strip()
+            prev_task_id = str(prev.get("provider_task_id") or "").strip()
+            prev_payload: dict[str, Any] = {}
+            raw_payload = prev.get("trace_payload_json")
+            if isinstance(raw_payload, str) and raw_payload.strip():
+                try:
+                    prev_payload = json.loads(raw_payload)
+                except Exception:
+                    prev_payload = {}
+
+            # Invariant 5: Task ID present blocks recovery submit
+            if prev_task_id:
+                return False, "recovery_previous_attempt_task_id_present", {
+                    "provider_task_id": prev_task_id,
+                    "previous_reference": recovery_ref,
+                }
+
+            # Invariant 3: Ambiguous outcome blocks recovery submit
+            if prev_stage == STAGE_OAT_CONSUMED_AMBIGUOUS or "ambiguous" in prev_stage.lower():
+                return False, "recovery_previous_attempt_ambiguous", {
+                    "stage": prev_stage,
+                    "previous_reference": recovery_ref,
+                }
+
+            # Invariant 2: Must be CONSUMED_FAILED
+            if prev_stage != STAGE_OAT_CONSUMED_FAILED:
+                if prev_stage == STAGE_OAT_CLAIMED:
+                    return False, "recovery_previous_attempt_still_active", {"stage": prev_stage}
+                if prev_stage == STAGE_OAT_CONSUMED_SUCCESS:
+                    return False, "recovery_previous_attempt_already_succeeded", {"stage": prev_stage}
+                return False, f"recovery_previous_attempt_invalid_stage_{prev_stage.lower()}", {"stage": prev_stage}
+
+            # Invariant 4: Transmitted attempt blocks recovery submit
+            http_sent = bool(
+                prev_payload.get("provider_http_request_sent")
+                or prev_payload.get("http_request_sent")
+            )
+            if http_sent:
+                return False, "recovery_previous_attempt_transmitted", {
+                    "provider_http_request_sent": True,
+                    "previous_reference": recovery_ref,
+                }
+
+            # Invariant 6: Submit count must be 0
+            submit_count = int(
+                prev_payload.get("provider_submit_count")
+                or prev_payload.get("submit_count")
+                or 0
+            )
+            if submit_count > 0:
+                return False, "recovery_previous_attempt_already_submitted", {
+                    "provider_submit_count": submit_count,
+                    "previous_reference": recovery_ref,
+                }
+
+            # Invariant 7: User charge must be 0
+            user_charge = float(
+                prev_payload.get("user_charge")
+                or prev_payload.get("charged_xu")
+                or prev_payload.get("charge")
+                or 0.0
+            )
+            charge_state = str(prev_payload.get("charge_state") or "").strip().upper()
+            if user_charge > 0 or (charge_state and charge_state not in ("NO_CHARGE", "NONE", "UNCHARGED")):
+                return False, "recovery_previous_attempt_user_charged", {
+                    "user_charge": user_charge,
+                    "charge_state": charge_state,
+                    "previous_reference": recovery_ref,
+                }
+
+            # Invariant 8: Identity matching
+            auth_user_id = auth.get("user_id")
+            if auth_user_id is not None and int(auth_user_id) != int(prev.get("owner_user_id") or 0):
+                return False, "recovery_user_mismatch", {}
+            auth_job_id = auth.get("job_id")
+            if auth_job_id is not None and prev.get("job_id") is not None and int(auth_job_id) != int(prev.get("job_id") or 0):
+                return False, "recovery_job_mismatch", {}
+            auth_proj_id = auth.get("project_id")
+            if auth_proj_id is not None and prev.get("project_id") is not None and int(auth_proj_id) != int(prev.get("project_id") or 0):
+                return False, "recovery_project_mismatch", {}
+
+            return True, "", {
+                "previous_reference": recovery_ref,
+                "previous_stage": prev_stage,
+                "previous_row": prev,
+            }
+        finally:
+            if should_close:
+                c.close()
+    except Exception as exc:
+        logger.error("Owner acceptance recovery validation error: %s", exc)
+        return False, "recovery_validation_failed", {"error": str(exc)}
 
 
 def is_owner_acceptance_attempt_claimed_or_consumed(
@@ -1279,6 +1436,23 @@ def claim_owner_acceptance_token(
     except (ValueError, TypeError):
         clean_proj_id = None
 
+    recovery_ref = str(
+        auth.get("recovery_previous_attempt_key")
+        or auth.get("previous_attempt_reference")
+        or auth.get("previous_attempt_key")
+        or ""
+    ).strip()
+    if recovery_ref or auth.get("is_recovery"):
+        rec_ok, rec_blocker, rec_details = validate_owner_acceptance_recovery_eligibility(
+            auth,
+            conn=c,
+            db_path=db_path,
+        )
+        if not rec_ok:
+            if should_close:
+                c.close()
+            return False, rec_blocker, rec_details
+
     payload = {
         "token_fingerprint": fingerprint,
         "attempt_fingerprint": attempt_fingerprint,
@@ -1287,6 +1461,12 @@ def claim_owner_acceptance_token(
         "auth": {k: v for k, v in auth.items() if k not in ("token", "api_key", "secret")},
         "stage": STAGE_OAT_CLAIMED,
     }
+    if recovery_ref:
+        payload["recovery"] = True
+        payload["recovery_previous_attempt_key"] = recovery_ref
+        payload["recovery_generation_id"] = str(
+            auth.get("recovery_generation_id") or auth.get("recovery_generation") or "1"
+        ).strip()
 
     try:
         c.execute(
@@ -1318,12 +1498,18 @@ def claim_owner_acceptance_token(
             ),
         )
         c.commit()
-        return True, "", {
+        res_details: dict[str, Any] = {
             "token_fingerprint": fingerprint,
             "attempt_fingerprint": attempt_fingerprint,
             "confirm_attempt_key": confirm_attempt_key,
             "stage": STAGE_OAT_CLAIMED,
         }
+        if recovery_ref:
+            res_details["recovery"] = True
+            res_details["is_recovery"] = True
+            res_details["recovery_previous_attempt_key"] = recovery_ref
+            res_details["recovery_generation_id"] = payload.get("recovery_generation_id")
+        return True, "", res_details
     except sqlite3.IntegrityError:
         return False, "owner_acceptance_already_consumed", {
             "token_fingerprint": fingerprint,

@@ -785,11 +785,35 @@ def selected_model_for_provider(metadata: dict[str, Any] | None, provider: str) 
     provider_model_map = meta.get("provider_model_map") if isinstance(meta.get("provider_model_map"), dict) else {}
     mapped = str(provider_model_map.get(provider_name) or "").strip()
     if mapped:
+        if provider_model_config(provider_name, mapped):
+            return mapped
+        tier_token = normalize_tier(mapped)
+        routing_cfg = load_product_video_model_routing()
+        if tier_token in (routing_cfg.get("tiers") or {}):
+            resolved = resolve_product_video_model(tier=tier_token, provider_chain=[provider_name])
+            if resolved.get("ok") and resolved.get("model"):
+                return str(resolved.get("model") or "")
         return mapped
     selected_provider = str(meta.get("selected_provider") or "").strip().lower()
     selected_model = str(meta.get("selected_model") or "").strip()
     if selected_model and (not selected_provider or selected_provider == provider_name):
+        if provider_model_config(provider_name, selected_model):
+            return selected_model
+        tier_token = normalize_tier(selected_model)
+        routing_cfg = load_product_video_model_routing()
+        if tier_token in (routing_cfg.get("tiers") or {}):
+            resolved = resolve_product_video_model(tier=tier_token, provider_chain=[provider_name])
+            if resolved.get("ok") and resolved.get("model"):
+                return str(resolved.get("model") or "")
         return selected_model
+    tier_name = str(meta.get("tier") or meta.get("pinned_tier") or "").strip()
+    if tier_name:
+        tier_token = normalize_tier(tier_name)
+        routing_cfg = load_product_video_model_routing()
+        if tier_token in (routing_cfg.get("tiers") or {}):
+            resolved = resolve_product_video_model(tier=tier_token, provider_chain=[provider_name])
+            if resolved.get("ok") and resolved.get("model"):
+                return str(resolved.get("model") or "")
     return ""
 
 
