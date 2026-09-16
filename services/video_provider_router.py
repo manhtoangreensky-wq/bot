@@ -43,6 +43,7 @@ from services.video_trace_state import (
     finalize_owner_acceptance_token,
     is_owner_acceptance_attempt_claimed_or_consumed,
     is_owner_acceptance_token_claimed_or_consumed,
+    validate_owner_acceptance_recovery_eligibility,
 )
 
 
@@ -3299,6 +3300,21 @@ def validate_owner_acceptance_authorization(
     else:
         auth_spend_unit = ""
 
+    # 9. Recovery contract verification (SPEC-03B1)
+    recovery_ref = str(
+        auth.get("recovery_previous_attempt_key")
+        or auth.get("previous_attempt_reference")
+        or auth.get("previous_attempt_key")
+        or ""
+    ).strip()
+    if recovery_ref or auth.get("is_recovery"):
+        rec_ok, rec_blocker, rec_details = validate_owner_acceptance_recovery_eligibility(
+            auth,
+            db_path=env.get("DB_PATH") or env.get("SQLITE_DB_PATH"),
+        )
+        if not rec_ok:
+            return False, rec_blocker, rec_details
+
     verified = dict(auth)
     verified["verified"] = True
     verified["token_fingerprint"] = fingerprint
@@ -3310,6 +3326,12 @@ def validate_owner_acceptance_authorization(
     verified["max_provider_spend_unit"] = auth_spend_unit
     verified["bypass_scope"] = ACCEPTANCE_BYPASS_SCOPE_PROBATION_LIVENESS_ONLY
     verified["paid_fallback_allowed"] = False
+    if recovery_ref:
+        verified["is_recovery"] = True
+        verified["recovery_previous_attempt_key"] = recovery_ref
+        verified["recovery_generation_id"] = str(
+            auth.get("recovery_generation_id") or auth.get("recovery_generation") or "1"
+        ).strip()
     return True, "", verified
 
 
