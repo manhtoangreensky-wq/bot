@@ -320,6 +320,33 @@ def test_multi_prepare_contract_reports_exact_bijection_failure():
     }
 
 
+def test_multi_prepare_contract_accepts_v2_millisecond_rounding():
+    source_segments = _source_segments(3, 3)
+    source_segments[1] = {
+        **source_segments[1],
+        "start": 2.0004,
+        "end": 3.8004,
+    }
+    output_segments = [
+        {**segment, "text": f"translated cue {index + 1}"}
+        for index, segment in enumerate(source_segments)
+    ]
+    output_segments[1] = {
+        **output_segments[1],
+        "start": 2.0,
+        "end": 3.8,
+    }
+
+    contract = bot._subdub_auto_multi_prepare_contract(
+        source_segments,
+        output_segments,
+        ["chunk_00:speaker_0", "chunk_00:speaker_1", "chunk_00:speaker_2"],
+    )
+
+    assert contract["auto_multi_prepare_contract_status"] == "pass"
+    assert contract["auto_multi_prepare_timing_mismatch_count"] == 0
+
+
 def test_v2_empty_selection_records_bounded_gate_provenance(monkeypatch):
     source_segments = _source_segments(3, 3)
     state = {

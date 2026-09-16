@@ -236195,9 +236195,12 @@ def _subdub_auto_multi_prepare_contract(
             if source_item.get("speaker_id") != output_item.get("speaker_id"):
                 speaker_mismatches += 1
             try:
+                tolerance = (
+                    auto_multi_speaker_v2.MULTI_V2_CUE_ROUNDING_TOLERANCE_SECONDS
+                )
                 identical_timing = (
-                    float(source_item.get("start")) == float(output_item.get("start"))
-                    and float(source_item.get("end")) == float(output_item.get("end"))
+                    abs(float(source_item.get("start")) - float(output_item.get("start"))) <= tolerance
+                    and abs(float(source_item.get("end")) - float(output_item.get("end"))) <= tolerance
                 )
             except (TypeError, ValueError, OverflowError):
                 identical_timing = False
