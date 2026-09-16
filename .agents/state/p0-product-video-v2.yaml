@@ -1335,3 +1335,50 @@ pv2_r01_job28_v4_scene2_transport_receipt_source_green:
     job 28 once: scene 1 poll/reuse only, scene 2 consumes the final authorized
     call. Stop at that call or a terminal two-scene MP4, then validate finalizer,
     Add-ons, delivery receipt/report and zero-Xu finance.
+
+pv2_r01_job28_v4_scene2_live_download_red:
+  phase: SOURCE_READY_TO_SHIP_ARTIFACT_RETRY
+  runtime_sha: 56c0a929c33e59b9ab4903db8cb7bd81a70690be
+  worker_sha: 56c0a929c33e59b9ab4903db8cb7bd81a70690be
+  job_identity: [28, 32, 27]
+  worker_started_once: true
+  worker_stopped_after_authorized_calls: true
+  authorized_calls: 2
+  calls_consumed: [scene_1, scene_2]
+  third_call: forbidden_and_not_attempted
+  live_result:
+    scene_1: provider_completed_100_but_download_HTTPError
+    scene_2: provider_completed_100_and_local_clip_4298149_bytes
+    final_mp4: absent
+    delivery_receipt: absent
+    charged_xu: 0
+    wallet: [200, 0]
+    transactions: 0
+    provider_usage: 0
+    worker_after_stop: inactive
+  root_cause: >-
+    Existing-task Key4U poll treats a completed provider result URL download
+    error as immediate failed_no_charge, losing the accepted task before a
+    poll-only URL refresh can succeed. No new paid submit is needed for this
+    recovery boundary.
+  correction_scope:
+    - only key4u_video existing-task poll-only path
+    - completed result plus provider_download_failed becomes bounded pending
+    - retry count is scene-scoped and capped at 2
+    - orchestrator and connector preserve retry state across defer/claim
+    - no change to ShopAIKey fallback, exact-two lane, UI, wallet or SubDub
+  red: 1 failed; completed existing task terminalized provider_download_failed
+  green:
+    router: 1 passed in 1.48s
+    router_bounded_inverse: passed
+    orchestrator_and_connector: 2 passed in 3.34s
+  focused_gate: 102 passed; 2 known R3 baseline failures; 1 missing local google dependency
+  compile: exit 0 for bot.py, workers, router, connector, APIs and test
+  diff_check: exit 0
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  live_pass: false
+  next_action: >-
+    Ship this bounded artifact-retry seam, deploy, verify exact bot/worker SHA,
+    then pause for Owner's quick live retest. Do not start job 28 again until
+    Owner provides fresh action-time authorization for any paid call.

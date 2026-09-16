@@ -4560,6 +4560,18 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
                 "automatic_fallback_allowed"
             ),
             "recovery_existing_tasks_only": recovery_existing_tasks_only,
+            "artifact_download_retry_count": _safe_int(
+                _meta_value("artifact_download_retry_count"),
+                0,
+            ),
+            "artifact_download_retry_limit": _safe_int(
+                _meta_value("artifact_download_retry_limit"),
+                0,
+            ),
+            "artifact_download_retry_scene_index": _safe_int(
+                _meta_value("artifact_download_retry_scene_index"),
+                0,
+            ),
             "provider_submit_allowed": False
             if recovery_existing_tasks_only and not scene_fallback_allowed
             else (job or {}).get("provider_submit_allowed"),
@@ -5690,6 +5702,15 @@ def _run_per_scene_provider_orchestrator(
         and not _safe_int(item.get("scene_index"), 0)
         for item in scene_tasks
     )
+    artifact_download_retry_state = next(
+        (
+            dict(item)
+            for item in reversed(debug_results)
+            if isinstance(item, dict)
+            and _safe_int(item.get("artifact_download_retry_count"), 0) > 0
+        ),
+        {},
+    )
     active_scene = next(
         (
             item
@@ -5861,6 +5882,24 @@ def _run_per_scene_provider_orchestrator(
         "provider_attempted": True,
         "route_requires_provider": True,
         "placeholder_forbidden": True,
+        "artifact_download_retryable": bool(
+            artifact_download_retry_state.get("artifact_download_retryable")
+        ),
+        "artifact_download_error": str(
+            artifact_download_retry_state.get("artifact_download_error") or ""
+        ),
+        "artifact_download_retry_count": _safe_int(
+            artifact_download_retry_state.get("artifact_download_retry_count"),
+            0,
+        ),
+        "artifact_download_retry_limit": _safe_int(
+            artifact_download_retry_state.get("artifact_download_retry_limit"),
+            0,
+        ),
+        "artifact_download_retry_scene_index": _safe_int(
+            artifact_download_retry_state.get("artifact_download_retry_scene_index"),
+            0,
+        ),
         "visual_source": "provider_pending" if len(scene_outputs) < _scene_count(job) else VISUAL_SOURCE_PROVIDER_MP4,
         "base_video_source": PROVIDER_VIDEO_SOURCE,
         "no_charge": True,
