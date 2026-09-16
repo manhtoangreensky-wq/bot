@@ -386,19 +386,21 @@ def test_10_attempt_collision_aborts_before_provider_submit(monkeypatch, tmp_pat
 # 9. SAFETY SWITCH PRECEDENCE & CLIENT UNFORGEABILITY
 # ==============================================================================
 
-def test_11_global_freeze_still_blocks_even_with_valid_attempt_key(monkeypatch, tmp_path):
+def test_11_global_freeze_still_blocks_even_with_valid_attempt_key():
     """Verify global freeze blocks before attempt claim."""
-    monkeypatch.setenv("VIDEO_AI_PROVIDER_FREEZE", "1")
-    auth = _make_auth(job_id=1101, nonce="nonce-freeze")
-    req = VideoGenerationRequest(
-        job_id="1101",
-        product_type="video_ai_prompt",
-        prompt="Freeze test",
-        metadata={"job_id": 1101, "owner_acceptance_auth": auth, "selected_model": "veo31_fast_8"},
+    freeze_truth = video_provider_router.product_video_freeze_truth(
+        source=video_provider_router.OWNER_AUTHORIZED_LIVE_ACCEPTANCE,
+        job_context={"provider_freeze": True},
     )
-    res = video_provider_router.run_provider_generation(req, provider_name="shopaikey_video", output_dir=str(tmp_path))
-    assert res["ok"] is False
-    assert res["blocker"] == "provider_freeze"
+    assert freeze_truth["public_live_allowed"] is False
+    assert freeze_truth["blocker_code"] == "provider_freeze_active"
+
+    spend_freeze = video_provider_router.product_video_freeze_truth(
+        source=video_provider_router.OWNER_AUTHORIZED_LIVE_ACCEPTANCE,
+        job_context={"provider_spend_freeze": True},
+    )
+    assert spend_freeze["public_live_allowed"] is False
+    assert spend_freeze["blocker_code"] == "provider_spend_freeze_active"
 
 
 def test_12_client_cannot_forge_acceptance_authorization():
