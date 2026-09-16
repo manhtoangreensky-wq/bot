@@ -58,10 +58,10 @@ def test_identity_partition_keeps_two_same_register_people_distinct():
     assert result["speaker_registers"].count("high") == 2
 
 
-def test_rejected_identity_partition_cannot_remap_gender_partition_registers(
+def test_stable_identity_partition_overrides_global_gender_allocation(
     monkeypatch,
 ):
-    """A rejected identity candidate must not lend registers to other labels."""
+    """Stable people remain stable even when global gender allocation differs."""
 
     matrix = np.zeros((12, embedding.EMBEDDING_DIM), dtype=np.float32)
     for index, identity in enumerate([0] * 4 + [1] * 4 + [2] * 4):
@@ -101,8 +101,51 @@ def test_rejected_identity_partition_cannot_remap_gender_partition_registers(
         speaker_count=3,
     )
 
-    assert result["identity_continuity_repaired"] is False
-    assert result["speaker_registers"] == ["high", "low", "low"]
+    assert result["labels"] == [0] * 4 + [1] * 4 + [2] * 4
+    assert result["identity_continuity_repaired"] is True
+    assert result["identity_gender_outlier_window_count"] == 2
+    assert result["speaker_registers"] == ["high", "high", "low"]
+
+
+def test_tied_identity_gender_votes_keep_fail_safe_gender_partition(monkeypatch):
+    matrix = np.zeros((12, embedding.EMBEDDING_DIM), dtype=np.float32)
+    for index, identity in enumerate([0] * 4 + [1] * 4 + [2] * 4):
+        matrix[index, identity] = 1.0
+    female_probabilities = (
+        [0.99, 0.99, 0.01, 0.01]
+        + [0.99] * 4
+        + [0.01] * 4
+    )
+    gender_labels = {
+        1: np.asarray([0, 0, 0, 1, 0, 0, 0, 1, 2, 2, 2, 2]),
+        2: np.asarray([0, 0, 0, 2, 1, 1, 1, 2, 2, 2, 2, 2]),
+    }
+
+    monkeypatch.setattr(
+        embedding,
+        "_gender_partition_for_allocation",
+        lambda *_args, female_count, **_kwargs: gender_labels[female_count],
+    )
+    monkeypatch.setattr(
+        embedding,
+        "_gender_partition_score",
+        lambda *_args, **_kwargs: 1.0,
+    )
+    monkeypatch.setattr(
+        embedding,
+        "_fixed_count_window_partition",
+        lambda *_args, **_kwargs: np.asarray([0] * 4 + [1] * 4 + [2] * 4),
+    )
+
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        embedding.build_gender_constrained_speech_authority(
+            matrix,
+            matrix.copy(),
+            np.arange(12, dtype=np.float64),
+            np.full(12, 1.5, dtype=np.float64),
+            female_probabilities,
+            speaker_count=3,
+        )
 
 
 def test_three_views_use_majority_then_aggregate_tiebreak_without_global_quorum(

@@ -1284,10 +1284,7 @@ def build_gender_constrained_speech_authority(
                         else probabilities_for_identity >= threshold
                     )
                 )
-            if (
-                len(identity_registers) == speaker_count
-                and identity_registers.count("high") == female_count
-            ):
+            if len(identity_registers) == speaker_count:
                 canonical_labels = identity_labels
                 quorum_labels = identity_labels
                 quorum_embeddings = aggregate
