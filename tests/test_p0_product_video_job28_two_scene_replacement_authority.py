@@ -2167,6 +2167,192 @@ def test_v4_orchestrator_reuses_durable_clip_path_before_scene_two_submit(
     assert result["charged_xu"] == 0
 
 
+def test_v4_scene_two_pending_task_persists_transport_receipt(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _configure_key4u_veo_contract(monkeypatch)
+    monkeypatch.setenv("PRODUCT_VIDEO_PROVIDER_SUBMIT_ENABLED", "1")
+    monkeypatch.setenv("REAL_PROVIDER_SMOKE_ENABLED", "1")
+    payload = _taskless_v3_job28_payload()
+    scene_one_task = "key4u-v4-scene-one-task-accepted"
+    scene_one_clip = tmp_path / "provider_scene_001.mp4"
+    scene_one_clip.write_bytes(b"v4-scene-one-real-provider-clip")
+    authorization = payload["controlled_fallback_replacement_authorization"]
+    authorization.update(
+        {
+            "authorization_id": V4_AUTHORIZATION_ID,
+            "authorization_version": 4,
+            "state": "active",
+            "calls_consumed": 1,
+            "consumed_scene_indexes": [1],
+        }
+    )
+    namespaces = payload[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ]
+    namespaces[V3_AUTHORIZATION_ID]["1"] = _authorization_receipt(
+        V3_AUTHORIZATION_ID,
+        3,
+        1,
+        task_id="expired-v3-scene-one-task",
+    )
+    namespaces[V4_AUTHORIZATION_ID] = {
+        "1": _authorization_receipt(
+            V4_AUTHORIZATION_ID,
+            4,
+            1,
+            task_id=scene_one_task,
+        )
+    }
+    for scene in payload["scene_tasks"]:
+        if int(scene.get("scene_index") or 0) == 1:
+            scene.update(
+                {
+                    "provider": "key4u_video",
+                    "selected_provider": "key4u_video",
+                    "provider_task_id": scene_one_task,
+                    "active_task_id": scene_one_task,
+                    "task_id_present": True,
+                    "task_pollable": True,
+                    "submit_accepted": True,
+                    "status": "provider_running",
+                    "actual_provider_payload_status": "queued",
+                    "clip_path": str(scene_one_clip),
+                    "clip_valid": True,
+                    "result_url_valid": True,
+                    "clip_bytes": scene_one_clip.stat().st_size,
+                    "fallback_count": 2,
+                    "provider_fallback_count": 2,
+                }
+            )
+        else:
+            scene.update(
+                {
+                    "provider": "key4u_video",
+                    "selected_provider": "key4u_video",
+                    "status": "pending_submit",
+                    "actual_provider_payload_status": "blocked_no_charge",
+                    "failure_reason": "replacement_accepted_task_poll_only",
+                    "provider_task_id": "",
+                    "active_task_id": "",
+                    "task_id_present": False,
+                    "task_pollable": False,
+                    "submit_accepted": False,
+                    "fallback_count": 0,
+                    "provider_fallback_count": 0,
+                    "fallback_allowed": True,
+                    "controlled_fallback_allowed": True,
+                    "fallback_provider_candidate": "key4u_video",
+                    "fallback_provider_order": ["key4u_video"],
+                    "fallback_scene_index": 2,
+                    "dispatch_attempted": True,
+                }
+            )
+    payload["provider_scene_tasks"] = copy.deepcopy(payload["scene_tasks"])
+    payload.update(
+        {
+            "user_id": 7126457028,
+            "product_type": "video_trend",
+            "quality_tier": 400,
+            "scene_count": 2,
+            "scene_duration_seconds": 8,
+            "expected_duration_seconds": 16,
+            "orchestration_mode": "per_scene_8s",
+            "scene_cards": [
+                {
+                    "scene_index": 1,
+                    "video_prompt": "V4 durable scene one",
+                    "target_duration_sec": 8,
+                    "aspect_ratio": "9:16",
+                },
+                {
+                    "scene_index": 2,
+                    "video_prompt": "V4 remaining scene two",
+                    "target_duration_sec": 8,
+                    "aspect_ratio": "9:16",
+                },
+            ],
+            "fallback_scene_index": 2,
+            "fallback_allowed": True,
+            "controlled_fallback_allowed": True,
+            "fallback_provider_candidate": "key4u_video",
+            "fallback_provider_order": ["key4u_video"],
+            "runtime_candidate_keys": ["key4u_video"],
+            "provider_model_map": {"key4u_video": "veo_3_1-fast"},
+            "provider_request_defaults": {
+                "key4u_video": {"duration": 8, "resolution": "1080p"}
+            },
+            "replacement_authorization_id": V4_AUTHORIZATION_ID,
+            "replacement_authorization_version": 4,
+            "replacement_calls_consumed": 1,
+            "replacement_calls_remaining": 1,
+        }
+    )
+    calls: list[tuple[str, str]] = []
+    def fake_open_json(self, url, payload=None, *, method="POST", **_kwargs):
+        calls.append((method, url))
+        if method == "POST":
+            assert set(payload) == {"model", "prompt", "aspect_ratio"}
+            assert "V4 remaining scene two" in payload["prompt"]
+            return {
+                "ok": True,
+                "status_code": 200,
+                "body": {"id": "key4u_v4_scene2_task", "status": "queued"},
+                "response_shape": {"type": "dict"},
+            }
+        return {
+            "ok": True,
+            "status_code": 200,
+            "body": {"id": "key4u_v4_scene2_task", "status": "pending"},
+            "response_shape": {"type": "dict"},
+        }
+
+    monkeypatch.setattr(GenericHttpVideoProvider, "_open_json", fake_open_json)
+    monkeypatch.setattr(
+        connector,
+        "_canonical_product_video_workspace",
+        lambda _job: str(tmp_path / "v4-pending-workspace"),
+    )
+
+    transport_debug = []
+    result = connector._run_per_scene_provider_orchestrator(
+        payload,
+        str(tmp_path / "unused"),
+        provider_order=["key4u_video"],
+        provider_events=[],
+        debug_results=transport_debug,
+    )
+    normalized, receipt_state = remote_worker_api._controlled_fallback_submit_receipt(
+        {**payload, **result}
+    )
+
+    assert [method for method, _url in calls] == ["POST", "GET"]
+    assert result["provider_submit_called"] is True
+    assert result["provider_http_request_sent"] is True
+    assert result["provider_submit_http_status"] == 200
+    assert result["fallback_scene_index"] == 2
+    assert receipt_state["consumed"] is True
+    assert receipt_state["task_id_present"] is True
+    receipt = normalized[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ][V4_AUTHORIZATION_ID]["2"]
+    assert receipt["authorization_state"] == "consumed"
+    assert receipt["provider_task_id"] == "key4u_v4_scene2_task"
+    assert normalized["replacement_calls_consumed"] == 2
+    assert normalized["replacement_calls_remaining"] == 0
+    assert normalized["charged_xu"] == 0
+    saved_receipts = normalized[
+        "controlled_fallback_replacement_submit_receipts_by_authorization"
+    ]
+    assert saved_receipts[V3_AUTHORIZATION_ID] == namespaces[V3_AUTHORIZATION_ID]
+    assert saved_receipts[V4_AUTHORIZATION_ID]["1"] == namespaces[V4_AUTHORIZATION_ID]["1"]
+    replay = connector.product_video_controlled_replacement_authorization_context(
+        normalized, scene_index=2
+    )
+    assert replay["scene_authorized"] is False
+
+
 def test_v3_taskless_watchdog_hands_fresh_worker_read_only_state_to_claim(
     monkeypatch,
 ) -> None:

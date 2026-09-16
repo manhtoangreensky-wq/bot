@@ -4450,6 +4450,26 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             for item in _existing_scene_tasks(job)
         )
     )
+    replacement_scene_result_evidence = [
+        {
+            "scene_index": _scene_task_index(item, 0),
+            "clip_valid": bool(item.get("clip_valid")),
+            "result_url_valid": bool(item.get("result_url_valid")),
+            "artifact_valid": bool(item.get("artifact_valid")),
+            "artifact_bytes": _safe_int(
+                item.get("artifact_bytes")
+                or item.get("clip_bytes")
+                or item.get("output_bytes"),
+                0,
+            ),
+            "status": str(item.get("status") or ""),
+            "actual_provider_payload_status": str(
+                item.get("actual_provider_payload_status") or ""
+            ),
+        }
+        for item in (_existing_scene_tasks(job) if taskless_replacement.get("present") else [])
+        if _scene_task_index(item, 0) > 0
+    ]
     if (
         missing_scene_dispatch_recovered
         and not scene_fallback_allowed
@@ -4568,6 +4588,11 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
                 "controlled_fallback_replacement_submit_receipts_by_authorization"
             )
             or {},
+            **(
+                {"scene_tasks": replacement_scene_result_evidence}
+                if taskless_replacement.get("present")
+                else {}
+            ),
             "controlled_fallback_submit_receipt_history": _meta_value(
                 "controlled_fallback_submit_receipt_history"
             )
@@ -5466,6 +5491,7 @@ def _run_per_scene_provider_orchestrator(
     scene_outputs: dict[int, str] = {}
     hard_failures: list[dict[str, Any]] = []
     pending_seen = False
+    replacement_submit_evidence: dict[str, Any] = {}
     dispatch_mode = product_video_scene_dispatch_mode(job)
     active_scene_slot = False
     os.makedirs(workspace, exist_ok=True)
@@ -5523,6 +5549,28 @@ def _run_per_scene_provider_orchestrator(
             diagnostics.setdefault("scene_index", scene_index)
             diagnostics.setdefault("scene_id", scene_index)
             diagnostics.setdefault("request_job_id", product_video_scene_request_id(job, scene_index))
+            replacement = product_video_controlled_replacement_authorization_context(
+                job, scene_index=scene_index
+            )
+            if (
+                replacement.get("valid")
+                and replacement.get("scene_authorized")
+                and diagnostics.get("provider_submit_called") is True
+            ):
+                # Keep this invocation's receipt evidence separate from scene-ledger defaults.
+                replacement_submit_evidence = {
+                    key: diagnostics[key]
+                    for key in (
+                        "provider_submit_called", "provider_http_request_sent",
+                        "provider_submit_http_status", "provider_http_status",
+                        "provider_task_id_saved", "submit_accepted",
+                        "provider_attempts", "provider_fallback_attempts",
+                        "fallback_provider_attempts", "fallback_submit_attempted",
+                        "fallback_idempotency_key", "fallback_scene_index",
+                        "fallback_submit_source", "provider_submit_source", "submit_source",
+                    )
+                    if key in diagnostics
+                }
             debug_results.append(diagnostics)
             provider_events.append(_provider_event_from_payload(job, scene_index, diagnostics))
             if diagnostics.get("continue_polling") or str(diagnostics.get("provider_error") or diagnostics.get("blocker") or "") in PROVIDER_PENDING_BLOCKERS:
@@ -5819,6 +5867,7 @@ def _run_per_scene_provider_orchestrator(
     }
     scene_ledger = video_project_queue_service.product_video_scene_ledger_state({}, job, base)
     base.update(scene_ledger)
+    base.update(replacement_submit_evidence)
     base["scene_coverage_valid"] = _safe_int(base.get("completed_scene_count"), 0)
     if hard_failures and base.get("processing_truth_applied"):
         # A failed dispatch for one scene cannot terminal the confirmed job
@@ -5876,6 +5925,7 @@ def _run_per_scene_provider_orchestrator(
         base["key4u_submit_suppressed_reason"] = str(base.get("fallback_block_reason") or ("not_start_under_threshold" if active_is_not_start else "primary_provider_in_progress"))
         partial_ledger = video_project_queue_service.product_video_scene_ledger_state({}, job, base)
         base.update(partial_ledger)
+        base.update(replacement_submit_evidence)
         base["scene_coverage_valid"] = _safe_int(base.get("completed_scene_count"), 0)
         base["source_of_truth"] = "partial_scene_coverage" if base.get("completed_scene_count") else str(active_scene.get("source_of_truth") or "waiting_for_remaining_scenes")
         base["visual_source"] = "scene_clip_validated" if base.get("completed_scene_count") else "provider_pending"

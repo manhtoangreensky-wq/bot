@@ -1288,3 +1288,50 @@ next_action: >-
   never be submitted again; scene 2 may consume the final V4 call. Stop after that
   call or terminal two-scene MP4, then validate stitch, Add-ons, delivery and zero-Xu
   finance before locking PV2-R01 and opening SPEC-04H.9.
+
+pv2_r01_job28_v4_scene2_transport_receipt_source_green:
+  phase: SOURCE_GREEN_PENDING_SHIP
+  verified_pre_ledger_head: 8a663142afb3771fc3fdf0a83c5be719938b6711
+  post_rebase_base: 2d01853a2912cd4c2cdf58316a8e3e38e1c2c08d
+  post_rebase_behind_ahead: [0, 1]
+  post_rebase_protected_green: 98 passed in 470.80s
+  post_rebase_compile: exit 0 for bot.py, local_worker.py, remote_worker.py, connector, APIs, router and test
+  post_rebase_diff_check: exit 0
+  root_cause: >-
+    The real per-scene executor sent the authorized scene-2 HTTP request, but
+    the orchestrator aggregate replaced the invocation evidence with a ledger
+    summary. Receipt persistence therefore could not prove the paid transport
+    attempt and left the scene-2 receipt absent.
+  correction_scope:
+    - pass sanitized existing-scene artifact evidence only for taskless replacement authorization
+    - preserve the authorized invocation's HTTP/submit/task evidence through aggregate and pending returns
+    - preserve V2/V3 receipt namespaces and ordinary jobs unchanged
+  red: 1 failed; result provider_http_request_sent was false after mocked POST+GET
+  exact_green: 1 passed in 1.37s; mocked calls POST,GET; scene-2 receipt and task persisted
+  protected_green: 98 passed in 19.87s
+  compile: services/video_real_render_connector.py, services/remote_worker_api.py, services/video_provider_router.py and test exit 0
+  diff_check: exit 0
+  provider_calls_during_source_gate: 0
+  wallet_mutations_during_source_gate: 0
+  live_pass: false
+  job19_reference:
+    same_job_project_outbox_recovery: true
+    existing_scene_tasks_and_clips_immutable: true
+    final_mp4_evidence: h264_540x960_16s; bytes_and_sha_recorded
+    addons: subtitle_and_transition_materialized_applied; missing=[]
+    delivery: one_telegram_video_and_durable_receipt; duplicate_retry_blocked
+    finance: charged_xu=0; submit_count=0; charge_count=0
+  job18_reference:
+    source: historical R18 multiscene engine contract and completion guards
+    apply_to_job28:
+      - keep per-scene output validation before stitch
+      - reuse durable clips/tasks instead of resubmitting completed scenes
+      - require validated final MP4 before delivery or settlement
+      - persist one delivery receipt and suppress duplicate delivery/report
+      - keep task acceptance and HTTP success distinct from artifact PASS
+    protected: UI Tail, provider route contract, wallet and locked lanes
+  next_action: >-
+    Rebase and ship this receipt seam only. Then query-check and resume existing
+    job 28 once: scene 1 poll/reuse only, scene 2 consumes the final authorized
+    call. Stop at that call or a terminal two-scene MP4, then validate finalizer,
+    Add-ons, delivery receipt/report and zero-Xu finance.
