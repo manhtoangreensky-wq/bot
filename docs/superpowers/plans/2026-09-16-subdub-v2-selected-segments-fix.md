@@ -113,3 +113,22 @@ Pre-final-rebase full-suite comparison on the reviewed tree:
 - [ ] Push one follow-up PR and deploy once.
 - [ ] A new live V2 job must produce validated MP4, Telegram delivery and one
   receipt before the task can be closed.
+
+## LIVE-03 — Separate Auto 2 success from Multi V2 failure
+
+- [x] Job `25F60D45442567B955ED` proved Auto 2 remains healthy: terminal
+  `delivered`, MP4 validated/delivered, Telegram video message `28597`, one
+  success receipt and `0` Xu for the admin run.
+- [x] Job `6D35C7BCEF0A50058E42` proved the failing video is a different blackbox:
+  `181s`, `69` acoustic cues, `3` speakers, `629` words, then
+  `AUTO_CAST_MANUAL_REQUIRED` after translation and before TTS.
+- [x] V1 delivered comparator `DUB-15E52AA8` had an exact `26 -> 26` cue
+  bijection, exact cache, `26/26` TTS artifacts, MP4 delivery and receipt.
+- [x] Add bounded Multi-only provenance for prepare bijection and gate
+  selection. Persist counts/status only; never persist transcript text.
+- [x] Provenance RED: `2 failed` because counters were absent. GREEN:
+  `2 passed`; complete focused file: `10 passed`.
+- [x] V2 regression: `77 passed`; protected V1/customer/Auto 2 comparator:
+  `88 passed, 241 deselected`; compile: exit `0`.
+- [ ] Deploy provenance once, then use exactly one new Multi V2 job to identify
+  the failing predicate and apply the final minimal behavioral correction.

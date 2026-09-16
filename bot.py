@@ -236144,6 +236144,83 @@ def _subdub_auto_selected_text(segments: object) -> str:
     ).strip()
 
 
+def _subdub_auto_record_multi_diagnostics(state: dict, **fields) -> None:
+    current = dict(state or {})
+    if not auto_multi_speaker.is_auto_multi_speaker_state(current):
+        return
+    job_key = str(current.get("_pipeline_job_key") or "").strip()
+    if not job_key:
+        return
+    bounded = {
+        str(key): value
+        for key, value in fields.items()
+        if str(key).startswith("auto_multi_")
+        and isinstance(value, (str, int, float, bool))
+    }
+    if not bounded:
+        return
+    try:
+        update_subtitle_dub_pipeline_job(job_key, **bounded)
+    except Exception:
+        return
+
+
+def _subdub_auto_multi_prepare_contract(
+    source_segments: object,
+    output_segments: object,
+    acoustic_labels: object,
+) -> dict:
+    source = list(source_segments) if isinstance(source_segments, list) else []
+    output = list(output_segments) if isinstance(output_segments, list) else []
+    labels = list(acoustic_labels) if isinstance(acoustic_labels, list) else []
+    cue_id_mismatches = 0
+    speaker_mismatches = 0
+    timing_mismatches = 0
+    empty_text_count = sum(
+        1
+        for item in output
+        if not isinstance(item, dict) or not str(item.get("text") or "").strip()
+    )
+    if len(source) == len(output):
+        for source_item, output_item in zip(source, output, strict=True):
+            if not isinstance(source_item, dict) or not isinstance(output_item, dict):
+                cue_id_mismatches += 1
+                speaker_mismatches += 1
+                timing_mismatches += 1
+                continue
+            if source_item.get("cue_id") != output_item.get("cue_id"):
+                cue_id_mismatches += 1
+            if source_item.get("speaker_id") != output_item.get("speaker_id"):
+                speaker_mismatches += 1
+            try:
+                identical_timing = (
+                    float(source_item.get("start")) == float(output_item.get("start"))
+                    and float(source_item.get("end")) == float(output_item.get("end"))
+                )
+            except (TypeError, ValueError, OverflowError):
+                identical_timing = False
+            if not identical_timing:
+                timing_mismatches += 1
+    if not 3 <= len(labels) <= 8:
+        status = "speaker_count_invalid"
+    elif len(output) != len(source):
+        status = "segment_count_mismatch"
+    elif cue_id_mismatches or speaker_mismatches or timing_mismatches:
+        status = "identity_mismatch"
+    else:
+        status = "pass"
+    return {
+        "auto_multi_prepare_contract_status": status,
+        "auto_multi_prepare_source_count": len(source),
+        "auto_multi_prepare_output_count": len(output),
+        "auto_multi_prepare_speaker_count": len(labels),
+        "auto_multi_prepare_cue_id_mismatch_count": cue_id_mismatches,
+        "auto_multi_prepare_speaker_mismatch_count": speaker_mismatches,
+        "auto_multi_prepare_timing_mismatch_count": timing_mismatches,
+        "auto_multi_prepare_empty_text_count": empty_text_count,
+    }
+
+
 def _subdub_auto_v2_restore_prepared_selection(
     prepared: dict,
     state: dict,
@@ -248267,22 +248344,14 @@ async def video_dubbing_prepare_subtitles(
                 output_subtitle = video_dubbing_srt_from_segments(output_segments) or output_subtitle
     if require_auto_cast and exact_acoustic_multi:
         acoustic_labels = subdub_speaker_cast.ordered_auto_speaker_labels(source_segments)
-        if not 3 <= len(acoustic_labels) <= 8 or len(output_segments) != len(source_segments):
+        prepare_contract = _subdub_auto_multi_prepare_contract(
+            source_segments,
+            output_segments,
+            acoustic_labels,
+        )
+        _subdub_auto_record_multi_diagnostics(state, **prepare_contract)
+        if prepare_contract["auto_multi_prepare_contract_status"] != "pass":
             raise subdub_speaker_cast.AutoCastUnavailable()
-        for source_item, output_item in zip(source_segments, output_segments, strict=True):
-            try:
-                identical_timing = (
-                    float(source_item.get("start")) == float(output_item.get("start"))
-                    and float(source_item.get("end")) == float(output_item.get("end"))
-                )
-            except (TypeError, ValueError, OverflowError) as exc:
-                raise subdub_speaker_cast.AutoCastUnavailable() from exc
-            if (
-                source_item.get("cue_id") != output_item.get("cue_id")
-                or source_item.get("speaker_id") != output_item.get("speaker_id")
-                or not identical_timing
-            ):
-                raise subdub_speaker_cast.AutoCastUnavailable()
     timing_validation = subdub_validate_cue_locked_timing(
         source_segments,
         output_segments if needs_translation else source_segments,
@@ -248838,6 +248907,24 @@ async def _subdub_auto_post_prepare_gate(prepared: dict, state: dict) -> dict:
     )
     selected_segments = list(policy.get("tts_segments") or [])
     selected_text = _subdub_auto_selected_text(selected_segments)
+    output_subtitle = str(prepared.get("output_subtitle") or "").strip()
+    parsed_output_count = len(
+        video_dubbing_segments_from_subtitle(output_subtitle)
+    ) if output_subtitle else 0
+    _subdub_auto_record_multi_diagnostics(
+        prepared_state,
+        auto_multi_gate_status=(
+            "selection_ready" if selected_segments and selected_text else "selection_empty"
+        ),
+        auto_multi_gate_source_count=len(list(prepared.get("source_segments") or [])),
+        auto_multi_gate_output_count=len(list(prepared.get("output_segments") or [])),
+        auto_multi_gate_parsed_output_count=parsed_output_count,
+        auto_multi_gate_selected_count=len(selected_segments),
+        auto_multi_gate_selected_text_chars=len(selected_text),
+        auto_multi_gate_source_subtitle_chars=len(str(prepared.get("source_subtitle") or "")),
+        auto_multi_gate_output_subtitle_chars=len(output_subtitle),
+        auto_multi_gate_workspace_present=bool(prepared_state.get("_pipeline_workspace")),
+    )
     if not selected_segments or not selected_text:
         return {"ok": False, "status": "AUTO_CAST_MANUAL_REQUIRED"}
     actual_words, actual_auto_xu, actual_subtitle_xu = (
