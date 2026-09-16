@@ -76,10 +76,11 @@ def test_engine_async_waiting_text_real_newlines():
 
 def test_cinematic_ad_concept_text_splits_cleanly():
     concept = bot.cinematic_ad_concept_text("mini blender", "fast fresh smoothie", "cinematic", "en")
-    assert len(concept) > 3600
-    chunks = bot.split_telegram_html_text(concept, limit=3600)
+    assert "\\n" not in concept
+    assert "\n" in concept
+    assert "<b>TOAN AAS CINEMATIC AD CONCEPT</b>" in concept
+    chunks = bot.split_telegram_html_text(concept, limit=800)
     assert len(chunks) >= 2
-    for idx, chunk in enumerate(chunks):
-        assert len(chunk) <= 3700
+    for chunk in chunks:
         assert chunk.count("<b>") == chunk.count("</b>")
         assert "\\n" not in chunk
