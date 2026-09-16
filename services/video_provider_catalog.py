@@ -318,21 +318,30 @@ def model_interface_contract(
                     data,
                     _KEY4U_EXCLUSIVE_ENDPOINT_ENVS.get(family, _KEY4U_EXCLUSIVE_ENDPOINT_ENVS["kling"]),
                 )
+                auth_hosts = {"api.key4u.vn", "api.key4u.shop", "key4u.vn", "key4u.shop"}
                 if base_submit_url:
                     parsed = urllib.parse.urlsplit(base_submit_url)
-                    path = parsed.path.rstrip("/")
-                    if path.endswith("/text2video"):
-                        new_path = path[:-10] + "image2video"
-                    elif path.endswith("/videos"):
-                        new_path = path + "/image2video"
-                    elif not path.endswith("/image2video"):
-                        new_path = path + "/videos/image2video"
-                    else:
-                        new_path = path
-                    submit_url = urllib.parse.urlunsplit(
-                        (parsed.scheme, parsed.netloc, new_path, parsed.query, parsed.fragment)
+                    if (parsed.hostname or "").lower() in auth_hosts:
+                        path = parsed.path.rstrip("/")
+                        if path in {"/kling/v1/videos/text2video", "/kling/v1/videos/image2video"}:
+                            submit_url = urllib.parse.urlunsplit(
+                                (parsed.scheme, parsed.netloc, "/kling/v1/videos/image2video", parsed.query, parsed.fragment)
+                            )
+                            submit_source = f"canonical_i2v:{base_source}"
+                if not submit_url:
+                    base_url = next(
+                        (
+                            str(data.get(name) or "").strip().rstrip("/")
+                            for name in ("KEY4U_BASE_URL", "KEY4U_API_BASE")
+                            if _valid_endpoint_url(data.get(name))
+                        ),
+                        "",
                     )
-                    submit_source = f"normalized_i2v:{base_source}"
+                    if base_url:
+                        parsed_base = urllib.parse.urlsplit(base_url)
+                        if (parsed_base.hostname or "").lower() in auth_hosts:
+                            submit_url = f"{base_url}/kling/v1/videos/image2video"
+                            submit_source = "canonical_contract:key4u_base_url"
         else:
             submit_url, submit_source = _first_endpoint(
                 data,

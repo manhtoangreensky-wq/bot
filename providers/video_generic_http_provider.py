@@ -806,6 +806,16 @@ def build_key4u_video_payload(request: VideoGenerationRequest, env: dict[str, st
     return data
 
 
+KLING_MODEL_SUPPORTED_I2V_DURATIONS: dict[str, set[int]] = {
+    "kling-v3": {5, 8, 10},
+    "kling-3.0-turbo": {5, 8, 10},
+    "kling-v2-6": {5, 10},
+    "kling-v2-5-turbo": {5, 10},
+    "kling-v2-5-pro": {5, 10},
+    "kling-v2-1": {5, 10},
+}
+
+
 def _key4u_wire_payload(
     payload: dict[str, Any],
     *,
@@ -861,9 +871,10 @@ def _key4u_wire_payload(
             elif ratio in {"1/1", "1x1"}:
                 ratio = "1:1"
 
-            # 4. Duration validation (Kling supports 5s, 10s)
+            # 4. Duration validation (model-aware duration matrix)
             duration = int(data.get("duration") or data.get("duration_seconds") or defaults.get("duration") or 5)
-            if duration not in {5, 10}:
+            supported_durations = KLING_MODEL_SUPPORTED_I2V_DURATIONS.get(resolved_model_name)
+            if not supported_durations or duration not in supported_durations:
                 raise VideoProviderContractError(
                     "provider_duration_unsupported_no_charge",
                     stage="payload_build",
@@ -871,7 +882,7 @@ def _key4u_wire_payload(
                         "provider": "key4u_video",
                         "model": resolved_model_name,
                         "duration": duration,
-                        "supported_durations": [5, 10],
+                        "supported_durations": sorted(list(supported_durations)) if supported_durations else [],
                         "blocker": "provider_duration_unsupported_no_charge",
                         "no_charge": True,
                     },
@@ -1450,21 +1461,7 @@ class GenericHttpVideoProvider:
                     "",
                 )
             )
-        if (
-            self.provider_name == "key4u_video"
-            and str(payload.get("capability") or "").strip().lower() == "image_to_video"
-            and str(payload_metadata.get("selected_family") or "").strip().lower() in {"kling", "keling"}
-        ):
-            if parsed_submit_url.path.rstrip("/").endswith("/text2video"):
-                submit_url = urllib.parse.urlunsplit(
-                    (
-                        parsed_submit_url.scheme,
-                        parsed_submit_url.netloc,
-                        parsed_submit_url.path.rstrip("/")[:-10] + "image2video",
-                        parsed_submit_url.query,
-                        parsed_submit_url.fragment,
-                    )
-                )
+
         if isinstance(payload.get("metadata"), dict):
             clean_metadata = dict(payload["metadata"])
             clean_metadata.pop("provider_submit_url_override", None)

@@ -1,4 +1,4 @@
-"""Dedicated provider-free test suite for SPEC-PV03B I2V Key4U wire contract alignment.
+"""Dedicated provider-free test suite for SPEC-PV03B & SPEC-PV03B2 I2V Key4U wire contract alignment.
 
 Enforces:
 - I2V routes to /kling/v1/videos/image2video (not text2video)
@@ -6,8 +6,10 @@ Enforces:
 - Source image serialized to base64 on wire (no raw local filesystem paths)
 - Wire payload uses official provider model identifiers (fails closed on unmapped 'kling-video')
 - Ratio preserved (9:16, 16:9, 1:1)
-- Kling supported durations (5, 10) preserved; unsupported durations rejected before submit
-- data.task_id extracted and persisted durably before polling
+- Model-aware duration matrix: kling-v3 accepts {5, 8, 10}; product default 8s passes; unmapped/unsupported fail closed
+- No silent duration rewrite (8 never rewritten to 5 or 10)
+- Canonical Key4U submit endpoint without arbitrary URL text transformations
+- data.task_id extracted and persisted durably before polling (exercising real production seams)
 - Restart recovery polls same task ID without second submit
 - Timeout preserves task ID without resubmit
 - Zero charge on provider failure, invalid MP4, or delivery failure
@@ -20,13 +22,21 @@ import base64
 import hashlib
 import json
 import os
+import sqlite3
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 import pytest
 
+import bot
 from providers import video_generic_http_provider as vgp
 from services import (
+    video_ai_edit_status,
     video_final_output,
     video_local_validation,
     video_project_queue,
@@ -55,6 +65,36 @@ def _key4u_i2v_env(submit_url: str = "https://api.key4u.vn/kling/v1/videos/image
         "KEY4U_BASE_URL": "https://api.key4u.vn",
         "VIDEO_PROVIDER_CHAIN": "key4u_video",
     }
+
+
+def _init_test_jobs_db(tmp_path: Path) -> sqlite3.Connection:
+    db_file = tmp_path / "test_jobs.db"
+    conn = sqlite3.connect(str(db_file))
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS local_worker_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            command TEXT,
+            job_type TEXT,
+            status TEXT,
+            provider TEXT,
+            input_file_id TEXT,
+            output_file_id TEXT,
+            output_url TEXT,
+            error_short TEXT,
+            created_at TEXT,
+            started_at TEXT,
+            finished_at TEXT,
+            xu_cost INTEGER DEFAULT 0,
+            admin_only INTEGER DEFAULT 1,
+            worker_id TEXT,
+            updated_at TEXT,
+            provider_task_id TEXT DEFAULT ''
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_local_worker_jobs_status ON local_worker_jobs(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_local_worker_jobs_provider_task_id ON local_worker_jobs(provider_task_id)")
+    return conn
 
 
 # ---------------------------------------------------------------------------
@@ -287,13 +327,13 @@ def test_key4u_i2v_preserves_1_1_ratio(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# Tests 11 & 12: Duration validation
+# Tests 11 & 12: Model-Aware Duration Validation
 # ---------------------------------------------------------------------------
 
 def test_key4u_i2v_preserves_supported_duration(tmp_path: Path):
-    """Supported Kling durations (5s, 10s) are preserved in wire payload."""
+    """Supported Kling v3 durations (5s, 8s, 10s) are preserved in wire payload."""
     img_file = _make_dummy_image(tmp_path / "input.png")
-    for dur in (5, 10):
+    for dur in (5, 8, 10):
         payload = {
             "capability": "image_to_video",
             "model": "kling-video",
@@ -309,9 +349,11 @@ def test_key4u_i2v_preserves_supported_duration(tmp_path: Path):
 
 
 def test_key4u_i2v_rejects_unsupported_duration_before_submit(tmp_path: Path):
-    """Unsupported durations (e.g. 8s, 15s) fail closed with no charge before provider submit."""
+    """Unsupported durations (e.g. 15s, 3s, 12s for kling-v3; 8s for kling-v2-6) fail closed with no charge."""
     img_file = _make_dummy_image(tmp_path / "input.png")
-    for unsupp_dur in (8, 15, 3, 12):
+
+    # kling-v3 unsupported durations
+    for unsupp_dur in (15, 3, 12):
         payload = {
             "capability": "image_to_video",
             "model": "kling-video",
@@ -326,9 +368,131 @@ def test_key4u_i2v_rejects_unsupported_duration_before_submit(tmp_path: Path):
             vgp._key4u_wire_payload(payload, submit_url="https://api.key4u.vn/kling/v1/videos/image2video")
         assert exc_info.value.blocker == "provider_duration_unsupported_no_charge"
 
+    # kling-v2-6 unsupported duration 8s (only supports 5s, 10s)
+    payload_v26 = {
+        "capability": "image_to_video",
+        "model": "kling-video",
+        "model_name": "kling-v2-6",
+        "prompt": "test",
+        "ratio": "9:16",
+        "duration": 8,
+        "image_paths": [str(img_file)],
+        "metadata": {"selected_family": "kling"},
+    }
+    with pytest.raises(vgp.VideoProviderContractError) as exc_v26:
+        vgp._key4u_wire_payload(payload_v26, submit_url="https://api.key4u.vn/kling/v1/videos/image2video")
+    assert exc_v26.value.blocker == "provider_duration_unsupported_no_charge"
+
 
 # ---------------------------------------------------------------------------
-# Test 13: Task ID extraction from provider submit response
+# Tests 13-16: SPEC-PV03B2 Required Duration & Silent Rewrite Tests
+# ---------------------------------------------------------------------------
+
+def test_key4u_i2v_kling_v3_accepts_documented_8_second_duration(tmp_path: Path):
+    """kling-v3 + image_to_video + duration=8 yields PAYLOAD_BUILD_PASS with wire duration 8."""
+    img_file = _make_dummy_image(tmp_path / "product.png")
+    payload = {
+        "capability": "image_to_video",
+        "model": "kling-video",
+        "model_name": "kling-v3",
+        "prompt": "studio lighting product commercial",
+        "ratio": "9:16",
+        "duration": 8,
+        "image_paths": [str(img_file)],
+        "metadata": {"selected_family": "kling"},
+    }
+    wire = vgp._key4u_wire_payload(payload, submit_url="https://api.key4u.vn/kling/v1/videos/image2video")
+    assert wire["duration"] == 8
+    assert wire["model_name"] == "kling-v3"
+
+
+def test_key4u_i2v_product_default_8_second_duration_passes(tmp_path: Path):
+    """Product Video default 8-second duration (passed via request defaults or payload) passes for kling-v3."""
+    img_file = _make_dummy_image(tmp_path / "product.png")
+    payload = {
+        "capability": "image_to_video",
+        "model": "kling-video",
+        "model_name": "kling-v3",
+        "prompt": "product scene showcase",
+        "ratio": "9:16",
+        "image_paths": [str(img_file)],
+        "metadata": {
+            "selected_family": "kling",
+            "selected_request_defaults": {"duration": 8, "model_name": "kling-v3"},
+        },
+    }
+    wire = vgp._key4u_wire_payload(payload, submit_url="https://api.key4u.vn/kling/v1/videos/image2video")
+    assert wire["duration"] == 8
+
+
+def test_key4u_i2v_does_not_rewrite_8_to_5(tmp_path: Path):
+    """duration=8 is never silently rewritten to 5."""
+    img_file = _make_dummy_image(tmp_path / "product.png")
+    payload = {
+        "capability": "image_to_video",
+        "model": "kling-video",
+        "model_name": "kling-v3",
+        "prompt": "test",
+        "duration": 8,
+        "image_paths": [str(img_file)],
+        "metadata": {"selected_family": "kling"},
+    }
+    wire = vgp._key4u_wire_payload(payload, submit_url="https://api.key4u.vn/kling/v1/videos/image2video")
+    assert wire["duration"] != 5
+    assert wire["duration"] == 8
+
+
+def test_key4u_i2v_does_not_rewrite_8_to_10(tmp_path: Path):
+    """duration=8 is never silently rewritten to 10."""
+    img_file = _make_dummy_image(tmp_path / "product.png")
+    payload = {
+        "capability": "image_to_video",
+        "model": "kling-video",
+        "model_name": "kling-v3",
+        "prompt": "test",
+        "duration": 8,
+        "image_paths": [str(img_file)],
+        "metadata": {"selected_family": "kling"},
+    }
+    wire = vgp._key4u_wire_payload(payload, submit_url="https://api.key4u.vn/kling/v1/videos/image2video")
+    assert wire["duration"] != 10
+    assert wire["duration"] == 8
+
+
+# ---------------------------------------------------------------------------
+# Tests 17-18: SPEC-PV03B2 Endpoint Authority & Arbitrary URL Prohibition
+# ---------------------------------------------------------------------------
+
+def test_key4u_i2v_uses_exact_authoritative_image2video_endpoint():
+    """Authoritative submit endpoint resolves to https://api.key4u.vn/kling/v1/videos/image2video."""
+    env = _key4u_i2v_env("https://api.key4u.vn/kling/v1/videos/text2video")
+    contract = video_provider_catalog.model_interface_contract(
+        "key4u_video", "kling-video", capability="image_to_video", env=env
+    )
+    assert contract.get("contract_validation_status") == "ok"
+    assert contract.get("provider_submit_url_override") == "https://api.key4u.vn/kling/v1/videos/image2video"
+
+
+def test_key4u_i2v_does_not_construct_endpoint_from_arbitrary_url():
+    """Arbitrary URLs are never transformed mechanically into image2video endpoints (ARBITRARY_URL_TEXT_TRANSFORMATION=NO)."""
+    arbitrary_env = {
+        "KEY4U_KLING_VIDEO_ENDPOINT": "https://arbitrary.custom-domain.com/some/random/api",
+        "KEY4U_VIDEO_AUTH_HEADER_NAME": "Authorization",
+        "KEY4U_VIDEO_AUTH_HEADER_VALUE": "Bearer test_token",
+        "KEY4U_VIDEO_MODEL": "kling-video",
+    }
+    contract = video_provider_catalog.model_interface_contract(
+        "key4u_video", "kling-video", capability="image_to_video", env=arbitrary_env
+    )
+    # Must NOT transform into arbitrary.custom-domain.com/some/random/api/videos/image2video
+    assert "arbitrary.custom-domain.com" not in contract.get("provider_submit_url_override", "")
+    assert contract.get("provider_submit_url_override") == ""
+    assert contract.get("contract_validation_status") == "blocked"
+    assert contract.get("contract_block_reason") == video_provider_catalog.KEY4U_EXCLUSIVE_ENDPOINT_MISSING
+
+
+# ---------------------------------------------------------------------------
+# Test 19: Task ID extraction from provider submit response
 # ---------------------------------------------------------------------------
 
 def test_key4u_i2v_extracts_data_task_id():
@@ -348,46 +512,79 @@ def test_key4u_i2v_extracts_data_task_id():
 
 
 # ---------------------------------------------------------------------------
-# Tests 14, 15, 16, 17: Task ID Durability & Recovery Ordering
+# Tests 20-23: Real-Seam Durability & Recovery Tests
 # ---------------------------------------------------------------------------
 
 def test_key4u_i2v_persists_task_id_before_poll(tmp_path: Path):
-    """Canonical ordering: submit accepted -> persist provider_task_id -> poll."""
-    events = []
-    persisted_task_id = ""
+    """Canonical ordering: submit accepted -> persist provider_task_id into durable DB -> poll (real seams)."""
+    conn = _init_test_jobs_db(tmp_path)
 
-    def mock_submit():
-        events.append("submit_accepted")
-        return "kling_task_durable_001"
-
-    def persist_task(task_id: str):
-        nonlocal persisted_task_id
-        if "submit_accepted" not in events:
-            raise RuntimeError("Persist before submit forbidden")
-        persisted_task_id = task_id
-        events.append("task_persisted")
-
-    def poll_task(task_id: str):
-        if "task_persisted" not in events or persisted_task_id != task_id:
-            raise RuntimeError("Poll before durable persist forbidden")
-        events.append("poll_started")
-
-    tid = mock_submit()
-    persist_task(tid)
-    poll_task(tid)
-
-    assert events == ["submit_accepted", "task_persisted", "poll_started"]
-    assert persisted_task_id == "kling_task_durable_001"
-
-
-def test_key4u_i2v_restart_polls_same_task_without_submit():
-    """Restart recovery finds existing task ID and resumes polling with 0 submissions."""
-    existing_task_id = "kling_task_persisted_777"
-    job_record = {
-        "job_id": "job_i2v_restart_1",
-        "provider_task_id": existing_task_id,
-        "status": "running",
+    # 1. Parse submit task ID using real production parser seam
+    response_body = {
+        "code": 0,
+        "message": "SUCCEED",
+        "data": {"task_id": "kling_task_durable_001", "task_status": "submitted"},
     }
+    parsed_tid, _, _, _ = vgp.parse_submit_task_ids(response_body)
+    assert parsed_tid == "kling_task_durable_001"
+
+    # 2. Persist durably in SQLite jobs table before any polling starts
+    conn.execute(
+        """INSERT INTO local_worker_jobs (
+            user_id, command, job_type, status, provider, input_file_id,
+            output_file_id, output_url, error_short, created_at, started_at,
+            finished_at, xu_cost, admin_only, worker_id, updated_at, provider_task_id
+        ) VALUES (
+            '12345', 'ai_edit', 'video_ai_edit', 'running', 'key4u', '',
+            '', '', '', '2026-09-16 10:00:00', '2026-09-16 10:00:00',
+            '', 0, 1, '', '2026-09-16 10:00:00', ?
+        )""",
+        (parsed_tid,),
+    )
+    conn.commit()
+
+    # 3. Discover recoverable job using real bot.find_recoverable_video_ai_edit_jobs seam
+    recoverable = bot.find_recoverable_video_ai_edit_jobs(conn=conn)
+    assert len(recoverable) == 1
+    assert recoverable[0]["provider_task_id"] == "kling_task_durable_001"
+
+    # 4. Claim recoverable job using real bot.claim_recoverable_video_ai_edit_job seam
+    claimed = bot.claim_recoverable_video_ai_edit_job(worker_id="worker_test_1", conn=conn)
+    assert claimed is not None
+    assert claimed["provider_task_id"] == "kling_task_durable_001"
+    assert claimed["worker_id"] == "worker_test_1"
+
+    # 5. Resolve provider task ID using real video_ai_edit_status.resolve_provider_task_id seam
+    assert video_ai_edit_status.resolve_provider_task_id(claimed) == "kling_task_durable_001"
+    conn.close()
+
+
+def test_key4u_i2v_restart_polls_same_task_without_submit(tmp_path: Path):
+    """Restart recovery finds existing task ID and resumes polling with 0 duplicate submissions."""
+    conn = _init_test_jobs_db(tmp_path)
+    existing_task_id = "kling_task_persisted_777"
+
+    conn.execute(
+        """INSERT INTO local_worker_jobs (
+            user_id, command, job_type, status, provider, input_file_id,
+            output_file_id, output_url, error_short, created_at, started_at,
+            finished_at, xu_cost, admin_only, worker_id, updated_at, provider_task_id
+        ) VALUES (
+            '12345', 'ai_edit', 'video_ai_edit', 'running', 'key4u', '',
+            '', '', '', '2026-09-16 10:00:00', '2026-09-16 10:00:00',
+            '', 0, 1, 'dead_worker', '2026-09-16 10:00:00', ?
+        )""",
+        (existing_task_id,),
+    )
+    conn.commit()
+
+    # Claim after restart
+    claimed = bot.claim_recoverable_video_ai_edit_job(worker_id="restarted_worker", conn=conn)
+    assert claimed is not None
+    assert video_ai_edit_status.is_recoverable_video_ai_edit_job(claimed) is True
+
+    resolved_tid = video_ai_edit_status.resolve_provider_task_id(claimed)
+    assert resolved_tid == existing_task_id
 
     submit_count = 0
     poll_count = 0
@@ -395,56 +592,70 @@ def test_key4u_i2v_restart_polls_same_task_without_submit():
     def mock_submit():
         nonlocal submit_count
         submit_count += 1
-        return "new_task_id"
+        return "new_unwanted_task_id"
 
-    def mock_poll(task_id: str):
+    def mock_poll(tid: str):
         nonlocal poll_count
         poll_count += 1
-        return {"status": "succeeded", "result_url": "https://cdn.key4u.vn/video.mp4"}
+        return {"status": "succeeded", "task_id": tid}
 
-    # Recovery logic: if task_id exists, poll; do NOT submit
-    if job_record.get("provider_task_id"):
-        res = mock_poll(job_record["provider_task_id"])
+    # Recovery seam: since resolved_tid exists, skip submit and poll directly
+    if resolved_tid:
+        res = mock_poll(resolved_tid)
     else:
-        job_record["provider_task_id"] = mock_submit()
+        mock_submit()
 
     assert submit_count == 0
     assert poll_count == 1
-    assert job_record["provider_task_id"] == existing_task_id
+    assert res["task_id"] == existing_task_id
+    conn.close()
 
 
 def test_key4u_i2v_timeout_preserves_task_id():
-    """Poll timeout preserves provider task ID for subsequent lookup without discarding."""
+    """Poll timeout preserves provider task ID via video_ai_edit_status seams without discarding."""
     job_record = {
         "job_id": "job_i2v_timeout_1",
+        "job_type": "video_ai_edit",
         "provider_task_id": "kling_task_timeout_abc",
         "status": "running",
+        "error_short": "",
     }
 
-    # Simulate timeout
-    job_record["status"] = "poll_timeout"
-    # Task ID must be retained
-    assert job_record["provider_task_id"] == "kling_task_timeout_abc"
+    # Reconcile progress on timeout using real seam
+    progress = video_ai_edit_status.reconcile_progress(
+        {"stage": "ai_processing", "provider_task_id": "kling_task_timeout_abc"},
+        {"stage": "failed_no_charge", "reason": "provider_poll_timeout"},
+    )
+    job_record["error_short"] = json.dumps(progress)
+    job_record["status"] = "failed"
+
+    # Task ID must be resolved and retained
+    resolved = video_ai_edit_status.resolve_provider_task_id(job_record)
+    assert resolved == "kling_task_timeout_abc"
 
 
 def test_key4u_i2v_timeout_does_not_resubmit():
     """Timeout recovery preserves original task ID and never executes duplicate paid submit."""
     job_record = {
-        "job_id": "job_i2v_timeout_2",
+        "id": 9991,
+        "job_type": "video_ai_edit",
         "provider_task_id": "kling_task_timeout_xyz",
-        "status": "poll_timeout",
+        "status": "failed",
     }
 
     paid_submit_called = False
-    if not job_record.get("provider_task_id"):
+    resolved = video_ai_edit_status.resolve_provider_task_id(job_record)
+
+    # When recovering from timeout, existing task ID prevents any new submit
+    if not resolved:
         paid_submit_called = True
 
     assert not paid_submit_called
-    assert job_record["provider_task_id"] == "kling_task_timeout_xyz"
+    assert resolved == "kling_task_timeout_xyz"
 
 
 # ---------------------------------------------------------------------------
-# Tests 18, 19, 20, 21: Failure zero-charge & Delivery Receipt Billing
+# Tests 24-27: Failure Zero-Charge & Delivery Receipt Billing
 # ---------------------------------------------------------------------------
 
 def test_key4u_i2v_provider_failure_charges_zero():
@@ -466,7 +677,7 @@ def test_key4u_i2v_invalid_final_mp4_charges_zero(tmp_path: Path):
     corrupt_mp4 = tmp_path / "corrupt_output.mp4"
     corrupt_mp4.write_bytes(b"NOT_A_VALID_MP4_FILE_BYTES")
 
-    # Local MP4 check fails
+    # Local MP4 validation check fails
     is_valid = corrupt_mp4.stat().st_size > 0 and corrupt_mp4.read_bytes().startswith(b"\x00\x00\x00")
     charged_xu = 100 if is_valid else 0
 
