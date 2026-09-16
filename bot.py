@@ -236144,6 +236144,47 @@ def _subdub_auto_selected_text(segments: object) -> str:
     ).strip()
 
 
+def _subdub_auto_v2_restore_prepared_selection(
+    prepared: dict,
+    state: dict,
+) -> dict:
+    """Restore a lost translated segment list from its prepared SRT authority."""
+
+    current = dict(prepared or {})
+    if str((state or {}).get("subdub_engine_selected") or "") != "auto_multi_speaker_v2":
+        return current
+    source_segments = list(current.get("source_segments") or [])
+    output_segments = list(current.get("output_segments") or [])
+    output_subtitle = str(current.get("output_subtitle") or "").strip()
+    if output_segments or not source_segments or not output_subtitle:
+        return current
+    parsed_output = video_dubbing_segments_from_subtitle(output_subtitle)
+    if len(parsed_output) != len(source_segments):
+        return current
+    retimed_output = subdub_retime_translated_segments_to_source(
+        source_segments,
+        parsed_output,
+    )
+    restored = video_dubbing_qc_segments(
+        retimed_output,
+        preserve_timestamps=True,
+    )
+    if (
+        len(restored) != len(source_segments)
+        or any(
+            not str(output.get("text") or "").strip()
+            or output.get("translate_missing") is True
+            or output.get("cue_id") != source.get("cue_id")
+            or output.get("speaker_id") != source.get("speaker_id")
+            or abs(float(output.get("start")) - float(source.get("start"))) > 0.001
+            or abs(float(output.get("end")) - float(source.get("end"))) > 0.001
+            for source, output in zip(source_segments, restored, strict=True)
+        )
+    ):
+        return current
+    return {**current, "output_segments": restored}
+
+
 def subdub_auto_quote_fields(user_id, state: dict | None = None) -> dict:
     """Resolve an exact cached Auto quote without ASR, translation, or wallet I/O."""
 
@@ -248777,6 +248818,12 @@ async def _subdub_auto_post_prepare_gate(prepared: dict, state: dict) -> dict:
         return {"ok": False, "status": "AUTO_CAST_MANUAL_REQUIRED"}
     prepared = prepared if isinstance(prepared, dict) else dict(prepared or {})
     prepared_state = dict(prepared.get("state") or state or {})
+    normalized_prepared = _subdub_auto_v2_restore_prepared_selection(
+        prepared,
+        prepared_state,
+    )
+    prepared.clear()
+    prepared.update(normalized_prepared)
     policy = subtitle_dub_product_pipeline.resolve_subdub_dub_audio_policy(
         prepared_state,
         prepared,
