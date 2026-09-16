@@ -185,6 +185,110 @@ def test_v2_post_prepare_restores_lost_translated_segments_before_exact_gate(
     ]
 
 
+def test_v2_post_prepare_uses_outer_route_and_srt_when_inner_segments_are_stale(
+    monkeypatch,
+):
+    source_segments = _source_segments(69, 3)
+    translated_segments = [
+        {**segment, "text": f"translated live cue {index + 1}"}
+        for index, segment in enumerate(source_segments)
+    ]
+    state = {
+        "subdub_engine_selected": "auto_multi_speaker_v2",
+        "mode": "subtitle_plus_dub",
+        "video_processing_mode": "subtitle_plus_dub",
+        "voice_kind": "auto_speaker_gender",
+        "voice_selection_mode": "auto_speaker",
+        "auto_speaker_lane": "multi",
+        "target_language": "English",
+        "translate_requested": "1",
+        "dub_text_source": "translated",
+        "subdub_final_confirmed": True,
+        "_pipeline_is_admin": True,
+        "_pipeline_job_id": "4b6751d819-live-shape",
+        "_pipeline_job_key": "4b6751d819-live-shape-key",
+        "_pipeline_owner_user_id": "admin-live-shape",
+        "_pipeline_chat_id": "admin-live-shape",
+        "auto_exact_session_nonce": "4b6751d819-nonce",
+    }
+    inner_state = {
+        key: value
+        for key, value in state.items()
+        if key != "subdub_engine_selected"
+    }
+    prepared = {
+        "state": inner_state,
+        "source_subtitle": bot.video_dubbing_srt_from_segments(source_segments),
+        "source_segments": source_segments,
+        "output_subtitle": bot.video_dubbing_srt_from_segments(translated_segments),
+        "output_segments": [
+            {**segment, "text": ""}
+            for segment in source_segments
+        ],
+        "source_bytes": b"provider-free-live-shape-source",
+    }
+    captured: dict = {}
+
+    monkeypatch.setattr(bot, "subdub_auto_speaker_route_enabled", lambda _state: True)
+    monkeypatch.setattr(
+        bot,
+        "_subdub_auto_actual_components",
+        lambda _prepared, _state, selected_text: (
+            len(selected_text.split()),
+            100,
+            50,
+        ),
+    )
+    monkeypatch.setattr(
+        bot.subdub_auto_word_pricing,
+        "auto_exact_confirmation_state",
+        lambda **_kwargs: {"exact_confirmation_required": True},
+    )
+
+    def build_receipt(
+        received_prepared,
+        _state,
+        *,
+        selected_segments,
+        selected_text,
+        **_kwargs,
+    ):
+        captured["prepared"] = received_prepared
+        captured["selected_segments"] = list(selected_segments)
+        captured["selected_text"] = selected_text
+        return {
+            "ok": True,
+            "receipt": {
+                "session_nonce": "4b6751d819-nonce",
+                "consumed": False,
+                "claim_state": "unconsumed",
+            },
+            "cache": {},
+            "resume_state": {},
+        }
+
+    monkeypatch.setattr(bot, "_subdub_auto_build_exact_receipt", build_receipt)
+    monkeypatch.setattr(
+        bot,
+        "update_subtitle_dub_pipeline_job",
+        lambda job_key, **fields: {"job_key": job_key, **fields},
+    )
+    monkeypatch.setattr(
+        bot,
+        "persist_subtitle_dub_pipeline_job_snapshot",
+        lambda *_args, **_kwargs: True,
+    )
+
+    result = asyncio.run(bot._subdub_auto_post_prepare_gate(prepared, state))
+
+    assert result == {"continue": True}
+    assert len(captured["selected_segments"]) == 69
+    assert [item["text"] for item in captured["selected_segments"]] == [
+        item["text"] for item in translated_segments
+    ]
+    assert prepared["state"]["subdub_engine_selected"] == "auto_multi_speaker_v2"
+
+
 @pytest.mark.parametrize("corruption", ("truncated", "extra", "blank"))
 def test_v2_post_prepare_recovery_fails_closed_on_incomplete_translation(
     corruption,

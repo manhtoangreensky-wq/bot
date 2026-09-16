@@ -86,3 +86,30 @@ Pre-final-rebase full-suite comparison on the reviewed tree:
 - [ ] Run one separately Owner-authorized V2 live job; no retry/rearm of job `756e0bbb01efee51383c`.
 - [ ] PASS requires validated MP4 + Telegram video + one receipt + settlement only after delivery.
 - [ ] V2 remains canary-routed until multiple supported videos pass; no global cutover from this single fix.
+
+## LIVE-02 — Production shape correction after job `4B6751D819`
+
+- [x] Runtime `ce6dafb96e22676783894c39da76c19d3818a219` received a new V2 job.
+- [x] The job completed acoustic preparation with `69` cues, `3` speakers,
+  `630` words and stable local acoustic evidence.
+- [x] The job stopped as `failed_no_charge` with no exact-selection cache,
+  TTS checkpoint, TTS artifact, mux, delivery or Xu charge.
+- [x] Provider-free RED reproduced the remaining live shape: the outer state
+  selected V2, the prepared inner state omitted that route marker, and a
+  truthy-but-stale `output_segments` list masked the valid translated SRT.
+- [x] Minimal correction: merge the outer route authority into prepared state
+  and canonicalize V2 translated segments from the existing SRT even when the
+  stale list is non-empty. V1, Auto 2, provider, TTS, mux, delivery and wallet
+  code remain untouched.
+- [x] Focused live-shape RED: `1 failed` with
+  `AUTO_CAST_MANUAL_REQUIRED`; GREEN: `1 passed` for `69` cues / `3` speakers.
+- [x] Complete post-prepare matrix after correction: `8 passed`.
+- [x] V2 routing/contract/checkpoint/artifact regression: `75 passed`.
+- [x] Protected V1 Multi + customer exact + Auto 2 comparator:
+  `88 passed, 241 deselected`.
+- [x] Compile `bot.py`, `local_worker.py` and V1/V2/Auto 2 blackboxes: exit `0`.
+- [x] Exact production diff reviewed: `bot.py` is `+14/-2`; protected blackbox,
+  pipeline and provider diffs are `0`.
+- [ ] Push one follow-up PR and deploy once.
+- [ ] A new live V2 job must produce validated MP4, Telegram delivery and one
+  receipt before the task can be closed.
