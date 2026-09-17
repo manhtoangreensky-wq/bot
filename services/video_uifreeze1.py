@@ -148,8 +148,9 @@ def compatible_quality_tiers(
             continue
         if aspect and aspect != "keep" and f"ratio_{aspect}" not in capabilities:
             continue
-        if capability and capability not in capabilities and product != "video_local_edit":
-            continue
+        if capability and capability not in capabilities:
+            if not (product == "video_local_edit" and capability == "video_to_video"):
+                continue
         if product == "storyboard_prompt" and not {
             "image_to_video",
             "first_last_frame_video",

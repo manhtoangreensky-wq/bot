@@ -379,9 +379,11 @@ def test_deferred_products_are_not_in_pv04_active_v2v_matrix() -> None:
     assert len(deferred_in_active) == 0
     deferred_in_v2v = DEFERRED_PRODUCT_IDS.intersection(PV04_ACTIVE_V2V_PRODUCT_IDS)
     assert len(deferred_in_v2v) == 0
-    # Explicit requirement: DEFERRED_PRODUCTS_IN_PV04_ACTIVE_MATRIX=0
+    # Explicit requirements: DEFERRED_PRODUCTS_IN_PV04_ACTIVE_MATRIX=0 and DEFERRED_PRODUCTS_IN_PV04_SCOPE=0
     DEFERRED_PRODUCTS_IN_PV04_ACTIVE_MATRIX = len(deferred_in_v2v)
     assert DEFERRED_PRODUCTS_IN_PV04_ACTIVE_MATRIX == 0
+    DEFERRED_PRODUCTS_IN_PV04_SCOPE = len(deferred_in_active)
+    assert DEFERRED_PRODUCTS_IN_PV04_SCOPE == 0
     for deferred_id in DEFERRED_PRODUCT_IDS:
         assert deferred_id not in PV04_ACTIVE_V2V_PRODUCT_IDS
         assert deferred_id not in PV04_ACTIVE_PRODUCT_IDS
@@ -426,3 +428,79 @@ def test_video_local_edit_contract_has_zero_delta_against_parent() -> None:
     }
     PV04_VIDEO_LOCAL_EDIT_CONTRACT_DELTA = len(contract_diffs)
     assert PV04_VIDEO_LOCAL_EDIT_CONTRACT_DELTA == 0
+
+
+def test_video_local_edit_behavioral_differential_and_tamper_rejection() -> None:
+    """Empirical differential proof for video_local_edit behavior against parent semantics.
+
+    Validates:
+    - required_capability="": returns all 10 canonical tiers.
+    - required_capability="video_to_video": returns all 10 canonical tiers.
+    - required_capability="text_to_video": returns all 10 canonical tiers.
+    - required_capability="image_to_video": returns all 10 canonical tiers.
+    - required_capability="unknown_tampered_capability": returns [] (rejection).
+    - representative ratios ("9:16", "16:9", "1:1", "keep") all preserve parent tiers.
+    - VIDEO_LOCAL_EDIT_BEHAVIOR_DELTA = 0.
+    - UNKNOWN_LOCAL_EDIT_CAPABILITY_REJECTED = YES.
+    """
+    LEGACY_DEFAULT_TIERS = [400, 500, 600, 200, 300, 700, 800, 1000, 1200, 1500]
+    UNKNOWN_CAPABILITY_TIERS = []
+
+    # 1. Default / video_to_video
+    default_cat = video_uifreeze1.catalog_report("video_local_edit", scene_count=2, ratio="keep")
+    assert default_cat["ok"] is True
+    assert default_cat["tier_ids"] == LEGACY_DEFAULT_TIERS
+
+    v2v_cat = video_uifreeze1.catalog_report("video_local_edit", scene_count=2, ratio="keep", required_capability="video_to_video")
+    assert v2v_cat["ok"] is True
+    assert v2v_cat["tier_ids"] == LEGACY_DEFAULT_TIERS
+
+    empty_cat = video_uifreeze1.catalog_report("video_local_edit", scene_count=2, ratio="keep", required_capability="")
+    assert empty_cat["ok"] is True
+    assert empty_cat["tier_ids"] == LEGACY_DEFAULT_TIERS
+
+    # 2. Valid other capability overrides
+    t2v_cat = video_uifreeze1.catalog_report("video_local_edit", scene_count=2, ratio="keep", required_capability="text_to_video")
+    assert t2v_cat["ok"] is True
+    assert t2v_cat["tier_ids"] == LEGACY_DEFAULT_TIERS
+
+    i2v_cat = video_uifreeze1.catalog_report("video_local_edit", scene_count=2, ratio="keep", required_capability="image_to_video")
+    assert i2v_cat["ok"] is True
+    assert i2v_cat["tier_ids"] == LEGACY_DEFAULT_TIERS
+
+    # 3. Unknown / tampered capability MUST be rejected
+    tampered_cat = video_uifreeze1.catalog_report("video_local_edit", scene_count=2, ratio="keep", required_capability="unknown_tampered_capability")
+    assert tampered_cat["ok"] is False
+    assert tampered_cat["tier_ids"] == UNKNOWN_CAPABILITY_TIERS
+    assert tampered_cat["reason"] == "no_compatible_quality_package"
+    UNKNOWN_LOCAL_EDIT_CAPABILITY_REJECTED = (tampered_cat["tier_ids"] == UNKNOWN_CAPABILITY_TIERS)
+    assert UNKNOWN_LOCAL_EDIT_CAPABILITY_REJECTED is True
+
+    # 4. Representative ratios with default capability
+    for r in ("9:16", "16:9", "1:1", "keep"):
+        r_cat = video_uifreeze1.catalog_report("video_local_edit", scene_count=2, ratio=r)
+        assert r_cat["ok"] is True
+        assert r_cat["tier_ids"] == LEGACY_DEFAULT_TIERS
+
+    # 5. Full grid differential against parent semantics
+    caps = ["", "video_to_video", "text_to_video", "image_to_video", "unknown_tampered_capability"]
+    ratios = ["9:16", "16:9", "1:1", "keep"]
+    counts = [1, 2, 5, 20, 25]
+
+    behavior_diffs = []
+    for c in caps:
+        for r in ratios:
+            for sc in counts:
+                if sc > 20:
+                    expected_tiers = []
+                elif c == "unknown_tampered_capability":
+                    expected_tiers = []
+                else:
+                    expected_tiers = LEGACY_DEFAULT_TIERS
+
+                actual = [t["tier_id"] for t in video_uifreeze1.compatible_quality_tiers("video_local_edit", scene_count=sc, ratio=r, required_capability=c)]
+                if actual != expected_tiers:
+                    behavior_diffs.append((c, r, sc, actual, expected_tiers))
+
+    VIDEO_LOCAL_EDIT_BEHAVIOR_DELTA = len(behavior_diffs)
+    assert VIDEO_LOCAL_EDIT_BEHAVIOR_DELTA == 0
