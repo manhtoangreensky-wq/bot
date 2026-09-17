@@ -118037,10 +118037,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             session = task3d_session_step(uid, "awaiting_script_ai_platform", provider_called=False, xu_charged=0)
             return await video_script_render_step(query, session, lang)
         if action == "script_platform":
-            label = video_script_product.public_choice_label(video_script_product.PLATFORMS, value)
-            if not label:
+            is_valid, platform_key, label = video_script_product.validate_platform(value)
+            if not is_valid:
                 return await video_script_render_step(query, task3d_session_step(uid, "script_ai_platform"), lang)
-            session = task3d_session_step(uid, "script_ai_duration", script_platform=value, script_platform_label=label, provider_called=False, xu_charged=0)
+            session = task3d_session_step(uid, "script_ai_duration", script_platform=platform_key, script_platform_label=label, provider_called=False, xu_charged=0)
             return await video_script_render_step(query, session, lang)
         if action == "script_style_screen":
             session = task3d_session_step(uid, "script_ai_style", provider_called=False, xu_charged=0)
@@ -121615,6 +121615,7 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
         )
         return True
     if str(session.get("product_id") or "") == "script_image_video":
+        lang = get_user_language(uid) or "vi"
         raw_script_input = str(update.message.text or "")
         if current_step == "awaiting_script_entry_count":
             scene_count = safe_int(re.sub(r"\D+", "", raw_script_input), 0)
@@ -121731,6 +121732,22 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
         }
         if current_step in custom_field_steps:
             if not raw_script_input.strip():
+                await video_script_render_step(update.message, session, lang)
+                return True
+            if current_step == "awaiting_script_ai_platform":
+                is_valid, platform_key, label = video_script_product.validate_platform(raw_script_input)
+                if not is_valid:
+                    session = task3d_session_step(uid, "script_ai_platform", provider_called=False, xu_charged=0)
+                    await video_script_render_step(update.message, session, lang)
+                    return True
+                session = task3d_session_step(
+                    uid,
+                    "script_ai_duration",
+                    script_platform=platform_key,
+                    script_platform_label=label,
+                    provider_called=False,
+                    xu_charged=0,
+                )
                 await video_script_render_step(update.message, session, lang)
                 return True
             next_step, field_name = custom_field_steps[current_step]
