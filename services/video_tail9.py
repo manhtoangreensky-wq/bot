@@ -284,9 +284,12 @@ PRODUCT_ADAPTER_ALIASES = {
     "trend_video": "video_trend",
     "script_to_video": "script_image_video",
     "storyboard_to_video": "storyboard_prompt",
+    "storyboard_video": "storyboard_prompt",
     "video_idea_to_product": "video_idea",
     "frame_video": "frame_video_local",
     "image_to_video": "frame_video_local",
+    "selfshot_scene_change": "self_shot_scene_change",
+    "selfshot_cinematic": "self_shot_cinematic_transform",
     "long_video": "video_long",
 }
 
