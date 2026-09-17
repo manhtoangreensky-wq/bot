@@ -65,6 +65,28 @@ PRODUCT_VIDEO_PROBATION_ADMISSION_MODE = "public_confirmed_probation"
 PRODUCT_VIDEO_PROBATION_FAILURE_COOLDOWN_SECONDS_DEFAULT = 1800
 PRODUCT_VIDEO_EXISTING_TASK_RECOVERY_MAX_ATTEMPTS = 3
 PRODUCT_VIDEO_EXISTING_TASK_RECOVERY_COOLDOWN_SECONDS = 60
+PRODUCT_VIDEO_POLL_RECOVERY_MAX_ATTEMPTS = 3
+PRODUCT_VIDEO_ARTIFACT_RECOVERY_MAX_ATTEMPTS = 3
+PRODUCT_VIDEO_SCENE_CLIP_RECOVERY_MAX_ATTEMPTS = 3
+PRODUCT_VIDEO_FINALIZER_RECOVERY_MAX_ATTEMPTS = 3
+PRODUCT_VIDEO_DELIVERY_RECOVERY_MAX_ATTEMPTS = 3
+PRODUCT_VIDEO_RECOVERY_DOMAINS = frozenset(
+    {"provider_poll", "provider_artifact", "scene_clip", "finalizer", "delivery"}
+)
+PRODUCT_VIDEO_DOMAIN_MAX_ATTEMPTS = {
+    "provider_poll": PRODUCT_VIDEO_POLL_RECOVERY_MAX_ATTEMPTS,
+    "provider_artifact": PRODUCT_VIDEO_ARTIFACT_RECOVERY_MAX_ATTEMPTS,
+    "scene_clip": PRODUCT_VIDEO_SCENE_CLIP_RECOVERY_MAX_ATTEMPTS,
+    "finalizer": PRODUCT_VIDEO_FINALIZER_RECOVERY_MAX_ATTEMPTS,
+    "delivery": PRODUCT_VIDEO_DELIVERY_RECOVERY_MAX_ATTEMPTS,
+}
+PRODUCT_VIDEO_DOMAIN_COUNTER_KEYS = {
+    "provider_poll": "provider_poll_recovery_count",
+    "provider_artifact": "provider_artifact_recovery_count",
+    "scene_clip": "scene_clip_recovery_count",
+    "finalizer": "finalizer_recovery_count",
+    "delivery": "delivery_recovery_count",
+}
 PRODUCT_VIDEO_RECONCILIATION_SOURCES = frozenset(
     {
         "watchdog_scheduler",
@@ -6929,12 +6951,97 @@ def product_video_recovery_cancellation_state(
     }
 
 
+def classify_product_video_recovery_domain(
+    result: dict | None = None,
+    job: dict | None = None,
+    project: dict | None = None,
+    *,
+    explicit_domain: str | None = None,
+) -> str:
+    """Classify the failure domain for a Product Video recovery attempt."""
+    if explicit_domain:
+        clean_domain = str(explicit_domain).strip().lower()
+        if clean_domain in PRODUCT_VIDEO_RECOVERY_DOMAINS:
+            return clean_domain
+        if "artifact" in clean_domain or "download" in clean_domain:
+            return "provider_artifact"
+        if "scene" in clean_domain or "clip" in clean_domain:
+            return "scene_clip"
+        if "final" in clean_domain or "ffmpeg" in clean_domain or "render" in clean_domain:
+            return "finalizer"
+        if "deliver" in clean_domain or "send" in clean_domain or "telegram" in clean_domain:
+            return "delivery"
+        if "poll" in clean_domain:
+            return "provider_poll"
+
+    result = dict(result or {})
+    job = dict(job or {})
+    project = dict(project or {})
+
+    # 1. Delivery domain
+    if (
+        str(project.get("video_terminal_state") or "").strip() == "telegram_delivery_failed"
+        or (str(result.get("telegram_delivery_status") or "").strip() not in {"", "sent"})
+        or bool(result.get("delivery_failed"))
+        or (
+            bool(result.get("final_mp4_valid"))
+            and not bool(result.get("final_delivered"))
+            and bool(result.get("final_delivery_attempted"))
+        )
+    ):
+        return "delivery"
+
+    # 2. Finalizer domain
+    coverage_complete = bool(
+        result.get("scene_clip_coverage_complete")
+        or (
+            _as_int(result.get("valid_scene_clip_count"), 0) >= _as_int(result.get("scene_count"), 1)
+            and _as_int(result.get("scene_count"), 0) > 0
+        )
+    )
+    last_error_str = str(result.get("last_error") or job.get("last_error") or "").strip()
+    is_finalizer_error = bool(
+        result.get("finalizer_failed")
+        or result.get("finalizer_error")
+        or last_error_str.startswith("RuntimeError:provider_render_failed")
+        or "finalizer" in last_error_str.lower()
+        or (coverage_complete and result.get("final_mp4_valid") is False and not result.get("artifact_download_error"))
+    )
+    if coverage_complete and is_finalizer_error:
+        return "finalizer"
+
+    # 3. Provider artifact / scene clip download domain
+    provider_done = bool(
+        str(result.get("provider_status") or "").strip().lower() in {"succeeded", "completed"}
+        or result.get("provider_finished")
+        or any(
+            str(item.get("status") or "").strip().lower() in {"succeeded", "completed"}
+            for item in (result.get("scene_tasks") or [])
+            if isinstance(item, dict)
+        )
+    )
+    is_artifact_failure = bool(
+        result.get("artifact_download_retryable")
+        or result.get("artifact_download_error")
+        or str(result.get("blocker") or "").startswith("provider_download_failed")
+        or (provider_done and not coverage_complete)
+    )
+    if is_artifact_failure:
+        if bool(result.get("missing_scene_clips")) or str(result.get("blocker") or "") == "scene_clip_download_failed":
+            return "scene_clip"
+        return "provider_artifact"
+
+    # 4. Default: Provider Polling
+    return "provider_poll"
+
+
 def product_video_existing_task_recovery_state(
     job: dict | None = None,
     project: dict | None = None,
     result: dict | None = None,
     outbox: dict | None = None,
     *,
+    recovery_domain: str | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Decide whether a failed job may resume by polling already-created tasks only."""
@@ -7010,14 +7117,61 @@ def product_video_existing_task_recovery_state(
         and required
         and mapped == required
     )
+
+    active_domain = classify_product_video_recovery_domain(
+        result, job=job, project=project, explicit_domain=recovery_domain
+    )
     already_recovered = bool(result.get("recovery_existing_tasks_only"))
-    recovery_count = max(
+    legacy_count = max(
         _as_int(result.get("existing_task_recovery_count"), 0),
         1 if already_recovered else 0,
     )
-    recovery_max_attempts = PRODUCT_VIDEO_EXISTING_TASK_RECOVERY_MAX_ATTEMPTS
-    recovery_attempts_remaining = max(0, recovery_max_attempts - recovery_count)
-    recovery_attempts_exhausted = recovery_count >= recovery_max_attempts
+
+    # PV06: Strict domain quota separation
+    # LEGACY_VALUE_REINTERPRETED_AS_ALL_DOMAINS=NO
+    # Historical existing_task_recovery_count represented provider polling only.
+    has_poll_counter = "provider_poll_recovery_count" in result
+    poll_count = _as_int(
+        result.get("provider_poll_recovery_count"),
+        legacy_count if not has_poll_counter else 0,
+    )
+    artifact_count = _as_int(
+        result.get("provider_artifact_recovery_count"),
+        _as_int(result.get("artifact_download_retry_count"), 0),
+    )
+    scene_clip_count = _as_int(result.get("scene_clip_recovery_count"), 0)
+    finalizer_count = _as_int(result.get("finalizer_recovery_count"), 0)
+    delivery_count = _as_int(
+        result.get("delivery_recovery_count"),
+        _as_int(project.get("delivery_attempt_count"), 0),
+    )
+
+    domain_counts = {
+        "provider_poll": poll_count,
+        "provider_artifact": artifact_count,
+        "scene_clip": scene_clip_count,
+        "finalizer": finalizer_count,
+        "delivery": delivery_count,
+    }
+
+    active_count = domain_counts.get(active_domain, 0)
+    active_max_attempts = PRODUCT_VIDEO_DOMAIN_MAX_ATTEMPTS.get(
+        active_domain, PRODUCT_VIDEO_EXISTING_TASK_RECOVERY_MAX_ATTEMPTS
+    )
+    active_attempts_remaining = max(0, active_max_attempts - active_count)
+    active_attempts_exhausted = active_count >= active_max_attempts
+
+    poll_exhausted = poll_count >= PRODUCT_VIDEO_POLL_RECOVERY_MAX_ATTEMPTS
+    artifact_exhausted = artifact_count >= PRODUCT_VIDEO_ARTIFACT_RECOVERY_MAX_ATTEMPTS
+    scene_clip_exhausted = scene_clip_count >= PRODUCT_VIDEO_SCENE_CLIP_RECOVERY_MAX_ATTEMPTS
+    finalizer_exhausted = finalizer_count >= PRODUCT_VIDEO_FINALIZER_RECOVERY_MAX_ATTEMPTS
+    delivery_exhausted = delivery_count >= PRODUCT_VIDEO_DELIVERY_RECOVERY_MAX_ATTEMPTS
+
+    recovery_count = active_count
+    recovery_max_attempts = active_max_attempts
+    recovery_attempts_remaining = active_attempts_remaining
+    recovery_attempts_exhausted = active_attempts_exhausted
+
     recovered_at_epoch = _parse_time_epoch(
         result.get("existing_task_recovery_recovered_at")
     )
@@ -7051,12 +7205,14 @@ def product_video_existing_task_recovery_state(
         and not delivered
     )
     authority_repair_eligible = bool(
-        recovery_attempts_exhausted
+        active_domain == "provider_poll"
+        and active_attempts_exhausted
         and not authority_repair_used
         and authority_repair_safe
     )
     terminal_classifier_repair_eligible = bool(
-        recovery_attempts_exhausted
+        active_domain == "provider_poll"
+        and active_attempts_exhausted
         and authority_repair_used
         and not terminal_classifier_repair_used
         and result.get("worker_failed")
@@ -7077,7 +7233,7 @@ def product_video_existing_task_recovery_state(
         and not charge_recorded
         and not delivered
         and (
-            not recovery_attempts_exhausted
+            not active_attempts_exhausted
             or authority_repair_eligible
             or terminal_classifier_repair_eligible
         )
@@ -7108,24 +7264,50 @@ def product_video_existing_task_recovery_state(
     elif delivered:
         blocker = "video_already_delivered"
     elif (
-        recovery_attempts_exhausted
+        active_attempts_exhausted
         and not authority_repair_eligible
         and not terminal_classifier_repair_eligible
     ):
-        blocker = "existing_task_recovery_attempts_exhausted"
+        if active_domain == "provider_poll" and not recovery_domain:
+            blocker = "existing_task_recovery_attempts_exhausted"
+        else:
+            blocker = f"{active_domain}_recovery_attempts_exhausted"
     elif recovery_cooldown_active:
         blocker = "existing_task_recovery_cooldown_active"
     else:
         blocker = "existing_task_recovery_not_eligible"
+
+    domain_block_reason = (
+        f"{active_domain}_recovery_attempts_exhausted"
+        if active_attempts_exhausted
+        else ""
+    )
     return {
         **ownership,
         "existing_task_recovery_recoverable": recoverable,
         "existing_task_recovery_block_reason": blocker,
+        "recovery_domain": active_domain,
+        "recovery_domain_block_reason": domain_block_reason,
         "existing_task_recovery_already_used": already_recovered,
-        "existing_task_recovery_count": recovery_count,
-        "existing_task_recovery_max_attempts": recovery_max_attempts,
-        "existing_task_recovery_attempts_remaining": recovery_attempts_remaining,
-        "existing_task_recovery_attempts_exhausted": recovery_attempts_exhausted,
+        "existing_task_recovery_count": legacy_count,
+        "existing_task_recovery_max_attempts": PRODUCT_VIDEO_EXISTING_TASK_RECOVERY_MAX_ATTEMPTS,
+        "existing_task_recovery_attempts_remaining": active_attempts_remaining,
+        "existing_task_recovery_attempts_exhausted": active_attempts_exhausted,
+        "provider_poll_recovery_count": poll_count,
+        "provider_poll_recovery_max_attempts": PRODUCT_VIDEO_POLL_RECOVERY_MAX_ATTEMPTS,
+        "provider_poll_recovery_exhausted": poll_exhausted,
+        "provider_artifact_recovery_count": artifact_count,
+        "provider_artifact_recovery_max_attempts": PRODUCT_VIDEO_ARTIFACT_RECOVERY_MAX_ATTEMPTS,
+        "provider_artifact_recovery_exhausted": artifact_exhausted,
+        "scene_clip_recovery_count": scene_clip_count,
+        "scene_clip_recovery_max_attempts": PRODUCT_VIDEO_SCENE_CLIP_RECOVERY_MAX_ATTEMPTS,
+        "scene_clip_recovery_exhausted": scene_clip_exhausted,
+        "finalizer_recovery_count": finalizer_count,
+        "finalizer_recovery_max_attempts": PRODUCT_VIDEO_FINALIZER_RECOVERY_MAX_ATTEMPTS,
+        "finalizer_recovery_exhausted": finalizer_exhausted,
+        "delivery_recovery_count": delivery_count,
+        "delivery_recovery_max_attempts": PRODUCT_VIDEO_DELIVERY_RECOVERY_MAX_ATTEMPTS,
+        "delivery_recovery_exhausted": delivery_exhausted,
         "existing_task_authority_repair_recovery_eligible": authority_repair_eligible,
         "existing_task_authority_repair_recovery_used": authority_repair_used,
         "existing_task_terminal_classifier_repair_eligible": terminal_classifier_repair_eligible,
@@ -7157,6 +7339,8 @@ def recover_product_video_existing_tasks(
     conn: sqlite3.Connection,
     *,
     job_id: int,
+    recovery_domain: str | None = None,
+    idempotency_key: str | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """CAS-requeue a failed Product Video job for read-only polling of its old tasks."""
@@ -7186,6 +7370,7 @@ def recover_product_video_existing_tasks(
             current_project,
             current_result,
             current_outbox,
+            recovery_domain=recovery_domain,
             now=recovery_moment,
         )
         return (
@@ -7197,12 +7382,31 @@ def recover_product_video_existing_tasks(
         )
 
     job, project, result, outbox, state = snapshot()
+    if idempotency_key and str(result.get("last_recovery_idempotency_key") or "") == str(idempotency_key):
+        return {
+            **state,
+            "existing_task_recovery_recovered": True,
+            "duplicate_prevented": True,
+            "job_status_after_recovery": "queued",
+            "project_status_after_recovery": "queued_for_worker",
+            "outbox_status_after_recovery": str(outbox.get("dispatch_status") or ""),
+        }
     if not state.get("existing_task_recovery_recoverable"):
         return {**state, "existing_task_recovery_recovered": False}
 
     try:
         conn.execute("BEGIN IMMEDIATE")
         job, project, result, outbox, state = snapshot()
+        if idempotency_key and str(result.get("last_recovery_idempotency_key") or "") == str(idempotency_key):
+            conn.rollback()
+            return {
+                **state,
+                "existing_task_recovery_recovered": True,
+                "duplicate_prevented": True,
+                "job_status_after_recovery": "queued",
+                "project_status_after_recovery": "queued_for_worker",
+                "outbox_status_after_recovery": str(outbox.get("dispatch_status") or ""),
+            }
         if not state.get("existing_task_recovery_recoverable"):
             conn.rollback()
             return {**state, "existing_task_recovery_recovered": False}
@@ -7228,10 +7432,20 @@ def recover_product_video_existing_tasks(
             or result.get("provider_submit_source")
             or "public_user_final_confirm"
         ).strip()
+
+        active_domain = str(state.get("recovery_domain") or "provider_poll")
+        domain_counter_key = PRODUCT_VIDEO_DOMAIN_COUNTER_KEYS.get(
+            active_domain, "provider_poll_recovery_count"
+        )
+        prior_domain_count = _as_int(state.get(domain_counter_key), 0)
+        new_domain_count = prior_domain_count + 1
+
         prior_recovery_count = max(
             _as_int(result.get("existing_task_recovery_count"), 0),
             1 if result.get("recovery_existing_tasks_only") else 0,
         )
+        new_legacy_count = prior_recovery_count + 1
+
         authority_repair = bool(
             state.get("existing_task_authority_repair_recovery_eligible")
         )
@@ -7250,8 +7464,12 @@ def recover_product_video_existing_tasks(
                 "recovery_existing_tasks_only": True,
                 "existing_task_recovery_recovered": True,
                 "existing_task_recovery_recovered_at": current,
-                "existing_task_recovery_count": prior_recovery_count + 1,
+                "existing_task_recovery_count": new_legacy_count,
                 "existing_task_recovery_max_attempts": PRODUCT_VIDEO_EXISTING_TASK_RECOVERY_MAX_ATTEMPTS,
+                domain_counter_key: new_domain_count,
+                f"{active_domain}_recovery_count": new_domain_count,
+                "last_recovery_domain": active_domain,
+                "last_recovery_idempotency_key": str(idempotency_key or ""),
                 "existing_task_authority_repair_recovery_used": bool(
                     result.get("existing_task_authority_repair_recovery_used")
                     or authority_repair
@@ -7344,6 +7562,9 @@ def recover_product_video_existing_tasks(
         return {
             **state,
             "existing_task_recovery_recovered": True,
+            domain_counter_key: new_domain_count,
+            f"{active_domain}_recovery_count": new_domain_count,
+            "existing_task_recovery_count": new_legacy_count,
             "job_status_after_recovery": "queued",
             "project_status_after_recovery": "queued_for_worker",
             "outbox_status_after_recovery": str(outbox.get("dispatch_status") or ""),
@@ -9670,6 +9891,9 @@ def note_video_delivery_result(
             {
                 "final_delivery_attempted": True,
                 "telegram_delivery_status": clean_reason,
+                "delivery_attempt_count": attempts,
+                "delivery_recovery_count": attempts,
+                "delivery_recovery_max_attempts": PRODUCT_VIDEO_DELIVERY_RECOVERY_MAX_ATTEMPTS,
                 "final_delivered": False,
                 "final_mp4_delivered": False,
                 "delivery_succeeded": False,
