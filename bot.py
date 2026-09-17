@@ -49720,7 +49720,7 @@ def classify_video_addons_for_package(session: dict | None = None) -> dict:
     if voice_cost > 0 or voice_is_explicit_paid:
         _video_classifier_add_item(paid_addons, "paid_voice", "Voice trả phí/voice riêng", voice_cost)
     elif voice_is_explicit_free:
-        label = "Giọng nam mặc định" if "male" in " ".join([voice_choice, voice_mode, voice_style]) else ("Giọng nữ mặc định" if "female" in " ".join([voice_choice, voice_mode, voice_style]) else "Giọng mặc định miễn phí")
+        label = "Giọng nữ mặc định" if "female" in " ".join([voice_choice, voice_mode, voice_style]) else ("Giọng nam mặc định" if "male" in " ".join([voice_choice, voice_mode, voice_style]) else "Giọng mặc định miễn phí")
         _video_classifier_add_item(free_addons, "default_voice", label, 0)
     elif voice_profile_id and _video_addon_paid_marker(_video_classifier_value(("voice_profile_paid", "selected_voice_paid"), sources, False)):
         _video_classifier_add_item(paid_addons, "paid_voice", "Voice profile trả phí", voice_cost)
@@ -106371,46 +106371,61 @@ def task3d_output_target_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     ])
 
 
+_TASK3D_SESSION_LOCKS: dict[str, threading.RLock] = {}
+_TASK3D_SESSION_LOCKS_GUARD = threading.Lock()
+
+
+def _get_task3d_session_lock(user_id) -> threading.RLock:
+    uid_str = str(user_id)
+    with _TASK3D_SESSION_LOCKS_GUARD:
+        lock = _TASK3D_SESSION_LOCKS.get(uid_str)
+        if lock is None:
+            lock = threading.RLock()
+            _TASK3D_SESSION_LOCKS[uid_str] = lock
+        return lock
+
+
 def task3d_session_step(user_id, step: str, **fields) -> dict:
-    session = get_video_session(user_id)
-    current = str(session.get("current_step") or "")
-    step = str(step or "")
-    history = [str(item) for item in (session.get("step_history") or []) if str(item or "")]
-    if current and current != step and current != VIDEO_BACK_MENU_TARGET and (not history or history[-1] != current):
-        history.append(current)
-    session["previous_step"] = current
-    session["current_step"] = step
-    session["step_history"] = history[-12:]
-    draft = dict(session.get("draft") or {})
-    product_id_before = str(session.get("product_id") or draft.get("product_id") or fields.get("product_id") or "")
-    for key, value in fields.items():
-        if key in {"product_id", "topic", "platform", "aspect_ratio", "style", "package_id", "prompt_bundle_id", "source_media_ref", "return_to", "selected_scene_count", "estimated_scene_seconds", "estimated_duration_seconds", "duration_mode", "duration_note", "video_flow", "video_tool", "source_button", "parent_menu", "parent_menu_callback", "back_target", "entry_callback", "first_step"}:
-            session[key] = value
-        if key == "increment_script_ai_revision" and value:
-            existing_rev = safe_int(draft.get("script_ai_revision"), 0)
-            draft["script_ai_revision"] = max(1, existing_rev + 1)
-            continue
-        if key == "script_ai_revision":
-            existing_rev = safe_int(draft.get("script_ai_revision"), 0)
-            target_rev = safe_int(value, 1)
-            draft["script_ai_revision"] = max(existing_rev, target_rev)
-            continue
-        draft[key] = value
-    product_id = str(session.get("product_id") or draft.get("product_id") or product_id_before or "")
-    route_tool = str(session.get("video_tool") or draft.get("video_tool") or product_id or "")
-    if product_id:
-        session.setdefault("video_flow", product_id)
-        draft.setdefault("video_flow", product_id)
-    if route_tool:
-        session.setdefault("video_tool", route_tool)
-        draft.setdefault("video_tool", route_tool)
-    if product_id or route_tool:
-        session.setdefault("parent_menu_callback", "menu|main_video")
-        session.setdefault("back_target", "menu|main_video")
-        session.setdefault("return_to", "menu|main_video")
-        session["flow_stack"] = ["video_main", route_tool or product_id, step or video_flow_first_step(route_tool or product_id)]
-    session["draft"] = draft
-    return save_video_session(user_id, session)
+    with _get_task3d_session_lock(user_id):
+        session = get_video_session(user_id)
+        current = str(session.get("current_step") or "")
+        step = str(step or "")
+        history = [str(item) for item in (session.get("step_history") or []) if str(item or "")]
+        if current and current != step and current != VIDEO_BACK_MENU_TARGET and (not history or history[-1] != current):
+            history.append(current)
+        session["previous_step"] = current
+        session["current_step"] = step
+        session["step_history"] = history[-12:]
+        draft = dict(session.get("draft") or {})
+        product_id_before = str(session.get("product_id") or draft.get("product_id") or fields.get("product_id") or "")
+        for key, value in fields.items():
+            if key in {"product_id", "topic", "platform", "aspect_ratio", "style", "package_id", "prompt_bundle_id", "source_media_ref", "return_to", "selected_scene_count", "estimated_scene_seconds", "estimated_duration_seconds", "duration_mode", "duration_note", "video_flow", "video_tool", "source_button", "parent_menu", "parent_menu_callback", "back_target", "entry_callback", "first_step"}:
+                session[key] = value
+            if key == "increment_script_ai_revision" and value:
+                existing_rev = safe_int(draft.get("script_ai_revision"), 0)
+                draft["script_ai_revision"] = max(1, existing_rev + 1)
+                continue
+            if key == "script_ai_revision":
+                existing_rev = safe_int(draft.get("script_ai_revision"), 0)
+                target_rev = safe_int(value, 1)
+                draft["script_ai_revision"] = max(existing_rev, target_rev)
+                continue
+            draft[key] = value
+        product_id = str(session.get("product_id") or draft.get("product_id") or product_id_before or "")
+        route_tool = str(session.get("video_tool") or draft.get("video_tool") or product_id or "")
+        if product_id:
+            session.setdefault("video_flow", product_id)
+            draft.setdefault("video_flow", product_id)
+        if route_tool:
+            session.setdefault("video_tool", route_tool)
+            draft.setdefault("video_tool", route_tool)
+        if product_id or route_tool:
+            session.setdefault("parent_menu_callback", "menu|main_video")
+            session.setdefault("back_target", "menu|main_video")
+            session.setdefault("return_to", "menu|main_video")
+            session["flow_stack"] = ["video_main", route_tool or product_id, step or video_flow_first_step(route_tool or product_id)]
+        session["draft"] = draft
+        return save_video_session(user_id, session)
 
 
 def task3d_back_step(user_id) -> tuple[str, dict]:
@@ -130465,7 +130480,8 @@ async def handle_developing_video_pending_text(update: Update, context: ContextT
             )
             return True
         if step == "catalog_edit":
-            plan = video_idea_catalog.apply_custom_note(dict(pending), text)
+            clean_text = str(text or "").strip()[:1000]
+            plan = video_idea_catalog.apply_custom_note(dict(pending), clean_text)
             clear_developing_video_pending(uid)
             plan = save_developing_video_plan(uid, "videoidea", plan)
             await safe_reply_long_html(

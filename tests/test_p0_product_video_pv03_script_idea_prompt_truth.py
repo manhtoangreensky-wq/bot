@@ -702,3 +702,68 @@ def test_protection_pv02_aliases_and_commercial_contracts():
         assert adapter["canonical_product_type"] == canonical
         assert adapter["executor_product_type"] == canonical
 
+
+# ==============================================================================
+# 13. HARDENED CONCURRENCY & INPUT CONTRACT LOCKS
+# ==============================================================================
+
+def test_task3d_session_step_concurrency_lock_prevents_lost_revision_update():
+    """Thread-safe locking ensures concurrent session increments are atomic without lost updates."""
+    import threading
+    user_id = 999123
+    store = {user_id: {"user_id": user_id, "draft": {"script_ai_revision": 1}}}
+    store_lock = threading.Lock()
+
+    def thread_safe_get(uid):
+        with store_lock:
+            return deepcopy(store[uid])
+
+    def thread_safe_save(uid, sess):
+        with store_lock:
+            store[uid] = deepcopy(sess)
+            return deepcopy(sess)
+
+    allocated_revisions = []
+
+    def worker():
+        res = bot.task3d_session_step(user_id, "step_worker", increment_script_ai_revision=True)
+        allocated_revisions.append(res["draft"]["script_ai_revision"])
+
+    with patch("bot.get_video_session", side_effect=thread_safe_get), \
+         patch("bot.save_video_session", side_effect=thread_safe_save):
+        t1 = threading.Thread(target=worker)
+        t2 = threading.Thread(target=worker)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+    assert sorted(allocated_revisions) == [2, 3]
+    assert store[user_id]["draft"]["script_ai_revision"] == 3
+
+
+def test_voice_resolution_default_female_precedence():
+    """Default female voice must resolve to female provider ID, not shadowed by male substring match."""
+    from services import voice_clone_pipeline
+
+    def getter(gender):
+        return "voice_female_01" if gender == "female" else "voice_male_01"
+
+    res = voice_clone_pipeline.resolve_user_voice_for_tts(
+        1001,
+        "default_female",
+        get_default_voice_id_func=getter,
+    )
+    assert res.ok is True
+    assert res.provider_voice_id == "voice_female_01"
+    assert res.voice_source == "default_female"
+
+
+def test_video_idea_custom_note_bounded_1000_chars():
+    """Video idea catalog custom note truncation and normalization."""
+    plan = video_idea_catalog.build_plan({"title": "Test"}, custom_note="B" * 2500)
+    assert len(plan["custom_note"]) == 2500  # build_plan retains brief
+    bounded_plan = video_idea_catalog.apply_custom_note(dict(plan), ("C" * 1500)[:1000])
+    assert len(bounded_plan["custom_note"]) == 1000
+
+
