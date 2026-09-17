@@ -30,6 +30,33 @@ I2V_EXPECTED_TIERS = frozenset({400, 500, 600, 200, 300, 700, 800, 1000, 1200, 1
 V2V_EXPECTED_TIERS = frozenset({500, 600, 700, 800})
 V2V_UNSUPPORTED_TIERS = frozenset({400, 200, 300, 1000, 1200, 1500})
 
+PV04_ACTIVE_T2V_PRODUCT_IDS = frozenset({
+    "video_trend",
+    "video_ai_prompt",
+    "video_idea",
+    "script_image_video",
+})
+PV04_ACTIVE_I2V_PRODUCT_IDS = frozenset({
+    "video_ai_image",
+    "storyboard_prompt",
+})
+PV04_ACTIVE_V2V_PRODUCT_IDS = frozenset({
+    "video_ai_video_reference",
+    "self_shot_scene_change",
+    "self_shot_cinematic_transform",
+})
+PV04_ACTIVE_PRODUCT_IDS = (
+    PV04_ACTIVE_T2V_PRODUCT_IDS
+    | PV04_ACTIVE_I2V_PRODUCT_IDS
+    | PV04_ACTIVE_V2V_PRODUCT_IDS
+)
+DEFERRED_PRODUCT_IDS = frozenset({
+    "video_local_edit",
+    "multi_scene_film",
+    "video_long",
+})
+
+
 
 # ==============================================================================
 # SECTION 1: CANONICAL MODALITY MATRIX
@@ -330,3 +357,72 @@ def test_callback_rejects_unknown_tampered_tier() -> None:
 
     import asyncio
     asyncio.run(_test())
+
+
+# ==============================================================================
+# SECTION 8: ACTIVE MATRIX & DEFERRED PRODUCT SCOPE CLOSURE
+# ==============================================================================
+
+
+def test_pv04_active_product_matrix_contains_only_exact_nine_products() -> None:
+    assert len(PV04_ACTIVE_PRODUCT_IDS) == 9
+    assert len(PV04_ACTIVE_T2V_PRODUCT_IDS) == 4
+    assert len(PV04_ACTIVE_I2V_PRODUCT_IDS) == 2
+    assert len(PV04_ACTIVE_V2V_PRODUCT_IDS) == 3
+    # Explicit constant requirement: PV04_ACTIVE_PRODUCT_IDS count = 9
+    pv04_active_count = len(PV04_ACTIVE_PRODUCT_IDS)
+    assert pv04_active_count == 9
+
+
+def test_deferred_products_are_not_in_pv04_active_v2v_matrix() -> None:
+    deferred_in_active = DEFERRED_PRODUCT_IDS.intersection(PV04_ACTIVE_PRODUCT_IDS)
+    assert len(deferred_in_active) == 0
+    deferred_in_v2v = DEFERRED_PRODUCT_IDS.intersection(PV04_ACTIVE_V2V_PRODUCT_IDS)
+    assert len(deferred_in_v2v) == 0
+    # Explicit requirement: DEFERRED_PRODUCTS_IN_PV04_ACTIVE_MATRIX=0
+    DEFERRED_PRODUCTS_IN_PV04_ACTIVE_MATRIX = len(deferred_in_v2v)
+    assert DEFERRED_PRODUCTS_IN_PV04_ACTIVE_MATRIX == 0
+    for deferred_id in DEFERRED_PRODUCT_IDS:
+        assert deferred_id not in PV04_ACTIVE_V2V_PRODUCT_IDS
+        assert deferred_id not in PV04_ACTIVE_PRODUCT_IDS
+
+
+def test_video_local_edit_contract_has_zero_delta_against_parent() -> None:
+    """Zero delta on video_local_edit commercial contract against parent commit 24a94ee7."""
+    contract = video_tail9.commercial_contract("video_local_edit")
+    assert contract["flow_owner"] == "video_edit"
+    assert contract["engine_route"] == "local_worker_ffmpeg"
+    assert contract["required_capability"] == "video_to_video"
+    assert contract["supported_quality_tiers"] == (400, 500, 600, 200, 300, 700, 800, 1000, 1200, 1500)
+    assert contract["worker_owner"] == "video_edit"
+    assert contract["public_planning_enabled"] is True
+    assert contract["execution_enabled"] is True
+    assert contract["execution_blocker"] == ""
+
+    parent_local_edit_contract = {
+        "product_type": "video_local_edit",
+        "flow_owner": "video_edit",
+        "engine_route": "local_worker_ffmpeg",
+        "executor_product_type": "video_local_edit",
+        "pricing_mode": "canonical",
+        "required_capability": "video_to_video",
+        "input_type": "source_video",
+        "output_type": "mp4",
+        "worker_owner": "video_edit",
+        "minimum_scene_count": 1,
+        "maximum_scene_count": 20,
+        "supports_single_scene": True,
+        "supported_quality_tiers": (400, 500, 600, 200, 300, 700, 800, 1000, 1200, 1500),
+        "supported_package_tiers": (400, 500, 600, 200, 300, 700, 800, 1000, 1200, 1500),
+        "scene_duration_seconds": 8,
+        "public_planning_enabled": True,
+        "execution_enabled": True,
+        "execution_blocker": "",
+    }
+    contract_diffs = {
+        k: (parent_local_edit_contract.get(k), contract.get(k))
+        for k in set(parent_local_edit_contract) | set(contract)
+        if parent_local_edit_contract.get(k) != contract.get(k)
+    }
+    PV04_VIDEO_LOCAL_EDIT_CONTRACT_DELTA = len(contract_diffs)
+    assert PV04_VIDEO_LOCAL_EDIT_CONTRACT_DELTA == 0

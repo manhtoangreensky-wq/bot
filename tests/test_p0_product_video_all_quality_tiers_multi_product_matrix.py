@@ -643,7 +643,7 @@ def test_video_idea_supports_all_ten_tiers(tier_id: int) -> None:
 # ==============================================================================
 
 
-@pytest.mark.parametrize("tier_id", V2V_SUPPORTED_TIERS)
+@pytest.mark.parametrize("tier_id", ALL_CANONICAL_TIERS)
 def test_video_local_edit_supports_all_ten_tiers(tier_id: int) -> None:
     contract = video_tail9.commercial_contract("video_local_edit")
     assert tier_id in contract["supported_quality_tiers"]

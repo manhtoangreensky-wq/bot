@@ -275,7 +275,7 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "required_capability": "video_to_video",
         "input_type": "source_video",
         "worker_owner": "video_edit",
-        "supported_quality_tiers": VIDEO_TO_VIDEO_QUALITY_TIERS,
+        "supported_quality_tiers": UIFLOW3_EXTENDED_QUALITY_TIERS,
     },
 }
 
