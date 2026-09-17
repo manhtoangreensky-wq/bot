@@ -89378,10 +89378,13 @@ def video_flow6_preflight_for_state(user_id: int, state: dict, quality: int) -> 
         explicit_public_final_confirm=True,
     )
     worker_ready = bool(worker_ready or public_preflight.get("ready"))
+    route = video_flow6.execution_route_for(context_state)
+    execution_owner = str(route.get("execution_owner") or "")
+    engine_ready = bool(execution_owner)
     result = video_flow6.preflight(
         context_state,
         package_available=bool(route_selection.get("ok")),
-        engine_ready=bool(public_preflight.get("ready")),
+        engine_ready=engine_ready,
         worker_ready=worker_ready,
         capability_ready=bool(route_selection.get("ok")),
     )
@@ -112270,6 +112273,12 @@ def video_tail9_runtime_only_blocker(value: str) -> bool:
         "ratio_not_supported",
         "input_not_ready",
         "assets_not_ready",
+        "trend_source",
+        "storyboard",
+        "scene_image",
+        "probe_missing",
+        "execution_owner",
+        "execution_route",
     )):
         return False
     return True
@@ -112283,6 +112292,8 @@ def video_tail9_deferred_runtime_blocker(value: str) -> bool:
             "runtime_unavailable",
             "not_server_renderable",
             "renderer_missing",
+            "worker_unavailable",
+            "provider_unavailable",
         ))
     )
 
