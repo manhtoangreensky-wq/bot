@@ -4666,10 +4666,15 @@ def heartbeat_video_job(
     progress = max(0, min(100, int(progress_percent or 0)))
     cursor = conn.execute(
         """UPDATE video_jobs
-           SET lease_expires_at=?, progress_percent=?, progress_message=?, updated_at=?
+           SET lease_expires_at=?,
+               progress_percent=CASE WHEN progress_percent IS NULL OR ? > progress_percent THEN ? ELSE progress_percent END,
+               progress_message=CASE WHEN progress_percent IS NULL OR ? >= progress_percent THEN ? ELSE progress_message END,
+               updated_at=?
            WHERE id=? AND status='processing' AND locked_by=?""",
         (
             lease_expires,
+            progress,
+            progress,
             progress,
             str(message or "")[:500],
             current,
@@ -9031,6 +9036,11 @@ def complete_video_job(
     job = get_video_render_job(conn, int(job_id))
     if not job:
         return {"ok": False, "reason": "job_not_found"}
+    job_status = str(job.get("status") or "").strip().lower()
+    if job_status in {"failed", "error", "terminal_failed"}:
+        return {"ok": False, "reason": "job_already_terminal_failed", "job": job}
+    if job_status in {"cancelled", "canceled"}:
+        return {"ok": False, "reason": "job_cancelled", "job": job}
     current = now_text()
 
     def begin_completion_mutation() -> tuple[dict | None, dict, dict]:
@@ -9060,6 +9070,14 @@ def complete_video_job(
             locked_outbox,
         )
         locked_job_status = str(locked_job.get("status") or "").strip().lower()
+        if locked_job_status in {"failed", "error", "terminal_failed"}:
+            conn.rollback()
+            return {
+                "ok": False,
+                "reason": "job_already_terminal_failed",
+                "job": locked_job,
+                "project": locked_project,
+            }, {}, {}
         if locked_job_status in {"cancelled", "canceled"} or cancellation.get("cancelled"):
             blocker = (
                 "job_cancelled"
@@ -9326,7 +9344,7 @@ def complete_video_job(
                SET status='completed', result_json=?, progress_percent=?,
                    progress_message=?, completed_at=?, updated_at=?, lease_expires_at=NULL
                WHERE id=?
-                 AND LOWER(COALESCE(status,'')) NOT IN ('cancelled','canceled')
+                 AND LOWER(COALESCE(status,'')) NOT IN ('cancelled','canceled','failed','error','terminal_failed')
                  AND NOT EXISTS (
                      SELECT 1 FROM video_projects p
                       WHERE p.project_id=video_jobs.project_id
@@ -9777,6 +9795,9 @@ def defer_video_job_for_provider_polling(
     job = get_video_render_job(conn, int(job_id))
     if not job:
         return {"ok": False, "reason": "job_not_found"}
+    job_status = str(job.get("status") or "").strip().lower()
+    if job_status in {"completed", "cancelled", "canceled"}:
+        return {"ok": False, "reason": "job_already_terminal", "job": job}
     project = get_video_project(conn, int(job.get("project_id") or 0))
     if project and (project.get("video_delivered_at") or project.get("video_delivery_message_id")):
         return {"ok": False, "reason": "late_defer_suppressed_after_delivery", "job": job, "project": project}
