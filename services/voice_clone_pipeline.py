@@ -517,7 +517,7 @@ def resolve_user_voice_for_tts(
         profile = get_profile_func(user_id, profile_id) if callable(get_profile_func) else {}
         source = "saved"
     if isinstance(option, str) and option.startswith(("default_", "male", "female")):
-        gender = "male" if "male" in option else ("female" if "female" in option else "neutral")
+        gender = "female" if "female" in option else ("male" if "male" in option else "neutral")
         voice_id = get_default_voice_id_func(gender) if callable(get_default_voice_id_func) else ""
         resolved = minimax_voice_adapter.resolve_provider_voice_id(voice_source=f"default_{gender}", default_male_voice_id=voice_id if gender == "male" else "", default_female_voice_id=voice_id if gender != "male" else "")
     else:
