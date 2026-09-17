@@ -48,6 +48,23 @@ PLATFORMS = {
     "multi": "Nhiều nền tảng",
 }
 
+
+def validate_platform(value: Any) -> tuple[bool, str, str]:
+    """Validate public platform input against canonical PLATFORMS.
+    Returns (is_valid, canonical_key, canonical_label).
+    Unknown, empty, or tampered values return (False, '', '').
+    """
+    key = str(value or "").strip().lower()
+    if not key:
+        return False, "", ""
+    if key in PLATFORMS:
+        return True, key, PLATFORMS[key]
+    for k, v in PLATFORMS.items():
+        if key == v.lower():
+            return True, k, v
+    return False, "", ""
+
+
 STYLES = {
     "realistic": "Chân thật, tự nhiên",
     "cinematic": "Điện ảnh, giàu cảm xúc",
@@ -577,14 +594,9 @@ def build_ai_prompt(state: Mapping[str, Any]) -> str:
     selected_goal = _clean(draft.get("script_goal_label"))
     if not selected_goal:
         selected_goal = goal_label(str(draft.get("script_goal") or ""))
-    platform_key = str(draft.get("script_platform") or "").strip()
-    platform_label = _clean(draft.get("script_platform_label"))
-    if platform_key in PLATFORMS:
-        platform_text = PLATFORMS[platform_key]
-    elif platform_label and not platform_key:
-        platform_text = platform_label
-    else:
-        platform_text = "Video ngắn"
+    raw_platform = draft.get("script_platform") or draft.get("script_platform_label")
+    is_valid, _platform_key, label = validate_platform(raw_platform)
+    platform_text = label if is_valid else PLATFORMS["multi"]
     return (
         "Bạn là biên kịch Video AI của TOAN AAS. Hãy tạo MỘT KỊCH BẢN HOÀN CHỈNH bằng tiếng Việt, "
         "không tạo video, không tóm tắt đầu vào, không bỏ chi tiết và không dùng tên model/provider. "
