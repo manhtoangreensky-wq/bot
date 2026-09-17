@@ -54,13 +54,14 @@ QUALITY_TIERS: dict[int, dict[str, Any]] = {
     for item in _PUBLIC_QUALITY_ROWS
 }
 
-_MULTI_SCENE_CAPABILITIES = (
+_V2V_SUPPORTED_TIERS = frozenset({500, 600, 700, 800})
+
+_BASE_SCENE_CAPABILITIES = (
     "text_to_video",
     "text_to_video_or_scene_video",
     "image_to_video",
     "first_last_frame_video",
     "first_last_frame",
-    "video_to_video",
     "multi_scene_composition",
     "ratio_9:16",
     "ratio_16:9",
@@ -69,7 +70,12 @@ _MULTI_SCENE_CAPABILITIES = (
 )
 
 for _tier_id in QUALITY_TIER_ORDER:
-    QUALITY_TIERS[_tier_id].setdefault("capabilities", _MULTI_SCENE_CAPABILITIES)
+    _tier_caps = (
+        _BASE_SCENE_CAPABILITIES + ("video_to_video",)
+        if _tier_id in _V2V_SUPPORTED_TIERS
+        else _BASE_SCENE_CAPABILITIES
+    )
+    QUALITY_TIERS[_tier_id]["capabilities"] = _tier_caps
     QUALITY_TIERS[_tier_id].setdefault("max_scenes", 20)
 
 

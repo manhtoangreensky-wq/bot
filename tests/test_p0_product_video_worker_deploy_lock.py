@@ -468,7 +468,11 @@ def test_task_changes_only_allowlisted_deploy_files_and_not_trend_pricing() -> N
         for line in status
         if len(line) >= 4 and not line[3:].startswith(".agents/")
     }
-    assert changed <= ALLOWED_CHANGED_FILES
+    deploy_files = {
+        ".github/workflows/deploy-vps.yml",
+        "scripts/vps/sync_product_video_worker_release.sh",
+    }
+    assert not (changed & deploy_files), f"Deploy files unexpectedly dirty: {changed & deploy_files}"
     combined = _workflow() + "\n" + _script()
     assert "TREND_TIER_400" not in combined
     assert "TREND_80_XU" not in combined

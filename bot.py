@@ -113947,8 +113947,11 @@ def video_tail9_catalog_report(tail: dict, capability: dict | None = None) -> di
             (capability or {}).get("required_capability")
             or contract.get("required_capability")
             or ""
-        )
-        required_capability = "video_to_video" if "video" in raw_cap else raw_cap
+        ).strip()
+        if raw_cap in {"direct_video_to_video", "cinematic_transformation"} or "video_to_video" in raw_cap:
+            required_capability = "video_to_video"
+        else:
+            required_capability = raw_cap
     report = video_uifreeze1.catalog_report(
         product,
         scene_count=safe_int(tail.get("scene_count"), 1),

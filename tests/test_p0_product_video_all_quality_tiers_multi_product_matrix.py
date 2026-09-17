@@ -10,6 +10,7 @@ from services import video_ai_real_pricing, video_tail9, video_uifreeze1
 
 ALL_CANONICAL_TIERS = (400, 500, 600, 200, 300, 700, 800, 1000, 1200, 1500)
 TREND_SUPPORTED_TIERS = ALL_CANONICAL_TIERS
+V2V_SUPPORTED_TIERS = (500, 600, 700, 800)
 
 LOCKED_UI_FUNCTION_HASHES = {
     "main_video_keyboard": "54d1b1cc1ea8d5a60b45005cc3ce13703f9a3da9f4c4d207cf31f5094f452ffa",
@@ -246,7 +247,7 @@ def test_video_ai_image_lane_supports_all_ten_tiers(tier_id: int) -> None:
 # ==============================================================================
 
 
-@pytest.mark.parametrize("tier_id", ALL_CANONICAL_TIERS)
+@pytest.mark.parametrize("tier_id", V2V_SUPPORTED_TIERS)
 def test_video_ai_video_reference_lane_supports_all_ten_tiers(tier_id: int) -> None:
     contract = video_tail9.commercial_contract("video_ai_video_reference")
     assert tier_id in contract["supported_quality_tiers"]
@@ -395,7 +396,7 @@ def test_storyboard_prompt_supports_all_ten_tiers(tier_id: int) -> None:
 # ==============================================================================
 
 
-@pytest.mark.parametrize("tier_id", ALL_CANONICAL_TIERS)
+@pytest.mark.parametrize("tier_id", V2V_SUPPORTED_TIERS)
 def test_self_shot_scene_change_supports_all_ten_tiers(tier_id: int) -> None:
     contract = video_tail9.commercial_contract("self_shot_scene_change")
     assert tier_id in contract["supported_quality_tiers"]
@@ -448,7 +449,7 @@ def test_self_shot_scene_change_supports_all_ten_tiers(tier_id: int) -> None:
 # ==============================================================================
 
 
-@pytest.mark.parametrize("tier_id", ALL_CANONICAL_TIERS)
+@pytest.mark.parametrize("tier_id", V2V_SUPPORTED_TIERS)
 def test_self_shot_cinematic_transform_supports_all_ten_tiers(tier_id: int) -> None:
     contract = video_tail9.commercial_contract("self_shot_cinematic_transform")
     assert tier_id in contract["supported_quality_tiers"]
@@ -642,7 +643,7 @@ def test_video_idea_supports_all_ten_tiers(tier_id: int) -> None:
 # ==============================================================================
 
 
-@pytest.mark.parametrize("tier_id", ALL_CANONICAL_TIERS)
+@pytest.mark.parametrize("tier_id", V2V_SUPPORTED_TIERS)
 def test_video_local_edit_supports_all_ten_tiers(tier_id: int) -> None:
     contract = video_tail9.commercial_contract("video_local_edit")
     assert tier_id in contract["supported_quality_tiers"]
