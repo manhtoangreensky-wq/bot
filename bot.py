@@ -95063,6 +95063,12 @@ async def video_script_render_step(target, session: dict, lang: str = "vi"):
 
 async def video_script_generate_ai(query, user_id: int, session: dict, lang: str = "vi"):
     draft = dict(session.get("draft") or {})
+    current_session = get_video_session(user_id)
+    current_rev = safe_int((current_session.get("draft") or {}).get("script_ai_revision"), 0)
+    invocation_rev = max(1, safe_int(draft.get("script_ai_revision"), 1))
+    if current_rev > invocation_rev:
+        logger.info("video_script_generate_ai | dropping stale invocation rev %s < active %s", invocation_rev, current_rev)
+        return current_session
     try:
         prompt = video_script_product.build_ai_prompt(draft)
     except ValueError:
@@ -95136,7 +95142,12 @@ async def video_script_generate_ai(query, user_id: int, session: dict, lang: str
             parse_mode=None,
             reply_markup=video_script_duration_keyboard(session),
         )
+    current_session = get_video_session(user_id)
+    current_rev = safe_int((current_session.get("draft") or {}).get("script_ai_revision"), 0)
     revision = max(1, safe_int(draft.get("script_ai_revision"), 1))
+    if current_rev > revision:
+        logger.info("video_script_generate_ai | dropping stale completion rev %s < active %s", revision, current_rev)
+        return current_session
     session = task3d_session_step(
         user_id,
         "script_ai_review",
@@ -106375,6 +106386,11 @@ def task3d_session_step(user_id, step: str, **fields) -> dict:
     for key, value in fields.items():
         if key in {"product_id", "topic", "platform", "aspect_ratio", "style", "package_id", "prompt_bundle_id", "source_media_ref", "return_to", "selected_scene_count", "estimated_scene_seconds", "estimated_duration_seconds", "duration_mode", "duration_note", "video_flow", "video_tool", "source_button", "parent_menu", "parent_menu_callback", "back_target", "entry_callback", "first_step"}:
             session[key] = value
+        if key == "script_ai_revision":
+            existing_rev = safe_int(draft.get("script_ai_revision"), 0)
+            target_rev = safe_int(value, 1)
+            draft["script_ai_revision"] = max(existing_rev, target_rev)
+            continue
         draft[key] = value
     product_id = str(session.get("product_id") or draft.get("product_id") or product_id_before or "")
     route_tool = str(session.get("video_tool") or draft.get("video_tool") or product_id or "")
