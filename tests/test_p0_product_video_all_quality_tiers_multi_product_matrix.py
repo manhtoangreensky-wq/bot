@@ -9,7 +9,7 @@ from services import video_ai_real_pricing, video_tail9, video_uifreeze1
 
 
 ALL_CANONICAL_TIERS = (400, 500, 600, 200, 300, 700, 800, 1000, 1200, 1500)
-TREND_SUPPORTED_TIERS = (500, 600, 200, 300, 700, 800, 1000, 1200, 1500)
+TREND_SUPPORTED_TIERS = ALL_CANONICAL_TIERS
 
 LOCKED_UI_FUNCTION_HASHES = {
     "main_video_keyboard": "54d1b1cc1ea8d5a60b45005cc3ce13703f9a3da9f4c4d207cf31f5094f452ffa",
@@ -44,21 +44,19 @@ def _pricing_snapshot(tier_id: int, scene_count: int = 2) -> dict[str, int]:
 
 
 # ==============================================================================
-# LANE 1: video_trend - Strict Exclusion of Tier 400 (80 Xu) & All 9 Other Tiers
+# LANE 1: video_trend - Complete Support of All 10 Tiers (Including 80 Xu Tier 400)
 # ==============================================================================
 
 
 @pytest.mark.parametrize("tier_id", TREND_SUPPORTED_TIERS)
-def test_video_trend_supports_all_nine_non_80xu_quality_tiers(tier_id: int) -> None:
-    """Owner mandate: video_trend handles all quality tiers except 80 Xu (Tier 400)."""
+def test_video_trend_supports_all_ten_quality_tiers(tier_id: int) -> None:
+    """video_trend handles all 10 quality tiers including 80 Xu (Tier 400)."""
     contract = video_tail9.commercial_contract("video_trend")
-    assert 400 not in contract["supported_quality_tiers"]
     assert tier_id in contract["supported_quality_tiers"]
 
     # UI Catalog check
     catalog = video_uifreeze1.catalog_report("video_trend", scene_count=2, ratio="9:16")
     assert catalog["ok"] is True
-    assert 400 not in catalog["tier_ids"]
     assert tier_id in catalog["tier_ids"]
 
     # Tail state lifecycle through invoice & confirmation
@@ -105,25 +103,25 @@ def test_video_trend_supports_all_nine_non_80xu_quality_tiers(tier_id: int) -> N
     assert confirmed["final_confirmed"] is True
 
 
-def test_video_trend_strictly_blocks_tier_400_80xu() -> None:
-    """Owner mandate: video_trend must strictly reject Tier 400 (80 Xu)."""
+def test_video_trend_supports_tier_400_80xu() -> None:
+    """video_trend supports Tier 400 (80 Xu) canonically."""
     contract = video_tail9.commercial_contract("video_trend")
-    assert 400 not in contract["supported_quality_tiers"]
+    assert 400 in contract["supported_quality_tiers"]
 
-    # Catalog does not offer Tier 400
+    # Catalog offers Tier 400
     catalog = video_uifreeze1.catalog_report("video_trend", scene_count=2, ratio="9:16")
-    assert 400 not in catalog["tier_ids"]
+    assert 400 in catalog["tier_ids"]
 
-    # package_compatibility returns quality_tier_not_supported
+    # package_compatibility returns ok
     compat = video_tail9.package_compatibility("video_trend", scene_count=2, ratio="9:16", quality_tier_id=400)
-    assert compat["ok"] is False
-    assert "quality_tier_not_supported" in compat["blockers"]
+    assert compat["ok"] is True
+    assert not compat["blockers"]
 
-    # select_package raises ValueError
+    # select_package succeeds
     state = video_tail9.new_state(
         product_type="video_trend",
         execution_product_type="video_trend",
-        session_id="trend-tier-400-blocked",
+        session_id="trend-tier-400-supported",
         scene_count=2,
         ratio="9:16",
     )
@@ -136,14 +134,15 @@ def test_video_trend_strictly_blocks_tier_400_80xu() -> None:
             "plan_status": "ready",
         },
     )
-    with pytest.raises(ValueError, match="quality_tier_not_supported"):
-        video_tail9.select_package(
-            state,
-            quality_tier_id="400",
-            package_id="product_video_400",
-            pricing_snapshot=_pricing_snapshot(400, scene_count=2),
-            capability_snapshot={"ok": True, "required_capability": "text_to_video"},
-        )
+    invoiced = video_tail9.select_package(
+        state,
+        quality_tier_id="400",
+        package_id="product_video_400",
+        pricing_snapshot=_pricing_snapshot(400, scene_count=2),
+        capability_snapshot={"ok": True, "required_capability": "text_to_video"},
+    )
+    assert invoiced["status_stage"] == "invoice"
+    assert invoiced["quality_tier_id"] == "400"
 
 
 # ==============================================================================

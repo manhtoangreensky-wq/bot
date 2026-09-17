@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 from pathlib import Path
 import threading
 import time
 from typing import Any, Callable, Iterable, Sequence
+
+logger = logging.getLogger(__name__)
 
 from services.public_chat_media import MediaInput, assess_video_readiness, validate_media_input
 
@@ -263,7 +266,8 @@ class GeminiPublicChatProvider:
             )
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
+            logger.warning("gemini_provider_generate_failed: %s", exc)
             return _failure("FAIL_PROVIDER")
         text = _response_text(response)
         if not text:

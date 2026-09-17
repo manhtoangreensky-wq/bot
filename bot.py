@@ -95073,8 +95073,18 @@ async def video_script_generate_ai(query, user_id: int, session: dict, lang: str
     try:
         script_text = await generate_video_script_pack(prompt, user_id)
     except Exception as exc:
-        logger.warning("video_script_ai_generation_failed | %s", sanitize_log_text(type(exc).__name__))
-        session = task3d_session_step(user_id, "script_ai_duration", provider_called=True, script_provider_error=type(exc).__name__, xu_charged=0)
+        logger.warning("video_script_ai_generation_failed | %s: %s", sanitize_log_text(type(exc).__name__), sanitize_log_text(str(exc)))
+        session = task3d_session_step(
+            user_id,
+            "script_ai_duration",
+            script_text="",
+            manual_script_raw="",
+            provider_called=True,
+            script_provider_error=type(exc).__name__,
+            job_created=False,
+            outbox_created=False,
+            xu_charged=0,
+        )
         return await safe_edit_or_send(
             query,
             "⚠️ Chưa tạo được kịch bản từ nguồn AI. TOAN AAS giữ nguyên toàn bộ lựa chọn; anh/chị có thể thử lại hoặc đổi thời lượng. Chưa tạo video và chưa trừ Xu.",
@@ -95086,6 +95096,8 @@ async def video_script_generate_ai(query, user_id: int, session: dict, lang: str
         session = task3d_session_step(
             user_id,
             "script_ai_duration",
+            script_text="",
+            manual_script_raw="",
             provider_called=True,
             script_provider_error="empty_script",
             job_created=False,
@@ -95095,6 +95107,29 @@ async def video_script_generate_ai(query, user_id: int, session: dict, lang: str
         return await safe_edit_or_send(
             query,
             "⚠️ Nguồn AI chưa trả về kịch bản có nội dung. TOAN AAS giữ nguyên toàn bộ lựa chọn; anh/chị có thể thử lại hoặc đổi thời lượng. Chưa tạo video và chưa trừ Xu.",
+            parse_mode=None,
+            reply_markup=video_script_duration_keyboard(session),
+        )
+    try:
+        _stored, proposal = video_flow7_store_script_proposal(user_id, script_text, source="ai", locked=False)
+        if not proposal or not proposal.get("scenes"):
+            raise ValueError("cannot parse valid scenes from script")
+    except Exception as exc:
+        logger.warning("video_script_ai_generation_failed | invalid_proposal: %s", sanitize_log_text(str(exc)))
+        session = task3d_session_step(
+            user_id,
+            "script_ai_duration",
+            script_text="",
+            manual_script_raw="",
+            provider_called=True,
+            script_provider_error="invalid_proposal",
+            job_created=False,
+            outbox_created=False,
+            xu_charged=0,
+        )
+        return await safe_edit_or_send(
+            query,
+            "⚠️ Kịch bản AI chưa đạt chuẩn cấu trúc cảnh. TOAN AAS giữ nguyên toàn bộ lựa chọn; anh/chị có thể thử lại hoặc đổi thời lượng. Chưa tạo video và chưa trừ Xu.",
             parse_mode=None,
             reply_markup=video_script_duration_keyboard(session),
         )
@@ -216463,15 +216498,43 @@ async def generate_video_script_pack(prompt: str, user_id) -> str:
         "hook, mở bài, diễn biến, cao trào, kết, CTA, lời dẫn, hội thoại, hành động, bối cảnh, ý đồ máy quay "
         "và ý đồ chuyển cảnh. Không bỏ sót dữ liệu khách đã chọn."
     )
-    result = await GeminiPublicChatProvider(client=gemini_client).generate(
-        str(prompt or "").strip(),
-        system_instruction=system_instruction,
-        max_output_tokens=8192,
-        temperature=0.45,
-    )
-    if not result.get("ok") or not str(result.get("text") or "").strip():
-        raise RuntimeError(str(result.get("status") or "AI provider unavailable"))
-    return str(result["text"]).strip()
+    result = None
+    if gemini_client:
+        try:
+            result = await GeminiPublicChatProvider(client=gemini_client).generate(
+                str(prompt or "").strip(),
+                system_instruction=system_instruction,
+                max_output_tokens=8192,
+                temperature=0.45,
+            )
+        except Exception as exc:
+            logger.warning("generate_video_script_pack | gemini attempt failed: %s", exc)
+            result = None
+
+    if (not result or not result.get("ok") or not str(result.get("text") or "").strip()) and openai_client:
+        try:
+            def _call_openai():
+                return openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": system_instruction},
+                        {"role": "user", "content": str(prompt or "").strip()},
+                    ],
+                    max_tokens=4000,
+                    temperature=0.45,
+                )
+            openai_resp = await asyncio.to_thread(_call_openai)
+            text = (openai_resp.choices[0].message.content or "").strip()
+            if text:
+                return text
+        except Exception as exc:
+            logger.warning("generate_video_script_pack | openai fallback failed: %s", exc)
+
+    if result and result.get("ok") and str(result.get("text") or "").strip():
+        return str(result["text"]).strip()
+
+    status = (result or {}).get("status") if result else "AI provider unconfigured or unavailable"
+    raise RuntimeError(str(status))
 
 def create_video_script_job(user_id, parsed: dict, cost_xu: int, status: str = "processing") -> int:
     conn = db_connect()
