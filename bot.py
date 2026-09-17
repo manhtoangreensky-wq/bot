@@ -277512,6 +277512,131 @@ async def api_internal_admin_wallet_compensate(request: Request):
     return JSONResponse(status_code=status_code, content=result)
 
 
+# ─── CANONICAL CUSTOMER READ MODEL ENDPOINTS (SPEC-P0.BOT.INTERNAL.CUSTOMER.READ.MODEL.API.V1) ───
+
+@fastapi_app.get("/internal/v1/wallet")
+async def api_internal_customer_wallet(request: Request):
+    """Canonical Bot Core customer wallet read model with ledger reconciliation."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import read_canonical_wallet
+
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path="/internal/v1/wallet",
+        body_bytes=b"",
+    )
+    if not auth_ok:
+        raise HTTPException(
+            status_code=auth_status,
+            detail={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    user_id = str(
+        request.query_params.get("user_id")
+        or request.query_params.get("canonical_user_id")
+        or request.headers.get("x-toan-aas-actor-id")
+        or ""
+    ).strip()
+
+    ok, result, status_code = read_canonical_wallet(user_id=user_id, db_path=DB_FILE)
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.get("/internal/v1/wallet/history")
+async def api_internal_customer_wallet_history(request: Request):
+    """Canonical Bot Core customer wallet ledger event history."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import read_canonical_wallet_history
+
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path="/internal/v1/wallet/history",
+        body_bytes=b"",
+    )
+    if not auth_ok:
+        raise HTTPException(
+            status_code=auth_status,
+            detail={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    user_id = str(
+        request.query_params.get("user_id")
+        or request.query_params.get("canonical_user_id")
+        or request.headers.get("x-toan-aas-actor-id")
+        or ""
+    ).strip()
+    limit = int(request.query_params.get("limit") or 50)
+
+    ok, result, status_code = read_canonical_wallet_history(user_id=user_id, db_path=DB_FILE, limit=limit)
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.get("/internal/v1/pricing")
+async def api_internal_customer_pricing(request: Request):
+    """Canonical Bot Core public pricing catalog."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import read_canonical_pricing_catalog
+
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path="/internal/v1/pricing",
+        body_bytes=b"",
+    )
+    if not auth_ok:
+        raise HTTPException(
+            status_code=auth_status,
+            detail={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    ok, result, status_code = read_canonical_pricing_catalog()
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.get("/internal/v1/packages")
+async def api_internal_customer_packages(request: Request):
+    """Canonical Bot Core packages and combos catalog."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import read_canonical_packages_catalog
+
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path="/internal/v1/packages",
+        body_bytes=b"",
+    )
+    if not auth_ok:
+        raise HTTPException(
+            status_code=auth_status,
+            detail={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    combos_fn = globals().get("p0_21d_combo_catalog_payload")
+    plan_cat = globals().get("PLAN_CATALOG")
+    pay_pkgs = globals().get("PAYMENT_PACKAGES")
+
+    ok, result, status_code = read_canonical_packages_catalog(
+        plan_catalog=plan_cat,
+        combo_catalog_fn=combos_fn,
+        payment_packages=pay_pkgs,
+    )
+    return JSONResponse(status_code=status_code, content=result)
+
+
 # ─── ENTRY POINT ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     uvicorn.run(
