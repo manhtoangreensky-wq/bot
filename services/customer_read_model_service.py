@@ -13,50 +13,57 @@ from typing import Any, Callable
 
 logger = logging.getLogger("customer_read_model_service")
 
-# Canonical topup packages fallback in case caller doesn't supply them
-CANONICAL_PAYMENT_PACKAGES = {
-    "10k": {"amount": 10000, "xu": 100, "text": "Mệnh giá 10k: 10.000đ ➔ 100 Xu"},
-    "20k": {"amount": 20000, "xu": 200, "text": "Mệnh giá 20k: 20.000đ ➔ 200 Xu"},
-    "50k": {"amount": 50000, "xu": 500, "text": "Mệnh giá 50k: 50.000đ ➔ 500 Xu"},
-    "100k": {"amount": 100000, "xu": 1000, "text": "Mệnh giá 100k: 100.000đ ➔ 1.000 Xu"},
-    "200k": {"amount": 200000, "xu": 2000, "text": "Mệnh giá 200k: 200.000đ ➔ 2.000 Xu"},
-    "500k": {"amount": 500000, "xu": 5000, "text": "Mệnh giá 500k: 500.000đ ➔ 5.000 Xu"},
-}
+def calculate_canonical_total_paid_vnd(c: sqlite3.Cursor, user_id: str) -> tuple[int | None, int | None]:
+    """Query lifetime proven deposited VND and Xu from canonical database tables.
 
-CANONICAL_PLAN_CATALOG = {
-    "starter": {
-        "name": "Starter",
-        "price_vnd": 49000,
-        "duration_days": 30,
-        "required_member_tier": "silver",
-        "plan_xu": 600,
-        "description": "Dành cho người mới làm content: chat thường, dịch ngắn, PDF cơ bản, prompt ảnh/video và workflow nhỏ",
-    },
-    "creator": {
-        "name": "Creator",
-        "price_vnd": 99000,
-        "duration_days": 30,
-        "required_member_tier": "silver",
-        "plan_xu": 1300,
-        "description": "Dành cho creator, affiliate hoặc shop nhỏ cần prompt/content/ảnh đều đặn",
-    },
-    "pro": {
-        "name": "Pro",
-        "price_vnd": 199000,
-        "duration_days": 30,
-        "required_member_tier": "gold",
-        "plan_xu": 3000,
-        "description": "Dành cho người dùng thường xuyên, có thể ưu tiên queue/tác vụ file/audio vừa khi công cụ mở",
-    },
-    "business": {
-        "name": "Business",
-        "price_vnd": 499000,
-        "duration_days": 30,
-        "required_member_tier": "gold_or_admin_approve",
-        "plan_xu": 8000,
-        "description": "Dành cho team nhỏ, shop hoặc affiliate team cần workflow content + ảnh + voice/audio",
-    },
-}
+    Returns (total_paid_vnd, total_deposited_vnd).
+    Returns (None, None) if tables or user data cannot be proven.
+    """
+    clean_uid = normalize_target_user_id(user_id)
+    if not clean_uid:
+        return None, None
+
+    try:
+        # 1. PayOS completed orders
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='payos_orders'")
+        has_payos = c.fetchone() is not None
+        payos_vnd = 0
+        if has_payos:
+            c.execute(
+                "SELECT COALESCE(SUM(amount), 0) FROM payos_orders "
+                "WHERE user_id = ? AND status IN ('PAID', 'completed')",
+                (clean_uid,),
+            )
+            p_row = c.fetchone()
+            payos_vnd = int(p_row[0] or 0) if p_row else 0
+
+        # 2. Approved manual topups
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='pending_deposits'")
+        has_pending_deposits = c.fetchone() is not None
+        manual_vnd = 0
+        if has_pending_deposits:
+            c.execute(
+                "SELECT COALESCE(SUM(amount_vnd), 0) FROM pending_deposits "
+                "WHERE user_id = ? AND status IN ('approved', 'completed')",
+                (clean_uid,),
+            )
+            m_row = c.fetchone()
+            manual_vnd = int(m_row[0] or 0) if m_row else 0
+
+        # 3. Check total_paid_vnd on users if present
+        c.execute("PRAGMA table_info(users)")
+        user_cols = {r[1] for r in c.fetchall()}
+        stored_paid_vnd = 0
+        if "total_paid_vnd" in user_cols:
+            c.execute("SELECT COALESCE(total_paid_vnd, 0) FROM users WHERE user_id = ?", (clean_uid,))
+            row_tp = c.fetchone()
+            stored_paid_vnd = int(row_tp[0] or 0) if row_tp else 0
+
+        proven_vnd = max(stored_paid_vnd, payos_vnd + manual_vnd)
+        return proven_vnd, proven_vnd
+    except Exception as exc:
+        logger.warning(f"Could not compute lifetime deposited VND: {exc}")
+        return None, None
 
 
 def normalize_target_user_id(raw_user_id: str | int | None) -> str:
@@ -96,23 +103,20 @@ def read_canonical_wallet(
 
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10)
-    except Exception:
-        try:
-            conn = sqlite3.connect(db_path, timeout=10)
-        except Exception as exc:
-            logger.error(f"Cannot connect to wallet database: {exc}")
-            return (
-                False,
-                {
-                    "ok": False,
-                    "status": "guarded",
-                    "status_name": "guarded",
-                    "error_code": "WALLET_DATABASE_UNAVAILABLE",
-                    "message": "Cơ sở dữ liệu ví canonical tạm thời không khả dụng.",
-                    "data": None,
-                },
-                200,
-            )
+    except Exception as exc:
+        logger.error(f"Cannot connect to wallet database in read-only mode: {exc}")
+        return (
+            False,
+            {
+                "ok": False,
+                "status": "guarded",
+                "status_name": "guarded",
+                "error_code": "WALLET_DATABASE_UNAVAILABLE",
+                "message": "Cơ sở dữ liệu ví canonical tạm thời không khả dụng.",
+                "data": None,
+            },
+            200,
+        )
 
     try:
         c = conn.cursor()
@@ -134,6 +138,9 @@ def read_canonical_wallet(
 
         snapshot_credits = int(user_row[0] or 0)
         is_vip = bool(user_row[1])
+
+        # Lifetime proven paid / deposited VND
+        total_paid_vnd, total_deposited_vnd = calculate_canonical_total_paid_vnd(c, clean_uid)
 
         # Query total spent from credit_events ledger (sum of negative deltas)
         c.execute(
@@ -171,6 +178,8 @@ def read_canonical_wallet(
                     "data": {
                         "balance_xu": snapshot_credits,
                         "total_spent_xu": total_spent_xu,
+                        "total_paid_vnd": total_paid_vnd,
+                        "total_deposited_vnd": total_deposited_vnd,
                         "is_vip": is_vip,
                         "source": "canonical_ledger",
                         "reconciliation": {
@@ -195,6 +204,8 @@ def read_canonical_wallet(
                 "data": {
                     "balance_xu": snapshot_credits,
                     "total_spent_xu": total_spent_xu,
+                    "total_paid_vnd": total_paid_vnd,
+                    "total_deposited_vnd": total_deposited_vnd,
                     "is_vip": is_vip,
                     "source": "canonical_ledger",
                     "reconciliation": {
@@ -251,23 +262,20 @@ def read_canonical_wallet_history(
 
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10)
-    except Exception:
-        try:
-            conn = sqlite3.connect(db_path, timeout=10)
-        except Exception as exc:
-            logger.error(f"Cannot connect to wallet database: {exc}")
-            return (
-                False,
-                {
-                    "ok": False,
-                    "status": "guarded",
-                    "status_name": "guarded",
-                    "error_code": "WALLET_DATABASE_UNAVAILABLE",
-                    "message": "Không thể kết nối cơ sở dữ liệu lịch sử ví.",
-                    "data": {"items": []},
-                },
-                200,
-            )
+    except Exception as exc:
+        logger.error(f"Cannot connect to wallet database in read-only mode: {exc}")
+        return (
+            False,
+            {
+                "ok": False,
+                "status": "guarded",
+                "status_name": "guarded",
+                "error_code": "WALLET_DATABASE_UNAVAILABLE",
+                "message": "Không thể kết nối cơ sở dữ liệu lịch sử ví.",
+                "data": {"items": []},
+            },
+            200,
+        )
 
     try:
         c = conn.cursor()
@@ -317,7 +325,9 @@ def read_canonical_wallet_history(
         conn.close()
 
 
-def read_canonical_pricing_catalog() -> tuple[bool, dict[str, Any], int]:
+def read_canonical_pricing_catalog(
+    combo_catalog_fn: Callable[[], dict[str, Any]] | None = None,
+) -> tuple[bool, dict[str, Any], int]:
     """Read canonical public pricing from Bot reviewed catalog (video_ai_real_pricing)."""
     try:
         from services import video_ai_real_pricing
@@ -347,18 +357,19 @@ def read_canonical_pricing_catalog() -> tuple[bool, dict[str, Any], int]:
             for item in video_catalog
         ]
 
-        video_combos = [
-            {
-                "code": "combo_product_video_3scene",
-                "label": "Combo 3 phân cảnh",
-                "summary": "Tối ưu cho quảng cáo TikTok / Reels 15-20s",
-            },
-            {
-                "code": "combo_product_video_5scene",
-                "label": "Combo 5 phân cảnh",
-                "summary": "Tối ưu cho video sản phẩm chi tiết 30-45s",
-            },
-        ]
+        video_combos = []
+        if combo_catalog_fn is not None:
+            try:
+                combos_data = combo_catalog_fn() or {}
+                for code, combo in combos_data.items():
+                    if isinstance(combo, dict):
+                        video_combos.append({
+                            "code": str(code),
+                            "label": str(combo.get("label") or code),
+                            "summary": str(combo.get("note") or ""),
+                        })
+            except Exception as exc:
+                logger.warning(f"Could not load dynamic combos for pricing catalog: {exc}")
 
         public_sale_items = [
             {
@@ -428,8 +439,21 @@ def read_canonical_packages_catalog(
     payment_packages: dict[str, Any] | None = None,
 ) -> tuple[bool, dict[str, Any], int]:
     """Read canonical monthly plans, combos, and topup packages."""
+    if not plan_catalog or not payment_packages:
+        return (
+            False,
+            {
+                "ok": False,
+                "status": "guarded",
+                "status_name": "guarded",
+                "error_code": "PACKAGES_CATALOG_UNAVAILABLE",
+                "message": "Danh mục gói canonical chưa được cấu hình hoặc không khả dụng.",
+                "data": None,
+            },
+            200,
+        )
+
     try:
-        active_plans = plan_catalog or CANONICAL_PLAN_CATALOG
         monthly_rows = [
             {
                 "code": str(code),
@@ -440,7 +464,8 @@ def read_canonical_packages_catalog(
                 "manual": False,
                 "items": {"xu": int(plan.get("plan_xu") or 0)},
             }
-            for code, plan in active_plans.items()
+            for code, plan in plan_catalog.items()
+            if isinstance(plan, dict)
         ]
 
         combos_data: dict[str, Any] = {}
@@ -469,7 +494,6 @@ def read_canonical_packages_catalog(
                 },
             })
 
-        active_topup = payment_packages or CANONICAL_PAYMENT_PACKAGES
         topup_rows = [
             {
                 "code": str(code),
@@ -477,7 +501,7 @@ def read_canonical_packages_catalog(
                 "xu": int(pkg.get("xu") or 0),
                 "label": str(pkg.get("text") or code),
             }
-            for code, pkg in active_topup.items()
+            for code, pkg in payment_packages.items()
             if isinstance(pkg, dict)
         ]
 

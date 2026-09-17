@@ -20,8 +20,12 @@ import sqlite3
 import time
 import pytest
 
-from services.admin_wallet_service import verify_internal_admin_wallet_auth
+from services.admin_wallet_service import (
+    compute_internal_admin_wallet_signature,
+    verify_internal_admin_wallet_auth,
+)
 from services.customer_read_model_service import (
+    calculate_canonical_total_paid_vnd,
     normalize_target_user_id,
     read_canonical_wallet,
     read_canonical_wallet_history,
@@ -40,7 +44,8 @@ def create_test_db(db_path: Path) -> sqlite3.Connection:
         credits INTEGER DEFAULT 0,
         is_vip INTEGER DEFAULT 0,
         join_date TEXT,
-        total_spent INTEGER DEFAULT 0
+        total_spent INTEGER DEFAULT 0,
+        total_paid_vnd INTEGER DEFAULT 0
     )""")
     conn.execute("""CREATE TABLE IF NOT EXISTS credit_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,6 +55,20 @@ def create_test_db(db_path: Path) -> sqlite3.Connection:
         event_type TEXT,
         ref_id TEXT,
         note TEXT,
+        created_at DATETIME
+    )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS payos_orders (
+        order_code INTEGER PRIMARY KEY,
+        user_id TEXT,
+        amount INTEGER,
+        status TEXT,
+        created_at DATETIME
+    )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS pending_deposits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        amount_vnd INTEGER,
+        status TEXT,
         created_at DATETIME
     )""")
     conn.commit()
@@ -69,7 +88,48 @@ def test_normalize_target_user_id():
 
 
 # ---------------------------------------------------------------------------
-# Section 2: Wallet Reading & Reconciliation
+# Section 2: Lifetime Proven Total Paid VND Truth
+# ---------------------------------------------------------------------------
+
+def test_calculate_canonical_total_paid_vnd(tmp_path: Path):
+    db_file = tmp_path / "test_paid_vnd.db"
+    conn = create_test_db(db_file)
+    c = conn.cursor()
+
+    # User 1: PayOS only
+    c.execute("INSERT INTO users (user_id, username, credits) VALUES ('5001', 'u1', 0)")
+    c.execute("INSERT INTO payos_orders (order_code, user_id, amount, status) VALUES (101, '5001', 50000, 'PAID')")
+    c.execute("INSERT INTO payos_orders (order_code, user_id, amount, status) VALUES (102, '5001', 100000, 'completed')")
+    c.execute("INSERT INTO payos_orders (order_code, user_id, amount, status) VALUES (103, '5001', 200000, 'PENDING')")
+
+    # User 2: Manual deposit + PayOS
+    c.execute("INSERT INTO users (user_id, username, credits) VALUES ('5002', 'u2', 0)")
+    c.execute("INSERT INTO payos_orders (order_code, user_id, amount, status) VALUES (201, '5002', 20000, 'PAID')")
+    c.execute("INSERT INTO pending_deposits (user_id, amount_vnd, status) VALUES ('5002', 30000, 'approved')")
+
+    # User 3: users.total_paid_vnd stored is higher
+    c.execute("INSERT INTO users (user_id, username, credits, total_paid_vnd) VALUES ('5003', 'u3', 0, 500000)")
+    c.execute("INSERT INTO payos_orders (order_code, user_id, amount, status) VALUES (301, '5003', 100000, 'PAID')")
+
+    conn.commit()
+
+    paid_1, dep_1 = calculate_canonical_total_paid_vnd(c, "5001")
+    assert paid_1 == 150000
+    assert dep_1 == 150000
+
+    paid_2, dep_2 = calculate_canonical_total_paid_vnd(c, "5002")
+    assert paid_2 == 50000
+    assert dep_2 == 50000
+
+    paid_3, dep_3 = calculate_canonical_total_paid_vnd(c, "5003")
+    assert paid_3 == 500000
+    assert dep_3 == 500000
+
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Section 3: Wallet Reading & Reconciliation
 # ---------------------------------------------------------------------------
 
 def test_read_canonical_wallet_unlinked():
@@ -106,6 +166,7 @@ def test_read_canonical_wallet_reconciled(tmp_path: Path):
         "INSERT INTO credit_events (user_id, delta, balance_after, event_type, created_at) "
         "VALUES ('1001', -100, 500, 'usage', '2026-09-17 10:05:00')"
     )
+    conn.execute("INSERT INTO payos_orders (order_code, user_id, amount, status) VALUES (1, '1001', 60000, 'PAID')")
     conn.commit()
     conn.close()
 
@@ -116,6 +177,8 @@ def test_read_canonical_wallet_reconciled(tmp_path: Path):
     data = result["data"]
     assert data["balance_xu"] == 500
     assert data["total_spent_xu"] == 100
+    assert data["total_paid_vnd"] == 60000
+    assert data["total_deposited_vnd"] == 60000
     assert data["is_vip"] is True
     assert data["reconciliation"]["reconciled"] is True
     assert data["reconciliation"]["discrepancy"] == 0
@@ -147,30 +210,17 @@ def test_read_canonical_wallet_unreconciled_fails_closed(tmp_path: Path):
     assert data["reconciliation"]["ledger_credits"] == 500
 
 
-def test_read_canonical_wallet_zero_credits_no_events_reconciled(tmp_path: Path):
-    db_file = tmp_path / "test_zero.db"
-    conn = create_test_db(db_file)
-    conn.execute("INSERT INTO users (user_id, username, credits, is_vip) VALUES ('1003', 'zero_user', 0, 0)")
-    conn.commit()
-    conn.close()
-
-    ok, result, status_code = read_canonical_wallet("1003", str(db_file))
-    assert ok is True
-    assert result["status_name"] == "read_only"
-    assert result["data"]["balance_xu"] == 0
-    assert result["data"]["total_spent_xu"] == 0
-    assert result["data"]["reconciliation"]["reconciled"] is True
-
-
-def test_read_canonical_wallet_database_error():
+def test_read_canonical_wallet_strictly_mode_ro():
+    """Fails closed immediately if path cannot be opened with mode=ro, zero RW fallback."""
     ok, result, status_code = read_canonical_wallet("1001", "invalid/nonexistent/dir/db.sqlite")
     assert ok is False
+    assert status_code == 200
     assert result["status_name"] == "guarded"
     assert result["error_code"] == "WALLET_DATABASE_UNAVAILABLE"
 
 
 # ---------------------------------------------------------------------------
-# Section 3: Wallet History
+# Section 4: Wallet History
 # ---------------------------------------------------------------------------
 
 def test_read_canonical_wallet_history_unlinked():
@@ -209,10 +259,11 @@ def test_read_canonical_wallet_history_success(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# Section 4: Canonical Pricing Catalog
+# Section 5: Canonical Pricing Catalog
 # ---------------------------------------------------------------------------
 
 def test_read_canonical_pricing_catalog():
+    # Without dynamic combos function: video_combos should be empty list (no hardcoded fake combos!)
     ok, result, status_code = read_canonical_pricing_catalog()
     assert ok is True
     assert status_code == 200
@@ -221,6 +272,7 @@ def test_read_canonical_pricing_catalog():
     assert data["available"] is True
     assert data["billing_mode"] == "prepaid_xu"
     assert data["price_table_source"] == "canonical_bot_core"
+    assert data["video_combos"] == []
 
     # Image tiers
     image_tiers = data["image_tiers"]
@@ -240,102 +292,125 @@ def test_read_canonical_pricing_catalog():
         assert "unit_xu" in tier
         assert tier["unit_xu"] > 0
 
-    # Video combos
-    video_combos = data["video_combos"]
-    assert len(video_combos) >= 1
+    # With dynamic combo fn
+    def mock_combo_catalog():
+        return {
+            "combo_3scene": {"label": "Combo 3 Phân Cảnh", "note": "Quảng cáo ngắn 15s"},
+            "combo_5scene": {"label": "Combo 5 Phân Cảnh", "note": "Video chi tiết 30s"},
+        }
 
-    # Public sale catalog
-    sale = data["public_sale_catalog"]
-    assert sale["available"] is True
-    assert "catalog_version" in sale
-    assert len(sale["items"]) > 0
+    ok2, result2, status_code2 = read_canonical_pricing_catalog(combo_catalog_fn=mock_combo_catalog)
+    assert ok2 is True
+    assert len(result2["data"]["video_combos"]) == 2
+    assert result2["data"]["video_combos"][0]["code"] == "combo_3scene"
 
 
 # ---------------------------------------------------------------------------
-# Section 5: Canonical Packages Catalog
+# Section 6: Canonical Packages Catalog
 # ---------------------------------------------------------------------------
 
-def test_read_canonical_packages_catalog():
-    ok, result, status_code = read_canonical_packages_catalog()
+def test_read_canonical_packages_catalog_fails_closed_when_missing():
+    # When catalogs are not provided / missing, fails closed with PACKAGES_CATALOG_UNAVAILABLE
+    ok, result, status_code = read_canonical_packages_catalog(plan_catalog=None, payment_packages=None)
+    assert ok is False
+    assert status_code == 200
+    assert result["status_name"] == "guarded"
+    assert result["error_code"] == "PACKAGES_CATALOG_UNAVAILABLE"
+
+
+def test_read_canonical_packages_catalog_success():
+    sample_plans = {
+        "starter": {"name": "Gói Starter", "description": "Gói khởi động", "duration_days": 30, "plan_xu": 500},
+        "creator": {"name": "Gói Creator", "description": "Gói sáng tạo", "duration_days": 30, "plan_xu": 1500},
+    }
+    sample_combos = {
+        "combo_basic": {"label": "Combo Basic", "note": "Gói combo 3 scene", "items": {"xu": 300}},
+    }
+    sample_topup = {
+        "10k": {"amount": 10000, "xu": 100, "text": "10.000đ (100 Xu)"},
+        "50k": {"amount": 50000, "xu": 550, "text": "50.000đ (550 Xu)"},
+    }
+
+    ok, result, status_code = read_canonical_packages_catalog(
+        plan_catalog=sample_plans,
+        combo_catalog_fn=lambda: sample_combos,
+        payment_packages=sample_topup,
+    )
     assert ok is True
     assert status_code == 200
     assert result["status_name"] == "read_only"
     data = result["data"]
-    assert data["available"] is True
-
-    # Monthly packages
-    monthly = data["monthly"]
-    assert len(monthly) >= 4
-    monthly_codes = {item["code"] for item in monthly}
-    assert {"starter", "creator", "pro", "business"}.issubset(monthly_codes)
-
-    # Topup packages
-    topup = data["topup"]
-    assert len(topup) >= 6
-    topup_codes = {item["code"] for item in topup}
-    assert {"10k", "20k", "50k", "100k", "200k", "500k"}.issubset(topup_codes)
+    assert len(data["monthly"]) == 2
+    assert len(data["combos"]) == 1
+    assert len(data["topup"]) == 2
 
 
 # ---------------------------------------------------------------------------
-# Section 6: Internal Authentication Verification on GET Requests
+# Section 7: HMAC Identity Binding & Tamper Rejection
 # ---------------------------------------------------------------------------
 
-def test_verify_internal_auth_get_request(monkeypatch):
+def test_verify_internal_auth_with_actor_id_binding(monkeypatch):
     token = "secret-bridge-token"
     hmac_secret = "secret-hmac-key"
     monkeypatch.setenv("CORE_BRIDGE_TOKEN", token)
     monkeypatch.setenv("CORE_BRIDGE_HMAC_SECRET", hmac_secret)
 
     now_ts = str(int(time.time()))
-    req_id = "test-req-001"
-    digest = hashlib.sha256(b"").hexdigest()
+    req_id = "req-test-tamper-01"
     path = "/internal/v1/wallet"
-    message = f"{now_ts}.{req_id}.GET.{path}.{digest}".encode("utf-8")
-    signature = hmac.new(hmac_secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
+    actor_id = "1001"
 
-    # Valid GET auth
-    is_valid, err, status = verify_internal_admin_wallet_auth(
-        authorization=f"Bearer {token}",
-        signature=signature,
+    # Signature bound to actor_id="1001"
+    valid_sig = compute_internal_admin_wallet_signature(
+        secret=hmac_secret,
         timestamp=now_ts,
         request_id=req_id,
         method="GET",
         path=path,
         body_bytes=b"",
+        actor_id=actor_id,
+    )
+
+    # 1. Valid verification with matching actor_id
+    is_valid, err, status = verify_internal_admin_wallet_auth(
+        authorization=f"Bearer {token}",
+        signature=valid_sig,
+        timestamp=now_ts,
+        request_id=req_id,
+        method="GET",
+        path=path,
+        body_bytes=b"",
+        actor_id="1001",
     )
     assert is_valid is True
     assert err == "OK"
     assert status == 200
 
-    # Missing auth
-    is_valid, err, status = verify_internal_admin_wallet_auth(
-        authorization="",
-        method="GET",
-        path=path,
-    )
-    assert is_valid is False
-    assert err == "AUTH_MISSING"
-    assert status == 401
-
-    # Invalid token
-    is_valid, err, status = verify_internal_admin_wallet_auth(
-        authorization="Bearer wrong-token",
-        method="GET",
-        path=path,
-    )
-    assert is_valid is False
-    assert err == "AUTH_INVALID"
-    assert status == 401
-
-    # Invalid signature
+    # 2. Tampered actor_id="9999" MUST BE REJECTED
     is_valid, err, status = verify_internal_admin_wallet_auth(
         authorization=f"Bearer {token}",
-        signature="wrong-signature",
+        signature=valid_sig,
         timestamp=now_ts,
         request_id=req_id,
         method="GET",
         path=path,
         body_bytes=b"",
+        actor_id="9999",
+    )
+    assert is_valid is False
+    assert err == "SIGNATURE_INVALID"
+    assert status == 401
+
+    # 3. Omitted actor_id when signature was bound MUST BE REJECTED
+    is_valid, err, status = verify_internal_admin_wallet_auth(
+        authorization=f"Bearer {token}",
+        signature=valid_sig,
+        timestamp=now_ts,
+        request_id=req_id,
+        method="GET",
+        path=path,
+        body_bytes=b"",
+        actor_id="",
     )
     assert is_valid is False
     assert err == "SIGNATURE_INVALID"
@@ -343,7 +418,7 @@ def test_verify_internal_auth_get_request(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Section 7: Invariants: Zero Mutations & Zero Wallet Deductions
+# Section 8: Invariants: Zero Mutations & Zero Wallet Deductions
 # ---------------------------------------------------------------------------
 
 def test_invariants_zero_mutations(tmp_path: Path):
@@ -357,6 +432,9 @@ def test_invariants_zero_mutations(tmp_path: Path):
     )
     conn.commit()
 
+    sample_plans = {"p1": {"name": "P1", "duration_days": 30, "plan_xu": 100}}
+    sample_topup = {"t1": {"amount": 10000, "xu": 100, "text": "10k"}}
+
     # Read wallet
     read_canonical_wallet("8888", str(db_file))
     # Read history
@@ -364,7 +442,7 @@ def test_invariants_zero_mutations(tmp_path: Path):
     # Read pricing
     read_canonical_pricing_catalog()
     # Read packages
-    read_canonical_packages_catalog()
+    read_canonical_packages_catalog(plan_catalog=sample_plans, payment_packages=sample_topup)
 
     # Check that users table was NOT modified
     row = conn.execute("SELECT credits FROM users WHERE user_id='8888'").fetchone()

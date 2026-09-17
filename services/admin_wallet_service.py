@@ -127,6 +127,26 @@ def compute_credit_request_fingerprint(
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
+def compute_internal_admin_wallet_signature(
+    secret: str,
+    timestamp: str,
+    request_id: str,
+    method: str,
+    path: str,
+    body_bytes: bytes = b"",
+    actor_id: str = "",
+) -> str:
+    """Compute canonical HMAC-SHA256 signature binding request parameters and target identity."""
+    digest = hashlib.sha256(body_bytes or b"").hexdigest()
+    normalized_path = "/" + path.lstrip("/")
+    clean_actor = str(actor_id or "").strip()
+    if clean_actor:
+        message = f"{timestamp}.{request_id}.{method.upper()}.{normalized_path}.{digest}.{clean_actor}".encode("utf-8")
+    else:
+        message = f"{timestamp}.{request_id}.{method.upper()}.{normalized_path}.{digest}".encode("utf-8")
+    return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+
 def verify_internal_admin_wallet_auth(
     authorization: str = "",
     signature: str = "",
@@ -135,6 +155,7 @@ def verify_internal_admin_wallet_auth(
     method: str = "POST",
     path: str = "/internal/v1/admin/wallet/credit",
     body_bytes: bytes = b"",
+    actor_id: str = "",
     token_override: str | None = None,
     secret_override: str | None = None,
     clock_skew_seconds: int = 300,
@@ -196,10 +217,15 @@ def verify_internal_admin_wallet_auth(
         except (ValueError, TypeError):
             return False, "INVALID_TIMESTAMP", 401
 
-        digest = hashlib.sha256(body_bytes or b"").hexdigest()
-        normalized_path = "/" + path.lstrip("/")
-        message = f"{clean_ts}.{clean_req_id}.{method.upper()}.{normalized_path}.{digest}".encode("utf-8")
-        expected_sig = hmac.new(hmac_secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
+        expected_sig = compute_internal_admin_wallet_signature(
+            secret=hmac_secret,
+            timestamp=clean_ts,
+            request_id=clean_req_id,
+            method=method,
+            path=path,
+            body_bytes=body_bytes,
+            actor_id=actor_id,
+        )
 
         if not hmac.compare_digest(clean_sig, expected_sig):
             return False, "SIGNATURE_INVALID", 401

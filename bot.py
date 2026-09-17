@@ -277518,7 +277518,25 @@ async def api_internal_admin_wallet_compensate(request: Request):
 async def api_internal_customer_wallet(request: Request):
     """Canonical Bot Core customer wallet read model with ledger reconciliation."""
     from services.admin_wallet_service import verify_internal_admin_wallet_auth
-    from services.customer_read_model_service import read_canonical_wallet
+    from services.customer_read_model_service import read_canonical_wallet, normalize_target_user_id
+
+    query_user_id = str(
+        request.query_params.get("user_id")
+        or request.query_params.get("canonical_user_id")
+        or ""
+    ).strip()
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
+
+    clean_query_uid = normalize_target_user_id(query_user_id) if query_user_id else ""
+    clean_header_actor = normalize_target_user_id(header_actor) if header_actor else ""
+
+    if clean_query_uid and clean_header_actor and clean_query_uid != clean_header_actor:
+        raise HTTPException(
+            status_code=401,
+            detail={"ok": False, "error_code": "ACTOR_ID_MISMATCH", "message": "Header actor_id does not match target user_id"},
+        )
+
+    target_user_id = clean_query_uid or clean_header_actor
 
     auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
         authorization=request.headers.get("authorization", ""),
@@ -277528,6 +277546,7 @@ async def api_internal_customer_wallet(request: Request):
         method="GET",
         path="/internal/v1/wallet",
         body_bytes=b"",
+        actor_id=target_user_id,
     )
     if not auth_ok:
         raise HTTPException(
@@ -277535,14 +277554,7 @@ async def api_internal_customer_wallet(request: Request):
             detail={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
         )
 
-    user_id = str(
-        request.query_params.get("user_id")
-        or request.query_params.get("canonical_user_id")
-        or request.headers.get("x-toan-aas-actor-id")
-        or ""
-    ).strip()
-
-    ok, result, status_code = read_canonical_wallet(user_id=user_id, db_path=DB_FILE)
+    ok, result, status_code = read_canonical_wallet(user_id=target_user_id, db_path=DB_FILE)
     return JSONResponse(status_code=status_code, content=result)
 
 
@@ -277550,7 +277562,25 @@ async def api_internal_customer_wallet(request: Request):
 async def api_internal_customer_wallet_history(request: Request):
     """Canonical Bot Core customer wallet ledger event history."""
     from services.admin_wallet_service import verify_internal_admin_wallet_auth
-    from services.customer_read_model_service import read_canonical_wallet_history
+    from services.customer_read_model_service import read_canonical_wallet_history, normalize_target_user_id
+
+    query_user_id = str(
+        request.query_params.get("user_id")
+        or request.query_params.get("canonical_user_id")
+        or ""
+    ).strip()
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
+
+    clean_query_uid = normalize_target_user_id(query_user_id) if query_user_id else ""
+    clean_header_actor = normalize_target_user_id(header_actor) if header_actor else ""
+
+    if clean_query_uid and clean_header_actor and clean_query_uid != clean_header_actor:
+        raise HTTPException(
+            status_code=401,
+            detail={"ok": False, "error_code": "ACTOR_ID_MISMATCH", "message": "Header actor_id does not match target user_id"},
+        )
+
+    target_user_id = clean_query_uid or clean_header_actor
 
     auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
         authorization=request.headers.get("authorization", ""),
@@ -277560,6 +277590,7 @@ async def api_internal_customer_wallet_history(request: Request):
         method="GET",
         path="/internal/v1/wallet/history",
         body_bytes=b"",
+        actor_id=target_user_id,
     )
     if not auth_ok:
         raise HTTPException(
@@ -277567,15 +277598,8 @@ async def api_internal_customer_wallet_history(request: Request):
             detail={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
         )
 
-    user_id = str(
-        request.query_params.get("user_id")
-        or request.query_params.get("canonical_user_id")
-        or request.headers.get("x-toan-aas-actor-id")
-        or ""
-    ).strip()
     limit = int(request.query_params.get("limit") or 50)
-
-    ok, result, status_code = read_canonical_wallet_history(user_id=user_id, db_path=DB_FILE, limit=limit)
+    ok, result, status_code = read_canonical_wallet_history(user_id=target_user_id, db_path=DB_FILE, limit=limit)
     return JSONResponse(status_code=status_code, content=result)
 
 
@@ -277600,7 +277624,8 @@ async def api_internal_customer_pricing(request: Request):
             detail={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
         )
 
-    ok, result, status_code = read_canonical_pricing_catalog()
+    combos_fn = globals().get("p0_21d_combo_catalog_payload")
+    ok, result, status_code = read_canonical_pricing_catalog(combo_catalog_fn=combos_fn)
     return JSONResponse(status_code=status_code, content=result)
 
 
