@@ -1931,11 +1931,49 @@ def test_isolated_multi_runner_assigns_and_synthesizes_three_voices(monkeypatch)
     assert len(set(synthesized_voices)) == 3
 
 
-@pytest.mark.parametrize("speaker_count", tuple(range(3, 9)))
+@pytest.mark.parametrize(
+    (
+        "speaker_count",
+        "cue_count",
+        "dub_text_source",
+        "source_display",
+        "output_display",
+    ),
+    (
+        pytest.param(
+            3,
+            3,
+            "source",
+            (854, 480),
+            (1280, 720),
+            id="post_sidecar-source-3-cues-landscape",
+        ),
+        pytest.param(
+            5,
+            25,
+            "translated",
+            (480, 854),
+            (720, 1280),
+            id="post_sidecar-translated-25-cues-portrait",
+        ),
+        pytest.param(
+            8,
+            70,
+            "translated",
+            (1920, 1080),
+            (1280, 720),
+            id="post_sidecar-translated-70-cues-landscape",
+        ),
+    ),
+)
 def test_provider_stub_full_chain_keeps_speech_speakers_through_mux(
     tmp_path,
     monkeypatch,
     speaker_count,
+    cue_count,
+    dub_text_source,
+    source_display,
+    output_display,
 ):
     multi_module = _multi_module()
     labels = [f"chunk_00:speaker_{index}" for index in range(speaker_count)]
@@ -1951,7 +1989,7 @@ def test_provider_stub_full_chain_keeps_speech_speakers_through_mux(
                 "speaker_confidence": 0.95,
                 "chunk_index": 0,
             }
-            for index in range(speaker_count * 2)
+            for index in range(cue_count)
         ],
         extraction_source="local_acoustic",
     )
@@ -2001,13 +2039,13 @@ def test_provider_stub_full_chain_keeps_speech_speakers_through_mux(
         "auto_speaker_lane": "multi",
         "mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
         "video_processing_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
-        "target_language": "English",
-        "translate_requested": "1",
-        "dub_text_source": "translated",
+        "target_language": "source" if dub_text_source == "source" else "English",
+        "translate_requested": "" if dub_text_source == "source" else "1",
+        "dub_text_source": dub_text_source,
         "output_type": "video_subtitle",
-        "input_duration": speaker_count * 2,
-        "video_duration": speaker_count * 2,
-        "source_duration": speaker_count * 2,
+        "input_duration": cue_count,
+        "video_duration": cue_count,
+        "source_duration": cue_count,
         "keep_original_audio": True,
         "original_audio_volume_percent": 40,
         "dubbed_voice_volume_percent": 150,
@@ -2041,7 +2079,7 @@ def test_provider_stub_full_chain_keeps_speech_speakers_through_mux(
         "output_script": "\n".join(item["text"] for item in output_segments),
         "translation_provider": "offline-translation-stub",
         "asr_provider": "offline-strict-word-stub",
-        "duration_seconds": speaker_count * 2,
+        "duration_seconds": cue_count,
         "media_sha256": media_sha256,
         "subtitle_sha256": subtitle_sha256,
     }
@@ -2083,7 +2121,8 @@ def test_provider_stub_full_chain_keeps_speech_speakers_through_mux(
     async def synthesize_segments(segments, **kwargs):
         assert len(segments) == 1
         cue = segments[0]
-        assert str(cue["text"]).startswith("English speaker ")
+        expected_prefix = "nguoi noi " if dub_text_source == "source" else "English speaker "
+        assert str(cue["text"]).startswith(expected_prefix)
         tts_calls.append(
             (cue["cue_id"], cue["speaker_id"], kwargs["voice_id"])
         )
@@ -2146,21 +2185,21 @@ def test_provider_stub_full_chain_keeps_speech_speakers_through_mux(
             validate_audio=lambda _audio: {
                 "ok": True,
                 "detail": "offline-audio-qc-stub",
-                "duration": float(speaker_count * 2),
+                "duration": float(cue_count),
             },
             render_video=render_video,
             source_video_probe={
                 "ok": True,
                 "has_video": True,
-                "display_width": 854,
-                "display_height": 480,
+                "display_width": source_display[0],
+                "display_height": source_display[1],
                 "rotation": 0,
             },
             probe_video=lambda _payload: {
                 "ok": True,
                 "has_video": True,
-                "display_width": 1280,
-                "display_height": 720,
+                "display_width": output_display[0],
+                "display_height": output_display[1],
                 "rotation": 0,
             },
             video_render_ready=lambda _output_type: True,
@@ -2173,8 +2212,8 @@ def test_provider_stub_full_chain_keeps_speech_speakers_through_mux(
     assert result["ok"] is True
     assert result["result_type"] == "mp4"
     assert result["video_output"].startswith(b"\x00\x00\x00\x18ftypmp42")
-    assert result["tts_expected_segments"] == speaker_count * 2
-    assert result["tts_generated_segments"] == speaker_count * 2
+    assert result["tts_expected_segments"] == cue_count
+    assert result["tts_generated_segments"] == cue_count
     assert result["tts_dropped_segments"] == 0
     assert result["cue_locked_timing"] is True
     assert result["state"]["auto_detected_speaker_count"] == speaker_count
@@ -2182,10 +2221,10 @@ def test_provider_stub_full_chain_keeps_speech_speakers_through_mux(
     assert result["state"]["auto_multi_voice_verified"] is True
     assert result["state"]["auto_multi_attribution_verified"] is True
     assert result["state"]["auto_multi_geometry_verified"] is True
-    assert result["state"]["auto_multi_source_display_width"] == 854
-    assert result["state"]["auto_multi_source_display_height"] == 480
-    assert result["state"]["auto_multi_output_display_width"] == 1280
-    assert result["state"]["auto_multi_output_display_height"] == 720
+    assert result["state"]["auto_multi_source_display_width"] == source_display[0]
+    assert result["state"]["auto_multi_source_display_height"] == source_display[1]
+    assert result["state"]["auto_multi_output_display_width"] == output_display[0]
+    assert result["state"]["auto_multi_output_display_height"] == output_display[1]
     assert result["state"]["auto_multi_output_rotation"] == 0
     assert {
         key: result["state"].get(key)
@@ -2193,7 +2232,7 @@ def test_provider_stub_full_chain_keeps_speech_speakers_through_mux(
     } == pipeline_context
     assert result["state"]["original_audio_volume_percent"] == 40
     assert result["state"]["dubbed_voice_volume_percent"] == 150
-    assert len(tts_calls) == speaker_count * 2
+    assert len(tts_calls) == cue_count
     speaker_to_voices = {
         speaker_id: {
             voice_id
@@ -2204,12 +2243,12 @@ def test_provider_stub_full_chain_keeps_speech_speakers_through_mux(
     }
     assert all(len(voice_ids) == 1 for voice_ids in speaker_to_voices.values())
     assert len({next(iter(voice_ids)) for voice_ids in speaker_to_voices.values()}) == speaker_count
-    assert len({cue_id for cue_id, _speaker_id, _voice_id in tts_calls}) == speaker_count * 2
+    assert len({cue_id for cue_id, _speaker_id, _voice_id in tts_calls}) == cue_count
     assert {speaker_id for _cue_id, speaker_id, _voice_id in tts_calls} == set(labels)
     assert len(render_calls) == 1
     assert render_calls[0][0] == source_bytes
     assert render_calls[0][1]["keep_original_audio"] is True
-    assert render_calls[0][1]["target_duration_seconds"] == float(speaker_count * 2)
+    assert render_calls[0][1]["target_duration_seconds"] == float(cue_count)
     assert render_calls[0][1]["dubbed_audio"] == b"offline-normalized-audio"
     assert render_calls[0][1]["subtitle_bytes"].decode("utf-8") == (
         output_subtitle.strip()
@@ -2364,6 +2403,8 @@ def test_multi_full_blackbox_rejects_wrong_output_aspect_before_delivery(
 
     assert result["ok"] is False
     assert result["status"] == speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+    assert result["auto_multi_failure_stage"] == "output_validation"
+    assert result["auto_multi_failure_code"] == "auto_cast_manual_required"
     assert result["public_copy_key"] == "voice_auto_manual_required"
 
 
@@ -2428,6 +2469,158 @@ def test_auto_multi_failure_returns_plain_maintenance_without_manual_voice_picke
         callback.startswith("videodub|voice|")
         for callback in _callbacks(repeated["reply_markup"])
     )
+
+
+def test_auto_multi_failure_stage_identifies_prepare_subtitles_without_leaking_error():
+    multi_module = _multi_module()
+    state = {**EXACT_AUTO_STATE, "auto_speaker_lane": "multi"}
+
+    async def failed_prepare(_state, *, require_auto_cast):
+        assert require_auto_cast is True
+        raise speaker_cast.AutoCastUnavailable("must-not-leak")
+
+    result = asyncio.run(
+        multi_module._run_multi_speaker_preflight(
+            state,
+            prepare_subtitles=failed_prepare,
+            post_prepare_gate=lambda *_args: {"continue": True},
+            extract_pcm=lambda *_args, **_kwargs: "unused.pcm",
+            classify_speakers=lambda *_args, **_kwargs: {},
+        )
+    )
+
+    assert result["status"] == speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+    assert result["auto_multi_failure_stage"] == "prepare_subtitles"
+    assert result["auto_multi_failure_code"] == "auto_cast_unavailable"
+    assert "must-not-leak" not in repr(result)
+
+
+def test_auto_multi_failure_stage_distinguishes_voice_pool_capacity_before_prepare():
+    multi_module = _multi_module()
+    state = {**EXACT_AUTO_STATE, "auto_speaker_lane": "multi"}
+    calls = {"prepare": 0}
+
+    async def forbidden_prepare(*_args, **_kwargs):
+        calls["prepare"] += 1
+        raise AssertionError("voice pool failure must stop before subtitle preparation")
+
+    result = asyncio.run(
+        multi_module._run_isolated_multi_speaker_blackbox(
+            lane_mode="subtitle_plus_dub",
+            run_lane_blackbox=lambda **_kwargs: {},
+            runner=lambda **_kwargs: {},
+            prepare_subtitles=forbidden_prepare,
+            resolve_voice_id=lambda *_args, **_kwargs: "voice",
+            synthesize_segments=lambda *_args, **_kwargs: {},
+            post_prepare_gate=lambda *_args: {"continue": True},
+            extract_pcm=lambda *_args, **_kwargs: "unused.pcm",
+            validated_pools={"low": ["low-voice"], "high": ["high-voice"]},
+            classify_speakers=lambda *_args, **_kwargs: {},
+            required_pool_capacity=2,
+            state=state,
+        )
+    )
+
+    assert result["status"] == speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+    assert result["auto_multi_failure_stage"] == "voice_pool_capacity"
+    assert result["auto_multi_failure_code"] == "voice_pool_capacity_insufficient"
+    assert calls == {"prepare": 0}
+
+
+def test_post_sidecar_failure_identifies_missing_scalar_audio_without_payload_leak(
+    monkeypatch,
+):
+    multi_module = _multi_module()
+    labels = [f"chunk_00:speaker_{index}" for index in range(3)]
+    state = {
+        **EXACT_AUTO_STATE,
+        "auto_speaker_lane": "multi",
+        "mode": "dub",
+        "dub_text_source": "source",
+    }
+    source_segments = [
+        {
+            "cue_id": f"cue-{index}",
+            "index": index + 1,
+            "start": float(index),
+            "end": float(index + 1),
+            "text": f"speaker {index}",
+            "speaker_id": label,
+        }
+        for index, label in enumerate(labels)
+    ]
+    prepared = {
+        "state": {**state, "speaker_sidecar_sha256": "a" * 64},
+        "source_segments": source_segments,
+        "output_segments": [dict(item) for item in source_segments],
+    }
+    classifications = {
+        label: {
+            "speaker_id": label,
+            "voice_register": "low" if index < 2 else "high",
+            "confidence": 0.9,
+        }
+        for index, label in enumerate(labels)
+    }
+
+    async def fake_preflight(_state, **_kwargs):
+        return {
+            "ok": True,
+            "status": auto_speaker.AUTO_SPEAKER_PREFLIGHT_READY,
+            "prepared": prepared,
+            "speaker_labels": labels,
+            "classifications": classifications,
+        }
+
+    async def missing_audio(segments, **_kwargs):
+        cue = segments[0]
+        return {
+            "chunks": [{"start": cue["start"], "end": cue["end"]}],
+            "provider": "provider_payload-must-not-leak",
+        }
+
+    async def run_lane_blackbox(*, runner, **payload):
+        assert runner is runner_token
+        annotated = await payload["prepare_subtitles"](payload["state"])
+        compatibility_voice = payload["resolve_voice_id"](7, payload["state"])
+        await payload["synthesize_segments"](
+            annotated["source_segments"],
+            voice_id=compatibility_voice,
+        )
+        raise AssertionError("missing scalar audio must stop the lane")
+
+    async def runner_token(**_kwargs):
+        raise AssertionError("focused lane stub owns the runner seam")
+
+    monkeypatch.setattr(
+        multi_module,
+        "_run_multi_speaker_preflight",
+        fake_preflight,
+    )
+    result = asyncio.run(
+        multi_module._run_isolated_multi_speaker_blackbox(
+            lane_mode="dub",
+            run_lane_blackbox=run_lane_blackbox,
+            runner=runner_token,
+            prepare_subtitles=lambda *_args, **_kwargs: prepared,
+            resolve_voice_id=lambda *_args, **_kwargs: "forbidden",
+            synthesize_segments=missing_audio,
+            post_prepare_gate=lambda *_args, **_kwargs: {"continue": True},
+            extract_pcm=lambda *_args, **_kwargs: "unused.pcm",
+            validated_pools={
+                "low": ["low-a", "low-b", "low-c"],
+                "high": ["high-a", "high-b", "high-c"],
+            },
+            classify_speakers=multi_module.classify_multi_speaker_registers,
+            required_pool_capacity=3,
+            state=state,
+        )
+    )
+
+    assert result["status"] == speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+    assert result["auto_multi_failure_stage"] == "tts_scalar"
+    assert result["auto_multi_failure_code"] == "scalar_audio_missing"
+    assert "provider_payload" not in repr(result)
 
 
 def test_subdub_admin_debug_surfaces_use_real_lines_without_raw_html():
@@ -2779,3 +2972,200 @@ def test_non_multi_pcm_keeps_normalized_saved_source_priority(
     )
 
     assert calls[0][0][3] == str(normalized)
+
+
+def test_generalized_multi_speaker_cue_parity_with_3dp_rounding_drift(monkeypatch):
+    """
+    SPEC-01A RED:
+    When source_segments has unrounded float timestamps (e.g. from ASR calculations)
+    and output_segments has 3-decimal rounded timestamps from subdub_retime_translated_segments_to_source,
+    the multi-speaker pipeline must successfully match cues by cue_id and pass cue assignment
+    instead of failing with AUTO_CAST_MANUAL_REQUIRED / cue_assignment.
+    """
+    multi_module = _multi_module()
+    labels = ["chunk_00:speaker_0", "chunk_00:speaker_1", "chunk_00:speaker_2"]
+    state = {
+        **EXACT_AUTO_STATE,
+        "auto_speaker_lane": "multi",
+        "mode": "subtitle_plus_dub",
+        "dub_text_source": "translated",
+    }
+    source_segments = [
+        {
+            "cue_id": "cue_001",
+            "index": 1,
+            "start": 1.234567,
+            "end": 2.345678,
+            "text": "Speaker zero unrounded",
+            "speaker_id": labels[0],
+        },
+        {
+            "cue_id": "cue_002",
+            "index": 2,
+            "start": 2.456789,
+            "end": 3.567890,
+            "text": "Speaker one unrounded",
+            "speaker_id": labels[1],
+        },
+        {
+            "cue_id": "cue_003",
+            "index": 3,
+            "start": 3.678901,
+            "end": 4.789012,
+            "text": "Speaker two unrounded",
+            "speaker_id": labels[2],
+        },
+    ]
+    output_segments = [
+        {
+            "cue_id": "cue_001",
+            "index": 1,
+            "start": round(1.234567, 3),
+            "end": round(2.345678, 3),
+            "text": "Speaker zero translated",
+            "speaker_id": labels[0],
+        },
+        {
+            "cue_id": "cue_002",
+            "index": 2,
+            "start": round(2.456789, 3),
+            "end": round(3.567890, 3),
+            "text": "Speaker one translated",
+            "speaker_id": labels[1],
+        },
+        {
+            "cue_id": "cue_003",
+            "index": 3,
+            "start": round(3.678901, 3),
+            "end": round(4.789012, 3),
+            "text": "Speaker two translated",
+            "speaker_id": labels[2],
+        },
+    ]
+    prepared = {
+        "state": {**state, "speaker_sidecar_sha256": "f" * 64},
+        "source_segments": source_segments,
+        "output_segments": output_segments,
+    }
+    classifications = {
+        labels[0]: {"speaker_id": labels[0], "voice_register": "low", "confidence": 0.99},
+        labels[1]: {"speaker_id": labels[1], "voice_register": "high", "confidence": 0.99},
+        labels[2]: {"speaker_id": labels[2], "voice_register": "low", "confidence": 0.99},
+    }
+
+    async def fake_preflight(*_args, **_kwargs):
+        return {
+            "ok": True,
+            "status": auto_speaker.AUTO_SPEAKER_PREFLIGHT_READY,
+            "prepared": prepared,
+            "speaker_labels": labels,
+            "classifications": classifications,
+        }
+
+    monkeypatch.setattr(
+        multi_module,
+        "_run_multi_speaker_preflight",
+        fake_preflight,
+    )
+
+    runner_calls = []
+    async def fake_run_lane(*, runner, **payload):
+        annotated = await payload["prepare_subtitles"](payload["state"])
+        runner_calls.append(annotated)
+        return {"ok": True, "final_mp4": "output.mp4"}
+
+    result = asyncio.run(
+        multi_module._run_isolated_multi_speaker_blackbox(
+            lane_mode="subtitle_plus_dub",
+            run_lane_blackbox=fake_run_lane,
+            runner=lambda **_kw: {},
+            prepare_subtitles=lambda _s: prepared,
+            resolve_voice_id=lambda _u, _s: "voice",
+            synthesize_segments=lambda _segs, **_kw: {},
+            post_prepare_gate=lambda _s: {"continue": True},
+            extract_pcm=lambda *_a, **_kw: "unused.pcm",
+            validated_pools={"low": ["v1", "v2", "v3"], "high": ["v4", "v5", "v6"]},
+            classify_speakers=lambda *_a, **_kw: classifications,
+            required_pool_capacity=3,
+            state=state,
+        )
+    )
+
+    assert result.get("ok") is True
+    assert result.get("status") != speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+    assert len(runner_calls) == 1
+    annotated_out = runner_calls[0]["output_segments"]
+    assert len(annotated_out) == 3
+    assert annotated_out[0]["cue_id"] == "cue_001"
+    assert annotated_out[0]["tts_voice_id"] is not None
+
+
+@pytest.mark.parametrize(
+    ("scenario", "source", "output", "expected_ok"),
+    [
+        (
+            "bounded_rounding_drift",
+            [{"cue_id": "c1", "start": 1.0004, "end": 2.0004, "speaker_id": "s0"}],
+            [{"cue_id": "c1", "start": 1.000, "end": 2.000, "speaker_id": "s0"}],
+            True,
+        ),
+        (
+            "duplicate_cue_id",
+            [
+                {"cue_id": "c1", "start": 1.0, "end": 2.0, "speaker_id": "s0"},
+                {"cue_id": "c1", "start": 2.0, "end": 3.0, "speaker_id": "s1"},
+            ],
+            [{"cue_id": "c1", "start": 1.0, "end": 2.0, "speaker_id": "s0"}],
+            False,
+        ),
+        (
+            "missing_cue_id",
+            [
+                {"cue_id": "c1", "start": 1.0, "end": 2.0, "speaker_id": "s0"},
+                {"cue_id": "c2", "start": 2.0, "end": 3.0, "speaker_id": "s1"},
+            ],
+            [{"cue_id": "c1", "start": 1.0, "end": 2.0, "speaker_id": "s0"}],
+            False,
+        ),
+        (
+            "extra_output_cue_id",
+            [
+                {"cue_id": "c1", "start": 1.0, "end": 2.0, "speaker_id": "s0"},
+                {"cue_id": "c2", "start": 2.0, "end": 3.0, "speaker_id": "s1"},
+            ],
+            [
+                {"cue_id": "c1", "start": 1.0, "end": 2.0, "speaker_id": "s0"},
+                {"cue_id": "c2", "start": 2.0, "end": 3.0, "speaker_id": "s1"},
+                {"cue_id": "c3", "start": 3.0, "end": 4.0, "speaker_id": "s2"},
+            ],
+            False,
+        ),
+        (
+            "drift_exceeds_tolerance",
+            [{"cue_id": "c1", "start": 1.003, "end": 2.0, "speaker_id": "s0"}],
+            [{"cue_id": "c1", "start": 1.000, "end": 2.0, "speaker_id": "s0"}],
+            False,
+        ),
+    ],
+    ids=[
+        "bounded_drift",
+        "duplicate_cue",
+        "missing_cue",
+        "extra_cue",
+        "drift_exceeds_tolerance",
+    ],
+)
+def test_multi_speaker_cue_parity_negative_guards(scenario, source, output, expected_ok):
+    multi_module = _multi_module()
+    casts = {
+        "s0": {"speaker_id": "s0", "voice_register": "low", "voice_id": "v0"},
+        "s1": {"speaker_id": "s1", "voice_register": "high", "voice_id": "v1"},
+        "s2": {"speaker_id": "s2", "voice_register": "low", "voice_id": "v2"},
+    }
+    prepared = {"source_segments": source, "output_segments": output}
+    if expected_ok:
+        res, assn = multi_module._annotate_multi_prepared_assignments(prepared, casts)
+        assert len(res["output_segments"]) == len(source)
+    else:
+        with pytest.raises(speaker_cast.AutoCastUnavailable):
+            multi_module._annotate_multi_prepared_assignments(prepared, casts)
