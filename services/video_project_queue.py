@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 from services import (
     product_video_public_seam,
     video_final_output,
+    video_local_validation,
     video_uiflow3_execution_contract,
 )
 from services.video_ai_real_pricing import public_quality_catalog
@@ -8153,22 +8154,29 @@ def product_video_scene_ledger_state(
         normalized_status_raw = status_raw.strip().lower().replace("-", "_").replace(" ", "_")
         clip_valid = bool(
             merged.get("clip_valid")
+            or merged.get("artifact_valid")
             or merged.get("validation_passed")
             or merged.get("output_validated")
             or merged.get("mp4_validator_result") == "valid_mp4"
-            or clip_bytes > 0
-            or (normalized_status_raw in {"clip_downloaded", "downloaded", "validated", "scene_clip_validated"} and result_present)
         )
+        if not clip_valid and clip_path and os.path.isfile(clip_path):
+            try:
+                probe_res = video_local_validation.probe_video_file(clip_path)
+                if probe_res.get("ok"):
+                    clip_valid = True
+            except Exception:
+                clip_valid = False
         durable_clip_without_task_identity = bool(
             (
                 merged.get("clip_valid")
                 and normalized_status_raw
                 in {"clip_downloaded", "downloaded", "validated", "clip_validated", "scene_clip_validated"}
             )
+            or merged.get("artifact_valid")
             or merged.get("validation_passed")
             or merged.get("output_validated")
             or merged.get("mp4_validator_result") == "valid_mp4"
-            or clip_bytes > 0
+            or clip_valid
         )
         if not result_mapping_verified and not task_ids and not durable_clip_without_task_identity:
             clip_valid = False
@@ -8602,9 +8610,12 @@ def product_video_scene_ledger_state(
         result.get("final_mp4_valid")
         or result.get("final_mp4_validated")
         or result.get("final_video_validated")
-        or result.get("final_video_path")
-        or result.get("result_url_present")
-        or result.get("provider_result_url_present")
+        or (
+            result.get("final_video_path")
+            and os.path.isfile(str(result.get("final_video_path")))
+            and os.path.getsize(str(result.get("final_video_path"))) > 0
+            and video_local_validation.probe_video_file(str(result.get("final_video_path"))).get("ok")
+        )
     ):
         records[1]["clip_valid"] = True
         records[1]["status"] = "scene_clip_validated"
@@ -8861,6 +8872,7 @@ def product_video_scene_ledger_state(
     concat_waiting = bool(scene_count > 1 and not coverage_complete)
     return {
         "scene_ledger": [records[index] for index in expected],
+        "scene_records": dict(records),
         "scene_ledger_source": panel_source,
         "panel_scene_ledger_source": panel_source,
         "scene_task_map": scene_task_map,
@@ -9719,7 +9731,8 @@ def note_video_delivery_result(
     attempts = int(project.get("delivery_attempt_count") or 0) + 1
     if sent:
         delivery_message_id_value = str(delivery_message_id or success_message_id or "").strip()
-        if str(payload.get("admission_mode") or "") == PRODUCT_VIDEO_PROBATION_ADMISSION_MODE:
+        is_probation = str(payload.get("admission_mode") or "") == PRODUCT_VIDEO_PROBATION_ADMISSION_MODE
+        if is_probation:
             scene_tasks = [
                 dict(item)
                 for item in (payload.get("scene_tasks") or payload.get("provider_scene_tasks") or [])
@@ -9764,6 +9777,55 @@ def note_video_delivery_result(
                         "probation_result_validation_blocker": "valid_result_scene_coverage_final_mp4_delivery_message_required",
                     }
                 )
+                conn.execute(
+                    "UPDATE video_jobs SET result_json=?, updated_at=? WHERE id=?",
+                    (_json_dumps(payload), current, int(job_id)),
+                )
+                conn.commit()
+                return {
+                    "ok": False,
+                    "sent": False,
+                    "reason": "probation_final_delivery_requirements_missing",
+                    "job": get_video_render_job(conn, int(job_id)),
+                    "project": project,
+                }
+        else:
+            if not delivery_message_id_value:
+                return {
+                    "ok": False,
+                    "sent": False,
+                    "reason": "delivery_receipt_required",
+                    "job": job,
+                    "project": project,
+                }
+
+            final_mp4_valid = bool(
+                payload.get("final_mp4_valid")
+                or payload.get("final_mp4_validated")
+                or payload.get("output_validated")
+                or payload.get("artifact_valid_for_charge")
+                or project.get("final_video_file_id")
+            )
+            final_path = str(
+                payload.get("final_video_path")
+                or payload.get("final_mp4_path")
+                or project.get("final_video_path")
+                or ""
+            ).strip()
+            if final_path and not project.get("final_video_file_id"):
+                try:
+                    if not (os.path.isfile(final_path) and os.path.getsize(final_path) > 0):
+                        final_mp4_valid = False
+                except OSError:
+                    final_mp4_valid = False
+            if not final_mp4_valid:
+                return {
+                    "ok": False,
+                    "sent": False,
+                    "reason": "final_mp4_invalid_delivery_refused",
+                    "job": job,
+                    "project": project,
+                }
         payload.update(
             {
                 "final_delivery_attempted": True,
