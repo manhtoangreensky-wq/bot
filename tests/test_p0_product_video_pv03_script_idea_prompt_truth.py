@@ -377,6 +377,67 @@ def test_regeneration_double_click_draft_stability():
         assert s2.get("outbox_created", False) is False
 
 
+@pytest.mark.anyio
+async def test_regeneration_stale_invocation_dropped_early():
+    """If current session revision is already ahead, stale invocation drops immediately without calling AI."""
+    user_id = 888103
+    stale_session = {"user_id": user_id, "draft": {"script_ai_revision": 1, "script_topic": "Test"}}
+    active_session = {"user_id": user_id, "draft": {"script_ai_revision": 2, "script_topic": "Test"}}
+    query = MagicMock()
+
+    with patch("bot.get_video_session", return_value=active_session), \
+         patch("services.video_script_product.build_ai_prompt") as mock_build_prompt, \
+         patch("bot.generate_video_script_pack", new_callable=AsyncMock) as mock_generate:
+
+        result = await bot.video_script_generate_ai(query, user_id, stale_session, "vi")
+        assert result == active_session
+        mock_build_prompt.assert_not_called()
+        mock_generate.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_regeneration_concurrent_revision_race_drops_stale_completion():
+    """When a slower task finishes with an older revision, it must drop and not overwrite newer draft."""
+    user_id = 888104
+    query = MagicMock()
+    session_rev1 = {
+        "user_id": user_id,
+        "draft": {
+            "script_topic": "Cà phê",
+            "script_ai_revision": 1,
+            "script_entry_scene_count": 5,
+        }
+    }
+    session_rev2 = {
+        "user_id": user_id,
+        "draft": {
+            "script_topic": "Cà phê",
+            "script_ai_revision": 2,
+            "script_entry_scene_count": 5,
+        }
+    }
+
+    current_storage = {"session": deepcopy(session_rev1)}
+
+    def fake_get_video_session(uid):
+        return deepcopy(current_storage["session"])
+
+    async def fake_generate(prompt, uid):
+        current_storage["session"] = deepcopy(session_rev2)
+        return "Cảnh 1: Cũ. Cảnh 2: Cũ. Cảnh 3: Cũ. Cảnh 4: Cũ. Cảnh 5: Cũ."
+
+    with patch("bot.get_video_session", side_effect=fake_get_video_session), \
+         patch("bot.generate_video_script_pack", side_effect=fake_generate), \
+         patch("bot.video_flow7_store_script_proposal", return_value=(session_rev1, {"scenes": ["1", "2", "3", "4", "5"]})), \
+         patch("bot.task3d_session_step") as mock_step, \
+         patch("bot.safe_edit_or_send", new_callable=AsyncMock):
+
+        res = await bot.video_script_generate_ai(query, user_id, session_rev1, "vi")
+
+        mock_step.assert_not_called()
+        assert res["draft"]["script_ai_revision"] == 2
+
+
 # ==============================================================================
 # 6. DURATION TRUTH
 # ==============================================================================

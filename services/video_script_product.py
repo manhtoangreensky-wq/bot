@@ -577,6 +577,14 @@ def build_ai_prompt(state: Mapping[str, Any]) -> str:
     selected_goal = _clean(draft.get("script_goal_label"))
     if not selected_goal:
         selected_goal = goal_label(str(draft.get("script_goal") or ""))
+    platform_key = str(draft.get("script_platform") or "").strip()
+    platform_label = _clean(draft.get("script_platform_label"))
+    if platform_key in PLATFORMS:
+        platform_text = PLATFORMS[platform_key]
+    elif platform_label and not platform_key:
+        platform_text = platform_label
+    else:
+        platform_text = "Video ngắn"
     return (
         "Bạn là biên kịch Video AI của TOAN AAS. Hãy tạo MỘT KỊCH BẢN HOÀN CHỈNH bằng tiếng Việt, "
         "không tạo video, không tóm tắt đầu vào, không bỏ chi tiết và không dùng tên model/provider. "
@@ -587,7 +595,7 @@ def build_ai_prompt(state: Mapping[str, Any]) -> str:
         f"Loại nội dung: {_clean(profile.get('public_name')) or 'Tự nhập'}\n"
         f"Cấu trúc gợi ý: {' → '.join(str(item) for item in profile.get('default_scene_pattern') or []) or 'Mở → phát triển → cao trào → kết'}\n"
         f"Đối tượng xem: {_clean(draft.get('script_audience_label')) or 'Người xem phù hợp nội dung'}\n"
-        f"Nền tảng: {_clean(draft.get('script_platform_label')) or 'Video ngắn'}\n"
+        f"Nền tảng: {platform_text}\n"
         f"Phong cách: {_clean(draft.get('script_style_label')) or 'Chân thật, rõ ràng'}\n"
         f"Tỉ lệ: {_clean(draft.get('script_ratio')) or '9:16'}\n"
         f"Thời lượng mục tiêu: {duration} giây\n"
