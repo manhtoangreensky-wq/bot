@@ -102,6 +102,7 @@ MULTI_SCENE_QUALITY_TIERS = tuple(
 )
 TREND_QUALITY_TIERS = CANONICAL_QUALITY_TIERS
 UIFLOW3_EXTENDED_QUALITY_TIERS = CANONICAL_QUALITY_TIERS
+VIDEO_TO_VIDEO_QUALITY_TIERS = (500, 600, 700, 800)
 
 
 PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
@@ -147,7 +148,7 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "required_capability": "video_to_video",
         "input_type": "source_video",
         "worker_owner": "product_video",
-        "supported_quality_tiers": UIFLOW3_EXTENDED_QUALITY_TIERS,
+        "supported_quality_tiers": VIDEO_TO_VIDEO_QUALITY_TIERS,
     },
     "script_image_video": {
         "flow_owner": "scene3",
@@ -208,7 +209,7 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "worker_owner": "selfshot2",
         "pricing_mode": "canonical",
         "maximum_scene_count": 20,
-        "supported_quality_tiers": UIFLOW3_EXTENDED_QUALITY_TIERS,
+        "supported_quality_tiers": VIDEO_TO_VIDEO_QUALITY_TIERS,
     },
     "self_shot_cinematic_transform": {
         "flow_owner": "selfshot3",
@@ -221,7 +222,7 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "worker_owner": "selfshot3",
         "pricing_mode": "canonical",
         "maximum_scene_count": 20,
-        "supported_quality_tiers": UIFLOW3_EXTENDED_QUALITY_TIERS,
+        "supported_quality_tiers": VIDEO_TO_VIDEO_QUALITY_TIERS,
     },
     "video_idea": {
         "flow_owner": "scene3",
