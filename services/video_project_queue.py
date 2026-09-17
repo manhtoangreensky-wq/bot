@@ -9796,7 +9796,7 @@ def defer_video_job_for_provider_polling(
     if not job:
         return {"ok": False, "reason": "job_not_found"}
     job_status = str(job.get("status") or "").strip().lower()
-    if job_status in {"completed", "cancelled", "canceled"}:
+    if job_status in {"completed", "failed", "error", "terminal_failed", "cancelled", "canceled"}:
         return {"ok": False, "reason": "job_already_terminal", "job": job}
     project = get_video_project(conn, int(job.get("project_id") or 0))
     if project and (project.get("video_delivered_at") or project.get("video_delivery_message_id")):

@@ -586,3 +586,229 @@ def test_pv05_watchdog_idempotency():
     no_duplicate_job = True
     assert no_duplicate_outbox_row is True
     assert no_duplicate_job is True
+
+
+def test_pv05_terminal_defer_fence_first_red_and_deltas():
+    """Section 1, 2, 3: Empirical first-red probe and zero mutation delta for terminal defer calls."""
+    terminal_statuses = ["failed", "error", "terminal_failed", "completed", "cancelled", "canceled"]
+
+    for status in terminal_statuses:
+        conn = _create_isolated_db()
+        project, pid = _create_canonical_project(conn)
+        job = queue.enqueue_video_render_job(conn, project_id=pid, user_id=1001)
+        jid = int(job["id"])
+
+        outbox = queue.ensure_product_video_dispatch_outbox(
+            conn,
+            job_id=jid,
+            project_id=pid,
+            scene_indexes=[1, 2],
+        )
+
+        initial_result = {"terminal_reason": f"test_{status}", "progress_percent": 45}
+        conn.execute(
+            """UPDATE video_jobs
+               SET status=?, progress_percent=45, progress_message=?, locked_by='worker-term',
+                   lease_expires_at='2026-09-18 12:00:00', result_json=?
+               WHERE id=?""",
+            (status, f"msg_{status}", json.dumps(initial_result), jid),
+        )
+        conn.execute(
+            """UPDATE video_dispatch_outbox
+               SET dispatch_status='completed' IF ? IN ('completed') ELSE 'failed',
+                   lease_owner='worker-term', lease_expires_at='2026-09-18 12:00:00'
+               WHERE job_id=?""",
+            (status, jid),
+        ) if False else None  # keep clean syntax below
+        conn.execute(
+            """UPDATE video_dispatch_outbox
+               SET dispatch_status=?, lease_owner='worker-term', lease_expires_at='2026-09-18 12:00:00'
+               WHERE job_id=?""",
+            (status, jid),
+        )
+        conn.commit()
+
+        job_before = dict(queue.get_video_render_job(conn, jid))
+        outbox_before = dict(queue.get_product_video_dispatch_outbox(conn, job_id=jid))
+
+        # Invoke defer_video_job_for_provider_polling on terminal job
+        res = queue.defer_video_job_for_provider_polling(
+            conn,
+            job_id=jid,
+            reason="probe_terminal_defer",
+        )
+
+        # Must reject with job_already_terminal
+        assert res.get("ok") is False, f"Status {status} was not rejected by defer!"
+        assert res.get("reason") in {"job_already_terminal", "late_defer_suppressed_after_delivery"}, f"Status {status} gave wrong reason: {res.get('reason')}"
+
+        job_after = dict(queue.get_video_render_job(conn, jid))
+        outbox_after = dict(queue.get_product_video_dispatch_outbox(conn, job_id=jid))
+
+        # Check zero deltas
+        job_delta = 0
+        if job_before["status"] != job_after["status"]:
+            job_delta += 1
+        if job_before["progress_percent"] != job_after["progress_percent"]:
+            job_delta += 1
+        if job_before["locked_by"] != job_after["locked_by"]:
+            job_delta += 1
+        if job_before["lease_expires_at"] != job_after["lease_expires_at"]:
+            job_delta += 1
+        if job_before["result_json"] != job_after["result_json"]:
+            job_delta += 1
+
+        outbox_delta = 0
+        if outbox_before["dispatch_status"] != outbox_after["dispatch_status"]:
+            outbox_delta += 1
+        if outbox_before["lease_owner"] != outbox_after["lease_owner"]:
+            outbox_delta += 1
+
+        lease_delta = 0
+        if job_before["lease_expires_at"] != job_after["lease_expires_at"]:
+            lease_delta += 1
+
+        assert job_delta == 0, f"TERMINAL_DEFER_JOB_DELTA > 0 for {status}: before={job_before['status']}, after={job_after['status']}"
+        assert outbox_delta == 0, f"TERMINAL_DEFER_OUTBOX_DELTA > 0 for {status}"
+        assert lease_delta == 0, f"TERMINAL_DEFER_LEASE_DELTA > 0 for {status}"
+
+    # Explicit gates
+    assert True  # all statuses passed
+
+
+def test_pv05_legal_defer_path():
+    """Section 4: Legitimate non-terminal provider-polling case still works (VALID_DEFER_REGRESSION=PASS)."""
+    conn = _create_isolated_db()
+    project, pid = _create_canonical_project(conn)
+    job = queue.enqueue_video_render_job(conn, project_id=pid, user_id=1001)
+    jid = int(job["id"])
+
+    # Normal non-terminal job in 'processing'
+    claim = queue.claim_next_video_job(conn, worker_id="worker-legal-defer", lease_seconds=600)
+    assert claim and int(claim["id"]) == jid
+
+    # Defer for provider polling
+    res = queue.defer_video_job_for_provider_polling(
+        conn,
+        job_id=jid,
+        reason="provider_in_progress",
+        diagnostics={"provider_pending_task_id": "p_task_456"},
+    )
+    assert res.get("ok") is True
+    assert res.get("continue_polling") is True
+    assert res.get("deferred") is True
+
+    # Job is transitioned to queued for autonomous poller
+    j = queue.get_video_render_job(conn, jid)
+    assert j["status"] == "queued"
+    assert j["locked_by"] == ""
+    assert j["lease_expires_at"] is None
+    payload = json.loads(j["result_json"])
+    assert payload.get("autonomous_poll_enabled") is True
+    assert payload.get("provider_pending_deferred") is True
+
+
+def test_pv05_state_machine_matrix():
+    """Section 5: Matrix assertions across heartbeat, complete, defer, and requeue."""
+    conn = _create_isolated_db()
+    project, pid = _create_canonical_project(conn)
+    job = queue.enqueue_video_render_job(conn, project_id=pid, user_id=1001)
+    jid = int(job["id"])
+
+    # Claim job
+    claim = queue.claim_next_video_job(conn, worker_id="worker-matrix", lease_seconds=600)
+    assert claim and int(claim["id"]) == jid
+
+    # 1. HEARTBEAT MATRIX
+    # processing + correct owner -> allowed
+    hb_valid = queue.heartbeat_video_job(conn, job_id=jid, worker_id="worker-matrix", progress_percent=30)
+    assert hb_valid.get("ok") is True
+
+    # processing + wrong owner -> rejected
+    hb_wrong = queue.heartbeat_video_job(conn, job_id=jid, worker_id="worker-intruder", progress_percent=35)
+    assert hb_wrong.get("ok") is False
+    assert hb_wrong.get("reason") == "job_not_owned_or_not_processing"
+
+    # terminal -> rejected
+    conn.execute("UPDATE video_jobs SET status='failed', locked_by='' WHERE id=?", (jid,))
+    conn.commit()
+    hb_term = queue.heartbeat_video_job(conn, job_id=jid, worker_id="worker-matrix", progress_percent=40)
+    assert hb_term.get("ok") is False
+
+    # 2. COMPLETE MATRIX
+    # failed -> rejected
+    comp_failed = queue.complete_video_job(conn, job_id=jid, final_video_path="/tmp/f.mp4")
+    assert comp_failed.get("ok") is False
+    assert comp_failed.get("reason") == "job_already_terminal_failed"
+
+    # cancelled -> rejected
+    conn.execute("UPDATE video_jobs SET status='cancelled' WHERE id=?", (jid,))
+    conn.commit()
+    comp_canc = queue.complete_video_job(conn, job_id=jid, final_video_path="/tmp/f.mp4")
+    assert comp_canc.get("ok") is False
+    assert comp_canc.get("reason") in {"job_cancelled", "product_video_cancelled"}
+
+    # 3. DEFER MATRIX
+    # failed -> rejected
+    conn.execute("UPDATE video_jobs SET status='failed' WHERE id=?", (jid,))
+    conn.commit()
+    assert queue.defer_video_job_for_provider_polling(conn, job_id=jid).get("reason") == "job_already_terminal"
+
+    # error -> rejected
+    conn.execute("UPDATE video_jobs SET status='error' WHERE id=?", (jid,))
+    conn.commit()
+    assert queue.defer_video_job_for_provider_polling(conn, job_id=jid).get("reason") == "job_already_terminal"
+
+    # terminal_failed -> rejected
+    conn.execute("UPDATE video_jobs SET status='terminal_failed' WHERE id=?", (jid,))
+    conn.commit()
+    assert queue.defer_video_job_for_provider_polling(conn, job_id=jid).get("reason") == "job_already_terminal"
+
+    # completed -> rejected
+    conn.execute("UPDATE video_jobs SET status='completed' WHERE id=?", (jid,))
+    conn.commit()
+    assert queue.defer_video_job_for_provider_polling(conn, job_id=jid).get("reason") == "job_already_terminal"
+
+    # 4. REQUEUE MATRIX
+    # completed remains completed
+    conn.execute("UPDATE video_jobs SET status='completed', lease_expires_at='2020-01-01 00:00:00' WHERE id=?", (jid,))
+    conn.commit()
+    queue.requeue_stale_video_jobs(conn, now=datetime.now() + timedelta(days=1))
+    assert queue.get_video_render_job(conn, jid)["status"] == "completed"
+
+    # failed remains failed
+    conn.execute("UPDATE video_jobs SET status='failed', lease_expires_at='2020-01-01 00:00:00' WHERE id=?", (jid,))
+    conn.commit()
+    queue.requeue_stale_video_jobs(conn, now=datetime.now() + timedelta(days=1))
+    assert queue.get_video_render_job(conn, jid)["status"] == "failed"
+
+
+def test_pv05_progress_equal_message_behavior():
+    """Section 6: Test equal progress behavior (60 -> 60) and verify STALE_PROGRESS_OVERWRITE=0."""
+    conn = _create_isolated_db()
+    project, pid = _create_canonical_project(conn)
+    job = queue.enqueue_video_render_job(conn, project_id=pid, user_id=1001)
+    jid = int(job["id"])
+
+    claim = queue.claim_next_video_job(conn, worker_id="worker-prog", lease_seconds=600)
+    assert claim and int(claim["id"]) == jid
+
+    # 1. Progress = 60 with initial message
+    queue.heartbeat_video_job(conn, job_id=jid, worker_id="worker-prog", progress_percent=60, message="Stage 1 at 60%")
+    j1 = queue.get_video_render_job(conn, jid)
+    assert j1["progress_percent"] == 60
+    assert j1["progress_message"] == "Stage 1 at 60%"
+
+    # 2. Equal progress (60 -> 60) with updated message
+    queue.heartbeat_video_job(conn, job_id=jid, worker_id="worker-prog", progress_percent=60, message="Stage 2 at 60%")
+    j2 = queue.get_video_render_job(conn, jid)
+    assert j2["progress_percent"] == 60
+    # Progress message updates because progress is equal (>= 60)
+    assert j2["progress_message"] == "Stage 2 at 60%"
+
+    # 3. Stale update (60 -> 40)
+    queue.heartbeat_video_job(conn, job_id=jid, worker_id="worker-prog", progress_percent=40, message="Stale stage at 40%")
+    j3 = queue.get_video_render_job(conn, jid)
+    assert j3["progress_percent"] == 60, "STALE_PROGRESS_OVERWRITE detected!"
+    # Message does NOT overwrite because incoming progress is strictly lower (< 60)
+    assert j3["progress_message"] == "Stage 2 at 60%"
