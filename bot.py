@@ -106386,6 +106386,10 @@ def task3d_session_step(user_id, step: str, **fields) -> dict:
     for key, value in fields.items():
         if key in {"product_id", "topic", "platform", "aspect_ratio", "style", "package_id", "prompt_bundle_id", "source_media_ref", "return_to", "selected_scene_count", "estimated_scene_seconds", "estimated_duration_seconds", "duration_mode", "duration_note", "video_flow", "video_tool", "source_button", "parent_menu", "parent_menu_callback", "back_target", "entry_callback", "first_step"}:
             session[key] = value
+        if key == "increment_script_ai_revision" and value:
+            existing_rev = safe_int(draft.get("script_ai_revision"), 0)
+            draft["script_ai_revision"] = max(1, existing_rev + 1)
+            continue
         if key == "script_ai_revision":
             existing_rev = safe_int(draft.get("script_ai_revision"), 0)
             target_rev = safe_int(value, 1)
@@ -118083,7 +118087,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             session = task3d_session_step(
                 uid,
                 "script_ai_duration",
-                script_ai_revision=max(1, safe_int(draft.get("script_ai_revision"), 1) + 1),
+                increment_script_ai_revision=True,
                 provider_called=False,
                 xu_charged=0,
             )

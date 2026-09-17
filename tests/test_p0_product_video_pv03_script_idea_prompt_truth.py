@@ -377,6 +377,20 @@ def test_regeneration_double_click_draft_stability():
         assert s2.get("outbox_created", False) is False
 
 
+def test_task3d_session_step_increment_script_ai_revision_atomic():
+    """increment_script_ai_revision=True atomically increments draft script_ai_revision."""
+    user_id = 888102
+    draft = {"script_ai_revision": 1}
+    session = {"user_id": user_id, "draft": draft}
+    with patch("bot.get_video_session", return_value=session), \
+         patch("bot.save_video_session", side_effect=lambda uid, s: s):
+
+        s1 = bot.task3d_session_step(user_id, "script_ai_duration", increment_script_ai_revision=True)
+        assert s1["draft"]["script_ai_revision"] == 2
+        s2 = bot.task3d_session_step(user_id, "script_ai_duration", increment_script_ai_revision=True)
+        assert s2["draft"]["script_ai_revision"] == 3
+
+
 @pytest.mark.anyio
 async def test_regeneration_stale_invocation_dropped_early():
     """If current session revision is already ahead, stale invocation drops immediately without calling AI."""
