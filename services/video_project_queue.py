@@ -64,6 +64,8 @@ PRODUCT_VIDEO_ADMISSION_TTL_SECONDS_DEFAULT = 60
 PRODUCT_VIDEO_FINAL_ADMISSION_CONTEXT_VERSION = "product_video_final_admission_v1"
 PRODUCT_VIDEO_PROBATION_ADMISSION_MODE = "public_confirmed_probation"
 PRODUCT_VIDEO_PROBATION_FAILURE_COOLDOWN_SECONDS_DEFAULT = 1800
+PRODUCT_VIDEO_PROBATION_LOCK_TTL_SECONDS_DEFAULT = 1800
+PRODUCT_VIDEO_PROBATION_DELIVERY_TTL_SECONDS_DEFAULT = 600
 PRODUCT_VIDEO_EXISTING_TASK_RECOVERY_MAX_ATTEMPTS = 3
 PRODUCT_VIDEO_EXISTING_TASK_RECOVERY_COOLDOWN_SECONDS = 60
 PRODUCT_VIDEO_POLL_RECOVERY_MAX_ATTEMPTS = 3
@@ -2306,7 +2308,11 @@ def product_video_probation_lock_state(
     """Return the persisted single-probation lock without probing providers."""
     wanted_provider = str(provider_key or "").strip()
     current_dt = now or datetime.now()
-    current_epoch = current_dt.timestamp()
+    current_epoch = (
+        current_dt.replace(tzinfo=None).timestamp()
+        if current_dt.tzinfo is not None
+        else current_dt.timestamp()
+    )
     try:
         rows = conn.execute(
             """SELECT id,project_id,user_id,status,result_json,created_at,updated_at,completed_at
@@ -2372,15 +2378,46 @@ def product_video_probation_lock_state(
             "probation_lock_expires_at": str(payload.get("probation_lock_expires_at") or ""),
         }
         lock_expiry_epoch = _parse_time_epoch(record["probation_lock_expires_at"])
-        lock_expired = bool(lock_expiry_epoch and lock_expiry_epoch <= current_epoch)
+        delivery_expired = False
+        if status == "completed":
+            completed_epoch = _parse_time_epoch(
+                row["completed_at"] if isinstance(row, sqlite3.Row) else row[7]
+            )
+            started_epoch = _parse_time_epoch(
+                record["probation_started_at"]
+                or ((row["created_at"] if isinstance(row, sqlite3.Row) else row[5]) or "")
+            )
+            if completed_epoch > 0:
+                delivery_lock_expiry_epoch = (
+                    completed_epoch + PRODUCT_VIDEO_PROBATION_DELIVERY_TTL_SECONDS_DEFAULT
+                )
+                if current_epoch >= delivery_lock_expiry_epoch:
+                    delivery_expired = True
+            elif started_epoch > 0:
+                if current_epoch >= started_epoch + PRODUCT_VIDEO_PROBATION_LOCK_TTL_SECONDS_DEFAULT:
+                    delivery_expired = True
+            elif not lock_expiry_epoch:
+                delivery_expired = True
+
+        lock_expired = bool(
+            (lock_expiry_epoch and lock_expiry_epoch <= current_epoch)
+            or delivery_expired
+        )
         pending_delivery = bool(
             probation_result == "pending"
             and status not in {"failed", "cancelled"}
         )
         if (status in {"queued", "processing"} or pending_delivery) and not lock_expired and not active:
             active = record
-        elif (probation_result in {"success", "failed"} or status in {"failed", "cancelled"}) and not latest_terminal:
-            latest_terminal = record
+        elif (
+            probation_result in {"success", "failed"}
+            or status in {"failed", "cancelled"}
+            or lock_expired
+        ) and not latest_terminal:
+            if lock_expired and probation_result == "pending":
+                latest_terminal = {**record, "probation_result": "expired"}
+            else:
+                latest_terminal = record
 
     cooldown_until = str(latest_terminal.get("probation_cooldown_until") or "")
     cooldown_epoch = _parse_time_epoch(cooldown_until)
@@ -3940,10 +3977,7 @@ def _confirm_product_video_invoice_atomic(
                 conn.rollback()
                 return {
                     "ok": False,
-                    "reason": str(
-                        probation_lock.get("probation_lock_reject_reason")
-                        or "product_video_probation_lock_active"
-                    ),
+                    "reason": "product_video_probation_lock_active",
                     "public_message": "TOAN AAS chưa thể bắt đầu tạo video lúc này.\nHệ thống chưa trừ Xu.\nAnh/chị có thể kiểm tra lại sau.",
                     "admission": {**admission_state, **probation_lock},
                     "job_created": False,
@@ -3969,6 +4003,9 @@ def _confirm_product_video_invoice_atomic(
                 admission_state.update(
                     {
                         "probation_started_at": current,
+                        "probation_lock_expires_at": now_text(
+                            current_dt + timedelta(seconds=PRODUCT_VIDEO_PROBATION_LOCK_TTL_SECONDS_DEFAULT)
+                        ),
                         "probation_job_id": 0,
                         "probation_result": "pending",
                         "probation_terminal_at": "",
@@ -4154,6 +4191,10 @@ def _confirm_product_video_invoice_atomic(
             )
             job_id = int(cursor.lastrowid or 0)
         if str(admission_state.get("admission_mode") or "") == PRODUCT_VIDEO_PROBATION_ADMISSION_MODE:
+            if not admission_state.get("probation_lock_expires_at"):
+                admission_state["probation_lock_expires_at"] = now_text(
+                    current_dt + timedelta(seconds=PRODUCT_VIDEO_PROBATION_LOCK_TTL_SECONDS_DEFAULT)
+                )
             admission_state.update(
                 {
                     "probation_job_id": job_id,
@@ -9854,6 +9895,10 @@ def note_video_delivery_result(
                     }
                 )
             else:
+                if not payload.get("probation_lock_expires_at"):
+                    payload["probation_lock_expires_at"] = now_text(
+                        datetime.now() + timedelta(seconds=PRODUCT_VIDEO_PROBATION_DELIVERY_TTL_SECONDS_DEFAULT)
+                    )
                 payload.update(
                     {
                         "probation_result": "pending",
