@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import pytest
 from services import video_ai_real_pricing, video_tail9, video_uifreeze1, video_flow6
@@ -54,7 +54,11 @@ def test_no_hide_to_pass_invariant_catalog_ignores_runtime_outages(product: str)
     cat = video_uifreeze1.catalog_report(product, scene_count=count, ratio="9:16")
     assert cat["ok"] is True
     assert len(cat["offers"]) > 0
-    assert 400 in cat["tier_ids"]
+    if product in {"video_ai_video_reference", "self_shot_scene_change", "self_shot_cinematic_transform"}:
+        assert 500 in cat["tier_ids"]
+        assert 400 not in cat["tier_ids"]
+    else:
+        assert 400 in cat["tier_ids"]
 
 
 @pytest.mark.parametrize("tier_id", ALL_CANONICAL_TIERS)

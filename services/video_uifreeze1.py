@@ -39,7 +39,7 @@ CANONICAL_PRICING_PRODUCTS = frozenset({
 })
 
 FRAMEVIDEO_PRICING_PRODUCTS = frozenset({"frame_video_local", "image_to_video"})
-PUBLIC_EXECUTION_LOCKED_PRODUCTS = frozenset({"multi_scene_film", "video_long"})
+PUBLIC_EXECUTION_LOCKED_PRODUCTS = frozenset({"multi_scene_film", "video_long", "video_local_edit"})
 
 _PUBLIC_QUALITY_ROWS = video_ai_real_pricing.public_quality_catalog()
 QUALITY_TIER_ORDER = tuple(int(item["tier_id"]) for item in _PUBLIC_QUALITY_ROWS)
@@ -54,13 +54,14 @@ QUALITY_TIERS: dict[int, dict[str, Any]] = {
     for item in _PUBLIC_QUALITY_ROWS
 }
 
-_MULTI_SCENE_CAPABILITIES = (
+_V2V_SUPPORTED_TIERS = frozenset({500, 600, 700, 800})
+
+_BASE_SCENE_CAPABILITIES = (
     "text_to_video",
     "text_to_video_or_scene_video",
     "image_to_video",
     "first_last_frame_video",
     "first_last_frame",
-    "video_to_video",
     "multi_scene_composition",
     "ratio_9:16",
     "ratio_16:9",
@@ -69,15 +70,22 @@ _MULTI_SCENE_CAPABILITIES = (
 )
 
 for _tier_id in QUALITY_TIER_ORDER:
-    QUALITY_TIERS[_tier_id].setdefault("capabilities", _MULTI_SCENE_CAPABILITIES)
+    _tier_caps = (
+        _BASE_SCENE_CAPABILITIES + ("video_to_video",)
+        if _tier_id in _V2V_SUPPORTED_TIERS
+        else _BASE_SCENE_CAPABILITIES
+    )
+    QUALITY_TIERS[_tier_id]["capabilities"] = _tier_caps
     QUALITY_TIERS[_tier_id].setdefault("max_scenes", 20)
 
 
 def tier_spec(tier_id: int) -> dict[str, Any]:
     """Return one immutable public tier snapshot."""
 
-    normalized = min(QUALITY_TIER_ORDER, key=lambda item: abs(item - int(tier_id or 200)))
-    return {"tier_id": normalized, **deepcopy(QUALITY_TIERS[normalized])}
+    tid = int(tier_id or 0)
+    if tid not in QUALITY_TIERS:
+        raise ValueError(f"unknown_quality_tier:{tier_id}")
+    return {"tier_id": tid, **deepcopy(QUALITY_TIERS[tid])}
 
 
 def uses_canonical_pricing(product_type: str) -> bool:
@@ -143,7 +151,8 @@ def compatible_quality_tiers(
         if aspect and aspect != "keep" and f"ratio_{aspect}" not in capabilities:
             continue
         if capability and capability not in capabilities:
-            continue
+            if not (product == "video_local_edit" and capability == "video_to_video"):
+                continue
         if product == "storyboard_prompt" and not {
             "image_to_video",
             "first_last_frame_video",

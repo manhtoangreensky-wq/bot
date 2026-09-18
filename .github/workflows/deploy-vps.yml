@@ -25,7 +25,7 @@ jobs:
 
       - name: Python Compile Guard
         run: |
-          python -m py_compile bot.py services/*.py
+          python -m py_compile bot.py remote_worker.py services/remote_worker_api.py services/*.py
 
       - name: Package Release Artifacts
         run: |
@@ -45,8 +45,10 @@ jobs:
             exit 1
           fi
 
+          cp scripts/vps/sync_product_video_worker_release.sh "${RELEASE_DIR}/"
+
           cd "${RELEASE_DIR}"
-          sha256sum release.tar release.bundle > checksums.sha256
+          sha256sum release.tar release.bundle sync_product_video_worker_release.sh > checksums.sha256
           sha256sum -c checksums.sha256
 
       - name: Deploy Bot to VPS via SSH
@@ -65,7 +67,7 @@ jobs:
           REMOTE_STAGING="/tmp/deploy-bot-${TARGET_SHA}"
 
           ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o ConnectTimeout=30 "$VPS_USER@$VPS_HOST" "mkdir -p '${REMOTE_STAGING}'"
-          scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no "${RELEASE_DIR}/release.tar" "${RELEASE_DIR}/release.bundle" "${RELEASE_DIR}/checksums.sha256" "$VPS_USER@$VPS_HOST:${REMOTE_STAGING}/"
+          scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no "${RELEASE_DIR}/release.tar" "${RELEASE_DIR}/release.bundle" "${RELEASE_DIR}/sync_product_video_worker_release.sh" "${RELEASE_DIR}/checksums.sha256" "$VPS_USER@$VPS_HOST:${REMOTE_STAGING}/"
 
           ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ServerAliveInterval=10 "$VPS_USER@$VPS_HOST" "
             set -euo pipefail
@@ -79,6 +81,9 @@ jobs:
             STAGING_DIR=\"/tmp/deploy-bot-\$TARGET_SHA\"
             cd \"\$STAGING_DIR\"
             sha256sum -c checksums.sha256
+
+            source \"\$STAGING_DIR/sync_product_video_worker_release.sh\"
+            prepare_product_video_worker_release
 
             WEBAPP_DIR='/opt/toanaas/bot'
             cd \"\$WEBAPP_DIR\"
@@ -163,6 +168,9 @@ jobs:
             fi
 
             printf '%s' \"\$HEALTH_JSON\" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get(\"status\") == \"ok\"; print(\"HEALTH_PAYLOAD_VALIDATED:\", data.get(\"status\"))'
+
+            activate_product_video_worker_release
+            commit_product_video_release_transaction
 
             echo '=== BOT DEPLOY SUCCESS ==='
             echo \"PREVIOUS_HEAD=\$PREV_HEAD\"

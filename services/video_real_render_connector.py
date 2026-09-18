@@ -5936,7 +5936,7 @@ def _run_per_scene_provider_orchestrator(
         )
         base["blocker"] = base["provider_error"]
         return _enforce_product_video_terminal_consistency(base, reason=base["provider_error"])
-    if len(scene_outputs) < _scene_count(job):
+    if len(scene_outputs) < _scene_count(job) or not base.get("finalizer_unlocked"):
         active_status = str(active_scene.get("status") or "")
         active_raw_status = str(active_scene.get("provider_status_raw") or active_status or "")
         active_is_not_start = _text_indicates_not_start(active_status, active_raw_status)

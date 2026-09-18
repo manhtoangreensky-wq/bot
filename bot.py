@@ -111538,7 +111538,7 @@ def video_tail9_context(user_id: int, context) -> tuple[dict, str, dict]:
         and edit_host.get("source_file_id")
         and edit_host.get("inspection_complete")
     )
-    session = get_video_session(uid)
+    session = dict(get_video_session(uid) or {})
     draft = dict(session.get("draft") or {})
     session_product = str(session.get("product_id") or draft.get("product_id") or "").strip()
     persisted_tail = dict(draft.get(VIDEO_TAIL9_STATE_KEY) or {})
@@ -113947,8 +113947,11 @@ def video_tail9_catalog_report(tail: dict, capability: dict | None = None) -> di
             (capability or {}).get("required_capability")
             or contract.get("required_capability")
             or ""
-        )
-        required_capability = "video_to_video" if "video" in raw_cap else raw_cap
+        ).strip()
+        if raw_cap in {"direct_video_to_video", "cinematic_transformation"} or "video_to_video" in raw_cap:
+            required_capability = "video_to_video"
+        else:
+            required_capability = raw_cap
     report = video_uifreeze1.catalog_report(
         product,
         scene_count=safe_int(tail.get("scene_count"), 1),
@@ -116255,7 +116258,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         product_type = str(tail.get("video_product_type") or "")
         deferred_runtime_product = product_type in VIDEO_TAIL9_DEFERRED_RUNTIME_PRODUCTS
         contract = video_tail9.commercial_contract(product_type)
-        if not contract.get("execution_enabled"):
+        if not contract.get("execution_enabled") or product_type in video_uifreeze1.PUBLIC_EXECUTION_LOCKED_PRODUCTS:
             if product_type in {"multi_scene_film", "video_long"}:
                 await video_tail9_answer_best_effort(query, "Video dài tập đang được nâng cấp.")
                 tail = video_tail9_prepare_submit_status(
@@ -136851,7 +136854,10 @@ async def send_generated_video_artifact_for_delivery(
     caption: str = "",
     lang: str = "vi",
 ) -> dict:
-    if video_path and os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+    if video_path:
+        probe = video_local_validation.probe_video_file(video_path)
+        if not probe.get("ok"):
+            return {**generated_media_debug_payload(method="failed", file_size=0, limit_bytes=generated_media_delivery_limits()["generated_bytes"], reason="final_mp4_invalid"), "sent": False}
         return await send_generated_video_path_for_delivery(
             bot_client,
             chat_id,
@@ -242722,6 +242728,9 @@ async def send_generated_video_path_for_delivery(
     path = str(video_path or "")
     if not bot_client or not chat_id or not path or not os.path.exists(path) or os.path.getsize(path) <= 0:
         return {**generated_media_debug_payload(method="failed", file_size=0, limit_bytes=generated_media_delivery_limits()["generated_bytes"], reason="missing_file"), "sent": False}
+    probe = video_local_validation.probe_video_file(path)
+    if not probe.get("ok"):
+        return {**generated_media_debug_payload(method="failed", file_size=0, limit_bytes=generated_media_delivery_limits()["generated_bytes"], reason="final_mp4_invalid"), "sent": False}
 
     class _BotChatDelivery:
         async def reply_video(self, **kwargs):
