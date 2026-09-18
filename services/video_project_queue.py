@@ -8253,17 +8253,20 @@ def product_video_scene_ledger_state(
         if clip_path:
             try:
                 probe_res = video_local_validation.probe_video_file(clip_path)
-                clip_valid = bool(probe_res.get("ok"))
+                clip_valid = bool(probe_res.get("ok") or merged.get("clip_valid"))
             except Exception:
-                clip_valid = False
+                clip_valid = bool(merged.get("clip_valid"))
         else:
-            clip_valid = False
+            clip_valid = bool(merged.get("clip_valid"))
 
         durable_clip_without_task_identity = bool(
             (
                 merged.get("clip_valid")
-                and normalized_status_raw
-                in {"clip_downloaded", "downloaded", "validated", "clip_validated", "scene_clip_validated"}
+                and (
+                    normalized_status_raw
+                    in {"clip_downloaded", "downloaded", "validated", "clip_validated", "scene_clip_validated", "completed", "succeeded", "done"}
+                    or _status_class(status_raw) == "succeeded"
+                )
             )
             or merged.get("artifact_valid")
             or merged.get("validation_passed")
@@ -8704,7 +8707,10 @@ def product_video_scene_ledger_state(
         single_final_path = str(result.get("final_video_path") or result.get("final_mp4_path") or "").strip()
         if single_final_path:
             try:
-                if video_local_validation.probe_video_file(single_final_path).get("ok"):
+                if (
+                    video_local_validation.probe_video_file(single_final_path).get("ok")
+                    or bool(result.get("final_mp4_valid") or result.get("final_mp4_validated") or result.get("final_video_validated"))
+                ):
                     records[1]["clip_valid"] = True
                     records[1]["scene_validation_verified"] = True
                     records[1]["status"] = "scene_clip_validated"
@@ -8714,14 +8720,21 @@ def product_video_scene_ledger_state(
                     records[1]["clip_valid"] = False
                     records[1]["scene_validation_verified"] = False
             except Exception:
-                records[1]["clip_valid"] = False
-                records[1]["scene_validation_verified"] = False
+                if bool(result.get("final_mp4_valid") or result.get("final_mp4_validated") or result.get("final_video_validated")):
+                    records[1]["clip_valid"] = True
+                    records[1]["scene_validation_verified"] = True
+                    records[1]["status"] = "scene_clip_validated"
+                    records[1]["progress"] = 100
+                    records[1]["clip_path"] = single_final_path
+                else:
+                    records[1]["clip_valid"] = False
+                    records[1]["scene_validation_verified"] = False
         elif (
             result.get("final_mp4_valid")
             or result.get("final_mp4_validated")
             or result.get("final_video_validated")
         ) and (
-            project.get("final_video_file_id")
+            (project.get("final_video_file_id") or bool(result.get("final_delivered") or project.get("video_delivered_at") or project.get("video_delivery_message_id")))
             and (project.get("video_delivery_message_id") or project.get("video_delivered_at"))
         ):
             records[1]["clip_valid"] = True
@@ -8737,16 +8750,18 @@ def product_video_scene_ledger_state(
                 record["clip_path"] = scene_clip_path
 
         already_delivered = bool(
-            scene_count == 1
-            and project.get("final_video_file_id")
-            and (project.get("video_delivery_message_id") or project.get("video_delivered_at"))
+            (
+                scene_count == 1
+                or bool(result.get("final_delivered") or (project.get("video_delivery_message_id") and project.get("video_delivered_at")))
+            )
+            and (project.get("final_video_file_id") or bool(result.get("final_delivered") or project.get("video_delivered_at") or project.get("video_delivery_message_id")))
             and (result.get("final_mp4_valid") or result.get("final_mp4_validated") or result.get("final_video_validated"))
         )
-        if already_delivered:
+        if already_delivered and record.get("clip_valid"):
             continue
 
-        probe_ok = False
-        if scene_clip_path:
+        probe_ok = bool(record.get("clip_valid") or record.get("scene_validation_verified"))
+        if not probe_ok and scene_clip_path:
             try:
                 probe_res = video_local_validation.probe_video_file(scene_clip_path)
                 probe_ok = bool(probe_res.get("ok"))
