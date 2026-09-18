@@ -212,7 +212,7 @@ def product_type_from_project(project: dict | None = None, result: dict | None =
         normalized = normalize_video_product_type(candidate)
         if normalized in VIDEO_PRODUCT_ENGINE_ROUTES:
             return normalized
-    return "video_ai_prompt"
+    return ""
 
 
 def route_for_product_type(product_type: str = "") -> dict[str, Any]:

@@ -39,7 +39,7 @@ CANONICAL_PRICING_PRODUCTS = frozenset({
 })
 
 FRAMEVIDEO_PRICING_PRODUCTS = frozenset({"frame_video_local", "image_to_video"})
-PUBLIC_EXECUTION_LOCKED_PRODUCTS = frozenset({"multi_scene_film", "video_long"})
+PUBLIC_EXECUTION_LOCKED_PRODUCTS = frozenset({"multi_scene_film", "video_long", "video_local_edit"})
 
 _PUBLIC_QUALITY_ROWS = video_ai_real_pricing.public_quality_catalog()
 QUALITY_TIER_ORDER = tuple(int(item["tier_id"]) for item in _PUBLIC_QUALITY_ROWS)
@@ -82,8 +82,10 @@ for _tier_id in QUALITY_TIER_ORDER:
 def tier_spec(tier_id: int) -> dict[str, Any]:
     """Return one immutable public tier snapshot."""
 
-    normalized = min(QUALITY_TIER_ORDER, key=lambda item: abs(item - int(tier_id or 200)))
-    return {"tier_id": normalized, **deepcopy(QUALITY_TIERS[normalized])}
+    tid = int(tier_id or 0)
+    if tid not in QUALITY_TIERS:
+        raise ValueError(f"unknown_quality_tier:{tier_id}")
+    return {"tier_id": tid, **deepcopy(QUALITY_TIERS[tid])}
 
 
 def uses_canonical_pricing(product_type: str) -> bool:

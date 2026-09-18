@@ -247,8 +247,8 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "scene_duration_seconds": 300,
         "maximum_scene_count": 20,
         "supported_quality_tiers": UIFLOW3_EXTENDED_QUALITY_TIERS,
-        "execution_enabled": True,
-        "execution_blocker": "",
+        "execution_enabled": False,
+        "execution_blocker": "multi_scene_film_under_upgrade",
     },
     "video_long": {
         "flow_owner": "video_long",
@@ -286,12 +286,23 @@ PRODUCT_ADAPTER_ALIASES = {
     "script_to_video": "script_image_video",
     "storyboard_to_video": "storyboard_prompt",
     "storyboard_video": "storyboard_prompt",
+    "storyboard": "storyboard_prompt",
     "video_idea_to_product": "video_idea",
     "frame_video": "frame_video_local",
     "image_to_video": "frame_video_local",
     "selfshot_scene_change": "self_shot_scene_change",
     "selfshot_cinematic": "self_shot_cinematic_transform",
     "long_video": "video_long",
+    "prompt_video": "video_ai_prompt",
+    "text_prompt": "video_ai_prompt",
+    "image_video": "video_ai_image",
+    "ai_image_menu": "video_ai_image",
+    "image_prompts": "video_ai_image",
+    "video_video": "video_ai_video_reference",
+    "video_reference": "video_ai_video_reference",
+    "ai_video_menu": "video_ai_video_reference",
+    "reference_video": "video_ai_video_reference",
+    "awaiting_reference_video": "video_ai_video_reference",
 }
 
 
@@ -419,7 +430,9 @@ def package_compatibility(
         blockers.append("scene_count_not_supported")
     if count == 1 and not contract["supports_single_scene"]:
         blockers.append("single_scene_not_supported")
-    if tier_id and tier_id not in set(contract["supported_quality_tiers"]):
+    if not tier_id:
+        blockers.append("quality_tier_missing")
+    elif tier_id not in set(contract["supported_quality_tiers"]):
         blockers.append("quality_tier_not_supported")
     if not input_valid:
         blockers.append("input_not_ready")
