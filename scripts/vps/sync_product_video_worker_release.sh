@@ -161,10 +161,13 @@ validate_inputs_and_bundle() {
     cd "$STAGING_DIR"
     sha256sum -c checksums.sha256
   )
-  git bundle verify "$STAGING_DIR/release.bundle" >/dev/null
+  (
+    cd "$BOT_DIR"
+    git bundle verify "$STAGING_DIR/release.bundle" >/dev/null
+  )
 
   local advertised_sha
-  advertised_sha="$(git bundle list-heads "$STAGING_DIR/release.bundle" "$RELEASE_REF" | awk 'NR == 1 {print $1}')"
+  advertised_sha="$( ( cd "$BOT_DIR" && git bundle list-heads "$STAGING_DIR/release.bundle" "$RELEASE_REF" ) | awk 'NR == 1 {print $1}')"
   if [[ "$advertised_sha" != "$TARGET_SHA" ]]; then
     fail "bundle target mismatch: expected=$TARGET_SHA advertised=${advertised_sha:-missing}"
   fi
