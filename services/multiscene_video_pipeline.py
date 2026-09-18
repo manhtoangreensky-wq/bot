@@ -1536,9 +1536,15 @@ def finalize_multiscene_scene_clips(
     missing = []
     for index in required_indexes:
         candidate = str(scene_clip_paths.get(index) or "").strip()
+        valid = False
         try:
-            valid = bool(candidate and os.path.isfile(candidate) and os.path.getsize(candidate) > 0)
-        except OSError:
+            if candidate and os.path.isfile(candidate) and os.path.getsize(candidate) > 0:
+                streams = probe_media_streams(candidate)
+                stream_rows = [item for item in list(streams.get("streams") or []) if isinstance(item, dict)]
+                has_video = any(item.get("codec_type") == "video" for item in stream_rows)
+                duration = probe_duration(candidate)
+                valid = bool(has_video and duration > 0)
+        except Exception:
             valid = False
         if not valid:
             missing.append(index)
@@ -1821,35 +1827,76 @@ def finalize_multiscene_scene_clips(
                 default_silence=True,
             )
         active_manifest.voice_audio_path = resolved_voice_path
-    final = mux_final_multiscene_video(
-        master_video_path=master,
-        output_path=os.path.join(workspace, "final_output.mp4"),
-        voice_audio_path=resolved_voice_path,
-        voice_volume_percent=voice_volume_percent,
-        bgm_audio_path=selected_music_path or None,
-        music_volume_percent=music_volume_percent,
-        sfx_audio_paths=selected_sfx_paths,
-        sfx_assets=selected_sfx_assets,
-        sfx_volume_percent=sfx_volume_percent,
-        subtitle_path=resolved_subtitle_path,
-        logo_path=selected_logo_path if enable_logo else None,
-        logo_text=logo_text,
-        watermark_text=selected_watermark_text,
-        burn_subtitles=bool(enable_subtitle),
-        logo_position=logo_position,
-        watermark_position=watermark_position,
-        watermark_opacity_percent=watermark_opacity_percent,
-        text_overlays=selected_text_overlays,
-        scene_windows=selected_scene_windows,
-        preserve_master_audio=preserve_scene_audio,
-        audio_sample_rate=audio_sample_rate,
-        audio_channels=audio_channels,
-    )
-    final_duration = probe_duration(final)
-    if abs(final_duration - target_duration) > tolerance:
+    canonical_final = os.path.join(workspace, "final_output.mp4")
+    staging_final = os.path.join(workspace, f"final_output.staging_{int(time.time() * 1000)}.mp4")
+    try:
+        final = mux_final_multiscene_video(
+            master_video_path=master,
+            output_path=staging_final,
+            voice_audio_path=resolved_voice_path,
+            voice_volume_percent=voice_volume_percent,
+            bgm_audio_path=selected_music_path or None,
+            music_volume_percent=music_volume_percent,
+            sfx_audio_paths=selected_sfx_paths,
+            sfx_assets=selected_sfx_assets,
+            sfx_volume_percent=sfx_volume_percent,
+            subtitle_path=resolved_subtitle_path,
+            logo_path=selected_logo_path if enable_logo else None,
+            logo_text=logo_text,
+            watermark_text=selected_watermark_text,
+            burn_subtitles=bool(enable_subtitle),
+            logo_position=logo_position,
+            watermark_position=watermark_position,
+            watermark_opacity_percent=watermark_opacity_percent,
+            text_overlays=selected_text_overlays,
+            scene_windows=selected_scene_windows,
+            preserve_master_audio=preserve_scene_audio,
+            audio_sample_rate=audio_sample_rate,
+            audio_channels=audio_channels,
+        )
+        final_duration = probe_duration(staging_final)
+        if abs(final_duration - target_duration) > tolerance:
+            if os.path.isfile(staging_final):
+                try:
+                    os.remove(staging_final)
+                except OSError:
+                    pass
+            active_manifest.status = "error"
+            active_manifest.concat_state = "invalid_final_duration"
+            active_manifest.errors["final"] = "final_duration_out_of_tolerance"
+            manifest_path = _write_manifest(active_manifest)
+            return {
+                "ok": False,
+                "status": "error",
+                "continue_polling": False,
+                "concat_attempted": True,
+                "concat_output_valid": False,
+                "manifest_path": manifest_path,
+                "final_video_path": canonical_final if os.path.isfile(canonical_final) else "",
+                "duration_sec": final_duration,
+                "target_duration_sec": target_duration,
+                "error": "final_duration_out_of_tolerance",
+            }
+        artifact_validation = _validate_composed_video(
+            staging_final,
+            require_audio=bool(
+                preserve_scene_audio
+                or resolved_voice_path
+                or selected_music_path
+                or selected_sfx_paths
+            ),
+        )
+        os.replace(staging_final, canonical_final)
+        final = canonical_final
+    except Exception as exc:
+        if os.path.isfile(staging_final):
+            try:
+                os.remove(staging_final)
+            except OSError:
+                pass
         active_manifest.status = "error"
-        active_manifest.concat_state = "invalid_final_duration"
-        active_manifest.errors["final"] = "final_duration_out_of_tolerance"
+        active_manifest.concat_state = "final_assembly_failed"
+        active_manifest.errors["final"] = f"final_assembly_failed:{type(exc).__name__}"
         manifest_path = _write_manifest(active_manifest)
         return {
             "ok": False,
@@ -1858,20 +1905,9 @@ def finalize_multiscene_scene_clips(
             "concat_attempted": True,
             "concat_output_valid": False,
             "manifest_path": manifest_path,
-            "final_video_path": final,
-            "duration_sec": final_duration,
-            "target_duration_sec": target_duration,
-            "error": "final_duration_out_of_tolerance",
+            "final_video_path": canonical_final if os.path.isfile(canonical_final) else "",
+            "error": str(exc),
         }
-    artifact_validation = _validate_composed_video(
-        final,
-        require_audio=bool(
-            preserve_scene_audio
-            or resolved_voice_path
-            or selected_music_path
-            or selected_sfx_paths
-        ),
-    )
     active_manifest.final_video_path = final
     active_manifest.final_duration_sec = final_duration
     active_manifest.status = "final_ready"
