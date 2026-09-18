@@ -7793,6 +7793,28 @@ def _product_video_replacement_ledger_fields(
     }
 
 
+LOCAL_PATH_ALIASES = (
+    "clip_path",
+    "output_path",
+    "local_path",
+    "raw_provider_video_path",
+)
+
+
+def _resolve_scene_local_path(payload: dict[str, Any] | None) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    debug = payload.get("debug") if isinstance(payload.get("debug"), dict) else {}
+    for key in LOCAL_PATH_ALIASES:
+        val = str(payload.get(key) or "").strip()
+        if val:
+            return val
+        val_debug = str(debug.get(key) or "").strip()
+        if val_debug:
+            return val_debug
+    return ""
+
+
 def product_video_scene_ledger_state(
     project: dict | None = None,
     job: dict | None = None,
@@ -8102,7 +8124,7 @@ def product_video_scene_ledger_state(
             "provider_submit_idempotency_key",
         )
         result_url = _text_value(merged, "result_url", "provider_result_url", "download_url", "file_url", "video_url", "output_url")
-        clip_path = _text_value(merged, "clip_path", "output_path", "local_path", "raw_provider_video_path")
+        clip_path = _resolve_scene_local_path(merged)
         clip_bytes = _as_int(
             merged.get("clip_bytes")
             or merged.get("artifact_size")
@@ -8152,23 +8174,15 @@ def product_video_scene_ledger_state(
             record["phantom_result_prevented"] = True
             result_url = ""
         normalized_status_raw = status_raw.strip().lower().replace("-", "_").replace(" ", "_")
-        explicit_clip_path_in_source = "clip_path" in item or (isinstance(item.get("debug"), dict) and "clip_path" in item["debug"])
+        explicit_clip_path_in_source = bool(_resolve_scene_local_path(item) or (isinstance(item.get("debug"), dict) and _resolve_scene_local_path(item["debug"])))
         if clip_path:
             try:
                 probe_res = video_local_validation.probe_video_file(clip_path)
                 clip_valid = bool(probe_res.get("ok"))
             except Exception:
                 clip_valid = False
-        elif explicit_clip_path_in_source:
-            clip_valid = False
         else:
-            clip_valid = bool(
-                merged.get("clip_valid")
-                or merged.get("artifact_valid")
-                or merged.get("validation_passed")
-                or merged.get("output_validated")
-                or merged.get("mp4_validator_result") == "valid_mp4"
-            )
+            clip_valid = False
 
         durable_clip_without_task_identity = bool(
             (
@@ -8611,37 +8625,13 @@ def product_video_scene_ledger_state(
                 record["clip_valid"] = False
             record["result_processing_action"] = ""
 
-    for index in expected:
-        record = records[index]
-        scene_clip_path = str(record.get("clip_path") or "").strip()
-        if scene_clip_path:
-            try:
-                probe_res = video_local_validation.probe_video_file(scene_clip_path)
-                if not probe_res.get("ok"):
-                    record["clip_valid"] = False
-                    record["scene_validation_verified"] = False
-                    if _status_class(record.get("status")) == "succeeded" or record.get("status") == "scene_clip_validated":
-                        record["status"] = "result_pending_validation"
-                        record["result_processing_action"] = "download_and_validate"
-                else:
-                    record["clip_valid"] = True
-                    record["scene_validation_verified"] = True
-            except Exception:
-                record["clip_valid"] = False
-                record["scene_validation_verified"] = False
-        elif any(t.get("explicit_clip_path") for t in record.get("task_candidates") or []):
-            record["clip_valid"] = False
-            record["scene_validation_verified"] = False
-            if _status_class(record.get("status")) == "succeeded" or record.get("status") == "scene_clip_validated":
-                record["status"] = "result_pending_validation"
-                record["result_processing_action"] = "download_and_validate"
-
     if scene_count == 1:
         single_final_path = str(result.get("final_video_path") or result.get("final_mp4_path") or "").strip()
         if single_final_path:
             try:
                 if video_local_validation.probe_video_file(single_final_path).get("ok"):
                     records[1]["clip_valid"] = True
+                    records[1]["scene_validation_verified"] = True
                     records[1]["status"] = "scene_clip_validated"
                     records[1]["progress"] = 100
                     records[1]["clip_path"] = single_final_path
@@ -8662,10 +8652,41 @@ def product_video_scene_ledger_state(
             records[1]["clip_valid"] = True
             records[1]["status"] = "scene_clip_validated"
             records[1]["progress"] = 100
+
+    for index in expected:
+        record = records[index]
+        scene_clip_path = str(record.get("clip_path") or "").strip()
+        if not scene_clip_path:
+            scene_clip_path = _resolve_scene_local_path(record)
+            if scene_clip_path:
+                record["clip_path"] = scene_clip_path
+
+        already_delivered = bool(
+            scene_count == 1
+            and project.get("final_video_file_id")
+            and (project.get("video_delivery_message_id") or project.get("video_delivered_at"))
+            and (result.get("final_mp4_valid") or result.get("final_mp4_validated") or result.get("final_video_validated"))
+        )
+        if already_delivered:
+            continue
+
+        probe_ok = False
+        if scene_clip_path:
+            try:
+                probe_res = video_local_validation.probe_video_file(scene_clip_path)
+                probe_ok = bool(probe_res.get("ok"))
+            except Exception:
+                probe_ok = False
+
+        if not scene_clip_path or not probe_ok:
+            record["clip_valid"] = False
+            record["scene_validation_verified"] = False
+            if _status_class(record.get("status")) == "succeeded" or record.get("status") == "scene_clip_validated":
+                record["status"] = "result_pending_validation"
+                record["result_processing_action"] = "download_and_validate"
         else:
-            if not str(records[1].get("clip_path") or "").strip() or not records[1].get("clip_valid"):
-                records[1]["clip_valid"] = False
-                records[1]["scene_validation_verified"] = False
+            record["clip_valid"] = True
+            record["scene_validation_verified"] = True
 
     if zero_task_watchdog.get("zero_task_progress_guard"):
         watchdog_states = dict(zero_task_watchdog.get("scene_dispatch_state_by_index") or {})
@@ -9935,7 +9956,10 @@ def note_video_delivery_result(
             "missing_scene_coverage_waiting",
             "missing_scene_coverage_timeout",
             "final_duration_short_scene_coverage_missing",
-        } or bool(payload.get("delivery_blocked_by_scene_coverage") or coverage.get("delivery_blocked_by_scene_coverage"))
+        } or (
+            not bool(payload.get("final_mp4_valid") or payload.get("final_delivered"))
+            and bool(payload.get("delivery_blocked_by_scene_coverage") or coverage.get("delivery_blocked_by_scene_coverage"))
+        )
         if coverage_reason:
             payload.update(
                 {
