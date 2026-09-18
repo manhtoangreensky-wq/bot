@@ -424,12 +424,17 @@ def _as_int(value: Any, default: int = 0) -> int:
         return int(default)
 
 
+VIETNAM_TZ = timezone(timedelta(hours=7))
+
+
 def _parse_time_epoch(value: Any) -> float:
     if value in (None, ""):
         return 0.0
     if isinstance(value, (int, float)):
         return float(value) if float(value) > 0 else 0.0
     if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return float(value.replace(tzinfo=VIETNAM_TZ).timestamp())
         return float(value.timestamp())
     try:
         numeric = float(value)
@@ -447,7 +452,8 @@ def _parse_time_epoch(value: Any) -> float:
             pass
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
         try:
-            return datetime.strptime(text.replace("Z", "").split("+", 1)[0], fmt).timestamp()
+            parsed = datetime.strptime(text.replace("Z", "").split("+", 1)[0], fmt)
+            return parsed.replace(tzinfo=VIETNAM_TZ).timestamp()
         except Exception:
             continue
     return 0.0
@@ -2316,8 +2322,11 @@ def product_video_probation_lock_state(
 ) -> dict[str, Any]:
     """Return the persisted single-probation lock without probing providers."""
     wanted_provider = str(provider_key or "").strip()
-    current_dt = now or datetime.now()
-    current_epoch = float(current_dt.timestamp())
+    current_dt = now or datetime.now(VIETNAM_TZ)
+    if current_dt.tzinfo is None:
+        current_epoch = float(current_dt.replace(tzinfo=VIETNAM_TZ).timestamp())
+    else:
+        current_epoch = float(current_dt.timestamp())
     try:
         rows = conn.execute(
             """SELECT id,project_id,user_id,status,result_json,created_at,updated_at,completed_at
@@ -2408,13 +2417,13 @@ def product_video_probation_lock_state(
                         delivery_expired = True
 
         lock_expiry_epoch = _parse_time_epoch(record["probation_lock_expires_at"])
-        if status == "completed":
+        if status in {"queued", "processing"}:
+            lock_expired = False
+        elif status == "completed":
             lock_expired = bool(
                 delivery_expired
                 or (lock_expiry_epoch and lock_expiry_epoch <= current_epoch)
             )
-        elif status == "processing":
-            lock_expired = False
         else:
             lock_expired = bool(lock_expiry_epoch and lock_expiry_epoch <= current_epoch)
 

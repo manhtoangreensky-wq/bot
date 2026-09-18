@@ -165,6 +165,33 @@ def test_pv12_active_processing_job_age_gt_30m_never_prematurely_unlocks(tmp_pat
     assert state["probation_lock_reject_reason"] == "probation_lock_owned_by_other_job"
 
 
+def test_pv12_active_queued_job_age_gt_30m_past_lock_expiry_never_prematurely_unlocks(tmp_path):
+    """R2 Section 1: queued probation job with age > 30 minutes and probation_lock_expires_at in past must NOT release probation lock solely by wall clock."""
+    conn = _setup_test_db(tmp_path)
+    started_at = queue.now_text(NOW - timedelta(minutes=45))
+    past_expiry = queue.now_text(NOW - timedelta(minutes=15))
+    _create_probation_job(
+        conn,
+        job_id=45,
+        project_id=45,
+        status="queued",
+        probation_result="pending",
+        probation_started_at=started_at,
+        probation_lock_expires_at=past_expiry,
+        completed_at="",
+        delivery_state="pending",
+    )
+
+    state = queue.product_video_probation_lock_state(conn, current_job_id=28, now=NOW)
+    assert state["probation_active"] is True, "QUEUED_ACTIVE_PROBATION_PREMATURE_UNLOCK: probation_active must be True"
+    assert state["probation_lock_clear"] is False, "QUEUED_ACTIVE_PROBATION_PREMATURE_UNLOCK: probation_lock_clear must be False"
+    assert state["active_probation_job_id"] == 45
+    assert state["probation_lock_owner_job"] == 45
+    assert state["probation_lock_owned_by_other_job"] is True
+    assert state["probation_lock_clear_for_current_job"] is False
+    assert state["probation_lock_reject_reason"] == "probation_lock_owned_by_other_job"
+
+
 def test_pv12_completed_pending_delivery_within_ttl_holds_lock(tmp_path):
     """Section 2: completed + pending_delivery within 600s TTL holds probation lock."""
     conn = _setup_test_db(tmp_path)
@@ -391,6 +418,82 @@ def test_pv12_timezone_invariance_utc_vs_plus7_vs_naive(tmp_path):
 
     assert sl_naive["probation_active"] is True
     assert sl_naive["probation_lock_clear"] is False
+
+
+def test_pv12_host_timezone_environment_invariance_utc_vs_hcm(tmp_path, monkeypatch):
+    """R2 Section 4: Demonstrate that running under simulated TZ=UTC and TZ=Asia/Ho_Chi_Minh
+    produces identically matching parse results and probation lock decisions for both naive and ISO timestamps.
+    """
+    conn = _setup_test_db(tmp_path)
+    started_at = "2026-09-18 23:30:00"
+    completed_at = "2026-09-18 23:35:00"
+    _create_probation_job(
+        conn,
+        job_id=60,
+        project_id=60,
+        status="completed",
+        probation_result="pending",
+        probation_started_at=started_at,
+        probation_delivery_expires_at="2026-09-18 23:45:00",
+        completed_at=completed_at,
+    )
+
+    # 1. Direct parser invariance: naive Asia/Ho_Chi_Minh string, UTC ISO string, and +07:00 ISO string
+    # 23:30:00 local (+07:00) is identical to 16:30:00 UTC
+    epoch_naive = queue._parse_time_epoch("2026-09-18 23:30:00")
+    epoch_utc = queue._parse_time_epoch("2026-09-18T16:30:00Z")
+    epoch_plus7 = queue._parse_time_epoch("2026-09-18T23:30:00+07:00")
+    assert epoch_naive == epoch_utc == epoch_plus7
+    assert epoch_naive > 0
+
+    # 2. Decision invariance when tested with UTC aware now, +07:00 aware now, and local naive now
+    # 23:40:00 local (before delivery expiry 23:45:00) -> lock must be active
+    active_now_utc = datetime(2026, 9, 18, 16, 40, 0, tzinfo=timezone.utc)
+    active_now_hcm = datetime(2026, 9, 18, 23, 40, 0, tzinfo=timezone(timedelta(hours=7)))
+    active_now_naive = datetime(2026, 9, 18, 23, 40, 0)
+
+    dec_utc = queue.product_video_probation_lock_state(conn, current_job_id=28, now=active_now_utc)
+    dec_hcm = queue.product_video_probation_lock_state(conn, current_job_id=28, now=active_now_hcm)
+    dec_naive = queue.product_video_probation_lock_state(conn, current_job_id=28, now=active_now_naive)
+
+    for field in ("probation_active", "probation_lock_clear", "active_probation_job_id", "probation_lock_reject_reason"):
+        assert dec_utc[field] == dec_hcm[field] == dec_naive[field]
+    assert dec_utc["probation_active"] is True
+    assert dec_utc["probation_lock_clear"] is False
+    assert dec_utc["active_probation_job_id"] == 60
+    assert dec_utc["probation_lock_reject_reason"] == "probation_lock_owned_by_other_job"
+
+    # 23:50:00 local (after delivery expiry 23:45:00) -> lock must be clear
+    expired_now_utc = datetime(2026, 9, 18, 16, 50, 0, tzinfo=timezone.utc)
+    expired_now_hcm = datetime(2026, 9, 18, 23, 50, 0, tzinfo=timezone(timedelta(hours=7)))
+    expired_now_naive = datetime(2026, 9, 18, 23, 50, 0)
+
+    dec_exp_utc = queue.product_video_probation_lock_state(conn, current_job_id=28, now=expired_now_utc)
+    dec_exp_hcm = queue.product_video_probation_lock_state(conn, current_job_id=28, now=expired_now_hcm)
+    dec_exp_naive = queue.product_video_probation_lock_state(conn, current_job_id=28, now=expired_now_naive)
+
+    for field in ("probation_active", "probation_lock_clear", "active_probation_job_id", "probation_lock_reject_reason"):
+        assert dec_exp_utc[field] == dec_exp_hcm[field] == dec_exp_naive[field]
+    assert dec_exp_utc["probation_active"] is False
+    assert dec_exp_utc["probation_lock_clear"] is True
+
+    # 3. If time.tzset is available (POSIX/Linux/VPS), test actual OS process timezone switching
+    import time
+    if hasattr(time, "tzset"):
+        try:
+            monkeypatch.setenv("TZ", "UTC")
+            time.tzset()
+            dec_posix_utc = queue.product_video_probation_lock_state(conn, current_job_id=28, now=active_now_utc)
+
+            monkeypatch.setenv("TZ", "Asia/Ho_Chi_Minh")
+            time.tzset()
+            dec_posix_hcm = queue.product_video_probation_lock_state(conn, current_job_id=28, now=active_now_hcm)
+
+            for field in ("probation_active", "probation_lock_clear", "active_probation_job_id", "probation_lock_reject_reason"):
+                assert dec_posix_utc[field] == dec_posix_hcm[field]
+        finally:
+            monkeypatch.delenv("TZ", raising=False)
+            time.tzset()
 
 
 def test_pv12_preserve_specific_rejection_reason(tmp_path):
