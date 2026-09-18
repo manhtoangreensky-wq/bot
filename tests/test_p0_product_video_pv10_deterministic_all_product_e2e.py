@@ -32,12 +32,15 @@ Deferred Products (3):
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import io
 import json
 import os
 import shutil
 import sqlite3
 import subprocess
+import urllib.request
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -45,6 +48,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import bot
 from services import (
     multiscene_video_pipeline as pipeline,
     product_video_public_seam,
@@ -53,6 +57,7 @@ from services import (
     video_local_validation,
     video_provider_catalog as cat,
     video_provider_router as router,
+    video_real_render_connector,
     video_tail9,
     video_uifreeze1,
 )
@@ -113,60 +118,51 @@ EXPECTED_MODALITY_MAP = {
     "self_shot_cinematic_transform": "video_to_video",
 }
 
-# Modality tier and scene configuration
+# Modality tier and scene configuration (pricing resolved dynamically via catalog)
 PRODUCT_CONFIG = {
     "video_trend": {
         "modality": "text_to_video",
         "tier": 400,
-        "price_xu": 80,
         "scene_count": 2,
     },
     "video_ai_prompt": {
         "modality": "text_to_video",
         "tier": 400,
-        "price_xu": 100,
         "scene_count": 1,
     },
     "video_idea": {
         "modality": "text_to_video",
         "tier": 500,
-        "price_xu": 120,
         "scene_count": 2,
     },
     "script_image_video": {
         "modality": "text_to_video",
         "tier": 400,
-        "price_xu": 200,
         "scene_count": 5,  # Requires minimum 5 scenes
     },
     "video_ai_image": {
         "modality": "image_to_video",
         "tier": 400,
-        "price_xu": 100,
         "scene_count": 1,
     },
     "storyboard_prompt": {
         "modality": "image_to_video",
         "tier": 500,
-        "price_xu": 150,
         "scene_count": 2,  # Requires minimum 2 scenes
     },
     "video_ai_video_reference": {
         "modality": "video_to_video",
         "tier": 500,  # V2V allowed set: {500, 600, 700, 800}
-        "price_xu": 150,
         "scene_count": 1,
     },
     "self_shot_scene_change": {
         "modality": "video_to_video",
         "tier": 600,
-        "price_xu": 180,
         "scene_count": 1,
     },
     "self_shot_cinematic_transform": {
         "modality": "video_to_video",
         "tier": 700,
-        "price_xu": 210,
         "scene_count": 1,
     },
 }
@@ -219,6 +215,130 @@ MINI_MP4_BASE64 = (
 )
 
 
+MINI_MP4_BYTES = base64.b64decode(MINI_MP4_BASE64)
+
+
+def _create_mini_mp4(target_path: Path, duration_sec: float = 1.0) -> Path:
+    """Deterministic local generation of a tiny valid MP4 with video & audio streams."""
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_bytes(MINI_MP4_BYTES)
+    return target_path
+
+
+class FakeResponse(io.BytesIO):
+    def __init__(self, data: bytes, code: int = 200, headers: dict | None = None, url: str = "https://cdn.fake.local/video.mp4"):
+        super().__init__(data)
+        self.code = code
+        self.status = code
+        self.url = url
+        self.headers = headers or {"Content-Type": "application/json", "Content-Length": str(len(data))}
+
+    def geturl(self) -> str:
+        return self.url
+
+    def getcode(self) -> int:
+        return self.code
+
+    def info(self):
+        return self.headers
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
+
+
+task_counter = 0
+
+
+def fake_dispatcher(req: Any, *args: Any, **kwargs: Any) -> FakeResponse:
+    global task_counter
+    if hasattr(req, "full_url"):
+        url = req.full_url
+    elif hasattr(req, "get_full_url"):
+        url = req.get_full_url()
+    else:
+        url = str(req)
+
+    # 1. Download video binary
+    if "cdn.fake.local" in url or url.endswith(".mp4"):
+        return FakeResponse(
+            MINI_MP4_BYTES,
+            code=200,
+            headers={"Content-Type": "video/mp4", "Content-Length": str(len(MINI_MP4_BYTES))},
+            url=url,
+        )
+
+    # 2. Poll video status
+    if "query?id=" in url or "{task_id}" in url or "fake_task_" in url:
+        import re
+        m = re.search(r"fake_task_pv10_\d+", url)
+        tid = m.group(0) if m else f"fake_task_pv10_{task_counter}"
+        continuity_payload = {
+            "person_identity": True,
+            "object_identity": True,
+            "person_object_relationship": True,
+        }
+        res_payload = {
+            "code": 0,
+            "status": "succeeded",
+            "state": "succeeded",
+            "task_status": "succeeded",
+            "id": tid,
+            "task_id": tid,
+            "result_url": f"https://cdn.fake.local/{tid}.mp4",
+            "video_url": f"https://cdn.fake.local/{tid}.mp4",
+            "continuity_evidence": continuity_payload,
+            "continuity_metrics": continuity_payload,
+            "continuity_validation": continuity_payload,
+            "data": {
+                "status": "succeeded",
+                "state": "succeeded",
+                "task_status": "succeeded",
+                "id": tid,
+                "task_id": tid,
+                "result_url": f"https://cdn.fake.local/{tid}.mp4",
+                "video_url": f"https://cdn.fake.local/{tid}.mp4",
+                "continuity_evidence": continuity_payload,
+                "continuity_metrics": continuity_payload,
+                "continuity_validation": continuity_payload,
+            },
+        }
+        return FakeResponse(json.dumps(res_payload).encode("utf-8"))
+
+    # 3. Submit video generation
+    task_counter += 1
+    tid = f"fake_task_pv10_{task_counter}"
+    continuity_payload = {
+        "person_identity": True,
+        "object_identity": True,
+        "person_object_relationship": True,
+    }
+    submit_payload = {
+        "code": 0,
+        "status": "processing",
+        "state": "processing",
+        "task_status": "processing",
+        "id": tid,
+        "task_id": tid,
+        "provider_task_id": tid,
+        "continuity_evidence": continuity_payload,
+        "continuity_metrics": continuity_payload,
+        "continuity_validation": continuity_payload,
+        "data": {
+            "id": tid,
+            "task_id": tid,
+            "provider_task_id": tid,
+            "status": "processing",
+            "continuity_evidence": continuity_payload,
+            "continuity_metrics": continuity_payload,
+            "continuity_validation": continuity_payload,
+        },
+    }
+    return FakeResponse(json.dumps(submit_payload).encode("utf-8"))
+
+
 # ==============================================================================
 # DETERMINISTIC HELPERS & FIXTURES
 # ==============================================================================
@@ -226,7 +346,17 @@ MINI_MP4_BASE64 = (
 @pytest.fixture(autouse=True)
 def deterministic_pv10_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     """Ensure fully deterministic isolated execution across all environments."""
-    # Deterministic fake provider endpoints for contract resolution without network
+    monkeypatch.setenv("SHOPAIKEY_API_KEY", "fake_shopaikey_key")
+    monkeypatch.setenv("SHOPAIKEY_VIDEO_ENABLED", "1")
+    monkeypatch.setenv("SHOPAIKEY_VIDEO_SUBMIT_URL", "https://fake.shopaikey.local/v1/video/generations")
+    monkeypatch.setenv("SHOPAIKEY_VIDEO_POLL_URL", "https://fake.shopaikey.local/v1/video/generations/{task_id}")
+    monkeypatch.setenv("SHOPAIKEY_VIDEO_MODEL", "veo3.1-fast")
+
+    monkeypatch.setenv("KEY4U_API_KEY", "fake_key4u_key")
+    monkeypatch.setenv("KEY4U_VIDEO_ENABLED", "1")
+    monkeypatch.setenv("KEY4U_VIDEO_SUBMIT_URL", "https://fake.key4u.local/v1/video/create")
+    monkeypatch.setenv("KEY4U_VIDEO_POLL_URL", "https://fake.key4u.local/v1/video/query?id={task_id}")
+    monkeypatch.setenv("KEY4U_VIDEO_MODEL", "kling-video")
     monkeypatch.setenv("KEY4U_VIDEO_ENDPOINT", "https://fake.key4u.local/v1/video")
     monkeypatch.setenv("KEY4U_VIDEO_POLL_ENDPOINT", "https://fake.key4u.local/v1/video/poll")
     monkeypatch.setenv("KEY4U_KLING_VIDEO_ENDPOINT", "https://fake.key4u.local/v1/kling")
@@ -235,54 +365,173 @@ def deterministic_pv10_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("KEY4U_HAILUO_VIDEO_POLL_URL", "https://fake.key4u.local/v1/hailuo/poll")
     monkeypatch.setenv("KEY4U_VEO_VIDEO_ENDPOINT", "https://fake.key4u.local/v1/veo")
     monkeypatch.setenv("KEY4U_VEO_VIDEO_POLL_URL", "https://fake.key4u.local/v1/veo/poll")
+    monkeypatch.setenv("KEY4U_VIDEO_TO_VIDEO_ENABLED", "true")
+    monkeypatch.setenv("KEY4U_VIDEO_TO_VIDEO_SUBMIT_URL", "https://fake.key4u.local/v1/video/edit")
+    monkeypatch.setenv("KEY4U_VIDEO_TO_VIDEO_POLL_URL", "https://fake.key4u.local/v1/video/query?id={task_id}")
+    monkeypatch.setenv("KEY4U_VIDEO_TO_VIDEO_AUTH_HEADER_VALUE", "Bearer fake_key4u_key")
+    monkeypatch.setenv("KEY4U_VIDEO_TO_VIDEO_MODEL", "kling-video")
+    monkeypatch.setenv("KEY4U_VIDEO_TO_VIDEO_INTERFACE", "video_to_video_multipart")
+    monkeypatch.setenv("KEY4U_VIDEO_TO_VIDEO_CAPABILITIES", "video_to_video")
 
-    def _stubbed_eligibility(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    monkeypatch.setattr(urllib.request, "urlopen", fake_dispatcher)
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", lambda self, req, *args, **kwargs: fake_dispatcher(req))
+
+    # Mock telegram bot for delivery
+    mock_message = MagicMock()
+    mock_message.message_id = 998877
+    mock_bot = MagicMock()
+    mock_bot.send_video = AsyncMock(return_value=mock_message)
+    mock_bot.send_document = AsyncMock(return_value=mock_message)
+    monkeypatch.setattr(bot, "tg_app", MagicMock(bot=mock_bot))
+
+    def fake_probe_video_file(path: str | os.PathLike[str], *args: Any, **kwargs: Any) -> dict[str, Any]:
+        target = Path(path)
+        if not target.is_file():
+            return {"ok": False, "reason": "input_missing"}
+        size = target.stat().st_size
+        if size <= 0:
+            return {"ok": False, "reason": "input_zero_bytes", "bytes": size}
+        content = target.read_bytes()
+        if (
+            b"corrupt" in content
+            or content.startswith(b"<html")
+            or not (len(content) > 12 and content[4:8] == b"ftyp")
+        ):
+            return {"ok": False, "reason": "ffprobe_failed", "bytes": size}
+        duration = 8.0
+        for parent_dir in (target.parent, target.parent.parent):
+            manifest_file = parent_dir / "manifest.json"
+            if manifest_file.is_file():
+                try:
+                    mdata = json.loads(manifest_file.read_text("utf-8"))
+                    exp = mdata.get("expected_duration_sec") or mdata.get("expected_duration_seconds")
+                    if exp and not ("provider_scene_" in target.name or target.name.startswith("scene_")):
+                        duration = float(exp)
+                        break
+                    specs = mdata.get("scenes") or mdata.get("scene_specs")
+                    if isinstance(specs, list) and len(specs) > 0:
+                        scene_dur = 0.0
+                        for s in specs:
+                            if isinstance(s, dict) and str(s.get("scene_id") or "") in target.name:
+                                scene_dur = float(s.get("target_duration_sec") or 0.0)
+                                break
+                        if scene_dur > 0:
+                            duration = scene_dur
+                            break
+                        if not ("provider_scene_" in target.name or target.name.startswith("scene_")):
+                            duration = sum(float(s.get("target_duration_sec") or 8.0) for s in specs if isinstance(s, dict))
+                            break
+                except Exception:
+                    pass
+            concat_txt = parent_dir / "concat_scenes.txt"
+            if concat_txt.is_file():
+                lines = [l for l in concat_txt.read_text("utf-8").splitlines() if l.strip()]
+                if lines:
+                    duration = float(len(lines) * 8.0)
+                    break
         return {
             "ok": True,
-            "eligible_provider_keys": ["shopaikey_video", "key4u_video"],
-            "runtime_candidate_keys": ["shopaikey_video", "key4u_video"],
-            "final_eligible_provider_count": 2,
-            "provider_eligibility_snapshot": {
-                "eligible_provider_keys": ["shopaikey_video", "key4u_video"],
-                "runtime_candidate_keys": ["shopaikey_video", "key4u_video"],
-                "final_eligible_provider_count": 2,
-            },
+            "has_video": True,
+            "has_audio": True,
+            "duration": duration,
+            "width": 720,
+            "height": 1280,
+            "codec_name": "h264",
+            "audio_codec_name": "aac",
+            "bytes": size,
         }
 
-    monkeypatch.setattr(remote_worker_api, "_product_video_runtime_eligibility", _stubbed_eligibility)
+    def fake_probe_video(path: str, *, ffprobe: str = "") -> dict[str, Any]:
+        target = Path(path)
+        if not target.is_file():
+            return {"ok": False, "reason": "output_missing"}
+        size = target.stat().st_size
+        if size <= 0:
+            return {"ok": False, "reason": "output_zero_bytes", "bytes": size}
+        content = target.read_bytes()
+        if (
+            b"corrupt" in content
+            or content.startswith(b"<html")
+            or not (len(content) > 12 and content[4:8] == b"ftyp")
+        ):
+            return {"ok": False, "reason": "ffprobe_failed", "bytes": size}
+        duration = 8.0
+        for parent_dir in (target.parent, target.parent.parent):
+            manifest_file = parent_dir / "manifest.json"
+            if manifest_file.is_file():
+                try:
+                    mdata = json.loads(manifest_file.read_text("utf-8"))
+                    exp = mdata.get("expected_duration_sec") or mdata.get("expected_duration_seconds")
+                    if exp and not ("provider_scene_" in target.name or target.name.startswith("scene_")):
+                        duration = float(exp)
+                        break
+                    specs = mdata.get("scenes") or mdata.get("scene_specs")
+                    if isinstance(specs, list) and len(specs) > 0:
+                        scene_dur = 0.0
+                        for s in specs:
+                            if isinstance(s, dict) and str(s.get("scene_id") or "") in target.name:
+                                scene_dur = float(s.get("target_duration_sec") or 0.0)
+                                break
+                        if scene_dur > 0:
+                            duration = scene_dur
+                            break
+                        if not ("provider_scene_" in target.name or target.name.startswith("scene_")):
+                            duration = sum(float(s.get("target_duration_sec") or 8.0) for s in specs if isinstance(s, dict))
+                            break
+                except Exception:
+                    pass
+            concat_txt = parent_dir / "concat_scenes.txt"
+            if concat_txt.is_file():
+                lines = [l for l in concat_txt.read_text("utf-8").splitlines() if l.strip()]
+                if lines:
+                    duration = float(len(lines) * 8.0)
+                    break
+        if "provider_scene_" in target.name or target.name.startswith("frame_"):
+            duration = 8.0
+        return {
+            "ok": True,
+            "path": str(path),
+            "bytes": size,
+            "duration": duration,
+            "has_video": True,
+            "has_audio": True,
+            "width": 720,
+            "height": 1280,
+            "sample_aspect_ratio": "1:1",
+            "display_aspect_ratio": "9:16",
+        }
 
-    # If ffprobe binary is missing on local test host, provide deterministic probe fallback
-    # that maintains fail-closed behavior on corrupted/invalid/missing files.
-    if not video_local_validation.find_ffprobe():
-        def _probing_wrapper(path: str | os.PathLike[str], *args: Any, **kwargs: Any) -> dict[str, Any]:
-            target = Path(path)
-            if not target.is_file():
-                return {"ok": False, "reason": "input_missing"}
-            size = target.stat().st_size
-            if size <= 0:
-                return {"ok": False, "reason": "input_zero_bytes", "bytes": size}
-            content = target.read_bytes()
-            if (
-                b"corrupt" in content
-                or content.startswith(b"<html")
-                or content.startswith(b"<!DOCTYPE")
-                or content.startswith(b"<!doctype")
-                or not (len(content) > 12 and content[4:8] == b"ftyp")
-            ):
-                return {"ok": False, "reason": "ffprobe_failed", "bytes": size}
-            return {
-                "ok": True,
-                "has_video": True,
-                "has_audio": True,
-                "duration": 1.0,
-                "width": 160,
-                "height": 120,
-                "codec_name": "h264",
-                "audio_codec_name": "aac",
-                "bytes": size,
-            }
+    def fake_probe_media_streams(path: str) -> dict[str, Any]:
+        return {"streams": [{"codec_type": "video", "width": 720, "height": 1280}, {"codec_type": "audio"}]}
 
-        monkeypatch.setattr(video_local_validation, "probe_video_file", _probing_wrapper)
+    def fake_probe_duration(path: str) -> float:
+        manifest_file = Path(path).parent / "manifest.json"
+        if manifest_file.is_file():
+            try:
+                data = json.loads(manifest_file.read_text("utf-8"))
+                expected = data.get("expected_duration_sec")
+                if expected:
+                    return float(expected)
+            except Exception:
+                pass
+        return 8.0
+
+    def fake_safe_run_ffmpeg(cmd: list[str], *, timeout: int = 180) -> subprocess.CompletedProcess[str]:
+        out_path = Path(cmd[-1])
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        if not out_path.is_file() or out_path.stat().st_size == 0:
+            _create_mini_mp4(out_path, duration_sec=1.0)
+        return subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(video_local_validation, "probe_video_file", fake_probe_video_file)
+    monkeypatch.setattr(video_final_output, "probe_video", fake_probe_video)
+    monkeypatch.setattr(pipeline, "probe_media_streams", fake_probe_media_streams)
+    monkeypatch.setattr(pipeline, "probe_duration", fake_probe_duration)
+    monkeypatch.setattr(pipeline, "_ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(pipeline, "_ffprobe_path", lambda: "ffprobe")
+    monkeypatch.setattr(video_real_render_connector, "_ffmpeg_binary", lambda: "ffmpeg")
+    monkeypatch.setattr(pipeline, "safe_run_ffmpeg", fake_safe_run_ffmpeg)
+    monkeypatch.setattr(video_real_render_connector, "safe_run_ffmpeg", fake_safe_run_ffmpeg)
 
 
 def _current_runtime_sha() -> str:
@@ -297,40 +546,22 @@ def _current_runtime_sha() -> str:
             return out
     except Exception:
         pass
-    return "3847697543a462fc5409d1bc0a17f205e4d1a608"
+    raise RuntimeError("runtime_sha_unavailable")
 
 
-def _create_mini_mp4(target_path: Path, duration_sec: float = 1.0) -> Path:
-    """Deterministic local generation of a tiny valid MP4 with video & audio streams.
-    
-    If ffmpeg binary is available, runs ffmpeg lavfi. Otherwise, emits canonical
-    valid MP4 byte stream directly.
-    """
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    ffmpeg_bin = shutil.which("ffmpeg")
-    if ffmpeg_bin:
-        cmd = [
-            ffmpeg_bin,
-            "-y",
-            "-f", "lavfi",
-            "-i", f"color=c=blue:s=160x120:d={duration_sec}:r=10",
-            "-f", "lavfi",
-            "-i", "anullsrc=r=22050:cl=mono",
-            "-t", f"{duration_sec}",
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-pix_fmt", "yuv420p",
-            "-c:a", "aac",
-            "-b:a", "32k",
-            "-shortest",
-            str(target_path),
-        ]
-        res = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        if res.returncode == 0 and target_path.is_file() and target_path.stat().st_size > 0:
-            return target_path
-    # Fallback to embedded canonical valid mini MP4 binary
-    target_path.write_bytes(base64.b64decode(MINI_MP4_BASE64))
-    return target_path
+def test_pv10_runtime_sha_fail_closed_on_invalid_env_and_git_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail-closed runtime SHA: raises RuntimeError when env SHA is missing/invalid and git fails."""
+    monkeypatch.delenv("DEPLOYED_SHA", raising=False)
+    monkeypatch.delenv("TARGET_SHA", raising=False)
+    monkeypatch.delenv("APP_BUILD_SHA", raising=False)
+    monkeypatch.setattr(subprocess, "check_output", MagicMock(side_effect=subprocess.CalledProcessError(1, "git")))
+    with pytest.raises(RuntimeError, match="runtime_sha_unavailable"):
+        _current_runtime_sha()
+
+    # Also invalid short SHA in env must fail closed
+    monkeypatch.setenv("DEPLOYED_SHA", "invalid_short_sha")
+    with pytest.raises(RuntimeError, match="runtime_sha_unavailable"):
+        _current_runtime_sha()
 
 
 def _create_isolated_db(db_path: Path | None = None) -> sqlite3.Connection:
@@ -368,6 +599,7 @@ def _build_sealed_admission(
         "admission_callback_data": queue.PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK,
         "eligible_provider_keys": candidate_keys,
         "runtime_candidate_keys": candidate_keys,
+        "contract_valid_provider_chain": candidate_keys,
         "final_eligible_provider_count": len(candidate_keys),
     }
 
@@ -380,6 +612,7 @@ def _build_sealed_admission(
         "admission_ttl_seconds": 60,
         "admission_candidate_keys": candidate_keys,
         "admission_candidate_count": len(candidate_keys),
+        "contract_valid_provider_chain": candidate_keys,
         "admission_result": "PASS" if candidate_keys else "BLOCKED",
         "admission_block_reason": "" if candidate_keys else "no_eligible_product_video_provider",
         "admission_user_id": int(project["user_id"]),
@@ -414,11 +647,14 @@ def _prepare_modality_inputs(
     tmp_path: Path,
     product_type: str,
     scene_count: int,
+    scene_sec: int = 8,
 ) -> dict[str, Any]:
     """Prepare product-specific clean input assets."""
     modality = EXPECTED_MODALITY_MAP[product_type]
     inputs: dict[str, Any] = {
+        "content_source": "user_prompt",
         "prompt": f"Deterministic prompt for {product_type}",
+        "selected_prompt": f"Deterministic prompt for {product_type}",
         "aspect_ratio": "9:16",
     }
     if modality == "image_to_video":
@@ -439,9 +675,26 @@ def _prepare_modality_inputs(
         src_dir = tmp_path / "source_videos"
         src_dir.mkdir(parents=True, exist_ok=True)
         src_video = src_dir / f"{product_type}_src.mp4"
-        _create_mini_mp4(src_video, duration_sec=2.0)
+        _create_mini_mp4(src_video, duration_sec=float(scene_count * scene_sec))
         inputs["source_video_path"] = str(src_video)
         inputs["source_video_local_path"] = str(src_video)
+        inputs["scene_source_segments"] = [
+            {
+                "scene_index": idx,
+                "start_seconds": float((idx - 1) * scene_sec),
+                "end_seconds": float(idx * scene_sec),
+            }
+            for idx in range(1, scene_count + 1)
+        ]
+        inputs["video_prompts"] = [
+            {"scene_index": idx, "prompt": f"Deterministic prompt scene {idx}"}
+            for idx in range(1, scene_count + 1)
+        ]
+        inputs["source_segment"] = {
+            "start_ms": 0,
+            "duration_ms": scene_count * scene_sec * 1000,
+            "end_ms": scene_count * scene_sec * 1000,
+        }
     return inputs
 
 
@@ -458,9 +711,16 @@ def _seed_and_confirm_project(
     """
     cfg = PRODUCT_CONFIG[product_type]
     scene_count = cfg["scene_count"]
-    package_xu = cfg["price_xu"]
     quality_tier = cfg["tier"]
-    inputs = _prepare_modality_inputs(tmp_path, product_type, scene_count)
+
+    cat_rep = video_uifreeze1.catalog_report(product_type, scene_count=scene_count, ratio="9:16")
+    target_offer = next(o for o in cat_rep["offers"] if o["tier_id"] == quality_tier)
+    package_xu = int(target_offer["unit_xu"])
+    scene_sec = int(target_offer.get("seconds") or 8)
+    if product_type == "video_trend":
+        assert package_xu == 80
+
+    inputs = _prepare_modality_inputs(tmp_path, product_type, scene_count, scene_sec)
 
     shared = {
         "source": "product_video",
@@ -479,20 +739,44 @@ def _seed_and_confirm_project(
         "provider_orchestration_mode": "per_scene_8s",
         "scene_count": scene_count,
         "quality_tier": quality_tier,
+        "scene_duration_seconds": scene_sec,
+        "duration_seconds": scene_count * scene_sec,
         **inputs,
     }
     tier_name = cat.normalize_tier(quality_tier)
+    health = {
+        "shopaikey_video": {
+            "provider": "shopaikey_video",
+            "live_healthy": True,
+            "route_ready": True,
+            "multi_scene_eligible": True,
+            "health_status": "healthy",
+            "last_valid_output_at": queue.now_text(),
+            "success_ttl_seconds": 3600,
+        },
+        "key4u_video": {
+            "provider": "key4u_video",
+            "live_healthy": True,
+            "route_ready": True,
+            "multi_scene_eligible": True,
+            "health_status": "healthy",
+            "last_valid_output_at": queue.now_text(),
+            "success_ttl_seconds": 3600,
+        },
+    }
     invoice = {
         **shared,
-        "tier": tier_name,
+        "tier": str(quality_tier),
+        "quality_tier": quality_tier,
         "package_xu": package_xu,
-        "scene_duration_seconds": 8,
-        "duration_seconds": scene_count * 8,
+        "scene_duration_seconds": scene_sec,
+        "duration_seconds": scene_count * scene_sec,
         "total_xu": package_xu,
         "user_visible_price_xu": package_xu,
         "persisted_quoted_price_xu": package_xu,
         "customer_charge_planned_xu": package_xu,
         "wallet_charge_amount_xu": package_xu,
+        "provider_health_at_submit": health,
     }
 
     initial_projects = conn.execute("SELECT COUNT(*) FROM video_projects").fetchone()[0]
@@ -634,8 +918,8 @@ def test_pv10_deterministic_e2e_all_active_products(
     
     Chain:
     PUBLIC ENTRY -> DRAFT -> QUALITY -> CONFIRM -> PROJECT -> JOB -> OUTBOX
-    -> WORKER CLAIM -> ADAPTER -> FAKE PROVIDER -> SCENE ARTIFACTS -> FINALIZER
-    -> VALID FINAL MP4 -> DELIVERY -> DURABLE RECEIPT -> PRODUCT SUCCESS.
+    -> WORKER CLAIM -> ADAPTER -> REAL RENDER SEAM -> VALID FINAL MP4
+    -> JOB COMPLETION -> DELIVERY SEAM -> DURABLE RECEIPT -> IDEMPOTENT REPLAY.
     """
     db_path = tmp_path / f"pv10_{product_type}.sqlite3"
     conn = _create_isolated_db(db_path)
@@ -667,6 +951,11 @@ def test_pv10_deterministic_e2e_all_active_products(
     assert int(claimed_job.get("job_id") or claimed_job.get("id") or 0) == jid
     assert int(claimed_job.get("project_id") or 0) == pid
 
+    src_vid_path = (claimed_job.get("asset_pack") or {}).get("source_video_local_path") or (claimed_job.get("asset_pack") or {}).get("source_video_path")
+    if src_vid_path:
+        claimed_job["source_video_local_path"] = src_vid_path
+        claimed_job["source_video_path"] = src_vid_path
+
     # Double claim prevented
     second_claim = remote_worker_api.claim_remote_worker_job(
         conn,
@@ -681,109 +970,32 @@ def test_pv10_deterministic_e2e_all_active_products(
     assert adapter["canonical_product_type"] == product_type
     assert adapter["required_capability"] == EXPECTED_MODALITY_MAP[product_type]
 
-    # 4. FAKE PROVIDER TASK & SCENE ARTIFACT TRUTH (REAL_PROVIDER_CALLS=0, PAID_PROVIDER_CALLS=0)
+    # 4. REAL RENDER EXECUTION SEAM (Zero external network calls)
     workspace = tmp_path / f"ws_{product_type}"
     workspace.mkdir(parents=True, exist_ok=True)
-    scene_clip_paths: dict[int, str] = {}
-    scene_tasks: list[dict[str, Any]] = []
-    modality = EXPECTED_MODALITY_MAP[product_type]
-    provider_name = "key4u_video" if modality in ("image_to_video", "video_to_video") else "shopaikey_video"
+    render_res = video_real_render_connector.render_real_video_job(claimed_job, str(workspace))
+    assert render_res["ok"] is True, f"Render failed for {product_type}: {render_res.get('error')}"
+    final_video_path = render_res.get("final_video_path")
+    assert final_video_path and os.path.isfile(final_video_path), "FINAL_MP4_EXISTS must be YES"
 
-    for idx in range(1, scene_count + 1):
-        clip_path = workspace / f"provider_scene_{idx:03d}.mp4"
-        _create_mini_mp4(clip_path, duration_sec=1.0)
-        scene_clip_paths[idx] = str(clip_path)
-
-        probe = video_local_validation.probe_video_file(str(clip_path))
-        if probe.get("reason") == "ffprobe_missing":
-            clip_ok = clip_path.is_file() and clip_path.stat().st_size > 0
-        else:
-            clip_ok = probe.get("ok") is True and probe.get("has_video") is True
-
-        assert clip_ok, f"Scene {idx} clip validation failed for {product_type}"
-
-        scene_tasks.append({
-            "scene_index": idx,
-            "provider": provider_name,
-            "task_id": f"fake_task_{product_type}_{idx}",
-            "status": "succeeded",
-            "result_url": f"https://cdn.fake.local/{product_type}/scene_{idx}.mp4",
-            "output_path": str(clip_path),
-            "clip_bytes": clip_path.stat().st_size,
-            "clip_valid": True,
-            "artifact_valid": True,
-        })
-
-    assert len(scene_clip_paths) == scene_count
-    assert all(Path(p).is_file() for p in scene_clip_paths.values())
-
-    # 5. FINALIZER & VALID FINAL MP4
-    final_output_path = workspace / "final_output.mp4"
-    if scene_count == 1:
-        shutil.copyfile(scene_clip_paths[1], final_output_path)
-    else:
-        scenes = [
-            pipeline.SceneSpec(
-                scene_id=idx,
-                title=f"Scene {idx}",
-                visual_prompt=f"Visual {idx}",
-                video_prompt=f"Video {idx}",
-                target_duration_sec=1.0,
-            )
-            for idx in range(1, scene_count + 1)
-        ]
-        res = pipeline.finalize_multiscene_scene_clips(
-            user_id="1001",
-            job_id=str(jid),
-            workspace_dir=str(workspace),
-            scenes=scenes,
-            scene_clip_paths=scene_clip_paths,
-        )
-        if res.get("ok") and res.get("final_video_path") and Path(res["final_video_path"]).is_file():
-            final_output_path = Path(res["final_video_path"])
-        else:
-            shutil.copyfile(scene_clip_paths[1], final_output_path)
-
-    assert final_output_path.is_file(), "FINAL_MP4_EXISTS must be YES"
-    assert final_output_path.stat().st_size > 0, "FINAL_MP4_SIZE_GT_0 must be YES"
-
-    final_probe = video_local_validation.probe_video_file(str(final_output_path))
-    if final_probe.get("reason") != "ffprobe_missing":
-        assert final_probe["ok"] is True, "FINAL_MP4_VALID must be YES"
-
-    # Persist job result
-    result_payload = {
-        "job_id": jid,
-        "project_id": pid,
-        "source": "product_video",
-        "product_video": True,
-        "product_type": product_type,
-        "scene_count": scene_count,
-        "orchestration_mode": "per_scene_8s",
-        "chat_id": 1001,
-        "user_id": 1001,
-        "public_user_confirmed": True,
-        "invoice_confirmed": True,
-        "charged_xu": 0,
-        "no_charge": True,
-        "scene_tasks": scene_tasks,
-        "provider_status": "succeeded",
-        "scene_clip_coverage_complete": True,
-        "final_mp4_valid": True,
-        "final_video_path": str(final_output_path),
-        "output_bytes": final_output_path.stat().st_size,
-        "output_duration": 1.0 * scene_count,
-        "has_video": True,
-        "has_audio": True,
-    }
-    conn.execute(
-        "UPDATE video_jobs SET status='processing', result_json=? WHERE id=?",
-        (json.dumps(result_payload), jid),
+    # 5. DB COMPLETION
+    comp_res = queue.complete_video_job(
+        conn,
+        job_id=jid,
+        final_video_path=str(final_video_path),
+        result=render_res,
     )
-    conn.commit()
+    assert comp_res["ok"] is True
+    job_after = queue.get_video_render_job(conn, jid)
+    assert job_after["status"] == "completed"
 
-    # 6. DELIVERY & DURABLE RECEIPT
-    delivery_message_id = f"tg_receipt_pv10_{product_type}_{jid}"
+    # 6. DELIVERY SEAM & DURABLE RECEIPT
+    proj_row = queue.get_video_project(conn, pid)
+    deliv_payload = {"ok": True, "job": dict(job_after), "project": dict(proj_row)}
+    deliv_out = asyncio.run(bot.maybe_send_remote_worker_final_video(deliv_payload))
+    assert deliv_out.get("sent") is True, f"Delivery send failed for {product_type}: {deliv_out}"
+    delivery_message_id = str(deliv_out.get("telegram_message_id") or f"tg_receipt_pv10_{product_type}_{jid}")
+
     delivery_res = queue.note_video_delivery_result(
         conn,
         job_id=jid,
@@ -793,28 +1005,30 @@ def test_pv10_deterministic_e2e_all_active_products(
     )
     assert delivery_res["ok"] is True, f"Delivery failed for {product_type}: {delivery_res}"
 
-    proj_row = queue.get_video_project(conn, pid)
-    assert proj_row["video_terminal_state"] == "final_delivered"
-    assert proj_row["video_delivery_message_id"] == delivery_message_id
-    assert bool(proj_row["video_delivered_at"]) is True
+    proj_after = queue.get_video_project(conn, pid)
+    assert proj_after["video_terminal_state"] == "final_delivered"
+    assert proj_after["video_delivery_message_id"] == delivery_message_id
+    assert bool(proj_after["video_delivered_at"]) is True
 
-    # Idempotent replay
-    delivery_replay = queue.note_video_delivery_result(
+    # 7. IDEMPOTENT REPLAY DELIVERY (SECOND_SEND=0, DUPLICATE_RECEIPT=0)
+    deliv_replay = asyncio.run(bot.maybe_send_remote_worker_final_video({
+        "ok": True,
+        "job": dict(job_after),
+        "project": dict(proj_after),
+        "duplicate": True,
+    }))
+    assert deliv_replay.get("sent") is False
+    assert deliv_replay.get("duplicate_prevented") is True
+
+    receipt_replay = queue.note_video_delivery_result(
         conn,
         job_id=jid,
         sent=True,
         delivery_message_id=delivery_message_id,
         success_message_id=delivery_message_id,
     )
-    assert delivery_replay["ok"] is True
-    assert delivery_replay.get("duplicate_prevented") is True
-
-    # 7. PRODUCT SUCCESS GATE
-    job_row = queue.get_video_render_job(conn, jid)
-    assert job_row["status"] == "completed"
-    assert result_payload["scene_clip_coverage_complete"] is True
-    assert result_payload["final_mp4_valid"] is True
-    assert proj_row["video_terminal_state"] == "final_delivered"
+    assert receipt_replay["ok"] is True
+    assert receipt_replay.get("duplicate_prevented") is True
 
 
 # ==============================================================================
