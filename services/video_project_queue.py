@@ -2427,14 +2427,25 @@ def product_video_probation_lock_state(
         else:
             lock_expired = bool(lock_expiry_epoch and lock_expiry_epoch <= current_epoch)
 
+        is_probation_terminal = bool(
+            probation_result in {"failed", "expired", "success"}
+            or record.get("probation_terminal_at")
+        )
         pending_delivery = bool(
             probation_result == "pending"
+            and not is_probation_terminal
             and status not in {"failed", "cancelled"}
         )
-        if (status in {"queued", "processing"} or pending_delivery) and not lock_expired and not active:
+        is_active_pending = bool(
+            not is_probation_terminal
+            and probation_result == "pending"
+            and (status in {"queued", "processing"} or pending_delivery)
+            and not lock_expired
+        )
+        if is_active_pending and not active:
             active = record
         elif (
-            probation_result in {"success", "failed"}
+            is_probation_terminal
             or status in {"failed", "cancelled"}
             or lock_expired
         ) and not latest_terminal:
@@ -10254,7 +10265,122 @@ def defer_video_job_for_provider_polling(
         payload = {}
     if isinstance(diagnostics, dict):
         payload.update(diagnostics)
+
+    coverage = product_video_scene_coverage_state(project, job, payload)
+    required_scenes = _as_int(coverage.get("required_scene_count"), 0)
+    finalizer_ready = bool(
+        required_scenes > 0
+        and not coverage.get("unresolved_scene_indexes")
+        and bool(coverage.get("finalizer_unlocked") or _as_int(coverage.get("completed_scene_count"), 0) >= required_scenes)
+    )
+
+    is_probation = str(payload.get("admission_mode") or "") == PRODUCT_VIDEO_PROBATION_ADMISSION_MODE
+    probation_terminal = bool(
+        is_probation
+        and (
+            str(payload.get("probation_result") or "").strip().lower() in {"failed", "expired"}
+            or payload.get("probation_terminal_at")
+        )
+    )
+
+    if finalizer_ready:
+        classification = "EXISTING_ARTIFACT_RECOVERY_REQUIRED"
+        clean_reason = "existing_artifact_recovery_required"
+        current = now_text()
+        payload.update(
+            {
+                "ok": True,
+                "continue_polling": False,
+                "recovery_existing_tasks_only": True,
+                "finalizer_input_complete": True,
+                "scene_coverage_complete": True,
+                "all_required_clips_valid": True,
+                "missing_scene_action": "concat",
+                "action": "concat",
+                "classification": classification,
+                "defer_classification": classification,
+                "no_charge": True,
+                "no_new_paid_submit": True,
+                "paid_fallback_not_used": True,
+                "blocker": "",
+                "provider_error": "",
+                "terminal_state": "ready_to_finalize",
+                "terminal_after_reconcile": "ready_to_finalize",
+            }
+        )
+        conn.execute(
+            """UPDATE video_jobs
+               SET status='processing', locked_by='', locked_at=NULL, lease_expires_at=NULL,
+                   last_error=?, result_json=?, progress_percent=90, progress_message=?, updated_at=?
+               WHERE id=?""",
+            (clean_reason, _json_dumps(payload), clean_reason, current, int(job_id)),
+        )
+        conn.execute(
+            """UPDATE video_projects
+               SET status='processing', video_terminal_state='ready_to_finalize',
+                   error_log=?, updated_at=?
+               WHERE project_id=?""",
+            (clean_reason, current, int(job["project_id"])),
+        )
+        conn.commit()
+        return {
+            "ok": True,
+            "status": "processing",
+            "deferred": False,
+            "continue_polling": False,
+            "classification": classification,
+            "defer_classification": classification,
+            "recovery_existing_tasks_only": True,
+            "job": get_video_render_job(conn, int(job_id)),
+            "project": get_video_project(conn, int(job["project_id"])),
+        }
+
+    if probation_terminal:
+        classification = "TERMINAL_PROBATION_BLOCKED"
+        clean_reason = "terminal_probation_blocked"
+        current = now_text()
+        payload.update(
+            {
+                "ok": False,
+                "continue_polling": False,
+                "classification": classification,
+                "defer_classification": classification,
+                "terminal_state": "failed_no_charge",
+                "final_decision": "failed_no_charge",
+                "no_charge": True,
+                "no_new_paid_submit": True,
+            }
+        )
+        conn.execute(
+            """UPDATE video_jobs
+               SET status='failed', locked_by='', locked_at=NULL, lease_expires_at=NULL,
+                   last_error=?, result_json=?, progress_percent=0, progress_message=?,
+                   completed_at=COALESCE(completed_at, ?), updated_at=?
+               WHERE id=?""",
+            (clean_reason, _json_dumps(payload), clean_reason, current, current, int(job_id)),
+        )
+        conn.execute(
+            """UPDATE video_projects
+               SET status='failed', video_terminal_state='failed_no_charge',
+                   video_terminal_locked_at=COALESCE(video_terminal_locked_at, ?),
+                   error_log=?, updated_at=?
+               WHERE project_id=?""",
+            (current, clean_reason, current, int(job["project_id"])),
+        )
+        conn.commit()
+        return {
+            "ok": False,
+            "status": "failed",
+            "deferred": False,
+            "continue_polling": False,
+            "classification": classification,
+            "defer_classification": classification,
+            "job": get_video_render_job(conn, int(job_id)),
+            "project": get_video_project(conn, int(job["project_id"])),
+        }
+
     clean_reason = str(reason or payload.get("provider_error") or payload.get("blocker") or "provider_in_progress")[:1000]
+    classification = "DEFER_ALLOWED"
     payload.update(
         {
             "ok": False,
@@ -10263,6 +10389,8 @@ def defer_video_job_for_provider_polling(
             "provider_error": payload.get("provider_error") or clean_reason,
             "blocker": payload.get("blocker") or clean_reason,
             "no_charge": True,
+            "classification": classification,
+            "defer_classification": classification,
         }
     )
     current = now_text()
@@ -10286,6 +10414,8 @@ def defer_video_job_for_provider_polling(
             "terminal_override_reason": "provider_running_overrides_failed_no_charge",
             "no_new_paid_submit": True,
             "paid_fallback_not_used": True,
+            "classification": classification,
+            "defer_classification": classification,
         }
     )
     progress = int(telemetry.get("final_progress_after_reconcile") or telemetry.get("final_progress") or 20)
@@ -10309,6 +10439,8 @@ def defer_video_job_for_provider_polling(
         "status": "queued",
         "deferred": True,
         "continue_polling": True,
+        "classification": classification,
+        "defer_classification": classification,
         "job": get_video_render_job(conn, int(job_id)),
         "project": get_video_project(conn, int(job["project_id"])),
     }
