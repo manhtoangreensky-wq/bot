@@ -427,6 +427,10 @@ def _as_int(value: Any, default: int = 0) -> int:
 def _parse_time_epoch(value: Any) -> float:
     if value in (None, ""):
         return 0.0
+    if isinstance(value, (int, float)):
+        return float(value) if float(value) > 0 else 0.0
+    if isinstance(value, datetime):
+        return float(value.timestamp())
     try:
         numeric = float(value)
         if numeric > 0:
@@ -436,6 +440,11 @@ def _parse_time_epoch(value: Any) -> float:
     text = str(value or "").strip()
     if not text:
         return 0.0
+    if "Z" in text or ("+" in text and "T" in text) or ("-" in text[10:] and "T" in text):
+        try:
+            return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+        except Exception:
+            pass
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
         try:
             return datetime.strptime(text.replace("Z", "").split("+", 1)[0], fmt).timestamp()
@@ -2308,11 +2317,7 @@ def product_video_probation_lock_state(
     """Return the persisted single-probation lock without probing providers."""
     wanted_provider = str(provider_key or "").strip()
     current_dt = now or datetime.now()
-    current_epoch = (
-        current_dt.replace(tzinfo=None).timestamp()
-        if current_dt.tzinfo is not None
-        else current_dt.timestamp()
-    )
+    current_epoch = float(current_dt.timestamp())
     try:
         rows = conn.execute(
             """SELECT id,project_id,user_id,status,result_json,created_at,updated_at,completed_at
@@ -2376,33 +2381,43 @@ def product_video_probation_lock_state(
             "probation_terminal_at": str(payload.get("probation_terminal_at") or ""),
             "probation_cooldown_until": str(payload.get("probation_cooldown_until") or ""),
             "probation_lock_expires_at": str(payload.get("probation_lock_expires_at") or ""),
+            "probation_delivery_expires_at": str(payload.get("probation_delivery_expires_at") or ""),
         }
-        lock_expiry_epoch = _parse_time_epoch(record["probation_lock_expires_at"])
         delivery_expired = False
-        if status == "completed":
-            completed_epoch = _parse_time_epoch(
-                row["completed_at"] if isinstance(row, sqlite3.Row) else row[7]
-            )
-            started_epoch = _parse_time_epoch(
-                record["probation_started_at"]
-                or ((row["created_at"] if isinstance(row, sqlite3.Row) else row[5]) or "")
-            )
-            if completed_epoch > 0:
-                delivery_lock_expiry_epoch = (
-                    completed_epoch + PRODUCT_VIDEO_PROBATION_DELIVERY_TTL_SECONDS_DEFAULT
+        if status == "completed" and probation_result == "pending":
+            delivery_expiry_epoch = _parse_time_epoch(record["probation_delivery_expires_at"])
+            if delivery_expiry_epoch > 0:
+                if current_epoch >= delivery_expiry_epoch:
+                    delivery_expired = True
+            else:
+                completed_epoch = _parse_time_epoch(
+                    row["completed_at"] if isinstance(row, sqlite3.Row) else row[7]
                 )
-                if current_epoch >= delivery_lock_expiry_epoch:
-                    delivery_expired = True
-            elif started_epoch > 0:
-                if current_epoch >= started_epoch + PRODUCT_VIDEO_PROBATION_LOCK_TTL_SECONDS_DEFAULT:
-                    delivery_expired = True
-            elif not lock_expiry_epoch:
-                delivery_expired = True
+                if completed_epoch > 0:
+                    if current_epoch >= completed_epoch + PRODUCT_VIDEO_PROBATION_DELIVERY_TTL_SECONDS_DEFAULT:
+                        delivery_expired = True
+                else:
+                    started_epoch = _parse_time_epoch(
+                        record["probation_started_at"]
+                        or ((row["created_at"] if isinstance(row, sqlite3.Row) else row[5]) or "")
+                    )
+                    if started_epoch > 0:
+                        if current_epoch >= started_epoch + PRODUCT_VIDEO_PROBATION_DELIVERY_TTL_SECONDS_DEFAULT:
+                            delivery_expired = True
+                    else:
+                        delivery_expired = True
 
-        lock_expired = bool(
-            (lock_expiry_epoch and lock_expiry_epoch <= current_epoch)
-            or delivery_expired
-        )
+        lock_expiry_epoch = _parse_time_epoch(record["probation_lock_expires_at"])
+        if status == "completed":
+            lock_expired = bool(
+                delivery_expired
+                or (lock_expiry_epoch and lock_expiry_epoch <= current_epoch)
+            )
+        elif status == "processing":
+            lock_expired = False
+        else:
+            lock_expired = bool(lock_expiry_epoch and lock_expiry_epoch <= current_epoch)
+
         pending_delivery = bool(
             probation_result == "pending"
             and status not in {"failed", "cancelled"}
@@ -2447,6 +2462,7 @@ def product_video_probation_lock_state(
         "active_probation_provider": str(active.get("provider") or ""),
         "active_probation_started_at": str(active.get("probation_started_at") or ""),
         "probation_lock_expires_at": str(active.get("probation_lock_expires_at") or ""),
+        "probation_delivery_expires_at": str(active.get("probation_delivery_expires_at") or ""),
         "current_probation_job_id": int(current_job_id or 0),
         "current_job_matches_lock": current_job_matches_lock,
         "current_project_matches_lock": same_project,
@@ -3977,7 +3993,10 @@ def _confirm_product_video_invoice_atomic(
                 conn.rollback()
                 return {
                     "ok": False,
-                    "reason": "product_video_probation_lock_active",
+                    "reason": str(
+                        probation_lock.get("probation_lock_reject_reason")
+                        or "product_video_probation_lock_active"
+                    ),
                     "public_message": "TOAN AAS chưa thể bắt đầu tạo video lúc này.\nHệ thống chưa trừ Xu.\nAnh/chị có thể kiểm tra lại sau.",
                     "admission": {**admission_state, **probation_lock},
                     "job_created": False,
@@ -4003,9 +4022,6 @@ def _confirm_product_video_invoice_atomic(
                 admission_state.update(
                     {
                         "probation_started_at": current,
-                        "probation_lock_expires_at": now_text(
-                            current_dt + timedelta(seconds=PRODUCT_VIDEO_PROBATION_LOCK_TTL_SECONDS_DEFAULT)
-                        ),
                         "probation_job_id": 0,
                         "probation_result": "pending",
                         "probation_terminal_at": "",
@@ -4191,10 +4207,6 @@ def _confirm_product_video_invoice_atomic(
             )
             job_id = int(cursor.lastrowid or 0)
         if str(admission_state.get("admission_mode") or "") == PRODUCT_VIDEO_PROBATION_ADMISSION_MODE:
-            if not admission_state.get("probation_lock_expires_at"):
-                admission_state["probation_lock_expires_at"] = now_text(
-                    current_dt + timedelta(seconds=PRODUCT_VIDEO_PROBATION_LOCK_TTL_SECONDS_DEFAULT)
-                )
             admission_state.update(
                 {
                     "probation_job_id": job_id,
@@ -9693,6 +9705,11 @@ def complete_video_job(
         )
     elif safe_claim_only_diagnostic:
         payload["terminal_state"] = terminal_state
+    if str(payload.get("admission_mode") or "") == PRODUCT_VIDEO_PROBATION_ADMISSION_MODE:
+        if not payload.get("probation_delivery_expires_at"):
+            payload["probation_delivery_expires_at"] = now_text(
+                datetime.now() + timedelta(seconds=PRODUCT_VIDEO_PROBATION_DELIVERY_TTL_SECONDS_DEFAULT)
+            )
     try:
         blocked, locked_job, locked_project = begin_completion_mutation()
         if blocked is not None:
@@ -9895,8 +9912,8 @@ def note_video_delivery_result(
                     }
                 )
             else:
-                if not payload.get("probation_lock_expires_at"):
-                    payload["probation_lock_expires_at"] = now_text(
+                if not payload.get("probation_delivery_expires_at"):
+                    payload["probation_delivery_expires_at"] = now_text(
                         datetime.now() + timedelta(seconds=PRODUCT_VIDEO_PROBATION_DELIVERY_TTL_SECONDS_DEFAULT)
                     )
                 payload.update(
