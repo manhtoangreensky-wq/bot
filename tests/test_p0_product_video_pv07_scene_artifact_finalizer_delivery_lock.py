@@ -25,6 +25,7 @@ import pytest
 from services import multiscene_video_pipeline as pipeline
 from services import video_local_validation
 from services import video_project_queue as queue
+from services import video_real_render_connector as connector
 
 
 TASK_SCENE_1 = "task-pv07-scene-1"
@@ -48,12 +49,9 @@ def _create_mini_mp4(target_path: Path, duration_sec: float = 1.0) -> Path:
         "-shortest",
         str(target_path),
     ]
-    try:
-        res = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    except (FileNotFoundError, OSError):
-        pytest.skip("ffmpeg binary not found in environment")
+    res = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if res.returncode != 0:
-        pytest.skip(f"ffmpeg mini MP4 creation failed: {res.stderr}")
+        raise RuntimeError(f"ffmpeg mini MP4 creation failed: {res.stderr}")
     return target_path
 
 
@@ -361,10 +359,12 @@ def test_pv07_all_scene_coverage_lock_matrix(
     scene_count = 3
     scene_tasks = []
     for idx in valid_indexes:
+        clip_file = _create_mini_mp4(tmp_path / f"clip_{idx}.mp4", duration_sec=1.0)
         scene_tasks.append(
             {
                 "scene_index": idx,
                 "task_id": f"task-{idx}",
+                "clip_path": str(clip_file),
                 "clip_valid": True,
                 "artifact_valid": True,
                 "status": "scene_clip_validated",
@@ -832,3 +832,408 @@ def test_pv07_frame_video_finalizer_regression(tmp_path: Path) -> None:
     assert res_after.get("final_mp4_valid") is not True
     assert res_after.get("final_delivered") is not True
     assert res_after.get("delivery_succeeded") is not True
+
+
+# =========================================================================
+# 16. MISSING LOCAL ARTIFACT FAILS CLOSED (SECTION 3 FIRST-RED)
+# =========================================================================
+
+def test_pv07_missing_local_artifact_stale_validation_flag_fails_closed(tmp_path: Path) -> None:
+    """A stale validation flag alone must not unlock a finalizer run without local file."""
+    db_path = tmp_path / "pv07_missing_local_artifact.sqlite3"
+
+    for missing_path in ["", str(tmp_path / "nonexistent_clip.mp4")]:
+        conn, job_id, project_id = _seed_pv07_test_job(
+            db_path,
+            scene_count=1,
+            provider_task_completed=True,
+            all_clips_downloaded=True,
+        )
+        job = queue.get_video_render_job(conn, job_id)
+        project = queue.get_video_project(conn, project_id)
+        result = json.loads(job["result_json"])
+
+        # Inject stale validation flags on record but with empty or nonexistent clip_path
+        result["scene_tasks"][0]["clip_valid"] = True
+        result["scene_tasks"][0]["artifact_valid"] = True
+        result["scene_tasks"][0]["clip_bytes"] = 1048576
+        result["scene_tasks"][0]["status"] = "scene_clip_validated"
+        result["scene_tasks"][0]["clip_path"] = missing_path
+        result["final_video_path"] = ""
+        result["final_mp4_path"] = ""
+
+        ledger = queue.product_video_scene_ledger_state(project, job, result)
+        coverage = queue.product_video_scene_coverage_state(project, job, result)
+
+        rec = ledger["scene_records"][1]
+        assert rec["clip_valid"] is False, f"clip_valid must be False when path={missing_path!r}"
+        assert rec.get("scene_validation_verified") is False, "scene_validation_verified must be False"
+        assert coverage["scene_clip_coverage_complete"] is False, "coverage_complete must be False"
+        assert coverage.get("finalizer_unlocked") is False, "finalizer_unlocked must be False"
+
+
+# =========================================================================
+# 17. ARTIFACT DISAPPEARS AFTER DB REOPEN (SECTION 4 PROOF)
+# =========================================================================
+
+def test_pv07_artifact_disappears_after_db_reopen(tmp_path: Path) -> None:
+    """Historical validation metadata in DB must fail closed if file is deleted before finalizer."""
+    db_path = tmp_path / "pv07_reopen_artifact_deleted.sqlite3"
+    clip_file = _create_mini_mp4(tmp_path / "scene_durable.mp4", duration_sec=1.0)
+    assert clip_file.is_file()
+
+    conn, job_id, project_id = _seed_pv07_test_job(
+        db_path,
+        scene_count=1,
+        provider_task_completed=True,
+        all_clips_downloaded=True,
+    )
+    job = queue.get_video_render_job(conn, job_id)
+    project = queue.get_video_project(conn, project_id)
+    result = json.loads(job["result_json"])
+
+    # Persist valid clip metadata into DB
+    result["scene_tasks"][0]["clip_path"] = str(clip_file)
+    result["scene_tasks"][0]["clip_valid"] = True
+    result["scene_tasks"][0]["artifact_valid"] = True
+    result["scene_tasks"][0]["clip_bytes"] = clip_file.stat().st_size
+    result["scene_tasks"][0]["status"] = "scene_clip_validated"
+    conn.execute("UPDATE video_jobs SET result_json=? WHERE id=?", (json.dumps(result), job_id))
+    conn.commit()
+    conn.close()
+
+    # Now delete the physical clip file from filesystem
+    clip_file.unlink()
+    assert not clip_file.exists()
+
+    # Reopen DB and recompute ledger & coverage
+    conn_reopen = sqlite3.connect(db_path)
+    conn_reopen.row_factory = sqlite3.Row
+    job_reopen = queue.get_video_render_job(conn_reopen, job_id)
+    project_reopen = queue.get_video_project(conn_reopen, project_id)
+    result_reopen = json.loads(job_reopen["result_json"])
+
+    ledger = queue.product_video_scene_ledger_state(project_reopen, job_reopen, result_reopen)
+    coverage = queue.product_video_scene_coverage_state(project_reopen, job_reopen, result_reopen)
+    conn_reopen.close()
+
+    rec = ledger["scene_records"][1]
+    assert rec["clip_valid"] is False, "SCENE_VALID_AFTER_REOPEN must be False"
+    assert coverage["scene_clip_coverage_complete"] is False, "COVERAGE_COMPLETE must be False"
+    assert coverage.get("finalizer_unlocked") is False, "FINALIZER_ENTRY must be blocked"
+    assert coverage["missing_scene_action"] != "concat"
+    assert coverage["missing_scene_action"] != "complete"
+
+
+# =========================================================================
+# 18. STALE VALIDATION FLAGS ACROSS ALL PATH REPRESENTATIONS FAIL CLOSED (R2 SECTION 1)
+# =========================================================================
+
+def test_pv07_stale_validation_flags_all_path_representations_fail_closed(tmp_path: Path) -> None:
+    """Historical validation booleans alone MUST NOT establish clip_valid or unlock finalizer."""
+    db_path = tmp_path / "pv07_path_representations.sqlite3"
+    valid_file1 = _create_mini_mp4(tmp_path / "valid_scene1.mp4", duration_sec=1.0)
+
+    # Case A: NO clip_path/output_path/local_path/raw_provider_video_path fields
+    # clip_valid=True, artifact_valid=True => MUST FAIL CLOSED
+    conn, job_id, project_id = _seed_pv07_test_job(db_path, scene_count=2)
+    job = queue.get_video_render_job(conn, job_id)
+    project = queue.get_video_project(conn, project_id)
+    result = json.loads(job["result_json"])
+    result["scene_tasks"] = [
+        {"scene_index": 1, "clip_path": str(valid_file1), "clip_valid": True, "status": "scene_clip_validated"},
+        {"scene_index": 2, "clip_valid": True, "artifact_valid": True, "status": "scene_clip_validated"},
+    ]
+    result["final_video_path"] = ""
+    result["final_mp4_path"] = ""
+    ledger = queue.product_video_scene_ledger_state(project, job, result)
+    coverage = queue.product_video_scene_coverage_state(project, job, result)
+    rec2 = ledger["scene_records"][2]
+    assert rec2["clip_valid"] is False, "Case A: MUST FAIL CLOSED when no path field provided"
+    assert rec2.get("scene_validation_verified") is False, "Case A: scene_validation_verified must be False"
+    assert coverage["scene_clip_coverage_complete"] is False, "Case A: coverage_complete must be False"
+    assert coverage.get("finalizer_unlocked") is False, "Case A: finalizer_unlocked must be False"
+    conn.close()
+
+    # Case B: output_path=""
+    # clip_valid=True, artifact_valid=True => MUST FAIL CLOSED
+    conn, job_id, project_id = _seed_pv07_test_job(db_path, scene_count=2)
+    job = queue.get_video_render_job(conn, job_id)
+    project = queue.get_video_project(conn, project_id)
+    result = json.loads(job["result_json"])
+    result["scene_tasks"] = [
+        {"scene_index": 1, "clip_path": str(valid_file1), "clip_valid": True, "status": "scene_clip_validated"},
+        {"scene_index": 2, "output_path": "", "clip_valid": True, "artifact_valid": True, "status": "scene_clip_validated"},
+    ]
+    result["final_video_path"] = ""
+    result["final_mp4_path"] = ""
+    ledger = queue.product_video_scene_ledger_state(project, job, result)
+    coverage = queue.product_video_scene_coverage_state(project, job, result)
+    rec2 = ledger["scene_records"][2]
+    assert rec2["clip_valid"] is False, "Case B: MUST FAIL CLOSED when output_path is empty"
+    assert rec2.get("scene_validation_verified") is False, "Case B: scene_validation_verified must be False"
+    assert coverage["scene_clip_coverage_complete"] is False, "Case B: coverage_complete must be False"
+    assert coverage.get("finalizer_unlocked") is False, "Case B: finalizer_unlocked must be False"
+    conn.close()
+
+    # Case C: local_path=""
+    # validation_passed=True => MUST FAIL CLOSED
+    conn, job_id, project_id = _seed_pv07_test_job(db_path, scene_count=2)
+    job = queue.get_video_render_job(conn, job_id)
+    project = queue.get_video_project(conn, project_id)
+    result = json.loads(job["result_json"])
+    result["scene_tasks"] = [
+        {"scene_index": 1, "clip_path": str(valid_file1), "clip_valid": True, "status": "scene_clip_validated"},
+        {"scene_index": 2, "local_path": "", "validation_passed": True, "status": "scene_clip_validated"},
+    ]
+    result["final_video_path"] = ""
+    result["final_mp4_path"] = ""
+    ledger = queue.product_video_scene_ledger_state(project, job, result)
+    coverage = queue.product_video_scene_coverage_state(project, job, result)
+    rec2 = ledger["scene_records"][2]
+    assert rec2["clip_valid"] is False, "Case C: MUST FAIL CLOSED when local_path is empty"
+    assert rec2.get("scene_validation_verified") is False, "Case C: scene_validation_verified must be False"
+    assert coverage["scene_clip_coverage_complete"] is False, "Case C: coverage_complete must be False"
+    assert coverage.get("finalizer_unlocked") is False, "Case C: finalizer_unlocked must be False"
+    conn.close()
+
+    # Case D: raw_provider_video_path=""
+    # output_validated=True => MUST FAIL CLOSED
+    conn, job_id, project_id = _seed_pv07_test_job(db_path, scene_count=2)
+    job = queue.get_video_render_job(conn, job_id)
+    project = queue.get_video_project(conn, project_id)
+    result = json.loads(job["result_json"])
+    result["scene_tasks"] = [
+        {"scene_index": 1, "clip_path": str(valid_file1), "clip_valid": True, "status": "scene_clip_validated"},
+        {"scene_index": 2, "raw_provider_video_path": "", "output_validated": True, "status": "scene_clip_validated"},
+    ]
+    result["final_video_path"] = ""
+    result["final_mp4_path"] = ""
+    ledger = queue.product_video_scene_ledger_state(project, job, result)
+    coverage = queue.product_video_scene_coverage_state(project, job, result)
+    rec2 = ledger["scene_records"][2]
+    assert rec2["clip_valid"] is False, "Case D: MUST FAIL CLOSED when raw_provider_video_path is empty"
+    assert rec2.get("scene_validation_verified") is False, "Case D: scene_validation_verified must be False"
+    assert coverage["scene_clip_coverage_complete"] is False, "Case D: coverage_complete must be False"
+    assert coverage.get("finalizer_unlocked") is False, "Case D: finalizer_unlocked must be False"
+    conn.close()
+
+    # Case E: each alias points to nonexistent file => MUST FAIL CLOSED
+    aliases = ("clip_path", "output_path", "local_path", "raw_provider_video_path")
+    for alias in aliases:
+        nonexistent = str(tmp_path / f"nonexistent_{alias}.mp4")
+        conn, job_id, project_id = _seed_pv07_test_job(db_path, scene_count=2)
+        job = queue.get_video_render_job(conn, job_id)
+        project = queue.get_video_project(conn, project_id)
+        result = json.loads(job["result_json"])
+        result["scene_tasks"] = [
+            {"scene_index": 1, "clip_path": str(valid_file1), "clip_valid": True, "status": "scene_clip_validated"},
+            {"scene_index": 2, alias: nonexistent, "clip_valid": True, "artifact_valid": True, "status": "scene_clip_validated"},
+        ]
+        result["final_video_path"] = ""
+        result["final_mp4_path"] = ""
+        ledger = queue.product_video_scene_ledger_state(project, job, result)
+        coverage = queue.product_video_scene_coverage_state(project, job, result)
+        rec2 = ledger["scene_records"][2]
+        assert rec2["clip_valid"] is False, f"Case E: {alias} pointing to nonexistent file must be False"
+        assert rec2.get("scene_validation_verified") is False, f"Case E: {alias} scene_validation_verified must be False"
+        assert coverage["scene_clip_coverage_complete"] is False, f"Case E: {alias} coverage_complete must be False"
+        assert coverage.get("finalizer_unlocked") is False, f"Case E: {alias} finalizer_unlocked must be False"
+        conn.close()
+
+    # Case F: each supported alias points to valid ffprobe-able MP4 => MAY PASS
+    for alias in aliases:
+        valid_file2 = _create_mini_mp4(tmp_path / f"valid_alias_{alias}.mp4", duration_sec=1.0)
+        conn, job_id, project_id = _seed_pv07_test_job(db_path, scene_count=2)
+        job = queue.get_video_render_job(conn, job_id)
+        project = queue.get_video_project(conn, project_id)
+        result = json.loads(job["result_json"])
+        result["scene_tasks"] = [
+            {"scene_index": 1, "clip_path": str(valid_file1), "clip_valid": True, "status": "scene_clip_validated"},
+            {"scene_index": 2, alias: str(valid_file2), "status": "scene_clip_validated"},
+        ]
+        result["final_video_path"] = ""
+        result["final_mp4_path"] = ""
+        ledger = queue.product_video_scene_ledger_state(project, job, result)
+        coverage = queue.product_video_scene_coverage_state(project, job, result)
+        rec2 = ledger["scene_records"][2]
+        assert rec2["clip_valid"] is True, f"Case F: {alias} pointing to valid MP4 must pass"
+        assert rec2.get("scene_validation_verified") is True, f"Case F: {alias} scene_validation_verified must be True"
+        assert coverage["scene_clip_coverage_complete"] is True, f"Case F: {alias} coverage_complete must be True"
+        assert coverage.get("finalizer_unlocked") is True, f"Case F: {alias} finalizer_unlocked must be True"
+        conn.close()
+
+
+# =========================================================================
+# 19. FINAL RECORD REPROBE LOCK OVERRIDES STALE CANDIDATE TRUTH (R2 SECTION 4)
+# =========================================================================
+
+def test_pv07_final_record_reprobe_lock_overrides_stale_candidate_truth(tmp_path: Path) -> None:
+    """Record-level lock must re-probe and fail closed even if earlier candidate or summary set clip_valid=True."""
+    db_path = tmp_path / "pv07_record_lock.sqlite3"
+    conn, job_id, project_id = _seed_pv07_test_job(db_path, scene_count=2)
+    job = queue.get_video_render_job(conn, job_id)
+    project = queue.get_video_project(conn, project_id)
+    result = json.loads(job["result_json"])
+
+    # Scene 1 has valid MP4
+    valid_file = _create_mini_mp4(tmp_path / "scene1_record_lock.mp4", duration_sec=1.0)
+    result["scene_tasks"][0]["clip_path"] = str(valid_file)
+    result["scene_tasks"][0]["clip_valid"] = True
+
+    # Scene 2 has stale candidate setting clip_valid=True, but missing file
+    result["scene_tasks"][1]["clip_path"] = str(tmp_path / "missing_scene2.mp4")
+    result["scene_tasks"][1]["clip_valid"] = True
+    result["scene_tasks"][1]["artifact_valid"] = True
+    # Also inject validation summary claiming ok without valid file
+    result["scene_clip_validation_by_index"] = {
+        "2": {"ok": True, "valid": True, "bytes": 1000000, "path": str(tmp_path / "missing_scene2.mp4")}
+    }
+
+    ledger = queue.product_video_scene_ledger_state(project, job, result)
+    coverage = queue.product_video_scene_coverage_state(project, job, result)
+    conn.close()
+
+    rec2 = ledger["scene_records"][2]
+    assert rec2["clip_valid"] is False, "Final record reprobe must fail closed on missing scene 2"
+    assert rec2.get("scene_validation_verified") is False, "scene_validation_verified must be False"
+    assert coverage["scene_clip_coverage_complete"] is False, "Full coverage must be False"
+    assert coverage.get("finalizer_unlocked") is False, "Finalizer must remain locked"
+
+
+# =========================================================================
+# 20. ARTIFACT DISAPPEARS AFTER DB REOPEN — ALTERNATE PATH ALIAS (R2 SECTION 6)
+# =========================================================================
+
+def test_pv07_artifact_disappears_after_db_reopen_alternate_alias(tmp_path: Path) -> None:
+    """Historical validation under alternate alias (output_path) must fail closed if file is deleted before reopen."""
+    db_path = tmp_path / "pv07_reopen_output_path_deleted.sqlite3"
+    clip_file = _create_mini_mp4(tmp_path / "scene_output_path_durable.mp4", duration_sec=1.0)
+    assert clip_file.is_file()
+
+    conn, job_id, project_id = _seed_pv07_test_job(db_path, scene_count=1)
+    job = queue.get_video_render_job(conn, job_id)
+    project = queue.get_video_project(conn, project_id)
+    result = json.loads(job["result_json"])
+
+    # Persist valid clip metadata into DB under output_path
+    result["scene_tasks"][0]["output_path"] = str(clip_file)
+    result["scene_tasks"][0]["clip_valid"] = True
+    result["scene_tasks"][0]["artifact_valid"] = True
+    result["scene_tasks"][0]["status"] = "scene_clip_validated"
+    conn.execute("UPDATE video_jobs SET result_json=? WHERE id=?", (json.dumps(result), job_id))
+    conn.commit()
+    conn.close()
+
+    # Delete the file
+    clip_file.unlink()
+    assert not clip_file.exists()
+
+    # Reopen DB and check
+    conn_reopen = sqlite3.connect(db_path)
+    conn_reopen.row_factory = sqlite3.Row
+    job_reopen = queue.get_video_render_job(conn_reopen, job_id)
+    project_reopen = queue.get_video_project(conn_reopen, project_id)
+    result_reopen = json.loads(job_reopen["result_json"])
+
+    ledger = queue.product_video_scene_ledger_state(project_reopen, job_reopen, result_reopen)
+    coverage = queue.product_video_scene_coverage_state(project_reopen, job_reopen, result_reopen)
+    conn_reopen.close()
+
+    rec = ledger["scene_records"][1]
+    assert rec["clip_valid"] is False, "SCENE_VALID_AFTER_REOPEN with output_path must be False"
+    assert coverage["scene_clip_coverage_complete"] is False, "COVERAGE_COMPLETE must be False"
+    assert coverage.get("finalizer_unlocked") is False, "FINALIZER_ENTRY must be blocked"
+
+
+# =========================================================================
+# 21. FINALIZER ENTRY — ACTUAL DISPATCH SEAM CALL COUNT = 0 (R2 SECTION 7)
+# =========================================================================
+
+def test_pv07_finalizer_entry_call_count_zero_on_invalid_scene(tmp_path: Path, monkeypatch) -> None:
+    """Actual finalizer dispatch/entry seam must NOT be invoked if any expected scene is invalid."""
+    finalizer_calls = []
+
+    def spy_finalize(**kwargs):
+        finalizer_calls.append(kwargs)
+        final_mp4 = Path(kwargs["workspace_dir"]) / "final_assembled.mp4"
+        final_mp4.parent.mkdir(parents=True, exist_ok=True)
+        _create_mini_mp4(final_mp4, duration_sec=2.0)
+        return {"ok": True, "final_video_path": str(final_mp4), "duration_sec": 2.0}
+
+    monkeypatch.setattr(connector, "finalize_multiscene_scene_clips", spy_finalize)
+
+    valid_clip1 = _create_mini_mp4(tmp_path / "scene1_valid.mp4", duration_sec=1.0)
+
+    # Sub-case 1: scene 2 has no local artifact (output_path="")
+    finalizer_calls.clear()
+    async def fake_render_no_artifact(scene, raw_path, _provider_order):
+        if int(scene.scene_id) == 1:
+            return {"ok": True, "scene_index": 1, "status": "SUCCESS", "clip_path": str(valid_clip1), "output_path": str(valid_clip1)}
+        return {"ok": True, "scene_index": 2, "status": "SUCCESS", "clip_valid": True, "output_path": ""}
+
+    monkeypatch.setattr(connector, "_render_scene_async", fake_render_no_artifact)
+    res = connector._run_per_scene_provider_orchestrator(
+        {"id": 901, "job_id": 901, "source": "product_video", "product_video": True, "scene_count": 2, "orchestration_mode": "per_scene_8s"},
+        str(tmp_path / "ws1"),
+        provider_order=["shopaikey_video"],
+        provider_events=[],
+        debug_results=[],
+    )
+    assert len(finalizer_calls) == 0, f"FINALIZER_CALL_COUNT must be 0 when scene 2 has no local artifact, got {len(finalizer_calls)}"
+    assert res.get("final_mp4_valid") is not True
+
+    # Sub-case 2: scene 2 points to missing media
+    finalizer_calls.clear()
+    missing_path = str(tmp_path / "scene2_missing.mp4")
+    async def fake_render_missing(scene, raw_path, _provider_order):
+        if int(scene.scene_id) == 1:
+            return {"ok": True, "scene_index": 1, "status": "SUCCESS", "clip_path": str(valid_clip1), "output_path": str(valid_clip1)}
+        return {"ok": True, "scene_index": 2, "status": "SUCCESS", "clip_path": missing_path, "output_path": missing_path}
+
+    monkeypatch.setattr(connector, "_render_scene_async", fake_render_missing)
+    res = connector._run_per_scene_provider_orchestrator(
+        {"id": 902, "job_id": 902, "source": "product_video", "product_video": True, "scene_count": 2, "orchestration_mode": "per_scene_8s"},
+        str(tmp_path / "ws2"),
+        provider_order=["shopaikey_video"],
+        provider_events=[],
+        debug_results=[],
+    )
+    assert len(finalizer_calls) == 0, f"FINALIZER_CALL_COUNT must be 0 when scene 2 points to missing media, got {len(finalizer_calls)}"
+    assert res.get("final_mp4_valid") is not True
+
+    # Sub-case 3: scene 2 has only stale validation flags
+    finalizer_calls.clear()
+    async def fake_render_stale(scene, raw_path, _provider_order):
+        if int(scene.scene_id) == 1:
+            return {"ok": True, "scene_index": 1, "status": "SUCCESS", "clip_path": str(valid_clip1), "output_path": str(valid_clip1)}
+        return {"ok": True, "scene_index": 2, "status": "scene_clip_validated", "clip_valid": True, "artifact_valid": True, "validation_passed": True}
+
+    monkeypatch.setattr(connector, "_render_scene_async", fake_render_stale)
+    res = connector._run_per_scene_provider_orchestrator(
+        {"id": 903, "job_id": 903, "source": "product_video", "product_video": True, "scene_count": 2, "orchestration_mode": "per_scene_8s"},
+        str(tmp_path / "ws3"),
+        provider_order=["shopaikey_video"],
+        provider_events=[],
+        debug_results=[],
+    )
+    assert len(finalizer_calls) == 0, f"FINALIZER_CALL_COUNT must be 0 when scene 2 has only stale flags, got {len(finalizer_calls)}"
+    assert res.get("final_mp4_valid") is not True
+
+    # Control case: both scenes have valid clips => finalizer invoked exactly once
+    finalizer_calls.clear()
+    valid_clip2 = _create_mini_mp4(tmp_path / "scene2_valid.mp4", duration_sec=1.0)
+    async def fake_render_both_valid(scene, raw_path, _provider_order):
+        c = valid_clip1 if int(scene.scene_id) == 1 else valid_clip2
+        return {"ok": True, "scene_index": int(scene.scene_id), "status": "SUCCESS", "clip_path": str(c), "output_path": str(c)}
+
+    monkeypatch.setattr(connector, "_render_scene_async", fake_render_both_valid)
+    res = connector._run_per_scene_provider_orchestrator(
+        {"id": 904, "job_id": 904, "source": "product_video", "product_video": True, "scene_count": 2, "orchestration_mode": "per_scene_8s"},
+        str(tmp_path / "ws4"),
+        provider_order=["shopaikey_video"],
+        provider_events=[],
+        debug_results=[],
+    )
+    assert len(finalizer_calls) == 1, f"FINALIZER_CALL_COUNT must be 1 when both scenes valid, got {len(finalizer_calls)}"
+    assert res.get("final_mp4_valid") is True
