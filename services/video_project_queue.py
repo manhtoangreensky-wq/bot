@@ -4788,31 +4788,44 @@ def _is_product_video_project(project: dict[str, Any]) -> bool:
 def product_video_engine_contract(product_type: Any) -> dict[str, Any]:
     """Resolve one product's immutable commercial-to-engine adapter contract."""
 
-    from services import video_tail9
+    from services import video_tail9, video_uifreeze1
 
-    requested = str(product_type or "video_ai_real").strip() or "video_ai_real"
+    requested = str(product_type or "").strip()
     commercial = video_tail9.commercial_contract(requested)
-    executor_product_type = str(commercial.get("executor_product_type") or requested)
-    route = video_final_output.route_for_product_type(executor_product_type)
+    executor_product_type = str(commercial.get("executor_product_type") or "")
+    route = video_final_output.route_for_product_type(executor_product_type) if executor_product_type else {}
     required_capability = str(
         route.get("provider_capability")
         or commercial.get("required_capability")
-        or "text_to_video"
+        or ""
     )
     if str(commercial.get("pricing_mode") or "") == "frame_video" or executor_product_type == "video_local_edit":
         required_capability = str(commercial.get("required_capability") or required_capability)
+
+    execution_enabled = bool(commercial.get("execution_enabled", False))
+    execution_blocker = str(commercial.get("execution_blocker") or "")
+    canonical_type = str(commercial.get("product_type") or "")
+    if not canonical_type:
+        execution_enabled = False
+        execution_blocker = execution_blocker or "product_owner_missing"
+    elif canonical_type in video_uifreeze1.PUBLIC_EXECUTION_LOCKED_PRODUCTS or requested in video_uifreeze1.PUBLIC_EXECUTION_LOCKED_PRODUCTS:
+        execution_enabled = False
+        execution_blocker = execution_blocker or f"{canonical_type or requested}_deferred"
+
+    resolved_product_type = str(route.get("product_type") or canonical_type) if canonical_type else ""
+
     return {
         "public_product_type": requested,
-        "product_type": str(route.get("product_type") or executor_product_type),
-        "executor_product_type": executor_product_type,
+        "product_type": resolved_product_type,
+        "executor_product_type": executor_product_type if canonical_type else "",
         "engine_route": str(commercial.get("engine_route") or route.get("engine_adapter") or ""),
         "engine_adapter": str(route.get("engine_adapter") or commercial.get("engine_route") or ""),
         "required_capability": required_capability,
         "package_capability": str(commercial.get("required_capability") or required_capability),
         "input_type": str(commercial.get("input_type") or ""),
         "worker_owner": str(commercial.get("worker_owner") or "product_video"),
-        "execution_enabled": bool(commercial.get("execution_enabled", True)),
-        "execution_blocker": str(commercial.get("execution_blocker") or ""),
+        "execution_enabled": execution_enabled,
+        "execution_blocker": execution_blocker,
     }
 
 
