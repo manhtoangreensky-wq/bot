@@ -340,7 +340,7 @@ def test_r18s14_expired_probation_lock_is_reclaimable(tmp_path):
     conn = _job135_db(tmp_path)
     payload = json.loads(conn.execute("SELECT result_json FROM video_jobs WHERE id=135").fetchone()[0])
     payload["probation_lock_expires_at"] = queue.now_text(NOW - timedelta(seconds=1))
-    conn.execute("UPDATE video_jobs SET result_json=? WHERE id=135", (json.dumps(payload),))
+    conn.execute("UPDATE video_jobs SET result_json=?, status='completed' WHERE id=135", (json.dumps(payload),))
     conn.commit()
     state = queue.product_video_probation_lock_state(conn, current_job_id=136, now=NOW)
     assert state["probation_active"] is False
