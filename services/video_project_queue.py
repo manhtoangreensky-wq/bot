@@ -8152,12 +8152,15 @@ def product_video_scene_ledger_state(
             record["phantom_result_prevented"] = True
             result_url = ""
         normalized_status_raw = status_raw.strip().lower().replace("-", "_").replace(" ", "_")
+        explicit_clip_path_in_source = "clip_path" in item or (isinstance(item.get("debug"), dict) and "clip_path" in item["debug"])
         if clip_path:
             try:
                 probe_res = video_local_validation.probe_video_file(clip_path)
                 clip_valid = bool(probe_res.get("ok"))
             except Exception:
                 clip_valid = False
+        elif explicit_clip_path_in_source:
+            clip_valid = False
         else:
             clip_valid = bool(
                 merged.get("clip_valid")
@@ -8254,6 +8257,7 @@ def product_video_scene_ledger_state(
                 "clip_path": clip_path,
                 "clip_bytes": clip_bytes,
                 "clip_valid": clip_valid,
+                "explicit_clip_path": explicit_clip_path_in_source,
                 "submitted_at": submitted_at,
                 "completed_at": completed_at,
                 "progress": max(0, min(100, progress)),
@@ -8625,6 +8629,12 @@ def product_video_scene_ledger_state(
             except Exception:
                 record["clip_valid"] = False
                 record["scene_validation_verified"] = False
+        elif any(t.get("explicit_clip_path") for t in record.get("task_candidates") or []):
+            record["clip_valid"] = False
+            record["scene_validation_verified"] = False
+            if _status_class(record.get("status")) == "succeeded" or record.get("status") == "scene_clip_validated":
+                record["status"] = "result_pending_validation"
+                record["result_processing_action"] = "download_and_validate"
 
     if scene_count == 1:
         single_final_path = str(result.get("final_video_path") or result.get("final_mp4_path") or "").strip()
@@ -8652,6 +8662,10 @@ def product_video_scene_ledger_state(
             records[1]["clip_valid"] = True
             records[1]["status"] = "scene_clip_validated"
             records[1]["progress"] = 100
+        else:
+            if not str(records[1].get("clip_path") or "").strip() or not records[1].get("clip_valid"):
+                records[1]["clip_valid"] = False
+                records[1]["scene_validation_verified"] = False
 
     if zero_task_watchdog.get("zero_task_progress_guard"):
         watchdog_states = dict(zero_task_watchdog.get("scene_dispatch_state_by_index") or {})
@@ -9002,6 +9016,11 @@ def product_video_scene_ledger_state(
         "scene_coverage_expected": scene_count,
         "scene_coverage_count": coverage_count,
         "scene_clip_coverage_complete": bool(coverage_complete),
+        "finalizer_unlocked": bool(
+            coverage_complete
+            and not unresolved_indexes
+            and all(records[idx]["clip_valid"] for idx in expected)
+        ),
         "scene_coverage_valid": bool(final_assembly_valid),
         "scene_coverage_valid_bool": bool(final_assembly_valid),
         "aggregate_job_status": aggregate_status,

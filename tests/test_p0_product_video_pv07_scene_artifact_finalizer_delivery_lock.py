@@ -48,12 +48,9 @@ def _create_mini_mp4(target_path: Path, duration_sec: float = 1.0) -> Path:
         "-shortest",
         str(target_path),
     ]
-    try:
-        res = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    except (FileNotFoundError, OSError):
-        pytest.skip("ffmpeg binary not found in environment")
+    res = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if res.returncode != 0:
-        pytest.skip(f"ffmpeg mini MP4 creation failed: {res.stderr}")
+        raise RuntimeError(f"ffmpeg mini MP4 creation failed: {res.stderr}")
     return target_path
 
 
@@ -832,3 +829,94 @@ def test_pv07_frame_video_finalizer_regression(tmp_path: Path) -> None:
     assert res_after.get("final_mp4_valid") is not True
     assert res_after.get("final_delivered") is not True
     assert res_after.get("delivery_succeeded") is not True
+
+
+# =========================================================================
+# 16. MISSING LOCAL ARTIFACT FAILS CLOSED (SECTION 3 FIRST-RED)
+# =========================================================================
+
+def test_pv07_missing_local_artifact_stale_validation_flag_fails_closed(tmp_path: Path) -> None:
+    """A stale validation flag alone must not unlock a finalizer run without local file."""
+    db_path = tmp_path / "pv07_missing_local_artifact.sqlite3"
+
+    for missing_path in ["", str(tmp_path / "nonexistent_clip.mp4")]:
+        conn, job_id, project_id = _seed_pv07_test_job(
+            db_path,
+            scene_count=1,
+            provider_task_completed=True,
+            all_clips_downloaded=True,
+        )
+        job = queue.get_video_render_job(conn, job_id)
+        project = queue.get_video_project(conn, project_id)
+        result = json.loads(job["result_json"])
+
+        # Inject stale validation flags on record but with empty or nonexistent clip_path
+        result["scene_tasks"][0]["clip_valid"] = True
+        result["scene_tasks"][0]["artifact_valid"] = True
+        result["scene_tasks"][0]["clip_bytes"] = 1048576
+        result["scene_tasks"][0]["status"] = "scene_clip_validated"
+        result["scene_tasks"][0]["clip_path"] = missing_path
+        result["final_video_path"] = ""
+        result["final_mp4_path"] = ""
+
+        ledger = queue.product_video_scene_ledger_state(project, job, result)
+        coverage = queue.product_video_scene_coverage_state(project, job, result)
+
+        rec = ledger["scene_records"][1]
+        assert rec["clip_valid"] is False, f"clip_valid must be False when path={missing_path!r}"
+        assert rec.get("scene_validation_verified") is False, "scene_validation_verified must be False"
+        assert coverage["scene_clip_coverage_complete"] is False, "coverage_complete must be False"
+        assert coverage.get("finalizer_unlocked") is False, "finalizer_unlocked must be False"
+
+
+# =========================================================================
+# 17. ARTIFACT DISAPPEARS AFTER DB REOPEN (SECTION 4 PROOF)
+# =========================================================================
+
+def test_pv07_artifact_disappears_after_db_reopen(tmp_path: Path) -> None:
+    """Historical validation metadata in DB must fail closed if file is deleted before finalizer."""
+    db_path = tmp_path / "pv07_reopen_artifact_deleted.sqlite3"
+    clip_file = _create_mini_mp4(tmp_path / "scene_durable.mp4", duration_sec=1.0)
+    assert clip_file.is_file()
+
+    conn, job_id, project_id = _seed_pv07_test_job(
+        db_path,
+        scene_count=1,
+        provider_task_completed=True,
+        all_clips_downloaded=True,
+    )
+    job = queue.get_video_render_job(conn, job_id)
+    project = queue.get_video_project(conn, project_id)
+    result = json.loads(job["result_json"])
+
+    # Persist valid clip metadata into DB
+    result["scene_tasks"][0]["clip_path"] = str(clip_file)
+    result["scene_tasks"][0]["clip_valid"] = True
+    result["scene_tasks"][0]["artifact_valid"] = True
+    result["scene_tasks"][0]["clip_bytes"] = clip_file.stat().st_size
+    result["scene_tasks"][0]["status"] = "scene_clip_validated"
+    conn.execute("UPDATE video_jobs SET result_json=? WHERE id=?", (json.dumps(result), job_id))
+    conn.commit()
+    conn.close()
+
+    # Now delete the physical clip file from filesystem
+    clip_file.unlink()
+    assert not clip_file.exists()
+
+    # Reopen DB and recompute ledger & coverage
+    conn_reopen = sqlite3.connect(db_path)
+    conn_reopen.row_factory = sqlite3.Row
+    job_reopen = queue.get_video_render_job(conn_reopen, job_id)
+    project_reopen = queue.get_video_project(conn_reopen, project_id)
+    result_reopen = json.loads(job_reopen["result_json"])
+
+    ledger = queue.product_video_scene_ledger_state(project_reopen, job_reopen, result_reopen)
+    coverage = queue.product_video_scene_coverage_state(project_reopen, job_reopen, result_reopen)
+    conn_reopen.close()
+
+    rec = ledger["scene_records"][1]
+    assert rec["clip_valid"] is False, "SCENE_VALID_AFTER_REOPEN must be False"
+    assert coverage["scene_clip_coverage_complete"] is False, "COVERAGE_COMPLETE must be False"
+    assert coverage.get("finalizer_unlocked") is False, "FINALIZER_ENTRY must be blocked"
+    assert coverage["missing_scene_action"] != "concat"
+    assert coverage["missing_scene_action"] != "complete"
