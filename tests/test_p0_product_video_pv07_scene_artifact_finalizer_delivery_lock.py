@@ -48,7 +48,10 @@ def _create_mini_mp4(target_path: Path, duration_sec: float = 1.0) -> Path:
         "-shortest",
         str(target_path),
     ]
-    res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    except (FileNotFoundError, OSError):
+        pytest.skip("ffmpeg binary not found in environment")
     if res.returncode != 0:
         pytest.skip(f"ffmpeg mini MP4 creation failed: {res.stderr}")
     return target_path

@@ -1886,7 +1886,7 @@ def finalize_multiscene_scene_clips(
                 or selected_sfx_paths
             ),
         )
-        shutil.move(staging_final, canonical_final)
+        os.replace(staging_final, canonical_final)
         final = canonical_final
     except Exception as exc:
         if os.path.isfile(staging_final):
