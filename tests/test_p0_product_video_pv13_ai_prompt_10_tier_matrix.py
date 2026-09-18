@@ -18,6 +18,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -56,6 +57,9 @@ EXPECTED_TIER_SECONDS = {
     1200: 8,
     1500: 10,
 }
+
+PUBLIC_RATIOS = ("9:16", "16:9", "1:1", "4:5")
+INTERNAL_COMPAT_TOKEN = "keep"
 
 
 def _pricing_snapshot(tier_id: int, scene_count: int = 1) -> dict[str, Any]:
@@ -211,6 +215,21 @@ def test_all_ten_tiers_prices_and_seconds_match_canonical_spec(tier_id: int) -> 
     )
 
 
+def test_ten_tier_pricing_aggregate_truth() -> None:
+    """Canonical one-scene total across 10 tiers is 5350 Xu; 2-scene aggregate is 9630 Xu.
+
+    The 2-scene aggregate is calculated from source pricing (video_multiscene_price),
+    not hardcoded prose.
+    """
+    assert sum(EXPECTED_TIER_PRICES.values()) == 5350
+
+    two_scene_aggregate = sum(
+        video_ai_real_pricing.video_multiscene_price(EXPECTED_TIER_PRICES[tier_id], scene_count=2)["total_xu"]
+        for tier_id in CANONICAL_10_TIERS
+    )
+    assert two_scene_aggregate == 9630
+
+
 # ==============================================================================
 # 2. PRODUCT ADAPTER TRUTH
 # ==============================================================================
@@ -294,17 +313,32 @@ def test_input_contract_empty_prompt_fails_closed() -> None:
     assert video_tail9.content_contract_ready(updated_state_ws) is False
 
 
-def test_input_contract_ratio_selection() -> None:
-    """Supported ratios pass; invalid ratios are rejected."""
-    for valid_ratio in ("9:16", "16:9", "1:1", "4:5", "keep"):
+def test_input_contract_public_ratios_pass() -> None:
+    """All 4 public customer ratios (9:16, 16:9, 1:1, 4:5) pass package compatibility."""
+    for valid_ratio in PUBLIC_RATIOS:
         compat = video_tail9.package_compatibility(
             "video_ai_prompt",
             scene_count=1,
             ratio=valid_ratio,
             quality_tier_id=400,
         )
-        assert compat["ok"] is True, f"Valid ratio {valid_ratio} failed: {compat}"
+        assert compat["ok"] is True, f"Public ratio {valid_ratio} failed: {compat}"
 
+
+def test_input_contract_internal_compat_token_keep() -> None:
+    """Internal compatibility token 'keep' is accepted by engine layer, but is NOT in PUBLIC_RATIOS."""
+    assert INTERNAL_COMPAT_TOKEN not in PUBLIC_RATIOS, "keep must not be exposed as a public user ratio"
+    compat = video_tail9.package_compatibility(
+        "video_ai_prompt",
+        scene_count=1,
+        ratio=INTERNAL_COMPAT_TOKEN,
+        quality_tier_id=400,
+    )
+    assert compat["ok"] is True, f"Internal compat token {INTERNAL_COMPAT_TOKEN} failed: {compat}"
+
+
+def test_input_contract_invalid_ratios_fail_closed() -> None:
+    """Non-supported ratios fail closed with ratio_not_supported."""
     for invalid_ratio in ("21:9", "invalid", "1080x1920", ""):
         compat_inv = video_tail9.package_compatibility(
             "video_ai_prompt",
@@ -449,6 +483,11 @@ def test_probation_lock_blocked_admission_when_held_by_other_job(tmp_path: Path)
         probation_lock_expires_at=expires_at,
     )
 
+    # Initial isolated SQLite table counts
+    projects_before = conn.execute("SELECT COUNT(*) FROM video_projects").fetchone()[0]
+    jobs_before = conn.execute("SELECT COUNT(*) FROM video_jobs").fetchone()[0]
+    outbox_before = conn.execute("SELECT COUNT(*) FROM video_dispatch_outbox").fetchone()[0]
+
     lock_state = queue.product_video_probation_lock_state(
         conn,
         provider_key="shopaikey_video",
@@ -464,23 +503,112 @@ def test_probation_lock_blocked_admission_when_held_by_other_job(tmp_path: Path)
     assert lock_state["probation_lock_owned_by_other_job"] is True
     assert lock_state["probation_lock_reject_reason"] == "probation_lock_owned_by_other_job"
 
+    # Verify zero side-effect mutations occurred
+    projects_after = conn.execute("SELECT COUNT(*) FROM video_projects").fetchone()[0]
+    jobs_after = conn.execute("SELECT COUNT(*) FROM video_jobs").fetchone()[0]
+    outbox_after = conn.execute("SELECT COUNT(*) FROM video_dispatch_outbox").fetchone()[0]
+
+    VIDEO_PROJECT_DELTA = projects_after - projects_before
+    VIDEO_JOB_DELTA = jobs_after - jobs_before
+    OUTBOX_DELTA = outbox_after - outbox_before
+
+    assert VIDEO_PROJECT_DELTA == 0
+    assert VIDEO_JOB_DELTA == 0
+    assert OUTBOX_DELTA == 0
+
     conn.close()
 
 
 # ==============================================================================
-# 6. ZERO MUTATION / ZERO PROVIDER SUBMISSION INVARIANTS
+# 6. ZERO MUTATION / ZERO PROVIDER SUBMISSION INVARIANTS (SPIES & DELTAS)
 # ==============================================================================
 
-def test_zero_mutation_safety_counters() -> None:
-    """Enforce compile-time safety invariants: all production mutation counters must be 0."""
-    PROVIDER_CALLS = 0
-    WALLET_MUTATIONS = 0
-    PRODUCTION_DB_MUTATIONS = 0
-    PRODUCTION_JOB_CREATIONS = 0
-    PRODUCTION_OUTBOX_CREATIONS = 0
+def test_zero_mutation_and_zero_provider_calls_with_canonical_spies(tmp_path: Path) -> None:
+    """Enforce runtime safety invariants with real spies/mocks around canonical seams and SQLite table deltas.
 
-    assert PROVIDER_CALLS == 0
-    assert WALLET_MUTATIONS == 0
-    assert PRODUCTION_DB_MUTATIONS == 0
-    assert PRODUCTION_JOB_CREATIONS == 0
-    assert PRODUCTION_OUTBOX_CREATIONS == 0
+    Verifies:
+    - PROVIDER_SUBMIT_CALLS = 0 (run_provider_generation)
+    - JOB_CREATION_DELTA = 0 (video_jobs table delta)
+    - OUTBOX_DELTA = 0 (video_dispatch_outbox table delta)
+    - WALLET_MUTATION_CALLS = 0 (product_video_delivery_charge_decision + deduct_dynamic_credit)
+    """
+    import bot
+
+    db_path = tmp_path / "pv13_zero_mutation_spies.db"
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    queue.ensure_video_project_queue_schema(conn)
+
+    now_vn = datetime.now(timezone(timedelta(hours=7)))
+    started_at = (now_vn - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+    expires_at = (now_vn + timedelta(minutes=25)).strftime("%Y-%m-%d %H:%M:%S")
+
+    _create_probation_job(
+        conn,
+        job_id=28,
+        project_id=32,
+        user_id=7126457028,
+        status="queued",
+        probation_result="pending",
+        probation_started_at=started_at,
+        probation_lock_expires_at=expires_at,
+    )
+
+    projects_before = conn.execute("SELECT COUNT(*) FROM video_projects").fetchone()[0]
+    jobs_before = conn.execute("SELECT COUNT(*) FROM video_jobs").fetchone()[0]
+    outbox_before = conn.execute("SELECT COUNT(*) FROM video_dispatch_outbox").fetchone()[0]
+
+    with patch("services.video_provider_router.run_provider_generation") as spy_provider_submit, \
+         patch("services.video_project_queue.enqueue_video_render_job") as spy_job_create, \
+         patch("services.video_project_queue._insert_product_video_dispatch_outbox_record") as spy_outbox_create, \
+         patch("services.video_project_queue.product_video_delivery_charge_decision") as spy_delivery_charge, \
+         patch("bot.deduct_dynamic_credit") as spy_wallet_deduct:
+
+        # 1. Run probation lock precheck
+        lock_state = queue.product_video_probation_lock_state(
+            conn,
+            provider_key="shopaikey_video",
+            current_job_id=999,
+            current_project_id=100,
+            now=now_vn,
+        )
+        assert lock_state["probation_active"] is True
+        assert lock_state["probation_lock_clear"] is False
+        assert lock_state["probation_lock_reject_reason"] == "probation_lock_owned_by_other_job"
+
+        # 2. Run package compatibility checks across all 10 tiers in preflight
+        for tier_id in CANONICAL_10_TIERS:
+            compat = video_tail9.package_compatibility(
+                "video_ai_prompt",
+                scene_count=1,
+                ratio="9:16",
+                quality_tier_id=tier_id,
+            )
+            assert compat["ok"] is True
+            assert compat["side_effects"]["provider_calls"] == 0
+            assert compat["side_effects"]["wallet_mutations"] == 0
+            assert compat["side_effects"]["job"] == 0
+
+        # Assert spies confirm ZERO calls made to canonical seams
+        PROVIDER_SUBMIT_CALLS = spy_provider_submit.call_count
+        WALLET_MUTATION_CALLS = spy_delivery_charge.call_count + spy_wallet_deduct.call_count
+
+        assert PROVIDER_SUBMIT_CALLS == 0
+        assert spy_job_create.call_count == 0
+        assert spy_outbox_create.call_count == 0
+        assert WALLET_MUTATION_CALLS == 0
+
+    # Assert isolated SQLite table deltas remain strictly 0
+    projects_after = conn.execute("SELECT COUNT(*) FROM video_projects").fetchone()[0]
+    jobs_after = conn.execute("SELECT COUNT(*) FROM video_jobs").fetchone()[0]
+    outbox_after = conn.execute("SELECT COUNT(*) FROM video_dispatch_outbox").fetchone()[0]
+
+    VIDEO_PROJECT_DELTA = projects_after - projects_before
+    VIDEO_JOB_DELTA = jobs_after - jobs_before
+    OUTBOX_DELTA = outbox_after - outbox_before
+
+    assert VIDEO_PROJECT_DELTA == 0
+    assert VIDEO_JOB_DELTA == 0
+    assert OUTBOX_DELTA == 0
+
+    conn.close()
