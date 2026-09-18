@@ -136854,7 +136854,10 @@ async def send_generated_video_artifact_for_delivery(
     caption: str = "",
     lang: str = "vi",
 ) -> dict:
-    if video_path and os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+    if video_path:
+        probe = video_local_validation.probe_video_file(video_path)
+        if not probe.get("ok"):
+            return {**generated_media_debug_payload(method="failed", file_size=0, limit_bytes=generated_media_delivery_limits()["generated_bytes"], reason="final_mp4_invalid"), "sent": False}
         return await send_generated_video_path_for_delivery(
             bot_client,
             chat_id,
@@ -242725,6 +242728,9 @@ async def send_generated_video_path_for_delivery(
     path = str(video_path or "")
     if not bot_client or not chat_id or not path or not os.path.exists(path) or os.path.getsize(path) <= 0:
         return {**generated_media_debug_payload(method="failed", file_size=0, limit_bytes=generated_media_delivery_limits()["generated_bytes"], reason="missing_file"), "sent": False}
+    probe = video_local_validation.probe_video_file(path)
+    if not probe.get("ok"):
+        return {**generated_media_debug_payload(method="failed", file_size=0, limit_bytes=generated_media_delivery_limits()["generated_bytes"], reason="final_mp4_invalid"), "sent": False}
 
     class _BotChatDelivery:
         async def reply_video(self, **kwargs):
