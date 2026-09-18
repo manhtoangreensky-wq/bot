@@ -111538,7 +111538,7 @@ def video_tail9_context(user_id: int, context) -> tuple[dict, str, dict]:
         and edit_host.get("source_file_id")
         and edit_host.get("inspection_complete")
     )
-    session = get_video_session(uid)
+    session = dict(get_video_session(uid) or {})
     draft = dict(session.get("draft") or {})
     session_product = str(session.get("product_id") or draft.get("product_id") or "").strip()
     persisted_tail = dict(draft.get(VIDEO_TAIL9_STATE_KEY) or {})
@@ -116258,7 +116258,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         product_type = str(tail.get("video_product_type") or "")
         deferred_runtime_product = product_type in VIDEO_TAIL9_DEFERRED_RUNTIME_PRODUCTS
         contract = video_tail9.commercial_contract(product_type)
-        if not contract.get("execution_enabled"):
+        if not contract.get("execution_enabled") or product_type in video_uifreeze1.PUBLIC_EXECUTION_LOCKED_PRODUCTS:
             if product_type in {"multi_scene_film", "video_long"}:
                 await video_tail9_answer_best_effort(query, "Video dài tập đang được nâng cấp.")
                 tail = video_tail9_prepare_submit_status(
