@@ -915,3 +915,52 @@ def receive_autopost_handoff_to_draft(
         created_at=now_ts,
     )
     return draft, "draft_created"
+
+
+def notify_autopost_producer_completion(
+    conn: sqlite3.Connection,
+    *,
+    source_product: str,
+    source_ref: int | str,
+    requesting_user_id: int,
+    purpose: str = "autopost",
+) -> dict[str, Any]:
+    """Canonical producer completion callback seam for AutoPost.
+
+    Invoked strictly after durable producer terminal truth is committed.
+    Passes only canonical identifiers, allowing AutoPost to re-resolve
+    authoritative producer truth from SQLite.
+
+    Invariants:
+    1. Zero failure coupling: AutoPost errors never fail or revert producer completion.
+    2. Zero external side effects: No live dispatch, no social calls, no wallet mutations.
+    3. Idempotent: Duplicate completion callbacks reuse the existing handoff receipt.
+    4. Diagnostic observability: Returns structured metadata without secret paths or tokens.
+    """
+    result: dict[str, Any] = {
+        "attempted": True,
+        "created_or_reused": False,
+        "handoff_id": None,
+        "blocker": None,
+    }
+    try:
+        receipt, reason = create_autopost_handoff_from_source(
+            conn,
+            source_product=source_product,
+            source_ref=source_ref,
+            requesting_user_id=requesting_user_id,
+            purpose=purpose,
+        )
+        if receipt:
+            result["created_or_reused"] = True
+            result["handoff_id"] = receipt.handoff_id
+            result["blocker"] = None
+        else:
+            result["created_or_reused"] = False
+            result["handoff_id"] = None
+            result["blocker"] = str(reason or "handoff_creation_failed")
+    except Exception as exc:
+        result["created_or_reused"] = False
+        result["handoff_id"] = None
+        result["blocker"] = f"autopost_exception:{type(exc).__name__}"
+    return result

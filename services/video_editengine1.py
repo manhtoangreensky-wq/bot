@@ -3184,6 +3184,25 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
     if not current:
         return {}
     if str(current.get("status") or "") in TERMINAL_JOB_STATES:
+        if (
+            current.get("status") in {"delivered", "charged"}
+            and current.get("receipt_state") == "created"
+        ):
+            try:
+                from services.autopost_asset_handoff import notify_autopost_producer_completion
+                current["autopost_handoff"] = notify_autopost_producer_completion(
+                    conn,
+                    source_product="video_edit",
+                    source_ref=int(current.get("id") or 0),
+                    requesting_user_id=int(current.get("user_id") or 0),
+                )
+            except Exception as exc:
+                current["autopost_handoff"] = {
+                    "attempted": True,
+                    "created_or_reused": False,
+                    "handoff_id": None,
+                    "blocker": f"autopost_callback_error:{type(exc).__name__}",
+                }
         return current
     delivery_owner, delivery_claim_attempt = _cleanup_delivery_binding(
         conn,
@@ -3508,7 +3527,29 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
             "UPDATE video_edit_outbox SET status='terminal_failed',terminal_reason=?,updated_at=? WHERE edit_job_id=?",
             (reason, now, int(current["id"])),
         )
-    return get_job_by_worker_id(conn, worker_job_id)
+    job = get_job_by_worker_id(conn, worker_job_id)
+    if (
+        job
+        and job.get("status") in {"delivered", "charged"}
+        and job.get("receipt_state") == "created"
+    ):
+        try:
+            from services.autopost_asset_handoff import notify_autopost_producer_completion
+            autopost_info = notify_autopost_producer_completion(
+                conn,
+                source_product="video_edit",
+                source_ref=int(job.get("id") or 0),
+                requesting_user_id=int(job.get("user_id") or 0),
+            )
+            job["autopost_handoff"] = autopost_info
+        except Exception as exc:
+            job["autopost_handoff"] = {
+                "attempted": True,
+                "created_or_reused": False,
+                "handoff_id": None,
+                "blocker": f"autopost_callback_error:{type(exc).__name__}",
+            }
+    return job
 
 
 def mark_charge_result(conn, *, worker_job_id: Any, ok: bool, charged_xu: int = 0, reason: str = "") -> dict[str, Any]:
