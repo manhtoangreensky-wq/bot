@@ -13,6 +13,7 @@ import inspect
 import json
 import hashlib
 import os
+import re
 import socket
 import sqlite3
 import uuid
@@ -10530,3 +10531,497 @@ def hydrate_video_job_payload(conn: sqlite3.Connection, job: dict[str, Any]) -> 
         "project": get_video_project(conn, project_id),
         "scenes": list_video_project_scenes(conn, project_id),
     }
+
+
+def _canonical_persisted_final_mp4_path(project: dict | None, res_payload: dict | None) -> str:
+    res = dict(res_payload or {})
+    proj = dict(project or {})
+    candidate = str(
+        res.get("final_video_path")
+        or res.get("final_mp4_path")
+        or res.get("output_path")
+        or res.get("video_path")
+        or proj.get("final_video_path")
+        or ""
+    ).strip()
+    if candidate:
+        return os.path.realpath(os.path.abspath(candidate))
+    return ""
+
+
+def reconcile_existing_final_mp4_ready(
+    conn: sqlite3.Connection,
+    *,
+    job_id: int,
+    project_id: int | None = None,
+    expected_final_mp4_sha256: str,
+    final_video_path: str | None = None,
+    owner_authorized: bool = False,
+) -> dict[str, Any]:
+    """Fail-closed completion-only reconciliation for terminal failed Product Video jobs.
+
+    Applies strictly to historical jobs (e.g. Job 28) that reached failed_no_charge due
+    to a completion seam despite possessing a valid, fully assembled final MP4.
+    Reconciles the job directly to final_mp4_ready_waiting_delivery without re-rendering,
+    re-submitting to providers, delivering to Telegram, or mutating wallet balances.
+    """
+    if not owner_authorized:
+        return {"ok": False, "mutation": 0, "reason": "owner_authorization_required"}
+
+    expected_sha = str(expected_final_mp4_sha256 or "").strip().lower()
+    if not expected_sha:
+        return {"ok": False, "mutation": 0, "reason": "expected_final_mp4_sha256_required"}
+    if not re.fullmatch(r"^[0-9a-f]{64}$", expected_sha):
+        return {"ok": False, "mutation": 0, "reason": "expected_final_mp4_sha256_invalid_hex"}
+
+    ensure_video_project_queue_schema(conn)
+    job = get_video_render_job(conn, int(job_id))
+    if not job:
+        return {"ok": False, "mutation": 0, "reason": "job_not_found"}
+
+    p_id = _as_int(project_id or job.get("project_id"), 0)
+    project = get_video_project(conn, p_id)
+    if not project:
+        return {"ok": False, "mutation": 0, "reason": "project_not_found"}
+
+    if _as_int(job.get("project_id"), 0) != p_id:
+        return {"ok": False, "mutation": 0, "reason": "project_binding_mismatch"}
+
+    if _as_int(job.get("user_id"), 0) != _as_int(project.get("user_id"), 0):
+        return {"ok": False, "mutation": 0, "reason": "user_binding_mismatch"}
+
+    job_status = str(job.get("status") or "").strip().lower()
+    project_status = str(project.get("status") or "").strip().lower()
+    res_payload = _json_loads(str(job.get("result_json") or ""), {})
+    if not isinstance(res_payload, dict):
+        res_payload = {}
+
+    # Canonical artifact path binding from durable Job/Project truth
+    canonical_path = _canonical_persisted_final_mp4_path(project, res_payload)
+    if not canonical_path:
+        return {"ok": False, "mutation": 0, "reason": "canonical_artifact_path_missing"}
+
+    if final_video_path is not None and str(final_video_path).strip():
+        caller_path = os.path.realpath(os.path.abspath(str(final_video_path).strip()))
+        if caller_path != canonical_path:
+            return {
+                "ok": False,
+                "mutation": 0,
+                "reason": "caller_path_override_forbidden",
+                "canonical_path": canonical_path,
+                "caller_path": caller_path,
+            }
+    bound_mp4_path = canonical_path
+
+    # Idempotency check: exact replay after successful reconciliation is a non-mutating no-op
+    already_reconciled = bool(
+        job_status == "completed"
+        and project_status == "completed"
+        and res_payload.get("completion_only_reconciliation_used")
+        and res_payload.get("terminal_state") == "final_mp4_ready"
+        and project.get("video_terminal_state") == "final_mp4_ready"
+        and str(res_payload.get("completion_only_reconciliation_sha256") or "").lower() == expected_sha
+    )
+    if already_reconciled:
+        return {
+            "ok": True,
+            "duplicate_prevented": True,
+            "already_reconciled": True,
+            "replay_state_delta": 0,
+            "mutation": 0,
+            "job": job,
+            "project": project,
+        }
+
+    # Strict Eligibility Contract
+    if str(job.get("job_type") or VIDEO_RENDER_JOB_TYPE) != VIDEO_RENDER_JOB_TYPE:
+        return {"ok": False, "mutation": 0, "reason": "not_product_video_job"}
+
+    if not _is_product_video_project(project):
+        return {"ok": False, "mutation": 0, "reason": "not_product_video_job"}
+
+    if job_status != "failed":
+        return {"ok": False, "mutation": 0, "reason": f"invalid_job_status_{job_status}"}
+
+    if project_status != "failed":
+        return {"ok": False, "mutation": 0, "reason": f"invalid_project_status_{project_status}"}
+
+    project_terminal = str(project.get("video_terminal_state") or "").strip().lower()
+    if project_terminal != "failed_no_charge":
+        return {"ok": False, "mutation": 0, "reason": f"invalid_project_terminal_state_{project_terminal}"}
+
+    outbox = get_product_video_dispatch_outbox(conn, job_id=int(job_id))
+    cancellation = product_video_recovery_cancellation_state(project, outbox)
+    if cancellation.get("cancelled"):
+        return {"ok": False, "mutation": 0, "reason": "job_cancelled"}
+
+    asset_pack = _json_loads(str(project.get("asset_pack_json") or ""), {})
+    if not isinstance(asset_pack, dict):
+        asset_pack = {}
+
+    recovery_existing_tasks_only = bool(
+        res_payload.get("recovery_existing_tasks_only")
+        or asset_pack.get("recovery_existing_tasks_only")
+        or job.get("recovery_existing_tasks_only")
+    )
+    if not recovery_existing_tasks_only:
+        return {"ok": False, "mutation": 0, "reason": "recovery_existing_tasks_only_required"}
+
+    video_delivered_at = project.get("video_delivered_at") or res_payload.get("video_delivered_at")
+    video_delivery_message_id = project.get("video_delivery_message_id") or res_payload.get("video_delivery_message_id")
+    delivered = bool(
+        video_delivered_at
+        or video_delivery_message_id
+        or res_payload.get("final_delivered")
+        or res_payload.get("final_mp4_delivered")
+        or res_payload.get("delivery_succeeded")
+    )
+    if delivered:
+        return {"ok": False, "mutation": 0, "reason": "already_delivered"}
+
+    charged_xu = _product_video_charge_first_int(
+        res_payload,
+        ("charged_amount_xu", "total_xu_charged", "charged_xu"),
+        0,
+    )
+    if charged_xu > 0 or res_payload.get("wallet_charge_recorded"):
+        return {"ok": False, "mutation": 0, "reason": "already_charged"}
+
+    has_active_lease = bool(job.get("locked_by") or job.get("locked_at") or job.get("lease_expires_at"))
+    if has_active_lease:
+        return {"ok": False, "mutation": 0, "reason": "active_lease_exists"}
+
+    # Final MP4 file existence, SHA256 binding, and physical media probe
+    if not os.path.isfile(bound_mp4_path):
+        return {"ok": False, "mutation": 0, "reason": "final_mp4_file_missing"}
+
+    try:
+        file_size = os.path.getsize(bound_mp4_path)
+    except OSError:
+        file_size = 0
+    if file_size == 0:
+        return {"ok": False, "mutation": 0, "reason": "final_mp4_empty"}
+
+    with open(bound_mp4_path, "rb") as f:
+        actual_sha256 = hashlib.sha256(f.read()).hexdigest().lower()
+
+    if actual_sha256 != expected_sha:
+        return {
+            "ok": False,
+            "mutation": 0,
+            "reason": "final_mp4_hash_mismatch",
+            "actual_sha256": actual_sha256,
+            "expected_sha256": expected_sha,
+        }
+
+    probe_res = video_local_validation.probe_video_file(bound_mp4_path)
+    if not probe_res.get("ok"):
+        return {
+            "ok": False,
+            "mutation": 0,
+            "reason": "final_mp4_media_invalid",
+            "probe_error": probe_res.get("error"),
+        }
+
+    duration_sec = float(probe_res.get("duration") or 0.0)
+    if duration_sec <= 0.0:
+        return {"ok": False, "mutation": 0, "reason": "invalid_duration"}
+
+    # Duration contract validation: persisted contract (if recorded)
+    persisted_contract = res_payload.get("final_duration_contract")
+    if isinstance(persisted_contract, str):
+        persisted_contract = _json_loads(persisted_contract, {})
+    if isinstance(persisted_contract, dict) and persisted_contract:
+        if not persisted_contract.get("ok"):
+            return {
+                "ok": False,
+                "mutation": 0,
+                "reason": "duration_contract_invalid",
+                "contract_reason": str(persisted_contract.get("reason") or "persisted_contract_failed"),
+            }
+        try:
+            persisted_actual = float(persisted_contract.get("actual_duration_seconds") or 0)
+        except (TypeError, ValueError):
+            persisted_actual = 0.0
+        if persisted_actual <= 0:
+            return {"ok": False, "mutation": 0, "reason": "duration_contract_invalid"}
+
+    # Duration contract validation: active probe contract via canonical product_video_duration_contract
+    active_duration_contract = product_video_duration_contract(project, res_payload, probe_res)
+    if not active_duration_contract.get("ok") or float(active_duration_contract.get("actual_duration_seconds") or 0) <= 0:
+        return {
+            "ok": False,
+            "mutation": 0,
+            "reason": "duration_contract_invalid",
+            "contract_reason": str(active_duration_contract.get("reason") or "duration_contract_failed"),
+            "expected_duration_seconds": active_duration_contract.get("expected_duration_seconds"),
+            "actual_duration_seconds": active_duration_contract.get("actual_duration_seconds"),
+        }
+
+    scene_count = max(1, _as_int(project.get("scene_count") or res_payload.get("scene_count"), 1))
+    coverage_count = max(0, _as_int(res_payload.get("scene_coverage_count") or res_payload.get("completed_scene_count"), 0))
+    missing_scenes = list(res_payload.get("missing_scene_indexes") or [])
+    scene_coverage_complete = bool(
+        res_payload.get("scene_clip_coverage_complete")
+        or (coverage_count >= scene_count and not missing_scenes)
+        or res_payload.get("final_reused_from_manifest")
+    )
+    if not scene_coverage_complete:
+        return {
+            "ok": False,
+            "mutation": 0,
+            "reason": "scene_coverage_incomplete",
+        }
+
+    concat_valid = bool(
+        res_payload.get("concat_output_valid")
+        or scene_count == 1
+        or res_payload.get("final_reused_from_manifest")
+    )
+    final_valid = bool(
+        res_payload.get("final_mp4_valid")
+        or res_payload.get("final_mp4_validated")
+    )
+    if not (concat_valid and final_valid):
+        return {
+            "ok": False,
+            "mutation": 0,
+            "reason": "final_assembly_invalid",
+        }
+
+    # CAS concurrency safety: lock immediately before applying mutation
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        cas_job = get_video_render_job(conn, int(job_id))
+        cas_project = get_video_project(conn, p_id)
+        if not cas_job or not cas_project:
+            conn.rollback()
+            return {"ok": False, "mutation": 0, "reason": "reconciliation_claim_lost"}
+
+        if _as_int(cas_job.get("project_id"), 0) != p_id:
+            conn.rollback()
+            return {"ok": False, "mutation": 0, "reason": "project_binding_mismatch"}
+
+        if _as_int(cas_job.get("user_id"), 0) != _as_int(cas_project.get("user_id"), 0):
+            conn.rollback()
+            return {"ok": False, "mutation": 0, "reason": "user_binding_mismatch"}
+
+        if str(cas_job.get("job_type") or VIDEO_RENDER_JOB_TYPE) != VIDEO_RENDER_JOB_TYPE:
+            conn.rollback()
+            return {"ok": False, "mutation": 0, "reason": "not_product_video_job"}
+
+        if not _is_product_video_project(cas_project):
+            conn.rollback()
+            return {"ok": False, "mutation": 0, "reason": "not_product_video_job"}
+
+        cas_job_status = str(cas_job.get("status") or "").strip().lower()
+        if cas_job_status != "failed":
+            conn.rollback()
+            return {"ok": False, "mutation": 0, "reason": "reconciliation_claim_lost", "drift_reason": "cas_job_status_drift_detected", "status": cas_job_status}
+
+        cas_project_status = str(cas_project.get("status") or "").strip().lower()
+        if cas_project_status != "failed":
+            conn.rollback()
+            return {"ok": False, "mutation": 0, "reason": "reconciliation_claim_lost", "drift_reason": "cas_project_status_drift_detected", "status": cas_project_status}
+
+        cas_project_terminal = str(cas_project.get("video_terminal_state") or "").strip().lower()
+        if cas_project_terminal != "failed_no_charge":
+            conn.rollback()
+            return {"ok": False, "mutation": 0, "reason": "reconciliation_claim_lost", "drift_reason": "cas_terminal_state_drift_detected", "terminal_state": cas_project_terminal}
+
+        cas_outbox = get_product_video_dispatch_outbox(conn, job_id=int(job_id))
+        cas_cancellation = product_video_recovery_cancellation_state(cas_project, cas_outbox)
+        if cas_cancellation.get("cancelled"):
+            conn.rollback()
+            return {"ok": False, "mutation": 0, "reason": "reconciliation_claim_lost", "drift_reason": "cas_job_cancelled"}
+
+        cas_result = _json_loads(str(cas_job.get("result_json") or ""), {})
+        if not isinstance(cas_result, dict):
+            cas_result = {}
+
+        cas_asset_pack = _json_loads(str(cas_project.get("asset_pack_json") or ""), {})
+        if not isinstance(cas_asset_pack, dict):
+            cas_asset_pack = {}
+
+        cas_recovery_mode = bool(
+            cas_result.get("recovery_existing_tasks_only")
+            or cas_asset_pack.get("recovery_existing_tasks_only")
+            or job.get("recovery_existing_tasks_only")
+        )
+        if not cas_recovery_mode:
+            conn.rollback()
+            return {"ok": False, "mutation": 0, "reason": "reconciliation_claim_lost", "drift_reason": "cas_recovery_mode_drift_detected"}
+
+        cas_delivered = bool(
+            cas_project.get("video_delivered_at")
+            or cas_project.get("video_delivery_message_id")
+            or cas_result.get("final_delivered")
+            or cas_result.get("final_mp4_delivered")
+            or cas_result.get("delivery_succeeded")
+        )
+        if cas_delivered:
+            conn.rollback()
+            return {"ok": False, "mutation": 0, "reason": "reconciliation_claim_lost", "drift_reason": "cas_delivery_drift_detected"}
+
+        cas_charged_xu = _product_video_charge_first_int(
+            cas_result,
+            ("charged_amount_xu", "total_xu_charged", "charged_xu"),
+            0,
+        )
+        if cas_charged_xu > 0 or cas_result.get("wallet_charge_recorded"):
+            conn.rollback()
+            return {"ok": False, "mutation": 0, "reason": "reconciliation_claim_lost", "drift_reason": "cas_charge_drift_detected"}
+
+        if cas_job.get("locked_by") or cas_job.get("locked_at") or cas_job.get("lease_expires_at"):
+            conn.rollback()
+            return {"ok": False, "mutation": 0, "reason": "reconciliation_claim_lost", "drift_reason": "cas_lease_drift_detected"}
+
+        cas_canonical_path = _canonical_persisted_final_mp4_path(cas_project, cas_result)
+        if not cas_canonical_path or cas_canonical_path != bound_mp4_path:
+            conn.rollback()
+            return {"ok": False, "mutation": 0, "reason": "reconciliation_claim_lost", "drift_reason": "cas_artifact_path_drift_detected"}
+
+        cas_scene_count = max(1, _as_int(cas_project.get("scene_count") or cas_result.get("scene_count"), 1))
+        cas_coverage_count = max(0, _as_int(cas_result.get("scene_coverage_count") or cas_result.get("completed_scene_count"), 0))
+        cas_missing = list(cas_result.get("missing_scene_indexes") or [])
+        cas_scene_coverage_complete = bool(
+            cas_result.get("scene_clip_coverage_complete")
+            or (cas_coverage_count >= cas_scene_count and not cas_missing)
+            or cas_result.get("final_reused_from_manifest")
+        )
+        if not cas_scene_coverage_complete:
+            conn.rollback()
+            return {"ok": False, "mutation": 0, "reason": "reconciliation_claim_lost", "drift_reason": "cas_scene_coverage_incomplete"}
+
+        cas_concat_valid = bool(
+            cas_result.get("concat_output_valid")
+            or scene_count == 1
+            or cas_result.get("final_reused_from_manifest")
+        )
+        cas_final_valid = bool(
+            cas_result.get("final_mp4_valid")
+            or cas_result.get("final_mp4_validated")
+        )
+        if not (cas_concat_valid and cas_final_valid):
+            conn.rollback()
+            return {"ok": False, "mutation": 0, "reason": "reconciliation_claim_lost", "drift_reason": "cas_assembly_invalid"}
+
+        cas_persisted_contract = cas_result.get("final_duration_contract")
+        if isinstance(cas_persisted_contract, str):
+            cas_persisted_contract = _json_loads(cas_persisted_contract, {})
+        if isinstance(cas_persisted_contract, dict) and cas_persisted_contract:
+            if not cas_persisted_contract.get("ok"):
+                conn.rollback()
+                return {"ok": False, "mutation": 0, "reason": "reconciliation_claim_lost", "drift_reason": "cas_duration_contract_invalid"}
+
+        # FILE TOCTOU RECHECK immediately before mutation
+        if not os.path.isfile(bound_mp4_path):
+            conn.rollback()
+            return {"ok": False, "mutation": 0, "reason": "reconciliation_claim_lost", "drift_reason": "artifact_toctou_missing"}
+
+        try:
+            toctou_size = os.path.getsize(bound_mp4_path)
+        except OSError:
+            toctou_size = 0
+        if toctou_size == 0:
+            conn.rollback()
+            return {"ok": False, "mutation": 0, "reason": "reconciliation_claim_lost", "drift_reason": "artifact_toctou_empty"}
+
+        with open(bound_mp4_path, "rb") as f:
+            toctou_sha = hashlib.sha256(f.read()).hexdigest().lower()
+        if toctou_sha != expected_sha:
+            conn.rollback()
+            return {
+                "ok": False,
+                "mutation": 0,
+                "reason": "reconciliation_claim_lost",
+                "drift_reason": "artifact_toctou_hash_mismatch",
+                "actual_sha256": toctou_sha,
+                "expected_sha256": expected_sha,
+            }
+
+        toctou_probe = video_local_validation.probe_video_file(bound_mp4_path)
+        if not toctou_probe.get("ok"):
+            conn.rollback()
+            return {"ok": False, "mutation": 0, "reason": "reconciliation_claim_lost", "drift_reason": "artifact_toctou_media_invalid"}
+
+        toctou_duration = float(toctou_probe.get("duration") or 0.0)
+        if toctou_duration <= 0.0:
+            conn.rollback()
+            return {"ok": False, "mutation": 0, "reason": "reconciliation_claim_lost", "drift_reason": "artifact_toctou_duration_invalid"}
+
+        toctou_duration_contract = product_video_duration_contract(cas_project, cas_result, toctou_probe)
+        if not toctou_duration_contract.get("ok") or float(toctou_duration_contract.get("actual_duration_seconds") or 0) <= 0:
+            conn.rollback()
+            return {"ok": False, "mutation": 0, "reason": "reconciliation_claim_lost", "drift_reason": "artifact_toctou_duration_contract_invalid"}
+
+        # STALE_PRELOCK_RESULT_OVERWRITE = 0: Build mutation from freshly re-read cas_result
+        now = now_text()
+        updated_result = {**cas_result}
+        updated_result.update({
+            "terminal_state": "final_mp4_ready",
+            "final_decision": "final_mp4_ready",
+            "final_mp4_valid": True,
+            "final_mp4_validated": True,
+            "final_video_path": bound_mp4_path,
+            "final_mp4_path": bound_mp4_path,
+            "final_duration_seconds": toctou_duration,
+            "final_duration_contract": toctou_duration_contract,
+            "expected_duration_seconds": toctou_duration_contract.get("expected_duration_seconds"),
+            "final_delivered": False,
+            "final_mp4_delivered": False,
+            "delivery_succeeded": False,
+            "no_charge": True,
+            "charge": 0,
+            "charged_xu": 0,
+            "wallet_charge_recorded": False,
+            "provider_submit_allowed": False,
+            "automatic_retry_allowed": False,
+            "automatic_resubmit_allowed": False,
+            "automatic_fallback_allowed": False,
+            "completion_only_reconciliation_used": True,
+            "completion_only_reconciliation_sha256": expected_sha,
+            "completion_only_reconciled_at": now,
+            "completion_only_reconciliation_source": "owner_completion_only_reconciliation",
+        })
+
+        conn.execute(
+            """UPDATE video_jobs SET
+                status = 'completed',
+                progress_percent = 95,
+                progress_message = 'final_mp4_ready_waiting_delivery',
+                last_error = NULL,
+                locked_by = NULL,
+                locked_at = NULL,
+                lease_expires_at = NULL,
+                result_json = ?,
+                updated_at = ?
+            WHERE id = ?""",
+            (_json_dumps(updated_result), now, int(job_id)),
+        )
+        conn.execute(
+            """UPDATE video_projects SET
+                status = 'completed',
+                final_video_path = ?,
+                video_terminal_state = 'final_mp4_ready',
+                video_artifact_hash = ?,
+                updated_at = ?
+            WHERE project_id = ?""",
+            (bound_mp4_path, expected_sha, now, p_id),
+        )
+        conn.commit()
+
+        return {
+            "ok": True,
+            "mutation": 1,
+            "terminal_state": "final_mp4_ready",
+            "final_mp4_ready": True,
+            "final_delivered": False,
+            "job": get_video_render_job(conn, int(job_id)),
+            "project": get_video_project(conn, p_id),
+            "artifact_sha256": expected_sha,
+            "final_duration_contract": toctou_duration_contract,
+        }
+    except Exception:
+        conn.rollback()
+        raise
