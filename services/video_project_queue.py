@@ -9866,6 +9866,22 @@ def complete_video_job(
         raise
 
 
+def _canonical_persisted_final_mp4_path(project: dict | None, res_payload: dict | None) -> str:
+    res = dict(res_payload or {})
+    proj = dict(project or {})
+    candidate = str(
+        res.get("final_video_path")
+        or res.get("final_mp4_path")
+        or res.get("output_path")
+        or res.get("video_path")
+        or proj.get("final_video_path")
+        or ""
+    ).strip()
+    if candidate:
+        return os.path.realpath(os.path.abspath(candidate))
+    return ""
+
+
 def note_video_delivery_result(
     conn: sqlite3.Connection,
     *,
@@ -9937,19 +9953,127 @@ def note_video_delivery_result(
     attempts = int(project.get("delivery_attempt_count") or 0) + 1
     if sent:
         delivery_message_id_value = str(delivery_message_id or success_message_id or "").strip()
+        if not delivery_message_id_value:
+            return {
+                "ok": False,
+                "sent": False,
+                "reason": "delivery_receipt_required",
+                "job": job,
+                "project": project,
+            }
+
         is_probation = str(payload.get("admission_mode") or "") == PRODUCT_VIDEO_PROBATION_ADMISSION_MODE
+
+        # ── Decision A: Customer Delivery Receipt Eligibility ──
+        scene_tasks = [
+            dict(item)
+            for item in (payload.get("scene_tasks") or payload.get("provider_scene_tasks") or [])
+            if isinstance(item, dict)
+        ]
+        coverage_expected = max(1, _as_int(payload.get("scene_coverage_expected") or payload.get("scenes_total") or project.get("scene_count"), 1))
+        coverage_count = max(0, _as_int(payload.get("scene_coverage_count") or payload.get("scenes_done") or payload.get("completed_scene_count"), 0))
+        missing_scenes = list(payload.get("missing_scene_indexes") or [])
+        scene_coverage_complete = bool(
+            payload.get("scene_clip_coverage_complete")
+            or (coverage_count >= coverage_expected and not missing_scenes)
+            or payload.get("final_reused_from_manifest")
+        )
+        if not scene_coverage_complete:
+            return {
+                "ok": False,
+                "sent": False,
+                "reason": "scene_coverage_required_before_delivery",
+                "job": job,
+                "project": project,
+            }
+
+        canonical_path = _canonical_persisted_final_mp4_path(project, payload)
+        final_path = str(
+            canonical_path
+            or payload.get("final_video_path")
+            or payload.get("final_mp4_path")
+            or project.get("final_video_path")
+            or ""
+        ).strip()
+
+        proven_remote_file_id = bool(
+            project.get("final_video_file_id")
+            and (project.get("video_delivery_message_id") or project.get("video_delivered_at"))
+        )
+
+        is_completion_only = bool(payload.get("completion_only_reconciliation_used"))
+        final_mp4_valid = False
+        rejection_reason = ""
+
+        if is_completion_only:
+            recon_sha = str(payload.get("completion_only_reconciliation_sha256") or "").strip().lower()
+            if not recon_sha or not re.fullmatch(r"^[0-9a-f]{64}$", recon_sha):
+                rejection_reason = "delivery_artifact_identity_mismatch"
+            else:
+                project_sha = str(project.get("video_artifact_hash") or "").strip().lower()
+                if project_sha and (not re.fullmatch(r"^[0-9a-f]{64}$", project_sha) or project_sha != recon_sha):
+                    rejection_reason = "delivery_artifact_identity_mismatch"
+
+            if not rejection_reason:
+                if not final_path or not os.path.isfile(final_path) or os.path.getsize(final_path) <= 0:
+                    rejection_reason = "delivery_artifact_identity_mismatch"
+                else:
+                    try:
+                        probe_res = video_local_validation.probe_video_file(final_path)
+                        probe_ok = bool(probe_res.get("ok"))
+                    except Exception:
+                        probe_ok = False
+
+                    if not probe_ok:
+                        rejection_reason = "delivery_artifact_identity_mismatch"
+                    else:
+                        try:
+                            with open(final_path, "rb") as f:
+                                actual_sha = hashlib.sha256(f.read()).hexdigest().lower()
+                            if actual_sha != recon_sha:
+                                rejection_reason = "delivery_artifact_identity_mismatch"
+                            else:
+                                final_mp4_valid = True
+                        except Exception:
+                            rejection_reason = "delivery_artifact_identity_mismatch"
+        else:
+            if final_path:
+                if os.path.isfile(final_path) and os.path.getsize(final_path) > 0:
+                    try:
+                        probe_res = video_local_validation.probe_video_file(final_path)
+                        final_mp4_valid = bool(probe_res.get("ok"))
+                    except Exception:
+                        final_mp4_valid = False
+            elif proven_remote_file_id:
+                final_mp4_valid = True
+
+        if not final_mp4_valid:
+            if rejection_reason:
+                return {
+                    "ok": False,
+                    "sent": False,
+                    "reason": rejection_reason,
+                    "job": job,
+                    "project": project,
+                }
+            if is_probation:
+                return {
+                    "ok": False,
+                    "sent": False,
+                    "reason": "probation_final_delivery_requirements_missing",
+                    "job": job,
+                    "project": project,
+                }
+            return {
+                "ok": False,
+                "sent": False,
+                "reason": "final_mp4_invalid_delivery_refused",
+                "job": job,
+                "project": project,
+            }
+
+        # ── Decision B: Provider Probation Promotion Eligibility ──
         if is_probation:
-            scene_tasks = [
-                dict(item)
-                for item in (payload.get("scene_tasks") or payload.get("provider_scene_tasks") or [])
-                if isinstance(item, dict)
-            ]
-            coverage_expected = max(1, _as_int(payload.get("scene_coverage_expected") or payload.get("scenes_total"), 1))
-            coverage_count = max(0, _as_int(payload.get("scene_coverage_count") or payload.get("scenes_done"), 0))
-            coverage_complete = bool(
-                payload.get("scene_clip_coverage_complete")
-                or coverage_count >= coverage_expected
-            )
             result_url_present = bool(
                 payload.get("result_url")
                 or payload.get("provider_result_url")
@@ -9957,9 +10081,9 @@ def note_video_delivery_result(
                 or any(item.get("result_url") or item.get("download_url") for item in scene_tasks)
             )
             promotion_eligible = bool(
-                coverage_complete
-                and (payload.get("final_mp4_valid") or payload.get("final_mp4_validated") or payload.get("artifact_valid_for_charge"))
-                and _as_int(payload.get("output_bytes") or payload.get("artifact_size"), 0) > 0
+                scene_coverage_complete
+                and (payload.get("final_mp4_valid") or payload.get("final_mp4_validated") or payload.get("artifact_valid_for_charge") or final_mp4_valid)
+                and (_as_int(payload.get("output_bytes") or payload.get("artifact_size"), 0) > 0 or (final_path and os.path.isfile(final_path) and os.path.getsize(final_path) > 0))
                 and result_url_present
                 and delivery_message_id_value
             )
@@ -9987,59 +10111,6 @@ def note_video_delivery_result(
                         "probation_result_validation_blocker": "valid_result_scene_coverage_final_mp4_delivery_message_required",
                     }
                 )
-                conn.execute(
-                    "UPDATE video_jobs SET result_json=?, updated_at=? WHERE id=?",
-                    (_json_dumps(payload), current, int(job_id)),
-                )
-                conn.commit()
-                return {
-                    "ok": False,
-                    "sent": False,
-                    "reason": "probation_final_delivery_requirements_missing",
-                    "job": get_video_render_job(conn, int(job_id)),
-                    "project": project,
-                }
-        else:
-            if not delivery_message_id_value:
-                return {
-                    "ok": False,
-                    "sent": False,
-                    "reason": "delivery_receipt_required",
-                    "job": job,
-                    "project": project,
-                }
-
-            final_path = str(
-                payload.get("final_video_path")
-                or payload.get("final_mp4_path")
-                or project.get("final_video_path")
-                or ""
-            ).strip()
-
-            proven_remote_file_id = bool(
-                project.get("final_video_file_id")
-                and (project.get("video_delivery_message_id") or project.get("video_delivered_at"))
-            )
-
-            if final_path:
-                try:
-                    probe_res = video_local_validation.probe_video_file(final_path)
-                    final_mp4_valid = bool(probe_res.get("ok"))
-                except Exception:
-                    final_mp4_valid = False
-            elif proven_remote_file_id:
-                final_mp4_valid = True
-            else:
-                final_mp4_valid = False
-
-            if not final_mp4_valid:
-                return {
-                    "ok": False,
-                    "sent": False,
-                    "reason": "final_mp4_invalid_delivery_refused",
-                    "job": job,
-                    "project": project,
-                }
         payload.update(
             {
                 "final_delivery_attempted": True,
@@ -10531,22 +10602,6 @@ def hydrate_video_job_payload(conn: sqlite3.Connection, job: dict[str, Any]) -> 
         "project": get_video_project(conn, project_id),
         "scenes": list_video_project_scenes(conn, project_id),
     }
-
-
-def _canonical_persisted_final_mp4_path(project: dict | None, res_payload: dict | None) -> str:
-    res = dict(res_payload or {})
-    proj = dict(project or {})
-    candidate = str(
-        res.get("final_video_path")
-        or res.get("final_mp4_path")
-        or res.get("output_path")
-        or res.get("video_path")
-        or proj.get("final_video_path")
-        or ""
-    ).strip()
-    if candidate:
-        return os.path.realpath(os.path.abspath(candidate))
-    return ""
 
 
 def reconcile_existing_final_mp4_ready(
