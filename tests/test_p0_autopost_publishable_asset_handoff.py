@@ -1,9 +1,11 @@
-"""Focused test suite for P0.AUTOPOST.PUBLISHABLE.ASSET.HANDOFF.CANONICAL.AUTHORITY.CLOSURE.
+"""Focused test suite for P0.AUTOPOST.PUBLISHABLE.ASSET.HANDOFF.FINALITY.TRUST.BOUNDARY.CLOSURE.
 
 Validates the canonical authority boundary for AutoPost Publishable Asset Handoff:
-- Test A: Forged PublishableAsset cannot create authoritative handoff (BLOCKED)
+- Test A: Forged PublishableAsset cannot create authoritative handoff (BLOCKED, no public trust bypass)
 - Test B: Forged HandoffReceipt cannot create publication draft (BLOCKED)
 - Test C: Product Video completion-only: project SHA != reconciliation SHA -> BLOCKED
+- Test C2: Product Video completion-only with non-completed job status (processing) -> BLOCKED
+- Test C3: Product Video completion-only with non-final project terminal state -> BLOCKED
 - Test D: Product Video canonical-path contract preserved (via _canonical_persisted_final_mp4_path)
 - Test E: Video Edit actual canonical delivered receipt (create_job + record_worker_update) -> PASS
 - Test F: Video Edit non-terminal / manual fake completed state -> BLOCKED
@@ -14,6 +16,7 @@ Validates the canonical authority boundary for AutoPost Publishable Asset Handof
 - Test K: Cross-owner parent lineage -> BLOCKED (cross_owner_lineage_forbidden)
 - Test L: Artifact changes between handoff and draft -> draft BLOCKED
 - Test M: Duplicate canonical source handoff -> same receipt reused (idempotency)
+- Test M2: Concurrent Idempotency -> unique conflict path caught and recovered, row count = 1
 - Test N: Valid receipt id loaded from DB -> PLANNED draft
 - Test O: Zero external/billing side effects remain
 """
@@ -21,6 +24,7 @@ Validates the canonical authority boundary for AutoPost Publishable Asset Handof
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import os
 import sqlite3
@@ -94,12 +98,26 @@ def mock_probe(monkeypatch):
 # =========================================================================
 
 def test_a_forged_publishable_asset_handoff_blocked(tmp_path, db_conn):
+    # 1. Proves no public free-form asset entrypoint exists (PUBLIC_FREEFORM_ASSET_AUTHORITY=NO)
+    assert not hasattr(aah, "create_autopost_handoff"), "Freeform create_autopost_handoff must not be public"
+
+    # 2. Proves no boolean trust bypass exists on public entrypoint (CANONICAL_PROOF_BOOLEAN_OVERRIDE=NO)
+    sig_pub = inspect.signature(aah.create_autopost_handoff_from_source)
+    assert "_canonical_proven" not in sig_pub.parameters
+    for param in sig_pub.parameters.values():
+        assert "proven" not in param.name
+        assert "trust" not in param.name
+
+    # 3. Proves private persistence helper has no boolean override
+    sig_priv = inspect.signature(aah._persist_canonical_autopost_handoff)
+    assert "_canonical_proven" not in sig_priv.parameters
+
+    # 4. Attempting to pass a free-form PublishableAsset to create_autopost_handoff_from_source is rejected
     raw_bytes = b"forged_media_content"
     video_file = _make_dummy_video(tmp_path, "forged.mp4", raw_bytes)
     sha = _sha256(raw_bytes)
     uid = 9999
 
-    # Caller creates arbitrary PublishableAsset with valid physical file and matching SHA
     forged_asset = aah.PublishableAsset(
         asset_id="ast_forged_123",
         owner_id=uid,
@@ -117,14 +135,14 @@ def test_a_forged_publishable_asset_handoff_blocked(tmp_path, db_conn):
         publish_eligible=True,
     )
 
-    # Calling internal handoff creation without canonical proven authority must be BLOCKED
-    receipt, reason = aah.create_autopost_handoff(
+    receipt, reason = aah.create_autopost_handoff_from_source(
         db_conn,
-        forged_asset,
+        source_product=forged_asset,  # invalid/unsupported product string
+        source_ref="fake_ref",
         requesting_user_id=uid,
     )
     assert receipt is None
-    assert reason == "forged_publishable_asset_handoff_blocked"
+    assert "unsupported_source_product" in reason
 
 
 # =========================================================================
@@ -197,6 +215,116 @@ def test_c_product_video_completion_only_sha_authority_drift_blocked(tmp_path, d
     )
     assert receipt is None
     assert reason == "completion_sha_authority_drift_blocked"
+
+
+# =========================================================================
+# Test C2: Completion-Only Non-Final Job State (Processing) -> BLOCKED
+# =========================================================================
+
+def test_c2_completion_only_processing_blocked(tmp_path, db_conn):
+    raw_bytes = b"actual_physical_rendered_mp4"
+    video_file = _make_dummy_video(tmp_path, "proc_pv.mp4", raw_bytes)
+    sha_a = _sha256(raw_bytes)
+    uid = 7126457028
+
+    proj = vpq.create_video_project(
+        db_conn,
+        user_id=uid,
+        profile_id="perfume_brand",
+        topic="Perfume",
+    )
+    pid = int(proj["project_id"])
+
+    job = vpq.enqueue_video_render_job(
+        db_conn,
+        project_id=pid,
+        user_id=uid,
+    )
+    jid = int(job.get("id") or job.get("job_id"))
+
+    # Project is completed, but Job is still processing
+    db_conn.execute(
+        """UPDATE video_projects SET
+           status='completed', video_terminal_state='final_mp4_ready',
+           final_video_path=?, video_artifact_hash=?
+           WHERE project_id=?""",
+        (str(video_file), sha_a, pid),
+    )
+
+    result_payload = {
+        "completion_only_reconciliation_used": True,
+        "completion_only_reconciliation_sha256": sha_a,
+        "final_video_path": str(video_file),
+    }
+    db_conn.execute(
+        "UPDATE video_jobs SET status='processing', result_json=? WHERE id=?",
+        (json.dumps(result_payload), jid),
+    )
+    db_conn.commit()
+
+    receipt, reason = aah.create_autopost_handoff_from_source(
+        db_conn,
+        source_product=aah.SourceProduct.VIDEO_PRODUCT,
+        source_ref=jid,
+        requesting_user_id=uid,
+    )
+    assert receipt is None
+    assert reason == "job_processing"
+
+
+# =========================================================================
+# Test C3: Completion-Only Non-Final Project State -> BLOCKED
+# =========================================================================
+
+def test_c3_completion_only_nonfinal_project_terminal_state_blocked(tmp_path, db_conn):
+    raw_bytes = b"actual_physical_rendered_mp4"
+    video_file = _make_dummy_video(tmp_path, "nonfinal_pv.mp4", raw_bytes)
+    sha_a = _sha256(raw_bytes)
+    uid = 7126457028
+
+    proj = vpq.create_video_project(
+        db_conn,
+        user_id=uid,
+        profile_id="perfume_brand",
+        topic="Perfume",
+    )
+    pid = int(proj["project_id"])
+
+    job = vpq.enqueue_video_render_job(
+        db_conn,
+        project_id=pid,
+        user_id=uid,
+    )
+    jid = int(job.get("id") or job.get("job_id"))
+
+    # Job is completed, but project terminal state is failed_no_charge
+    db_conn.execute(
+        """UPDATE video_projects SET
+           status='completed', video_terminal_state='failed_no_charge',
+           final_video_path=?, video_artifact_hash=?
+           WHERE project_id=?""",
+        (str(video_file), sha_a, pid),
+    )
+
+    result_payload = {
+        "completion_only_reconciliation_used": True,
+        "completion_only_reconciliation_sha256": sha_a,
+        "final_video_path": str(video_file),
+    }
+    db_conn.execute(
+        "UPDATE video_jobs SET status='completed', result_json=? WHERE id=?",
+        (json.dumps(result_payload), jid),
+    )
+    db_conn.commit()
+
+    receipt, reason = aah.create_autopost_handoff_from_source(
+        db_conn,
+        source_product=aah.SourceProduct.VIDEO_PRODUCT,
+        source_ref=jid,
+        requesting_user_id=uid,
+    )
+    assert receipt is None
+    assert "invalid_project_terminal_state" in reason
 
 
 # =========================================================================
@@ -345,7 +473,6 @@ def test_f_video_edit_non_terminal_manual_fake_completed_blocked(tmp_path, db_co
         requesting_user_id=uid,
     )
     assert receipt_fake is None
-    assert "video_edit_not_in_terminal_delivered_state" in reason_fake
     assert "video_edit_not_in_terminal_delivered_state" in reason_fake
 
 
@@ -571,6 +698,193 @@ def test_m_duplicate_canonical_source_handoff_idempotency(tmp_path, db_conn):
     assert r2 is not None
     assert s2 == "idempotent_existing_receipt"
     assert r1.handoff_id == r2.handoff_id
+
+
+# =========================================================================
+# Test M2: Concurrent Idempotency Unique Conflict Recovery
+# =========================================================================
+
+def test_m2_concurrent_idempotency_unique_conflict_path(tmp_path, db_conn, monkeypatch):
+    raw_bytes = b"race_idempotency_bytes"
+    vfile = _make_dummy_video(tmp_path, "race.mp4", raw_bytes)
+    sha = _sha256(raw_bytes)
+    uid = 8888
+
+    proj = vpq.create_video_project(db_conn, user_id=uid, profile_id="p", topic="T")
+    job = vpq.enqueue_video_render_job(db_conn, project_id=int(proj["project_id"]), user_id=uid)
+    jid = int(job["id"])
+
+    db_conn.execute(
+        "UPDATE video_projects SET status='completed', video_terminal_state='final_mp4_ready', final_video_path=?, video_artifact_hash=? WHERE project_id=?",
+        (str(vfile), sha, int(proj["project_id"])),
+    )
+    db_conn.execute(
+        "UPDATE video_jobs SET status='completed', result_json=? WHERE id=?",
+        (json.dumps({"final_video_path": str(vfile)}), jid),
+    )
+    db_conn.commit()
+
+    # Call 1: normal creation
+    r1, s1 = aah.create_autopost_handoff_from_source(
+        db_conn,
+        source_product=aah.SourceProduct.VIDEO_PRODUCT,
+        source_ref=jid,
+        requesting_user_id=uid,
+    )
+    assert s1 == "created"
+    assert r1 is not None
+
+    # Call 2: simulate concurrent SELECT-then-INSERT race by forcing the initial SELECT
+    # to miss (return None), simulating another worker inserting before this worker's INSERT.
+    class ConnectionProxy:
+        def __init__(self, real_conn):
+            self._real = real_conn
+            self.first_select = True
+
+        def cursor(self):
+            real_cur = self._real.cursor()
+            proxy = self
+
+            class CursorProxy:
+                def execute(self, sql, params=()):
+                    if "SELECT * FROM autopost_handoff_receipts" in sql and proxy.first_select:
+                        proxy.first_select = False
+                        return real_cur.execute("SELECT * FROM autopost_handoff_receipts WHERE 1=0")
+                    return real_cur.execute(sql, params)
+
+                def fetchone(self):
+                    return real_cur.fetchone()
+
+                def fetchall(self):
+                    return real_cur.fetchall()
+
+                def __getattr__(self, name):
+                    return getattr(real_cur, name)
+
+            return CursorProxy()
+
+        def execute(self, sql, params=()):
+            if "SELECT * FROM autopost_handoff_receipts" in sql and self.first_select:
+                self.first_select = False
+                return self._real.execute("SELECT * FROM autopost_handoff_receipts WHERE 1=0")
+            return self._real.execute(sql, params)
+
+        def commit(self):
+            return self._real.commit()
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+    proxy_conn = ConnectionProxy(db_conn)
+
+    r2, s2 = aah.create_autopost_handoff_from_source(
+        proxy_conn,
+        source_product=aah.SourceProduct.VIDEO_PRODUCT,
+        source_ref=jid,
+        requesting_user_id=uid,
+    )
+    assert s2 == "idempotent_existing_receipt"
+    assert r2 is not None
+    assert r2.handoff_id == r1.handoff_id
+
+    # Verify exact row count is 1
+    count = db_conn.execute("SELECT count(*) FROM autopost_handoff_receipts").fetchone()[0]
+    assert count == 1
+
+
+# =========================================================================
+# Test M3: Concurrent Draft Idempotency Unique Conflict Recovery
+# =========================================================================
+
+def test_m3_concurrent_draft_idempotency_unique_conflict_path(tmp_path, db_conn):
+    raw_bytes = b"draft_race_bytes"
+    vfile = _make_dummy_video(tmp_path, "race_draft.mp4", raw_bytes)
+    sha = _sha256(raw_bytes)
+    uid = 9999
+
+    proj = vpq.create_video_project(db_conn, user_id=uid, profile_id="p", topic="T")
+    job = vpq.enqueue_video_render_job(db_conn, project_id=int(proj["project_id"]), user_id=uid)
+    jid = int(job["id"])
+
+    db_conn.execute(
+        "UPDATE video_projects SET status='completed', video_terminal_state='final_mp4_ready', final_video_path=?, video_artifact_hash=? WHERE project_id=?",
+        (str(vfile), sha, int(proj["project_id"])),
+    )
+    db_conn.execute(
+        "UPDATE video_jobs SET status='completed', result_json=? WHERE id=?",
+        (json.dumps({"final_video_path": str(vfile)}), jid),
+    )
+    db_conn.commit()
+
+    receipt, _ = aah.create_autopost_handoff_from_source(
+        db_conn,
+        source_product=aah.SourceProduct.VIDEO_PRODUCT,
+        source_ref=jid,
+        requesting_user_id=uid,
+    )
+    assert receipt is not None
+
+    d1, s1 = aah.receive_autopost_handoff_to_draft(
+        db_conn,
+        handoff_id=receipt.handoff_id,
+        requesting_user_id=uid,
+    )
+    assert s1 == "draft_created"
+    assert d1 is not None
+
+    class DraftConnectionProxy:
+        def __init__(self, real_conn):
+            self._real = real_conn
+            self.first_select = True
+
+        def cursor(self):
+            real_cur = self._real.cursor()
+            proxy = self
+
+            class CursorProxy:
+                def execute(self, sql, params=()):
+                    if "SELECT * FROM autopost_publication_drafts" in sql and proxy.first_select:
+                        proxy.first_select = False
+                        return real_cur.execute("SELECT * FROM autopost_publication_drafts WHERE 1=0")
+                    return real_cur.execute(sql, params)
+
+                def fetchone(self):
+                    return real_cur.fetchone()
+
+                def fetchall(self):
+                    return real_cur.fetchall()
+
+                def __getattr__(self, name):
+                    return getattr(real_cur, name)
+
+            return CursorProxy()
+
+        def execute(self, sql, params=()):
+            if "SELECT * FROM autopost_publication_drafts" in sql and self.first_select:
+                self.first_select = False
+                return self._real.execute("SELECT * FROM autopost_publication_drafts WHERE 1=0")
+            return self._real.execute(sql, params)
+
+        def commit(self):
+            return self._real.commit()
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+    proxy_conn = DraftConnectionProxy(db_conn)
+
+    d2, s2 = aah.receive_autopost_handoff_to_draft(
+        proxy_conn,
+        handoff_id=receipt.handoff_id,
+        requesting_user_id=uid,
+    )
+    assert s2 == "idempotent_existing_draft"
+    assert d2 is not None
+    assert d2.draft_id == d1.draft_id
+
+    # Verify exact draft count is 1
+    count = db_conn.execute("SELECT count(*) FROM autopost_publication_drafts").fetchone()[0]
+    assert count == 1
 
 
 # =========================================================================

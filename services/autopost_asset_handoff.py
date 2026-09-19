@@ -10,16 +10,25 @@ without coupling AutoPost to the internal implementation of those processors.
 
 Core Invariants:
 1. AUTOPOST != VIDEO_PROCESSOR
-2. Authoritative Entrypoint Re-Resolves Source Truth:
+2. Authoritative Public Entrypoint Re-Resolves Source Truth:
    create_autopost_handoff_from_source(conn, source_product, source_ref, requesting_user_id)
-3. Forged PublishableAsset / HandoffReceipt BLOCKED
-4. PV12 Identity Contract: completion-only SHA authority agreement (Fail-Closed on drift)
-5. Video Edit Canonical Terminal Contract: delivered/charged with created receipt
-6. SubDub / Existing Video: Guarded (Fail-Closed on unavailable canonical storage authority)
-7. Storage Reference Truth: Only actual producer remote IDs (no fabricated schemes)
-8. Durable DB Receipt Authority: Draft creation loads receipt from DB & revalidates artifact
-9. Lineage Owner Scoping: Cross-owner parent lineage strictly forbidden
-10. Initial AutoPost Publication Draft: PLANNED (Zero live dispatch, zero billing)
+3. Shared Producer Terminal Completion Gate:
+   All paths (both completion-only and standard) require terminal completed state:
+   job.status == 'completed' AND project.status == 'completed' AND
+   project.video_terminal_state in {'final_mp4_ready', 'final_delivered', 'delivered'}
+4. No Boolean Trust Bypass:
+   Caller-created PublishableAsset cannot create a handoff by passing a trust flag.
+   Internal persistence helper _persist_canonical_autopost_handoff is private and private-only.
+5. PV12 Identity Contract:
+   Completion-only reconciliation SHA authority agreement (Fail-Closed on drift)
+6. Video Edit Canonical Terminal Contract:
+   delivered/charged with created receipt and valid physical MP4
+7. SubDub / Existing Video: Guarded (Fail-Closed on unavailable canonical storage authority)
+8. Storage Reference Truth: Only actual producer remote IDs (no fabricated schemes)
+9. Durable DB Receipt Authority: Draft creation loads receipt from DB & revalidates artifact
+10. Lineage Owner Scoping: Cross-owner parent lineage strictly forbidden
+11. Concurrent Idempotency: SQLite-safe deterministic UNIQUE conflict recovery
+12. Initial AutoPost Publication Draft: PLANNED (Zero live dispatch, zero billing)
 """
 
 from __future__ import annotations
@@ -179,7 +188,7 @@ def ensure_autopost_handoff_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         """CREATE TABLE IF NOT EXISTS autopost_publication_drafts (
             draft_id TEXT PRIMARY KEY,
-            handoff_id TEXT NOT NULL,
+            handoff_id TEXT NOT NULL UNIQUE,
             asset_id TEXT NOT NULL,
             owner_id INTEGER NOT NULL,
             caption_draft TEXT NOT NULL,
@@ -232,7 +241,10 @@ def adapt_product_video_output(
     """Canonical resolver for Video Product completed output.
 
     Enforces finalizer invariants:
-    - Must be a completed job with valid terminal state
+    - Shared terminal completion gate: applies to ALL paths (both completion-only and standard)
+      job.status == 'completed'
+      project.status == 'completed'
+      project.video_terminal_state in {'final_mp4_ready', 'final_delivered', 'delivered'}
     - Reject queued, processing, failed, cancelled, or intermediate scene clips
     - Strict owner verification
     - Path resolved via _canonical_persisted_final_mp4_path
@@ -268,7 +280,28 @@ def adapt_product_video_output(
     if owner_id != int(requesting_user_id):
         return None, "owner_mismatch"
 
-    # 2. Intermediate Clip Rejection
+    # 2. Shared Terminal Completion State Validation (applies to ALL paths before branching)
+    job_status = str(job.get("status") or "").strip().lower()
+    if job_status in {"queued", "submitted", "pending"}:
+        return None, "job_queued"
+    if job_status == "processing":
+        return None, "job_processing"
+    if job_status in {"failed", "error"}:
+        return None, "job_failed"
+    if job_status == "cancelled":
+        return None, "job_cancelled"
+    if job_status != "completed":
+        return None, f"job_status_not_completed:{job_status}"
+
+    proj_status = str(project.get("status") or "").strip().lower()
+    if proj_status != "completed":
+        return None, f"project_status_not_completed:{proj_status}"
+
+    terminal_state = str(project.get("video_terminal_state") or "").strip().lower()
+    if terminal_state not in {"final_mp4_ready", "final_delivered", "delivered"}:
+        return None, f"invalid_project_terminal_state:{terminal_state}"
+
+    # 3. Intermediate Clip Rejection
     result_payload = {}
     if job.get("result_json"):
         try:
@@ -283,20 +316,20 @@ def adapt_product_video_output(
     if result_payload.get("is_intermediate_clip") or result_payload.get("scene_index") is not None:
         return None, "intermediate_scene_clip_rejected"
 
-    # 3. Canonical Path Resolution (Hardened PV12 resolver)
+    # 4. Canonical Path Resolution (Hardened PV12 resolver)
     final_path = _canonical_persisted_final_mp4_path(project, result_payload)
     if not final_path:
         return None, "canonical_artifact_path_missing"
 
-    # 4. Media Integrity Probe
+    # 5. Media Integrity Probe
     valid, probe, reason = _validate_final_mp4(final_path)
     if not valid:
         return None, reason
 
-    # 5. Physical SHA256 computation
+    # 6. Physical SHA256 computation
     physical_sha = _compute_sha256(final_path)
 
-    # 6. PV12 Identity Contract Check
+    # 7. PV12 Identity Contract Check
     is_completion_only = bool(result_payload.get("completion_only_reconciliation_used"))
     if is_completion_only:
         recon_sha = str(result_payload.get("completion_only_reconciliation_sha256") or "").strip().lower()
@@ -314,23 +347,6 @@ def adapt_product_video_output(
         if physical_sha != recon_sha:
             return None, "physical_sha_mismatch"
     else:
-        # Standard completion state checks
-        job_status = str(job.get("status") or "").strip().lower()
-        if job_status in {"queued", "submitted", "pending"}:
-            return None, "job_queued"
-        if job_status == "processing":
-            return None, "job_processing"
-        if job_status in {"failed", "error"}:
-            return None, "job_failed"
-        if job_status == "cancelled":
-            return None, "job_cancelled"
-        if job_status != "completed":
-            return None, f"job_status_not_completed:{job_status}"
-
-        terminal_state = str(project.get("video_terminal_state") or "").strip().lower()
-        if terminal_state not in {"final_mp4_ready", "final_delivered", "delivered"}:
-            return None, f"invalid_project_terminal_state:{terminal_state}"
-
         persisted_sha = str(
             project.get("video_artifact_hash")
             or result_payload.get("video_artifact_hash")
@@ -564,7 +580,7 @@ def create_autopost_handoff_from_source(
     4. Verify owner binding and terminal completion state
     5. Resolve canonical artifact path & expected hash
     6. Verify physical probe & hash
-    7. Persist idempotent handoff receipt
+    7. Persist idempotent handoff receipt via private persistence helper
     """
     ensure_autopost_handoff_schema(conn)
 
@@ -625,35 +641,28 @@ def create_autopost_handoff_from_source(
     if not asset:
         return None, err
 
-    # 4. Delegate to internal persistence with canonical authority proven
-    return create_autopost_handoff(
+    # 4. Delegate to private persistence helper
+    return _persist_canonical_autopost_handoff(
         conn,
         asset,
-        requesting_user_id,
+        requesting_user_id=requesting_user_id,
         purpose=norm_purpose,
-        _canonical_proven=True,
     )
 
 
-def create_autopost_handoff(
+def _persist_canonical_autopost_handoff(
     conn: sqlite3.Connection,
     asset: PublishableAsset,
     requesting_user_id: int,
-    *,
     purpose: str = "autopost",
-    _canonical_proven: bool = False,
 ) -> tuple[Optional[HandoffReceipt], str]:
-    """Internal handoff persistence boundary.
+    """Private persistence helper for canonical handoff receipts.
 
-    Guards against forged PublishableAsset objects created outside canonical resolution.
+    Internal only: cannot be reached from client-derived data.
+    Enforces SQLite-safe concurrent idempotency handling via IntegrityError recovery.
     """
     ensure_autopost_handoff_schema(conn)
 
-    # Gate: Reject free-form caller-created asset objects
-    if not _canonical_proven:
-        return None, "forged_publishable_asset_handoff_blocked"
-
-    # Purpose validation
     norm_purpose = str(purpose or "").strip().lower()
     if norm_purpose not in SUPPORTED_PURPOSES:
         return None, "unsupported_purpose"
@@ -674,19 +683,21 @@ def create_autopost_handoff(
         if current_physical_sha != asset.artifact_sha256:
             return None, "artifact_replacement_detected"
 
-    # 4. Idempotency Check
     cur = conn.cursor()
-    cur.execute(
-        """SELECT * FROM autopost_handoff_receipts
-           WHERE owner_id=? AND asset_id=? AND artifact_sha256=? AND purpose=?
-           LIMIT 1""",
-        (asset.owner_id, asset.asset_id, asset.artifact_sha256, norm_purpose),
-    )
-    existing_row = cur.fetchone()
-    if existing_row:
-        existing = dict(existing_row)
+
+    def _load_existing_receipt() -> Optional[HandoffReceipt]:
+        cur.execute(
+            """SELECT * FROM autopost_handoff_receipts
+               WHERE owner_id=? AND asset_id=? AND artifact_sha256=? AND purpose=?
+               LIMIT 1""",
+            (asset.owner_id, asset.asset_id, asset.artifact_sha256, norm_purpose),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        existing = dict(row)
         lineage = json.loads(existing.get("lineage_json") or "[]")
-        receipt = HandoffReceipt(
+        return HandoffReceipt(
             handoff_id=existing["handoff_id"],
             asset_id=existing["asset_id"],
             owner_id=existing["owner_id"],
@@ -700,7 +711,11 @@ def create_autopost_handoff(
             created_at=existing["created_at"],
             expires_at=existing.get("expires_at"),
         )
-        return receipt, "idempotent_existing_receipt"
+
+    # 4. Idempotency Check (SELECT check before insert)
+    existing_receipt = _load_existing_receipt()
+    if existing_receipt:
+        return existing_receipt, "idempotent_existing_receipt"
 
     # 5. Build Owner-Scoped Lineage Chain
     lineage = [asset.asset_id]
@@ -725,36 +740,43 @@ def create_autopost_handoff(
                 except Exception:
                     pass
 
-    # 6. Create Durable Receipt
+    # 6. Create Durable Receipt (with concurrent UNIQUE conflict recovery)
     handoff_hash = hashlib.sha256(
         f"{asset.owner_id}:{asset.asset_id}:{asset.artifact_sha256}:{norm_purpose}".encode("utf-8")
     ).hexdigest()[:24]
     handoff_id = f"hnd_{handoff_hash}"
     now_ts = _now_iso()
 
-    conn.execute(
-        """INSERT INTO autopost_handoff_receipts (
-            handoff_id, asset_id, owner_id, source_product, source_job_id,
-            artifact_sha256, purpose, status, parent_asset_id, lineage_json,
-            asset_snapshot_json, created_at, expires_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (
-            handoff_id,
-            asset.asset_id,
-            asset.owner_id,
-            asset.source_product,
-            asset.source_job_id,
-            asset.artifact_sha256,
-            norm_purpose,
-            "created",
-            asset.parent_asset_id,
-            json.dumps(lineage),
-            json.dumps(asset.to_server_dict()),
-            now_ts,
-            None,
-        ),
-    )
-    conn.commit()
+    try:
+        conn.execute(
+            """INSERT INTO autopost_handoff_receipts (
+                handoff_id, asset_id, owner_id, source_product, source_job_id,
+                artifact_sha256, purpose, status, parent_asset_id, lineage_json,
+                asset_snapshot_json, created_at, expires_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                handoff_id,
+                asset.asset_id,
+                asset.owner_id,
+                asset.source_product,
+                asset.source_job_id,
+                asset.artifact_sha256,
+                norm_purpose,
+                "created",
+                asset.parent_asset_id,
+                json.dumps(lineage),
+                json.dumps(asset.to_server_dict()),
+                now_ts,
+                None,
+            ),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError:
+        # Concurrent race / replay unique conflict path: recover and return canonical receipt
+        conflict_existing = _load_existing_receipt()
+        if conflict_existing:
+            return conflict_existing, "idempotent_existing_receipt"
+        raise
 
     receipt = HandoffReceipt(
         handoff_id=handoff_id,
@@ -825,15 +847,16 @@ def receive_autopost_handoff_to_draft(
         if physical_sha != expected_sha:
             return None, "draft_artifact_tampered_or_modified"
 
-    # 4. Idempotency Check for Draft
-    cur.execute(
-        "SELECT * FROM autopost_publication_drafts WHERE handoff_id=? LIMIT 1",
-        (receipt["handoff_id"],),
-    )
-    existing_row = cur.fetchone()
-    if existing_row:
+    def _load_existing_draft() -> Optional[PublicationDraft]:
+        cur.execute(
+            "SELECT * FROM autopost_publication_drafts WHERE handoff_id=? LIMIT 1",
+            (receipt["handoff_id"],),
+        )
+        existing_row = cur.fetchone()
+        if not existing_row:
+            return None
         existing = dict(existing_row)
-        draft = PublicationDraft(
+        return PublicationDraft(
             draft_id=existing["draft_id"],
             handoff_id=existing["handoff_id"],
             asset_id=existing["asset_id"],
@@ -844,31 +867,41 @@ def receive_autopost_handoff_to_draft(
             status=existing["status"],
             created_at=existing["created_at"],
         )
-        return draft, "idempotent_existing_draft"
+
+    # 4. Idempotency Check for Draft
+    existing_draft = _load_existing_draft()
+    if existing_draft:
+        return existing_draft, "idempotent_existing_draft"
 
     draft_hash = hashlib.sha256(f"{receipt['handoff_id']}:{receipt['owner_id']}".encode("utf-8")).hexdigest()[:24]
     draft_id = f"draft_{draft_hash}"
     now_ts = _now_iso()
     caption_draft = str(snapshot.get("caption_candidate") or "").strip()
 
-    conn.execute(
-        """INSERT INTO autopost_publication_drafts (
-            draft_id, handoff_id, asset_id, owner_id, caption_draft,
-            selected_channels_json, schedule_at, status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (
-            draft_id,
-            receipt["handoff_id"],
-            receipt["asset_id"],
-            receipt["owner_id"],
-            caption_draft,
-            json.dumps([]),
-            None,
-            "PLANNED",
-            now_ts,
-        ),
-    )
-    conn.commit()
+    try:
+        conn.execute(
+            """INSERT INTO autopost_publication_drafts (
+                draft_id, handoff_id, asset_id, owner_id, caption_draft,
+                selected_channels_json, schedule_at, status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                draft_id,
+                receipt["handoff_id"],
+                receipt["asset_id"],
+                receipt["owner_id"],
+                caption_draft,
+                json.dumps([]),
+                None,
+                "PLANNED",
+                now_ts,
+            ),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conflict_draft = _load_existing_draft()
+        if conflict_draft:
+            return conflict_draft, "idempotent_existing_draft"
+        raise
 
     draft = PublicationDraft(
         draft_id=draft_id,
