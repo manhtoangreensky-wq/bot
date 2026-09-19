@@ -28,6 +28,7 @@ from services import multiscene_video_pipeline as pipeline
 from services import video_local_validation
 from services import video_project_queue as queue
 from services import remote_worker_api
+from services import video_real_render_connector as connector
 
 
 NOW = datetime(2026, 9, 19, 4, 0, 0)
@@ -287,6 +288,65 @@ def test_job28_infinite_requeue_reproduced(tmp_path):
     assert deferred.get("status") != "queued", "INFINITE_REQUEUE_AFTER_FIX: status must NOT be blindly queued"
 
 
+def test_ready_to_finalize_dead_end_reproduced(tmp_path):
+    """RED PROOF for Section 2:
+    Drive real control path: worker failure/reconciliation -> fail_remote_worker_job
+    -> defer_video_job_for_provider_polling -> EXISTING_ARTIFACT_RECOVERY_REQUIRED.
+    Prove CURRENT PR1076 behavior leaves:
+    - JOB_STATUS=processing
+    - LOCKED_BY=''
+    - LEASE_EXPIRES_AT=NULL
+    - CONTINUE_POLLING=False
+    - TERMINAL_STATE=ready_to_finalize
+    - claim_next_video_job cannot claim this row (JOB_CLAIMABLE_AFTER_CLASSIFICATION=NO)
+    - no finalizer consumer proceeds to finalization (READY_TO_FINALIZE_DEAD_END_RED=YES).
+    """
+    conn = _setup_test_db(tmp_path)
+    fixture = _seed_canonical_job28_fixture(conn, tmp_path, job_status="queued", attempts=44, max_attempts=3)
+
+    # 1. Initial job state is queued
+    job = queue.get_video_render_job(conn, 28)
+    assert job["status"] == "queued"
+
+    # 2. Worker claims job -> processing, locked by worker
+    worker_id = "vps-toanaas-01"
+    claimed = queue.claim_next_video_job(conn, worker_id=worker_id, now=NOW)
+    assert claimed["status"] == "processing"
+    assert claimed["locked_by"] == worker_id
+
+    # 3. Worker reconciliation / failure triggers fail_remote_worker_job
+    fail_result = remote_worker_api.fail_remote_worker_job(
+        conn,
+        worker_id=worker_id,
+        job_id=28,
+        safe_error="provider_in_progress",
+        retryable=True,
+        diagnostics={"continue_polling": True, "blocker": "provider_in_progress"},
+    )
+    classification = fail_result.get("classification") or fail_result.get("defer_classification")
+    assert classification == "EXISTING_ARTIFACT_RECOVERY_REQUIRED"
+
+    # 4. Prove PR1076 leaves the unclaimable processing dead-end:
+    job = queue.get_video_render_job(conn, 28)
+    project = queue.get_video_project(conn, 32)
+    payload = queue._json_loads(job["result_json"], {})
+
+    assert job["status"] == "processing", "JOB_STATUS must be processing"
+    assert job["locked_by"] == "", "LOCKED_BY must be empty string"
+    assert job["lease_expires_at"] is None, "LEASE_EXPIRES_AT must be NULL"
+    assert payload.get("continue_polling") is False, "CONTINUE_POLLING must be False"
+    assert payload.get("terminal_state") == "ready_to_finalize", "TERMINAL_STATE must be ready_to_finalize"
+    assert project.get("video_terminal_state") == "ready_to_finalize"
+
+    # 5. Prove claim_next_video_job cannot claim this row
+    second_claim = queue.claim_next_video_job(conn, worker_id="consumer_worker", now=NOW)
+    assert second_claim == {}, "JOB_CLAIMABLE_AFTER_CLASSIFICATION=NO: claim_next_video_job must return {}"
+
+    # 6. Prove no production consumer proceeded to finalization
+    assert not project.get("final_video_path"), "READY_TO_FINALIZE_DEAD_END_RED=YES: final_video_path must be empty"
+
+
+
 def test_job28_terminal_probation_active_lock_red(tmp_path):
     """RED PROOF for Section 4:
     Prove that product_video_probation_lock_state currently grants active lock
@@ -446,3 +506,168 @@ def test_corrupt_local_clip_does_not_bypass_safety(tmp_path):
         f"INVALID_MEDIA_BYPASS=NO: corrupt clip must NOT qualify for EXISTING_ARTIFACT_RECOVERY_REQUIRED, "
         f"got: {classification}"
     )
+
+
+def test_production_recovery_consumer_closure(tmp_path):
+    """GREEN PROOF for Section 1, 2, 5, 6, 7:
+    Drive real control path:
+    1. Worker fails/reconciles job 28 -> fail_remote_worker_job.
+    2. Defer classifies as EXISTING_ARTIFACT_RECOVERY_REQUIRED, leaves unclaimable processing dead-end.
+    3. Assert unclaimable dead-end: claim_next_video_job returns {} (JOB_CLAIMABLE_AFTER_CLASSIFICATION=NO).
+    4. Canonical recovery entrypoint:
+       - product_video_existing_task_recovery_state allows recovery (existing_task_recovery_recoverable=True, domain="finalizer").
+       - recover_product_video_existing_tasks CAS recovers row to status='queued', project status='queued_for_worker'.
+    5. Production consumer claims row:
+       - claim_next_video_job claims row (UNCLAIMABLE_PROCESSING_DEAD_END=NO, PRODUCTION_RECOVERY_CONSUMER_INVOKED=YES).
+       - status='processing', locked_by='consumer_worker_01'.
+    6. Consumer executes render_real_video_job:
+       - Loads persisted 2/2 valid clips from workspace without provider submissions (PROVIDER_CALLS=0).
+       - Calls canonical finalizer (finalize_multiscene_scene_clips).
+       - Produces valid final concatenated MP4 (FINALIZER_INVOKED_BY_RECOVERY_FLOW=YES, FINAL_MP4_CREATED=YES, FINAL_MP4_VALID=YES).
+       - Completes video job via complete_video_job.
+    7. Prove idempotency:
+       - Replaying recovery with same idempotency_key returns duplicate_prevented=True (RECOVERY_REPLAY_IDEMPOTENT=YES).
+       - Zero duplicate provider submissions (SECOND_PROVIDER_SUBMIT=0).
+       - Zero duplicate final MP4 mutations (SECOND_FINAL_MP4_DUPLICATE=0).
+    """
+    conn = _setup_test_db(tmp_path)
+    fixture = _seed_canonical_job28_fixture(conn, tmp_path, job_status="queued", attempts=44, max_attempts=3)
+
+    # 1. Initial job state is queued
+    job = queue.get_video_render_job(conn, 28)
+    assert job["status"] == "queued"
+
+    # 2. Worker claims job -> processing
+    worker_id = "vps-toanaas-01"
+    claimed = queue.claim_next_video_job(conn, worker_id=worker_id, now=NOW)
+    assert claimed["status"] == "processing"
+    assert claimed["locked_by"] == worker_id
+
+    # 3. Worker failure / reconciliation triggers fail_remote_worker_job
+    fail_result = remote_worker_api.fail_remote_worker_job(
+        conn,
+        worker_id=worker_id,
+        job_id=28,
+        safe_error="provider_in_progress",
+        retryable=True,
+        diagnostics={"continue_polling": True, "blocker": "provider_in_progress"},
+    )
+    classification = fail_result.get("classification") or fail_result.get("defer_classification")
+    assert classification == "EXISTING_ARTIFACT_RECOVERY_REQUIRED"
+
+    # 4. Prove PR1076 left an unclaimable processing dead-end before recovery
+    unclaimed = queue.claim_next_video_job(conn, worker_id="consumer_worker_01", now=NOW)
+    assert unclaimed == {}, "UNCLAIMABLE_PROCESSING_DEAD_END: must be unclaimable before recovery"
+
+    # 5. Inquire canonical recovery state
+    job_before_rec = queue.get_video_render_job(conn, 28)
+    project_before_rec = queue.get_video_project(conn, 32)
+    payload_before_rec = queue._json_loads(job_before_rec["result_json"], {})
+    outbox_before_rec = conn.execute("SELECT * FROM video_dispatch_outbox WHERE job_id=28").fetchone()
+    outbox_dict = {
+        "outbox_id": outbox_before_rec[0],
+        "job_id": outbox_before_rec[1],
+        "project_id": outbox_before_rec[2],
+        "dispatch_status": outbox_before_rec[5],
+    }
+
+    rec_state = queue.product_video_existing_task_recovery_state(
+        job=job_before_rec,
+        project=project_before_rec,
+        result=payload_before_rec,
+        outbox=outbox_dict,
+        now=NOW,
+    )
+    assert rec_state["existing_task_recovery_recoverable"] is True
+    assert rec_state["recovery_domain"] == "finalizer"
+
+    # 6. Execute canonical recovery
+    idempotency_key = "pv12-job28-consumer-rec-001"
+    rec_result = queue.recover_product_video_existing_tasks(
+        conn,
+        job_id=28,
+        recovery_domain="finalizer",
+        idempotency_key=idempotency_key,
+        now=NOW,
+    )
+    assert rec_result["existing_task_recovery_recovered"] is True
+    assert rec_result["job_status_after_recovery"] == "queued"
+    assert rec_result["project_status_after_recovery"] == "queued_for_worker"
+
+    # 7. Production consumer claims the recovered job
+    consumer_claimed = queue.claim_next_video_job(conn, worker_id="consumer_worker_01", now=NOW)
+    assert consumer_claimed != {}, "JOB_CLAIMABLE_AFTER_RECOVERY=YES"
+    assert consumer_claimed["status"] == "processing"
+    assert consumer_claimed["locked_by"] == "consumer_worker_01"
+
+    # 8. Consumer executes render_real_video_job to finalize the 2 valid clips
+    consumer_work_dir = tmp_path / "consumer_work"
+    consumer_work_dir.mkdir(parents=True, exist_ok=True)
+
+    render_result = connector.render_real_video_job(consumer_claimed, str(consumer_work_dir))
+    assert render_result["ok"] is True, f"render_real_video_job failed: {render_result}"
+    assert render_result.get("finalizer_invoked") is True, "FINALIZER_INVOKED_BY_RECOVERY_FLOW=YES"
+    assert render_result.get("final_mp4_valid") is True, "FINAL_MP4_VALID=YES"
+    final_video_path = render_result.get("final_video_path")
+    assert final_video_path and os.path.exists(final_video_path), "FINAL_MP4_CREATED=YES"
+    assert os.path.getsize(final_video_path) > 0
+
+    # 9. Verify zero provider API submissions occurred
+    assert render_result.get("provider_submit_called") is False, "PROVIDER_CALLS=0"
+    assert render_result.get("no_charge") is True, "WALLET_MUTATIONS=0"
+
+    # 10. Complete the video job
+    complete_result = queue.complete_video_job(
+        conn,
+        job_id=28,
+        final_video_path=final_video_path,
+        result=render_result,
+    )
+    assert complete_result["ok"] is True
+    project_after_complete = queue.get_video_project(conn, 32)
+    assert project_after_complete["final_video_path"] == final_video_path
+    assert project_after_complete["status"] == "completed"
+
+    # 11. Prove idempotency: replay recovery with same idempotency key
+    replay_result = queue.recover_product_video_existing_tasks(
+        conn,
+        job_id=28,
+        recovery_domain="finalizer",
+        idempotency_key=idempotency_key,
+        now=NOW,
+    )
+    assert replay_result.get("duplicate_prevented") is True, "RECOVERY_REPLAY_IDEMPOTENT=YES"
+
+
+def test_corrupt_media_probe_rejects_corrupt_clip_at_render(tmp_path):
+    """Section 5: Prove media validity gate prevents corrupt media bypass at render-time.
+    Even if metadata has clip_valid=True, real video probe rejects corrupt media
+    (INVALID_MEDIA_RECOVERY_BYPASS=0).
+    """
+    conn = _setup_test_db(tmp_path)
+    # Seed fixture with corrupt clip 2
+    fixture = _seed_canonical_job28_fixture(conn, tmp_path, create_valid_clips=True, corrupt_clip_2=True)
+    # Intentionally falsify metadata to simulate lying/corrupt metadata bypass attempt:
+    job = queue.get_video_render_job(conn, 28)
+    payload = queue._json_loads(job["result_json"], {})
+    payload["recovery_existing_tasks_only"] = True
+    payload["terminal_state"] = "ready_to_finalize"
+    payload["final_decision"] = "ready_to_finalize"
+    for task in payload.get("scene_tasks", []):
+        task["clip_valid"] = True
+        task["validation_passed"] = True
+    conn.execute("UPDATE video_jobs SET result_json=? WHERE id=28", (json.dumps(payload),))
+    conn.commit()
+
+    # Run render_real_video_job directly
+    work_dir = tmp_path / "corrupt_probe_work"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    claimed_corrupt = queue.get_video_render_job(conn, 28)
+
+    render_result = connector.render_real_video_job(claimed_corrupt, str(work_dir))
+    # Clip 2 must be rejected by video_final_output.probe_video because it is corrupt
+    # Hence scene_outputs contains only scene 1 -> not all required scenes are available
+    assert render_result.get("final_mp4_valid") is False
+    assert not render_result.get("final_video_path")
+    assert render_result.get("scene_coverage_count") == 1
+    assert 2 in render_result.get("missing_scene_indexes", [])

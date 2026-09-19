@@ -7081,6 +7081,8 @@ def classify_product_video_recovery_domain(
     # 2. Finalizer domain
     coverage_complete = bool(
         result.get("scene_clip_coverage_complete")
+        or result.get("scene_coverage_complete")
+        or result.get("finalizer_input_complete")
         or (
             _as_int(result.get("valid_scene_clip_count"), 0) >= _as_int(result.get("scene_count"), 1)
             and _as_int(result.get("scene_count"), 0) > 0
@@ -7093,6 +7095,9 @@ def classify_product_video_recovery_domain(
         or last_error_str.startswith("RuntimeError:provider_render_failed")
         or "finalizer" in last_error_str.lower()
         or (coverage_complete and result.get("final_mp4_valid") is False and not result.get("artifact_download_error"))
+        or str(result.get("terminal_state") or project.get("video_terminal_state") or "").strip() == "ready_to_finalize"
+        or str(result.get("classification") or "").strip() == "EXISTING_ARTIFACT_RECOVERY_REQUIRED"
+        or last_error_str == "existing_artifact_recovery_required"
     )
     if coverage_complete and is_finalizer_error:
         return "finalizer"
@@ -7307,8 +7312,20 @@ def product_video_existing_task_recovery_state(
         == "provider_in_progress"
         and authority_repair_safe
     )
-    recoverable = bool(
+    job_status_recoverable = bool(
         job_status == "failed"
+        or (
+            job_status == "processing"
+            and (
+                str(result.get("terminal_state") or project.get("video_terminal_state") or "").strip() == "ready_to_finalize"
+                or str(result.get("classification") or "").strip() == "EXISTING_ARTIFACT_RECOVERY_REQUIRED"
+                or str(job.get("last_error") or "").strip() == "existing_artifact_recovery_required"
+            )
+            and not str(job.get("locked_by") or "").strip()
+        )
+    )
+    recoverable = bool(
+        job_status_recoverable
         and product_video
         and confirmed
         and not project_cancelled
@@ -7328,7 +7345,7 @@ def product_video_existing_task_recovery_state(
     )
     if recoverable:
         blocker = ""
-    elif job_status != "failed":
+    elif not job_status_recoverable:
         blocker = "job_not_failed"
     elif not product_video:
         blocker = "not_product_video"
@@ -7539,14 +7556,16 @@ def recover_product_video_existing_tasks(
         terminal_classifier_repair = bool(
             state.get("existing_task_terminal_classifier_repair_eligible")
         )
+        is_finalizer_recovery = (active_domain == "finalizer")
         result.update(
             {
                 "status": "queued",
                 "canonical_status": "queued_existing_task_recovery",
                 "terminal": False,
                 "terminal_state": "",
-                "final_decision": "continue_polling",
-                "continue_polling": True,
+                "final_decision": "ready_to_finalize" if is_finalizer_recovery else "continue_polling",
+                "continue_polling": False if is_finalizer_recovery else True,
+                "action": "concat" if is_finalizer_recovery else str(result.get("action") or ""),
                 "scene_count": durable_scene_count,
                 "recovery_existing_tasks_only": True,
                 "existing_task_recovery_recovered": True,
@@ -7615,7 +7634,7 @@ def recover_product_video_existing_tasks(
                   SET status='queued',result_json=?,last_error='',progress_percent=?,
                       progress_message='queued_existing_task_recovery',locked_by='',locked_at=NULL,
                       lease_expires_at=NULL,completed_at=NULL,updated_at=?
-                WHERE id=? AND status='failed'""",
+                WHERE id=? AND (status='failed' OR (status='processing' AND (COALESCE(locked_by,'')='' OR lease_expires_at IS NULL)))""",
             (_json_dumps(result), progress, current, int(job_id)),
         )
         if cursor.rowcount != 1:
@@ -7629,7 +7648,7 @@ def recover_product_video_existing_tasks(
             """UPDATE video_projects
                   SET status='queued_for_worker',scene_count=?,video_terminal_state='',
                       video_terminal_locked_at=NULL,error_log='',completed_at=NULL,updated_at=?
-                WHERE project_id=? AND status=?
+                WHERE project_id=? AND (status=? OR status IN ('queued_for_worker','processing','failed'))
                   AND LOWER(status) NOT IN ('cancelled','canceled')""",
             (
                 durable_scene_count,
@@ -9140,8 +9159,8 @@ def product_video_scene_ledger_state(
             else bool(unresolved_indexes and not terminal_no_charge)
         ),
         "provider_task_alive": bool(active_indexes and not terminal_no_charge),
-        "terminal_state": "completed" if final_delivered else ("failed_no_charge" if terminal_no_charge else "final_rendering"),
-        "final_decision": "delivered" if final_delivered else ("failed_no_charge" if terminal_no_charge else "continue_polling"),
+        "terminal_state": "completed" if final_delivered else ("failed_no_charge" if terminal_no_charge else ("completed" if final_assembly_valid else "final_rendering")),
+        "final_decision": "delivered" if final_delivered else ("failed_no_charge" if terminal_no_charge else ("final_mp4_ready" if final_assembly_valid else "continue_polling")),
         "concat_ready": bool(coverage_complete and scene_count > 1),
         "concat_attempted": bool(concat_attempted),
         "concat_attempted_raw": bool(raw_concat_attempted),

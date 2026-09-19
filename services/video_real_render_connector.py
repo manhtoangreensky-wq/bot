@@ -621,6 +621,8 @@ def _enforce_product_video_terminal_consistency(data: dict[str, Any] | None = No
 
 
 def _apply_pending_provider_dominance(data: dict[str, Any], *, job: dict | None = None) -> dict[str, Any]:
+    if bool(data.get("final_mp4_valid")) or (data.get("ok") and bool(data.get("final_video_path"))):
+        return data
     terminal_probe = {**dict(job or {}), **dict(data or {})}
     if _product_video_terminal_failure_should_dominate(terminal_probe):
         return _enforce_product_video_terminal_consistency({**dict(data or {}), **dict(job or {})})
@@ -1263,12 +1265,19 @@ def product_video_scene_duration_seconds(job: dict | None = None) -> int:
 def _existing_scene_tasks(job: dict | None = None) -> list[dict[str, Any]]:
     job = dict(job or {})
     result: list[dict[str, Any]] = []
-    for key in ("scene_tasks", "provider_scene_tasks", "product_video_scene_tasks"):
-        value = job.get(key)
-        if isinstance(value, str):
-            value = _json_loads(value, [])
-        if isinstance(value, list):
-            result.extend(dict(item or {}) for item in value if isinstance(item, dict))
+    payload = _json_loads(job.get("result_json"), {}) if isinstance(job.get("result_json"), str) else (job.get("result_json") or {})
+    if not isinstance(payload, dict):
+        payload = {}
+    sources = [job, payload]
+    for src in sources:
+        for key in ("scene_tasks", "provider_scene_tasks", "product_video_scene_tasks"):
+            value = src.get(key)
+            if isinstance(value, str):
+                value = _json_loads(value, [])
+            if isinstance(value, list):
+                result.extend(dict(item or {}) for item in value if isinstance(item, dict))
+        if result:
+            break
     return result
 
 
@@ -5517,11 +5526,13 @@ def _run_per_scene_provider_orchestrator(
         persisted_scene = product_video_scene_task_for_index(job, scene_index)
         persisted_clip = _scene_output_from_payload(persisted_scene)
         if persisted_clip and bool(persisted_scene.get("clip_valid") or persisted_scene.get("validation_passed")):
-            scene_outputs[scene_index] = persisted_clip
-            retained = {**persisted_scene, "scene_index": scene_index, "status": "scene_clip_validated", "clip_valid": True}
-            debug_results.append(retained)
-            provider_events.append(_provider_event_from_payload(job, scene_index, retained))
-            continue
+            probe = video_final_output.probe_video(persisted_clip)
+            if probe.get("ok"):
+                scene_outputs[scene_index] = persisted_clip
+                retained = {**persisted_scene, "scene_index": scene_index, "status": "scene_clip_validated", "clip_valid": True}
+                debug_results.append(retained)
+                provider_events.append(_provider_event_from_payload(job, scene_index, retained))
+                continue
         if persisted_scene:
             active_scene_slot = _normalize_scene_task_status(
                 persisted_scene.get("status") or persisted_scene.get("provider_status"),
@@ -5966,6 +5977,8 @@ def _run_per_scene_provider_orchestrator(
         base.update(partial_ledger)
         base.update(replacement_submit_evidence)
         base["scene_coverage_valid"] = _safe_int(base.get("completed_scene_count"), 0)
+        base["scene_coverage_count"] = len(scene_outputs)
+        base["missing_scene_indexes"] = [idx for idx in expected_scene_indexes if idx not in scene_outputs]
         base["source_of_truth"] = "partial_scene_coverage" if base.get("completed_scene_count") else str(active_scene.get("source_of_truth") or "waiting_for_remaining_scenes")
         base["visual_source"] = "scene_clip_validated" if base.get("completed_scene_count") else "provider_pending"
         base["concat_attempted"] = False
@@ -6040,6 +6053,13 @@ def _run_per_scene_provider_orchestrator(
     final_result["missing_scene_action"] = "complete"
     final_result.update(video_project_queue_service.product_video_scene_ledger_state({}, job, final_result))
     final_result["scene_coverage_valid"] = _safe_int(final_result.get("completed_scene_count"), 0)
+    final_result["ok"] = bool(final_result.get("final_video_path"))
+    final_result["final_mp4_valid"] = bool(final_result.get("final_video_path"))
+    if final_result["ok"]:
+        final_result["status"] = "completed"
+        final_result["continue_polling"] = False
+        final_result["final_decision"] = "final_mp4_ready"
+        final_result["terminal_state"] = "final_mp4_ready"
     return final_result
 
 
@@ -6465,6 +6485,35 @@ def _run_multiscene_render(
 
 
 def render_real_video_job(job: dict, work_dir: str) -> dict:
+    raw_job = dict(job or {})
+    result_payload = _json_loads(raw_job.get("result_json"), {}) if isinstance(raw_job.get("result_json"), str) else (raw_job.get("result_json") or {})
+    if isinstance(result_payload, dict) and result_payload:
+        job = {**result_payload, **raw_job}
+        for k in (
+            "scene_tasks",
+            "provider_scene_tasks",
+            "product_video_scene_tasks",
+            "source",
+            "product_video",
+            "product_type",
+            "scene_count",
+            "recovery_existing_tasks_only",
+            "provider_submit_allowed",
+        ):
+            if k in result_payload and k not in raw_job:
+                job[k] = result_payload[k]
+    else:
+        job = raw_job
+    if (
+        str(job.get("terminal_state") or "") == "ready_to_finalize"
+        or str((result_payload or {}).get("terminal_state") or "") == "ready_to_finalize"
+        or str(job.get("final_decision") or "") == "ready_to_finalize"
+        or str((result_payload or {}).get("final_decision") or "") == "ready_to_finalize"
+        or str(job.get("classification") or "") == "EXISTING_ARTIFACT_RECOVERY_REQUIRED"
+        or str((result_payload or {}).get("classification") or "") == "EXISTING_ARTIFACT_RECOVERY_REQUIRED"
+        or bool((result_payload or {}).get("recovery_existing_tasks_only"))
+    ):
+        job["recovery_existing_tasks_only"] = True
     addon = _addon_plan(job)
     workspace = os.path.abspath(work_dir)
     total_duration = max(1.0, float(product_video_expected_duration_seconds(job)))
@@ -6878,7 +6927,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         result["visual_classification"] = FINAL_AI_VIDEO
         result["final_classification"] = FINAL_AI_VIDEO
         result["no_charge"] = bool(job.get("no_charge"))
-    elif is_product_video and not readiness.get("ok") and fallback_capability in {
+    elif is_product_video and not readiness.get("ok") and not bool(job.get("recovery_existing_tasks_only")) and fallback_capability in {
         "clean_fail_provider_capability_missing",
         "delegate_or_clean_fail",
     }:
@@ -6897,7 +6946,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
                 "no_charge": True,
             },
         )
-    elif readiness.get("ok") or not is_product_video:
+    elif readiness.get("ok") or not is_product_video or bool(job.get("recovery_existing_tasks_only")):
         provider_attempted = True
         try:
             if is_product_video and product_video_orchestration_mode(job) == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S:
@@ -6948,7 +6997,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         return _record_render_diagnostics(result)
     if is_product_video and not readiness.get("ok"):
         provider_error = str(readiness.get("reason") or "provider_capability_missing")
-    if is_product_video and route_requires_provider and (not result or not result.get("ok")):
+    if is_product_video and route_requires_provider and (not result or not result.get("ok")) and not bool(job.get("recovery_existing_tasks_only")):
         blocker = str((result or {}).get("blocker") or (result or {}).get("provider_error") or provider_error or REAL_VIDEO_RENDER_UNAVAILABLE)
         if blocker == REAL_VIDEO_RENDER_UNAVAILABLE and not provider_candidates:
             blocker = "provider_capability_missing"
@@ -7141,7 +7190,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         result.get("provider_selection_blocker")
         or ("" if provider_candidates else ("provider_capability_missing" if route_requires_provider else ""))
     )
-    result["provider_submit_called"] = bool(result.get("provider_submit_called") or provider_attempted)
+    result["provider_submit_called"] = False if bool(job.get("recovery_existing_tasks_only")) else bool(result.get("provider_submit_called") or provider_attempted)
     result["provider_submit_http_status"] = result.get("provider_submit_http_status") or result.get("provider_http_status") or 0
     result["provider_task_id_saved"] = bool(result.get("provider_task_id_saved") or result.get("provider_task_ids"))
     result["provider_poll_called"] = bool(result.get("provider_poll_called")) if "provider_poll_called" in result else bool(provider_attempted)
