@@ -344,3 +344,166 @@ def test_h_charge_decision_after_job28_delivery_is_zero(monkeypatch, tmp_path):
     assert decision["charge_skip_reason"] == "existing_task_recovery_no_charge"
 
     conn.close()
+
+
+def test_completion_only_delivery_rejects_valid_mp4_hash_replacement(monkeypatch, tmp_path):
+    """SECTION 6: Replaces canonical path contents with a different physically valid MP4.
+    Must fail closed, recording no delivery mutation.
+    """
+    conn, job_id, project_id, mp4_path = _setup_job28_fixture(tmp_path, create_valid_file=True)
+
+    monkeypatch.setattr(
+        queue.video_uiflow3_execution_contract,
+        "validate_execution_contract",
+        lambda *_args, **_kwargs: {"ok": True, "applies": False, "blocker": ""},
+    )
+    monkeypatch.setattr(
+        video_local_validation,
+        "probe_video_file",
+        lambda _p: {"ok": True, "duration": 16.0},
+    )
+
+    # Step 4: replace canonical path contents with a DIFFERENT physically valid MP4
+    replacement_content = b"\xff" * 2048
+    mp4_path.write_bytes(replacement_content)
+
+    # Step 6: call note_video_delivery_result
+    receipt = queue.note_video_delivery_result(
+        conn,
+        job_id=job_id,
+        sent=True,
+        delivery_message_id="tg-msg-replace-28",
+    )
+
+    assert receipt["ok"] is False
+    assert receipt["sent"] is False
+    assert receipt["reason"] == "delivery_artifact_identity_mismatch"
+
+    stored_job = queue.get_video_render_job(conn, job_id)
+    stored_project = queue.get_video_project(conn, project_id)
+
+    assert stored_project["video_delivered_at"] is None
+    assert stored_project["video_delivery_message_id"] is None
+    assert stored_job["progress_percent"] == 95
+    assert stored_project["video_terminal_state"] == "final_mp4_ready"
+
+    conn.close()
+
+
+def test_completion_only_delivery_rejects_hash_authority_drift(monkeypatch, tmp_path):
+    """SECTION 7: completion_only_reconciliation_sha256 != project.video_artifact_hash
+    Must fail closed, recording no delivery mutation.
+    """
+    conn, job_id, project_id, mp4_path = _setup_job28_fixture(tmp_path, create_valid_file=True)
+
+    monkeypatch.setattr(
+        queue.video_uiflow3_execution_contract,
+        "validate_execution_contract",
+        lambda *_args, **_kwargs: {"ok": True, "applies": False, "blocker": ""},
+    )
+    monkeypatch.setattr(
+        video_local_validation,
+        "probe_video_file",
+        lambda _p: {"ok": True, "duration": 16.0},
+    )
+
+    # Induce drift: project.video_artifact_hash != completion_only_reconciliation_sha256
+    drift_sha = "0" * 64
+    conn.execute(
+        "UPDATE video_projects SET video_artifact_hash=? WHERE project_id=?",
+        (drift_sha, project_id),
+    )
+    conn.commit()
+
+    receipt = queue.note_video_delivery_result(
+        conn,
+        job_id=job_id,
+        sent=True,
+        delivery_message_id="tg-msg-drift-28",
+    )
+
+    assert receipt["ok"] is False
+    assert receipt["sent"] is False
+    assert receipt["reason"] == "delivery_artifact_identity_mismatch"
+
+    stored_job = queue.get_video_render_job(conn, job_id)
+    stored_project = queue.get_video_project(conn, project_id)
+
+    assert stored_project["video_delivered_at"] is None
+    assert stored_project["video_delivery_message_id"] is None
+    assert stored_job["progress_percent"] == 95
+    assert stored_project["video_terminal_state"] == "final_mp4_ready"
+
+    conn.close()
+
+
+def test_stale_flags_without_artifact_fails_closed(monkeypatch, tmp_path):
+    """SECTION 8: Payload has final_mp4_valid=True, final_mp4_validated=True, output_bytes>0,
+    but canonical final path absent and remote proof absent.
+    Must fail closed with no delivery receipt.
+    """
+    conn = sqlite3.connect(tmp_path / "stale_flags.db")
+    conn.row_factory = sqlite3.Row
+    queue.ensure_video_project_queue_schema(conn)
+
+    project = queue.create_video_project(
+        conn,
+        user_id=7126457028,
+        asset_pack={"source": "product_video", "render_mode": "real"},
+    )
+    project_id = int(project["project_id"])
+    job = queue.enqueue_video_render_job(
+        conn,
+        project_id=project_id,
+        user_id=7126457028,
+    )
+    job_id = int(job["id"])
+
+    payload = {
+        "admission_mode": queue.PRODUCT_VIDEO_PROBATION_ADMISSION_MODE,
+        "final_mp4_valid": True,
+        "final_mp4_validated": True,
+        "output_bytes": 1024,
+        "final_video_path": "",
+        "scene_tasks": [
+            {"scene_index": 1, "clip_valid": True},
+            {"scene_index": 2, "clip_valid": True},
+        ],
+        "scene_coverage_expected": 2,
+        "scene_coverage_count": 2,
+        "scene_clip_coverage_complete": True,
+    }
+    conn.execute(
+        "UPDATE video_jobs SET status='completed', progress_percent=95, result_json=? WHERE id=?",
+        (json.dumps(payload), job_id),
+    )
+    conn.execute(
+        "UPDATE video_projects SET status='completed', final_video_path='', final_video_file_id='' WHERE project_id=?",
+        (project_id,),
+    )
+    conn.commit()
+
+    monkeypatch.setattr(
+        queue.video_uiflow3_execution_contract,
+        "validate_execution_contract",
+        lambda *_args, **_kwargs: {"ok": True, "applies": False, "blocker": ""},
+    )
+
+    receipt = queue.note_video_delivery_result(
+        conn,
+        job_id=job_id,
+        sent=True,
+        delivery_message_id="tg-msg-stale-28",
+    )
+
+    assert receipt["ok"] is False
+    assert receipt["sent"] is False
+
+    stored_job = queue.get_video_render_job(conn, job_id)
+    stored_project = queue.get_video_project(conn, project_id)
+
+    assert stored_project["video_delivered_at"] is None
+    assert stored_project["video_delivery_message_id"] is None
+    assert stored_project["video_terminal_state"] != "final_delivered"
+
+    conn.close()

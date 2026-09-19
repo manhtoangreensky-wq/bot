@@ -10001,20 +10001,61 @@ def note_video_delivery_result(
             and (project.get("video_delivery_message_id") or project.get("video_delivered_at"))
         )
 
+        is_completion_only = bool(payload.get("completion_only_reconciliation_used"))
         final_mp4_valid = False
-        if final_path:
-            if os.path.isfile(final_path) and os.path.getsize(final_path) > 0:
-                try:
-                    probe_res = video_local_validation.probe_video_file(final_path)
-                    final_mp4_valid = bool(probe_res.get("ok"))
-                except Exception:
-                    final_mp4_valid = False
-        elif proven_remote_file_id:
-            final_mp4_valid = True
-        elif bool(payload.get("final_mp4_valid") or payload.get("final_mp4_validated")) and _as_int(payload.get("output_bytes") or payload.get("artifact_size"), 0) > 0:
-            final_mp4_valid = True
+        rejection_reason = ""
+
+        if is_completion_only:
+            recon_sha = str(payload.get("completion_only_reconciliation_sha256") or "").strip().lower()
+            if not recon_sha or not re.fullmatch(r"^[0-9a-f]{64}$", recon_sha):
+                rejection_reason = "delivery_artifact_identity_mismatch"
+            else:
+                project_sha = str(project.get("video_artifact_hash") or "").strip().lower()
+                if project_sha and (not re.fullmatch(r"^[0-9a-f]{64}$", project_sha) or project_sha != recon_sha):
+                    rejection_reason = "delivery_artifact_identity_mismatch"
+
+            if not rejection_reason:
+                if not final_path or not os.path.isfile(final_path) or os.path.getsize(final_path) <= 0:
+                    rejection_reason = "delivery_artifact_identity_mismatch"
+                else:
+                    try:
+                        probe_res = video_local_validation.probe_video_file(final_path)
+                        probe_ok = bool(probe_res.get("ok"))
+                    except Exception:
+                        probe_ok = False
+
+                    if not probe_ok:
+                        rejection_reason = "delivery_artifact_identity_mismatch"
+                    else:
+                        try:
+                            with open(final_path, "rb") as f:
+                                actual_sha = hashlib.sha256(f.read()).hexdigest().lower()
+                            if actual_sha != recon_sha:
+                                rejection_reason = "delivery_artifact_identity_mismatch"
+                            else:
+                                final_mp4_valid = True
+                        except Exception:
+                            rejection_reason = "delivery_artifact_identity_mismatch"
+        else:
+            if final_path:
+                if os.path.isfile(final_path) and os.path.getsize(final_path) > 0:
+                    try:
+                        probe_res = video_local_validation.probe_video_file(final_path)
+                        final_mp4_valid = bool(probe_res.get("ok"))
+                    except Exception:
+                        final_mp4_valid = False
+            elif proven_remote_file_id:
+                final_mp4_valid = True
 
         if not final_mp4_valid:
+            if rejection_reason:
+                return {
+                    "ok": False,
+                    "sent": False,
+                    "reason": rejection_reason,
+                    "job": job,
+                    "project": project,
+                }
             if is_probation:
                 return {
                     "ok": False,

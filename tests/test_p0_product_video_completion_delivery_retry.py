@@ -248,8 +248,11 @@ def test_probation_delivery_records_receipt_without_promoting_provider(
         user_id=7126457028,
     )
     job_id = int(job["id"])
+    final_path = tmp_path / "final.mp4"
+    final_path.write_bytes(b"product-video-content")
     payload = {
         "admission_mode": queue.PRODUCT_VIDEO_PROBATION_ADMISSION_MODE,
+        "final_video_path": str(final_path),
         "scene_tasks": [
             {"scene_index": 1, "clip_valid": True},
             {"scene_index": 2, "clip_valid": True},
@@ -268,10 +271,15 @@ def test_probation_delivery_records_receipt_without_promoting_provider(
         (json.dumps(payload), job_id),
     )
     conn.execute(
-        "UPDATE video_projects SET status='completed' WHERE project_id=?",
-        (project_id,),
+        "UPDATE video_projects SET status='completed',final_video_path=? WHERE project_id=?",
+        (str(final_path), project_id),
     )
     conn.commit()
+    monkeypatch.setattr(
+        queue.video_local_validation,
+        "probe_video_file",
+        lambda _p: {"ok": True, "duration": 16.0},
+    )
     monkeypatch.setattr(
         queue.video_uiflow3_execution_contract,
         "validate_execution_contract",
