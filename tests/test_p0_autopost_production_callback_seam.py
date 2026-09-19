@@ -175,6 +175,7 @@ def _setup_video_edit_job(
     rec["output_path"] = str(video_file)
     rec["output_sha256"] = sha
     rec["output_size_bytes"] = len(raw_bytes)
+    conn.commit()
     return job, rec, video_file, sha
 
 
@@ -495,6 +496,346 @@ def test_pv_h_completion_only_reconciliation_identity_drift_remains_fail_closed(
 # =========================================================================
 # VIDEO EDIT SUITE (VE-A to VE-F)
 # =========================================================================
+
+def test_1_first_red_pre_patch_write_tx_seam_proof(tmp_path):
+    """1. FIRST RED: Proves why calling AutoPost during uncommitted write tx is invalid:
+    secondary connection cannot read committed terminal state and write lock is held."""
+    conn = sqlite3.connect(tmp_path / "ve_red1.db")
+    conn.row_factory = sqlite3.Row
+    job, rec, video_file, sha = _setup_video_edit_job(conn, tmp_path)
+    edit_job_id = job["edit_job_id"]
+
+    conn.execute("BEGIN IMMEDIATE")
+    conn.execute(
+        "UPDATE video_edit_jobs SET status='delivered', receipt_state='created' WHERE id=?",
+        (edit_job_id,),
+    )
+    assert conn.in_transaction is True
+
+    sec_conn = sqlite3.connect(tmp_path / "ve_red1.db")
+    sec_row = sec_conn.execute(
+        "SELECT status FROM video_edit_jobs WHERE id=?", (edit_job_id,)
+    ).fetchone()
+    assert sec_row[0] != "delivered", "Uncommitted state is invisible to other connections"
+    sec_conn.close()
+    conn.rollback()
+
+
+def test_2_patched_callback_occurs_post_commit_with_in_transaction_false(tmp_path, monkeypatch):
+    """2. Patched callback occurs post-commit (conn.in_transaction == False)."""
+    conn = sqlite3.connect(tmp_path / "ve_test2.db")
+    conn.row_factory = sqlite3.Row
+    job, rec, video_file, sha = _setup_video_edit_job(conn, tmp_path)
+    worker_job_id = job["local_worker_job_id"]
+
+    observed_in_tx = []
+    orig_notify = aah.notify_autopost_producer_completion
+
+    def spy_notify(connection, **kwargs):
+        observed_in_tx.append(connection.in_transaction)
+        return orig_notify(connection, **kwargs)
+
+    monkeypatch.setattr(aah, "notify_autopost_producer_completion", spy_notify)
+
+    updated = video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=worker_job_id,
+        worker_status="succeeded",
+        detail={"stage": "delivering", "validation": "passed"},
+        receipt=rec,
+    )
+    assert len(observed_in_tx) == 1
+    assert observed_in_tx[0] is False, "AutoPost callback MUST be invoked with conn.in_transaction == False"
+    assert updated.get("status") == "delivered"
+    assert updated["autopost_handoff"]["created_or_reused"] is True
+
+
+def test_3_producer_terminal_row_committed_before_canonical_autopost_resolver(tmp_path, monkeypatch):
+    """3. Producer terminal row committed before canonical AutoPost resolver (verified via secondary connection)."""
+    db_path = tmp_path / "ve_test3.db"
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    job, rec, video_file, sha = _setup_video_edit_job(conn, tmp_path)
+    worker_job_id = job["local_worker_job_id"]
+    edit_job_id = job["edit_job_id"]
+
+    secondary_observed = []
+    orig_notify = aah.notify_autopost_producer_completion
+
+    def spy_notify(connection, **kwargs):
+        sec_conn = sqlite3.connect(db_path)
+        sec_conn.row_factory = sqlite3.Row
+        row = sec_conn.execute(
+            "SELECT status, receipt_state, delivered_at FROM video_edit_jobs WHERE id=?",
+            (edit_job_id,),
+        ).fetchone()
+        secondary_observed.append(dict(row) if row else None)
+        sec_conn.close()
+        return orig_notify(connection, **kwargs)
+
+    monkeypatch.setattr(aah, "notify_autopost_producer_completion", spy_notify)
+
+    video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=worker_job_id,
+        worker_status="succeeded",
+        detail={"stage": "delivering", "validation": "passed"},
+        receipt=rec,
+    )
+    assert len(secondary_observed) == 1
+    obs = secondary_observed[0]
+    assert obs is not None
+    assert obs["status"] == "delivered", "Secondary connection MUST observe status == 'delivered'"
+    assert obs["receipt_state"] == "created", "Secondary connection MUST observe receipt_state == 'created'"
+    assert obs["delivered_at"] != "", "Secondary connection MUST observe non-empty delivered_at"
+
+
+def test_4_media_probe_executes_with_zero_write_lock_held(tmp_path, monkeypatch):
+    """4. Media probe executes with 0 write lock held (concurrent write succeeds during media probe)."""
+    db_path = tmp_path / "ve_test4.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.row_factory = sqlite3.Row
+    job, rec, video_file, sha = _setup_video_edit_job(conn, tmp_path)
+    worker_job_id = job["local_worker_job_id"]
+
+    concurrent_write_succeeded = []
+    orig_validate = aah._validate_final_mp4
+
+    def spy_validate(path):
+        sec_conn = sqlite3.connect(db_path)
+        try:
+            sec_conn.execute(
+                "INSERT INTO local_worker_jobs (user_id, status) VALUES ('999', 'test_concurrent')"
+            )
+            sec_conn.commit()
+            concurrent_write_succeeded.append(True)
+        except sqlite3.OperationalError:
+            concurrent_write_succeeded.append(False)
+        finally:
+            sec_conn.close()
+        return orig_validate(path)
+
+    monkeypatch.setattr(aah, "_validate_final_mp4", spy_validate)
+
+    video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=worker_job_id,
+        worker_status="succeeded",
+        detail={"stage": "delivering", "validation": "passed"},
+        receipt=rec,
+    )
+    assert len(concurrent_write_succeeded) >= 1
+    assert all(concurrent_write_succeeded), "Concurrent write MUST succeed during media probe (0 write lock held)"
+
+
+def test_5_caller_owned_transaction_is_not_force_committed(tmp_path):
+    """5. Caller-owned transaction is not force-committed."""
+    conn = sqlite3.connect(tmp_path / "ve_test5.db")
+    conn.row_factory = sqlite3.Row
+    job, rec, video_file, sha = _setup_video_edit_job(conn, tmp_path)
+    worker_job_id = job["local_worker_job_id"]
+
+    # Caller starts transaction
+    conn.execute("BEGIN IMMEDIATE")
+    assert conn.in_transaction is True
+
+    updated = video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=worker_job_id,
+        worker_status="succeeded",
+        detail={"stage": "delivering", "validation": "passed"},
+        receipt=rec,
+    )
+
+    # Caller transaction is STILL active (not force-committed!)
+    assert conn.in_transaction is True, "CALLER_OWNED_TRANSACTION_NOT_FORCE_COMMITTED=YES"
+    autopost_meta = updated.get("autopost_handoff")
+    assert autopost_meta is not None
+    assert autopost_meta["attempted"] is False
+    assert autopost_meta["created_or_reused"] is False
+    assert autopost_meta["blocker"] == "caller_transaction_uncommitted"
+
+    # Caller can rollback and verify delivery was rolled back
+    conn.rollback()
+    recheck = video_editengine1.get_job_by_worker_id(conn, worker_job_id)
+    assert recheck["status"] != "delivered", "Rollback of caller transaction succeeded"
+
+
+def test_6_autopost_exception_after_commit_leaves_producer_terminal_truth_unchanged(tmp_path, monkeypatch):
+    """6. AutoPost exception after commit leaves producer terminal truth unchanged."""
+    db_path = tmp_path / "ve_test6.db"
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    job, rec, video_file, sha = _setup_video_edit_job(conn, tmp_path)
+    worker_job_id = job["local_worker_job_id"]
+    edit_job_id = job["edit_job_id"]
+
+    def _crash(*_a, **_kw):
+        raise RuntimeError("simulated_autopost_crash_after_commit")
+
+    monkeypatch.setattr(aah, "create_autopost_handoff_from_source", _crash)
+
+    updated = video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=worker_job_id,
+        worker_status="succeeded",
+        detail={"stage": "delivering", "validation": "passed"},
+        receipt=rec,
+    )
+
+    assert updated.get("status") == "delivered"
+    assert updated.get("receipt_state") == "created"
+    assert updated["autopost_handoff"]["created_or_reused"] is False
+    assert "autopost_exception:RuntimeError" in updated["autopost_handoff"]["blocker"]
+
+    # Verify via independent connection that producer row is fully committed & intact in SQLite
+    sec_conn = sqlite3.connect(db_path)
+    sec_conn.row_factory = sqlite3.Row
+    row = sec_conn.execute(
+        "SELECT status, receipt_state, delivered_at FROM video_edit_jobs WHERE id=?",
+        (edit_job_id,),
+    ).fetchone()
+    assert row["status"] == "delivered"
+    assert row["receipt_state"] == "created"
+    assert row["delivered_at"] != ""
+    sec_conn.close()
+
+
+def test_7_media_probe_failure_after_commit_leaves_producer_truth_unchanged(tmp_path):
+    """7. Media probe failure after commit leaves producer truth unchanged."""
+    db_path = tmp_path / "ve_test7.db"
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    job, rec, video_file, sha = _setup_video_edit_job(conn, tmp_path)
+    worker_job_id = job["local_worker_job_id"]
+    edit_job_id = job["edit_job_id"]
+
+    # Delete the video file right before calling record_worker_update so physical media probe fails in AutoPost
+    video_file.unlink()
+
+    updated = video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=worker_job_id,
+        worker_status="succeeded",
+        detail={"stage": "delivering", "validation": "passed"},
+        receipt=rec,
+    )
+
+    assert updated.get("status") == "delivered"
+    assert updated.get("receipt_state") == "created"
+    assert updated["autopost_handoff"]["created_or_reused"] is False
+    assert "artifact_file_not_found" in updated["autopost_handoff"]["blocker"]
+
+    # Producer state remains committed
+    sec_conn = sqlite3.connect(db_path)
+    sec_row = sec_conn.execute(
+        "SELECT status, receipt_state FROM video_edit_jobs WHERE id=?", (edit_job_id,)
+    ).fetchone()
+    assert sec_row[0] == "delivered"
+    assert sec_row[1] == "created"
+    sec_conn.close()
+
+
+def test_8_artifact_sha_replacement_blocks_handoff_only(tmp_path):
+    """8. Artifact SHA replacement blocks handoff only."""
+    conn = sqlite3.connect(tmp_path / "ve_test8.db")
+    conn.row_factory = sqlite3.Row
+    job, rec, video_file, sha = _setup_video_edit_job(conn, tmp_path)
+    worker_job_id = job["local_worker_job_id"]
+
+    # Tamper with file
+    video_file.write_bytes(b"tampered_bytes_causing_hash_mismatch")
+
+    updated = video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=worker_job_id,
+        worker_status="succeeded",
+        detail={"stage": "delivering", "validation": "passed"},
+        receipt=rec,
+    )
+
+    assert updated.get("status") == "delivered"
+    assert updated["autopost_handoff"]["created_or_reused"] is False
+    assert "artifact_replacement_detected" in updated["autopost_handoff"]["blocker"]
+
+
+def test_9_duplicate_worker_terminal_callback_yields_one_handoff(tmp_path):
+    """9. Duplicate worker terminal callback => 1 handoff."""
+    conn = sqlite3.connect(tmp_path / "ve_test9.db")
+    conn.row_factory = sqlite3.Row
+    job, rec, video_file, sha = _setup_video_edit_job(conn, tmp_path)
+    worker_job_id = job["local_worker_job_id"]
+
+    updated1 = video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=worker_job_id,
+        worker_status="succeeded",
+        detail={"stage": "delivering", "validation": "passed"},
+        receipt=rec,
+    )
+    hnd1 = updated1["autopost_handoff"]["handoff_id"]
+    assert updated1["autopost_handoff"]["created_or_reused"] is True
+
+    # Duplicate invocation (handled by line 3186 post-commit path)
+    updated2 = video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=worker_job_id,
+        worker_status="succeeded",
+        detail={"stage": "delivering", "validation": "passed"},
+        receipt=rec,
+    )
+    assert updated2["autopost_handoff"]["created_or_reused"] is True
+    assert updated2["autopost_handoff"]["handoff_id"] == hnd1
+
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM autopost_handoff_receipts")
+    assert cur.fetchone()[0] == 1
+
+
+def test_10_delivery_charge_and_cleanup_authority_remain_unchanged(tmp_path):
+    """10. Delivery/charge/cleanup authority remains unchanged."""
+    conn = sqlite3.connect(tmp_path / "ve_test10.db")
+    conn.row_factory = sqlite3.Row
+    job, rec, video_file, sha = _setup_video_edit_job(conn, tmp_path)
+    worker_job_id = job["local_worker_job_id"]
+    edit_job_id = job["edit_job_id"]
+
+    # Ensure price is non-zero so charging is exercised
+    conn.execute("UPDATE video_edit_jobs SET price_xu=500 WHERE id=?", (edit_job_id,))
+    conn.commit()
+
+    updated = video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=worker_job_id,
+        worker_status="succeeded",
+        detail={"stage": "delivering", "validation": "passed", "cleanup_intent": "archive"},
+        receipt=rec,
+    )
+    assert updated.get("status") == "delivered"
+    assert updated.get("receipt_state") == "created"
+
+    # Claim charge atomically
+    claimed = video_editengine1.claim_charge(conn, worker_job_id=worker_job_id)
+    assert claimed is True
+
+    # Mark charge result
+    charged = video_editengine1.mark_charge_result(
+        conn,
+        worker_job_id=worker_job_id,
+        ok=True,
+        charged_xu=500,
+    )
+    assert charged.get("status") == "charged"
+    assert charged.get("charge_state") == "charged"
+    assert charged.get("charged_xu") == 500
+
+    # Verify cleanup audit in tail
+    tail = charged.get("tail") or {}
+    cleanup_audit = tail.get("cleanup_audit") or {}
+    assert cleanup_audit.get("job_id") == int(worker_job_id)
+    assert cleanup_audit.get("state") in {"pending", "failed_exhausted", "succeeded"}
+
 
 def test_ve_a_canonical_terminal_delivered_video_edit_creates_one_handoff(tmp_path):
     """VE-A: canonical terminal delivered Video Edit creates one handoff."""
