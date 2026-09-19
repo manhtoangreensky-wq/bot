@@ -8929,6 +8929,22 @@ def product_video_scene_ledger_state(
         or result.get("output_validated")
         or final_delivered_raw
     )
+    final_candidate_path = str(
+        result.get("final_video_path")
+        or result.get("final_mp4_path")
+        or job.get("final_video_path")
+        or project.get("final_video_path")
+        or ""
+    ).strip()
+    if final_candidate_path and not final_delivered_raw:
+        try:
+            probe_res = video_local_validation.probe_video_file(final_candidate_path)
+            if not probe_res.get("ok"):
+                explicit_final_valid = False
+                concat_output_valid = False
+        except Exception:
+            explicit_final_valid = False
+            concat_output_valid = False
     final_assembly_valid = bool(
         (scene_count == 1 and coverage_complete and explicit_final_valid)
         or (
@@ -9149,6 +9165,7 @@ def product_video_scene_ledger_state(
         ),
         "scene_coverage_valid": bool(final_assembly_valid),
         "scene_coverage_valid_bool": bool(final_assembly_valid),
+        "final_assembly_valid": bool(final_assembly_valid),
         "aggregate_job_status": aggregate_status,
         "aggregate_status_reason": aggregate_reason,
         "provider_status": "succeeded" if final_assembly_valid else ("failed_no_charge" if terminal_no_charge else "processing"),
@@ -9159,7 +9176,7 @@ def product_video_scene_ledger_state(
             else bool(unresolved_indexes and not terminal_no_charge)
         ),
         "provider_task_alive": bool(active_indexes and not terminal_no_charge),
-        "terminal_state": "completed" if final_delivered else ("failed_no_charge" if terminal_no_charge else ("completed" if final_assembly_valid else "final_rendering")),
+        "terminal_state": "completed" if final_delivered else ("failed_no_charge" if terminal_no_charge else ("final_mp4_ready" if final_assembly_valid else "final_rendering")),
         "final_decision": "delivered" if final_delivered else ("failed_no_charge" if terminal_no_charge else ("final_mp4_ready" if final_assembly_valid else "continue_polling")),
         "concat_ready": bool(coverage_complete and scene_count > 1),
         "concat_attempted": bool(concat_attempted),
@@ -9589,7 +9606,11 @@ def complete_video_job(
         and not payload.get("admin_video_delivery")
         and (asset_pack.get("no_charge") or asset_pack.get("admin_no_charge") or payload.get("no_charge"))
     )
-    terminal_state = "needs_admin_review" if safe_claim_only_diagnostic else "final_delivered"
+    terminal_state = (
+        "needs_admin_review"
+        if safe_claim_only_diagnostic
+        else ("final_mp4_ready" if (product_job and not payload.get("final_delivered")) else "final_delivered")
+    )
     if product_job and not safe_claim_only_diagnostic:
         coverage = product_video_scene_coverage_state(project, job, payload)
         payload.update(coverage)
@@ -9733,13 +9754,16 @@ def complete_video_job(
                 "status": "completed",
                 "canonical_status": "completed",
                 "terminal": True,
-                "terminal_state": "final_delivered",
-                "final_decision": "final_delivered",
+                "terminal_state": terminal_state,
+                "final_decision": terminal_state,
                 "continue_polling": False,
                 "blocker": "",
                 "provider_error": "",
                 "visual_classification": payload.get("visual_classification") or "final_ai_video",
                 "final_classification": payload.get("final_classification") or "final_ai_video",
+                "final_delivered": bool(payload.get("final_delivered")),
+                "final_mp4_delivered": bool(payload.get("final_mp4_delivered")),
+                "delivery_succeeded": bool(payload.get("delivery_succeeded")),
             }
         )
     elif safe_claim_only_diagnostic:
@@ -9771,8 +9795,8 @@ def complete_video_job(
                  )""",
             (
                 _json_dumps(payload),
-                95 if product_job and not safe_claim_only_diagnostic else 100,
-                "final_mp4_ready_waiting_delivery" if product_job and not safe_claim_only_diagnostic else "completed",
+                95 if product_job and not safe_claim_only_diagnostic and not payload.get("final_delivered") else 100,
+                "final_mp4_ready_waiting_delivery" if product_job and not safe_claim_only_diagnostic and not payload.get("final_delivered") else "completed",
                 current,
                 current,
                 int(job_id),

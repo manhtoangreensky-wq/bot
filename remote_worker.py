@@ -21,6 +21,7 @@ import uuid
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 from services import product_video_public_seam
 
@@ -1180,6 +1181,51 @@ def download_selfshot2_source_video(job: dict, work_dir: str) -> str:
     return str(target)
 
 
+def project_worker_finalizer_result(connector_result: dict | None) -> dict[str, Any]:
+    """Pure projection of canonical multiscene finalizer truth for worker completion payload.
+
+    Preserves top-level finalizer truth produced by the canonical connector without
+    fabrication. Returns safe canonical defaults when connector_result is missing or empty.
+    """
+    src = dict(connector_result or {})
+    concat_attempted = bool(src.get("concat_attempted"))
+    concat_output_valid = bool(src.get("concat_output_valid"))
+    final_mp4_valid = bool(src.get("final_mp4_valid"))
+    final_mp4_validated = bool(
+        src.get("final_mp4_validated")
+        if src.get("final_mp4_validated") is not None
+        else src.get("final_mp4_valid")
+    )
+    raw_attempt_count = src.get("concat_attempt_count")
+    concat_attempt_count = int(raw_attempt_count) if raw_attempt_count is not None else (1 if concat_attempted else 0)
+
+    return {
+        "concat_attempted": concat_attempted,
+        "concat_attempt_count": concat_attempt_count,
+        "concat_idempotency_key": str(src.get("concat_idempotency_key") or ""),
+        "concat_output_valid": concat_output_valid,
+        "concat_status": str(src.get("concat_status") or ""),
+        "concat_duration_seconds": float(src.get("concat_duration_seconds") or 0.0),
+        "final_mp4_valid": final_mp4_valid,
+        "final_mp4_validated": final_mp4_validated,
+        "final_duration_seconds": float(
+            src.get("final_duration_seconds")
+            or src.get("concat_duration_seconds")
+            or src.get("output_duration")
+            or 0.0
+        ),
+        "scene_clip_coverage_complete": bool(src.get("scene_clip_coverage_complete")),
+        "scene_coverage_count": int(src.get("scene_coverage_count") or 0),
+        "scene_coverage_valid_bool": bool(src.get("scene_coverage_valid_bool")),
+        "missing_scene_indexes": list(src.get("missing_scene_indexes") or []),
+        "missing_scene_action": str(src.get("missing_scene_action") or ""),
+        "final_reused_from_manifest": bool(src.get("final_reused_from_manifest")),
+        "artifact_valid_for_charge_after_coverage": bool(
+            src.get("artifact_valid_for_charge_after_coverage")
+        ),
+    }
+
+
 def process_claimed_job(job: dict) -> dict:
     job_id = str(job.get("job_id") or "")
     if not job_id:
@@ -1424,6 +1470,7 @@ def process_claimed_job(job: dict) -> dict:
             "addon_materialization": connector_result.get("addon_materialization") or {},
             "addon_application": connector_result.get("addon_application") or {},
         }
+        result.update(project_worker_finalizer_result(connector_result))
         send_heartbeat(job_id, 90, "uploading final video")
         return complete_job(job_id, result, final_path)
 
