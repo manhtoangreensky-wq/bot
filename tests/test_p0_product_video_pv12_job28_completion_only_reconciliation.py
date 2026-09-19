@@ -314,11 +314,15 @@ def test_media_validation_and_hash_binding_fail_closed(tmp_path: Path):
     assert res_mismatch["reason"] == "final_mp4_hash_mismatch"
 
     # 2. Missing file
+    missing_file = tmp_path / "missing.mp4"
+    conn_missing = sqlite3.connect(tmp_path / "test_missing.db")
+    conn_missing.row_factory = sqlite3.Row
+    _setup_terminal_failed_db(conn_missing, missing_file)
     res_missing = queue.reconcile_existing_final_mp4_ready(
-        conn,
+        conn_missing,
         job_id=28,
         expected_final_mp4_sha256=actual_sha256,
-        final_video_path=str(tmp_path / "non_existent.mp4"),
+        final_video_path=str(missing_file),
         owner_authorized=True,
     )
     assert res_missing["ok"] is False
@@ -328,10 +332,12 @@ def test_media_validation_and_hash_binding_fail_closed(tmp_path: Path):
     # 3. Empty 0-byte file
     empty_file = tmp_path / "empty.mp4"
     empty_file.write_bytes(b"")
-    with open(empty_file, "rb") as f:
-        empty_sha = hashlib.sha256(f.read()).hexdigest()
+    conn_empty = sqlite3.connect(tmp_path / "test_empty.db")
+    conn_empty.row_factory = sqlite3.Row
+    _setup_terminal_failed_db(conn_empty, empty_file)
+    empty_sha = hashlib.sha256(b"").hexdigest()
     res_empty = queue.reconcile_existing_final_mp4_ready(
-        conn,
+        conn_empty,
         job_id=28,
         expected_final_mp4_sha256=empty_sha,
         final_video_path=str(empty_file),
@@ -344,10 +350,12 @@ def test_media_validation_and_hash_binding_fail_closed(tmp_path: Path):
     # 4. Corrupt non-video bytes (even if caller supplies matching hash)
     corrupt_file = tmp_path / "corrupt.mp4"
     corrupt_file.write_bytes(b"corrupted video content dummy bytes 1234567890")
-    with open(corrupt_file, "rb") as f:
-        corrupt_sha = hashlib.sha256(f.read()).hexdigest()
+    conn_corrupt = sqlite3.connect(tmp_path / "test_corrupt.db")
+    conn_corrupt.row_factory = sqlite3.Row
+    _setup_terminal_failed_db(conn_corrupt, corrupt_file)
+    corrupt_sha = hashlib.sha256(corrupt_file.read_bytes()).hexdigest()
     res_corrupt = queue.reconcile_existing_final_mp4_ready(
-        conn,
+        conn_corrupt,
         job_id=28,
         expected_final_mp4_sha256=corrupt_sha,
         final_video_path=str(corrupt_file),
@@ -552,5 +560,317 @@ def test_expected_sha256_validation_parameter_missing(tmp_path: Path):
         owner_authorized=True,
     )
     assert res_short["ok"] is False
-    assert res_short["reason"] == "expected_final_mp4_sha256_required"
+    assert res_short["reason"] == "expected_final_mp4_sha256_invalid_hex"
+
+
+def test_class_a_different_valid_artifact_path_blocked(tmp_path: Path):
+    """Class A: Persisted path=A, caller path=B, both valid MP4s, caller supplies SHA(B) -> BLOCKED, MUTATION=0."""
+    conn = sqlite3.connect(tmp_path / "test_class_a.db")
+    conn.row_factory = sqlite3.Row
+    path_a, sha_a = _create_mini_mp4(tmp_path / "canonical_a.mp4", duration_sec=16.0)
+    path_b, sha_b = _create_mini_mp4(tmp_path / "substitute_b.mp4", duration_sec=16.0)
+    _setup_terminal_failed_db(conn, path_a)
+
+    # Caller attempts to supply path B with SHA(B)
+    res = queue.reconcile_existing_final_mp4_ready(
+        conn,
+        job_id=28,
+        project_id=32,
+        expected_final_mp4_sha256=sha_b,
+        final_video_path=str(path_b),
+        owner_authorized=True,
+    )
+    assert res["ok"] is False
+    assert res["mutation"] == 0
+    assert res["reason"] == "caller_path_override_forbidden"
+
+    # Verify DB remains unmutated
+    job = queue.get_video_render_job(conn, 28)
+    assert job["status"] == "failed"
+    project = queue.get_video_project(conn, 32)
+    assert project["status"] == "failed"
+
+
+def test_class_b_concurrent_result_json_charge_drift_blocked(tmp_path: Path):
+    """Class B: Initial charged_xu=0, before locked reread charged_xu > 0 or wallet_charge_recorded=True -> BLOCKED, MUTATION=0."""
+    conn = sqlite3.connect(tmp_path / "test_class_b.db")
+    conn.row_factory = sqlite3.Row
+    mp4_path, sha = _create_mini_mp4(tmp_path / "job28.mp4", duration_sec=16.0)
+    _setup_terminal_failed_db(conn, mp4_path)
+
+    original_get_job = queue.get_video_render_job
+    call_count = [0]
+
+    def mock_get_job(c, j_id):
+        call_count[0] += 1
+        res = original_get_job(c, j_id)
+        if call_count[0] >= 2 and res:
+            res = dict(res)
+            res_payload = json.loads(res.get("result_json") or "{}")
+            res_payload["charged_xu"] = 100
+            res_payload["wallet_charge_recorded"] = True
+            res["result_json"] = json.dumps(res_payload)
+        return res
+
+    with patch("services.video_project_queue.get_video_render_job", side_effect=mock_get_job):
+        res = queue.reconcile_existing_final_mp4_ready(
+            conn,
+            job_id=28,
+            project_id=32,
+            expected_final_mp4_sha256=sha,
+            owner_authorized=True,
+        )
+        assert res["ok"] is False
+        assert res["mutation"] == 0
+        assert res["reason"] == "reconciliation_claim_lost"
+        assert res["drift_reason"] == "cas_charge_drift_detected"
+
+    job = queue.get_video_render_job(conn, 28)
+    assert job["status"] == "failed"
+
+
+def test_class_c_concurrent_terminal_state_drift_blocked(tmp_path: Path):
+    """Class C: Concurrent terminal-state drift from failed_no_charge -> another terminal state -> BLOCKED."""
+    conn = sqlite3.connect(tmp_path / "test_class_c.db")
+    conn.row_factory = sqlite3.Row
+    mp4_path, sha = _create_mini_mp4(tmp_path / "job28.mp4", duration_sec=16.0)
+    _setup_terminal_failed_db(conn, mp4_path)
+
+    original_get_project = queue.get_video_project
+    call_count = [0]
+
+    def mock_get_project(c, p_id):
+        call_count[0] += 1
+        res = original_get_project(c, p_id)
+        if call_count[0] >= 2 and res:
+            res = dict(res)
+            res["video_terminal_state"] = "failed_refunded"
+        return res
+
+    with patch("services.video_project_queue.get_video_project", side_effect=mock_get_project):
+        res = queue.reconcile_existing_final_mp4_ready(
+            conn,
+            job_id=28,
+            project_id=32,
+            expected_final_mp4_sha256=sha,
+            owner_authorized=True,
+        )
+        assert res["ok"] is False
+        assert res["mutation"] == 0
+        assert res["reason"] == "reconciliation_claim_lost"
+        assert res["drift_reason"] == "cas_terminal_state_drift_detected"
+
+
+def test_class_d_concurrent_recovery_mode_drift_blocked(tmp_path: Path):
+    """Class D: Concurrent recovery-mode drift from recovery_existing_tasks_only true -> false -> BLOCKED."""
+    conn = sqlite3.connect(tmp_path / "test_class_d.db")
+    conn.row_factory = sqlite3.Row
+    mp4_path, sha = _create_mini_mp4(tmp_path / "job28.mp4", duration_sec=16.0)
+    _setup_terminal_failed_db(conn, mp4_path)
+
+    original_get_job = queue.get_video_render_job
+    original_get_project = queue.get_video_project
+    job_call = [0]
+    proj_call = [0]
+
+    def mock_get_job(c, j_id):
+        job_call[0] += 1
+        res = original_get_job(c, j_id)
+        if job_call[0] >= 2 and res:
+            res = dict(res)
+            res_payload = json.loads(res.get("result_json") or "{}")
+            res_payload["recovery_existing_tasks_only"] = False
+            res["result_json"] = json.dumps(res_payload)
+            res["recovery_existing_tasks_only"] = False
+        return res
+
+    def mock_get_project(c, p_id):
+        proj_call[0] += 1
+        res = original_get_project(c, p_id)
+        if proj_call[0] >= 2 and res:
+            res = dict(res)
+            asset_pack = json.loads(res.get("asset_pack_json") or "{}")
+            asset_pack["recovery_existing_tasks_only"] = False
+            res["asset_pack_json"] = json.dumps(asset_pack)
+        return res
+
+    with patch("services.video_project_queue.get_video_render_job", side_effect=mock_get_job):
+        with patch("services.video_project_queue.get_video_project", side_effect=mock_get_project):
+            res = queue.reconcile_existing_final_mp4_ready(
+                conn,
+                job_id=28,
+                project_id=32,
+                expected_final_mp4_sha256=sha,
+                owner_authorized=True,
+            )
+            assert res["ok"] is False
+            assert res["mutation"] == 0
+            assert res["reason"] == "reconciliation_claim_lost"
+            assert res["drift_reason"] == "cas_recovery_mode_drift_detected"
+
+
+def test_class_e_artifact_replacement_between_precheck_and_final_cas_verify_blocked(tmp_path: Path):
+    """Class E: Artifact replacement between precheck and final CAS verify -> BLOCKED, MUTATION=0."""
+    conn = sqlite3.connect(tmp_path / "test_class_e.db")
+    conn.row_factory = sqlite3.Row
+    mp4_path, sha = _create_mini_mp4(tmp_path / "job28.mp4", duration_sec=16.0)
+    _setup_terminal_failed_db(conn, mp4_path)
+
+    original_get_job = queue.get_video_render_job
+    call_count = [0]
+
+    def mock_get_job_tamper_file(c, j_id):
+        call_count[0] += 1
+        res = original_get_job(c, j_id)
+        if call_count[0] >= 2:
+            # Tamper the file right before CAS TOCTOU verification
+            mp4_path.write_bytes(b"tampered_bytes_after_precheck_before_cas_mutation")
+        return res
+
+    with patch("services.video_project_queue.get_video_render_job", side_effect=mock_get_job_tamper_file):
+        res = queue.reconcile_existing_final_mp4_ready(
+            conn,
+            job_id=28,
+            project_id=32,
+            expected_final_mp4_sha256=sha,
+            owner_authorized=True,
+        )
+        assert res["ok"] is False
+        assert res["mutation"] == 0
+        assert res["reason"] == "reconciliation_claim_lost"
+        assert res["drift_reason"] == "artifact_toctou_hash_mismatch"
+
+    job = queue.get_video_render_job(conn, 28)
+    assert job["status"] == "failed"
+
+
+def test_class_f_invalid_64_char_non_hex_sha_blocked(tmp_path: Path):
+    """Class F: Invalid 64-char non-hex SHA -> BLOCKED, MUTATION=0."""
+    conn = sqlite3.connect(tmp_path / "test_class_f.db")
+    conn.row_factory = sqlite3.Row
+    mp4_path, _ = _create_mini_mp4(tmp_path / "job28.mp4", duration_sec=16.0)
+    _setup_terminal_failed_db(conn, mp4_path)
+
+    for invalid_sha in ["g" * 64, "z" * 64, "1234567890abcdef" * 3 + "xyzxyzxyzxyzxyzx"]:
+        res = queue.reconcile_existing_final_mp4_ready(
+            conn,
+            job_id=28,
+            project_id=32,
+            expected_final_mp4_sha256=invalid_sha,
+            owner_authorized=True,
+        )
+        assert res["ok"] is False
+        assert res["mutation"] == 0
+        assert res["reason"] == "expected_final_mp4_sha256_invalid_hex"
+
+    job = queue.get_video_render_job(conn, 28)
+    assert job["status"] == "failed"
+
+
+def test_class_g_invalid_duration_contract_with_valid_mp4_blocked(tmp_path: Path):
+    """Class G: Invalid duration contract with otherwise valid MP4 -> BLOCKED, MUTATION=0."""
+    conn = sqlite3.connect(tmp_path / "test_class_g.db")
+    conn.row_factory = sqlite3.Row
+    mp4_path, sha = _create_mini_mp4(tmp_path / "job28.mp4", duration_sec=16.0)
+    _setup_terminal_failed_db(conn, mp4_path)
+
+    # 1. Persisted invalid contract in result_json
+    conn.execute(
+        """UPDATE video_jobs SET result_json = json_set(
+            result_json,
+            '$.final_duration_contract',
+            json('{"ok": false, "reason": "final_duration_short_scene_coverage_missing", "actual_duration_seconds": 8.0, "expected_duration_seconds": 16.0}')
+        ) WHERE id = 28"""
+    )
+    conn.commit()
+
+    res = queue.reconcile_existing_final_mp4_ready(
+        conn,
+        job_id=28,
+        project_id=32,
+        expected_final_mp4_sha256=sha,
+        owner_authorized=True,
+    )
+    assert res["ok"] is False
+    assert res["mutation"] == 0
+    assert res["reason"] == "duration_contract_invalid"
+
+    # 2. Active duration contract failure: expected duration 64s vs probed 16s
+    conn_active = sqlite3.connect(tmp_path / "test_class_g_active.db")
+    conn_active.row_factory = sqlite3.Row
+    _setup_terminal_failed_db(conn_active, mp4_path)
+    conn_active.execute(
+        """UPDATE video_projects SET scene_count = 8,
+            asset_pack_json = json_set(asset_pack_json, '$.orchestration_mode', 'per_scene_8s', '$.scene_count', 8)
+        WHERE project_id = 32"""
+    )
+    conn_active.execute(
+        """UPDATE video_jobs SET result_json = json_set(
+            result_json, '$.orchestration_mode', 'per_scene_8s', '$.scene_count', 8
+        ) WHERE id = 28"""
+    )
+    conn_active.commit()
+
+    res_active = queue.reconcile_existing_final_mp4_ready(
+        conn_active,
+        job_id=28,
+        project_id=32,
+        expected_final_mp4_sha256=sha,
+        owner_authorized=True,
+    )
+    assert res_active["ok"] is False
+    assert res_active["mutation"] == 0
+    assert res_active["reason"] == "duration_contract_invalid"
+
+
+def test_class_h_exact_job28_compatible_fixture_succeeds(tmp_path: Path):
+    """Class H: Exact Job28-compatible fixture succeeds and satisfies all invariants."""
+    conn = sqlite3.connect(tmp_path / "test_class_h.db")
+    conn.row_factory = sqlite3.Row
+    mp4_path, sha = _create_mini_mp4(tmp_path / "job28.mp4", duration_sec=16.0)
+    _setup_terminal_failed_db(conn, mp4_path)
+
+    res = queue.reconcile_existing_final_mp4_ready(
+        conn,
+        job_id=28,
+        project_id=32,
+        expected_final_mp4_sha256=sha,
+        final_video_path=str(mp4_path),
+        owner_authorized=True,
+    )
+    assert res["ok"] is True
+    assert res["mutation"] == 1
+    assert res["terminal_state"] == "final_mp4_ready"
+    assert res["final_mp4_ready"] is True
+    assert res["final_delivered"] is False
+    assert res["artifact_sha256"] == sha
+    assert res["final_duration_contract"]["ok"] is True
+    assert res["final_duration_contract"]["actual_duration_seconds"] > 0
+
+    # Invariants verification
+    job = queue.get_video_render_job(conn, 28)
+    assert job["status"] == "completed"
+    assert job["progress_percent"] == 95
+    assert job["progress_message"] == "final_mp4_ready_waiting_delivery"
+    assert job["last_error"] is None
+    assert job["locked_by"] is None
+
+    project = queue.get_video_project(conn, 32)
+    assert project["status"] == "completed"
+    assert project["video_terminal_state"] == "final_mp4_ready"
+    assert project["final_video_path"] == str(os.path.realpath(mp4_path))
+    assert project["video_artifact_hash"] == sha
+    assert project["video_delivered_at"] is None
+    assert project["video_delivery_message_id"] is None
+
+    res_json = json.loads(job["result_json"])
+    assert res_json["terminal_state"] == "final_mp4_ready"
+    assert res_json["final_delivered"] is False
+    assert res_json["final_mp4_delivered"] is False
+    assert res_json["delivery_succeeded"] is False
+    assert res_json["provider_submit_allowed"] is False
+    assert res_json["charged_xu"] == 0
+    assert res_json["wallet_charge_recorded"] is False
+    assert res_json["completion_only_reconciliation_used"] is True
+    assert res_json["completion_only_reconciliation_sha256"] == sha
 
