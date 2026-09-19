@@ -1,21 +1,25 @@
-"""AutoPost Publishable Asset Handoff Foundation.
+"""AutoPost Publishable Asset Handoff Canonical Authority Service.
 
 Establishes the common artifact/handoff boundary that lets AutoPost consume completed
 output from:
 - Video Product
 - Video Edit
-- SubDub
-- Existing Finished Video
+- SubDub (Guarded)
+- Existing Finished Video (Guarded)
 without coupling AutoPost to the internal implementation of those processors.
 
 Core Invariants:
 1. AUTOPOST != VIDEO_PROCESSOR
-2. Final-Artifact Only (Fail Closed on incomplete/failed/temporary artifacts)
-3. Strict Owner Binding (requesting_user == artifact_owner)
-4. Artifact Hash Binding & Replacement Safety (Metadata SHA == Physical SHA)
-5. Deterministic Handoff Idempotency (Same owner, asset, sha, purpose -> single receipt)
-6. Non-Compulsory Pipeline with Preserved Derivation Lineage (parent_asset_id)
-7. Initial AutoPost Publication Draft: PLANNED (Zero live dispatch, zero billing)
+2. Authoritative Entrypoint Re-Resolves Source Truth:
+   create_autopost_handoff_from_source(conn, source_product, source_ref, requesting_user_id)
+3. Forged PublishableAsset / HandoffReceipt BLOCKED
+4. PV12 Identity Contract: completion-only SHA authority agreement (Fail-Closed on drift)
+5. Video Edit Canonical Terminal Contract: delivered/charged with created receipt
+6. SubDub / Existing Video: Guarded (Fail-Closed on unavailable canonical storage authority)
+7. Storage Reference Truth: Only actual producer remote IDs (no fabricated schemes)
+8. Durable DB Receipt Authority: Draft creation loads receipt from DB & revalidates artifact
+9. Lineage Owner Scoping: Cross-owner parent lineage strictly forbidden
+10. Initial AutoPost Publication Draft: PLANNED (Zero live dispatch, zero billing)
 """
 
 from __future__ import annotations
@@ -31,10 +35,19 @@ import sqlite3
 from typing import Any, Optional
 
 from services import video_local_validation
+from services.video_project_queue import _canonical_persisted_final_mp4_path
+import services.video_editengine1 as video_editengine1
 
 
 def _now_iso() -> str:
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _is_64_hex(val: Any) -> bool:
+    if not isinstance(val, str):
+        return False
+    s = val.strip().lower()
+    return bool(re.fullmatch(r"^[0-9a-f]{64}$", s))
 
 
 def _compute_sha256(file_path: str) -> str:
@@ -59,6 +72,8 @@ SUPPORTED_SOURCE_PRODUCTS = {
     SourceProduct.EXISTING_VIDEO.value,
 }
 
+SUPPORTED_PURPOSES = {"autopost"}
+
 
 @dataclass
 class PublishableAsset:
@@ -76,7 +91,7 @@ class PublishableAsset:
     height: int
     artifact_state: str
     processing_completed_at: str
-    canonical_storage_ref: str
+    canonical_storage_ref: str = ""
     internal_artifact_path: str = ""
     parent_asset_id: Optional[str] = None
     media_type: str = "video"
@@ -203,12 +218,8 @@ def _generate_asset_id(source_product: str, source_job_id: str, sha256: str) -> 
     return f"ast_{prefix}_{digest}"
 
 
-def _generate_storage_ref(source_product: str, asset_id: str, filename: str = "final.mp4") -> str:
-    return f"ref://toanaas-assets/{source_product}/{asset_id}/{filename}"
-
-
 # =========================================================================
-# Producer Adapters
+# Producer Canonical Resolvers
 # =========================================================================
 
 def adapt_product_video_output(
@@ -218,13 +229,20 @@ def adapt_product_video_output(
     *,
     parent_asset_id: Optional[str] = None,
 ) -> tuple[Optional[PublishableAsset], str]:
-    """Read adapter for Video Product completed output.
+    """Canonical resolver for Video Product completed output.
 
     Enforces finalizer invariants:
     - Must be a completed job with valid terminal state
     - Reject queued, processing, failed, cancelled, or intermediate scene clips
     - Strict owner verification
-    - SHA256 binding and replacement safety check
+    - Path resolved via _canonical_persisted_final_mp4_path
+    - PV12 identity contract:
+      For completion-only reconciliation:
+        recon_sha and project_sha must be strict 64-hex
+        where both exist: recon_sha == project_sha == physical_sha
+        Fail-closed on authority drift (no preference)
+      For standard completed:
+        persisted_sha == physical_sha
     """
     try:
         jid = int(job_id)
@@ -250,74 +268,103 @@ def adapt_product_video_output(
     if owner_id != int(requesting_user_id):
         return None, "owner_mismatch"
 
-    # 2. Final-Artifact Status Check
-    job_status = str(job.get("status") or "").strip().lower()
-    if job_status in {"queued", "submitted", "pending"}:
-        return None, "job_queued"
-    if job_status == "processing":
-        return None, "job_processing"
-    if job_status in {"failed", "error"}:
-        return None, "job_failed"
-    if job_status == "cancelled":
-        return None, "job_cancelled"
-    if job_status != "completed":
-        return None, f"job_status_not_completed:{job_status}"
-
-    terminal_state = str(project.get("video_terminal_state") or "").strip().lower()
-    if terminal_state not in {"final_mp4_ready", "final_delivered", "delivered"}:
-        return None, f"invalid_project_terminal_state:{terminal_state}"
-
-    # 3. Reject Intermediate Clips
+    # 2. Intermediate Clip Rejection
     result_payload = {}
     if job.get("result_json"):
         try:
-            result_payload = json.loads(job["result_json"]) if isinstance(job["result_json"], str) else dict(job["result_json"])
+            result_payload = (
+                json.loads(job["result_json"])
+                if isinstance(job["result_json"], str)
+                else dict(job["result_json"])
+            )
         except Exception:
             result_payload = {}
 
     if result_payload.get("is_intermediate_clip") or result_payload.get("scene_index") is not None:
         return None, "intermediate_scene_clip_rejected"
 
-    # 4. Resolve Canonical Path
-    final_path = str(
-        project.get("final_video_path")
-        or result_payload.get("final_video_path")
-        or result_payload.get("final_mp4_path")
-        or ""
-    ).strip()
+    # 3. Canonical Path Resolution (Hardened PV12 resolver)
+    final_path = _canonical_persisted_final_mp4_path(project, result_payload)
     if not final_path:
-        return None, "missing_final_artifact_path"
+        return None, "canonical_artifact_path_missing"
 
-    # 5. Media Integrity Probe
+    # 4. Media Integrity Probe
     valid, probe, reason = _validate_final_mp4(final_path)
     if not valid:
         return None, reason
 
-    # 6. SHA Binding & Replacement Safety
+    # 5. Physical SHA256 computation
     physical_sha = _compute_sha256(final_path)
-    persisted_sha = str(
-        project.get("video_artifact_hash")
-        or result_payload.get("completion_only_reconciliation_sha256")
-        or result_payload.get("artifact_sha256")
-        or ""
-    ).strip().lower()
 
-    if persisted_sha and persisted_sha != physical_sha:
-        return None, "artifact_replacement_detected"
+    # 6. PV12 Identity Contract Check
+    is_completion_only = bool(result_payload.get("completion_only_reconciliation_used"))
+    if is_completion_only:
+        recon_sha = str(result_payload.get("completion_only_reconciliation_sha256") or "").strip().lower()
+        if not _is_64_hex(recon_sha):
+            return None, "completion_only_reconciliation_sha_invalid"
+
+        project_sha = str(project.get("video_artifact_hash") or "").strip().lower()
+        if project_sha:
+            if not _is_64_hex(project_sha):
+                return None, "project_artifact_sha_invalid"
+            # Strict authority agreement: fail-closed on drift
+            if project_sha != recon_sha:
+                return None, "completion_sha_authority_drift_blocked"
+
+        if physical_sha != recon_sha:
+            return None, "physical_sha_mismatch"
+    else:
+        # Standard completion state checks
+        job_status = str(job.get("status") or "").strip().lower()
+        if job_status in {"queued", "submitted", "pending"}:
+            return None, "job_queued"
+        if job_status == "processing":
+            return None, "job_processing"
+        if job_status in {"failed", "error"}:
+            return None, "job_failed"
+        if job_status == "cancelled":
+            return None, "job_cancelled"
+        if job_status != "completed":
+            return None, f"job_status_not_completed:{job_status}"
+
+        terminal_state = str(project.get("video_terminal_state") or "").strip().lower()
+        if terminal_state not in {"final_mp4_ready", "final_delivered", "delivered"}:
+            return None, f"invalid_project_terminal_state:{terminal_state}"
+
+        persisted_sha = str(
+            project.get("video_artifact_hash")
+            or result_payload.get("video_artifact_hash")
+            or result_payload.get("final_mp4_sha256")
+            or ""
+        ).strip().lower()
+
+        if persisted_sha:
+            if not _is_64_hex(persisted_sha):
+                return None, "project_artifact_sha_invalid"
+            if persisted_sha != physical_sha:
+                return None, "artifact_replacement_detected"
 
     artifact_sha = physical_sha
     asset_id = _generate_asset_id(SourceProduct.VIDEO_PRODUCT.value, str(jid), artifact_sha)
-    storage_ref = _generate_storage_ref(SourceProduct.VIDEO_PRODUCT.value, asset_id)
+
+    # Storage ref: use genuine remote file ID if proven, else empty (no fabricated ref://)
+    remote_file_id = str(project.get("final_video_file_id") or result_payload.get("output_file_id") or "").strip()
+    storage_ref = f"telegram_file_id:{remote_file_id}" if remote_file_id else ""
 
     caption = str(result_payload.get("caption") or project.get("topic") or "").strip()
-    completed_at = str(job.get("completed_at") or project.get("video_delivered_at") or project.get("updated_at") or _now_iso())
+    completed_at = str(
+        job.get("completed_at")
+        or project.get("video_delivered_at")
+        or project.get("updated_at")
+        or _now_iso()
+    )
 
     asset = PublishableAsset(
         asset_id=asset_id,
         owner_id=owner_id,
         source_product=SourceProduct.VIDEO_PRODUCT.value,
         source_job_id=str(jid),
-        source_asset_id=str(project.get("final_video_file_id") or result_payload.get("output_file_id") or asset_id),
+        source_asset_id=remote_file_id or asset_id,
         parent_asset_id=parent_asset_id,
         artifact_sha256=artifact_sha,
         byte_size=os.path.getsize(final_path),
@@ -343,41 +390,64 @@ def adapt_video_edit_output(
     *,
     parent_asset_id: Optional[str] = None,
 ) -> tuple[Optional[PublishableAsset], str]:
-    """Read adapter for Video Edit completed output.
+    """Canonical resolver for Video Edit completed output.
 
     Enforces video edit invariants:
-    - Resolves only canonical output_path and output_sha256
-    - Never resolves source input video, intermediate FFmpeg temp files
+    - Reads from video_editengine1 canonical source
+    - Requires canonical terminal state: status in ('delivered', 'charged')
+    - Requires receipt_state == 'created' and delivered_at present
+    - Rejects queued, processing, failed, and arbitrary non-terminal states (e.g. 'completed', 'success')
+    - Resolves only canonical output_path and output_sha256 (never source_video_path or worker temp)
     - Strict owner verification
-    - SHA256 binding and replacement safety check
+    - SHA256 physical binding check
     """
     try:
         jid = int(job_id)
     except (TypeError, ValueError):
         return None, "invalid_job_id"
 
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM video_edit_jobs WHERE id=?", (jid,))
-    row = cur.fetchone()
+    # Use video_editengine1 schema and lookup
+    video_editengine1.ensure_schema(conn)
+    row = conn.execute(
+        """SELECT id,user_id,status,receipt_state,delivered_at,output_path,
+                  output_sha256,output_file_id,delivery_file_id,tail_json,
+                  finished_at,updated_at
+           FROM video_edit_jobs WHERE id=? OR local_worker_job_id=?""",
+        (jid, jid),
+    ).fetchone()
+
     if not row:
         return None, "job_not_found"
-    job = dict(row)
+
+    fields = (
+        "id", "user_id", "status", "receipt_state", "delivered_at", "output_path",
+        "output_sha256", "output_file_id", "delivery_file_id", "tail_json",
+        "finished_at", "updated_at",
+    )
+    job = dict(zip(fields, row))
 
     # 1. Owner Binding
     owner_id = int(job.get("user_id") or 0)
     if owner_id != int(requesting_user_id):
         return None, "owner_mismatch"
 
-    # 2. Status Check
+    # 2. Terminal State Check
     status = str(job.get("status") or "").strip().lower()
     if status == "queued":
         return None, "job_queued"
-    if status in {"processing", "running"}:
+    if status in {"processing", "running", "rendering"}:
         return None, "job_processing"
-    if status in {"failed", "cancelled", "error"}:
+    if status in {"failed", "failed_no_charge", "delivery_unknown", "cancelled", "error"}:
         return None, "job_failed"
-    if status not in {"completed", "delivered", "success"}:
-        return None, f"job_status_not_completed:{status}"
+    if status not in {"delivered", "charged"}:
+        return None, f"video_edit_not_in_terminal_delivered_state:{status}"
+
+    receipt_state = str(job.get("receipt_state") or "").strip().lower()
+    if receipt_state != "created":
+        return None, f"video_edit_receipt_state_invalid:{receipt_state}"
+
+    if not job.get("delivered_at"):
+        return None, "video_edit_not_delivered"
 
     # 3. Canonical Output Path Only (Never source input video or worker temp)
     output_path = str(job.get("output_path") or "").strip()
@@ -390,17 +460,22 @@ def adapt_video_edit_output(
         return None, reason
 
     # 5. SHA Binding & Replacement Safety
-    physical_sha = _compute_sha256(output_path)
     recorded_sha = str(job.get("output_sha256") or "").strip().lower()
+    if not _is_64_hex(recorded_sha):
+        return None, "video_edit_output_sha_invalid"
 
-    if recorded_sha and recorded_sha != physical_sha:
+    physical_sha = _compute_sha256(output_path)
+    if physical_sha != recorded_sha:
         return None, "artifact_replacement_detected"
 
     artifact_sha = physical_sha
-    asset_id = _generate_asset_id(SourceProduct.VIDEO_EDIT.value, str(jid), artifact_sha)
-    storage_ref = _generate_storage_ref(SourceProduct.VIDEO_EDIT.value, asset_id)
+    actual_job_id = str(job.get("id") or jid)
+    asset_id = _generate_asset_id(SourceProduct.VIDEO_EDIT.value, actual_job_id, artifact_sha)
 
-    # Inherit or resolve lineage: check if edit job recorded a parent asset id
+    # Storage ref: genuine remote file ID if present, else empty (no fabricated ref://)
+    remote_file_id = str(job.get("output_file_id") or job.get("delivery_file_id") or "").strip()
+    storage_ref = f"telegram_file_id:{remote_file_id}" if remote_file_id else ""
+
     resolved_parent = parent_asset_id
     if not resolved_parent and job.get("tail_json"):
         try:
@@ -415,8 +490,8 @@ def adapt_video_edit_output(
         asset_id=asset_id,
         owner_id=owner_id,
         source_product=SourceProduct.VIDEO_EDIT.value,
-        source_job_id=str(jid),
-        source_asset_id=str(job.get("output_file_id") or asset_id),
+        source_job_id=actual_job_id,
+        source_asset_id=remote_file_id or asset_id,
         parent_asset_id=resolved_parent,
         artifact_sha256=artifact_sha,
         byte_size=os.path.getsize(output_path),
@@ -441,175 +516,124 @@ def adapt_subdub_output(
     requesting_user_id: int,
     *,
     parent_asset_id: Optional[str] = None,
-    in_memory_job: Optional[dict[str, Any]] = None,
 ) -> tuple[Optional[PublishableAsset], str]:
-    """Read adapter for SubDub completed output.
+    """Guarded adapter for SubDub.
 
-    Enforces SubDub invariants:
-    - Resolves final completed SubDub output
-    - Requires completed status and delivered terminal state
-    - Rejects jobs where full video failed (e.g. partial audio fallback only)
-    - Strict owner verification
-    - SHA256 binding and replacement safety check
+    Current canonical SubDub runtime stores ephemeral job receipts in bot memory
+    and lacks a durable SQLite service-layer storage table.
+    Fails closed deterministically to prevent false authority claims.
     """
-    job = dict(in_memory_job or {})
-    jid = str(job_id or "").strip()
-
-    if not job and conn is not None and jid:
-        try:
-            row = conn.execute(
-                "SELECT value FROM system_settings WHERE key=? LIMIT 1",
-                (f"subdub:job:{jid}",),
-            ).fetchone()
-            if row and row[0]:
-                job = json.loads(row[0])
-        except Exception:
-            pass
-
-    if not job:
-        return None, "job_not_found"
-
-    # 1. Owner Binding
-    owner_id = int(job.get("user_id") or 0)
-    if owner_id != int(requesting_user_id):
-        return None, "owner_mismatch"
-
-    # 2. Status Check
-    status = str(job.get("status") or "").strip().lower()
-    terminal = str(job.get("terminal_state") or "").strip().lower()
-    if status == "running" or job.get("lifecycle_state") in {"processing", "received_file"}:
-        return None, "job_processing"
-    if status in {"failed", "failed_no_charge"} or job.get("full_video_failed"):
-        return None, "job_failed"
-    if terminal not in {"delivered", "completed"} and not (status == "completed" and job.get("output_sent")):
-        return None, "not_final_delivered"
-
-    # 3. Output Path
-    final_path = str(
-        job.get("final_video_path")
-        or job.get("output_video_path")
-        or job.get("video_output")
-        or job.get("output_path")
-        or ""
-    ).strip()
-    if not final_path:
-        return None, "missing_final_artifact_path"
-
-    # 4. Media Integrity Probe
-    valid, probe, reason = _validate_final_mp4(final_path)
-    if not valid:
-        return None, reason
-
-    # 5. SHA Binding & Replacement Safety
-    physical_sha = _compute_sha256(final_path)
-    recorded_sha = str(
-        job.get("video_delivery_sha256")
-        or job.get("output_sha256")
-        or job.get("final_sha256")
-        or ""
-    ).strip().lower()
-
-    if recorded_sha and recorded_sha != physical_sha:
-        return None, "artifact_replacement_detected"
-
-    artifact_sha = physical_sha
-    asset_id = _generate_asset_id(SourceProduct.SUBDUB.value, jid, artifact_sha)
-    storage_ref = _generate_storage_ref(SourceProduct.SUBDUB.value, asset_id)
-
-    completed_at = str(
-        job.get("subdub_delivered_at")
-        or job.get("delivered_at")
-        or job.get("completed_at")
-        or _now_iso()
-    )
-
-    asset = PublishableAsset(
-        asset_id=asset_id,
-        owner_id=owner_id,
-        source_product=SourceProduct.SUBDUB.value,
-        source_job_id=jid,
-        source_asset_id=str(job.get("video_delivery_file_id") or asset_id),
-        parent_asset_id=parent_asset_id or job.get("parent_asset_id"),
-        artifact_sha256=artifact_sha,
-        byte_size=os.path.getsize(final_path),
-        duration_seconds=float(probe.get("duration") or 0.0),
-        width=int(probe.get("width") or 0),
-        height=int(probe.get("height") or 0),
-        artifact_state="final_ready",
-        processing_completed_at=completed_at,
-        canonical_storage_ref=storage_ref,
-        internal_artifact_path=final_path,
-        caption_candidate=str(job.get("source_caption") or "").strip(),
-        language=str(job.get("target_language") or "vi"),
-        publish_eligible=True,
-        publish_blockers=[],
-    )
-    return asset, ""
+    return None, "subdub_canonical_authority_unavailable"
 
 
 def adapt_existing_video_output(
     conn: Optional[sqlite3.Connection],
-    asset_record: dict[str, Any],
+    asset_record: Any,
     requesting_user_id: int,
     *,
     parent_asset_id: Optional[str] = None,
 ) -> tuple[Optional[PublishableAsset], str]:
-    """Read adapter for existing uploaded or pre-existing finished video.
+    """Guarded adapter for Existing Finished Video.
 
-    Only operates on proven canonical records with valid media and ownership.
+    No durable canonical media vault table exists in the current system.
+    Arbitrary dictionaries cannot establish authority.
+    Fails closed deterministically.
     """
-    if not asset_record or not isinstance(asset_record, dict):
-        return None, "invalid_asset_record"
-
-    owner_id = int(asset_record.get("owner_id") or asset_record.get("owner_user_id") or 0)
-    if owner_id != int(requesting_user_id):
-        return None, "owner_mismatch"
-
-    local_path = str(asset_record.get("local_path") or asset_record.get("path") or "").strip()
-    if not local_path:
-        return None, "missing_final_artifact_path"
-
-    valid, probe, reason = _validate_final_mp4(local_path)
-    if not valid:
-        return None, reason
-
-    physical_sha = _compute_sha256(local_path)
-    expected_sha = str(asset_record.get("sha256") or asset_record.get("artifact_sha256") or "").strip().lower()
-    if expected_sha and expected_sha != physical_sha:
-        return None, "artifact_replacement_detected"
-
-    artifact_sha = physical_sha
-    source_asset_id = str(asset_record.get("asset_id") or asset_record.get("media_id") or "existing").strip()
-    asset_id = _generate_asset_id(SourceProduct.EXISTING_VIDEO.value, source_asset_id, artifact_sha)
-    storage_ref = _generate_storage_ref(SourceProduct.EXISTING_VIDEO.value, asset_id)
-
-    asset = PublishableAsset(
-        asset_id=asset_id,
-        owner_id=owner_id,
-        source_product=SourceProduct.EXISTING_VIDEO.value,
-        source_job_id=source_asset_id,
-        source_asset_id=source_asset_id,
-        parent_asset_id=parent_asset_id or asset_record.get("parent_asset_id"),
-        artifact_sha256=artifact_sha,
-        byte_size=os.path.getsize(local_path),
-        duration_seconds=float(probe.get("duration") or 0.0),
-        width=int(probe.get("width") or 0),
-        height=int(probe.get("height") or 0),
-        artifact_state="final_ready",
-        processing_completed_at=str(asset_record.get("created_at") or _now_iso()),
-        canonical_storage_ref=storage_ref,
-        internal_artifact_path=local_path,
-        caption_candidate=str(asset_record.get("caption") or "").strip(),
-        language="vi",
-        publish_eligible=True,
-        publish_blockers=[],
-    )
-    return asset, ""
+    return None, "existing_video_canonical_authority_unavailable"
 
 
 # =========================================================================
 # AutoPost Handoff Service & Receiver Boundary
 # =========================================================================
+
+def create_autopost_handoff_from_source(
+    conn: sqlite3.Connection,
+    source_product: str | SourceProduct,
+    source_ref: Any,
+    requesting_user_id: int,
+    *,
+    purpose: str = "autopost",
+    parent_asset_id: Optional[str] = None,
+) -> tuple[Optional[HandoffReceipt], str]:
+    """Authoritative public handoff entrypoint.
+
+    Workflow:
+    1. Validate purpose against allowlist ('autopost')
+    2. Validate parent lineage ownership (strictly owner-scoped)
+    3. Resolve canonical source producer truth
+    4. Verify owner binding and terminal completion state
+    5. Resolve canonical artifact path & expected hash
+    6. Verify physical probe & hash
+    7. Persist idempotent handoff receipt
+    """
+    ensure_autopost_handoff_schema(conn)
+
+    # 1. Purpose allowlist check
+    norm_purpose = str(purpose or "").strip().lower()
+    if norm_purpose not in SUPPORTED_PURPOSES:
+        return None, "unsupported_purpose"
+
+    # 2. Lineage Owner Binding Check
+    norm_parent_id = str(parent_asset_id or "").strip() if parent_asset_id else None
+    if norm_parent_id:
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT owner_id, lineage_json FROM autopost_handoff_receipts
+               WHERE asset_id=? OR handoff_id=? LIMIT 1""",
+            (norm_parent_id, norm_parent_id),
+        )
+        parent_row = cur.fetchone()
+        if not parent_row:
+            return None, "parent_asset_not_found"
+        parent_owner_id = int(parent_row[0])
+        if parent_owner_id != int(requesting_user_id):
+            return None, "cross_owner_lineage_forbidden"
+
+    # 3. Re-resolve producer canonical state
+    product_str = str(getattr(source_product, "value", source_product)).strip().lower()
+    if product_str == SourceProduct.VIDEO_PRODUCT.value:
+        asset, err = adapt_product_video_output(
+            conn,
+            job_id=source_ref,
+            requesting_user_id=requesting_user_id,
+            parent_asset_id=norm_parent_id,
+        )
+    elif product_str == SourceProduct.VIDEO_EDIT.value:
+        asset, err = adapt_video_edit_output(
+            conn,
+            job_id=source_ref,
+            requesting_user_id=requesting_user_id,
+            parent_asset_id=norm_parent_id,
+        )
+    elif product_str == SourceProduct.SUBDUB.value:
+        asset, err = adapt_subdub_output(
+            conn,
+            job_id=str(source_ref),
+            requesting_user_id=requesting_user_id,
+            parent_asset_id=norm_parent_id,
+        )
+    elif product_str == SourceProduct.EXISTING_VIDEO.value:
+        asset, err = adapt_existing_video_output(
+            conn,
+            asset_record=source_ref,
+            requesting_user_id=requesting_user_id,
+            parent_asset_id=norm_parent_id,
+        )
+    else:
+        return None, f"unsupported_source_product:{product_str}"
+
+    if not asset:
+        return None, err
+
+    # 4. Delegate to internal persistence with canonical authority proven
+    return create_autopost_handoff(
+        conn,
+        asset,
+        requesting_user_id,
+        purpose=norm_purpose,
+        _canonical_proven=True,
+    )
+
 
 def create_autopost_handoff(
     conn: sqlite3.Connection,
@@ -617,17 +641,22 @@ def create_autopost_handoff(
     requesting_user_id: int,
     *,
     purpose: str = "autopost",
+    _canonical_proven: bool = False,
 ) -> tuple[Optional[HandoffReceipt], str]:
-    """Create an immutable, idempotent handoff receipt for an eligible publishable asset.
+    """Internal handoff persistence boundary.
 
-    Guarantees:
-    - Zero media rendering / copying
-    - Fail-closed if artifact SHA has changed or physical file missing
-    - Strictly bound to requesting owner
-    - Deterministic duplicate deduplication (returns existing receipt)
-    - Preserves derivation lineage
+    Guards against forged PublishableAsset objects created outside canonical resolution.
     """
     ensure_autopost_handoff_schema(conn)
+
+    # Gate: Reject free-form caller-created asset objects
+    if not _canonical_proven:
+        return None, "forged_publishable_asset_handoff_blocked"
+
+    # Purpose validation
+    norm_purpose = str(purpose or "").strip().lower()
+    if norm_purpose not in SUPPORTED_PURPOSES:
+        return None, "unsupported_purpose"
 
     # 1. Owner Binding
     if int(requesting_user_id) != int(asset.owner_id):
@@ -651,7 +680,7 @@ def create_autopost_handoff(
         """SELECT * FROM autopost_handoff_receipts
            WHERE owner_id=? AND asset_id=? AND artifact_sha256=? AND purpose=?
            LIMIT 1""",
-        (asset.owner_id, asset.asset_id, asset.artifact_sha256, purpose),
+        (asset.owner_id, asset.asset_id, asset.artifact_sha256, norm_purpose),
     )
     existing_row = cur.fetchone()
     if existing_row:
@@ -673,28 +702,32 @@ def create_autopost_handoff(
         )
         return receipt, "idempotent_existing_receipt"
 
-    # 5. Build Lineage Chain
+    # 5. Build Owner-Scoped Lineage Chain
     lineage = [asset.asset_id]
     if asset.parent_asset_id:
         lineage.append(asset.parent_asset_id)
-        # Traverse prior handoffs to trace ancestry C -> B -> A
         cur.execute(
-            "SELECT lineage_json FROM autopost_handoff_receipts WHERE asset_id=? LIMIT 1",
-            (asset.parent_asset_id,),
+            """SELECT owner_id, lineage_json FROM autopost_handoff_receipts
+               WHERE asset_id=? OR handoff_id=? LIMIT 1""",
+            (asset.parent_asset_id, asset.parent_asset_id),
         )
         parent_row = cur.fetchone()
-        if parent_row and parent_row[0]:
-            try:
-                parent_lineage = json.loads(parent_row[0])
-                for item in parent_lineage:
-                    if item not in lineage:
-                        lineage.append(item)
-            except Exception:
-                pass
+        if parent_row:
+            p_owner = int(parent_row[0])
+            if p_owner != int(asset.owner_id):
+                return None, "cross_owner_lineage_forbidden"
+            if parent_row[1]:
+                try:
+                    parent_lineage = json.loads(parent_row[1])
+                    for item in parent_lineage:
+                        if item not in lineage:
+                            lineage.append(item)
+                except Exception:
+                    pass
 
     # 6. Create Durable Receipt
     handoff_hash = hashlib.sha256(
-        f"{asset.owner_id}:{asset.asset_id}:{asset.artifact_sha256}:{purpose}".encode("utf-8")
+        f"{asset.owner_id}:{asset.asset_id}:{asset.artifact_sha256}:{norm_purpose}".encode("utf-8")
     ).hexdigest()[:24]
     handoff_id = f"hnd_{handoff_hash}"
     now_ts = _now_iso()
@@ -712,7 +745,7 @@ def create_autopost_handoff(
             asset.source_product,
             asset.source_job_id,
             asset.artifact_sha256,
-            purpose,
+            norm_purpose,
             "created",
             asset.parent_asset_id,
             json.dumps(lineage),
@@ -730,7 +763,7 @@ def create_autopost_handoff(
         source_product=asset.source_product,
         source_job_id=asset.source_job_id,
         artifact_sha256=asset.artifact_sha256,
-        purpose=purpose,
+        purpose=norm_purpose,
         status="created",
         parent_asset_id=asset.parent_asset_id,
         lineage=lineage,
@@ -742,31 +775,60 @@ def create_autopost_handoff(
 
 def receive_autopost_handoff_to_draft(
     conn: sqlite3.Connection,
-    handoff: HandoffReceipt,
-    asset: PublishableAsset,
+    handoff_id: str,
     requesting_user_id: int,
 ) -> tuple[Optional[PublicationDraft], str]:
-    """AutoPost receiver boundary: accepts a valid handoff and registers a publication draft.
+    """AutoPost receiver boundary: accepts a durable handoff ID and registers a publication draft.
 
     Contract:
+    - Loads receipt strictly from database (rejects caller-forged objects)
+    - Validates owner matches requesting_user_id
+    - Validates status is 'created' (usable)
+    - Revalidates artifact: physical SHA must match stored expected SHA
     - Creates a draft in initial status PLANNED
     - Zero platform dispatch, zero external API calls, zero billing side effects
     """
     ensure_autopost_handoff_schema(conn)
 
-    # 1. Owner & Asset Verification
-    if int(requesting_user_id) != int(handoff.owner_id) or int(requesting_user_id) != int(asset.owner_id):
-        return None, "owner_mismatch"
-    if handoff.asset_id != asset.asset_id:
-        return None, "asset_id_mismatch"
-    if handoff.artifact_sha256 != asset.artifact_sha256:
-        return None, "artifact_sha_mismatch"
-
-    # 2. Idempotency Check for Draft
     cur = conn.cursor()
     cur.execute(
+        "SELECT * FROM autopost_handoff_receipts WHERE handoff_id=? LIMIT 1",
+        (str(handoff_id or "").strip(),),
+    )
+    row = cur.fetchone()
+    if not row:
+        return None, "receipt_not_found"
+
+    receipt = dict(row)
+
+    # 1. Owner verification
+    if int(receipt.get("owner_id") or 0) != int(requesting_user_id):
+        return None, "owner_mismatch"
+
+    # 2. Status verification
+    if str(receipt.get("status") or "").strip().lower() != "created":
+        return None, "receipt_not_usable"
+
+    # 3. Artifact Revalidation between handoff and draft
+    snapshot_json = receipt.get("asset_snapshot_json")
+    try:
+        snapshot = json.loads(snapshot_json) if snapshot_json else {}
+    except Exception:
+        snapshot = {}
+
+    internal_path = str(snapshot.get("internal_artifact_path") or "").strip()
+    if internal_path:
+        if not os.path.isfile(internal_path):
+            return None, "draft_artifact_missing"
+        physical_sha = _compute_sha256(internal_path)
+        expected_sha = str(receipt.get("artifact_sha256") or "").strip().lower()
+        if physical_sha != expected_sha:
+            return None, "draft_artifact_tampered_or_modified"
+
+    # 4. Idempotency Check for Draft
+    cur.execute(
         "SELECT * FROM autopost_publication_drafts WHERE handoff_id=? LIMIT 1",
-        (handoff.handoff_id,),
+        (receipt["handoff_id"],),
     )
     existing_row = cur.fetchone()
     if existing_row:
@@ -784,9 +846,10 @@ def receive_autopost_handoff_to_draft(
         )
         return draft, "idempotent_existing_draft"
 
-    draft_hash = hashlib.sha256(f"{handoff.handoff_id}:{handoff.owner_id}".encode("utf-8")).hexdigest()[:24]
+    draft_hash = hashlib.sha256(f"{receipt['handoff_id']}:{receipt['owner_id']}".encode("utf-8")).hexdigest()[:24]
     draft_id = f"draft_{draft_hash}"
     now_ts = _now_iso()
+    caption_draft = str(snapshot.get("caption_candidate") or "").strip()
 
     conn.execute(
         """INSERT INTO autopost_publication_drafts (
@@ -795,10 +858,10 @@ def receive_autopost_handoff_to_draft(
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             draft_id,
-            handoff.handoff_id,
-            asset.asset_id,
-            handoff.owner_id,
-            asset.caption_candidate,
+            receipt["handoff_id"],
+            receipt["asset_id"],
+            receipt["owner_id"],
+            caption_draft,
             json.dumps([]),
             None,
             "PLANNED",
@@ -809,10 +872,10 @@ def receive_autopost_handoff_to_draft(
 
     draft = PublicationDraft(
         draft_id=draft_id,
-        handoff_id=handoff.handoff_id,
-        asset_id=asset.asset_id,
-        owner_id=handoff.owner_id,
-        caption_draft=asset.caption_candidate,
+        handoff_id=receipt["handoff_id"],
+        asset_id=receipt["asset_id"],
+        owner_id=receipt["owner_id"],
+        caption_draft=caption_draft,
         selected_channels=[],
         schedule=None,
         status="PLANNED",
