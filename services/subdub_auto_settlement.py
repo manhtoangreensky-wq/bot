@@ -242,6 +242,9 @@ def _durable_video_delivery(job: dict) -> bool:
     )
 
 
+durable_video_delivery = _durable_video_delivery
+
+
 def _identity_reason(
     job: dict,
     receipt: dict,

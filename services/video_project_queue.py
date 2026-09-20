@@ -9853,10 +9853,48 @@ def complete_video_job(
                 "project": fresh_project,
             }
         conn.commit()
+        autopost_info = None
+        autopost_adapter_info = None
+        try:
+            from services.autopost_asset_handoff import notify_autopost_producer_completion
+            owner_uid = int(
+                locked_job.get("user_id")
+                or (locked_project.get("user_id") if locked_project else 0)
+                or 0
+            )
+            autopost_info = notify_autopost_producer_completion(
+                conn,
+                source_product="video_product",
+                source_ref=int(job_id),
+                requesting_user_id=owner_uid,
+            )
+            from services import autopost_product_video_adapter as apva
+            adapter_res, _ = apva.process_product_video_autopost_handoff(
+                conn,
+                product_video_job_id=int(job_id),
+                owner_id=owner_uid,
+                handoff_receipt=autopost_info,
+            )
+            autopost_adapter_info = adapter_res
+        except Exception as exc:
+            if autopost_info is None:
+                autopost_info = {
+                    "attempted": True,
+                    "created_or_reused": False,
+                    "handoff_id": None,
+                    "blocker": f"autopost_callback_error:{type(exc).__name__}",
+                }
+            autopost_adapter_info = {
+                "attempted": True,
+                "created_or_reused": False,
+                "blocker": f"autopost_adapter_error:{type(exc).__name__}",
+            }
         return {
             "ok": True,
             "job": get_video_render_job(conn, int(job_id)),
             "project": get_video_project(conn, int(locked_job["project_id"])),
+            "autopost_handoff": autopost_info,
+            "autopost_adapter": autopost_adapter_info,
         }
     except Exception:
         try:
@@ -10284,7 +10322,47 @@ def note_video_delivery_result(
             ),
         )
     conn.commit()
-    return {"ok": True, "sent": bool(sent), "job": get_video_render_job(conn, int(job_id)), "project": get_video_project(conn, int(project["project_id"]))}
+    autopost_info = None
+    autopost_adapter_info = None
+    if sent:
+        try:
+            from services.autopost_asset_handoff import notify_autopost_producer_completion
+            owner_uid = int((project or {}).get("user_id") or 0)
+            autopost_info = notify_autopost_producer_completion(
+                conn,
+                source_product="video_product",
+                source_ref=int(job_id),
+                requesting_user_id=owner_uid,
+            )
+            from services import autopost_product_video_adapter as apva
+            adapter_res, _ = apva.process_product_video_autopost_handoff(
+                conn,
+                product_video_job_id=int(job_id),
+                owner_id=owner_uid,
+                handoff_receipt=autopost_info,
+            )
+            autopost_adapter_info = adapter_res
+        except Exception as exc:
+            if autopost_info is None:
+                autopost_info = {
+                    "attempted": True,
+                    "created_or_reused": False,
+                    "handoff_id": None,
+                    "blocker": f"autopost_callback_error:{type(exc).__name__}",
+                }
+            autopost_adapter_info = {
+                "attempted": True,
+                "created_or_reused": False,
+                "blocker": f"autopost_adapter_error:{type(exc).__name__}",
+            }
+    return {
+        "ok": True,
+        "sent": bool(sent),
+        "job": get_video_render_job(conn, int(job_id)),
+        "project": get_video_project(conn, int(project["project_id"])),
+        "autopost_handoff": autopost_info,
+        "autopost_adapter": autopost_adapter_info,
+    }
 
 
 def fail_video_job(conn: sqlite3.Connection, *, job_id: int, error: str, retry: bool = True) -> dict[str, Any]:
