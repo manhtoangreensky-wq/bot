@@ -19,12 +19,14 @@ QUOTE_VERSION = "2026-08-15.auto-word.1"
 
 
 def _load_bot_functions(*names: str) -> dict:
+    from services.subdub_blackboxes import auto_multi_speaker
     source = (Path(__file__).parents[1] / "bot.py").read_text(encoding="utf-8")
     namespace = {
         "hashlib": hashlib,
         "os": os,
         "time": time,
         "ContextTypes": SimpleNamespace(DEFAULT_TYPE=object),
+        "auto_multi_speaker": auto_multi_speaker,
     }
     chunks = []
     for name in names:

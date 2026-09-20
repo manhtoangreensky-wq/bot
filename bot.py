@@ -237241,11 +237241,15 @@ async def subdub_recover_existing_mp4_delivery(
         delivery_succeeded=True,
     )
     latest = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(str(job_key or "")) or {})
+    owner_id = str(latest.get("user_id") or current.get("user_id") or "").strip()
+    internal_job_id = str(
+        latest.get("internal_job_id")
+        or latest.get("job_id")
+        or current.get("internal_job_id")
+        or current.get("job_id")
+        or ""
+    ).strip()
     if subdub_auto_speaker_route_enabled(latest):
-        owner_id = str(latest.get("user_id") or "").strip()
-        internal_job_id = str(
-            latest.get("internal_job_id") or latest.get("job_id") or ""
-        ).strip()
         receipt = dict(latest.get("auto_exact_receipt") or {})
         amount_xu = int(receipt.get("actual_total_xu") or 0)
         if owner_id and is_admin_user(owner_id):
@@ -237306,6 +237310,8 @@ async def subdub_recover_existing_mp4_delivery(
                     settlement_error_category=settlement_error,
                     auto_settlement_pending_recovery=True,
                 )
+    if internal_job_id and owner_id and latest.get("charge_status") in ("charged", "admin_free", "not_charged"):
+        _notify_subdub_autopost_completion(internal_job_id, int(owner_id or 0))
     return {**current, **latest, **delivery, "video_delivery_message_id": message_id}
 
 
@@ -250392,6 +250398,20 @@ def _expire_subdub_auto_exact_job_if_due(
     return True, expired_job
 
 
+def _notify_subdub_autopost_completion(internal_job_id: str, owner_id: int) -> dict:
+    """Post-commit notifier for SubDub AutoPost handoff."""
+    try:
+        from services.autopost_subdub_adapter import process_subdub_autopost_handoff
+        conn = db_connect()
+        try:
+            diag, _ = process_subdub_autopost_handoff(conn, str(internal_job_id or "").strip(), int(owner_id or 0))
+            return diag
+        finally:
+            conn.close()
+    except Exception as exc:
+        return {"attempted": True, "blocker": f"autopost_notifier_error:{type(exc).__name__}"}
+
+
 def reconcile_subdub_auto_postdelivery_settlements(limit: int = 40) -> dict:
     """Settle delivered Auto jobs after restart without replaying media work."""
 
@@ -250497,6 +250517,7 @@ def reconcile_subdub_auto_postdelivery_settlements(limit: int = 40) -> dict:
                         **dict(SUBTITLE_DUB_PIPELINE_JOBS.get(job_key) or {}),
                         **dict(durable_job),
                     }
+                _notify_subdub_autopost_completion(internal_job_id, int(user_id or durable_job.get("user_id") or 0))
     return report
 
 
@@ -252938,6 +252959,8 @@ async def _execute_video_dubbing_pipeline_core(
             "pipeline_blocker": "",
         })
         internal_job_id = str(job.get("internal_job_id") or "")
+        if delivered_video and internal_job_id and job.get("charge_status") in ("charged", "admin_free", "not_charged"):
+            _notify_subdub_autopost_completion(internal_job_id, int(job.get("user_id") or uid or 0))
     except Exception as exc:
         logger.warning("subtitle/dub internal job save failed | %s", sanitize_log_text(str(exc))[:180])
     return {
