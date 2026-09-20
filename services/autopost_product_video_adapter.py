@@ -31,6 +31,7 @@ from typing import Any, Optional
 
 from services import autopost_asset_handoff as aah
 from services import autopost_scheduler as aps
+from services import video_project_queue as queue
 
 
 # =========================================================================
@@ -70,6 +71,7 @@ MAX_CAPTION_LENGTH = 2000
 
 def ensure_autopost_product_video_adapter_schema(conn: sqlite3.Connection) -> None:
     """Ensure the durable autopost_product_video_intents table and indexes exist."""
+    queue.ensure_video_project_queue_schema(conn)
     aah.ensure_autopost_handoff_schema(conn)
     aps.ensure_autopost_scheduler_schema(conn)
 
@@ -127,8 +129,11 @@ def register_product_video_autopost_intent(
 
     Enforces:
     - owner_id and product_video_job_id must be valid positive integers
+    - canonical Product Video job and project exist in DB
+    - canonical owner matches requesting owner_id
     - mode must be in ALLOWED_INTENT_MODES
-    - schedule_at validated strictly for SCHEDULE_AT mode (strict canonical UTC)
+    - for SCHEDULE_NOW: durable effective schedule_at is locked to canonical registration time
+    - for SCHEDULE_AT: schedule_at validated strictly (strict canonical UTC)
     - selected_channels bounded to metadata allowlist
     - caption_override bounded length
     - Idempotent: re-registration with identical parameters returns existing record.
@@ -148,6 +153,13 @@ def register_product_video_autopost_intent(
     if clean_mode not in ALLOWED_INTENT_MODES:
         return None, f"unsupported_mode:{clean_mode}"
 
+    if now is not None:
+        norm_now, time_err = aps.parse_and_validate_utc(now)
+        if not norm_now:
+            return None, time_err
+    else:
+        norm_now = aps.canonical_utc_now()
+
     norm_schedule_at: Optional[str] = None
     if clean_mode == ProductVideoAutoPostMode.SCHEDULE_AT.value:
         if not schedule_at:
@@ -162,6 +174,8 @@ def register_product_video_autopost_intent(
             if not validated_sched:
                 return None, f"invalid_schedule_at:{sched_err}"
             norm_schedule_at = validated_sched
+        else:
+            norm_schedule_at = norm_now
 
     # Bounded channels metadata validation
     norm_channels: list[str] = []
@@ -181,14 +195,32 @@ def register_product_video_autopost_intent(
     if caption_override is not None:
         clean_caption = str(caption_override).strip()[:MAX_CAPTION_LENGTH]
 
-    if now is not None:
-        norm_now, time_err = aps.parse_and_validate_utc(now)
-        if not norm_now:
-            return None, time_err
-    else:
-        norm_now = aps.canonical_utc_now()
-
+    # Canonical Product Video job/project ownership verification BEFORE INSERT
     cur = conn.cursor()
+    cur.execute("SELECT project_id, user_id FROM video_jobs WHERE id=?", (norm_job_id,))
+    job_row = cur.fetchone()
+    if not job_row:
+        return None, "product_video_job_not_found"
+
+    job_project_id = job_row["project_id"] if hasattr(job_row, "keys") else job_row[0]
+    job_user_id = job_row["user_id"] if hasattr(job_row, "keys") else job_row[1]
+
+    try:
+        norm_project_id = int(job_project_id or 0)
+    except (TypeError, ValueError):
+        norm_project_id = 0
+
+    cur.execute("SELECT user_id FROM video_projects WHERE project_id=?", (norm_project_id,))
+    proj_row = cur.fetchone()
+    if not proj_row:
+        return None, "product_video_project_not_found"
+
+    proj_user_id = proj_row["user_id"] if hasattr(proj_row, "keys") else proj_row[0]
+
+    canonical_owner_id = int(proj_user_id if proj_user_id is not None else (job_user_id or 0))
+    if canonical_owner_id != norm_owner_id:
+        return None, "owner_mismatch"
+
     cur.execute(
         """SELECT * FROM autopost_product_video_intents
            WHERE owner_id=? AND product_video_job_id=? LIMIT 1""",
@@ -200,7 +232,13 @@ def register_product_video_autopost_intent(
         # Check identical parameters
         channels_match = json.loads(existing.get("selected_channels_json") or "[]") == norm_channels
         mode_match = existing.get("mode") == clean_mode
-        sched_match = (existing.get("schedule_at") or None) == norm_schedule_at
+        if clean_mode == ProductVideoAutoPostMode.SCHEDULE_NOW.value:
+            if schedule_at is None:
+                sched_match = True
+            else:
+                sched_match = (existing.get("schedule_at") or None) == norm_schedule_at
+        else:
+            sched_match = (existing.get("schedule_at") or None) == norm_schedule_at
         caption_match = (existing.get("caption_override") or None) == clean_caption
 
         if channels_match and mode_match and sched_match and caption_match:
@@ -381,18 +419,19 @@ def process_product_video_autopost_handoff(
     )
 
     norm_handoff_id: Optional[str] = None
+    candidate_handoff_id: Optional[str] = None
     if handoff_receipt:
         if isinstance(handoff_receipt, dict):
-            norm_handoff_id = handoff_receipt.get("handoff_id")
+            candidate_handoff_id = handoff_receipt.get("handoff_id")
         else:
-            norm_handoff_id = getattr(handoff_receipt, "handoff_id", None)
+            candidate_handoff_id = getattr(handoff_receipt, "handoff_id", None)
 
     if not intent:
         return {
             "attempted": False,
             "mode": "NONE",
             "intent_id": None,
-            "handoff_id": norm_handoff_id,
+            "handoff_id": candidate_handoff_id,
             "draft_id": None,
             "publication_id": None,
             "state": None,
@@ -419,25 +458,73 @@ def process_product_video_autopost_handoff(
             "attempted": True,
             "mode": ProductVideoAutoPostMode.OFF.value,
             "intent_id": intent_id,
-            "handoff_id": norm_handoff_id,
+            "handoff_id": candidate_handoff_id,
             "draft_id": None,
             "publication_id": None,
             "state": None,
             "blocker": None,
         }, "off"
 
-    # 4. Ensure canonical handoff exists
-    if not norm_handoff_id:
-        cur = conn.cursor()
+    # 4. Strict handoff verification and binding
+    cur = conn.cursor()
+    if candidate_handoff_id:
         cur.execute(
-            """SELECT handoff_id FROM autopost_handoff_receipts
-               WHERE source_product='video_product' AND source_job_id=?
+            "SELECT * FROM autopost_handoff_receipts WHERE handoff_id=? LIMIT 1",
+            (str(candidate_handoff_id).strip(),),
+        )
+        rec_row = cur.fetchone()
+        if not rec_row:
+            _record_intent_blocker(conn, intent_id, "handoff_product_binding_mismatch")
+            return {
+                "attempted": True,
+                "mode": mode,
+                "intent_id": intent_id,
+                "handoff_id": candidate_handoff_id,
+                "draft_id": None,
+                "publication_id": None,
+                "state": None,
+                "blocker": "handoff_product_binding_mismatch",
+            }, "handoff_product_binding_mismatch"
+
+        rec = _row_to_dict(rec_row)
+        if (
+            int(rec.get("owner_id") or 0) != int(owner_id)
+            or str(rec.get("source_product") or "") != "video_product"
+            or str(rec.get("source_job_id") or "") != str(product_video_job_id)
+            or str(rec.get("asset_id") or "") != str(asset.asset_id)
+            or str(rec.get("artifact_sha256") or "").lower() != str(asset.artifact_sha256).lower()
+            or str(rec.get("purpose") or "") != "autopost"
+            or str(rec.get("status") or "") != "created"
+        ):
+            _record_intent_blocker(conn, intent_id, "handoff_product_binding_mismatch")
+            return {
+                "attempted": True,
+                "mode": mode,
+                "intent_id": intent_id,
+                "handoff_id": candidate_handoff_id,
+                "draft_id": None,
+                "publication_id": None,
+                "state": None,
+                "blocker": "handoff_product_binding_mismatch",
+            }, "handoff_product_binding_mismatch"
+
+        norm_handoff_id = str(candidate_handoff_id).strip()
+    else:
+        cur.execute(
+            """SELECT * FROM autopost_handoff_receipts
+               WHERE source_product='video_product'
+                 AND source_job_id=?
+                 AND owner_id=?
+                 AND asset_id=?
+                 AND artifact_sha256=?
+                 AND purpose='autopost'
+                 AND status='created'
                ORDER BY created_at DESC LIMIT 1""",
-            (str(product_video_job_id),),
+            (str(product_video_job_id), int(owner_id), str(asset.asset_id), str(asset.artifact_sha256)),
         )
         h_row = cur.fetchone()
         if h_row:
-            norm_handoff_id = h_row[0]
+            norm_handoff_id = _row_to_dict(h_row)["handoff_id"]
         else:
             h_rec, h_err = aah.create_autopost_handoff_from_source(
                 conn,
@@ -526,7 +613,10 @@ def process_product_video_autopost_handoff(
 
         # Determine target schedule time
         if mode == ProductVideoAutoPostMode.SCHEDULE_NOW.value:
-            if now is not None:
+            intent_sched = intent.get("schedule_at")
+            if intent_sched:
+                target_schedule_at = intent_sched
+            elif now is not None:
                 norm_now, time_err = aps.parse_and_validate_utc(now)
                 if not norm_now:
                     _record_intent_blocker(conn, intent_id, f"schedule_time_invalid:{time_err}")
@@ -543,6 +633,17 @@ def process_product_video_autopost_handoff(
                 target_schedule_at = norm_now
             else:
                 target_schedule_at = aps.canonical_utc_now()
+
+            # Ensure schedule_at is locked into intent for subsequent replays
+            if not intent_sched:
+                try:
+                    conn.execute(
+                        "UPDATE autopost_product_video_intents SET schedule_at=? WHERE intent_id=?",
+                        (target_schedule_at, intent_id),
+                    )
+                    conn.commit()
+                except Exception:
+                    pass
         else:  # SCHEDULE_AT
             raw_sched = intent.get("schedule_at")
             target_schedule_at, time_err = aps.parse_and_validate_utc(raw_sched)
@@ -568,8 +669,33 @@ def process_product_video_autopost_handoff(
         q_row = cur.fetchone()
         if q_row:
             q_dict = _row_to_dict(q_row)
-            existing_state = q_dict.get("state")
+            existing_state = str(q_dict.get("state") or "").upper()
             existing_sched = q_dict.get("schedule_at")
+            pub_id = q_dict.get("publication_id")
+
+            # Check owner and artifact binding
+            q_owner = int(q_dict.get("owner_id") or 0)
+            q_handoff = q_dict.get("handoff_id")
+            q_asset = q_dict.get("asset_id")
+            q_sha = q_dict.get("artifact_sha256")
+            if (
+                q_owner != int(owner_id)
+                or q_handoff != norm_handoff_id
+                or q_asset != asset.asset_id
+                or q_sha != asset.artifact_sha256
+            ):
+                _record_intent_blocker(conn, intent_id, "handoff_product_binding_mismatch")
+                return {
+                    "attempted": True,
+                    "mode": mode,
+                    "intent_id": intent_id,
+                    "handoff_id": norm_handoff_id,
+                    "draft_id": draft.draft_id,
+                    "publication_id": pub_id,
+                    "state": existing_state,
+                    "blocker": "handoff_product_binding_mismatch",
+                }, "handoff_product_binding_mismatch"
+
             if existing_state == "SCHEDULED":
                 if existing_sched and existing_sched != target_schedule_at:
                     _record_intent_blocker(conn, intent_id, "schedule_conflict_different_timestamp")
@@ -579,7 +705,7 @@ def process_product_video_autopost_handoff(
                         "intent_id": intent_id,
                         "handoff_id": norm_handoff_id,
                         "draft_id": draft.draft_id,
-                        "publication_id": q_dict.get("publication_id"),
+                        "publication_id": pub_id,
                         "state": "SCHEDULED",
                         "blocker": "schedule_conflict_different_timestamp",
                     }, "schedule_conflict_different_timestamp"
@@ -590,10 +716,42 @@ def process_product_video_autopost_handoff(
                     "intent_id": intent_id,
                     "handoff_id": norm_handoff_id,
                     "draft_id": draft.draft_id,
-                    "publication_id": q_dict.get("publication_id"),
+                    "publication_id": pub_id,
                     "state": "SCHEDULED",
                     "blocker": None,
                 }, "scheduled"
+
+            if existing_state in (
+                "CLAIMED",
+                "PUBLISHING",
+                "PUBLISHED",
+                "FAILED_RETRYABLE",
+                "FAILED_FINAL",
+                "CANCELLED",
+            ):
+                if existing_sched and existing_sched != target_schedule_at:
+                    _record_intent_blocker(conn, intent_id, "schedule_conflict_different_timestamp")
+                    return {
+                        "attempted": True,
+                        "mode": mode,
+                        "intent_id": intent_id,
+                        "handoff_id": norm_handoff_id,
+                        "draft_id": draft.draft_id,
+                        "publication_id": pub_id,
+                        "state": existing_state,
+                        "blocker": "schedule_conflict_different_timestamp",
+                    }, "schedule_conflict_different_timestamp"
+
+                return {
+                    "attempted": True,
+                    "mode": mode,
+                    "intent_id": intent_id,
+                    "handoff_id": norm_handoff_id,
+                    "draft_id": draft.draft_id,
+                    "publication_id": pub_id,
+                    "state": existing_state,
+                    "blocker": None,
+                }, existing_state.lower()
 
         # Approve draft through scheduler authority
         appr_pub, appr_err = aps.approve_publication_draft(

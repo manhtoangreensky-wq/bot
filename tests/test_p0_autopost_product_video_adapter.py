@@ -53,6 +53,19 @@ def mock_media_probe(monkeypatch):
     )
 
 
+def _seed_minimal_product_video_job(conn: sqlite3.Connection, uid: int = 101, job_id: int = 201) -> None:
+    queue.ensure_video_project_queue_schema(conn)
+    conn.execute(
+        "INSERT OR REPLACE INTO video_projects (project_id, user_id, status) VALUES (1, ?, 'processing')",
+        (uid,),
+    )
+    conn.execute(
+        "INSERT OR REPLACE INTO video_jobs (id, project_id, user_id, status) VALUES (?, 1, ?, 'processing')",
+        (job_id, uid),
+    )
+    conn.commit()
+
+
 def _setup_product_video_job(
     conn: sqlite3.Connection,
     tmp_path: Path,
@@ -178,6 +191,7 @@ def test_02_register_off_intent(tmp_path: Path):
     """02: Register OFF intent successfully and verify idempotency."""
     conn = sqlite3.connect(tmp_path / "t02.db")
     conn.row_factory = sqlite3.Row
+    _seed_minimal_product_video_job(conn, 101, 201)
 
     intent, status = apva.register_product_video_autopost_intent(conn, 101, 201, "OFF")
     assert intent is not None
@@ -222,6 +236,7 @@ def test_04_register_draft_only(tmp_path: Path):
     """04: Register DRAFT_ONLY intent successfully."""
     conn = sqlite3.connect(tmp_path / "t04.db")
     conn.row_factory = sqlite3.Row
+    _seed_minimal_product_video_job(conn, 101, 201)
 
     intent, status = apva.register_product_video_autopost_intent(
         conn, 101, 201, "DRAFT_ONLY", caption_override="My custom caption"
@@ -289,6 +304,7 @@ def test_07_register_schedule_at_valid_utc(tmp_path: Path):
     """07: Register SCHEDULE_AT with valid UTC timestamp."""
     conn = sqlite3.connect(tmp_path / "t07.db")
     conn.row_factory = sqlite3.Row
+    _seed_minimal_product_video_job(conn, 101, 201)
 
     intent, status = apva.register_product_video_autopost_intent(
         conn, 101, 201, "SCHEDULE_AT", schedule_at="2026-09-25T14:30:00Z"
@@ -438,7 +454,7 @@ def test_13_exact_replay_produces_one_draft(tmp_path: Path, monkeypatch: pytest.
 
 
 def test_14_exact_replay_produces_one_scheduler_row(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """14: Replaying SCHEDULE_NOW 3 times yields exactly 1 queue row."""
+    """14: Replaying SCHEDULE_NOW 3 times yields exactly 1 queue row with identical publication and schedule."""
     conn = sqlite3.connect(tmp_path / "t14.db")
     conn.row_factory = sqlite3.Row
     uid = 7126457028
@@ -446,11 +462,24 @@ def test_14_exact_replay_produces_one_scheduler_row(tmp_path: Path, monkeypatch:
     project_id, job_id, video_file, sha = _setup_product_video_job(conn, tmp_path, uid=uid)
     apva.register_product_video_autopost_intent(conn, uid, job_id, "SCHEDULE_NOW")
 
-    _complete_job_helper(conn, job_id, video_file, sha, monkeypatch)
-    apva.process_product_video_autopost_handoff(conn, job_id, uid)
-    apva.process_product_video_autopost_handoff(conn, job_id, uid)
+    comp = _complete_job_helper(conn, job_id, video_file, sha, monkeypatch)
+    canon_pub_id = comp["autopost_adapter"]["publication_id"]
 
     cur = conn.cursor()
+    cur.execute("SELECT schedule_at FROM autopost_publication_queue WHERE publication_id=?", (canon_pub_id,))
+    init_sched = cur.fetchone()[0]
+
+    r2, err2 = apva.process_product_video_autopost_handoff(conn, job_id, uid)
+    r3, err3 = apva.process_product_video_autopost_handoff(conn, job_id, uid)
+
+    for r, err in [(comp["autopost_adapter"], "scheduled"), (r2, err2), (r3, err3)]:
+        assert r["publication_id"] == canon_pub_id
+        assert r["blocker"] is None
+        assert err != "schedule_conflict_different_timestamp"
+
+    cur.execute("SELECT schedule_at FROM autopost_publication_queue WHERE publication_id=?", (canon_pub_id,))
+    assert cur.fetchone()[0] == init_sched
+
     cur.execute("SELECT COUNT(*) FROM autopost_publication_queue")
     assert cur.fetchone()[0] == 1
 
@@ -480,14 +509,24 @@ def test_15_concurrent_adapter_replay_one_identity(tmp_path: Path, monkeypatch: 
         futures = [executor.submit(_worker_run) for _ in range(4)]
         results = [f.result() for f in futures]
 
+    for r in results:
+        assert r.get("blocker") is None
+
     pub_ids = {r.get("publication_id") for r in results if r.get("publication_id")}
     assert len(pub_ids) == 1
+    canon_pub_id = next(iter(pub_ids))
 
     chk_conn = sqlite3.connect(db_path)
     cur = chk_conn.cursor()
+    cur.execute("SELECT schedule_at FROM autopost_publication_queue WHERE publication_id=?", (canon_pub_id,))
+    canon_sched = cur.fetchone()[0]
+    assert canon_sched is not None
+
     cur.execute("SELECT COUNT(*) FROM autopost_publication_drafts")
     assert cur.fetchone()[0] == 1
     cur.execute("SELECT COUNT(*) FROM autopost_publication_queue")
+    assert cur.fetchone()[0] == 1
+    cur.execute("SELECT COUNT(*) FROM autopost_handoff_receipts")
     assert cur.fetchone()[0] == 1
     chk_conn.close()
 
@@ -779,6 +818,7 @@ def test_34_video_edit_completion_does_not_activate_s3(tmp_path: Path):
     job, rec, video_file, sha = _setup_video_edit_job(conn, tmp_path, uid=77)
 
     # Registering a fake product video intent with same job_id must not trigger Video Edit draft
+    _seed_minimal_product_video_job(conn, 77, job["local_worker_job_id"])
     apva.register_product_video_autopost_intent(conn, 77, job["local_worker_job_id"], "SCHEDULE_NOW")
 
     updated = video_editengine1.record_worker_update(
@@ -842,3 +882,366 @@ def test_36_s2_scheduler_protected_behavior_remains_green(tmp_path: Path, monkey
     assert claimed is not None
     assert claimed["publication_id"] == pub_id
     assert claimed["state"] == "CLAIMED"
+
+
+def test_37_wrong_owner_cannot_register_intent(tmp_path: Path):
+    """37: FIRST RED 1 - Requesting owner differing from canonical video job owner cannot register intent."""
+    conn = sqlite3.connect(tmp_path / "t37.db")
+    conn.row_factory = sqlite3.Row
+
+    project_id, job_id, video_file, sha = _setup_product_video_job(conn, tmp_path, uid=101)
+
+    intent, status = apva.register_product_video_autopost_intent(conn, owner_id=999, product_video_job_id=job_id, mode="SCHEDULE_NOW")
+    assert intent is None
+    assert status == "owner_mismatch"
+
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM autopost_product_video_intents")
+    assert cur.fetchone()[0] == 0
+
+
+def test_38_nonexistent_product_video_job_cannot_register_intent(tmp_path: Path):
+    """38: Registration fails if Product Video job does not exist."""
+    conn = sqlite3.connect(tmp_path / "t38.db")
+    conn.row_factory = sqlite3.Row
+    queue.ensure_video_project_queue_schema(conn)
+
+    intent, status = apva.register_product_video_autopost_intent(conn, owner_id=101, product_video_job_id=999999, mode="SCHEDULE_NOW")
+    assert intent is None
+    assert status == "product_video_job_not_found"
+
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM autopost_product_video_intents")
+    assert cur.fetchone()[0] == 0
+
+
+def test_39_cross_job_same_owner_supplied_handoff_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """39: FIRST RED 2 - Same owner completed Job A and Job B; passing handoff B into Job A is rejected."""
+    conn = sqlite3.connect(tmp_path / "t39.db")
+    conn.row_factory = sqlite3.Row
+    uid = 101
+
+    # Job A
+    path_a = tmp_path / "job_a"
+    path_a.mkdir()
+    proj_a, job_a, vf_a, sha_a = _setup_product_video_job(conn, path_a, uid=uid, raw_bytes=b"job_a_bytes")
+    comp_a = _complete_job_helper(conn, job_a, vf_a, sha_a, monkeypatch)
+    assert comp_a["ok"] is True
+
+    # Job B
+    path_b = tmp_path / "job_b"
+    path_b.mkdir()
+    proj_b, job_b, vf_b, sha_b = _setup_product_video_job(conn, path_b, uid=uid, raw_bytes=b"job_b_bytes")
+    comp_b = _complete_job_helper(conn, job_b, vf_b, sha_b, monkeypatch)
+    assert comp_b["ok"] is True
+
+    handoff_b_id = comp_b["autopost_handoff"]["handoff_id"]
+    assert handoff_b_id is not None
+
+    # Register intent for Job A
+    intent, status = apva.register_product_video_autopost_intent(conn, uid, job_a, "SCHEDULE_NOW")
+    assert intent is not None
+
+    # Pass handoff B into process for Job A
+    res, err = apva.process_product_video_autopost_handoff(
+        conn,
+        product_video_job_id=job_a,
+        owner_id=uid,
+        handoff_receipt={"handoff_id": handoff_b_id},
+    )
+    assert res["attempted"] is True
+    assert res["blocker"] == "handoff_product_binding_mismatch"
+    assert err == "handoff_product_binding_mismatch"
+
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM autopost_publication_drafts WHERE owner_id=?", (uid,))
+    assert cur.fetchone()[0] == 0
+    cur.execute("SELECT COUNT(*) FROM autopost_publication_queue WHERE owner_id=?", (uid,))
+    assert cur.fetchone()[0] == 0
+
+
+def test_40_cross_asset_sha_handoff_binding_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """40: Handoff with mismatched asset_id or SHA is rejected fail-closed."""
+    conn = sqlite3.connect(tmp_path / "t40.db")
+    conn.row_factory = sqlite3.Row
+    uid = 101
+
+    proj_id, job_id, vf, sha = _setup_product_video_job(conn, tmp_path, uid=uid)
+    comp = _complete_job_helper(conn, job_id, vf, sha, monkeypatch)
+    assert comp["ok"] is True
+
+    apva.register_product_video_autopost_intent(conn, uid, job_id, "DRAFT_ONLY")
+
+    # Insert forged receipt with mismatched SHA
+    forged_handoff_id = "handoff_forged_sha"
+    now_ts = aps.canonical_utc_now()
+    conn.execute(
+        """INSERT INTO autopost_handoff_receipts (
+            handoff_id, asset_id, owner_id, source_product, source_job_id,
+            artifact_sha256, purpose, status, parent_asset_id, lineage_json,
+            asset_snapshot_json, created_at, expires_at
+        ) VALUES (?, 'asset_1', ?, 'video_product', ?, ?, 'autopost', 'created', NULL, '[]', '{}', ?, NULL)""",
+        (forged_handoff_id, uid, str(job_id), "0" * 64, now_ts),
+    )
+    conn.commit()
+
+    res, err = apva.process_product_video_autopost_handoff(
+        conn,
+        product_video_job_id=job_id,
+        owner_id=uid,
+        handoff_receipt={"handoff_id": forged_handoff_id},
+    )
+    assert res["blocker"] == "handoff_product_binding_mismatch"
+    assert err == "handoff_product_binding_mismatch"
+
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM autopost_publication_drafts")
+    assert cur.fetchone()[0] == 0
+
+
+def test_41_schedule_now_t1_to_t2_replay_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """41: FIRST RED 3 - Replaying SCHEDULE_NOW at T2 > T1 succeeds without schedule conflict."""
+    conn = sqlite3.connect(tmp_path / "t41.db")
+    conn.row_factory = sqlite3.Row
+    uid = 7126457028
+    t1 = "2026-09-20T10:00:00Z"
+    t2 = "2026-09-20T10:05:00Z"
+
+    proj_id, job_id, vf, sha = _setup_product_video_job(conn, tmp_path, uid=uid)
+    intent, status = apva.register_product_video_autopost_intent(conn, uid, job_id, "SCHEDULE_NOW", now=t1)
+    assert intent is not None
+    assert intent["schedule_at"] == t1
+
+    comp = _complete_job_helper(conn, job_id, vf, sha, monkeypatch)
+    canon_pub_id = comp["autopost_adapter"]["publication_id"]
+    assert canon_pub_id is not None
+
+    cur = conn.cursor()
+    cur.execute("SELECT schedule_at FROM autopost_publication_queue WHERE publication_id=?", (canon_pub_id,))
+    assert cur.fetchone()[0] == t1
+
+    # Replay at T2 > T1 passing now=t2
+    res2, err2 = apva.process_product_video_autopost_handoff(conn, job_id, uid, now=t2)
+    assert res2["blocker"] is None
+    assert res2["publication_id"] == canon_pub_id
+    assert res2["state"] == "SCHEDULED"
+    assert err2 == "scheduled"
+
+    cur.execute("SELECT schedule_at FROM autopost_publication_queue WHERE publication_id=?", (canon_pub_id,))
+    assert cur.fetchone()[0] == t1
+    cur.execute("SELECT COUNT(*) FROM autopost_publication_queue")
+    assert cur.fetchone()[0] == 1
+
+
+def test_42_concurrent_schedule_now_uses_one_durable_timestamp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """42: Concurrent SCHEDULE_NOW executions share the durable effective schedule timestamp."""
+    db_path = tmp_path / "t42.db"
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    uid = 7126457028
+    t_base = "2026-09-20T08:00:00Z"
+
+    proj_id, job_id, vf, sha = _setup_product_video_job(conn, tmp_path, uid=uid)
+    apva.register_product_video_autopost_intent(conn, uid, job_id, "SCHEDULE_NOW", now=t_base)
+    _complete_job_helper(conn, job_id, vf, sha, monkeypatch)
+    conn.close()
+
+    def _worker(worker_idx: int):
+        w_conn = sqlite3.connect(db_path, timeout=30.0)
+        w_conn.row_factory = sqlite3.Row
+        try:
+            worker_now = f"2026-09-20T08:0{worker_idx}:00Z"
+            res, _ = apva.process_product_video_autopost_handoff(w_conn, job_id, uid, now=worker_now)
+            return res
+        finally:
+            w_conn.close()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
+        futures = [ex.submit(_worker, i) for i in range(1, 5)]
+        results = [f.result() for f in futures]
+
+    for r in results:
+        assert r["blocker"] is None
+        assert r["state"] == "SCHEDULED"
+
+    pub_ids = {r["publication_id"] for r in results}
+    assert len(pub_ids) == 1
+
+    chk_conn = sqlite3.connect(db_path)
+    cur = chk_conn.cursor()
+    cur.execute("SELECT schedule_at FROM autopost_publication_queue WHERE publication_id=?", (next(iter(pub_ids)),))
+    assert cur.fetchone()[0] == t_base
+    chk_conn.close()
+
+
+def test_43_claimed_publication_replay_observes_claimed_without_reapproval(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """43: FIRST RED 4 - CLAIMED publication replay observes CLAIMED with zero reapproval attempts."""
+    conn = sqlite3.connect(tmp_path / "t43.db")
+    conn.row_factory = sqlite3.Row
+    uid = 7126457028
+
+    proj_id, job_id, vf, sha = _setup_product_video_job(conn, tmp_path, uid=uid)
+    apva.register_product_video_autopost_intent(conn, uid, job_id, "SCHEDULE_NOW")
+    comp = _complete_job_helper(conn, job_id, vf, sha, monkeypatch)
+    pub_id = comp["autopost_adapter"]["publication_id"]
+
+    # Transition to CLAIMED
+    conn.execute(
+        "UPDATE autopost_publication_queue SET state='CLAIMED', lease_owner='vps_worker_1' WHERE publication_id=?",
+        (pub_id,),
+    )
+    conn.commit()
+
+    res, status = apva.process_product_video_autopost_handoff(conn, job_id, uid)
+    assert res["blocker"] is None
+    assert res["state"] == "CLAIMED"
+    assert res["publication_id"] == pub_id
+    assert status == "claimed"
+
+    cur = conn.cursor()
+    cur.execute("SELECT state, lease_owner FROM autopost_publication_queue WHERE publication_id=?", (pub_id,))
+    row = cur.fetchone()
+    assert row["state"] == "CLAIMED"
+    assert row["lease_owner"] == "vps_worker_1"
+    cur.execute("SELECT COUNT(*) FROM autopost_publication_queue")
+    assert cur.fetchone()[0] == 1
+
+
+def test_44_publishing_publication_replay_observes_publishing_without_reapproval(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """44: PUBLISHING publication replay observes PUBLISHING with zero reapproval attempts."""
+    conn = sqlite3.connect(tmp_path / "t44.db")
+    conn.row_factory = sqlite3.Row
+    uid = 7126457028
+
+    proj_id, job_id, vf, sha = _setup_product_video_job(conn, tmp_path, uid=uid)
+    apva.register_product_video_autopost_intent(conn, uid, job_id, "SCHEDULE_NOW")
+    comp = _complete_job_helper(conn, job_id, vf, sha, monkeypatch)
+    pub_id = comp["autopost_adapter"]["publication_id"]
+
+    conn.execute(
+        "UPDATE autopost_publication_queue SET state='PUBLISHING', publish_started_at='2026-09-20T10:01:00Z' WHERE publication_id=?",
+        (pub_id,),
+    )
+    conn.commit()
+
+    res, status = apva.process_product_video_autopost_handoff(conn, job_id, uid)
+    assert res["blocker"] is None
+    assert res["state"] == "PUBLISHING"
+    assert res["publication_id"] == pub_id
+    assert status == "publishing"
+
+    cur = conn.cursor()
+    cur.execute("SELECT state FROM autopost_publication_queue WHERE publication_id=?", (pub_id,))
+    assert cur.fetchone()[0] == "PUBLISHING"
+
+
+def test_45_published_publication_replay_observes_published_without_reapproval(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """45: PUBLISHED publication replay observes PUBLISHED with zero reapproval attempts."""
+    conn = sqlite3.connect(tmp_path / "t45.db")
+    conn.row_factory = sqlite3.Row
+    uid = 7126457028
+
+    proj_id, job_id, vf, sha = _setup_product_video_job(conn, tmp_path, uid=uid)
+    apva.register_product_video_autopost_intent(conn, uid, job_id, "SCHEDULE_NOW")
+    comp = _complete_job_helper(conn, job_id, vf, sha, monkeypatch)
+    pub_id = comp["autopost_adapter"]["publication_id"]
+
+    conn.execute(
+        "UPDATE autopost_publication_queue SET state='PUBLISHED', published_at='2026-09-20T10:02:00Z' WHERE publication_id=?",
+        (pub_id,),
+    )
+    conn.commit()
+
+    res, status = apva.process_product_video_autopost_handoff(conn, job_id, uid)
+    assert res["blocker"] is None
+    assert res["state"] == "PUBLISHED"
+    assert res["publication_id"] == pub_id
+    assert status == "published"
+
+    cur = conn.cursor()
+    cur.execute("SELECT state FROM autopost_publication_queue WHERE publication_id=?", (pub_id,))
+    assert cur.fetchone()[0] == "PUBLISHED"
+
+
+def test_46_failed_retryable_replay_does_not_recreate_publication(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """46: FAILED_RETRYABLE replay returns state without duplicate creation."""
+    conn = sqlite3.connect(tmp_path / "t46.db")
+    conn.row_factory = sqlite3.Row
+    uid = 7126457028
+
+    proj_id, job_id, vf, sha = _setup_product_video_job(conn, tmp_path, uid=uid)
+    apva.register_product_video_autopost_intent(conn, uid, job_id, "SCHEDULE_NOW")
+    comp = _complete_job_helper(conn, job_id, vf, sha, monkeypatch)
+    pub_id = comp["autopost_adapter"]["publication_id"]
+
+    conn.execute(
+        "UPDATE autopost_publication_queue SET state='FAILED_RETRYABLE', attempt_count=1 WHERE publication_id=?",
+        (pub_id,),
+    )
+    conn.commit()
+
+    res, status = apva.process_product_video_autopost_handoff(conn, job_id, uid)
+    assert res["blocker"] is None
+    assert res["state"] == "FAILED_RETRYABLE"
+    assert res["publication_id"] == pub_id
+    assert status == "failed_retryable"
+
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM autopost_publication_queue")
+    assert cur.fetchone()[0] == 1
+
+
+def test_47_failed_final_replay_does_not_recreate_publication(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """47: FAILED_FINAL replay returns state without duplicate creation."""
+    conn = sqlite3.connect(tmp_path / "t47.db")
+    conn.row_factory = sqlite3.Row
+    uid = 7126457028
+
+    proj_id, job_id, vf, sha = _setup_product_video_job(conn, tmp_path, uid=uid)
+    apva.register_product_video_autopost_intent(conn, uid, job_id, "SCHEDULE_NOW")
+    comp = _complete_job_helper(conn, job_id, vf, sha, monkeypatch)
+    pub_id = comp["autopost_adapter"]["publication_id"]
+
+    conn.execute(
+        "UPDATE autopost_publication_queue SET state='FAILED_FINAL', attempt_count=3 WHERE publication_id=?",
+        (pub_id,),
+    )
+    conn.commit()
+
+    res, status = apva.process_product_video_autopost_handoff(conn, job_id, uid)
+    assert res["blocker"] is None
+    assert res["state"] == "FAILED_FINAL"
+    assert res["publication_id"] == pub_id
+    assert status == "failed_final"
+
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM autopost_publication_queue")
+    assert cur.fetchone()[0] == 1
+
+
+def test_48_cancelled_replay_does_not_recreate_publication(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """48: CANCELLED replay returns truthful CANCELLED state and does not recreate."""
+    conn = sqlite3.connect(tmp_path / "t48.db")
+    conn.row_factory = sqlite3.Row
+    uid = 7126457028
+
+    proj_id, job_id, vf, sha = _setup_product_video_job(conn, tmp_path, uid=uid)
+    apva.register_product_video_autopost_intent(conn, uid, job_id, "SCHEDULE_NOW")
+    comp = _complete_job_helper(conn, job_id, vf, sha, monkeypatch)
+    pub_id = comp["autopost_adapter"]["publication_id"]
+
+    conn.execute(
+        "UPDATE autopost_publication_queue SET state='CANCELLED', cancelled_at='2026-09-20T10:03:00Z' WHERE publication_id=?",
+        (pub_id,),
+    )
+    conn.commit()
+
+    res, status = apva.process_product_video_autopost_handoff(conn, job_id, uid)
+    assert res["blocker"] is None
+    assert res["state"] == "CANCELLED"
+    assert res["publication_id"] == pub_id
+    assert status == "cancelled"
+
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM autopost_publication_queue")
+    assert cur.fetchone()[0] == 1
