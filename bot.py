@@ -272306,7 +272306,19 @@ async def internal_worker_job_update(request: Request):
                         output_url=str(payload.get("output_url") or "")[:video_edit_payload_limit],
                         conn=conn,
                     )
+            autopost_intent = (canonical.get("autopost_handoff") or {}).get("post_commit_intent")
             conn.commit()
+            if autopost_intent and isinstance(autopost_intent, dict):
+                try:
+                    from services.autopost_asset_handoff import notify_autopost_producer_completion
+                    notify_autopost_producer_completion(
+                        conn,
+                        source_product=str(autopost_intent.get("source_product") or "video_edit"),
+                        source_ref=autopost_intent.get("source_ref"),
+                        requesting_user_id=int(autopost_intent.get("requesting_user_id") or 0),
+                    )
+                except Exception:
+                    logger.exception("internal_worker_job_update post-commit autopost handoff failed")
         except HTTPException:
             raise
         except ValueError as exc:

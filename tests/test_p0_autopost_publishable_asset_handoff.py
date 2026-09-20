@@ -435,7 +435,7 @@ def test_e_video_edit_canonical_delivered_receipt_pass(tmp_path, db_conn):
         requesting_user_id=uid,
     )
     assert receipt is not None
-    assert reason == "created"
+    assert reason in ("created", "idempotent_existing_receipt")
     assert receipt.artifact_sha256 == sha
     assert receipt.source_product == "video_edit"
 
