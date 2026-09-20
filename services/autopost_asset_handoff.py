@@ -533,13 +533,133 @@ def adapt_subdub_output(
     *,
     parent_asset_id: Optional[str] = None,
 ) -> tuple[Optional[PublishableAsset], str]:
-    """Guarded adapter for SubDub.
+    """Canonical adapter for SubDub.
 
-    Current canonical SubDub runtime stores ephemeral job receipts in bot memory
-    and lacks a durable SQLite service-layer storage table.
-    Fails closed deterministically to prevent false authority claims.
+    Re-resolves authoritative durable job truth from SQLite system_settings,
+    enforcing canonical delivery predicate, owner binding, and artifact integrity.
     """
-    return None, "subdub_canonical_authority_unavailable"
+    if conn is None:
+        return None, "sqlite_connection_required"
+
+    safe_job_id = str(job_id or "").strip()
+    if not safe_job_id:
+        return None, "subdub_job_id_missing"
+
+    try:
+        row = conn.execute(
+            "SELECT value FROM system_settings WHERE key=? LIMIT 1",
+            (f"engine_async_job:{safe_job_id}",),
+        ).fetchone()
+    except Exception:
+        return None, "subdub_canonical_authority_unavailable"
+
+    if not row:
+        return None, "subdub_canonical_authority_unavailable"
+
+    try:
+        job = json.loads(str(row[0] or ""))
+    except Exception:
+        return None, "subdub_durable_job_invalid"
+
+    if not isinstance(job, dict):
+        return None, "subdub_durable_job_invalid"
+
+    feature = str(job.get("feature") or "").strip().lower()
+    if feature not in {"subtitle_dub", "video_dub"}:
+        return None, "subdub_feature_mismatch"
+
+    canon_id = str(job.get("internal_job_id") or job.get("job_id") or "").strip()
+    if canon_id != safe_job_id:
+        return None, "subdub_job_id_mismatch"
+
+    try:
+        job_user_id = int(job.get("user_id") or 0)
+    except (TypeError, ValueError):
+        job_user_id = 0
+
+    if job_user_id <= 0 or job_user_id != int(requesting_user_id):
+        return None, "owner_mismatch"
+
+    from services.subdub_auto_settlement import _durable_video_delivery
+
+    if not _durable_video_delivery(job):
+        return None, "subdub_delivery_not_durable"
+
+    charge_status = str(job.get("charge_status") or "").strip().lower()
+    auto_settlement_pending = bool(job.get("auto_settlement_pending_recovery"))
+    if auto_settlement_pending or charge_status in {
+        "settlement_pending_recovery",
+        "pending",
+        "charging",
+        "resuming",
+        "charge_failed",
+        "failed_no_charge",
+    } or charge_status not in {"charged", "admin_free", "not_charged"}:
+        return None, "subdub_billing_not_terminal"
+
+    video_sha = str(job.get("video_delivery_sha256") or "").strip().lower()
+    if not _is_64_hex(video_sha):
+        return None, "subdub_output_sha_invalid"
+
+    local_path = str(job.get("final_mp4") or job.get("output_path") or job.get("video_delivery_path") or "").strip()
+    internal_path = ""
+    if local_path and os.path.isfile(local_path):
+        physical_sha = _compute_sha256(local_path)
+        if physical_sha != video_sha:
+            return None, "subdub_artifact_replacement_detected"
+        internal_path = local_path
+
+    validation = dict(job.get("output_validation") or {})
+    try:
+        duration = float(
+            job.get("video_delivery_duration_seconds")
+            or validation.get("actual_duration")
+            or validation.get("duration")
+            or 0.0
+        )
+    except Exception:
+        duration = 0.0
+
+    width = int(validation.get("width") or validation.get("actual_width") or 0)
+    height = int(validation.get("height") or validation.get("actual_height") or 0)
+
+    file_id = str(job.get("video_delivery_file_id") or "").strip()
+    storage_ref = f"telegram_file_id:{file_id}" if file_id else ""
+    asset_id = _generate_asset_id(SourceProduct.SUBDUB.value, canon_id, video_sha)
+
+    resolved_parent = parent_asset_id or str(job.get("parent_asset_id") or job.get("source_asset_id") or "").strip() or None
+    completed_at = str(
+        job.get("settled_at")
+        or job.get("subdub_delivered_at")
+        or job.get("delivered_at")
+        or job.get("updated_at")
+        or _now_iso()
+    )
+
+    size_bytes = int(job.get("video_delivery_size_bytes") or (os.path.getsize(internal_path) if internal_path else 0))
+
+    asset = PublishableAsset(
+        asset_id=asset_id,
+        owner_id=job_user_id,
+        source_product=SourceProduct.SUBDUB.value,
+        source_job_id=canon_id,
+        source_asset_id=file_id or asset_id,
+        parent_asset_id=resolved_parent,
+        artifact_sha256=video_sha,
+        byte_size=size_bytes,
+        duration_seconds=duration,
+        width=width,
+        height=height,
+        artifact_state="final_ready",
+        processing_completed_at=completed_at,
+        canonical_storage_ref=storage_ref,
+        internal_artifact_path=internal_path,
+        caption_candidate="",
+        language="vi",
+        publish_eligible=True,
+        publish_blockers=[],
+    )
+    return asset, ""
 
 
 def adapt_existing_video_output(
