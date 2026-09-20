@@ -145,7 +145,7 @@ import video_image_to_video_flow as ivf
 from services import ai_chatbot_copilot, telegram_business_support, telegram_transport
 from services import multiscene_video_pipeline as multiscene_blackbox
 from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_ass_layout, subdub_auto_settlement, subdub_auto_word_pricing, subdub_blackboxes, subdub_canonical_cues, subdub_combo_blackbox, subdub_long_media, subdub_media_preflight, subdub_provider_contract, subdub_speaker_cast, subdub_multi_speaker_asr_fallback, subdub_two_speaker_asr_fallback, subdub_visual_subtitle, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
-from services.subdub_blackboxes import auto_multi_speaker, auto_multi_speaker_v2, auto_speaker
+from services.subdub_blackboxes import auto_multi_speaker, auto_multi_speaker_v2, auto_smart_multivoice, auto_speaker
 from services import ai_chatbot_copilot, cskh_session_memory, telegram_business_support, telegram_transport
 from services import public_chat_media, public_chat_runtime, public_chat_store
 from providers.gemini_public_chat_provider import GeminiPublicChatProvider
@@ -233204,6 +233204,17 @@ def subdub_entry_state_fields(
 # customer-reachable. Task 7 flips this code gate only after pricing and the
 # durable exact-confirmation contract pass; this is intentionally not ENV.
 SUBDUB_AUTO_SPEAKER_ACTIVATION_ENABLED = True
+SUBDUB_AUTO_SMART_MULTIVOICE_BUTTON_ENABLED = True
+
+
+def subdub_auto_smart_multivoice_route_enabled(
+    state: dict | None = None,
+) -> bool:
+    return bool(
+        SUBDUB_AUTO_SPEAKER_ACTIVATION_ENABLED
+        and subdub_auto_provider_capacity_ready()
+        and auto_smart_multivoice.is_auto_smart_multivoice_state(state)
+    )
 
 
 def subdub_auto_speaker_route_enabled(state: dict | None = None) -> bool:
@@ -233212,7 +233223,10 @@ def subdub_auto_speaker_route_enabled(state: dict | None = None) -> bool:
     return bool(
         SUBDUB_AUTO_SPEAKER_ACTIVATION_ENABLED
         and subdub_auto_provider_capacity_ready()
-        and auto_speaker.is_auto_speaker_state(state)
+        and (
+            auto_speaker.is_auto_speaker_state(state)
+            or auto_smart_multivoice.is_auto_smart_multivoice_state(state)
+        )
     )
 
 
@@ -233358,6 +233372,8 @@ def subdub_auto_routing_decision(
     state: dict | None = None,
 ) -> tuple[str, str]:
     current = state if isinstance(state, dict) else (dict(state) if hasattr(state, "get") else {})
+    if subdub_auto_smart_multivoice_route_enabled(current):
+        return "auto_smart_multivoice", "explicit_smart_multivoice_opt_in"
     if subdub_auto_multi_v2_route_enabled(current):
         if str(current.get("auto_multi_engine") or "").strip().lower() == "v2":
             reason = "explicit_engine_v2"
@@ -233380,6 +233396,8 @@ def subdub_auto_blackbox_runner(state: dict | None = None):
     if isinstance(state, dict):
         state["subdub_engine_selected"] = engine_name
         state["auto_multi_routing_reason"] = reason
+    if engine_name == "auto_smart_multivoice":
+        return auto_smart_multivoice.run_auto_smart_multivoice_blackbox
     if engine_name == "auto_multi_speaker_v2":
         return auto_multi_speaker_v2.run_auto_multi_speaker_v2_blackbox
     if engine_name == "auto_multi_speaker":
@@ -234330,6 +234348,17 @@ def subdub_auto_multi_voice_choice(lang: str = "vi") -> tuple[str, str]:
     copy = public_subdub_deep_copy(normalize_user_language(lang))
     return copy["voice_auto_multi_speaker"], "videodub|voice|auto_multi_speaker"
 
+
+def subdub_auto_smart_multivoice_choice(lang: str = "vi") -> tuple[str, str]:
+    copy = public_subdub_deep_copy(normalize_user_language(lang))
+    label = copy.get("voice_auto_smart_multivoice") or (
+        "✨ Tự động thông minh (Smart Multi)"
+        if normalize_user_language(lang) == "vi"
+        else "✨ Auto Smart Multi"
+    )
+    return label, "videodub|voice|auto_smart_multivoice"
+
+
 def subtitle_plus_dub_voice_keyboard(
     lang: str = "vi",
     state: dict | None = None,
@@ -234363,6 +234392,9 @@ def subtitle_plus_dub_voice_keyboard(
             InlineKeyboardButton(label, callback_data=callback),
             InlineKeyboardButton(multi_label, callback_data=multi_callback),
         ])
+        if bool(globals().get("SUBDUB_AUTO_SMART_MULTIVOICE_BUTTON_ENABLED", False)):
+            smart_label, smart_callback = subdub_auto_smart_multivoice_choice(lang)
+            rows.insert(2, [InlineKeyboardButton(smart_label, callback_data=smart_callback)])
         return InlineKeyboardMarkup(rows)
     return markup
 
@@ -234382,9 +234414,13 @@ def subtitle_plus_dub_confirm_text(state: dict | None = None, lang: str = "vi") 
     copy = public_subdub_deep_copy(normalize_user_language(lang))
     voice = str(
         (
-            subdub_auto_multi_voice_choice(lang)[0]
-            if subdub_auto_multi_speaker_route_enabled(state)
-            else subdub_auto_voice_choice(lang)[0]
+            subdub_auto_smart_multivoice_choice(lang)[0]
+            if subdub_auto_smart_multivoice_route_enabled(state)
+            else (
+                subdub_auto_multi_voice_choice(lang)[0]
+                if subdub_auto_multi_speaker_route_enabled(state)
+                else subdub_auto_voice_choice(lang)[0]
+            )
         )
         if subdub_auto_speaker_route_enabled(state)
         else state.get("voice_style") or state.get("selected_voice") or copy["voice"]
@@ -235776,11 +235812,12 @@ def video_dubbing_voice_keyboard(
     )
     if subtitle_plus_dub_is_active(state) and str((state or {}).get("active_flow") or "") == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB:
         return subtitle_plus_dub_voice_keyboard(lang, state, include_auto=include_auto)
+    is_vi = normalize_user_language(lang) == "vi"
     items = [
-        (copy["voice_default_female"], "videodub|voice|default_female"),
-        (copy["voice_default_male"], "videodub|voice|default_male"),
-        (copy["saved_voice"], "videodub|voice_saved"),
-        (copy["voice_custom_create"], "videodub|voice_create"),
+        (copy.get("voice_default_female") or ("👩 Giọng nữ mặc định" if is_vi else "👩 Default female"), "videodub|voice|default_female"),
+        (copy.get("voice_default_male") or ("👨 Giọng nam mặc định" if is_vi else "👨 Default male"), "videodub|voice|default_male"),
+        (copy.get("saved_voice") or ("🎙 Kho giọng đã lưu" if is_vi else "🎙 Saved voice library"), "videodub|voice_saved"),
+        (copy.get("voice_custom_create") or copy.get("voice_create") or ("🎙 Tạo voice riêng" if is_vi else "🎙 Create custom voice"), "videodub|voice_create"),
     ]
     markup = video_v6_keyboard(
         items,
@@ -235795,6 +235832,9 @@ def video_dubbing_voice_keyboard(
             InlineKeyboardButton(label, callback_data=callback),
             InlineKeyboardButton(multi_label, callback_data=multi_callback),
         ])
+        if bool(globals().get("SUBDUB_AUTO_SMART_MULTIVOICE_BUTTON_ENABLED", False)):
+            smart_label, smart_callback = subdub_auto_smart_multivoice_choice(lang)
+            rows.insert(2, [InlineKeyboardButton(smart_label, callback_data=smart_callback)])
         return InlineKeyboardMarkup(rows)
     return markup
 
@@ -235926,15 +235966,26 @@ def subdub_apply_voice_choice(
     """Reset first, then assign exactly one Auto or existing manual mode."""
 
     value = str(choice or "").strip()
-    selecting_auto = value in {"auto_speaker_gender", "auto_multi_speaker"}
+    selecting_auto = value in {
+        "auto_speaker_gender",
+        "auto_multi_speaker",
+        "auto_smart_multivoice",
+    }
     selected_auto_lane = (
-        auto_multi_speaker.AUTO_MULTI_SPEAKER_LANE
-        if value == "auto_multi_speaker"
-        else ""
+        auto_smart_multivoice.AUTO_SMART_MULTIVOICE_LANE
+        if value == "auto_smart_multivoice"
+        else (
+            auto_multi_speaker.AUTO_MULTI_SPEAKER_LANE
+            if value == "auto_multi_speaker"
+            else ""
+        )
     )
     switching_auto_profile = bool(
         selecting_auto
-        and auto_speaker.is_auto_speaker_state(state)
+        and (
+            auto_speaker.is_auto_speaker_state(state)
+            or auto_smart_multivoice.is_auto_smart_multivoice_state(state)
+        )
         and str((state or {}).get("auto_speaker_lane") or "")
         != selected_auto_lane
     )
@@ -235959,8 +236010,10 @@ def subdub_apply_voice_choice(
         selected["voice_kind"] = "auto_speaker_gender"
         selected["voice_selection_mode"] = "auto_speaker"
         selected.pop("auto_speaker_lane", None)
-        if value == "auto_multi_speaker":
+        if value in {"auto_multi_speaker", "auto_smart_multivoice"}:
             selected["auto_speaker_lane"] = selected_auto_lane
+        if value == "auto_smart_multivoice":
+            selected["auto_smart_multivoice_opt_in"] = True
         if (
             subtitle_plus_dub_is_active(selected)
             and str(selected.get("translate_requested") or "") == "1"
@@ -236626,9 +236679,13 @@ def video_dubbing_confirm_text(state: dict | None = None, lang: str = "vi") -> s
     target = _short_pending_text(state.get("target_language"), 80)
     voice = _short_pending_text(
         (
-            subdub_auto_multi_voice_choice(lang)[0]
-            if subdub_auto_multi_speaker_route_enabled(state)
-            else subdub_auto_voice_choice(lang)[0]
+            subdub_auto_smart_multivoice_choice(lang)[0]
+            if subdub_auto_smart_multivoice_route_enabled(state)
+            else (
+                subdub_auto_multi_voice_choice(lang)[0]
+                if subdub_auto_multi_speaker_route_enabled(state)
+                else subdub_auto_voice_choice(lang)[0]
+            )
         )
         if subdub_auto_speaker_route_enabled(state)
         else state.get("voice_style"),

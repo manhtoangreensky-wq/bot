@@ -941,3 +941,110 @@ async def run_auto_smart_multivoice(
         "tts_cues": decision.tts_cues,
         "decision_version": decision.decision_version,
     }
+
+
+AUTO_SMART_MULTIVOICE_LANE = "auto_smart_multivoice"
+
+
+def is_auto_smart_multivoice_state(state: Mapping[str, Any] | None) -> bool:
+    """Return True only when explicit opt-in mode auto_smart_multivoice was selected."""
+    if not isinstance(state, Mapping):
+        return False
+    lane = str(state.get("auto_speaker_lane") or "").strip().lower()
+    mode = str(state.get("voice_selection_mode") or "").strip().lower()
+    opt_in = state.get("auto_smart_multivoice_opt_in") is True
+    flag = state.get("auto_smart_multivoice") is True
+    engine = str(state.get("auto_multi_engine") or "").strip().lower()
+    subdub_mode = str(state.get("subdub_mode") or "").strip().lower()
+    return bool(
+        lane == AUTO_SMART_MULTIVOICE_LANE
+        or mode == AUTO_SMART_MULTIVOICE_LANE
+        or opt_in
+        or flag
+        or engine == "smart"
+        or subdub_mode == "smart_multivoice"
+    )
+
+
+async def run_auto_smart_multivoice_blackbox(
+    *,
+    extract_pcm: Callable[..., Any] | None = None,
+    state: Mapping[str, Any] | None = None,
+    **payload: Any,
+) -> dict[str, Any]:
+    """Thin production blackbox / integration adapter invoking run_auto_smart_multivoice()."""
+    current = state if isinstance(state, Mapping) else {}
+    if not is_auto_smart_multivoice_state(current):
+        return {
+            "ok": False,
+            "status": "AUTO_CAST_MANUAL_REQUIRED",
+            "reason": "not_auto_smart_multivoice_state",
+            "lane_mode": str(payload.get("lane_mode") or current.get("mode") or ""),
+            "public_copy_key": "voice_auto_manual_required",
+        }
+
+    source_media = (
+        payload.get("source_media")
+        or current.get("source")
+        or current.get("source_file")
+        or (current.get("input_save") if isinstance(current.get("input_save"), Mapping) else {}).get("source_path")
+        or ""
+    )
+    segments = payload.get("segments") or payload.get("cues") or []
+
+    prepare_subtitles = payload.get("prepare_subtitles")
+    if (not segments or not source_media) and callable(prepare_subtitles):
+        try:
+            prepared = await _maybe_await(prepare_subtitles(dict(current)))
+            if isinstance(prepared, dict):
+                segments = segments or prepared.get("source_segments") or prepared.get("segments") or []
+                source_media = source_media or prepared.get("source_file") or ""
+        except Exception:
+            pass
+
+    output_path = payload.get("output_path") or current.get("output_path") or "output.mp4"
+    validated_pools = payload.get("validated_pools")
+    synthesize_segments = payload.get("synthesize_segments")
+    render_pipeline = payload.get("render_pipeline") or payload.get("render_video")
+    probe_fn = payload.get("probe_fn") or payload.get("probe_video")
+    assignment_seed = str(payload.get("job_id") or current.get("job_id") or current.get("task_id") or "smart_job_seed")
+
+    smart_result = await run_auto_smart_multivoice(
+        source_media=source_media,
+        segments=segments,
+        output_path=output_path,
+        validated_pools=validated_pools,
+        assignment_seed=assignment_seed,
+        stereo_pcm_path=payload.get("stereo_pcm_path"),
+        ranges_by_speaker=payload.get("ranges_by_speaker"),
+        deadline_monotonic=payload.get("deadline_monotonic"),
+        stop_requested=payload.get("stop_requested"),
+        strict_two_classifier=payload.get("strict_two_classifier"),
+        acoustic_classifications=payload.get("acoustic_classifications"),
+        synthesize_segments=synthesize_segments,
+        render_pipeline=render_pipeline,
+        probe_fn=probe_fn,
+        is_cancelled=payload.get("is_cancelled"),
+        fallback_level_override=payload.get("fallback_level_override"),
+        default_fallback_voice=payload.get("default_fallback_voice"),
+        state=current,
+    )
+
+    result_state = dict(current)
+    result_state["subdub_engine_selected"] = "auto_smart_multivoice"
+    result_state["auto_smart_multivoice_verified"] = smart_result.get("auto_smart_verified", False)
+    result_state["auto_smart_strategy"] = smart_result.get("strategy")
+    result_state["auto_detected_speaker_count"] = smart_result.get("detected_speaker_count", 0)
+    result_state["auto_effective_speaker_count"] = smart_result.get("effective_speaker_count", 0)
+    result_state["auto_distinct_voice_count"] = smart_result.get("effective_voice_count", 0)
+    result_state["auto_smart_output_mode"] = smart_result.get("output_mode")
+    result_state["speaker_voice_map"] = smart_result.get("speaker_voice_map") or {}
+
+    response = {
+        **smart_result,
+        "state": result_state,
+    }
+    if smart_result.get("final_mp4_path"):
+        response["video_output"] = smart_result["final_mp4_path"]
+    return response
+
