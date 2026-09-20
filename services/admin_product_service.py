@@ -323,28 +323,32 @@ def resolve_canonical_product_key(product_key: str) -> str:
     return CANONICAL_PRODUCT_ALIASES.get(clean, clean)
 
 
-def resolve_canonical_product_video_ratios(product_key: str, comm: dict[str, Any]) -> list[str]:
-    """Dynamically resolve supported ratios from video_tail9.package_compatibility."""
-    from services import video_tail9
-    candidate_ratios = ("9:16", "16:9", "1:1", "4:5", "3:4", "4:3", "21:9")
-    valid_tiers = list(comm.get("supported_quality_tiers") or (400,))
-    tier_id = valid_tiers[0] if valid_tiers else 400
-    scene_cnt = int(comm.get("minimum_scene_count") or 1)
+def resolve_canonical_product_video_ratios(product_key: str, comm: dict[str, Any]) -> list[str] | str:
+    """Dynamically resolve supported ratios from canonical authority.
 
-    supported = []
-    for cand in candidate_ratios:
-        try:
-            compat = video_tail9.package_compatibility(
-                product_key,
-                scene_count=scene_cnt,
-                ratio=cand,
-                quality_tier_id=tier_id,
-            )
-            if "ratio_not_supported" not in compat.get("blockers", []):
-                supported.append(cand)
-        except Exception:
-            pass
-    return supported
+    If canonical authority exposes supported ratios (in commercial_contract or video_tail9),
+    use it directly. Otherwise, do NOT maintain a synthetic candidate list; report NOT_EXPOSED.
+    """
+    from services import video_tail9
+
+    # 1. Direct commercial contract key if exposed
+    if "supported_ratios" in comm and comm["supported_ratios"] is not None:
+        return list(comm["supported_ratios"])
+
+    # 2. Canonical ratio inventory function on video_tail9 if exposed
+    if hasattr(video_tail9, "supported_ratios") and callable(getattr(video_tail9, "supported_ratios")):
+        return list(video_tail9.supported_ratios(product_key))
+
+    # 3. Canonical catalog/attribute on video_tail9 if exposed
+    if hasattr(video_tail9, "PRODUCT_SUPPORTED_RATIOS"):
+        cat = getattr(video_tail9, "PRODUCT_SUPPORTED_RATIOS")
+        if isinstance(cat, dict) and product_key in cat:
+            return list(cat[product_key])
+        if isinstance(cat, (list, tuple, set, frozenset)):
+            return list(cat)
+
+    # 4. Only admission predicate exists and NO canonical ratio inventory is exposed
+    return "NOT_EXPOSED"
 
 
 def resolve_canonical_technical_contract(product_key: str) -> dict[str, Any]:
@@ -431,14 +435,14 @@ def resolve_canonical_technical_contract(product_key: str) -> dict[str, Any]:
             "execution_blocker": execution_blocker,
             "supported_tiers": supported_tiers,
             "supported_quality_tiers": supported_tiers,
-            "supported_ratios": [],
-            "required_capability": "text_to_image",
-            "provider_capability": "text_to_image",
-            "modality": "text_to_image",
-            "executor_product_type": "image_generation",
-            "engine_route": "image_generation",
-            "flow_owner": "image",
-            "worker_owner": "image",
+            "supported_ratios": "NOT_EXPOSED",
+            "required_capability": "NOT_EXPOSED",
+            "provider_capability": "NOT_EXPOSED",
+            "modality": "NOT_EXPOSED",
+            "executor_product_type": "NOT_EXPOSED",
+            "engine_route": "NOT_EXPOSED",
+            "flow_owner": "NOT_EXPOSED",
+            "worker_owner": "NOT_EXPOSED",
             "source_authority": "services.video_ai_real_pricing.public_image_quality_catalog",
         }
 
@@ -467,14 +471,14 @@ def resolve_canonical_technical_contract(product_key: str) -> dict[str, Any]:
             "execution_blocker": blocker,
             "supported_tiers": supported_tiers,
             "supported_quality_tiers": supported_tiers,
-            "supported_ratios": [],
-            "required_capability": "text_to_speech",
-            "provider_capability": "text_to_speech",
-            "modality": "text_to_speech",
-            "executor_product_type": "voice_tts",
-            "engine_route": "voice_tts",
-            "flow_owner": "voice",
-            "worker_owner": "voice",
+            "supported_ratios": "NOT_EXPOSED",
+            "required_capability": "NOT_EXPOSED",
+            "provider_capability": "NOT_EXPOSED",
+            "modality": "NOT_EXPOSED",
+            "executor_product_type": "NOT_EXPOSED",
+            "engine_route": "NOT_EXPOSED",
+            "flow_owner": "NOT_EXPOSED",
+            "worker_owner": "NOT_EXPOSED",
             "source_authority": "bot.get_tts_provider_readiness",
         }
 
@@ -501,14 +505,14 @@ def resolve_canonical_technical_contract(product_key: str) -> dict[str, Any]:
             "execution_blocker": blocker,
             "supported_tiers": [],
             "supported_quality_tiers": [],
-            "supported_ratios": [],
-            "required_capability": "voice_cloning",
-            "provider_capability": "voice_cloning",
-            "modality": "voice_cloning",
-            "executor_product_type": "voice_clone",
-            "engine_route": "voice_clone",
-            "flow_owner": "voice",
-            "worker_owner": "voice",
+            "supported_ratios": "NOT_EXPOSED",
+            "required_capability": "NOT_EXPOSED",
+            "provider_capability": "NOT_EXPOSED",
+            "modality": "NOT_EXPOSED",
+            "executor_product_type": "NOT_EXPOSED",
+            "engine_route": "NOT_EXPOSED",
+            "flow_owner": "NOT_EXPOSED",
+            "worker_owner": "NOT_EXPOSED",
             "source_authority": "bot.get_minimax_voice_clone_readiness",
         }
 
@@ -537,14 +541,14 @@ def resolve_canonical_technical_contract(product_key: str) -> dict[str, Any]:
             "execution_blocker": execution_blocker,
             "supported_tiers": supported_tiers,
             "supported_quality_tiers": supported_tiers,
-            "supported_ratios": [],
-            "required_capability": "text_to_music",
-            "provider_capability": "text_to_music",
-            "modality": "text_to_music",
-            "executor_product_type": "music_generation",
-            "engine_route": "music_generation",
-            "flow_owner": "music",
-            "worker_owner": "music",
+            "supported_ratios": "NOT_EXPOSED",
+            "required_capability": "NOT_EXPOSED",
+            "provider_capability": "NOT_EXPOSED",
+            "modality": "NOT_EXPOSED",
+            "executor_product_type": "NOT_EXPOSED",
+            "engine_route": "NOT_EXPOSED",
+            "flow_owner": "NOT_EXPOSED",
+            "worker_owner": "NOT_EXPOSED",
             "source_authority": "services.video_ai_real_pricing.music_model_catalog",
         }
 
@@ -577,7 +581,7 @@ def resolve_canonical_technical_contract(product_key: str) -> dict[str, Any]:
             "execution_blocker": blocker,
             "supported_tiers": supported_tiers,
             "supported_quality_tiers": supported_tiers,
-            "supported_ratios": [],
+            "supported_ratios": "NOT_EXPOSED",
             "required_capability": "NOT_EXPOSED",
             "provider_capability": "NOT_EXPOSED",
             "modality": "NOT_EXPOSED",
@@ -609,7 +613,7 @@ def resolve_canonical_technical_contract(product_key: str) -> dict[str, Any]:
             "execution_blocker": "chat_pro_readiness_authority_unproven",
             "supported_tiers": supported_tiers,
             "supported_quality_tiers": supported_tiers,
-            "supported_ratios": [],
+            "supported_ratios": "NOT_EXPOSED",
             "required_capability": "NOT_EXPOSED",
             "provider_capability": "NOT_EXPOSED",
             "modality": "NOT_EXPOSED",
@@ -810,12 +814,14 @@ def resolve_effective_product(
     # Ensure technical fields are always pure canonical reflection
     effective["supported_tiers"] = base.get("supported_tiers", [])
     effective["supported_quality_tiers"] = base.get("supported_quality_tiers", [])
-    effective["supported_ratios"] = base.get("supported_ratios", [])
-    effective["provider_capability"] = base.get("provider_capability", "")
-    effective["required_capability"] = base.get("required_capability", "")
-    effective["modality"] = base.get("modality", "")
-    effective["executor_product_type"] = base.get("executor_product_type", "")
-    effective["engine_route"] = base.get("engine_route", "")
+    effective["supported_ratios"] = base.get("supported_ratios", "NOT_EXPOSED")
+    effective["provider_capability"] = base.get("provider_capability", "NOT_EXPOSED")
+    effective["required_capability"] = base.get("required_capability", "NOT_EXPOSED")
+    effective["modality"] = base.get("modality", "NOT_EXPOSED")
+    effective["executor_product_type"] = base.get("executor_product_type", "NOT_EXPOSED")
+    effective["engine_route"] = base.get("engine_route", "NOT_EXPOSED")
+    effective["flow_owner"] = base.get("flow_owner", "NOT_EXPOSED")
+    effective["worker_owner"] = base.get("worker_owner", "NOT_EXPOSED")
     effective["source_authority"] = base.get("source_authority", "")
 
     effective["has_override"] = override_row is not None

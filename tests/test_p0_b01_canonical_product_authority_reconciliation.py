@@ -194,20 +194,23 @@ def test_red_06_product_video_supported_tiers_equals_canonical_contract(test_env
 
 
 def test_red_07_product_video_supported_ratios_canonical_truth(test_env):
-    """RED 7: Product Video supported ratios equals canonical product authority."""
+    """RED 7: Product Video supported ratios equals canonical product authority directly (or NOT_EXPOSED)."""
     client = test_env["client"]
     path = "/internal/v1/admin/products/video_trend"
     headers = build_auth_headers("GET", path, b"")
     resp = client.get(path, headers=headers)
     assert resp.status_code == 200
     effective = resp.json().get("effective", {})
-    
-    candidates = ("9:16", "16:9", "1:1", "4:5", "3:4", "4:3", "21:9")
-    canonical_ratios = [
-        r for r in candidates
-        if "ratio_not_supported" not in video_tail9.package_compatibility("video_trend", scene_count=1, ratio=r, quality_tier_id=100).get("blockers", [])
-    ]
-    assert sorted(effective.get("supported_ratios", [])) == sorted(canonical_ratios)
+
+    comm = video_tail9.commercial_contract("video_trend")
+    if "supported_ratios" in comm and comm["supported_ratios"] is not None:
+        expected = list(comm["supported_ratios"])
+    elif hasattr(video_tail9, "supported_ratios") and callable(getattr(video_tail9, "supported_ratios")):
+        expected = list(video_tail9.supported_ratios("video_trend"))
+    else:
+        expected = "NOT_EXPOSED"
+
+    assert effective.get("supported_ratios") == expected
 
 
 def test_red_08_execution_enabled_dynamic_and_cannot_be_overridden(test_env):
@@ -270,21 +273,14 @@ def test_red_10_product_count_static_inventory(monkeypatch, test_env):
 
 
 def test_red_11_product_video_ratios_hardcoded(monkeypatch, test_env):
-    """RED 11: Admin product video ratios must be sourced from package_compatibility, not hardcoded."""
-    orig_compat = video_tail9.package_compatibility
-    def restricted_compat(product_type, **kwargs):
-        res = orig_compat(product_type, **kwargs)
-        if kwargs.get("ratio") != "9:16":
-            res["ok"] = False
-            res["blockers"] = ["ratio_not_supported"]
-        return res
-    monkeypatch.setattr(video_tail9, "package_compatibility", restricted_compat)
+    """RED 11: Admin product video ratios must dynamically reflect canonical authority when exposed, without hardcoding."""
+    monkeypatch.setattr(video_tail9, "supported_ratios", lambda p: ["9:16"], raising=False)
 
     client = test_env["client"]
     resp = client.get("/internal/v1/admin/products/video_trend", headers=build_auth_headers("GET", "/internal/v1/admin/products/video_trend", b""))
     assert resp.status_code == 200
     ratios = resp.json()["effective"]["supported_ratios"]
-    assert ratios == ["9:16"], f"Admin ratios must dynamically derive from package_compatibility, got {ratios}"
+    assert ratios == ["9:16"], f"Admin ratios must dynamically derive from canonical authority, got {ratios}"
 
 
 def test_red_12_image_technical_fallback_fail_open(monkeypatch, test_env):
@@ -390,3 +386,117 @@ def test_red_19_discovery_adapters_exist():
     assert hasattr(aps, "discover_canonical_products"), "admin_product_service must provide discover_canonical_products"
     assert hasattr(aps, "discover_product_video_products"), "admin_product_service must provide discover_product_video_products"
     assert callable(aps.discover_canonical_products)
+
+
+def test_red_20_image_unproven_technical_fields(test_env):
+    """RED 20: Image unproven capability and routing fields must be NOT_EXPOSED."""
+    client = test_env["client"]
+    resp = client.get("/internal/v1/admin/products/image_generation", headers=build_auth_headers("GET", "/internal/v1/admin/products/image_generation", b""))
+    assert resp.status_code == 200
+    effective = resp.json()["effective"]
+    for field in (
+        "required_capability",
+        "provider_capability",
+        "modality",
+        "executor_product_type",
+        "engine_route",
+        "flow_owner",
+        "worker_owner",
+    ):
+        assert effective.get(field) == "NOT_EXPOSED", (
+            f"Image field {field} is unproven by image authority and must be NOT_EXPOSED, got {effective.get(field)}"
+        )
+
+
+def test_red_21_tts_unproven_technical_fields(test_env):
+    """RED 21: TTS unproven capability and routing fields must be NOT_EXPOSED."""
+    client = test_env["client"]
+    resp = client.get("/internal/v1/admin/products/voice_tts", headers=build_auth_headers("GET", "/internal/v1/admin/products/voice_tts", b""))
+    assert resp.status_code == 200
+    effective = resp.json()["effective"]
+    for field in (
+        "required_capability",
+        "provider_capability",
+        "modality",
+        "executor_product_type",
+        "engine_route",
+        "flow_owner",
+        "worker_owner",
+    ):
+        assert effective.get(field) == "NOT_EXPOSED", (
+            f"TTS field {field} is unproven by get_tts_provider_readiness and must be NOT_EXPOSED, got {effective.get(field)}"
+        )
+
+
+def test_red_22_voice_clone_unproven_technical_fields(test_env):
+    """RED 22: Voice clone unproven capability and routing fields must be NOT_EXPOSED."""
+    client = test_env["client"]
+    resp = client.get("/internal/v1/admin/products/voice_clone", headers=build_auth_headers("GET", "/internal/v1/admin/products/voice_clone", b""))
+    assert resp.status_code == 200
+    effective = resp.json()["effective"]
+    for field in (
+        "required_capability",
+        "provider_capability",
+        "modality",
+        "executor_product_type",
+        "engine_route",
+        "flow_owner",
+        "worker_owner",
+    ):
+        assert effective.get(field) == "NOT_EXPOSED", (
+            f"Voice clone field {field} is unproven by get_minimax_voice_clone_readiness and must be NOT_EXPOSED, got {effective.get(field)}"
+        )
+
+
+def test_red_23_music_unproven_technical_fields(test_env):
+    """RED 23: Music unproven capability and routing fields must be NOT_EXPOSED."""
+    client = test_env["client"]
+    resp = client.get("/internal/v1/admin/products/music_generation", headers=build_auth_headers("GET", "/internal/v1/admin/products/music_generation", b""))
+    assert resp.status_code == 200
+    effective = resp.json()["effective"]
+    for field in (
+        "required_capability",
+        "provider_capability",
+        "modality",
+        "executor_product_type",
+        "engine_route",
+        "flow_owner",
+        "worker_owner",
+    ):
+        assert effective.get(field) == "NOT_EXPOSED", (
+            f"Music field {field} is unproven by music_model_catalog and must be NOT_EXPOSED, got {effective.get(field)}"
+        )
+
+
+def test_red_24_product_video_new_ratio_discovery(monkeypatch, test_env):
+    """RED 24: Monkeypatching canonical ratio authority with a new ratio ('2:1') must be discovered without editing admin_product_service."""
+    orig_compat = video_tail9.package_compatibility
+    def mock_compat(product_type, **kwargs):
+        res = orig_compat(product_type, **kwargs)
+        if kwargs.get("ratio") == "2:1":
+            res["ok"] = True
+            res["blockers"] = [b for b in res.get("blockers", []) if b != "ratio_not_supported"]
+        return res
+
+    monkeypatch.setattr(video_tail9, "package_compatibility", mock_compat)
+    monkeypatch.setattr(video_tail9, "supported_ratios", lambda p: ["9:16", "16:9", "1:1", "4:5", "2:1"], raising=False)
+
+    client = test_env["client"]
+    resp = client.get("/internal/v1/admin/products/video_trend", headers=build_auth_headers("GET", "/internal/v1/admin/products/video_trend", b""))
+    assert resp.status_code == 200
+    effective = resp.json()["effective"]
+    ratios = effective.get("supported_ratios")
+    assert isinstance(ratios, list) and "2:1" in ratios, (
+        f"Admin must discover newly supported canonical ratio '2:1' dynamically, got {ratios}"
+    )
+
+
+def test_red_25_ratio_test_not_self_comparator(test_env):
+    """RED 25: When canonical authority exposes NO ratio inventory, Admin must return NOT_EXPOSED rather than filtering hardcoded candidates."""
+    client = test_env["client"]
+    resp = client.get("/internal/v1/admin/products/video_trend", headers=build_auth_headers("GET", "/internal/v1/admin/products/video_trend", b""))
+    assert resp.status_code == 200
+    effective = resp.json()["effective"]
+    assert effective.get("supported_ratios") == "NOT_EXPOSED", (
+        f"When canonical authority has only admission predicate and no ratio inventory, supported_ratios must be NOT_EXPOSED, got {effective.get('supported_ratios')}"
+    )
