@@ -3207,20 +3207,47 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
                     },
                 }
             else:
+                autopost_info = None
                 try:
                     from services.autopost_asset_handoff import notify_autopost_producer_completion
-                    current["autopost_handoff"] = notify_autopost_producer_completion(
+                    autopost_info = notify_autopost_producer_completion(
                         conn,
                         source_product="video_edit",
                         source_ref=int(current.get("id") or 0),
                         requesting_user_id=int(current.get("user_id") or 0),
                     )
+                    current["autopost_handoff"] = autopost_info
+                    from services import autopost_video_edit_adapter as avea
+                    intent = avea.get_video_edit_autopost_intent(
+                        conn,
+                        owner_id=int(current.get("user_id") or 0),
+                        video_edit_job_id=int(current.get("id") or 0),
+                    )
+                    if intent and intent.get("mode") in {"DRAFT_ONLY", "SCHEDULE_NOW", "SCHEDULE_AT"}:
+                        adapter_res, _ = avea.process_video_edit_autopost_handoff(
+                            conn,
+                            video_edit_job_id=int(current.get("id") or 0),
+                            owner_id=int(current.get("user_id") or 0),
+                            handoff_receipt=autopost_info,
+                        )
+                        current["autopost_adapter"] = adapter_res
                 except Exception as exc:
-                    current["autopost_handoff"] = {
+                    if autopost_info is None:
+                        current["autopost_handoff"] = {
+                            "attempted": True,
+                            "created_or_reused": False,
+                            "handoff_id": None,
+                            "blocker": f"autopost_callback_error:{type(exc).__name__}",
+                        }
+                    current["autopost_adapter"] = {
                         "attempted": True,
-                        "created_or_reused": False,
+                        "mode": None,
+                        "intent_id": None,
                         "handoff_id": None,
-                        "blocker": f"autopost_callback_error:{type(exc).__name__}",
+                        "draft_id": None,
+                        "publication_id": None,
+                        "state": None,
+                        "blocker": f"autopost_adapter_error:{type(exc).__name__}",
                     }
         return current
     delivery_owner, delivery_claim_attempt = _cleanup_delivery_binding(
@@ -3573,6 +3600,7 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
                 },
             }
         else:
+            autopost_info = None
             try:
                 from services.autopost_asset_handoff import notify_autopost_producer_completion
                 autopost_info = notify_autopost_producer_completion(
@@ -3582,12 +3610,37 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
                     requesting_user_id=int(job.get("user_id") or 0),
                 )
                 job["autopost_handoff"] = autopost_info
+                from services import autopost_video_edit_adapter as avea
+                intent = avea.get_video_edit_autopost_intent(
+                    conn,
+                    owner_id=int(job.get("user_id") or 0),
+                    video_edit_job_id=int(job.get("id") or 0),
+                )
+                if intent and intent.get("mode") in {"DRAFT_ONLY", "SCHEDULE_NOW", "SCHEDULE_AT"}:
+                    adapter_res, _ = avea.process_video_edit_autopost_handoff(
+                        conn,
+                        video_edit_job_id=int(job.get("id") or 0),
+                        owner_id=int(job.get("user_id") or 0),
+                        handoff_receipt=autopost_info,
+                    )
+                    job["autopost_adapter"] = adapter_res
             except Exception as exc:
-                job["autopost_handoff"] = {
+                if autopost_info is None:
+                    job["autopost_handoff"] = {
+                        "attempted": True,
+                        "created_or_reused": False,
+                        "handoff_id": None,
+                        "blocker": f"autopost_callback_error:{type(exc).__name__}",
+                    }
+                job["autopost_adapter"] = {
                     "attempted": True,
-                    "created_or_reused": False,
+                    "mode": None,
+                    "intent_id": None,
                     "handoff_id": None,
-                    "blocker": f"autopost_callback_error:{type(exc).__name__}",
+                    "draft_id": None,
+                    "publication_id": None,
+                    "state": None,
+                    "blocker": f"autopost_adapter_error:{type(exc).__name__}",
                 }
     elif started_tx and conn.in_transaction:
         conn.commit()
