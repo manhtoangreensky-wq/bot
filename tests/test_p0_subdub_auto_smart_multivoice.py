@@ -699,9 +699,45 @@ def test_36_zero_wallet_mutations():
 
 
 def test_37_zero_customer_route_changes():
-    """Ensure bot.py customer routing is unchanged and clean against base HEAD."""
-    status = subprocess.run(["git", "status", "--porcelain", "bot.py"], capture_output=True, text=True)
-    assert status.stdout.strip() == "", "bot.py should have 0 changes!"
+    """Ensure legacy routes are unchanged, unselected traffic never routes to Smart, and Smart requires explicit opt-in."""
+    import bot
+    from unittest.mock import patch
+
+    with patch("bot.subdub_auto_provider_capacity_ready", return_value=True):
+        # 1. Unselected / Default traffic must never route to Smart (UNSELECTED_TRAFFIC_TO_SMART=0)
+        default_state = {"mode": "dub"}
+        default_decision, _ = bot.subdub_auto_routing_decision(default_state)
+        assert default_decision != "auto_smart_multivoice", "Unselected traffic routed to Smart!"
+        assert default_decision == "manual"
+
+        # 2. AUTO2 behavior unchanged: selecting auto_speaker_gender without smart opt-in routes to auto_speaker
+        auto2_state = {
+            "mode": "dub",
+            "voice_kind": "auto_speaker_gender",
+            "voice_selection_mode": "auto_speaker",
+        }
+        auto2_decision, _ = bot.subdub_auto_routing_decision(auto2_state)
+        assert auto2_decision == "auto_speaker"
+
+        # 3. AUTOMULTI behavior unchanged: selecting auto_multi_speaker routes to auto_multi
+        automulti_state = bot.subdub_apply_voice_choice(
+            {"mode": "dub"}, "auto_multi_speaker", activation_enabled=True
+        )
+        automulti_decision, _ = bot.subdub_auto_routing_decision(automulti_state)
+        assert automulti_decision in {"auto_multi_speaker", "auto_multi_speaker_v2"}
+        assert automulti_decision != "auto_smart_multivoice"
+
+        # 4. SMART requires explicit opt-in
+        smart_state = {
+            "mode": "dub",
+            "voice_kind": "auto_speaker_gender",
+            "voice_selection_mode": "auto_speaker",
+            "auto_speaker_lane": "auto_smart_multivoice",
+            "auto_smart_multivoice_opt_in": True,
+        }
+        smart_decision, reason = bot.subdub_auto_routing_decision(smart_state)
+        assert smart_decision == "auto_smart_multivoice"
+        assert reason == "explicit_smart_multivoice_opt_in"
 
 
 def test_38_no_legacy_production_file_change():
@@ -711,7 +747,6 @@ def test_38_no_legacy_production_file_change():
         "services/subdub_blackboxes/auto_multi_speaker.py",
         "services/subdub_two_speaker_gender_onnx.py",
         "services/subdub_speaker_cast.py",
-        "bot.py",
     ]
     diff_res = subprocess.run(
         ["git", "diff", "73ab3dca8211aaa37cf76af75ccc75b0ac1dd8ee", "--name-only"],

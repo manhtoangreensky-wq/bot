@@ -233453,6 +233453,7 @@ SUBDUB_MANUAL_VOICE_FIELDS = frozenset({
 
 SUBDUB_AUTO_VOICE_FIELDS = frozenset({
     "voice_selection_mode", "auto_speaker_lane",
+    "auto_smart_multivoice_opt_in", "auto_smart_multivoice",
     "speaker_sidecar_path", "speaker_sidecar_sha256",
     "speaker_classifications", "speaker_casts", "per_cue_voice_assignments",
     "auto_exact_receipt_version", "auto_exact_media_sha256",
@@ -233501,6 +233502,23 @@ SUBDUB_VOICE_CONFIRMATION_FIELDS = frozenset({
 })
 
 
+def _clear_subdub_smart_multivoice_markers(state: dict | None) -> dict:
+    """Purge every Smart MultiVoice marker so non-Smart selections never route to Smart."""
+    if not isinstance(state, dict):
+        return {}
+    state.pop("auto_smart_multivoice_opt_in", None)
+    state.pop("auto_smart_multivoice", None)
+    if str(state.get("auto_speaker_lane") or "").strip().lower() == auto_smart_multivoice.AUTO_SMART_MULTIVOICE_LANE:
+        state.pop("auto_speaker_lane", None)
+    if str(state.get("voice_selection_mode") or "").strip().lower() == auto_smart_multivoice.AUTO_SMART_MULTIVOICE_LANE:
+        state.pop("voice_selection_mode", None)
+    if str(state.get("auto_multi_engine") or "").strip().lower() == "smart":
+        state.pop("auto_multi_engine", None)
+    if str(state.get("subdub_mode") or "").strip().lower() == "smart_multivoice":
+        state.pop("subdub_mode", None)
+    return state
+
+
 def reset_subdub_voice_selection(state: dict, *, selecting_auto: bool) -> dict:
     """Clear the opposite voice mode before a new mode is assigned."""
 
@@ -233515,6 +233533,8 @@ def reset_subdub_voice_selection(state: dict, *, selecting_auto: bool) -> dict:
     }
     cleaned.pop("voice_kind", None)
     cleaned.pop("voice_selection_mode", None)
+    if not selecting_auto:
+        _clear_subdub_smart_multivoice_markers(cleaned)
     return cleaned
 
 
@@ -236014,6 +236034,8 @@ def subdub_apply_voice_choice(
             selected["auto_speaker_lane"] = selected_auto_lane
         if value == "auto_smart_multivoice":
             selected["auto_smart_multivoice_opt_in"] = True
+        else:
+            _clear_subdub_smart_multivoice_markers(selected)
         if (
             subtitle_plus_dub_is_active(selected)
             and str(selected.get("translate_requested") or "") == "1"
