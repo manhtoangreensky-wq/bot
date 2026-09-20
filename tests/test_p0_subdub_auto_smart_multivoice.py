@@ -1,6 +1,6 @@
-"""Comprehensive test suite for P0.SUBDUB.AUTO.SMART.MULTIVOICE.ISOLATED.SOURCE.IMPLEMENTATION.R1.
+"""Comprehensive test suite for P0.SUBDUB.AUTO.SMART.MULTIVOICE.ISOLATED.SOURCE.IMPLEMENTATION.R1.C1.
 
-Covers all 38 test requirements:
+Covers all 58 test requirements:
 01 Smart module missing FIRST RED
 02 N=1 clear voice
 03 N=1 uncertain register
@@ -39,6 +39,26 @@ Covers all 38 test requirements:
 36 zero wallet mutations
 37 zero customer route changes
 38 no legacy production file change
+39 STRICT_TWO cannot be emitted without strict engine success
+40 strict engine spy is actually called
+41 strict AutoCastManualRequired falls back without manual halt
+42 missing speaker ID does not invent speaker_0
+43 missing canonical cue identity does not invent current canonical ID
+44 validated_pools=None does not invent provider voices
+45 malformed/unapproved pool rejected/falls lower truthfully
+46 DUBBED mode without synth authority cannot succeed
+47 partial TTS coverage cannot succeed as DUBBED
+48 duplicate TTS artifact rejected
+49 unknown TTS artifact rejected
+50 non-empty garbage MP4 rejected without caller probe
+51 stale pre-existing output rejected
+52 render_pipeline absent cannot claim current-run output
+53 bar fixture full runner -> valid MP4
+54 bar singing/music never sent to TTS
+55 preserved bar cues reach renderer
+56 cooking fixture full runner -> valid MP4
+57 cancellation after synthesis cannot succeed
+58 cancellation before render cannot succeed
 """
 
 from __future__ import annotations
@@ -62,14 +82,28 @@ TEST_POOLS = {
 }
 
 
-def _create_mock_mp4(path: Path, size_bytes: int = 1024) -> Path:
+def _create_real_valid_mp4(target_path: Path) -> Path:
+    """Generate deterministic 1-second valid MP4 via local ffmpeg."""
+    ffmpeg_bin = r"D:\TOANAAS\_venv311_restore400\Scripts\ffmpeg.exe"
+    cmd = [
+        ffmpeg_bin,
+        "-f", "lavfi", "-i", "color=c=black:s=320x240:d=1",
+        "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+        "-t", "1",
+        "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p",
+        "-y", str(target_path),
+    ]
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return target_path
+
+
+def _create_mock_file(path: Path, size_bytes: int = 1024) -> Path:
     path.write_bytes(b"\x00" * size_bytes)
     return path
 
 
 def test_01_first_red_demonstration():
     """FIRST RED: Prove legacy strict-two requires manual fallback for N=1 and N=2 weak evidence."""
-    # N=1 in legacy speaker_cast
     with pytest.raises(speaker_cast.AutoCastManualRequired):
         speaker_cast.assign_stable_voices(
             {"spk_1": {"voice_register": "low", "confidence": 0.95}},
@@ -78,7 +112,6 @@ def test_01_first_red_demonstration():
             assignment_seed="a" * 64,
         )
 
-    # N=2 with weak confidence (< 0.75) in legacy
     with pytest.raises(speaker_cast.AutoCastManualRequired):
         speaker_cast.assign_stable_voices(
             {
@@ -131,20 +164,25 @@ def test_03_n1_uncertain_register():
 
 
 def test_04_n2_strict_success():
-    """N=2 with confident opposite registers: reuses strict two-speaker assignment."""
+    """N=2 with strict engine success: STRICT_TWO emitted when real strict engine succeeds."""
     cues = [
         {"cue_id": "c1", "speaker_id": "spk_1", "text": "Chào bạn, hôm nay thế nào?", "start_ms": 0, "end_ms": 1500},
         {"cue_id": "c2", "speaker_id": "spk_2", "text": "Tôi rất khỏe, cảm ơn bạn.", "start_ms": 1600, "end_ms": 3000},
     ]
-    acoustics = {
-        "spk_1": {"voice_register": "low", "confidence": 0.95},
-        "spk_2": {"voice_register": "high", "confidence": 0.96},
-    }
+    calls = []
+    def strict_spy(pcm_path, ranges, **kwargs):
+        calls.append((pcm_path, ranges))
+        return {
+            "spk_1": {"voice_register": "low", "confidence": 0.95},
+            "spk_2": {"voice_register": "high", "confidence": 0.96},
+        }
+
     decision = smart.decide_smart_multivoice(
         cues,
         validated_pools=TEST_POOLS,
-        acoustic_classifications=acoustics,
+        strict_two_classifier=strict_spy,
     )
+    assert len(calls) == 1
     assert decision.detected_speaker_count == 2
     assert decision.effective_speaker_count == 2
     assert decision.effective_voice_count == 2
@@ -155,16 +193,18 @@ def test_04_n2_strict_success():
 
 
 def test_05_n2_insufficient_cues_fallback():
-    """N=2 with missing acoustic cues: catches strict failure, falls back internally without manual halt."""
+    """N=2 where strict classifier fails: catches strict failure, falls back internally without manual halt."""
     cues = [
         {"cue_id": "c1", "speaker_id": "spk_1", "text": "Một câu nói ngắn", "start_ms": 0, "end_ms": 500},
         {"cue_id": "c2", "speaker_id": "spk_2", "text": "Câu trả lời ngắn", "start_ms": 600, "end_ms": 1000},
     ]
-    # No acoustic classification provided -> strict would fail
+    def failing_strict(*args, **kwargs):
+        raise speaker_cast.AutoCastManualRequired()
+
     decision = smart.decide_smart_multivoice(
         cues,
         validated_pools=TEST_POOLS,
-        acoustic_classifications={},
+        strict_two_classifier=failing_strict,
     )
     assert decision.detected_speaker_count == 2
     assert decision.effective_voice_count == 2
@@ -176,19 +216,18 @@ def test_05_n2_insufficient_cues_fallback():
 
 
 def test_06_n2_low_confidence_fallback():
-    """N=2 with low confidence (< 0.75): catches strict failure and assigns distinct voices."""
+    """N=2 with low confidence (< 0.75): strict engine fails, Smart falls back internally."""
     cues = [
         {"cue_id": "c1", "speaker_id": "spk_1", "text": "Câu nói 1", "start_ms": 0, "end_ms": 1500},
         {"cue_id": "c2", "speaker_id": "spk_2", "text": "Câu nói 2", "start_ms": 1600, "end_ms": 3000},
     ]
-    acoustics = {
-        "spk_1": {"voice_register": "low", "confidence": 0.55},
-        "spk_2": {"voice_register": "high", "confidence": 0.60},
-    }
+    def low_conf_strict(*args, **kwargs):
+        raise speaker_cast.AutoCastManualRequired()
+
     decision = smart.decide_smart_multivoice(
         cues,
         validated_pools=TEST_POOLS,
-        acoustic_classifications=acoustics,
+        strict_two_classifier=low_conf_strict,
     )
     assert decision.detected_speaker_count == 2
     assert decision.effective_voice_count == 2
@@ -248,7 +287,6 @@ def test_10_voice_pool_exhaustion():
     decision = smart.decide_smart_multivoice(cues, validated_pools=small_pools)
     assert decision.detected_speaker_count == 6
     assert decision.effective_speaker_count == 6
-    # 4 unique voices in pool -> effective_voice_count must be 4 truthfully
     assert decision.effective_voice_count == 4
     assert decision.fallback_level == 2
     assert decision.fallback_reason == "voice_pool_exhaustion_reuse"
@@ -304,11 +342,7 @@ def test_14_no_gender_only_speaker_merge():
         {"cue_id": "c1", "speaker_id": "male_speaker_1", "text": "Tôi là người thứ nhất", "start_ms": 0, "end_ms": 1000},
         {"cue_id": "c2", "speaker_id": "male_speaker_2", "text": "Tôi là người thứ hai", "start_ms": 1100, "end_ms": 2000},
     ]
-    acoustics = {
-        "male_speaker_1": {"voice_register": "low", "confidence": 0.90},
-        "male_speaker_2": {"voice_register": "low", "confidence": 0.88},
-    }
-    decision = smart.decide_smart_multivoice(cues, validated_pools=TEST_POOLS, acoustic_classifications=acoustics)
+    decision = smart.decide_smart_multivoice(cues, validated_pools=TEST_POOLS)
     assert decision.detected_speaker_count == 2
     assert decision.effective_speaker_count == 2
     assert "male_speaker_1" in decision.speaker_voice_map
@@ -406,18 +440,15 @@ def test_21_no_tts_cue_without_voice():
 def test_22_valid_final_mp4(tmp_path):
     """Runner with valid media and successful render verifies final MP4 and reports ok=True."""
     async def _run():
-        source_media = _create_mock_mp4(tmp_path / "source.mp4")
+        source_media = _create_real_valid_mp4(tmp_path / "source.mp4")
         output_mp4 = tmp_path / "output.mp4"
         cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Chào", "start_ms": 0, "end_ms": 1000}]
 
         async def mock_synth(cues, speaker_voice_map):
-            return [{"chunk_id": "chk_1"}]
+            return [{"cue_id": "c1", "audio": b"dummy_pcm_bytes"}]
 
         async def mock_render(source_media, output_path, **kwargs):
-            return _create_mock_mp4(Path(output_path), 2048)
-
-        def mock_probe(path):
-            return {"ok": True, "detail": "ok"}
+            return _create_real_valid_mp4(Path(output_path))
 
         res = await smart.run_auto_smart_multivoice(
             source_media=source_media,
@@ -426,7 +457,6 @@ def test_22_valid_final_mp4(tmp_path):
             validated_pools=TEST_POOLS,
             synthesize_segments=mock_synth,
             render_pipeline=mock_render,
-            probe_fn=mock_probe,
         )
         assert res["ok"] is True
         assert res["output_mode"] == smart.OUTPUT_MODE_DUBBED_SINGLE
@@ -438,12 +468,14 @@ def test_22_valid_final_mp4(tmp_path):
 def test_23_invalid_final_mp4_rejected(tmp_path):
     """Empty or non-existent rendered file fails MP4 validation truthfully."""
     async def _run():
-        source_media = _create_mock_mp4(tmp_path / "source.mp4")
+        source_media = _create_real_valid_mp4(tmp_path / "source.mp4")
         output_mp4 = tmp_path / "output.mp4"
         cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Chào", "start_ms": 0, "end_ms": 1000}]
 
+        async def mock_synth(cues, speaker_voice_map):
+            return [{"cue_id": "c1", "audio": b"dummy"}]
+
         async def mock_render(source_media, output_path, **kwargs):
-            # Create empty file (0 bytes)
             Path(output_path).write_bytes(b"")
             return output_path
 
@@ -452,11 +484,12 @@ def test_23_invalid_final_mp4_rejected(tmp_path):
             segments=cues,
             output_path=output_mp4,
             validated_pools=TEST_POOLS,
+            synthesize_segments=mock_synth,
             render_pipeline=mock_render,
         )
         assert res["ok"] is False
         assert res["output_mode"] == smart.OUTPUT_MODE_FAILED
-        assert "empty_file" in str(res["blocker"])
+        assert "empty_or_undersized_file" in str(res["blocker"])
     asyncio.run(_run())
 
 
@@ -479,9 +512,12 @@ def test_24_corrupt_input_fails_truthfully(tmp_path):
 def test_25_render_failure_fails_truthfully(tmp_path):
     """Exception raised during render pipeline is caught and reported truthfully."""
     async def _run():
-        source_media = _create_mock_mp4(tmp_path / "source.mp4")
+        source_media = _create_real_valid_mp4(tmp_path / "source.mp4")
         output_mp4 = tmp_path / "output.mp4"
         cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Chào", "start_ms": 0, "end_ms": 1000}]
+
+        async def mock_synth(cues, speaker_voice_map):
+            return [{"cue_id": "c1", "audio": b"dummy"}]
 
         async def failing_render(**kwargs):
             raise RuntimeError("ffmpeg_mux_failure_code_1")
@@ -491,6 +527,7 @@ def test_25_render_failure_fails_truthfully(tmp_path):
             segments=cues,
             output_path=output_mp4,
             validated_pools=TEST_POOLS,
+            synthesize_segments=mock_synth,
             render_pipeline=failing_render,
         )
         assert res["ok"] is False
@@ -502,7 +539,7 @@ def test_25_render_failure_fails_truthfully(tmp_path):
 def test_26_cancellation_respected(tmp_path):
     """Cancellation flag aborts processing before synthesis/render."""
     async def _run():
-        source_media = _create_mock_mp4(tmp_path / "source.mp4")
+        source_media = _create_real_valid_mp4(tmp_path / "source.mp4")
         output_mp4 = tmp_path / "output.mp4"
 
         res = await smart.run_auto_smart_multivoice(
@@ -560,7 +597,6 @@ def test_29_bar_video_regression():
         {"cue_id": "c5", "speaker_id": "person_talking", "text": "Bây giờ chuẩn bị về nhà", "start_ms": 12500, "end_ms": 14000},
     ]
     decision = smart.decide_smart_multivoice(cues, validated_pools=TEST_POOLS)
-    # Only 1 speech speaker detected
     assert decision.detected_speaker_count == 1
     assert decision.effective_voice_count == 1
     assert decision.output_mode == smart.OUTPUT_MODE_DUBBED_SINGLE
@@ -581,14 +617,21 @@ def test_30_two_person_cooking_regression():
         {"cue_id": "c3", "speaker_id": "chef_male", "text": "Cần xương bò và hoa hồi", "start_ms": 4100, "end_ms": 6000},
         {"cue_id": "c4", "speaker_id": "host_female", "text": "Tuyệt vời quá thầy ơi", "start_ms": 6100, "end_ms": 8000},
     ]
-    acoustics = {
-        "chef_male": {"voice_register": "low", "confidence": 0.95},
-        "host_female": {"voice_register": "high", "confidence": 0.93},
-    }
-    decision = smart.decide_smart_multivoice(cues, validated_pools=TEST_POOLS, acoustic_classifications=acoustics)
+    def cooking_strict_engine(*args, **kwargs):
+        return {
+            "chef_male": {"voice_register": "low", "confidence": 0.95},
+            "host_female": {"voice_register": "high", "confidence": 0.93},
+        }
+
+    decision = smart.decide_smart_multivoice(
+        cues,
+        validated_pools=TEST_POOLS,
+        strict_two_classifier=cooking_strict_engine,
+    )
     assert decision.detected_speaker_count == 2
     assert decision.effective_voice_count == 2
     assert decision.output_mode == smart.OUTPUT_MODE_DUBBED_MULTI
+    assert decision.strategy == smart.STRATEGY_STRICT_TWO
     assert decision.speaker_voice_map["chef_male"] != decision.speaker_voice_map["host_female"]
 
 
@@ -617,7 +660,6 @@ def test_33_legacy_manual_behavior_unchanged():
 
 def test_34_smart_never_routes_to_manual_for_cast_ambiguity():
     """Smart lane never raises AutoCastManualRequired for any speaker count or ambiguity."""
-    # Test across speaker counts 0..10 with various edge-case cues
     for n in range(0, 11):
         cues = [
             {"cue_id": f"c{i}", "speaker_id": f"s{i}", "text": f"text {i}", "start_ms": i * 1000, "end_ms": (i + 1) * 1000}
@@ -636,7 +678,6 @@ def test_34_smart_never_routes_to_manual_for_cast_ambiguity():
 
 def test_35_zero_provider_calls(monkeypatch):
     """Ensure zero external network calls are made."""
-    # If any socket connection is attempted, pytest will fail
     import socket
     def forbidden_connect(*args, **kwargs):
         raise AssertionError("LIVE_PROVIDER_CALL_FORBIDDEN")
@@ -680,3 +721,479 @@ def test_38_no_legacy_production_file_change():
     changed_files = [line.strip() for line in diff_res.stdout.splitlines() if line.strip()]
     for ff in frozen_files:
         assert ff not in changed_files, f"Legacy frozen file was modified: {ff}"
+
+
+# ============================================================
+# C1 TESTS (39 - 58)
+# ============================================================
+
+def test_39_strict_two_cannot_be_emitted_without_strict_engine_success():
+    """GAP 1: Emitting STRICT_TWO is forbidden without real strict engine execution/success."""
+    cues = [
+        {"cue_id": "c1", "speaker_id": "s1", "text": "Thoại 1", "start_ms": 0, "end_ms": 1000},
+        {"cue_id": "c2", "speaker_id": "s2", "text": "Thoại 2", "start_ms": 1100, "end_ms": 2000},
+    ]
+    # No strict engine provided -> MUST NOT emit STRICT_TWO
+    decision = smart.decide_smart_multivoice(cues, validated_pools=TEST_POOLS, strict_two_classifier=None)
+    assert decision.strategy != smart.STRATEGY_STRICT_TWO
+    assert decision.strategy == smart.STRATEGY_STABLE_FALLBACK
+
+
+def test_40_strict_engine_spy_is_actually_called():
+    """GAP 1: Strict classifier spy is executed exactly once for N=2."""
+    cues = [
+        {"cue_id": "c1", "speaker_id": "s1", "text": "Thoại 1", "start_ms": 0, "end_ms": 1000},
+        {"cue_id": "c2", "speaker_id": "s2", "text": "Thoại 2", "start_ms": 1100, "end_ms": 2000},
+    ]
+    call_count = 0
+    def strict_spy(pcm, ranges, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return {
+            "s1": {"voice_register": "low"},
+            "s2": {"voice_register": "high"},
+        }
+
+    decision = smart.decide_smart_multivoice(cues, validated_pools=TEST_POOLS, strict_two_classifier=strict_spy)
+    assert call_count == 1
+    assert decision.strategy == smart.STRATEGY_STRICT_TWO
+
+
+def test_41_strict_manual_required_falls_back_without_manual_halt():
+    """GAP 1: If strict engine raises AutoCastManualRequired, Smart catches it and falls back."""
+    cues = [
+        {"cue_id": "c1", "speaker_id": "s1", "text": "Thoại 1", "start_ms": 0, "end_ms": 1000},
+        {"cue_id": "c2", "speaker_id": "s2", "text": "Thoại 2", "start_ms": 1100, "end_ms": 2000},
+    ]
+    def strict_manual_err(*args, **kwargs):
+        raise speaker_cast.AutoCastManualRequired()
+
+    decision = smart.decide_smart_multivoice(cues, validated_pools=TEST_POOLS, strict_two_classifier=strict_manual_err)
+    assert decision.strategy == smart.STRATEGY_STABLE_FALLBACK
+    assert decision.fallback_level == 1
+    assert decision.effective_voice_count == 2
+
+
+def test_42_missing_speaker_id_does_not_invent_speaker_0():
+    """GAP 2: Missing speaker identity on speech cue must NOT invent speaker_0."""
+    cues = [
+        {"cue_id": "c1", "text": "Câu nói không có speaker_id", "start_ms": 0, "end_ms": 1000},
+    ]
+    decision = smart.decide_smart_multivoice(cues, validated_pools=TEST_POOLS)
+    assert "speaker_0" not in decision.speaker_voice_map
+    assert decision.cue_dispositions["c1"] == smart.DISPOSITION_TERMINAL_REJECTED
+    assert len(decision.tts_cues) == 0
+
+
+def test_43_missing_canonical_cue_identity_does_not_invent_current_canonical_id():
+    """GAP 2: Cue with missing cue_id is marked TERMINAL_REJECTED, no fabricated canonical ID."""
+    cues = [
+        {"speaker_id": "spk_1", "text": "Câu nói không có cue_id", "start_ms": 0, "end_ms": 1000},
+    ]
+    decision = smart.decide_smart_multivoice(cues, validated_pools=TEST_POOLS)
+    assert len(decision.tts_cues) == 0
+    assert any(disp == smart.DISPOSITION_TERMINAL_REJECTED for disp in decision.cue_dispositions.values())
+
+
+def test_44_validated_pools_none_does_not_invent_provider_voices():
+    """GAP 3: validated_pools=None must NOT invent vi-VN-Standard-A/B/C/D provider voices."""
+    cues = [
+        {"cue_id": "c1", "speaker_id": "spk_1", "text": "Xin chào", "start_ms": 0, "end_ms": 1000},
+    ]
+    decision = smart.decide_smart_multivoice(cues, validated_pools=None)
+    for v in decision.speaker_voice_map.values():
+        assert "vi-VN-Standard" not in v
+    assert decision.fallback_level in {4, 5}
+    assert decision.output_mode == smart.OUTPUT_MODE_SUBTITLE_ONLY
+
+
+def test_45_malformed_unapproved_pool_rejected_falls_lower_truthfully():
+    """GAP 3: Malformed pool falls down ladder truthfully without manual halt."""
+    malformed_pools = {"low": ["invalid space voice id!"], "high": []}
+    cues = [
+        {"cue_id": "c1", "speaker_id": "spk_1", "text": "Thoại", "start_ms": 0, "end_ms": 1000},
+    ]
+    decision = smart.decide_smart_multivoice(cues, validated_pools=malformed_pools)
+    assert decision.strategy == smart.STRATEGY_SUBTITLE_ONLY
+    assert decision.fallback_level == 4
+    assert decision.fallback_reason == "no_approved_voice_pool"
+
+
+def test_46_dubbed_mode_without_synth_authority_cannot_succeed(tmp_path):
+    """GAP 4: DUBBED mode without synthesize_segments cannot succeed."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "source.mp4")
+        output_mp4 = tmp_path / "output.mp4"
+        cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Chào", "start_ms": 0, "end_ms": 1000}]
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            synthesize_segments=None,
+        )
+        assert res["ok"] is False
+        assert res["output_mode"] == smart.OUTPUT_MODE_FAILED
+        assert "synthesis_authority_required" in res["blocker"]
+    asyncio.run(_run())
+
+
+def test_47_partial_tts_coverage_cannot_succeed_as_dubbed(tmp_path):
+    """GAP 4: Missing chunk for one of the TTS cues must fail."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "source.mp4")
+        output_mp4 = tmp_path / "output.mp4"
+        cues = [
+            {"cue_id": "c1", "speaker_id": "spk_1", "text": "Câu 1", "start_ms": 0, "end_ms": 1000},
+            {"cue_id": "c2", "speaker_id": "spk_1", "text": "Câu 2", "start_ms": 1100, "end_ms": 2000},
+        ]
+        # Synthesizer only returns c1, omitting c2
+        async def partial_synth(cues, speaker_voice_map):
+            return [{"cue_id": "c1", "audio": b"chunk1_data"}]
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            synthesize_segments=partial_synth,
+        )
+        assert res["ok"] is False
+        assert "missing_tts_cues" in res["blocker"]
+    asyncio.run(_run())
+
+
+def test_48_duplicate_tts_artifact_rejected(tmp_path):
+    """GAP 4: Duplicate chunks for the same cue must be rejected."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "source.mp4")
+        output_mp4 = tmp_path / "output.mp4"
+        cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Câu 1", "start_ms": 0, "end_ms": 1000}]
+
+        async def dup_synth(cues, speaker_voice_map):
+            return [
+                {"cue_id": "c1", "audio": b"chunk1_a"},
+                {"cue_id": "c1", "audio": b"chunk1_b"},
+            ]
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            synthesize_segments=dup_synth,
+        )
+        assert res["ok"] is False
+        assert "duplicate_tts_chunk" in res["blocker"]
+    asyncio.run(_run())
+
+
+def test_49_unknown_tts_artifact_rejected(tmp_path):
+    """GAP 4: Chunk with unrecognized cue_id must be rejected."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "source.mp4")
+        output_mp4 = tmp_path / "output.mp4"
+        cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Câu 1", "start_ms": 0, "end_ms": 1000}]
+
+        async def unknown_synth(cues, speaker_voice_map):
+            return [
+                {"cue_id": "c1", "audio": b"chunk1"},
+                {"cue_id": "c_unknown_99", "audio": b"chunk99"},
+            ]
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            synthesize_segments=unknown_synth,
+        )
+        assert res["ok"] is False
+        assert "unknown_tts_chunk" in res["blocker"]
+    asyncio.run(_run())
+
+
+def test_50_non_empty_garbage_mp4_rejected_without_caller_probe(tmp_path):
+    """GAP 5: Non-empty garbage file rejected by canonical validator when probe_fn is absent."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "source.mp4")
+        output_mp4 = tmp_path / "output.mp4"
+        cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Thoại", "start_ms": 0, "end_ms": 1000}]
+
+        async def mock_synth(cues, speaker_voice_map):
+            return [{"cue_id": "c1", "audio": b"data"}]
+
+        async def garbage_render(source_media, output_path, **kwargs):
+            # Write 4KB of garbage non-mp4 bytes
+            Path(output_path).write_bytes(b"\x00" * 4096)
+            return output_path
+
+        # probe_fn is absent -> default canonical video_local_validation must reject it!
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            synthesize_segments=mock_synth,
+            render_pipeline=garbage_render,
+            probe_fn=None,
+        )
+        assert res["ok"] is False
+        assert res["output_mode"] == smart.OUTPUT_MODE_FAILED
+        assert any(term in str(res["blocker"]) for term in ("canonical_mp4_validation_failed", "output_container_invalid", "ffprobe_failed"))
+    asyncio.run(_run())
+
+
+def test_51_stale_pre_existing_output_rejected(tmp_path):
+    """GAP 6: Stale output from previous runs must be cleared and not accepted if render fails."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "source.mp4")
+        output_mp4 = tmp_path / "output.mp4"
+        # Pre-create stale file on disk
+        _create_real_valid_mp4(output_mp4)
+        cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Thoại", "start_ms": 0, "end_ms": 1000}]
+
+        async def mock_synth(cues, speaker_voice_map):
+            return [{"cue_id": "c1", "audio": b"data"}]
+
+        # Render pipeline fails to create any file
+        async def failing_render(source_media, output_path, **kwargs):
+            return output_path
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            synthesize_segments=mock_synth,
+            render_pipeline=failing_render,
+        )
+        assert res["ok"] is False
+        assert "did_not_create_output" in res["blocker"]
+    asyncio.run(_run())
+
+
+def test_52_render_pipeline_absent_cannot_claim_current_run_output(tmp_path):
+    """GAP 6: render_pipeline absent cannot claim current run output for dubbed mode."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "source.mp4")
+        output_mp4 = tmp_path / "output.mp4"
+        cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Thoại", "start_ms": 0, "end_ms": 1000}]
+
+        async def mock_synth(cues, speaker_voice_map):
+            return [{"cue_id": "c1", "audio": b"data"}]
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            synthesize_segments=mock_synth,
+            render_pipeline=None,
+        )
+        assert res["ok"] is False
+        assert "render_pipeline_required" in res["blocker"]
+    asyncio.run(_run())
+
+
+def test_53_bar_fixture_full_runner(tmp_path):
+    """GAP 7: BAR fixture full runner produces valid MP4."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "bar_source.mp4")
+        output_mp4 = tmp_path / "bar_output.mp4"
+        cues = [
+            {"cue_id": "c1", "speaker_id": "person", "text": "Chào bạn ở quán bar", "start_ms": 0, "end_ms": 1000},
+            {"cue_id": "c2", "speaker_id": "singer", "text": "♪ Trót yêu em ♪", "start_ms": 1000, "end_ms": 3000, "is_singing": True},
+            {"cue_id": "c3", "text": "[Music]", "start_ms": 3000, "end_ms": 5000, "is_music": True},
+        ]
+        synth_cues_called = []
+        async def mock_synth(cues, speaker_voice_map):
+            synth_cues_called.extend(cues)
+            return [{"cue_id": c["cue_id"], "audio": b"data"} for c in cues]
+
+        async def mock_render(source_media, output_path, **kwargs):
+            return _create_real_valid_mp4(Path(output_path))
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            synthesize_segments=mock_synth,
+            render_pipeline=mock_render,
+        )
+        assert res["ok"] is True
+        assert res["detected_speaker_count"] == 1
+        assert res["output_mode"] == smart.OUTPUT_MODE_DUBBED_SINGLE
+        assert len(synth_cues_called) == 1
+        assert synth_cues_called[0]["cue_id"] == "c1"
+    asyncio.run(_run())
+
+
+def test_54_bar_singing_music_never_sent_to_tts(tmp_path):
+    """GAP 7/8: Bar singing and music cues are NEVER dispatched to TTS synthesizer."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "source.mp4")
+        output_mp4 = tmp_path / "output.mp4"
+        cues = [
+            {"cue_id": "c1", "speaker_id": "person", "text": "Nói chuyện", "start_ms": 0, "end_ms": 1000},
+            {"cue_id": "c2", "text": "♪ Hát bài này ♪", "start_ms": 1000, "end_ms": 2000, "is_singing": True},
+            {"cue_id": "c3", "text": "[Music]", "start_ms": 2000, "end_ms": 3000, "is_music": True},
+        ]
+        tts_received_ids = []
+        async def mock_synth(cues, speaker_voice_map):
+            for c in cues:
+                tts_received_ids.append(c["cue_id"])
+            return [{"cue_id": c["cue_id"], "audio": b"data"} for c in cues]
+
+        async def mock_render(source_media, output_path, **kwargs):
+            return _create_real_valid_mp4(Path(output_path))
+
+        await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            synthesize_segments=mock_synth,
+            render_pipeline=mock_render,
+        )
+        assert tts_received_ids == ["c1"]
+        assert "c2" not in tts_received_ids
+        assert "c3" not in tts_received_ids
+    asyncio.run(_run())
+
+
+def test_55_preserved_bar_cues_reach_renderer(tmp_path):
+    """GAP 8: Audio preservation directives explicitly reach render pipeline."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "source.mp4")
+        output_mp4 = tmp_path / "output.mp4"
+        cues = [
+            {"cue_id": "c1", "speaker_id": "person", "text": "Nói", "start_ms": 0, "end_ms": 1000},
+            {"cue_id": "c2", "text": "♪ Hát ♪", "start_ms": 1000, "end_ms": 2000, "is_singing": True},
+            {"cue_id": "c3", "text": "[Music]", "start_ms": 2000, "end_ms": 3000, "is_music": True},
+        ]
+        render_spy_kwargs = {}
+        async def mock_synth(cues, speaker_voice_map):
+            return [{"cue_id": "c1", "audio": b"data"}]
+
+        async def mock_render(source_media, output_path, **kwargs):
+            render_spy_kwargs.update(kwargs)
+            return _create_real_valid_mp4(Path(output_path))
+
+        await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            synthesize_segments=mock_synth,
+            render_pipeline=mock_render,
+        )
+        assert "preserved_cues" in render_spy_kwargs
+        preserved_ids = [c["cue_id"] for c in render_spy_kwargs["preserved_cues"]]
+        assert "c2" in preserved_ids
+        assert "c3" in preserved_ids
+        assert "c1" not in preserved_ids
+    asyncio.run(_run())
+
+
+def test_56_cooking_fixture_full_runner(tmp_path):
+    """GAP 7: Two-person cooking fixture full runner produces valid MP4 with distinct voices."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "cooking_source.mp4")
+        output_mp4 = tmp_path / "cooking_output.mp4"
+        cues = [
+            {"cue_id": "c1", "speaker_id": "chef", "text": "Nấu phở", "start_ms": 0, "end_ms": 1500},
+            {"cue_id": "c2", "speaker_id": "host", "text": "Ngon quá", "start_ms": 1600, "end_ms": 3000},
+        ]
+        def mock_strict(*args, **kwargs):
+            return {
+                "chef": {"voice_register": "low"},
+                "host": {"voice_register": "high"},
+            }
+
+        async def mock_synth(cues, speaker_voice_map):
+            return [{"cue_id": c["cue_id"], "audio": b"data"} for c in cues]
+
+        async def mock_render(source_media, output_path, **kwargs):
+            return _create_real_valid_mp4(Path(output_path))
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            strict_two_classifier=mock_strict,
+            synthesize_segments=mock_synth,
+            render_pipeline=mock_render,
+        )
+        assert res["ok"] is True
+        assert res["strategy"] == smart.STRATEGY_STRICT_TWO
+        assert res["output_mode"] == smart.OUTPUT_MODE_DUBBED_MULTI
+        assert res["effective_voice_count"] == 2
+    asyncio.run(_run())
+
+
+def test_57_cancellation_after_synthesis_cannot_succeed(tmp_path):
+    """Checkpoint: Cancellation occurring after synthesis must not succeed."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "source.mp4")
+        output_mp4 = tmp_path / "output.mp4"
+        cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Thoại", "start_ms": 0, "end_ms": 1000}]
+
+        cancelled_state = False
+        async def mock_synth(cues, speaker_voice_map):
+            nonlocal cancelled_state
+            cancelled_state = True # Trigger cancel during/after synth
+            return [{"cue_id": "c1", "audio": b"data"}]
+
+        async def mock_render(source_media, output_path, **kwargs):
+            return _create_real_valid_mp4(Path(output_path))
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            synthesize_segments=mock_synth,
+            render_pipeline=mock_render,
+            is_cancelled=lambda: cancelled_state,
+        )
+        assert res["ok"] is False
+        assert res["blocker"] == "cancelled"
+    asyncio.run(_run())
+
+
+def test_58_cancellation_before_render_cannot_succeed(tmp_path):
+    """Checkpoint: Cancellation occurring before render must not succeed."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "source.mp4")
+        output_mp4 = tmp_path / "output.mp4"
+        cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Thoại", "start_ms": 0, "end_ms": 1000}]
+
+        cancel_flag = False
+        async def mock_synth(cues, speaker_voice_map):
+            nonlocal cancel_flag
+            cancel_flag = True
+            return [{"cue_id": "c1", "audio": b"data"}]
+
+        render_called = False
+        async def mock_render(source_media, output_path, **kwargs):
+            nonlocal render_called
+            render_called = True
+            return _create_real_valid_mp4(Path(output_path))
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            synthesize_segments=mock_synth,
+            render_pipeline=mock_render,
+            is_cancelled=lambda: cancel_flag,
+        )
+        assert res["ok"] is False
+        assert res["blocker"] == "cancelled"
+        assert render_called is False
+    asyncio.run(_run())
