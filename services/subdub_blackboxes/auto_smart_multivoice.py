@@ -232,7 +232,12 @@ def decide_smart_multivoice(
                 tts_cues=[],
             )
 
-    default_voice = default_fallback_voice or all_pool[0]
+    # Invariant: Every TTS voice used by Smart lane must belong to canonical validated all_pool.
+    # Unapproved or unknown default_fallback_voice is ignored in favor of approved fallback all_pool[0].
+    if isinstance(default_fallback_voice, str) and default_fallback_voice.strip() in all_pool:
+        default_voice = default_fallback_voice.strip()
+    else:
+        default_voice = all_pool[0]
 
     # Step 4: Handle Fallback Ladder Overrides (Levels 4 and 5)
     if fallback_level_override == 5:
@@ -437,11 +442,16 @@ def decide_smart_multivoice(
         tts_cue = dict(c)
         spk = c["speaker_id"]
         assigned_voice = speaker_voice_map.get(spk)
-        if not assigned_voice:
+        if not assigned_voice or assigned_voice not in all_pool:
             assigned_voice = default_voice
             speaker_voice_map[spk] = assigned_voice
         tts_cue["tts_voice_id"] = assigned_voice
         tts_cues.append(tts_cue)
+
+    # Invariant: Every emitted voice ID must belong to validated all_pool
+    for spk, voice_id in list(speaker_voice_map.items()):
+        if voice_id not in all_pool:
+            speaker_voice_map[spk] = default_voice
 
     effective_speaker_count = len(speaker_voice_map)
     effective_voice_count = len(set(speaker_voice_map.values()))

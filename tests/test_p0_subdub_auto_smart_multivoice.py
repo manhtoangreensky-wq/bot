@@ -1197,3 +1197,102 @@ def test_58_cancellation_before_render_cannot_succeed(tmp_path):
         assert res["blocker"] == "cancelled"
         assert render_called is False
     asyncio.run(_run())
+
+
+def test_59_unapproved_default_fallback_voice_bypassed_to_approved_pool_root():
+    """Invariant: Unapproved default_fallback_voice cannot enter speaker map or tts_cues."""
+    cues = [
+        {"cue_id": "c1", "speaker_id": "spk_1", "text": "Thoại", "start_ms": 0, "end_ms": 1000},
+    ]
+    decision = smart.decide_smart_multivoice(
+        cues,
+        validated_pools=TEST_POOLS,
+        default_fallback_voice="unapproved_foreign_voice_999",
+    )
+    all_approved = TEST_POOLS["low"] + TEST_POOLS["high"]
+    assert "unapproved_foreign_voice_999" not in decision.speaker_voice_map.values()
+    assert decision.speaker_voice_map["spk_1"] in all_approved
+    assert decision.tts_cues[0]["tts_voice_id"] in all_approved
+
+
+def test_60_level3_override_with_unapproved_default_uses_approved_pool_deterministic():
+    """Invariant: Level 3 override with unapproved default uses all_pool[0] deterministically."""
+    cues = [
+        {"cue_id": "c1", "speaker_id": "spk_1", "text": "Thoại", "start_ms": 0, "end_ms": 1000},
+        {"cue_id": "c2", "speaker_id": "spk_2", "text": "Thoại 2", "start_ms": 1100, "end_ms": 2000},
+    ]
+    decision = smart.decide_smart_multivoice(
+        cues,
+        validated_pools=TEST_POOLS,
+        default_fallback_voice="rogue_unvalidated_voice",
+        fallback_level_override=3,
+    )
+    expected_default = (TEST_POOLS["low"] + TEST_POOLS["high"])[0]
+    assert decision.strategy == smart.STRATEGY_SINGLE_DOMINANT
+    assert decision.fallback_level == 3
+    assert decision.speaker_voice_map["spk_1"] == expected_default
+    assert decision.speaker_voice_map["spk_2"] == expected_default
+    for tts_c in decision.tts_cues:
+        assert tts_c["tts_voice_id"] == expected_default
+
+
+def test_61_n2_single_voice_fallback_cannot_use_unapproved_default_override():
+    """Invariant: N=2 single-voice pool fallback uses approved pool voice, not unapproved default."""
+    single_pool = {"low": ["approved_only_voice_low"], "high": []}
+    cues = [
+        {"cue_id": "c1", "speaker_id": "spk_1", "text": "A", "start_ms": 0, "end_ms": 1000},
+        {"cue_id": "c2", "speaker_id": "spk_2", "text": "B", "start_ms": 1100, "end_ms": 2000},
+    ]
+    def failing_strict(*args, **kwargs):
+        raise ValueError("strict failed")
+
+    decision = smart.decide_smart_multivoice(
+        cues,
+        validated_pools=single_pool,
+        default_fallback_voice="unapproved_external_voice",
+        strict_two_classifier=failing_strict,
+    )
+    assert decision.strategy == smart.STRATEGY_SINGLE_DOMINANT
+    assert decision.fallback_level == 3
+    assert decision.speaker_voice_map["spk_1"] == "approved_only_voice_low"
+    assert decision.speaker_voice_map["spk_2"] == "approved_only_voice_low"
+    assert "unapproved_external_voice" not in decision.speaker_voice_map.values()
+
+
+def test_62_explicit_approved_default_fallback_voice_accepted():
+    """Invariant: When default_fallback_voice is an approved pool member, it is accepted."""
+    approved_high = TEST_POOLS["high"][0]
+    cues = [
+        {"cue_id": "c1", "speaker_id": "spk_1", "text": "A", "start_ms": 0, "end_ms": 1000},
+        {"cue_id": "c2", "speaker_id": "spk_2", "text": "B", "start_ms": 1100, "end_ms": 2000},
+    ]
+    decision = smart.decide_smart_multivoice(
+        cues,
+        validated_pools=TEST_POOLS,
+        default_fallback_voice=approved_high,
+        fallback_level_override=3,
+    )
+    assert decision.speaker_voice_map["spk_1"] == approved_high
+    assert decision.speaker_voice_map["spk_2"] == approved_high
+
+
+def test_63_property_all_emitted_voices_subset_of_validated_pool():
+    """Property Invariant: Every emitted voice in speaker_voice_map and tts_cues is a subset of all_pool."""
+    all_approved = set(TEST_POOLS["low"] + TEST_POOLS["high"])
+
+    # Test across multiple speaker counts and various default_fallback_voice values
+    for spk_count in [1, 2, 3, 5, 8]:
+        cues = [
+            {"cue_id": f"c_{i}", "speaker_id": f"spk_{i}", "text": f"text {i}", "start_ms": i*1000, "end_ms": (i+1)*1000}
+            for i in range(spk_count)
+        ]
+        for bad_fallback in [None, "", "   ", "unapproved_random_voice", "another_unknown"]:
+            decision = smart.decide_smart_multivoice(
+                cues,
+                validated_pools=TEST_POOLS,
+                default_fallback_voice=bad_fallback,
+            )
+            emitted = set(decision.speaker_voice_map.values())
+            assert emitted.issubset(all_approved), f"Emitted unapproved voice: {emitted - all_approved}"
+            for tts_c in decision.tts_cues:
+                assert tts_c["tts_voice_id"] in all_approved
