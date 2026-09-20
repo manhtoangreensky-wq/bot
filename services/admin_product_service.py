@@ -38,41 +38,120 @@ DEFAULT_ADMIN_ID = "7126457028"
 
 # ─── CANONICAL CUSTOMER PRODUCT INVENTORY ─────────────────────────────────────
 
-CANONICAL_PRODUCT_KEYS: tuple[str, ...] = (
-    "video_trend",
-    "video_ai_prompt",
-    "video_idea",
-    "script_image_video",
-    "video_ai_image",
-    "storyboard_prompt",
-    "video_ai_video_reference",
-    "self_shot_scene_change",
-    "self_shot_cinematic_transform",
-    "multi_scene_film",
-    "video_local_edit",
-    "video_long",
-    "image_generation",
-    "voice_tts",
-    "voice_clone",
-    "music_generation",
-    "subdub_service",
-    "chat_pro",
-)
+# ─── CANONICAL CUSTOMER PRODUCT DYNAMIC DISCOVERY ──────────────────────────────
+# Technical inventory is dynamically resolved from live bot authorities.
+# No static tuples act as technical authorities.
 
-PRODUCT_VIDEO_KEYS: frozenset[str] = frozenset({
-    "video_trend",
-    "video_ai_prompt",
-    "video_idea",
-    "script_image_video",
-    "video_ai_image",
-    "storyboard_prompt",
-    "video_ai_video_reference",
-    "self_shot_scene_change",
-    "self_shot_cinematic_transform",
-    "multi_scene_film",
-    "video_local_edit",
-    "video_long",
-})
+def discover_product_video_products() -> list[str]:
+    """Dynamically discover Product Video canonical customer product keys from video authorities."""
+    from services import video_tail9, video_uifreeze1
+    sources = set(video_tail9.PRODUCT_ADAPTERS.keys()) | set(video_uifreeze1.CANONICAL_PRICING_PRODUCTS)
+    frame_keys = set(getattr(video_uifreeze1, "FRAMEVIDEO_PRICING_PRODUCTS", ()))
+    
+    discovered = set()
+    for raw_key in sources:
+        if raw_key in frame_keys:
+            continue
+        canonical_key = resolve_canonical_product_key(raw_key)
+        discovered.add(canonical_key)
+    return sorted(discovered, key=lambda k: (PRODUCT_PRESENTATION_DEFAULTS.get(k, {}).get("sort_order", 100), k))
+
+
+def discover_image_products() -> list[str]:
+    """Dynamically discover Image canonical customer product keys from image authorities."""
+    from services import video_ai_real_pricing
+    if hasattr(video_ai_real_pricing, "public_image_quality_catalog"):
+        return ["image_generation"]
+    return []
+
+
+def discover_voice_products() -> list[str]:
+    """Dynamically discover Voice canonical customer product keys from voice authorities."""
+    import bot
+    res = []
+    if hasattr(bot, "get_tts_provider_readiness"):
+        res.append("voice_tts")
+    if hasattr(bot, "get_minimax_voice_clone_readiness"):
+        res.append("voice_clone")
+    return res
+
+
+def discover_music_products() -> list[str]:
+    """Dynamically discover Music canonical customer product keys from music authorities."""
+    from services import video_ai_real_pricing
+    if hasattr(video_ai_real_pricing, "music_model_catalog"):
+        return ["music_generation"]
+    return []
+
+
+def discover_subdub_products() -> list[str]:
+    """Dynamically discover SubDub canonical customer product keys from subdub authorities."""
+    from services import subtitle_dub_product_pipeline
+    modes = getattr(subtitle_dub_product_pipeline, "SUBDUB_SHARED_CORE_MODES", set())
+    if modes:
+        return ["subdub_service"]
+    return []
+
+
+def discover_chat_products() -> list[str]:
+    """Dynamically discover Chat Pro canonical customer product keys from chat authorities."""
+    from services import chat_pro_pricing
+    if hasattr(chat_pro_pricing, "CLAUDE_OPUS_MODEL"):
+        return ["chat_pro"]
+    return []
+
+
+def discover_canonical_products() -> list[str]:
+    """Discover, canonicalize, de-duplicate, and return all available canonical customer products."""
+    discovered: list[str] = []
+    seen: set[str] = set()
+    for provider_func in (
+        discover_product_video_products,
+        discover_image_products,
+        discover_voice_products,
+        discover_music_products,
+        discover_subdub_products,
+        discover_chat_products,
+    ):
+        for raw_key in provider_func():
+            canonical_key = resolve_canonical_product_key(raw_key)
+            if canonical_key not in seen:
+                seen.add(canonical_key)
+                discovered.append(canonical_key)
+
+    discovered.sort(key=lambda k: (PRODUCT_PRESENTATION_DEFAULTS.get(k, {}).get("sort_order", 999), k))
+    return discovered
+
+
+class _DynamicKeys(tuple):
+    """Dynamic sequence of canonical keys reflecting discovered inventory."""
+    def __contains__(self, item: object) -> bool:
+        return resolve_canonical_product_key(str(item)) in discover_canonical_products()
+
+    def __iter__(self):
+        return iter(discover_canonical_products())
+
+    def __len__(self) -> int:
+        return len(discover_canonical_products())
+
+    def __getitem__(self, idx):
+        return discover_canonical_products()[idx]
+
+
+class _DynamicVideoKeys(frozenset):
+    """Dynamic set of product video keys reflecting discovered inventory."""
+    def __contains__(self, item: object) -> bool:
+        return resolve_canonical_product_key(str(item)) in discover_product_video_products()
+
+    def __iter__(self):
+        return iter(discover_product_video_products())
+
+    def __len__(self) -> int:
+        return len(discover_product_video_products())
+
+
+CANONICAL_PRODUCT_KEYS = _DynamicKeys()
+PRODUCT_VIDEO_KEYS = _DynamicVideoKeys()
 
 # Canonical mapping from legacy/executor aliases to canonical customer product keys
 CANONICAL_PRODUCT_ALIASES: dict[str, str] = {
@@ -82,6 +161,7 @@ CANONICAL_PRODUCT_ALIASES: dict[str, str] = {
     "long_video": "video_long",
     "trend_video": "video_trend",
     "prompt_video": "video_ai_prompt",
+    "video_ai_real": "video_ai_prompt",
     "image_video": "video_ai_image",
     "video_video": "video_ai_video_reference",
     "selfshot_scene_change": "self_shot_scene_change",
@@ -243,6 +323,30 @@ def resolve_canonical_product_key(product_key: str) -> str:
     return CANONICAL_PRODUCT_ALIASES.get(clean, clean)
 
 
+def resolve_canonical_product_video_ratios(product_key: str, comm: dict[str, Any]) -> list[str]:
+    """Dynamically resolve supported ratios from video_tail9.package_compatibility."""
+    from services import video_tail9
+    candidate_ratios = ("9:16", "16:9", "1:1", "4:5", "3:4", "4:3", "21:9")
+    valid_tiers = list(comm.get("supported_quality_tiers") or (400,))
+    tier_id = valid_tiers[0] if valid_tiers else 400
+    scene_cnt = int(comm.get("minimum_scene_count") or 1)
+
+    supported = []
+    for cand in candidate_ratios:
+        try:
+            compat = video_tail9.package_compatibility(
+                product_key,
+                scene_count=scene_cnt,
+                ratio=cand,
+                quality_tier_id=tier_id,
+            )
+            if "ratio_not_supported" not in compat.get("blockers", []):
+                supported.append(cand)
+        except Exception:
+            pass
+    return supported
+
+
 def resolve_canonical_technical_contract(product_key: str) -> dict[str, Any]:
     """Dynamically resolve technical capability fields from authoritative Bot source modules.
 
@@ -250,17 +354,18 @@ def resolve_canonical_technical_contract(product_key: str) -> dict[str, Any]:
     - Product Video: services.video_tail9, services.video_uifreeze1, services.video_project_queue
     - Image: services.video_ai_real_pricing.public_image_quality_catalog
     - Music: services.video_ai_real_pricing.music_model_catalog
-    - Voice: bot.get_tts_provider_readiness
-    - SubDub: services.subtitle_dub_product_pipeline
+    - Voice: bot.get_tts_provider_readiness, bot.get_minimax_voice_clone_readiness
+    - SubDub: services.subtitle_dub_product_pipeline, providers.subtitle_dub_pipeline
     - Chat: services.chat_pro_pricing
     """
     clean_key = resolve_canonical_product_key(product_key)
-    if clean_key not in CANONICAL_PRODUCT_KEYS:
+    discovered = discover_canonical_products()
+    if clean_key not in discovered:
         raise KeyError(f"Unrecognized canonical product key: {product_key}")
 
     defaults = deepcopy(PRODUCT_PRESENTATION_DEFAULTS.get(clean_key, {}))
 
-    if clean_key in PRODUCT_VIDEO_KEYS:
+    if clean_key in discover_product_video_products():
         from services import video_tail9, video_uifreeze1, video_project_queue
 
         comm = video_tail9.commercial_contract(clean_key)
@@ -268,7 +373,7 @@ def resolve_canonical_technical_contract(product_key: str) -> dict[str, Any]:
         is_locked = clean_key in video_uifreeze1.PUBLIC_EXECUTION_LOCKED_PRODUCTS
 
         supported_tiers = list(comm.get("supported_quality_tiers") or ())
-        supported_ratios = ["9:16", "16:9", "1:1", "4:5"] if clean_key != "video_local_edit" else ["source_ratio"]
+        supported_ratios = resolve_canonical_product_video_ratios(clean_key, comm)
 
         execution_enabled = False if is_locked else bool(comm.get("execution_enabled", False))
         execution_blocker = str(comm.get("execution_blocker") or (f"{clean_key}_deferred" if is_locked else ""))
@@ -307,8 +412,12 @@ def resolve_canonical_technical_contract(product_key: str) -> dict[str, Any]:
         try:
             image_catalog = video_ai_real_pricing.public_image_quality_catalog()
             supported_tiers = [item["tier_key"] for item in image_catalog]
+            execution_enabled = bool(supported_tiers)
+            execution_blocker = ""
         except Exception:
-            supported_tiers = ["low", "standard", "standard_warranty", "common", "common_warranty", "high", "high_warranty"]
+            supported_tiers = []
+            execution_enabled = False
+            execution_blocker = "image_authority_unavailable"
 
         return {
             "product_key": clean_key,
@@ -318,11 +427,11 @@ def resolve_canonical_technical_contract(product_key: str) -> dict[str, Any]:
             "public_visible": defaults.get("public_visible", True),
             "commercial_enabled": defaults.get("commercial_enabled", True),
             "sort_order": defaults.get("sort_order", 130),
-            "execution_enabled": True,
-            "execution_blocker": "",
+            "execution_enabled": execution_enabled,
+            "execution_blocker": execution_blocker,
             "supported_tiers": supported_tiers,
             "supported_quality_tiers": supported_tiers,
-            "supported_ratios": ["1:1", "9:16", "16:9", "4:3", "3:4"],
+            "supported_ratios": [],
             "required_capability": "text_to_image",
             "provider_capability": "text_to_image",
             "modality": "text_to_image",
@@ -338,13 +447,13 @@ def resolve_canonical_technical_contract(product_key: str) -> dict[str, Any]:
 
         try:
             tts_info = bot.get_tts_provider_readiness(public=True)
+            ready = bool(tts_info.get("public_ready", False) or tts_info.get("ready", False))
             supported_tiers = list(tts_info.get("supported_voices", []))
-            ready = bool(tts_info.get("public_ready", True))
             blocker = str(tts_info.get("reason", "")) if not ready else ""
         except Exception:
-            supported_tiers = ["female-shaonv", "male-qn-qingse", "vi-VN-HoaiMyNeural", "vi-VN-NamMinhNeural"]
-            ready = True
-            blocker = ""
+            supported_tiers = []
+            ready = False
+            blocker = "tts_authority_unavailable"
 
         return {
             "product_key": clean_key,
@@ -370,6 +479,16 @@ def resolve_canonical_technical_contract(product_key: str) -> dict[str, Any]:
         }
 
     elif clean_key == "voice_clone":
+        import bot
+
+        try:
+            clone_info = bot.get_minimax_voice_clone_readiness()
+            ready = bool(clone_info.get("public_enabled", False))
+            blocker = str(clone_info.get("reason", "")) if not ready else ""
+        except Exception:
+            ready = False
+            blocker = "voice_clone_authority_unavailable"
+
         return {
             "product_key": clean_key,
             "product_group": defaults.get("product_group", "voice"),
@@ -378,10 +497,10 @@ def resolve_canonical_technical_contract(product_key: str) -> dict[str, Any]:
             "public_visible": defaults.get("public_visible", True),
             "commercial_enabled": defaults.get("commercial_enabled", True),
             "sort_order": defaults.get("sort_order", 150),
-            "execution_enabled": True,
-            "execution_blocker": "",
-            "supported_tiers": ["custom_clone"],
-            "supported_quality_tiers": ["custom_clone"],
+            "execution_enabled": ready,
+            "execution_blocker": blocker,
+            "supported_tiers": [],
+            "supported_quality_tiers": [],
             "supported_ratios": [],
             "required_capability": "voice_cloning",
             "provider_capability": "voice_cloning",
@@ -399,8 +518,12 @@ def resolve_canonical_technical_contract(product_key: str) -> dict[str, Any]:
         try:
             music_catalog = video_ai_real_pricing.music_model_catalog()
             supported_tiers = [item["key"] for item in music_catalog]
+            execution_enabled = bool(supported_tiers)
+            execution_blocker = ""
         except Exception:
-            supported_tiers = ["suno_music"]
+            supported_tiers = []
+            execution_enabled = False
+            execution_blocker = "music_authority_unavailable"
 
         return {
             "product_key": clean_key,
@@ -410,8 +533,8 @@ def resolve_canonical_technical_contract(product_key: str) -> dict[str, Any]:
             "public_visible": defaults.get("public_visible", True),
             "commercial_enabled": defaults.get("commercial_enabled", True),
             "sort_order": defaults.get("sort_order", 160),
-            "execution_enabled": True,
-            "execution_blocker": "",
+            "execution_enabled": execution_enabled,
+            "execution_blocker": execution_blocker,
             "supported_tiers": supported_tiers,
             "supported_quality_tiers": supported_tiers,
             "supported_ratios": [],
@@ -429,9 +552,18 @@ def resolve_canonical_technical_contract(product_key: str) -> dict[str, Any]:
         from services import subtitle_dub_product_pipeline
 
         try:
+            from providers import subtitle_dub_pipeline
+            readiness = subtitle_dub_pipeline.readiness()
+            ready = bool(readiness.get("public_enabled", False) or readiness.get("ready", False))
+            blocker = str(readiness.get("reason", "")) if not ready else ""
+        except Exception:
+            ready = False
+            blocker = "subdub_pipeline_unavailable"
+
+        try:
             supported_tiers = sorted(list(subtitle_dub_product_pipeline.SUBDUB_SHARED_CORE_MODES))
         except Exception:
-            supported_tiers = ["dub", "subtitle_create", "subtitle_plus_dub", "subtitle_translate"]
+            supported_tiers = []
 
         return {
             "product_key": clean_key,
@@ -441,18 +573,18 @@ def resolve_canonical_technical_contract(product_key: str) -> dict[str, Any]:
             "public_visible": defaults.get("public_visible", True),
             "commercial_enabled": defaults.get("commercial_enabled", True),
             "sort_order": defaults.get("sort_order", 170),
-            "execution_enabled": True,
-            "execution_blocker": "",
+            "execution_enabled": ready,
+            "execution_blocker": blocker,
             "supported_tiers": supported_tiers,
             "supported_quality_tiers": supported_tiers,
-            "supported_ratios": ["source_ratio"],
-            "required_capability": "speech_to_text_and_dub",
-            "provider_capability": "speech_to_text_and_dub",
-            "modality": "speech_to_text_and_dub",
-            "executor_product_type": "subdub_service",
-            "engine_route": "subdub_service",
-            "flow_owner": "subdub",
-            "worker_owner": "subdub",
+            "supported_ratios": [],
+            "required_capability": "NOT_EXPOSED",
+            "provider_capability": "NOT_EXPOSED",
+            "modality": "NOT_EXPOSED",
+            "executor_product_type": "NOT_EXPOSED",
+            "engine_route": "NOT_EXPOSED",
+            "flow_owner": "NOT_EXPOSED",
+            "worker_owner": "NOT_EXPOSED",
             "source_authority": "services.subtitle_dub_product_pipeline.SUBDUB_SHARED_CORE_MODES",
         }
 
@@ -461,8 +593,9 @@ def resolve_canonical_technical_contract(product_key: str) -> dict[str, Any]:
 
         try:
             model = chat_pro_pricing.CLAUDE_OPUS_MODEL
+            supported_tiers = [model]
         except Exception:
-            model = "claude-opus-4-8"
+            supported_tiers = []
 
         return {
             "product_key": clean_key,
@@ -472,34 +605,70 @@ def resolve_canonical_technical_contract(product_key: str) -> dict[str, Any]:
             "public_visible": defaults.get("public_visible", True),
             "commercial_enabled": defaults.get("commercial_enabled", True),
             "sort_order": defaults.get("sort_order", 180),
-            "execution_enabled": True,
-            "execution_blocker": "",
-            "supported_tiers": [model],
-            "supported_quality_tiers": [model],
+            "execution_enabled": False,
+            "execution_blocker": "chat_pro_readiness_authority_unproven",
+            "supported_tiers": supported_tiers,
+            "supported_quality_tiers": supported_tiers,
             "supported_ratios": [],
-            "required_capability": "chat_completion",
-            "provider_capability": "chat_completion",
-            "modality": "chat_completion",
-            "executor_product_type": "chat_pro",
-            "engine_route": "chat_pro",
-            "flow_owner": "chat",
-            "worker_owner": "chat",
-            "source_authority": "services.chat_pro_pricing",
+            "required_capability": "NOT_EXPOSED",
+            "provider_capability": "NOT_EXPOSED",
+            "modality": "NOT_EXPOSED",
+            "executor_product_type": "NOT_EXPOSED",
+            "engine_route": "NOT_EXPOSED",
+            "flow_owner": "NOT_EXPOSED",
+            "worker_owner": "NOT_EXPOSED",
+            "source_authority": "services.chat_pro_pricing.CLAUDE_OPUS_MODEL",
         }
 
     raise KeyError(f"Unhandled canonical product: {clean_key}")
 
 
+class _DynamicCatalog(dict):
+    """Dynamic catalog mapping that resolves technical contracts fresh on access.
+
+    Prevents stale import-time snapshotting of live technical truth.
+    """
+    def __getitem__(self, key: str) -> dict[str, Any]:
+        return resolve_canonical_technical_contract(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        try:
+            return resolve_canonical_technical_contract(key)
+        except KeyError:
+            return default
+
+    def __contains__(self, key: object) -> bool:
+        try:
+            return resolve_canonical_product_key(str(key)) in discover_canonical_products()
+        except Exception:
+            return False
+
+    def keys(self):
+        return discover_canonical_products()
+
+    def values(self):
+        return [resolve_canonical_technical_contract(k) for k in discover_canonical_products()]
+
+    def items(self):
+        return [(k, resolve_canonical_technical_contract(k)) for k in discover_canonical_products()]
+
+    def __len__(self) -> int:
+        return len(discover_canonical_products())
+
+    def __iter__(self):
+        return iter(discover_canonical_products())
+
+
 def get_canonical_base_products() -> dict[str, dict[str, Any]]:
     """Return dictionary of all canonical products resolved dynamically from technical authorities."""
     catalog: dict[str, dict[str, Any]] = {}
-    for key in CANONICAL_PRODUCT_KEYS:
+    for key in discover_canonical_products():
         catalog[key] = resolve_canonical_technical_contract(key)
     return catalog
 
 
 # Dynamic backward-compatibility mapping for existing callers and test suites
-BASE_PRODUCTS: dict[str, dict[str, Any]] = get_canonical_base_products()
+BASE_PRODUCTS: dict[str, dict[str, Any]] = _DynamicCatalog()
 
 # ─── WHITELIST & IMMUTABLE GUARDS ─────────────────────────────────────────────
 
@@ -605,7 +774,7 @@ def resolve_effective_product(
     - Version is 1 (base default) or override version
     """
     canonical_key = resolve_canonical_product_key(product_key)
-    if canonical_key not in CANONICAL_PRODUCT_KEYS:
+    if canonical_key not in discover_canonical_products():
         raise KeyError(f"Unknown product key: {product_key}")
 
     base = resolve_canonical_technical_contract(canonical_key)
@@ -675,7 +844,7 @@ def get_canonical_product_collection(
         override_rows = {}
 
     products = []
-    for key in CANONICAL_PRODUCT_KEYS:
+    for key in discover_canonical_products():
         override = override_rows.get(key)
         effective = resolve_effective_product(key, override)
         products.append(effective)
@@ -704,7 +873,7 @@ def get_canonical_product_single(
         (ok, response_dict, http_status)
     """
     clean_key = resolve_canonical_product_key(product_key)
-    if clean_key not in CANONICAL_PRODUCT_KEYS:
+    if clean_key not in discover_canonical_products():
         return (
             False,
             {
@@ -769,7 +938,7 @@ def update_canonical_product(
         (ok, response_dict, http_status)
     """
     clean_key = resolve_canonical_product_key(product_key)
-    if clean_key not in CANONICAL_PRODUCT_KEYS:
+    if clean_key not in discover_canonical_products():
         return (
             False,
             {

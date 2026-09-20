@@ -202,8 +202,12 @@ def test_red_07_product_video_supported_ratios_canonical_truth(test_env):
     assert resp.status_code == 200
     effective = resp.json().get("effective", {})
     
-    # Canonical ratios per package_compatibility are ('9:16', '16:9', '1:1', '4:5')
-    assert set(effective.get("supported_ratios", [])) == {"9:16", "16:9", "1:1", "4:5"}
+    candidates = ("9:16", "16:9", "1:1", "4:5", "3:4", "4:3", "21:9")
+    canonical_ratios = [
+        r for r in candidates
+        if "ratio_not_supported" not in video_tail9.package_compatibility("video_trend", scene_count=1, ratio=r, quality_tier_id=100).get("blockers", [])
+    ]
+    assert sorted(effective.get("supported_ratios", [])) == sorted(canonical_ratios)
 
 
 def test_red_08_execution_enabled_dynamic_and_cannot_be_overridden(test_env):
@@ -238,3 +242,151 @@ def test_red_09_provider_capability_comes_from_canonical_contract(test_env):
     engine_contract = video_project_queue.product_video_engine_contract("video_trend")
     expected_cap = engine_contract["required_capability"]
     assert effective.get("provider_capability") == expected_cap
+
+
+def test_red_10_product_count_static_inventory(monkeypatch, test_env):
+    """RED 10: Dynamic discovery must discover newly added canonical source products."""
+    monkeypatch.setitem(
+        video_tail9.PRODUCT_ADAPTERS,
+        "video_dynamic_test_product",
+        {
+            "flow_owner": "test",
+            "engine_route": "test",
+            "executor_product_type": "video_dynamic_test_product",
+            "source_audio_available": False,
+            "return_to": "test",
+            "required_capability": "text_to_video",
+            "input_type": "text",
+            "worker_owner": "product_video",
+            "supported_quality_tiers": (100, 200),
+            "execution_enabled": True,
+        }
+    )
+    client = test_env["client"]
+    resp = client.get("/internal/v1/admin/products", headers=build_auth_headers("GET", "/internal/v1/admin/products", b""))
+    assert resp.status_code == 200
+    product_keys = [p["product_key"] for p in resp.json().get("products", [])]
+    assert "video_dynamic_test_product" in product_keys, "Dynamic source product must appear in admin collection without editing static tuples"
+
+
+def test_red_11_product_video_ratios_hardcoded(monkeypatch, test_env):
+    """RED 11: Admin product video ratios must be sourced from package_compatibility, not hardcoded."""
+    orig_compat = video_tail9.package_compatibility
+    def restricted_compat(product_type, **kwargs):
+        res = orig_compat(product_type, **kwargs)
+        if kwargs.get("ratio") != "9:16":
+            res["ok"] = False
+            res["blockers"] = ["ratio_not_supported"]
+        return res
+    monkeypatch.setattr(video_tail9, "package_compatibility", restricted_compat)
+
+    client = test_env["client"]
+    resp = client.get("/internal/v1/admin/products/video_trend", headers=build_auth_headers("GET", "/internal/v1/admin/products/video_trend", b""))
+    assert resp.status_code == 200
+    ratios = resp.json()["effective"]["supported_ratios"]
+    assert ratios == ["9:16"], f"Admin ratios must dynamically derive from package_compatibility, got {ratios}"
+
+
+def test_red_12_image_technical_fallback_fail_open(monkeypatch, test_env):
+    """RED 12: Image authority failure must fail closed, NOT invent tiers or ready=True."""
+    from services import video_ai_real_pricing
+    def broken_catalog():
+        raise RuntimeError("Image authority catalog unavailable")
+    monkeypatch.setattr(video_ai_real_pricing, "public_image_quality_catalog", broken_catalog)
+
+    client = test_env["client"]
+    resp = client.get("/internal/v1/admin/products/image_generation", headers=build_auth_headers("GET", "/internal/v1/admin/products/image_generation", b""))
+    assert resp.status_code == 200
+    effective = resp.json()["effective"]
+    assert effective["execution_enabled"] is False, "Image must fail closed (execution_enabled=False) on authority failure"
+    assert effective["supported_tiers"] == [], f"Image must NOT invent tiers on authority failure, got {effective['supported_tiers']}"
+
+
+def test_red_13_tts_authority_failure_fail_open(monkeypatch, test_env):
+    """RED 13: Voice TTS authority failure must fail closed, NOT invent voices or ready=True."""
+    def broken_tts(**kwargs):
+        raise RuntimeError("TTS readiness check failed")
+    monkeypatch.setattr(bot, "get_tts_provider_readiness", broken_tts)
+
+    client = test_env["client"]
+    resp = client.get("/internal/v1/admin/products/voice_tts", headers=build_auth_headers("GET", "/internal/v1/admin/products/voice_tts", b""))
+    assert resp.status_code == 200
+    effective = resp.json()["effective"]
+    assert effective["execution_enabled"] is False, "Voice TTS must fail closed (execution_enabled=False) on authority failure"
+    assert effective["supported_tiers"] == [], f"Voice TTS must NOT invent voices on authority failure, got {effective['supported_tiers']}"
+
+
+def test_red_14_voice_clone_source_authority_not_called(monkeypatch, test_env):
+    """RED 14: Voice clone must actually invoke bot.get_minimax_voice_clone_readiness."""
+    invoked = []
+    def mock_clone_readiness():
+        invoked.append(True)
+        return {"ready": False, "public_enabled": False, "reason": "clone_offline"}
+    monkeypatch.setattr(bot, "get_minimax_voice_clone_readiness", mock_clone_readiness)
+
+    client = test_env["client"]
+    resp = client.get("/internal/v1/admin/products/voice_clone", headers=build_auth_headers("GET", "/internal/v1/admin/products/voice_clone", b""))
+    assert resp.status_code == 200
+    effective = resp.json()["effective"]
+    assert len(invoked) > 0, "Claimed authority bot.get_minimax_voice_clone_readiness was not invoked"
+    assert effective["execution_enabled"] is False
+    assert effective["execution_blocker"] == "clone_offline"
+    assert effective["supported_tiers"] == [], "Unproven voice clone tiers must not be invented"
+
+
+def test_red_15_music_authority_failure_invents_technical_truth(monkeypatch, test_env):
+    """RED 15: Music authority failure must fail closed, NOT invent fallback tiers."""
+    from services import video_ai_real_pricing
+    def broken_music():
+        raise RuntimeError("Music catalog unavailable")
+    monkeypatch.setattr(video_ai_real_pricing, "music_model_catalog", broken_music)
+
+    client = test_env["client"]
+    resp = client.get("/internal/v1/admin/products/music_generation", headers=build_auth_headers("GET", "/internal/v1/admin/products/music_generation", b""))
+    assert resp.status_code == 200
+    effective = resp.json()["effective"]
+    assert effective["execution_enabled"] is False, "Music must fail closed on authority failure"
+    assert effective["supported_tiers"] == [], f"Music must NOT invent fallback tiers on authority failure, got {effective['supported_tiers']}"
+
+
+def test_red_16_subdub_partial_authority_with_hardcoded_capability(test_env):
+    """RED 16: SubDub unproven capability fields must be NOT_EXPOSED and execution_enabled must reflect real readiness."""
+    client = test_env["client"]
+    resp = client.get("/internal/v1/admin/products/subdub_service", headers=build_auth_headers("GET", "/internal/v1/admin/products/subdub_service", b""))
+    assert resp.status_code == 200
+    effective = resp.json()["effective"]
+    assert effective["provider_capability"] == "NOT_EXPOSED", (
+        f"Unproven SubDub provider_capability must be NOT_EXPOSED, got {effective.get('provider_capability')}"
+    )
+    assert effective["execution_enabled"] is False, "SubDub execution_enabled must reflect live readiness (which is currently False/requires smoke)"
+
+
+def test_red_17_chat_partial_authority_with_hardcoded_capability(test_env):
+    """RED 17: Chat Pro unproven capability fields must be NOT_EXPOSED and execution_enabled must be False (fail closed)."""
+    client = test_env["client"]
+    resp = client.get("/internal/v1/admin/products/chat_pro", headers=build_auth_headers("GET", "/internal/v1/admin/products/chat_pro", b""))
+    assert resp.status_code == 200
+    effective = resp.json()["effective"]
+    assert effective["provider_capability"] == "NOT_EXPOSED", (
+        f"Unproven Chat Pro provider_capability must be NOT_EXPOSED, got {effective.get('provider_capability')}"
+    )
+    assert effective["execution_enabled"] is False, "Chat Pro has no live readiness authority and must fail closed (execution_enabled=False)"
+
+
+def test_red_18_base_products_import_snapshot_stale(monkeypatch):
+    """RED 18: BASE_PRODUCTS must NOT be a static import-time snapshot of live technical truth."""
+    import services.admin_product_service as aps
+    monkeypatch.setattr(bot, "get_tts_provider_readiness", lambda **kw: {"public_ready": False, "supported_voices": [], "reason": "offline"})
+    fresh_base = aps.resolve_canonical_technical_contract("voice_tts")
+    assert fresh_base["execution_enabled"] is False
+    assert aps.BASE_PRODUCTS["voice_tts"]["execution_enabled"] is False, (
+        "BASE_PRODUCTS holds a stale import-time snapshot that does not reflect live technical truth"
+    )
+
+
+def test_red_19_discovery_adapters_exist():
+    """RED 19: Explicit dynamic discovery adapters must exist and be callable."""
+    import services.admin_product_service as aps
+    assert hasattr(aps, "discover_canonical_products"), "admin_product_service must provide discover_canonical_products"
+    assert hasattr(aps, "discover_product_video_products"), "admin_product_service must provide discover_product_video_products"
+    assert callable(aps.discover_canonical_products)
