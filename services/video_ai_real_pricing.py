@@ -995,7 +995,10 @@ def public_quality_catalog() -> list[dict[str, Any]]:
             "resolution": resolution,
             "use_case": str(model.get("use_case") or model.get("description") or "Video theo nội dung đã duyệt."),
             "seconds": max(1, int(model.get("seconds") or 1)),
-            "unit_xu": max(1, int(model.get("unit_xu") or 1)),
+            "unit_xu": int(
+                __import__("services.admin_pricing_service", fromlist=["get_canonical_effective_price"])
+                .get_canonical_effective_price(f"video_tier_{tier_id}", fallback=max(1, int(model.get("unit_xu") or 1)))
+            ),
         })
     return sorted(rows, key=lambda item: (int(item["unit_xu"]), int(item["tier_id"])))
 
@@ -1193,7 +1196,10 @@ def public_image_quality_catalog() -> list[dict[str, Any]]:
             "use_case": str(model.get("use_case") or model.get("description") or "Ảnh theo nội dung đã duyệt."),
             "retry_warranty_count": retry_count,
             "attempt_count_priced": attempt_count,
-            "unit_xu": round_sale_xu(raw_sale_xu),
+            "unit_xu": int(
+                __import__("services.admin_pricing_service", fromlist=["get_canonical_effective_price"])
+                .get_canonical_effective_price(f"image_tier_{tier_key}", fallback=round_sale_xu(raw_sale_xu))
+            ),
         })
     return rows
 
@@ -1253,5 +1259,11 @@ def music_model_catalog() -> list[dict[str, Any]]:
 
 def public_music_background_prices() -> dict[str, int]:
     """Return the approved public sale prices for standalone background music."""
-
-    return dict(MUSIC_BACKGROUND_PUBLIC_PRICES)
+    prices = dict(MUSIC_BACKGROUND_PUBLIC_PRICES)
+    try:
+        from services.admin_pricing_service import get_canonical_effective_price
+        for key in prices:
+            prices[key] = int(get_canonical_effective_price(f"music_background_{key}", fallback=prices[key]))
+    except Exception:
+        pass
+    return prices
