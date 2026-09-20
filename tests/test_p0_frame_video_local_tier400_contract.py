@@ -126,8 +126,24 @@ def test_scenario2_addon_configuration_music_subtitles_watermark_no_tts(tmp_path
     assert "Phụ kiện túi cói mộc mạc" in sub_text
 
 
-def test_scenario2_delivery_receipt_and_exactly_once_billing(tmp_path):
+def test_scenario2_delivery_receipt_and_exactly_once_billing(tmp_path, monkeypatch):
     """Verify exactly-once 240 Xu billing upon valid artifact delivery, and fail-closed zero charge."""
+    def fake_probe(path, *args, **kwargs):
+        p = str(path or "")
+        if "corrupt" in p or "invalid" in p:
+            return {"ok": False, "error": "corrupt_video"}
+        if p and Path(p).is_file() and Path(p).stat().st_size > 0:
+            return {
+                "ok": True,
+                "duration": 5.0,
+                "has_video": True,
+                "format": "mp4",
+                "streams": [{"codec_type": "video"}],
+            }
+        return {"ok": False, "error": "file_not_found"}
+
+    monkeypatch.setattr(queue.video_local_validation, "probe_video_file", fake_probe)
+
     valid_mp4 = str(tmp_path / "hanoi_fashion_final.mp4")
     with open(valid_mp4, "wb") as f:
         f.write(b"\x00\x00\x00 ftypisom" + b"\x00" * 1024)
