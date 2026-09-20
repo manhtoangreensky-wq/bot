@@ -23,6 +23,7 @@ Invariants Verified:
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import hashlib
 import json
@@ -31,6 +32,7 @@ from pathlib import Path
 import re
 import sqlite3
 import time
+import types
 from types import SimpleNamespace
 from typing import Any
 
@@ -592,72 +594,144 @@ def test_06_reconcile_nonterminal_and_ineligible_zero_calls():
     assert len(notifier_calls) == 0
 
 
+def _extract_core_pipeline_notifier_ast() -> tuple[ast.If, types.CodeType]:
+    """Extract and compile the production terminal notifier AST node from _execute_video_dubbing_pipeline_core.
+
+    Enforces structural invariants on production source:
+    1. Exactly 1 call site of _notify_subdub_autopost_completion in _execute_video_dubbing_pipeline_core.
+    2. Notifier is gated inside an ast.If block checking delivered_video, internal_job_id, and terminal charge_status.
+    3. Compiles the authentic production AST node into executable bytecode.
+    """
+    func_source = _extract_function_source("_execute_video_dubbing_pipeline_core")
+    tree = ast.parse(func_source)
+    func_def = tree.body[0]
+    assert isinstance(func_def, (ast.FunctionDef, ast.AsyncFunctionDef))
+
+    # Invariant 1: Exactly 1 call site in the entire core pipeline function
+    notifier_calls = [
+        node
+        for node in ast.walk(func_def)
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "id", None) == "_notify_subdub_autopost_completion"
+    ]
+    assert len(notifier_calls) == 1, (
+        f"Expected exactly 1 call site of _notify_subdub_autopost_completion in "
+        f"_execute_video_dubbing_pipeline_core, found {len(notifier_calls)}"
+    )
+
+    # Invariant 2: Find the enclosing ast.If statement gating the notifier call
+    target_if: ast.If | None = None
+    for node in ast.walk(func_def):
+        if isinstance(node, ast.If):
+            for sub in ast.walk(node):
+                if (
+                    isinstance(sub, ast.Call)
+                    and getattr(sub.func, "id", None) == "_notify_subdub_autopost_completion"
+                ):
+                    target_if = node
+                    break
+            if target_if:
+                break
+
+    assert target_if is not None, (
+        "Notifier call is not gated by an If statement in _execute_video_dubbing_pipeline_core"
+    )
+
+    # Invariant 3: Structural condition invariant checks directly on production AST
+    condition_text = ast.unparse(target_if.test)
+    assert "delivered_video" in condition_text, (
+        f"Production gate missing delivered_video check: {condition_text}"
+    )
+    assert "internal_job_id" in condition_text, (
+        f"Production gate missing internal_job_id check: {condition_text}"
+    )
+    assert "charge_status" in condition_text, (
+        f"Production gate missing charge_status check: {condition_text}"
+    )
+
+    # Invariant 4: Compile the authentic production AST node
+    mod = ast.Module(body=[target_if], type_ignores=[])
+    ast.fix_missing_locations(mod)
+    code_obj = compile(mod, filename="bot.py", mode="exec")
+    return target_if, code_obj
+
+
 # =============================================================================
 # TEST 07: Core Pipeline Terminal Completion Calls Notifier Exactly Once
 # =============================================================================
 def test_07_core_pipeline_completion_calls_notifier_once():
-    """Verify lines 252957-252964 seam in _execute_video_dubbing_pipeline_core."""
-    notifier_calls: list[tuple[str, int]] = []
+    """Verify production _execute_video_dubbing_pipeline_core seam calls notifier exactly once on terminal delivery."""
+    _target_if, code_obj = _extract_core_pipeline_notifier_ast()
 
-    def _notify(internal_job_id: str, owner_id: int) -> dict[str, Any]:
-        notifier_calls.append((internal_job_id, owner_id))
-        return {"attempted": True}
-
-    # Simulate the exact terminal completion block from bot.py
     terminal_statuses = ["charged", "admin_free", "not_charged"]
     for idx, status in enumerate(terminal_statuses):
-        delivered_video = True
+        notifier_calls: list[tuple[str, int]] = []
         internal_job_id = f"job_core_{idx}"
         uid = 123456
-        job = {
+
+        ns = {
+            "_notify_subdub_autopost_completion": lambda jid, u: notifier_calls.append((jid, u)),
+            "delivered_video": True,
             "internal_job_id": internal_job_id,
-            "user_id": uid,
-            "charge_status": status,
+            "uid": uid,
+            "job": {
+                "internal_job_id": internal_job_id,
+                "user_id": uid,
+                "charge_status": status,
+            },
         }
 
-        # Exact code snippet from lines 252962-252964 of bot.py:
-        if delivered_video and internal_job_id and job.get("charge_status") in ("charged", "admin_free", "not_charged"):
-            _notify(internal_job_id, int(job.get("user_id") or uid or 0))
+        # Execute the production bytecode extracted from bot.py
+        exec(code_obj, ns)
 
-    assert len(notifier_calls) == len(terminal_statuses)
-    for idx, status in enumerate(terminal_statuses):
-        assert notifier_calls[idx] == (f"job_core_{idx}", 123456)
+        assert len(notifier_calls) == 1, (
+            f"Expected exactly 1 notifier call for status '{status}', got {len(notifier_calls)}"
+        )
+        assert notifier_calls[0] == (internal_job_id, uid)
 
 
 # =============================================================================
 # TEST 08: Core Pipeline Undelivered or Non-Terminal Billing Calls Notifier Zero Times
 # =============================================================================
 def test_08_core_pipeline_undelivered_or_nonterminal_zero_calls():
-    """Verify non-delivered or non-terminal status suppresses notifier in core pipeline."""
-    notifier_calls: list[tuple[str, int]] = []
-
-    def _notify(internal_job_id: str, owner_id: int) -> dict[str, Any]:
-        notifier_calls.append((internal_job_id, owner_id))
-        return {"attempted": True}
+    """Verify production _execute_video_dubbing_pipeline_core seam suppresses notifier when undelivered or non-terminal."""
+    _target_if, code_obj = _extract_core_pipeline_notifier_ast()
 
     test_cases = [
         {"delivered": False, "charge_status": "charged", "internal_id": "job_fail_1"},
         {"delivered": True, "charge_status": "pending", "internal_id": "job_fail_2"},
         {"delivered": True, "charge_status": "settlement_pending_recovery", "internal_id": "job_fail_3"},
         {"delivered": True, "charge_status": "", "internal_id": "job_fail_4"},
-        {"delivered": False, "charge_status": "pending", "internal_id": "job_fail_5"},
+        {"delivered": True, "charge_status": "failed", "internal_id": "job_fail_5"},
+        {"delivered": False, "charge_status": "pending", "internal_id": "job_fail_6"},
         {"delivered": True, "charge_status": "charged", "internal_id": ""},
+        {"delivered": False, "charge_status": "admin_free", "internal_id": "job_fail_7"},
     ]
 
     for tc in test_cases:
+        notifier_calls: list[tuple[str, int]] = []
         delivered_video = tc["delivered"]
         internal_job_id = tc["internal_id"]
         uid = 123456
-        job = {
+
+        ns = {
+            "_notify_subdub_autopost_completion": lambda jid, u: notifier_calls.append((jid, u)),
+            "delivered_video": delivered_video,
             "internal_job_id": internal_job_id,
-            "user_id": uid,
-            "charge_status": tc["charge_status"],
+            "uid": uid,
+            "job": {
+                "internal_job_id": internal_job_id,
+                "user_id": uid,
+                "charge_status": tc["charge_status"],
+            },
         }
 
-        if delivered_video and internal_job_id and job.get("charge_status") in ("charged", "admin_free", "not_charged"):
-            _notify(internal_job_id, int(job.get("user_id") or uid or 0))
+        # Execute the production bytecode extracted from bot.py
+        exec(code_obj, ns)
 
-    assert len(notifier_calls) == 0
+        assert len(notifier_calls) == 0, (
+            f"Expected 0 notifier calls for case {tc}, got {len(notifier_calls)}"
+        )
 
 
 # =============================================================================
