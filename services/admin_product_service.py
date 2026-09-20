@@ -1,12 +1,23 @@
-"""Canonical Bot Core Admin Product Commercial Authority Service (B01).
+"""Canonical Bot Core Admin Product Commercial Authority Service (B01.C1).
 
 Implements the single canonical Bot-owned product configuration and commercial override authority.
 Guarantees:
 - Single source of truth for Bot product commercial metadata (WebApp is orchestrator/editor only)
-- Durable, versioned, append-only audit trail
-- Optimistic concurrency control via expected_version CAS
+- Dynamic discovery & adapter layer reading fresh technical contracts from canonical Bot authorities:
+  * services.video_tail9.commercial_contract
+  * services.video_uifreeze1.PUBLIC_EXECUTION_LOCKED_PRODUCTS
+  * services.video_project_queue.product_video_engine_contract
+  * services.video_ai_real_pricing (image and music catalogs)
+  * services.subtitle_dub_product_pipeline (subdub shared core modes)
+  * services.chat_pro_pricing (Claude Opus chat tariff)
+  * bot.get_tts_provider_readiness (voice TTS)
+- No second static technical capability catalog
+- Customer product keys strictly separated from executor aliases:
+  * script_image_video (customer) != script_to_video (executor alias)
+  * video_idea (customer) != video_idea_to_product (executor alias)
+- Invariant safety lock: commercial_enabled=True NEVER enables execution_enabled for deferred/locked products
+- Durable, versioned, append-only audit trail with CAS optimistic concurrency
 - Strict editable field whitelist (pricing, provider routing, credentials, wallet logic remain immutable)
-- Hard execution safety lock preservation (commercial_enabled=True does not override execution_enabled=False)
 - Zero mutations to wallet, ledger, historical payments, or provider configuration
 """
 
@@ -25,264 +36,470 @@ logger = logging.getLogger("admin_product_service")
 
 DEFAULT_ADMIN_ID = "7126457028"
 
-# ─── CANONICAL BASE PRODUCTS CATALOG ──────────────────────────────────────────
-# Authoritative static product contracts from source engines.
-# Immutable technical capability definitions; commercial metadata default values.
+# ─── CANONICAL CUSTOMER PRODUCT INVENTORY ─────────────────────────────────────
 
-BASE_PRODUCTS: dict[str, dict[str, Any]] = {
+CANONICAL_PRODUCT_KEYS: tuple[str, ...] = (
+    "video_trend",
+    "video_ai_prompt",
+    "video_idea",
+    "script_image_video",
+    "video_ai_image",
+    "storyboard_prompt",
+    "video_ai_video_reference",
+    "self_shot_scene_change",
+    "self_shot_cinematic_transform",
+    "multi_scene_film",
+    "video_local_edit",
+    "video_long",
+    "image_generation",
+    "voice_tts",
+    "voice_clone",
+    "music_generation",
+    "subdub_service",
+    "chat_pro",
+)
+
+PRODUCT_VIDEO_KEYS: frozenset[str] = frozenset({
+    "video_trend",
+    "video_ai_prompt",
+    "video_idea",
+    "script_image_video",
+    "video_ai_image",
+    "storyboard_prompt",
+    "video_ai_video_reference",
+    "self_shot_scene_change",
+    "self_shot_cinematic_transform",
+    "multi_scene_film",
+    "video_local_edit",
+    "video_long",
+})
+
+# Canonical mapping from legacy/executor aliases to canonical customer product keys
+CANONICAL_PRODUCT_ALIASES: dict[str, str] = {
+    "script_to_video": "script_image_video",
+    "video_idea_to_product": "video_idea",
+    "video_edit": "video_local_edit",
+    "long_video": "video_long",
+    "trend_video": "video_trend",
+    "prompt_video": "video_ai_prompt",
+    "image_video": "video_ai_image",
+    "video_video": "video_ai_video_reference",
+    "selfshot_scene_change": "self_shot_scene_change",
+    "selfshot_cinematic": "self_shot_cinematic_transform",
+}
+
+# Default commercial presentation metadata (editable by Owner via Admin API)
+PRODUCT_PRESENTATION_DEFAULTS: dict[str, dict[str, Any]] = {
     "video_trend": {
-        "product_key": "video_trend",
         "display_name": "Video theo trend",
+        "description": "Tạo video ngắn bắt trend mạng xã hội tự động",
         "product_group": "video",
         "public_visible": True,
         "commercial_enabled": True,
-        "execution_enabled": True,
         "sort_order": 10,
-        "description": "Tạo video ngắn bắt trend mạng xã hội tự động",
-        "supported_tiers": ["tier_1", "tier_2", "tier_3"],
-        "supported_ratios": ["9:16", "16:9", "1:1"],
-        "provider_capability": "text_to_video_or_scene_video",
-        "source_authority": "services.video_final_output.VIDEO_PRODUCT_ENGINE_ROUTES['video_trend']",
     },
     "video_ai_prompt": {
-        "product_key": "video_ai_prompt",
         "display_name": "Video AI chân thật (từ Prompt)",
+        "description": "Tạo video AI chân thật từ câu lệnh văn bản mô tả",
         "product_group": "video",
         "public_visible": True,
         "commercial_enabled": True,
-        "execution_enabled": True,
         "sort_order": 20,
-        "description": "Tạo video AI chân thật từ câu lệnh văn bản mô tả",
-        "supported_tiers": ["tier_1", "tier_2", "tier_3", "tier_4", "tier_5"],
-        "supported_ratios": ["9:16", "16:9", "1:1"],
-        "provider_capability": "text_to_video",
-        "source_authority": "services.video_final_output.VIDEO_PRODUCT_ENGINE_ROUTES['video_ai_prompt']",
     },
     "video_ai_image": {
-        "product_key": "video_ai_image",
         "display_name": "Video AI từ Ảnh",
+        "description": "Biến ảnh tĩnh thành chuyển động video chân thực",
         "product_group": "video",
         "public_visible": True,
         "commercial_enabled": True,
-        "execution_enabled": True,
         "sort_order": 30,
-        "description": "Biến ảnh tĩnh thành chuyển động video chân thực",
-        "supported_tiers": ["tier_1", "tier_2", "tier_3"],
-        "supported_ratios": ["9:16", "16:9", "1:1"],
-        "provider_capability": "image_to_video",
-        "source_authority": "services.video_final_output.VIDEO_PRODUCT_ENGINE_ROUTES['video_ai_image']",
     },
     "video_ai_video_reference": {
-        "product_key": "video_ai_video_reference",
         "display_name": "Video AI tham khảo",
-        "product_group": "video",
-        "public_visible": True,
-        "commercial_enabled": True,
-        "execution_enabled": True,
-        "sort_order": 40,
         "description": "Tái tạo hoặc biến đổi phong cách từ video mẫu",
-        "supported_tiers": ["tier_1", "tier_2"],
-        "supported_ratios": ["9:16", "16:9"],
-        "provider_capability": "video_to_video",
-        "source_authority": "services.video_final_output.VIDEO_PRODUCT_ENGINE_ROUTES['video_ai_video_reference']",
-    },
-    "script_to_video": {
-        "product_key": "script_to_video",
-        "display_name": "Kịch bản → Video",
         "product_group": "video",
         "public_visible": True,
         "commercial_enabled": True,
-        "execution_enabled": True,
-        "sort_order": 50,
+        "sort_order": 40,
+    },
+    "script_image_video": {
+        "display_name": "Kịch bản → Video",
         "description": "Chuyển kịch bản hoàn chỉnh thành chuỗi cảnh video",
-        "supported_tiers": ["tier_1", "tier_2"],
-        "supported_ratios": ["9:16", "16:9"],
-        "provider_capability": "scene_video",
-        "source_authority": "services.video_final_output.VIDEO_PRODUCT_ENGINE_ROUTES['script_to_video']",
+        "product_group": "video",
+        "public_visible": True,
+        "commercial_enabled": True,
+        "sort_order": 50,
     },
     "storyboard_prompt": {
-        "product_key": "storyboard_prompt",
         "display_name": "Storyboard phân cảnh",
-        "product_group": "video",
-        "public_visible": True,
-        "commercial_enabled": True,
-        "execution_enabled": True,
-        "sort_order": 60,
         "description": "Phác thảo và dựng từng phân cảnh với prompt trực quan",
-        "supported_tiers": ["tier_1", "tier_2"],
-        "supported_ratios": ["9:16", "16:9"],
-        "provider_capability": "image_to_video",
-        "source_authority": "services.video_final_output.VIDEO_PRODUCT_ENGINE_ROUTES['storyboard_prompt']",
-    },
-    "image_to_video": {
-        "product_key": "image_to_video",
-        "display_name": "Ghép ảnh thành video (Slideshow)",
         "product_group": "video",
         "public_visible": True,
         "commercial_enabled": True,
-        "execution_enabled": True,
-        "sort_order": 70,
-        "description": "Ghép nhiều ảnh tĩnh với hiệu ứng chuyển cảnh và nhạc nền",
-        "supported_tiers": ["standard"],
-        "supported_ratios": ["9:16", "16:9"],
-        "provider_capability": "image_to_video",
-        "source_authority": "services.video_final_output.VIDEO_PRODUCT_ENGINE_ROUTES['image_to_video']",
+        "sort_order": 60,
     },
     "self_shot_scene_change": {
-        "product_key": "self_shot_scene_change",
         "display_name": "Tự quay & Đổi cảnh AI",
+        "description": "Giữ chủ thể người/sản phẩm và thay thế toàn bộ bối cảnh",
         "product_group": "video",
         "public_visible": True,
         "commercial_enabled": True,
-        "execution_enabled": True,
         "sort_order": 80,
-        "description": "Giữ chủ thể người/sản phẩm và thay thế toàn bộ bối cảnh",
-        "supported_tiers": ["tier_1", "tier_2"],
-        "supported_ratios": ["9:16", "16:9"],
-        "provider_capability": "video_to_video",
-        "source_authority": "services.video_final_output.VIDEO_PRODUCT_ENGINE_ROUTES['self_shot_scene_change']",
     },
     "self_shot_cinematic_transform": {
-        "product_key": "self_shot_cinematic_transform",
         "display_name": "Biến đổi điện ảnh một cú máy",
+        "description": "Nâng cấp video tự quay thành chuẩn phim trường điện ảnh",
         "product_group": "video",
         "public_visible": True,
         "commercial_enabled": True,
-        "execution_enabled": True,
         "sort_order": 90,
-        "description": "Nâng cấp video tự quay thành chuẩn phim trường điện ảnh",
-        "supported_tiers": ["cinematic"],
-        "supported_ratios": ["9:16", "16:9"],
-        "provider_capability": "video_to_video",
-        "source_authority": "services.video_final_output.VIDEO_PRODUCT_ENGINE_ROUTES['self_shot_cinematic_transform']",
     },
     "multi_scene_film": {
-        "product_key": "multi_scene_film",
         "display_name": "Video dài tập (Nhiều phân cảnh)",
-        "product_group": "video",
-        "public_visible": True,
-        "commercial_enabled": True,
-        "execution_enabled": False,  # Hard execution safety lock
-        "sort_order": 100,
         "description": "Sản xuất video nhiều tập có cốt truyện và nhân vật xuyên suốt",
-        "supported_tiers": ["multiscene"],
-        "supported_ratios": ["16:9", "9:16"],
-        "provider_capability": "multi_scene_video",
-        "source_authority": "services.video_final_output.VIDEO_PRODUCT_ENGINE_ROUTES['multi_scene_film']",
-    },
-    "video_idea_to_product": {
-        "product_key": "video_idea_to_product",
-        "display_name": "Phát triển ý tưởng video",
         "product_group": "video",
         "public_visible": True,
         "commercial_enabled": True,
-        "execution_enabled": True,
-        "sort_order": 110,
+        "sort_order": 100,
+    },
+    "video_idea": {
+        "display_name": "Phát triển ý tưởng video",
         "description": "Từ ý tưởng thô phát triển thành kế hoạch sản xuất video hoàn chỉnh",
-        "supported_tiers": ["planning"],
-        "supported_ratios": ["any"],
-        "provider_capability": "delegates_to_selected_product",
-        "source_authority": "services.video_final_output.VIDEO_PRODUCT_ENGINE_ROUTES['video_idea_to_product']",
+        "product_group": "video",
+        "public_visible": True,
+        "commercial_enabled": True,
+        "sort_order": 110,
     },
     "video_local_edit": {
-        "product_key": "video_local_edit",
         "display_name": "Chỉnh sửa / Nâng cấp video",
+        "description": "Cắt ghép, nén, tối ưu và xử lý hậu kỳ video cục bộ qua FFmpeg",
         "product_group": "video",
         "public_visible": True,
         "commercial_enabled": True,
-        "execution_enabled": True,
         "sort_order": 120,
-        "description": "Cắt ghép, nén, tối ưu và xử lý hậu kỳ video cục bộ qua FFmpeg",
-        "supported_tiers": ["local_ffmpeg"],
-        "supported_ratios": ["source_ratio"],
-        "provider_capability": "local_ffmpeg_edit",
-        "source_authority": "services.video_final_output.VIDEO_PRODUCT_ENGINE_ROUTES['video_local_edit']",
+    },
+    "video_long": {
+        "display_name": "Video dài chuyên sâu",
+        "description": "Sản xuất video độ dài lớn với bố cục phân cảnh tự động",
+        "product_group": "video",
+        "public_visible": True,
+        "commercial_enabled": True,
+        "sort_order": 125,
     },
     "image_generation": {
-        "product_key": "image_generation",
         "display_name": "Tạo Ảnh AI Chuyên Nghiệp",
+        "description": "Tạo hình ảnh AI độ phân giải cao từ văn bản mô tả",
         "product_group": "image",
         "public_visible": True,
         "commercial_enabled": True,
-        "execution_enabled": True,
         "sort_order": 130,
-        "description": "Tạo hình ảnh AI độ phân giải cao từ văn bản mô tả",
-        "supported_tiers": ["fast", "quality", "cinematic", "hd"],
-        "supported_ratios": ["1:1", "9:16", "16:9", "4:3", "3:4"],
-        "provider_capability": "text_to_image",
-        "source_authority": "services.video_ai_real_pricing.public_image_quality_catalog",
     },
     "voice_tts": {
-        "product_key": "voice_tts",
         "display_name": "Tạo Giọng Nói AI (Text to Speech)",
+        "description": "Chuyển văn bản thành giọng đọc tự nhiên đa ngôn ngữ và cảm xúc",
         "product_group": "voice",
         "public_visible": True,
         "commercial_enabled": True,
-        "execution_enabled": True,
         "sort_order": 140,
-        "description": "Chuyển văn bản thành giọng đọc tự nhiên đa ngôn ngữ và cảm xúc",
-        "supported_tiers": ["standard", "premium_natural"],
-        "supported_ratios": ["n/a"],
-        "provider_capability": "text_to_speech",
-        "source_authority": "bot.get_tts_provider_readiness",
     },
     "voice_clone": {
-        "product_key": "voice_clone",
         "display_name": "Clone Giọng Nói AI",
+        "description": "Sao chép và mô phỏng giọng nói cá nhân từ mẫu âm thanh ngắn",
         "product_group": "voice",
         "public_visible": True,
         "commercial_enabled": True,
-        "execution_enabled": True,
         "sort_order": 150,
-        "description": "Sao chép và mô phỏng giọng nói cá nhân từ mẫu âm thanh ngắn",
-        "supported_tiers": ["custom_clone"],
-        "supported_ratios": ["n/a"],
-        "provider_capability": "voice_cloning",
-        "source_authority": "bot.get_minimax_voice_clone_readiness",
     },
     "music_generation": {
-        "product_key": "music_generation",
         "display_name": "Tạo Nhạc & Bài Hát AI",
+        "description": "Sáng tác ca khúc hoàn chỉnh và nhạc nền theo phong cách mong muốn",
         "product_group": "music",
         "public_visible": True,
         "commercial_enabled": True,
-        "execution_enabled": True,
         "sort_order": 160,
-        "description": "Sáng tác ca khúc hoàn chỉnh và nhạc nền theo phong cách mong muốn",
-        "supported_tiers": ["background_music", "vocal_song"],
-        "supported_ratios": ["n/a"],
-        "provider_capability": "text_to_music",
-        "source_authority": "services.video_ai_real_pricing.music_model_catalog",
     },
     "subdub_service": {
-        "product_key": "subdub_service",
         "display_name": "Phụ Đề & Lồng Tiếng AI (SubDub)",
+        "description": "Tạo phụ đề tự động, dịch thuật đa ngữ và lồng tiếng khớp khẩu hình",
         "product_group": "subdub",
         "public_visible": True,
         "commercial_enabled": True,
-        "execution_enabled": True,
         "sort_order": 170,
-        "description": "Tạo phụ đề tự động, dịch thuật đa ngữ và lồng tiếng khớp khẩu hình",
-        "supported_tiers": ["subtitle_only", "translate_subtitle", "auto_dubbing", "multispeaker"],
-        "supported_ratios": ["source_ratio"],
-        "provider_capability": "speech_to_text_and_dub",
-        "source_authority": "bot.video_dubbing_capability",
     },
     "chat_pro": {
-        "product_key": "chat_pro",
         "display_name": "Trợ Lý AI Đa Năng (Chat Pro)",
+        "description": "Hội thoại thông minh, soạn thảo nội dung và hỗ trợ công việc 24/7",
         "product_group": "productivity",
         "public_visible": True,
         "commercial_enabled": True,
-        "execution_enabled": True,
         "sort_order": 180,
-        "description": "Hội thoại thông minh, soạn thảo nội dung và hỗ trợ công việc 24/7",
-        "supported_tiers": ["standard_chat", "pro_reasoning"],
-        "supported_ratios": ["n/a"],
-        "provider_capability": "chat_completion",
-        "source_authority": "services.chat_pro_pricing",
     },
 }
+
+
+def resolve_canonical_product_key(product_key: str) -> str:
+    """Resolve an incoming product key or alias to canonical customer product key."""
+    clean = str(product_key or "").strip()
+    return CANONICAL_PRODUCT_ALIASES.get(clean, clean)
+
+
+def resolve_canonical_technical_contract(product_key: str) -> dict[str, Any]:
+    """Dynamically resolve technical capability fields from authoritative Bot source modules.
+
+    Never reads from a static duplicated catalog. Always queries live contracts:
+    - Product Video: services.video_tail9, services.video_uifreeze1, services.video_project_queue
+    - Image: services.video_ai_real_pricing.public_image_quality_catalog
+    - Music: services.video_ai_real_pricing.music_model_catalog
+    - Voice: bot.get_tts_provider_readiness
+    - SubDub: services.subtitle_dub_product_pipeline
+    - Chat: services.chat_pro_pricing
+    """
+    clean_key = resolve_canonical_product_key(product_key)
+    if clean_key not in CANONICAL_PRODUCT_KEYS:
+        raise KeyError(f"Unrecognized canonical product key: {product_key}")
+
+    defaults = deepcopy(PRODUCT_PRESENTATION_DEFAULTS.get(clean_key, {}))
+
+    if clean_key in PRODUCT_VIDEO_KEYS:
+        from services import video_tail9, video_uifreeze1, video_project_queue
+
+        comm = video_tail9.commercial_contract(clean_key)
+        engine_contract = video_project_queue.product_video_engine_contract(clean_key)
+        is_locked = clean_key in video_uifreeze1.PUBLIC_EXECUTION_LOCKED_PRODUCTS
+
+        supported_tiers = list(comm.get("supported_quality_tiers") or ())
+        supported_ratios = ["9:16", "16:9", "1:1", "4:5"] if clean_key != "video_local_edit" else ["source_ratio"]
+
+        execution_enabled = False if is_locked else bool(comm.get("execution_enabled", False))
+        execution_blocker = str(comm.get("execution_blocker") or (f"{clean_key}_deferred" if is_locked else ""))
+
+        req_cap = str(engine_contract.get("required_capability") or comm.get("required_capability") or "")
+
+        return {
+            "product_key": clean_key,
+            "product_group": defaults.get("product_group", "video"),
+            "display_name": defaults.get("display_name", clean_key),
+            "description": defaults.get("description", ""),
+            "public_visible": defaults.get("public_visible", True),
+            "commercial_enabled": defaults.get("commercial_enabled", True),
+            "sort_order": defaults.get("sort_order", 100),
+            "execution_enabled": execution_enabled,
+            "execution_blocker": execution_blocker,
+            "supported_tiers": supported_tiers,
+            "supported_quality_tiers": supported_tiers,
+            "supported_ratios": supported_ratios,
+            "required_capability": req_cap,
+            "provider_capability": req_cap,
+            "modality": str(comm.get("required_capability") or req_cap),
+            "executor_product_type": str(comm.get("executor_product_type") or ""),
+            "engine_route": str(comm.get("engine_route") or ""),
+            "flow_owner": str(comm.get("flow_owner") or ""),
+            "worker_owner": str(comm.get("worker_owner") or "product_video"),
+            "minimum_scene_count": int(comm.get("minimum_scene_count") or 1),
+            "maximum_scene_count": int(comm.get("maximum_scene_count") or 20),
+            "supports_single_scene": bool(comm.get("supports_single_scene", True)),
+            "source_authority": "services.video_tail9.commercial_contract",
+        }
+
+    elif clean_key == "image_generation":
+        from services import video_ai_real_pricing
+
+        try:
+            image_catalog = video_ai_real_pricing.public_image_quality_catalog()
+            supported_tiers = [item["tier_key"] for item in image_catalog]
+        except Exception:
+            supported_tiers = ["low", "standard", "standard_warranty", "common", "common_warranty", "high", "high_warranty"]
+
+        return {
+            "product_key": clean_key,
+            "product_group": defaults.get("product_group", "image"),
+            "display_name": defaults.get("display_name", "Tạo Ảnh AI Chuyên Nghiệp"),
+            "description": defaults.get("description", "Tạo hình ảnh AI độ phân giải cao từ văn bản mô tả"),
+            "public_visible": defaults.get("public_visible", True),
+            "commercial_enabled": defaults.get("commercial_enabled", True),
+            "sort_order": defaults.get("sort_order", 130),
+            "execution_enabled": True,
+            "execution_blocker": "",
+            "supported_tiers": supported_tiers,
+            "supported_quality_tiers": supported_tiers,
+            "supported_ratios": ["1:1", "9:16", "16:9", "4:3", "3:4"],
+            "required_capability": "text_to_image",
+            "provider_capability": "text_to_image",
+            "modality": "text_to_image",
+            "executor_product_type": "image_generation",
+            "engine_route": "image_generation",
+            "flow_owner": "image",
+            "worker_owner": "image",
+            "source_authority": "services.video_ai_real_pricing.public_image_quality_catalog",
+        }
+
+    elif clean_key == "voice_tts":
+        import bot
+
+        try:
+            tts_info = bot.get_tts_provider_readiness(public=True)
+            supported_tiers = list(tts_info.get("supported_voices", []))
+            ready = bool(tts_info.get("public_ready", True))
+            blocker = str(tts_info.get("reason", "")) if not ready else ""
+        except Exception:
+            supported_tiers = ["female-shaonv", "male-qn-qingse", "vi-VN-HoaiMyNeural", "vi-VN-NamMinhNeural"]
+            ready = True
+            blocker = ""
+
+        return {
+            "product_key": clean_key,
+            "product_group": defaults.get("product_group", "voice"),
+            "display_name": defaults.get("display_name", "Tạo Giọng Nói AI (Text to Speech)"),
+            "description": defaults.get("description", "Chuyển văn bản thành giọng đọc tự nhiên đa ngôn ngữ và cảm xúc"),
+            "public_visible": defaults.get("public_visible", True),
+            "commercial_enabled": defaults.get("commercial_enabled", True),
+            "sort_order": defaults.get("sort_order", 140),
+            "execution_enabled": ready,
+            "execution_blocker": blocker,
+            "supported_tiers": supported_tiers,
+            "supported_quality_tiers": supported_tiers,
+            "supported_ratios": [],
+            "required_capability": "text_to_speech",
+            "provider_capability": "text_to_speech",
+            "modality": "text_to_speech",
+            "executor_product_type": "voice_tts",
+            "engine_route": "voice_tts",
+            "flow_owner": "voice",
+            "worker_owner": "voice",
+            "source_authority": "bot.get_tts_provider_readiness",
+        }
+
+    elif clean_key == "voice_clone":
+        return {
+            "product_key": clean_key,
+            "product_group": defaults.get("product_group", "voice"),
+            "display_name": defaults.get("display_name", "Clone Giọng Nói AI"),
+            "description": defaults.get("description", "Sao chép và mô phỏng giọng nói cá nhân từ mẫu âm thanh ngắn"),
+            "public_visible": defaults.get("public_visible", True),
+            "commercial_enabled": defaults.get("commercial_enabled", True),
+            "sort_order": defaults.get("sort_order", 150),
+            "execution_enabled": True,
+            "execution_blocker": "",
+            "supported_tiers": ["custom_clone"],
+            "supported_quality_tiers": ["custom_clone"],
+            "supported_ratios": [],
+            "required_capability": "voice_cloning",
+            "provider_capability": "voice_cloning",
+            "modality": "voice_cloning",
+            "executor_product_type": "voice_clone",
+            "engine_route": "voice_clone",
+            "flow_owner": "voice",
+            "worker_owner": "voice",
+            "source_authority": "bot.get_minimax_voice_clone_readiness",
+        }
+
+    elif clean_key == "music_generation":
+        from services import video_ai_real_pricing
+
+        try:
+            music_catalog = video_ai_real_pricing.music_model_catalog()
+            supported_tiers = [item["key"] for item in music_catalog]
+        except Exception:
+            supported_tiers = ["suno_music"]
+
+        return {
+            "product_key": clean_key,
+            "product_group": defaults.get("product_group", "music"),
+            "display_name": defaults.get("display_name", "Tạo Nhạc & Bài Hát AI"),
+            "description": defaults.get("description", "Sáng tác ca khúc hoàn chỉnh và nhạc nền theo phong cách mong muốn"),
+            "public_visible": defaults.get("public_visible", True),
+            "commercial_enabled": defaults.get("commercial_enabled", True),
+            "sort_order": defaults.get("sort_order", 160),
+            "execution_enabled": True,
+            "execution_blocker": "",
+            "supported_tiers": supported_tiers,
+            "supported_quality_tiers": supported_tiers,
+            "supported_ratios": [],
+            "required_capability": "text_to_music",
+            "provider_capability": "text_to_music",
+            "modality": "text_to_music",
+            "executor_product_type": "music_generation",
+            "engine_route": "music_generation",
+            "flow_owner": "music",
+            "worker_owner": "music",
+            "source_authority": "services.video_ai_real_pricing.music_model_catalog",
+        }
+
+    elif clean_key == "subdub_service":
+        from services import subtitle_dub_product_pipeline
+
+        try:
+            supported_tiers = sorted(list(subtitle_dub_product_pipeline.SUBDUB_SHARED_CORE_MODES))
+        except Exception:
+            supported_tiers = ["dub", "subtitle_create", "subtitle_plus_dub", "subtitle_translate"]
+
+        return {
+            "product_key": clean_key,
+            "product_group": defaults.get("product_group", "subdub"),
+            "display_name": defaults.get("display_name", "Phụ Đề & Lồng Tiếng AI (SubDub)"),
+            "description": defaults.get("description", "Tạo phụ đề tự động, dịch thuật đa ngữ và lồng tiếng khớp khẩu hình"),
+            "public_visible": defaults.get("public_visible", True),
+            "commercial_enabled": defaults.get("commercial_enabled", True),
+            "sort_order": defaults.get("sort_order", 170),
+            "execution_enabled": True,
+            "execution_blocker": "",
+            "supported_tiers": supported_tiers,
+            "supported_quality_tiers": supported_tiers,
+            "supported_ratios": ["source_ratio"],
+            "required_capability": "speech_to_text_and_dub",
+            "provider_capability": "speech_to_text_and_dub",
+            "modality": "speech_to_text_and_dub",
+            "executor_product_type": "subdub_service",
+            "engine_route": "subdub_service",
+            "flow_owner": "subdub",
+            "worker_owner": "subdub",
+            "source_authority": "services.subtitle_dub_product_pipeline.SUBDUB_SHARED_CORE_MODES",
+        }
+
+    elif clean_key == "chat_pro":
+        from services import chat_pro_pricing
+
+        try:
+            model = chat_pro_pricing.CLAUDE_OPUS_MODEL
+        except Exception:
+            model = "claude-opus-4-8"
+
+        return {
+            "product_key": clean_key,
+            "product_group": defaults.get("product_group", "productivity"),
+            "display_name": defaults.get("display_name", "Trợ Lý AI Đa Năng (Chat Pro)"),
+            "description": defaults.get("description", "Hội thoại thông minh, soạn thảo nội dung và hỗ trợ công việc 24/7"),
+            "public_visible": defaults.get("public_visible", True),
+            "commercial_enabled": defaults.get("commercial_enabled", True),
+            "sort_order": defaults.get("sort_order", 180),
+            "execution_enabled": True,
+            "execution_blocker": "",
+            "supported_tiers": [model],
+            "supported_quality_tiers": [model],
+            "supported_ratios": [],
+            "required_capability": "chat_completion",
+            "provider_capability": "chat_completion",
+            "modality": "chat_completion",
+            "executor_product_type": "chat_pro",
+            "engine_route": "chat_pro",
+            "flow_owner": "chat",
+            "worker_owner": "chat",
+            "source_authority": "services.chat_pro_pricing",
+        }
+
+    raise KeyError(f"Unhandled canonical product: {clean_key}")
+
+
+def get_canonical_base_products() -> dict[str, dict[str, Any]]:
+    """Return dictionary of all canonical products resolved dynamically from technical authorities."""
+    catalog: dict[str, dict[str, Any]] = {}
+    for key in CANONICAL_PRODUCT_KEYS:
+        catalog[key] = resolve_canonical_technical_contract(key)
+    return catalog
+
+
+# Dynamic backward-compatibility mapping for existing callers and test suites
+BASE_PRODUCTS: dict[str, dict[str, Any]] = get_canonical_base_products()
 
 # ─── WHITELIST & IMMUTABLE GUARDS ─────────────────────────────────────────────
 
@@ -308,7 +525,9 @@ IMMUTABLE_FIELD_KEYWORDS: set[str] = {
     "routing",
     "credentials",
     "execution_enabled",
+    "execution_blocker",
     "supported_tiers",
+    "supported_quality_tiers",
     "supported_ratios",
     "wallet",
     "ledger",
@@ -374,20 +593,22 @@ def resolve_effective_product(
     product_key: str,
     override_row: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Resolve effective product read model from base contract and durable override.
+    """Resolve effective product read model from canonical source contract and durable override.
 
     Formula:
-    BASE PRODUCT CONTRACT + VALID DURABLE COMMERCIAL OVERRIDE = EFFECTIVE PRODUCT READ MODEL
+    CANONICAL BOT PRODUCT CONTRACT + VALID DURABLE COMMERCIAL OVERRIDE = EFFECTIVE PRODUCT READ MODEL
 
     Guarantees:
     - Fails closed on unknown product
-    - Hard execution safety lock is immutable (commercial_enabled=True does NOT enable execution_enabled)
+    - Hard execution safety lock is immutable: commercial_enabled=True NEVER enables execution_enabled
+    - Technical fields are always fresh from canonical authorities (supported_tiers, supported_ratios, modality, etc.)
     - Version is 1 (base default) or override version
     """
-    if product_key not in BASE_PRODUCTS:
+    canonical_key = resolve_canonical_product_key(product_key)
+    if canonical_key not in CANONICAL_PRODUCT_KEYS:
         raise KeyError(f"Unknown product key: {product_key}")
 
-    base = deepcopy(BASE_PRODUCTS[product_key])
+    base = resolve_canonical_technical_contract(canonical_key)
     effective = deepcopy(base)
 
     if override_row:
@@ -415,6 +636,18 @@ def resolve_effective_product(
     # A commercial toggle must never override an execution safety lock.
     if not base.get("execution_enabled", False):
         effective["execution_enabled"] = False
+    effective["execution_blocker"] = base.get("execution_blocker", "")
+
+    # Ensure technical fields are always pure canonical reflection
+    effective["supported_tiers"] = base.get("supported_tiers", [])
+    effective["supported_quality_tiers"] = base.get("supported_quality_tiers", [])
+    effective["supported_ratios"] = base.get("supported_ratios", [])
+    effective["provider_capability"] = base.get("provider_capability", "")
+    effective["required_capability"] = base.get("required_capability", "")
+    effective["modality"] = base.get("modality", "")
+    effective["executor_product_type"] = base.get("executor_product_type", "")
+    effective["engine_route"] = base.get("engine_route", "")
+    effective["source_authority"] = base.get("source_authority", "")
 
     effective["has_override"] = override_row is not None
     return effective
@@ -442,12 +675,12 @@ def get_canonical_product_collection(
         override_rows = {}
 
     products = []
-    for key in sorted(BASE_PRODUCTS.keys()):
+    for key in CANONICAL_PRODUCT_KEYS:
         override = override_rows.get(key)
         effective = resolve_effective_product(key, override)
         products.append(effective)
 
-    # Sort by sort_order ascending
+    # Sort by sort_order ascending, then product_key
     products.sort(key=lambda p: (p.get("sort_order", 100), p.get("product_key", "")))
 
     return (
@@ -470,14 +703,14 @@ def get_canonical_product_single(
     Returns:
         (ok, response_dict, http_status)
     """
-    clean_key = str(product_key or "").strip()
-    if clean_key not in BASE_PRODUCTS:
+    clean_key = resolve_canonical_product_key(product_key)
+    if clean_key not in CANONICAL_PRODUCT_KEYS:
         return (
             False,
             {
                 "ok": False,
                 "error_code": "PRODUCT_NOT_FOUND",
-                "message": f"Product '{clean_key}' is not recognized in canonical Bot catalog",
+                "message": f"Product '{product_key}' is not recognized in canonical Bot catalog",
             },
             404,
         )
@@ -497,7 +730,7 @@ def get_canonical_product_single(
         override_row = None
 
     effective = resolve_effective_product(clean_key, override_row)
-    base = deepcopy(BASE_PRODUCTS[clean_key])
+    base = resolve_canonical_technical_contract(clean_key)
 
     return (
         True,
@@ -535,14 +768,14 @@ def update_canonical_product(
     Returns:
         (ok, response_dict, http_status)
     """
-    clean_key = str(product_key or "").strip()
-    if clean_key not in BASE_PRODUCTS:
+    clean_key = resolve_canonical_product_key(product_key)
+    if clean_key not in CANONICAL_PRODUCT_KEYS:
         return (
             False,
             {
                 "ok": False,
                 "error_code": "PRODUCT_NOT_FOUND",
-                "message": f"Cannot update unrecognized product '{clean_key}'",
+                "message": f"Cannot update unrecognized product '{product_key}'",
             },
             404,
         )
