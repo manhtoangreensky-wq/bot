@@ -277838,6 +277838,111 @@ async def api_internal_customer_packages(request: Request):
     return JSONResponse(status_code=status_code, content=result)
 
 
+# ─── CANONICAL ADMIN PRODUCT COMMERCIAL AUTHORITY ENDPOINTS (SPEC-B01) ──────────
+
+@fastapi_app.get("/internal/v1/admin/products")
+async def api_internal_admin_products_collection(request: Request):
+    """Canonical Bot Core admin product collection read endpoint (SPEC-B01)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.admin_product_service import get_canonical_product_collection
+
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path="/internal/v1/admin/products",
+        body_bytes=b"",
+        actor_id=str(request.headers.get("x-toan-aas-actor-id") or "").strip(),
+    )
+    if not auth_ok:
+        raise HTTPException(
+            status_code=auth_status,
+            detail={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    ok, result, status_code = get_canonical_product_collection(db_path=DB_FILE)
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.get("/internal/v1/admin/products/{product_key}")
+async def api_internal_admin_product_single(product_key: str, request: Request):
+    """Canonical Bot Core admin single product read endpoint (SPEC-B01)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.admin_product_service import get_canonical_product_single
+
+    path = f"/internal/v1/admin/products/{product_key}"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path=path,
+        body_bytes=b"",
+        actor_id=str(request.headers.get("x-toan-aas-actor-id") or "").strip(),
+    )
+    if not auth_ok:
+        raise HTTPException(
+            status_code=auth_status,
+            detail={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    ok, result, status_code = get_canonical_product_single(product_key=product_key, db_path=DB_FILE)
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.patch("/internal/v1/admin/products/{product_key}")
+async def api_internal_admin_product_update(product_key: str, request: Request):
+    """Canonical Bot Core admin product update endpoint with CAS and audit (SPEC-B01)."""
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+        if not isinstance(payload, dict):
+            raise ValueError("Payload must be an object")
+    except Exception:
+        raise HTTPException(status_code=400, detail={"ok": False, "error_code": "INVALID_JSON", "message": "Invalid JSON payload"})
+
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.admin_product_service import update_canonical_product
+
+    path = f"/internal/v1/admin/products/{product_key}"
+    actor_id = str(request.headers.get("x-toan-aas-actor-id") or payload.get("actor_id") or "").strip()
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="PATCH",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=actor_id,
+    )
+    if not auth_ok:
+        raise HTTPException(
+            status_code=auth_status,
+            detail={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    expected_version = payload.get("expected_version")
+    changes = payload.get("changes")
+    reason = payload.get("reason")
+    actor_id = request.headers.get("x-toan-aas-actor-id") or payload.get("actor_id") or ""
+    request_id = request.headers.get("x-toan-aas-request-id") or ""
+
+    ok, result, status_code = update_canonical_product(
+        product_key=product_key,
+        expected_version=expected_version,
+        changes=changes,
+        reason=reason,
+        actor_id=actor_id,
+        request_id=request_id,
+        db_path=DB_FILE,
+    )
+    return JSONResponse(status_code=status_code, content=result)
+
+
 # ─── ENTRY POINT ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     uvicorn.run(
