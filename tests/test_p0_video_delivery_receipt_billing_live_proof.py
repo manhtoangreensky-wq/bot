@@ -28,6 +28,26 @@ import services.video_project_queue as queue
 import services.video_trace_state as vts
 
 
+@pytest.fixture(autouse=True)
+def mock_probe_video(monkeypatch):
+    """Deterministic media probe fixture reconciling historical dummy test bytes with production ffprobe."""
+    def fake_probe(path, *args, **kwargs):
+        p = str(path or "")
+        if "corrupt" in p or "invalid" in p:
+            return {"ok": False, "error": "corrupt_video"}
+        if p and os.path.isfile(p) and os.path.getsize(p) > 0:
+            return {
+                "ok": True,
+                "duration": 5.0,
+                "has_video": True,
+                "format": "mp4",
+                "streams": [{"codec_type": "video"}],
+            }
+        return {"ok": False, "error": "file_not_found"}
+
+    monkeypatch.setattr(queue.video_local_validation, "probe_video_file", fake_probe)
+
+
 def test_scenario_1_valid_artifact_delivered_receipt_persisted_charges_once(tmp_path):
     """1. valid artifact + delivery accepted + receipt persisted -> one charge"""
     valid_mp4 = str(tmp_path / "final_valid.mp4")
