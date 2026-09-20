@@ -3176,6 +3176,68 @@ def renew_worker_lease(
     return int(cursor.rowcount or 0) == 1
 
 
+def _handle_autopost_video_edit_seam(conn, job: dict[str, Any], *, started_tx: bool) -> dict[str, Any]:
+    if not job or job.get("status") not in {"delivered", "charged"} or job.get("receipt_state") != "created":
+        return job
+    if not started_tx:
+        job["autopost_handoff"] = {
+            "attempted": False,
+            "created_or_reused": False,
+            "handoff_id": None,
+            "blocker": "caller_transaction_uncommitted",
+            "post_commit_intent": {
+                "source_product": "video_edit",
+                "source_ref": int(job.get("id") or 0),
+                "requesting_user_id": int(job.get("user_id") or 0),
+            },
+        }
+        return job
+
+    autopost_info = None
+    try:
+        from services.autopost_asset_handoff import notify_autopost_producer_completion
+        autopost_info = notify_autopost_producer_completion(
+            conn,
+            source_product="video_edit",
+            source_ref=int(job.get("id") or 0),
+            requesting_user_id=int(job.get("user_id") or 0),
+        )
+        job["autopost_handoff"] = autopost_info
+        from services import autopost_video_edit_adapter as avea
+        intent = avea.get_video_edit_autopost_intent(
+            conn,
+            owner_id=int(job.get("user_id") or 0),
+            video_edit_job_id=int(job.get("id") or 0),
+        )
+        if intent and intent.get("mode") in {"DRAFT_ONLY", "SCHEDULE_NOW", "SCHEDULE_AT"}:
+            adapter_res, _ = avea.process_video_edit_autopost_handoff(
+                conn,
+                video_edit_job_id=int(job.get("id") or 0),
+                owner_id=int(job.get("user_id") or 0),
+                handoff_receipt=autopost_info,
+            )
+            job["autopost_adapter"] = adapter_res
+    except Exception as exc:
+        if autopost_info is None:
+            job["autopost_handoff"] = {
+                "attempted": True,
+                "created_or_reused": False,
+                "handoff_id": None,
+                "blocker": f"autopost_callback_error:{type(exc).__name__}",
+            }
+        job["autopost_adapter"] = {
+            "attempted": True,
+            "mode": None,
+            "intent_id": None,
+            "handoff_id": None,
+            "draft_id": None,
+            "publication_id": None,
+            "state": None,
+            "blocker": f"autopost_adapter_error:{type(exc).__name__}",
+        }
+    return job
+
+
 def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail: dict, receipt: dict) -> dict[str, Any]:
     ensure_schema(conn)
     started_tx = False
@@ -3194,61 +3256,7 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
             current.get("status") in {"delivered", "charged"}
             and current.get("receipt_state") == "created"
         ):
-            if not started_tx:
-                current["autopost_handoff"] = {
-                    "attempted": False,
-                    "created_or_reused": False,
-                    "handoff_id": None,
-                    "blocker": "caller_transaction_uncommitted",
-                    "post_commit_intent": {
-                        "source_product": "video_edit",
-                        "source_ref": int(current.get("id") or 0),
-                        "requesting_user_id": int(current.get("user_id") or 0),
-                    },
-                }
-            else:
-                autopost_info = None
-                try:
-                    from services.autopost_asset_handoff import notify_autopost_producer_completion
-                    autopost_info = notify_autopost_producer_completion(
-                        conn,
-                        source_product="video_edit",
-                        source_ref=int(current.get("id") or 0),
-                        requesting_user_id=int(current.get("user_id") or 0),
-                    )
-                    current["autopost_handoff"] = autopost_info
-                    from services import autopost_video_edit_adapter as avea
-                    intent = avea.get_video_edit_autopost_intent(
-                        conn,
-                        owner_id=int(current.get("user_id") or 0),
-                        video_edit_job_id=int(current.get("id") or 0),
-                    )
-                    if intent and intent.get("mode") in {"DRAFT_ONLY", "SCHEDULE_NOW", "SCHEDULE_AT"}:
-                        adapter_res, _ = avea.process_video_edit_autopost_handoff(
-                            conn,
-                            video_edit_job_id=int(current.get("id") or 0),
-                            owner_id=int(current.get("user_id") or 0),
-                            handoff_receipt=autopost_info,
-                        )
-                        current["autopost_adapter"] = adapter_res
-                except Exception as exc:
-                    if autopost_info is None:
-                        current["autopost_handoff"] = {
-                            "attempted": True,
-                            "created_or_reused": False,
-                            "handoff_id": None,
-                            "blocker": f"autopost_callback_error:{type(exc).__name__}",
-                        }
-                    current["autopost_adapter"] = {
-                        "attempted": True,
-                        "mode": None,
-                        "intent_id": None,
-                        "handoff_id": None,
-                        "draft_id": None,
-                        "publication_id": None,
-                        "state": None,
-                        "blocker": f"autopost_adapter_error:{type(exc).__name__}",
-                    }
+            _handle_autopost_video_edit_seam(conn, current, started_tx=started_tx)
         return current
     delivery_owner, delivery_claim_attempt = _cleanup_delivery_binding(
         conn,
@@ -3587,79 +3595,39 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
         and job.get("status") in {"delivered", "charged"}
         and job.get("receipt_state") == "created"
     ):
-        if not started_tx:
-            job["autopost_handoff"] = {
-                "attempted": False,
-                "created_or_reused": False,
-                "handoff_id": None,
-                "blocker": "caller_transaction_uncommitted",
-                "post_commit_intent": {
-                    "source_product": "video_edit",
-                    "source_ref": int(job.get("id") or 0),
-                    "requesting_user_id": int(job.get("user_id") or 0),
-                },
-            }
-        else:
-            autopost_info = None
-            try:
-                from services.autopost_asset_handoff import notify_autopost_producer_completion
-                autopost_info = notify_autopost_producer_completion(
-                    conn,
-                    source_product="video_edit",
-                    source_ref=int(job.get("id") or 0),
-                    requesting_user_id=int(job.get("user_id") or 0),
-                )
-                job["autopost_handoff"] = autopost_info
-                from services import autopost_video_edit_adapter as avea
-                intent = avea.get_video_edit_autopost_intent(
-                    conn,
-                    owner_id=int(job.get("user_id") or 0),
-                    video_edit_job_id=int(job.get("id") or 0),
-                )
-                if intent and intent.get("mode") in {"DRAFT_ONLY", "SCHEDULE_NOW", "SCHEDULE_AT"}:
-                    adapter_res, _ = avea.process_video_edit_autopost_handoff(
-                        conn,
-                        video_edit_job_id=int(job.get("id") or 0),
-                        owner_id=int(job.get("user_id") or 0),
-                        handoff_receipt=autopost_info,
-                    )
-                    job["autopost_adapter"] = adapter_res
-            except Exception as exc:
-                if autopost_info is None:
-                    job["autopost_handoff"] = {
-                        "attempted": True,
-                        "created_or_reused": False,
-                        "handoff_id": None,
-                        "blocker": f"autopost_callback_error:{type(exc).__name__}",
-                    }
-                job["autopost_adapter"] = {
-                    "attempted": True,
-                    "mode": None,
-                    "intent_id": None,
-                    "handoff_id": None,
-                    "draft_id": None,
-                    "publication_id": None,
-                    "state": None,
-                    "blocker": f"autopost_adapter_error:{type(exc).__name__}",
-                }
+        _handle_autopost_video_edit_seam(conn, job, started_tx=started_tx)
     elif started_tx and conn.in_transaction:
         conn.commit()
     return job
 
 
 def mark_charge_result(conn, *, worker_job_id: Any, ok: bool, charged_xu: int = 0, reason: str = "") -> dict[str, Any]:
+    ensure_schema(conn)
+    started_tx = False
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+        started_tx = True
+
     current = get_job_by_worker_id(conn, worker_job_id)
     if not current or current.get("receipt_state") != "created":
-        return current
+        if started_tx and conn.in_transaction:
+            conn.commit()
+        return current or {}
     price_xu = _strict_nonnegative_int(
         current.get("price_xu", 0), reason="canonical_price_invalid"
     )
     if price_xu <= 0:
+        if started_tx and conn.in_transaction:
+            conn.commit()
         return current
     now = _now()
     if current.get("charge_state") == "charged":
-        return current
+        if started_tx and conn.in_transaction:
+            conn.commit()
+        return _handle_autopost_video_edit_seam(conn, current, started_tx=started_tx)
     if current.get("charge_state") != "charging":
+        if started_tx and conn.in_transaction:
+            conn.commit()
         return current
     if ok:
         try:
@@ -3673,23 +3641,37 @@ def mark_charge_result(conn, *, worker_job_id: Any, ok: bool, charged_xu: int = 
                 "UPDATE video_edit_jobs SET charge_state='charge_failed',charged_xu=0,blocker='charge_amount_mismatch',updated_at=? WHERE id=?",
                 (now, int(current["id"])),
             )
+            if started_tx and conn.in_transaction:
+                conn.commit()
+            return get_job_by_worker_id(conn, worker_job_id)
         else:
             conn.execute(
                 "UPDATE video_edit_jobs SET status='charged',charge_state='charged',charged_xu=?,blocker='',charged_at=?,updated_at=? WHERE id=?",
                 (charged_amount, now, now, int(current["id"])),
             )
+            if started_tx and conn.in_transaction:
+                conn.commit()
+            job = get_job_by_worker_id(conn, worker_job_id)
+            return _handle_autopost_video_edit_seam(conn, job, started_tx=started_tx)
     else:
         conn.execute(
             "UPDATE video_edit_jobs SET charge_state='charge_failed',blocker=?,updated_at=? WHERE id=?",
             (str(reason or "charge_failed_after_delivery")[:180], now, int(current["id"])),
         )
-    return get_job_by_worker_id(conn, worker_job_id)
+        if started_tx and conn.in_transaction:
+            conn.commit()
+        return get_job_by_worker_id(conn, worker_job_id)
 
 
 def claim_charge(conn, *, worker_job_id: Any) -> bool:
     """Atomically grant one post-delivery charge attempt."""
 
     ensure_schema(conn)
+    started_tx = False
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+        started_tx = True
+
     row = conn.execute(
         """SELECT status,receipt_state,charge_state,price_xu,source_sha256,
                   output_file_id,output_path,output_sha256,output_size_bytes,
@@ -3699,6 +3681,8 @@ def claim_charge(conn, *, worker_job_id: Any) -> bool:
         (int(worker_job_id or 0),),
     ).fetchone()
     if not row:
+        if started_tx and conn.in_transaction:
+            conn.commit()
         return False
     try:
         price_xu = _strict_nonnegative_int(row[3], reason="canonical_price_invalid")
@@ -3712,11 +3696,17 @@ def claim_charge(conn, *, worker_job_id: Any) -> bool:
         artifact_value = json.loads(str(row[12]))
         canonical_tail = json.loads(str(row[14]))
     except (TypeError, ValueError, json.JSONDecodeError):
+        if started_tx and conn.in_transaction:
+            conn.commit()
         return False
     if not isinstance(canonical_tail, dict):
+        if started_tx and conn.in_transaction:
+            conn.commit()
         return False
     artifacts = _artifact_receipts(artifact_value)
     if not _artifact_receipts_valid(artifact_value):
+        if started_tx and conn.in_transaction:
+            conn.commit()
         return False
     delivery_message_id = _telegram_message_id(row[10])
     delivery_file_id = _telegram_file_id(row[11])
@@ -3730,8 +3720,12 @@ def claim_charge(conn, *, worker_job_id: Any) -> bool:
             )
             _validate_delivery_cursor_receipt_prefix(strict_cursor, artifacts)
         except (TypeError, ValueError):
+            if started_tx and conn.in_transaction:
+                conn.commit()
             return False
         if strict_cursor.state != "delivered":
+            if started_tx and conn.in_transaction:
+                conn.commit()
             return False
     bound_artifact = (
         artifacts[-1]
@@ -3770,6 +3764,8 @@ def claim_charge(conn, *, worker_job_id: Any) -> bool:
         )
     )
     if not evidence_valid:
+        if started_tx and conn.in_transaction:
+            conn.commit()
         return False
     cursor = conn.execute(
         """UPDATE video_edit_jobs
@@ -3797,4 +3793,7 @@ def claim_charge(conn, *, worker_job_id: Any) -> bool:
             row[10], row[11], row[12], row[13], row[14],
         ),
     )
-    return int(cursor.rowcount or 0) == 1
+    ok = int(cursor.rowcount or 0) == 1
+    if started_tx and conn.in_transaction:
+        conn.commit()
+    return ok

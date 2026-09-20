@@ -91,6 +91,20 @@ def _setup_video_edit_job(
     sha = _sha256(raw_bytes)
     now = "2026-03-20T10:00:00Z"
 
+    canonical_probe = {
+        "ok": True,
+        "has_video": True,
+        "has_audio": True,
+        "video_codec": "h264",
+        "audio_codec": "aac",
+        "duration": 15.0,
+        "duration_ms": 15000,
+        "width": 720,
+        "height": 1280,
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "full_decode": True,
+    }
+
     conn.execute(
         """INSERT OR REPLACE INTO video_edit_jobs (
             id, idempotency_key, user_id, chat_id, product_type, worker_job_type,
@@ -104,10 +118,10 @@ def _setup_video_edit_job(
         ) VALUES (
             ?, ?, ?, '88', 'video_edit', 'video_local_edit',
             'local_worker_ffmpeg', 'local_video_edit', 'session-1', ?, 'source-file-1',
-            '', '', '{}', '{}',
+            '', ?, '{}', '{}',
             ?, '300', 100, ?, 100,
-            '', 'out-file-1', ?, ?, ?,
-            '{}', 'msg-1', 'del-file-1', '[]',
+            '', 'del-file-1', ?, ?, ?,
+            ?, '9001', 'del-file-1', '[]',
             0, ?, 'not_charged', 0, ?,
             ?, ?, '', ?, ?
         )""",
@@ -116,11 +130,13 @@ def _setup_video_edit_job(
             f"idemp_{job_id}",
             str(uid),
             status,
+            "c" * 64,
             tail_json,
             local_worker_job_id,
             str(video_file),
             sha,
             len(raw_bytes),
+            json.dumps(canonical_probe),
             receipt_state,
             now,
             now,
@@ -692,12 +708,20 @@ def test_36_delivered_to_charged_replay_same_handoff(tmp_path):
 
     r1, _ = avea.process_video_edit_autopost_handoff(conn, 501, 77)
 
-    # Progress state to charged
-    conn.execute("UPDATE video_edit_jobs SET status='charged', charge_state='charged', charged_xu=100 WHERE id=501")
-    conn.commit()
+    # Canonical charge transition
+    claimed = video_editengine1.claim_charge(conn, worker_job_id=901)
+    assert claimed is True
+    charged = video_editengine1.mark_charge_result(conn, worker_job_id=901, ok=True, charged_xu=100)
+    assert charged.get("status") == "charged"
+    assert charged.get("charge_state") == "charged"
+    assert charged.get("charged_xu") == 100
 
-    r2, _ = avea.process_video_edit_autopost_handoff(conn, 501, 77)
-    assert r1["handoff_id"] == r2["handoff_id"]
+    assert charged["autopost_handoff"]["handoff_id"] == r1["handoff_id"]
+    assert charged["autopost_adapter"]["handoff_id"] == r1["handoff_id"]
+
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM autopost_handoff_receipts")
+    assert cur.fetchone()[0] == 1
 
 
 def test_37_delivered_to_charged_replay_same_draft(tmp_path):
@@ -707,11 +731,20 @@ def test_37_delivered_to_charged_replay_same_draft(tmp_path):
     avea.register_video_edit_autopost_intent(conn, 77, 501, "SCHEDULE_NOW")
 
     r1, _ = avea.process_video_edit_autopost_handoff(conn, 501, 77)
-    conn.execute("UPDATE video_edit_jobs SET status='charged', charge_state='charged', charged_xu=100 WHERE id=501")
-    conn.commit()
 
-    r2, _ = avea.process_video_edit_autopost_handoff(conn, 501, 77)
-    assert r1["draft_id"] == r2["draft_id"]
+    # Canonical charge transition
+    claimed = video_editengine1.claim_charge(conn, worker_job_id=901)
+    assert claimed is True
+    charged = video_editengine1.mark_charge_result(conn, worker_job_id=901, ok=True, charged_xu=100)
+    assert charged.get("status") == "charged"
+    assert charged.get("charge_state") == "charged"
+    assert charged.get("charged_xu") == 100
+
+    assert charged["autopost_adapter"]["draft_id"] == r1["draft_id"]
+
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM autopost_publication_drafts")
+    assert cur.fetchone()[0] == 1
 
 
 def test_38_delivered_to_charged_replay_same_publication(tmp_path):
@@ -721,11 +754,16 @@ def test_38_delivered_to_charged_replay_same_publication(tmp_path):
     avea.register_video_edit_autopost_intent(conn, 77, 501, "SCHEDULE_NOW")
 
     r1, _ = avea.process_video_edit_autopost_handoff(conn, 501, 77)
-    conn.execute("UPDATE video_edit_jobs SET status='charged', charge_state='charged', charged_xu=100 WHERE id=501")
-    conn.commit()
 
-    r2, _ = avea.process_video_edit_autopost_handoff(conn, 501, 77)
-    assert r1["publication_id"] == r2["publication_id"]
+    # Canonical charge transition
+    claimed = video_editengine1.claim_charge(conn, worker_job_id=901)
+    assert claimed is True
+    charged = video_editengine1.mark_charge_result(conn, worker_job_id=901, ok=True, charged_xu=100)
+    assert charged.get("status") == "charged"
+    assert charged.get("charge_state") == "charged"
+    assert charged.get("charged_xu") == 100
+
+    assert charged["autopost_adapter"]["publication_id"] == r1["publication_id"]
 
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM autopost_publication_queue")
@@ -773,7 +811,7 @@ def test_41_autopost_failure_leaves_receipt_delivery_metadata(tmp_path):
     row = cur.fetchone()
     assert row["receipt_state"] == "created"
     assert row["delivered_at"] == "2026-03-20T10:00:00Z"
-    assert row["delivery_message_id"] == "msg-1"
+    assert row["delivery_message_id"] in ("msg-1", "9001")
 
 
 def test_42_autopost_failure_does_not_alter_charge_state(tmp_path):
@@ -1102,3 +1140,310 @@ def test_65_record_worker_update_without_intent_has_no_autopost_adapter(tmp_path
     assert updated.get("status") in {"delivered", "charged"}
     assert updated.get("autopost_handoff") is not None
     assert updated.get("autopost_adapter") is None
+
+
+# =========================================================================
+# TEST 66-77: CANONICAL CHARGE TRANSITION REPLAY & SAFETY GATES
+# =========================================================================
+
+def test_66_canonical_delivered_to_charged_same_handoff(tmp_path):
+    """66 canonical delivered -> claim_charge -> mark_charge_result -> same handoff"""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    jid, wid, vf, sha = _setup_video_edit_job(conn, tmp_path, uid=77, job_id=501, local_worker_job_id=901, status="delivered")
+    avea.register_video_edit_autopost_intent(conn, 77, jid, "SCHEDULE_NOW")
+
+    r1, _ = avea.process_video_edit_autopost_handoff(conn, jid, 77)
+
+    claimed = video_editengine1.claim_charge(conn, worker_job_id=wid)
+    assert claimed is True
+    charged = video_editengine1.mark_charge_result(conn, worker_job_id=wid, ok=True, charged_xu=100)
+
+    assert charged.get("status") == "charged"
+    assert charged.get("charge_state") == "charged"
+    assert charged["autopost_handoff"]["handoff_id"] == r1["handoff_id"]
+
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM autopost_handoff_receipts WHERE source_job_id=?", (str(jid),))
+    assert cur.fetchone()[0] == 1
+
+
+def test_67_canonical_delivered_to_charged_same_draft(tmp_path):
+    """67 canonical delivered -> charged -> same draft"""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    jid, wid, vf, sha = _setup_video_edit_job(conn, tmp_path, uid=77, job_id=501, local_worker_job_id=901, status="delivered")
+    avea.register_video_edit_autopost_intent(conn, 77, jid, "SCHEDULE_NOW")
+
+    r1, _ = avea.process_video_edit_autopost_handoff(conn, jid, 77)
+
+    claimed = video_editengine1.claim_charge(conn, worker_job_id=wid)
+    assert claimed is True
+    charged = video_editengine1.mark_charge_result(conn, worker_job_id=wid, ok=True, charged_xu=100)
+
+    assert charged.get("status") == "charged"
+    assert charged["autopost_adapter"]["draft_id"] == r1["draft_id"]
+
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM autopost_publication_drafts WHERE handoff_id=?", (r1["handoff_id"],))
+    assert cur.fetchone()[0] == 1
+
+
+def test_68_canonical_delivered_to_charged_same_publication(tmp_path):
+    """68 canonical delivered -> charged -> same publication"""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    jid, wid, vf, sha = _setup_video_edit_job(conn, tmp_path, uid=77, job_id=501, local_worker_job_id=901, status="delivered")
+    avea.register_video_edit_autopost_intent(conn, 77, jid, "SCHEDULE_NOW")
+
+    r1, _ = avea.process_video_edit_autopost_handoff(conn, jid, 77)
+
+    claimed = video_editengine1.claim_charge(conn, worker_job_id=wid)
+    assert claimed is True
+    charged = video_editengine1.mark_charge_result(conn, worker_job_id=wid, ok=True, charged_xu=100)
+
+    assert charged.get("status") == "charged"
+    assert charged["autopost_adapter"]["publication_id"] == r1["publication_id"]
+
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM autopost_publication_queue WHERE draft_id=?", (r1["draft_id"],))
+    assert cur.fetchone()[0] == 1
+
+
+def test_69_charged_transition_replay_with_publication_claimed(tmp_path):
+    """69 charged transition replay with publication CLAIMED"""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    jid, wid, vf, sha = _setup_video_edit_job(conn, tmp_path, uid=77, job_id=501, local_worker_job_id=901, status="delivered")
+    avea.register_video_edit_autopost_intent(conn, 77, jid, "SCHEDULE_NOW")
+
+    r1, _ = avea.process_video_edit_autopost_handoff(conn, jid, 77)
+    pub_id = r1["publication_id"]
+
+    # Progress queue state to CLAIMED
+    conn.execute("UPDATE autopost_publication_queue SET state='CLAIMED' WHERE publication_id=?", (pub_id,))
+    conn.commit()
+
+    claimed = video_editengine1.claim_charge(conn, worker_job_id=wid)
+    assert claimed is True
+    charged = video_editengine1.mark_charge_result(conn, worker_job_id=wid, ok=True, charged_xu=100)
+
+    assert charged.get("status") == "charged"
+    assert charged["autopost_adapter"]["publication_id"] == pub_id
+    assert charged["autopost_adapter"]["state"] == "CLAIMED"
+
+    # Verify no state regression in database
+    cur = conn.cursor()
+    cur.execute("SELECT state FROM autopost_publication_queue WHERE publication_id=?", (pub_id,))
+    assert cur.fetchone()[0] == "CLAIMED"
+
+
+def test_70_charged_transition_replay_with_publication_publishing(tmp_path):
+    """70 charged transition replay with publication PUBLISHING"""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    jid, wid, vf, sha = _setup_video_edit_job(conn, tmp_path, uid=77, job_id=501, local_worker_job_id=901, status="delivered")
+    avea.register_video_edit_autopost_intent(conn, 77, jid, "SCHEDULE_NOW")
+
+    r1, _ = avea.process_video_edit_autopost_handoff(conn, jid, 77)
+    pub_id = r1["publication_id"]
+
+    conn.execute("UPDATE autopost_publication_queue SET state='PUBLISHING' WHERE publication_id=?", (pub_id,))
+    conn.commit()
+
+    claimed = video_editengine1.claim_charge(conn, worker_job_id=wid)
+    assert claimed is True
+    charged = video_editengine1.mark_charge_result(conn, worker_job_id=wid, ok=True, charged_xu=100)
+
+    assert charged.get("status") == "charged"
+    assert charged["autopost_adapter"]["publication_id"] == pub_id
+    assert charged["autopost_adapter"]["state"] == "PUBLISHING"
+
+    cur = conn.cursor()
+    cur.execute("SELECT state FROM autopost_publication_queue WHERE publication_id=?", (pub_id,))
+    assert cur.fetchone()[0] == "PUBLISHING"
+
+
+def test_71_charged_transition_replay_with_publication_published(tmp_path):
+    """71 charged transition replay with publication PUBLISHED"""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    jid, wid, vf, sha = _setup_video_edit_job(conn, tmp_path, uid=77, job_id=501, local_worker_job_id=901, status="delivered")
+    avea.register_video_edit_autopost_intent(conn, 77, jid, "SCHEDULE_NOW")
+
+    r1, _ = avea.process_video_edit_autopost_handoff(conn, jid, 77)
+    pub_id = r1["publication_id"]
+
+    conn.execute("UPDATE autopost_publication_queue SET state='PUBLISHED' WHERE publication_id=?", (pub_id,))
+    conn.commit()
+
+    claimed = video_editengine1.claim_charge(conn, worker_job_id=wid)
+    assert claimed is True
+    charged = video_editengine1.mark_charge_result(conn, worker_job_id=wid, ok=True, charged_xu=100)
+
+    assert charged.get("status") == "charged"
+    assert charged["autopost_adapter"]["publication_id"] == pub_id
+    assert charged["autopost_adapter"]["state"] == "PUBLISHED"
+
+    cur = conn.cursor()
+    cur.execute("SELECT state FROM autopost_publication_queue WHERE publication_id=?", (pub_id,))
+    assert cur.fetchone()[0] == "PUBLISHED"
+
+
+def test_72_charged_transition_replay_with_failed_retryable(tmp_path):
+    """72 charged transition replay with FAILED_RETRYABLE"""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    jid, wid, vf, sha = _setup_video_edit_job(conn, tmp_path, uid=77, job_id=501, local_worker_job_id=901, status="delivered")
+    avea.register_video_edit_autopost_intent(conn, 77, jid, "SCHEDULE_NOW")
+
+    r1, _ = avea.process_video_edit_autopost_handoff(conn, jid, 77)
+    pub_id = r1["publication_id"]
+
+    conn.execute("UPDATE autopost_publication_queue SET state='FAILED_RETRYABLE' WHERE publication_id=?", (pub_id,))
+    conn.commit()
+
+    claimed = video_editengine1.claim_charge(conn, worker_job_id=wid)
+    assert claimed is True
+    charged = video_editengine1.mark_charge_result(conn, worker_job_id=wid, ok=True, charged_xu=100)
+
+    assert charged.get("status") == "charged"
+    assert charged["autopost_adapter"]["publication_id"] == pub_id
+    assert charged["autopost_adapter"]["state"] == "FAILED_RETRYABLE"
+
+    cur = conn.cursor()
+    cur.execute("SELECT state FROM autopost_publication_queue WHERE publication_id=?", (pub_id,))
+    assert cur.fetchone()[0] == "FAILED_RETRYABLE"
+
+
+def test_73_charged_transition_replay_with_failed_final(tmp_path):
+    """73 charged transition replay with FAILED_FINAL"""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    jid, wid, vf, sha = _setup_video_edit_job(conn, tmp_path, uid=77, job_id=501, local_worker_job_id=901, status="delivered")
+    avea.register_video_edit_autopost_intent(conn, 77, jid, "SCHEDULE_NOW")
+
+    r1, _ = avea.process_video_edit_autopost_handoff(conn, jid, 77)
+    pub_id = r1["publication_id"]
+
+    conn.execute("UPDATE autopost_publication_queue SET state='FAILED_FINAL' WHERE publication_id=?", (pub_id,))
+    conn.commit()
+
+    claimed = video_editengine1.claim_charge(conn, worker_job_id=wid)
+    assert claimed is True
+    charged = video_editengine1.mark_charge_result(conn, worker_job_id=wid, ok=True, charged_xu=100)
+
+    assert charged.get("status") == "charged"
+    assert charged["autopost_adapter"]["publication_id"] == pub_id
+    assert charged["autopost_adapter"]["state"] == "FAILED_FINAL"
+
+    cur = conn.cursor()
+    cur.execute("SELECT state FROM autopost_publication_queue WHERE publication_id=?", (pub_id,))
+    assert cur.fetchone()[0] == "FAILED_FINAL"
+
+
+def test_74_charged_transition_replay_with_cancelled(tmp_path):
+    """74 charged transition replay with CANCELLED"""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    jid, wid, vf, sha = _setup_video_edit_job(conn, tmp_path, uid=77, job_id=501, local_worker_job_id=901, status="delivered")
+    avea.register_video_edit_autopost_intent(conn, 77, jid, "SCHEDULE_NOW")
+
+    r1, _ = avea.process_video_edit_autopost_handoff(conn, jid, 77)
+    pub_id = r1["publication_id"]
+
+    conn.execute("UPDATE autopost_publication_queue SET state='CANCELLED' WHERE publication_id=?", (pub_id,))
+    conn.commit()
+
+    claimed = video_editengine1.claim_charge(conn, worker_job_id=wid)
+    assert claimed is True
+    charged = video_editengine1.mark_charge_result(conn, worker_job_id=wid, ok=True, charged_xu=100)
+
+    assert charged.get("status") == "charged"
+    assert charged["autopost_adapter"]["publication_id"] == pub_id
+    assert charged["autopost_adapter"]["state"] == "CANCELLED"
+
+    cur = conn.cursor()
+    cur.execute("SELECT state FROM autopost_publication_queue WHERE publication_id=?", (pub_id,))
+    assert cur.fetchone()[0] == "CANCELLED"
+
+
+def test_75_autopost_replay_failure_after_charge_leaves_charged_xu_unchanged(tmp_path, monkeypatch):
+    """75 AutoPost replay failure after charge leaves charged_xu unchanged"""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    jid, wid, vf, sha = _setup_video_edit_job(conn, tmp_path, uid=77, job_id=501, local_worker_job_id=901, status="delivered")
+    avea.register_video_edit_autopost_intent(conn, 77, jid, "SCHEDULE_NOW")
+
+    monkeypatch.setattr(avea, "process_video_edit_autopost_handoff", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("simulated_autopost_crash")))
+
+    claimed = video_editengine1.claim_charge(conn, worker_job_id=wid)
+    assert claimed is True
+    charged = video_editengine1.mark_charge_result(conn, worker_job_id=wid, ok=True, charged_xu=100)
+
+    assert charged.get("status") == "charged"
+    assert charged.get("charge_state") == "charged"
+    assert charged.get("charged_xu") == 100
+
+    cur = conn.cursor()
+    cur.execute("SELECT status, charge_state, charged_xu FROM video_edit_jobs WHERE id=?", (jid,))
+    row = cur.fetchone()
+    assert row["status"] == "charged"
+    assert row["charge_state"] == "charged"
+    assert row["charged_xu"] == 100
+
+
+def test_76_autopost_replay_failure_after_charge_leaves_delivery_metadata_unchanged(tmp_path, monkeypatch):
+    """76 AutoPost replay failure after charge leaves delivery metadata unchanged"""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    jid, wid, vf, sha = _setup_video_edit_job(conn, tmp_path, uid=77, job_id=501, local_worker_job_id=901, status="delivered")
+    avea.register_video_edit_autopost_intent(conn, 77, jid, "SCHEDULE_NOW")
+
+    cur = conn.cursor()
+    cur.execute("SELECT output_path, output_sha256, output_size_bytes, delivery_file_id, delivery_message_id FROM video_edit_jobs WHERE id=?", (jid,))
+    before = dict(cur.fetchone())
+
+    monkeypatch.setattr(avea, "process_video_edit_autopost_handoff", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("simulated_autopost_crash")))
+
+    claimed = video_editengine1.claim_charge(conn, worker_job_id=wid)
+    assert claimed is True
+    charged = video_editengine1.mark_charge_result(conn, worker_job_id=wid, ok=True, charged_xu=100)
+    assert charged.get("status") == "charged"
+
+    cur.execute("SELECT output_path, output_sha256, output_size_bytes, delivery_file_id, delivery_message_id FROM video_edit_jobs WHERE id=?", (jid,))
+    after = dict(cur.fetchone())
+    assert before == after
+
+
+def test_77_caller_owned_charge_transaction_does_not_execute_adapter_precommit(tmp_path, monkeypatch):
+    """77 caller-owned charge transaction does not execute adapter pre-commit"""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    jid, wid, vf, sha = _setup_video_edit_job(conn, tmp_path, uid=77, job_id=501, local_worker_job_id=901, status="delivered")
+    avea.register_video_edit_autopost_intent(conn, 77, jid, "SCHEDULE_NOW")
+
+    claimed = video_editengine1.claim_charge(conn, worker_job_id=wid)
+    assert claimed is True
+
+    # Caller owns an uncommitted transaction
+    conn.execute("BEGIN IMMEDIATE")
+    assert conn.in_transaction is True
+
+    adapter_calls = []
+    monkeypatch.setattr(avea, "process_video_edit_autopost_handoff", lambda *a, **kw: adapter_calls.append(True))
+
+    charged = video_editengine1.mark_charge_result(conn, worker_job_id=wid, ok=True, charged_xu=100)
+
+    # 1. Zero pre-commit adapter calls
+    assert len(adapter_calls) == 0
+
+    # 2. No force commit: transaction remains open and owned by caller
+    assert conn.in_transaction is True
+
+    # 3. Observability blocker recorded
+    assert charged.get("autopost_handoff", {}).get("blocker") == "caller_transaction_uncommitted"
+
+    # 4. Post-commit: caller commits and can safely invoke adapter
+    conn.commit()
+    assert conn.in_transaction is False
