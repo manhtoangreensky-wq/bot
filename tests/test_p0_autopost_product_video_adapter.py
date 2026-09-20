@@ -1245,3 +1245,131 @@ def test_48_cancelled_replay_does_not_recreate_publication(tmp_path: Path, monke
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM autopost_publication_queue")
     assert cur.fetchone()[0] == 1
+
+
+def test_49_schedule_now_rejects_caller_supplied_future_schedule_at(tmp_path: Path):
+    """49: FIRST RED (C2) - SCHEDULE_NOW rejects caller-supplied schedule_at fail-closed."""
+    conn = sqlite3.connect(tmp_path / "t49.db")
+    conn.row_factory = sqlite3.Row
+
+    project_id, job_id, video_file, sha = _setup_product_video_job(conn, tmp_path, uid=101)
+
+    intent, status = apva.register_product_video_autopost_intent(
+        conn,
+        owner_id=101,
+        product_video_job_id=job_id,
+        mode="SCHEDULE_NOW",
+        schedule_at="2099-01-01T00:00:00Z",
+    )
+    assert intent is None
+    assert status == "schedule_at_not_allowed_for_schedule_now"
+
+
+def test_50_rejected_schedule_now_override_creates_zero_intent_rows(tmp_path: Path):
+    """50: Rejected SCHEDULE_NOW with schedule_at creates zero intent rows in DB."""
+    conn = sqlite3.connect(tmp_path / "t50.db")
+    conn.row_factory = sqlite3.Row
+
+    project_id, job_id, video_file, sha = _setup_product_video_job(conn, tmp_path, uid=101)
+
+    intent, status = apva.register_product_video_autopost_intent(
+        conn,
+        owner_id=101,
+        product_video_job_id=job_id,
+        mode="SCHEDULE_NOW",
+        schedule_at="2099-01-01T00:00:00Z",
+    )
+    assert intent is None
+    assert status == "schedule_at_not_allowed_for_schedule_now"
+
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM autopost_product_video_intents WHERE owner_id=101 AND product_video_job_id=?", (job_id,))
+    assert cur.fetchone()[0] == 0
+
+
+def test_51_normal_schedule_now_persists_norm_now(tmp_path: Path):
+    """51: Normal SCHEDULE_NOW without schedule_at persists canonical registration timestamp norm_now."""
+    conn = sqlite3.connect(tmp_path / "t51.db")
+    conn.row_factory = sqlite3.Row
+    t_reg = "2026-09-20T12:34:56Z"
+
+    project_id, job_id, video_file, sha = _setup_product_video_job(conn, tmp_path, uid=101)
+
+    intent, status = apva.register_product_video_autopost_intent(
+        conn,
+        owner_id=101,
+        product_video_job_id=job_id,
+        mode="SCHEDULE_NOW",
+        schedule_at=None,
+        now=t_reg,
+    )
+    assert intent is not None
+    assert status == "registered"
+    assert intent["schedule_at"] == t_reg
+
+    cur = conn.cursor()
+    cur.execute("SELECT schedule_at FROM autopost_product_video_intents WHERE intent_id=?", (intent["intent_id"],))
+    assert cur.fetchone()[0] == t_reg
+
+
+def test_52_normal_schedule_now_replay_retains_exact_schedule_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """52: Normal SCHEDULE_NOW replay retains exact durable schedule_at across wall-clock changes."""
+    conn = sqlite3.connect(tmp_path / "t52.db")
+    conn.row_factory = sqlite3.Row
+    uid = 7126457028
+    t_reg = "2026-09-20T12:00:00Z"
+    t_replay = "2026-09-20T15:30:00Z"
+
+    project_id, job_id, video_file, sha = _setup_product_video_job(conn, tmp_path, uid=uid)
+    intent, status = apva.register_product_video_autopost_intent(
+        conn,
+        owner_id=uid,
+        product_video_job_id=job_id,
+        mode="SCHEDULE_NOW",
+        schedule_at=None,
+        now=t_reg,
+    )
+    assert intent is not None
+
+    comp = _complete_job_helper(conn, job_id, video_file, sha, monkeypatch)
+    pub_id = comp["autopost_adapter"]["publication_id"]
+    assert pub_id is not None
+
+    cur = conn.cursor()
+    cur.execute("SELECT schedule_at FROM autopost_publication_queue WHERE publication_id=?", (pub_id,))
+    assert cur.fetchone()[0] == t_reg
+
+    # Replay with later timestamp
+    res, status = apva.process_product_video_autopost_handoff(conn, job_id, uid, now=t_replay)
+    assert res["blocker"] is None
+    assert res["state"] == "SCHEDULED"
+    assert res["publication_id"] == pub_id
+
+    cur.execute("SELECT schedule_at FROM autopost_publication_queue WHERE publication_id=?", (pub_id,))
+    assert cur.fetchone()[0] == t_reg
+    cur.execute("SELECT COUNT(*) FROM autopost_publication_queue")
+    assert cur.fetchone()[0] == 1
+
+
+def test_53_schedule_at_still_accepts_explicit_future_timestamp(tmp_path: Path):
+    """53: SCHEDULE_AT mode preserves accepting explicit future UTC timestamps."""
+    conn = sqlite3.connect(tmp_path / "t53.db")
+    conn.row_factory = sqlite3.Row
+    future_ts = "2026-10-01T09:00:00Z"
+
+    project_id, job_id, video_file, sha = _setup_product_video_job(conn, tmp_path, uid=101)
+
+    intent, status = apva.register_product_video_autopost_intent(
+        conn,
+        owner_id=101,
+        product_video_job_id=job_id,
+        mode="SCHEDULE_AT",
+        schedule_at=future_ts,
+    )
+    assert intent is not None
+    assert status == "registered"
+    assert intent["schedule_at"] == future_ts
+
+    cur = conn.cursor()
+    cur.execute("SELECT schedule_at FROM autopost_product_video_intents WHERE intent_id=?", (intent["intent_id"],))
+    assert cur.fetchone()[0] == future_ts

@@ -170,12 +170,8 @@ def register_product_video_autopost_intent(
         norm_schedule_at = validated_sched
     elif clean_mode == ProductVideoAutoPostMode.SCHEDULE_NOW.value:
         if schedule_at is not None:
-            validated_sched, sched_err = aps.parse_and_validate_utc(schedule_at)
-            if not validated_sched:
-                return None, f"invalid_schedule_at:{sched_err}"
-            norm_schedule_at = validated_sched
-        else:
-            norm_schedule_at = norm_now
+            return None, "schedule_at_not_allowed_for_schedule_now"
+        norm_schedule_at = norm_now
 
     # Bounded channels metadata validation
     norm_channels: list[str] = []
