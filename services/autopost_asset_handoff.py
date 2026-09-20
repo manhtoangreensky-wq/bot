@@ -773,9 +773,31 @@ def _persist_canonical_autopost_handoff(
         conn.commit()
     except sqlite3.IntegrityError:
         # Concurrent race / replay unique conflict path: recover and return canonical receipt
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         conflict_existing = _load_existing_receipt()
         if conflict_existing:
             return conflict_existing, "idempotent_existing_receipt"
+        cur.execute("SELECT * FROM autopost_handoff_receipts WHERE handoff_id=? LIMIT 1", (handoff_id,))
+        h_row = cur.fetchone()
+        if h_row:
+            existing = dict(h_row)
+            return HandoffReceipt(
+                handoff_id=existing["handoff_id"],
+                asset_id=existing["asset_id"],
+                owner_id=existing["owner_id"],
+                source_product=existing["source_product"],
+                source_job_id=existing["source_job_id"],
+                artifact_sha256=existing["artifact_sha256"],
+                purpose=existing["purpose"],
+                status=existing["status"],
+                parent_asset_id=existing.get("parent_asset_id"),
+                lineage=json.loads(existing.get("lineage_json") or "[]"),
+                created_at=existing["created_at"],
+                expires_at=existing.get("expires_at"),
+            ), "idempotent_existing_receipt"
         raise
 
     receipt = HandoffReceipt(
@@ -898,6 +920,10 @@ def receive_autopost_handoff_to_draft(
         )
         conn.commit()
     except sqlite3.IntegrityError:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         conflict_draft = _load_existing_draft()
         if conflict_draft:
             return conflict_draft, "idempotent_existing_draft"
