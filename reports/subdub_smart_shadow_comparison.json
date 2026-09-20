@@ -1,18 +1,18 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-09-20T07:55:46Z",
+  "generated_at": "2026-09-20T08:22:20Z",
   "program": "P0.SUBDUB.AUTO.SMART.MULTIVOICE.V1",
-  "task": "P0.SUBDUB.AUTO.SMART.MULTIVOICE.SHADOW.COMPARISON.VALIDATION.R1.C1",
+  "task": "P0.SUBDUB.AUTO.SMART.MULTIVOICE.SHADOW.COMPARISON.VALIDATION.R1.C2",
   "summary": {
     "total_fixtures": 24,
     "smart_executed": 24,
     "smart_manual_halts": 0,
     "legacy_auto_2_applicable": 7,
     "legacy_auto_2_executed": 7,
-    "legacy_auto_2_manual_halts": 3,
+    "legacy_auto_2_manual_halts": 4,
     "legacy_auto_multi_applicable": 12,
     "legacy_auto_multi_executed": 12,
-    "legacy_auto_multi_manual_halts": 12,
+    "legacy_auto_multi_manual_halts": 8,
     "legacy_auto_2_entrypoint_calls": 7,
     "legacy_auto_multi_entrypoint_calls": 12
   },
@@ -43,11 +43,29 @@
       },
       "legacy_auto_2_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       },
       "legacy_auto_multi_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       }
     },
     {
@@ -76,11 +94,29 @@
       },
       "legacy_auto_2_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       },
       "legacy_auto_multi_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       }
     },
     {
@@ -109,11 +145,29 @@
       },
       "legacy_auto_2_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       },
       "legacy_auto_multi_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       }
     },
     {
@@ -142,11 +196,29 @@
       },
       "legacy_auto_2_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       },
       "legacy_auto_multi_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       }
     },
     {
@@ -182,8 +254,8 @@
         "effective_speaker_count": 2,
         "effective_voice_count": 2,
         "speaker_voice_map": {
-          "spk_1": "voice_male_1",
-          "spk_2": "voice_female_1"
+          "chunk_00:speaker_0": "voice_male_1",
+          "chunk_00:speaker_1": "voice_female_2"
         },
         "tts_eligible_cues": 2,
         "tts_synthesized_cues": 2,
@@ -192,15 +264,24 @@
         "terminal_rejected_cues": 0,
         "unaccounted_cues": 0,
         "render_attempted": true,
-        "final_mp4_valid": true,
-        "fallback_strategy": "STRICT_TWO",
-        "failure_code": null
+        "final_mp4_valid": "NOT_OBSERVED",
+        "fallback_strategy": "NOT_EXPOSED",
+        "failure_code": null,
+        "provenance": {
+          "entrypoint_called": true,
+          "entrypoint_call_count": 1,
+          "manual_halt_source": "production_status_check",
+          "voice_map_source": "synthesize_segments_callback",
+          "tts_metric_source": "synthesize_segments_callback",
+          "render_metric_source": "run_lane_blackbox_callback",
+          "mp4_metric_source": "bounded_harness_unrendered"
+        }
       },
       "legacy_auto_multi_result": {
         "applicable": true,
         "result_state": "MANUAL_HALT",
         "manual_halt": true,
-        "detected_speaker_count": 2,
+        "detected_speaker_count": 0,
         "effective_speaker_count": 0,
         "effective_voice_count": 0,
         "speaker_voice_map": {},
@@ -211,9 +292,18 @@
         "terminal_rejected_cues": 0,
         "unaccounted_cues": 0,
         "render_attempted": false,
-        "final_mp4_valid": false,
-        "fallback_strategy": "MANUAL_REQUIRED",
-        "failure_code": "AUTO_CAST_MANUAL_REQUIRED"
+        "final_mp4_valid": "NOT_OBSERVED",
+        "fallback_strategy": "NOT_EXPOSED",
+        "failure_code": "AUTO_CAST_MANUAL_REQUIRED",
+        "provenance": {
+          "entrypoint_called": true,
+          "entrypoint_call_count": 1,
+          "manual_halt_source": "production_status_check",
+          "voice_map_source": "synthesize_segments_callback",
+          "tts_metric_source": "synthesize_segments_callback",
+          "render_metric_source": "run_lane_blackbox_callback",
+          "mp4_metric_source": "bounded_harness_unrendered"
+        }
       }
     },
     {
@@ -249,8 +339,8 @@
         "effective_speaker_count": 2,
         "effective_voice_count": 2,
         "speaker_voice_map": {
-          "spk_1": "voice_male_1",
-          "spk_2": "voice_female_1"
+          "chunk_00:speaker_0": "voice_male_4",
+          "chunk_00:speaker_1": "voice_female_2"
         },
         "tts_eligible_cues": 2,
         "tts_synthesized_cues": 2,
@@ -259,15 +349,24 @@
         "terminal_rejected_cues": 0,
         "unaccounted_cues": 0,
         "render_attempted": true,
-        "final_mp4_valid": true,
-        "fallback_strategy": "STRICT_TWO",
-        "failure_code": null
+        "final_mp4_valid": "NOT_OBSERVED",
+        "fallback_strategy": "NOT_EXPOSED",
+        "failure_code": null,
+        "provenance": {
+          "entrypoint_called": true,
+          "entrypoint_call_count": 1,
+          "manual_halt_source": "production_status_check",
+          "voice_map_source": "synthesize_segments_callback",
+          "tts_metric_source": "synthesize_segments_callback",
+          "render_metric_source": "run_lane_blackbox_callback",
+          "mp4_metric_source": "bounded_harness_unrendered"
+        }
       },
       "legacy_auto_multi_result": {
         "applicable": true,
         "result_state": "MANUAL_HALT",
         "manual_halt": true,
-        "detected_speaker_count": 2,
+        "detected_speaker_count": 0,
         "effective_speaker_count": 0,
         "effective_voice_count": 0,
         "speaker_voice_map": {},
@@ -278,9 +377,18 @@
         "terminal_rejected_cues": 0,
         "unaccounted_cues": 0,
         "render_attempted": false,
-        "final_mp4_valid": false,
-        "fallback_strategy": "MANUAL_REQUIRED",
-        "failure_code": "AUTO_CAST_MANUAL_REQUIRED"
+        "final_mp4_valid": "NOT_OBSERVED",
+        "fallback_strategy": "NOT_EXPOSED",
+        "failure_code": "AUTO_CAST_MANUAL_REQUIRED",
+        "provenance": {
+          "entrypoint_called": true,
+          "entrypoint_call_count": 1,
+          "manual_halt_source": "production_status_check",
+          "voice_map_source": "synthesize_segments_callback",
+          "tts_metric_source": "synthesize_segments_callback",
+          "render_metric_source": "run_lane_blackbox_callback",
+          "mp4_metric_source": "bounded_harness_unrendered"
+        }
       }
     },
     {
@@ -323,15 +431,24 @@
         "terminal_rejected_cues": 0,
         "unaccounted_cues": 0,
         "render_attempted": false,
-        "final_mp4_valid": false,
-        "fallback_strategy": "MANUAL_REQUIRED",
-        "failure_code": "AUTO_CAST_MANUAL_REQUIRED"
+        "final_mp4_valid": "NOT_OBSERVED",
+        "fallback_strategy": "NOT_EXPOSED",
+        "failure_code": "AUTO_CAST_MANUAL_REQUIRED",
+        "provenance": {
+          "entrypoint_called": true,
+          "entrypoint_call_count": 1,
+          "manual_halt_source": "production_status_check",
+          "voice_map_source": "synthesize_segments_callback",
+          "tts_metric_source": "synthesize_segments_callback",
+          "render_metric_source": "run_lane_blackbox_callback",
+          "mp4_metric_source": "bounded_harness_unrendered"
+        }
       },
       "legacy_auto_multi_result": {
         "applicable": true,
         "result_state": "MANUAL_HALT",
         "manual_halt": true,
-        "detected_speaker_count": 2,
+        "detected_speaker_count": 0,
         "effective_speaker_count": 0,
         "effective_voice_count": 0,
         "speaker_voice_map": {},
@@ -342,9 +459,18 @@
         "terminal_rejected_cues": 0,
         "unaccounted_cues": 0,
         "render_attempted": false,
-        "final_mp4_valid": false,
-        "fallback_strategy": "MANUAL_REQUIRED",
-        "failure_code": "AUTO_CAST_MANUAL_REQUIRED"
+        "final_mp4_valid": "NOT_OBSERVED",
+        "fallback_strategy": "NOT_EXPOSED",
+        "failure_code": "AUTO_CAST_MANUAL_REQUIRED",
+        "provenance": {
+          "entrypoint_called": true,
+          "entrypoint_call_count": 1,
+          "manual_halt_source": "production_status_check",
+          "voice_map_source": "synthesize_segments_callback",
+          "tts_metric_source": "synthesize_segments_callback",
+          "render_metric_source": "run_lane_blackbox_callback",
+          "mp4_metric_source": "bounded_harness_unrendered"
+        }
       }
     },
     {
@@ -387,15 +513,24 @@
         "terminal_rejected_cues": 0,
         "unaccounted_cues": 0,
         "render_attempted": false,
-        "final_mp4_valid": false,
-        "fallback_strategy": "MANUAL_REQUIRED",
-        "failure_code": "AUTO_CAST_MANUAL_REQUIRED"
+        "final_mp4_valid": "NOT_OBSERVED",
+        "fallback_strategy": "NOT_EXPOSED",
+        "failure_code": "AUTO_CAST_MANUAL_REQUIRED",
+        "provenance": {
+          "entrypoint_called": true,
+          "entrypoint_call_count": 1,
+          "manual_halt_source": "production_status_check",
+          "voice_map_source": "synthesize_segments_callback",
+          "tts_metric_source": "synthesize_segments_callback",
+          "render_metric_source": "run_lane_blackbox_callback",
+          "mp4_metric_source": "bounded_harness_unrendered"
+        }
       },
       "legacy_auto_multi_result": {
         "applicable": true,
         "result_state": "MANUAL_HALT",
         "manual_halt": true,
-        "detected_speaker_count": 2,
+        "detected_speaker_count": 0,
         "effective_speaker_count": 0,
         "effective_voice_count": 0,
         "speaker_voice_map": {},
@@ -406,9 +541,18 @@
         "terminal_rejected_cues": 0,
         "unaccounted_cues": 0,
         "render_attempted": false,
-        "final_mp4_valid": false,
-        "fallback_strategy": "MANUAL_REQUIRED",
-        "failure_code": "AUTO_CAST_MANUAL_REQUIRED"
+        "final_mp4_valid": "NOT_OBSERVED",
+        "fallback_strategy": "NOT_EXPOSED",
+        "failure_code": "AUTO_CAST_MANUAL_REQUIRED",
+        "provenance": {
+          "entrypoint_called": true,
+          "entrypoint_call_count": 1,
+          "manual_halt_source": "production_status_check",
+          "voice_map_source": "synthesize_segments_callback",
+          "tts_metric_source": "synthesize_segments_callback",
+          "render_metric_source": "run_lane_blackbox_callback",
+          "mp4_metric_source": "bounded_harness_unrendered"
+        }
       }
     },
     {
@@ -439,26 +583,48 @@
       },
       "legacy_auto_2_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       },
       "legacy_auto_multi_result": {
         "applicable": true,
-        "result_state": "MANUAL_HALT",
-        "manual_halt": true,
+        "result_state": "SUCCESS",
+        "manual_halt": false,
         "detected_speaker_count": 3,
-        "effective_speaker_count": 0,
-        "effective_voice_count": 0,
-        "speaker_voice_map": {},
+        "effective_speaker_count": 3,
+        "effective_voice_count": 3,
+        "speaker_voice_map": {
+          "chunk_00:speaker_0": "voice_male_2",
+          "chunk_00:speaker_1": "voice_female_1",
+          "chunk_00:speaker_2": "voice_male_3"
+        },
         "tts_eligible_cues": 3,
-        "tts_synthesized_cues": 0,
+        "tts_synthesized_cues": 3,
         "preserved_cues": 0,
         "subtitle_only_cues": 0,
         "terminal_rejected_cues": 0,
         "unaccounted_cues": 0,
-        "render_attempted": false,
-        "final_mp4_valid": false,
-        "fallback_strategy": "MANUAL_REQUIRED",
-        "failure_code": "AUTO_CAST_MANUAL_REQUIRED"
+        "render_attempted": true,
+        "final_mp4_valid": "NOT_OBSERVED",
+        "fallback_strategy": "NOT_EXPOSED",
+        "failure_code": null,
+        "provenance": {
+          "entrypoint_called": true,
+          "entrypoint_call_count": 1,
+          "manual_halt_source": "production_status_check",
+          "voice_map_source": "synthesize_segments_callback",
+          "tts_metric_source": "synthesize_segments_callback",
+          "render_metric_source": "run_lane_blackbox_callback",
+          "mp4_metric_source": "bounded_harness_unrendered"
+        }
       }
     },
     {
@@ -491,26 +657,50 @@
       },
       "legacy_auto_2_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       },
       "legacy_auto_multi_result": {
         "applicable": true,
-        "result_state": "MANUAL_HALT",
-        "manual_halt": true,
+        "result_state": "SUCCESS",
+        "manual_halt": false,
         "detected_speaker_count": 5,
-        "effective_speaker_count": 0,
-        "effective_voice_count": 0,
-        "speaker_voice_map": {},
+        "effective_speaker_count": 5,
+        "effective_voice_count": 5,
+        "speaker_voice_map": {
+          "chunk_00:speaker_0": "voice_male_1",
+          "chunk_00:speaker_1": "voice_female_3",
+          "chunk_00:speaker_2": "voice_male_4",
+          "chunk_00:speaker_3": "voice_female_4",
+          "chunk_00:speaker_4": "voice_male_2"
+        },
         "tts_eligible_cues": 5,
-        "tts_synthesized_cues": 0,
+        "tts_synthesized_cues": 5,
         "preserved_cues": 0,
         "subtitle_only_cues": 0,
         "terminal_rejected_cues": 0,
         "unaccounted_cues": 0,
-        "render_attempted": false,
-        "final_mp4_valid": false,
-        "fallback_strategy": "MANUAL_REQUIRED",
-        "failure_code": "AUTO_CAST_MANUAL_REQUIRED"
+        "render_attempted": true,
+        "final_mp4_valid": "NOT_OBSERVED",
+        "fallback_strategy": "NOT_EXPOSED",
+        "failure_code": null,
+        "provenance": {
+          "entrypoint_called": true,
+          "entrypoint_call_count": 1,
+          "manual_halt_source": "production_status_check",
+          "voice_map_source": "synthesize_segments_callback",
+          "tts_metric_source": "synthesize_segments_callback",
+          "render_metric_source": "run_lane_blackbox_callback",
+          "mp4_metric_source": "bounded_harness_unrendered"
+        }
       }
     },
     {
@@ -546,26 +736,53 @@
       },
       "legacy_auto_2_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       },
       "legacy_auto_multi_result": {
         "applicable": true,
-        "result_state": "MANUAL_HALT",
-        "manual_halt": true,
+        "result_state": "SUCCESS",
+        "manual_halt": false,
         "detected_speaker_count": 8,
-        "effective_speaker_count": 0,
-        "effective_voice_count": 0,
-        "speaker_voice_map": {},
+        "effective_speaker_count": 8,
+        "effective_voice_count": 8,
+        "speaker_voice_map": {
+          "chunk_00:speaker_0": "voice_male_3",
+          "chunk_00:speaker_1": "voice_female_1",
+          "chunk_00:speaker_2": "voice_male_2",
+          "chunk_00:speaker_3": "voice_female_4",
+          "chunk_00:speaker_4": "voice_male_1",
+          "chunk_00:speaker_5": "voice_female_3",
+          "chunk_00:speaker_6": "voice_male_4",
+          "chunk_00:speaker_7": "voice_female_2"
+        },
         "tts_eligible_cues": 8,
-        "tts_synthesized_cues": 0,
+        "tts_synthesized_cues": 8,
         "preserved_cues": 0,
         "subtitle_only_cues": 0,
         "terminal_rejected_cues": 0,
         "unaccounted_cues": 0,
-        "render_attempted": false,
-        "final_mp4_valid": false,
-        "fallback_strategy": "MANUAL_REQUIRED",
-        "failure_code": "AUTO_CAST_MANUAL_REQUIRED"
+        "render_attempted": true,
+        "final_mp4_valid": "NOT_OBSERVED",
+        "fallback_strategy": "NOT_EXPOSED",
+        "failure_code": null,
+        "provenance": {
+          "entrypoint_called": true,
+          "entrypoint_call_count": 1,
+          "manual_halt_source": "production_status_check",
+          "voice_map_source": "synthesize_segments_callback",
+          "tts_metric_source": "synthesize_segments_callback",
+          "render_metric_source": "run_lane_blackbox_callback",
+          "mp4_metric_source": "bounded_harness_unrendered"
+        }
       }
     },
     {
@@ -598,13 +815,22 @@
       },
       "legacy_auto_2_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       },
       "legacy_auto_multi_result": {
         "applicable": true,
         "result_state": "MANUAL_HALT",
         "manual_halt": true,
-        "detected_speaker_count": 5,
+        "detected_speaker_count": 0,
         "effective_speaker_count": 0,
         "effective_voice_count": 0,
         "speaker_voice_map": {},
@@ -615,9 +841,18 @@
         "terminal_rejected_cues": 0,
         "unaccounted_cues": 0,
         "render_attempted": false,
-        "final_mp4_valid": false,
-        "fallback_strategy": "MANUAL_REQUIRED",
-        "failure_code": "AUTO_CAST_MANUAL_REQUIRED"
+        "final_mp4_valid": "NOT_OBSERVED",
+        "fallback_strategy": "NOT_EXPOSED",
+        "failure_code": "AUTO_CAST_MANUAL_REQUIRED",
+        "provenance": {
+          "entrypoint_called": true,
+          "entrypoint_call_count": 1,
+          "manual_halt_source": "production_status_check",
+          "voice_map_source": "synthesize_segments_callback",
+          "tts_metric_source": "synthesize_segments_callback",
+          "render_metric_source": "run_lane_blackbox_callback",
+          "mp4_metric_source": "bounded_harness_unrendered"
+        }
       }
     },
     {
@@ -648,26 +883,48 @@
       },
       "legacy_auto_2_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       },
       "legacy_auto_multi_result": {
         "applicable": true,
-        "result_state": "MANUAL_HALT",
-        "manual_halt": true,
+        "result_state": "SUCCESS",
+        "manual_halt": false,
         "detected_speaker_count": 3,
-        "effective_speaker_count": 0,
-        "effective_voice_count": 0,
-        "speaker_voice_map": {},
+        "effective_speaker_count": 3,
+        "effective_voice_count": 3,
+        "speaker_voice_map": {
+          "chunk_00:speaker_0": "voice_male_3",
+          "chunk_00:speaker_1": "voice_female_1",
+          "chunk_00:speaker_2": "voice_male_4"
+        },
         "tts_eligible_cues": 5,
-        "tts_synthesized_cues": 0,
+        "tts_synthesized_cues": 5,
         "preserved_cues": 0,
         "subtitle_only_cues": 0,
         "terminal_rejected_cues": 0,
         "unaccounted_cues": 0,
-        "render_attempted": false,
-        "final_mp4_valid": false,
-        "fallback_strategy": "MANUAL_REQUIRED",
-        "failure_code": "AUTO_CAST_MANUAL_REQUIRED"
+        "render_attempted": true,
+        "final_mp4_valid": "NOT_OBSERVED",
+        "fallback_strategy": "NOT_EXPOSED",
+        "failure_code": null,
+        "provenance": {
+          "entrypoint_called": true,
+          "entrypoint_call_count": 1,
+          "manual_halt_source": "production_status_check",
+          "voice_map_source": "synthesize_segments_callback",
+          "tts_metric_source": "synthesize_segments_callback",
+          "render_metric_source": "run_lane_blackbox_callback",
+          "mp4_metric_source": "bounded_harness_unrendered"
+        }
       }
     },
     {
@@ -710,15 +967,24 @@
         "terminal_rejected_cues": 0,
         "unaccounted_cues": 0,
         "render_attempted": false,
-        "final_mp4_valid": false,
-        "fallback_strategy": "MANUAL_REQUIRED",
-        "failure_code": "AUTO_CAST_MANUAL_REQUIRED"
+        "final_mp4_valid": "NOT_OBSERVED",
+        "fallback_strategy": "NOT_EXPOSED",
+        "failure_code": "AUTO_CAST_MANUAL_REQUIRED",
+        "provenance": {
+          "entrypoint_called": true,
+          "entrypoint_call_count": 1,
+          "manual_halt_source": "production_status_check",
+          "voice_map_source": "synthesize_segments_callback",
+          "tts_metric_source": "synthesize_segments_callback",
+          "render_metric_source": "run_lane_blackbox_callback",
+          "mp4_metric_source": "bounded_harness_unrendered"
+        }
       },
       "legacy_auto_multi_result": {
         "applicable": true,
         "result_state": "MANUAL_HALT",
         "manual_halt": true,
-        "detected_speaker_count": 2,
+        "detected_speaker_count": 0,
         "effective_speaker_count": 0,
         "effective_voice_count": 0,
         "speaker_voice_map": {},
@@ -729,9 +995,18 @@
         "terminal_rejected_cues": 0,
         "unaccounted_cues": 0,
         "render_attempted": false,
-        "final_mp4_valid": false,
-        "fallback_strategy": "MANUAL_REQUIRED",
-        "failure_code": "AUTO_CAST_MANUAL_REQUIRED"
+        "final_mp4_valid": "NOT_OBSERVED",
+        "fallback_strategy": "NOT_EXPOSED",
+        "failure_code": "AUTO_CAST_MANUAL_REQUIRED",
+        "provenance": {
+          "entrypoint_called": true,
+          "entrypoint_call_count": 1,
+          "manual_halt_source": "production_status_check",
+          "voice_map_source": "synthesize_segments_callback",
+          "tts_metric_source": "synthesize_segments_callback",
+          "render_metric_source": "run_lane_blackbox_callback",
+          "mp4_metric_source": "bounded_harness_unrendered"
+        }
       }
     },
     {
@@ -767,8 +1042,8 @@
         "effective_speaker_count": 2,
         "effective_voice_count": 2,
         "speaker_voice_map": {
-          "spk_1": "voice_male_1",
-          "spk_2": "voice_female_1"
+          "chunk_00:speaker_0": "voice_male_1",
+          "chunk_00:speaker_1": "voice_female_4"
         },
         "tts_eligible_cues": 8,
         "tts_synthesized_cues": 8,
@@ -777,15 +1052,24 @@
         "terminal_rejected_cues": 0,
         "unaccounted_cues": 0,
         "render_attempted": true,
-        "final_mp4_valid": true,
-        "fallback_strategy": "STRICT_TWO",
-        "failure_code": null
+        "final_mp4_valid": "NOT_OBSERVED",
+        "fallback_strategy": "NOT_EXPOSED",
+        "failure_code": null,
+        "provenance": {
+          "entrypoint_called": true,
+          "entrypoint_call_count": 1,
+          "manual_halt_source": "production_status_check",
+          "voice_map_source": "synthesize_segments_callback",
+          "tts_metric_source": "synthesize_segments_callback",
+          "render_metric_source": "run_lane_blackbox_callback",
+          "mp4_metric_source": "bounded_harness_unrendered"
+        }
       },
       "legacy_auto_multi_result": {
         "applicable": true,
         "result_state": "MANUAL_HALT",
         "manual_halt": true,
-        "detected_speaker_count": 2,
+        "detected_speaker_count": 0,
         "effective_speaker_count": 0,
         "effective_voice_count": 0,
         "speaker_voice_map": {},
@@ -796,9 +1080,18 @@
         "terminal_rejected_cues": 0,
         "unaccounted_cues": 0,
         "render_attempted": false,
-        "final_mp4_valid": false,
-        "fallback_strategy": "MANUAL_REQUIRED",
-        "failure_code": "AUTO_CAST_MANUAL_REQUIRED"
+        "final_mp4_valid": "NOT_OBSERVED",
+        "fallback_strategy": "NOT_EXPOSED",
+        "failure_code": "AUTO_CAST_MANUAL_REQUIRED",
+        "provenance": {
+          "entrypoint_called": true,
+          "entrypoint_call_count": 1,
+          "manual_halt_source": "production_status_check",
+          "voice_map_source": "synthesize_segments_callback",
+          "tts_metric_source": "synthesize_segments_callback",
+          "render_metric_source": "run_lane_blackbox_callback",
+          "mp4_metric_source": "bounded_harness_unrendered"
+        }
       }
     },
     {
@@ -827,11 +1120,29 @@
       },
       "legacy_auto_2_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       },
       "legacy_auto_multi_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       }
     },
     {
@@ -860,11 +1171,29 @@
       },
       "legacy_auto_2_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       },
       "legacy_auto_multi_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       }
     },
     {
@@ -891,11 +1220,29 @@
       },
       "legacy_auto_2_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       },
       "legacy_auto_multi_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       }
     },
     {
@@ -922,11 +1269,29 @@
       },
       "legacy_auto_2_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       },
       "legacy_auto_multi_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       }
     },
     {
@@ -953,11 +1318,29 @@
       },
       "legacy_auto_2_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       },
       "legacy_auto_multi_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       }
     },
     {
@@ -986,11 +1369,29 @@
       },
       "legacy_auto_2_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       },
       "legacy_auto_multi_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       }
     },
     {
@@ -1017,28 +1418,6 @@
       },
       "legacy_auto_2_result": {
         "applicable": true,
-        "result_state": "SUCCESS",
-        "manual_halt": false,
-        "detected_speaker_count": 2,
-        "effective_speaker_count": 2,
-        "effective_voice_count": 2,
-        "speaker_voice_map": {
-          "spk_1": "voice_male_1",
-          "spk_2": "voice_female_1"
-        },
-        "tts_eligible_cues": 2,
-        "tts_synthesized_cues": 2,
-        "preserved_cues": 0,
-        "subtitle_only_cues": 0,
-        "terminal_rejected_cues": 0,
-        "unaccounted_cues": 0,
-        "render_attempted": true,
-        "final_mp4_valid": true,
-        "fallback_strategy": "STRICT_TWO",
-        "failure_code": null
-      },
-      "legacy_auto_multi_result": {
-        "applicable": true,
         "result_state": "MANUAL_HALT",
         "manual_halt": true,
         "detected_speaker_count": 2,
@@ -1051,10 +1430,47 @@
         "subtitle_only_cues": 0,
         "terminal_rejected_cues": 0,
         "unaccounted_cues": 0,
+        "render_attempted": true,
+        "final_mp4_valid": "NOT_OBSERVED",
+        "fallback_strategy": "NOT_EXPOSED",
+        "failure_code": "AUTO_CAST_MANUAL_REQUIRED",
+        "provenance": {
+          "entrypoint_called": true,
+          "entrypoint_call_count": 1,
+          "manual_halt_source": "production_status_check",
+          "voice_map_source": "synthesize_segments_callback",
+          "tts_metric_source": "synthesize_segments_callback",
+          "render_metric_source": "run_lane_blackbox_callback",
+          "mp4_metric_source": "bounded_harness_unrendered"
+        }
+      },
+      "legacy_auto_multi_result": {
+        "applicable": true,
+        "result_state": "MANUAL_HALT",
+        "manual_halt": true,
+        "detected_speaker_count": 0,
+        "effective_speaker_count": 0,
+        "effective_voice_count": 0,
+        "speaker_voice_map": {},
+        "tts_eligible_cues": 2,
+        "tts_synthesized_cues": 0,
+        "preserved_cues": 0,
+        "subtitle_only_cues": 0,
+        "terminal_rejected_cues": 0,
+        "unaccounted_cues": 0,
         "render_attempted": false,
-        "final_mp4_valid": false,
-        "fallback_strategy": "MANUAL_REQUIRED",
-        "failure_code": "AUTO_CAST_MANUAL_REQUIRED"
+        "final_mp4_valid": "NOT_OBSERVED",
+        "fallback_strategy": "NOT_EXPOSED",
+        "failure_code": "AUTO_CAST_MANUAL_REQUIRED",
+        "provenance": {
+          "entrypoint_called": true,
+          "entrypoint_call_count": 1,
+          "manual_halt_source": "production_status_check",
+          "voice_map_source": "synthesize_segments_callback",
+          "tts_metric_source": "synthesize_segments_callback",
+          "render_metric_source": "run_lane_blackbox_callback",
+          "mp4_metric_source": "bounded_harness_unrendered"
+        }
       }
     },
     {
@@ -1083,11 +1499,29 @@
       },
       "legacy_auto_2_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       },
       "legacy_auto_multi_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       }
     },
     {
@@ -1116,11 +1550,29 @@
       },
       "legacy_auto_2_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       },
       "legacy_auto_multi_result": {
         "applicable": false,
-        "reason": "NOT_APPLICABLE"
+        "reason": "NOT_APPLICABLE",
+        "provenance": {
+          "entrypoint_called": false,
+          "entrypoint_call_count": 0,
+          "manual_halt_source": "not_applicable",
+          "voice_map_source": "not_applicable",
+          "tts_metric_source": "not_applicable",
+          "render_metric_source": "not_applicable",
+          "mp4_metric_source": "not_applicable"
+        }
       }
     }
   ]

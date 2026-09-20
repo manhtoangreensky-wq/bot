@@ -54,6 +54,20 @@ LEGACY_COUNTERS = {
 }
 
 
+_ORIGINAL_RUN_AUTO_SPEAKER_BLACKBOX = auto_speaker.run_auto_speaker_blackbox
+_ORIGINAL_RUN_AUTO_MULTI_SPEAKER_BLACKBOX = auto_multi_speaker.run_auto_multi_speaker_blackbox
+
+
+async def counted_run_auto_speaker_blackbox(*args: Any, **kwargs: Any) -> Any:
+    LEGACY_COUNTERS["legacy_auto_2_entrypoint_calls"] += 1
+    return await _ORIGINAL_RUN_AUTO_SPEAKER_BLACKBOX(*args, **kwargs)
+
+
+async def counted_run_auto_multi_speaker_blackbox(*args: Any, **kwargs: Any) -> Any:
+    LEGACY_COUNTERS["legacy_auto_multi_entrypoint_calls"] += 1
+    return await _ORIGINAL_RUN_AUTO_MULTI_SPEAKER_BLACKBOX(*args, **kwargs)
+
+
 def _create_real_valid_mp4(target_path: Path) -> Path:
     """Generate deterministic 1-second valid MP4 via local ffmpeg."""
     ffmpeg_bin = shutil.which("ffmpeg") or r"D:\TOANAAS\_venv311_restore400\Scripts\ffmpeg.exe"
@@ -83,33 +97,47 @@ def _execute_legacy_auto_2(fixture: dict[str, Any], tmp_path: Path) -> dict[str,
         return {
             "applicable": False,
             "reason": "NOT_APPLICABLE",
+            "provenance": {
+                "entrypoint_called": False,
+                "entrypoint_call_count": 0,
+                "manual_halt_source": "not_applicable",
+                "voice_map_source": "not_applicable",
+                "tts_metric_source": "not_applicable",
+                "render_metric_source": "not_applicable",
+                "mp4_metric_source": "not_applicable",
+            },
         }
 
     LEGACY_COUNTERS["legacy_auto_2_fixtures_run"] += 1
-    LEGACY_COUNTERS["legacy_auto_2_entrypoint_calls"] += 1
 
     pools = fixture.get("pools", TEST_POOLS)
     strict_behavior = fixture.get("strict_behavior", "success")
-    spk1, spk2 = speaker_ids[0], speaker_ids[1]
+    synth_valid = fixture.get("synth_valid", True)
 
     legacy_tmp = tmp_path / "legacy_2"
     legacy_tmp.mkdir(parents=True, exist_ok=True)
 
-    raw_cues = [
-        {
-            "cue_id": f"c_{i+1}",
+    raw_cues = []
+    for i, c in enumerate(cues):
+        spk = c.get("speaker_id") or c.get("speaker")
+        spk_idx = speaker_ids.index(spk) if spk in speaker_ids else 0
+        start_ms = int(c.get("start_ms", i * 1000))
+        end_ms = int(c.get("end_ms", (i + 1) * 1000))
+        if end_ms <= start_ms:
+            end_ms = start_ms + 1000
+        raw_cues.append({
+            "cue_id": c.get("cue_id", f"c_{i+1}"),
             "index": i + 1,
-            "start": float(i),
-            "end": float(i + 1),
-            "start_ms": i * 1000,
-            "end_ms": (i + 1) * 1000,
-            "text": f"text {i+1}",
-            "speaker": i,
-            "speaker_id": f"chunk_00:speaker_{i}",
+            "start": float(c.get("start", start_ms / 1000.0)),
+            "end": float(c.get("end", end_ms / 1000.0)),
+            "start_ms": start_ms,
+            "end_ms": end_ms,
+            "text": str(c.get("text", f"cue {i+1}")),
+            "speaker": spk_idx,
+            "speaker_id": f"chunk_00:speaker_{spk_idx}",
             "chunk_index": 0,
-        }
-        for i in range(2)
-    ]
+        })
+
     source = bot.subdub_canonical_auto_speaker_segments(raw_cues, extraction_source="local_acoustic")
     source_sub = bot.video_dubbing_srt_from_segments(source)
     sub_sha256 = bot.subdub_speaker_sidecar_subtitle_sha256(source_sub)
@@ -124,6 +152,8 @@ def _execute_legacy_auto_2(fixture: dict[str, Any], tmp_path: Path) -> dict[str,
     state = {
         "voice_kind": "auto_speaker_gender",
         "voice_selection_mode": "auto_speaker",
+        "mode": "dub",
+        "dub_text_source": "source",
         "_pipeline_workspace": str(legacy_tmp),
         "speaker_sidecar_path": receipt["path"],
         "speaker_sidecar_sha256": receipt["sha256"],
@@ -149,14 +179,38 @@ def _execute_legacy_auto_2(fixture: dict[str, Any], tmp_path: Path) -> dict[str,
         def _fail(*a, **kw): raise speaker_cast.AutoCastManualRequired()
         subdub_two_speaker_gender_onnx.classify_two_speaker_genders = _fail
 
+    observed_cues: list[dict[str, Any]] = []
+    observed_voice_map: dict[str, str] = {}
+    synth_calls = 0
+    render_calls = 0
+
     async def synth_segments(segments, *args, **kwargs):
+        nonlocal synth_calls
+        synth_calls += 1
+        if not synth_valid:
+            raise speaker_cast.AutoCastUnavailable()
         cue = segments[0]
+        spk_id = cue.get("speaker_id")
+        v_id = kwargs.get("voice_id") or cue.get("tts_voice_id")
+        if spk_id and v_id:
+            observed_voice_map[str(spk_id)] = str(v_id)
+        observed_cues.append(dict(cue))
         return {"ok": True, "chunks": [{"start": cue["start"], "end": cue["end"], "audio_bytes": b"abc"}]}
 
-    async def run_lane_blackbox(*args, **kwargs):
-        return {"ok": True, "lane_executed": True, "state": state}
+    async def run_lane_blackbox(*, lane_mode, runner, **payload):
+        nonlocal render_calls
+        render_calls += 1
+        annotated = await payload["prepare_subtitles"](payload["state"])
+        compat_voice = payload["resolve_voice_id"](7, payload["state"])
+        synth_res = await payload["synthesize_segments"](
+            annotated["source_segments"],
+            voice_id=compat_voice,
+        )
+        if callable(runner):
+            await auto_speaker._maybe_await(runner(**payload))
+        return {"ok": True, "lane_executed": True, "state": payload["state"], "synth_result": synth_res}
 
-    res = asyncio.run(auto_speaker.run_auto_speaker_blackbox(
+    res = asyncio.run(counted_run_auto_speaker_blackbox(
         lane_mode="dub",
         run_lane_blackbox=run_lane_blackbox,
         runner=lambda **kw: None,
@@ -170,30 +224,49 @@ def _execute_legacy_auto_2(fixture: dict[str, Any], tmp_path: Path) -> dict[str,
     ))
 
     is_ok = bool(res.get("ok"))
-    is_manual = bool(res.get("status") == speaker_cast.AUTO_CAST_MANUAL_REQUIRED or not is_ok)
-    v_map = {spk1: pools["low"][0], spk2: pools["high"][0]} if is_ok else {}
+    is_manual = bool(
+        res.get("status") == speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+        or res.get("reason") == speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+    )
+    if is_ok:
+        result_state = "SUCCESS"
+    elif is_manual:
+        result_state = "MANUAL_HALT"
+    else:
+        result_state = "FAILED"
 
     tts_eligible = len([c for c in cues if not smart._is_non_speech_cue(c)])
     preserved = len([c for c in cues if smart._is_non_speech_cue(c)])
+    effective_spk_cnt = len(observed_voice_map)
+    effective_v_cnt = len(set(observed_voice_map.values()))
 
     return {
         "applicable": True,
-        "result_state": "SUCCESS" if is_ok else "MANUAL_HALT",
+        "result_state": result_state,
         "manual_halt": is_manual,
         "detected_speaker_count": 2,
-        "effective_speaker_count": 2 if is_ok else 0,
-        "effective_voice_count": 2 if is_ok else 0,
-        "speaker_voice_map": v_map,
+        "effective_speaker_count": effective_spk_cnt,
+        "effective_voice_count": effective_v_cnt,
+        "speaker_voice_map": dict(observed_voice_map),
         "tts_eligible_cues": tts_eligible,
-        "tts_synthesized_cues": tts_eligible if is_ok else 0,
+        "tts_synthesized_cues": len(observed_cues),
         "preserved_cues": preserved if is_ok else 0,
         "subtitle_only_cues": 0,
         "terminal_rejected_cues": 0,
         "unaccounted_cues": 0,
-        "render_attempted": is_ok,
-        "final_mp4_valid": is_ok,
-        "fallback_strategy": "STRICT_TWO" if is_ok else "MANUAL_REQUIRED",
-        "failure_code": None if is_ok else res.get("status", speaker_cast.AUTO_CAST_MANUAL_REQUIRED),
+        "render_attempted": bool(render_calls > 0),
+        "final_mp4_valid": "NOT_OBSERVED",
+        "fallback_strategy": "NOT_EXPOSED",
+        "failure_code": None if is_ok else (res.get("status") or res.get("reason") or "AUTO_CAST_MANUAL_REQUIRED"),
+        "provenance": {
+            "entrypoint_called": True,
+            "entrypoint_call_count": 1,
+            "manual_halt_source": "production_status_check",
+            "voice_map_source": "synthesize_segments_callback",
+            "tts_metric_source": "synthesize_segments_callback",
+            "render_metric_source": "run_lane_blackbox_callback",
+            "mp4_metric_source": "bounded_harness_unrendered",
+        },
     }
 
 
@@ -210,33 +283,51 @@ def _execute_legacy_auto_multi(fixture: dict[str, Any], tmp_path: Path) -> dict[
         return {
             "applicable": False,
             "reason": "NOT_APPLICABLE",
+            "provenance": {
+                "entrypoint_called": False,
+                "entrypoint_call_count": 0,
+                "manual_halt_source": "not_applicable",
+                "voice_map_source": "not_applicable",
+                "tts_metric_source": "not_applicable",
+                "render_metric_source": "not_applicable",
+                "mp4_metric_source": "not_applicable",
+            },
         }
 
     LEGACY_COUNTERS["legacy_auto_multi_fixtures_run"] += 1
-    LEGACY_COUNTERS["legacy_auto_multi_entrypoint_calls"] += 1
 
     pools = fixture.get("pools", TEST_POOLS)
     strict_behavior = fixture.get("strict_behavior", "success")
+    synth_valid = fixture.get("synth_valid", True)
     spk_cnt = len(speaker_ids)
 
     legacy_tmp = tmp_path / "legacy_multi"
     legacy_tmp.mkdir(parents=True, exist_ok=True)
 
     labels = [f"chunk_00:speaker_{i}" for i in range(spk_cnt)]
-    raw = [
-        {
+    raw_cues = []
+    for i, c in enumerate(cues):
+        spk = c.get("speaker_id") or c.get("speaker")
+        spk_idx = speaker_ids.index(spk) if spk in speaker_ids else 0
+        start_ms = int(c.get("start_ms", i * 1000))
+        end_ms = int(c.get("end_ms", (i + 1) * 1000))
+        if end_ms <= start_ms:
+            end_ms = start_ms + 1000
+        raw_cues.append({
+            "cue_id": c.get("cue_id", f"c_{i+1}"),
             "index": i + 1,
-            "start": float(i),
-            "end": float(i + 1),
-            "text": f"text {i}",
-            "speaker": i % spk_cnt,
-            "speaker_id": labels[i % spk_cnt],
+            "start": float(c.get("start", start_ms / 1000.0)),
+            "end": float(c.get("end", end_ms / 1000.0)),
+            "start_ms": start_ms,
+            "end_ms": end_ms,
+            "text": str(c.get("text", f"cue {i+1}")),
+            "speaker": spk_idx,
+            "speaker_id": labels[spk_idx],
             "speaker_confidence": 0.95,
             "chunk_index": 0,
-        }
-        for i in range(spk_cnt * 2)
-    ]
-    source_segments = bot.subdub_canonical_auto_speaker_segments(raw, extraction_source="local_acoustic")
+        })
+
+    source_segments = bot.subdub_canonical_auto_speaker_segments(raw_cues, extraction_source="local_acoustic")
     output_segments = [dict(item) for item in source_segments]
     source_bytes = f"offline-{spk_cnt}".encode("ascii")
     source_sub = bot.video_dubbing_srt_from_segments(source_segments)
@@ -303,7 +394,7 @@ def _execute_legacy_auto_multi(fixture: dict[str, Any], tmp_path: Path) -> dict[
         "speaker_sidecar_sha256": receipt["sha256"],
     }
 
-    if strict_behavior == "success":
+    if strict_behavior not in {"insufficient", "ambiguous", "fail"}:
         subdub_multi_speaker_gender_onnx.classify_multi_speaker_genders = lambda pcm, ranges, **kw: {
             lbl: {"speaker_id": lbl, "voice_register": "low" if i % 2 == 0 else "high", "confidence": 0.95}
             for i, lbl in enumerate(ranges)
@@ -312,17 +403,53 @@ def _execute_legacy_auto_multi(fixture: dict[str, Any], tmp_path: Path) -> dict[
         def _fail(*a, **kw): raise speaker_cast.AutoCastManualRequired()
         subdub_multi_speaker_gender_onnx.classify_multi_speaker_genders = _fail
 
-    async def synth_segments(segments, **kwargs):
+    observed_cues: list[dict[str, Any]] = []
+    observed_voice_map: dict[str, str] = {}
+    synth_calls = 0
+    render_calls = 0
+
+    async def synth_segments(segments, *args, **kwargs):
+        nonlocal synth_calls
+        synth_calls += 1
+        if not synth_valid:
+            raise speaker_cast.AutoCastUnavailable()
         cue = segments[0]
-        return {"chunks": [{"cue_id": cue.get("cue_id", "c1"), "start": cue["start"], "end": cue["end"], "audio_bytes": b"abc"}], "provider": "stub"}
+        spk_id = cue.get("speaker_id")
+        v_id = kwargs.get("voice_id") or cue.get("tts_voice_id")
+        if spk_id and v_id:
+            observed_voice_map[str(spk_id)] = str(v_id)
+        observed_cues.append(dict(cue))
+        return {
+            "chunks": [
+                {
+                    "cue_id": cue.get("cue_id", "c1"),
+                    "start": cue["start"],
+                    "end": cue["end"],
+                    "audio_bytes": b"abc",
+                }
+            ],
+            "provider": "stub_legacy_auto_multi",
+        }
 
     async def run_lane_blackbox(*, lane_mode, runner, **payload):
+        nonlocal render_calls
+        render_calls += 1
         annotated = await payload["prepare_subtitles"](payload["state"])
         compat_voice = payload["resolve_voice_id"](7, payload["state"])
-        aggregate = await payload["synthesize_segments"](annotated["source_segments"], voice_id=compat_voice)
-        return {"ok": True, "lane_executed": True, "state": payload["state"]}
+        synth_res = await payload["synthesize_segments"](
+            annotated["source_segments"],
+            voice_id=compat_voice,
+        )
+        if callable(runner):
+            await auto_speaker._maybe_await(runner(**payload))
+        return {
+            "ok": True,
+            "lane_executed": True,
+            "state": payload["state"],
+            "synth_result": synth_res,
+        }
 
-    res = asyncio.run(auto_multi_speaker.run_auto_multi_speaker_blackbox(
+    res = asyncio.run(counted_run_auto_multi_speaker_blackbox(
         lane_mode="dub",
         run_lane_blackbox=run_lane_blackbox,
         runner=lambda **kw: None,
@@ -331,37 +458,65 @@ def _execute_legacy_auto_multi(fixture: dict[str, Any], tmp_path: Path) -> dict[
         synthesize_segments=synth_segments,
         post_prepare_gate=lambda *a, **k: {"continue": True},
         extract_pcm=lambda *a, **k: str(pcm_file),
+        probe_video=lambda *a: {
+            "ok": True,
+            "source_display_width": 1920,
+            "source_display_height": 1080,
+            "display_width": 1920,
+            "display_height": 1080,
+            "rotation": 0,
+        },
         validated_pools=pools,
         state=state,
     ))
 
     is_ok = bool(res.get("ok"))
-    is_manual = bool(res.get("status") == speaker_cast.AUTO_CAST_MANUAL_REQUIRED or not is_ok)
-    all_v = pools.get("low", []) + pools.get("high", [])
-    v_map = {spk: all_v[i % len(all_v)] for i, spk in enumerate(speaker_ids)} if is_ok else {}
+    is_manual = bool(
+        res.get("status") == speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+        or res.get("reason") == speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+    )
+    if is_ok:
+        result_state = "SUCCESS"
+    elif is_manual:
+        result_state = "MANUAL_HALT"
+    else:
+        result_state = "FAILED"
 
     tts_eligible = len([c for c in cues if not smart._is_non_speech_cue(c)])
     preserved = len([c for c in cues if smart._is_non_speech_cue(c)])
+    detected_count = res.get("state", {}).get("auto_detected_speaker_count", spk_cnt if is_ok else 0)
+    effective_spk_cnt = len(observed_voice_map)
+    effective_v_cnt = len(set(observed_voice_map.values()))
 
     return {
         "applicable": True,
-        "result_state": "SUCCESS" if is_ok else "MANUAL_HALT",
+        "result_state": result_state,
         "manual_halt": is_manual,
-        "detected_speaker_count": spk_cnt,
-        "effective_speaker_count": spk_cnt if is_ok else 0,
-        "effective_voice_count": len(set(v_map.values())) if is_ok else 0,
-        "speaker_voice_map": v_map,
+        "detected_speaker_count": detected_count,
+        "effective_speaker_count": effective_spk_cnt,
+        "effective_voice_count": effective_v_cnt,
+        "speaker_voice_map": dict(observed_voice_map),
         "tts_eligible_cues": tts_eligible,
-        "tts_synthesized_cues": tts_eligible if is_ok else 0,
+        "tts_synthesized_cues": len(observed_cues),
         "preserved_cues": preserved if is_ok else 0,
         "subtitle_only_cues": 0,
         "terminal_rejected_cues": 0,
         "unaccounted_cues": 0,
-        "render_attempted": is_ok,
-        "final_mp4_valid": is_ok,
-        "fallback_strategy": "GENERIC_MULTI" if is_ok else "MANUAL_REQUIRED",
-        "failure_code": None if is_ok else res.get("status", speaker_cast.AUTO_CAST_MANUAL_REQUIRED),
+        "render_attempted": bool(render_calls > 0),
+        "final_mp4_valid": "NOT_OBSERVED",
+        "fallback_strategy": "NOT_EXPOSED",
+        "failure_code": None if is_ok else (res.get("status") or res.get("reason") or "AUTO_CAST_MANUAL_REQUIRED"),
+        "provenance": {
+            "entrypoint_called": True,
+            "entrypoint_call_count": 1,
+            "manual_halt_source": "production_status_check",
+            "voice_map_source": "synthesize_segments_callback",
+            "tts_metric_source": "synthesize_segments_callback",
+            "render_metric_source": "run_lane_blackbox_callback",
+            "mp4_metric_source": "bounded_harness_unrendered",
+        },
     }
+
 
 
 def _execute_smart_lane(fixture: dict[str, Any], tmp_path: Path) -> dict[str, Any]:
@@ -773,7 +928,7 @@ def shadow_report_records(tmp_path_factory):
         "schema_version": 2,
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "program": "P0.SUBDUB.AUTO.SMART.MULTIVOICE.V1",
-        "task": "P0.SUBDUB.AUTO.SMART.MULTIVOICE.SHADOW.COMPARISON.VALIDATION.R1.C1",
+        "task": "P0.SUBDUB.AUTO.SMART.MULTIVOICE.SHADOW.COMPARISON.VALIDATION.R1.C2",
         "summary": summary,
         "fixtures": records,
     }
@@ -787,7 +942,7 @@ def shadow_report_records(tmp_path_factory):
 
 
 # ============================================================================
-# TEST SUITE: P0.SUBDUB.AUTO.SMART.MULTIVOICE.SHADOW.COMPARISON.VALIDATION.R1.C1
+# TEST SUITE: P0.SUBDUB.AUTO.SMART.MULTIVOICE.SHADOW.COMPARISON.VALIDATION.R1.C2
 # ============================================================================
 
 def test_shadow_01_matrix_and_report_generation(shadow_report_records):
@@ -1099,8 +1254,8 @@ def test_shadow_17_no_simulated_outcome_dictionaries():
     src_m = inspect.getsource(_execute_legacy_auto_multi)
     src_s = inspect.getsource(_execute_smart_lane)
 
-    assert "auto_speaker.run_auto_speaker_blackbox" in src_2
-    assert "auto_multi_speaker.run_auto_multi_speaker_blackbox" in src_m
+    assert "counted_run_auto_speaker_blackbox" in src_2 or "auto_speaker.run_auto_speaker_blackbox" in src_2
+    assert "counted_run_auto_multi_speaker_blackbox" in src_m or "auto_multi_speaker.run_auto_multi_speaker_blackbox" in src_m
     assert '"manual_halt": False' not in src_s
     assert 'res.get("status") == "AUTO_CAST_MANUAL_REQUIRED"' in src_s
 
@@ -1110,7 +1265,7 @@ def test_shadow_18_report_schema_v2_summary_consistency(shadow_report_records):
     assert REPORT_PATH.is_file()
     data = json.loads(REPORT_PATH.read_text(encoding="utf-8"))
     assert data["schema_version"] == 2
-    assert data["task"] == "P0.SUBDUB.AUTO.SMART.MULTIVOICE.SHADOW.COMPARISON.VALIDATION.R1.C1"
+    assert data["task"] == "P0.SUBDUB.AUTO.SMART.MULTIVOICE.SHADOW.COMPARISON.VALIDATION.R1.C2"
 
     summary = data["summary"]
     assert summary["total_fixtures"] == 24
@@ -1134,3 +1289,193 @@ def test_shadow_19_full_production_source_unmodified():
         check=True,
     )
     assert proc.stdout.strip() == "", f"Production files modified: {proc.stdout}"
+
+
+def test_first_red_01_legacy_outcome_reconstructed_by_pre_c2_harness():
+    """FIRST RED 1: Prove pre-C2 helper reconstructed outcome fields without sourcing from production callbacks."""
+    is_ok = True
+    cues = [{"cue_id": "c1"}, {"cue_id": "c2"}]
+    pools = {"low": ["v_low"], "high": ["v_high"]}
+    speaker_ids = ["spk_1", "spk_2"]
+
+    # 1. speaker_voice_map constructed by test code
+    v_map = {speaker_ids[0]: pools["low"][0], speaker_ids[1]: pools["high"][0]} if is_ok else {}
+    assert v_map == {"spk_1": "v_low", "spk_2": "v_high"}
+
+    # 2. effective_speaker_count is fixture-derived
+    effective_speaker_count = 2 if is_ok else 0
+    assert effective_speaker_count == 2
+
+    # 3. effective_voice_count is fixture-derived
+    effective_voice_count = 2 if is_ok else 0
+    assert effective_voice_count == 2
+
+    # 4. tts_synthesized_cues is inferred from is_ok
+    tts_eligible = len(cues)
+    tts_synthesized_cues = tts_eligible if is_ok else 0
+    assert tts_synthesized_cues == 2
+
+    # 5. render_attempted is assigned from is_ok
+    render_attempted = is_ok
+    assert render_attempted is True
+
+    # 6. final_mp4_valid is assigned from is_ok
+    final_mp4_valid = is_ok
+    assert final_mp4_valid is True
+
+    # 7. fallback_strategy is assigned by test code
+    fallback_strategy = "STRICT_TWO" if is_ok else "MANUAL_REQUIRED"
+    assert fallback_strategy == "STRICT_TWO"
+
+
+def test_first_red_02_non_manual_failure_mislabeled_manual():
+    """FIRST RED 2: Prove pre-C2 helper misclassified generic non-manual failures as MANUAL_HALT due to `or not is_ok`."""
+    res = {"ok": False, "status": "RENDER_PIPELINE_CRASH", "blocker": "render_error"}
+    is_ok = bool(res.get("ok"))
+
+    # Pre-C2 flawed formula:
+    is_manual = bool(res.get("status") == speaker_cast.AUTO_CAST_MANUAL_REQUIRED or not is_ok)
+    result_state = "SUCCESS" if is_ok else "MANUAL_HALT"
+
+    assert res.get("status") != speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+    assert is_manual is True
+    assert result_state == "MANUAL_HALT"
+
+
+def test_shadow_20_entrypoint_counter_zero_when_not_invoked(tmp_path):
+    """Guard 20: Entrypoint counters remain unchanged if production entrypoint is never invoked."""
+    fixtures = _get_24_canonical_fixtures()
+    f01 = next(f for f in fixtures if f["fixture_id"] == "F01")
+    c2_before = LEGACY_COUNTERS["legacy_auto_2_entrypoint_calls"]
+    cm_before = LEGACY_COUNTERS["legacy_auto_multi_entrypoint_calls"]
+
+    res_2 = _execute_legacy_auto_2(f01, tmp_path / "f01_2")
+    res_m = _execute_legacy_auto_multi(f01, tmp_path / "f01_m")
+
+    assert res_2["applicable"] is False
+    assert res_m["applicable"] is False
+    assert res_2["provenance"]["entrypoint_called"] is False
+    assert res_m["provenance"]["entrypoint_called"] is False
+    assert LEGACY_COUNTERS["legacy_auto_2_entrypoint_calls"] == c2_before
+    assert LEGACY_COUNTERS["legacy_auto_multi_entrypoint_calls"] == cm_before
+
+
+def test_shadow_21_generic_production_failure_not_classified_as_manual_halt():
+    """Guard 21: Generic production failure is classified as FAILED, not MANUAL_HALT."""
+    res = {"ok": False, "status": "GPU_OUT_OF_MEMORY", "reason": "oom"}
+    is_ok = bool(res.get("ok"))
+    is_manual = bool(
+        res.get("status") == speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+        or res.get("reason") == speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+    )
+    if is_ok:
+        result_state = "SUCCESS"
+    elif is_manual:
+        result_state = "MANUAL_HALT"
+    else:
+        result_state = "FAILED"
+
+    assert is_manual is False
+    assert result_state == "FAILED"
+
+
+def test_shadow_22_auto_2_speaker_voice_map_observed_from_callbacks(shadow_report_records):
+    """Guard 22: Auto-2 speaker_voice_map comes strictly from observed callback execution."""
+    rec05 = next(r for r in shadow_report_records if r["fixture_id"] == "F05")
+    leg2 = rec05["legacy_auto_2_result"]
+    assert leg2["applicable"] is True
+    assert leg2["result_state"] == "SUCCESS"
+    v_map = leg2["speaker_voice_map"]
+    assert len(v_map) == 2
+    assert "chunk_00:speaker_0" in v_map
+    assert "chunk_00:speaker_1" in v_map
+    assert leg2["provenance"]["voice_map_source"] == "synthesize_segments_callback"
+    assert leg2["effective_voice_count"] == len(set(v_map.values()))
+
+
+def test_shadow_23_auto_multi_speaker_voice_map_observed_from_callbacks(shadow_report_records):
+    """Guard 23: Auto-Multi speaker_voice_map comes strictly from observed callback execution."""
+    rec09 = next(r for r in shadow_report_records if r["fixture_id"] == "F09")
+    leg_m = rec09["legacy_auto_multi_result"]
+    assert leg_m["applicable"] is True
+    assert leg_m["result_state"] == "SUCCESS"
+    v_map = leg_m["speaker_voice_map"]
+    assert len(v_map) == 3
+    assert leg_m["provenance"]["voice_map_source"] == "synthesize_segments_callback"
+    assert leg_m["effective_voice_count"] == len(set(v_map.values()))
+
+
+def test_shadow_24_synth_count_observed_from_callbacks(shadow_report_records):
+    """Guard 24: Synth count derives from actual callback observations, not is_ok."""
+    rec05 = next(r for r in shadow_report_records if r["fixture_id"] == "F05")
+    assert rec05["legacy_auto_2_result"]["tts_synthesized_cues"] == 2
+
+    rec07 = next(r for r in shadow_report_records if r["fixture_id"] == "F07")
+    assert rec07["legacy_auto_2_result"]["tts_synthesized_cues"] == 0
+
+    rec12 = next(r for r in shadow_report_records if r["fixture_id"] == "F12")
+    assert rec12["legacy_auto_multi_result"]["tts_synthesized_cues"] == 0
+
+
+def test_shadow_25_render_attempted_observed_from_callback(shadow_report_records):
+    """Guard 25: render_attempted derives from actual run_lane_blackbox callback invocation."""
+    rec05 = next(r for r in shadow_report_records if r["fixture_id"] == "F05")
+    assert rec05["legacy_auto_2_result"]["render_attempted"] is True
+
+    rec07 = next(r for r in shadow_report_records if r["fixture_id"] == "F07")
+    assert rec07["legacy_auto_2_result"]["render_attempted"] is False
+
+
+def test_shadow_26_final_mp4_valid_cannot_become_true_solely_from_is_ok(shadow_report_records):
+    """Guard 26: final_mp4_valid cannot be True without actual output MP4 generation."""
+    for rec in shadow_report_records:
+        r2 = rec["legacy_auto_2_result"]
+        if r2.get("applicable"):
+            assert r2["final_mp4_valid"] == "NOT_OBSERVED"
+        rm = rec["legacy_auto_multi_result"]
+        if rm.get("applicable"):
+            assert rm["final_mp4_valid"] == "NOT_OBSERVED"
+
+
+def test_shadow_27_fallback_strategy_cannot_be_fixture_hardcoded(shadow_report_records):
+    """Guard 27: fallback_strategy reports NOT_EXPOSED rather than invented strategies."""
+    for rec in shadow_report_records:
+        r2 = rec["legacy_auto_2_result"]
+        if r2.get("applicable"):
+            assert r2["fallback_strategy"] == "NOT_EXPOSED"
+        rm = rec["legacy_auto_multi_result"]
+        if rm.get("applicable"):
+            assert rm["fallback_strategy"] == "NOT_EXPOSED"
+
+
+def test_shadow_28_report_fixture_aggregate_recomputation_matches_summary():
+    """Guard 28: Summary aggregates recomputed from fixture rows match summary exactly."""
+    assert REPORT_PATH.is_file()
+    data = json.loads(REPORT_PATH.read_text(encoding="utf-8"))
+    summary = data["summary"]
+    fixtures = data["fixtures"]
+
+    assert len(fixtures) == summary["total_fixtures"]
+    assert sum(1 for f in fixtures if f["smart_result"] is not None) == summary["smart_executed"]
+    assert sum(1 for f in fixtures if f["smart_result"].get("manual_halt")) == summary["smart_manual_halts"]
+    assert sum(1 for f in fixtures if f["legacy_auto_2_result"].get("applicable")) == summary["legacy_auto_2_applicable"]
+    assert sum(1 for f in fixtures if f["legacy_auto_2_result"].get("provenance", {}).get("entrypoint_called")) == summary["legacy_auto_2_executed"]
+    assert sum(1 for f in fixtures if f["legacy_auto_2_result"].get("manual_halt")) == summary["legacy_auto_2_manual_halts"]
+    assert sum(1 for f in fixtures if f["legacy_auto_multi_result"].get("applicable")) == summary["legacy_auto_multi_applicable"]
+    assert sum(1 for f in fixtures if f["legacy_auto_multi_result"].get("provenance", {}).get("entrypoint_called")) == summary["legacy_auto_multi_executed"]
+    assert sum(1 for f in fixtures if f["legacy_auto_multi_result"].get("manual_halt")) == summary["legacy_auto_multi_manual_halts"]
+    assert summary["legacy_auto_2_entrypoint_calls"] == summary["legacy_auto_2_executed"]
+    assert summary["legacy_auto_multi_entrypoint_calls"] == summary["legacy_auto_multi_executed"]
+
+
+def test_shadow_29_source_guards_reject_hardcoded_patterns():
+    """Guard 29: Source code guard verifies forbidden heuristic patterns are eliminated."""
+    import inspect
+    src_2 = inspect.getsource(_execute_legacy_auto_2)
+    src_m = inspect.getsource(_execute_legacy_auto_multi)
+
+    for src in [src_2, src_m]:
+        assert '"render_attempted": is_ok' not in src
+        assert '"final_mp4_valid": is_ok' not in src
+        assert '"tts_synthesized_cues": tts_eligible if is_ok else 0' not in src
+        assert 'or not is_ok' not in src
