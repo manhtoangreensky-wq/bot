@@ -886,3 +886,257 @@ def test_35_zero_provider_social_wallet_effects():
     for forbidden in ["tiktok", "facebook", "instagram", "youtube_publish", "payos", "wallet"]:
         assert f"import {forbidden}" not in scheduler_file.lower()
         assert f"from {forbidden}" not in scheduler_file.lower()
+
+
+# =========================================================================
+# C1 CORRECTION TESTS (FIRST RED & TESTS 36 - 48)
+# =========================================================================
+
+def test_first_red_revalidation_bypass(tmp_path):
+    """FIRST RED C1: Proves production publishing boundary enforces canonical revalidation.
+    When an artifact is tampered, the real production boundary (mark_publication_started /
+    prepare_publication_dispatch) must reject the transition and remain CLAIMED."""
+    conn = sqlite3.connect(tmp_path / "c1_red.db")
+    conn.row_factory = sqlite3.Row
+    draft_id, _, _, video_path, _ = _setup_planned_draft(conn, tmp_path, owner_id=101)
+    aps.approve_publication_draft(conn, draft_id, requesting_user_id=101)
+    aps.schedule_publication(conn, draft_id, requesting_user_id=101, schedule_at="2026-09-21T12:00:00Z")
+    item, _ = aps.claim_due_publication(conn, worker_id="worker_alpha", now="2026-09-21T12:00:00Z", lease_seconds=300)
+    assert item["state"] == "CLAIMED"
+
+    # Tamper physical artifact
+    video_path.write_bytes(b"tampered_bytes_in_first_red_proof_123456789")
+
+    # Calling production publishing boundary directly
+    pub_res, pub_err = aps.mark_publication_started(conn, item["publication_id"], worker_id="worker_alpha", now="2026-09-21T12:01:00Z")
+    assert pub_res is None
+    assert pub_err == "artifact_replacement_detected"
+
+    # Verify state remains CLAIMED and publish_started_at is empty
+    row = conn.execute("SELECT state, publish_started_at FROM autopost_publication_queue WHERE publication_id=?", (item["publication_id"],)).fetchone()
+    assert row["state"] == "CLAIMED"
+    assert row["publish_started_at"] is None
+
+
+def test_36_production_publishing_boundary_rejects_replaced_artifact(tmp_path):
+    """36. Production publishing boundary rejects replaced/tampered physical artifact."""
+    conn = sqlite3.connect(tmp_path / "test36.db")
+    conn.row_factory = sqlite3.Row
+    draft_id, _, _, video_path, _ = _setup_planned_draft(conn, tmp_path, owner_id=101)
+    aps.approve_publication_draft(conn, draft_id, requesting_user_id=101)
+    aps.schedule_publication(conn, draft_id, requesting_user_id=101, schedule_at="2026-09-21T12:00:00Z")
+    item, _ = aps.claim_due_publication(conn, worker_id="worker_alpha", now="2026-09-21T12:00:00Z", lease_seconds=300)
+
+    # Mutate physical artifact
+    video_path.write_bytes(b"corrupted_video_artifact_bytes_999999999")
+
+    res, err = aps.prepare_publication_dispatch(conn, item["publication_id"], worker_id="worker_alpha", now="2026-09-21T12:01:00Z")
+    assert res is None
+    assert err == "artifact_replacement_detected"
+
+    # Database state remains CLAIMED
+    q = conn.execute("SELECT state FROM autopost_publication_queue WHERE publication_id=?", (item["publication_id"],)).fetchone()
+    assert q["state"] == "CLAIMED"
+
+
+def test_37_production_publishing_boundary_rejects_handoff_sha_drift(tmp_path):
+    """37. Production publishing boundary rejects canonical handoff SHA drift."""
+    conn = sqlite3.connect(tmp_path / "test37.db")
+    conn.row_factory = sqlite3.Row
+    draft_id, handoff_id, _, _, _ = _setup_planned_draft(conn, tmp_path, owner_id=101)
+    aps.approve_publication_draft(conn, draft_id, requesting_user_id=101)
+    aps.schedule_publication(conn, draft_id, requesting_user_id=101, schedule_at="2026-09-21T12:00:00Z")
+    item, _ = aps.claim_due_publication(conn, worker_id="worker_alpha", now="2026-09-21T12:00:00Z", lease_seconds=300)
+
+    # Simulate drift in handoff receipt table
+    conn.execute("UPDATE autopost_handoff_receipts SET artifact_sha256='0000000000000000000000000000000000000000000000000000000000000000' WHERE handoff_id=?", (handoff_id,))
+    conn.commit()
+
+    res, err = aps.mark_publication_started(conn, item["publication_id"], worker_id="worker_alpha", now="2026-09-21T12:01:00Z")
+    assert res is None
+    assert err == "artifact_sha_mismatch"
+
+    q = conn.execute("SELECT state FROM autopost_publication_queue WHERE publication_id=?", (item["publication_id"],)).fetchone()
+    assert q["state"] == "CLAIMED"
+
+
+def test_38_successful_canonical_revalidation_then_claimed_to_publishing(tmp_path):
+    """38. Successful canonical revalidation allows CLAIMED -> PUBLISHING transition."""
+    conn = sqlite3.connect(tmp_path / "test38.db")
+    conn.row_factory = sqlite3.Row
+    draft_id, _, _, _, _ = _setup_planned_draft(conn, tmp_path, owner_id=101)
+    aps.approve_publication_draft(conn, draft_id, requesting_user_id=101)
+    aps.schedule_publication(conn, draft_id, requesting_user_id=101, schedule_at="2026-09-21T12:00:00Z")
+    item, _ = aps.claim_due_publication(conn, worker_id="worker_alpha", now="2026-09-21T12:00:00Z", lease_seconds=300)
+
+    res, err = aps.prepare_publication_dispatch(conn, item["publication_id"], worker_id="worker_alpha", now="2026-09-21T12:01:00Z")
+    assert err == "publishing_started"
+    assert res["state"] == "PUBLISHING"
+    assert res["publish_started_at"] == "2026-09-21T12:01:00Z"
+
+
+def test_39_media_probe_still_executes_without_db_write_lock_through_real_boundary(tmp_path, monkeypatch):
+    """39. Media probe executes outside any SQLite write lock during production boundary transition."""
+    conn = sqlite3.connect(tmp_path / "test39.db")
+    conn.row_factory = sqlite3.Row
+    draft_id, _, _, _, _ = _setup_planned_draft(conn, tmp_path, owner_id=101)
+    aps.approve_publication_draft(conn, draft_id, requesting_user_id=101)
+    aps.schedule_publication(conn, draft_id, requesting_user_id=101, schedule_at="2026-09-21T12:00:00Z")
+    item, _ = aps.claim_due_publication(conn, worker_id="worker_alpha", now="2026-09-21T12:00:00Z", lease_seconds=300)
+
+    lock_observed = []
+    orig_probe = video_local_validation.probe_video_file
+
+    def spy_probe(path):
+        lock_observed.append(conn.in_transaction)
+        return orig_probe(path)
+
+    monkeypatch.setattr(video_local_validation, "probe_video_file", spy_probe)
+
+    res, err = aps.mark_publication_started(conn, item["publication_id"], worker_id="worker_alpha", now="2026-09-21T12:01:00Z")
+    assert err == "publishing_started"
+    assert len(lock_observed) == 1
+    assert lock_observed[0] is False, "Media probe must NOT execute under an active write transaction"
+
+
+def test_40_planned_draft_cancellation_succeeds(tmp_path):
+    """40. Owner cancels unapproved PLANNED draft successfully; persists state durably without queue row."""
+    conn = sqlite3.connect(tmp_path / "test40.db")
+    conn.row_factory = sqlite3.Row
+    draft_id, _, _, _, _ = _setup_planned_draft(conn, tmp_path, owner_id=101)
+
+    # Cancel unapproved PLANNED draft
+    cancelled, err = aps.cancel_publication_draft(conn, draft_id=draft_id, requesting_user_id=101, reason="owner_cancelled_draft")
+    assert err == "cancelled"
+    assert cancelled["status"] == "CANCELLED"
+    assert cancelled["cancellation_reason"] == "owner_cancelled_draft"
+    assert cancelled.get("cancelled_at") is not None
+
+    # Verify zero rows in queue table
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM autopost_publication_queue WHERE draft_id=?", (draft_id,))
+    assert cur.fetchone()[0] == 0
+
+
+def test_41_planned_cancellation_wrong_owner_blocked(tmp_path):
+    """41. PLANNED draft cancellation by wrong owner is blocked."""
+    conn = sqlite3.connect(tmp_path / "test41.db")
+    conn.row_factory = sqlite3.Row
+    draft_id, _, _, _, _ = _setup_planned_draft(conn, tmp_path, owner_id=101)
+
+    cancelled, err = aps.cancel_publication_draft(conn, draft_id=draft_id, requesting_user_id=999, reason="impostor")
+    assert cancelled is None
+    assert err == "owner_mismatch"
+
+    row = conn.execute("SELECT status FROM autopost_publication_drafts WHERE draft_id=?", (draft_id,)).fetchone()
+    assert row["status"] == "PLANNED"
+
+
+def test_42_cancelled_planned_draft_cannot_approve(tmp_path):
+    """42. Cancelled PLANNED draft cannot be approved later."""
+    conn = sqlite3.connect(tmp_path / "test42.db")
+    conn.row_factory = sqlite3.Row
+    draft_id, _, _, _, _ = _setup_planned_draft(conn, tmp_path, owner_id=101)
+
+    aps.cancel_publication_draft(conn, draft_id=draft_id, requesting_user_id=101)
+
+    appr, err = aps.approve_publication_draft(conn, draft_id=draft_id, requesting_user_id=101)
+    assert appr is None
+    assert err == "draft_terminal_cannot_approve:CANCELLED"
+
+
+def test_43_planned_cancellation_replay_idempotent(tmp_path):
+    """43. Repeated cancellation of PLANNED draft is idempotent."""
+    conn = sqlite3.connect(tmp_path / "test43.db")
+    conn.row_factory = sqlite3.Row
+    draft_id, _, _, _, _ = _setup_planned_draft(conn, tmp_path, owner_id=101)
+
+    c1, err1 = aps.cancel_publication_draft(conn, draft_id=draft_id, requesting_user_id=101)
+    assert err1 == "cancelled"
+
+    c2, err2 = aps.cancel_publication_draft(conn, draft_id=draft_id, requesting_user_id=101)
+    assert err2 == "idempotent_already_cancelled"
+    assert c2["status"] == "CANCELLED"
+
+
+def test_44_claim_invalid_explicit_now_rejected(tmp_path):
+    """44. claim_due_publication with invalid explicit now fails closed."""
+    conn = sqlite3.connect(tmp_path / "test44.db")
+    conn.row_factory = sqlite3.Row
+    aps.ensure_autopost_scheduler_schema(conn)
+
+    res, err = aps.claim_due_publication(conn, worker_id="w1", now="not-a-valid-utc-time")
+    assert res is None
+    assert err == "non_utc_or_naive_timestamp"
+
+
+def test_45_renew_invalid_explicit_now_rejected(tmp_path):
+    """45. renew_publication_lease with invalid explicit now fails closed."""
+    conn = sqlite3.connect(tmp_path / "test45.db")
+    conn.row_factory = sqlite3.Row
+    draft_id, _, _, _, _ = _setup_planned_draft(conn, tmp_path, owner_id=101)
+    aps.approve_publication_draft(conn, draft_id, requesting_user_id=101)
+    aps.schedule_publication(conn, draft_id, requesting_user_id=101, schedule_at="2026-09-21T12:00:00Z")
+    item, _ = aps.claim_due_publication(conn, worker_id="w1", now="2026-09-21T12:00:00Z")
+
+    res, err = aps.renew_publication_lease(conn, item["publication_id"], worker_id="w1", now="invalid-time")
+    assert res is None
+    assert err == "non_utc_or_naive_timestamp"
+
+
+def test_46_publishing_boundary_invalid_explicit_now_rejected(tmp_path):
+    """46. mark_publication_started with invalid explicit now fails closed."""
+    conn = sqlite3.connect(tmp_path / "test46.db")
+    conn.row_factory = sqlite3.Row
+    draft_id, _, _, _, _ = _setup_planned_draft(conn, tmp_path, owner_id=101)
+    aps.approve_publication_draft(conn, draft_id, requesting_user_id=101)
+    aps.schedule_publication(conn, draft_id, requesting_user_id=101, schedule_at="2026-09-21T12:00:00Z")
+    item, _ = aps.claim_due_publication(conn, worker_id="w1", now="2026-09-21T12:00:00Z")
+
+    res, err = aps.mark_publication_started(conn, item["publication_id"], worker_id="w1", now="2026-09-21 12:01:00")
+    assert res is None
+    assert err == "non_utc_or_naive_timestamp"
+
+
+def test_47_recovery_invalid_explicit_now_rejected(tmp_path):
+    """47. recover_expired_claimed_publication with invalid explicit now fails closed."""
+    conn = sqlite3.connect(tmp_path / "test47.db")
+    conn.row_factory = sqlite3.Row
+    draft_id, _, _, _, _ = _setup_planned_draft(conn, tmp_path, owner_id=101)
+    aps.approve_publication_draft(conn, draft_id, requesting_user_id=101)
+    aps.schedule_publication(conn, draft_id, requesting_user_id=101, schedule_at="2026-09-21T12:00:00Z")
+    item, _ = aps.claim_due_publication(conn, worker_id="w1", now="2026-09-21T12:00:00Z")
+
+    res, err = aps.recover_expired_claimed_publication(conn, item["publication_id"], now="invalid_now_string")
+    assert res is None
+    assert err == "non_utc_or_naive_timestamp"
+
+
+def test_48_non_utc_naive_explicit_now_rejected(tmp_path):
+    """48. All scheduler state APIs reject naive and non-UTC timestamps when explicitly supplied."""
+    conn = sqlite3.connect(tmp_path / "test48.db")
+    conn.row_factory = sqlite3.Row
+    draft_id, _, _, _, _ = _setup_planned_draft(conn, tmp_path, owner_id=101)
+    aps.approve_publication_draft(conn, draft_id, requesting_user_id=101)
+    aps.schedule_publication(conn, draft_id, requesting_user_id=101, schedule_at="2026-09-21T12:00:00Z")
+    item, _ = aps.claim_due_publication(conn, worker_id="w1", now="2026-09-21T12:00:00Z")
+
+    # Non-UTC offset (+07:00) rejected
+    c_res, c_err = aps.claim_due_publication(conn, worker_id="w2", now="2026-09-21T12:05:00+07:00")
+    assert c_res is None
+    assert c_err == "non_utc_or_naive_timestamp"
+
+    # Naive timestamp rejected in record_publication_result
+    r_res, r_err = aps.record_publication_result(conn, item["publication_id"], worker_id="w1", outcome="succeeded", now="2026-09-21 12:05:00")
+    assert r_res is None
+    assert r_err == "non_utc_or_naive_timestamp"
+
+    # Naive timestamp rejected in inspect_ambiguous_publishing_publication
+    i_res, i_err = aps.inspect_ambiguous_publishing_publication(conn, item["publication_id"], now="2026-09-21 12:05:00")
+    assert i_res is None
+    assert i_err == "non_utc_or_naive_timestamp"
+
+    # Naive timestamp rejected in cancel_publication
+    can_res, can_err = aps.cancel_publication(conn, item["publication_id"], requesting_user_id=101, now="2026-09-21 12:05:00")
+    assert can_res is None
+    assert can_err == "non_utc_or_naive_timestamp"

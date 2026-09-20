@@ -145,9 +145,9 @@ def parse_and_validate_utc(ts: str) -> tuple[Optional[str], str]:
 
 def add_seconds_to_utc(base_utc_ts: str, seconds: int) -> str:
     """Add integer seconds to canonical UTC timestamp."""
-    norm_ts, _ = parse_and_validate_utc(base_utc_ts)
+    norm_ts, err = parse_and_validate_utc(base_utc_ts)
     if not norm_ts:
-        norm_ts = canonical_utc_now()
+        raise ValueError(f"invalid_base_timestamp:{err}")
     dt = datetime.datetime.strptime(norm_ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
     new_dt = dt + datetime.timedelta(seconds=max(0, int(seconds)))
     return new_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -170,7 +170,7 @@ def calculate_backoff_seconds(
 # =========================================================================
 
 def ensure_autopost_scheduler_schema(conn: sqlite3.Connection) -> None:
-    """Ensure the durable autopost_publication_queue table and indexes exist."""
+    """Ensure the durable autopost_publication_queue table, indexes, and draft cancellation columns exist."""
     aah.ensure_autopost_handoff_schema(conn)
 
     conn.execute(
@@ -203,6 +203,16 @@ def ensure_autopost_scheduler_schema(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_apq_owner ON autopost_publication_queue (owner_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_apq_draft ON autopost_publication_queue (draft_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_apq_handoff ON autopost_publication_queue (handoff_id)")
+
+    try:
+        conn.execute("ALTER TABLE autopost_publication_drafts ADD COLUMN cancelled_at TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute("ALTER TABLE autopost_publication_drafts ADD COLUMN cancellation_reason TEXT")
+    except sqlite3.OperationalError:
+        pass
+
     conn.commit()
 
 
@@ -433,7 +443,13 @@ def claim_due_publication(
     if not clean_worker:
         return None, "worker_id_missing"
 
-    norm_now = canonical_utc_now() if now is None else parse_and_validate_utc(now)[0] or canonical_utc_now()
+    if now is None:
+        norm_now = canonical_utc_now()
+    else:
+        norm_now, time_err = parse_and_validate_utc(now)
+        if not norm_now:
+            return None, time_err
+
     lease_sec = max(30, min(3600, int(lease_seconds)))
     lease_expires = add_seconds_to_utc(norm_now, lease_sec)
 
@@ -519,7 +535,13 @@ def renew_publication_lease(
     ensure_autopost_scheduler_schema(conn)
 
     clean_worker = str(worker_id or "").strip()
-    norm_now = canonical_utc_now() if now is None else parse_and_validate_utc(now)[0] or canonical_utc_now()
+    if now is None:
+        norm_now = canonical_utc_now()
+    else:
+        norm_now, time_err = parse_and_validate_utc(now)
+        if not norm_now:
+            return None, time_err
+
     lease_sec = max(30, min(3600, int(lease_seconds)))
     new_expires = add_seconds_to_utc(norm_now, lease_sec)
 
@@ -582,12 +604,26 @@ def mark_publication_started(
 ) -> tuple[Optional[dict[str, Any]], str]:
     """Transition CLAIMED -> PUBLISHING before attempting external dispatch.
 
-    Enforces exact lease ownership and unexpired lease.
+    Enforces:
+    - Strict UTC timestamp validation if now is explicitly provided (fails closed)
+    - Exact lease ownership and unexpired lease
+    - Mandatory canonical revalidation before transition:
+      * rereads SQLite handoff receipt
+      * checks owner and asset ID bindings
+      * checks handoff artifact SHA binding
+      * probes physical media file outside write lock
+      * checks physical SHA match
+      Any failure blocks transition to PUBLISHING and leaves state as CLAIMED.
     """
     ensure_autopost_scheduler_schema(conn)
 
     clean_worker = str(worker_id or "").strip()
-    norm_now = canonical_utc_now() if now is None else parse_and_validate_utc(now)[0] or canonical_utc_now()
+    if now is None:
+        norm_now = canonical_utc_now()
+    else:
+        norm_now, time_err = parse_and_validate_utc(now)
+        if not norm_now:
+            return None, time_err
 
     cur = conn.cursor()
     cur.execute("SELECT * FROM autopost_publication_queue WHERE publication_id=? LIMIT 1", (publication_id,))
@@ -609,6 +645,11 @@ def mark_publication_started(
     ok, reason = validate_transition(item["state"], PublicationState.PUBLISHING)
     if not ok:
         return None, reason
+
+    # Mandatory canonical artifact & handoff revalidation (outside DB write lock)
+    reval_ok, reval_err = revalidate_publication_artifact(conn, publication_id)
+    if not reval_ok:
+        return None, reval_err
 
     cur.execute(
         """UPDATE autopost_publication_queue SET
@@ -637,6 +678,10 @@ def mark_publication_started(
     return _row_to_dict(cur.fetchone()), "publishing_started"
 
 
+# Canonical alias for production publishing dispatch preparation
+prepare_publication_dispatch = mark_publication_started
+
+
 def record_publication_result(
     conn: sqlite3.Connection,
     publication_id: str,
@@ -660,7 +705,12 @@ def record_publication_result(
     ensure_autopost_scheduler_schema(conn)
 
     clean_worker = str(worker_id or "").strip()
-    norm_now = canonical_utc_now() if now is None else parse_and_validate_utc(now)[0] or canonical_utc_now()
+    if now is None:
+        norm_now = canonical_utc_now()
+    else:
+        norm_now, time_err = parse_and_validate_utc(now)
+        if not norm_now:
+            return None, time_err
     norm_outcome = str(outcome or "").strip().lower()
 
     cur = conn.cursor()
@@ -840,7 +890,12 @@ def recover_expired_claimed_publication(
     """
     ensure_autopost_scheduler_schema(conn)
 
-    norm_now = canonical_utc_now() if now is None else parse_and_validate_utc(now)[0] or canonical_utc_now()
+    if now is None:
+        norm_now = canonical_utc_now()
+    else:
+        norm_now, time_err = parse_and_validate_utc(now)
+        if not norm_now:
+            return None, time_err
 
     cur = conn.cursor()
     cur.execute("SELECT * FROM autopost_publication_queue WHERE publication_id=? LIMIT 1", (publication_id,))
@@ -935,7 +990,12 @@ def inspect_ambiguous_publishing_publication(
     """
     ensure_autopost_scheduler_schema(conn)
 
-    norm_now = canonical_utc_now() if now is None else parse_and_validate_utc(now)[0] or canonical_utc_now()
+    if now is None:
+        norm_now = canonical_utc_now()
+    else:
+        norm_now, time_err = parse_and_validate_utc(now)
+        if not norm_now:
+            return None, time_err
 
     cur = conn.cursor()
     cur.execute("SELECT * FROM autopost_publication_queue WHERE publication_id=? LIMIT 1", (publication_id,))
@@ -1049,6 +1109,7 @@ def cancel_publication(
     publication_id: str,
     requesting_user_id: int,
     reason: str = "",
+    now: Optional[str] = None,
 ) -> tuple[Optional[dict[str, Any]], str]:
     """Explicit owner-bound publication cancellation.
 
@@ -1058,7 +1119,13 @@ def cancel_publication(
     """
     ensure_autopost_scheduler_schema(conn)
 
-    norm_now = canonical_utc_now()
+    if now is None:
+        norm_now = canonical_utc_now()
+    else:
+        norm_now, time_err = parse_and_validate_utc(now)
+        if not norm_now:
+            return None, time_err
+
     cur = conn.cursor()
     cur.execute("SELECT * FROM autopost_publication_queue WHERE publication_id=? LIMIT 1", (publication_id,))
     item_row = cur.fetchone()
@@ -1114,4 +1181,61 @@ def cancel_publication(
     conn.commit()
 
     cur.execute("SELECT * FROM autopost_publication_queue WHERE publication_id=? LIMIT 1", (publication_id,))
+    return _row_to_dict(cur.fetchone()), "cancelled"
+
+
+def cancel_publication_draft(
+    conn: sqlite3.Connection,
+    draft_id: str,
+    requesting_user_id: int,
+    reason: str = "",
+    now: Optional[str] = None,
+) -> tuple[Optional[dict[str, Any]], str]:
+    """Explicit owner-bound cancellation path for unapproved PLANNED drafts.
+
+    Enforces:
+    - Draft exists
+    - Owner matches requesting_user_id
+    - Status == 'PLANNED'
+    - Updates draft.status = 'CANCELLED', sets cancelled_at and cancellation_reason
+    - Does not create or require any queue row
+    - Idempotent: re-cancelling already cancelled draft returns existing draft
+    """
+    ensure_autopost_scheduler_schema(conn)
+
+    if now is None:
+        norm_now = canonical_utc_now()
+    else:
+        norm_now, time_err = parse_and_validate_utc(now)
+        if not norm_now:
+            return None, time_err
+
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM autopost_publication_drafts WHERE draft_id=? LIMIT 1", (draft_id,))
+    row = cur.fetchone()
+    if not row:
+        return None, "draft_not_found"
+    draft = _row_to_dict(row)
+
+    if int(draft["owner_id"]) != int(requesting_user_id):
+        return None, "owner_mismatch"
+
+    curr_status = str(draft.get("status") or "").strip().upper()
+    if curr_status == PublicationState.CANCELLED.value:
+        return draft, "idempotent_already_cancelled"
+
+    if curr_status != PublicationState.PLANNED.value:
+        return None, f"cannot_cancel_draft_in_status:{curr_status}"
+
+    cur.execute(
+        """UPDATE autopost_publication_drafts
+           SET status='CANCELLED',
+               cancelled_at=?,
+               cancellation_reason=?
+           WHERE draft_id=? AND status='PLANNED'""",
+        (norm_now, str(reason or "user_cancelled"), draft_id),
+    )
+    conn.commit()
+
+    cur.execute("SELECT * FROM autopost_publication_drafts WHERE draft_id=? LIMIT 1", (draft_id,))
     return _row_to_dict(cur.fetchone()), "cancelled"
