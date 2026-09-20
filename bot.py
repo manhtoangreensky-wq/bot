@@ -239447,8 +239447,8 @@ def subdub_enrich_job_identity(job: dict | None = None, *, job_key: str = "", mo
     return subdub_normalize_input_save_failed_terminal(current)
 
 def subdub_progress_stage_payload(stage: str = "") -> dict:
-    token = str(stage or "saved_input").strip().lower()
-    percent, label, status = SUBDUB_PROGRESS_STAGES.get(token, SUBDUB_PROGRESS_STAGES["saved_input"])
+    token = str(stage or "received_file").strip().lower()
+    percent, label, status = SUBDUB_PROGRESS_STAGES.get(token, SUBDUB_PROGRESS_STAGES["received_file"])
     return {"stage": token, "percent": percent, "label": label, "status": status}
 
 
@@ -239465,6 +239465,10 @@ def subdub_progress_bar(percent) -> str:
 
 
 def subdub_progress_text(stage: str = "saved_input", job_id: str = "", lang: str = "vi") -> str:
+    stage_token = str(stage or "").strip().lower()
+    canonical_stage = subdub_canonical_lifecycle_state(stage_token)
+    if (stage_token in SUBDUB_TERMINAL_STATES or canonical_stage in SUBDUB_TERMINAL_STATES or "failed" in stage_token or "failed" in canonical_stage) and stage_token != "delivered" and canonical_stage != "delivered":
+        return subdub_clean_failure_text(lang)
     normalized_lang = normalize_user_language(lang)
     copy = public_subdub_deep_copy(normalized_lang)
     payload = subdub_progress_stage_payload(stage)
@@ -239772,9 +239776,11 @@ def subdub_should_suppress_generic_fail_for_active_job(job: dict | None = None, 
         return False
     if subdub_should_suppress_late_public_failure(current) or subdub_result_has_delivered_video(current):
         return True
+    if result is not None and result.get("ok") is False and not (subdub_should_suppress_late_public_failure(current) or subdub_result_has_delivered_video(current)):
+        return False
     terminal = str(current.get("terminal_state") or "").strip().lower()
     status = str(current.get("status") or "").strip().lower()
-    if terminal.startswith("failed") or status.startswith("failed"):
+    if terminal in SUBDUB_TERMINAL_STATES or terminal.startswith("failed") or status.startswith("failed") or status in {"no_output_bytes", "error", "runtimeerror"}:
         return False
     progress = _safe_int(current.get("progress_percent") or current.get("panel_final_percent"), 0)
     if bool(current.get("in_progress")):
@@ -239823,6 +239829,8 @@ def subtitle_plus_dub_should_suppress_public_failure(result: dict | None = None,
         return False
     if subdub_result_has_delivered_video(current) or subdub_job_video_delivery_succeeded(current):
         return True
+    if result is not None and result.get("ok") is False:
+        return False
     return subdub_should_suppress_generic_fail_for_active_job(job, result)
 
 def subdub_should_skip_public_subtitle_fallback(job: dict | None = None, delivery: dict | None = None) -> bool:
@@ -240331,7 +240339,14 @@ def subdub_job_public_status_text(job: dict | None = None, lang: str = "vi") -> 
         return subdub_download_failure_public_text(lang)
     if terminal == "delivered" or (status == "completed" and job.get("output_sent")):
         return subdub_progress_text("delivered", job_id, lang)
-    if status.startswith("failed") or terminal.startswith("failed"):
+    if (
+        (terminal in SUBDUB_TERMINAL_STATES and terminal != "delivered")
+        or (status in SUBDUB_TERMINAL_STATES and status != "delivered")
+        or "failed" in status
+        or "failed" in terminal
+        or status in {"no_output_bytes", "error", "runtimeerror"}
+        or outcome == "failure"
+    ):
         safe = sanitize_log_text(
             str(job.get("last_error_safe") or job.get("public_safe_error") or "")
         ).strip()[:500]
