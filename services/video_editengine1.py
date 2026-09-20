@@ -3200,6 +3200,11 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
                     "created_or_reused": False,
                     "handoff_id": None,
                     "blocker": "caller_transaction_uncommitted",
+                    "post_commit_intent": {
+                        "source_product": "video_edit",
+                        "source_ref": int(current.get("id") or 0),
+                        "requesting_user_id": int(current.get("user_id") or 0),
+                    },
                 }
             else:
                 try:
@@ -3561,6 +3566,11 @@ def record_worker_update(conn, *, worker_job_id: Any, worker_status: str, detail
                 "created_or_reused": False,
                 "handoff_id": None,
                 "blocker": "caller_transaction_uncommitted",
+                "post_commit_intent": {
+                    "source_product": "video_edit",
+                    "source_ref": int(job.get("id") or 0),
+                    "requesting_user_id": int(job.get("user_id") or 0),
+                },
             }
         else:
             try:
