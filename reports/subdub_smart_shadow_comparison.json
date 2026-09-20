@@ -1,0 +1,1143 @@
+[
+  {
+    "fixture_id": "F01",
+    "speaker_count": 1,
+    "conditions": "1 clear speech speaker",
+    "smart_result": {
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 1,
+      "effective_speaker_count": 1,
+      "effective_voice_count": 1,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_2"
+      },
+      "tts_eligible_cues": 1,
+      "tts_synthesized_cues": 1,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "GENERIC_SINGLE",
+      "failure_code": null
+    },
+    "legacy_auto_2_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    },
+    "legacy_auto_multi_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    }
+  },
+  {
+    "fixture_id": "F02",
+    "speaker_count": 1,
+    "conditions": "1 speaker + uncertain register",
+    "smart_result": {
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 1,
+      "effective_speaker_count": 1,
+      "effective_voice_count": 1,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_2"
+      },
+      "tts_eligible_cues": 1,
+      "tts_synthesized_cues": 1,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "GENERIC_SINGLE",
+      "failure_code": null
+    },
+    "legacy_auto_2_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    },
+    "legacy_auto_multi_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    }
+  },
+  {
+    "fixture_id": "F03",
+    "speaker_count": 1,
+    "conditions": "1 speaker + background music",
+    "smart_result": {
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 1,
+      "effective_speaker_count": 1,
+      "effective_voice_count": 1,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_2"
+      },
+      "tts_eligible_cues": 1,
+      "tts_synthesized_cues": 1,
+      "preserved_cues": 1,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "GENERIC_SINGLE",
+      "failure_code": null
+    },
+    "legacy_auto_2_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    },
+    "legacy_auto_multi_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    }
+  },
+  {
+    "fixture_id": "F04",
+    "speaker_count": 1,
+    "conditions": "1 speaker + background singer",
+    "smart_result": {
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 1,
+      "effective_speaker_count": 1,
+      "effective_voice_count": 1,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_2"
+      },
+      "tts_eligible_cues": 1,
+      "tts_synthesized_cues": 1,
+      "preserved_cues": 1,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "GENERIC_SINGLE",
+      "failure_code": null
+    },
+    "legacy_auto_2_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    },
+    "legacy_auto_multi_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    }
+  },
+  {
+    "fixture_id": "F05",
+    "speaker_count": 2,
+    "conditions": "2 clear speakers",
+    "smart_result": {
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 2,
+      "effective_speaker_count": 2,
+      "effective_voice_count": 2,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_3",
+        "spk_2": "voice_female_2"
+      },
+      "tts_eligible_cues": 2,
+      "tts_synthesized_cues": 2,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "STRICT_TWO",
+      "failure_code": null
+    },
+    "legacy_auto_2_result": {
+      "applicable": true,
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 2,
+      "effective_speaker_count": 2,
+      "effective_voice_count": 2,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_1",
+        "spk_2": "voice_female_1"
+      },
+      "tts_eligible_cues": 2,
+      "tts_synthesized_cues": 2,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "STRICT_TWO",
+      "failure_code": null
+    },
+    "legacy_auto_multi_result": {
+      "applicable": true,
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 2,
+      "effective_speaker_count": 2,
+      "effective_voice_count": 2,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_1",
+        "spk_2": "voice_male_2"
+      },
+      "tts_eligible_cues": 2,
+      "tts_synthesized_cues": 2,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "GENERIC_MULTI",
+      "failure_code": null
+    }
+  },
+  {
+    "fixture_id": "F06",
+    "speaker_count": 2,
+    "conditions": "2 speakers with strict ONNX confidence",
+    "smart_result": {
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 2,
+      "effective_speaker_count": 2,
+      "effective_voice_count": 2,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_3",
+        "spk_2": "voice_female_2"
+      },
+      "tts_eligible_cues": 2,
+      "tts_synthesized_cues": 2,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "STRICT_TWO",
+      "failure_code": null
+    },
+    "legacy_auto_2_result": {
+      "applicable": true,
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 2,
+      "effective_speaker_count": 2,
+      "effective_voice_count": 2,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_1",
+        "spk_2": "voice_female_1"
+      },
+      "tts_eligible_cues": 2,
+      "tts_synthesized_cues": 2,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "STRICT_TWO",
+      "failure_code": null
+    },
+    "legacy_auto_multi_result": {
+      "applicable": true,
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 2,
+      "effective_speaker_count": 2,
+      "effective_voice_count": 2,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_1",
+        "spk_2": "voice_male_2"
+      },
+      "tts_eligible_cues": 2,
+      "tts_synthesized_cues": 2,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "GENERIC_MULTI",
+      "failure_code": null
+    }
+  },
+  {
+    "fixture_id": "F07",
+    "speaker_count": 2,
+    "conditions": "2 speakers with insufficient strict evidence",
+    "smart_result": {
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 2,
+      "effective_speaker_count": 2,
+      "effective_voice_count": 2,
+      "speaker_voice_map": {
+        "spk_1": "voice_female_4",
+        "spk_2": "voice_male_3"
+      },
+      "tts_eligible_cues": 2,
+      "tts_synthesized_cues": 2,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "STABLE_FALLBACK",
+      "failure_code": null
+    },
+    "legacy_auto_2_result": {
+      "applicable": true,
+      "result_state": "MANUAL_HALT",
+      "manual_halt": true,
+      "detected_speaker_count": 2,
+      "effective_speaker_count": 0,
+      "effective_voice_count": 0,
+      "speaker_voice_map": {},
+      "tts_eligible_cues": 2,
+      "tts_synthesized_cues": 0,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": false,
+      "final_mp4_valid": false,
+      "fallback_strategy": "MANUAL_REQUIRED",
+      "failure_code": "AUTO_CAST_MANUAL_REQUIRED"
+    },
+    "legacy_auto_multi_result": {
+      "applicable": true,
+      "result_state": "MANUAL_HALT",
+      "manual_halt": true,
+      "detected_speaker_count": 2,
+      "effective_speaker_count": 0,
+      "effective_voice_count": 0,
+      "speaker_voice_map": {},
+      "tts_eligible_cues": 2,
+      "tts_synthesized_cues": 0,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": false,
+      "final_mp4_valid": false,
+      "fallback_strategy": "MANUAL_REQUIRED",
+      "failure_code": "AUTO_CAST_MANUAL_REQUIRED"
+    }
+  },
+  {
+    "fixture_id": "F08",
+    "speaker_count": 2,
+    "conditions": "2 speakers with ambiguous register",
+    "smart_result": {
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 2,
+      "effective_speaker_count": 2,
+      "effective_voice_count": 2,
+      "speaker_voice_map": {
+        "spk_1": "voice_female_4",
+        "spk_2": "voice_male_3"
+      },
+      "tts_eligible_cues": 2,
+      "tts_synthesized_cues": 2,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "STABLE_FALLBACK",
+      "failure_code": null
+    },
+    "legacy_auto_2_result": {
+      "applicable": true,
+      "result_state": "MANUAL_HALT",
+      "manual_halt": true,
+      "detected_speaker_count": 2,
+      "effective_speaker_count": 0,
+      "effective_voice_count": 0,
+      "speaker_voice_map": {},
+      "tts_eligible_cues": 2,
+      "tts_synthesized_cues": 0,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": false,
+      "final_mp4_valid": false,
+      "fallback_strategy": "MANUAL_REQUIRED",
+      "failure_code": "AUTO_CAST_MANUAL_REQUIRED"
+    },
+    "legacy_auto_multi_result": {
+      "applicable": true,
+      "result_state": "MANUAL_HALT",
+      "manual_halt": true,
+      "detected_speaker_count": 2,
+      "effective_speaker_count": 0,
+      "effective_voice_count": 0,
+      "speaker_voice_map": {},
+      "tts_eligible_cues": 2,
+      "tts_synthesized_cues": 0,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": false,
+      "final_mp4_valid": false,
+      "fallback_strategy": "MANUAL_REQUIRED",
+      "failure_code": "AUTO_CAST_MANUAL_REQUIRED"
+    }
+  },
+  {
+    "fixture_id": "F09",
+    "speaker_count": 3,
+    "conditions": "3 speakers",
+    "smart_result": {
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 3,
+      "effective_speaker_count": 3,
+      "effective_voice_count": 3,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_4",
+        "spk_2": "voice_male_2",
+        "spk_3": "voice_female_4"
+      },
+      "tts_eligible_cues": 3,
+      "tts_synthesized_cues": 3,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "GENERIC_MULTI",
+      "failure_code": null
+    },
+    "legacy_auto_2_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    },
+    "legacy_auto_multi_result": {
+      "applicable": true,
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 3,
+      "effective_speaker_count": 3,
+      "effective_voice_count": 3,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_1",
+        "spk_2": "voice_male_2",
+        "spk_3": "voice_male_3"
+      },
+      "tts_eligible_cues": 3,
+      "tts_synthesized_cues": 3,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "GENERIC_MULTI",
+      "failure_code": null
+    }
+  },
+  {
+    "fixture_id": "F10",
+    "speaker_count": 5,
+    "conditions": "5 speakers",
+    "smart_result": {
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 5,
+      "effective_speaker_count": 5,
+      "effective_voice_count": 5,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_4",
+        "spk_2": "voice_male_2",
+        "spk_3": "voice_female_4",
+        "spk_4": "voice_male_1",
+        "spk_5": "voice_female_3"
+      },
+      "tts_eligible_cues": 5,
+      "tts_synthesized_cues": 5,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "GENERIC_MULTI",
+      "failure_code": null
+    },
+    "legacy_auto_2_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    },
+    "legacy_auto_multi_result": {
+      "applicable": true,
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 5,
+      "effective_speaker_count": 5,
+      "effective_voice_count": 5,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_1",
+        "spk_2": "voice_male_2",
+        "spk_3": "voice_male_3",
+        "spk_4": "voice_male_4",
+        "spk_5": "voice_female_1"
+      },
+      "tts_eligible_cues": 5,
+      "tts_synthesized_cues": 5,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "GENERIC_MULTI",
+      "failure_code": null
+    }
+  },
+  {
+    "fixture_id": "F11",
+    "speaker_count": 8,
+    "conditions": "8 speakers",
+    "smart_result": {
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 8,
+      "effective_speaker_count": 8,
+      "effective_voice_count": 8,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_4",
+        "spk_2": "voice_male_2",
+        "spk_3": "voice_female_4",
+        "spk_4": "voice_male_1",
+        "spk_5": "voice_female_3",
+        "spk_6": "voice_male_3",
+        "spk_7": "voice_female_2",
+        "spk_8": "voice_female_1"
+      },
+      "tts_eligible_cues": 8,
+      "tts_synthesized_cues": 8,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "GENERIC_MULTI",
+      "failure_code": null
+    },
+    "legacy_auto_2_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    },
+    "legacy_auto_multi_result": {
+      "applicable": true,
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 8,
+      "effective_speaker_count": 8,
+      "effective_voice_count": 8,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_1",
+        "spk_2": "voice_male_2",
+        "spk_3": "voice_male_3",
+        "spk_4": "voice_male_4",
+        "spk_5": "voice_female_1",
+        "spk_6": "voice_female_2",
+        "spk_7": "voice_female_3",
+        "spk_8": "voice_female_4"
+      },
+      "tts_eligible_cues": 8,
+      "tts_synthesized_cues": 8,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "GENERIC_MULTI",
+      "failure_code": null
+    }
+  },
+  {
+    "fixture_id": "F12",
+    "speaker_count": 5,
+    "conditions": "more speakers than distinct approved voices",
+    "smart_result": {
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 5,
+      "effective_speaker_count": 5,
+      "effective_voice_count": 2,
+      "speaker_voice_map": {
+        "spk_1": "v_male_only",
+        "spk_2": "v_female_only",
+        "spk_3": "v_female_only",
+        "spk_4": "v_male_only",
+        "spk_5": "v_female_only"
+      },
+      "tts_eligible_cues": 5,
+      "tts_synthesized_cues": 5,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "GENERIC_MULTI",
+      "failure_code": null
+    },
+    "legacy_auto_2_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    },
+    "legacy_auto_multi_result": {
+      "applicable": true,
+      "result_state": "MANUAL_HALT",
+      "manual_halt": true,
+      "detected_speaker_count": 5,
+      "effective_speaker_count": 0,
+      "effective_voice_count": 0,
+      "speaker_voice_map": {},
+      "tts_eligible_cues": 5,
+      "tts_synthesized_cues": 0,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": false,
+      "final_mp4_valid": false,
+      "fallback_strategy": "INSUFFICIENT_POOL_CAPACITY",
+      "failure_code": "AUTO_CAST_MANUAL_REQUIRED"
+    }
+  },
+  {
+    "fixture_id": "F13",
+    "speaker_count": 3,
+    "conditions": "speaker disappears and reappears across chunks",
+    "smart_result": {
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 3,
+      "effective_speaker_count": 3,
+      "effective_voice_count": 3,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_4",
+        "spk_2": "voice_male_2",
+        "spk_3": "voice_female_4"
+      },
+      "tts_eligible_cues": 5,
+      "tts_synthesized_cues": 5,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "GENERIC_MULTI",
+      "failure_code": null
+    },
+    "legacy_auto_2_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    },
+    "legacy_auto_multi_result": {
+      "applicable": true,
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 3,
+      "effective_speaker_count": 3,
+      "effective_voice_count": 3,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_1",
+        "spk_2": "voice_male_2",
+        "spk_3": "voice_male_3"
+      },
+      "tts_eligible_cues": 5,
+      "tts_synthesized_cues": 5,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "GENERIC_MULTI",
+      "failure_code": null
+    }
+  },
+  {
+    "fixture_id": "F14",
+    "speaker_count": 2,
+    "conditions": "short utterances",
+    "smart_result": {
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 2,
+      "effective_speaker_count": 2,
+      "effective_voice_count": 2,
+      "speaker_voice_map": {
+        "spk_1": "voice_female_4",
+        "spk_2": "voice_male_3"
+      },
+      "tts_eligible_cues": 2,
+      "tts_synthesized_cues": 2,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "STABLE_FALLBACK",
+      "failure_code": null
+    },
+    "legacy_auto_2_result": {
+      "applicable": true,
+      "result_state": "MANUAL_HALT",
+      "manual_halt": true,
+      "detected_speaker_count": 2,
+      "effective_speaker_count": 0,
+      "effective_voice_count": 0,
+      "speaker_voice_map": {},
+      "tts_eligible_cues": 2,
+      "tts_synthesized_cues": 0,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": false,
+      "final_mp4_valid": false,
+      "fallback_strategy": "MANUAL_REQUIRED",
+      "failure_code": "AUTO_CAST_MANUAL_REQUIRED"
+    },
+    "legacy_auto_multi_result": {
+      "applicable": true,
+      "result_state": "MANUAL_HALT",
+      "manual_halt": true,
+      "detected_speaker_count": 2,
+      "effective_speaker_count": 0,
+      "effective_voice_count": 0,
+      "speaker_voice_map": {},
+      "tts_eligible_cues": 2,
+      "tts_synthesized_cues": 0,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": false,
+      "final_mp4_valid": false,
+      "fallback_strategy": "MANUAL_REQUIRED",
+      "failure_code": "AUTO_CAST_MANUAL_REQUIRED"
+    }
+  },
+  {
+    "fixture_id": "F15",
+    "speaker_count": 2,
+    "conditions": "long-form dialogue",
+    "smart_result": {
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 2,
+      "effective_speaker_count": 2,
+      "effective_voice_count": 2,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_3",
+        "spk_2": "voice_female_2"
+      },
+      "tts_eligible_cues": 8,
+      "tts_synthesized_cues": 8,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "STRICT_TWO",
+      "failure_code": null
+    },
+    "legacy_auto_2_result": {
+      "applicable": true,
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 2,
+      "effective_speaker_count": 2,
+      "effective_voice_count": 2,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_1",
+        "spk_2": "voice_female_1"
+      },
+      "tts_eligible_cues": 8,
+      "tts_synthesized_cues": 8,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "STRICT_TWO",
+      "failure_code": null
+    },
+    "legacy_auto_multi_result": {
+      "applicable": true,
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 2,
+      "effective_speaker_count": 2,
+      "effective_voice_count": 2,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_1",
+        "spk_2": "voice_male_2"
+      },
+      "tts_eligible_cues": 8,
+      "tts_synthesized_cues": 8,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "GENERIC_MULTI",
+      "failure_code": null
+    }
+  },
+  {
+    "fixture_id": "F16",
+    "speaker_count": 1,
+    "conditions": "speech + music + noise",
+    "smart_result": {
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 1,
+      "effective_speaker_count": 1,
+      "effective_voice_count": 1,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_2"
+      },
+      "tts_eligible_cues": 1,
+      "tts_synthesized_cues": 1,
+      "preserved_cues": 2,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "GENERIC_SINGLE",
+      "failure_code": null
+    },
+    "legacy_auto_2_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    },
+    "legacy_auto_multi_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    }
+  },
+  {
+    "fixture_id": "F17",
+    "speaker_count": 1,
+    "conditions": "speech + singing + noise",
+    "smart_result": {
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 1,
+      "effective_speaker_count": 1,
+      "effective_voice_count": 1,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_2"
+      },
+      "tts_eligible_cues": 1,
+      "tts_synthesized_cues": 1,
+      "preserved_cues": 2,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "GENERIC_SINGLE",
+      "failure_code": null
+    },
+    "legacy_auto_2_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    },
+    "legacy_auto_multi_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    }
+  },
+  {
+    "fixture_id": "F18",
+    "speaker_count": 0,
+    "conditions": "no valid speech cues",
+    "smart_result": {
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 0,
+      "effective_speaker_count": 0,
+      "effective_voice_count": 0,
+      "speaker_voice_map": {},
+      "tts_eligible_cues": 0,
+      "tts_synthesized_cues": 0,
+      "preserved_cues": 2,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "PASSTHROUGH",
+      "failure_code": null
+    },
+    "legacy_auto_2_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    },
+    "legacy_auto_multi_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    }
+  },
+  {
+    "fixture_id": "F19",
+    "speaker_count": 0,
+    "conditions": "malformed/missing speaker identity",
+    "smart_result": {
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 0,
+      "effective_speaker_count": 0,
+      "effective_voice_count": 0,
+      "speaker_voice_map": {},
+      "tts_eligible_cues": 0,
+      "tts_synthesized_cues": 0,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 1,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "PASSTHROUGH",
+      "failure_code": null
+    },
+    "legacy_auto_2_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    },
+    "legacy_auto_multi_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    }
+  },
+  {
+    "fixture_id": "F20",
+    "speaker_count": 1,
+    "conditions": "invalid media",
+    "smart_result": {
+      "result_state": "FAILED",
+      "manual_halt": false,
+      "detected_speaker_count": 0,
+      "effective_speaker_count": 0,
+      "effective_voice_count": 0,
+      "speaker_voice_map": {},
+      "tts_eligible_cues": 1,
+      "tts_synthesized_cues": 0,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": false,
+      "final_mp4_valid": false,
+      "fallback_strategy": "FAILED",
+      "failure_code": "corrupt_or_empty_source_media"
+    },
+    "legacy_auto_2_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    },
+    "legacy_auto_multi_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    }
+  },
+  {
+    "fixture_id": "F21",
+    "speaker_count": 1,
+    "conditions": "render failure",
+    "smart_result": {
+      "result_state": "FAILED",
+      "manual_halt": false,
+      "detected_speaker_count": 1,
+      "effective_speaker_count": 1,
+      "effective_voice_count": 1,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_2"
+      },
+      "tts_eligible_cues": 1,
+      "tts_synthesized_cues": 0,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": false,
+      "fallback_strategy": "GENERIC_SINGLE",
+      "failure_code": "render_pipeline_failed_ffmpeg_render_error"
+    },
+    "legacy_auto_2_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    },
+    "legacy_auto_multi_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    }
+  },
+  {
+    "fixture_id": "F22",
+    "speaker_count": 2,
+    "conditions": "TTS synthesis partial failure",
+    "smart_result": {
+      "result_state": "FAILED",
+      "manual_halt": false,
+      "detected_speaker_count": 0,
+      "effective_speaker_count": 0,
+      "effective_voice_count": 0,
+      "speaker_voice_map": {},
+      "tts_eligible_cues": 2,
+      "tts_synthesized_cues": 0,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": false,
+      "final_mp4_valid": false,
+      "fallback_strategy": "STRICT_TWO",
+      "failure_code": "missing_tts_cues:['c2']"
+    },
+    "legacy_auto_2_result": {
+      "applicable": true,
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 2,
+      "effective_speaker_count": 2,
+      "effective_voice_count": 2,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_1",
+        "spk_2": "voice_female_1"
+      },
+      "tts_eligible_cues": 2,
+      "tts_synthesized_cues": 2,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "STRICT_TWO",
+      "failure_code": null
+    },
+    "legacy_auto_multi_result": {
+      "applicable": true,
+      "result_state": "SUCCESS",
+      "manual_halt": false,
+      "detected_speaker_count": 2,
+      "effective_speaker_count": 2,
+      "effective_voice_count": 2,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_1",
+        "spk_2": "voice_male_2"
+      },
+      "tts_eligible_cues": 2,
+      "tts_synthesized_cues": 2,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": true,
+      "fallback_strategy": "GENERIC_MULTI",
+      "failure_code": null
+    }
+  },
+  {
+    "fixture_id": "F23",
+    "speaker_count": 1,
+    "conditions": "cancellation after synthesis",
+    "smart_result": {
+      "result_state": "FAILED",
+      "manual_halt": false,
+      "detected_speaker_count": 1,
+      "effective_speaker_count": 1,
+      "effective_voice_count": 1,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_2"
+      },
+      "tts_eligible_cues": 1,
+      "tts_synthesized_cues": 0,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": false,
+      "final_mp4_valid": false,
+      "fallback_strategy": "GENERIC_SINGLE",
+      "failure_code": "cancelled"
+    },
+    "legacy_auto_2_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    },
+    "legacy_auto_multi_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    }
+  },
+  {
+    "fixture_id": "F24",
+    "speaker_count": 1,
+    "conditions": "cancellation before render",
+    "smart_result": {
+      "result_state": "FAILED",
+      "manual_halt": false,
+      "detected_speaker_count": 1,
+      "effective_speaker_count": 1,
+      "effective_voice_count": 1,
+      "speaker_voice_map": {
+        "spk_1": "voice_male_2"
+      },
+      "tts_eligible_cues": 1,
+      "tts_synthesized_cues": 0,
+      "preserved_cues": 0,
+      "subtitle_only_cues": 0,
+      "terminal_rejected_cues": 0,
+      "unaccounted_cues": 0,
+      "render_attempted": true,
+      "final_mp4_valid": false,
+      "fallback_strategy": "GENERIC_SINGLE",
+      "failure_code": "cancelled"
+    },
+    "legacy_auto_2_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    },
+    "legacy_auto_multi_result": {
+      "applicable": false,
+      "reason": "NOT_APPLICABLE"
+    }
+  }
+]
