@@ -22,7 +22,7 @@ The completed Tail UI and terminal engine seams remain byte-locked.
 - [x] `V2-02` Resolve active source-contract seams before any representative
   provider job.
 - [-] `V2-03` Execute one representative complex non-manual lane per product;
-  current row is `PV2-R04` (`PV2-R01`, `PV2-R02`, `PV2-R03` completed and locked).
+  current row is `PV2-R05A` (`PV2-R01`, `PV2-R02`, `PV2-R03`, `PV2-R04` completed and locked).
   - [x] Full Trend upload flow, shared Tail, tier `400`, Invoice `144 Xu`, one
     Confirm and exact admission `VID-20260829-D78AA3 / project 32 / job 28 /
     outbox 27` are proven. Two provider tasks were accepted, one per scene.
@@ -449,6 +449,28 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     0 Key4U, 0 retry, 0 fallback; direct Owner live generation authorization PROVEN;
     delivery authorization compliance FAIL_NOT_PROVEN.
     `PV2-R03` marked `LOCKED_LIVE_PASS`.
+  - [x] `PV2-R04` formal live lock and evidence reconciliation completed.
+    Frame Video Job `fv17900165560001` (Local Worker Job `14`) delivered real 2-scene 9:16 MP4 (1,658,856 bytes,
+    SHA256 `CB42D7C77032CE052F26D5C6287F2BC495E0725291F09BD2B95F220A9D6A8664`),
+    duration 5.5s, 720x1280, H.264+AAC full decode PASS; 2 AI source images generated
+    via ShopAIKey (`nano-banana`, tier `low`, unit quote 50 Xu, batch quote 100 Xu):
+    Image 1 Job `18` (SHA256 `f6df56c2fabe6b3a1825f1e45f228b6cdaa35549828fe3365c3828d64944874d`,
+    Telegram message ID 28859) and Image 2 Job `19` (SHA256 `df4e9fea58f90b444db9aa4bf9700dc02a4e32c80e73fe0a6c4c1f8da65ec762`,
+    Telegram message ID 28860); prompt hashes `ccdf54b19a8a0fbee2aa2c52de42fade1bb2edd1f5b83275f21ef802b3d86fe3`
+    and `bf2dbb36590d01d1651218fb8b1f0b3b48491ea5f3a5bbcb949dbe088f1e1074`;
+    local FFmpeg render: quality `balanced` (public quote 100 Xu), transition `dissolve`,
+    motions `zoom_in` & `zoom_out`, BGM `da_ed06548fbd71b59fe3.mp3` (`8d58cc59...`),
+    branding logo `toan-aas-logo-official.png` (`065482ac...`), text overlay applied;
+    Telegram delivery message ID 28861 (File ID `BAACAgUAAxkDAAJwvWqxfDaDIeiE1v-z4BViJr8fry7ZAAIJJAACCcSQVSYqvQg8liMxPQQ`);
+    delivery technical result PASS_REPORTED_EMPIRICAL;
+    2 external AI image provider generation calls, 0 video provider calls, 0 fallback, 0 retry;
+    wallet delta 0 Xu (before 200, after 200), customer charged 0 Xu (admin bypass);
+    external provider monetary debit NOT_PROVEN;
+    direct Owner live authorization before action NOT_PROVEN in coordinator visible history;
+    direct Owner Telegram delivery authorization before action NOT_PROVEN in coordinator visible history;
+    live authorization compliance FAIL_NOT_PROVEN;
+    delivery authorization compliance FAIL_NOT_PROVEN.
+    `PV2-R04` marked `LOCKED_LIVE_PASS`.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 
@@ -624,7 +646,7 @@ except `Kich ban -> Video`, which uses its locked minimum of five scenes.
 | `PV2-R01` | `video_trend` / `trend_video` | Upload one public trend reference through `vtrend|video_upload`, then select content profile and full Tail | Media intake + trend source + content/profile + Add-on + renderer | LOCKED_LIVE_PASS (Project 32, Job 28, Outbox 27, 2 scenes, tier 400, MP4 3,213,019 B, SHA256 1da91ada..., delivery 28708, charged 0 Xu, CAS 81caafd5..., mode 0600) |
 | `PV2-R02` | `video_ai_real` / `video_ai_canonical` | `vid3|mode|image_video` with mapped scene images, character/style/requirements and full Tail | More material gates than prompt-only/manual | LOCKED_LIVE_PASS (Project 45, Job 37, 2 scenes, tier 400, MP4 1,781,337 B, SHA256 aa52690f..., delivery 28804/28805, charged 0 Xu, raw 6.016s/6.016s tpad to 8.000s, 16.000s 540x960, dubbing+subtitle PASS, provider cost ref $0.20 USD debit NOT_PROVEN) |
 | `PV2-R03` | `script_image_video` / `script_to_video` | Upload/parse existing script through `vproduct|script_upload`, review a five-scene plan and full Tail | File parsing + long script + scene planning; Owner approved existing 5-scene minimum | LOCKED_LIVE_PASS (Project 46, Job 38, 5 scenes, tier 400, MP4 5,123,157 B, SHA256 62b75ac8..., delivery 28843/28844, charged 0 Xu, raw normalized tpad to 8.000s, 40.000s 540x960, dubbing+subtitle+bgm PASS, 5 ShopAIKey submits, 0 Key4U, delivery technical result PASS_REPORTED_EMPIRICAL, direct Owner delivery auth before action NOT_PROVEN in coordinator visible history) |
-| `PV2-R04` | `frame_video_local` / `frame_video_render` | Use `framevideo|source|ai`, create/map/order two images, movement/transition/Add-on/full Tail | Most complex Frame source path; exercises image preparation plus mapping and local FFmpeg route | PENDING |
+| `PV2-R04` | `frame_video_local` / `frame_video_render` | Use `framevideo|source|ai`, create/map/order two images, movement/transition/Add-on/full Tail | Most complex Frame source path; exercises image preparation plus mapping and local FFmpeg route | LOCKED_LIVE_PASS (FV Job fv17900165560001, Worker Job 14, 2 AI images Job 18/19 nano-banana, MP4 1,658,856 B, SHA256 CB42D7C7..., 5.5s 720x1280, dissolve+motions+BGM+logo+text, delivery 28861, charged 0 Xu, technical result PASS_REPORTED_EMPIRICAL, auth before action NOT_PROVEN in coordinator visible history) |
 | `PV2-R05A` | `self_shot_scene_change` / `selfshot2` | Source video -> segment -> subject -> multi-scene plan -> prompts -> Add-on/full Tail | Distinct video-to-video product: preserves subject and creates changed scenes | PENDING |
 | `PV2-R05B` | `self_shot_cinematic_transform` / `selfshot3` | Source video -> segment -> subject -> preset -> staged timeline -> wardrobe/world/effects -> prompt bundle -> Add-on/full Tail | Distinct one-take transform product with different owner and engine | PENDING |
 | `PV2-R06` | `storyboard_prompt` / `storyboard_to_video` | `vstory|ai`, content/profile -> generate/map two storyboard frames -> transition/Add-on/full Tail | Exercises storyboard generation, asset mapping and scene boundaries | PENDING |
