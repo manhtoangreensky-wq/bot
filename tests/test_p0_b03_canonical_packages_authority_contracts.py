@@ -537,3 +537,64 @@ def test_req_25_zero_financial_side_effects(test_env):
     assert cur.fetchone()[0] == 1
 
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Requirement 26: Commercial toggle blocks plan purchase via user_can_buy_plan
+# ---------------------------------------------------------------------------
+def test_req_26_commercial_toggle_blocks_plan_purchase(test_env):
+    client = test_env["client"]
+    path = "/internal/v1/admin/packages/starter"
+    body = {
+        "expected_version": 1,
+        "changes": {
+            "commercial_enabled": False,
+        },
+        "reason": "Tạm dừng mở bán gói starter",
+    }
+    raw = json.dumps(body).encode("utf-8")
+    headers = build_auth_headers("PATCH", path, raw, request_id="req-toggle-starter-01")
+    resp = client.patch(path, headers=headers, content=raw)
+    assert resp.status_code == 200
+
+    assert bot.PLAN_CATALOG["starter"]["commercial_enabled"] is False
+    can_buy, reason = bot.user_can_buy_plan(1001, "starter")
+    assert can_buy is False
+    assert "tạm dừng mở bán" in reason
+
+
+# ---------------------------------------------------------------------------
+# Requirement 27: Rehydrate overrides on startup via apply_active_package_overrides
+# ---------------------------------------------------------------------------
+def test_req_27_rehydrate_overrides_on_startup(test_env):
+    from services.admin_package_service import apply_active_package_overrides, clear_runtime_package_cache
+
+    # Verify creator was not overridden
+    clear_runtime_package_cache()
+    assert bot.PLAN_CATALOG["creator"]["price_vnd"] == 99000
+
+    # Apply overrides from DB (which already contains previous patch modifications if any)
+    client = test_env["client"]
+    path = "/internal/v1/admin/packages/creator"
+    body = {
+        "expected_version": 1,
+        "changes": {
+            "display_name": "Creator Plus VIP",
+            "price_vnd": 129000,
+        },
+        "reason": "Nâng cấp gói creator",
+    }
+    raw = json.dumps(body).encode("utf-8")
+    headers = build_auth_headers("PATCH", path, raw, request_id="req-rehydrate-creator-01")
+    resp = client.patch(path, headers=headers, content=raw)
+    assert resp.status_code == 200
+
+    # Reset in-memory cache and state
+    clear_runtime_package_cache()
+    assert bot.PLAN_CATALOG["creator"]["price_vnd"] == 99000
+
+    # Simulate startup rehydration
+    apply_active_package_overrides(test_env["db_file"])
+    assert bot.PLAN_CATALOG["creator"]["name"] == "Creator Plus VIP"
+    assert bot.PLAN_CATALOG["creator"]["price_vnd"] == 129000
+
