@@ -1331,3 +1331,310 @@ def test_63_property_all_emitted_voices_subset_of_validated_pool():
             assert emitted.issubset(all_approved), f"Emitted unapproved voice: {emitted - all_approved}"
             for tts_c in decision.tts_cues:
                 assert tts_c["tts_voice_id"] in all_approved
+
+
+# ---------------------------------------------------------------------------
+# Tests for P0.SUBDUB.AUTO.SMART.MULTIVOICE.5VOICE.EXACT_MAP.RUNTIME.WIRING.R1
+# ---------------------------------------------------------------------------
+
+APPROVED_5VOICE_MAP = {
+    "person_1": "Vietnamese_Professional_Narrator_v2",
+    "person_2": "Vietnamese_Cute_Girl_v1",
+    "person_3": "Vietnamese_Cheerful_Instructor_v1",
+    "person_4": "Vietnamese_crisp_announcer_v2",
+    "person_5": "Vietnamese_Steady_Instructor_v1",
+}
+
+FIVEVOICE_APPROVED_POOLS = {
+    "low": [
+        "Vietnamese_Professional_Narrator_v2",
+        "Vietnamese_crisp_announcer_v2",
+        "Vietnamese_Steady_Instructor_v1",
+    ],
+    "high": [
+        "Vietnamese_Cute_Girl_v1",
+        "Vietnamese_Cheerful_Instructor_v1",
+    ],
+}
+
+MANIFEST_36_SPEAKER_SEQUENCE = [
+    ("turn_001", "person_1"), ("turn_002", "person_2"), ("turn_003", "person_1"),
+    ("turn_004", "person_2"), ("turn_005", "person_3"), ("turn_006", "person_4"),
+    ("turn_007", "person_2"), ("turn_008", "person_1"), ("turn_009", "person_2"),
+    ("turn_010", "person_3"), ("turn_011", "person_2"), ("turn_012", "person_1"),
+    ("turn_013", "person_2"), ("turn_014", "person_1"), ("turn_015", "person_2"),
+    ("turn_016", "person_1"), ("turn_017", "person_2"), ("turn_018", "person_1"),
+    ("turn_019", "person_2"), ("turn_020", "person_2"), ("turn_021", "person_1"),
+    ("turn_022", "person_2"), ("turn_023", "person_1"), ("turn_024", "person_5"),
+    ("turn_025", "person_1"), ("turn_026", "person_2"), ("turn_027", "person_5"),
+    ("turn_028", "person_2"), ("turn_029", "person_5"), ("turn_030", "person_2"),
+    ("turn_031", "person_5"), ("turn_032", "person_2"), ("turn_033", "person_1"),
+    ("turn_034", "person_2"), ("turn_035", "person_1"), ("turn_036", "person_1"),
+]
+
+
+def _build_36_cues() -> list[dict[str, Any]]:
+    return [
+        {
+            "cue_id": turn_id,
+            "speaker_id": spk_id,
+            "text": f"Canonical turn {turn_id} by {spk_id}",
+            "start_ms": i * 1000,
+            "end_ms": (i + 1) * 1000,
+        }
+        for i, (turn_id, spk_id) in enumerate(MANIFEST_36_SPEAKER_SEQUENCE)
+    ]
+
+
+def test_64_n5_exact_map_honored():
+    """N5_EXACT_MAP_HONORED=PASS: Verify locked 5-voice map is adopted exactly."""
+    cues = _build_36_cues()
+    decision = smart.decide_smart_multivoice(
+        cues,
+        validated_pools=FIVEVOICE_APPROVED_POOLS,
+        locked_speaker_voice_map=APPROVED_5VOICE_MAP,
+    )
+    assert decision.output_mode == smart.OUTPUT_MODE_DUBBED_MULTI
+    assert decision.strategy == smart.STRATEGY_GENERIC_MULTI
+    assert decision.fallback_level == 0
+    assert decision.fallback_reason is None
+    assert decision.detected_speaker_count == 5
+    assert decision.effective_speaker_count == 5
+    assert decision.effective_voice_count == 5
+    assert decision.speaker_voice_map == APPROVED_5VOICE_MAP
+
+
+def test_65_seed_independent_exact_map():
+    """SEED_A_EXACT_MAP=PASS, SEED_B_EXACT_MAP=PASS, SEED_INDEPENDENT_EXACT_MAP=YES.
+
+    Proves that two different assignment seeds yield the identical approved map.
+    """
+    cues = _build_36_cues()
+    decision_a = smart.decide_smart_multivoice(
+        cues,
+        validated_pools=FIVEVOICE_APPROVED_POOLS,
+        assignment_seed="seed_acceptance_alpha",
+        locked_speaker_voice_map=APPROVED_5VOICE_MAP,
+    )
+    decision_b = smart.decide_smart_multivoice(
+        cues,
+        validated_pools=FIVEVOICE_APPROVED_POOLS,
+        assignment_seed="seed_acceptance_beta",
+        locked_speaker_voice_map=APPROVED_5VOICE_MAP,
+    )
+    assert decision_a.speaker_voice_map == APPROVED_5VOICE_MAP
+    assert decision_b.speaker_voice_map == APPROVED_5VOICE_MAP
+    assert decision_a.speaker_voice_map == decision_b.speaker_voice_map
+
+
+def test_66_all_36_cues_use_canonical_speaker_voice():
+    """ALL_36_CUES_USE_CANONICAL_SPEAKER_VOICE=YES: Every emitted cue has tts_voice_id == locked_map[speaker_id]."""
+    cues = _build_36_cues()
+    decision = smart.decide_smart_multivoice(
+        cues,
+        validated_pools=FIVEVOICE_APPROVED_POOLS,
+        locked_speaker_voice_map=APPROVED_5VOICE_MAP,
+    )
+    assert len(decision.tts_cues) == 36
+    for tts_cue in decision.tts_cues:
+        cid = tts_cue["cue_id"]
+        spk = tts_cue["speaker_id"]
+        expected_voice = APPROVED_5VOICE_MAP[spk]
+        assert tts_cue["tts_voice_id"] == expected_voice, f"Cue {cid} for speaker {spk} had unexpected voice {tts_cue['tts_voice_id']}"
+
+
+def test_67_missing_speaker_fail_closed():
+    """MISSING_SPEAKER_FAIL_CLOSED=YES: Missing speaker in locked map fails closed before synthesis."""
+    cues = _build_36_cues()
+    partial_map = dict(APPROVED_5VOICE_MAP)
+    del partial_map["person_5"]
+
+    decision = smart.decide_smart_multivoice(
+        cues,
+        validated_pools=FIVEVOICE_APPROVED_POOLS,
+        locked_speaker_voice_map=partial_map,
+    )
+    assert decision.output_mode == smart.OUTPUT_MODE_FAILED
+    assert decision.strategy == smart.STRATEGY_FAILED
+    assert "LOCKED_SPEAKER_VOICE_MAP_CONFLICT" in str(decision.fallback_reason)
+    assert "missing_speaker" in str(decision.fallback_reason)
+    assert decision.tts_cues == []
+
+
+def test_68_extra_speaker_fail_closed():
+    """EXTRA_SPEAKER_FAIL_CLOSED=YES: Extra speaker in locked map fails closed."""
+    cues = _build_36_cues()
+    extra_map = dict(APPROVED_5VOICE_MAP)
+    extra_map["person_6"] = "Vietnamese_Professional_Narrator_v2"
+
+    decision = smart.decide_smart_multivoice(
+        cues,
+        validated_pools=FIVEVOICE_APPROVED_POOLS,
+        locked_speaker_voice_map=extra_map,
+    )
+    assert decision.output_mode == smart.OUTPUT_MODE_FAILED
+    assert decision.strategy == smart.STRATEGY_FAILED
+    assert "LOCKED_SPEAKER_VOICE_MAP_CONFLICT" in str(decision.fallback_reason)
+    assert "extra_speaker" in str(decision.fallback_reason)
+    assert decision.tts_cues == []
+
+
+def test_69_duplicate_voice_fail_closed():
+    """DUPLICATE_VOICE_FAIL_CLOSED=YES: Duplicate voice allocation fails closed."""
+    cues = _build_36_cues()
+    dup_map = dict(APPROVED_5VOICE_MAP)
+    dup_map["person_5"] = dup_map["person_1"]
+
+    decision = smart.decide_smart_multivoice(
+        cues,
+        validated_pools=FIVEVOICE_APPROVED_POOLS,
+        locked_speaker_voice_map=dup_map,
+    )
+    assert decision.output_mode == smart.OUTPUT_MODE_FAILED
+    assert decision.strategy == smart.STRATEGY_FAILED
+    assert "LOCKED_SPEAKER_VOICE_MAP_CONFLICT" in str(decision.fallback_reason)
+    assert "duplicate_voice" in str(decision.fallback_reason)
+    assert decision.tts_cues == []
+
+
+def test_70_unknown_voice_fail_closed():
+    """UNKNOWN_VOICE_FAIL_CLOSED=YES: Malformed/illegal voice ID fails closed."""
+    cues = _build_36_cues()
+    bad_map = dict(APPROVED_5VOICE_MAP)
+    bad_map["person_1"] = "invalid voice id with spaces!"
+
+    decision = smart.decide_smart_multivoice(
+        cues,
+        validated_pools=FIVEVOICE_APPROVED_POOLS,
+        locked_speaker_voice_map=bad_map,
+    )
+    assert decision.output_mode == smart.OUTPUT_MODE_FAILED
+    assert decision.strategy == smart.STRATEGY_FAILED
+    assert "LOCKED_SPEAKER_VOICE_MAP_CONFLICT" in str(decision.fallback_reason)
+    assert "unknown_voice" in str(decision.fallback_reason)
+    assert decision.tts_cues == []
+
+
+def test_71_unapproved_voice_fail_closed():
+    """UNAPPROVED_VOICE_FAIL_CLOSED=YES: Voice not in validated all_pool fails closed."""
+    cues = _build_36_cues()
+    unapproved_map = dict(APPROVED_5VOICE_MAP)
+    unapproved_map["person_1"] = "Vietnamese_Unapproved_Voice_v99"
+
+    decision = smart.decide_smart_multivoice(
+        cues,
+        validated_pools=FIVEVOICE_APPROVED_POOLS,
+        locked_speaker_voice_map=unapproved_map,
+    )
+    assert decision.output_mode == smart.OUTPUT_MODE_FAILED
+    assert decision.strategy == smart.STRATEGY_FAILED
+    assert "LOCKED_SPEAKER_VOICE_MAP_CONFLICT" in str(decision.fallback_reason)
+    assert "unapproved_voice" in str(decision.fallback_reason)
+    assert decision.tts_cues == []
+
+
+def test_72_resume_map_immutable(tmp_path):
+    """RESUME_MAP_IMMUTABLE=YES: Resume through blackbox state retains exact map without recomputing from seed."""
+    async def _run():
+        media_file = tmp_path / "source.mp4"
+        _create_mock_file(media_file)
+        cues = _build_36_cues()
+
+        synth_called = False
+
+        async def mock_synth(cues, speaker_voice_map):
+            nonlocal synth_called
+            synth_called = True
+            return [{"cue_id": c["cue_id"], "audio": b"dummy_mp3_data"} for c in cues]
+
+        def mock_render(**kwargs):
+            out = Path(kwargs["output_path"])
+            _create_real_valid_mp4(out)
+            return out
+
+        # Initial run with locked map
+        initial_state = {
+            "auto_smart_multivoice": True,
+            "job_id": "seed_initial_run",
+        }
+        out1 = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=str(media_file),
+            segments=cues,
+            output_path=str(tmp_path / "out1.mp4"),
+            validated_pools=FIVEVOICE_APPROVED_POOLS,
+            synthesize_segments=mock_synth,
+            render_pipeline=mock_render,
+            locked_speaker_voice_map=APPROVED_5VOICE_MAP,
+            state=initial_state,
+        )
+        assert out1["ok"] is True
+        assert out1["speaker_voice_map"] == APPROVED_5VOICE_MAP
+        assert out1["state"]["locked_speaker_voice_map"] == APPROVED_5VOICE_MAP
+
+        # Resumed run: completely new job_id / seed, locked_speaker_voice_map in persisted state
+        resumed_state = dict(out1["state"])
+        resumed_state["job_id"] = "completely_different_resumed_seed_9999"
+
+        out2 = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=str(media_file),
+            segments=cues,
+            output_path=str(tmp_path / "out2.mp4"),
+            validated_pools=FIVEVOICE_APPROVED_POOLS,
+            synthesize_segments=mock_synth,
+            render_pipeline=mock_render,
+            state=resumed_state,
+        )
+        assert out2["ok"] is True
+        assert out2["speaker_voice_map"] == APPROVED_5VOICE_MAP, "Resumed run must retain exact map, not recompute from seed"
+        assert out2["state"]["locked_speaker_voice_map"] == APPROVED_5VOICE_MAP
+
+    asyncio.run(_run())
+
+
+def test_73_no_lock_existing_auto_behavior_unchanged():
+    """NO_LOCK_EXISTING_AUTO_BEHAVIOR_UNCHANGED=YES: Without locked map, existing automatic allocation runs unchanged."""
+    cues = _build_36_cues()
+    decision = smart.decide_smart_multivoice(
+        cues,
+        validated_pools=TEST_POOLS,
+        assignment_seed="fixed_auto_seed",
+    )
+    assert decision.output_mode == smart.OUTPUT_MODE_DUBBED_MULTI
+    assert decision.strategy == smart.STRATEGY_GENERIC_MULTI
+    assert decision.effective_speaker_count == 5
+    assert decision.effective_voice_count == 5
+    all_test_voices = set(TEST_POOLS["low"] + TEST_POOLS["high"])
+    for spk, v in decision.speaker_voice_map.items():
+        assert v in all_test_voices
+
+
+def test_74_locked_map_conflict_aborts_before_synthesis(tmp_path):
+    """Conflicted locked map fails closed with BLOCKER=LOCKED_SPEAKER_VOICE_MAP_CONFLICT and 0 synth calls."""
+    async def _run():
+        media_file = tmp_path / "source.mp4"
+        _create_mock_file(media_file)
+        cues = _build_36_cues()
+
+        synth_called = False
+
+        async def spy_synth(cues, speaker_voice_map):
+            nonlocal synth_called
+            synth_called = True
+            return []
+
+        conflicted_map = dict(APPROVED_5VOICE_MAP)
+        conflicted_map["person_1"] = "Vietnamese_Unapproved_Voice_v99"
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=str(media_file),
+            segments=cues,
+            output_path=str(tmp_path / "out.mp4"),
+            validated_pools=FIVEVOICE_APPROVED_POOLS,
+            synthesize_segments=spy_synth,
+            locked_speaker_voice_map=conflicted_map,
+        )
+        assert res["ok"] is False
+        assert res["output_mode"] == smart.OUTPUT_MODE_FAILED
+        assert res["blocker"] == "LOCKED_SPEAKER_VOICE_MAP_CONFLICT"
+        assert synth_called is False, "No synthesis authority may be invoked on map conflict"
+    asyncio.run(_run())
