@@ -252,8 +252,9 @@ def decide_smart_multivoice(
             )
 
         # Voice validation: canonical voice ID syntax and pool membership
+        normalized_locked_map: dict[str, str] = {}
         for spk, voice_id in locked_speaker_voice_map.items():
-            if not isinstance(voice_id, str) or not bool(speaker_cast._VOICE_ID_RE.fullmatch(voice_id.strip())):
+            if not isinstance(voice_id, str):
                 return SmartVoiceDecision(
                     strategy=STRATEGY_FAILED,
                     detected_speaker_count=detected_speaker_count,
@@ -267,6 +268,19 @@ def decide_smart_multivoice(
                     tts_cues=[],
                 )
             clean_voice = voice_id.strip()
+            if not clean_voice or not bool(speaker_cast._VOICE_ID_RE.fullmatch(clean_voice)):
+                return SmartVoiceDecision(
+                    strategy=STRATEGY_FAILED,
+                    detected_speaker_count=detected_speaker_count,
+                    effective_speaker_count=0,
+                    effective_voice_count=0,
+                    speaker_voice_map={},
+                    fallback_level=-1,
+                    fallback_reason="LOCKED_SPEAKER_VOICE_MAP_CONFLICT:unknown_voice",
+                    output_mode=OUTPUT_MODE_FAILED,
+                    cue_dispositions=fail_dispositions,
+                    tts_cues=[],
+                )
             if clean_voice not in all_pool:
                 return SmartVoiceDecision(
                     strategy=STRATEGY_FAILED,
@@ -280,9 +294,10 @@ def decide_smart_multivoice(
                     cue_dispositions=fail_dispositions,
                     tts_cues=[],
                 )
+            normalized_locked_map[spk] = clean_voice
 
-        # Distinctness validation
-        if len(set(locked_speaker_voice_map.values())) != len(locked_speaker_voice_map):
+        # Distinctness validation on normalized IDs
+        if len(set(normalized_locked_map.values())) != len(normalized_locked_map):
             return SmartVoiceDecision(
                 strategy=STRATEGY_FAILED,
                 detected_speaker_count=detected_speaker_count,
@@ -296,8 +311,8 @@ def decide_smart_multivoice(
                 tts_cues=[],
             )
 
-        # Lock Precedence: directly adopt locked map without hash or fallback ladder
-        speaker_voice_map = {spk: str(locked_speaker_voice_map[spk]).strip() for spk in ordered_speakers}
+        # Lock Precedence: directly adopt validated normalized map ordered by canonical speaker order
+        speaker_voice_map = {spk: normalized_locked_map[spk] for spk in ordered_speakers}
         if detected_speaker_count == 1:
             strategy = STRATEGY_GENERIC_SINGLE
             output_mode = OUTPUT_MODE_DUBBED_SINGLE
@@ -1093,7 +1108,7 @@ async def run_auto_smart_multivoice(
         "cue_dispositions": decision.cue_dispositions,
         "tts_cues": decision.tts_cues,
         "decision_version": decision.decision_version,
-        "locked_speaker_voice_map": dict(locked_speaker_voice_map) if locked_speaker_voice_map else None,
+        "locked_speaker_voice_map": dict(decision.speaker_voice_map) if locked_speaker_voice_map else None,
     }
 
 
@@ -1197,8 +1212,12 @@ async def run_auto_smart_multivoice_blackbox(
     result_state["auto_distinct_voice_count"] = smart_result.get("effective_voice_count", 0)
     result_state["auto_smart_output_mode"] = smart_result.get("output_mode")
     result_state["speaker_voice_map"] = smart_result.get("speaker_voice_map") or {}
-    if locked_speaker_voice_map is not None:
-        result_state["locked_speaker_voice_map"] = dict(locked_speaker_voice_map)
+    if smart_result.get("locked_speaker_voice_map"):
+        result_state["locked_speaker_voice_map"] = dict(smart_result["locked_speaker_voice_map"])
+    elif locked_speaker_voice_map is not None and smart_result.get("speaker_voice_map"):
+        result_state["locked_speaker_voice_map"] = dict(smart_result["speaker_voice_map"])
+    elif locked_speaker_voice_map is not None:
+        result_state["locked_speaker_voice_map"] = {k: str(v).strip() for k, v in locked_speaker_voice_map.items()}
 
     response = {
         **smart_result,

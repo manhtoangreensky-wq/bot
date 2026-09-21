@@ -1497,6 +1497,24 @@ def test_69_duplicate_voice_fail_closed():
     assert decision.tts_cues == []
 
 
+def test_69b_normalized_duplicate_voice_fail_closed():
+    """NORMALIZED_DUPLICATE_VOICE_FAIL_CLOSED=YES: Equivalent voice IDs differing only by whitespace fail closed."""
+    cues = _build_36_cues()
+    dup_map = dict(APPROVED_5VOICE_MAP)
+    # Assign person_5 the same voice as person_1 with surrounding whitespace
+    dup_map["person_5"] = f"  {dup_map['person_1']}  "
+
+    decision = smart.decide_smart_multivoice(
+        cues,
+        validated_pools=FIVEVOICE_APPROVED_POOLS,
+        locked_speaker_voice_map=dup_map,
+    )
+    assert decision.output_mode == smart.OUTPUT_MODE_FAILED
+    assert decision.strategy == smart.STRATEGY_FAILED
+    assert "LOCKED_SPEAKER_VOICE_MAP_CONFLICT:duplicate_voice" in str(decision.fallback_reason)
+    assert decision.tts_cues == []
+
+
 def test_70_unknown_voice_fail_closed():
     """UNKNOWN_VOICE_FAIL_CLOSED=YES: Malformed/illegal voice ID fails closed."""
     cues = _build_36_cues()
@@ -1552,7 +1570,8 @@ def test_72_resume_map_immutable(tmp_path):
             _create_real_valid_mp4(out)
             return out
 
-        # Initial run with locked map
+        # Initial run with raw whitespace in locked map: proves normalization on persist
+        raw_whitespace_map = {k: f"  {v}  " for k, v in APPROVED_5VOICE_MAP.items()}
         initial_state = {
             "auto_smart_multivoice": True,
             "job_id": "seed_initial_run",
@@ -1564,7 +1583,7 @@ def test_72_resume_map_immutable(tmp_path):
             validated_pools=FIVEVOICE_APPROVED_POOLS,
             synthesize_segments=mock_synth,
             render_pipeline=mock_render,
-            locked_speaker_voice_map=APPROVED_5VOICE_MAP,
+            locked_speaker_voice_map=raw_whitespace_map,
             state=initial_state,
         )
         assert out1["ok"] is True
@@ -1637,4 +1656,40 @@ def test_74_locked_map_conflict_aborts_before_synthesis(tmp_path):
         assert res["output_mode"] == smart.OUTPUT_MODE_FAILED
         assert res["blocker"] == "LOCKED_SPEAKER_VOICE_MAP_CONFLICT"
         assert synth_called is False, "No synthesis authority may be invoked on map conflict"
+
+    asyncio.run(_run())
+
+
+def test_74b_normalized_duplicate_aborts_synthesis(tmp_path):
+    """Normalized duplicate map aborts before synthesis with 0 synthesis calls."""
+    async def _run():
+        media_file = tmp_path / "source.mp4"
+        _create_mock_file(media_file)
+        cues = _build_36_cues()
+
+        synth_called = False
+
+        async def spy_synth(cues, speaker_voice_map):
+            nonlocal synth_called
+            synth_called = True
+            return []
+
+        dup_map = dict(APPROVED_5VOICE_MAP)
+        dup_map["person_5"] = f"  {dup_map['person_1']}  "
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=str(media_file),
+            segments=cues,
+            output_path=str(tmp_path / "out.mp4"),
+            validated_pools=FIVEVOICE_APPROVED_POOLS,
+            synthesize_segments=spy_synth,
+            locked_speaker_voice_map=dup_map,
+        )
+        assert res["ok"] is False
+        assert res["output_mode"] == smart.OUTPUT_MODE_FAILED
+        assert res["blocker"] == "LOCKED_SPEAKER_VOICE_MAP_CONFLICT"
+        assert "LOCKED_SPEAKER_VOICE_MAP_CONFLICT:duplicate_voice" in str(res["fallback_reason"])
+        assert res.get("tts_cues", []) == []
+        assert synth_called is False, "No synthesis authority may be invoked on duplicate map conflict"
+
     asyncio.run(_run())
