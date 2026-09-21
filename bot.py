@@ -204146,6 +204146,7 @@ async def handle_img2vid_lock1_callback(query, context: ContextTypes.DEFAULT_TYP
                         model=model,
                         aspect_ratio=ratio,
                         tier=tier_name,
+                        fallback_models=[],
                     )
                 except Exception as exc:
                     reason = sanitize_log_text(str(exc))[:220]
