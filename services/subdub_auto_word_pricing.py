@@ -84,6 +84,18 @@ def auto_volume_discount_percent(words: int) -> int:
     return 0
 
 
+def effective_auto_word_rate_xu() -> Decimal:
+    """Return effective auto word rate honoring canonical admin pricing override."""
+    try:
+        from services.admin_pricing_service import get_canonical_effective_price
+        rate = get_canonical_effective_price("subdub_auto_word", fallback=None)
+        if rate is not None:
+            return Decimal(str(rate))
+    except Exception:
+        pass
+    return AUTO_XU_PER_WORD
+
+
 def auto_voice_component_xu(words: int) -> int:
     """Price only the Auto voice component, rounded up once to whole Xu."""
 
@@ -91,7 +103,8 @@ def auto_voice_component_xu(words: int) -> int:
     discount_multiplier = (
         Decimal(100 - auto_volume_discount_percent(safe_words)) / Decimal(100)
     )
-    amount = Decimal(safe_words) * AUTO_XU_PER_WORD * discount_multiplier
+    rate = effective_auto_word_rate_xu()
+    amount = Decimal(safe_words) * rate * discount_multiplier
     return int(amount.to_integral_value(rounding=ROUND_CEILING))
 
 
@@ -156,4 +169,5 @@ __all__ = (
     "auto_voice_component_xu",
     "auto_volume_discount_percent",
     "count_billable_words",
+    "effective_auto_word_rate_xu",
 )

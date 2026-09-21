@@ -6938,6 +6938,11 @@ def cskh_live_pricing_snapshot() -> dict:
         scene_seconds = int((product_video_r9_scene_pricing(1) or {}).get("scene_seconds") or 0)
         if not image_tiers or not video_tiers or not music_background_tiers or not music_song_tiers or scene_seconds <= 0:
             raise ValueError("canonical_cskh_price_snapshot_incomplete")
+        try:
+            from services.admin_pricing_service import get_canonical_effective_price
+            voice_clone_repeat_xu = int(get_canonical_effective_price("voice_clone_create", fallback=int(VOICE_PROFILE_PRICE_XU or 50)))
+        except Exception:
+            voice_clone_repeat_xu = int(VOICE_PROFILE_PRICE_XU or 0)
         return {
             "available": True,
             "source": "runtime_canonical",
@@ -6946,8 +6951,8 @@ def cskh_live_pricing_snapshot() -> dict:
             "video_tiers": video_tiers,
             "music_background_tiers": music_background_tiers,
             "music_song_tiers": music_song_tiers,
-            "voice_private_first_xu": 0 if VOICE_PROFILE_FIRST_FREE else int(VOICE_PROFILE_PRICE_XU or 0),
-            "voice_private_repeat_xu": int(VOICE_PROFILE_PRICE_XU or 0),
+            "voice_private_first_xu": 0 if VOICE_PROFILE_FIRST_FREE else voice_clone_repeat_xu,
+            "voice_private_repeat_xu": voice_clone_repeat_xu,
             "voice_tts_rate": canonical_price_xu("voice_tts_basic"),
             "voice_tts_min_xu": int(VOICE_TTS_PRODUCT_MIN_CHARGE_XU or 0),
             "subtitle_rate": canonical_price_xu("subtitle_translate_video"),
@@ -56749,15 +56754,34 @@ def video_combo_pricing_payload() -> list[dict]:
     return rows
 
 def workflow_trend_analysis_cost_xu() -> int:
-    return max(0, int(WORKFLOW_TREND_ANALYSIS_COST_XU or 0))
+    try:
+        from services.admin_pricing_service import get_canonical_effective_price
+        return int(get_canonical_effective_price("content_trend_analysis", fallback=int(WORKFLOW_TREND_ANALYSIS_COST_XU or 20)))
+    except Exception:
+        return max(0, int(WORKFLOW_TREND_ANALYSIS_COST_XU or 0))
 
 def workflow_script_storyboard_cost_xu() -> int:
-    return max(0, int(WORKFLOW_SCRIPT_STORYBOARD_COST_XU or 0))
+    try:
+        from services.admin_pricing_service import get_canonical_effective_price
+        return int(get_canonical_effective_price("content_script_storyboard", fallback=int(WORKFLOW_SCRIPT_STORYBOARD_COST_XU or 30)))
+    except Exception:
+        return max(0, int(WORKFLOW_SCRIPT_STORYBOARD_COST_XU or 0))
 
 def workflow_prompt_pack_cost_xu() -> int:
-    return max(0, int(WORKFLOW_PROMPT_PACK_COST_XU or 0))
+    try:
+        from services.admin_pricing_service import get_canonical_effective_price
+        return int(get_canonical_effective_price("content_prompt_pack", fallback=int(WORKFLOW_PROMPT_PACK_COST_XU or 20)))
+    except Exception:
+        return max(0, int(WORKFLOW_PROMPT_PACK_COST_XU or 0))
 
 def workflow_content_cost_xu() -> int:
+    try:
+        from services.admin_pricing_service import get_canonical_effective_price
+        override_val = get_canonical_effective_price("content_full_pack", fallback=None)
+        if override_val is not None and override_val != 70:
+            return int(override_val)
+    except Exception:
+        pass
     return workflow_trend_analysis_cost_xu() + workflow_script_storyboard_cost_xu() + workflow_prompt_pack_cost_xu()
 
 def trend_workflow_content_cost_breakdown() -> dict:
@@ -167764,7 +167788,11 @@ def voice_profile_storage_display_price_xu(user_id, product_context: str = PRODU
         successful_count = count_successful_custom_voice_profiles(user_id, profile_id)
     if VOICE_PROFILE_FIRST_FREE and successful_count < int(VOICE_PROFILE_MAX_FREE_PER_USER or 0):
         return 0
-    return int(VOICE_PROFILE_PRICE_XU or 0)
+    try:
+        from services.admin_pricing_service import get_canonical_effective_price
+        return int(get_canonical_effective_price("voice_clone_create", fallback=int(VOICE_PROFILE_PRICE_XU or 50)))
+    except Exception:
+        return int(VOICE_PROFILE_PRICE_XU or 0)
 
 VOICE_ASSET_STATUSES = {"generated_unused", "preview_sent", "reserved", "used", "archived", "failed", "blocked"}
 
