@@ -4477,13 +4477,19 @@ def confirm_video_project_invoice(
         if charge is False:
             return {"ok": False, "reason": "deduct_failed", "charge": charge}
     confirmed_at = now_text()
+    project_updates: dict[str, Any] = {
+        "status": "queued_for_worker",
+        "video_terminal_state": "final_rendering",
+        "is_confirmed": 1,
+        "confirmed_at": confirmed_at,
+    }
+    if billing_exempt:
+        invoice["billing_exempt"] = True
+        project_updates["invoice_json"] = invoice
     update_video_project(
         conn,
         int(project_id),
-        status="queued_for_worker",
-        video_terminal_state="final_rendering",
-        is_confirmed=1,
-        confirmed_at=confirmed_at,
+        **project_updates,
     )
     job = enqueue_video_render_job(conn, project_id=int(project_id), user_id=int(user_id))
     update_video_project(conn, int(project_id), job_id=int(job.get("id") or 0))
@@ -9447,6 +9453,19 @@ def product_video_delivery_charge_decision(
             "quote_consistent": False,
             "charge_skip_reason": "product_video_quote_mismatch_no_charge",
         }
+    if bool(merged.get("billing_exempt")):
+        return {
+            "ok": False,
+            "already_charged": False,
+            "amount_xu": 0,
+            "user_visible_price_xu": user_visible or amount,
+            "persisted_quoted_price_xu": quoted or amount,
+            "customer_charge_planned_xu": planned or amount,
+            "wallet_charge_amount_xu": 0,
+            "quote_consistent": True,
+            "billing_exempt": True,
+            "charge_skip_reason": "billing_exempt_admin_owner",
+        }
     if amount <= 0:
         return {"ok": False, "amount_xu": 0, "charge_skip_reason": "charge_amount_missing"}
     return {
@@ -9460,7 +9479,7 @@ def product_video_delivery_charge_decision(
         "quote_consistent": True,
         "charge_idempotency_key": f"product_video_final_delivery:{job_id}:{amount}",
         "charge_skip_reason": "",
-        "billing_exempt": bool(merged.get("billing_exempt")),
+        "billing_exempt": False,
     }
 
 
