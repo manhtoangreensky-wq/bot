@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "strategy_id": "PRODUCT-VIDEO-LIVE-V2",
-  "current_pointer": "V2-03/PV2-R03",
+  "current_pointer": "V2-03/PV2-R04",
   "source_merge_sha": "d92a98ddbc10ea4c626f75a65c2ddb58403a2fc6",
   "representative_tier_id": 400,
   "representative_unit_xu": 80,
@@ -147,7 +147,38 @@
         "voice_default",
         "subtitle_source_language",
         "background_music"
-      ]
+      ],
+      "status": "PASS",
+      "execution_evidence": {
+        "project_id": 46,
+        "job_id": 38,
+        "scene_count": 5,
+        "tier_id": 400,
+        "artifact_sha256": "62b75ac8ab860c9e69ec3f547d84090344b69fd3929384d47b49602336f54d17",
+        "artifact_bytes": 5123157,
+        "telegram_delivery_message_id": 28843,
+        "telegram_video_message_id": 28843,
+        "telegram_report_message_id": 28844,
+        "prompt_acceptance": "PASS",
+        "strict_addon_acceptance": "PASS",
+        "zero_wallet_proof": "PASS",
+        "direct_owner_live_generation_authorization": "PROVEN",
+        "direct_owner_telegram_delivery_authorization_before_action": "NOT_PROVEN_IN_COORDINATOR_VISIBLE_HISTORY",
+        "delivery_authorization_compliance": "FAIL_NOT_PROVEN",
+        "scene_1_task_id": "task_Shn7Hzo7GZ0uPRqDxfKljYyb7rTUBkoI",
+        "scene_2_task_id": "task_rcLelx9NQxqZkmzBAUZN0e2noXUrtWDy",
+        "scene_3_task_id": "task_To0AFnDUL1L0Q7y6i35WLBWdOv7ljj7l",
+        "scene_4_task_id": "task_NpYM6kQBU4aa70sigdp4Dq6lVEIh9zTQ",
+        "scene_5_task_id": "task_XpCsluMUEl1CEd1a5Rxe75iFPWYB5dFv",
+        "scene_1_raw_sha256": "8aa9dbd3b05200120f6d57ccde1afefac47120f81e9a7934ca509f737d33d130",
+        "scene_2_raw_sha256": "cb05ec48c6b61cce1ccea5f54b57ae6b4656b9a53ad0056b899d33460e83d380",
+        "scene_3_raw_sha256": "de10a54e6eac726db54a9508ca04944d7fc04152d2b17ad25631913b6a0db6c2",
+        "scene_4_raw_sha256": "cc1a72f9627850cf7b36e8aa1ef194d75130b2b9088c833eccdd6a39e3cf32e1",
+        "scene_5_raw_sha256": "364a0c75cfb71db818e4938875d6afb4385a9122a8c4b8bc19d2af6614b62341",
+        "final_duration_sec": 40.0,
+        "final_resolution": "540x960",
+        "duration_normalization": "freeze_frame_tpad_to_8s_per_scene"
+      }
     },
     {
       "case_id": "PV2-R04",
