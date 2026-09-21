@@ -2,15 +2,6 @@
   "starter": {
     "package_key": "starter",
     "package_type": "subscription",
-    "display_name": "Starter",
-    "description": "Dành cho người mới làm content: chat thường, dịch ngắn, PDF cơ bản, prompt ảnh/video và workflow nhỏ",
-    "price_vnd": 49000,
-    "duration_days": 30,
-    "benefits": {
-      "xu": 600
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 10,
     "group": "subscription",
     "read_authority": "bot.PLAN_CATALOG",
@@ -20,15 +11,6 @@
   "creator": {
     "package_key": "creator",
     "package_type": "subscription",
-    "display_name": "Creator",
-    "description": "Dành cho creator, affiliate hoặc shop nhỏ cần prompt/content/ảnh đều đặn",
-    "price_vnd": 99000,
-    "duration_days": 30,
-    "benefits": {
-      "xu": 1300
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 20,
     "group": "subscription",
     "read_authority": "bot.PLAN_CATALOG",
@@ -38,15 +20,6 @@
   "pro": {
     "package_key": "pro",
     "package_type": "subscription",
-    "display_name": "Pro",
-    "description": "Dành cho người dùng thường xuyên, có thể ưu tiên queue/tác vụ file/audio vừa khi công cụ mở",
-    "price_vnd": 199000,
-    "duration_days": 30,
-    "benefits": {
-      "xu": 3000
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 30,
     "group": "subscription",
     "read_authority": "bot.PLAN_CATALOG",
@@ -56,15 +29,6 @@
   "business": {
     "package_key": "business",
     "package_type": "subscription",
-    "display_name": "Business",
-    "description": "Dành cho team nhỏ, shop hoặc affiliate team cần workflow content + ảnh + voice/audio",
-    "price_vnd": 499000,
-    "duration_days": 30,
-    "benefits": {
-      "xu": 8000
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 40,
     "group": "subscription",
     "read_authority": "bot.PLAN_CATALOG",
@@ -74,18 +38,6 @@
   "combo_ad_video_588k": {
     "package_key": "combo_ad_video_588k",
     "package_type": "combo",
-    "display_name": "🎬 Combo Video Quảng Cáo Sản Phẩm Mini",
-    "description": "1 video 3-5 cảnh, 3-5 ảnh phụ trợ, prompt/storyboard, gợi ý voice/nhạc/phụ đề nếu bật.",
-    "price_vnd": 48000,
-    "duration_days": 30,
-    "benefits": {
-      "video_standard": 1,
-      "image_standard": 5,
-      "trend_workflow": 1,
-      "music_library": 1
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 50,
     "group": "video_ads",
     "read_authority": "bot.package_catalog_payload[\"combos\"]",
@@ -95,18 +47,6 @@
   "combo_ad_video_pro_1288k": {
     "package_key": "combo_ad_video_pro_1288k",
     "package_type": "combo",
-    "display_name": "🎬 Combo Video Quảng Cáo Sản Phẩm Pro",
-    "description": "3 video quảng cáo, ảnh chất lượng cao, voice/nhạc/phụ đề/logo theo brief.",
-    "price_vnd": 198000,
-    "duration_days": 30,
-    "benefits": {
-      "video_high": 3,
-      "image_high": 10,
-      "trend_workflow": 3,
-      "music_library": 3
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 60,
     "group": "video_ads",
     "read_authority": "bot.package_catalog_payload[\"combos\"]",
@@ -116,18 +56,6 @@
   "combo_tiktok_week_1288k": {
     "package_key": "combo_tiktok_week_1288k",
     "package_type": "combo",
-    "display_name": "📱 Combo TikTok/Reels 1 Tuần",
-    "description": "7 video ngắn kèm caption/prompt, nhạc nền và thumbnail nếu có.",
-    "price_vnd": 238000,
-    "duration_days": 30,
-    "benefits": {
-      "video_standard": 7,
-      "image_standard": 7,
-      "trend_workflow": 7,
-      "music_library": 7
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 70,
     "group": "tiktok",
     "read_authority": "bot.package_catalog_payload[\"combos\"]",
@@ -137,18 +65,6 @@
   "combo_product_review_888k": {
     "package_key": "combo_product_review_888k",
     "package_type": "combo",
-    "display_name": "🛒 Combo Affiliate / Review Sản Phẩm",
-    "description": "5 video review, ảnh minh họa, voice đọc review, nhạc nền, phụ đề và kịch bản bán hàng.",
-    "price_vnd": 178000,
-    "duration_days": 30,
-    "benefits": {
-      "video_standard": 5,
-      "image_standard": 10,
-      "trend_workflow": 5,
-      "music_library": 5
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 80,
     "group": "shop",
     "read_authority": "bot.package_catalog_payload[\"combos\"]",
@@ -158,18 +74,6 @@
   "combo_shop_30d_2888k": {
     "package_key": "combo_shop_30d_2888k",
     "package_type": "combo",
-    "display_name": "🛒 Combo Shop Bán Hàng 30 Ngày",
-    "description": "20-30 ảnh, 10 video ngắn, workflow, voice/TTS và nhạc nền theo kế hoạch tháng.",
-    "price_vnd": 498000,
-    "duration_days": 30,
-    "benefits": {
-      "image_high": 30,
-      "video_standard": 10,
-      "trend_workflow": 20,
-      "music_library": 10
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 90,
     "group": "shop",
     "read_authority": "bot.package_catalog_payload[\"combos\"]",
@@ -179,18 +83,6 @@
   "combo_song_visual_888k": {
     "package_key": "combo_song_visual_888k",
     "package_type": "combo",
-    "display_name": "🎵 Combo MV Nhạc / Ca Khúc",
-    "description": "1 bài nhạc có lời, visual ảnh/video, lyric/subtitle và MV đơn giản.",
-    "price_vnd": 98000,
-    "duration_days": 30,
-    "benefits": {
-      "music_song": 1,
-      "image_high": 5,
-      "video_high": 1,
-      "subtitle_translate": 1
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 100,
     "group": "music_mv",
     "read_authority": "bot.package_catalog_payload[\"combos\"]",
@@ -200,19 +92,6 @@
   "combo_mini_course_1888k": {
     "package_key": "combo_mini_course_1888k",
     "package_type": "combo",
-    "display_name": "🎓 Combo Khóa Học Mini",
-    "description": "5 video bài học, voice/TTS, phụ đề, slide/ảnh minh họa và nhạc nền nhẹ.",
-    "price_vnd": 448000,
-    "duration_days": 30,
-    "benefits": {
-      "video_standard": 5,
-      "image_high": 10,
-      "voice_words": 30000,
-      "subtitle_dub_combo": 5,
-      "music_library": 1
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 110,
     "group": "course",
     "read_authority": "bot.package_catalog_payload[\"combos\"]",
@@ -222,16 +101,6 @@
   "combo_translate_dub_888k": {
     "package_key": "combo_translate_dub_888k",
     "package_type": "combo",
-    "display_name": "🌐 Combo Dịch Video Đa Ngôn Ngữ",
-    "description": "5 video dịch phụ đề và 5 video lồng tiếng, cần chốt ngôn ngữ/độ dài.",
-    "price_vnd": 188000,
-    "duration_days": 30,
-    "benefits": {
-      "subtitle_translate": 5,
-      "subtitle_dub_combo": 5
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 120,
     "group": "translation",
     "read_authority": "bot.package_catalog_payload[\"combos\"]",
@@ -241,18 +110,6 @@
   "combo_launch_1288k": {
     "package_key": "combo_launch_1288k",
     "package_type": "combo",
-    "display_name": "🚀 Combo Ra Mắt Sản Phẩm",
-    "description": "1 teaser, 1 video quảng cáo, 10 ảnh, nhạc nền, voice/TTS và phụ đề nếu bật.",
-    "price_vnd": 168000,
-    "duration_days": 30,
-    "benefits": {
-      "video_high": 2,
-      "image_high": 10,
-      "trend_workflow": 5,
-      "music_library": 2
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 130,
     "group": "launch",
     "read_authority": "bot.package_catalog_payload[\"combos\"]",
@@ -262,19 +119,6 @@
   "combo_small_business_2888k": {
     "package_key": "combo_small_business_2888k",
     "package_type": "combo",
-    "display_name": "🏢 Combo Doanh Nghiệp Nhỏ",
-    "description": "Video + ảnh + voice + nhạc + phụ đề theo tháng; giá trị cao nên admin review.",
-    "price_vnd": 778000,
-    "duration_days": 30,
-    "benefits": {
-      "video_high": 12,
-      "image_high": 30,
-      "trend_workflow": 20,
-      "music_library": 10,
-      "subtitle_dub_combo": 5
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 140,
     "group": "business",
     "read_authority": "bot.package_catalog_payload[\"combos\"]",
@@ -284,18 +128,6 @@
   "combo_daily_content_2888k": {
     "package_key": "combo_daily_content_2888k",
     "package_type": "combo",
-    "display_name": "🧩 Combo Nội Dung Hàng Ngày",
-    "description": "30 ý tưởng/trend, 30 ảnh/thumbnail, 10 video ngắn, voice/nhạc/phụ đề cơ bản.",
-    "price_vnd": 448000,
-    "duration_days": 30,
-    "benefits": {
-      "trend_workflow": 30,
-      "image_standard": 30,
-      "video_standard": 10,
-      "music_library": 10
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 150,
     "group": "tiktok",
     "read_authority": "bot.package_catalog_payload[\"combos\"]",
@@ -305,13 +137,6 @@
   "combo_custom_order": {
     "package_key": "combo_custom_order",
     "package_type": "combo",
-    "display_name": "📩 Combo Order Riêng / Cần Gói Lớn Hơn",
-    "description": "Không auto checkout. Bot chỉ gửi yêu cầu admin duyệt riêng.",
-    "price_vnd": 0,
-    "duration_days": 30,
-    "benefits": {},
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 160,
     "group": "custom",
     "read_authority": "bot.package_catalog_payload[\"combos\"]",
@@ -321,16 +146,6 @@
   "combo_brand_voice_588k": {
     "package_key": "combo_brand_voice_588k",
     "package_type": "combo",
-    "display_name": "🎙 Combo Voice Thương Hiệu — 588k",
-    "description": "Cần xác nhận quyền giọng và phạm vi sử dụng.",
-    "price_vnd": 588000,
-    "duration_days": 30,
-    "benefits": {
-      "voice_audio": 10,
-      "custom_voice": 1
-    },
-    "public_visible": false,
-    "commercial_enabled": false,
     "sort_order": 170,
     "group": "combo",
     "read_authority": "bot.package_catalog_payload[\"combos\"]",
@@ -340,18 +155,6 @@
   "combo_content_week_1288k": {
     "package_key": "combo_content_week_1288k",
     "package_type": "combo",
-    "display_name": "🧩 Combo Content 1 Tuần — 1.288M",
-    "description": "Bộ nội dung một tuần gồm ảnh, video ngắn, ý tưởng và gợi ý nhạc.",
-    "price_vnd": 1288000,
-    "duration_days": 30,
-    "benefits": {
-      "video_standard": 5,
-      "image_standard": 7,
-      "trend_workflow": 4,
-      "music_library": 5
-    },
-    "public_visible": false,
-    "commercial_enabled": false,
     "sort_order": 180,
     "group": "combo",
     "read_authority": "bot.package_catalog_payload[\"combos\"]",
@@ -361,18 +164,6 @@
   "combo_shop_affiliate_1888k": {
     "package_key": "combo_shop_affiliate_1888k",
     "package_type": "combo",
-    "display_name": "🛍 Combo Shop / Affiliate — 1.888M",
-    "description": "Bộ ảnh/video/review cho shop hoặc affiliate chạy nội dung đều.",
-    "price_vnd": 1888000,
-    "duration_days": 30,
-    "benefits": {
-      "video_standard": 8,
-      "image_high": 12,
-      "trend_workflow": 6,
-      "music_library": 8
-    },
-    "public_visible": false,
-    "commercial_enabled": false,
     "sort_order": 190,
     "group": "combo",
     "read_authority": "bot.package_catalog_payload[\"combos\"]",
@@ -382,15 +173,6 @@
   "tiktok_99k": {
     "package_key": "tiktok_99k",
     "package_type": "combo",
-    "display_name": "🎁 Combo Ưu Đãi TikTok — 99k",
-    "description": "Legacy hidden package kept for existing wallets/tests.",
-    "price_vnd": 99000,
-    "duration_days": 30,
-    "benefits": {
-      "video_common": 3
-    },
-    "public_visible": false,
-    "commercial_enabled": false,
     "sort_order": 200,
     "group": "combo",
     "read_authority": "bot.package_catalog_payload[\"combos\"]",
@@ -400,16 +182,6 @@
   "basic_199k": {
     "package_key": "basic_199k",
     "package_type": "combo",
-    "display_name": "📦 Combo Cơ Bản — 199k",
-    "description": "Legacy hidden package kept for existing wallets.",
-    "price_vnd": 199000,
-    "duration_days": 30,
-    "benefits": {
-      "video_common": 3,
-      "image_standard": 2
-    },
-    "public_visible": false,
-    "commercial_enabled": false,
     "sort_order": 210,
     "group": "combo",
     "read_authority": "bot.package_catalog_payload[\"combos\"]",
@@ -419,17 +191,6 @@
   "standard_299k": {
     "package_key": "standard_299k",
     "package_type": "combo",
-    "display_name": "⭐ Combo Tiêu Chuẩn — 299k",
-    "description": "Legacy hidden package kept for existing wallets.",
-    "price_vnd": 299000,
-    "duration_days": 30,
-    "benefits": {
-      "video_standard": 4,
-      "image_standard": 3,
-      "trend_workflow": 1
-    },
-    "public_visible": false,
-    "commercial_enabled": false,
     "sort_order": 220,
     "group": "combo",
     "read_authority": "bot.package_catalog_payload[\"combos\"]",
@@ -439,16 +200,6 @@
   "posting_499k": {
     "package_key": "posting_499k",
     "package_type": "combo",
-    "display_name": "📅 Combo Đăng Đều — 499k",
-    "description": "Legacy hidden package kept for existing wallets.",
-    "price_vnd": 499000,
-    "duration_days": 30,
-    "benefits": {
-      "video_common": 5,
-      "video_standard": 5
-    },
-    "public_visible": false,
-    "commercial_enabled": false,
     "sort_order": 230,
     "group": "combo",
     "read_authority": "bot.package_catalog_payload[\"combos\"]",
@@ -458,18 +209,6 @@
   "product_ads_699k": {
     "package_key": "product_ads_699k",
     "package_type": "combo",
-    "display_name": "🚀 Combo Quảng Cáo Sản Phẩm — 699k",
-    "description": "Legacy hidden package kept for existing wallets.",
-    "price_vnd": 699000,
-    "duration_days": 30,
-    "benefits": {
-      "image_high": 5,
-      "video_standard": 3,
-      "video_high": 1,
-      "trend_workflow": 2
-    },
-    "public_visible": false,
-    "commercial_enabled": false,
     "sort_order": 240,
     "group": "combo",
     "read_authority": "bot.package_catalog_payload[\"combos\"]",
@@ -479,15 +218,6 @@
   "image_mini_monthly": {
     "package_key": "image_mini_monthly",
     "package_type": "service_monthly",
-    "display_name": "🖼 Ảnh Mini — 20 ảnh / 30 ngày",
-    "description": "Gói ảnh nhỏ để test sản phẩm, avatar, post nhanh.",
-    "price_vnd": 38000,
-    "duration_days": 30,
-    "benefits": {
-      "image_standard": 20
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 250,
     "group": "image",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -497,15 +227,6 @@
   "image_basic_monthly": {
     "package_key": "image_basic_monthly",
     "package_type": "service_monthly",
-    "display_name": "🖼 Ảnh Cơ bản — 50 ảnh / 30 ngày",
-    "description": "Dùng đều cho ảnh social, ảnh mô tả sản phẩm và bài đăng.",
-    "price_vnd": 88000,
-    "duration_days": 30,
-    "benefits": {
-      "image_standard": 50
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 260,
     "group": "image",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -515,16 +236,6 @@
   "image_sales_monthly": {
     "package_key": "image_sales_monthly",
     "package_type": "service_monthly",
-    "display_name": "🛒 Ảnh Bán hàng — 100 ảnh / 30 ngày",
-    "description": "Có thêm ảnh chất lượng cao cho chiến dịch bán hàng.",
-    "price_vnd": 248000,
-    "duration_days": 30,
-    "benefits": {
-      "image_standard": 80,
-      "image_high": 20
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 270,
     "group": "image",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -534,16 +245,6 @@
   "image_pro_monthly": {
     "package_key": "image_pro_monthly",
     "package_type": "service_monthly",
-    "display_name": "💎 Ảnh Chuyên nghiệp — 200 ảnh / 30 ngày",
-    "description": "Nhiều ảnh chất lượng cao hơn, phù hợp team nội dung dùng đều.",
-    "price_vnd": 758000,
-    "duration_days": 30,
-    "benefits": {
-      "image_standard_warranty": 100,
-      "image_high": 100
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 280,
     "group": "image",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -553,16 +254,6 @@
   "image_business_monthly": {
     "package_key": "image_business_monthly",
     "package_type": "service_monthly",
-    "display_name": "🏢 Ảnh Doanh nghiệp — 500 ảnh / 30 ngày",
-    "description": "Gói ảnh lớn cho shop/team, ưu tiên lên kế hoạch dùng đều.",
-    "price_vnd": 1408000,
-    "duration_days": 30,
-    "benefits": {
-      "image_standard": 300,
-      "image_high": 200
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 290,
     "group": "image",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -572,15 +263,6 @@
   "video_mini_monthly": {
     "package_key": "video_mini_monthly",
     "package_type": "service_monthly",
-    "display_name": "🎬 Video Mini — 3 video / 30 ngày",
-    "description": "3 video phổ thông cho nhu cầu thử sản phẩm.",
-    "price_vnd": 28000,
-    "duration_days": 30,
-    "benefits": {
-      "video_common": 3
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 300,
     "group": "video",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -590,15 +272,6 @@
   "video_basic_monthly": {
     "package_key": "video_basic_monthly",
     "package_type": "service_monthly",
-    "display_name": "🎬 Video Cơ bản — 5 video / 30 ngày",
-    "description": "5 video phổ thông cho lịch đăng tuần.",
-    "price_vnd": 38000,
-    "duration_days": 30,
-    "benefits": {
-      "video_common": 5
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 310,
     "group": "video",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -608,15 +281,6 @@
   "video_sales_monthly": {
     "package_key": "video_sales_monthly",
     "package_type": "service_monthly",
-    "display_name": "🛒 Video Bán hàng — 10 video / 30 ngày",
-    "description": "Video tiêu chuẩn cho quảng cáo/bán hàng.",
-    "price_vnd": 128000,
-    "duration_days": 30,
-    "benefits": {
-      "video_standard": 10
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 320,
     "group": "video",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -626,16 +290,6 @@
   "video_pro_monthly": {
     "package_key": "video_pro_monthly",
     "package_type": "service_monthly",
-    "display_name": "💎 Video Chuyên nghiệp — 20 video / 30 ngày",
-    "description": "Gói video lớn cần admin xác nhận lịch xử lý nếu quá tải.",
-    "price_vnd": 318000,
-    "duration_days": 30,
-    "benefits": {
-      "video_standard": 15,
-      "video_high": 5
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 330,
     "group": "video",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -645,17 +299,6 @@
   "video_studio_monthly": {
     "package_key": "video_studio_monthly",
     "package_type": "service_monthly",
-    "display_name": "🎞 Video Studio — 40 video / 30 ngày",
-    "description": "Gói rất lớn chuyển admin review để chốt lịch, provider và phạm vi.",
-    "price_vnd": 1008000,
-    "duration_days": 30,
-    "benefits": {
-      "video_standard": 20,
-      "video_high": 10,
-      "video_multiscene": 10
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 340,
     "group": "video",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -665,15 +308,6 @@
   "music_bg_mini_monthly": {
     "package_key": "music_bg_mini_monthly",
     "package_type": "service_monthly",
-    "display_name": "🎵 Nhạc nền Mini — 5 track / 30 ngày",
-    "description": "Nhạc không lời cho vài video ngắn; cần admin xác nhận khi tạo thật.",
-    "price_vnd": 48000,
-    "duration_days": 30,
-    "benefits": {
-      "music_background": 5
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 350,
     "group": "music",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -683,15 +317,6 @@
   "music_bg_creator_monthly": {
     "package_key": "music_bg_creator_monthly",
     "package_type": "service_monthly",
-    "display_name": "🎵 Nhạc nền Creator — 10 track / 30 ngày",
-    "description": "Nhạc nền không lời cho lịch đăng đều.",
-    "price_vnd": 128000,
-    "duration_days": 30,
-    "benefits": {
-      "music_background": 10
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 360,
     "group": "music",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -701,15 +326,6 @@
   "music_song_monthly": {
     "package_key": "music_song_monthly",
     "package_type": "service_monthly",
-    "display_name": "🎤 Bài hát Có Lời — 5 bài / 30 ngày",
-    "description": "Bài hát có lời cần brief và quyền sử dụng rõ trước khi xử lý.",
-    "price_vnd": 88000,
-    "duration_days": 30,
-    "benefits": {
-      "music_song": 5
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 370,
     "group": "music",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -719,15 +335,6 @@
   "music_shop_ads_monthly": {
     "package_key": "music_shop_ads_monthly",
     "package_type": "service_monthly",
-    "display_name": "📣 Nhạc Shop/Quảng cáo — 10 bài / 30 ngày",
-    "description": "Nhạc quảng cáo/slogan cần admin duyệt brief trước khi mở đơn.",
-    "price_vnd": 188000,
-    "duration_days": 30,
-    "benefits": {
-      "music_song": 10
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 380,
     "group": "music",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -737,16 +344,6 @@
   "music_studio_monthly": {
     "package_key": "music_studio_monthly",
     "package_type": "service_monthly",
-    "display_name": "🎼 Nhạc Studio — 20 bài mixed / 30 ngày",
-    "description": "Gói nhạc lớn admin review lịch xử lý, quyền dùng và phong cách.",
-    "price_vnd": 358000,
-    "duration_days": 30,
-    "benefits": {
-      "music_song": 10,
-      "music_background": 10
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 390,
     "group": "music",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -756,15 +353,6 @@
   "voice_tts_mini_monthly": {
     "package_key": "voice_tts_mini_monthly",
     "package_type": "service_monthly",
-    "display_name": "🎙 TTS Mini — khoảng 20.000 từ / 30 ngày",
-    "description": "Gói giọng đọc ngắn cho quảng cáo, intro, bài bán hàng.",
-    "price_vnd": 188000,
-    "duration_days": 30,
-    "benefits": {
-      "voice_words": 20000
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 400,
     "group": "voice",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -774,15 +362,6 @@
   "voice_tts_content_monthly": {
     "package_key": "voice_tts_content_monthly",
     "package_type": "service_monthly",
-    "display_name": "🎙 TTS Nội dung — khoảng 50.000 từ / 30 ngày",
-    "description": "Dùng cho bài bán hàng, review, script video.",
-    "price_vnd": 428000,
-    "duration_days": 30,
-    "benefits": {
-      "voice_words": 50000
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 410,
     "group": "voice",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -792,15 +371,6 @@
   "voice_shop_monthly": {
     "package_key": "voice_shop_monthly",
     "package_type": "service_monthly",
-    "display_name": "🛒 Voice Shop — 80 audio / 30 ngày",
-    "description": "Nhiều voice quảng cáo ngắn, cần chốt giọng/độ dài.",
-    "price_vnd": 328000,
-    "duration_days": 30,
-    "benefits": {
-      "voice_audio": 80
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 420,
     "group": "voice",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -810,15 +380,6 @@
   "voice_creator_monthly": {
     "package_key": "voice_creator_monthly",
     "package_type": "service_monthly",
-    "display_name": "🎙 Voice Creator — 150.000 từ / 30 ngày",
-    "description": "Gói voice dài hơn cho nội dung, khóa học, review.",
-    "price_vnd": 1128000,
-    "duration_days": 30,
-    "benefits": {
-      "voice_words": 150000
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 430,
     "group": "voice",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -828,16 +389,6 @@
   "voice_pro_monthly": {
     "package_key": "voice_pro_monthly",
     "package_type": "service_monthly",
-    "display_name": "🗣 Voice Pro — TTS + 3 giọng riêng / 30 ngày",
-    "description": "Custom voice cần quyền giọng và admin duyệt trước khi xử lý.",
-    "price_vnd": 1418000,
-    "duration_days": 30,
-    "benefits": {
-      "voice_words": 200000,
-      "custom_voice": 3
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 440,
     "group": "voice",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -847,15 +398,6 @@
   "subtitle_mini_monthly": {
     "package_key": "subtitle_mini_monthly",
     "package_type": "service_monthly",
-    "display_name": "🌐 Phụ đề Mini — 5 video / 30 ngày",
-    "description": "Dịch phụ đề cơ bản; auto subtitle free nếu chính sách đang free.",
-    "price_vnd": 68000,
-    "duration_days": 30,
-    "benefits": {
-      "subtitle_translate": 5
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 450,
     "group": "subtitle_dub",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -865,15 +407,6 @@
   "subtitle_translate_monthly": {
     "package_key": "subtitle_translate_monthly",
     "package_type": "service_monthly",
-    "display_name": "🌐 Dịch phụ đề — 10 video / 30 ngày",
-    "description": "Dịch phụ đề theo ký tự, video dài/đa ngôn ngữ cần admin chốt phạm vi.",
-    "price_vnd": 128000,
-    "duration_days": 30,
-    "benefits": {
-      "subtitle_translate": 10
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 460,
     "group": "subtitle_dub",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -883,15 +416,6 @@
   "subtitle_dub_basic_monthly": {
     "package_key": "subtitle_dub_basic_monthly",
     "package_type": "service_monthly",
-    "display_name": "🎙 Lồng tiếng Cơ bản — 5 video / 30 ngày",
-    "description": "Lồng tiếng mặc định theo ký tự; cần xác nhận ngôn ngữ/độ dài.",
-    "price_vnd": 108000,
-    "duration_days": 30,
-    "benefits": {
-      "subtitle_dub": 5
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 470,
     "group": "subtitle_dub",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -901,15 +425,6 @@
   "subtitle_multilang_monthly": {
     "package_key": "subtitle_multilang_monthly",
     "package_type": "service_monthly",
-    "display_name": "🌍 Lồng tiếng Đa ngôn ngữ — 10 video / 30 ngày",
-    "description": "Phụ đề + lồng tiếng đa ngôn ngữ, gói lớn admin duyệt.",
-    "price_vnd": 188000,
-    "duration_days": 30,
-    "benefits": {
-      "subtitle_dub_combo": 10
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 480,
     "group": "subtitle_dub",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -919,16 +434,6 @@
   "subtitle_studio_monthly": {
     "package_key": "subtitle_studio_monthly",
     "package_type": "service_monthly",
-    "display_name": "🎞 Studio Dịch Video — 20 video / 30 ngày",
-    "description": "Gói dịch/lồng lớn cần admin chốt lịch xử lý.",
-    "price_vnd": 338000,
-    "duration_days": 30,
-    "benefits": {
-      "subtitle_translate": 20,
-      "subtitle_dub_combo": 20
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 490,
     "group": "subtitle_dub",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -938,15 +443,6 @@
   "prompt_mini_monthly": {
     "package_key": "prompt_mini_monthly",
     "package_type": "service_monthly",
-    "display_name": "🧠 Prompt Mini — 20 ý tưởng / 30 ngày",
-    "description": "Ý tưởng/prompt video cho người chưa tạo media ngay.",
-    "price_vnd": 128000,
-    "duration_days": 30,
-    "benefits": {
-      "trend_workflow": 20
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 500,
     "group": "prompt_workflow",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -956,15 +452,6 @@
   "storyboard_creator_monthly": {
     "package_key": "storyboard_creator_monthly",
     "package_type": "service_monthly",
-    "display_name": "📚 Storyboard Creator — 50 kịch bản / 30 ngày",
-    "description": "Storyboard + prompt cho video ngắn, review, bài bán hàng.",
-    "price_vnd": 298000,
-    "duration_days": 30,
-    "benefits": {
-      "trend_workflow": 50
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 510,
     "group": "prompt_workflow",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -974,15 +461,6 @@
   "workflow_shop_monthly": {
     "package_key": "workflow_shop_monthly",
     "package_type": "service_monthly",
-    "display_name": "🛒 Workflow Shop — 100 workflow / 30 ngày",
-    "description": "Trend workflow, kịch bản và prompt cho shop đăng đều.",
-    "price_vnd": 568000,
-    "duration_days": 30,
-    "benefits": {
-      "trend_workflow": 100
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 520,
     "group": "prompt_workflow",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -992,15 +470,6 @@
   "workflow_pro_monthly": {
     "package_key": "workflow_pro_monthly",
     "package_type": "service_monthly",
-    "display_name": "💼 Workflow Pro — 200 workflow / 30 ngày",
-    "description": "Gói prompt/workflow lớn cho team, giảm sâu hơn.",
-    "price_vnd": 988000,
-    "duration_days": 30,
-    "benefits": {
-      "trend_workflow": 200
-    },
-    "public_visible": true,
-    "commercial_enabled": true,
     "sort_order": 530,
     "group": "prompt_workflow",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -1010,16 +479,6 @@
   "starter_monthly": {
     "package_key": "starter_monthly",
     "package_type": "service_monthly",
-    "display_name": "🟢 Gói Cơ bản — 98k / 30 ngày",
-    "description": "Dùng đều mỗi tháng cho người mới bắt đầu: ảnh cơ bản và ý tưởng nội dung. Đây là gói mixed giữ tương thích sau PR #113.",
-    "price_vnd": 98000,
-    "duration_days": 30,
-    "benefits": {
-      "image_standard": 10,
-      "trend_workflow": 4
-    },
-    "public_visible": true,
-    "commercial_enabled": false,
     "sort_order": 540,
     "group": "mixed",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -1029,17 +488,6 @@
   "creator_monthly": {
     "package_key": "creator_monthly",
     "package_type": "service_monthly",
-    "display_name": "🔵 Gói Nội dung — 188k / 30 ngày",
-    "description": "Cho người đăng nội dung đều: ảnh, ý tưởng và vài video ngắn phổ thông. Đây là gói mixed giữ tương thích sau PR #113.",
-    "price_vnd": 188000,
-    "duration_days": 30,
-    "benefits": {
-      "image_standard": 20,
-      "trend_workflow": 8,
-      "video_common": 2
-    },
-    "public_visible": true,
-    "commercial_enabled": false,
     "sort_order": 550,
     "group": "mixed",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -1049,17 +497,6 @@
   "shop_monthly": {
     "package_key": "shop_monthly",
     "package_type": "service_monthly",
-    "display_name": "🟣 Gói Bán hàng — 388k / 30 ngày",
-    "description": "Cho shop bán hàng cần ảnh đẹp, video ngắn và ý tưởng đăng đều. Đây là gói mixed giữ tương thích sau PR #113.",
-    "price_vnd": 388000,
-    "duration_days": 30,
-    "benefits": {
-      "image_high": 20,
-      "video_standard": 3,
-      "trend_workflow": 10
-    },
-    "public_visible": true,
-    "commercial_enabled": false,
     "sort_order": 560,
     "group": "mixed",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -1069,17 +506,6 @@
   "pro_monthly": {
     "package_key": "pro_monthly",
     "package_type": "service_monthly",
-    "display_name": "🟠 Gói Chuyên nghiệp — 588k / 30 ngày",
-    "description": "Gói lớn hơn, giảm nhiều hơn cho team dùng đều hằng tháng. Đây là gói mixed giữ tương thích sau PR #113.",
-    "price_vnd": 588000,
-    "duration_days": 30,
-    "benefits": {
-      "image_high": 40,
-      "video_standard": 6,
-      "trend_workflow": 20
-    },
-    "public_visible": true,
-    "commercial_enabled": false,
     "sort_order": 570,
     "group": "mixed",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
@@ -1089,18 +515,6 @@
   "small_business_monthly": {
     "package_key": "small_business_monthly",
     "package_type": "service_monthly",
-    "display_name": "🔴 Gói Doanh nghiệp nhỏ — 888k / 30 ngày",
-    "description": "Gói tháng lớn nhất hiện tại cho doanh nghiệp nhỏ, ưu đãi sâu hơn và cần admin theo dõi nếu phát sinh vượt gói. Đây là gói mixed giữ tương thích sau PR #113.",
-    "price_vnd": 888000,
-    "duration_days": 30,
-    "benefits": {
-      "image_high": 80,
-      "video_high": 6,
-      "video_standard": 10,
-      "trend_workflow": 30
-    },
-    "public_visible": true,
-    "commercial_enabled": false,
     "sort_order": 580,
     "group": "mixed",
     "read_authority": "bot.package_catalog_payload[\"monthly\"]",
