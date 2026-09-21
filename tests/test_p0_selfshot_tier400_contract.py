@@ -156,24 +156,8 @@ def test_selfshot_provider_requirements_and_clean_fail():
     assert exc_info.value.diagnostics.get("no_charge") is True
 
 
-def test_selfshot_delivery_receipt_and_exactly_once_billing(tmp_path, monkeypatch):
+def test_selfshot_delivery_receipt_and_exactly_once_billing(tmp_path):
     """Verify exactly-once billing upon valid artifact delivery and 0 Xu charge upon failure."""
-    def fake_probe(path):
-        p = str(path or "")
-        if "corrupt" in p or "invalid" in p:
-            return {"ok": False, "error": "corrupt_video"}
-        if p and Path(p).is_file() and Path(p).stat().st_size > 0:
-            return {
-                "ok": True,
-                "duration": 16.0,
-                "has_video": True,
-                "format": "mp4",
-                "streams": [{"codec_type": "video"}],
-            }
-        return {"ok": False, "error": "file_not_found"}
-
-    monkeypatch.setattr(queue.video_local_validation, "probe_video_file", fake_probe)
-
     valid_mp4_ss2 = str(tmp_path / "ss2_final.mp4")
     with open(valid_mp4_ss2, "wb") as f:
         f.write(b"\x00\x00\x00 ftypisom" + b"\x00" * 1024)

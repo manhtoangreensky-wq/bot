@@ -666,7 +666,7 @@ Every assigned product below supports single-scene execution and the assigned ti
 product rows already cover it. `PV2-Q700` remains a separate 1-scene quality-only job.
 
 | Quality ID | Public offer | Assigned product/lane | Scenes | Status |
-|---:|---|---|---|---:|---|
+|---:|---|---|---:|---|
 | `400` | Nhanh gon - `80 Xu` | Covered by default-tier representative product rows | 2 | PENDING representative rows |
 | `500` | Chuyen dong on dinh - `110 Xu` | `video_trend`, search/catalog sibling lane | 1 | PENDING |
 | `600` | Chuyen dong co am thanh - `160 Xu` | `video_idea`, explored preset handoff | 1 | PENDING |
