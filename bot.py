@@ -58091,6 +58091,21 @@ def p0_21d_task_package_payload() -> dict:
         ),
     }
     packages.update(p0_21d_legacy_mixed_monthly_payload())
+    try:
+        from services.admin_package_service import get_runtime_package_override
+        for code, entry in packages.items():
+            ov = get_runtime_package_override(code)
+            if ov:
+                if "display_name" in ov:
+                    entry["label"] = ov["display_name"]
+                if "description" in ov:
+                    entry["note"] = ov["description"]
+                if "price_vnd" in ov:
+                    entry["price_vnd"] = ov["price_vnd"]
+                if "public_visible" in ov:
+                    entry["public"] = ov["public_visible"]
+    except Exception:
+        pass
     return packages
 
 def p0_21d_combo_catalog_payload(include_legacy: bool = True) -> dict:
@@ -58277,12 +58292,28 @@ def p0_21d_combo_catalog_payload(include_legacy: bool = True) -> dict:
             hidden["public"] = False
             hidden["legacy"] = True
             combos[code] = hidden
+    try:
+        from services.admin_package_service import get_runtime_package_override
+        for code, entry in combos.items():
+            ov = get_runtime_package_override(code)
+            if ov:
+                if "display_name" in ov:
+                    entry["label"] = ov["display_name"]
+                if "description" in ov:
+                    entry["note"] = ov["description"]
+                if "price_vnd" in ov:
+                    entry["price_vnd"] = ov["price_vnd"]
+                if "public_visible" in ov:
+                    entry["public"] = ov["public_visible"]
+    except Exception:
+        pass
     return combos
 
 def package_catalog_payload() -> dict:
+    combos = p0_21d_combo_catalog_payload(include_legacy=True)
     monthly = p0_21d_task_package_payload()
     return {
-        "combos": p0_21d_combo_catalog_payload(include_legacy=True),
+        "combos": combos,
         "monthly": monthly,
     }
 
@@ -278088,6 +278119,108 @@ async def api_internal_admin_pricing_update(price_key: str, request: Request):
 
     ok, result, status_code = update_canonical_pricing(
         price_key=price_key,
+        payload=payload,
+        actor_id=actor_id,
+        request_id=request_id,
+        db_path=DB_FILE,
+    )
+    return JSONResponse(status_code=status_code, content=result)
+
+
+# ─── CANONICAL ADMIN PACKAGES COMMERCIAL AUTHORITY ENDPOINTS (SPEC-B03) ──────────
+
+@fastapi_app.get("/internal/v1/admin/packages")
+async def api_internal_admin_packages_collection(request: Request):
+    """Canonical Bot Core admin packages collection read endpoint (SPEC-B03)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.admin_package_service import get_canonical_package_collection
+
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path="/internal/v1/admin/packages",
+        body_bytes=b"",
+        actor_id=str(request.headers.get("x-toan-aas-actor-id") or "").strip(),
+    )
+    if not auth_ok:
+        raise HTTPException(
+            status_code=auth_status,
+            detail={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    ok, result, status_code = get_canonical_package_collection(db_path=DB_FILE)
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.get("/internal/v1/admin/packages/{package_key}")
+async def api_internal_admin_packages_single(package_key: str, request: Request):
+    """Canonical Bot Core admin single package read endpoint (SPEC-B03)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.admin_package_service import get_canonical_package_single
+
+    path = f"/internal/v1/admin/packages/{package_key}"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path=path,
+        body_bytes=b"",
+        actor_id=str(request.headers.get("x-toan-aas-actor-id") or "").strip(),
+    )
+    if not auth_ok:
+        raise HTTPException(
+            status_code=auth_status,
+            detail={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    ok, result, status_code = get_canonical_package_single(package_key=package_key, db_path=DB_FILE)
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.patch("/internal/v1/admin/packages/{package_key}")
+async def api_internal_admin_packages_update(package_key: str, request: Request):
+    """Canonical Bot Core admin package mutation endpoint with CAS and audit (SPEC-B03)."""
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+        if not isinstance(payload, dict):
+            raise ValueError("Payload must be an object")
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail={"ok": False, "error_code": "INVALID_JSON", "message": "Invalid JSON payload"},
+        )
+
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.admin_package_service import update_canonical_package
+
+    path = f"/internal/v1/admin/packages/{package_key}"
+    actor_id = str(request.headers.get("x-toan-aas-actor-id") or payload.get("actor_id") or "").strip()
+    request_id = str(request.headers.get("x-toan-aas-request-id") or "").strip()
+
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request_id,
+        method="PATCH",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=actor_id,
+    )
+    if not auth_ok:
+        raise HTTPException(
+            status_code=auth_status,
+            detail={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    ok, result, status_code = update_canonical_package(
+        package_key=package_key,
         payload=payload,
         actor_id=actor_id,
         request_id=request_id,
