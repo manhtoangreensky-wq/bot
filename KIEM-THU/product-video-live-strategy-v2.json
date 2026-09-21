@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "strategy_id": "PRODUCT-VIDEO-LIVE-V2",
+  "current_pointer": "V2-03/PV2-R02",
   "source_merge_sha": "d92a98ddbc10ea4c626f75a65c2ddb58403a2fc6",
   "representative_tier_id": 400,
   "representative_unit_xu": 80,
@@ -72,7 +73,24 @@
       "addons": [
         "subtitle_source_language",
         "transition_default"
-      ]
+      ],
+      "status": "PASS",
+      "execution_evidence": {
+        "project_id": 32,
+        "job_id": 28,
+        "outbox_id": 27,
+        "scene_count": 2,
+        "tier_id": 400,
+        "artifact_sha256": "1da91adab09303aae98ba6ac899a93471494041c318dc09b5eb686c1d592ca2d",
+        "artifact_bytes": 3213019,
+        "telegram_delivery_message_id": 28708,
+        "prompt_acceptance": "PASS",
+        "strict_addon_acceptance": "PASS",
+        "zero_wallet_proof": "PASS",
+        "pre_success_cas_backup_path": "/opt/toanaas/bot/delete/pv2-r01-job28-scene1-unified-poll-only-production-20260904T121904.json",
+        "pre_success_cas_backup_sha256": "81caafd5e9bc3f27ffe893b3a2b31fb5506f3059c748443989bb228cf0eebc97",
+        "pre_success_cas_backup_mode": "0600"
+      }
     },
     {
       "case_id": "PV2-R02",
