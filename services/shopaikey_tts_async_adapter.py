@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import json
@@ -329,13 +329,26 @@ async def download_audio_from_url(
         should_close = True
 
     try:
-        res = await client.get(target)
-        http_status = int(res.status_code)
-        content = bytes(res.content or b"")
-        content_type = str(res.headers.get("content-type") or "")
-        if http_status < 400 and content and (content_type.startswith("audio/") or len(content) > 512):
-            return content, f"http={http_status}; bytes={len(content)}", http_status
-        return b"", f"http={http_status}; bytes={len(content)}; content_type={content_type}", http_status
+        last_exc_detail = ""
+        for attempt in range(3):
+            try:
+                res = await client.get(target)
+                http_status = int(res.status_code)
+                content = bytes(res.content or b"")
+                content_type = str(res.headers.get("content-type") or "")
+                if http_status < 400 and content and (content_type.startswith("audio/") or len(content) > 512):
+                    return content, f"http={http_status}; bytes={len(content)}", http_status
+                if attempt < 2 and http_status >= 500:
+                    await asyncio.sleep(1.0)
+                    continue
+                return b"", f"http={http_status}; bytes={len(content)}; content_type={content_type}", http_status
+            except (httpx.TimeoutException, httpx.TransportError) as exc:
+                last_exc_detail = f"{type(exc).__name__}: {exc}"
+                if attempt < 2:
+                    await asyncio.sleep(1.0)
+                    continue
+                return b"", f"network_error: {last_exc_detail}", 0
+        return b"", f"download_exhausted: {last_exc_detail}", 0
     finally:
         if should_close:
             await client.aclose()
