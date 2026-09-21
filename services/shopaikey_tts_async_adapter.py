@@ -4,11 +4,18 @@ import asyncio
 import io
 import json
 import os
+import re
 import tarfile
+import tempfile
 import time
 from typing import Any, Callable
 
 import httpx
+
+from services.subdub_tts_artifact_validator import (
+    validate_tts_audio_artifact,
+    STATUS_VALID,
+)
 
 DEFAULT_SHOPAIKEY_TTS_BASE_URL = "https://direct.shopaikey.com"
 DEFAULT_SHOPAIKEY_TTS_MODEL = "speech-02-hd"
@@ -322,7 +329,7 @@ MAX_SHOPAIKEY_EXTRACTED_AUDIO_BYTES = 50 * 1024 * 1024  # 50 MB
 
 
 def is_valid_mp3_payload(data: bytes) -> bool:
-    """Validate whether binary data has a valid MP3 ID3 header or sync frame."""
+    """Cheap magic-byte prefilter to check potential MP3 container (ID3 or frame sync)."""
     if not data or len(data) < 32:
         return False
     if data.startswith(b"ID3"):
@@ -330,6 +337,52 @@ def is_valid_mp3_payload(data: bytes) -> bool:
     if data[0] == 0xFF and (data[1] & 0xE0) == 0xE0:
         return True
     return False
+
+
+def validate_mp3_audio_bytes(
+    data: bytes,
+    *,
+    expected_container: str = "mp3",
+    expected_codec: str = "mp3",
+    min_duration: float = 0.01,
+) -> tuple[bool, str]:
+    """Validate in-memory audio bytes using the canonical validator.
+
+    Guarantees:
+    - TEMP_FILE_CLEANUP=ALWAYS via finally block
+    - Canonical ffprobe container=mp3, codec=mp3/mp3float, duration>0, full ffmpeg decode PASS
+    - PRODUCTION_ARTIFACT_WRITE=NO
+    - CHECKPOINT_WRITE_BEFORE_VALIDATION=NO
+    """
+    if not data or len(data) < 32:
+        return False, "audio_bytes_too_short_or_empty"
+
+    temp_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+            temp_path = tmp.name
+            tmp.write(data)
+            tmp.flush()
+
+        res = validate_tts_audio_artifact(
+            temp_path,
+            expected_container=expected_container,
+            expected_codec=expected_codec,
+            min_duration=min_duration,
+        )
+        if not res.ok:
+            return False, f"status={res.status}; detail={res.detail}"
+        if res.duration <= 0.0:
+            return False, f"status=ZERO_OR_INVALID_DURATION; duration={res.duration}"
+        return True, f"status={STATUS_VALID}; duration={res.duration:.4f}s; codec={res.codec}"
+    except Exception as exc:
+        return False, f"exception={type(exc).__name__}: {exc}"
+    finally:
+        if temp_path:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
 
 
 def normalize_shopaikey_tts_audio_payload(
@@ -343,7 +396,7 @@ def normalize_shopaikey_tts_audio_payload(
         tuple[status, clean_audio_bytes, detail]
         - Direct MP3 => validated and returned directly
         - POSIX TAR => safely extracted regular *.mp3 member in memory (ignoring sidecars)
-        - Multiple MP3s / 0 MP3s / symlinks / path traversal / invalid audio => fail closed
+        - Multiple MP3s / 0 MP3s / symlinks / hardlinks / path traversal / absolute paths / invalid audio => fail closed
     """
     if not content:
         return "FAIL_EMPTY", b"", "empty_audio_content"
@@ -383,6 +436,8 @@ def normalize_shopaikey_tts_audio_payload(
                         any(p == ".." for p in parts)
                         or norm_name.startswith("/")
                         or os.path.isabs(m.name)
+                        or os.path.isabs(norm_name)
+                        or bool(re.match(r"^[a-zA-Z]:", norm_name))
                     ):
                         return "FAIL_UNSAFE_TAR", b"", f"tar_path_traversal: name={m.name}"
 
@@ -409,17 +464,21 @@ def normalize_shopaikey_tts_audio_payload(
                 if len(extracted_bytes) > MAX_SHOPAIKEY_EXTRACTED_AUDIO_BYTES:
                     return "FAIL_AUDIO_TOO_LARGE", b"", f"extracted_mp3_read_overflow: {len(extracted_bytes)}"
 
-                if not is_valid_mp3_payload(extracted_bytes):
-                    return "FAIL_INVALID_AUDIO", b"", f"extracted_member_not_valid_mp3: name={target_member.name}; bytes={len(extracted_bytes)}"
+                val_ok, val_detail = validate_mp3_audio_bytes(extracted_bytes)
+                if not val_ok:
+                    return "FAIL_INVALID_AUDIO", b"", f"extracted_member_invalid_audio: name={target_member.name}; {val_detail}"
 
-                return "PASS", extracted_bytes, f"tar_extracted; member={target_member.name}; bytes={len(extracted_bytes)}"
+                return "PASS", extracted_bytes, f"tar_extracted; member={target_member.name}; bytes={len(extracted_bytes)}; {val_detail}"
 
         except (tarfile.TarError, Exception) as exc:
             return "FAIL_CORRUPT_TAR", b"", f"tar_processing_error: {type(exc).__name__}: {exc}"
 
-    # 2. Direct MP3 check (fast path)
+    # 2. Direct MP3 check (magic-byte prefilter + canonical validator)
     if is_valid_mp3_payload(content):
-        return "PASS", content, f"direct_mp3; bytes={len(content)}"
+        val_ok, val_detail = validate_mp3_audio_bytes(content)
+        if val_ok:
+            return "PASS", content, f"direct_mp3; bytes={len(content)}; {val_detail}"
+        return "FAIL_INVALID_AUDIO", b"", f"direct_mp3_invalid_audio: {val_detail}"
 
     # 3. Unknown or unsupported binary payload => fail closed
     return "FAIL_UNKNOWN_PAYLOAD", b"", f"unknown_payload_rejected: bytes={len(content)}; content_type={content_type}"
