@@ -310,12 +310,12 @@ BASE_PRICING_CATALOG: dict[str, dict[str, Any]] = {
         "unit": "char",
         "base_value": 0.2,
         "value_type": "float",
-        "editable": True,
-        "policy_type": "PAID_PRICE",
+        "editable": False,
+        "policy_type": "UNWIRED_RUNTIME_POLICY",
         "domain": "voice",
-        "read_authority": "bot.custom_voice_usage_price_xu",
-        "quote_authority": "bot.saved_voice_tts_confirm_text",
-        "charge_authority": "bot.spend_fixed_credit_info",
+        "read_authority": "UNWIRED_FROM_MUTABLE_ADMIN_SURFACE",
+        "quote_authority": "UNWIRED_FROM_MUTABLE_ADMIN_SURFACE",
+        "charge_authority": "UNWIRED_FROM_MUTABLE_ADMIN_SURFACE",
     },
 
     # --- AI Music (services.video_ai_real_pricing.public_music_background_prices, bot.py) ---
@@ -615,6 +615,7 @@ IMMUTABLE_INTERNAL_COST_FIELDS: set[str] = {
 
 # In-memory runtime override cache for ultra-fast and deterministic execution reads
 _RUNTIME_PRICING_OVERRIDES: dict[str, Any] = {}
+_RUNTIME_PRICING_STATES: dict[str, dict[str, Any]] = {}
 
 # Canonical pricing aliases mapping legacy or alternative keys to canonical price keys
 CANONICAL_PRICING_ALIASES: dict[str, str] = {
@@ -771,13 +772,19 @@ def get_canonical_pricing_single(price_key: str, db_path: str) -> tuple[bool, di
 def clear_runtime_pricing_cache() -> None:
     """Clear in-memory runtime cache, useful for testing and fresh reload."""
     _RUNTIME_PRICING_OVERRIDES.clear()
+    _RUNTIME_PRICING_STATES.clear()
 
 
-def get_canonical_effective_price(price_key: str, fallback: Any = None, db_path: str | None = None) -> Any:
-    """Synchronous read helper consumed directly by execution engines and quote resolvers."""
+def get_canonical_effective_price_state(price_key: str, db_path: str | None = None) -> dict[str, Any]:
+    """Return explicit authority state: (base_value, effective_value, has_override, version).
+    Does NOT infer override status from numeric equality."""
     price_key = CANONICAL_PRICING_ALIASES.get(price_key, price_key)
-    if price_key in _RUNTIME_PRICING_OVERRIDES:
-        return _RUNTIME_PRICING_OVERRIDES[price_key]
+    base = BASE_PRICING_CATALOG.get(price_key, {})
+    base_val = base.get("base_value")
+    val_type = base.get("value_type", "int")
+
+    if price_key in _RUNTIME_PRICING_STATES:
+        return dict(_RUNTIME_PRICING_STATES[price_key])
 
     resolved_db = db_path
     if not resolved_db:
@@ -795,21 +802,43 @@ def get_canonical_effective_price(price_key: str, fallback: Any = None, db_path:
             conn.row_factory = sqlite3.Row
             ensure_admin_pricing_schema(conn)
             cur = conn.cursor()
-            cur.execute("SELECT effective_value FROM admin_pricing_overrides WHERE price_key = ?", (price_key,))
+            cur.execute("SELECT effective_value, version FROM admin_pricing_overrides WHERE price_key = ?", (price_key,))
             row = cur.fetchone()
             conn.close()
             if row:
-                base = BASE_PRICING_CATALOG.get(price_key, {})
-                val_type = base.get("value_type", "int")
                 raw = row["effective_value"]
                 val = int(Decimal(str(raw))) if val_type == "int" else float(Decimal(str(raw)))
+                ver = int(row["version"])
+                state = {
+                    "price_key": price_key,
+                    "base_value": base_val,
+                    "effective_value": val,
+                    "has_override": True,
+                    "version": ver,
+                }
                 _RUNTIME_PRICING_OVERRIDES[price_key] = val
-                return val
+                _RUNTIME_PRICING_STATES[price_key] = state
+                return dict(state)
         except Exception:
             pass
 
-    if price_key in BASE_PRICING_CATALOG:
-        return BASE_PRICING_CATALOG[price_key]["base_value"]
+    state = {
+        "price_key": price_key,
+        "base_value": base_val,
+        "effective_value": base_val,
+        "has_override": False,
+        "version": 1,
+    }
+    return state
+
+
+def get_canonical_effective_price(price_key: str, fallback: Any = None, db_path: str | None = None) -> Any:
+    """Synchronous read helper consumed directly by execution engines and quote resolvers."""
+    state = get_canonical_effective_price_state(price_key, db_path=db_path)
+    if state["has_override"]:
+        return state["effective_value"]
+    if state["base_value"] is not None:
+        return state["base_value"]
     return fallback
 
 
@@ -1016,6 +1045,13 @@ def update_canonical_pricing(
 
         # Update runtime hook cache
         _RUNTIME_PRICING_OVERRIDES[price_key] = clean_val
+        _RUNTIME_PRICING_STATES[price_key] = {
+            "price_key": price_key,
+            "base_value": base["base_value"],
+            "effective_value": clean_val,
+            "has_override": True,
+            "version": new_version,
+        }
 
         # Fresh canonical readback verification
         readback_val = get_canonical_effective_price(price_key, db_path=db_path)

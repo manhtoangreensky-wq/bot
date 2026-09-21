@@ -56776,10 +56776,10 @@ def workflow_prompt_pack_cost_xu() -> int:
 
 def workflow_content_cost_xu() -> int:
     try:
-        from services.admin_pricing_service import get_canonical_effective_price
-        override_val = get_canonical_effective_price("content_full_pack", fallback=None)
-        if override_val is not None and override_val != 70:
-            return int(override_val)
+        from services.admin_pricing_service import get_canonical_effective_price_state
+        state = get_canonical_effective_price_state("content_full_pack")
+        if state.get("has_override"):
+            return int(state["effective_value"])
     except Exception:
         pass
     return workflow_trend_analysis_cost_xu() + workflow_script_storyboard_cost_xu() + workflow_prompt_pack_cost_xu()
@@ -56792,7 +56792,7 @@ def trend_workflow_content_cost_breakdown() -> dict:
         "trend_analysis": trend_cost,
         "script_storyboard": script_cost,
         "prompt_pack": prompt_pack_cost,
-        "total": trend_cost + script_cost + prompt_pack_cost,
+        "total": workflow_content_cost_xu(),
         "image_separate": image_base_cost_xu(),
         "video_separate": video_base_cost_xu(),
     }

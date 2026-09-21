@@ -13,7 +13,7 @@ Validates all 19 required B02 specifications and invariants:
 10. Forbidden internal cost fields (cost, provider_cost, api_key, etc.) rejected with 400
 11. Negative price or zero on paid price rejected with 400
 12. Decimal value on integer price key rejected with 400 (INVALID_PRICE_VALUE_TYPE)
-13. Decimal value accepted on float price key (voice_custom_tts_per_char)
+13. Decimal value accepted on float price key (subdub_auto_word)
 14. Missing or empty reason rejected with 400 (REASON_MANDATORY)
 15. Unauthorized caller rejected with 401 / 503
 16. Consumer propagation: public_quality_catalog reflects overridden video tier price
@@ -427,13 +427,13 @@ def test_req_12_decimal_value_on_int_type_rejected_400(test_env):
 # ---------------------------------------------------------------------------
 def test_req_13_decimal_value_accepted_on_float_type(test_env):
     client = test_env["client"]
-    path = "/internal/v1/admin/pricing/voice_custom_tts_per_char"
-    payload = {"expected_version": 1, "new_value": 0.35, "reason": "Adjust per-char rate"}
+    path = "/internal/v1/admin/pricing/subdub_auto_word"
+    payload = {"expected_version": 1, "new_value": 0.75, "reason": "Adjust auto word rate"}
     body = json.dumps(payload).encode("utf-8")
     headers = build_auth_headers("PATCH", path, body)
     resp = client.patch(path, content=body, headers=headers)
     assert resp.status_code == 200
-    assert resp.json()["pricing"]["effective_value"] == 0.35
+    assert resp.json()["pricing"]["effective_value"] == 0.75
 
 
 # ---------------------------------------------------------------------------
