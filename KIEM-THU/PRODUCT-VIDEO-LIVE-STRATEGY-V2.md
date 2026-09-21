@@ -7,10 +7,12 @@ nhung khong duoc dung de mo them job ngoai bang assignment ben duoi.
 
 ## 1. Pointer hien tai
 
-`CURRENT_POINTER=V2-03/PV2-R04` - execute the fourth complex non-manual
-representative: Frame to Video (`frame_video_local` / `frame_video_render` via
-`framevideo|source|ai`), tier `400`, two 9:16 scenes, AI image generation,
-scene mapping and full Tail. Sibling lanes inherit source contracts.
+`CURRENT_POINTER=V2-03/PV2-R05A` - execute the fifth complex non-manual
+representative: Self-shot Video Scene Change (`self_shot_scene_change` /
+`selfshot2` via `vproduct|selfshot_product|scene_change`), tier `400`, two 9:16
+scenes using the existing self-shot source-video fixture (`PV-L05-self-shot-typing-source.mp4`,
+SHA256 `784FBE5BBD7B8D59A40A16AD103DB2B14B5DC7FCE71BE2ADA3E24A3BC04E2732`),
+subject-preserving scene transformation, and full Tail. Sibling lanes inherit source contracts.
 The completed Tail UI and terminal engine seams remain byte-locked.
 
 - [x] `V2-00` Trend4 Facebook failure loop: PR #914 merged as
