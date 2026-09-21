@@ -3805,6 +3805,7 @@ def _confirm_product_video_invoice_atomic(
     require_provider_admission: bool,
     require_authoritative_snapshot: bool = False,
     now: datetime | None = None,
+    billing_exempt: bool = False,
 ) -> dict[str, Any]:
     current_dt = now or datetime.now()
     current = now_text(current_dt)
@@ -3846,6 +3847,7 @@ def _confirm_product_video_invoice_atomic(
                 "continue_polling": False,
                 "charge": 0,
                 "charged_xu": 0,
+                "billing_exempt": bool(billing_exempt),
             }
             try:
                 conn.execute("BEGIN IMMEDIATE")
@@ -4090,6 +4092,8 @@ def _confirm_product_video_invoice_atomic(
             existing_probation_started_at = str(active_payload.get("probation_started_at") or "")
             existing_probation_provider = str(active_payload.get("probation_candidate_key") or "")
             active_payload.update(admission_state)
+            if billing_exempt:
+                active_payload["billing_exempt"] = True
             if str(active_payload.get("admission_mode") or "") == PRODUCT_VIDEO_PROBATION_ADMISSION_MODE:
                 active_payload["probation_job_id"] = int(active["id"])
                 active_payload["same_job_lock_reentry_allowed"] = True
@@ -4146,6 +4150,8 @@ def _confirm_product_video_invoice_atomic(
             asset_pack = {}
         if not isinstance(invoice, dict):
             invoice = {}
+        if billing_exempt:
+            admission_state["billing_exempt"] = True
         asset_pack.update(admission_state)
         invoice.update(admission_state)
         route_max_attempts = (
@@ -4325,6 +4331,7 @@ def _confirm_product_video_invoice_atomic(
             "final_decision": "continue_polling",
             "charge": 0,
             "charged_xu": 0,
+            "billing_exempt": bool(billing_exempt),
             "admission_handler_id": str(admission_state.get("admission_callback_handler_id") or ""),
             "worker_claim_id": "",
             "canonical_engine_entry": PRODUCT_VIDEO_CANONICAL_ENGINE_ENTRY,
@@ -4422,6 +4429,7 @@ def confirm_video_project_invoice(
     provider_admission: dict[str, Any] | None = None,
     require_provider_admission: bool = False,
     require_authoritative_admission: bool = False,
+    billing_exempt: bool = False,
 ) -> dict[str, Any]:
     ensure_video_project_queue_schema(conn)
     project = get_video_project(conn, int(project_id))
@@ -4450,7 +4458,7 @@ def confirm_video_project_invoice(
         total_xu = int(project.get("total_xu_estimated") or 0)
     if total_xu <= 0:
         total_xu = int(invoice.get("total_xu") or invoice.get("total") or 0)
-    if balance_xu is not None and int(balance_xu) < total_xu:
+    if not billing_exempt and balance_xu is not None and int(balance_xu) < total_xu:
         return {"ok": False, "reason": "insufficient_balance", "required_xu": total_xu}
     if _is_product_video_project(project):
         return _confirm_product_video_invoice_atomic(
@@ -4460,8 +4468,9 @@ def confirm_video_project_invoice(
             admission=provider_admission,
             require_provider_admission=bool(require_provider_admission),
             require_authoritative_snapshot=bool(require_authoritative_admission),
+            billing_exempt=bool(billing_exempt),
         )
-    if deduct_func is not None:
+    if deduct_func is not None and not billing_exempt:
         charge = deduct_func(int(user_id), total_xu)
         if isinstance(charge, dict) and not charge.get("ok", True):
             return {"ok": False, "reason": "deduct_failed", "charge": charge}
@@ -4641,6 +4650,7 @@ def confirm_public_product_video_invoice(
     user_id: int,
     balance_xu: int | None = None,
     provider_admission: dict[str, Any] | None = None,
+    billing_exempt: bool = False,
 ) -> dict[str, Any]:
     """The only queue entry point authorized for a public final-confirm callback."""
     if not verify_product_video_final_admission_context(provider_admission):
@@ -4671,6 +4681,7 @@ def confirm_public_product_video_invoice(
         provider_admission=provider_admission,
         require_provider_admission=True,
         require_authoritative_admission=True,
+        billing_exempt=bool(billing_exempt),
     )
 
 
@@ -9326,7 +9337,8 @@ def product_video_delivery_charge_decision(
     job = dict(job or {})
     result = dict(result or {})
     invoice = _json_loads(project.get("invoice_json") or result.get("invoice_json") or result.get("invoice"), {})
-    merged = {**project, **job, **invoice, **result}
+    job_payload = _json_loads(job.get("result_json"), {}) if isinstance(job.get("result_json"), str) else dict(job.get("result_json") or {})
+    merged = {**project, **job, **job_payload, **invoice, **result}
     job_id = _as_int(job.get("id") or job.get("job_id") or result.get("job_id"), 0)
     recovery_existing_tasks_only = bool(
         result.get("recovery_existing_tasks_only")
@@ -9448,6 +9460,7 @@ def product_video_delivery_charge_decision(
         "quote_consistent": True,
         "charge_idempotency_key": f"product_video_final_delivery:{job_id}:{amount}",
         "charge_skip_reason": "",
+        "billing_exempt": bool(merged.get("billing_exempt")),
     }
 
 

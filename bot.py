@@ -6084,10 +6084,17 @@ def confirm_video_project_invoice(
     provider_admission: dict | None = None,
     require_provider_admission: bool = False,
     conn=None,
+    billing_exempt: bool | None = None,
 ) -> dict:
     owned = conn is None
     db = conn or db_connect()
     try:
+        if billing_exempt is None:
+            try:
+                billing_exempt = bool(video_b14_is_admin_or_owner(user_id))
+            except Exception:
+                billing_exempt = False
+
         def _deduct(uid: int, amount: int):
             if deduct_func is not None:
                 return deduct_func(uid, amount)
@@ -6120,6 +6127,7 @@ def confirm_video_project_invoice(
                 user_id=int(user_id),
                 balance_xu=balance_xu,
                 provider_admission=final_admission,
+                billing_exempt=bool(billing_exempt),
             )
         return video_project_queue.confirm_video_project_invoice(
             db,
@@ -6129,6 +6137,7 @@ def confirm_video_project_invoice(
             deduct_func=_deduct,
             provider_admission=final_admission,
             require_provider_admission=bool(require_provider_admission),
+            billing_exempt=bool(billing_exempt),
         )
     finally:
         if owned:
@@ -120491,6 +120500,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             use_wallet=False,
             provider_admission=final_admission,
             require_provider_admission=True,
+            billing_exempt=is_internal,
         )
         queue_job = dict(queue_result.get("job") or {})
         queue_job_id = safe_int(queue_job.get("id"), 0)
