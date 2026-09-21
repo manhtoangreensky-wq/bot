@@ -378,3 +378,18 @@ def test_p0_21d_does_not_touch_engines():
     )
     offenders = [path for path in changed if path.startswith(forbidden_prefixes) and not _allowed_p0_18o_engine_guard_path(path, changed)]
     assert offenders == []
+
+
+def test_p0_21d_user_can_buy_package_and_manual_routing():
+    can_buy, reason = bot.user_can_buy_package("test_user", "monthly", "video_studio_monthly")
+    assert can_buy is False
+    assert "admin hỗ trợ" in reason
+
+    can_buy, reason = bot.user_can_buy_package("test_user", "monthly", "image_mini_monthly")
+    assert can_buy is True
+    assert reason == "eligible"
+
+    can_buy, reason = bot.user_can_buy_package("test_user", "monthly", "non_existent_code")
+    assert can_buy is False
+    assert "không tồn tại" in reason
+

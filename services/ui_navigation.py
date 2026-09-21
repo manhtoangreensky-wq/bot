@@ -145,12 +145,14 @@ def canonicalize_bottom_navigation(
 
     back = back_buttons[-1]
     main = main_buttons[-1]
+    back_cb = _button_callback(back)
     kept_rows: list[list[Any]] = []
     for row in normalized:
         kept = [
             button
             for button in row
-            if not is_main_menu_button(button) and not is_back_button(button)
+            if not is_main_menu_button(button)
+            and not (is_back_button(button) and _button_callback(button) == back_cb)
         ]
         if kept:
             if is_numeric_suggestion_row(kept) or is_position_grid_row(kept):
