@@ -46,7 +46,11 @@ def test_v2_representatives_lock_owner_scope_and_selfshot_products() -> None:
         contract = video_tail9.commercial_contract(adapter_id)
         assert contract["flow_owner"] == row["flow_owner"], row["case_id"]
         assert contract["engine_route"] == row["engine_route"], row["case_id"]
-        assert int(strategy["representative_tier_id"]) in set(
+        effective_tier = int(
+            row.get("representative_tier_id")
+            or strategy["representative_tier_id"]
+        )
+        assert effective_tier in set(
             contract["supported_quality_tiers"]
         ), row["case_id"]
         assert int(row["scene_count"]) >= int(contract["minimum_scene_count"])

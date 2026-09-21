@@ -246,6 +246,7 @@
       "flow_owner": "selfshot2",
       "engine_route": "self_shot_scene_change",
       "lane_callback": "vproduct|selfshot_product|scene_change",
+      "representative_tier_id": 700,
       "scene_count": 2,
       "scenario_id": "PV2-R05A-SELF-SHOT-SCENE-CHANGE",
       "scenario": "Preserve the real person and typing action; change the workspace into a rooftop cafe across two coherent scenes.",
