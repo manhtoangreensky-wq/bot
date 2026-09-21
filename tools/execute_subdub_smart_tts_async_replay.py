@@ -134,19 +134,26 @@ async def process_single_cue(
         print(f"[{cue_id}] ASYNC_SUBMITTED: task_id={task_id}")
 
     t0 = time.monotonic()
-    status, audio_bytes, detail, http_status, task_id = await shopaikey_minimax_tts_async_bytes(
-        text=text,
-        voice_id=voice_id,
-        model="speech-02-hd",
-        speed=1.0,
-        tts_language_boost="auto",
-        existing_task_id=existing_task_id,
-        on_submit_hook=on_submit if not existing_task_id else None,
-        api_key=api_key,
-        base_url=base_url,
-        max_poll_seconds=max_poll_seconds,
-        poll_interval_seconds=2.0,
-    )
+    try:
+        status, audio_bytes, detail, http_status, task_id = await shopaikey_minimax_tts_async_bytes(
+            text=text,
+            voice_id=voice_id,
+            model="speech-02-hd",
+            speed=1.0,
+            tts_language_boost="auto",
+            existing_task_id=existing_task_id,
+            on_submit_hook=on_submit if not existing_task_id else None,
+            api_key=api_key,
+            base_url=base_url,
+            max_poll_seconds=max_poll_seconds,
+            poll_interval_seconds=2.0,
+        )
+    except Exception as exc:
+        status = "FAIL_EXCEPTION"
+        audio_bytes = b""
+        detail = f"{type(exc).__name__}: {exc}"
+        http_status = 0
+        task_id = existing_task_id
     latency = time.monotonic() - t0
 
     if status != "PASS" or not audio_bytes:
