@@ -458,6 +458,13 @@ def test_gate_propagation_matrix_executable_proof(test_env):
 
     empirical_matrix: list[dict[str, Any]] = []
 
+    restart_display_name_gaps: list[str] = []
+    restart_description_gaps: list[str] = []
+    restart_price_quote_gaps: list[str] = []
+    restart_commercial_enabled_gaps: list[str] = []
+    restart_public_visible_gaps: list[str] = []
+    restart_sort_order_gaps: list[str] = []
+
     for row in matrix_specs:
         pkg_key = row["PACKAGE_KEY"]
         ptype = row["PACKAGE_TYPE"]
@@ -484,7 +491,7 @@ def test_gate_propagation_matrix_executable_proof(test_env):
         elif field == "public_visible":
             test_val = False
         elif field == "sort_order":
-            test_val = 77
+            test_val = 1
         else:
             pytest.fail(f"Unhandled field in matrix: {field}")
 
@@ -509,7 +516,7 @@ def test_gate_propagation_matrix_executable_proof(test_env):
         canonical_read_proven = bool(adm.get(field) == test_val)
         assert canonical_read_proven is True, f"CANONICAL_READ failed for {pkg_key}.{field}"
 
-        # 2. CUSTOMER_READ: customer resolver reflects the field value
+        # 2. CUSTOMER_READ: customer resolver reflects the field value pre-restart
         customer_read_proven = False
         if ptype == "subscription":
             sub_plan = bot.PLAN_CATALOG.get(pkg_key) or {}
@@ -522,7 +529,11 @@ def test_gate_propagation_matrix_executable_proof(test_env):
             elif field == "commercial_enabled":
                 customer_read_proven = (sub_plan.get("commercial_enabled") == test_val)
             elif field == "sort_order":
-                customer_read_proven = (adm.get("sort_order") == test_val)
+                ok_coll, coll_data, _ = get_canonical_package_collection(db_path=db_file)
+                packages = coll_data.get("packages") if ok_coll else []
+                customer_read_proven = bool(
+                    packages and packages[0].get("package_key") == pkg_key and packages[0].get("sort_order") == test_val
+                )
         else:
             grp = "combos" if ptype == "combo" else "monthly"
             cat_payload = bot.package_catalog_payload()
@@ -538,7 +549,11 @@ def test_gate_propagation_matrix_executable_proof(test_env):
             elif field == "commercial_enabled":
                 customer_read_proven = (entry.get("commercial_enabled") == test_val)
             elif field == "sort_order":
-                customer_read_proven = (adm.get("sort_order") == test_val)
+                ok_coll, coll_data, _ = get_canonical_package_collection(db_path=db_file)
+                packages = coll_data.get("packages") if ok_coll else []
+                customer_read_proven = bool(
+                    packages and packages[0].get("package_key") == pkg_key and packages[0].get("sort_order") == test_val
+                )
         assert customer_read_proven is True, f"CUSTOMER_READ failed for {pkg_key}.{field}"
 
         # 3. QUOTE: executed for price_vnd
@@ -559,20 +574,108 @@ def test_gate_propagation_matrix_executable_proof(test_env):
                 eligibility_proven = bool(can_buy is False and "tạm dừng mở bán" in reason)
             else:
                 can_buy, reason = bot.user_can_buy_package(1001, ptype, pkg_key)
-                eligibility_proven = bool(can_buy is False and "tạm dừng mở bán" in reason)
+                entry = bot.package_catalog_entry(pkg_key, ptype)
+                auto_checkout = bot.package_entry_auto_checkout_enabled(entry)
+                eligibility_proven = bool(can_buy is False and "tạm dừng mở bán" in reason and auto_checkout is False)
             assert eligibility_proven is True, f"ELIGIBILITY failed for {pkg_key}.{field}"
 
         # 5. RESTART: simulate bot restart / clear cache + rehydrate from DB
         clear_runtime_package_cache()
         apply_active_package_overrides_to_runtime(db_file)
         rehydrated = get_package_admin_detail(pkg_key, db_file)
-        restart_proven = bool(rehydrated and rehydrated.get(field) == test_val)
-        if field == "price_vnd":
+        db_readback_proven = bool(rehydrated and rehydrated.get(field) == test_val)
+
+        # Verify against the actual runtime consumer post-restart
+        restart_consumer_proven = False
+        if field == "display_name":
             if ptype == "subscription":
-                restart_proven = restart_proven and (bot.PLAN_CATALOG.get(pkg_key, {}).get("price_vnd") == test_val)
+                sub_plan = bot.PLAN_CATALOG.get(pkg_key) or {}
+                restart_consumer_proven = bool(sub_plan.get("name") == test_val and bot.plan_label(pkg_key) == test_val)
             else:
-                restart_proven = restart_proven and (bot.package_price_quote(ptype, pkg_key).get("price_vnd") == test_val)
-        assert restart_proven is True, f"RESTART failed for {pkg_key}.{field}"
+                grp = "combos" if ptype == "combo" else "monthly"
+                cat_payload = bot.package_catalog_payload()
+                entry = (cat_payload.get(grp) or {}).get(pkg_key) or {}
+                entry_direct = bot.package_catalog_entry(pkg_key, ptype)
+                restart_consumer_proven = bool(entry.get("label") == test_val and entry_direct.get("label") == test_val)
+            if not restart_consumer_proven:
+                restart_display_name_gaps.append(pkg_key)
+
+        elif field == "description":
+            if ptype == "subscription":
+                sub_plan = bot.PLAN_CATALOG.get(pkg_key) or {}
+                restart_consumer_proven = bool(sub_plan.get("description") == test_val)
+            else:
+                grp = "combos" if ptype == "combo" else "monthly"
+                cat_payload = bot.package_catalog_payload()
+                entry = (cat_payload.get(grp) or {}).get(pkg_key) or {}
+                entry_direct = bot.package_catalog_entry(pkg_key, ptype)
+                restart_consumer_proven = bool(entry.get("note") == test_val and entry_direct.get("note") == test_val)
+            if not restart_consumer_proven:
+                restart_description_gaps.append(pkg_key)
+
+        elif field == "price_vnd":
+            if ptype == "subscription":
+                restart_consumer_proven = bool(bot.PLAN_CATALOG.get(pkg_key, {}).get("price_vnd") == test_val)
+            else:
+                q = bot.package_price_quote(ptype, pkg_key)
+                restart_consumer_proven = bool(q and q.get("price_vnd") == test_val)
+            if not restart_consumer_proven:
+                restart_price_quote_gaps.append(pkg_key)
+
+        elif field == "commercial_enabled":
+            if ptype == "subscription":
+                can_buy, reason = bot.user_can_buy_plan(1001, pkg_key)
+                restart_consumer_proven = bool(can_buy is False and "tạm dừng mở bán" in reason)
+            else:
+                can_buy, reason = bot.user_can_buy_package(1001, ptype, pkg_key)
+                entry = bot.package_catalog_entry(pkg_key, ptype)
+                auto_checkout = bot.package_entry_auto_checkout_enabled(entry)
+                restart_consumer_proven = bool(can_buy is False and "tạm dừng mở bán" in reason and auto_checkout is False)
+            if not restart_consumer_proven:
+                restart_commercial_enabled_gaps.append(pkg_key)
+
+        elif field == "public_visible":
+            if ptype == "combo":
+                cat_payload = bot.package_catalog_payload()
+                entry = (cat_payload.get("combos") or {}).get(pkg_key) or {}
+                entry_direct = bot.package_catalog_entry(pkg_key, "combo")
+                public_combos = [item["code"] for item in bot.public_video_combo_pricing_payload()]
+                kb = bot.pricing_combo_keyboard("vi")
+                callbacks = [btn.callback_data for row in kb.inline_keyboard for btn in row]
+                restart_consumer_proven = bool(
+                    entry.get("public") is False
+                    and entry_direct.get("public") is False
+                    and pkg_key not in public_combos
+                    and f"pkgcombo:combo_detail:{pkg_key}" not in callbacks
+                )
+            elif ptype in ("monthly", "service_monthly"):
+                cat_payload = bot.package_catalog_payload()
+                entry = (cat_payload.get("monthly") or {}).get(pkg_key) or {}
+                entry_direct = bot.package_catalog_entry(pkg_key, "monthly")
+                public_entries = [code for code, _ in bot.public_task_package_entries("")]
+                pkg_group = str(entry_direct.get("group") or "")
+                kb_group = bot.pricing_task_package_group_keyboard(pkg_group, "vi")
+                group_cbs = [btn.callback_data for row in kb_group.inline_keyboard for btn in row]
+                restart_consumer_proven = bool(
+                    entry.get("public") is False
+                    and entry_direct.get("public") is False
+                    and pkg_key not in public_entries
+                    and f"pkgcombo:detail:{pkg_key}" not in group_cbs
+                )
+            if not restart_consumer_proven:
+                restart_public_visible_gaps.append(pkg_key)
+
+        elif field == "sort_order":
+            ok_coll, coll_data, _ = get_canonical_package_collection(db_path=db_file)
+            packages = coll_data.get("packages") if ok_coll else []
+            is_first = bool(packages and packages[0].get("package_key") == pkg_key and packages[0].get("sort_order") == test_val)
+            is_sorted = bool(packages and all(packages[i]["sort_order"] <= packages[i+1]["sort_order"] for i in range(len(packages)-1)))
+            restart_consumer_proven = bool(is_first and is_sorted)
+            if not restart_consumer_proven:
+                restart_sort_order_gaps.append(pkg_key)
+
+        restart_proven = bool(db_readback_proven and restart_consumer_proven)
+        assert restart_proven is True, f"RESTART consumer verification failed for {pkg_key}.{field}"
 
         # Record empirical row
         empirical_matrix.append({
@@ -587,15 +690,16 @@ def test_gate_propagation_matrix_executable_proof(test_env):
             "RESTART_PROVEN": restart_proven,
         })
 
-        # Cleanup: if commercial_enabled was False or public_visible was False, restore to True
-        if field in ("commercial_enabled", "public_visible"):
+        # Cleanup: restore modified state to avoid polluting subsequent tests
+        if field in ("commercial_enabled", "public_visible", "sort_order"):
+            orig_val = current_pkg[field]
             latest_adm = get_package_admin_detail(pkg_key, db_file)
             latest_ver = latest_adm["version"]
             update_canonical_package(
                 pkg_key,
                 {
                     "expected_version": latest_ver,
-                    "changes": {field: True},
+                    "changes": {field: orig_val},
                     "reason": f"Empirical cleanup for {pkg_key}.{field}",
                 },
                 actor_id="empirical_cleanup",
@@ -604,6 +708,13 @@ def test_gate_propagation_matrix_executable_proof(test_env):
             )
 
     # Final assertions on the empirical verification matrix
+    assert len(restart_display_name_gaps) == 0, f"RESTART_DISPLAY_NAME_GAPS: {restart_display_name_gaps}"
+    assert len(restart_description_gaps) == 0, f"RESTART_DESCRIPTION_GAPS: {restart_description_gaps}"
+    assert len(restart_price_quote_gaps) == 0, f"RESTART_PRICE_QUOTE_GAPS: {restart_price_quote_gaps}"
+    assert len(restart_commercial_enabled_gaps) == 0, f"RESTART_COMMERCIAL_ENABLED_GAPS: {restart_commercial_enabled_gaps}"
+    assert len(restart_public_visible_gaps) == 0, f"RESTART_PUBLIC_VISIBLE_GAPS: {restart_public_visible_gaps}"
+    assert len(restart_sort_order_gaps) == 0, f"RESTART_SORT_ORDER_GAPS: {restart_sort_order_gaps}"
+
     assert len(empirical_matrix) == 344
     assert all(r["CANONICAL_READ_PROVEN"] is True for r in empirical_matrix)
     assert all(r["CUSTOMER_READ_PROVEN"] is True for r in empirical_matrix)
@@ -614,6 +725,9 @@ def test_gate_propagation_matrix_executable_proof(test_env):
     assert len(ce_rows) == 58
     assert all(r["ELIGIBILITY_PROVEN"] is True for r in ce_rows)
     assert all(r["RESTART_PROVEN"] is True for r in empirical_matrix)
+
+    restart_unproven = [r for r in empirical_matrix if not r["RESTART_PROVEN"]]
+    assert len(restart_unproven) == 0
 
 
 
