@@ -58587,7 +58587,7 @@ def package_catalog_entry(code: str, package_type: str = "") -> dict:
     safe_type = str(package_type or "").strip().lower()
     if safe_type in {"combo", "combos"}:
         return dict((catalog.get("combos") or {}).get(safe_code) or {})
-    if safe_type in {"monthly", "month", "plan"}:
+    if safe_type in {"monthly", "month", "plan", "service_monthly"}:
         return dict((catalog.get("monthly") or {}).get(safe_code) or {})
     for group in ("combos", "monthly"):
         entry = dict((catalog.get(group) or {}).get(safe_code) or {})
@@ -58597,7 +58597,7 @@ def package_catalog_entry(code: str, package_type: str = "") -> dict:
     return {}
 
 def package_purchase_price_vnd(package_type: str, code: str) -> int:
-    package_type = "monthly" if str(package_type or "").strip().lower() in {"monthly", "month", "plan"} else "combo"
+    package_type = "monthly" if str(package_type or "").strip().lower() in {"monthly", "month", "plan", "service_monthly"} else "combo"
     code = str(code or "").strip().lower()
     entry = package_catalog_entry(code, package_type)
     if int((entry or {}).get("price_vnd") or 0) > 0:
@@ -58757,7 +58757,7 @@ def package_items_summary(items: dict) -> str:
     return ", ".join(f"{package_item_display_name(k)} x{int(v or 0)}" for k, v in (items or {}).items()) or "liên hệ admin để chốt hạn mức"
 
 def package_price_quote(package_type: str, code: str) -> dict:
-    package_type = "monthly" if str(package_type or "").strip().lower() in {"monthly", "month", "plan", "task", "package"} else "combo"
+    package_type = "monthly" if str(package_type or "").strip().lower() in {"monthly", "month", "plan", "task", "package", "service_monthly"} else "combo"
     code = str(code or "").strip().lower()
     entry = package_catalog_entry(code, package_type)
     price = package_purchase_price_vnd(package_type, code)
@@ -58787,7 +58787,7 @@ def package_entry_auto_checkout_enabled(entry: dict) -> bool:
     )
 
 def user_can_buy_package(user_id, package_type: str, code: str) -> tuple[bool, str]:
-    package_type = "monthly" if str(package_type or "").strip().lower() in {"monthly", "month", "plan", "task", "package"} else "combo"
+    package_type = "monthly" if str(package_type or "").strip().lower() in {"monthly", "month", "plan", "task", "package", "service_monthly"} else "combo"
     code = str(code or "").strip().lower()
     entry = package_catalog_entry(code, package_type)
     if not entry:

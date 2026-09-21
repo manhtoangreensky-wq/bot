@@ -41,6 +41,7 @@ from services.admin_package_service import (
     ensure_admin_package_schema,
     get_canonical_package_collection,
     get_canonical_package_single,
+    get_package_admin_detail,
     update_canonical_package,
     resolve_effective_package,
     get_runtime_package_override,
@@ -48,6 +49,7 @@ from services.admin_package_service import (
     compare_all_packages_against_runtime,
     generate_package_propagation_matrix,
     apply_active_package_overrides,
+    apply_active_package_overrides_to_runtime,
 )
 from services.admin_wallet_service import compute_internal_admin_wallet_signature
 
@@ -415,9 +417,10 @@ def test_gate_price_and_display_propagation_without_purchase(test_env):
 
 
 # ---------------------------------------------------------------------------
-# 7. Complete Dynamic Propagation Matrix
+# 7. Complete Dynamic Propagation Matrix: Structural Spec & Empirical Proof
 # ---------------------------------------------------------------------------
-def test_gate_propagation_matrix_completeness():
+def test_gate_propagation_matrix_structural_specification():
+    """Verify production matrix generator returns purely structural specification with zero synthetic proof flags."""
     matrix = generate_package_propagation_matrix()
     assert len(matrix) == 344
 
@@ -425,15 +428,193 @@ def test_gate_propagation_matrix_completeness():
         pkg_key = row["PACKAGE_KEY"]
         ptype = row["PACKAGE_TYPE"]
         field = row["FIELD"]
+        scope = row["EFFECT_SCOPE"]
+
         assert pkg_key in BASE_PACKAGE_CATALOG
         assert field in get_editable_fields_for_type(ptype)
-        assert row["CANONICAL_READ"] is True
-        assert row["CUSTOMER_READ"] is True
-        assert row["RESTART"] is True
+        assert scope in (
+            EFFECT_SCOPE_CUSTOMER_DISPLAY,
+            EFFECT_SCOPE_CUSTOMER_PRICE,
+            EFFECT_SCOPE_CUSTOMER_VISIBILITY,
+            EFFECT_SCOPE_CUSTOMER_PURCHASE_GATE,
+            EFFECT_SCOPE_ADMIN_ORDER_ONLY,
+        )
+        # Production matrix MUST NOT contain synthetic proof flags
+        assert "CANONICAL_READ" not in row
+        assert "CUSTOMER_READ" not in row
+        assert "QUOTE" not in row
+        assert "ELIGIBILITY" not in row
+        assert "RESTART" not in row
+
+
+def test_gate_propagation_matrix_executable_proof(test_env):
+    """Execute real empirical proof across all 344 matrix rows (58 packages x editable fields).
+    Every row evaluates CANONICAL_READ, CUSTOMER_READ, QUOTE (price_vnd),
+    ELIGIBILITY (commercial_enabled), and RESTART from actual runtime observations.
+    """
+    db_file = test_env["db_file"]
+    matrix_specs = generate_package_propagation_matrix()
+    assert len(matrix_specs) == 344
+
+    empirical_matrix: list[dict[str, Any]] = []
+
+    for row in matrix_specs:
+        pkg_key = row["PACKAGE_KEY"]
+        ptype = row["PACKAGE_TYPE"]
+        field = row["FIELD"]
+        scope = row["EFFECT_SCOPE"]
+
+        # Fetch current package state
+        ok_cur, cur_data, _ = get_canonical_package_single(pkg_key, db_file)
+        assert ok_cur is True
+        current_pkg = cur_data["package"]
+        current_version = current_pkg["version"]
+
+        # Pick distinct test value
+        if field == "display_name":
+            test_val = f"Empirical {pkg_key} Title"
+        elif field == "description":
+            test_val = f"Empirical {pkg_key} Description"
+        elif field == "price_vnd":
+            test_val = int(current_pkg.get("price_vnd") or 0) + 1000
+            if test_val <= 1000:
+                test_val = 88000
+        elif field == "commercial_enabled":
+            test_val = False
+        elif field == "public_visible":
+            test_val = False
+        elif field == "sort_order":
+            test_val = 77
+        else:
+            pytest.fail(f"Unhandled field in matrix: {field}")
+
+        # Execute mutation
+        ok_u, resp_u, status_u = update_canonical_package(
+            pkg_key,
+            {
+                "expected_version": current_version,
+                "changes": {field: test_val},
+                "reason": f"Empirical test for {pkg_key}.{field}",
+            },
+            actor_id="empirical_tester",
+            request_id=f"emp-{pkg_key}-{field}-{int(time.time()*1000)}",
+            db_path=db_file,
+        )
+        assert ok_u is True, f"Failed updating {pkg_key}.{field}: {resp_u}"
+        assert status_u == 200
+
+        # 1. CANONICAL_READ: get_package_admin_detail reflects the field value
+        adm = get_package_admin_detail(pkg_key, db_file)
+        assert adm is not None
+        canonical_read_proven = bool(adm.get(field) == test_val)
+        assert canonical_read_proven is True, f"CANONICAL_READ failed for {pkg_key}.{field}"
+
+        # 2. CUSTOMER_READ: customer resolver reflects the field value
+        customer_read_proven = False
+        if ptype == "subscription":
+            sub_plan = bot.PLAN_CATALOG.get(pkg_key) or {}
+            if field == "display_name":
+                customer_read_proven = (sub_plan.get("name") == test_val and bot.plan_label(pkg_key) == test_val)
+            elif field == "description":
+                customer_read_proven = (sub_plan.get("description") == test_val)
+            elif field == "price_vnd":
+                customer_read_proven = (sub_plan.get("price_vnd") == test_val)
+            elif field == "commercial_enabled":
+                customer_read_proven = (sub_plan.get("commercial_enabled") == test_val)
+            elif field == "sort_order":
+                customer_read_proven = (adm.get("sort_order") == test_val)
+        else:
+            grp = "combos" if ptype == "combo" else "monthly"
+            cat_payload = bot.package_catalog_payload()
+            entry = (cat_payload.get(grp) or {}).get(pkg_key) or {}
+            if field == "display_name":
+                customer_read_proven = (entry.get("label") == test_val)
+            elif field == "description":
+                customer_read_proven = (entry.get("note") == test_val)
+            elif field == "price_vnd":
+                customer_read_proven = (entry.get("price_vnd") == test_val)
+            elif field == "public_visible":
+                customer_read_proven = (entry.get("public") == test_val)
+            elif field == "commercial_enabled":
+                customer_read_proven = (entry.get("commercial_enabled") == test_val)
+            elif field == "sort_order":
+                customer_read_proven = (adm.get("sort_order") == test_val)
+        assert customer_read_proven is True, f"CUSTOMER_READ failed for {pkg_key}.{field}"
+
+        # 3. QUOTE: executed for price_vnd
+        quote_proven = None
         if field == "price_vnd":
-            assert row["QUOTE"] is True
+            if ptype == "subscription":
+                quote_proven = bool(bot.PLAN_CATALOG.get(pkg_key, {}).get("price_vnd") == test_val)
+            else:
+                q = bot.package_price_quote(ptype, pkg_key)
+                quote_proven = bool(q and q.get("price_vnd") == test_val)
+            assert quote_proven is True, f"QUOTE failed for {pkg_key}.{field}"
+
+        # 4. ELIGIBILITY / PURCHASE GATE: executed for commercial_enabled
+        eligibility_proven = None
         if field == "commercial_enabled":
-            assert row["ELIGIBILITY"] is True
+            if ptype == "subscription":
+                can_buy, reason = bot.user_can_buy_plan(1001, pkg_key)
+                eligibility_proven = bool(can_buy is False and "tạm dừng mở bán" in reason)
+            else:
+                can_buy, reason = bot.user_can_buy_package(1001, ptype, pkg_key)
+                eligibility_proven = bool(can_buy is False and "tạm dừng mở bán" in reason)
+            assert eligibility_proven is True, f"ELIGIBILITY failed for {pkg_key}.{field}"
+
+        # 5. RESTART: simulate bot restart / clear cache + rehydrate from DB
+        clear_runtime_package_cache()
+        apply_active_package_overrides_to_runtime(db_file)
+        rehydrated = get_package_admin_detail(pkg_key, db_file)
+        restart_proven = bool(rehydrated and rehydrated.get(field) == test_val)
+        if field == "price_vnd":
+            if ptype == "subscription":
+                restart_proven = restart_proven and (bot.PLAN_CATALOG.get(pkg_key, {}).get("price_vnd") == test_val)
+            else:
+                restart_proven = restart_proven and (bot.package_price_quote(ptype, pkg_key).get("price_vnd") == test_val)
+        assert restart_proven is True, f"RESTART failed for {pkg_key}.{field}"
+
+        # Record empirical row
+        empirical_matrix.append({
+            "PACKAGE_KEY": pkg_key,
+            "PACKAGE_TYPE": ptype,
+            "FIELD": field,
+            "EFFECT_SCOPE": scope,
+            "CANONICAL_READ_PROVEN": canonical_read_proven,
+            "CUSTOMER_READ_PROVEN": customer_read_proven,
+            "QUOTE_PROVEN": quote_proven,
+            "ELIGIBILITY_PROVEN": eligibility_proven,
+            "RESTART_PROVEN": restart_proven,
+        })
+
+        # Cleanup: if commercial_enabled was False or public_visible was False, restore to True
+        if field in ("commercial_enabled", "public_visible"):
+            latest_adm = get_package_admin_detail(pkg_key, db_file)
+            latest_ver = latest_adm["version"]
+            update_canonical_package(
+                pkg_key,
+                {
+                    "expected_version": latest_ver,
+                    "changes": {field: True},
+                    "reason": f"Empirical cleanup for {pkg_key}.{field}",
+                },
+                actor_id="empirical_cleanup",
+                request_id=f"emp-clean-{pkg_key}-{field}-{int(time.time()*1000)}",
+                db_path=db_file,
+            )
+
+    # Final assertions on the empirical verification matrix
+    assert len(empirical_matrix) == 344
+    assert all(r["CANONICAL_READ_PROVEN"] is True for r in empirical_matrix)
+    assert all(r["CUSTOMER_READ_PROVEN"] is True for r in empirical_matrix)
+    price_rows = [r for r in empirical_matrix if r["FIELD"] == "price_vnd"]
+    assert len(price_rows) == 58
+    assert all(r["QUOTE_PROVEN"] is True for r in price_rows)
+    ce_rows = [r for r in empirical_matrix if r["FIELD"] == "commercial_enabled"]
+    assert len(ce_rows) == 58
+    assert all(r["ELIGIBILITY_PROVEN"] is True for r in ce_rows)
+    assert all(r["RESTART_PROVEN"] is True for r in empirical_matrix)
+
 
 
 # ---------------------------------------------------------------------------

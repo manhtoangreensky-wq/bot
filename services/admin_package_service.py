@@ -158,9 +158,16 @@ def derive_canonical_base_packages_catalog() -> dict[str, dict[str, Any]]:
 class CanonicalBasePackagesCatalog(dict):
     """Dynamic dict proxy providing single canonical package authority.
     Always resolves commercial fields dynamically from runtime base resolvers."""
+    _cached_catalog: dict[str, dict[str, Any]] | None = None
+
+    @classmethod
+    def invalidate_cache(cls) -> None:
+        cls._cached_catalog = None
 
     def _get_catalog(self) -> dict[str, dict[str, Any]]:
-        return derive_canonical_base_packages_catalog()
+        if CanonicalBasePackagesCatalog._cached_catalog is None:
+            CanonicalBasePackagesCatalog._cached_catalog = derive_canonical_base_packages_catalog()
+        return CanonicalBasePackagesCatalog._cached_catalog
 
     def __getitem__(self, key: str) -> dict[str, Any]:
         cat = self._get_catalog()
@@ -461,6 +468,21 @@ def get_canonical_package_single(package_key: str, db_path: str) -> tuple[bool, 
             "error_code": "INTERNAL_PACKAGE_ERROR",
             "message": str(exc),
         }, 500
+
+
+def get_package_admin_detail(package_key: str, db_path: str | None = None) -> dict[str, Any] | None:
+    """Convenience helper returning single admin package detail dictionary."""
+    if not db_path:
+        import sys
+        import os
+        bot_mod = sys.modules.get("bot")
+        db_path = getattr(bot_mod, "DB_FILE", None) if bot_mod else None
+        if not db_path:
+            db_path = os.getenv("TOANAAS_DB_FILE") or ""
+    ok, data, _ = get_canonical_package_single(package_key, db_path)
+    if ok:
+        return data.get("package")
+    return None
 
 
 def update_canonical_package(
@@ -811,7 +833,11 @@ def update_canonical_package(
 
 def apply_package_override_to_runtime(package_key: str, changes: dict[str, Any]) -> None:
     """Propagate changes to active in-memory runtime catalogs in bot."""
-    _RUNTIME_PACKAGE_OVERRIDES.setdefault(package_key, {}).update(changes)
+    existing = _RUNTIME_PACKAGE_OVERRIDES.get(package_key)
+    if existing is None:
+        _RUNTIME_PACKAGE_OVERRIDES[package_key] = dict(changes)
+    else:
+        existing.update(changes)
 
     import sys
     bot_mod = sys.modules.get("bot")
@@ -864,6 +890,10 @@ def apply_active_package_overrides(db_path: str) -> None:
         logger.warning("Could not apply active package overrides: %s", exc)
 
 
+apply_active_package_overrides_to_runtime = apply_active_package_overrides
+
+
+
 def get_runtime_package_override(package_key: str, db_path: str | None = None) -> dict[str, Any] | None:
     """Return runtime package override if active."""
     if package_key in _RUNTIME_PACKAGE_OVERRIDES:
@@ -904,6 +934,9 @@ def get_runtime_package_override(package_key: str, db_path: str | None = None) -
                     changes["sort_order"] = int(row["sort_order"])
                 _RUNTIME_PACKAGE_OVERRIDES[package_key] = changes
                 return changes
+            else:
+                _RUNTIME_PACKAGE_OVERRIDES[package_key] = None
+                return None
         except Exception:
             pass
 
@@ -915,6 +948,7 @@ def clear_runtime_package_cache() -> None:
     RESET_USES_RUNTIME_BASE_TRUTH=YES.
     """
     _RUNTIME_PACKAGE_OVERRIDES.clear()
+    CanonicalBasePackagesCatalog.invalidate_cache()
 
     import sys
     bot_mod = sys.modules.get("bot")
@@ -993,14 +1027,38 @@ def compare_all_packages_against_runtime() -> dict[str, Any]:
         if pkg["benefits"] != expected_benefits:
             benefit_gaps.append((k, pkg["benefits"], expected_benefits))
 
+    # Dynamically derive PACKAGE_PRICE_DUAL_AUTHORITY_COUNT:
+    # Check if metadata JSON contains price_vnd, and check if multiple runtime authorities define price_vnd
+    metadata_cat = _load_base_packages_metadata()
+    price_dual_count = sum(1 for k, meta in metadata_cat.items() if "price_vnd" in meta)
+    for k in admin_keys:
+        runtime_price_defs = (
+            (1 if (k in subs and "price_vnd" in subs[k]) else 0)
+            + (1 if (k in combos and "price_vnd" in combos[k]) else 0)
+            + (1 if (k in monthlies and "price_vnd" in monthlies[k]) else 0)
+        )
+        if runtime_price_defs > 1:
+            price_dual_count += 1
+    package_price_dual_authority_count = price_dual_count
+
+    # Dynamically derive CANONICAL_BASE_SOURCE_COUNT_PER_PACKAGE:
+    # Must be exactly 1 source authority per package
+    source_counts = {
+        k: (1 if k in subs else 0) + (1 if k in combos else 0) + (1 if k in monthlies else 0)
+        for k in admin_keys
+    }
+    canonical_base_source_count_per_package = (
+        1 if (source_counts and all(c == 1 for c in source_counts.values())) else 0
+    )
+
     return {
         "BASE_PACKAGE_KEY_GAPS": key_gaps,
         "BASE_DISPLAY_NAME_GAPS": display_gaps,
         "BASE_PRICE_GAPS": price_gaps,
         "BASE_DURATION_GAPS": duration_gaps,
         "BASE_BENEFIT_GAPS": benefit_gaps,
-        "PACKAGE_PRICE_DUAL_AUTHORITY_COUNT": 0,
-        "CANONICAL_BASE_SOURCE_COUNT_PER_PACKAGE": 1,
+        "PACKAGE_PRICE_DUAL_AUTHORITY_COUNT": package_price_dual_authority_count,
+        "CANONICAL_BASE_SOURCE_COUNT_PER_PACKAGE": canonical_base_source_count_per_package,
         "ADMIN_ONLY_PACKAGE_KEYS": admin_only,
         "RUNTIME_PACKAGE_MISSING_FROM_ADMIN": runtime_missing,
         "TOPUP_PACKAGE_KEYS_IN_B03": topup_in_b03,
@@ -1008,10 +1066,12 @@ def compare_all_packages_against_runtime() -> dict[str, Any]:
 
 
 def generate_package_propagation_matrix() -> list[dict[str, Any]]:
-    """Build dynamic matrix row for every editable field/package combination.
+    """Build dynamic matrix specification for every editable field/package combination.
     Guarantees:
     - EDITABLE_FIELD_WITHOUT_MATRIX_ROW = 0
     - EDITABLE_BUT_RUNTIME_UNWIRED = 0
+    Returns ONLY structural specification (PACKAGE_KEY, PACKAGE_TYPE, FIELD, EFFECT_SCOPE).
+    Execution and empirical proof evaluation belong exclusively to the test harness.
     """
     matrix: list[dict[str, Any]] = []
     for pkg_key in sorted(BASE_PACKAGE_CATALOG.keys()):
@@ -1026,10 +1086,5 @@ def generate_package_propagation_matrix() -> list[dict[str, Any]]:
                 "PACKAGE_TYPE": ptype,
                 "FIELD": field,
                 "EFFECT_SCOPE": scope,
-                "CANONICAL_READ": True,
-                "CUSTOMER_READ": True,
-                "QUOTE": True if field == "price_vnd" else None,
-                "ELIGIBILITY": True if field == "commercial_enabled" else None,
-                "RESTART": True,
             })
     return matrix
