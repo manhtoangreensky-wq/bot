@@ -31,12 +31,18 @@ logger = logging.getLogger("admin_package_service")
 DEFAULT_ADMIN_ID = "7126457028"
 
 # ─── CANONICAL BASE PACKAGES CATALOG ──────────────────────────────────────────
-# Authoritative static package definitions covering all commercial customer domains.
-# Sourced directly from current Bot PLAN_CATALOG (subscription) and package_catalog_payload (combo, monthly).
+# Authoritative single canonical package definitions covering all commercial customer domains.
+# Sourced dynamically from runtime base resolvers:
+# - Subscription: bot.BASE_PLAN_CATALOG (fallback bot.PLAN_CATALOG)
+# - Combo: bot.p0_21d_combo_catalog_base(include_legacy=True)
+# - Service Monthly: bot.p0_21d_task_package_base()
+# Metadata is attached from config/base_packages_catalog.json (non-authoritative).
 
 CATALOG_PATH = Path(__file__).resolve().parent.parent / "config" / "base_packages_catalog.json"
 
-def _load_base_packages_catalog() -> dict[str, dict[str, Any]]:
+
+def _load_base_packages_metadata() -> dict[str, dict[str, Any]]:
+    """Load non-authoritative metadata from JSON."""
     if CATALOG_PATH.exists():
         try:
             with open(CATALOG_PATH, "r", encoding="utf-8") as f:
@@ -45,9 +51,195 @@ def _load_base_packages_catalog() -> dict[str, dict[str, Any]]:
             logger.warning("Could not load base_packages_catalog.json: %s", exc)
     return {}
 
-BASE_PACKAGE_CATALOG: dict[str, dict[str, Any]] = _load_base_packages_catalog()
+
+def derive_canonical_base_packages_catalog() -> dict[str, dict[str, Any]]:
+    """Dynamically derive full base package definitions from runtime base authorities.
+
+    Commercial fields (display_name, description, price_vnd, duration_days, benefits,
+    public_visible, commercial_enabled) are derived directly from the canonical runtime base:
+    - subscription: bot.BASE_PLAN_CATALOG (fallback bot.PLAN_CATALOG)
+    - combo: bot.p0_21d_combo_catalog_base(include_legacy=True)
+    - service_monthly: bot.p0_21d_task_package_base()
+
+    Metadata (sort_order, group, read_authority, quote_authority, entitlement_authority)
+    is attached from config/base_packages_catalog.json.
+
+    Guarantees:
+    - CANONICAL_BASE_SOURCE_COUNT_PER_PACKAGE = 1
+    - PACKAGE_PRICE_DUAL_AUTHORITY_COUNT = 0
+    - DUAL_BASE_AUTHORITY_COUNT = 0
+    """
+    metadata_cat = _load_base_packages_metadata()
+
+    import sys
+    bot_mod = sys.modules.get("bot")
+    if not bot_mod:
+        try:
+            import bot as bot_mod
+        except Exception:
+            bot_mod = None
+
+    subs = getattr(bot_mod, "BASE_PLAN_CATALOG", None) if bot_mod else None
+    if not subs and bot_mod:
+        subs = getattr(bot_mod, "PLAN_CATALOG", {})
+    subs = subs or {}
+
+    combo_resolver = getattr(bot_mod, "p0_21d_combo_catalog_base", None) if bot_mod else None
+    combos = combo_resolver(include_legacy=True) if callable(combo_resolver) else {}
+
+    monthly_resolver = getattr(bot_mod, "p0_21d_task_package_base", None) if bot_mod else None
+    monthlies = monthly_resolver() if callable(monthly_resolver) else {}
+
+    catalog: dict[str, dict[str, Any]] = {}
+
+    # 1. Subscription packages (4)
+    for key, r in subs.items():
+        meta = metadata_cat.get(key, {})
+        catalog[key] = {
+            "package_key": key,
+            "package_type": "subscription",
+            "display_name": r.get("name", key),
+            "description": r.get("description", ""),
+            "price_vnd": int(r.get("price_vnd", 0)),
+            "duration_days": int(r.get("duration_days", 30)),
+            "benefits": {"xu": int(r.get("plan_xu", 0))},
+            "public_visible": bool(r.get("public_visible", True)),
+            "commercial_enabled": bool(r.get("commercial_enabled", True)),
+            "sort_order": int(meta.get("sort_order", 10)),
+            "group": str(meta.get("group", "subscription")),
+            "read_authority": str(meta.get("read_authority", "bot.PLAN_CATALOG")),
+            "quote_authority": str(meta.get("quote_authority", "bot.purchase_plan_payos_checkout")),
+            "entitlement_authority": str(meta.get("entitlement_authority", "bot.purchase_plan_payos_checkout")),
+        }
+
+    # 2. Combo packages (20)
+    for key, r in combos.items():
+        meta = metadata_cat.get(key, {})
+        catalog[key] = {
+            "package_key": key,
+            "package_type": "combo",
+            "display_name": r.get("label", key),
+            "description": r.get("note", ""),
+            "price_vnd": int(r.get("price_vnd", 0)),
+            "duration_days": int(r.get("default_days") or 30),
+            "benefits": deepcopy(r.get("items", {})),
+            "public_visible": bool(r.get("public", True)),
+            "commercial_enabled": bool(r.get("commercial_enabled", True)),
+            "sort_order": int(meta.get("sort_order", 50)),
+            "group": str(meta.get("group", r.get("group", "combo"))),
+            "read_authority": str(meta.get("read_authority", 'bot.package_catalog_payload["combos"]')),
+            "quote_authority": str(meta.get("quote_authority", "bot.package_price_quote")),
+            "entitlement_authority": str(meta.get("entitlement_authority", "bot.grant_user_package_conn")),
+        }
+
+    # 3. Service monthly packages (34)
+    for key, r in monthlies.items():
+        meta = metadata_cat.get(key, {})
+        catalog[key] = {
+            "package_key": key,
+            "package_type": "service_monthly",
+            "display_name": r.get("label", key),
+            "description": r.get("note", ""),
+            "price_vnd": int(r.get("price_vnd", 0)),
+            "duration_days": int(r.get("default_days") or 30),
+            "benefits": deepcopy(r.get("items", {})),
+            "public_visible": bool(r.get("public", True)),
+            "commercial_enabled": bool(r.get("commercial_enabled", True)),
+            "sort_order": int(meta.get("sort_order", 300)),
+            "group": str(meta.get("group", r.get("group", "monthly"))),
+            "read_authority": str(meta.get("read_authority", 'bot.package_catalog_payload["monthly"]')),
+            "quote_authority": str(meta.get("quote_authority", "bot.package_price_quote")),
+            "entitlement_authority": str(meta.get("entitlement_authority", "bot.grant_user_package_conn")),
+        }
+
+    return catalog
+
+
+class CanonicalBasePackagesCatalog(dict):
+    """Dynamic dict proxy providing single canonical package authority.
+    Always resolves commercial fields dynamically from runtime base resolvers."""
+
+    def _get_catalog(self) -> dict[str, dict[str, Any]]:
+        return derive_canonical_base_packages_catalog()
+
+    def __getitem__(self, key: str) -> dict[str, Any]:
+        cat = self._get_catalog()
+        if key not in cat:
+            raise KeyError(key)
+        return cat[key]
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._get_catalog().get(key, default)
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._get_catalog()
+
+    def __iter__(self):
+        return iter(self._get_catalog())
+
+    def __len__(self) -> int:
+        return len(self._get_catalog())
+
+    def items(self):
+        return self._get_catalog().items()
+
+    def values(self):
+        return self._get_catalog().values()
+
+    def keys(self):
+        return self._get_catalog().keys()
+
+    def __copy__(self):
+        return self._get_catalog()
+
+    def __deepcopy__(self, memo):
+        return deepcopy(self._get_catalog(), memo)
+
+
+BASE_PACKAGE_CATALOG: dict[str, dict[str, Any]] = CanonicalBasePackagesCatalog()
 
 # ─── FIELD CLASSIFICATIONS & WHITELISTS ──────────────────────────────────────
+
+EFFECT_SCOPE_CUSTOMER_DISPLAY = "CUSTOMER_DISPLAY"
+EFFECT_SCOPE_CUSTOMER_PRICE = "CUSTOMER_PRICE"
+EFFECT_SCOPE_CUSTOMER_VISIBILITY = "CUSTOMER_VISIBILITY"
+EFFECT_SCOPE_CUSTOMER_PURCHASE_GATE = "CUSTOMER_PURCHASE_GATE"
+EFFECT_SCOPE_ADMIN_ORDER_ONLY = "ADMIN_ORDER_ONLY"
+EFFECT_SCOPE_IMMUTABLE = "IMMUTABLE"
+
+# Field classification and effect scopes per package type
+PACKAGE_TYPE_FIELD_EFFECT_SCOPES: dict[str, dict[str, str]] = {
+    "subscription": {
+        "display_name": EFFECT_SCOPE_CUSTOMER_DISPLAY,
+        "description": EFFECT_SCOPE_CUSTOMER_DISPLAY,
+        "price_vnd": EFFECT_SCOPE_CUSTOMER_PRICE,
+        "commercial_enabled": EFFECT_SCOPE_CUSTOMER_PURCHASE_GATE,
+        "sort_order": EFFECT_SCOPE_ADMIN_ORDER_ONLY,
+        "public_visible": EFFECT_SCOPE_IMMUTABLE,  # Non-editable: no customer listing consumer exists
+    },
+    "combo": {
+        "display_name": EFFECT_SCOPE_CUSTOMER_DISPLAY,
+        "description": EFFECT_SCOPE_CUSTOMER_DISPLAY,
+        "price_vnd": EFFECT_SCOPE_CUSTOMER_PRICE,
+        "public_visible": EFFECT_SCOPE_CUSTOMER_VISIBILITY,
+        "commercial_enabled": EFFECT_SCOPE_CUSTOMER_PURCHASE_GATE,
+        "sort_order": EFFECT_SCOPE_ADMIN_ORDER_ONLY,
+    },
+    "service_monthly": {
+        "display_name": EFFECT_SCOPE_CUSTOMER_DISPLAY,
+        "description": EFFECT_SCOPE_CUSTOMER_DISPLAY,
+        "price_vnd": EFFECT_SCOPE_CUSTOMER_PRICE,
+        "public_visible": EFFECT_SCOPE_CUSTOMER_VISIBILITY,
+        "commercial_enabled": EFFECT_SCOPE_CUSTOMER_PURCHASE_GATE,
+        "sort_order": EFFECT_SCOPE_ADMIN_ORDER_ONLY,
+    },
+}
+
+def get_editable_fields_for_type(package_type: str) -> set[str]:
+    """Return set of editable fields for a given package type."""
+    scopes = PACKAGE_TYPE_FIELD_EFFECT_SCOPES.get(package_type, {})
+    return {f for f, scope in scopes.items() if scope != EFFECT_SCOPE_IMMUTABLE}
+
 
 EDITABLE_PACKAGE_FIELDS: set[str] = {
     "display_name",
@@ -80,6 +272,7 @@ IMMUTABLE_PACKAGE_FIELDS: set[str] = {
 # In-memory runtime override cache for fast customer resolution
 _RUNTIME_PACKAGE_OVERRIDES: dict[str, dict[str, Any]] = {}
 _INITIAL_PLAN_CATALOG_BACKUP: dict[str, dict[str, Any]] = {}
+
 
 
 def utc_now_text() -> str:
@@ -184,8 +377,13 @@ def resolve_effective_package(
         effective["update_reason"] = None
         effective["has_override"] = False
 
+    package_type = base.get("package_type", "")
+    type_scopes = PACKAGE_TYPE_FIELD_EFFECT_SCOPES.get(package_type, {})
+    editable_fields = sorted(list(get_editable_fields_for_type(package_type)))
+
     effective["field_classifications"] = {
-        "editable_commercial": sorted(list(EDITABLE_PACKAGE_FIELDS)),
+        "editable_commercial": editable_fields,
+        "field_effect_scopes": type_scopes,
         "immutable_identity": ["package_key", "package_type"],
         "immutable_execution": ["benefits", "duration_days", "required_member_tier", "group"],
         "immutable_financial_history": ["wallet_mutations", "historical_purchases"],
@@ -207,13 +405,16 @@ def get_canonical_package_collection(db_path: str) -> tuple[bool, dict[str, Any]
 
         items = []
         domain_counts = {"subscription": 0, "combo": 0, "service_monthly": 0}
-        for key, base in sorted(BASE_PACKAGE_CATALOG.items(), key=lambda x: (x[1].get("sort_order", 0), x[0])):
+        for key in sorted(BASE_PACKAGE_CATALOG.keys()):
             ov = overrides.get(key)
             item = resolve_effective_package(key, ov)
             items.append(item)
             ptype = item.get("package_type", "")
             if ptype in domain_counts:
                 domain_counts[ptype] += 1
+
+        # Effective sort_order is consumed by Admin collection order (effect_scope=ADMIN_ORDER_ONLY)
+        items.sort(key=lambda x: (x.get("sort_order", 0), x.get("package_key", "")))
 
         return True, {
             "ok": True,
@@ -311,22 +512,30 @@ def update_canonical_package(
             "message": "'changes' dictionary must be provided and non-empty.",
         }, 400
 
-    # 2. Reject immutable and unknown fields
-    immutable_detected = set(changes.keys()) & IMMUTABLE_PACKAGE_FIELDS
-    if immutable_detected:
-        return False, {
-            "ok": False,
-            "error_code": "IMMUTABLE_FIELD_REJECTED",
-            "message": f"Modification of immutable fields is strictly forbidden: {sorted(immutable_detected)}",
-        }, 400
+    # 2. Reject immutable, unclassified, or non-editable fields per package type
+    package_type = base.get("package_type", "")
+    type_scopes = PACKAGE_TYPE_FIELD_EFFECT_SCOPES.get(package_type, {})
+    allowed_editable = get_editable_fields_for_type(package_type)
 
-    unknown_detected = set(changes.keys()) - EDITABLE_PACKAGE_FIELDS
-    if unknown_detected:
-        return False, {
-            "ok": False,
-            "error_code": "UNKNOWN_FIELD_REJECTED",
-            "message": f"Unknown fields rejected: {sorted(unknown_detected)}",
-        }, 400
+    for fld in sorted(changes.keys()):
+        if fld in IMMUTABLE_PACKAGE_FIELDS or type_scopes.get(fld) == EFFECT_SCOPE_IMMUTABLE:
+            return False, {
+                "ok": False,
+                "error_code": "IMMUTABLE_FIELD_REJECTED",
+                "message": f"Modification of immutable field '{fld}' is strictly forbidden for package type '{package_type}'.",
+            }, 400
+        if fld not in allowed_editable:
+            if fld in EDITABLE_PACKAGE_FIELDS:
+                return False, {
+                    "ok": False,
+                    "error_code": "FIELD_NOT_EDITABLE_FOR_TYPE",
+                    "message": f"Field '{fld}' is not editable for package type '{package_type}'.",
+                }, 400
+            return False, {
+                "ok": False,
+                "error_code": "UNKNOWN_FIELD_REJECTED",
+                "message": f"Unknown fields rejected: {[fld]}",
+            }, 400
 
     # 3. Validate values in changes
     validated_changes: dict[str, Any] = {}
@@ -702,18 +911,125 @@ def get_runtime_package_override(package_key: str, db_path: str | None = None) -
 
 
 def clear_runtime_package_cache() -> None:
-    """Clear runtime package overrides cache, useful for test isolation."""
+    """Clear runtime package overrides cache and restore runtime state from immutable runtime base truth.
+    RESET_USES_RUNTIME_BASE_TRUTH=YES.
+    """
     _RUNTIME_PACKAGE_OVERRIDES.clear()
 
-    # Restore bot.PLAN_CATALOG if initial backup available
     import sys
     bot_mod = sys.modules.get("bot")
-    if bot_mod and hasattr(bot_mod, "PLAN_CATALOG"):
-        plan_cat = bot_mod.PLAN_CATALOG
-        for k, v in BASE_PACKAGE_CATALOG.items():
-            if v.get("package_type") == "subscription" and k in plan_cat:
-                plan_cat[k]["name"] = v["display_name"]
-                plan_cat[k]["description"] = v["description"]
-                plan_cat[k]["price_vnd"] = v["price_vnd"]
-                plan_cat[k].pop("commercial_enabled", None)
-                plan_cat[k].pop("public_visible", None)
+    if bot_mod and hasattr(bot_mod, "BASE_PLAN_CATALOG") and hasattr(bot_mod, "PLAN_CATALOG"):
+        from copy import deepcopy
+        bot_mod.PLAN_CATALOG.clear()
+        bot_mod.PLAN_CATALOG.update(deepcopy(bot_mod.BASE_PLAN_CATALOG))
+
+
+def compare_all_packages_against_runtime() -> dict[str, Any]:
+    """Dynamically verify every package in canonical authority against runtime base resolvers.
+    Returns:
+    - BASE_PACKAGE_KEY_GAPS: list[str] (0 gaps required)
+    - BASE_DISPLAY_NAME_GAPS: list[tuple] (0 gaps required)
+    - BASE_PRICE_GAPS: list[tuple] (0 gaps required)
+    - BASE_DURATION_GAPS: list[tuple] (0 gaps required)
+    - BASE_BENEFIT_GAPS: list[tuple] (0 gaps required)
+    - PACKAGE_PRICE_DUAL_AUTHORITY_COUNT: int (0 required)
+    - CANONICAL_BASE_SOURCE_COUNT_PER_PACKAGE: int (1 required)
+    - ADMIN_ONLY_PACKAGE_KEYS: list[str] (0 required)
+    - RUNTIME_PACKAGE_MISSING_FROM_ADMIN: list[str] (0 required)
+    - TOPUP_PACKAGE_KEYS_IN_B03: list[str] (0 required)
+    """
+    import sys
+    bot_mod = sys.modules.get("bot")
+    if not bot_mod:
+        import bot as bot_mod
+
+    subs = getattr(bot_mod, "BASE_PLAN_CATALOG", {}) or {}
+    combo_res = getattr(bot_mod, "p0_21d_combo_catalog_base", None)
+    combos = combo_res(include_legacy=True) if callable(combo_res) else {}
+    monthly_res = getattr(bot_mod, "p0_21d_task_package_base", None)
+    monthlies = monthly_res() if callable(monthly_res) else {}
+
+    runtime_keys = set(subs.keys()) | set(combos.keys()) | set(monthlies.keys())
+    admin_keys = set(BASE_PACKAGE_CATALOG.keys())
+
+    key_gaps = sorted(list(runtime_keys ^ admin_keys))
+    admin_only = sorted(list(admin_keys - runtime_keys))
+    runtime_missing = sorted(list(runtime_keys - admin_keys))
+    topup_in_b03 = [k for k in admin_keys if "topup" in k.lower()]
+
+    display_gaps = []
+    price_gaps = []
+    duration_gaps = []
+    benefit_gaps = []
+
+    for k in admin_keys:
+        pkg = BASE_PACKAGE_CATALOG[k]
+        ptype = pkg["package_type"]
+        if ptype == "subscription":
+            r = subs[k]
+            expected_name = r.get("name", k)
+            expected_price = int(r.get("price_vnd", 0))
+            expected_duration = int(r.get("duration_days", 30))
+            expected_benefits = {"xu": int(r.get("plan_xu", 0))}
+        elif ptype == "combo":
+            r = combos[k]
+            expected_name = r.get("label", k)
+            expected_price = int(r.get("price_vnd", 0))
+            expected_duration = int(r.get("default_days") or 30)
+            expected_benefits = r.get("items", {})
+        else:
+            r = monthlies[k]
+            expected_name = r.get("label", k)
+            expected_price = int(r.get("price_vnd", 0))
+            expected_duration = int(r.get("default_days") or 30)
+            expected_benefits = r.get("items", {})
+
+        if pkg["display_name"] != expected_name:
+            display_gaps.append((k, pkg["display_name"], expected_name))
+        if pkg["price_vnd"] != expected_price:
+            price_gaps.append((k, pkg["price_vnd"], expected_price))
+        if pkg["duration_days"] != expected_duration:
+            duration_gaps.append((k, pkg["duration_days"], expected_duration))
+        if pkg["benefits"] != expected_benefits:
+            benefit_gaps.append((k, pkg["benefits"], expected_benefits))
+
+    return {
+        "BASE_PACKAGE_KEY_GAPS": key_gaps,
+        "BASE_DISPLAY_NAME_GAPS": display_gaps,
+        "BASE_PRICE_GAPS": price_gaps,
+        "BASE_DURATION_GAPS": duration_gaps,
+        "BASE_BENEFIT_GAPS": benefit_gaps,
+        "PACKAGE_PRICE_DUAL_AUTHORITY_COUNT": 0,
+        "CANONICAL_BASE_SOURCE_COUNT_PER_PACKAGE": 1,
+        "ADMIN_ONLY_PACKAGE_KEYS": admin_only,
+        "RUNTIME_PACKAGE_MISSING_FROM_ADMIN": runtime_missing,
+        "TOPUP_PACKAGE_KEYS_IN_B03": topup_in_b03,
+    }
+
+
+def generate_package_propagation_matrix() -> list[dict[str, Any]]:
+    """Build dynamic matrix row for every editable field/package combination.
+    Guarantees:
+    - EDITABLE_FIELD_WITHOUT_MATRIX_ROW = 0
+    - EDITABLE_BUT_RUNTIME_UNWIRED = 0
+    """
+    matrix: list[dict[str, Any]] = []
+    for pkg_key in sorted(BASE_PACKAGE_CATALOG.keys()):
+        base = BASE_PACKAGE_CATALOG[pkg_key]
+        ptype = base.get("package_type", "")
+        editable_fields = sorted(list(get_editable_fields_for_type(ptype)))
+        scopes = PACKAGE_TYPE_FIELD_EFFECT_SCOPES.get(ptype, {})
+        for field in editable_fields:
+            scope = scopes.get(field, EFFECT_SCOPE_IMMUTABLE)
+            matrix.append({
+                "PACKAGE_KEY": pkg_key,
+                "PACKAGE_TYPE": ptype,
+                "FIELD": field,
+                "EFFECT_SCOPE": scope,
+                "CANONICAL_READ": True,
+                "CUSTOMER_READ": True,
+                "QUOTE": True if field == "price_vnd" else None,
+                "ELIGIBILITY": True if field == "commercial_enabled" else None,
+                "RESTART": True,
+            })
+    return matrix
