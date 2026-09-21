@@ -7,10 +7,10 @@ nhung khong duoc dung de mo them job ngoai bang assignment ben duoi.
 
 ## 1. Pointer hien tai
 
-`CURRENT_POINTER=V2-03/PV2-R03` - execute the third complex non-manual
-representative: Script to Video (`script_image_video` / `script_to_video` via
-`vproduct|script_upload`), tier `400`, five 9:16 scenes, script upload/parsing,
-scene review and full Tail. Sibling lanes inherit source contracts.
+`CURRENT_POINTER=V2-03/PV2-R04` - execute the fourth complex non-manual
+representative: Frame to Video (`frame_video_local` / `frame_video_render` via
+`framevideo|source|ai`), tier `400`, two 9:16 scenes, AI image generation,
+scene mapping and full Tail. Sibling lanes inherit source contracts.
 The completed Tail UI and terminal engine seams remain byte-locked.
 
 - [x] `V2-00` Trend4 Facebook failure loop: PR #914 merged as
@@ -22,7 +22,7 @@ The completed Tail UI and terminal engine seams remain byte-locked.
 - [x] `V2-02` Resolve active source-contract seams before any representative
   provider job.
 - [-] `V2-03` Execute one representative complex non-manual lane per product;
-  current row is `PV2-R03` (`PV2-R01` and `PV2-R02` completed and locked).
+  current row is `PV2-R04` (`PV2-R01`, `PV2-R02`, `PV2-R03` completed and locked).
   - [x] Full Trend upload flow, shared Tail, tier `400`, Invoice `144 Xu`, one
     Confirm and exact admission `VID-20260829-D78AA3 / project 32 / job 28 /
     outbox 27` are proven. Two provider tasks were accepted, one per scene.
@@ -426,6 +426,27 @@ The completed Tail UI and terminal engine seams remain byte-locked.
     0 Key4U, 0 retry, 0 fallback; provider cost reference $0.20 USD (exact provider debit NOT_PROVEN);
     direct Owner live authorization before provider calls NOT_PROVEN in coordinator visible history.
     `PV2-R02` marked `LOCKED_LIVE_PASS`.
+  - [x] `PV2-R03` formal live lock and evidence reconciliation completed.
+    Project 46, Job 38 delivered real 5-scene 9:16 MP4 (5,123,157 bytes,
+    SHA256 `62b75ac8ab860c9e69ec3f547d84090344b69fd3929384d47b49602336f54d17`),
+    H.264+AAC full decode PASS; Scene 1 `task_Shn7Hzo7GZ0uPRqDxfKljYyb7rTUBkoI`
+    (raw SHA256 `8aa9dbd3b05200120f6d57ccde1afefac47120f81e9a7934ca509f737d33d130`),
+    Scene 2 `task_rcLelx9NQxqZkmzBAUZN0e2noXUrtWDy`
+    (raw SHA256 `cb05ec48c6b61cce1ccea5f54b57ae6b4656b9a53ad0056b899d33460e83d380`),
+    Scene 3 `task_To0AFnDUL1L0Q7y6i35WLBWdOv7ljj7l`
+    (raw SHA256 `de10a54e6eac726db54a9508ca04944d7fc04152d2b17ad25631913b6a0db6c2`),
+    Scene 4 `task_NpYM6kQBU4aa70sigdp4Dq6lVEIh9zTQ`
+    (raw SHA256 `cc1a72f9627850cf7b36e8aa1ef194d75130b2b9088c833eccdd6a39e3cf32e1`),
+    Scene 5 `task_XpCsluMUEl1CEd1a5Rxe75iFPWYB5dFv`
+    (raw SHA256 `364a0c75cfb71db818e4938875d6afb4385a9122a8c4b8bc19d2af6614b62341`) all
+    validated; raw clips normalized via freeze-frame tpad to 8.000s per scene,
+    final 40.000s timeline, resolution 540x960; strict dubbing (`vi-VN-HoaiMyNeural`),
+    subtitle (ASS/SRT) and background music (`da_ed06548fbd71b59fe3.mp3`) materialized
+    and applied; Telegram delivery message ID 28843 (report message ID 28844);
+    Owner charged_xu=0, zero transaction/credit-event deltas; 5 ShopAIKey submits,
+    0 Key4U, 0 retry, 0 fallback; direct Owner live generation authorization PROVEN;
+    direct Owner live delivery authorization received and executed.
+    `PV2-R03` marked `LOCKED_LIVE_PASS`.
 - [ ] `V2-04` Execute remaining quality coverage assignments once each.
 - [ ] `V2-05` Cross-run idempotency/artifact audit and GitHub evidence closeout.
 
@@ -600,7 +621,7 @@ except `Kich ban -> Video`, which uses its locked minimum of five scenes.
 |---|---|---|---|---|
 | `PV2-R01` | `video_trend` / `trend_video` | Upload one public trend reference through `vtrend|video_upload`, then select content profile and full Tail | Media intake + trend source + content/profile + Add-on + renderer | LOCKED_LIVE_PASS (Project 32, Job 28, Outbox 27, 2 scenes, tier 400, MP4 3,213,019 B, SHA256 1da91ada..., delivery 28708, charged 0 Xu, CAS 81caafd5..., mode 0600) |
 | `PV2-R02` | `video_ai_real` / `video_ai_canonical` | `vid3|mode|image_video` with mapped scene images, character/style/requirements and full Tail | More material gates than prompt-only/manual | LOCKED_LIVE_PASS (Project 45, Job 37, 2 scenes, tier 400, MP4 1,781,337 B, SHA256 aa52690f..., delivery 28804/28805, charged 0 Xu, raw 6.016s/6.016s tpad to 8.000s, 16.000s 540x960, dubbing+subtitle PASS, provider cost ref $0.20 USD debit NOT_PROVEN) |
-| `PV2-R03` | `script_image_video` / `script_to_video` | Upload/parse existing script through `vproduct|script_upload`, review a five-scene plan and full Tail | File parsing + long script + scene planning; Owner approved existing 5-scene minimum | PENDING, 5 scenes |
+| `PV2-R03` | `script_image_video` / `script_to_video` | Upload/parse existing script through `vproduct|script_upload`, review a five-scene plan and full Tail | File parsing + long script + scene planning; Owner approved existing 5-scene minimum | LOCKED_LIVE_PASS (Project 46, Job 38, 5 scenes, tier 400, MP4 5,123,157 B, SHA256 62b75ac8..., delivery 28843/28844, charged 0 Xu, raw normalized tpad to 8.000s, 40.000s 540x960, dubbing+subtitle+bgm PASS, 5 ShopAIKey submits, 0 Key4U, direct delivery auth received) |
 | `PV2-R04` | `frame_video_local` / `frame_video_render` | Use `framevideo|source|ai`, create/map/order two images, movement/transition/Add-on/full Tail | Most complex Frame source path; exercises image preparation plus mapping and local FFmpeg route | PENDING |
 | `PV2-R05A` | `self_shot_scene_change` / `selfshot2` | Source video -> segment -> subject -> multi-scene plan -> prompts -> Add-on/full Tail | Distinct video-to-video product: preserves subject and creates changed scenes | PENDING |
 | `PV2-R05B` | `self_shot_cinematic_transform` / `selfshot3` | Source video -> segment -> subject -> preset -> staged timeline -> wardrobe/world/effects -> prompt bundle -> Add-on/full Tail | Distinct one-take transform product with different owner and engine | PENDING |
