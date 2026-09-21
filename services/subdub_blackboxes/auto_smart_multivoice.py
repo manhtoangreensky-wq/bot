@@ -157,6 +157,7 @@ def decide_smart_multivoice(
     acoustic_classifications: Mapping[str, Mapping[str, Any]] | None = None,
     fallback_level_override: int | None = None,
     default_fallback_voice: str | None = None,
+    locked_speaker_voice_map: Mapping[str, str] | None = None,
 ) -> SmartVoiceDecision:
     """Core pure-functional decision authority for Auto Smart Multi-Voice lane."""
     seed = hashlib.sha256(str(assignment_seed).encode("utf-8")).hexdigest()
@@ -200,6 +201,151 @@ def decide_smart_multivoice(
 
     # Step 3: Normalize voice pools from approved input only
     low_pool, high_pool, all_pool = _normalize_voice_pools(validated_pools)
+
+    # If explicit locked_speaker_voice_map is supplied, validate fail-closed before any fallback
+    if locked_speaker_voice_map is not None:
+        fail_dispositions = {str(c.get("cue_id") or c.get("id")): DISPOSITION_TERMINAL_REJECTED for c in cues if (c.get("cue_id") or c.get("id"))}
+        if not isinstance(locked_speaker_voice_map, Mapping):
+            return SmartVoiceDecision(
+                strategy=STRATEGY_FAILED,
+                detected_speaker_count=detected_speaker_count,
+                effective_speaker_count=0,
+                effective_voice_count=0,
+                speaker_voice_map={},
+                fallback_level=-1,
+                fallback_reason="LOCKED_SPEAKER_VOICE_MAP_CONFLICT:invalid_mapping_type",
+                output_mode=OUTPUT_MODE_FAILED,
+                cue_dispositions=fail_dispositions,
+                tts_cues=[],
+            )
+
+        locked_keys = set(locked_speaker_voice_map.keys())
+        canonical_spks = set(ordered_speakers)
+
+        missing_speakers = canonical_spks - locked_keys
+        extra_speakers = locked_keys - canonical_spks
+        if missing_speakers:
+            return SmartVoiceDecision(
+                strategy=STRATEGY_FAILED,
+                detected_speaker_count=detected_speaker_count,
+                effective_speaker_count=0,
+                effective_voice_count=0,
+                speaker_voice_map={},
+                fallback_level=-1,
+                fallback_reason="LOCKED_SPEAKER_VOICE_MAP_CONFLICT:missing_speaker",
+                output_mode=OUTPUT_MODE_FAILED,
+                cue_dispositions=fail_dispositions,
+                tts_cues=[],
+            )
+        if extra_speakers:
+            return SmartVoiceDecision(
+                strategy=STRATEGY_FAILED,
+                detected_speaker_count=detected_speaker_count,
+                effective_speaker_count=0,
+                effective_voice_count=0,
+                speaker_voice_map={},
+                fallback_level=-1,
+                fallback_reason="LOCKED_SPEAKER_VOICE_MAP_CONFLICT:extra_speaker",
+                output_mode=OUTPUT_MODE_FAILED,
+                cue_dispositions=fail_dispositions,
+                tts_cues=[],
+            )
+
+        # Voice validation: canonical voice ID syntax and pool membership
+        normalized_locked_map: dict[str, str] = {}
+        for spk, voice_id in locked_speaker_voice_map.items():
+            if not isinstance(voice_id, str):
+                return SmartVoiceDecision(
+                    strategy=STRATEGY_FAILED,
+                    detected_speaker_count=detected_speaker_count,
+                    effective_speaker_count=0,
+                    effective_voice_count=0,
+                    speaker_voice_map={},
+                    fallback_level=-1,
+                    fallback_reason="LOCKED_SPEAKER_VOICE_MAP_CONFLICT:unknown_voice",
+                    output_mode=OUTPUT_MODE_FAILED,
+                    cue_dispositions=fail_dispositions,
+                    tts_cues=[],
+                )
+            clean_voice = voice_id.strip()
+            if not clean_voice or not bool(speaker_cast._VOICE_ID_RE.fullmatch(clean_voice)):
+                return SmartVoiceDecision(
+                    strategy=STRATEGY_FAILED,
+                    detected_speaker_count=detected_speaker_count,
+                    effective_speaker_count=0,
+                    effective_voice_count=0,
+                    speaker_voice_map={},
+                    fallback_level=-1,
+                    fallback_reason="LOCKED_SPEAKER_VOICE_MAP_CONFLICT:unknown_voice",
+                    output_mode=OUTPUT_MODE_FAILED,
+                    cue_dispositions=fail_dispositions,
+                    tts_cues=[],
+                )
+            if clean_voice not in all_pool:
+                return SmartVoiceDecision(
+                    strategy=STRATEGY_FAILED,
+                    detected_speaker_count=detected_speaker_count,
+                    effective_speaker_count=0,
+                    effective_voice_count=0,
+                    speaker_voice_map={},
+                    fallback_level=-1,
+                    fallback_reason="LOCKED_SPEAKER_VOICE_MAP_CONFLICT:unapproved_voice",
+                    output_mode=OUTPUT_MODE_FAILED,
+                    cue_dispositions=fail_dispositions,
+                    tts_cues=[],
+                )
+            normalized_locked_map[spk] = clean_voice
+
+        # Distinctness validation on normalized IDs
+        if len(set(normalized_locked_map.values())) != len(normalized_locked_map):
+            return SmartVoiceDecision(
+                strategy=STRATEGY_FAILED,
+                detected_speaker_count=detected_speaker_count,
+                effective_speaker_count=0,
+                effective_voice_count=0,
+                speaker_voice_map={},
+                fallback_level=-1,
+                fallback_reason="LOCKED_SPEAKER_VOICE_MAP_CONFLICT:duplicate_voice",
+                output_mode=OUTPUT_MODE_FAILED,
+                cue_dispositions=fail_dispositions,
+                tts_cues=[],
+            )
+
+        # Lock Precedence: directly adopt validated normalized map ordered by canonical speaker order
+        speaker_voice_map = {spk: normalized_locked_map[spk] for spk in ordered_speakers}
+        if detected_speaker_count == 1:
+            strategy = STRATEGY_GENERIC_SINGLE
+            output_mode = OUTPUT_MODE_DUBBED_SINGLE
+        elif detected_speaker_count == 2:
+            strategy = STRATEGY_GENERIC_MULTI
+            output_mode = OUTPUT_MODE_DUBBED_MULTI
+        else:
+            strategy = STRATEGY_GENERIC_MULTI
+            output_mode = OUTPUT_MODE_DUBBED_MULTI
+
+        tts_cues = []
+        for c in speech_cues:
+            cid = str(c["cue_id"])
+            dispositions[cid] = DISPOSITION_DUBBED
+            tts_cue = dict(c)
+            tts_cue["tts_voice_id"] = speaker_voice_map[c["speaker_id"]]
+            tts_cues.append(tts_cue)
+
+        effective_speaker_count = len(speaker_voice_map)
+        effective_voice_count = len(set(speaker_voice_map.values()))
+
+        return SmartVoiceDecision(
+            strategy=strategy,
+            detected_speaker_count=detected_speaker_count,
+            effective_speaker_count=effective_speaker_count,
+            effective_voice_count=effective_voice_count,
+            speaker_voice_map=speaker_voice_map,
+            fallback_level=0,
+            fallback_reason=None,
+            output_mode=output_mode,
+            cue_dispositions=dispositions,
+            tts_cues=tts_cues,
+        )
 
     # If no approved voice pool exists: do NOT manual halt! Fall down ladder truthfully.
     if not all_pool:
@@ -534,6 +680,7 @@ async def run_auto_smart_multivoice(
     is_cancelled: Callable[[], bool] | None = None,
     fallback_level_override: int | None = None,
     default_fallback_voice: str | None = None,
+    locked_speaker_voice_map: Mapping[str, str] | None = None,
     state: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Bounded, truthful execution runner for Auto Smart Multi-Voice lane.
@@ -546,6 +693,9 @@ async def run_auto_smart_multivoice(
         if callable(stop_requested) and stop_requested():
             return True
         return False
+
+    if locked_speaker_voice_map is None and isinstance(state, Mapping):
+        locked_speaker_voice_map = state.get("locked_speaker_voice_map")
 
     # Checkpoint 1: Before decision
     if _is_stopped():
@@ -615,7 +765,25 @@ async def run_auto_smart_multivoice(
         acoustic_classifications=acoustic_classifications,
         fallback_level_override=fallback_level_override,
         default_fallback_voice=default_fallback_voice,
+        locked_speaker_voice_map=locked_speaker_voice_map,
     )
+
+    if decision.output_mode == OUTPUT_MODE_FAILED:
+        blocker = "LOCKED_SPEAKER_VOICE_MAP_CONFLICT" if "LOCKED_SPEAKER_VOICE_MAP_CONFLICT" in str(decision.fallback_reason) else (decision.fallback_reason or "decision_failed")
+        return {
+            "ok": False,
+            "strategy": decision.strategy,
+            "detected_speaker_count": decision.detected_speaker_count,
+            "effective_speaker_count": decision.effective_speaker_count,
+            "effective_voice_count": decision.effective_voice_count,
+            "speaker_voice_map": decision.speaker_voice_map,
+            "fallback_level": decision.fallback_level,
+            "fallback_reason": decision.fallback_reason,
+            "output_mode": OUTPUT_MODE_FAILED,
+            "final_mp4_path": None,
+            "blocker": blocker,
+            "auto_smart_verified": False,
+        }
 
     out_target = Path(output_path)
 
@@ -940,6 +1108,7 @@ async def run_auto_smart_multivoice(
         "cue_dispositions": decision.cue_dispositions,
         "tts_cues": decision.tts_cues,
         "decision_version": decision.decision_version,
+        "locked_speaker_voice_map": dict(decision.speaker_voice_map) if locked_speaker_voice_map else None,
     }
 
 
@@ -1008,6 +1177,9 @@ async def run_auto_smart_multivoice_blackbox(
     render_pipeline = payload.get("render_pipeline") or payload.get("render_video")
     probe_fn = payload.get("probe_fn") or payload.get("probe_video")
     assignment_seed = str(payload.get("job_id") or current.get("job_id") or current.get("task_id") or "smart_job_seed")
+    locked_speaker_voice_map = payload.get("locked_speaker_voice_map")
+    if locked_speaker_voice_map is None and isinstance(current, Mapping):
+        locked_speaker_voice_map = current.get("locked_speaker_voice_map")
 
     smart_result = await run_auto_smart_multivoice(
         source_media=source_media,
@@ -1027,6 +1199,7 @@ async def run_auto_smart_multivoice_blackbox(
         is_cancelled=payload.get("is_cancelled"),
         fallback_level_override=payload.get("fallback_level_override"),
         default_fallback_voice=payload.get("default_fallback_voice"),
+        locked_speaker_voice_map=locked_speaker_voice_map,
         state=current,
     )
 
@@ -1039,6 +1212,12 @@ async def run_auto_smart_multivoice_blackbox(
     result_state["auto_distinct_voice_count"] = smart_result.get("effective_voice_count", 0)
     result_state["auto_smart_output_mode"] = smart_result.get("output_mode")
     result_state["speaker_voice_map"] = smart_result.get("speaker_voice_map") or {}
+    if smart_result.get("locked_speaker_voice_map"):
+        result_state["locked_speaker_voice_map"] = dict(smart_result["locked_speaker_voice_map"])
+    elif locked_speaker_voice_map is not None and smart_result.get("speaker_voice_map"):
+        result_state["locked_speaker_voice_map"] = dict(smart_result["speaker_voice_map"])
+    elif locked_speaker_voice_map is not None:
+        result_state["locked_speaker_voice_map"] = {k: str(v).strip() for k, v in locked_speaker_voice_map.items()}
 
     response = {
         **smart_result,
