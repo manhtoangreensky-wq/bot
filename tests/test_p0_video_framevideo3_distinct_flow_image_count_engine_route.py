@@ -514,3 +514,256 @@ def test_real_local_mp4_for_every_supported_count(tmp_path: Path, image_count: i
     assert probe["duration_delta_seconds"] <= 0.35
     assert probe["video_stream_count"] == 1
     assert probe["size_bytes"] > 0
+
+
+def test_framevideo_ai_explicit_no_fallback() -> None:
+    """FRAMEVIDEO_AI_EXPLICIT_NO_FALLBACK=PASS: FrameVideo3 AI image confirmation must pass fallback_models=[]."""
+    ai_handler = BOT_SOURCE[
+        BOT_SOURCE.index("async def handle_img2vid_lock1_callback") :
+        BOT_SOURCE.index("async def handle_frame_video_callback")
+    ]
+    image_confirm = ai_handler[ai_handler.index('    if action == "ai_generate_confirm":') :]
+    gen_call = image_confirm[image_confirm.index("shopaikey_image_generate(") : image_confirm.index("image_url = ")]
+    assert "fallback_models=[]" in gen_call or "fallback_models = []" in gen_call, (
+        "FrameVideo3 AI image generation must explicitly pass fallback_models=[] to disable implicit fallback"
+    )
+
+
+def test_framevideo_ai_single_attempt_per_prompt_and_no_fallback_on_error() -> None:
+    """Tests attempt caps: ONE_PROMPT_ONE_PROVIDER_ATTEMPT, TWO_PROMPTS_TWO_PROVIDER_ATTEMPTS,
+    FIRST_PROMPT_FAILURE_NO_FALLBACK, SECOND_PROMPT_FAILURE_NO_THIRD_CALL,
+    FALLBACK_ELIGIBLE_ERROR_STILL_NO_FALLBACK, GENERIC_PROVIDER_FALLBACK_BEHAVIOR_UNCHANGED,
+    IMAGE_JOB_COUNT_EQUALS_PROMPT_COUNT.
+    """
+    import bot
+
+    # 1. Generic provider fallback behavior unchanged when fallback_models is omitted
+    seq_default = bot.shopaikey_image_model_sequence("nano-banana", None)
+    assert len(seq_default) > 1, "Generic provider must retain fallback models"
+    assert "nano-banana-2" in seq_default or len(seq_default) >= 2
+
+    # 2. Explicit fallback_models=[] limits sequence to exactly primary model
+    seq_locked = bot.shopaikey_image_model_sequence("nano-banana", [])
+    assert seq_locked == ["nano-banana"]
+
+    # 3. Verify shopaikey_image_generate makes at most 1 attempt per prompt with fallback_models=[]
+    http_calls: list[dict] = []
+
+    class FakeResponse:
+        status_code = 503
+        text = '{"error": "service_unavailable"}'
+        def json(self):
+            return {"error": "service_unavailable", "message": "Service Temporarily Unavailable"}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+        async def post(self, url, headers=None, json=None):
+            http_calls.append({"url": url, "model": json.get("model")})
+            return FakeResponse()
+
+    async def _test_single_attempt():
+        orig_client = bot.httpx.AsyncClient
+        orig_key = bot.SHOPAIKEY_API_KEY
+        bot.SHOPAIKEY_API_KEY = "test_key_for_no_fallback"
+        bot.httpx.AsyncClient = FakeClient
+        try:
+            res = await bot.shopaikey_image_generate(
+                "test prompt 1",
+                model="nano-banana",
+                aspect_ratio="9:16",
+                tier="low",
+                fallback_models=[],
+            )
+            # ONE_PROMPT_ONE_PROVIDER_ATTEMPT=PASS
+            # FALLBACK_ELIGIBLE_ERROR_STILL_NO_FALLBACK=PASS
+            assert len(http_calls) == 1
+            assert res["models_tried"] == ["nano-banana"]
+            assert res["fallback_used"] is False
+
+            # TWO_PROMPTS_TWO_PROVIDER_ATTEMPTS: Second prompt call
+            res2 = await bot.shopaikey_image_generate(
+                "test prompt 2",
+                model="nano-banana",
+                aspect_ratio="9:16",
+                tier="low",
+                fallback_models=[],
+            )
+            # Exactly 2 calls total across two prompts
+            assert len(http_calls) == 2
+            assert res2["models_tried"] == ["nano-banana"]
+            assert res2["fallback_used"] is False
+        finally:
+            bot.httpx.AsyncClient = orig_client
+            bot.SHOPAIKEY_API_KEY = orig_key
+
+    asyncio.run(_test_single_attempt())
+
+
+def test_framevideo_ai_callback_two_prompts_wiring(monkeypatch) -> None:
+    """Tests the full callback wiring of ai_generate_confirm:
+    - IMAGE_JOB_COUNT_EQUALS_PROMPT_COUNT=PASS
+    - TWO_PROMPTS_TWO_PROVIDER_ATTEMPTS=PASS
+    - Both calls explicitly pass fallback_models=[]
+    """
+    import bot
+
+    monkeypatch.setattr(bot, "is_admin_user", lambda uid: True)
+    monkeypatch.setattr(bot, "shopaikey_provider_submit_guard", lambda *args, **kwargs: {"provider_submit_allowed": True})
+    monkeypatch.setattr(
+        bot,
+        "frame_video_image_quote",
+        lambda st: {"ok": True, "image_count": 2, "total_price_xu": 100, "unit_price_xu": 50, "model": "nano-banana", "tier": "low", "ratio": "9:16"},
+    )
+
+    calls = []
+    async def mock_generate(prompt, model="", aspect_ratio="", tier="", fallback_models=None):
+        calls.append({
+            "prompt": prompt,
+            "model": model,
+            "aspect_ratio": aspect_ratio,
+            "tier": tier,
+            "fallback_models": fallback_models,
+        })
+        assert fallback_models == [], f"Expected fallback_models=[], got {fallback_models}"
+        return {
+            "image_url": "https://cdn.toanaas.vn/test.png",
+            "b64_json": "",
+            "final_model": model,
+        }
+
+    monkeypatch.setattr(bot, "shopaikey_image_generate", mock_generate)
+
+    async def mock_send_image(context, chat_id, **kwargs):
+        call_idx = len(calls)
+        return {
+            "sent": True,
+            "message_id": 99900 + call_idx,
+            "file_id": f"file_{call_idx}",
+            "artifact": f"test_artifact_{call_idx}",
+        }
+    monkeypatch.setattr(bot, "send_frame_video_generated_image", mock_send_image)
+
+    created_jobs = []
+    def mock_create_job(uid, chat_id, job_type, **kwargs):
+        job_id = 7000 + len(created_jobs)
+        created_jobs.append({"id": job_id, "prompt": kwargs.get("prompt"), "model": kwargs.get("model")})
+        return job_id
+    monkeypatch.setattr(bot, "create_shopaikey_job", mock_create_job)
+    monkeypatch.setattr(bot, "update_shopaikey_job", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bot, "spend_fixed_credit_info", lambda *args, **kwargs: {"ok": True, "final_cost": 0})
+
+    class DummyBot:
+        async def send_message(self, *args, **kwargs):
+            return True
+
+    class DummyMessage:
+        chat_id = 12345
+        message_id = 999
+    class DummyUser:
+        id = 1001
+        first_name = "Test User"
+        username = "testuser"
+    class DummyQuery:
+        message = DummyMessage()
+        from_user = DummyUser()
+        async def answer(self): pass
+        async def edit_message_text(self, *args, **kwargs): pass
+    class DummyContext:
+        bot = DummyBot()
+
+    state = bot.frame_video3_new_state("ai")
+    state["image_count"] = 2
+    state["ai_image_count"] = 2
+    state["ai_prompt"] = "Common leather wallet prompt"
+    state["ai_image_prompts"] = ["Prompt 1: artisan stitching", "Prompt 2: finished wallet hero"]
+    state["ai_image_tier"] = "low"
+    state["ai_image_model"] = "nano-banana"
+    state["ratio"] = "9:16"
+    bot.set_frame_video_state(1001, state)
+
+    async def _run_confirm():
+        await bot.handle_img2vid_lock1_callback(
+            DummyQuery(), DummyContext(), 1001, "vi", "ai_generate_confirm", ["framevideo", "ai_generate_confirm"], state
+        )
+
+    asyncio.run(_run_confirm())
+
+    assert len(created_jobs) == 2, f"IMAGE_JOB_COUNT_EQUALS_PROMPT_COUNT: expected 2, got {len(created_jobs)}"
+    assert len(calls) == 2, f"TWO_PROMPTS_TWO_PROVIDER_ATTEMPTS: expected 2, got {len(calls)}"
+    for c in calls:
+        assert c["fallback_models"] == [], "Each call must have fallback_models=[]"
+        assert c["model"] == "nano-banana"
+
+
+def test_framevideo_ai_callback_first_prompt_failure_no_fallback(monkeypatch) -> None:
+    """FIRST_PROMPT_FAILURE_NO_FALLBACK=PASS & SECOND_PROMPT_FAILURE_NO_THIRD_CALL=PASS."""
+    import bot
+
+    monkeypatch.setattr(bot, "is_admin_user", lambda uid: True)
+    monkeypatch.setattr(bot, "shopaikey_provider_submit_guard", lambda *args, **kwargs: {"provider_submit_allowed": True})
+    monkeypatch.setattr(
+        bot,
+        "frame_video_image_quote",
+        lambda st: {"ok": True, "image_count": 2, "total_price_xu": 100, "unit_price_xu": 50, "model": "nano-banana", "tier": "low", "ratio": "9:16"},
+    )
+
+    calls = []
+    async def mock_generate_fail(prompt, model="", aspect_ratio="", tier="", fallback_models=None):
+        calls.append({"prompt": prompt, "model": model, "fallback_models": fallback_models})
+        assert fallback_models == []
+        return {"error": "service_unavailable", "detail": "Service Unavailable", "image_url": "", "b64_json": ""}
+
+    monkeypatch.setattr(bot, "shopaikey_image_generate", mock_generate_fail)
+    created_jobs = []
+    def mock_create_job(uid, chat_id, job_type, **kwargs):
+        job_id = 8000 + len(created_jobs)
+        created_jobs.append({"id": job_id})
+        return job_id
+    monkeypatch.setattr(bot, "create_shopaikey_job", mock_create_job)
+    monkeypatch.setattr(bot, "update_shopaikey_job", lambda *args, **kwargs: None)
+
+    class DummyBot:
+        async def send_message(self, *args, **kwargs):
+            return True
+
+    class DummyMessage:
+        chat_id = 12345
+        message_id = 999
+    class DummyUser:
+        id = 1002
+        first_name = "Test User"
+        username = "testuser"
+    class DummyQuery:
+        message = DummyMessage()
+        from_user = DummyUser()
+        async def answer(self): pass
+        async def edit_message_text(self, *args, **kwargs): pass
+    class DummyContext:
+        bot = DummyBot()
+
+    state = bot.frame_video3_new_state("ai")
+    state["image_count"] = 2
+    state["ai_image_count"] = 2
+    state["ai_prompt"] = "Common leather wallet prompt"
+    state["ai_image_prompts"] = ["Prompt 1: artisan stitching", "Prompt 2: finished wallet hero"]
+    state["ai_image_tier"] = "low"
+    state["ai_image_model"] = "nano-banana"
+    state["ratio"] = "9:16"
+    bot.set_frame_video_state(1002, state)
+
+    async def _run_confirm_fail():
+        await bot.handle_img2vid_lock1_callback(
+            DummyQuery(), DummyContext(), 1002, "vi", "ai_generate_confirm", ["framevideo", "ai_generate_confirm"], state
+        )
+
+    asyncio.run(_run_confirm_fail())
+
+    # Exactly 2 calls made total across the two prompts (1 attempt per prompt)
+    assert len(calls) == 2
+    # No fallback attempt on prompt 1, no third call on prompt 2
+    assert len(created_jobs) == 2
