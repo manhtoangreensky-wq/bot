@@ -32,6 +32,7 @@ class SubdubTTSQuoteMismatchError(SubdubTTSCheckpointError):
 STATE_NOT_STARTED = "NOT_STARTED"
 STATE_INTENT_PERSISTED = "INTENT_PERSISTED"
 STATE_SUBMITTING = "SUBMITTING"
+STATE_ASYNC_SUBMITTED = "ASYNC_SUBMITTED"
 STATE_SUCCEEDED = "SUCCEEDED"
 STATE_AMBIGUOUS = "AMBIGUOUS"
 STATE_FAILED_PRE_SUBMIT = "FAILED_PRE_SUBMIT"
@@ -199,6 +200,9 @@ class SubdubTTSCheckpointManager:
                     )
                 return True, path, data, dict(entry)
 
+            if state == STATE_ASYNC_SUBMITTED and entry.get("task_id"):
+                return False, "", b"", dict(entry)
+
             if state in (STATE_SUBMITTING, STATE_AMBIGUOUS):
                 raise SubdubTTSAmbiguousSubmissionError(
                     f"ambiguous_prior_submit for cue {cid} (state={state}); auto-resubmit forbidden"
@@ -222,6 +226,34 @@ class SubdubTTSCheckpointManager:
         self.cue_id_to_unit_key[cid] = unit_key
         self._save_manifest_atomic()
         return False, "", b"", None
+
+    def record_cue_async_submitted(
+        self,
+        cue: Mapping[str, Any],
+        voice_id: str,
+        task_id: str,
+        provider_request_id: str = "",
+    ) -> dict[str, Any]:
+        unit_key = self.compute_key(cue, voice_id)
+        cid = str(cue.get("cue_id") or cue.get("id") or "")
+        entry = self.entries.get(unit_key) or {
+            "tts_unit_key": unit_key,
+            "cue_id": cid,
+            "speaker_id": str(cue.get("speaker_id") or ""),
+            "voice_id": voice_id,
+            "text_hash": hashlib.sha256(str(cue.get("text") or "").strip().encode("utf-8")).hexdigest(),
+            "target_language": self.target_language,
+        }
+        entry.update({
+            "state": STATE_ASYNC_SUBMITTED,
+            "task_id": str(task_id or "").strip(),
+            "provider_request_id": str(provider_request_id or ""),
+            "async_submitted_at": time.time(),
+        })
+        self.entries[unit_key] = entry
+        self.cue_id_to_unit_key[cid] = unit_key
+        self._save_manifest_atomic()
+        return entry
 
     def record_cue_success(
         self,
