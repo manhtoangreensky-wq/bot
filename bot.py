@@ -58122,7 +58122,7 @@ def p0_21d_task_package_payload() -> dict:
         pass
     return packages
 
-def p0_21d_combo_catalog_payload(include_legacy: bool = True) -> dict:
+def p0_21d_combo_catalog_base(include_legacy: bool = True) -> dict:
     image_standard = package_catalog_image_cost_xu("standard", 150)
     image_high = package_catalog_image_cost_xu("high", 500)
     video_standard = package_catalog_video_cost_xu("standard", video_tier_cost_xu("standard"))
@@ -58306,6 +58306,10 @@ def p0_21d_combo_catalog_payload(include_legacy: bool = True) -> dict:
             hidden["public"] = False
             hidden["legacy"] = True
             combos[code] = hidden
+    return combos
+
+def p0_21d_combo_catalog_payload(include_legacy: bool = True) -> dict:
+    combos = p0_21d_combo_catalog_base(include_legacy=include_legacy)
     try:
         from services.admin_package_service import get_runtime_package_override
         for code, entry in combos.items():
@@ -58325,7 +58329,6 @@ def p0_21d_combo_catalog_payload(include_legacy: bool = True) -> dict:
         pass
     return combos
 
-p0_21d_combo_catalog_base = p0_21d_combo_catalog_payload
 
 def package_catalog_payload() -> dict:
     combos = p0_21d_combo_catalog_payload(include_legacy=True)
@@ -58780,7 +58783,21 @@ def package_entry_auto_checkout_enabled(entry: dict) -> bool:
         and int((entry or {}).get("price_vnd") or 0) > 0
         and items
         and all(normalize_package_item_type(item_type) for item_type in items)
+        and (entry or {}).get("commercial_enabled", True) is not False
     )
+
+def user_can_buy_package(user_id, package_type: str, code: str) -> tuple[bool, str]:
+    package_type = "monthly" if str(package_type or "").strip().lower() in {"monthly", "month", "plan", "task", "package"} else "combo"
+    code = str(code or "").strip().lower()
+    entry = package_catalog_entry(code, package_type)
+    if not entry:
+        return False, "Gói/combo không tồn tại."
+    if entry.get("commercial_enabled", True) is False:
+        return False, "Gói/combo này đang tạm dừng mở bán."
+    if not package_entry_auto_checkout_enabled(entry):
+        return False, "Gói/combo này cần admin hỗ trợ trước khi mở thanh toán tự động."
+    return True, "eligible"
+
 
 def package_purchase_month_start_text(reference: datetime | None = None) -> str:
     ref = reference or datetime.now()
@@ -211123,9 +211140,10 @@ async def start_package_purchase(update: Update, context: ContextTypes.DEFAULT_T
     entry = package_catalog_entry(code, package_type)
     back_action = package_detail_back_callback(package_type, code)
     large_action = pkgcombo_large_order_callback("detail" if package_type == "monthly" else "combo_detail", package_type, code)
-    if not entry or not package_entry_auto_checkout_enabled(entry):
+    can_buy, reason = user_can_buy_package(uid, package_type, code)
+    if not can_buy:
         return await message.reply_text(
-            "⚠️ Gói/combo này cần admin hỗ trợ trước khi mở thanh toán tự động.\n\n"
+            f"⚠️ {reason}\n\n"
             "Bot chưa tạo đơn, chưa trừ Xu và chưa kích hoạt quyền lợi.",
             reply_markup=package_need_larger_keyboard(back_action, large_action),
         )
@@ -211450,7 +211468,7 @@ async def handle_package_purchase_callback(update: Update, context: ContextTypes
     entry = package_catalog_entry(code, package_type)
     if not entry:
         return await safe_edit_or_send(query, "⚠️ Gói không hợp lệ. Bot chưa tạo đơn.")
-    if entry.get("manual"):
+    if entry.get("manual") or not package_entry_auto_checkout_enabled(entry):
         return await edit_or_send_pricing_lines(
             query,
             package_purchase_detail_lines(package_type, code),
@@ -211498,7 +211516,7 @@ async def render_pkgcombo_detail(query, package_type: str, code: str, lang: str 
         else:
             text = "⚠️ Gói không hợp lệ. Bot chưa tạo đơn."
         return await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=pricing_packages_keyboard(requested_locale))
-    keyboard = package_purchase_manual_keyboard(package_type, code, requested_locale) if entry.get("manual") else package_purchase_confirm_keyboard(package_type, code, requested_locale)
+    keyboard = package_purchase_manual_keyboard(package_type, code, requested_locale) if (entry.get("manual") or not package_entry_auto_checkout_enabled(entry)) else package_purchase_confirm_keyboard(package_type, code, requested_locale)
     return await edit_or_send_pricing_lines(query, package_purchase_detail_lines(package_type, code, requested_locale), keyboard)
 
 async def render_pkgcombo_large_order(query, context: ContextTypes.DEFAULT_TYPE, origin_parts: list[str] | None = None):
