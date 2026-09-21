@@ -618,6 +618,10 @@ def apply_package_override_to_runtime(package_key: str, changes: dict[str, Any])
             plan_cat[package_key]["description"] = changes["description"]
         if "price_vnd" in changes:
             plan_cat[package_key]["price_vnd"] = changes["price_vnd"]
+        if "commercial_enabled" in changes:
+            plan_cat[package_key]["commercial_enabled"] = changes["commercial_enabled"]
+        if "public_visible" in changes:
+            plan_cat[package_key]["public_visible"] = changes["public_visible"]
 
 
 def apply_active_package_overrides(db_path: str) -> None:
@@ -711,3 +715,5 @@ def clear_runtime_package_cache() -> None:
                 plan_cat[k]["name"] = v["display_name"]
                 plan_cat[k]["description"] = v["description"]
                 plan_cat[k]["price_vnd"] = v["price_vnd"]
+                plan_cat[k].pop("commercial_enabled", None)
+                plan_cat[k].pop("public_visible", None)

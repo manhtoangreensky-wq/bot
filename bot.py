@@ -1687,6 +1687,7 @@ PLAN_CATALOG = {
         "description": "Dành cho team nhỏ, shop hoặc affiliate team cần workflow content + ảnh + voice/audio",
     },
 }
+BASE_PLAN_CATALOG = deepcopy(PLAN_CATALOG)
 MONTHLY_STARTER_PRICE_VND = env_int("MONTHLY_STARTER_PRICE_VND", 99000)
 MONTHLY_CREATOR_PRICE_VND = env_int("MONTHLY_CREATOR_PRICE_VND", 199000)
 MONTHLY_SHOP_PRICE_VND = env_int("MONTHLY_SHOP_PRICE_VND", 299000)
@@ -5772,6 +5773,11 @@ def init_db():
     local_video_planning_store.ensure_schema(conn)
     conn.commit()
     conn.close()
+    try:
+        from services.admin_package_service import apply_active_package_overrides
+        apply_active_package_overrides(DB_FILE)
+    except Exception:
+        pass
 
 def now_text():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -16018,6 +16024,8 @@ def user_can_buy_plan(user_id, plan_id: str) -> tuple[bool, str]:
     plan = PLAN_CATALOG.get(plan_id)
     if not plan:
         return False, "Gói tháng không tồn tại."
+    if plan.get("commercial_enabled", True) is False:
+        return False, "Gói tháng này đang tạm dừng mở bán."
     if is_admin_user(user_id):
         return True, "admin_bypass"
     profile = get_member_profile(user_id)
