@@ -1,6 +1,8 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
+import io
 import json
+import tarfile
 from unittest.mock import MagicMock
 import pytest
 import httpx
@@ -240,3 +242,168 @@ def test_subdub_checkpoint_async_submitted_lifecycle(tmp_path):
     assert entry2 is not None
     assert entry2.get("state") == subdub_tts_checkpoint.STATE_ASYNC_SUBMITTED
     assert entry2.get("task_id") == "task_async_abc123"
+
+
+def make_test_tar(members: dict[str, bytes], *, symlinks: dict[str, str] | None = None) -> bytes:
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tf:
+        for name, data in members.items():
+            ti = tarfile.TarInfo(name=name)
+            ti.size = len(data)
+            ti.mtime = 1700000000
+            ti.type = tarfile.REGTYPE
+            tf.addfile(ti, io.BytesIO(data))
+        if symlinks:
+            for link_name, target in symlinks.items():
+                ti = tarfile.TarInfo(name=link_name)
+                ti.type = tarfile.SYMTYPE
+                ti.linkname = target
+                tf.addfile(ti)
+    return buf.getvalue()
+
+
+def test_normalize_shopaikey_direct_mp3():
+    valid_id3 = b"ID3" + b"\x00" * 60
+    status, audio, detail = async_adapter.normalize_shopaikey_tts_audio_payload(valid_id3, "audio/mpeg")
+    assert status == "PASS"
+    assert audio == valid_id3
+    assert "direct_mp3" in detail
+
+    valid_sync = b"\xff\xfb\x90\x44" + b"\x00" * 60
+    status2, audio2, detail2 = async_adapter.normalize_shopaikey_tts_audio_payload(valid_sync)
+    assert status2 == "PASS"
+    assert audio2 == valid_sync
+
+
+def test_normalize_shopaikey_tar_single_mp3_with_sidecars():
+    clean_audio = b"ID3\x04\x00\x00\x00\x00\x00\x00" + b"\x00" * 120
+    tar_bytes = make_test_tar({
+        "content-123456.titles": b"titles metadata text",
+        "content-123456.mp3": clean_audio,
+        "content-123456.extra": b"extra metadata json",
+    })
+    status, audio, detail = async_adapter.normalize_shopaikey_tts_audio_payload(tar_bytes, "application/octet-stream")
+    assert status == "PASS"
+    assert audio == clean_audio
+    assert "tar_extracted" in detail
+    assert "content-123456.mp3" in detail
+
+
+def test_normalize_shopaikey_tar_multiple_mp3_fails():
+    tar_bytes = make_test_tar({
+        "track1.mp3": b"ID3" + b"\x00" * 50,
+        "track2.mp3": b"ID3" + b"\x00" * 50,
+    })
+    status, audio, detail = async_adapter.normalize_shopaikey_tts_audio_payload(tar_bytes)
+    assert status.startswith("FAIL")
+    assert audio == b""
+    assert "multiple" in detail.lower()
+
+
+def test_normalize_shopaikey_tar_no_mp3_fails():
+    tar_bytes = make_test_tar({
+        "content-123456.titles": b"titles metadata",
+        "content-123456.extra": b"extra metadata",
+    })
+    status, audio, detail = async_adapter.normalize_shopaikey_tts_audio_payload(tar_bytes)
+    assert status.startswith("FAIL")
+    assert audio == b""
+    assert "no mp3" in detail.lower() or "not found" in detail.lower()
+
+
+def test_normalize_shopaikey_tar_unsafe_path_traversal_fails():
+    tar_bytes = make_test_tar({
+        "../../etc/evil.mp3": b"ID3" + b"\x00" * 50,
+    })
+    status, audio, detail = async_adapter.normalize_shopaikey_tts_audio_payload(tar_bytes)
+    assert status.startswith("FAIL")
+    assert audio == b""
+    assert "unsafe" in detail.lower() or "traversal" in detail.lower()
+
+
+def test_normalize_shopaikey_tar_symlink_fails():
+    tar_bytes = make_test_tar(
+        {"real.mp3": b"ID3" + b"\x00" * 50},
+        symlinks={"link.mp3": "real.mp3"},
+    )
+    status, audio, detail = async_adapter.normalize_shopaikey_tts_audio_payload(tar_bytes)
+    assert status.startswith("FAIL")
+    assert audio == b""
+    assert "unsafe" in detail.lower() or "symlink" in detail.lower()
+
+
+def test_normalize_shopaikey_random_payload_fails():
+    random_junk = b"\x01\x02\x03\x04" * 200  # 800 bytes of non-audio non-tar
+    status, audio, detail = async_adapter.normalize_shopaikey_tts_audio_payload(random_junk)
+    assert status.startswith("FAIL")
+    assert audio == b""
+
+
+@pytest.mark.anyio
+async def test_download_audio_from_url_normalizes_tar():
+    clean_audio = b"ID3" + b"\x00" * 100
+    tar_bytes = make_test_tar({
+        "audio.titles": b"titles",
+        "audio.mp3": clean_audio,
+    })
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=tar_bytes, headers={"content-type": "application/octet-stream"})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        audio, detail, http_status = await async_adapter.download_audio_from_url("https://example.com/audio", client=client)
+
+    assert http_status == 200
+    assert audio == clean_audio
+    assert "tar_extracted" in detail
+
+
+@pytest.mark.anyio
+async def test_download_audio_from_url_rejects_random_payload():
+    random_junk = b"NON_AUDIO_PAYLOAD" * 50  # > 512 bytes
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=random_junk, headers={"content-type": "application/octet-stream"})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        audio, detail, http_status = await async_adapter.download_audio_from_url("https://example.com/junk", client=client)
+
+    assert http_status == 200
+    assert audio == b""
+    assert "normalization_failed" in detail
+
+
+@pytest.mark.anyio
+async def test_shopaikey_minimax_tts_async_bytes_extracts_tar_via_download():
+    clean_audio = b"ID3" + b"\x00" * 150
+    tar_bytes = make_test_tar({
+        "audio.titles": b"titles",
+        "audio.mp3": clean_audio,
+    })
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url_str = str(request.url)
+        if "/t2a_async_v2" in url_str:
+            return httpx.Response(200, json={"task_id": "task_tar_norm"})
+        if "query" in url_str:
+            return httpx.Response(200, json={"status": "Success", "download_url": "https://direct.shopaikey.com/dl/archive.tar"})
+        if "archive.tar" in url_str:
+            return httpx.Response(200, content=tar_bytes, headers={"content-type": "application/octet-stream"})
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        status, audio_bytes, detail, http_status, task_id = await async_adapter.shopaikey_minimax_tts_async_bytes(
+            text="Testing tar normalizer.",
+            voice_id="Vietnamese_patient_Instructor_v1",
+            poll_interval_seconds=0.01,
+            max_poll_seconds=5.0,
+            client=client,
+            api_key="fake_key",
+        )
+
+    assert status == "PASS"
+    assert audio_bytes == clean_audio
+    assert task_id == "task_tar_norm"

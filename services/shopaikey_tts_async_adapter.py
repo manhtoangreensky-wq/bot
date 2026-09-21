@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import os
+import tarfile
 import time
 from typing import Any, Callable
 
@@ -314,6 +316,115 @@ async def shopaikey_minimax_tts_async_retrieve(
         return "FAIL_PROVIDER_ERROR", "", f"{type(exc).__name__}: {exc}", 0
 
 
+MAX_SHOPAIKEY_AUDIO_ARCHIVE_BYTES = 50 * 1024 * 1024  # 50 MB
+MAX_SHOPAIKEY_TAR_MEMBERS = 32
+MAX_SHOPAIKEY_EXTRACTED_AUDIO_BYTES = 50 * 1024 * 1024  # 50 MB
+
+
+def is_valid_mp3_payload(data: bytes) -> bool:
+    """Validate whether binary data has a valid MP3 ID3 header or sync frame."""
+    if not data or len(data) < 32:
+        return False
+    if data.startswith(b"ID3"):
+        return True
+    if data[0] == 0xFF and (data[1] & 0xE0) == 0xE0:
+        return True
+    return False
+
+
+def normalize_shopaikey_tts_audio_payload(
+    content: bytes,
+    content_type: str = "",
+) -> tuple[str, bytes, str]:
+    """
+    Safely classify, validate, and normalize ShopAIKey TTS audio responses.
+
+    Returns:
+        tuple[status, clean_audio_bytes, detail]
+        - Direct MP3 => validated and returned directly
+        - POSIX TAR => safely extracted regular *.mp3 member in memory (ignoring sidecars)
+        - Multiple MP3s / 0 MP3s / symlinks / path traversal / invalid audio => fail closed
+    """
+    if not content:
+        return "FAIL_EMPTY", b"", "empty_audio_content"
+
+    if len(content) > MAX_SHOPAIKEY_AUDIO_ARCHIVE_BYTES:
+        return "FAIL_PAYLOAD_TOO_LARGE", b"", f"payload_exceeds_limit: {len(content)} > {MAX_SHOPAIKEY_AUDIO_ARCHIVE_BYTES}"
+
+    # 1. In-memory TAR archive inspection if recognized as tar
+    is_tar = False
+    if len(content) >= 512:
+        if len(content) >= 262 and content[257:262] == b"ustar":
+            is_tar = True
+        else:
+            try:
+                is_tar = tarfile.is_tarfile(io.BytesIO(content))
+            except Exception:
+                is_tar = False
+
+    if is_tar:
+        try:
+            with tarfile.open(fileobj=io.BytesIO(content), mode="r:*") as tf:
+                members = tf.getmembers()
+                if len(members) > MAX_SHOPAIKEY_TAR_MEMBERS:
+                    return "FAIL_UNSAFE_TAR", b"", f"tar_too_many_members: {len(members)} > {MAX_SHOPAIKEY_TAR_MEMBERS}"
+
+                mp3_members: list[tarfile.TarInfo] = []
+
+                for m in members:
+                    # Reject symlinks and hardlinks
+                    if m.issym() or m.islnk():
+                        return "FAIL_UNSAFE_TAR", b"", f"tar_unsafe_link: name={m.name}; link={m.linkname}"
+
+                    # Reject path traversal / absolute paths
+                    norm_name = m.name.replace("\\", "/")
+                    parts = [p for p in norm_name.split("/") if p]
+                    if (
+                        any(p == ".." for p in parts)
+                        or norm_name.startswith("/")
+                        or os.path.isabs(m.name)
+                    ):
+                        return "FAIL_UNSAFE_TAR", b"", f"tar_path_traversal: name={m.name}"
+
+                    # Collect regular .mp3 files (sidecars like .titles and .extra are ignored)
+                    if m.isreg() and m.name.lower().endswith(".mp3"):
+                        mp3_members.append(m)
+
+                if len(mp3_members) == 0:
+                    return "FAIL_NO_MP3", b"", f"tar_archive_contains_no_mp3: no mp3 found in archive (members={len(members)})"
+
+                if len(mp3_members) > 1:
+                    names = [m.name for m in mp3_members]
+                    return "FAIL_MULTIPLE_MP3", b"", f"tar_archive_contains_multiple_mp3: {names}"
+
+                target_member = mp3_members[0]
+                if target_member.size > MAX_SHOPAIKEY_EXTRACTED_AUDIO_BYTES:
+                    return "FAIL_AUDIO_TOO_LARGE", b"", f"extracted_mp3_too_large: {target_member.size}"
+
+                extracted_file = tf.extractfile(target_member)
+                if extracted_file is None:
+                    return "FAIL_TAR_EXTRACT", b"", f"tar_extractfile_none: name={target_member.name}"
+
+                extracted_bytes = extracted_file.read(MAX_SHOPAIKEY_EXTRACTED_AUDIO_BYTES + 1)
+                if len(extracted_bytes) > MAX_SHOPAIKEY_EXTRACTED_AUDIO_BYTES:
+                    return "FAIL_AUDIO_TOO_LARGE", b"", f"extracted_mp3_read_overflow: {len(extracted_bytes)}"
+
+                if not is_valid_mp3_payload(extracted_bytes):
+                    return "FAIL_INVALID_AUDIO", b"", f"extracted_member_not_valid_mp3: name={target_member.name}; bytes={len(extracted_bytes)}"
+
+                return "PASS", extracted_bytes, f"tar_extracted; member={target_member.name}; bytes={len(extracted_bytes)}"
+
+        except (tarfile.TarError, Exception) as exc:
+            return "FAIL_CORRUPT_TAR", b"", f"tar_processing_error: {type(exc).__name__}: {exc}"
+
+    # 2. Direct MP3 check (fast path)
+    if is_valid_mp3_payload(content):
+        return "PASS", content, f"direct_mp3; bytes={len(content)}"
+
+    # 3. Unknown or unsupported binary payload => fail closed
+    return "FAIL_UNKNOWN_PAYLOAD", b"", f"unknown_payload_rejected: bytes={len(content)}; content_type={content_type}"
+
+
 async def download_audio_from_url(
     url: str,
     timeout_seconds: float = 60.0,
@@ -336,8 +447,11 @@ async def download_audio_from_url(
                 http_status = int(res.status_code)
                 content = bytes(res.content or b"")
                 content_type = str(res.headers.get("content-type") or "")
-                if http_status < 400 and content and (content_type.startswith("audio/") or len(content) > 512):
-                    return content, f"http={http_status}; bytes={len(content)}", http_status
+                if http_status < 400 and content:
+                    norm_status, clean_bytes, norm_detail = normalize_shopaikey_tts_audio_payload(content, content_type=content_type)
+                    if norm_status == "PASS" and clean_bytes:
+                        return clean_bytes, f"http={http_status}; bytes={len(clean_bytes)}; {norm_detail}", http_status
+                    return b"", f"http={http_status}; normalization_failed={norm_status}; {norm_detail}", http_status
                 if attempt < 2 and http_status >= 500:
                     await asyncio.sleep(1.0)
                     continue
@@ -435,9 +549,15 @@ async def shopaikey_minimax_tts_async_bytes(
         download_url = r_url
 
     # Phase 4: Download binary audio bytes
-    downloader = audio_downloader or download_audio_from_url
-    audio_bytes, dl_detail, dl_http = await downloader(download_url)
+    if audio_downloader is not None:
+        audio_bytes, dl_detail, dl_http = await audio_downloader(download_url)
+    else:
+        audio_bytes, dl_detail, dl_http = await download_audio_from_url(download_url, client=client)
     if not audio_bytes or len(audio_bytes) < 32:
         return "FAIL_AUDIO_EMPTY", b"", f"empty_audio: {dl_detail}", dl_http, task_id
 
-    return "PASS", audio_bytes, f"http={last_http}; bytes={len(audio_bytes)}; task_id={task_id}", last_http, task_id
+    norm_status, clean_bytes, norm_detail = normalize_shopaikey_tts_audio_payload(audio_bytes)
+    if norm_status != "PASS" or not clean_bytes:
+        return "FAIL_AUDIO_NORMALIZATION", b"", f"normalization_failed: {norm_status}; {norm_detail}", dl_http, task_id
+
+    return "PASS", clean_bytes, f"http={last_http}; bytes={len(clean_bytes)}; task_id={task_id}", last_http, task_id
