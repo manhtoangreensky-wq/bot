@@ -446,6 +446,7 @@ def test_req_22_combo_propagation_to_package_price_quote(test_env):
             "display_name": "Combo Video QC Siêu Tốc 2026",
             "price_vnd": 65000,
             "public_visible": True,
+            "commercial_enabled": True,
         },
         "reason": "Điều chỉnh combo mini video",
     }
@@ -458,11 +459,13 @@ def test_req_22_combo_propagation_to_package_price_quote(test_env):
     quote = bot.package_price_quote("combo", "combo_ad_video_588k")
     assert quote["price_vnd"] == 65000
 
-    # Verify catalog payload reflects new label and price
+    # Verify catalog payload reflects new label, price, commercial_enabled, and alias
     catalog = bot.package_catalog_payload()
     entry = catalog["combos"]["combo_ad_video_588k"]
     assert entry["label"] == "Combo Video QC Siêu Tốc 2026"
     assert entry["price_vnd"] == 65000
+    assert entry["commercial_enabled"] is True
+    assert callable(bot.p0_21d_combo_catalog_base)
 
 
 # ---------------------------------------------------------------------------

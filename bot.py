@@ -57742,7 +57742,7 @@ def p0_21d_legacy_mixed_monthly_payload() -> dict:
         mixed[code] = payload
     return mixed
 
-def p0_21d_task_package_payload() -> dict:
+def p0_21d_task_package_base() -> dict:
     image_standard = package_catalog_image_cost_xu("standard", 150)
     image_standard_warranty = package_catalog_image_cost_xu("standard_warranty", 200)
     image_high = package_catalog_image_cost_xu("high", 500)
@@ -58099,6 +58099,10 @@ def p0_21d_task_package_payload() -> dict:
         ),
     }
     packages.update(p0_21d_legacy_mixed_monthly_payload())
+    return packages
+
+def p0_21d_task_package_payload() -> dict:
+    packages = p0_21d_task_package_base()
     try:
         from services.admin_package_service import get_runtime_package_override
         for code, entry in packages.items():
@@ -58112,6 +58116,8 @@ def p0_21d_task_package_payload() -> dict:
                     entry["price_vnd"] = ov["price_vnd"]
                 if "public_visible" in ov:
                     entry["public"] = ov["public_visible"]
+                if "commercial_enabled" in ov:
+                    entry["commercial_enabled"] = ov["commercial_enabled"]
     except Exception:
         pass
     return packages
@@ -58313,9 +58319,13 @@ def p0_21d_combo_catalog_payload(include_legacy: bool = True) -> dict:
                     entry["price_vnd"] = ov["price_vnd"]
                 if "public_visible" in ov:
                     entry["public"] = ov["public_visible"]
+                if "commercial_enabled" in ov:
+                    entry["commercial_enabled"] = ov["commercial_enabled"]
     except Exception:
         pass
     return combos
+
+p0_21d_combo_catalog_base = p0_21d_combo_catalog_payload
 
 def package_catalog_payload() -> dict:
     combos = p0_21d_combo_catalog_payload(include_legacy=True)
