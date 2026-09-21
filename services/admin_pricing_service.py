@@ -398,12 +398,12 @@ BASE_PRICING_CATALOG: dict[str, dict[str, Any]] = {
         "unit": "minute",
         "base_value": 40,
         "value_type": "int",
-        "editable": True,
-        "policy_type": "PAID_PRICE",
+        "editable": False,
+        "policy_type": "UNWIRED_RUNTIME_POLICY",
         "domain": "subdub",
-        "read_authority": "bot.TRANSLATE_SUBTITLE_PRICE_XU_PER_MIN",
-        "quote_authority": "bot.calculate_named_addon_quote",
-        "charge_authority": "bot.spend_fixed_credit_info",
+        "read_authority": "UNWIRED_FROM_MUTABLE_ADMIN_SURFACE",
+        "quote_authority": "UNWIRED_FROM_MUTABLE_ADMIN_SURFACE",
+        "charge_authority": "UNWIRED_FROM_MUTABLE_ADMIN_SURFACE",
     },
     "subdub_burn_per_min": {
         "price_key": "subdub_burn_per_min",
@@ -412,12 +412,12 @@ BASE_PRICING_CATALOG: dict[str, dict[str, Any]] = {
         "unit": "minute",
         "base_value": 20,
         "value_type": "int",
-        "editable": True,
-        "policy_type": "PAID_PRICE",
+        "editable": False,
+        "policy_type": "UNWIRED_RUNTIME_POLICY",
         "domain": "subdub",
-        "read_authority": "bot.BURN_SUBTITLE_PRICE_XU_PER_MIN",
-        "quote_authority": "bot.calculate_named_addon_quote",
-        "charge_authority": "bot.spend_fixed_credit_info",
+        "read_authority": "UNWIRED_FROM_MUTABLE_ADMIN_SURFACE",
+        "quote_authority": "UNWIRED_FROM_MUTABLE_ADMIN_SURFACE",
+        "charge_authority": "UNWIRED_FROM_MUTABLE_ADMIN_SURFACE",
     },
     "subdub_blur_per_min": {
         "price_key": "subdub_blur_per_min",
@@ -426,12 +426,12 @@ BASE_PRICING_CATALOG: dict[str, dict[str, Any]] = {
         "unit": "minute",
         "base_value": 20,
         "value_type": "int",
-        "editable": True,
-        "policy_type": "PAID_PRICE",
+        "editable": False,
+        "policy_type": "UNWIRED_RUNTIME_POLICY",
         "domain": "subdub",
-        "read_authority": "bot.BLUR_OLD_SUBTITLE_PRICE_XU_PER_MIN",
-        "quote_authority": "bot.calculate_named_addon_quote",
-        "charge_authority": "bot.spend_fixed_credit_info",
+        "read_authority": "UNWIRED_FROM_MUTABLE_ADMIN_SURFACE",
+        "quote_authority": "UNWIRED_FROM_MUTABLE_ADMIN_SURFACE",
+        "charge_authority": "UNWIRED_FROM_MUTABLE_ADMIN_SURFACE",
     },
 
     # --- Video Local Edit (services.video_local_editing) ---
@@ -616,6 +616,13 @@ IMMUTABLE_INTERNAL_COST_FIELDS: set[str] = {
 # In-memory runtime override cache for ultra-fast and deterministic execution reads
 _RUNTIME_PRICING_OVERRIDES: dict[str, Any] = {}
 
+# Canonical pricing aliases mapping legacy or alternative keys to canonical price keys
+CANONICAL_PRICING_ALIASES: dict[str, str] = {
+    "voice_clone": "voice_clone_create",
+    "voice_clone_create": "voice_clone_create",
+    "voice_profile_storage": "voice_clone_create",
+}
+
 
 def utc_now_text() -> str:
     """Format current UTC time as YYYY-MM-DD HH:MM:SS."""
@@ -731,6 +738,7 @@ def get_canonical_pricing_collection(db_path: str) -> tuple[bool, dict[str, Any]
 
 def get_canonical_pricing_single(price_key: str, db_path: str) -> tuple[bool, dict[str, Any], int]:
     """Return a single canonical pricing entry with effective value and version."""
+    price_key = CANONICAL_PRICING_ALIASES.get(price_key, price_key)
     if price_key not in BASE_PRICING_CATALOG:
         return False, {
             "ok": False,
@@ -767,6 +775,7 @@ def clear_runtime_pricing_cache() -> None:
 
 def get_canonical_effective_price(price_key: str, fallback: Any = None, db_path: str | None = None) -> Any:
     """Synchronous read helper consumed directly by execution engines and quote resolvers."""
+    price_key = CANONICAL_PRICING_ALIASES.get(price_key, price_key)
     if price_key in _RUNTIME_PRICING_OVERRIDES:
         return _RUNTIME_PRICING_OVERRIDES[price_key]
 
@@ -812,6 +821,7 @@ def update_canonical_pricing(
     db_path: str,
 ) -> tuple[bool, dict[str, Any], int]:
     """Execute CAS mutation on a single price key and append immutable audit event."""
+    price_key = CANONICAL_PRICING_ALIASES.get(price_key, price_key)
     if price_key not in BASE_PRICING_CATALOG:
         return False, {
             "ok": False,
@@ -826,7 +836,7 @@ def update_canonical_pricing(
         return False, {
             "ok": False,
             "error_code": "IMMUTABLE_PRICE_KEY_REJECTED",
-            "message": f"Price key '{price_key}' is governed by canonical free policy and cannot be mutated.",
+            "message": f"Price key '{price_key}' is immutable by canonical policy and cannot be mutated.",
         }, 400
 
     # Reject immutable / internal cost fields

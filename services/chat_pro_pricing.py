@@ -130,10 +130,28 @@ def public_chat_customer_pricing(
         usd_fixed_rate_vnd=usd_fixed_rate_vnd,
         xu_to_vnd=xu_to_vnd,
     )
+    input_rate_per_k = _round_visible_rate_xu(source["input"])
+    output_rate_per_k = _round_visible_rate_xu(source["output"])
+    cache_read_rate_per_k = source["cache_read"]
+
+    try:
+        from services.admin_pricing_service import get_canonical_effective_price
+        in_override = get_canonical_effective_price("chat_pro_input", fallback=None)
+        if in_override is not None:
+            input_rate_per_k = Decimal(str(in_override))
+        out_override = get_canonical_effective_price("chat_pro_output", fallback=None)
+        if out_override is not None:
+            output_rate_per_k = Decimal(str(out_override))
+        cache_override = get_canonical_effective_price("chat_pro_cache_read", fallback=None)
+        if cache_override is not None:
+            cache_read_rate_per_k = Decimal(str(cache_override))
+    except Exception:
+        pass
+
     return ClaudeOpusPricing(
-        input_xu_per_million=_round_visible_rate_xu(source["input"]) * Decimal(1_000),
-        output_xu_per_million=_round_visible_rate_xu(source["output"]) * Decimal(1_000),
-        cache_read_xu_per_million=source["cache_read"] * Decimal(1_000),
+        input_xu_per_million=input_rate_per_k * Decimal(1_000),
+        output_xu_per_million=output_rate_per_k * Decimal(1_000),
+        cache_read_xu_per_million=cache_read_rate_per_k * Decimal(1_000),
         multiplier=1,
     )
 
