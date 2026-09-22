@@ -719,6 +719,8 @@ async def run_auto_smart_multivoice(
     if not media_path.is_file():
         return {
             "ok": False,
+            "status": "SOURCE_MEDIA_NOT_FOUND",
+            "error_code": "source_media_not_found",
             "strategy": STRATEGY_FAILED,
             "detected_speaker_count": 0,
             "effective_speaker_count": 0,
@@ -729,6 +731,7 @@ async def run_auto_smart_multivoice(
             "output_mode": OUTPUT_MODE_FAILED,
             "final_mp4_path": None,
             "blocker": "source_media_not_found",
+            "admin_debug_summary": "source_media_not_found",
             "auto_smart_verified": False,
         }
 
@@ -739,6 +742,8 @@ async def run_auto_smart_multivoice(
     if media_size <= 0:
         return {
             "ok": False,
+            "status": "SOURCE_MEDIA_NOT_FOUND",
+            "error_code": "corrupt_or_empty_source_media",
             "strategy": STRATEGY_FAILED,
             "detected_speaker_count": 0,
             "effective_speaker_count": 0,
@@ -749,6 +754,7 @@ async def run_auto_smart_multivoice(
             "output_mode": OUTPUT_MODE_FAILED,
             "final_mp4_path": None,
             "blocker": "corrupt_or_empty_source_media",
+            "admin_debug_summary": "corrupt_or_empty_source_media",
             "auto_smart_verified": False,
         }
 
@@ -1157,6 +1163,9 @@ async def run_auto_smart_multivoice_blackbox(
         or current.get("source")
         or current.get("source_file")
         or (current.get("input_save") if isinstance(current.get("input_save"), Mapping) else {}).get("source_path")
+        or (current.get("input_save") if isinstance(current.get("input_save"), Mapping) else {}).get("path")
+        or current.get("_pipeline_saved_source_path")
+        or current.get("_pipeline_source_path_override")
         or ""
     )
     segments = payload.get("segments") or payload.get("cues") or []
@@ -1167,7 +1176,14 @@ async def run_auto_smart_multivoice_blackbox(
             prepared = await _maybe_await(prepare_subtitles(dict(current)))
             if isinstance(prepared, dict):
                 segments = segments or prepared.get("source_segments") or prepared.get("segments") or []
-                source_media = source_media or prepared.get("source_file") or ""
+                source_media = (
+                    source_media
+                    or prepared.get("source_file")
+                    or prepared.get("source_path")
+                    or (prepared.get("state") if isinstance(prepared.get("state"), Mapping) else {}).get("_pipeline_saved_source_path")
+                    or (prepared.get("state") if isinstance(prepared.get("state"), Mapping) else {}).get("_pipeline_source_path_override")
+                    or ""
+                )
         except Exception:
             pass
 
@@ -1223,6 +1239,17 @@ async def run_auto_smart_multivoice_blackbox(
         **smart_result,
         "state": result_state,
     }
+    if not smart_result.get("ok"):
+        blocker = str(smart_result.get("blocker") or "smart_multivoice_failed")
+        response.setdefault("blocker", blocker)
+        response.setdefault("error_code", str(smart_result.get("error_code") or blocker))
+        response.setdefault("admin_debug_summary", str(smart_result.get("admin_debug_summary") or blocker))
+        if not response.get("status"):
+            response["status"] = (
+                "SOURCE_MEDIA_NOT_FOUND"
+                if blocker in {"source_media_not_found", "corrupt_or_empty_source_media"}
+                else f"SMART_{blocker.upper()}"
+            )
     if smart_result.get("final_mp4_path"):
         response["video_output"] = smart_result["final_mp4_path"]
     return response
