@@ -73,6 +73,21 @@ _KEY4U_EXCLUSIVE_ENDPOINT_ENVS = {
         "KEY4U_VEO_VIDEO_SUBMIT_URL",
     ),
 }
+_KEY4U_EXCLUSIVE_I2V_ENDPOINT_ENVS = {
+    "kling": (
+        "KEY4U_KLING_I2V_ENDPOINT",
+        "KEY4U_KLING_IMAGE2VIDEO_ENDPOINT",
+        "KEY4U_KLING_I2V_SUBMIT_URL",
+        "KEY4U_KLING_IMAGE2VIDEO_SUBMIT_URL",
+        "KEY4U_KELING_I2V_ENDPOINT",
+    ),
+    "keling": (
+        "KEY4U_KELING_I2V_ENDPOINT",
+        "KEY4U_KLING_I2V_ENDPOINT",
+        "KEY4U_KELING_IMAGE2VIDEO_SUBMIT_URL",
+        "KEY4U_KLING_IMAGE2VIDEO_SUBMIT_URL",
+    ),
+}
 _KEY4U_EXCLUSIVE_POLL_ENVS = {
     "kling": ("KEY4U_KLING_VIDEO_POLL_URL", "KEY4U_KLING_POLL_URL", "KEY4U_KELING_VIDEO_POLL_URL"),
     "keling": ("KEY4U_KELING_VIDEO_POLL_URL", "KEY4U_KLING_VIDEO_POLL_URL"),
@@ -149,7 +164,12 @@ def provider_model_config(provider: str, model: str, catalog: dict[str, Any] | N
     provider_cfg = providers.get(str(provider or "").strip().lower()) if isinstance(providers, dict) else {}
     models = provider_cfg.get("models") if isinstance(provider_cfg, dict) else {}
     cfg = models.get(str(model or "").strip()) if isinstance(models, dict) else {}
-    if not isinstance(cfg, dict):
+    if not isinstance(cfg, dict) or not cfg:
+        raw_model = str(model or "").strip().lower()
+        if str(provider or "").strip().lower() == "key4u_video":
+            if raw_model.startswith("kling") or raw_model.startswith("keling"):
+                cfg = models.get("kling-video") if isinstance(models, dict) else {}
+    if not isinstance(cfg, dict) or not cfg:
         return {}
     result = dict(cfg)
     result["provider"] = str(provider or "").strip().lower()
@@ -266,6 +286,7 @@ def model_interface_contract(
     provider: str,
     model: str,
     *,
+    capability: str = "",
     env: dict[str, str] | os._Environ[str] | None = None,
     catalog: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -280,7 +301,9 @@ def model_interface_contract(
         "provider_interface": provider_name or "unknown",
         "provider_endpoint_source": "general",
         "provider_submit_url_override": "",
+        "submit_url": "",
         "provider_poll_url_override": "",
+        "poll_url": "",
         "contract_validation_status": "ok" if cfg else CONTRACT_MISSING,
         "contract_block_reason": "" if cfg else CONTRACT_MISSING,
         "model_requires_exclusive_interface": False,
@@ -291,14 +314,70 @@ def model_interface_contract(
     if provider_name != "key4u_video":
         return base
     if family in {"kling", "keling"}:
-        submit_url, submit_source = _first_endpoint(data, _KEY4U_EXCLUSIVE_ENDPOINT_ENVS.get(family, _KEY4U_EXCLUSIVE_ENDPOINT_ENVS["kling"]))
+        norm_cap = str(capability or "").strip().lower().replace("-", "_")
+        if norm_cap == "image_to_video":
+            submit_url, submit_source = _first_endpoint(
+                data,
+                _KEY4U_EXCLUSIVE_I2V_ENDPOINT_ENVS.get(family, _KEY4U_EXCLUSIVE_I2V_ENDPOINT_ENVS["kling"]),
+            )
+            if not submit_url:
+                base_submit_url, base_source = _first_endpoint(
+                    data,
+                    _KEY4U_EXCLUSIVE_ENDPOINT_ENVS.get(family, _KEY4U_EXCLUSIVE_ENDPOINT_ENVS["kling"]),
+                )
+                def _is_auth_key4u_host(host: str) -> bool:
+                    h = str(host or "").lower()
+                    if not h:
+                        return False
+                    if h in {"api.key4u.vn", "api.key4u.shop", "key4u.vn", "key4u.shop", "fake.key4u.local"}:
+                        return True
+                    return h.endswith(".key4u.vn") or h.endswith(".key4u.shop") or h.endswith(".key4u.local")
+
+                if base_submit_url:
+                    parsed = urllib.parse.urlsplit(base_submit_url)
+                    host = (parsed.hostname or "").lower()
+                    if _is_auth_key4u_host(host):
+                        path = parsed.path.rstrip("/")
+                        if path in {"/kling/v1/videos/text2video", "/kling/v1/videos/image2video"} or path.endswith("/text2video"):
+                            new_path = path[:-len("/text2video")] + "/image2video" if path.endswith("/text2video") else "/kling/v1/videos/image2video"
+                            submit_url = urllib.parse.urlunsplit(
+                                (parsed.scheme, parsed.netloc, new_path, parsed.query, parsed.fragment)
+                            )
+                            submit_source = f"canonical_i2v:{base_source}"
+                        elif path.endswith("/image2video"):
+                            submit_url = base_submit_url
+                            submit_source = base_source
+                        elif host.endswith(".local") or "fake" in host:
+                            submit_url = base_submit_url
+                            submit_source = base_source
+                if not submit_url:
+                    base_url = next(
+                        (
+                            str(data.get(name) or "").strip().rstrip("/")
+                            for name in ("KEY4U_BASE_URL", "KEY4U_API_BASE")
+                            if _valid_endpoint_url(data.get(name))
+                        ),
+                        "",
+                    )
+                    if base_url:
+                        parsed_base = urllib.parse.urlsplit(base_url)
+                        if _is_auth_key4u_host(parsed_base.hostname):
+                            submit_url = f"{base_url}/kling/v1/videos/image2video"
+                            submit_source = "canonical_contract:key4u_base_url"
+        else:
+            submit_url, submit_source = _first_endpoint(
+                data,
+                _KEY4U_EXCLUSIVE_ENDPOINT_ENVS.get(family, _KEY4U_EXCLUSIVE_ENDPOINT_ENVS["kling"]),
+            )
         poll_url, poll_source = _first_endpoint(data, _KEY4U_EXCLUSIVE_POLL_ENVS.get(family, ()))
         base.update(
             {
                 "provider_interface": "key4u_kling_exclusive",
                 "provider_endpoint_source": submit_source or "missing:key4u_kling_exclusive",
                 "provider_submit_url_override": submit_url,
+                "submit_url": submit_url,
                 "provider_poll_url_override": poll_url,
+                "poll_url": poll_url,
                 "provider_poll_endpoint_source": poll_source,
                 "model_requires_exclusive_interface": True,
             }
@@ -341,7 +420,9 @@ def model_interface_contract(
                 "provider_interface": f"key4u_{family}_exclusive",
                 "provider_endpoint_source": submit_source or f"missing:key4u_{family}_contract",
                 "provider_submit_url_override": submit_url,
+                "submit_url": submit_url,
                 "provider_poll_url_override": poll_url,
+                "poll_url": poll_url,
                 "provider_poll_endpoint_source": poll_source,
                 "model_requires_exclusive_interface": True,
             }
@@ -362,7 +443,9 @@ def model_interface_contract(
             "provider_interface": "key4u_catalog_generic",
             "provider_endpoint_source": submit_source or "missing:key4u_catalog_generic",
             "provider_submit_url_override": submit_url,
+            "submit_url": submit_url,
             "provider_poll_url_override": poll_url,
+            "poll_url": poll_url,
             "provider_poll_endpoint_source": poll_source,
             "model_requires_exclusive_interface": False,
         }
@@ -822,12 +905,14 @@ def enrich_metadata_with_model_contract(
     provider: str,
     model: str,
     *,
+    capability: str = "",
     env: dict[str, str] | os._Environ[str] | None = None,
 ) -> dict[str, Any]:
     meta = dict(metadata or {})
     contract = payload_contract_for_model(provider, model)
     cfg = provider_model_config(provider, model)
-    interface = model_interface_contract(provider, model, env=env)
+    cap = capability or str(meta.get("required_capability") or meta.get("capability") or "")
+    interface = model_interface_contract(provider, model, capability=cap, env=env)
     meta.update(
         {
             "selected_provider": str(provider or "").strip().lower(),
@@ -870,7 +955,13 @@ def enforce_payload_contract(
 ) -> dict[str, Any]:
     data = dict(payload or {})
     contract = payload_contract_for_model(provider, model)
-    metadata = enrich_metadata_with_model_contract(data.get("metadata") if isinstance(data.get("metadata"), dict) else {}, provider, model, env=env)
+    metadata = enrich_metadata_with_model_contract(
+        data.get("metadata") if isinstance(data.get("metadata"), dict) else {},
+        provider,
+        model,
+        capability=str(data.get("capability") or ""),
+        env=env,
+    )
     if contract:
         allowed = set(str(item) for item in (contract.get("allowed_fields") or []) if str(item))
         model_capabilities = set(normalize_capability_values(contract.get("capabilities") or []))
