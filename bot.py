@@ -239990,11 +239990,17 @@ def subdub_job_blocks_public_fail(job: dict | None = None) -> bool:
 def subdub_job_has_failure_public_outcome(job: dict | None = None) -> bool:
     current = dict(job or {})
     outcome = str(current.get("terminal_public_outcome_type") or "").strip().lower()
-    return bool(
-        outcome == "failure"
+    if outcome == "success":
+        return False
+    has_sent_evidence = bool(
+        current.get("terminal_public_outcome_sent")
+        or current.get("public_error_sent")
+        or current.get("public_failure_sent")
         or int(current.get("public_error_sent_count") or 0) > 0
-        or (current.get("public_error_sent") and outcome != "success")
+        or str(current.get("terminal_public_outcome_message_id") or "").strip()
+        or str(current.get("subdub_fail_message_id") or "").strip()
     )
+    return bool(has_sent_evidence and (outcome == "failure" or not outcome))
 
 def subdub_terminal_outcome_debug_defaults() -> dict:
     return {
