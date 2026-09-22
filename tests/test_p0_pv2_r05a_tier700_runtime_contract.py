@@ -285,6 +285,12 @@ def test_case_f_manual_continuity_metadata_provenance(tmp_path: Path):
 # CASE G: non-R05A existing product routes -> unchanged
 # ---------------------------------------------------------------------------
 def test_case_g_non_r05a_existing_product_routes_unchanged():
+    # Non-R05A existing product normalization and route contracts
+    assert video_final_output.normalize_video_product_type("video_idea") == "video_idea_to_product"
+    route_idea = video_final_output.route_for_product_type("video_idea")
+    assert route_idea["product_type"] == "video_idea_to_product"
+    assert route_idea["engine_adapter"] == "delegates_to_selected_product"
+
     route_prompt = video_final_output.route_for_product_type("video_ai_prompt")
     assert route_prompt["engine_adapter"] == "text_to_video"
 

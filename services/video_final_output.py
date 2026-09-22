@@ -188,6 +188,7 @@ def normalize_video_product_type(value: Any = "") -> str:
         "script_image_video": "script_to_video",
         "frame_video_local": "image_to_video",
         "storyboard": "storyboard_prompt",
+        "video_idea": "video_idea_to_product",
         "selfshot2": "self_shot_scene_change",
         "selfshot_scene_change": "self_shot_scene_change",
         "self_shot_scene": "self_shot_scene_change",
