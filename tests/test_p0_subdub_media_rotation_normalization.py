@@ -177,3 +177,63 @@ def test_fail_closed_on_real_geometry_change(monkeypatch):
     assert res.get("ok") is False
     assert res.get("blocker") == "media_normalization_geometry_mismatch"
     assert res.get("geometry_preserved") is False
+
+
+def test_r2_command_construction_display_rotation_override():
+    """R2 Command Contract: non-zero rotation must place -display_rotation:v:0 0 before -i."""
+    # Case A: rotation 270
+    cmd270 = subdub_media_preflight.build_normalization_command(
+        "/usr/bin/ffmpeg", "/tmp/in270.mp4", "/tmp/out270.mp4",
+        {"duration": 10.0, "rotation": 270, "has_video": True},
+    )
+    idx_i_270 = cmd270.index("-i")
+    prefix270 = cmd270[:idx_i_270]
+    assert "-noautorotate" in prefix270
+    assert "-display_rotation:v:0" in prefix270
+    rot_flag_idx270 = prefix270.index("-display_rotation:v:0")
+    assert prefix270[rot_flag_idx270 + 1] == "0"
+    vf_idx270 = cmd270.index("-vf")
+    vf_str270 = cmd270[vf_idx270 + 1]
+    assert "transpose=cclock" in vf_str270
+    assert "sidedata=mode=delete:type=DISPLAYMATRIX" in vf_str270
+
+    # Case B: rotation 90
+    cmd90 = subdub_media_preflight.build_normalization_command(
+        "/usr/bin/ffmpeg", "/tmp/in90.mp4", "/tmp/out90.mp4",
+        {"duration": 10.0, "rotation": 90, "has_video": True},
+    )
+    idx_i_90 = cmd90.index("-i")
+    prefix90 = cmd90[:idx_i_90]
+    assert "-noautorotate" in prefix90
+    assert "-display_rotation:v:0" in prefix90
+    rot_flag_idx90 = prefix90.index("-display_rotation:v:0")
+    assert prefix90[rot_flag_idx90 + 1] == "0"
+    vf_idx90 = cmd90.index("-vf")
+    vf_str90 = cmd90[vf_idx90 + 1]
+    assert "transpose=clock" in vf_str90
+    assert "sidedata=mode=delete:type=DISPLAYMATRIX" in vf_str90
+
+    # Case C: rotation 180
+    cmd180 = subdub_media_preflight.build_normalization_command(
+        "/usr/bin/ffmpeg", "/tmp/in180.mp4", "/tmp/out180.mp4",
+        {"duration": 10.0, "rotation": 180, "has_video": True},
+    )
+    idx_i_180 = cmd180.index("-i")
+    prefix180 = cmd180[:idx_i_180]
+    assert "-noautorotate" in prefix180
+    assert "-display_rotation:v:0" in prefix180
+    rot_flag_idx180 = prefix180.index("-display_rotation:v:0")
+    assert prefix180[rot_flag_idx180 + 1] == "0"
+    vf_idx180 = cmd180.index("-vf")
+    vf_str180 = cmd180[vf_idx180 + 1]
+    assert "hflip" in vf_str180 and "vflip" in vf_str180
+    assert "sidedata=mode=delete:type=DISPLAYMATRIX" in vf_str180
+
+    # Case D: rotation 0
+    cmd0 = subdub_media_preflight.build_normalization_command(
+        "/usr/bin/ffmpeg", "/tmp/in0.mp4", "/tmp/out0.mp4",
+        {"duration": 10.0, "rotation": 0, "has_video": True},
+    )
+    assert "-display_rotation:v:0" not in cmd0
+    assert "-noautorotate" not in cmd0
+

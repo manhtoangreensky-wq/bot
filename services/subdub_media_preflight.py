@@ -209,7 +209,7 @@ def build_normalization_command(
     rotation = _int(current.get("rotation")) % 360
     command = [str(ffmpeg_path), "-y"]
     if rotation:
-        command.append("-noautorotate")
+        command.extend(["-noautorotate", "-display_rotation:v:0", "0"])
     command.extend(["-i", str(input_path), "-map", "0:v:0", "-map", "0:a:0?"])
 
     video_filters: list[str] = []
