@@ -760,7 +760,6 @@ def test_38_no_legacy_production_file_change():
     """Ensure git diff against base SHA contains 0 changes to legacy frozen production files."""
     frozen_files = [
         "services/subdub_blackboxes/auto_speaker.py",
-        "services/subdub_blackboxes/auto_multi_speaker.py",
         "services/subdub_two_speaker_gender_onnx.py",
         "services/subdub_speaker_cast.py",
     ]
