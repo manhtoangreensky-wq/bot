@@ -189,6 +189,11 @@ def normalize_video_product_type(value: Any = "") -> str:
         "frame_video_local": "image_to_video",
         "storyboard": "storyboard_prompt",
         "video_idea": "video_idea_to_product",
+        "selfshot2": "self_shot_scene_change",
+        "selfshot_scene_change": "self_shot_scene_change",
+        "self_shot_scene": "self_shot_scene_change",
+        "selfshot3": "self_shot_cinematic_transform",
+        "selfshot_cinematic": "self_shot_cinematic_transform",
         "multiscene_video": "multi_scene_film",
         "video_long": "multi_scene_film",
     }

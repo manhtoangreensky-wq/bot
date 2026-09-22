@@ -5126,11 +5126,30 @@ def build_product_video_confirm_kickoff_payload(
     asset_pack = _json_loads(str(project.get("asset_pack_json") or ""), {})
     if not isinstance(asset_pack, dict):
         asset_pack = {}
+    tier = (
+        invoice.get("quality_tier")
+        or invoice.get("tier")
+        or asset_pack.get("quality_tier")
+        or asset_pack.get("tier")
+        or project.get("quality_tier")
+        or project.get("tier")
+    )
+    quality_key = str(
+        invoice.get("quality_key")
+        or asset_pack.get("quality_key")
+        or project.get("quality_key")
+        or ""
+    ).strip()
+    is_tier_700 = _as_int(tier, 0) == 700 or quality_key == "kling_long_audio_15"
     scene_duration_limit = (
         PRODUCT_VIDEO_MAX_UIFLOW3_SCENE_SECONDS
-        if str(asset_pack.get("uiflow3_handoff_sha256") or "").strip()
+        if (
+            is_tier_700
+            or str(asset_pack.get("uiflow3_handoff_sha256") or "").strip()
+        )
         else PRODUCT_VIDEO_SCENE_SECONDS
     )
+    default_scene_seconds = 15 if is_tier_700 else PRODUCT_VIDEO_SCENE_SECONDS
     scene_duration = max(
         1,
         min(
@@ -5140,7 +5159,7 @@ def build_product_video_confirm_kickoff_payload(
                 or invoice.get("scene_seconds")
                 or asset_pack.get("scene_duration_seconds")
                 or asset_pack.get("scene_seconds"),
-                PRODUCT_VIDEO_SCENE_SECONDS,
+                default_scene_seconds,
             ),
         ),
     )
@@ -6819,14 +6838,35 @@ def product_video_expected_duration_seconds(project: dict | None = None, payload
     asset_pack = _json_loads(str(project.get("asset_pack_json") or payload.get("asset_pack_json") or ""), {})
     if not isinstance(asset_pack, dict):
         asset_pack = {}
+    tier = (
+        payload.get("quality_tier")
+        or payload.get("tier")
+        or asset_pack.get("quality_tier")
+        or asset_pack.get("tier")
+        or invoice.get("quality_tier")
+        or invoice.get("tier")
+        or project.get("quality_tier")
+        or project.get("tier")
+    )
+    quality_key = str(
+        payload.get("quality_key")
+        or asset_pack.get("quality_key")
+        or invoice.get("quality_key")
+        or project.get("quality_key")
+        or ""
+    ).strip()
+    is_tier_700 = _as_int(tier, 0) == 700 or quality_key == "kling_long_audio_15"
     scene_duration_limit = (
         PRODUCT_VIDEO_MAX_UIFLOW3_SCENE_SECONDS
-        if str(
-            payload.get("uiflow3_handoff_sha256")
-            or asset_pack.get("uiflow3_handoff_sha256")
-            or invoice.get("uiflow3_handoff_sha256")
-            or ""
-        ).strip()
+        if (
+            is_tier_700
+            or str(
+                payload.get("uiflow3_handoff_sha256")
+                or asset_pack.get("uiflow3_handoff_sha256")
+                or invoice.get("uiflow3_handoff_sha256")
+                or ""
+            ).strip()
+        )
         else PRODUCT_VIDEO_SCENE_SECONDS
     )
     scene_count = _as_int(project.get("scene_count") or payload.get("scene_count") or invoice.get("scene_count"), 1)
@@ -6837,12 +6877,13 @@ def product_video_expected_duration_seconds(project: dict | None = None, payload
         or ""
     ).strip().lower()
     if orchestration_mode in {"per_scene_8s", "scene_orchestrator", "per_scene"}:
+        default_scene_seconds = 15 if is_tier_700 else PRODUCT_VIDEO_SCENE_SECONDS
         scene_seconds = _as_int(
             payload.get("scene_duration_seconds")
             or payload.get("scene_seconds")
             or invoice.get("scene_duration_seconds")
             or invoice.get("scene_seconds"),
-            PRODUCT_VIDEO_SCENE_SECONDS,
+            default_scene_seconds,
         )
         return max(1, min(20, scene_count)) * max(1, min(scene_duration_limit, scene_seconds))
     direct = _as_int(

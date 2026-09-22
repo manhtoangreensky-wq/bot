@@ -1242,21 +1242,40 @@ def product_video_scene_duration_seconds(job: dict | None = None) -> int:
             0,
         )
         return max(1, segment_seconds or direct_seconds or PRODUCT_VIDEO_SCENE_SECONDS)
+    tier = (
+        job.get("quality_tier")
+        or job.get("tier")
+        or invoice.get("quality_tier")
+        or invoice.get("tier")
+        or asset_pack.get("quality_tier")
+        or asset_pack.get("tier")
+    )
+    quality_key = str(
+        job.get("quality_key")
+        or invoice.get("quality_key")
+        or asset_pack.get("quality_key")
+        or ""
+    ).strip()
+    is_tier_700 = _safe_int(tier, 0) == 700 or quality_key == "kling_long_audio_15"
+    default_scene_seconds = 15 if is_tier_700 else PRODUCT_VIDEO_SCENE_SECONDS
     scene_seconds = _safe_int(
         job.get("scene_duration_seconds")
         or job.get("scene_seconds")
         or invoice.get("scene_duration_seconds")
         or invoice.get("scene_seconds"),
-        PRODUCT_VIDEO_SCENE_SECONDS,
+        default_scene_seconds,
     )
     scene_duration_limit = (
         PRODUCT_VIDEO_MAX_UIFLOW3_SCENE_SECONDS
-        if str(
-            job.get("uiflow3_handoff_sha256")
-            or asset_pack.get("uiflow3_handoff_sha256")
-            or invoice.get("uiflow3_handoff_sha256")
-            or ""
-        ).strip()
+        if (
+            is_tier_700
+            or str(
+                job.get("uiflow3_handoff_sha256")
+                or asset_pack.get("uiflow3_handoff_sha256")
+                or invoice.get("uiflow3_handoff_sha256")
+                or ""
+            ).strip()
+        )
         else PRODUCT_VIDEO_SCENE_SECONDS
     )
     return max(1, min(scene_duration_limit, scene_seconds))
@@ -3559,7 +3578,7 @@ def _render_selfshot3_video_to_video(
     raise RealVideoRenderError("selfshot3_video_to_video_failed", diagnostics={"ok": False, "selfshot3": True, "provider_attempted": bool(attempts), "attempts": attempts, "no_charge": True, "blocker": "selfshot3_video_to_video_failed"})
 
 
-def _selfshot2_scene_source_segment(asset_pack: dict[str, Any], scene_index: int) -> dict[str, Any]:
+def _selfshot2_scene_source_segment(asset_pack: dict[str, Any], scene_index: int, default_duration: float = 8.0) -> dict[str, Any]:
     rows = asset_pack.get("scene_source_segments")
     if not isinstance(rows, list):
         rows = []
@@ -3573,6 +3592,24 @@ def _selfshot2_scene_source_segment(asset_pack: dict[str, Any], scene_index: int
     )
     start_seconds = float(selected.get("start_seconds") or 0)
     end_seconds = float(selected.get("end_seconds") or 0)
+    if start_seconds < 0 or end_seconds <= start_seconds:
+        plan_rows = asset_pack.get("scene_plan")
+        if isinstance(plan_rows, list):
+            plan_selected = next(
+                (
+                    dict(item)
+                    for item in plan_rows
+                    if isinstance(item, dict) and _safe_int(item.get("scene_index"), 0) == scene_index
+                ),
+                {},
+            )
+            if plan_selected:
+                start_seconds = float(plan_selected.get("source_segment_start") or plan_selected.get("start_seconds") or 0)
+                end_seconds = float(plan_selected.get("source_segment_end") or plan_selected.get("end_seconds") or 0)
+        if start_seconds < 0 or end_seconds <= start_seconds:
+            dur = max(1.0, float(default_duration or 8.0))
+            start_seconds = float(max(0, scene_index - 1) * dur)
+            end_seconds = float(start_seconds + dur)
     if start_seconds < 0 or end_seconds <= start_seconds:
         raise RealVideoRenderError(
             "selfshot2_scene_source_segment_invalid",
@@ -3718,7 +3755,13 @@ def _render_selfshot2_video_to_video(
 ) -> dict[str, Any]:
     """Render one source-bound SELFSHOT2 scene through a true V2V contract."""
 
-    source_path = str((job or {}).get("source_video_local_path") or (job or {}).get("source_video_path") or "").strip()
+    source_path = str(
+        (job or {}).get("source_video_local_path")
+        or (job or {}).get("source_video_path")
+        or (asset_pack or {}).get("source_video_local_path")
+        or (asset_pack or {}).get("source_video_path")
+        or ""
+    ).strip()
     if not source_path or not os.path.isfile(source_path):
         raise RealVideoRenderError(
             "selfshot2_source_video_not_materialized",
@@ -3742,8 +3785,32 @@ def _render_selfshot2_video_to_video(
             "selfshot2_public_confirm_required",
             diagnostics={"ok": False, "selfshot2": True, "scene_index": scene_index, "provider_attempted": False, "no_charge": True, "blocker": "selfshot2_public_confirm_required"},
         )
-    segment = _selfshot2_scene_source_segment(asset_pack, scene_index)
-    target_duration = max(1, _safe_int(asset_pack.get("scene_duration_seconds"), PRODUCT_VIDEO_SCENE_SECONDS))
+    tier = (
+        (job or {}).get("quality_tier")
+        or (job or {}).get("tier")
+        or asset_pack.get("quality_tier")
+        or asset_pack.get("tier")
+    )
+    quality_key = str(
+        (job or {}).get("quality_key")
+        or asset_pack.get("quality_key")
+        or ""
+    ).strip()
+    is_tier_700 = _safe_int(tier, 0) == 700 or quality_key == "kling_long_audio_15"
+    if is_tier_700:
+        target_duration = 15
+    elif _safe_int(tier, 0) == 800 or quality_key == "motion_pro_audio_10":
+        target_duration = 10
+    else:
+        target_duration = max(
+            1,
+            _safe_int(
+                asset_pack.get("scene_duration_seconds")
+                or (job or {}).get("scene_duration_seconds"),
+                PRODUCT_VIDEO_SCENE_SECONDS,
+            ),
+        )
+    segment = _selfshot2_scene_source_segment(asset_pack, scene_index, default_duration=float(target_duration))
     configs = _selfshot3_provider_configs(provider_order, target_duration)
     if not configs:
         raise RealVideoRenderError(
@@ -4003,9 +4070,19 @@ def selfshot2_continuity_validation(
             and (not relationship_required or evidence_by_scene.get(index, {}).get("person_object_relationship") is True)
         )
     )
+    metadata_contract_pass = not blocker
+    continuity_metadata_present = bool(evidence_by_scene)
+    is_debug_metadata = bool(debug_results and any("continuity_evidence" in d for d in debug_results if isinstance(d, dict)))
+    authority = "manual_debug_metadata" if is_debug_metadata else ("provider_or_scene_metadata" if continuity_metadata_present else "none")
     return {
-        "ok": not blocker,
+        "ok": metadata_contract_pass,
         "blocker": blocker,
+        "metadata_contract_pass": metadata_contract_pass,
+        "continuity_metadata_present": continuity_metadata_present,
+        "continuity_metadata_authority": authority,
+        "independent_visual_validation": "NOT_PERFORMED",
+        "independent_visual_validation_pass": False,
+        "independent_visual_continuity_proven": False,
         "required": required_metrics,
         "metrics": metrics,
         "expected_scene_indexes": sorted(expected_indexes),
@@ -4696,13 +4773,7 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         provider_env["SHOPAIKEY_VIDEO_MODEL"] = str(provider_model_map.get("shopaikey_video") or "")
     if provider_model_map.get("key4u_video"):
         provider_env["KEY4U_VIDEO_MODEL"] = str(provider_model_map.get("key4u_video") or "")
-    if recovery_existing_tasks_only:
-        result = run_provider_generation(
-            request,
-            output_dir=output_dir,
-            environ=provider_env,
-        )
-    elif product_type == "self_shot_scene_change":
+    if product_type == "self_shot_scene_change":
         result = _render_selfshot2_video_to_video(
             job=dict(job or {}),
             asset_pack=dict(asset_pack or {}),
@@ -4720,6 +4791,12 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             provider_order=provider_order,
             fallback_prompt=prompt,
             aspect_ratio=aspect_ratio,
+        )
+    elif recovery_existing_tasks_only:
+        result = run_provider_generation(
+            request,
+            output_dir=output_dir,
+            environ=provider_env,
         )
     else:
         result = run_provider_generation(request, output_dir=output_dir, environ=provider_env)
