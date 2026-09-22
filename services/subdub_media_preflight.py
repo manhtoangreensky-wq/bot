@@ -219,6 +219,8 @@ def build_normalization_command(
         video_filters.append("transpose=cclock")
     elif rotation == 180:
         video_filters.extend(("hflip", "vflip"))
+    if rotation:
+        video_filters.append("sidedata=mode=delete:type=DISPLAYMATRIX")
     if str(current.get("frame_rate_mode") or "") == "vfr":
         target_rate = _float(current.get("avg_frame_rate")) or 30.0
         target_rate = min(60.0, max(15.0, target_rate))
