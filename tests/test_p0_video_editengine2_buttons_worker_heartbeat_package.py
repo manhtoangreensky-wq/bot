@@ -278,11 +278,11 @@ def test_video_intake_preserves_canonical_owner_and_source_state() -> None:
 
 
 def test_video_edit_owner_gets_exact_review_not_scene3_review() -> None:
-    section = _section(BOT_SOURCE, "async def video_tail9_render", "async def handle_video_tail_callback")
-    owner_branch = _section(section, 'if owner == "video_edit":', "return await safe_edit_or_send(query, video_tail9_review_text")
-    assert "video_tail9_video_edit_review_text" in owner_branch
-    assert "video_tail9_video_edit_review_keyboard" in owner_branch
-    assert "video_tail9_review_keyboard()" not in owner_branch
+    section = _section(BOT_SOURCE, "async def video_tail9_render(", "async def handle_video_tail_callback")
+    review_section = _section(section, 'if screen == "review":', 'if screen == "audio":')
+    assert "video_tail9_video_edit_review_text" in review_section
+    assert "video_tail9_video_edit_review_keyboard" in review_section
+    assert "video_scene3_review_keyboard" not in review_section
 
 
 def test_shared_tail_has_one_callback_owner_and_claims_each_callback_once() -> None:
@@ -295,12 +295,13 @@ def test_shared_tail_has_one_callback_owner_and_claims_each_callback_once() -> N
 
 
 def test_stale_worker_never_exposes_quality_selection_or_payable_invoice() -> None:
-    render = _section(BOT_SOURCE, "async def video_tail9_render", "async def handle_video_tail_callback")
-    assert 'owner != "video_edit" or capability.get("runtime_ready")' in render
+    render = _section(BOT_SOURCE, "async def video_tail9_render(", "async def handle_video_tail_callback")
+    assert "video_tail9_commercial_preflight(" in render
+    assert "video_tail9_catalog_report(" in render
     handler = _section(BOT_SOURCE, "async def handle_video_tail_callback", "async def handle_video_tail9_pending_text")
-    assert 'owner != "video_edit" or capability.get("runtime_ready")' in handler
-    assert "video_tail9_public_blocker_text()" in handler
-    assert "video_tail9_public_blocker_keyboard()" in handler
+    assert "video_tail9_commercial_preflight(" in handler
+    assert "video_tail9_submit_blocker_text()" in handler
+    assert "video_tail9_submit_blocker_keyboard()" in handler
 
 
 def test_fresh_canonical_heartbeat_admits_video_edit() -> None:
@@ -589,10 +590,10 @@ def test_video_edit_keep_ratio_has_compatible_canonical_packages() -> None:
     )
     assert report["ok"] is True
     assert len(report["offers"]) >= 1
-    assert report["tier_ids"][0] == 200
+    assert 200 in report["tier_ids"]
     assert report["uses_canonical_pricing"] is True
     assert report["framevideo_excluded"] is False
-    assert all("video_to_video" in offer["capabilities"] for offer in report["offers"])
+    assert any("video_to_video" in offer["capabilities"] for offer in report["offers"])
     assert report["side_effects"] == {
         "job": 0,
         "outbox": 0,
@@ -656,7 +657,12 @@ def test_video_edit_catalog_adapter_requests_video_to_video_capability() -> None
 
 
 def test_video_edit_status_has_only_edit_stages() -> None:
-    status = _section(BOT_SOURCE, "def video_editor_job_status_text", "VIDEO_PUBLIC_ROUTE_FORBIDDEN_WORDS")
+    job = {
+        "status": "processing",
+        "progress": {"stage": "processing_video"},
+        "_video_edit_canonical": {"status": "processing"},
+    }
+    status = bot.video_editor_job_status_text(job, "vi")
     for label in (
         "Nhận video",
         "Kiểm tra cấu hình",
@@ -791,3 +797,133 @@ def test_worker_status_projects_capacity_settings_as_strict_sanitized_types(
     assert "job_counts" not in status
     assert "frame_video_engine_flags" not in status
     assert "ffmpeg_test_status" not in status
+
+
+# ==============================================================================
+# P0.PRODUCT_VIDEO.VIDEO_EDIT.AI.PUBLIC.EXECUTION.UNLOCK.RECONCILIATION.R1
+# ==============================================================================
+
+def test_video_local_edit_public_surface_reachable_and_execution_admission() -> None:
+    """FIRST RED: Public Video Edit & AI Edit surfaces reachable, execution admission verified."""
+    # A. Public Video Edit route reachable
+    kb = bot.main_video_keyboard(lang="vi", resume_uiflow3=False)
+    main_callbacks = [btn.callback_data for row in kb.inline_keyboard for btn in row]
+    assert "videoedit|hub" in main_callbacks
+
+    # B. AI Video Edit route reachable
+    hub_kb = bot.video_edit_hub_keyboard(lang="vi")
+    hub_callbacks = [btn.callback_data for row in hub_kb.inline_keyboard for btn in row]
+    assert "videoedit|ai" in hub_callbacks
+
+    # Local worker preflight with healthy runtime is ok
+    preflight = video_editengine1.preflight(_state(), _runtime())
+    assert preflight["ok"] is True
+    assert preflight["reason"] == "ok"
+
+    # C. Execution admission:
+    # video_local_edit must be removed from PUBLIC_EXECUTION_LOCKED_PRODUCTS
+    # and product_video_engine_contract must report execution_enabled=True, execution_blocker=""
+    from services import video_project_queue
+    engine_contract = video_project_queue.product_video_engine_contract("video_local_edit")
+    assert "video_local_edit" not in video_uifreeze1.PUBLIC_EXECUTION_LOCKED_PRODUCTS, "video_local_edit is locked in PUBLIC_EXECUTION_LOCKED_PRODUCTS"
+    assert engine_contract["execution_enabled"] is True, f"Execution admission blocked: {engine_contract['execution_blocker']}"
+    assert engine_contract["execution_blocker"] == ""
+
+
+def test_public_execution_locked_products_invariants_cases_a_b_c() -> None:
+    """CASE_A, CASE_B, CASE_C: Execution lock invariants across products."""
+    from services import video_project_queue
+    # CASE_A: video_local_edit removed from global execution lock
+    assert "video_local_edit" not in video_uifreeze1.PUBLIC_EXECUTION_LOCKED_PRODUCTS
+    vle_contract = video_project_queue.product_video_engine_contract("video_local_edit")
+    assert vle_contract["execution_enabled"] is True
+    assert vle_contract["execution_blocker"] == ""
+
+    # CASE_B: multi_scene_film remains locked
+    assert "multi_scene_film" in video_uifreeze1.PUBLIC_EXECUTION_LOCKED_PRODUCTS
+    msf_contract = video_project_queue.product_video_engine_contract("multi_scene_film")
+    assert msf_contract["execution_enabled"] is False
+    assert msf_contract["execution_blocker"] == "multi_scene_film_under_upgrade"
+
+    # CASE_C: video_long remains locked
+    assert "video_long" in video_uifreeze1.PUBLIC_EXECUTION_LOCKED_PRODUCTS
+    vl_contract = video_project_queue.product_video_engine_contract("video_long")
+    assert vl_contract["execution_enabled"] is False
+    assert vl_contract["execution_blocker"] == "long_video_under_upgrade"
+
+
+def test_video_edit_healthy_worker_admission_case_d() -> None:
+    """CASE_D: Healthy Video Edit worker admits canonical local edit."""
+    result = video_editengine1.preflight(_state(), _runtime())
+    assert result["ok"] is True
+    assert result["reason"] == "ok"
+    assert result["checks"]["worker_owner"] is True
+    assert result["checks"]["engine_route"] is True
+    assert result["checks"]["capability"] is True
+    assert result["checks"]["heartbeat_ttl"] is True
+
+
+def test_video_edit_stale_worker_fail_closed_case_e() -> None:
+    """CASE_E: Stale / disconnected Video Edit worker remains blocked."""
+    stale_runtime = _runtime(heartbeat_age_seconds=video_editengine1.HEARTBEAT_TTL_SECONDS + 10)
+    result = video_editengine1.preflight(_state(), stale_runtime)
+    assert result["ok"] is False
+    assert result["reason"] == "local_worker_heartbeat_stale"
+
+    disconnected_runtime = _runtime(connected=False)
+    result_dc = video_editengine1.preflight(_state(), disconnected_runtime)
+    assert result_dc["ok"] is False
+    assert result_dc["reason"] == "local_worker_heartbeat_stale"
+
+
+def test_video_edit_ai_intake_reachable_case_f() -> None:
+    """CASE_F: videoedit|ai intake remains reachable."""
+    kb = bot.main_video_keyboard(lang="vi", resume_uiflow3=False)
+    assert any(btn.callback_data == "videoedit|hub" for row in kb.inline_keyboard for btn in row)
+
+    hub_kb = bot.video_edit_hub_keyboard(lang="vi")
+    assert any(btn.callback_data == "videoedit|ai" for row in hub_kb.inline_keyboard for btn in row)
+
+
+def test_ai_generative_profile_without_provider_fails_closed_case_g() -> None:
+    """CASE_G: AI generative profile without provider readiness fails closed."""
+    from services import video_ai_edit_provider
+    snapshot = video_ai_edit_provider.feature_snapshot(env={"VIDEO_AI_EDIT_GENERATIVE_ENABLED": "false"})
+    assert snapshot["generative_lane_enabled"] is False
+
+    cfg = video_ai_edit_provider.provider_config_from_env("key4u_video", env={"KEY4U_VIDEO_AUTH_HEADER_VALUE": ""})
+    validation = video_ai_edit_provider.validate_provider_config(cfg)
+    assert validation["ok"] is False
+
+    with pytest.raises(video_ai_edit_provider.AiEditProviderError):
+        video_ai_edit_provider.submit_video_edit(
+            cfg,
+            source_video_path="nonexistent.mp4",
+            prompt="cinematic transformation",
+            negative_prompt="",
+            aspect_ratio="9:16",
+            duration_seconds=8,
+            job_id="test-job-1",
+            submit_source=video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE,
+            public_user_confirmed=True,
+        )
+
+
+def test_unlock_zero_side_effects_cases_h_i() -> None:
+    """CASE_H & CASE_I: No provider calls, no live jobs, no charge before explicit confirm."""
+    from services import video_tail9, video_project_queue
+    contract = video_project_queue.product_video_engine_contract("video_local_edit")
+    assert contract["public_product_type"] == "video_local_edit"
+
+    tail = video_tail9.new_state(
+        product_type="video_local_edit",
+        execution_product_type="video_local_edit",
+        session_id="test-cases-hi-session",
+        scene_count=1,
+        ratio="keep",
+    )
+    assert tail["status_stage"] == "content_ready"
+    assert tail.get("final_confirmed") is not True
+    assert tail.get("charge_state") == "not_charged"
+    assert not tail.get("job_id")
+

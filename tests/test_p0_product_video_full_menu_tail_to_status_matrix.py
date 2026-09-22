@@ -51,7 +51,11 @@ def test_each_video_menu_lane_has_invoice_confirm_and_terminal_status_contract(
     contract = video_tail9.commercial_contract(product_type)
     assert contract["product_type"], case_id
     assert contract["public_planning_enabled"] is True, case_id
-    assert contract["execution_enabled"] is True, case_id
+    if product_type == "multi_scene_film":
+        assert contract["execution_enabled"] is False, case_id
+        assert contract["execution_blocker"] == "multi_scene_film_under_upgrade", case_id
+    else:
+        assert contract["execution_enabled"] is True, case_id
     assert contract["supported_quality_tiers"], case_id
 
     selected_tier = int(contract["supported_quality_tiers"][0])
@@ -92,6 +96,10 @@ def test_each_video_menu_lane_has_invoice_confirm_and_terminal_status_contract(
 
     assert invoiced["status_stage"] == "invoice", case_id
     assert video_tail9.invoice_allowed(invoiced) == (True, "ok"), case_id
+    if product_type == "multi_scene_film":
+        with pytest.raises(ValueError, match="multi_scene_film_under_upgrade"):
+            video_tail9.confirm_once(invoiced, f"confirm-{case_id}")
+        return
     confirmed, created = video_tail9.confirm_once(invoiced, f"confirm-{case_id}")
     replayed, created_again = video_tail9.confirm_once(
         confirmed,

@@ -39,7 +39,7 @@ CANONICAL_PRICING_PRODUCTS = frozenset({
 })
 
 FRAMEVIDEO_PRICING_PRODUCTS = frozenset({"frame_video_local", "image_to_video"})
-PUBLIC_EXECUTION_LOCKED_PRODUCTS = frozenset({"multi_scene_film", "video_long", "video_local_edit"})
+PUBLIC_EXECUTION_LOCKED_PRODUCTS = frozenset({"multi_scene_film", "video_long"})
 
 _PUBLIC_QUALITY_ROWS = video_ai_real_pricing.public_quality_catalog()
 QUALITY_TIER_ORDER = tuple(int(item["tier_id"]) for item in _PUBLIC_QUALITY_ROWS)
