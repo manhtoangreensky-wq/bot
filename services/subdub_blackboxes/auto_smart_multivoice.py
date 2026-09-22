@@ -1147,7 +1147,7 @@ async def run_auto_smart_multivoice_blackbox(
     state: Mapping[str, Any] | None = None,
     **payload: Any,
 ) -> dict[str, Any]:
-    """Thin production blackbox / integration adapter invoking run_auto_smart_multivoice()."""
+    """Smart Multi-Voice Orchestrator delegating execution to the standard SubDub pipeline."""
     current = state if isinstance(state, Mapping) else {}
     if not is_auto_smart_multivoice_state(current):
         return {
@@ -1168,39 +1168,147 @@ async def run_auto_smart_multivoice_blackbox(
         or current.get("_pipeline_source_path_override")
         or ""
     )
-    segments = payload.get("segments") or payload.get("cues") or []
 
     prepare_subtitles = payload.get("prepare_subtitles")
-    if (not segments or not source_media) and callable(prepare_subtitles):
+    prepared = None
+    if callable(prepare_subtitles):
         try:
             prepared = await _maybe_await(prepare_subtitles(dict(current)))
-            if isinstance(prepared, dict):
-                segments = segments or prepared.get("source_segments") or prepared.get("segments") or []
-                source_media = (
-                    source_media
-                    or prepared.get("source_file")
-                    or prepared.get("source_path")
-                    or (prepared.get("state") if isinstance(prepared.get("state"), Mapping) else {}).get("_pipeline_saved_source_path")
-                    or (prepared.get("state") if isinstance(prepared.get("state"), Mapping) else {}).get("_pipeline_source_path_override")
-                    or ""
-                )
-        except Exception:
+        except Exception as prep_err:
+            lane_mode = str(payload.get("lane_mode") or current.get("mode") or "dub")
+            return {
+                "ok": False,
+                "status": "DIALOGUE_UNAVAILABLE" if lane_mode == "dub" else "SUBTITLE_PREPARE_FAILED",
+                "error_code": type(prep_err).__name__,
+                "admin_debug_summary": str(prep_err)[:160],
+                "state": dict(current),
+            }
+
+    if isinstance(prepared, dict):
+        source_media = (
+            source_media
+            or prepared.get("source_file")
+            or prepared.get("source_path")
+            or (prepared.get("state") if isinstance(prepared.get("state"), Mapping) else {}).get("_pipeline_saved_source_path")
+            or (prepared.get("state") if isinstance(prepared.get("state"), Mapping) else {}).get("_pipeline_source_path_override")
+            or ""
+        )
+
+    has_source_bytes = bool(prepared and prepared.get("source_bytes")) or bool(current.get("source_bytes"))
+    has_source_file = bool(source_media and Path(source_media).is_file())
+    if not has_source_bytes and not has_source_file:
+        return {
+            "ok": False,
+            "status": "SOURCE_MEDIA_NOT_FOUND",
+            "error_code": "source_media_not_found",
+            "blocker": "source_media_not_found",
+            "admin_debug_summary": "source_media_not_found",
+            "strategy": STRATEGY_FAILED,
+            "detected_speaker_count": 0,
+            "effective_speaker_count": 0,
+            "effective_voice_count": 0,
+            "speaker_voice_map": {},
+            "fallback_level": -1,
+            "fallback_reason": None,
+            "output_mode": OUTPUT_MODE_FAILED,
+            "final_mp4_path": None,
+            "auto_smart_verified": False,
+            "state": dict(current),
+        }
+
+    if isinstance(prepared, dict) and not prepared.get("source_bytes") and has_source_file:
+        try:
+            prepared["source_bytes"] = Path(source_media).read_bytes()
+        except OSError:
             pass
 
-    output_path = payload.get("output_path") or current.get("output_path") or "output.mp4"
+    run_lane_blackbox = payload.get("run_lane_blackbox")
+    runner = payload.get("runner")
+
+    # If run_lane_blackbox is not supplied, fall back to isolated engine (for direct isolated unit tests)
+    if not callable(run_lane_blackbox) or not callable(runner):
+        segments = payload.get("segments") or payload.get("cues") or []
+        if not segments and isinstance(prepared, dict):
+            segments = prepared.get("source_segments") or prepared.get("segments") or []
+        output_path = payload.get("output_path") or current.get("output_path") or "output.mp4"
+        smart_result = await run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=segments,
+            output_path=output_path,
+            validated_pools=payload.get("validated_pools"),
+            assignment_seed=str(payload.get("job_id") or current.get("job_id") or current.get("task_id") or "smart_job_seed"),
+            stereo_pcm_path=payload.get("stereo_pcm_path"),
+            ranges_by_speaker=payload.get("ranges_by_speaker"),
+            deadline_monotonic=payload.get("deadline_monotonic"),
+            stop_requested=payload.get("stop_requested"),
+            strict_two_classifier=payload.get("strict_two_classifier"),
+            acoustic_classifications=payload.get("acoustic_classifications"),
+            synthesize_segments=payload.get("synthesize_segments"),
+            render_pipeline=payload.get("render_pipeline") or payload.get("render_video"),
+            probe_fn=payload.get("probe_fn") or payload.get("probe_video"),
+            is_cancelled=payload.get("is_cancelled"),
+            fallback_level_override=payload.get("fallback_level_override"),
+            default_fallback_voice=payload.get("default_fallback_voice"),
+            locked_speaker_voice_map=payload.get("locked_speaker_voice_map") or current.get("locked_speaker_voice_map"),
+            state=current,
+        )
+        result_state = dict(current)
+        result_state["subdub_engine_selected"] = "auto_smart_multivoice"
+        result_state["auto_smart_multivoice_verified"] = smart_result.get("auto_smart_verified", False)
+        result_state["auto_smart_strategy"] = smart_result.get("strategy")
+        result_state["auto_detected_speaker_count"] = smart_result.get("detected_speaker_count", 0)
+        result_state["auto_effective_speaker_count"] = smart_result.get("effective_speaker_count", 0)
+        result_state["auto_distinct_voice_count"] = smart_result.get("effective_voice_count", 0)
+        result_state["auto_smart_output_mode"] = smart_result.get("output_mode")
+        result_state["speaker_voice_map"] = smart_result.get("speaker_voice_map") or {}
+        if smart_result.get("locked_speaker_voice_map"):
+            result_state["locked_speaker_voice_map"] = dict(smart_result["locked_speaker_voice_map"])
+        elif (payload.get("locked_speaker_voice_map") or current.get("locked_speaker_voice_map")) and smart_result.get("speaker_voice_map"):
+            result_state["locked_speaker_voice_map"] = dict(smart_result["speaker_voice_map"])
+        response = {
+            **smart_result,
+            "state": result_state,
+        }
+        if not smart_result.get("ok"):
+            blocker = str(smart_result.get("blocker") or "smart_multivoice_failed")
+            response.setdefault("blocker", blocker)
+            response.setdefault("error_code", str(smart_result.get("error_code") or blocker))
+            response.setdefault("admin_debug_summary", str(smart_result.get("admin_debug_summary") or blocker))
+            if not response.get("status"):
+                response["status"] = (
+                    "SOURCE_MEDIA_NOT_FOUND"
+                    if blocker in {"source_media_not_found", "corrupt_or_empty_source_media"}
+                    else f"SMART_{blocker.upper()}"
+                )
+        if smart_result.get("final_mp4_path"):
+            response["video_output"] = smart_result["final_mp4_path"]
+        return response
+
+    # -----------------------------------------------------------------
+    # SMART ORCHESTRATOR DELEGATING TO STANDARD PIPELINE
+    # -----------------------------------------------------------------
+    cues = (
+        (prepared.get("output_segments") if isinstance(prepared, dict) else None)
+        or (prepared.get("source_segments") if isinstance(prepared, dict) else None)
+        or (prepared.get("segments") if isinstance(prepared, dict) else None)
+        or payload.get("segments")
+        or payload.get("cues")
+        or []
+    )
     validated_pools = payload.get("validated_pools")
-    synthesize_segments = payload.get("synthesize_segments")
-    render_pipeline = payload.get("render_pipeline") or payload.get("render_video")
-    probe_fn = payload.get("probe_fn") or payload.get("probe_video")
-    assignment_seed = str(payload.get("job_id") or current.get("job_id") or current.get("task_id") or "smart_job_seed")
+    assignment_seed = str(
+        payload.get("job_id")
+        or current.get("job_id")
+        or current.get("_pipeline_job_id")
+        or current.get("task_id")
+        or "smart_job_seed"
+    )
     locked_speaker_voice_map = payload.get("locked_speaker_voice_map")
     if locked_speaker_voice_map is None and isinstance(current, Mapping):
         locked_speaker_voice_map = current.get("locked_speaker_voice_map")
 
-    smart_result = await run_auto_smart_multivoice(
-        source_media=source_media,
-        segments=segments,
-        output_path=output_path,
+    decision = decide_smart_multivoice(
+        cues,
         validated_pools=validated_pools,
         assignment_seed=assignment_seed,
         stereo_pcm_path=payload.get("stereo_pcm_path"),
@@ -1209,48 +1317,161 @@ async def run_auto_smart_multivoice_blackbox(
         stop_requested=payload.get("stop_requested"),
         strict_two_classifier=payload.get("strict_two_classifier"),
         acoustic_classifications=payload.get("acoustic_classifications"),
-        synthesize_segments=synthesize_segments,
-        render_pipeline=render_pipeline,
-        probe_fn=probe_fn,
-        is_cancelled=payload.get("is_cancelled"),
         fallback_level_override=payload.get("fallback_level_override"),
         default_fallback_voice=payload.get("default_fallback_voice"),
         locked_speaker_voice_map=locked_speaker_voice_map,
-        state=current,
     )
 
-    result_state = dict(current)
-    result_state["subdub_engine_selected"] = "auto_smart_multivoice"
-    result_state["auto_smart_multivoice_verified"] = smart_result.get("auto_smart_verified", False)
-    result_state["auto_smart_strategy"] = smart_result.get("strategy")
-    result_state["auto_detected_speaker_count"] = smart_result.get("detected_speaker_count", 0)
-    result_state["auto_effective_speaker_count"] = smart_result.get("effective_speaker_count", 0)
-    result_state["auto_distinct_voice_count"] = smart_result.get("effective_voice_count", 0)
-    result_state["auto_smart_output_mode"] = smart_result.get("output_mode")
-    result_state["speaker_voice_map"] = smart_result.get("speaker_voice_map") or {}
-    if smart_result.get("locked_speaker_voice_map"):
-        result_state["locked_speaker_voice_map"] = dict(smart_result["locked_speaker_voice_map"])
-    elif locked_speaker_voice_map is not None and smart_result.get("speaker_voice_map"):
-        result_state["locked_speaker_voice_map"] = dict(smart_result["speaker_voice_map"])
-    elif locked_speaker_voice_map is not None:
-        result_state["locked_speaker_voice_map"] = {k: str(v).strip() for k, v in locked_speaker_voice_map.items()}
+    if decision.strategy == STRATEGY_FAILED:
+        return {
+            "ok": False,
+            "status": "SMART_MULTIVOICE_DECISION_FAILED",
+            "strategy": decision.strategy,
+            "blocker": decision.fallback_reason or "smart_decision_failed",
+            "state": dict(current),
+        }
 
-    response = {
-        **smart_result,
-        "state": result_state,
-    }
-    if not smart_result.get("ok"):
-        blocker = str(smart_result.get("blocker") or "smart_multivoice_failed")
-        response.setdefault("blocker", blocker)
-        response.setdefault("error_code", str(smart_result.get("error_code") or blocker))
-        response.setdefault("admin_debug_summary", str(smart_result.get("admin_debug_summary") or blocker))
-        if not response.get("status"):
-            response["status"] = (
-                "SOURCE_MEDIA_NOT_FOUND"
-                if blocker in {"source_media_not_found", "corrupt_or_empty_source_media"}
-                else f"SMART_{blocker.upper()}"
+    for cid, disp in decision.cue_dispositions.items():
+        if disp == DISPOSITION_TERMINAL_REJECTED:
+            return {
+                "ok": False,
+                "status": "SMART_CUE_TERMINAL_REJECTED",
+                "blocker": f"cue_terminal_rejected:{cid}",
+                "state": dict(current),
+            }
+
+    annotated_prepared = dict(prepared or {})
+    annotated_output_segments = []
+    for raw_seg in (annotated_prepared.get("output_segments") or cues):
+        seg = dict(raw_seg)
+        cid = str(seg.get("cue_id") or seg.get("id") or "")
+        disp = decision.cue_dispositions.get(cid)
+        if disp == DISPOSITION_DUBBED:
+            spk = seg.get("speaker_id") or seg.get("speaker")
+            v_id = decision.speaker_voice_map.get(str(spk))
+            if v_id:
+                seg["tts_voice_id"] = v_id
+            seg["disposition"] = DISPOSITION_DUBBED
+        else:
+            seg["disposition"] = disp or DISPOSITION_PRESERVED
+        annotated_output_segments.append(seg)
+    annotated_prepared["output_segments"] = annotated_output_segments
+
+    if "source_segments" in annotated_prepared:
+        annotated_source_segments = []
+        for raw_seg in annotated_prepared["source_segments"]:
+            seg = dict(raw_seg)
+            cid = str(seg.get("cue_id") or seg.get("id") or "")
+            disp = decision.cue_dispositions.get(cid)
+            if disp == DISPOSITION_DUBBED:
+                spk = seg.get("speaker_id") or seg.get("speaker")
+                v_id = decision.speaker_voice_map.get(str(spk))
+                if v_id:
+                    seg["tts_voice_id"] = v_id
+                seg["disposition"] = DISPOSITION_DUBBED
+            else:
+                seg["disposition"] = disp or DISPOSITION_PRESERVED
+            annotated_source_segments.append(seg)
+        annotated_prepared["source_segments"] = annotated_source_segments
+
+    async def already_prepared(_state: dict) -> dict[str, Any]:
+        return annotated_prepared
+
+    base_resolve = payload.get("resolve_voice_id")
+    def smart_resolve_voice_id(user_id_arg: int | str, service_state: dict) -> str:
+        if decision.speaker_voice_map:
+            return next(iter(decision.speaker_voice_map.values()))
+        if callable(base_resolve):
+            return str(base_resolve(user_id_arg, service_state) or "")
+        return str(payload.get("default_fallback_voice") or "")
+
+    base_synthesize = payload.get("synthesize_segments")
+    async def smart_synthesize_segments(segments: list[dict], *args: Any, **kwargs: Any) -> Any:
+        if not callable(base_synthesize):
+            return {"chunks": [], "provider": "smart_fallback"}
+        cues_to_dub = []
+        for seg in segments:
+            cid = str(seg.get("cue_id") or seg.get("id") or "")
+            disp = decision.cue_dispositions.get(cid)
+            if disp == DISPOSITION_PRESERVED:
+                continue
+            cues_to_dub.append(seg)
+
+        if not cues_to_dub:
+            return {"chunks": [], "provider": "smart_non_speech_preserved"}
+
+        all_chunks = []
+        provider_labels = []
+        for cue in cues_to_dub:
+            cid = str(cue.get("cue_id") or cue.get("id") or "")
+            spk = cue.get("speaker_id") or cue.get("speaker")
+            cue_voice_id = cue.get("tts_voice_id") or decision.speaker_voice_map.get(str(spk)) or kwargs.get("voice_id")
+            chunk_res = await _maybe_await(
+                base_synthesize([cue], *args, **{**kwargs, "voice_id": cue_voice_id})
             )
-    if smart_result.get("final_mp4_path"):
-        response["video_output"] = smart_result["final_mp4_path"]
+            if isinstance(chunk_res, dict):
+                raw_chunks = chunk_res.get("chunks") or []
+                prov = chunk_res.get("provider")
+                if prov:
+                    provider_labels.append(str(prov))
+            elif isinstance(chunk_res, list):
+                raw_chunks = chunk_res
+            else:
+                raw_chunks = [chunk_res]
+            for ch in raw_chunks:
+                if isinstance(ch, dict):
+                    ch.setdefault("cue_id", cid)
+                    all_chunks.append(ch)
+
+        return {
+            "chunks": all_chunks,
+            "provider": provider_labels[0] if provider_labels else "smart_tts",
+        }
+
+    lane_mode = str(payload.get("lane_mode") or current.get("mode") or "dub")
+    lane_payload = dict(payload)
+    lane_payload.pop("lane_mode", None)
+    lane_payload.pop("run_lane_blackbox", None)
+    lane_payload.pop("runner", None)
+    lane_payload.pop("render_pipeline", None)
+    lane_payload.update({
+        "mode": lane_mode,
+        "prepare_subtitles": already_prepared,
+        "resolve_voice_id": smart_resolve_voice_id,
+        "synthesize_segments": smart_synthesize_segments,
+        "state": dict(current),
+    })
+
+    delegated_result = await _maybe_await(
+        run_lane_blackbox(
+            lane_mode=lane_mode,
+            runner=runner,
+            **lane_payload,
+        )
+    )
+
+    if not isinstance(delegated_result, dict):
+        return {
+            "ok": False,
+            "status": "SMART_LANE_DELEGATION_FAILED",
+            "blocker": "delegated_result_not_dict",
+            "state": dict(current),
+        }
+
+    result_state = dict(delegated_result.get("state") or current)
+    result_state["subdub_engine_selected"] = "auto_smart_multivoice"
+    result_state["auto_smart_multivoice_verified"] = delegated_result.get("ok", False)
+    result_state["auto_smart_strategy"] = decision.strategy
+    result_state["auto_detected_speaker_count"] = decision.detected_speaker_count
+    result_state["auto_effective_speaker_count"] = decision.effective_speaker_count
+    result_state["auto_distinct_voice_count"] = decision.effective_voice_count
+    result_state["auto_smart_output_mode"] = decision.output_mode
+    result_state["speaker_voice_map"] = decision.speaker_voice_map or {}
+    if decision.speaker_voice_map:
+        result_state["locked_speaker_voice_map"] = dict(decision.speaker_voice_map)
+
+    response = dict(delegated_result)
+    response["state"] = result_state
     return response
+
 
