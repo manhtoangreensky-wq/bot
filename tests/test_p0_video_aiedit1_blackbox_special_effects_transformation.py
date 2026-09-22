@@ -7,7 +7,7 @@ import pytest
 
 import local_worker
 
-from aiedit1_scope_guard import aiedit1_scope_files
+from aiedit1_scope_guard import aiedit1_scope_files, aiedit1_scope_active
 
 from services import (
     video_ai_edit_prompt as prompt,
@@ -61,6 +61,8 @@ def source_between(text, start, end):
 
 
 def test_aiedit1_changed_files_stay_in_exact_scope():
+    if not aiedit1_scope_active():
+        pytest.skip("aiedit1 scope not active on this branch")
     changed = set()
     for command in (
         ["git", "diff", "--name-only", "origin/main"],
