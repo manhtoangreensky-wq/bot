@@ -67,7 +67,9 @@ import asyncio
 from collections.abc import Mapping
 import hashlib
 from pathlib import Path
+import shutil
 import subprocess
+import sys
 import tempfile
 import pytest
 
@@ -82,9 +84,23 @@ TEST_POOLS = {
 }
 
 
+def _resolve_test_ffmpeg() -> str:
+    """Deterministically resolve ffmpeg executable across Windows and Linux environments."""
+    candidates = [
+        shutil.which("ffmpeg"),
+        shutil.which("ffmpeg.exe"),
+        str(Path(sys.executable).with_name("ffmpeg")),
+        str(Path(sys.executable).with_name("ffmpeg.exe")),
+    ]
+    for cand in candidates:
+        if cand and Path(cand).is_file():
+            return cand
+    raise RuntimeError("ffmpeg executable unavailable for SubDub MP4 fixture")
+
+
 def _create_real_valid_mp4(target_path: Path) -> Path:
     """Generate deterministic 1-second valid MP4 via local ffmpeg."""
-    ffmpeg_bin = r"D:\TOANAAS\_venv311_restore400\Scripts\ffmpeg.exe"
+    ffmpeg_bin = _resolve_test_ffmpeg()
     cmd = [
         ffmpeg_bin,
         "-f", "lavfi", "-i", "color=c=black:s=320x240:d=1",
