@@ -1575,8 +1575,9 @@ def test_72_resume_map_immutable(tmp_path):
         initial_state = {
             "auto_smart_multivoice": True,
             "job_id": "seed_initial_run",
+            "locked_speaker_voice_map": raw_whitespace_map,
         }
-        out1 = await smart.run_auto_smart_multivoice_blackbox(
+        out1 = await smart.run_auto_smart_multivoice(
             source_media=str(media_file),
             segments=cues,
             output_path=str(tmp_path / "out1.mp4"),
@@ -1588,13 +1589,15 @@ def test_72_resume_map_immutable(tmp_path):
         )
         assert out1["ok"] is True
         assert out1["speaker_voice_map"] == APPROVED_5VOICE_MAP
-        assert out1["state"]["locked_speaker_voice_map"] == APPROVED_5VOICE_MAP
+        assert out1["locked_speaker_voice_map"] == APPROVED_5VOICE_MAP
 
         # Resumed run: completely new job_id / seed, locked_speaker_voice_map in persisted state
-        resumed_state = dict(out1["state"])
-        resumed_state["job_id"] = "completely_different_resumed_seed_9999"
+        resumed_state = {
+            "job_id": "completely_different_resumed_seed_9999",
+            "locked_speaker_voice_map": out1["locked_speaker_voice_map"],
+        }
 
-        out2 = await smart.run_auto_smart_multivoice_blackbox(
+        out2 = await smart.run_auto_smart_multivoice(
             source_media=str(media_file),
             segments=cues,
             output_path=str(tmp_path / "out2.mp4"),
@@ -1605,7 +1608,7 @@ def test_72_resume_map_immutable(tmp_path):
         )
         assert out2["ok"] is True
         assert out2["speaker_voice_map"] == APPROVED_5VOICE_MAP, "Resumed run must retain exact map, not recompute from seed"
-        assert out2["state"]["locked_speaker_voice_map"] == APPROVED_5VOICE_MAP
+        assert out2["locked_speaker_voice_map"] == APPROVED_5VOICE_MAP
 
     asyncio.run(_run())
 
