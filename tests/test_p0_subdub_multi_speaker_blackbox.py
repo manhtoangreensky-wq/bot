@@ -3077,3 +3077,68 @@ def test_generalized_multi_speaker_cue_parity_with_3dp_rounding_drift(monkeypatc
     assert len(annotated_out) == 3
     assert annotated_out[0]["cue_id"] == "cue_001"
     assert annotated_out[0]["tts_voice_id"] is not None
+
+
+@pytest.mark.parametrize(
+    ("drift", "should_pass"),
+    [
+        (0.0010000, True),
+        (0.0010000000000001, True),
+        (0.0010001, False),
+        (0.0010004, False),
+        (0.001001, False),
+    ],
+)
+def test_multi_speaker_cue_parity_micro_boundary_annotation(drift: float, should_pass: bool) -> None:
+    multi_module = _multi_module()
+    src_start = 1.0
+    src_end = 2.0
+    out_start = src_start + drift
+    out_end = src_end + drift
+    source = [{"cue_id": "cue-1", "start": src_start, "end": src_end, "speaker_id": "s0"}]
+    output = [{"cue_id": "cue-1", "start": out_start, "end": out_end, "speaker_id": "s0"}]
+    casts = {"s0": {"speaker_id": "s0", "voice_register": "low", "voice_id": "v0"}}
+    prepared = {"source_segments": source, "output_segments": output}
+
+    if should_pass:
+        annotated, assignments = multi_module._annotate_multi_prepared_assignments(prepared, casts)
+        assert len(annotated["output_segments"]) == 1
+        assert annotated["output_segments"][0]["tts_voice_id"] == "v0"
+    else:
+        with pytest.raises(speaker_cast.AutoCastUnavailable):
+            multi_module._annotate_multi_prepared_assignments(prepared, casts)
+
+
+@pytest.mark.parametrize(
+    ("drift", "should_pass"),
+    [
+        (0.0010000, True),
+        (0.0010000000000001, True),
+        (0.0010001, False),
+        (0.0010004, False),
+        (0.001001, False),
+    ],
+)
+def test_multi_speaker_cue_parity_micro_boundary_selected_segment(drift: float, should_pass: bool) -> None:
+    multi_module = _multi_module()
+    src_start = 1.0
+    src_end = 2.0
+    seg_start = src_start + drift
+    seg_end = src_end + drift
+    assignments = {"cue-1": ("low", "v0", src_start, src_end)}
+    raw_segments = [
+        {
+            "cue_id": "cue-1",
+            "start": seg_start,
+            "end": seg_end,
+            "voice_register": "low",
+            "tts_voice_id": "v0",
+        }
+    ]
+
+    if should_pass:
+        validated = multi_module._validated_multi_assigned_segments(raw_segments, assignments)
+        assert len(validated) == 1
+    else:
+        with pytest.raises(speaker_cast.AutoCastUnavailable):
+            multi_module._validated_multi_assigned_segments(raw_segments, assignments)

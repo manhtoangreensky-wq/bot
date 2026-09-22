@@ -1626,6 +1626,19 @@ async def _run_multi_speaker_preflight(
 
 
 MULTI_CUE_ROUNDING_TOLERANCE_SECONDS = 0.001
+MULTI_CUE_FLOAT_REPRESENTATION_EPSILON = 1e-11
+
+
+def _multi_timing_matches(actual: float, expected: float) -> bool:
+    delta = abs(actual - expected)
+    if delta <= MULTI_CUE_ROUNDING_TOLERANCE_SECONDS:
+        return True
+    return math.isclose(
+        delta,
+        MULTI_CUE_ROUNDING_TOLERANCE_SECONDS,
+        rel_tol=0.0,
+        abs_tol=MULTI_CUE_FLOAT_REPRESENTATION_EPSILON,
+    )
 
 
 def _extract_multi_cue_identity(item: object) -> tuple[str, float, float]:
@@ -1710,8 +1723,8 @@ def _annotate_multi_prepared_assignments(
             raise speaker_cast.AutoCastUnavailable()
         voice_register, voice_id, src_start, src_end = assignment
         if (
-            round(abs(out_start - src_start), 6) > MULTI_CUE_ROUNDING_TOLERANCE_SECONDS
-            or round(abs(out_end - src_end), 6) > MULTI_CUE_ROUNDING_TOLERANCE_SECONDS
+            not _multi_timing_matches(out_start, src_start)
+            or not _multi_timing_matches(out_end, src_end)
         ):
             raise speaker_cast.AutoCastUnavailable()
         annotated_output.append(
@@ -1788,8 +1801,8 @@ def _validated_multi_assigned_segments(
             raise speaker_cast.AutoCastUnavailable()
         expected_register, expected_voice_id, src_start, src_end = expected
         if (
-            round(abs(seg_start - src_start), 6) > MULTI_CUE_ROUNDING_TOLERANCE_SECONDS
-            or round(abs(seg_end - src_end), 6) > MULTI_CUE_ROUNDING_TOLERANCE_SECONDS
+            not _multi_timing_matches(seg_start, src_start)
+            or not _multi_timing_matches(seg_end, src_end)
         ):
             raise speaker_cast.AutoCastUnavailable()
         voice_register = raw_segment.get("voice_register")
