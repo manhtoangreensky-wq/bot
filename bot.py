@@ -247263,6 +247263,28 @@ async def execute_video_dubbing_preview(
         )
     return {"ok": True, "preview_seconds": preview_seconds, "preview_text": preview_text[:700]}
 
+def key4u_minimax_voice_compatible(voice_id: str = "") -> bool:
+    clean = str(voice_id or "").strip()
+    if not clean:
+        return True
+    if clean == "male-qn-qingse":
+        return True
+    if clean.startswith("moss_audio_"):
+        return True
+    low_ids = globals().get("SUBDUB_AUTO_DOCUMENTED_LOW_VOICE_IDS") or ()
+    high_ids = globals().get("SUBDUB_AUTO_DOCUMENTED_HIGH_VOICE_IDS") or ()
+    if clean in low_ids or clean in high_ids:
+        return True
+    try:
+        pools_fn = globals().get("subdub_auto_validated_voice_pools")
+        if callable(pools_fn):
+            pools = pools_fn("key4u_minimax")
+            if clean in (pools.get("low") or []) or clean in (pools.get("high") or []):
+                return True
+    except Exception:
+        pass
+    return False
+
 async def video_dubbing_tts_bytes(
     text: str,
     voice_style: str = "",
@@ -247342,7 +247364,7 @@ async def video_dubbing_tts_bytes(
     if international_route and edge_voice_id and provider in {"auto", "edge", "edge_tts"}:
         candidates.append(("Edge TTS", lambda value: call_edge_tts_with_speed(value, voice_id=edge_voice_id, voice_speed=voice_speed)))
         edge_candidate_added = True
-    if provider in {"auto", "minimax", "key4u_minimax", "minimax_voice"} and key4u_ready:
+    if provider in {"auto", "minimax", "key4u_minimax", "minimax_voice"} and key4u_ready and key4u_minimax_voice_compatible(voice_id):
         candidates.append(("Key4U MiniMax", _key4u_minimax_candidate))
     if provider in {"auto", "minimax", "shopaikey_minimax", "minimax_voice"} and shopaikey_ready:
         candidates.append(("ShopAIKey MiniMax", lambda value: call_shopaikey_minimax_tts_bytes_with_speed(
@@ -247408,6 +247430,10 @@ async def video_dubbing_tts_bytes(
     if provider in {"auto", "edge", "edge_tts"} and not edge_candidate_added:
         candidates.append(("Edge TTS", lambda value: call_edge_tts_with_speed(value, voice_id=edge_voice_id or voice_id, voice_speed=voice_speed)))
     errors = []
+    if not candidates:
+        if provider == "key4u_minimax" and not key4u_minimax_voice_compatible(voice_id):
+            raise RuntimeError(f"tts_unavailable:voice_provider_incompatible:key4u_minimax:{voice_id}")
+        raise RuntimeError("tts_unavailable:no_compatible_provider_for_voice")
     for label, func in candidates:
         status, audio_bytes, detail, _http_status = await func(text[:3500])
         if status == "PASS" and audio_bytes:
