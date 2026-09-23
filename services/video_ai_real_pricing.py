@@ -406,8 +406,16 @@ QUALITY_TIER_MODEL_KEYS: dict[int, str] = {
 }
 
 PUBLIC_QUALITY_IDENTITY_OVERRIDES: dict[int, dict[str, str]] = {
-    400: {"name": "Nhanh gọn", "icon": "⚡"},
-    200: {"name": "Cân bằng rõ nét", "icon": "✨"},
+    300: {"name": "Video Khởi Đầu Âm Thanh 5s", "icon": "🌱"},
+    200: {"name": "Video Chuyển Động Xã Hội 5s", "icon": "⚡"},
+    1000: {"name": "Video Diễn Xuất Nhân Vật 6s", "icon": "🎭"},
+    400: {"name": "Video Veo Cân Bằng Chi Tiết 8s", "icon": "🌊"},
+    500: {"name": "Video Chuyển Động Kiểm Soát 5s", "icon": "🎬"},
+    600: {"name": "Video Chuyển Động Đồng Bộ Âm Thanh 5s", "icon": "🎵"},
+    1200: {"name": "Video Tham Chiếu Đa Góc Nhìn 8s", "icon": "🧭"},
+    800: {"name": "Video Chuyển Động Chuyên Nghiệp Kling 10s", "icon": "🚀"},
+    1500: {"name": "Video Điện Ảnh Đa Phân Cảnh Doubao 10s", "icon": "👑"},
+    700: {"name": "Video Toàn Cảnh Chuyển Động Dài Kling 15s", "icon": "💎"},
 }
 
 VIDEO_RUNTIME_FALLBACK_MODEL_KEYS = frozenset({
@@ -1082,6 +1090,247 @@ def video_quality_unit_economics(
         "cost_catalog_version": str(model.get("runtime_route_schema_version") or ""),
         "source_checked_on": str(model.get("runtime_route_checked_at") or ""),
         "cost_source": str(model.get("runtime_route_source") or ""),
+    }
+
+
+KEY4U_USD_TO_VND = Decimal("3500")
+SHOPAIKEY_USD_TO_VND = Decimal("3250")
+
+CANONICAL_TTS_MODEL = "tts-1"
+CANONICAL_TTS_RATE_USD_PER_CHAR = Decimal("0.000015")  # $0.015 per 1,000 characters
+CANONICAL_TTS_BILLING_UNIT = "characters"
+LOSS_GUARD_MULTIPLIER = Decimal("1")
+
+
+def calculate_tts_cost_vnd(text_or_char_count: str | int = 0) -> Decimal:
+    """Calculate expected ShopAIKey TTS cost in VND based on billable character count."""
+    if isinstance(text_or_char_count, str):
+        char_count = len(text_or_char_count.strip())
+    else:
+        char_count = max(0, int(text_or_char_count or 0))
+    usd = Decimal(char_count) * CANONICAL_TTS_RATE_USD_PER_CHAR
+    return usd * SHOPAIKEY_USD_TO_VND
+
+
+def product_video_provider_usd_to_vnd(provider: str = "") -> Decimal:
+    """Canonical exchange rate for Product Video runtime routing (Key4U=3500, ShopAIKey=3250)."""
+    prov = str(provider or "").strip().lower()
+    if "key4u" in prov:
+        return KEY4U_USD_TO_VND
+    if "shopaikey" in prov:
+        return SHOPAIKEY_USD_TO_VND
+    rates = dict(_load_product_video_price_route_map().get("exchange_rates_vnd_per_usd") or {})
+    val = (rates.get(prov) or {}).get("value")
+    if val:
+        return Decimal(str(val))
+    return DEFAULT_PROVIDER_USD_TO_VND
+
+
+def _product_video_candidate_cost_vnd(
+    candidate: dict[str, Any] | None,
+    route: dict[str, Any],
+    *,
+    billable_text: str | int = "",
+    audio_cost_vnd: int | float | Decimal | None = None,
+) -> Decimal:
+    """Calculate candidate provider cost in VND using canonical USD * provider FX rate + paid audio."""
+    if not candidate:
+        return Decimal("0")
+    if audio_cost_vnd is not None:
+        audio_cost = Decimal(str(audio_cost_vnd))
+    elif billable_text:
+        audio_cost = calculate_tts_cost_vnd(billable_text)
+    elif candidate.get("audio_addon_cost_vnd") is not None:
+        audio_cost = _decimal(candidate.get("audio_addon_cost_vnd"))
+    elif candidate.get("total_route_cost_vnd") is not None:
+        return _decimal(candidate.get("total_route_cost_vnd"))
+    else:
+        audio_cost = Decimal("0")
+
+    provider_key = str(candidate.get("provider") or "").strip().lower()
+    exchange = product_video_provider_usd_to_vnd(provider_key)
+    usd_per_scene = _decimal(candidate.get("usd_per_scene"))
+    if usd_per_scene <= 0:
+        seconds = max(1, int(route.get("seconds_per_scene") or 1))
+        usd_per_scene = _decimal(candidate.get("usd_per_second")) * Decimal(seconds)
+    if usd_per_scene > 0:
+        video_cost = usd_per_scene * exchange
+    else:
+        video_cost = _decimal(candidate.get("vnd_per_scene"))
+    return video_cost + audio_cost
+
+
+def check_product_video_economics(
+    tier_id: int | str,
+    scene_count: int | str = 1,
+    provider: str = "",
+    model: str = "",
+    customer_quote_xu: int | str | Decimal = 0,
+    *,
+    is_fallback: bool = False,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Check Product Video economics against provider cost and canonical margin policy.
+
+    Loss Guard Policy:
+    SAFE iff customer_revenue_vnd >= provider_total_cost_vnd * LOSS_GUARD_MULTIPLIER (LOSS_GUARD_MULTIPLIER = 1).
+    Fail-closed: if economics is not safe, returns economics_safe=False and appropriate block_reason.
+    """
+    selected_tier = int(tier_id or 0)
+    count = max(1, int(scene_count or 1))
+
+    prov_str = str(provider or "").strip().lower()
+    if "shopaikey" in prov_str:
+        provider_key = "shopaikey"
+    elif "key4u" in prov_str:
+        provider_key = "key4u"
+    else:
+        provider_key = prov_str
+
+    model_name = str(model or "").strip()
+
+    try:
+        route = product_video_route_by_tier(selected_tier)
+    except Exception:
+        route = {}
+
+    candidates = [
+        item for item in (route.get("candidates") or [])
+        if isinstance(item, dict) and bool(item.get("eligible"))
+    ]
+
+    candidate = None
+    if model_name:
+        candidate = next(
+            (c for c in candidates if str(c.get("provider") or "").lower() == provider_key and str(c.get("model") or "") == model_name),
+            None,
+        )
+    if not candidate:
+        target_role = "fallback" if is_fallback else "primary"
+        candidate = next(
+            (c for c in candidates if str(c.get("provider") or "").lower() == provider_key and target_role in str(c.get("role") or "").lower()),
+            None,
+        )
+    if not candidate:
+        candidate = next(
+            (c for c in candidates if str(c.get("provider") or "").lower() == provider_key),
+            None,
+        )
+
+    if not candidate:
+        block_reason = "PRODUCT_VIDEO_FALLBACK_ECONOMICS_UNSAFE" if is_fallback else "PRODUCT_VIDEO_PROVIDER_ECONOMICS_UNSAFE"
+        return {
+            "tier_id": selected_tier,
+            "scene_count": count,
+            "provider": provider_key,
+            "model": model_name,
+            "customer_quote_xu": int(customer_quote_xu or 0),
+            "is_fallback": is_fallback,
+            "provider_cost_vnd_per_scene": 0.0,
+            "provider_total_cost_vnd": 0.0,
+            "customer_revenue_vnd": int(Decimal(str(customer_quote_xu or 0)) * XU_TO_VND),
+            "required_revenue_vnd": 0.0,
+            "gross_profit_vnd": 0.0,
+            "margin_percent": 0.0,
+            "economics_safe": False,
+            "block_reason": block_reason,
+        }
+
+    billable_text = kwargs.get("billable_text") or kwargs.get("text") or ""
+    audio_cost_param = kwargs.get("audio_cost_vnd")
+    provider_cost_vnd_per_scene = _product_video_candidate_cost_vnd(
+        candidate, route, billable_text=billable_text, audio_cost_vnd=audio_cost_param
+    )
+    provider_total_cost_vnd = provider_cost_vnd_per_scene * Decimal(count)
+
+    quote_xu = int(Decimal(str(customer_quote_xu or 0)))
+    if quote_xu <= 0 and selected_tier > 0:
+        try:
+            quality = public_quality_by_tier(selected_tier)
+            price_info = video_multiscene_price(quality["unit_xu"], count)
+            quote_xu = int(price_info["total_xu"])
+        except Exception:
+            quote_xu = 0
+
+    customer_revenue_vnd = Decimal(quote_xu) * XU_TO_VND
+    required_revenue_vnd = provider_total_cost_vnd * LOSS_GUARD_MULTIPLIER
+    gross_profit_vnd = customer_revenue_vnd - provider_total_cost_vnd
+
+    if customer_revenue_vnd > 0:
+        margin_percent = float(((gross_profit_vnd / customer_revenue_vnd) * Decimal("100")).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP))
+    else:
+        margin_percent = -100.0
+
+    economics_safe = bool(customer_revenue_vnd >= required_revenue_vnd)
+    if not economics_safe:
+        block_reason = "PRODUCT_VIDEO_FALLBACK_ECONOMICS_UNSAFE" if is_fallback else "PRODUCT_VIDEO_PROVIDER_ECONOMICS_UNSAFE"
+    else:
+        block_reason = ""
+
+    return {
+        "tier_id": selected_tier,
+        "scene_count": count,
+        "provider": provider_key,
+        "model": str(candidate.get("model") or model_name),
+        "customer_quote_xu": quote_xu,
+        "is_fallback": is_fallback,
+        "provider_cost_vnd_per_scene": float(provider_cost_vnd_per_scene.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)),
+        "provider_total_cost_vnd": float(provider_total_cost_vnd.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)),
+        "customer_revenue_vnd": int(customer_revenue_vnd),
+        "required_revenue_vnd": float(required_revenue_vnd.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)),
+        "gross_profit_vnd": float(gross_profit_vnd.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)),
+        "margin_percent": margin_percent,
+        "economics_safe": economics_safe,
+    }
+
+
+def calculate_product_video_safe_prices(tier_id: int | str) -> dict[str, Any]:
+    """Calculate minimum safe customer unit prices for 1 scene and with max 20% discount.
+
+    Rounds UPWARD (ceiling) so no calculated safe price ever falls below required revenue.
+    """
+    import math
+    selected_tier = int(tier_id or 0)
+    route = product_video_route_by_tier(selected_tier)
+    current_unit_xu = int(route.get("customer_unit_xu") or 0)
+    candidates = [
+        item for item in (route.get("candidates") or [])
+        if isinstance(item, dict) and bool(item.get("eligible"))
+    ]
+    pri = next((c for c in candidates if "primary" in str(c.get("role") or "").lower()), None)
+    fb = next((c for c in candidates if c.get("role") == "fallback"), None)
+
+    pri_provider = str(pri.get("provider") or "") if pri else "NONE"
+    pri_cost_vnd = float(_product_video_candidate_cost_vnd(pri, route))
+    if pri and pri_cost_vnd > 0:
+        pri_req = Decimal(str(pri_cost_vnd)) * SALE_MULTIPLIER
+        pri_min_1 = math.ceil(pri_req / XU_TO_VND)
+        pri_min_20 = math.ceil(pri_req / (Decimal("0.8") * XU_TO_VND))
+    else:
+        pri_min_1 = 0
+        pri_min_20 = 0
+
+    fb_provider = str(fb.get("provider") or "") if fb else "NONE"
+    fb_cost_vnd = float(_product_video_candidate_cost_vnd(fb, route))
+    if fb and fb_cost_vnd > 0:
+        fb_req = Decimal(str(fb_cost_vnd)) * SALE_MULTIPLIER
+        fb_min_1 = math.ceil(fb_req / XU_TO_VND)
+        fb_min_20 = math.ceil(fb_req / (Decimal("0.8") * XU_TO_VND))
+    else:
+        fb_min_1 = 0
+        fb_min_20 = 0
+
+    return {
+        "tier_id": selected_tier,
+        "current_unit_xu": current_unit_xu,
+        "primary_provider": pri_provider,
+        "primary_cost_vnd": pri_cost_vnd,
+        "primary_min_unit_xu_1_scene": pri_min_1,
+        "primary_min_unit_xu_with_max_20_percent_discount": pri_min_20,
+        "fallback_provider": fb_provider,
+        "fallback_cost_vnd": fb_cost_vnd,
+        "fallback_min_unit_xu_1_scene": fb_min_1,
+        "fallback_min_unit_xu_with_max_20_percent_discount": fb_min_20,
     }
 
 

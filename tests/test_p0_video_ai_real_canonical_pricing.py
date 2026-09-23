@@ -52,16 +52,16 @@ def test_video_public_prices_and_runtime_routes_use_the_saved_current_map():
         for row in pricing.model_catalog()
     }
     assert video_prices == {
-        "social_fast_5": 200,
-        "grok3_5": 220,
-        "veo31_fast_8": 80,
-        "motion_standard_5": 110,
-        "motion_audio_5": 160,
-        "kling_long_audio_15": 220,
-        "motion_pro_audio_10": 370,
-        "human_performance_6": 370,
-        "multi_angle_reference_8": 1260,
-        "cinematic_multishot_10": 2360,
+        "social_fast_5": 259,
+        "grok3_5": 221,
+        "veo31_fast_8": 371,
+        "motion_standard_5": 804,
+        "motion_audio_5": 804,
+        "kling_long_audio_15": 3214,
+        "motion_pro_audio_10": 2143,
+        "human_performance_6": 337,
+        "multi_angle_reference_8": 1261,
+        "cinematic_multishot_10": 2411,
     }
 
     saved_rows = {
@@ -106,16 +106,16 @@ def test_video_catalog_has_ten_stable_tier_ids_in_owner_order():
 
 def test_video_package_registry_uses_tier_ids_with_canonical_price_and_duration():
     expected = {
-        200: (200, 5),
-        300: (220, 5),
-        400: (80, 8),
-        500: (110, 5),
-        600: (160, 5),
-        700: (220, 15),
-        800: (370, 10),
-        1000: (370, 6),
-        1200: (1260, 8),
-        1500: (2360, 10),
+        200: (259, 5),
+        300: (221, 5),
+        400: (371, 8),
+        500: (804, 5),
+        600: (804, 5),
+        700: (3214, 15),
+        800: (2143, 10),
+        1000: (337, 6),
+        1200: (1261, 8),
+        1500: (2411, 10),
     }
 
     for tier_id, (price_xu, seconds) in expected.items():
