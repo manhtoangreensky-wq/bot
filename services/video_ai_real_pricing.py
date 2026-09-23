@@ -1099,6 +1099,7 @@ SHOPAIKEY_USD_TO_VND = Decimal("3250")
 CANONICAL_TTS_MODEL = "tts-1"
 CANONICAL_TTS_RATE_USD_PER_CHAR = Decimal("0.000015")  # $0.015 per 1,000 characters
 CANONICAL_TTS_BILLING_UNIT = "characters"
+LIST_PRICE_MARKUP_MULTIPLIER = Decimal("3")
 LOSS_GUARD_MULTIPLIER = Decimal("1")
 
 
@@ -1303,20 +1304,24 @@ def calculate_product_video_safe_prices(tier_id: int | str) -> dict[str, Any]:
     pri_provider = str(pri.get("provider") or "") if pri else "NONE"
     pri_cost_vnd = float(_product_video_candidate_cost_vnd(pri, route))
     if pri and pri_cost_vnd > 0:
-        pri_req = Decimal(str(pri_cost_vnd)) * SALE_MULTIPLIER
-        pri_min_1 = math.ceil(pri_req / XU_TO_VND)
-        pri_min_20 = math.ceil(pri_req / (Decimal("0.8") * XU_TO_VND))
+        pri_cost_dec = Decimal(str(pri_cost_vnd))
+        pri_list_x3 = math.ceil(pri_cost_dec * LIST_PRICE_MARKUP_MULTIPLIER / XU_TO_VND)
+        pri_min_1 = math.ceil(pri_cost_dec * LOSS_GUARD_MULTIPLIER / XU_TO_VND)
+        pri_min_20 = math.ceil(pri_cost_dec * LOSS_GUARD_MULTIPLIER / (Decimal("0.8") * XU_TO_VND))
     else:
+        pri_list_x3 = 0
         pri_min_1 = 0
         pri_min_20 = 0
 
     fb_provider = str(fb.get("provider") or "") if fb else "NONE"
     fb_cost_vnd = float(_product_video_candidate_cost_vnd(fb, route))
     if fb and fb_cost_vnd > 0:
-        fb_req = Decimal(str(fb_cost_vnd)) * SALE_MULTIPLIER
-        fb_min_1 = math.ceil(fb_req / XU_TO_VND)
-        fb_min_20 = math.ceil(fb_req / (Decimal("0.8") * XU_TO_VND))
+        fb_cost_dec = Decimal(str(fb_cost_vnd))
+        fb_list_x3 = math.ceil(fb_cost_dec * LIST_PRICE_MARKUP_MULTIPLIER / XU_TO_VND)
+        fb_min_1 = math.ceil(fb_cost_dec * LOSS_GUARD_MULTIPLIER / XU_TO_VND)
+        fb_min_20 = math.ceil(fb_cost_dec * LOSS_GUARD_MULTIPLIER / (Decimal("0.8") * XU_TO_VND))
     else:
+        fb_list_x3 = 0
         fb_min_1 = 0
         fb_min_20 = 0
 
@@ -1325,10 +1330,12 @@ def calculate_product_video_safe_prices(tier_id: int | str) -> dict[str, Any]:
         "current_unit_xu": current_unit_xu,
         "primary_provider": pri_provider,
         "primary_cost_vnd": pri_cost_vnd,
+        "primary_list_unit_xu_x3": pri_list_x3,
         "primary_min_unit_xu_1_scene": pri_min_1,
         "primary_min_unit_xu_with_max_20_percent_discount": pri_min_20,
         "fallback_provider": fb_provider,
         "fallback_cost_vnd": fb_cost_vnd,
+        "fallback_list_unit_xu_x3": fb_list_x3,
         "fallback_min_unit_xu_1_scene": fb_min_1,
         "fallback_min_unit_xu_with_max_20_percent_discount": fb_min_20,
     }

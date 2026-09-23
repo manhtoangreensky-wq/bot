@@ -444,3 +444,56 @@ def test_canonical_positive_execution_allowed(monkeypatch, tmp_path):
     )
     assert key4u.submit_calls == 1
     assert result.get("provider_task_id_saved") is True or result.get("submit_accepted") is True
+
+
+def test_product_video_safe_price_helper_separates_markup_from_loss_guard(monkeypatch):
+    """Test that calculate_product_video_safe_prices separates x3 list price markup from loss-guard minimums.
+
+    On a deterministic provider cost of 10,000 VND:
+    - list_price_x3_xu = ceil(10,000 * 3 / 100) = 300 Xu
+    - no_loss_min_xu = ceil(10,000 * 1 / 100) = 100 Xu
+    - no_loss_min_with_20_percent_discount_xu = ceil(10,000 * 1 / (0.8 * 100)) = 125 Xu
+    - MUST NOT EQUAL 375 Xu (stale formula: 10,000 * 3 / 0.8 / 100)
+    """
+    monkeypatch.setattr(
+        video_ai_real_pricing,
+        "product_video_route_by_tier",
+        lambda _tier: {
+            "tier_id": 9999,
+            "customer_unit_xu": 300,
+            "candidates": [
+                {
+                    "provider": "shopaikey_video",
+                    "role": "primary",
+                    "eligible": True,
+                    "model": "grok-video-3",
+                    "total_route_cost_vnd": 10000,
+                },
+                {
+                    "provider": "key4u_video",
+                    "role": "fallback",
+                    "eligible": True,
+                    "model": "grok-imagine-video",
+                    "total_route_cost_vnd": 10000,
+                },
+            ],
+        },
+    )
+
+    res = video_ai_real_pricing.calculate_product_video_safe_prices(9999)
+
+    assert res["primary_cost_vnd"] == 10000.0
+    assert res["fallback_cost_vnd"] == 10000.0
+
+    # Stale helper derived 375 from 10000 * 3 / 0.8 / 100
+    # Expected Owner semantics:
+    assert res["primary_min_unit_xu_1_scene"] == 100
+    assert res["fallback_min_unit_xu_1_scene"] == 100
+
+    assert res["primary_min_unit_xu_with_max_20_percent_discount"] == 125
+    assert res["fallback_min_unit_xu_with_max_20_percent_discount"] == 125
+    assert res["primary_min_unit_xu_with_max_20_percent_discount"] != 375
+    assert res["fallback_min_unit_xu_with_max_20_percent_discount"] != 375
+
+    assert res.get("primary_list_unit_xu_x3") == 300
+    assert res.get("fallback_list_unit_xu_x3") == 300
