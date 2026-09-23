@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from services.subdub_blackboxes import auto_smart_multivoice
+from services import subdub_blackboxes
 
 
 TEST_POOLS = {
@@ -382,4 +383,125 @@ def test_case_k_source_path_fix_through_delegated_path(tmp_path):
     assert result.get("ok") is True
     assert spies["run_lane_blackbox_calls"] == 1
     assert result.get("source_bytes") == fake_bytes
+
+
+def test_smart_multivoice_lane_payload_contract_strict_runner():
+    """Prove Smart MultiVoice delegates clean payload to strict standard runner without kwargs leakage.
+
+    Reproduces production job #F22E5919 where process_subtitle_dub_job rejected 'validated_pools'.
+    """
+    spies, payload = _create_standard_harness()
+
+    captured_kwargs = {}
+
+    async def strict_standard_runner(
+        *,
+        mode: str,
+        state: dict,
+        prepare_subtitles: Any,
+        resolve_voice_id: Any,
+        synthesize_segments: Any,
+        build_timeline_audio: Any = None,
+        normalize_audio: Any = None,
+        validate_audio: Any = None,
+        render_video: Any = None,
+        job_id: str = "",
+        user_id: int | str = 0,
+        srt_from_text: Any = None,
+        segments_from_text: Any = None,
+        segments_from_subtitle: Any = None,
+        subtitle_output_items: Any = None,
+        parse_voice_speed: Any = None,
+        video_render_ready: Any = None,
+        ffmpeg_ready: Any = None,
+        dub_mux_enabled: bool = True,
+        is_admin: bool = False,
+    ) -> dict[str, Any]:
+        nonlocal captured_kwargs
+        captured_kwargs = {
+            "mode": mode,
+            "state": state,
+            "prepare_subtitles": prepare_subtitles,
+            "resolve_voice_id": resolve_voice_id,
+            "synthesize_segments": synthesize_segments,
+            "build_timeline_audio": build_timeline_audio,
+            "normalize_audio": normalize_audio,
+            "validate_audio": validate_audio,
+            "render_video": render_video,
+            "job_id": job_id,
+            "user_id": user_id,
+            "srt_from_text": srt_from_text,
+            "segments_from_text": segments_from_text,
+            "segments_from_subtitle": segments_from_subtitle,
+            "subtitle_output_items": subtitle_output_items,
+            "parse_voice_speed": parse_voice_speed,
+            "video_render_ready": video_render_ready,
+            "ffmpeg_ready": ffmpeg_ready,
+            "dub_mux_enabled": dub_mux_enabled,
+            "is_admin": is_admin,
+        }
+        return {
+            "ok": True,
+            "status": "SUCCESS",
+            "state": state,
+            "video_output": b"VALID_FINAL_MP4_BYTES",
+            "source_bytes": b"FAKE_SOURCE_MP4_BYTES_LONG_ENOUGH",
+            "audio_bytes": b"NORMALIZED_AUDIO_BYTES",
+            "output_segments": [],
+        }
+
+    async def spy_run_lane_blackbox(*, lane_mode: str, runner: Any, **lane_payload: Any):
+        spies["run_lane_blackbox_calls"] += 1
+        return await subdub_blackboxes.run_subdub_lane_blackbox(
+            lane_mode=lane_mode,
+            runner=runner,
+            **lane_payload,
+        )
+
+    payload["runner"] = strict_standard_runner
+    payload["run_lane_blackbox"] = spy_run_lane_blackbox
+
+    # Realistic production kwargs from bot.py
+    payload["validated_pools"] = TEST_POOLS
+    payload["required_pool_capacity"] = 2
+    payload["post_prepare_gate"] = lambda *a, **k: True
+    payload["stereo_pcm_path"] = "/tmp/stereo.pcm"
+    payload["ranges_by_speaker"] = {}
+    payload["deadline_monotonic"] = 999999.0
+    payload["stop_requested"] = lambda: False
+    payload["strict_two_classifier"] = None
+    payload["acoustic_classifications"] = {}
+    payload["fallback_level_override"] = None
+    payload["default_fallback_voice"] = "voice_male_1"
+    payload["locked_speaker_voice_map"] = None
+    payload["segments"] = []
+    payload["cues"] = []
+    payload["source_media"] = "/tmp/media.mp4"
+
+    result = asyncio.run(auto_smart_multivoice.run_auto_smart_multivoice_blackbox(**payload))
+    assert result.get("ok") is True
+
+    # Assert Smart-only control keys are NOT in delegated kwargs
+    assert "validated_pools" not in captured_kwargs
+    assert "required_pool_capacity" not in captured_kwargs
+    assert "post_prepare_gate" not in captured_kwargs
+    assert "stereo_pcm_path" not in captured_kwargs
+    assert "ranges_by_speaker" not in captured_kwargs
+    assert "deadline_monotonic" not in captured_kwargs
+    assert "stop_requested" not in captured_kwargs
+    assert "strict_two_classifier" not in captured_kwargs
+    assert "acoustic_classifications" not in captured_kwargs
+    assert "fallback_level_override" not in captured_kwargs
+    assert "default_fallback_voice" not in captured_kwargs
+    assert "locked_speaker_voice_map" not in captured_kwargs
+    assert "segments" not in captured_kwargs
+    assert "cues" not in captured_kwargs
+    assert "source_media" not in captured_kwargs
+
+    # Assert standard pipeline required keys remain present
+    assert captured_kwargs["mode"] == "dub"
+    assert isinstance(captured_kwargs["state"], dict)
+    assert callable(captured_kwargs["prepare_subtitles"])
+    assert callable(captured_kwargs["resolve_voice_id"])
+    assert callable(captured_kwargs["synthesize_segments"])
 

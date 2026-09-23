@@ -75,6 +75,26 @@ _NON_SPEECH_TEXT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Control-plane kwargs owned exclusively by Smart preflight/decision and excluded from standard lane delegation
+SMART_CONTROL_ONLY_KEYS: tuple[str, ...] = (
+    "validated_pools",
+    "required_pool_capacity",
+    "post_prepare_gate",
+    "extract_pcm",
+    "stereo_pcm_path",
+    "ranges_by_speaker",
+    "deadline_monotonic",
+    "stop_requested",
+    "strict_two_classifier",
+    "acoustic_classifications",
+    "fallback_level_override",
+    "default_fallback_voice",
+    "locked_speaker_voice_map",
+    "segments",
+    "cues",
+    "source_media",
+)
+
 
 @dataclass(frozen=True)
 class SmartVoiceDecision:
@@ -1398,6 +1418,8 @@ async def run_auto_smart_multivoice_blackbox(
     lane_payload.pop("run_lane_blackbox", None)
     lane_payload.pop("runner", None)
     lane_payload.pop("render_pipeline", None)
+    for key in SMART_CONTROL_ONLY_KEYS:
+        lane_payload.pop(key, None)
     lane_payload.update({
         "mode": lane_mode,
         "prepare_subtitles": already_prepared,
