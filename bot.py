@@ -3420,8 +3420,8 @@ def migrate_operations_v1b_schema(cursor) -> None:
         existing = _table_columns(cursor, table_name)
         for column_name, column_sql in columns_sql:
             _add_column_if_missing(cursor, table_name, column_name, column_sql, existing)
+    cursor.execute("DROP INDEX IF EXISTS idx_support_tickets_user_idemp_unique")
     cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_support_tickets_user_idempotency ON support_tickets(user_id, idempotency_key) WHERE idempotency_key != ''")
-    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_support_tickets_user_idemp_unique ON support_tickets(user_id, idempotency_key) WHERE idempotency_key != ''")
 
 def init_db():
     evaluate_data_persistence_startup_state()
@@ -4469,8 +4469,8 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_support_tickets_status ON support_tickets(status, created_at)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_support_tickets_priority ON support_tickets(priority, status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_support_tickets_idempotency ON support_tickets(user_id, idempotency_key)")
+    c.execute("DROP INDEX IF EXISTS idx_support_tickets_user_idemp_unique")
     c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_support_tickets_user_idempotency ON support_tickets(user_id, idempotency_key) WHERE idempotency_key != ''")
-    c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_support_tickets_user_idemp_unique ON support_tickets(user_id, idempotency_key) WHERE idempotency_key != ''")
     c.execute("CREATE INDEX IF NOT EXISTS idx_support_ticket_messages_ticket ON support_ticket_messages(ticket_id, created_at)")
     c.execute("""CREATE TABLE IF NOT EXISTS system_flags (
         key TEXT PRIMARY KEY,
@@ -60124,7 +60124,7 @@ def create_or_replay_support_ticket_atomic(
     detail = str(detail or clean_message)[:4000]
     idempotency_key = str(idempotency_key or "").strip()[:160]
     payload_hash = str(payload_hash or "").strip()[:64]
-    canonical_category = DEFAULT_SUPPORT_CATEGORY
+    canonical_category = category if category in SUPPORT_CATEGORIES else DEFAULT_SUPPORT_CATEGORY
     priority = support_ticket_priority(canonical_category, clean_message)
     now = now_text()
 
@@ -60267,8 +60267,14 @@ def list_support_tickets(*, user_id=None, status=None, high_priority=False, sear
         clauses.append("user_id=?")
         params.append(str(user_id))
     if status:
-        clauses.append("status=?")
-        params.append(str(status))
+        st = str(status).strip().lower()
+        if st == "open":
+            clauses.append("status NOT IN ('resolved','closed')")
+        elif st == "closed":
+            clauses.append("status IN ('resolved','closed')")
+        else:
+            clauses.append("status=?")
+            params.append(str(status))
     if high_priority:
         clauses.append("priority IN ('high','urgent')")
         clauses.append("status NOT IN ('resolved','closed')")
@@ -60333,7 +60339,6 @@ def update_support_ticket(ticket_id, **fields) -> dict | None:
     allowed = {
         "status", "priority", "attachment_file_id", "attachment_type", "attachment_name",
         "admin_note", "suggested_reply", "assigned_admin_id", "subject", "detail",
-        "idempotency_key", "payload_hash",
     }
     updates = []
     params = []
@@ -278143,28 +278148,28 @@ async def api_internal_customer_support_tickets_list(request: Request):
     from services.admin_wallet_service import verify_internal_admin_wallet_auth
     from services.customer_read_model_service import normalize_target_user_id
 
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
+    clean_header_actor = normalize_target_user_id(header_actor) if header_actor else ""
+    if not clean_header_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
     query_user_id = str(
         request.query_params.get("user_id")
         or request.query_params.get("canonical_user_id")
         or ""
     ).strip()
-    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
-
     clean_query_uid = normalize_target_user_id(query_user_id) if query_user_id else ""
-    clean_header_actor = normalize_target_user_id(header_actor) if header_actor else ""
 
-    if clean_query_uid and clean_header_actor and clean_query_uid != clean_header_actor:
+    if clean_query_uid and clean_query_uid != clean_header_actor:
         return JSONResponse(
             status_code=401,
             content={"ok": False, "error_code": "ACTOR_ID_MISMATCH", "message": "Header actor_id does not match target user_id"},
         )
 
-    target_user_id = clean_query_uid or clean_header_actor
-    if not target_user_id:
-        return JSONResponse(
-            status_code=401,
-            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
-        )
+    target_user_id = clean_header_actor
 
     auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
         authorization=request.headers.get("authorization", ""),
@@ -278182,9 +278187,17 @@ async def api_internal_customer_support_tickets_list(request: Request):
             content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
         )
 
+    status_filter = str(request.query_params.get("status") or "").strip().lower()
+    if status_filter:
+        if status_filter not in ("open", "closed"):
+            return JSONResponse(
+                status_code=400,
+                content={"ok": False, "error_code": "INVALID_STATUS_FILTER", "message": "Only 'open' and 'closed' status filters are allowed"},
+            )
+
     limit = max(1, min(int(request.query_params.get("limit") or 50), 100))
     offset = max(0, int(request.query_params.get("offset") or 0))
-    tickets = list_support_tickets(user_id=target_user_id, limit=limit, offset=offset)
+    tickets = list_support_tickets(user_id=target_user_id, status=status_filter or None, limit=limit, offset=offset)
     return JSONResponse(status_code=200, content={"ok": True, "items": tickets})
 
 
@@ -278211,6 +278224,11 @@ async def api_internal_customer_support_tickets_create(request: Request):
 
     header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
     clean_header_actor = normalize_target_user_id(header_actor) if header_actor else ""
+    if not clean_header_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
 
     forbidden_fields = {
         "account_id", "owner_id", "status", "priority", "assigned_admin", "assigned_admin_id",
@@ -278227,18 +278245,13 @@ async def api_internal_customer_support_tickets_create(request: Request):
     body_user_id = str(data.get("user_id") or "").strip()
     clean_body_uid = normalize_target_user_id(body_user_id) if body_user_id else ""
 
-    if clean_body_uid and clean_header_actor and clean_body_uid != clean_header_actor:
+    if clean_body_uid and clean_body_uid != clean_header_actor:
         return JSONResponse(
             status_code=401,
             content={"ok": False, "error_code": "ACTOR_ID_MISMATCH", "message": "Header actor_id does not match payload user_id"},
         )
 
-    target_user_id = clean_header_actor or clean_body_uid
-    if not target_user_id:
-        return JSONResponse(
-            status_code=401,
-            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
-        )
+    target_user_id = clean_header_actor
 
     auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
         authorization=request.headers.get("authorization", ""),
@@ -278295,25 +278308,13 @@ async def api_internal_customer_support_tickets_create(request: Request):
             content={"ok": False, "error_code": "INVALID_IDEMPOTENCY_KEY_LENGTH", "message": "Idempotency key must be between 12 and 160 characters"},
         )
 
+    category = str(data.get("category") or DEFAULT_SUPPORT_CATEGORY).strip()
+    if category not in SUPPORT_CATEGORIES:
+        category = DEFAULT_SUPPORT_CATEGORY
+
     payload_hash = hashlib.sha256(f"{subject}|{detail}".encode("utf-8")).hexdigest()
 
-    existing = get_support_ticket_by_idempotency(target_user_id, idempotency_key)
-    if existing:
-        existing_hash = str(existing.get("payload_hash") or "").strip()
-        if existing_hash and existing_hash == payload_hash:
-            return JSONResponse(status_code=200, content={"ok": True, "replayed": True, "ticket": existing, "items": [existing]})
-        if existing_hash != payload_hash:
-            return JSONResponse(
-                status_code=409,
-                content={"ok": False, "error_code": "IDEMPOTENCY_CONFLICT", "message": "Ticket with same idempotency key exists with different payload"},
-            )
-        return JSONResponse(status_code=200, content={"ok": True, "replayed": True, "ticket": existing, "items": [existing]})
-
-    category = str(data.get("category") or "general_support").strip()
-    if category not in SUPPORT_CATEGORIES:
-        category = "general_support"
-
-    ticket = create_support_ticket(
+    ticket, replayed, error_code = create_or_replay_support_ticket_atomic(
         user=target_user_id,
         category=category,
         message=detail,
@@ -278322,13 +278323,18 @@ async def api_internal_customer_support_tickets_create(request: Request):
         idempotency_key=idempotency_key,
         payload_hash=payload_hash,
     )
+    if error_code == "IDEMPOTENCY_CONFLICT":
+        return JSONResponse(
+            status_code=409,
+            content={"ok": False, "error_code": "IDEMPOTENCY_CONFLICT", "message": "Ticket with same idempotency key exists with different payload"},
+        )
     if not ticket or not ticket.get("id"):
         return JSONResponse(
             status_code=500,
-            content={"ok": False, "error_code": "TICKET_CREATION_FAILED", "message": "Failed to persist support ticket"},
+            content={"ok": False, "error_code": error_code or "TICKET_CREATION_FAILED", "message": "Failed to persist support ticket"},
         )
 
-    return JSONResponse(status_code=200, content={"ok": True, "replayed": False, "ticket": ticket, "items": [ticket]})
+    return JSONResponse(status_code=200, content={"ok": True, "replayed": bool(replayed), "ticket": ticket, "items": [ticket]})
 
 
 # ─── CANONICAL ADMIN PRODUCT COMMERCIAL AUTHORITY ENDPOINTS (SPEC-B01) ──────────
