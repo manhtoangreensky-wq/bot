@@ -100,7 +100,7 @@ def _create_standard_harness():
         },
     }
 
-    async def spy_prepare_subtitles(state: dict):
+    async def spy_prepare_subtitles(state: dict, *, require_auto_cast: bool = False):
         return dict(sample_prepared)
 
     async def fake_runner(**kwargs: Any) -> dict[str, Any]:
@@ -259,7 +259,7 @@ def test_case_f_non_speech_preservation():
         "text": "Lời nói bình thường",
     }
 
-    async def prepare_with_music(st: dict):
+    async def prepare_with_music(st: dict, *, require_auto_cast: bool = False):
         return {
             "source_bytes": b"FAKE_SOURCE_MP4_BYTES",
             "content_type": "video/mp4",
@@ -294,7 +294,7 @@ def test_case_g_no_manual_fallback_for_speaker_ambiguity():
         "text": "Chỉ có một người nói",
     }
 
-    async def prepare_single(st: dict):
+    async def prepare_single(st: dict, *, require_auto_cast: bool = False):
         return {
             "source_bytes": b"FAKE_SOURCE_MP4_BYTES",
             "content_type": "video/mp4",
@@ -370,8 +370,8 @@ def test_case_k_source_path_fix_through_delegated_path(tmp_path):
     payload["state"]["_pipeline_source_path_override"] = str(fake_source)
 
     # Empty source_bytes in prepare_subtitles to verify fallback to source_media file loading
-    async def prepare_without_bytes(st: dict):
-        base = await _create_standard_harness()[1]["prepare_subtitles"](st)
+    async def prepare_without_bytes(st: dict, *, require_auto_cast: bool = False):
+        base = await _create_standard_harness()[1]["prepare_subtitles"](st, require_auto_cast=require_auto_cast)
         base.pop("source_bytes", None)
         return base
 

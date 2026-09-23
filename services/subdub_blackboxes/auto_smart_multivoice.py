@@ -1173,7 +1173,12 @@ async def run_auto_smart_multivoice_blackbox(
     prepared = None
     if callable(prepare_subtitles):
         try:
-            prepared = await _maybe_await(prepare_subtitles(dict(current)))
+            prepared = await _maybe_await(
+                prepare_subtitles(
+                    dict(current),
+                    require_auto_cast=True,
+                )
+            )
         except Exception as prep_err:
             lane_mode = str(payload.get("lane_mode") or current.get("mode") or "dub")
             return {
