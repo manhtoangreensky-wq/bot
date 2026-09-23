@@ -3420,6 +3420,8 @@ def migrate_operations_v1b_schema(cursor) -> None:
         existing = _table_columns(cursor, table_name)
         for column_name, column_sql in columns_sql:
             _add_column_if_missing(cursor, table_name, column_name, column_sql, existing)
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_support_tickets_user_idempotency ON support_tickets(user_id, idempotency_key) WHERE idempotency_key != ''")
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_support_tickets_user_idemp_unique ON support_tickets(user_id, idempotency_key) WHERE idempotency_key != ''")
 
 def init_db():
     evaluate_data_persistence_startup_state()
@@ -4467,6 +4469,8 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_support_tickets_status ON support_tickets(status, created_at)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_support_tickets_priority ON support_tickets(priority, status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_support_tickets_idempotency ON support_tickets(user_id, idempotency_key)")
+    c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_support_tickets_user_idempotency ON support_tickets(user_id, idempotency_key) WHERE idempotency_key != ''")
+    c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_support_tickets_user_idemp_unique ON support_tickets(user_id, idempotency_key) WHERE idempotency_key != ''")
     c.execute("CREATE INDEX IF NOT EXISTS idx_support_ticket_messages_ticket ON support_ticket_messages(ticket_id, created_at)")
     c.execute("""CREATE TABLE IF NOT EXISTS system_flags (
         key TEXT PRIMARY KEY,
@@ -60102,6 +60106,109 @@ def create_support_ticket(user, category: str, message: str, **related) -> dict:
     finally:
         conn.close()
     return get_support_ticket(ticket_id) or {"id": ticket_id, "ticket_code": ticket_code}
+
+DEFAULT_SUPPORT_CATEGORY = "general_support"
+
+def create_or_replay_support_ticket_atomic(
+    user,
+    category: str = DEFAULT_SUPPORT_CATEGORY,
+    message: str = "",
+    subject: str = "",
+    detail: str = "",
+    idempotency_key: str = "",
+    payload_hash: str = "",
+    **related,
+) -> tuple[dict | None, bool, str | None]:
+    clean_message = str(detail or message or subject or "").strip()[:4000]
+    subject = str(subject or clean_message)[:180]
+    detail = str(detail or clean_message)[:4000]
+    idempotency_key = str(idempotency_key or "").strip()[:160]
+    payload_hash = str(payload_hash or "").strip()[:64]
+    canonical_category = DEFAULT_SUPPORT_CATEGORY
+    priority = support_ticket_priority(canonical_category, clean_message)
+    now = now_text()
+
+    if hasattr(user, "id"):
+        uid = str(user.id or "")
+        username = str(getattr(user, "username", "") or getattr(user, "first_name", "") or "")[:160]
+    elif isinstance(user, dict):
+        uid = str(user.get("id") or user.get("user_id") or "")
+        username = str(user.get("username") or user.get("first_name") or "")[:160]
+    else:
+        uid = str(user or "")
+        username = ""
+
+    conn = db_connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        if idempotency_key:
+            row = conn.execute(
+                """SELECT id,ticket_code,user_id,username,category,priority,status,message,
+                          related_job_id,related_payment_id,related_tool,attachment_file_id,attachment_type,
+                          attachment_name,admin_note,suggested_reply,assigned_admin_id,created_at,updated_at,closed_at,
+                          subject,detail,idempotency_key,payload_hash
+                   FROM support_tickets
+                   WHERE user_id=? AND idempotency_key=?
+                   ORDER BY id DESC LIMIT 1""",
+                (uid, idempotency_key),
+            ).fetchone()
+            if row:
+                conn.rollback()
+                existing = _support_ticket_row(row)
+                existing_hash = str(existing.get("payload_hash") or "").strip()
+                if existing_hash and existing_hash != payload_hash:
+                    return None, False, "IDEMPOTENCY_CONFLICT"
+                return existing, True, None
+
+        temporary_code = f"TMP-{uid}-{time.time_ns()}"
+        cursor = conn.execute(
+            """INSERT INTO support_tickets
+            (ticket_code, user_id, username, category, priority, status, message,
+             related_job_id, related_payment_id, related_tool, created_at, updated_at,
+             subject, detail, idempotency_key, payload_hash)
+            VALUES (?,?,?,?,?,'new',?,?,?,?,?,?,?,?,?,?)""",
+            (
+                temporary_code, uid, username, canonical_category, priority, clean_message,
+                str(related.get("related_job_id") or "")[:160],
+                str(related.get("related_payment_id") or "")[:160],
+                str(related.get("related_tool") or "")[:160],
+                now, now,
+                subject, detail, idempotency_key, payload_hash,
+            ),
+        )
+        ticket_id = int(cursor.lastrowid)
+        ticket_code = f"TA-{datetime.now().strftime('%Y%m%d')}-{ticket_id:06d}"
+        conn.execute("UPDATE support_tickets SET ticket_code=? WHERE id=?", (ticket_code, ticket_id))
+        conn.execute(
+            "INSERT INTO support_ticket_messages (ticket_id, sender_type, sender_id, message, delivery_status, created_at) VALUES (?,?,?,?,?,?)",
+            (ticket_id, "user", uid, clean_message, "recorded", now),
+        )
+        conn.commit()
+
+        created_row = conn.execute(
+            """SELECT id,ticket_code,user_id,username,category,priority,status,message,
+                      related_job_id,related_payment_id,related_tool,attachment_file_id,attachment_type,
+                      attachment_name,admin_note,suggested_reply,assigned_admin_id,created_at,updated_at,closed_at,
+                      subject,detail,idempotency_key,payload_hash
+               FROM support_tickets WHERE id=?""",
+            (ticket_id,),
+        ).fetchone()
+        return _support_ticket_row(created_row) or {"id": ticket_id, "ticket_code": ticket_code}, False, None
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        if idempotency_key:
+            existing = get_support_ticket_by_idempotency(uid, idempotency_key)
+            if existing:
+                existing_hash = str(existing.get("payload_hash") or "").strip()
+                if existing_hash and existing_hash != payload_hash:
+                    return None, False, "IDEMPOTENCY_CONFLICT"
+                return existing, True, None
+        return None, False, "INTEGRITY_ERROR"
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 def get_support_ticket(ticket_id, user_id=None) -> dict | None:
     conn = db_connect()
