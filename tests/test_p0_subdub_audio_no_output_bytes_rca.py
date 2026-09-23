@@ -44,7 +44,7 @@ def test_case_a_pipeline_saved_source_path_resolved(tmp_path: Path):
             "_pipeline_saved_source_path": str(dummy_source),
         }
 
-        async def mock_prepare(_st):
+        async def mock_prepare(_st, *, require_auto_cast: bool = False):
             return {
                 "source_bytes": b"dummy video data 12345678",
                 "content_type": "video/mp4",
@@ -80,7 +80,7 @@ def test_case_b_pipeline_source_path_override_resolved(tmp_path: Path):
             "_pipeline_source_path_override": str(dummy_source),
         }
 
-        async def mock_prepare(_st):
+        async def mock_prepare(_st, *, require_auto_cast: bool = False):
             return {
                 "source_bytes": b"dummy video data 12345678",
                 "content_type": "video/mp4",
@@ -119,7 +119,7 @@ def test_case_c_explicit_payload_source_media_precedence(tmp_path: Path):
             "_pipeline_saved_source_path": str(saved_source),
         }
 
-        async def mock_prepare(_st):
+        async def mock_prepare(_st, *, require_auto_cast: bool = False):
             return {
                 "source_bytes": b"explicit video data",
                 "content_type": "video/mp4",
@@ -153,7 +153,7 @@ def test_case_d_and_e_missing_source_failure_contract():
 
         result = await auto_smart_multivoice.run_auto_smart_multivoice_blackbox(
             state=state,
-            prepare_subtitles=lambda _st: asyncio.sleep(0, result={}),
+            prepare_subtitles=lambda _st, *a, **k: asyncio.sleep(0, result={}),
         )
 
         assert result.get("ok") is False
@@ -180,7 +180,7 @@ def test_case_f_44100_incident_fixture_path_resolution(tmp_path: Path):
             "source_sample_rate": 44100,
         }
 
-        async def mock_prepare(_st):
+        async def mock_prepare(_st, *, require_auto_cast: bool = False):
             return {
                 "source_bytes": b"incident fixture data 44100hz aac stereo",
                 "content_type": "video/mp4",

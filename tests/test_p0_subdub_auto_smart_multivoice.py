@@ -1711,3 +1711,80 @@ def test_74b_normalized_duplicate_aborts_synthesis(tmp_path):
         assert synth_called is False, "No synthesis authority may be invoked on duplicate map conflict"
 
     asyncio.run(_run())
+
+
+def test_75_smart_multivoice_prepare_subtitles_missing_require_auto_cast_regression(tmp_path):
+    """REGRESSION: prepare_subtitles must be called with require_auto_cast=True.
+
+    When require_auto_cast is False, ASR does not attach canonical speaker_id,
+    causing speech cues to fail with SMART_CUE_TERMINAL_REJECTED (#FC3A0CAADB).
+    """
+    async def _run():
+        dummy_media = tmp_path / "source.mp4"
+        dummy_media.write_bytes(b"dummy video data 12345678")
+
+        state = {
+            "auto_speaker_lane": "auto_smart_multivoice",
+            "voice_selection_mode": "auto_speaker",
+            "mode": "subtitle_plus_dub",
+            "_pipeline_saved_source_path": str(dummy_media),
+        }
+
+        observed: dict[str, Any] = {}
+
+        async def prepare_subtitles_seam(st, *, require_auto_cast=False):
+            observed["require_auto_cast"] = require_auto_cast
+            if require_auto_cast:
+                return {
+                    "source_bytes": b"dummy video data 12345678",
+                    "content_type": "video/mp4",
+                    "source_segments": [
+                        {"id": "cue_1", "cue_id": "cue_1", "speaker_id": "chunk_00:speaker_0", "start": 0.0, "end": 2.0, "text": "Hello"},
+                    ],
+                    "output_segments": [
+                        {"id": "cue_1", "cue_id": "cue_1", "speaker_id": "chunk_00:speaker_0", "start": 0.0, "end": 2.0, "text": "Xin chao"},
+                    ],
+                }
+            return {
+                "source_bytes": b"dummy video data 12345678",
+                "content_type": "video/mp4",
+                "source_segments": [
+                    {"id": "cue_1", "cue_id": "cue_1", "start": 0.0, "end": 2.0, "text": "Hello"},
+                ],
+                "output_segments": [
+                    {"id": "cue_1", "cue_id": "cue_1", "start": 0.0, "end": 2.0, "text": "Xin chao"},
+                ],
+            }
+
+        async def _mock_run_lane(*, lane_mode: str, runner: Any, **lane_payload: Any):
+            return await runner(lane_mode=lane_mode, **lane_payload)
+
+        async def _mock_runner(**kwargs: Any):
+            prep_fn = kwargs.get("prepare_subtitles")
+            prep = await prep_fn(kwargs.get("state") or {}) if callable(prep_fn) else {}
+            return {
+                "ok": True,
+                "status": "SUCCESS",
+                "source_bytes": prep.get("source_bytes") or b"dummy video data 12345678",
+                "audio_bytes": b"dummy audio",
+                "video_output": b"dummy mp4 bytes",
+                "state": kwargs.get("state") or {},
+            }
+
+        result = await smart.run_auto_smart_multivoice_blackbox(
+            state=state,
+            prepare_subtitles=prepare_subtitles_seam,
+            validated_pools={"low": ["v1", "v2"], "high": ["v3", "v4"]},
+            run_lane_blackbox=_mock_run_lane,
+            runner=_mock_runner,
+        )
+
+        assert observed.get("require_auto_cast") is True, (
+            f"Expected prepare_subtitles to receive require_auto_cast=True, observed: {observed.get('require_auto_cast')}"
+        )
+        assert result.get("ok") is True, (
+            f"Expected ok=True when require_auto_cast=True, got status={result.get('status')}, blocker={result.get('blocker')}"
+        )
+
+    asyncio.run(_run())
+
