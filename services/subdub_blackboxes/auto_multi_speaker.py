@@ -1625,6 +1625,199 @@ async def _run_multi_speaker_preflight(
     return result
 
 
+MULTI_CUE_ROUNDING_TOLERANCE_SECONDS = 0.001
+MULTI_CUE_FLOAT_REPRESENTATION_EPSILON = 1e-11
+
+
+def _multi_timing_matches(actual: float, expected: float) -> bool:
+    delta = abs(actual - expected)
+    if delta <= MULTI_CUE_ROUNDING_TOLERANCE_SECONDS:
+        return True
+    return math.isclose(
+        delta,
+        MULTI_CUE_ROUNDING_TOLERANCE_SECONDS,
+        rel_tol=0.0,
+        abs_tol=MULTI_CUE_FLOAT_REPRESENTATION_EPSILON,
+    )
+
+
+def _extract_multi_cue_identity(item: object) -> tuple[str, float, float]:
+    if not isinstance(item, Mapping):
+        raise speaker_cast.AutoCastUnavailable()
+    cue_id = item.get("cue_id")
+    start = item.get("start")
+    end = item.get("end")
+    if (
+        type(cue_id) is not str
+        or not cue_id
+        or cue_id != cue_id.strip()
+        or isinstance(start, bool)
+        or isinstance(end, bool)
+        or not isinstance(start, (int, float))
+        or not isinstance(end, (int, float))
+    ):
+        raise speaker_cast.AutoCastUnavailable()
+    normalized_start = float(start)
+    normalized_end = float(end)
+    if (
+        not math.isfinite(normalized_start)
+        or not math.isfinite(normalized_end)
+        or normalized_start < 0.0
+        or normalized_end <= normalized_start
+    ):
+        raise speaker_cast.AutoCastUnavailable()
+    return cue_id, normalized_start, normalized_end
+
+
+def _annotate_multi_prepared_assignments(
+    prepared: object,
+    casts: Mapping[str, object],
+) -> tuple[dict[str, Any], dict[str, tuple[str, str, float, float]]]:
+    if not isinstance(prepared, dict) or not isinstance(casts, Mapping) or not casts:
+        raise speaker_cast.AutoCastUnavailable()
+    raw_source = prepared.get("source_segments")
+    raw_output = prepared.get("output_segments")
+    if (
+        not isinstance(raw_source, list)
+        or not raw_source
+        or not isinstance(raw_output, list)
+        or not raw_output
+    ):
+        raise speaker_cast.AutoCastUnavailable()
+
+    assignments: dict[str, tuple[str, str, float, float]] = {}
+    annotated_source: list[dict[str, Any]] = []
+    for raw_segment in raw_source:
+        cue_id, start, end = _extract_multi_cue_identity(raw_segment)
+        if cue_id in assignments:
+            raise speaker_cast.AutoCastUnavailable()
+        segment = dict(raw_segment)
+        speaker_id = segment.get("speaker_id")
+        if type(speaker_id) is not str or not speaker_id or speaker_id != speaker_id.strip():
+            raise speaker_cast.AutoCastUnavailable()
+        cast = casts.get(speaker_id)
+        if not isinstance(cast, Mapping):
+            raise speaker_cast.AutoCastManualRequired()
+        voice_register = cast.get("voice_register")
+        voice_id = cast.get("voice_id")
+        if voice_register not in {"low", "high"} or type(voice_id) is not str or not voice_id:
+            raise speaker_cast.AutoCastManualRequired()
+        assignments[cue_id] = (str(voice_register), str(voice_id), start, end)
+        annotated_source.append(
+            {
+                **segment,
+                "voice_register": voice_register,
+                "tts_voice_id": voice_id,
+            }
+        )
+
+    annotated_output: list[dict[str, Any]] = []
+    output_cue_ids: set[str] = set()
+    for raw_segment in raw_output:
+        cue_id, out_start, out_end = _extract_multi_cue_identity(raw_segment)
+        if cue_id in output_cue_ids:
+            raise speaker_cast.AutoCastUnavailable()
+        output_cue_ids.add(cue_id)
+        assignment = assignments.get(cue_id)
+        if assignment is None:
+            raise speaker_cast.AutoCastUnavailable()
+        voice_register, voice_id, src_start, src_end = assignment
+        if (
+            not _multi_timing_matches(out_start, src_start)
+            or not _multi_timing_matches(out_end, src_end)
+        ):
+            raise speaker_cast.AutoCastUnavailable()
+        annotated_output.append(
+            {
+                **dict(raw_segment),
+                "voice_register": voice_register,
+                "tts_voice_id": voice_id,
+            }
+        )
+
+    if output_cue_ids != set(assignments.keys()):
+        raise speaker_cast.AutoCastUnavailable()
+
+    annotated_prepared = {
+        **prepared,
+        "source_segments": annotated_source,
+        "output_segments": annotated_output,
+    }
+    return annotated_prepared, assignments
+
+
+def _multi_selected_voice_signature(
+    segments: list[dict[str, Any]],
+) -> tuple[tuple[str, str], ...]:
+    signature: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for segment in segments:
+        cue_id, _, _ = _extract_multi_cue_identity(segment)
+        if cue_id in seen:
+            raise speaker_cast.AutoCastUnavailable()
+        seen.add(cue_id)
+        voice_id = segment.get("tts_voice_id")
+        if type(voice_id) is not str or not voice_id:
+            raise speaker_cast.AutoCastManualRequired()
+        signature.append((cue_id, voice_id))
+    if not signature:
+        raise speaker_cast.AutoCastManualRequired()
+    return tuple(signature)
+
+
+def _validated_multi_policy_segments(
+    pipeline_state: object,
+    prepared: dict[str, Any],
+    assignments: Mapping[str, tuple[str, str, float, float]],
+) -> list[dict[str, Any]]:
+    if not isinstance(pipeline_state, dict):
+        raise speaker_cast.AutoCastUnavailable()
+    policy = auto_speaker.subtitle_dub_product_pipeline.resolve_subdub_dub_audio_policy(
+        pipeline_state,
+        prepared,
+    )
+    raw_segments = policy.get("tts_segments")
+    if not isinstance(raw_segments, list) or not raw_segments:
+        raise speaker_cast.AutoCastManualRequired()
+    return _validated_multi_assigned_segments(raw_segments, assignments)
+
+
+def _validated_multi_assigned_segments(
+    raw_segments: object,
+    assignments: Mapping[str, tuple[str, str, float, float]],
+) -> list[dict[str, Any]]:
+    if not isinstance(raw_segments, list) or not raw_segments:
+        raise speaker_cast.AutoCastManualRequired()
+
+    selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw_segment in raw_segments:
+        cue_id, seg_start, seg_end = _extract_multi_cue_identity(raw_segment)
+        if cue_id in seen:
+            raise speaker_cast.AutoCastUnavailable()
+        seen.add(cue_id)
+        expected = assignments.get(cue_id)
+        if expected is None:
+            raise speaker_cast.AutoCastUnavailable()
+        expected_register, expected_voice_id, src_start, src_end = expected
+        if (
+            not _multi_timing_matches(seg_start, src_start)
+            or not _multi_timing_matches(seg_end, src_end)
+        ):
+            raise speaker_cast.AutoCastUnavailable()
+        voice_register = raw_segment.get("voice_register")
+        voice_id = raw_segment.get("tts_voice_id")
+        if (
+            voice_register != expected_register
+            or type(voice_id) is not str
+            or not voice_id
+            or voice_id != expected_voice_id
+        ):
+            raise speaker_cast.AutoCastManualRequired()
+        selected.append(dict(raw_segment))
+    return selected
+
+
 async def _run_isolated_multi_speaker_blackbox(
     *,
     lane_mode: str,
@@ -1714,7 +1907,7 @@ async def _run_isolated_multi_speaker_blackbox(
             assignment_seed=assignment_seed,
         )
         annotated_prepared, assignments = (
-            auto_speaker._annotate_prepared_assignments(prepared, casts)
+            _annotate_multi_prepared_assignments(prepared, casts)
         )
     except asyncio.CancelledError:
         raise
@@ -1725,7 +1918,7 @@ async def _run_isolated_multi_speaker_blackbox(
         return _multi_manual_required_result(current, exc)
 
     expected_selected_signature: tuple[
-        tuple[str, float, float, str], ...
+        tuple[str, str], ...
     ] | None = None
 
     async def already_prepared(_state: dict) -> dict[str, Any]:
@@ -1737,15 +1930,15 @@ async def _run_isolated_multi_speaker_blackbox(
     ) -> str:
         nonlocal expected_selected_signature
         try:
-            selected = auto_speaker._validated_policy_segments(
+            selected = _validated_multi_policy_segments(
                 pipeline_state,
                 annotated_prepared,
                 assignments,
             )
-            expected_selected_signature = auto_speaker._selected_voice_signature(
+            expected_selected_signature = _multi_selected_voice_signature(
                 selected
             )
-            return expected_selected_signature[0][3]
+            return expected_selected_signature[0][1]
         except (
             speaker_cast.AutoCastUnavailable,
             speaker_cast.AutoCastManualRequired,
@@ -1761,15 +1954,15 @@ async def _run_isolated_multi_speaker_blackbox(
         try:
             if expected_selected_signature is None:
                 raise speaker_cast.AutoCastUnavailable()
-            selected = auto_speaker._validated_assigned_segments(
+            selected = _validated_multi_assigned_segments(
                 segments,
                 assignments,
             )
-            actual_signature = auto_speaker._selected_voice_signature(selected)
+            actual_signature = _multi_selected_voice_signature(selected)
             if actual_signature != expected_selected_signature:
                 raise speaker_cast.AutoCastUnavailable()
             compatibility_voice = kwargs.get("voice_id")
-            if compatibility_voice != expected_selected_signature[0][3]:
+            if compatibility_voice != expected_selected_signature[0][1]:
                 raise speaker_cast.AutoCastManualRequired()
 
             chunks: list[dict[str, Any]] = []

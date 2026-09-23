@@ -2779,3 +2779,366 @@ def test_non_multi_pcm_keeps_normalized_saved_source_priority(
     )
 
     assert calls[0][0][3] == str(normalized)
+
+
+# ==============================================================================
+# P0.SUBDUB.AUTO.MULTI.CUE.PARITY.ROUNDING.RECONCILIATION.R1
+# Tests A through J: Positive & Negative cue parity rounding regression suite
+# ==============================================================================
+
+def test_multi_speaker_cue_parity_a_exact_same_cue_timing_pass() -> None:
+    """Test A: Exact same cue/timing remains PASS."""
+    multi_module = _multi_module()
+    source = [{"cue_id": "cue-1", "start": 1.234, "end": 2.345, "speaker_id": "s0"}]
+    output = [{"cue_id": "cue-1", "start": 1.234, "end": 2.345, "speaker_id": "s0"}]
+    casts = {"s0": {"speaker_id": "s0", "voice_register": "low", "voice_id": "v0"}}
+    prepared = {"source_segments": source, "output_segments": output}
+
+    annotated, assignments = multi_module._annotate_multi_prepared_assignments(prepared, casts)
+    assert len(annotated["output_segments"]) == 1
+    assert annotated["output_segments"][0]["cue_id"] == "cue-1"
+    assert annotated["output_segments"][0]["tts_voice_id"] == "v0"
+    assert assignments["cue-1"] == ("low", "v0", 1.234, 2.345)
+
+
+def test_multi_speaker_cue_parity_b_drift_0_0005_pass() -> None:
+    """Test B: Same cue_id with +0.0005s drift remains PASS."""
+    multi_module = _multi_module()
+    source = [{"cue_id": "cue-1", "start": 1.234, "end": 2.345, "speaker_id": "s0"}]
+    output = [{"cue_id": "cue-1", "start": 1.2345, "end": 2.3455, "speaker_id": "s0"}]
+    casts = {"s0": {"speaker_id": "s0", "voice_register": "low", "voice_id": "v0"}}
+    prepared = {"source_segments": source, "output_segments": output}
+
+    annotated, assignments = multi_module._annotate_multi_prepared_assignments(prepared, casts)
+    assert len(annotated["output_segments"]) == 1
+    assert annotated["output_segments"][0]["cue_id"] == "cue-1"
+    assert annotated["output_segments"][0]["tts_voice_id"] == "v0"
+    assert assignments["cue-1"] == ("low", "v0", 1.234, 2.345)
+
+
+def test_multi_speaker_cue_parity_c_drift_0_001_pass() -> None:
+    """Test C: Same cue_id with exactly 0.001s drift remains PASS."""
+    multi_module = _multi_module()
+    source = [{"cue_id": "cue-1", "start": 1.234, "end": 2.345, "speaker_id": "s0"}]
+    output = [{"cue_id": "cue-1", "start": 1.235, "end": 2.346, "speaker_id": "s0"}]
+    casts = {"s0": {"speaker_id": "s0", "voice_register": "low", "voice_id": "v0"}}
+    prepared = {"source_segments": source, "output_segments": output}
+
+    annotated, assignments = multi_module._annotate_multi_prepared_assignments(prepared, casts)
+    assert len(annotated["output_segments"]) == 1
+    assert annotated["output_segments"][0]["cue_id"] == "cue-1"
+    assert annotated["output_segments"][0]["tts_voice_id"] == "v0"
+    assert assignments["cue-1"] == ("low", "v0", 1.234, 2.345)
+
+
+def test_multi_speaker_cue_parity_d_drift_over_0_001_fail_closed() -> None:
+    """Test D: drift > 0.001s FAIL_CLOSED."""
+    multi_module = _multi_module()
+    source = [{"cue_id": "cue-1", "start": 1.234, "end": 2.345, "speaker_id": "s0"}]
+    output = [{"cue_id": "cue-1", "start": 1.2351, "end": 2.345, "speaker_id": "s0"}]
+    casts = {"s0": {"speaker_id": "s0", "voice_register": "low", "voice_id": "v0"}}
+    prepared = {"source_segments": source, "output_segments": output}
+
+    with pytest.raises(speaker_cast.AutoCastUnavailable):
+        multi_module._annotate_multi_prepared_assignments(prepared, casts)
+
+
+def test_multi_speaker_cue_parity_e_duplicate_source_cue_fail_closed() -> None:
+    """Test E: duplicate source cue_id FAIL_CLOSED."""
+    multi_module = _multi_module()
+    source = [
+        {"cue_id": "cue-1", "start": 1.0, "end": 2.0, "speaker_id": "s0"},
+        {"cue_id": "cue-1", "start": 2.0, "end": 3.0, "speaker_id": "s1"},
+    ]
+    output = [{"cue_id": "cue-1", "start": 1.0, "end": 2.0, "speaker_id": "s0"}]
+    casts = {
+        "s0": {"speaker_id": "s0", "voice_register": "low", "voice_id": "v0"},
+        "s1": {"speaker_id": "s1", "voice_register": "high", "voice_id": "v1"},
+    }
+    prepared = {"source_segments": source, "output_segments": output}
+
+    with pytest.raises(speaker_cast.AutoCastUnavailable):
+        multi_module._annotate_multi_prepared_assignments(prepared, casts)
+
+
+def test_multi_speaker_cue_parity_f_duplicate_output_cue_fail_closed() -> None:
+    """Test F: duplicate output cue_id FAIL_CLOSED."""
+    multi_module = _multi_module()
+    source = [{"cue_id": "cue-1", "start": 1.0, "end": 2.0, "speaker_id": "s0"}]
+    output = [
+        {"cue_id": "cue-1", "start": 1.0, "end": 2.0, "speaker_id": "s0"},
+        {"cue_id": "cue-1", "start": 1.0, "end": 2.0, "speaker_id": "s0"},
+    ]
+    casts = {"s0": {"speaker_id": "s0", "voice_register": "low", "voice_id": "v0"}}
+    prepared = {"source_segments": source, "output_segments": output}
+
+    with pytest.raises(speaker_cast.AutoCastUnavailable):
+        multi_module._annotate_multi_prepared_assignments(prepared, casts)
+
+
+def test_multi_speaker_cue_parity_g_missing_output_cue_fail_closed() -> None:
+    """Test G: missing output cue FAIL_CLOSED."""
+    multi_module = _multi_module()
+    source = [
+        {"cue_id": "cue-1", "start": 1.0, "end": 2.0, "speaker_id": "s0"},
+        {"cue_id": "cue-2", "start": 2.0, "end": 3.0, "speaker_id": "s1"},
+    ]
+    output = [{"cue_id": "cue-1", "start": 1.0, "end": 2.0, "speaker_id": "s0"}]
+    casts = {
+        "s0": {"speaker_id": "s0", "voice_register": "low", "voice_id": "v0"},
+        "s1": {"speaker_id": "s1", "voice_register": "high", "voice_id": "v1"},
+    }
+    prepared = {"source_segments": source, "output_segments": output}
+
+    with pytest.raises(speaker_cast.AutoCastUnavailable):
+        multi_module._annotate_multi_prepared_assignments(prepared, casts)
+
+
+def test_multi_speaker_cue_parity_h_extra_output_cue_fail_closed() -> None:
+    """Test H: extra output cue FAIL_CLOSED."""
+    multi_module = _multi_module()
+    source = [{"cue_id": "cue-1", "start": 1.0, "end": 2.0, "speaker_id": "s0"}]
+    output = [
+        {"cue_id": "cue-1", "start": 1.0, "end": 2.0, "speaker_id": "s0"},
+        {"cue_id": "cue-2", "start": 2.0, "end": 3.0, "speaker_id": "s1"},
+    ]
+    casts = {
+        "s0": {"speaker_id": "s0", "voice_register": "low", "voice_id": "v0"},
+        "s1": {"speaker_id": "s1", "voice_register": "high", "voice_id": "v1"},
+    }
+    prepared = {"source_segments": source, "output_segments": output}
+
+    with pytest.raises(speaker_cast.AutoCastUnavailable):
+        multi_module._annotate_multi_prepared_assignments(prepared, casts)
+
+
+def test_multi_speaker_cue_parity_i_different_cue_id_same_timing_fail_closed() -> None:
+    """Test I: same timing but different cue_id FAIL_CLOSED."""
+    multi_module = _multi_module()
+    source = [{"cue_id": "cue-1", "start": 1.234, "end": 2.345, "speaker_id": "s0"}]
+    output = [{"cue_id": "cue-2", "start": 1.234, "end": 2.345, "speaker_id": "s0"}]
+    casts = {"s0": {"speaker_id": "s0", "voice_register": "low", "voice_id": "v0"}}
+    prepared = {"source_segments": source, "output_segments": output}
+
+    with pytest.raises(speaker_cast.AutoCastUnavailable):
+        multi_module._annotate_multi_prepared_assignments(prepared, casts)
+
+
+def test_multi_speaker_cue_parity_j_voice_assignment_mismatch_fail_closed() -> None:
+    """Test J: voice assignment mismatch FAIL_CLOSED."""
+    multi_module = _multi_module()
+    source = [{"cue_id": "cue-1", "start": 1.0, "end": 2.0, "speaker_id": "s0"}]
+    output = [{"cue_id": "cue-1", "start": 1.0, "end": 2.0, "speaker_id": "s0"}]
+    # Missing cast for s0 raises AutoCastManualRequired
+    prepared = {"source_segments": source, "output_segments": output}
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        multi_module._annotate_multi_prepared_assignments(
+            prepared,
+            {"s1": {"speaker_id": "s1", "voice_register": "high", "voice_id": "v1"}},
+        )
+
+    # In validation: wrong voice_id raises AutoCastManualRequired
+    casts = {"s0": {"speaker_id": "s0", "voice_register": "low", "voice_id": "v0"}}
+    _, assignments = multi_module._annotate_multi_prepared_assignments(prepared, casts)
+    mismatched_segments = [
+        {
+            "cue_id": "cue-1",
+            "start": 1.0,
+            "end": 2.0,
+            "voice_register": "low",
+            "tts_voice_id": "wrong-voice",
+        }
+    ]
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        multi_module._validated_multi_assigned_segments(mismatched_segments, assignments)
+
+
+def test_generalized_multi_speaker_cue_parity_with_3dp_rounding_drift(monkeypatch) -> None:
+    """
+    End-to-end blackbox acceptance test:
+    When source_segments has unrounded float timestamps and output_segments has
+    3-decimal rounded timestamps, the multi-speaker pipeline must successfully
+    match cues by cue_id and pass cue assignment without failing.
+    """
+    multi_module = _multi_module()
+    labels = ["chunk_00:speaker_0", "chunk_00:speaker_1", "chunk_00:speaker_2"]
+    state = {
+        **EXACT_AUTO_STATE,
+        "auto_speaker_lane": "multi",
+        "mode": "subtitle_plus_dub",
+        "dub_text_source": "translated",
+    }
+    source_segments = [
+        {
+            "cue_id": "cue_001",
+            "index": 1,
+            "start": 1.234567,
+            "end": 2.345678,
+            "text": "Speaker zero unrounded",
+            "speaker_id": labels[0],
+        },
+        {
+            "cue_id": "cue_002",
+            "index": 2,
+            "start": 2.456789,
+            "end": 3.567890,
+            "text": "Speaker one unrounded",
+            "speaker_id": labels[1],
+        },
+        {
+            "cue_id": "cue_003",
+            "index": 3,
+            "start": 3.678901,
+            "end": 4.789012,
+            "text": "Speaker two unrounded",
+            "speaker_id": labels[2],
+        },
+    ]
+    output_segments = [
+        {
+            "cue_id": "cue_001",
+            "index": 1,
+            "start": round(1.234567, 3),
+            "end": round(2.345678, 3),
+            "text": "Speaker zero translated",
+            "speaker_id": labels[0],
+        },
+        {
+            "cue_id": "cue_002",
+            "index": 2,
+            "start": round(2.456789, 3),
+            "end": round(3.567890, 3),
+            "text": "Speaker one translated",
+            "speaker_id": labels[1],
+        },
+        {
+            "cue_id": "cue_003",
+            "index": 3,
+            "start": round(3.678901, 3),
+            "end": round(4.789012, 3),
+            "text": "Speaker two translated",
+            "speaker_id": labels[2],
+        },
+    ]
+    prepared = {
+        "state": {**state, "speaker_sidecar_sha256": "f" * 64},
+        "source_segments": source_segments,
+        "output_segments": output_segments,
+    }
+    classifications = {
+        labels[0]: {"speaker_id": labels[0], "voice_register": "low", "confidence": 0.99},
+        labels[1]: {"speaker_id": labels[1], "voice_register": "high", "confidence": 0.99},
+        labels[2]: {"speaker_id": labels[2], "voice_register": "low", "confidence": 0.99},
+    }
+
+    async def fake_preflight(*_args, **_kwargs):
+        return {
+            "ok": True,
+            "status": auto_speaker.AUTO_SPEAKER_PREFLIGHT_READY,
+            "prepared": prepared,
+            "speaker_labels": labels,
+            "classifications": classifications,
+        }
+
+    monkeypatch.setattr(
+        multi_module,
+        "_run_multi_speaker_preflight",
+        fake_preflight,
+    )
+
+    runner_calls = []
+
+    async def fake_run_lane(*, runner, **payload):
+        annotated = await payload["prepare_subtitles"](payload["state"])
+        runner_calls.append(annotated)
+        return {"ok": True, "final_mp4": "output.mp4"}
+
+    result = asyncio.run(
+        multi_module._run_isolated_multi_speaker_blackbox(
+            lane_mode="subtitle_plus_dub",
+            run_lane_blackbox=fake_run_lane,
+            runner=lambda **_kw: {},
+            prepare_subtitles=lambda _s: prepared,
+            resolve_voice_id=lambda _u, _s: "voice",
+            synthesize_segments=lambda _segs, **_kw: {},
+            post_prepare_gate=lambda _s: {"continue": True},
+            extract_pcm=lambda *_a, **_kw: "unused.pcm",
+            validated_pools={"low": ["v1", "v2", "v3"], "high": ["v4", "v5", "v6"]},
+            classify_speakers=lambda *_a, **_kw: classifications,
+            required_pool_capacity=3,
+            state=state,
+        )
+    )
+
+    assert result.get("ok") is True
+    assert result.get("status") != speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+    assert len(runner_calls) == 1
+    annotated_out = runner_calls[0]["output_segments"]
+    assert len(annotated_out) == 3
+    assert annotated_out[0]["cue_id"] == "cue_001"
+    assert annotated_out[0]["tts_voice_id"] is not None
+
+
+@pytest.mark.parametrize(
+    ("drift", "should_pass"),
+    [
+        (0.0010000, True),
+        (0.0010000000000001, True),
+        (0.0010001, False),
+        (0.0010004, False),
+        (0.001001, False),
+    ],
+)
+def test_multi_speaker_cue_parity_micro_boundary_annotation(drift: float, should_pass: bool) -> None:
+    multi_module = _multi_module()
+    src_start = 1.0
+    src_end = 2.0
+    out_start = src_start + drift
+    out_end = src_end + drift
+    source = [{"cue_id": "cue-1", "start": src_start, "end": src_end, "speaker_id": "s0"}]
+    output = [{"cue_id": "cue-1", "start": out_start, "end": out_end, "speaker_id": "s0"}]
+    casts = {"s0": {"speaker_id": "s0", "voice_register": "low", "voice_id": "v0"}}
+    prepared = {"source_segments": source, "output_segments": output}
+
+    if should_pass:
+        annotated, assignments = multi_module._annotate_multi_prepared_assignments(prepared, casts)
+        assert len(annotated["output_segments"]) == 1
+        assert annotated["output_segments"][0]["tts_voice_id"] == "v0"
+    else:
+        with pytest.raises(speaker_cast.AutoCastUnavailable):
+            multi_module._annotate_multi_prepared_assignments(prepared, casts)
+
+
+@pytest.mark.parametrize(
+    ("drift", "should_pass"),
+    [
+        (0.0010000, True),
+        (0.0010000000000001, True),
+        (0.0010001, False),
+        (0.0010004, False),
+        (0.001001, False),
+    ],
+)
+def test_multi_speaker_cue_parity_micro_boundary_selected_segment(drift: float, should_pass: bool) -> None:
+    multi_module = _multi_module()
+    src_start = 1.0
+    src_end = 2.0
+    seg_start = src_start + drift
+    seg_end = src_end + drift
+    assignments = {"cue-1": ("low", "v0", src_start, src_end)}
+    raw_segments = [
+        {
+            "cue_id": "cue-1",
+            "start": seg_start,
+            "end": seg_end,
+            "voice_register": "low",
+            "tts_voice_id": "v0",
+        }
+    ]
+
+    if should_pass:
+        validated = multi_module._validated_multi_assigned_segments(raw_segments, assignments)
+        assert len(validated) == 1
+    else:
+        with pytest.raises(speaker_cast.AutoCastUnavailable):
+            multi_module._validated_multi_assigned_segments(raw_segments, assignments)
