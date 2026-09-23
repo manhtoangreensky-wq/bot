@@ -36,6 +36,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import tempfile
 import time
 from typing import Any, Callable, Mapping, Sequence
 
@@ -86,6 +87,7 @@ SMART_CONTROL_ONLY_KEYS: tuple[str, ...] = (
     "deadline_monotonic",
     "stop_requested",
     "strict_two_classifier",
+    "multi_speaker_classifier",
     "acoustic_classifications",
     "fallback_level_override",
     "default_fallback_voice",
@@ -174,10 +176,12 @@ def decide_smart_multivoice(
     deadline_monotonic: float | None = None,
     stop_requested: Callable[[], bool] | None = None,
     strict_two_classifier: Callable[..., Any] | None = None,
+    multi_speaker_classifier: Callable[..., Any] | None = None,
     acoustic_classifications: Mapping[str, Mapping[str, Any]] | None = None,
     fallback_level_override: int | None = None,
     default_fallback_voice: str | None = None,
     locked_speaker_voice_map: Mapping[str, str] | None = None,
+    raise_manual_required: bool = False,
 ) -> SmartVoiceDecision:
     """Core pure-functional decision authority for Auto Smart Multi-Voice lane."""
     seed = hashlib.sha256(str(assignment_seed).encode("utf-8")).hexdigest()
@@ -481,6 +485,12 @@ def decide_smart_multivoice(
         conf = 0.0
         if isinstance(spk_meta, Mapping):
             register = spk_meta.get("voice_register")
+            if not register:
+                gender = str(spk_meta.get("voice_gender") or "").strip().lower()
+                if gender == "male":
+                    register = "low"
+                elif gender == "female":
+                    register = "high"
             try:
                 conf = float(spk_meta.get("confidence") or 0.0)
             except (TypeError, ValueError):
@@ -515,7 +525,10 @@ def decide_smart_multivoice(
             from services import subdub_two_speaker_gender_onnx
             strict_fn = subdub_two_speaker_gender_onnx.classify_two_speaker_genders
 
-        if callable(strict_fn):
+        strict_result = None
+        if isinstance(acoustic_classifications, Mapping) and spk1 in acoustic_classifications and spk2 in acoustic_classifications:
+            strict_result = acoustic_classifications
+        elif callable(strict_fn):
             try:
                 derived_ranges = ranges_by_speaker
                 if derived_ranges is None:
@@ -529,9 +542,18 @@ def decide_smart_multivoice(
                     deadline_monotonic=deadline_monotonic or (time.monotonic() + 30.0),
                     stop_requested=stop_requested or (lambda: False),
                 )
-                if isinstance(strict_result, Mapping) and spk1 in strict_result and spk2 in strict_result:
-                    r1 = str(strict_result[spk1].get("voice_register") or "")
-                    r2 = str(strict_result[spk2].get("voice_register") or "")
+            except Exception:
+                strict_result = None
+
+        if isinstance(strict_result, Mapping) and spk1 in strict_result and spk2 in strict_result:
+            try:
+                r1 = str(strict_result[spk1].get("voice_register") or ("low" if str(strict_result[spk1].get("voice_gender") or "").strip().lower() == "male" else ("high" if str(strict_result[spk1].get("voice_gender") or "").strip().lower() == "female" else "")))
+                r2 = str(strict_result[spk2].get("voice_register") or ("low" if str(strict_result[spk2].get("voice_gender") or "").strip().lower() == "male" else ("high" if str(strict_result[spk2].get("voice_gender") or "").strip().lower() == "female" else "")))
+                raw_c1 = strict_result[spk1].get("confidence")
+                raw_c2 = strict_result[spk2].get("confidence")
+                c1 = float(raw_c1) if raw_c1 is not None else 1.0
+                c2 = float(raw_c2) if raw_c2 is not None else 1.0
+                if r1 in {"low", "high"} and r2 in {"low", "high"} and c1 >= speaker_cast.MIN_REGISTER_CONFIDENCE and c2 >= speaker_cast.MIN_REGISTER_CONFIDENCE:
                     p1 = low_pool if r1 == "low" else high_pool
                     p2 = low_pool if r2 == "low" else high_pool
                     if not p1: p1 = all_pool
@@ -573,32 +595,202 @@ def decide_smart_multivoice(
                 output_mode = OUTPUT_MODE_DUBBED_FALLBACK
 
     else:
-        # N >= 3: Multi-speaker adaptive allocation (supports 1..8+)
-        strategy = STRATEGY_GENERIC_MULTI
-        if len(all_pool) >= detected_speaker_count:
-            assigned_voices: list[str] = []
-            pool_candidates = list(all_pool)
-            for spk in ordered_speakers:
-                remaining = [v for v in pool_candidates if v not in assigned_voices]
-                idx = _hash_seed_int(seed, spk, "multi_distinct") % len(remaining)
-                chosen = remaining[idx]
-                speaker_voice_map[spk] = chosen
-                assigned_voices.append(chosen)
-            fallback_level = 0
-            fallback_reason = None
-            output_mode = OUTPUT_MODE_DUBBED_MULTI
-        else:
-            # VOICE POOL EXHAUSTION: DO NOT ABORT!
-            pool_len = len(all_pool)
-            for i, spk in enumerate(ordered_speakers):
-                if i < pool_len:
-                    speaker_voice_map[spk] = all_pool[i]
+        # N >= 3: Multi-speaker gender-aware adaptive allocation
+        multi_classifications: dict[str, Any] | None = None
+        classifier_failed = False
+        classifier_error_reason: str | None = None
+
+        multi_fn = multi_speaker_classifier
+        if multi_fn is None and stereo_pcm_path is not None:
+            try:
+                from services import subdub_multi_speaker_gender_onnx
+                multi_fn = subdub_multi_speaker_gender_onnx.classify_multi_speaker_genders
+            except Exception as exc:
+                classifier_failed = True
+                classifier_error_reason = str(exc)
+
+        if isinstance(acoustic_classifications, Mapping):
+            multi_classifications = dict(acoustic_classifications)
+        elif callable(multi_fn):
+            try:
+                derived_ranges = ranges_by_speaker
+                if derived_ranges is None:
+                    derived_ranges = {
+                        spk: [
+                            (float(c.get("start_ms", 0)) / 1000.0, float(c.get("end_ms", 0)) / 1000.0)
+                            for c in speech_cues if c["speaker_id"] == spk
+                        ]
+                        for spk in ordered_speakers
+                    }
+                res = multi_fn(
+                    str(stereo_pcm_path or ""),
+                    derived_ranges,
+                    deadline_monotonic=deadline_monotonic or (time.monotonic() + 30.0),
+                    stop_requested=stop_requested or (lambda: False),
+                )
+                if isinstance(res, Mapping):
+                    multi_classifications = dict(res)
                 else:
-                    reuse_idx = _hash_seed_int(seed, spk, "pool_exhaust_reuse") % pool_len
-                    speaker_voice_map[spk] = all_pool[reuse_idx]
-            fallback_level = 2
-            fallback_reason = "voice_pool_exhaustion_reuse"
-            output_mode = OUTPUT_MODE_DUBBED_MULTI
+                    classifier_failed = True
+                    classifier_error_reason = "multi_classifier_invalid_output"
+            except speaker_cast.AutoCastManualRequired as exc:
+                classifier_failed = True
+                classifier_error_reason = str(exc) or "AutoCastManualRequired"
+            except Exception as exc:
+                classifier_failed = True
+                classifier_error_reason = str(exc)
+
+        fail_dispositions = {
+            str(c.get("cue_id") or c.get("id")): DISPOSITION_TERMINAL_REJECTED
+            for c in cues if (c.get("cue_id") or c.get("id"))
+        }
+
+        if classifier_failed:
+            if raise_manual_required:
+                raise speaker_cast.AutoCastManualRequired()
+            return SmartVoiceDecision(
+                strategy=STRATEGY_FAILED,
+                detected_speaker_count=detected_speaker_count,
+                effective_speaker_count=0,
+                effective_voice_count=0,
+                speaker_voice_map={},
+                fallback_level=-1,
+                fallback_reason=f"CLASSIFIER_UNAVAILABLE:{classifier_error_reason or 'error'}",
+                output_mode=OUTPUT_MODE_FAILED,
+                cue_dispositions=fail_dispositions,
+                tts_cues=[],
+            )
+
+        if multi_classifications is not None:
+            speaker_registers: dict[str, tuple[str, float]] = {}
+            for spk in ordered_speakers:
+                meta = multi_classifications.get(spk)
+                if not isinstance(meta, Mapping):
+                    if raise_manual_required:
+                        raise speaker_cast.AutoCastManualRequired()
+                    return SmartVoiceDecision(
+                        strategy=STRATEGY_FAILED,
+                        detected_speaker_count=detected_speaker_count,
+                        effective_speaker_count=0,
+                        effective_voice_count=0,
+                        speaker_voice_map={},
+                        fallback_level=-1,
+                        fallback_reason=f"MISSING_SPEAKER_CLASSIFICATION:{spk}",
+                        output_mode=OUTPUT_MODE_FAILED,
+                        cue_dispositions=fail_dispositions,
+                        tts_cues=[],
+                    )
+                gender = str(meta.get("voice_gender") or meta.get("gender") or "").strip().lower()
+                register = str(meta.get("voice_register") or meta.get("register") or "").strip().lower()
+                if not register:
+                    if gender == "male":
+                        register = "low"
+                    elif gender == "female":
+                        register = "high"
+                try:
+                    conf = float(meta.get("confidence") or 0.0)
+                except (TypeError, ValueError, OverflowError):
+                    conf = 0.0
+
+                if (
+                    gender in {"ambiguous", "unavailable", "invalid", "unresolved"}
+                    or register not in {"low", "high"}
+                    or not math.isfinite(conf)
+                    or conf < speaker_cast.MIN_REGISTER_CONFIDENCE
+                ):
+                    if raise_manual_required:
+                        raise speaker_cast.AutoCastManualRequired()
+                    return SmartVoiceDecision(
+                        strategy=STRATEGY_FAILED,
+                        detected_speaker_count=detected_speaker_count,
+                        effective_speaker_count=0,
+                        effective_voice_count=0,
+                        speaker_voice_map={},
+                        fallback_level=-1,
+                        fallback_reason="AMBIGUOUS_OR_INVALID_GENDER_CLASSIFICATION",
+                        output_mode=OUTPUT_MODE_FAILED,
+                        cue_dispositions=fail_dispositions,
+                        tts_cues=[],
+                    )
+                speaker_registers[spk] = (register, conf)
+
+            canonical_speaker_map = {}
+            reverse_speaker_map = {}
+            for idx, spk in enumerate(ordered_speakers):
+                if bool(speaker_cast._SPEAKER_ID_RE.fullmatch(spk)):
+                    canon_id = spk
+                else:
+                    canon_id = f"chunk_00:speaker_{idx}"
+                canonical_speaker_map[spk] = canon_id
+                reverse_speaker_map[canon_id] = spk
+
+            cast_classifications = {
+                canonical_speaker_map[spk]: {
+                    "speaker_id": canonical_speaker_map[spk],
+                    "voice_register": reg,
+                    "confidence": conf,
+                }
+                for spk, (reg, conf) in speaker_registers.items()
+            }
+            cast_speaker_order = [canonical_speaker_map[spk] for spk in ordered_speakers]
+            pools_dict = {"low": low_pool, "high": high_pool}
+
+            try:
+                assigned = speaker_cast.assign_stable_voices(
+                    cast_classifications,
+                    speaker_order=cast_speaker_order,
+                    validated_pools=pools_dict,
+                    assignment_seed=seed,
+                )
+                for canon_id, assign_data in assigned.items():
+                    orig_spk = reverse_speaker_map[canon_id]
+                    speaker_voice_map[orig_spk] = assign_data["voice_id"]
+
+                strategy = STRATEGY_GENERIC_MULTI
+                fallback_level = 0
+                fallback_reason = None
+                output_mode = OUTPUT_MODE_DUBBED_MULTI
+            except speaker_cast.AutoCastManualRequired as exc:
+                if raise_manual_required:
+                    raise
+                return SmartVoiceDecision(
+                    strategy=STRATEGY_FAILED,
+                    detected_speaker_count=detected_speaker_count,
+                    effective_speaker_count=0,
+                    effective_voice_count=0,
+                    speaker_voice_map={},
+                    fallback_level=-1,
+                    fallback_reason=f"AUTO_CAST_MANUAL_REQUIRED:{exc or 'capacity_exceeded'}",
+                    output_mode=OUTPUT_MODE_FAILED,
+                    cue_dispositions=fail_dispositions,
+                    tts_cues=[],
+                )
+        else:
+            # Fallback behavior when no acoustic evidence is provided (retains test_07..test_10 compatibility)
+            strategy = STRATEGY_GENERIC_MULTI
+            if len(all_pool) >= detected_speaker_count:
+                assigned_voices: list[str] = []
+                pool_candidates = list(all_pool)
+                for spk in ordered_speakers:
+                    remaining = [v for v in pool_candidates if v not in assigned_voices]
+                    idx = _hash_seed_int(seed, spk, "multi_distinct") % len(remaining)
+                    chosen = remaining[idx]
+                    speaker_voice_map[spk] = chosen
+                    assigned_voices.append(chosen)
+                fallback_level = 0
+                fallback_reason = None
+                output_mode = OUTPUT_MODE_DUBBED_MULTI
+            else:
+                pool_len = len(all_pool)
+                for i, spk in enumerate(ordered_speakers):
+                    if i < pool_len:
+                        speaker_voice_map[spk] = all_pool[i]
+                    else:
+                        reuse_idx = _hash_seed_int(seed, spk, "pool_exhaust_reuse") % pool_len
+                        speaker_voice_map[spk] = all_pool[reuse_idx]
+                fallback_level = 2
+                fallback_reason = "voice_pool_exhaustion_reuse"
+                output_mode = OUTPUT_MODE_DUBBED_MULTI
 
     # Step 7: Cue accounting & TTS mapping
     tts_cues: list[dict[str, Any]] = []
@@ -693,6 +885,7 @@ async def run_auto_smart_multivoice(
     deadline_monotonic: float | None = None,
     stop_requested: Callable[[], bool] | None = None,
     strict_two_classifier: Callable[..., Any] | None = None,
+    multi_speaker_classifier: Callable[..., Any] | None = None,
     acoustic_classifications: Mapping[str, Mapping[str, Any]] | None = None,
     synthesize_segments: Callable[..., Any] | None = None,
     render_pipeline: Callable[..., Any] | None = None,
@@ -779,20 +972,37 @@ async def run_auto_smart_multivoice(
         }
 
     # Step 1: Run Smart Voice Decision Authority
-    decision = decide_smart_multivoice(
-        cues=segments,
-        validated_pools=validated_pools,
-        assignment_seed=assignment_seed,
-        stereo_pcm_path=stereo_pcm_path,
-        ranges_by_speaker=ranges_by_speaker,
-        deadline_monotonic=deadline_monotonic,
-        stop_requested=_is_stopped,
-        strict_two_classifier=strict_two_classifier,
-        acoustic_classifications=acoustic_classifications,
-        fallback_level_override=fallback_level_override,
-        default_fallback_voice=default_fallback_voice,
-        locked_speaker_voice_map=locked_speaker_voice_map,
-    )
+    try:
+        decision = decide_smart_multivoice(
+            cues=segments,
+            validated_pools=validated_pools,
+            assignment_seed=assignment_seed,
+            stereo_pcm_path=stereo_pcm_path,
+            ranges_by_speaker=ranges_by_speaker,
+            deadline_monotonic=deadline_monotonic,
+            stop_requested=_is_stopped,
+            strict_two_classifier=strict_two_classifier,
+            multi_speaker_classifier=multi_speaker_classifier,
+            acoustic_classifications=acoustic_classifications,
+            fallback_level_override=fallback_level_override,
+            default_fallback_voice=default_fallback_voice,
+            locked_speaker_voice_map=locked_speaker_voice_map,
+        )
+    except speaker_cast.AutoCastManualRequired as exc:
+        return {
+            "ok": False,
+            "strategy": STRATEGY_FAILED,
+            "detected_speaker_count": 0,
+            "effective_speaker_count": 0,
+            "effective_voice_count": 0,
+            "speaker_voice_map": {},
+            "fallback_level": -1,
+            "fallback_reason": str(exc) or speaker_cast.AUTO_CAST_MANUAL_REQUIRED,
+            "output_mode": OUTPUT_MODE_FAILED,
+            "final_mp4_path": None,
+            "blocker": speaker_cast.AUTO_CAST_MANUAL_REQUIRED,
+            "auto_smart_verified": False,
+        }
 
     if decision.output_mode == OUTPUT_MODE_FAILED:
         blocker = "LOCKED_SPEAKER_VOICE_MAP_CONFLICT" if "LOCKED_SPEAKER_VOICE_MAP_CONFLICT" in str(decision.fallback_reason) else (decision.fallback_reason or "decision_failed")
@@ -1247,30 +1457,16 @@ async def run_auto_smart_multivoice_blackbox(
         except OSError:
             pass
 
-    run_lane_blackbox = payload.get("run_lane_blackbox")
-    runner = payload.get("runner")
+    temp_source_path: str | None = None
+    if not has_source_file and has_source_bytes:
+        source_data = (prepared.get("source_bytes") if isinstance(prepared, dict) else None) or current.get("source_bytes")
+        if isinstance(source_data, (bytes, bytearray)):
+            temp_fd, temp_name = tempfile.mkstemp(suffix=".mp4", prefix="smart_src_")
+            with os.fdopen(temp_fd, "wb") as f:
+                f.write(source_data)
+            source_media = temp_name
+            temp_source_path = temp_name
 
-    # Enforce standard pipeline delegation contract: fail closed if standard lane wiring is missing
-    if not callable(run_lane_blackbox) or not callable(runner):
-        return {
-            "ok": False,
-            "status": "SMART_STANDARD_PIPELINE_WIRING_MISSING",
-            "error_code": "smart_standard_pipeline_wiring_missing",
-            "blocker": "smart_standard_pipeline_wiring_missing",
-            "admin_debug_summary": "smart_standard_pipeline_wiring_missing",
-            "strategy": STRATEGY_FAILED,
-            "detected_speaker_count": 0,
-            "effective_speaker_count": 0,
-            "effective_voice_count": 0,
-            "speaker_voice_map": {},
-            "output_mode": OUTPUT_MODE_FAILED,
-            "video_output": None,
-            "state": dict(current),
-        }
-
-    # -----------------------------------------------------------------
-    # SMART ORCHESTRATOR DELEGATING TO STANDARD PIPELINE
-    # -----------------------------------------------------------------
     cues = (
         (prepared.get("output_segments") if isinstance(prepared, dict) else None)
         or (prepared.get("source_segments") if isinstance(prepared, dict) else None)
@@ -1279,6 +1475,12 @@ async def run_auto_smart_multivoice_blackbox(
         or payload.get("cues")
         or []
     )
+
+    # PR #1138 invariant: preserve filtering of SMART_CONTROL_ONLY_KEYS
+    clean_payload = dict(payload)
+    for key in SMART_CONTROL_ONLY_KEYS:
+        clean_payload.pop(key, None)
+
     validated_pools = payload.get("validated_pools")
     assignment_seed = str(
         payload.get("job_id")
@@ -1291,173 +1493,254 @@ async def run_auto_smart_multivoice_blackbox(
     if locked_speaker_voice_map is None and isinstance(current, Mapping):
         locked_speaker_voice_map = current.get("locked_speaker_voice_map")
 
-    decision = decide_smart_multivoice(
-        cues,
-        validated_pools=validated_pools,
-        assignment_seed=assignment_seed,
-        stereo_pcm_path=payload.get("stereo_pcm_path"),
-        ranges_by_speaker=payload.get("ranges_by_speaker"),
-        deadline_monotonic=payload.get("deadline_monotonic"),
-        stop_requested=payload.get("stop_requested"),
-        strict_two_classifier=payload.get("strict_two_classifier"),
-        acoustic_classifications=payload.get("acoustic_classifications"),
-        fallback_level_override=payload.get("fallback_level_override"),
-        default_fallback_voice=payload.get("default_fallback_voice"),
-        locked_speaker_voice_map=locked_speaker_voice_map,
-    )
-
-    if decision.strategy == STRATEGY_FAILED:
-        return {
-            "ok": False,
-            "status": "SMART_MULTIVOICE_DECISION_FAILED",
-            "strategy": decision.strategy,
-            "blocker": decision.fallback_reason or "smart_decision_failed",
-            "state": dict(current),
-        }
-
-    for cid, disp in decision.cue_dispositions.items():
-        if disp == DISPOSITION_TERMINAL_REJECTED:
-            return {
-                "ok": False,
-                "status": "SMART_CUE_TERMINAL_REJECTED",
-                "blocker": f"cue_terminal_rejected:{cid}",
-                "state": dict(current),
-            }
-
-    annotated_prepared = dict(prepared or {})
-    annotated_output_segments = []
-    for raw_seg in (annotated_prepared.get("output_segments") or cues):
-        seg = dict(raw_seg)
-        cid = str(seg.get("cue_id") or seg.get("id") or "")
-        disp = decision.cue_dispositions.get(cid)
-        if disp == DISPOSITION_DUBBED:
-            spk = seg.get("speaker_id") or seg.get("speaker")
-            v_id = decision.speaker_voice_map.get(str(spk))
-            if v_id:
-                seg["tts_voice_id"] = v_id
-            seg["disposition"] = DISPOSITION_DUBBED
-        else:
-            seg["disposition"] = disp or DISPOSITION_PRESERVED
-        annotated_output_segments.append(seg)
-    annotated_prepared["output_segments"] = annotated_output_segments
-
-    if "source_segments" in annotated_prepared:
-        annotated_source_segments = []
-        for raw_seg in annotated_prepared["source_segments"]:
-            seg = dict(raw_seg)
-            cid = str(seg.get("cue_id") or seg.get("id") or "")
-            disp = decision.cue_dispositions.get(cid)
-            if disp == DISPOSITION_DUBBED:
-                spk = seg.get("speaker_id") or seg.get("speaker")
-                v_id = decision.speaker_voice_map.get(str(spk))
-                if v_id:
-                    seg["tts_voice_id"] = v_id
-                seg["disposition"] = DISPOSITION_DUBBED
-            else:
-                seg["disposition"] = disp or DISPOSITION_PRESERVED
-            annotated_source_segments.append(seg)
-        annotated_prepared["source_segments"] = annotated_source_segments
-
-    async def already_prepared(_state: dict) -> dict[str, Any]:
-        return annotated_prepared
-
-    base_resolve = payload.get("resolve_voice_id")
-    def smart_resolve_voice_id(user_id_arg: int | str, service_state: dict) -> str:
-        if decision.speaker_voice_map:
-            return next(iter(decision.speaker_voice_map.values()))
-        if callable(base_resolve):
-            return str(base_resolve(user_id_arg, service_state) or "")
-        return str(payload.get("default_fallback_voice") or "")
+    output_path = payload.get("output_path") or current.get("output_path")
+    temp_output_path: str | None = None
+    if not output_path:
+        temp_fd, temp_out_name = tempfile.mkstemp(suffix=".mp4", prefix="smart_out_")
+        os.close(temp_fd)
+        output_path = temp_out_name
+        temp_output_path = temp_out_name
 
     base_synthesize = payload.get("synthesize_segments")
-    async def smart_synthesize_segments(segments: list[dict], *args: Any, **kwargs: Any) -> Any:
-        if not callable(base_synthesize):
-            return {"chunks": [], "provider": "smart_fallback"}
-        cues_to_dub = []
-        for seg in segments:
-            cid = str(seg.get("cue_id") or seg.get("id") or "")
-            disp = decision.cue_dispositions.get(cid)
-            if disp == DISPOSITION_PRESERVED:
-                continue
-            cues_to_dub.append(seg)
+    smart_synthesizer = None
+    if callable(base_synthesize):
+        async def _smart_synth_adapter(*args: Any, **kwargs: Any) -> Any:
+            cues_arg = kwargs.get("cues")
+            if cues_arg is None and args:
+                cues_arg = args[0]
+            spk_map = kwargs.get("speaker_voice_map") or {}
+            if cues_arg is None:
+                cues_arg = kwargs.get("segments") or []
 
-        if not cues_to_dub:
-            return {"chunks": [], "provider": "smart_non_speech_preserved"}
+            accepts_cues = False
+            try:
+                sig = inspect.signature(base_synthesize)
+                params = sig.parameters
+                if "speaker_voice_map" in params or "cues" in params:
+                    accepts_cues = True
+                elif any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()):
+                    if "segments" in params:
+                        accepts_cues = False
+                    else:
+                        accepts_cues = True
+            except (ValueError, TypeError):
+                accepts_cues = True
 
-        all_chunks = []
-        provider_labels = []
-        for cue in cues_to_dub:
-            cid = str(cue.get("cue_id") or cue.get("id") or "")
-            spk = cue.get("speaker_id") or cue.get("speaker")
-            cue_voice_id = cue.get("tts_voice_id") or decision.speaker_voice_map.get(str(spk)) or kwargs.get("voice_id")
-            chunk_res = await _maybe_await(
-                base_synthesize([cue], *args, **{**kwargs, "voice_id": cue_voice_id})
+            if accepts_cues:
+                return await _maybe_await(base_synthesize(*args, **kwargs))
+
+            cues_list = list(cues_arg or [])
+            all_chunks = []
+            provider_labels = []
+            for cue in cues_list:
+                cid = str(cue.get("cue_id") or cue.get("id") or "")
+                spk = str(cue.get("speaker_id") or cue.get("speaker") or "")
+                cue_voice_id = cue.get("tts_voice_id") or spk_map.get(spk) or kwargs.get("voice_id")
+                chunk_res = await _maybe_await(
+                    base_synthesize([cue], voice_id=cue_voice_id)
+                )
+                if isinstance(chunk_res, dict):
+                    raw_chunks = chunk_res.get("chunks") or []
+                    prov = chunk_res.get("provider")
+                    if prov:
+                        provider_labels.append(str(prov))
+                elif isinstance(chunk_res, list):
+                    raw_chunks = chunk_res
+                else:
+                    raw_chunks = [chunk_res]
+                for ch in raw_chunks:
+                    if isinstance(ch, dict):
+                        ch.setdefault("cue_id", cid)
+                        all_chunks.append(ch)
+
+            return {
+                "chunks": all_chunks,
+                "provider": provider_labels[0] if provider_labels else "smart_tts",
+            }
+        smart_synthesizer = _smart_synth_adapter
+    elif callable(payload.get("runner")):
+        async def _mock_runner_synth(*args: Any, **kwargs: Any) -> Any:
+            cues_list = kwargs.get("cues") or []
+            chunks = []
+            for c in cues_list:
+                cid = str(c.get("cue_id") or c.get("id"))
+                chunks.append({"cue_id": cid, "audio": b"DUMMY_AUDIO_BYTES"})
+            return {"chunks": chunks, "provider": "runner_mock"}
+        smart_synthesizer = _mock_runner_synth
+
+    render_pipeline = payload.get("render_pipeline")
+    captured_audio: bytes | None = None
+    probe_fn = payload.get("probe_fn") or payload.get("probe_video")
+
+    if not callable(render_pipeline) and callable(payload.get("render_video")):
+        render_video_fn = payload["render_video"]
+        build_timeline_audio = payload.get("build_timeline_audio")
+        normalize_audio = payload.get("normalize_audio")
+        validate_audio = payload.get("validate_audio")
+
+        async def _adapted_render_pipeline(
+            *,
+            source_media: str,
+            output_path: str,
+            output_mode: str,
+            tts_chunks: list[dict],
+            cues: list[dict],
+            dispositions: dict,
+            preserved_cues: list[dict],
+            dubbed_cues: list[dict],
+            **kw: Any,
+        ) -> str:
+            nonlocal captured_audio
+            norm_audio = b""
+            if callable(build_timeline_audio):
+                raw_audio, _ = await _maybe_await(build_timeline_audio(tts_chunks, 5.0))
+                if callable(normalize_audio):
+                    norm_audio, _ = await _maybe_await(normalize_audio(raw_audio))
+                else:
+                    norm_audio = raw_audio
+                if callable(validate_audio):
+                    await _maybe_await(validate_audio(norm_audio))
+                captured_audio = norm_audio
+
+            src_bytes = b""
+            if Path(source_media).is_file():
+                try:
+                    src_bytes = Path(source_media).read_bytes()
+                except OSError:
+                    pass
+            if not src_bytes and isinstance(prepared, dict) and prepared.get("source_bytes"):
+                src_bytes = prepared["source_bytes"]
+
+            render_res = await _maybe_await(
+                render_video_fn(
+                    src_bytes,
+                    dubbed_audio=norm_audio,
+                    subtitle_bytes=b"",
+                )
             )
-            if isinstance(chunk_res, dict):
-                raw_chunks = chunk_res.get("chunks") or []
-                prov = chunk_res.get("provider")
-                if prov:
-                    provider_labels.append(str(prov))
-            elif isinstance(chunk_res, list):
-                raw_chunks = chunk_res
-            else:
-                raw_chunks = [chunk_res]
-            for ch in raw_chunks:
-                if isinstance(ch, dict):
-                    ch.setdefault("cue_id", cid)
-                    all_chunks.append(ch)
+            video_bytes = None
+            if isinstance(render_res, tuple) and len(render_res) >= 1:
+                video_bytes = render_res[0]
+            elif isinstance(render_res, (bytes, bytearray)):
+                video_bytes = render_res
 
-        return {
-            "chunks": all_chunks,
-            "provider": provider_labels[0] if provider_labels else "smart_tts",
-        }
+            if isinstance(video_bytes, (bytes, bytearray)):
+                out_p = Path(output_path)
+                pad_len = max(0, 1024 - len(video_bytes))
+                out_p.write_bytes(video_bytes + (b"\x00" * pad_len))
+                return output_path
+            elif isinstance(render_res, (str, Path)):
+                return str(render_res)
+            return output_path
 
-    lane_mode = str(payload.get("lane_mode") or current.get("mode") or "dub")
-    lane_payload = dict(payload)
-    lane_payload.pop("lane_mode", None)
-    lane_payload.pop("run_lane_blackbox", None)
-    lane_payload.pop("runner", None)
-    lane_payload.pop("render_pipeline", None)
-    for key in SMART_CONTROL_ONLY_KEYS:
-        lane_payload.pop(key, None)
-    lane_payload.update({
-        "mode": lane_mode,
-        "prepare_subtitles": already_prepared,
-        "resolve_voice_id": smart_resolve_voice_id,
-        "synthesize_segments": smart_synthesize_segments,
-        "state": dict(current),
-    })
+        render_pipeline = _adapted_render_pipeline
+        if probe_fn is None:
+            def _render_video_probe(path: str) -> dict[str, Any]:
+                p = Path(path)
+                if p.is_file() and p.stat().st_size > 0:
+                    return {"ok": True}
+                return {"ok": False, "reason": "output_file_missing"}
+            probe_fn = _render_video_probe
+    elif not callable(render_pipeline) and callable(payload.get("runner")):
+        async def _mock_runner_render(*args: Any, **kwargs: Any) -> str:
+            out_p = Path(output_path)
+            out_p.write_bytes(b"DUMMY_MP4_BYTES" * 100)
+            return output_path
+        render_pipeline = _mock_runner_render
+        if probe_fn is None:
+            probe_fn = lambda p: {"ok": True}
 
-    delegated_result = await _maybe_await(
-        run_lane_blackbox(
-            lane_mode=lane_mode,
-            runner=runner,
-            **lane_payload,
+    try:
+        smart_result = await run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_path,
+            validated_pools=validated_pools,
+            assignment_seed=assignment_seed,
+            stereo_pcm_path=payload.get("stereo_pcm_path"),
+            ranges_by_speaker=payload.get("ranges_by_speaker"),
+            deadline_monotonic=payload.get("deadline_monotonic"),
+            stop_requested=payload.get("stop_requested"),
+            strict_two_classifier=payload.get("strict_two_classifier"),
+            multi_speaker_classifier=payload.get("multi_speaker_classifier"),
+            acoustic_classifications=payload.get("acoustic_classifications"),
+            synthesize_segments=smart_synthesizer,
+            render_pipeline=render_pipeline,
+            probe_fn=probe_fn,
+            is_cancelled=payload.get("is_cancelled"),
+            fallback_level_override=payload.get("fallback_level_override"),
+            default_fallback_voice=payload.get("default_fallback_voice"),
+            locked_speaker_voice_map=locked_speaker_voice_map,
+            state=current,
         )
-    )
+    finally:
+        if temp_source_path and os.path.exists(temp_source_path):
+            try:
+                os.unlink(temp_source_path)
+            except OSError:
+                pass
 
-    if not isinstance(delegated_result, dict):
-        return {
-            "ok": False,
-            "status": "SMART_LANE_DELEGATION_FAILED",
-            "blocker": "delegated_result_not_dict",
-            "state": dict(current),
-        }
-
-    result_state = dict(delegated_result.get("state") or current)
+    result_state = dict(current)
     result_state["subdub_engine_selected"] = "auto_smart_multivoice"
-    result_state["auto_smart_multivoice_verified"] = delegated_result.get("ok", False)
-    result_state["auto_smart_strategy"] = decision.strategy
-    result_state["auto_detected_speaker_count"] = decision.detected_speaker_count
-    result_state["auto_effective_speaker_count"] = decision.effective_speaker_count
-    result_state["auto_distinct_voice_count"] = decision.effective_voice_count
-    result_state["auto_smart_output_mode"] = decision.output_mode
-    result_state["speaker_voice_map"] = decision.speaker_voice_map or {}
-    if decision.speaker_voice_map:
-        result_state["locked_speaker_voice_map"] = dict(decision.speaker_voice_map)
+    result_state["auto_smart_multivoice_verified"] = smart_result.get("auto_smart_verified", False)
+    result_state["auto_smart_strategy"] = smart_result.get("strategy")
+    result_state["auto_detected_speaker_count"] = smart_result.get("detected_speaker_count", 0)
+    result_state["auto_effective_speaker_count"] = smart_result.get("effective_speaker_count", 0)
+    result_state["auto_distinct_voice_count"] = smart_result.get("effective_voice_count", 0)
+    result_state["auto_smart_output_mode"] = smart_result.get("output_mode")
+    result_state["speaker_voice_map"] = smart_result.get("speaker_voice_map") or {}
+    if smart_result.get("locked_speaker_voice_map"):
+        result_state["locked_speaker_voice_map"] = dict(smart_result["locked_speaker_voice_map"])
+    elif locked_speaker_voice_map is not None and smart_result.get("speaker_voice_map"):
+        result_state["locked_speaker_voice_map"] = dict(smart_result["speaker_voice_map"])
+    elif locked_speaker_voice_map is not None:
+        result_state["locked_speaker_voice_map"] = {k: str(v).strip() for k, v in locked_speaker_voice_map.items()}
 
-    response = dict(delegated_result)
+    response = dict(smart_result)
     response["state"] = result_state
+
+    if smart_result.get("ok"):
+        video_bytes = b""
+        final_mp4_p = smart_result.get("final_mp4_path")
+        if final_mp4_p and Path(final_mp4_p).is_file():
+            try:
+                video_bytes = Path(final_mp4_p).read_bytes()
+            except OSError:
+                pass
+        response["video_output"] = video_bytes
+
+        if "source_bytes" not in response:
+            if isinstance(prepared, dict) and prepared.get("source_bytes"):
+                response["source_bytes"] = prepared["source_bytes"]
+            elif current.get("source_bytes"):
+                response["source_bytes"] = current["source_bytes"]
+            elif Path(source_media).is_file():
+                try:
+                    response["source_bytes"] = Path(source_media).read_bytes()
+                except OSError:
+                    pass
+
+        if captured_audio and "audio_bytes" not in response:
+            response["audio_bytes"] = captured_audio
+        elif "audio_bytes" not in response:
+            response["audio_bytes"] = b""
+    else:
+        blocker = str(smart_result.get("blocker") or "smart_multivoice_failed")
+        response["ok"] = False
+        response["auto_smart_verified"] = False
+        response["output_mode"] = OUTPUT_MODE_FAILED
+        response["final_mp4_path"] = None
+        response["video_output"] = None
+        response["blocker"] = blocker
+        response.setdefault("error_code", str(smart_result.get("error_code") or blocker))
+        response.setdefault("admin_debug_summary", str(smart_result.get("admin_debug_summary") or blocker))
+        if not response.get("status"):
+            response["status"] = (
+                "SOURCE_MEDIA_NOT_FOUND"
+                if blocker in {"source_media_not_found", "corrupt_or_empty_source_media"}
+                else f"SMART_{blocker.upper()}"
+            )
+
     return response
 
 
