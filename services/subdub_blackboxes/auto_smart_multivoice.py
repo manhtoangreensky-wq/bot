@@ -1518,13 +1518,8 @@ async def run_auto_smart_multivoice_blackbox(
                 params = sig.parameters
                 if "speaker_voice_map" in params or "cues" in params:
                     accepts_cues = True
-                elif any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()):
-                    if "segments" in params:
-                        accepts_cues = False
-                    else:
-                        accepts_cues = True
             except (ValueError, TypeError):
-                accepts_cues = True
+                accepts_cues = False
 
             if accepts_cues:
                 return await _maybe_await(base_synthesize(*args, **kwargs))
@@ -1548,10 +1543,28 @@ async def run_auto_smart_multivoice_blackbox(
                     raw_chunks = chunk_res
                 else:
                     raw_chunks = [chunk_res]
+                matched_chunks = []
                 for ch in raw_chunks:
                     if isinstance(ch, dict):
-                        ch.setdefault("cue_id", cid)
-                        all_chunks.append(ch)
+                        ch_cid = str(ch.get("cue_id") or ch.get("id") or "")
+                        if ch_cid == cid:
+                            matched_chunks.append(ch)
+                if not matched_chunks:
+                    for ch in raw_chunks:
+                        if isinstance(ch, dict):
+                            ch_cid = str(ch.get("cue_id") or ch.get("id") or "")
+                            if not ch_cid:
+                                ch_copy = dict(ch)
+                                ch_copy["cue_id"] = cid
+                                matched_chunks.append(ch_copy)
+                if not matched_chunks:
+                    for ch in raw_chunks:
+                        if isinstance(ch, dict):
+                            ch_copy = dict(ch)
+                            ch_copy.setdefault("cue_id", cid)
+                            matched_chunks.append(ch_copy)
+                for ch in matched_chunks:
+                    all_chunks.append(ch)
 
             return {
                 "chunks": all_chunks,
