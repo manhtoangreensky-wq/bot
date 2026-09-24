@@ -1636,3 +1636,12 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   `git diff --check` exit `0`. Provider, production DB and wallet mutations are
   `0`; this is source evidence only until an Owner-authorized live job produces
   a real MP4 and Telegram receipt.
+
+## Provider balance notifications — 24/09/2026
+
+- Mỗi provider dùng mốc cố định `100 USD credit = 100%`; chỉ cảnh báo khi số dư thực `< 10 USD`.
+- Key4U đọc `GET https://api.key4u.vn/v1/balance` bằng Bearer auth, trường `balance`/`used`; ShopAIKey đọc `GET https://api.shopaikey.com/usage?apiKey=...`. Giá trị key không được ghi vào log/kết quả.
+- Dữ liệu thiếu, sai, cũ hoặc fetch thất bại là `UNKNOWN`, không tự đổi thành `0` và không gửi cảnh báo.
+- Trạng thái cảnh báo ghi `PENDING` trước send, `SENT` sau receipt `message_id`; timeout/receipt không rõ cần đối soát, không blind retry. Nhắc lại mặc định sau `6 giờ`.
+- Read-only probe ngày 21/09/2026: ShopAIKey `11.26 USD`, Key4U `24.18613397221324 USD`; đều chưa dưới ngưỡng. Đây là số đo kiểm tra, chưa chứng minh deploy.
+- Local evidence: `51` test policy/reader/notification/seam pass và `23` quota regression pass; chưa push/deploy/send thật.

@@ -227,3 +227,15 @@ Các case trên phải chạy bằng SQLite tạm trước khi live. Không dùn
 
 FAIL nếu test gọi provider, chạy hai local model song song, thay đổi exact-two,
 hoặc hết timeout mà không fail-closed/cleanup.
+
+## Provider balance alert cases — source of truth
+
+| ID | Mức | Tác vụ | PASS bắt buộc |
+|---|---|---|---|
+| `BAL-01` | 🟠 nặng | Đọc Key4U `/v1/balance` Bearer | HTTP 200 schema hợp lệ, key không vào log/kết quả |
+| `BAL-02` | 🟠 nặng | Đọc ShopAIKey `/usage` | balance số, query key không vào HTTP log |
+| `BAL-03` | 🔴 chặn | Kiểm tra 10.00 / 9.99 / 0.00 USD | 10.00 không cảnh báo; 9.99 và 0.00 cảnh báo |
+| `BAL-04` | 🟠 nặng | Thiếu/sai/cũ/HTTP lỗi | UNKNOWN, không cảnh báo, không tự freeze |
+| `BAL-05` | 🟡 vừa | Gửi trùng/timeout/restart | PENDING/SENT receipt; không blind retry; provider độc lập |
+
+Case mới có bằng chứng local; cần chạy lại trên runtime sau khi được phép deploy.

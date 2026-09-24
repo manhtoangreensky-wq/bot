@@ -807,3 +807,13 @@ Evidence source: ONNX `136`, blackbox `68`, continuity `7`, recovery `162`,
 provider-fallback `56`, exact-two `3` passed; changed-file compile và
 `git diff --check` exit `0`. Chưa có live MP4/receipt cho correction nên chưa
 được ghi `LIVE PASS`.
+
+## Provider balance notification — 24/09/2026
+
+| Cơ chế cũ | Hiện tại | Trạng thái |
+|---|---|---|
+| Cảnh báo theo phần trăm `total` của response | Mốc vận hành cố định `100 USD`, strict `<10 USD` | ⚠️ Policy đã đổi |
+| Balance lỗi/mất coi như zero | `UNKNOWN`, không cảnh báo và không tự freeze | ❌ Không còn đúng |
+| Chỉ có ShopAIKey monitor | Monitor dùng chung có thể đọc Key4U khi switch bật | ⚠️ Đã mở rộng |
+| Timeout gửi thì gửi lại | Lưu `PENDING`, cần reconcile | ❌ Không còn đúng |
+| Test module = runtime thành công | Chỉ source/test local; LIVE chưa xác minh | ❌ Không được suy diễn |

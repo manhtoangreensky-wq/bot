@@ -286,7 +286,12 @@ def test_cost2_no_subdub_changes():
 
 
 def test_cost2_no_payos_wallet_finance_changes():
-    diff = _bot_diff().lower()
+    # Diff context can contain an unchanged neighbouring payment startup block.
+    # Inspect modifications, not context, while still rejecting any payment edit.
+    diff = "\n".join(
+        line for line in _bot_diff().lower().splitlines()
+        if line.startswith(("+", "-")) and not line.startswith(("+++", "---"))
+    )
     if _current_branch().startswith("hotfix/p0-subdub"):
         # SubDub-scoped branches may move admin status copy that contains the
         # literal "wallet_mutation=0" reassurance line; real PayOS/wallet code
