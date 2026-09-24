@@ -788,3 +788,139 @@ def test_real_person_plus_object_plus_relationship_all_three_lanes_end_to_end() 
         assert r_obs["relationship_ok"] is True
 
 
+def test_invalid_geometry_localization_regressions_fail_closed() -> None:
+    """22. Fail-closed regressions for invalid homography localization geometries."""
+    from unittest.mock import patch
+    import numpy as np
+    from services.video_selfshot_object_validator import verify_object_identity
+    repo_root = Path(__file__).resolve().parents[1]
+    obj_ref = repo_root / "tests" / "fixtures" / "selfshot_vision" / "object_calibration" / "snuff_bottle_coins_obs1.jpg"
+    obj_cand = repo_root / "tests" / "fixtures" / "selfshot_vision" / "object_calibration" / "snuff_bottle_coins_obs2.jpg"
+    ref_roi = [130, 120, 200, 390]
+    cand_roi = [0, 0, 450, 600]
+
+    # 1. Invalid perspective transform (returns None or != 4 points)
+    with patch("cv2.perspectiveTransform", return_value=None):
+        res = verify_object_identity(obj_ref, obj_cand, reference_roi=ref_roi, candidate_roi=cand_roi)
+        assert res["decision"] is False
+        assert res["object_identity"] is False
+        assert res["candidate_object_bbox"] is None
+        assert res["failure_reason"] == "invalid_perspective_transform"
+
+    # 2. Nonfinite projected coordinates (NaN/Inf)
+    with patch("cv2.perspectiveTransform", return_value=np.array([[[np.nan, 0]], [[100, 0]], [[100, 100]], [[0, 100]]])):
+        res = verify_object_identity(obj_ref, obj_cand, reference_roi=ref_roi, candidate_roi=cand_roi)
+        assert res["decision"] is False
+        assert res["object_identity"] is False
+        assert res["candidate_object_bbox"] is None
+        assert res["failure_reason"] == "nonfinite_projected_coordinates"
+
+    # 3. Degenerate quad area (collinear points / area <= 0)
+    with patch("cv2.perspectiveTransform", return_value=np.array([[[0, 0]], [[0, 0]], [[0, 0]], [[0, 0]]])):
+        res = verify_object_identity(obj_ref, obj_cand, reference_roi=ref_roi, candidate_roi=cand_roi)
+        assert res["decision"] is False
+        assert res["object_identity"] is False
+        assert res["candidate_object_bbox"] is None
+        assert res["failure_reason"] == "degenerate_quad_area"
+
+    # 4. Projected bbox outside frame
+    with patch("cv2.perspectiveTransform", return_value=np.array([[[2000, 2000]], [[2100, 2000]], [[2100, 2100]], [[2000, 2100]]])):
+        res = verify_object_identity(obj_ref, obj_cand, reference_roi=ref_roi, candidate_roi=cand_roi)
+        assert res["decision"] is False
+        assert res["object_identity"] is False
+        assert res["candidate_object_bbox"] is None
+        assert res["failure_reason"] == "projected_bbox_outside_frame"
+
+    # 5. Degenerate clamped bbox (clamping collapses width or height)
+    with patch("cv2.perspectiveTransform", return_value=np.array([[[0, 0]], [[0, 0]], [[0, 100]], [[0, 100]]])):
+        res = verify_object_identity(obj_ref, obj_cand, reference_roi=ref_roi, candidate_roi=cand_roi)
+        assert res["decision"] is False
+        assert res["object_identity"] is False
+        assert res["candidate_object_bbox"] is None
+
+    # 6. Localization exception
+    with patch("cv2.perspectiveTransform", side_effect=RuntimeError("internal_cv_error")):
+        res = verify_object_identity(obj_ref, obj_cand, reference_roi=ref_roi, candidate_roi=cand_roi)
+        assert res["decision"] is False
+        assert res["object_identity"] is False
+        assert res["candidate_object_bbox"] is None
+        assert "localization_exception" in res["failure_reason"]
+
+    # 7. Valid projection succeeds
+    res_valid = verify_object_identity(obj_ref, obj_cand, reference_roi=ref_roi, candidate_roi=cand_roi)
+    assert res_valid["decision"] is True
+    assert res_valid["object_identity"] is True
+    assert res_valid["candidate_object_bbox"] is not None
+
+
+def test_object_only_scene_fails_closed_when_localization_fails() -> None:
+    """23. Object-only scene fails closed when SIFT matches but localization geometry fails."""
+    from unittest.mock import patch
+    import cv2
+    import numpy as np
+    repo_root = Path(__file__).resolve().parents[1]
+    obj_ref = repo_root / "tests" / "fixtures" / "selfshot_vision" / "object_calibration" / "snuff_bottle_coins_obs1.jpg"
+    obj_cand = repo_root / "tests" / "fixtures" / "selfshot_vision" / "object_calibration" / "snuff_bottle_coins_obs2.jpg"
+    cand_img = cv2.imread(str(obj_cand))
+    frames = [cand_img, cand_img, cand_img]
+
+    # Localization fails via nonfinite projection
+    with patch("cv2.perspectiveTransform", return_value=np.array([[[np.nan, 0]], [[100, 0]], [[100, 100]], [[0, 100]]])):
+        res = validate_selfshot_scene_continuity(
+            frames,
+            scene_index=1,
+            scene_duration_seconds=5,
+            person_required=False,
+            object_required=True,
+            relationship_required=False,
+            object_reference=str(obj_ref),
+            object_reference_roi=[130, 120, 200, 390],
+        )
+        assert res["ok"] is False
+        assert res["object_identity"] is False
+        assert res["independent_visual_validation"] == "NOT_PERFORMED"
+        assert res["blocker"] == "insufficient_temporal_evidence"
+        for obs in res["object_observations"]:
+            assert obs["object_ok"] is False
+            assert obs["object_bbox"] is None
+
+
+def test_relationship_scene_fails_closed_when_object_localization_fails() -> None:
+    """24. Relationship scene fails closed when object localization cannot be produced."""
+    from unittest.mock import patch
+    import cv2
+    import numpy as np
+    repo_root = Path(__file__).resolve().parents[1]
+    person_ref = repo_root / "tests" / "fixtures" / "selfshot_vision" / "person_calibration" / "obama_obs1.jpg"
+    person_cand = repo_root / "tests" / "fixtures" / "selfshot_vision" / "person_calibration" / "obama_obs2.jpg"
+    object_ref = repo_root / "tests" / "fixtures" / "selfshot_vision" / "object_calibration" / "snuff_bottle_coins_obs1.jpg"
+    object_cand = repo_root / "tests" / "fixtures" / "selfshot_vision" / "object_calibration" / "snuff_bottle_coins_obs2.jpg"
+
+    img_p2 = cv2.imread(str(person_cand))
+    img_o2 = cv2.imread(str(object_cand))
+    canvas = np.zeros((800, 1400, 3), dtype=np.uint8)
+    canvas[50:50+img_p2.shape[0], 50:50+img_p2.shape[1]] = img_p2
+    canvas[50:50+img_o2.shape[0], 400:400+img_o2.shape[1]] = img_o2
+
+    frames = [canvas, canvas, canvas]
+
+    # Object localization produces degenerate quad
+    with patch("cv2.perspectiveTransform", return_value=np.array([[[0, 0]], [[0, 0]], [[0, 0]], [[0, 0]]])):
+        res = validate_selfshot_scene_continuity(
+            frames,
+            scene_index=1,
+            scene_duration_seconds=5,
+            person_required=True,
+            object_required=True,
+            relationship_required=True,
+            person_reference=str(person_ref),
+            object_reference=str(object_ref),
+            object_reference_roi=[130, 120, 200, 390],
+        )
+        assert res["ok"] is False
+        assert res["person_identity"] is True  # Person alone matched
+        assert res["object_identity"] is False  # Object localization failed
+        assert res["person_object_relationship"] is False  # Relationship blocked
+        assert res["independent_visual_validation"] == "NOT_PERFORMED"
+
+
