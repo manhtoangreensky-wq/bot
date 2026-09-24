@@ -353,6 +353,51 @@ def _nested(payload: dict[str, Any], *paths: str) -> Any:
     return None
 
 
+_CONTINUITY_CONTAINERS = (
+    "continuity_metrics",
+    "continuity_evidence",
+    "continuity_validation",
+    "subject_continuity",
+)
+_SENSITIVE_KEY_SUBSTRINGS = ("auth", "token", "secret", "password", "api_key", "credential")
+
+
+def _sanitize_continuity_metadata(container: dict[str, Any]) -> dict[str, Any]:
+    sanitized: dict[str, Any] = {}
+    for key, val in container.items():
+        key_str = str(key).strip()
+        lowered = key_str.lower()
+        if any(bad in lowered for bad in _SENSITIVE_KEY_SUBSTRINGS):
+            continue
+        if isinstance(val, (bool, int, float, str)):
+            sanitized[key_str] = val
+        elif isinstance(val, dict):
+            nested_sanitized = _sanitize_continuity_metadata(val)
+            if nested_sanitized:
+                sanitized[key_str] = nested_sanitized
+    return sanitized
+
+
+def _extract_continuity_metadata(payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    extracted: dict[str, Any] = {}
+    data_nested = payload.get("data")
+    sources: list[dict[str, Any]] = []
+    if isinstance(data_nested, dict):
+        sources.append(data_nested)
+    sources.append(payload)
+    for container_name in _CONTINUITY_CONTAINERS:
+        for src in sources:
+            val = src.get(container_name)
+            if isinstance(val, dict):
+                cleaned = _sanitize_continuity_metadata(val)
+                if cleaned:
+                    extracted[container_name] = cleaned
+                    break
+    return extracted
+
+
 def parse_provider_payload(payload: dict[str, Any]) -> dict[str, Any]:
     task_id = _nested(payload, "data.task_id", "data.id", "data.id_base", "task_id", "id", "job_id")
     raw_status = _nested(payload, "data.status", "status", "state")
@@ -369,13 +414,15 @@ def parse_provider_payload(payload: dict[str, Any]) -> dict[str, Any]:
         canonical = "running"
     else:
         canonical = "unknown"
-    return {
+    result = {
         "provider_task_id": str(task_id or ""),
         "raw_status": raw,
         "status": canonical,
         "result_url": str(result_url or ""),
         "result_url_present": bool(result_url),
     }
+    result.update(_extract_continuity_metadata(payload))
+    return result
 
 
 def submit_video_edit(

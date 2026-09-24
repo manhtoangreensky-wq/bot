@@ -488,6 +488,19 @@ def direction_contract(direction_id: str) -> dict[str, Any]:
     }
 
 
+def canonical_scene_seconds(quality_tier: Any = None, default: int = SCENE_SECONDS) -> int:
+    """Return the canonical scene duration in seconds for a given quality tier."""
+    if quality_tier:
+        try:
+            from services import video_ai_real_pricing
+            val = int(video_ai_real_pricing.product_video_route_by_tier(int(quality_tier)).get("seconds_per_scene") or 0)
+            if val > 0:
+                return val
+        except Exception:
+            pass
+    return default
+
+
 def build_scene_plan(
     *,
     analysis: Mapping[str, Any],
@@ -497,6 +510,8 @@ def build_scene_plan(
     scene_count: int,
     content: Mapping[str, Any],
     direction: Mapping[str, Any],
+    quality_tier: int | None = None,
+    scene_duration: int | None = None,
 ) -> list[dict[str, Any]]:
     count = max(MIN_SCENES, min(MAX_SCENES, int(scene_count or 1)))
     segment = dict(source_segment or {})
@@ -508,6 +523,7 @@ def build_scene_plan(
         segment_end = source_duration
     duration = max(0.1, min(source_duration, segment_end) - segment_start)
     segment_span = duration / count
+    target_scene_duration = int(scene_duration or canonical_scene_seconds(quality_tier) or SCENE_SECONDS)
     rows = []
     for index in range(1, count + 1):
         start = round(segment_start + ((index - 1) * segment_span), 3)
@@ -529,7 +545,7 @@ def build_scene_plan(
             "subject_motion": "transfer_source_motion_and_contact_points",
             "start_state": "inherits_previous_end" if index > 1 else "source_segment_start",
             "end_state": "natural_completed_action_ready_for_next_scene" if index < count else "closed_story_state",
-            "duration": SCENE_SECONDS,
+            "duration": target_scene_duration,
             "audio_policy": "configured_in_audio_plan",
             "prompt_version": 1,
         })
@@ -680,6 +696,8 @@ def preflight(
             scene_count=scene_count,
             content=content,
             direction=direction,
+            quality_tier=draft.get("quality_tier") or draft.get("quality_tier_id"),
+            scene_duration=draft.get("scene_duration_seconds"),
         )
     if len(scene_plan) != scene_count:
         blockers.append("scene_plan_incomplete")
@@ -990,6 +1008,8 @@ def apply_action(state: Mapping[str, Any] | None, operation: str, argument: str 
             scene_count=int(draft.get("scene_count") or 1),
             content=draft.get("selected_content") or {},
             direction=draft.get("direction_contract") or {},
+            quality_tier=draft.get("quality_tier") or draft.get("quality_tier_id"),
+            scene_duration=draft.get("scene_duration_seconds"),
         )
         draft["video_prompts"] = []
         result["screen"] = "scene_plan"
@@ -1008,6 +1028,8 @@ def apply_action(state: Mapping[str, Any] | None, operation: str, argument: str 
                 scene_count=int(draft.get("scene_count") or 1),
                 content=draft.get("selected_content") or {},
                 direction=draft.get("direction_contract") or {},
+                quality_tier=draft.get("quality_tier") or draft.get("quality_tier_id"),
+                scene_duration=draft.get("scene_duration_seconds"),
             )
             draft["video_prompts"] = []
         result["screen"] = "scene_plan"

@@ -106174,7 +106174,12 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
             "capability_snapshot": dict(preflight_snapshot.get("engine_route") or {}),
             "route_selection": dict(preflight_snapshot.get("route_selection") or {}),
             "scene_count": scene_count,
-            "duration_seconds": scene_count * video_selfshot2.SCENE_SECONDS,
+            "scene_duration_seconds": video_selfshot2.canonical_scene_seconds(
+                draft.get("quality_tier") or draft.get("quality_tier_id") or invoice.get("routing_quality_tier") or invoice.get("quality_xu")
+            ),
+            "duration_seconds": scene_count * video_selfshot2.canonical_scene_seconds(
+                draft.get("quality_tier") or draft.get("quality_tier_id") or invoice.get("routing_quality_tier") or invoice.get("quality_xu")
+            ),
             "source_bound_per_scene": True,
             "text_only_fallback_allowed": False,
             "continuity_validation_required": True,
@@ -106185,11 +106190,15 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
             ),
             "receipt_once": True,
         })
+        selfshot2_scene_seconds = video_selfshot2.canonical_scene_seconds(
+            draft.get("quality_tier") or draft.get("quality_tier_id") or invoice.get("routing_quality_tier") or invoice.get("quality_xu")
+        )
         invoice.update({
             "job_type": video_selfshot2.JOB_TYPE,
             "source_hash": str(source_analysis.get("source_hash") or ""),
             "scene_count": scene_count,
-            "duration_seconds": scene_count * video_selfshot2.SCENE_SECONDS,
+            "scene_duration_seconds": selfshot2_scene_seconds,
+            "duration_seconds": scene_count * selfshot2_scene_seconds,
             "engine_route": str((preflight_snapshot.get("engine_route") or {}).get("route") or ""),
             "continuity_validation_required": True,
             "text_only_fallback_allowed": False,
