@@ -227,3 +227,17 @@ Các case trên phải chạy bằng SQLite tạm trước khi live. Không dùn
 
 FAIL nếu test gọi provider, chạy hai local model song song, thay đổi exact-two,
 hoặc hết timeout mà không fail-closed/cleanup.
+
+## UI small-flow cases — source of truth
+
+| ID | Mức | Luồng | PASS bắt buộc |
+|---|---|---|---|
+| `UI-SM-01` | 🟠 nặng | AutoPost Back/Home nhập | Pending đúng luồng dọn, draft/job khác giữ |
+| `UI-SM-02` | 🟠 nặng | AutoPost caption edit | Save/Cancel; owner + chat + message + token; nút cũ bị chặn |
+| `UI-SM-03` | 🟡 vừa | Support Tư vấn / `/start` | Pending cũ dọn, ticket DB không xóa |
+| `UI-SM-04` | 🟡 vừa | Broadcast Lite Back/Menu | Pending dọn, draft DB giữ |
+| `UI-SM-05` | 🟡 vừa | Document split Back | Page prompt dọn, file/options giữ |
+| `UI-SM-06` | 🟡 vừa | Memory empty delete | Pending delete dọn, ghi chú không đổi |
+| `UI-SM-07` | 🟢 nhẹ | Internal archive type picker | Nhãn Back khớp preview destination |
+
+Cases chạy local; sửa case này trước khi tạo issue thật.

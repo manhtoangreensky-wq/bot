@@ -807,3 +807,15 @@ Evidence source: ONNX `136`, blackbox `68`, continuity `7`, recovery `162`,
 provider-fallback `56`, exact-two `3` passed; changed-file compile và
 `git diff --check` exit `0`. Chưa có live MP4/receipt cho correction nên chưa
 được ghi `LIVE PASS`.
+
+## UI small-flow corrections — 24/09/2026
+
+| Giả định cũ | Hiện tại | Trạng thái |
+|---|---|---|
+| Back/Home chỉ đổi màn | Back/Home dọn đúng pending owner, giữ draft/job | Đã sửa theo seam |
+| Nút thiếu handler có thể về hub | Rewrite/logo/affiliate báo chưa khả dụng tại màn hiện tại | Feature chưa triển khai |
+| Caption draft đổi trực tiếp | Preview + Save/Cancel; owner/chat/message/token kiểm tra | Đã nối source |
+| Back tài liệu giữ page prompt | Back received clear prompt, giữ file/options | Đã sửa |
+| Empty delete list giữ pending | Ghi chú rỗng clear delete pending | Đã sửa |
+
+Các số đo local chưa chứng minh deploy/LIVE.

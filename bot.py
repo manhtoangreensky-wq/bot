@@ -44434,6 +44434,7 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
     uid = update.effective_user.id
     try:
         if action in {"back", "menu"}:
+            clear_broadcast_lite_pending(uid)
             return await _broadcast_lite_edit(query, broadcast_lite_admin_menu_text(), broadcast_lite_admin_menu_keyboard())
 
         if action == "compose":
@@ -135657,8 +135658,11 @@ async def cmd_linkweb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from services.autopost_draft_edit import clear_pending as clear_autopost_pending
+    clear_autopost_pending(context)
     log_command_received("start", update)
     uid = update.effective_user.id
+    clear_support_ticket_pending(uid)
     user_existed_before = user_exists(uid)
     get_user(uid, update.effective_user.first_name)
     record_usage_event(
@@ -139808,6 +139812,7 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
             reply_markup=support_consult_keyboard(lang),
         )
     if action == "consult_type" and len(parts) >= 3:
+        clear_support_ticket_pending(uid)
         service_type = parts[2] if parts[2] in SUPPORT_CONSULT_DETAILS else "video"
         return await safe_edit_or_send(
             query,
@@ -140075,7 +140080,15 @@ def autopost_hub_keyboard(lang: str = "vi", is_admin: bool = False) -> InlineKey
     return autopost_main_keyboard(lang)
 
 async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from services.autopost_draft_edit import handle_callback as handle_caption_callback
+    if await handle_caption_callback(update, context):
+        return
+    context.user_data.pop("autopost_caption_edit", None)
     query = update.callback_query
+    callback_action = str(query.data or "").split("|")[1:2]
+    if callback_action and callback_action[0] in {"draft_rewrite", "brand_logo_prompt", "draft_change_aff"}:
+        await query.answer("Chức năng này chưa khả dụng. Dữ liệu của bạn được giữ nguyên.", show_alert=True)
+        return
     await query.answer()
     uid = query.from_user.id
     lang = get_user_language(uid) or "vi"
@@ -140084,7 +140097,13 @@ async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT
     action = parts[1] if len(parts) > 1 else "main"
     value = parts[2] if len(parts) > 2 else ""
 
+    if action in {"input", "brand_edit_prompt"} or (action == "conn" and (value or "telegram") == "telegram"):
+        for pending_key in ("awaiting_content_input_type", "awaiting_telegram_channel_id", "awaiting_brand_edit"):
+            context.user_data.pop(pending_key, None)
+
     if action in {"main", "hub", "dashboard"}:
+        for pending_key in ("awaiting_content_input_type", "awaiting_telegram_channel_id", "awaiting_brand_edit"):
+            context.user_data.pop(pending_key, None)
         return await safe_edit_query_message(
             query,
             autopost_main_dashboard_text(lang, uid),
@@ -140093,6 +140112,7 @@ async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT
         )
 
     if action == "content_input_menu":
+        context.user_data.pop("awaiting_content_input_type", None)
         return await safe_edit_query_message(
             query,
             autopost_content_input_menu_text(),
@@ -140131,6 +140151,7 @@ async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT
         return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
 
     if action == "brands":
+        context.user_data.pop("awaiting_brand_edit", None)
         brand = get_effective_brand_profile(uid)
         msg = autopost_brand_view_text(brand)
         reply_kb = autopost_brand_keyboard()
@@ -140205,6 +140226,7 @@ async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT
         return
 
     if action == "channels":
+        context.user_data.pop("awaiting_telegram_channel_id", None)
         msg = autopost_channels_text(uid)
         reply_kb = autopost_channels_keyboard()
         return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
@@ -140385,6 +140407,8 @@ exec(compile(autopost_engine_code, f"{__file__}:autopost_engine", "exec"), globa
 
 
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from services.autopost_draft_edit import clear_pending as clear_autopost_pending
+    clear_autopost_pending(context)
     query = update.callback_query
     await query.answer()
     action = (query.data.split("|", 1)[1] if "|" in query.data else "main").strip()
@@ -185100,6 +185124,8 @@ async def handle_doc_tool_callback(update: Update, context: ContextTypes.DEFAULT
         USER_PENDING[doc_tool_pending_key(uid)] = state
         return await safe_edit_or_send(query, "🧹 Đã xóa danh sách file tạm. TOAN AAS chưa xử lý và chưa trừ Xu.", reply_markup=doc_tool_start_keyboard(tool, lang, state))
     if action == "back_received":
+        state["awaiting_page_spec"] = "0"
+        USER_PENDING[doc_tool_pending_key(uid)] = state
         return await safe_edit_or_send(query, doc_tool_received_text(state, lang), parse_mode="HTML", reply_markup=doc_tool_after_file_keyboard(state, lang))
     if action == "ask_pages":
         state["awaiting_page_spec"] = "1"
@@ -186602,6 +186628,7 @@ async def handle_memory_callback(update: Update, context: ContextTypes.DEFAULT_T
     if action == "delete_start":
         notes = memory_list_notes(uid, limit=8)
         if not notes:
+            clear_memory_guided_pending(uid)
             return await safe_edit_or_send(query, memory_notes_list_text([], "🗑 Xóa ghi chú" if normalize_user_language(lang) == "vi" else "🗑 Delete note", lang), parse_mode="HTML", reply_markup=memory_main_keyboard(lang))
         set_memory_guided_pending(uid, "delete_id")
         return await safe_edit_or_send(
@@ -232172,7 +232199,7 @@ def internal_archive_type_keyboard(department: str) -> InlineKeyboardMarkup:
         for index in range(0, len(buttons), 2)
     ]
     rows.append([
-        InlineKeyboardButton("⬅️ Phòng ban", callback_data="archive|back_department"),
+        InlineKeyboardButton("⬅️ Xem lại hồ sơ", callback_data="archive|back_department"),
         InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
     ])
     return InlineKeyboardMarkup(rows)
@@ -269671,6 +269698,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_state_reset_slash_command(update, context, text):
         return
 
+    # AutoPost caption edit owns text only while its explicit session is active.
+    from services.autopost_draft_edit import handle_text as handle_caption_text
+    if await handle_caption_text(update, context):
+        return
+
     # AutoPost Content Input Text Handling
     if context.user_data.get("awaiting_content_input_type"):
         in_type = context.user_data.pop("awaiting_content_input_type")
@@ -269681,7 +269713,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["current_draft"] = draft
         msg = autopost_draft_view_text(draft)
         reply_kb = autopost_draft_keyboard(0)
-        return await update.message.reply_text(msg, parse_mode="HTML", reply_markup=reply_kb)
+        draft_message = await update.message.reply_text(msg, parse_mode="HTML", reply_markup=reply_kb)
+        context.user_data["autopost_draft_message_id"] = draft_message.message_id
+        context.user_data["autopost_draft_chat_id"] = draft_message.chat_id
+        return
 
     # AutoPost Telegram Channel Connect Handling
     if context.user_data.get("awaiting_telegram_channel_id"):
