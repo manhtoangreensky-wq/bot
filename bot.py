@@ -875,6 +875,8 @@ KEY4U_VIDEO_MODEL = _env("KEY4U_DEFAULT_VIDEO_MODEL", _env("KEY4U_VIDEO_MODEL", 
 KEY4U_VIDEO_FALLBACK_MODELS = _env("KEY4U_VIDEO_FALLBACK_MODELS", "veo3.1-fast,pixverse-video,viduq3,kling-video,minimax-video,doubao-seedance")
 KEY4U_TTS_MODEL = _env("KEY4U_DEFAULT_TTS_MODEL", _env("KEY4U_TTS_MODEL", "speech-02-hd"))
 KEY4U_TTS_ALT_MODEL = _env("KEY4U_ALT_TTS_MODEL", "speech-2.6-hd")
+KEY4U_TTS_MAX_RETRIES = env_int("KEY4U_TTS_MAX_RETRIES", 2)
+KEY4U_TTS_RETRY_BACKOFF = env_float("KEY4U_TTS_RETRY_BACKOFF", 0.5)
 KEY4U_MINIMAX_CLONE_MODEL = _env("KEY4U_MINIMAX_CLONE_MODEL", "speech-2.8-hd")
 KEY4U_STT_MODEL = _env("KEY4U_STT_MODEL", "whisper-1")
 KEY4U_SUNO_MODEL = _env("KEY4U_DEFAULT_MUSIC_MODEL", _env("KEY4U_SUNO_MODEL", "chirp-v4"))
@@ -64891,6 +64893,38 @@ async def minimax_audio_reference_to_bytes(value) -> tuple[bytes, str]:
             return audio_bytes, encoding
     return b"", "empty_demo_audio"
 
+def _is_transient_key4u_tts_error(result: dict, status: str, http_status: int) -> bool:
+    if int(http_status or 0) in {429, 500, 502, 503, 504}:
+        return True
+    stat = str(status or "").upper()
+    if stat in {
+        "FAIL_TIMEOUT",
+        "FAIL_PROVIDER_UNAVAILABLE",
+        "FAIL_RATE_LIMIT",
+        "FAIL_PROVIDER_GROUP_UNAVAILABLE",
+    }:
+        return True
+    res_dict = result if isinstance(result, dict) else {}
+    err_text = " ".join([
+        str(res_dict.get("error_message_safe") or ""),
+        str(res_dict.get("error_class") or ""),
+        str(res_dict.get("detail") or ""),
+        stat,
+    ]).lower()
+    transient_markers = (
+        "temporarily unavailable",
+        "try again later",
+        "service_unavailable",
+        "quá tải",
+        "overloaded",
+        "rate limit",
+        "timeout",
+        "connection reset",
+        "new_api_error",
+    )
+    return any(marker in err_text for marker in transient_markers)
+
+
 async def key4u_minimax_tts_bytes(
     text: str,
     voice_id: str = "",
@@ -64905,26 +64939,41 @@ async def key4u_minimax_tts_bytes(
     provider = key4u_provider_instance()
     selected_voice_id = str(voice_id or default_tts_voice_id("male"))
     selected_speed = voice_tts_provider_speed(voice_speed or VOICE_TTS_DEFAULT_SPEED)
-    result = await provider.tts(
-        str(text or "")[:3500],
-        model=KEY4U_TTS_MODEL,
-        voice_id=str(voice_id or default_tts_voice_id("male")),
-        speed=selected_speed,
-        timeout_seconds=float(SHOPAIKEY_TTS_TIMEOUT_SECONDS or 60),
-        language_boost=str(tts_language_boost or "auto"),
-    )
-    status = str(result.get("status") or ("PASS" if result.get("ok") else "FAIL"))
-    http_status = int(result.get("http_status") or 0)
-    audio_bytes = bytes(result.get("output_bytes") or b"")
-    if result.get("ok") and audio_bytes:
-        return "PASS", audio_bytes, f"http={http_status}; bytes={len(audio_bytes)}; route=key4u_minimax", http_status
-    output_url = str(result.get("output_url") or "").strip()
-    if result.get("ok") and output_url:
-        downloaded, detail, download_http = await _download_audio_url_bytes(output_url)
-        if downloaded:
-            return "PASS", downloaded, f"http={http_status}; {detail}; route=key4u_minimax", int(download_http or http_status)
-    detail = sanitize_provider_error(result.get("error_message_safe") or status)[:240]
-    return status or "FAIL", b"", detail, http_status
+    max_retries = max(0, int(KEY4U_TTS_MAX_RETRIES))
+    base_backoff = max(0.0, float(KEY4U_TTS_RETRY_BACKOFF))
+    last_status = "FAIL"
+    last_detail = ""
+    last_http_status = 0
+    for attempt in range(max_retries + 1):
+        result = await provider.tts(
+            str(text or "")[:3500],
+            model=KEY4U_TTS_MODEL,
+            voice_id=selected_voice_id,
+            speed=selected_speed,
+            timeout_seconds=float(SHOPAIKEY_TTS_TIMEOUT_SECONDS or 60),
+            language_boost=str(tts_language_boost or "auto"),
+        )
+        status = str(result.get("status") or ("PASS" if result.get("ok") else "FAIL"))
+        http_status = int(result.get("http_status") or 0)
+        audio_bytes = bytes(result.get("output_bytes") or b"")
+        if result.get("ok") and audio_bytes:
+            return "PASS", audio_bytes, f"http={http_status}; bytes={len(audio_bytes)}; route=key4u_minimax", http_status
+        output_url = str(result.get("output_url") or "").strip()
+        if result.get("ok") and output_url:
+            downloaded, detail, download_http = await _download_audio_url_bytes(output_url)
+            if downloaded:
+                return "PASS", downloaded, f"http={http_status}; {detail}; route=key4u_minimax", int(download_http or http_status)
+        detail = sanitize_provider_error(result.get("error_message_safe") or status)[:240]
+        last_status = status or "FAIL"
+        last_detail = detail
+        last_http_status = http_status
+        if attempt < max_retries and _is_transient_key4u_tts_error(result, status, http_status):
+            delay = base_backoff * (attempt + 1)
+            if delay > 0:
+                await asyncio.sleep(delay)
+            continue
+        break
+    return last_status, b"", last_detail, last_http_status
 
 async def shopaikey_minimax_tts_bytes(
     text: str,
