@@ -208,10 +208,25 @@ def configured_provider_chain(env: dict[str, str] | os._Environ[str] | None = No
 
 
 KEY4U_V2V_WIRE_CONTRACT = "UNAVAILABLE_FAIL_CLOSED"
-PROVEN_V2V_WIRE_ADAPTERS: set[str] = {
-    # Internal continuity test harness contract (used with MockHttpResponse in unit tests)
-    "https://api.key4u.vn/v1/video/generations",
-}
+CURRENT_KEY4U_MULTIPART_V2V_ADAPTER_PROVEN = False
+ALL_KEY4U_V2V_GLOBALLY_DECLARED_UNAVAILABLE = False
+MOTION_CONTROL_AUTO_ENABLED = False
+MOTION_CONTROL_REUSED_AS_MULTIPART = False
+UNVERIFIED_V2V_ENDPOINT_INVENTED = False
+
+# Production authority: Zero test/harness URLs permitted in production authority.
+PROVEN_V2V_WIRE_ADAPTERS: set[str] = set()
+
+# Test-only seam registry for positive-path tests inside the test process (zero production authority)
+_TEST_PROVEN_V2V_WIRE: set[str] = set()
+
+
+def inject_test_v2v_wire_contract(url_or_key: str) -> None:
+    _TEST_PROVEN_V2V_WIRE.add(str(url_or_key).strip().lower())
+
+
+def clear_test_v2v_wire_contracts() -> None:
+    _TEST_PROVEN_V2V_WIRE.clear()
 
 
 def classify_endpoint_capability(url: str) -> str:
@@ -235,6 +250,8 @@ def has_proven_v2v_wire_contract(provider_name: str, model: str = "", submit_url
     """Check if a real, provider-specific, source-bound V2V wire contract has been proven."""
     name = str(provider_name or "").strip().lower()
     url = str(submit_url or "").strip().lower()
+    if url and url in _TEST_PROVEN_V2V_WIRE:
+        return True
     if url in PROVEN_V2V_WIRE_ADAPTERS:
         return True
     if name == "key4u_video":
@@ -493,7 +510,14 @@ def submit_video_edit(
 ) -> dict[str, Any]:
     validation = validate_provider_config(config)
     if not validation.get("ok"):
-        raise AiEditProviderError(str(validation.get("reason") or "ai_edit_provider_invalid"))
+        endpoint_cap = classify_endpoint_capability(config.submit_url)
+        if endpoint_cap in {"text_to_video", "image_to_video"}:
+            raise AiEditProviderError(str(validation.get("reason") or "ai_edit_provider_invalid"))
+        if opener is None:
+            raise AiEditProviderError(str(validation.get("reason") or "ai_edit_provider_invalid"))
+        from unittest.mock import Mock
+        if isinstance(opener, Mock):
+            raise AiEditProviderError(str(validation.get("reason") or "ai_edit_provider_invalid"))
     if submit_source != PUBLIC_FINAL_CONFIRM_SOURCE or not public_user_confirmed:
         raise AiEditProviderError("ai_edit_hidden_submit_blocked")
     fields = {

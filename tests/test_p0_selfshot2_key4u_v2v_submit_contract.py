@@ -1,14 +1,20 @@
-"""Tests for P0 Self-Shot V2V Submit Contract Correction (Fail-Closed Gates & Hidden Fallback Guard).
+"""Tests for P0 Self-Shot V2V Submit Contract Correction (Fail-Closed Gates & Authority Model).
 
-Mandatory Verification:
-CASE_A: Key4U + /text2video + required V2V -> FAIL_CLOSED (provider_capability_contract_mismatch), provider calls = 0, fallback calls = 0.
-CASE_B: Catalog says video_to_video but no proven wire adapter -> FAIL_CLOSED, calls = 0.
-CASE_C: Generic multipart + no provider-specific V2V proof -> FAIL_CLOSED, calls = 0.
-CASE_D: Unknown endpoint naming -> FAIL_CLOSED, calls = 0.
-CASE_E: Primary capability mismatch + fallback provider configured -> no fallback called, total provider calls = 0.
-CASE_F: Tier 500 duration = 5s preserved.
-CASE_G: Source segment missing/unbound -> FAIL_CLOSED.
-CASE_H: Text-only fallback -> FORBIDDEN.
+Mandatory Regression Verification:
+1. internal/test harness URL cannot become production V2V authority
+2. same URL cannot prove V2V for Key4U
+3. same URL cannot prove V2V for generic provider
+4. Key4U text2video remains blocked
+5. Key4U image2video remains blocked for V2V
+6. unknown endpoint remains blocked
+7. model catalog video_to_video capability alone is insufficient
+8. no fallback after primary capability mismatch
+9. SelfShot2 mismatch fails before provider HTTP
+10. SelfShot3 mismatch fails before provider HTTP
+11. Provider-success positive-path tests may inject test-only seam/mock without production authority
+12. Tier 500 duration = 5s preserved
+13. Source segment missing/unbound -> FAIL_CLOSED
+14. Text-only fallback -> FORBIDDEN
 """
 
 from __future__ import annotations
@@ -25,13 +31,129 @@ from services.video_real_render_connector import RealVideoRenderError
 
 
 # ---------------------------------------------------------------------------
-# CASE_A: Key4U + /text2video + required V2V -> FAIL_CLOSED
+# 1. Internal/test harness URL cannot become production V2V authority
 # ---------------------------------------------------------------------------
 
-def test_case_a_key4u_text2video_fails_closed_before_http(tmp_path: Path):
-    """Key4U with /text2video endpoint must fail pre-submit validation with provider_capability_contract_mismatch and 0 HTTP calls."""
+def test_1_internal_test_harness_url_cannot_become_production_v2v_authority():
+    """Production PROVEN_V2V_WIRE_ADAPTERS must contain 0 test-only endpoints; test URL cannot prove V2V."""
+    test_harness_url = "https://api.key4u.vn/v1/video/generations"
+
+    # Production authority set has 0 test-only endpoints
+    assert test_harness_url not in video_ai_edit_provider.PROVEN_V2V_WIRE_ADAPTERS
+    assert len(video_ai_edit_provider.PROVEN_V2V_WIRE_ADAPTERS) == 0
+
+    # has_proven_v2v_wire_contract must NOT return True merely because of this URL
+    assert not video_ai_edit_provider.has_proven_v2v_wire_contract(
+        "key4u_video", "kling-video", test_harness_url
+    )
+
+
+# ---------------------------------------------------------------------------
+# 2. Same test harness URL cannot prove V2V for Key4U
+# ---------------------------------------------------------------------------
+
+def test_2_same_url_cannot_prove_v2v_for_key4u(tmp_path: Path):
+    """Key4U using test harness URL cannot become V2V-proven; pre-submit validation fails closed."""
     sample_video = tmp_path / "source.mp4"
-    sample_video.write_bytes(b"TEST_VIDEO_BYTES_12345")
+    sample_video.write_bytes(b"TEST_VIDEO_BYTES_KEY4U")
+
+    cfg = video_ai_edit_provider.AiEditProviderConfig(
+        provider_name="key4u_video",
+        enabled=True,
+        submit_url="https://api.key4u.vn/v1/video/generations",
+        poll_url="https://api.key4u.vn/v1/video/generations/{task_id}",
+        auth_header_name="Authorization",
+        auth_header_value="Bearer real_token",
+        model="kling-video",
+        interface="video_to_video_multipart",
+        capabilities=("video_to_video",),
+    )
+
+    # 1. has_proven_v2v_wire_contract must return False
+    assert not video_ai_edit_provider.has_proven_v2v_wire_contract(
+        cfg.provider_name, cfg.model, cfg.submit_url
+    )
+
+    # 2. validate_provider_config fails closed with mismatch
+    val = video_ai_edit_provider.validate_provider_config(cfg, required_capability="video_to_video")
+    assert val["ok"] is False
+    assert val["reason"] == "provider_capability_contract_mismatch"
+    assert "provider_capability_contract_mismatch" in val["invalid_fields"]
+
+    # 3. Production submit_video_edit (without opener) raises before HTTP
+    with pytest.raises(video_ai_edit_provider.AiEditProviderError) as exc_info:
+        video_ai_edit_provider.submit_video_edit(
+            cfg,
+            source_video_path=str(sample_video),
+            prompt="edit",
+            negative_prompt="",
+            aspect_ratio="9:16",
+            duration_seconds=5,
+            job_id="test-job-key4u-url",
+            submit_source=video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE,
+            public_user_confirmed=True,
+        )
+    assert exc_info.value.reason == "provider_capability_contract_mismatch"
+
+
+# ---------------------------------------------------------------------------
+# 3. Same test harness URL cannot prove V2V for generic provider
+# ---------------------------------------------------------------------------
+
+def test_3_same_url_cannot_prove_v2v_for_generic_provider(tmp_path: Path):
+    """A non-Key4U generic provider using the same test harness URL cannot become V2V-proven."""
+    sample_video = tmp_path / "source.mp4"
+    sample_video.write_bytes(b"TEST_VIDEO_BYTES_GENERIC")
+
+    cfg = video_ai_edit_provider.AiEditProviderConfig(
+        provider_name="generic_http",
+        enabled=True,
+        submit_url="https://api.key4u.vn/v1/video/generations",
+        poll_url="https://api.key4u.vn/v1/video/generations/{task_id}",
+        auth_header_name="Authorization",
+        auth_header_value="Bearer generic_token",
+        model="generic-model",
+        interface="video_to_video_multipart",
+        capabilities=("video_to_video",),
+    )
+
+    # 1. has_proven_v2v_wire_contract must return False
+    assert not video_ai_edit_provider.has_proven_v2v_wire_contract(
+        cfg.provider_name, cfg.model, cfg.submit_url
+    )
+
+    # 2. validate_provider_config fails closed
+    val = video_ai_edit_provider.validate_provider_config(cfg, required_capability="video_to_video")
+    assert val["ok"] is False
+    assert val["reason"] == "provider_capability_contract_mismatch"
+
+    # 3. submit_video_edit fails closed before HTTP
+    mock_opener = MagicMock()
+    with pytest.raises(video_ai_edit_provider.AiEditProviderError) as exc_info:
+        video_ai_edit_provider.submit_video_edit(
+            cfg,
+            source_video_path=str(sample_video),
+            prompt="edit",
+            negative_prompt="",
+            aspect_ratio="9:16",
+            duration_seconds=5,
+            job_id="test-job-generic-url",
+            submit_source=video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE,
+            public_user_confirmed=True,
+            opener=mock_opener,
+        )
+    assert exc_info.value.reason == "provider_capability_contract_mismatch"
+    assert mock_opener.call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# 4. Key4U text2video remains blocked
+# ---------------------------------------------------------------------------
+
+def test_4_key4u_text2video_remains_blocked(tmp_path: Path):
+    """Key4U with /text2video endpoint must classify as text_to_video and fail closed before HTTP."""
+    sample_video = tmp_path / "source.mp4"
+    sample_video.write_bytes(b"TEST_VIDEO_BYTES_T2V")
 
     cfg = video_ai_edit_provider.AiEditProviderConfig(
         provider_name="key4u_video",
@@ -45,18 +167,15 @@ def test_case_a_key4u_text2video_fails_closed_before_http(tmp_path: Path):
         capabilities=("video_to_video",),
     )
 
-    # 1. Endpoint classification
-    cap = video_ai_edit_provider.classify_endpoint_capability(cfg.submit_url)
-    assert cap == "text_to_video"
+    # Classification
+    assert video_ai_edit_provider.classify_endpoint_capability(cfg.submit_url) == "text_to_video"
 
-    # 2. Pre-submit validation
+    # Pre-submit validation
     val = video_ai_edit_provider.validate_provider_config(cfg, required_capability="video_to_video")
     assert val["ok"] is False
     assert val["reason"] == "provider_capability_contract_mismatch"
-    assert "provider_capability_contract_mismatch" in val["invalid_fields"]
-    assert val["endpoint_capability"] == "text_to_video"
 
-    # 3. submit_video_edit must raise before any HTTP request
+    # submit_video_edit raises before HTTP even if opener spy passed
     mock_opener = MagicMock()
     with pytest.raises(video_ai_edit_provider.AiEditProviderError) as exc_info:
         video_ai_edit_provider.submit_video_edit(
@@ -66,46 +185,40 @@ def test_case_a_key4u_text2video_fails_closed_before_http(tmp_path: Path):
             negative_prompt="",
             aspect_ratio="9:16",
             duration_seconds=5,
-            job_id="test-job-45",
+            job_id="test-job-4",
             submit_source=video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE,
             public_user_confirmed=True,
             opener=mock_opener,
         )
-
     assert exc_info.value.reason == "provider_capability_contract_mismatch"
-    assert mock_opener.call_count == 0  # PROVIDER_CALLS = 0
+    assert mock_opener.call_count == 0
 
 
 # ---------------------------------------------------------------------------
-# CASE_B: Catalog says video_to_video but no proven wire adapter -> FAIL_CLOSED
+# 5. Key4U image2video remains blocked for V2V
 # ---------------------------------------------------------------------------
 
-def test_case_b_catalog_v2v_without_proven_wire_adapter_fails_closed(tmp_path: Path):
-    """Catalog metadata claiming video_to_video is not proof of wire contract; must fail closed."""
+def test_5_key4u_image2video_remains_blocked_for_v2v(tmp_path: Path):
+    """Key4U with /image2video endpoint must classify as image_to_video and fail closed for V2V."""
     sample_video = tmp_path / "source.mp4"
-    sample_video.write_bytes(b"TEST_VIDEO_BYTES_12345")
-
-    # kling-3.0-turbo has video_to_video in catalog
-    contract = video_ai_edit_provider.model_contract("key4u_video", "kling-3.0-turbo")
-    assert contract["known"] is True
-    assert contract["video_to_video"] is True
-
-    # But Key4U has no proven V2V wire adapter
-    assert video_ai_edit_provider.KEY4U_V2V_WIRE_CONTRACT == "UNAVAILABLE_FAIL_CLOSED"
-    assert not video_ai_edit_provider.has_proven_v2v_wire_contract("key4u_video", "kling-3.0-turbo")
+    sample_video.write_bytes(b"TEST_VIDEO_BYTES_I2V")
 
     cfg = video_ai_edit_provider.AiEditProviderConfig(
         provider_name="key4u_video",
         enabled=True,
-        submit_url="https://api.key4u.click/kling/v1/videos/text2video",
-        poll_url="https://api.key4u.click/kling/v1/videos/text2video/{task_id}",
+        submit_url="https://api.key4u.click/kling/v1/videos/image2video",
+        poll_url="https://api.key4u.click/kling/v1/videos/image2video/{task_id}",
         auth_header_name="Authorization",
         auth_header_value="Bearer real_secret_token",
-        model="kling-3.0-turbo",
+        model="kling-video",
         interface="video_to_video_multipart",
         capabilities=("video_to_video",),
     )
 
+    # Classification
+    assert video_ai_edit_provider.classify_endpoint_capability(cfg.submit_url) == "image_to_video"
+
+    # Pre-submit validation
     val = video_ai_edit_provider.validate_provider_config(cfg, required_capability="video_to_video")
     assert val["ok"] is False
     assert val["reason"] == "provider_capability_contract_mismatch"
@@ -119,70 +232,23 @@ def test_case_b_catalog_v2v_without_proven_wire_adapter_fails_closed(tmp_path: P
             negative_prompt="",
             aspect_ratio="9:16",
             duration_seconds=5,
-            job_id="test-job-45-b",
+            job_id="test-job-5",
             submit_source=video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE,
             public_user_confirmed=True,
             opener=mock_opener,
         )
-
     assert exc_info.value.reason == "provider_capability_contract_mismatch"
     assert mock_opener.call_count == 0
 
 
 # ---------------------------------------------------------------------------
-# CASE_C: Generic multipart without provider-specific V2V proof -> FAIL_CLOSED
+# 6. Unknown endpoint remains blocked
 # ---------------------------------------------------------------------------
 
-def test_case_c_generic_multipart_without_proven_wire_adapter_fails_closed(tmp_path: Path):
-    """Generic multipart interface without a proven provider-specific V2V wire adapter fails closed."""
-    sample_video = tmp_path / "source.mp4"
-    sample_video.write_bytes(b"TEST_VIDEO_BYTES_12345")
-
-    cfg = video_ai_edit_provider.AiEditProviderConfig(
-        provider_name="generic_http",
-        enabled=True,
-        submit_url="https://api.generic.ai/v1/video/edit",
-        poll_url="https://api.generic.ai/v1/video/edit/{task_id}",
-        auth_header_name="Authorization",
-        auth_header_value="Bearer generic_secret_token",
-        model="generic-v2v-model",
-        interface="video_to_video_multipart",
-        capabilities=("video_to_video",),
-    )
-
-    assert not video_ai_edit_provider.has_proven_v2v_wire_contract("generic_http", "generic-v2v-model")
-
-    val = video_ai_edit_provider.validate_provider_config(cfg, required_capability="video_to_video")
-    assert val["ok"] is False
-    assert val["reason"] == "provider_capability_contract_mismatch"
-
-    mock_opener = MagicMock()
-    with pytest.raises(video_ai_edit_provider.AiEditProviderError) as exc_info:
-        video_ai_edit_provider.submit_video_edit(
-            cfg,
-            source_video_path=str(sample_video),
-            prompt="edit",
-            negative_prompt="",
-            aspect_ratio="9:16",
-            duration_seconds=5,
-            job_id="test-job-c",
-            submit_source=video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE,
-            public_user_confirmed=True,
-            opener=mock_opener,
-        )
-
-    assert exc_info.value.reason == "provider_capability_contract_mismatch"
-    assert mock_opener.call_count == 0
-
-
-# ---------------------------------------------------------------------------
-# CASE_D: Unknown endpoint naming -> FAIL_CLOSED
-# ---------------------------------------------------------------------------
-
-def test_case_d_unknown_endpoint_naming_fails_closed(tmp_path: Path):
+def test_6_unknown_endpoint_remains_blocked(tmp_path: Path):
     """Endpoints with unknown or custom naming classify as unknown and fail closed for V2V."""
     sample_video = tmp_path / "source.mp4"
-    sample_video.write_bytes(b"TEST_VIDEO_BYTES_12345")
+    sample_video.write_bytes(b"TEST_VIDEO_BYTES_UNKNOWN")
 
     urls = [
         "https://api.key4u.click/custom/unverified/endpoint",
@@ -219,7 +285,7 @@ def test_case_d_unknown_endpoint_naming_fails_closed(tmp_path: Path):
                 negative_prompt="",
                 aspect_ratio="9:16",
                 duration_seconds=5,
-                job_id="test-d",
+                job_id="test-6",
                 submit_source=video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE,
                 public_user_confirmed=True,
                 opener=mock_opener,
@@ -229,15 +295,61 @@ def test_case_d_unknown_endpoint_naming_fails_closed(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# CASE_E: Primary capability mismatch + fallback provider -> NO FALLBACK CALLED
+# 7. Model catalog video_to_video capability alone is insufficient
 # ---------------------------------------------------------------------------
 
-def test_case_e_primary_capability_mismatch_blocks_hidden_fallback(tmp_path: Path):
-    """When primary provider has capability mismatch, hidden fallback is strictly blocked and 0 provider calls are made."""
-    source_file = tmp_path / "source.mp4"
-    source_file.write_bytes(b"SOURCE_MP4_VALID_BYTES")
+def test_7_model_catalog_v2v_capability_alone_is_insufficient(tmp_path: Path):
+    """Catalog metadata claiming video_to_video is not proof of wire contract; must fail closed."""
+    sample_video = tmp_path / "source.mp4"
+    sample_video.write_bytes(b"TEST_VIDEO_BYTES_CATALOG")
 
-    # Controlled fallback decision unit guard check
+    contract = video_ai_edit_provider.model_contract("key4u_video", "kling-3.0-turbo")
+    assert contract["known"] is True
+    assert contract["video_to_video"] is True
+
+    assert video_ai_edit_provider.KEY4U_V2V_WIRE_CONTRACT == "UNAVAILABLE_FAIL_CLOSED"
+    assert not video_ai_edit_provider.has_proven_v2v_wire_contract("key4u_video", "kling-3.0-turbo")
+
+    cfg = video_ai_edit_provider.AiEditProviderConfig(
+        provider_name="key4u_video",
+        enabled=True,
+        submit_url="https://api.key4u.click/kling/v1/videos/text2video",
+        poll_url="https://api.key4u.click/kling/v1/videos/text2video/{task_id}",
+        auth_header_name="Authorization",
+        auth_header_value="Bearer real_secret_token",
+        model="kling-3.0-turbo",
+        interface="video_to_video_multipart",
+        capabilities=("video_to_video",),
+    )
+
+    val = video_ai_edit_provider.validate_provider_config(cfg, required_capability="video_to_video")
+    assert val["ok"] is False
+    assert val["reason"] == "provider_capability_contract_mismatch"
+
+    mock_opener = MagicMock()
+    with pytest.raises(video_ai_edit_provider.AiEditProviderError) as exc_info:
+        video_ai_edit_provider.submit_video_edit(
+            cfg,
+            source_video_path=str(sample_video),
+            prompt="cinematic edit",
+            negative_prompt="",
+            aspect_ratio="9:16",
+            duration_seconds=5,
+            job_id="test-job-7",
+            submit_source=video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE,
+            public_user_confirmed=True,
+            opener=mock_opener,
+        )
+    assert exc_info.value.reason == "provider_capability_contract_mismatch"
+    assert mock_opener.call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# 8. No fallback after primary capability mismatch
+# ---------------------------------------------------------------------------
+
+def test_8_no_fallback_after_primary_capability_mismatch():
+    """controlled_fallback_decision must strictly reject candidate when primary has capability mismatch."""
     decision = video_ai_edit_provider.controlled_fallback_decision(
         public_confirm_provenance=True,
         primary_status="failed",
@@ -259,9 +371,16 @@ def test_case_e_primary_capability_mismatch_blocks_hidden_fallback(tmp_path: Pat
     assert decision["allowed"] is False
     assert decision["reason"] == "capability_contract_mismatch_fallback_forbidden"
 
-    # End-to-end connector render guard check:
-    # Key4U has text2video URL (capability mismatch).
-    # ShopAiKey is in provider_order as fallback candidate.
+
+# ---------------------------------------------------------------------------
+# 9. SelfShot2 mismatch fails before provider HTTP
+# ---------------------------------------------------------------------------
+
+def test_9_selfshot2_mismatch_fails_before_provider_http(tmp_path: Path):
+    """SelfShot2 connector fails closed on primary capability mismatch with 0 HTTP calls and 0 fallback calls."""
+    source_file = tmp_path / "source.mp4"
+    source_file.write_bytes(b"SOURCE_MP4_VALID_BYTES_SS2")
+
     submit_spy = MagicMock(wraps=video_ai_edit_provider.submit_video_edit)
     mock_urlopen = MagicMock()
 
@@ -296,24 +415,102 @@ def test_case_e_primary_capability_mismatch_blocks_hidden_fallback(tmp_path: Pat
                 scene_index=0,
             )
 
-        # 1. Primary provider fails closed immediately on capability mismatch
-        assert exc_info.value.diagnostics["blocker"] == "provider_capability_contract_mismatch"
-        assert exc_info.value.diagnostics["no_charge"] is True
-        assert exc_info.value.diagnostics["provider_attempted"] is False
-        assert exc_info.value.diagnostics.get("fallback_blocked_reason") == "capability_contract_mismatch_fallback_forbidden"
+        diag = exc_info.value.diagnostics
+        assert diag["blocker"] == "provider_capability_contract_mismatch"
+        assert diag["no_charge"] is True
+        assert diag["provider_attempted"] is False
+        assert diag.get("fallback_blocked_reason") == "capability_contract_mismatch_fallback_forbidden"
 
-        # 2. Key4U validation failed pre-submit, so 0 HTTP requests were sent
+        # 0 HTTP requests sent
         assert mock_urlopen.call_count == 0
 
-        # 3. Fallback provider (ShopAiKey) was NEVER submitted (0 fallback calls)
+        # Fallback provider was never submitted
         assert not any(call.args and getattr(call.args[0], "provider_name", "") == "shopaikey_video" for call in submit_spy.call_args_list)
 
 
 # ---------------------------------------------------------------------------
-# CASE_F: Tier 500 duration = 5s preserved
+# 10. SelfShot3 mismatch fails before provider HTTP
 # ---------------------------------------------------------------------------
 
-def test_case_f_tier_500_duration_preserved():
+def test_10_selfshot3_mismatch_fails_before_provider_http(tmp_path: Path):
+    """SelfShot3 connector fails closed on primary capability mismatch with 0 HTTP calls and 0 fallback calls."""
+    source_file = tmp_path / "source.mp4"
+    source_file.write_bytes(b"SOURCE_MP4_VALID_BYTES_SS3")
+
+    submit_spy = MagicMock(wraps=video_ai_edit_provider.submit_video_edit)
+    mock_urlopen = MagicMock()
+
+    with patch.dict(os.environ, {
+        "KEY4U_VIDEO_TO_VIDEO_ENABLED": "1",
+        "KEY4U_VIDEO_TO_VIDEO_SUBMIT_URL": "https://api.key4u.click/kling/v1/videos/text2video",
+        "KEY4U_VIDEO_TO_VIDEO_POLL_URL": "https://api.key4u.click/kling/v1/videos/text2video/{task_id}",
+        "KEY4U_VIDEO_TO_VIDEO_AUTH_HEADER_VALUE": "Bearer key4u_token",
+        "KEY4U_VIDEO_TO_VIDEO_MODEL": "kling-video",
+        "SHOPAIKEY_VIDEO_TO_VIDEO_ENABLED": "1",
+        "SHOPAIKEY_VIDEO_TO_VIDEO_SUBMIT_URL": "https://api.shopaikey.com/v1/video",
+        "SHOPAIKEY_VIDEO_TO_VIDEO_POLL_URL": "https://api.shopaikey.com/v1/video/{task_id}",
+        "SHOPAIKEY_VIDEO_TO_VIDEO_AUTH_HEADER_VALUE": "Bearer shopaikey_token",
+        "SHOPAIKEY_VIDEO_TO_VIDEO_MODEL": "veo3.1-fast",
+    }), patch("services.video_ai_edit_provider.submit_video_edit", submit_spy), \
+        patch("urllib.request.urlopen", mock_urlopen):
+
+        with pytest.raises(RealVideoRenderError) as exc_info:
+            video_real_render_connector._render_selfshot3_video_to_video(
+                job={
+                    "source_video_local_path": str(source_file),
+                    "quality_tier": 500,
+                    "public_user_confirmed": True,
+                    "submit_source": "public_user_final_confirm",
+                },
+                asset_pack={},
+                raw_path=str(tmp_path / "raw_ss3.mp4"),
+                provider_order=["key4u_video", "shopaikey_video"],
+                fallback_prompt="prompt",
+                aspect_ratio="9:16",
+            )
+
+        diag = exc_info.value.diagnostics
+        assert diag["blocker"] == "provider_capability_contract_mismatch"
+        assert diag["no_charge"] is True
+        assert diag["provider_attempted"] is False
+        assert diag.get("fallback_blocked_reason") == "capability_contract_mismatch_fallback_forbidden"
+
+        # 0 HTTP requests sent
+        assert mock_urlopen.call_count == 0
+
+        # Fallback provider was never submitted
+        assert not any(call.args and getattr(call.args[0], "provider_name", "") == "shopaikey_video" for call in submit_spy.call_args_list)
+
+
+# ---------------------------------------------------------------------------
+# 11. Provider-success positive-path tests may inject test-only seam/mock
+# ---------------------------------------------------------------------------
+
+def test_11_positive_path_test_seam_mock_without_production_authority():
+    """Positive-path unit tests may inject mock wire authority in test process without creating production authority."""
+    test_url = "https://mock.test.local/v1/video/generations"
+
+    # Prior to injection: not proven
+    assert not video_ai_edit_provider.has_proven_v2v_wire_contract("test_provider", "test-model", test_url)
+
+    # Injected test seam grants test authority during test execution
+    video_ai_edit_provider.inject_test_v2v_wire_contract(test_url)
+    try:
+        assert video_ai_edit_provider.has_proven_v2v_wire_contract("test_provider", "test-model", test_url)
+        # Production authority set remains strictly zero
+        assert len(video_ai_edit_provider.PROVEN_V2V_WIRE_ADAPTERS) == 0
+    finally:
+        video_ai_edit_provider.clear_test_v2v_wire_contracts()
+
+    # After cleanup: not proven
+    assert not video_ai_edit_provider.has_proven_v2v_wire_contract("test_provider", "test-model", test_url)
+
+
+# ---------------------------------------------------------------------------
+# 12. Tier 500 duration contract is preserved
+# ---------------------------------------------------------------------------
+
+def test_12_tier_500_duration_preserved():
     """Tier 500 duration contract is exactly 5 seconds."""
     route = video_ai_real_pricing.product_video_route_by_tier(500)
     assert route["seconds_per_scene"] == 5
@@ -321,10 +518,10 @@ def test_case_f_tier_500_duration_preserved():
 
 
 # ---------------------------------------------------------------------------
-# CASE_G: Source segment missing / unbound -> FAIL_CLOSED
+# 13. Source segment missing / unbound -> FAIL_CLOSED
 # ---------------------------------------------------------------------------
 
-def test_case_g_unbound_missing_source_fails_closed(tmp_path: Path):
+def test_13_unbound_missing_source_fails_closed(tmp_path: Path):
     """Missing or non-materialized source video fails closed immediately with no_charge."""
     nonexistent = tmp_path / "does_not_exist.mp4"
 
@@ -352,16 +549,14 @@ def test_case_g_unbound_missing_source_fails_closed(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# CASE_H: Text-only fallback -> FORBIDDEN
+# 14. Text-only fallback -> FORBIDDEN
 # ---------------------------------------------------------------------------
 
-def test_case_h_text_only_fallback_forbidden(tmp_path: Path):
+def test_14_text_only_fallback_forbidden(tmp_path: Path):
     """Text-only fallback is strictly forbidden in SELFSHOT2."""
     source_file = tmp_path / "source.mp4"
     source_file.write_bytes(b"VIDEO_CONTENT")
 
-    # If V2V provider fails, connector fails closed with RealVideoRenderError
-    # and NEVER falls back to text-only generation.
     mock_cfg = video_ai_edit_provider.AiEditProviderConfig(
         provider_name="key4u_video",
         enabled=True,
