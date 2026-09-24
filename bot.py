@@ -63311,25 +63311,34 @@ async def get_shopaikey_usage() -> dict:
 def shopaikey_low_quota_alert_due(remaining_percent: float, low_threshold: float | None = None) -> bool:
     return provider_quota_alert_due("shopaikey", remaining_percent, low_threshold)
 
-async def maybe_alert_shopaikey_low_quota(bot_client, usage: dict, updated_by="monitor") -> bool:
-    if not bot_client or not ADMIN_ID or not usage:
-        return False
-    quota = provider_quota_usage_payload("shopaikey", usage)
-    remaining_percent = float(quota.get("remaining_percent") or 0)
-    if quota.get("alert_state") not in {"LOW", "CRITICAL"}:
-        return False
-    if not shopaikey_low_quota_alert_due(remaining_percent, float(quota.get("low_threshold") or SHOPAIKEY_USAGE_ALERT_PERCENT or 10)):
-        return False
-    freeze_note = ""
-    if quota.get("alert_state") == "CRITICAL":
-        freeze_note = "\n⚠️ ShopAIKey video credit thấp. Public video đã tạm khóa để bảo vệ chi phí.\n"
-    text = provider_quota_alert_text("shopaikey", usage)
-    if freeze_note:
-        text = text + f"\n{freeze_note}"
-    await bot_client.send_message(chat_id=ADMIN_ID, text=text)
-    set_system_setting("shopaikey_low_quota_alert_at", now_text(), f"remaining_percent={remaining_percent:.2f}", updated_by)
-    set_system_setting(f"{provider_quota_cycle_prefix('shopaikey')}_low_quota_alert_at", now_text(), f"remaining_percent={remaining_percent:.2f}", updated_by)
-    return True
+_provider_balance_notification_locks = {}
+
+async def provider_balance_notification_tick(bot_client, provider, credential):
+    from services.provider_balance_reader import read_balance
+    from services.provider_balance_notifications import notify_low_balance
+    from datetime import datetime as balance_datetime, timezone as balance_timezone
+    if not bot_client or not ADMIN_ID or not credential:
+        return 'BLOCKED'
+    lock = _provider_balance_notification_locks.setdefault(provider, asyncio.Lock())
+    async with lock:
+        snapshot = await read_balance(provider, credential)
+        if snapshot['state'] == 'UNKNOWN':
+            return 'UNKNOWN'
+        set_system_setting(
+            'provider_balance_snapshot_v1_' + provider,
+            json.dumps({'balance_usd': str(snapshot['balance_usd']),
+                        'checked_at': snapshot['checked_at'].isoformat(), 'baseline_usd': '100'}),
+            'Notification-only provider balance', 'monitor')
+        async def send_notice(text):
+            return await bot_client.send_message(chat_id=ADMIN_ID, text=text, parse_mode=None)
+        return await notify_low_balance(
+            provider, snapshot['balance_usd'], checked_at=snapshot['checked_at'],
+            now=balance_datetime.now(balance_timezone.utc), read=get_system_setting,
+            write=lambda key, value: set_system_setting(key, value, 'Provider balance notification', 'monitor'),
+            send=send_notice)
+
+async def maybe_alert_shopaikey_low_quota(bot_client, usage: dict, updated_by='monitor') -> bool:
+    return await provider_balance_notification_tick(bot_client, 'shopaikey', SHOPAIKEY_API_KEY) == 'SENT'
 
 def shopaikey_classify_error(http_status: int = 0, detail: str = "") -> str:
     value = str(detail or "").lower()
@@ -270018,6 +270027,14 @@ async def shopaikey_usage_monitor_loop(bot_client):
             raise
         except Exception as e:
             logger.warning(f"ShopAIKey usage monitor skipped: {type(e).__name__}")
+        try:
+            if key4u_usage_alert_enabled():
+                await provider_balance_notification_tick(
+                    bot_client, 'key4u', KEY4U_SYSTEM_API_KEY or KEY4U_API_KEY)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning('Key4U balance notification skipped: %s', type(exc).__name__)
         await asyncio.sleep(interval_seconds)
 TELEGRAM_STARTUP_ERROR = ""
 
@@ -271486,7 +271503,7 @@ async def lifespan(app: FastAPI):
             tg_frame_video_watchdog_task = asyncio.create_task(frame_video_watchdog_scheduler_loop())
         if tg_video_trend_catalog_task is None or tg_video_trend_catalog_task.done():
             tg_video_trend_catalog_task = asyncio.create_task(video_trend_catalog_scheduler_loop())
-        if SHOPAIKEY_USAGE_CHECK_ENABLED and SHOPAIKEY_API_KEY:
+        if (SHOPAIKEY_USAGE_CHECK_ENABLED and SHOPAIKEY_API_KEY) or (key4u_usage_alert_enabled() and (KEY4U_SYSTEM_API_KEY or KEY4U_API_KEY)):
             tg_shopaikey_usage_task = asyncio.create_task(shopaikey_usage_monitor_loop(tg_app.bot))
         if PAYOS_EXPIRY_ALERT_ENABLED and PAYOS_REGISTRATION_EXPIRES_AT:
             tg_payos_expiry_task = asyncio.create_task(payos_expiry_monitor_loop(tg_app.bot))
