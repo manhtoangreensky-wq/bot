@@ -48,6 +48,7 @@ from services import video_local_validation
 SMART_DECISION_VERSION = "smart_multivoice_v1"
 
 FAIL_CLOSED_ASYNC_SUBMITTED_PRIOR_SUBMIT = "FAIL_CLOSED_ASYNC_SUBMITTED_PRIOR_SUBMIT"
+FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE = "FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE"
 
 
 class SubdubTTSAsyncSubmittedPriorSubmitError(subdub_tts_checkpoint.SubdubTTSCheckpointError):
@@ -67,6 +68,15 @@ class SubdubTTSAsyncSubmittedPriorSubmitError(subdub_tts_checkpoint.SubdubTTSChe
         self.task_id = str(task_id or "")
         self.provider_request_id = str(provider_request_id or "")
         self.entry = dict(entry or {})
+
+
+class SubdubTTSUnprovenSynthSignatureError(subdub_tts_checkpoint.SubdubTTSCheckpointError):
+    """Raised when base_synthesize signature cannot be proven safe for per-cue synthesis."""
+
+    def __init__(self, message: str, *, reason: str = "") -> None:
+        super().__init__(message)
+        self.reason = str(reason or "")
+        self.error_code = FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE
 
 
 # Allowed strategies
@@ -1161,6 +1171,25 @@ async def run_auto_smart_multivoice(
                 "cue_id": synth_err.cue_id,
                 "auto_smart_verified": False,
             }
+        except SubdubTTSUnprovenSynthSignatureError as synth_err:
+            return {
+                "ok": False,
+                "strategy": decision.strategy,
+                "detected_speaker_count": decision.detected_speaker_count,
+                "effective_speaker_count": decision.effective_speaker_count,
+                "effective_voice_count": decision.effective_voice_count,
+                "speaker_voice_map": decision.speaker_voice_map,
+                "fallback_level": decision.fallback_level,
+                "fallback_reason": decision.fallback_reason,
+                "output_mode": OUTPUT_MODE_FAILED,
+                "final_mp4_path": None,
+                "status": FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE,
+                "blocker": FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE,
+                "error_code": FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE,
+                "tts_checkpoint_failure_stage": "tts_checkpoint",
+                "tts_checkpoint_failure_code": "tts_unproven_synth_signature",
+                "auto_smart_verified": False,
+            }
         except subdub_tts_checkpoint.SubdubTTSContractMismatchError as synth_err:
             return {
                 "ok": False,
@@ -1513,6 +1542,81 @@ def is_auto_smart_multivoice_state(state: Mapping[str, Any] | None) -> bool:
     )
 
 
+def resolve_synth_call_shape(
+    base_synthesize: Callable[..., Any],
+    extra_kwargs: Mapping[str, Any] | None = None,
+) -> tuple[str, inspect.Signature]:
+    """Inspects base_synthesize signature BEFORE provider invocation to select call shape deterministically.
+
+    Supported safe per-cue invocation shapes:
+    1. 'kwargs_voice_id': accepts (cues, *extra_args, **scalar_kwargs) with voice_id.
+    2. 'cues_voice_id_kw': accepts (cues, voice_id=...) keyword argument.
+    3. 'cues_voice_id_pos': accepts (cues, voice_id) positional argument.
+    4. 'cues_speaker_voice_map': accepts (cues, speaker_voice_map={spk: voice_id}).
+
+    Fails closed if the signature cannot accept any safe per-cue shape.
+    """
+    if not callable(base_synthesize):
+        raise SubdubTTSUnprovenSynthSignatureError("base_synthesize is not callable", reason="not_callable")
+    try:
+        sig = inspect.signature(base_synthesize)
+    except (ValueError, TypeError) as exc:
+        raise SubdubTTSUnprovenSynthSignatureError(f"uninspectable signature: {exc}", reason="uninspectable") from exc
+
+    dummy_cues = [{"cue_id": "__probe__", "text": "__probe__", "speaker_id": "__probe__"}]
+    dummy_voice = "__probe_voice__"
+    kw = dict(extra_kwargs or {})
+    kw["voice_id"] = dummy_voice
+
+    params = list(sig.parameters.values())
+    param_names = [p.name for p in params]
+    has_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params)
+
+    # Specific signature contracts
+    if "speaker_voice_map" in param_names:
+        try:
+            sig.bind(dummy_cues, speaker_voice_map={"__probe__": dummy_voice})
+            return "cues_speaker_voice_map", sig
+        except TypeError:
+            pass
+
+    if "voice_id" in param_names:
+        try:
+            sig.bind(dummy_cues, voice_id=dummy_voice)
+            return "cues_voice_id_kw", sig
+        except TypeError:
+            pass
+        try:
+            sig.bind(dummy_cues, dummy_voice)
+            return "cues_voice_id_pos", sig
+        except TypeError:
+            pass
+
+    if has_varkw:
+        try:
+            sig.bind(dummy_cues, **kw)
+            return "kwargs_voice_id", sig
+        except TypeError:
+            pass
+
+    try:
+        sig.bind(dummy_cues, voice_id=dummy_voice)
+        return "cues_voice_id_kw", sig
+    except TypeError:
+        pass
+
+    try:
+        sig.bind(dummy_cues, speaker_voice_map={"__probe__": dummy_voice})
+        return "cues_speaker_voice_map", sig
+    except TypeError:
+        pass
+
+    raise SubdubTTSUnprovenSynthSignatureError(
+        f"unsupported_synth_signature: signature {sig} does not accept any supported per-cue shape",
+        reason="no_supported_signature",
+    )
+
+
 def create_smart_synth_adapter(
     base_synthesize: Callable[..., Any],
     *,
@@ -1549,6 +1653,17 @@ def create_smart_synth_adapter(
         spk_map = kwargs.get("speaker_voice_map") or {}
         if cues_arg is None:
             cues_arg = kwargs.get("segments") or []
+
+        # Pre-submit argument normalization:
+        # Do not forward original cues positional argument again.
+        extra_args = args[1:] if len(args) > 1 else ()
+        extra_kwargs = {
+            k: v for k, v in kwargs.items()
+            if k not in ("cues", "segments", "speaker_voice_map", "voice_id")
+        }
+
+        # Deterministic pre-submit signature selection (no trial calls, no runtime exception probing)
+        call_shape, _sig = resolve_synth_call_shape(base_synthesize, extra_kwargs)
 
         cues_list = list(cues_arg or [])
         all_chunks: list[dict[str, Any]] = []
@@ -1595,23 +1710,30 @@ def create_smart_synth_adapter(
                 continue
 
             # 3. Provider call for new/uncompleted safe cue
-            scalar_kwargs = dict(kwargs)
-            scalar_kwargs["voice_id"] = cue_voice_id
-            scalar_kwargs.pop("cues", None)
-            scalar_kwargs.pop("speaker_voice_map", None)
+            # Exactly one provider call per attempt: any exception marks ambiguous and fails closed.
             try:
-                chunk_res = await _maybe_await(
-                    base_synthesize([cue], *args, **scalar_kwargs)
-                )
-            except TypeError:
-                try:
+                if call_shape == "kwargs_voice_id":
+                    scalar_kwargs = dict(extra_kwargs)
+                    scalar_kwargs["voice_id"] = cue_voice_id
+                    chunk_res = await _maybe_await(
+                        base_synthesize([cue], *extra_args, **scalar_kwargs)
+                    )
+                elif call_shape == "cues_voice_id_kw":
                     chunk_res = await _maybe_await(
                         base_synthesize([cue], voice_id=cue_voice_id)
                     )
-                except Exception as net_exc:
-                    if checkpoint_manager is not None:
-                        checkpoint_manager.record_cue_ambiguous(cue, cue_voice_id, net_exc)
-                    raise
+                elif call_shape == "cues_voice_id_pos":
+                    chunk_res = await _maybe_await(
+                        base_synthesize([cue], cue_voice_id)
+                    )
+                elif call_shape == "cues_speaker_voice_map":
+                    chunk_res = await _maybe_await(
+                        base_synthesize([cue], speaker_voice_map={spk: cue_voice_id})
+                    )
+                else:
+                    raise SubdubTTSUnprovenSynthSignatureError(
+                        f"unsupported_call_shape: {call_shape}"
+                    )
             except Exception as net_exc:
                 if checkpoint_manager is not None:
                     checkpoint_manager.record_cue_ambiguous(cue, cue_voice_id, net_exc)

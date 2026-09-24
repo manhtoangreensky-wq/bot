@@ -1019,3 +1019,194 @@ async def test_smart_synth_adapter_async_submitted_raises_prior_submit_error(tmp
     assert provider_called is False, "base_synthesize MUST NOT be called for STATE_ASYNC_SUBMITTED cue"
 
 
+@_sync
+async def test_typeerror_post_submit_single_call_and_ambiguous_state(tmp_path: Path):
+    """Verify that a TypeError raised after provider boundary makes exactly ONE provider call
+    and transitions checkpoint state to STATE_AMBIGUOUS without any auto-resubmit.
+    """
+    ws = str(tmp_path / "ws_typeerror_single")
+    job_id = "job_typeerror_01"
+    mgr = subdub_tts_checkpoint.SubdubTTSCheckpointManager(
+        workspace=ws,
+        job_id=job_id,
+        target_language="vi",
+        quote_fingerprint="quote_fp_typeerror",
+    )
+
+    call_count = 0
+
+    async def mock_base_synthesize(cues_arg, *args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        raise TypeError("post_submit_type_error_simulated")
+
+    adapter = smart.create_smart_synth_adapter(
+        mock_base_synthesize,
+        checkpoint_manager=mgr,
+    )
+
+    cue = {"cue_id": "c1", "speaker_id": "spk_1", "text": "Câu test post-submit TypeError", "start": 0.0, "end": 2.0}
+
+    with pytest.raises(TypeError, match="post_submit_type_error_simulated"):
+        await adapter(cues=[cue], speaker_voice_map={"spk_1": "voice_female"})
+
+    assert call_count == 1, f"Expected exactly 1 call, got {call_count} (double submit detected!)"
+
+    # Verify checkpoint state is STATE_AMBIGUOUS
+    key = mgr.compute_key(cue, "voice_female")
+    assert key in mgr.entries
+    assert mgr.entries[key]["state"] == subdub_tts_checkpoint.STATE_AMBIGUOUS
+    assert "post_submit_type_error_simulated" in str(mgr.entries[key]["error_detail"])
+
+
+@_sync
+async def test_typeerror_restart_zero_provider_calls(tmp_path: Path):
+    """Verify that restarting a job whose prior run failed with TypeError in provider boundary
+    fails closed with 0 provider calls on restart. Total calls across both runs remain 1.
+    """
+    ws = str(tmp_path / "ws_typeerror_restart")
+    job_id = "job_typeerror_restart_01"
+    mgr1 = subdub_tts_checkpoint.SubdubTTSCheckpointManager(
+        workspace=ws,
+        job_id=job_id,
+        target_language="vi",
+        quote_fingerprint="quote_fp_typeerror_restart",
+    )
+
+    call_count = 0
+
+    async def mock_base_synthesize(cues_arg, *args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        raise TypeError("post_submit_type_error_first_run")
+
+    adapter1 = smart.create_smart_synth_adapter(
+        mock_base_synthesize,
+        checkpoint_manager=mgr1,
+    )
+
+    cue = {"cue_id": "c1", "speaker_id": "spk_1", "text": "Câu test restart after TypeError", "start": 0.0, "end": 2.0}
+
+    with pytest.raises(TypeError):
+        await adapter1(cues=[cue], speaker_voice_map={"spk_1": "voice_female"})
+
+    assert call_count == 1
+
+    # RUN 2: Restart same job
+    mgr2 = subdub_tts_checkpoint.SubdubTTSCheckpointManager(
+        workspace=ws,
+        job_id=job_id,
+        target_language="vi",
+        quote_fingerprint="quote_fp_typeerror_restart",
+    )
+    adapter2 = smart.create_smart_synth_adapter(
+        mock_base_synthesize,
+        checkpoint_manager=mgr2,
+    )
+
+    with pytest.raises(subdub_tts_checkpoint.SubdubTTSAmbiguousSubmissionError):
+        await adapter2(cues=[cue], speaker_voice_map={"spk_1": "voice_female"})
+
+    assert call_count == 1, "Provider MUST NOT be invoked on restart for STATE_AMBIGUOUS cue"
+
+
+@_sync
+async def test_unproven_signature_zero_provider_calls(tmp_path: Path):
+    """Verify that a callable with unsupported signature fails closed BEFORE provider boundary
+    with 0 provider calls and raises SubdubTTSUnprovenSynthSignatureError.
+    """
+    ws = str(tmp_path / "ws_unproven_sig")
+    job_id = "job_unproven_01"
+    mgr = subdub_tts_checkpoint.SubdubTTSCheckpointManager(
+        workspace=ws,
+        job_id=job_id,
+        target_language="vi",
+        quote_fingerprint="quote_fp_unproven",
+    )
+
+    call_count = 0
+
+    def bad_synth(x, y, z):
+        nonlocal call_count
+        call_count += 1
+        return []
+
+    adapter = smart.create_smart_synth_adapter(
+        bad_synth,
+        checkpoint_manager=mgr,
+    )
+
+    cue = {"cue_id": "c1", "speaker_id": "spk_1", "text": "Câu test unproven signature", "start": 0.0, "end": 2.0}
+
+    with pytest.raises(smart.SubdubTTSUnprovenSynthSignatureError) as exc_info:
+        await adapter(cues=[cue], speaker_voice_map={"spk_1": "voice_female"})
+
+    assert exc_info.value.error_code == smart.FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE
+    assert call_count == 0, f"Expected 0 provider calls for invalid signature, got {call_count}"
+    assert len(mgr.entries) == 0, "No checkpoint entry should be created for unproven signature"
+
+
+@_sync
+async def test_supported_signature_matrix(tmp_path: Path):
+    """Verify that all supported signature forms (A: cues, voice_id=None; B: cues, *, voice_id=None;
+    C: *args, **kwargs; D: cues, speaker_voice_map) select call shape pre-submit and invoke once.
+    """
+    cue = {"cue_id": "c1", "speaker_id": "spk_1", "text": "Câu test signature matrix", "start": 0.0, "end": 2.0}
+
+    # Form A: async synth(cues, voice_id=None)
+    calls_a = []
+    async def synth_a(cues, voice_id=None):
+        calls_a.append((cues, voice_id))
+        return {"chunks": [{"cue_id": "c1", "audio": SAMPLE_VALID_MP3, "audio_duration": 2.0}], "provider": "mock_a"}
+
+    mgr_a = subdub_tts_checkpoint.SubdubTTSCheckpointManager(workspace=str(tmp_path / "ws_sig_a"), job_id="job_a")
+    adapter_a = smart.create_smart_synth_adapter(synth_a, checkpoint_manager=mgr_a)
+    res_a = await adapter_a(cues=[cue], speaker_voice_map={"spk_1": "voice_a"})
+    assert len(calls_a) == 1
+    assert calls_a[0][1] == "voice_a"
+    assert len(res_a["chunks"]) == 1
+
+    # Form B: async synth(cues, *, voice_id=None)
+    calls_b = []
+    async def synth_b(cues, *, voice_id=None):
+        calls_b.append((cues, voice_id))
+        return {"chunks": [{"cue_id": "c1", "audio": SAMPLE_VALID_MP3, "audio_duration": 2.0}], "provider": "mock_b"}
+
+    mgr_b = subdub_tts_checkpoint.SubdubTTSCheckpointManager(workspace=str(tmp_path / "ws_sig_b"), job_id="job_b")
+    adapter_b = smart.create_smart_synth_adapter(synth_b, checkpoint_manager=mgr_b)
+    res_b = await adapter_b(cues=[cue], speaker_voice_map={"spk_1": "voice_b"})
+    assert len(calls_b) == 1
+    assert calls_b[0][1] == "voice_b"
+    assert len(res_b["chunks"]) == 1
+
+    # Form C: Key4U live route wrapper signature (*args, **kwargs)
+    calls_c = []
+    async def synth_c(*args, **kwargs):
+        calls_c.append((args, kwargs))
+        return {"chunks": [{"cue_id": "c1", "audio": SAMPLE_VALID_MP3, "audio_duration": 2.0}], "provider": "mock_c"}
+
+    mgr_c = subdub_tts_checkpoint.SubdubTTSCheckpointManager(workspace=str(tmp_path / "ws_sig_c"), job_id="job_c")
+    adapter_c = smart.create_smart_synth_adapter(synth_c, checkpoint_manager=mgr_c)
+    res_c = await adapter_c(cues=[cue], speaker_voice_map={"spk_1": "voice_c"}, allow_admin=True)
+    assert len(calls_c) == 1
+    assert calls_c[0][1].get("voice_id") == "voice_c"
+    assert calls_c[0][1].get("allow_admin") is True
+    # Verify original cues positional argument was NOT duplicated in args
+    assert len(calls_c[0][0]) == 1, "args should only contain [cue], not duplicate cues"
+    assert len(res_c["chunks"]) == 1
+
+    # Form D: cues, speaker_voice_map
+    calls_d = []
+    async def synth_d(cues, speaker_voice_map):
+        calls_d.append((cues, speaker_voice_map))
+        return {"chunks": [{"cue_id": "c1", "audio": SAMPLE_VALID_MP3, "audio_duration": 2.0}], "provider": "mock_d"}
+
+    mgr_d = subdub_tts_checkpoint.SubdubTTSCheckpointManager(workspace=str(tmp_path / "ws_sig_d"), job_id="job_d")
+    adapter_d = smart.create_smart_synth_adapter(synth_d, checkpoint_manager=mgr_d)
+    res_d = await adapter_d(cues=[cue], speaker_voice_map={"spk_1": "voice_d"})
+    assert len(calls_d) == 1
+    assert calls_d[0][1].get("spk_1") == "voice_d"
+    assert len(res_d["chunks"]) == 1
+
+
+
