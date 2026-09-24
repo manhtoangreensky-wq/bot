@@ -41,10 +41,43 @@ import time
 from typing import Any, Callable, Mapping, Sequence
 
 from services import subdub_speaker_cast as speaker_cast
+from services import subdub_tts_checkpoint
 from services import video_local_validation
 
 
 SMART_DECISION_VERSION = "smart_multivoice_v1"
+
+FAIL_CLOSED_ASYNC_SUBMITTED_PRIOR_SUBMIT = "FAIL_CLOSED_ASYNC_SUBMITTED_PRIOR_SUBMIT"
+FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE = "FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE"
+
+
+class SubdubTTSAsyncSubmittedPriorSubmitError(subdub_tts_checkpoint.SubdubTTSCheckpointError):
+    """Raised when a cue was already submitted asynchronously to provider; auto-resubmit forbidden."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        cue_id: str = "",
+        task_id: str = "",
+        provider_request_id: str = "",
+        entry: Mapping[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.cue_id = str(cue_id or "")
+        self.task_id = str(task_id or "")
+        self.provider_request_id = str(provider_request_id or "")
+        self.entry = dict(entry or {})
+
+
+class SubdubTTSUnprovenSynthSignatureError(subdub_tts_checkpoint.SubdubTTSCheckpointError):
+    """Raised when base_synthesize signature cannot be proven safe for per-cue synthesis."""
+
+    def __init__(self, message: str, *, reason: str = "") -> None:
+        super().__init__(message)
+        self.reason = str(reason or "")
+        self.error_code = FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE
+
 
 # Allowed strategies
 STRATEGY_STRICT_TWO = "STRICT_TWO"
@@ -95,6 +128,8 @@ SMART_CONTROL_ONLY_KEYS: tuple[str, ...] = (
     "segments",
     "cues",
     "source_media",
+    "checkpoint_manager",
+    "checkpoint_workspace",
 )
 
 
@@ -1076,6 +1111,142 @@ async def run_auto_smart_multivoice(
                 raw_chunks = list(synth_result.get("chunks") or [])
             else:
                 raw_chunks = [synth_result]
+        except subdub_tts_checkpoint.SubdubTTSArtifactCorruptionError as synth_err:
+            return {
+                "ok": False,
+                "strategy": decision.strategy,
+                "detected_speaker_count": decision.detected_speaker_count,
+                "effective_speaker_count": decision.effective_speaker_count,
+                "effective_voice_count": decision.effective_voice_count,
+                "speaker_voice_map": decision.speaker_voice_map,
+                "fallback_level": decision.fallback_level,
+                "fallback_reason": decision.fallback_reason,
+                "output_mode": OUTPUT_MODE_FAILED,
+                "final_mp4_path": None,
+                "status": "FAIL_CLOSED_ARTIFACT_CORRUPTION",
+                "blocker": "FAIL_CLOSED_ARTIFACT_CORRUPTION",
+                "error_code": "FAIL_CLOSED_ARTIFACT_CORRUPTION",
+                "tts_checkpoint_failure_stage": "tts_checkpoint",
+                "tts_checkpoint_failure_code": "tts_artifact_corruption",
+                "auto_smart_verified": False,
+            }
+        except subdub_tts_checkpoint.SubdubTTSAmbiguousSubmissionError as synth_err:
+            return {
+                "ok": False,
+                "strategy": decision.strategy,
+                "detected_speaker_count": decision.detected_speaker_count,
+                "effective_speaker_count": decision.effective_speaker_count,
+                "effective_voice_count": decision.effective_voice_count,
+                "speaker_voice_map": decision.speaker_voice_map,
+                "fallback_level": decision.fallback_level,
+                "fallback_reason": decision.fallback_reason,
+                "output_mode": OUTPUT_MODE_FAILED,
+                "final_mp4_path": None,
+                "status": "FAIL_CLOSED_AMBIGUOUS_SUBMISSION",
+                "blocker": "FAIL_CLOSED_AMBIGUOUS_SUBMISSION",
+                "error_code": "FAIL_CLOSED_AMBIGUOUS_SUBMISSION",
+                "tts_checkpoint_failure_stage": "tts_checkpoint",
+                "tts_checkpoint_failure_code": "tts_ambiguous_submission",
+                "auto_smart_verified": False,
+            }
+        except SubdubTTSAsyncSubmittedPriorSubmitError as synth_err:
+            return {
+                "ok": False,
+                "strategy": decision.strategy,
+                "detected_speaker_count": decision.detected_speaker_count,
+                "effective_speaker_count": decision.effective_speaker_count,
+                "effective_voice_count": decision.effective_voice_count,
+                "speaker_voice_map": decision.speaker_voice_map,
+                "fallback_level": decision.fallback_level,
+                "fallback_reason": decision.fallback_reason,
+                "output_mode": OUTPUT_MODE_FAILED,
+                "final_mp4_path": None,
+                "status": FAIL_CLOSED_ASYNC_SUBMITTED_PRIOR_SUBMIT,
+                "blocker": FAIL_CLOSED_ASYNC_SUBMITTED_PRIOR_SUBMIT,
+                "error_code": FAIL_CLOSED_ASYNC_SUBMITTED_PRIOR_SUBMIT,
+                "tts_checkpoint_failure_stage": "tts_checkpoint",
+                "tts_checkpoint_failure_code": "tts_async_submitted_prior_submit",
+                "async_task_id": synth_err.task_id,
+                "async_provider_request_id": synth_err.provider_request_id,
+                "cue_id": synth_err.cue_id,
+                "auto_smart_verified": False,
+            }
+        except SubdubTTSUnprovenSynthSignatureError as synth_err:
+            return {
+                "ok": False,
+                "strategy": decision.strategy,
+                "detected_speaker_count": decision.detected_speaker_count,
+                "effective_speaker_count": decision.effective_speaker_count,
+                "effective_voice_count": decision.effective_voice_count,
+                "speaker_voice_map": decision.speaker_voice_map,
+                "fallback_level": decision.fallback_level,
+                "fallback_reason": decision.fallback_reason,
+                "output_mode": OUTPUT_MODE_FAILED,
+                "final_mp4_path": None,
+                "status": FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE,
+                "blocker": FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE,
+                "error_code": FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE,
+                "tts_checkpoint_failure_stage": "tts_checkpoint",
+                "tts_checkpoint_failure_code": "tts_unproven_synth_signature",
+                "auto_smart_verified": False,
+            }
+        except subdub_tts_checkpoint.SubdubTTSContractMismatchError as synth_err:
+            return {
+                "ok": False,
+                "strategy": decision.strategy,
+                "detected_speaker_count": decision.detected_speaker_count,
+                "effective_speaker_count": decision.effective_speaker_count,
+                "effective_voice_count": decision.effective_voice_count,
+                "speaker_voice_map": decision.speaker_voice_map,
+                "fallback_level": decision.fallback_level,
+                "fallback_reason": decision.fallback_reason,
+                "output_mode": OUTPUT_MODE_FAILED,
+                "final_mp4_path": None,
+                "status": "FAIL_CLOSED_CONTRACT_MISMATCH",
+                "blocker": "FAIL_CLOSED_CONTRACT_MISMATCH",
+                "error_code": "FAIL_CLOSED_CONTRACT_MISMATCH",
+                "tts_checkpoint_failure_stage": "tts_checkpoint",
+                "tts_checkpoint_failure_code": "tts_contract_mismatch",
+                "auto_smart_verified": False,
+            }
+        except subdub_tts_checkpoint.SubdubTTSQuoteMismatchError as synth_err:
+            return {
+                "ok": False,
+                "strategy": decision.strategy,
+                "detected_speaker_count": decision.detected_speaker_count,
+                "effective_speaker_count": decision.effective_speaker_count,
+                "effective_voice_count": decision.effective_voice_count,
+                "speaker_voice_map": decision.speaker_voice_map,
+                "fallback_level": decision.fallback_level,
+                "fallback_reason": decision.fallback_reason,
+                "output_mode": OUTPUT_MODE_FAILED,
+                "final_mp4_path": None,
+                "status": "FAIL_CLOSED_QUOTE_MISMATCH",
+                "blocker": "FAIL_CLOSED_QUOTE_MISMATCH",
+                "error_code": "FAIL_CLOSED_QUOTE_MISMATCH",
+                "tts_checkpoint_failure_stage": "tts_checkpoint",
+                "tts_checkpoint_failure_code": "tts_quote_mismatch",
+                "auto_smart_verified": False,
+            }
+        except subdub_tts_checkpoint.SubdubTTSCheckpointError as synth_err:
+            return {
+                "ok": False,
+                "strategy": decision.strategy,
+                "detected_speaker_count": decision.detected_speaker_count,
+                "effective_speaker_count": decision.effective_speaker_count,
+                "effective_voice_count": decision.effective_voice_count,
+                "speaker_voice_map": decision.speaker_voice_map,
+                "fallback_level": decision.fallback_level,
+                "fallback_reason": decision.fallback_reason,
+                "output_mode": OUTPUT_MODE_FAILED,
+                "final_mp4_path": None,
+                "status": "FAIL_CLOSED_CHECKPOINT_ERROR",
+                "blocker": "FAIL_CLOSED_CHECKPOINT_ERROR",
+                "error_code": "FAIL_CLOSED_CHECKPOINT_ERROR",
+                "tts_checkpoint_failure_stage": "tts_checkpoint",
+                "tts_checkpoint_failure_code": "tts_checkpoint_error",
+                "auto_smart_verified": False,
+            }
         except Exception as synth_err:
             return {
                 "ok": False,
@@ -1371,6 +1542,278 @@ def is_auto_smart_multivoice_state(state: Mapping[str, Any] | None) -> bool:
     )
 
 
+def resolve_synth_call_shape(
+    base_synthesize: Callable[..., Any],
+    extra_kwargs: Mapping[str, Any] | None = None,
+) -> tuple[str, inspect.Signature]:
+    """Inspects base_synthesize signature BEFORE provider invocation to select call shape deterministically.
+
+    Supported safe per-cue invocation shapes:
+    1. 'kwargs_voice_id': accepts (cues, *extra_args, **scalar_kwargs) with voice_id.
+    2. 'cues_voice_id_kw': accepts (cues, voice_id=...) keyword argument.
+    3. 'cues_voice_id_pos': accepts (cues, voice_id) positional argument.
+    4. 'cues_speaker_voice_map': accepts (cues, speaker_voice_map={spk: voice_id}).
+
+    Fails closed if the signature cannot accept any safe per-cue shape.
+    """
+    if not callable(base_synthesize):
+        raise SubdubTTSUnprovenSynthSignatureError("base_synthesize is not callable", reason="not_callable")
+    try:
+        sig = inspect.signature(base_synthesize)
+    except (ValueError, TypeError) as exc:
+        raise SubdubTTSUnprovenSynthSignatureError(f"uninspectable signature: {exc}", reason="uninspectable") from exc
+
+    dummy_cues = [{"cue_id": "__probe__", "text": "__probe__", "speaker_id": "__probe__"}]
+    dummy_voice = "__probe_voice__"
+    kw = dict(extra_kwargs or {})
+    kw["voice_id"] = dummy_voice
+
+    params = list(sig.parameters.values())
+    param_names = [p.name for p in params]
+    has_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params)
+
+    # Specific signature contracts
+    if "speaker_voice_map" in param_names:
+        try:
+            sig.bind(dummy_cues, speaker_voice_map={"__probe__": dummy_voice})
+            return "cues_speaker_voice_map", sig
+        except TypeError:
+            pass
+
+    if "voice_id" in param_names:
+        try:
+            sig.bind(dummy_cues, voice_id=dummy_voice)
+            return "cues_voice_id_kw", sig
+        except TypeError:
+            pass
+        try:
+            sig.bind(dummy_cues, dummy_voice)
+            return "cues_voice_id_pos", sig
+        except TypeError:
+            pass
+
+    if has_varkw:
+        try:
+            sig.bind(dummy_cues, **kw)
+            return "kwargs_voice_id", sig
+        except TypeError:
+            pass
+
+    try:
+        sig.bind(dummy_cues, voice_id=dummy_voice)
+        return "cues_voice_id_kw", sig
+    except TypeError:
+        pass
+
+    try:
+        sig.bind(dummy_cues, speaker_voice_map={"__probe__": dummy_voice})
+        return "cues_speaker_voice_map", sig
+    except TypeError:
+        pass
+
+    raise SubdubTTSUnprovenSynthSignatureError(
+        f"unsupported_synth_signature: signature {sig} does not accept any supported per-cue shape",
+        reason="no_supported_signature",
+    )
+
+
+def create_smart_synth_adapter(
+    base_synthesize: Callable[..., Any],
+    *,
+    checkpoint_manager: subdub_tts_checkpoint.SubdubTTSCheckpointManager | None = None,
+    workspace: str | None = None,
+    job_id: str | None = None,
+    target_language: str = "vi",
+    quote_fingerprint: str = "",
+) -> Callable[..., Any]:
+    """Wraps per-cue base_synthesize with SubdubTTSCheckpointManager.
+
+    Invariant: A cue with durable STATE_SUCCEEDED must never invoke the
+    paid provider again for the same immutable cue contract.
+    Before every per-cue synthesis call, prepare_cue_intent is consulted.
+    Success is persisted to disk and atomic manifest before the next cue.
+    """
+    safe_job_id = str(job_id or "").strip()
+    if checkpoint_manager is None and workspace and safe_job_id:
+        checkpoint_manager = subdub_tts_checkpoint.SubdubTTSCheckpointManager(
+            workspace=workspace,
+            job_id=safe_job_id,
+            target_language=target_language or "vi",
+            quote_fingerprint=quote_fingerprint or "",
+        )
+
+    async def _smart_synth_adapter(*args: Any, **kwargs: Any) -> Any:
+        if checkpoint_manager is None:
+            raise subdub_tts_checkpoint.SubdubTTSCheckpointError(
+                "missing_checkpoint_identity: durable workspace and stable job_id required"
+            )
+        cues_arg = kwargs.get("cues")
+        if cues_arg is None and args:
+            cues_arg = args[0]
+        spk_map = kwargs.get("speaker_voice_map") or {}
+        if cues_arg is None:
+            cues_arg = kwargs.get("segments") or []
+
+        # Pre-submit argument normalization:
+        # Do not forward original cues positional argument again.
+        extra_args = args[1:] if len(args) > 1 else ()
+        extra_kwargs = {
+            k: v for k, v in kwargs.items()
+            if k not in ("cues", "segments", "speaker_voice_map", "voice_id")
+        }
+
+        # Deterministic pre-submit signature selection (no trial calls, no runtime exception probing)
+        call_shape, _sig = resolve_synth_call_shape(base_synthesize, extra_kwargs)
+
+        cues_list = list(cues_arg or [])
+        all_chunks: list[dict[str, Any]] = []
+        provider_labels: list[str] = []
+
+        for cue in cues_list:
+            cid = str(cue.get("cue_id") or cue.get("id") or "")
+            spk = str(cue.get("speaker_id") or cue.get("speaker") or "")
+            cue_voice_id = str(cue.get("tts_voice_id") or spk_map.get(spk) or kwargs.get("voice_id") or "")
+
+            is_reused = False
+            entry = None
+            cached_bytes = b""
+            if checkpoint_manager is not None:
+                # 1. Consult checkpoint manager BEFORE provider boundary
+                is_reused, _path, cached_bytes, entry = checkpoint_manager.prepare_cue_intent(
+                    cue, cue_voice_id
+                )
+
+            if entry and entry.get("state") == subdub_tts_checkpoint.STATE_ASYNC_SUBMITTED:
+                task_id = str(entry.get("task_id") or "")
+                provider_request_id = str(entry.get("provider_request_id") or "")
+                raise SubdubTTSAsyncSubmittedPriorSubmitError(
+                    f"async_submitted_prior_submit for cue {cid}: task_id={task_id} provider_request_id={provider_request_id}",
+                    cue_id=cid,
+                    task_id=task_id,
+                    provider_request_id=provider_request_id,
+                    entry=entry,
+                )
+
+            if is_reused and entry is not None:
+                # 2. Reconstruct and reuse persisted chunks with 0 provider calls
+                reconstructed = checkpoint_manager.reconstruct_chunks(cue, entry, cached_bytes)
+                for ch in reconstructed:
+                    if isinstance(ch, dict):
+                        ch_copy = dict(ch)
+                        ch_copy.setdefault("cue_id", cid)
+                        if "audio" not in ch_copy and "audio_bytes" in ch_copy:
+                            ch_copy["audio"] = ch_copy["audio_bytes"]
+                        elif "audio_bytes" not in ch_copy and "audio" in ch_copy:
+                            ch_copy["audio_bytes"] = ch_copy["audio"]
+                        all_chunks.append(ch_copy)
+                provider_labels.append(str(entry.get("provider_label") or "smart_tts"))
+                continue
+
+            # 3. Provider call for new/uncompleted safe cue
+            # Exactly one provider call per attempt: any exception marks ambiguous and fails closed.
+            try:
+                if call_shape == "kwargs_voice_id":
+                    scalar_kwargs = dict(extra_kwargs)
+                    scalar_kwargs["voice_id"] = cue_voice_id
+                    chunk_res = await _maybe_await(
+                        base_synthesize([cue], *extra_args, **scalar_kwargs)
+                    )
+                elif call_shape == "cues_voice_id_kw":
+                    chunk_res = await _maybe_await(
+                        base_synthesize([cue], voice_id=cue_voice_id)
+                    )
+                elif call_shape == "cues_voice_id_pos":
+                    chunk_res = await _maybe_await(
+                        base_synthesize([cue], cue_voice_id)
+                    )
+                elif call_shape == "cues_speaker_voice_map":
+                    chunk_res = await _maybe_await(
+                        base_synthesize([cue], speaker_voice_map={spk: cue_voice_id})
+                    )
+                else:
+                    raise SubdubTTSUnprovenSynthSignatureError(
+                        f"unsupported_call_shape: {call_shape}"
+                    )
+            except Exception as net_exc:
+                if checkpoint_manager is not None:
+                    checkpoint_manager.record_cue_ambiguous(cue, cue_voice_id, net_exc)
+                raise
+
+            # 4. Extract audio chunks and metadata
+            if isinstance(chunk_res, dict):
+                raw_chunks = chunk_res.get("chunks") or []
+                prov = chunk_res.get("provider")
+                if prov:
+                    provider_labels.append(str(prov))
+            elif isinstance(chunk_res, list):
+                raw_chunks = chunk_res
+            else:
+                raw_chunks = [chunk_res]
+
+            matched_chunks: list[dict[str, Any]] = []
+            for ch in raw_chunks:
+                if isinstance(ch, dict):
+                    ch_cid = str(ch.get("cue_id") or ch.get("id") or "")
+                    if ch_cid == cid:
+                        matched_chunks.append(dict(ch))
+            if not matched_chunks:
+                for ch in raw_chunks:
+                    if isinstance(ch, dict):
+                        ch_cid = str(ch.get("cue_id") or ch.get("id") or "")
+                        if not ch_cid:
+                            ch_copy = dict(ch)
+                            ch_copy["cue_id"] = cid
+                            matched_chunks.append(ch_copy)
+            if not matched_chunks:
+                for ch in raw_chunks:
+                    if isinstance(ch, dict):
+                        ch_copy = dict(ch)
+                        ch_copy.setdefault("cue_id", cid)
+                        matched_chunks.append(ch_copy)
+
+            primary_audio = b""
+            primary_dur = 0.0
+            if matched_chunks:
+                primary_audio = bytes(matched_chunks[0].get("audio_bytes") or matched_chunks[0].get("audio") or b"")
+                primary_dur = float(
+                    matched_chunks[0].get("audio_duration")
+                    or matched_chunks[0].get("raw_audio_duration")
+                    or 0.0
+                )
+                for ch in matched_chunks:
+                    if "audio" not in ch and "audio_bytes" in ch:
+                        ch["audio"] = ch["audio_bytes"]
+                    elif "audio_bytes" not in ch and "audio" in ch:
+                        ch["audio_bytes"] = ch["audio"]
+
+            provider_label = provider_labels[-1] if provider_labels else "smart_tts"
+
+            # 5. Persist success to disk and atomic manifest BEFORE continuing to next cue
+            if checkpoint_manager is not None:
+                clean_chunks_meta = [
+                    {k: v for k, v in ch.items() if k not in ("audio", "audio_bytes") and not isinstance(v, (bytes, bytearray))}
+                    for ch in matched_chunks
+                ]
+                checkpoint_manager.record_cue_success(
+                    cue,
+                    cue_voice_id,
+                    primary_audio,
+                    duration=primary_dur,
+                    provider_label=provider_label,
+                    chunks_meta=clean_chunks_meta,
+                )
+
+            for ch in matched_chunks:
+                all_chunks.append(ch)
+
+        return {
+            "chunks": all_chunks,
+            "provider": provider_labels[0] if provider_labels else "smart_tts",
+        }
+
+    return _smart_synth_adapter
+
+
 async def run_auto_smart_multivoice_blackbox(
     *,
     extract_pcm: Callable[..., Any] | None = None,
@@ -1503,74 +1946,100 @@ async def run_auto_smart_multivoice_blackbox(
 
     base_synthesize = payload.get("synthesize_segments")
     smart_synthesizer = None
+    checkpoint_mgr = None
     if callable(base_synthesize):
-        async def _smart_synth_adapter(*args: Any, **kwargs: Any) -> Any:
-            cues_arg = kwargs.get("cues")
-            if cues_arg is None and args:
-                cues_arg = args[0]
-            spk_map = kwargs.get("speaker_voice_map") or {}
-            if cues_arg is None:
-                cues_arg = kwargs.get("segments") or []
+        checkpoint_mgr = payload.get("checkpoint_manager") or current.get("checkpoint_manager")
+        resolved_job_id = str(
+            current.get("_pipeline_job_id")
+            or current.get("job_id")
+            or payload.get("job_id")
+            or ""
+        ).strip()
+        ws = str(
+            payload.get("checkpoint_workspace")
+            or payload.get("workspace")
+            or current.get("_pipeline_workspace")
+            or current.get("workspace")
+            or ""
+        ).strip()
 
-            accepts_cues = False
-            try:
-                sig = inspect.signature(base_synthesize)
-                params = sig.parameters
-                if "speaker_voice_map" in params or "cues" in params:
-                    accepts_cues = True
-            except (ValueError, TypeError):
-                accepts_cues = False
-
-            if accepts_cues:
-                return await _maybe_await(base_synthesize(*args, **kwargs))
-
-            cues_list = list(cues_arg or [])
-            all_chunks = []
-            provider_labels = []
-            for cue in cues_list:
-                cid = str(cue.get("cue_id") or cue.get("id") or "")
-                spk = str(cue.get("speaker_id") or cue.get("speaker") or "")
-                cue_voice_id = cue.get("tts_voice_id") or spk_map.get(spk) or kwargs.get("voice_id")
-                chunk_res = await _maybe_await(
-                    base_synthesize([cue], voice_id=cue_voice_id)
-                )
-                if isinstance(chunk_res, dict):
-                    raw_chunks = chunk_res.get("chunks") or []
-                    prov = chunk_res.get("provider")
-                    if prov:
-                        provider_labels.append(str(prov))
-                elif isinstance(chunk_res, list):
-                    raw_chunks = chunk_res
-                else:
-                    raw_chunks = [chunk_res]
-                matched_chunks = []
-                for ch in raw_chunks:
-                    if isinstance(ch, dict):
-                        ch_cid = str(ch.get("cue_id") or ch.get("id") or "")
-                        if ch_cid == cid:
-                            matched_chunks.append(ch)
-                if not matched_chunks:
-                    for ch in raw_chunks:
-                        if isinstance(ch, dict):
-                            ch_cid = str(ch.get("cue_id") or ch.get("id") or "")
-                            if not ch_cid:
-                                ch_copy = dict(ch)
-                                ch_copy["cue_id"] = cid
-                                matched_chunks.append(ch_copy)
-                if not matched_chunks:
-                    for ch in raw_chunks:
-                        if isinstance(ch, dict):
-                            ch_copy = dict(ch)
-                            ch_copy.setdefault("cue_id", cid)
-                            matched_chunks.append(ch_copy)
-                for ch in matched_chunks:
-                    all_chunks.append(ch)
-
+        if not ws and not checkpoint_mgr:
             return {
-                "chunks": all_chunks,
-                "provider": provider_labels[0] if provider_labels else "smart_tts",
+                "ok": False,
+                "status": "BLOCKED_NO_DURABLE_LIVE_JOB_WORKSPACE",
+                "blocker": "BLOCKED_NO_DURABLE_LIVE_JOB_WORKSPACE",
+                "error_code": "BLOCKED_NO_DURABLE_LIVE_JOB_WORKSPACE",
+                "state": dict(current),
             }
-        smart_synthesizer = _smart_synth_adapter
+
+        if not resolved_job_id and not checkpoint_mgr:
+            return {
+                "ok": False,
+                "status": "FAIL_CLOSED_MISSING_CHECKPOINT_JOB_ID",
+                "blocker": "FAIL_CLOSED_MISSING_CHECKPOINT_JOB_ID",
+                "error_code": "FAIL_CLOSED_MISSING_CHECKPOINT_JOB_ID",
+                "state": dict(current),
+            }
+
+        target_lang = str(
+            payload.get("target_language")
+            or current.get("target_language")
+            or "vi"
+        ).strip()
+        quote_fp = str(
+            payload.get("quote_fingerprint")
+            or current.get("quote_fingerprint")
+            or current.get("confirmed_quote_id")
+            or ""
+        ).strip()
+
+        if checkpoint_mgr is None and ws and resolved_job_id:
+            try:
+                checkpoint_mgr = subdub_tts_checkpoint.SubdubTTSCheckpointManager(
+                    workspace=ws,
+                    job_id=resolved_job_id,
+                    target_language=target_lang,
+                    quote_fingerprint=quote_fp,
+                )
+            except subdub_tts_checkpoint.SubdubTTSQuoteMismatchError as exc:
+                return {
+                    "ok": False,
+                    "status": "FAIL_CLOSED_QUOTE_MISMATCH",
+                    "blocker": "FAIL_CLOSED_QUOTE_MISMATCH",
+                    "error_code": "FAIL_CLOSED_QUOTE_MISMATCH",
+                    "tts_checkpoint_failure_stage": "tts_checkpoint",
+                    "tts_checkpoint_failure_code": "tts_quote_mismatch",
+                    "state": dict(current),
+                }
+            except subdub_tts_checkpoint.SubdubTTSContractMismatchError as exc:
+                return {
+                    "ok": False,
+                    "status": "FAIL_CLOSED_CONTRACT_MISMATCH",
+                    "blocker": "FAIL_CLOSED_CONTRACT_MISMATCH",
+                    "error_code": "FAIL_CLOSED_CONTRACT_MISMATCH",
+                    "tts_checkpoint_failure_stage": "tts_checkpoint",
+                    "tts_checkpoint_failure_code": "tts_contract_mismatch",
+                    "state": dict(current),
+                }
+            except subdub_tts_checkpoint.SubdubTTSCheckpointError as exc:
+                return {
+                    "ok": False,
+                    "status": "FAIL_CLOSED_AMBIGUOUS_SUBMISSION",
+                    "blocker": "FAIL_CLOSED_AMBIGUOUS_SUBMISSION",
+                    "error_code": "FAIL_CLOSED_AMBIGUOUS_SUBMISSION",
+                    "tts_checkpoint_failure_stage": "tts_checkpoint",
+                    "tts_checkpoint_failure_code": "tts_ambiguous_submission",
+                    "state": dict(current),
+                }
+
+        smart_synthesizer = create_smart_synth_adapter(
+            base_synthesize,
+            checkpoint_manager=checkpoint_mgr,
+            workspace=ws,
+            job_id=resolved_job_id,
+            target_language=target_lang,
+            quote_fingerprint=quote_fp,
+        )
     elif callable(payload.get("runner")):
         async def _mock_runner_synth(*args: Any, **kwargs: Any) -> Any:
             cues_list = kwargs.get("cues") or []
@@ -1709,8 +2178,20 @@ async def run_auto_smart_multivoice_blackbox(
     elif locked_speaker_voice_map is not None:
         result_state["locked_speaker_voice_map"] = {k: str(v).strip() for k, v in locked_speaker_voice_map.items()}
 
+    if checkpoint_mgr is not None:
+        result_state["checkpoint_workspace"] = checkpoint_mgr.workspace
+        result_state["checkpoint_job_id"] = checkpoint_mgr.job_id
+
+    if smart_result.get("async_task_id"):
+        result_state["async_task_id"] = smart_result["async_task_id"]
+    if smart_result.get("async_provider_request_id"):
+        result_state["async_provider_request_id"] = smart_result["async_provider_request_id"]
+
     response = dict(smart_result)
     response["state"] = result_state
+    if checkpoint_mgr is not None:
+        response["checkpoint_workspace"] = checkpoint_mgr.workspace
+        response["checkpoint_job_id"] = checkpoint_mgr.job_id
 
     if smart_result.get("ok"):
         video_bytes = b""
