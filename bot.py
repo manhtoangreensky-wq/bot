@@ -64894,16 +64894,16 @@ async def minimax_audio_reference_to_bytes(value) -> tuple[bytes, str]:
     return b"", "empty_demo_audio"
 
 def _is_transient_key4u_tts_error(result: dict, status: str, http_status: int) -> bool:
-    if int(http_status or 0) in {429, 500, 502, 503, 504}:
-        return True
+    code = int(http_status or 0)
+    # Ambiguous delivery: without confirmed HTTP status code, delivery is unverified.
+    # Automatic retry on ambiguous delivery is disabled to prevent duplicate paid submits.
+    if code <= 0:
+        return False
+
     stat = str(status or "").upper()
-    if stat in {
-        "FAIL_TIMEOUT",
-        "FAIL_PROVIDER_UNAVAILABLE",
-        "FAIL_RATE_LIMIT",
-        "FAIL_PROVIDER_GROUP_UNAVAILABLE",
-    }:
-        return True
+    if stat in {"FAIL_TIMEOUT", "FAIL_EXCEPTION"}:
+        return False
+
     res_dict = result if isinstance(result, dict) else {}
     err_text = " ".join([
         str(res_dict.get("error_message_safe") or ""),
@@ -64911,18 +64911,50 @@ def _is_transient_key4u_tts_error(result: dict, status: str, http_status: int) -
         str(res_dict.get("detail") or ""),
         stat,
     ]).lower()
-    transient_markers = (
-        "temporarily unavailable",
-        "try again later",
-        "service_unavailable",
-        "quá tải",
-        "overloaded",
-        "rate limit",
-        "timeout",
-        "connection reset",
-        "new_api_error",
-    )
-    return any(marker in err_text for marker in transient_markers)
+
+    # Ambiguous transport / timeout / connection reset errors must never be auto-retried
+    if any(marker in err_text for marker in ("timeout", "connection reset", "connection dropped")):
+        return False
+
+    # HTTP 504 is Gateway Timeout: upstream receipt is ambiguous without idempotency
+    if code == 504:
+        return False
+
+    # Permanent client / auth / bad request errors
+    if code in {400, 401, 403, 404, 405, 422}:
+        return False
+    if stat in {
+        "FAIL_AUTH",
+        "FAIL_BAD_REQUEST",
+        "FAIL_NOT_FOUND",
+        "FAIL_MODEL_NOT_FOUND",
+        "FAIL_PARAM",
+        "FAIL_VOICE_NOT_FOUND",
+        "PASS",
+    }:
+        return False
+
+    # Explicit provider rate limit (HTTP 429)
+    if code == 429 or stat == "FAIL_RATE_LIMIT":
+        return True
+
+    # Explicit provider unavailable / group unavailable (HTTP 503)
+    if code == 503 or stat == "FAIL_PROVIDER_GROUP_UNAVAILABLE":
+        return True
+
+    # Explicit server-side transient rejection markers with confirmed HTTP error response
+    if code in {500, 502}:
+        explicit_transient_markers = (
+            "temporarily unavailable",
+            "try again later",
+            "service_unavailable",
+            "quá tải",
+            "overloaded",
+            "rate limit",
+        )
+        return any(marker in err_text for marker in explicit_transient_markers)
+
+    return False
 
 
 async def key4u_minimax_tts_bytes(
