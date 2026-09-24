@@ -3461,6 +3461,26 @@ def _selfshot3_provider_configs(provider_order: list[str], duration_seconds: int
     """Return only configured, contract-valid V2V providers in persisted order."""
 
     configured = video_ai_edit_provider.configured_provider_chain(os.environ)
+    aliases = {
+        "key4u": "key4u_video",
+        "shopaikey": "shopaikey_video",
+        "generic_http": "generic_http",
+    }
+    ordered_names = [aliases.get(str(name).strip().lower(), str(name).strip().lower()) for name in provider_order if str(name).strip()]
+
+    # If the primary provider has a capability/contract mismatch, fail closed:
+    # do NOT silently fall back to secondary providers.
+    primary_name = ordered_names[0] if ordered_names else (configured[0].provider_name if configured else "")
+    if primary_name:
+        primary_cfg = next((c for c in configured if c.provider_name == primary_name), None)
+        if primary_cfg and primary_cfg.enabled:
+            primary_check = video_ai_edit_provider.validate_provider_config(primary_cfg)
+            if not primary_check.get("ok"):
+                reason = str(primary_check.get("reason") or "")
+                invalid_fields = primary_check.get("invalid_fields") or []
+                if reason == "provider_capability_contract_mismatch" or "provider_capability_contract_mismatch" in invalid_fields:
+                    return [primary_cfg]
+
     valid = []
     for config in configured:
         check = video_ai_edit_provider.validate_provider_config(config)
@@ -3469,12 +3489,6 @@ def _selfshot3_provider_configs(provider_order: list[str], duration_seconds: int
         if not check.get("ok") or (max_seconds and duration_seconds > max_seconds):
             continue
         valid.append(config)
-    aliases = {
-        "key4u": "key4u_video",
-        "shopaikey": "shopaikey_video",
-        "generic_http": "generic_http",
-    }
-    ordered_names = [aliases.get(str(name).strip().lower(), str(name).strip().lower()) for name in provider_order if str(name).strip()]
     ordered = []
     for name in ordered_names:
         ordered.extend(item for item in valid if item.provider_name == name and item not in ordered)
@@ -3583,12 +3597,26 @@ def _render_selfshot3_video_to_video(
         except video_ai_edit_provider.AiEditProviderError as exc:
             attempts.append({"provider": config.provider_name, "model": config.model, "error": exc.reason, "fallback": bool(index)})
             if index == 0:
+                if exc.reason in {"provider_capability_contract_mismatch", "ai_edit_provider_contract_invalid"}:
+                    raise RealVideoRenderError(
+                        exc.reason,
+                        diagnostics={
+                            "ok": False,
+                            "selfshot3": True,
+                            "provider_attempted": False,
+                            "attempts": attempts,
+                            "no_charge": True,
+                            "blocker": exc.reason,
+                            "fallback_blocked_reason": "capability_contract_mismatch_fallback_forbidden",
+                        },
+                    ) from exc
                 decision = video_ai_edit_provider.controlled_fallback_decision(
                     public_confirm_provenance=True,
                     primary_status="timeout" if exc.reason == "provider_poll_timeout" else "failed",
                     primary_task_alive=False,
                     fallback_count=0,
                     candidate=fallback,
+                    primary_error=exc.reason,
                 )
                 if not decision.get("allowed"):
                     raise RealVideoRenderError(exc.reason, diagnostics={"ok": False, "selfshot3": True, "provider_attempted": True, "attempts": attempts, "no_charge": True, "blocker": exc.reason}) from exc
@@ -3962,12 +3990,27 @@ def _render_selfshot2_video_to_video(
         except video_ai_edit_provider.AiEditProviderError as exc:
             attempts.append({"provider": config.provider_name, "model": config.model, "error": exc.reason, "fallback": bool(index)})
             if index == 0:
+                if exc.reason in {"provider_capability_contract_mismatch", "ai_edit_provider_contract_invalid"}:
+                    raise RealVideoRenderError(
+                        exc.reason,
+                        diagnostics={
+                            "ok": False,
+                            "selfshot2": True,
+                            "scene_index": scene_index,
+                            "provider_attempted": False,
+                            "attempts": attempts,
+                            "no_charge": True,
+                            "blocker": exc.reason,
+                            "fallback_blocked_reason": "capability_contract_mismatch_fallback_forbidden",
+                        },
+                    ) from exc
                 decision = video_ai_edit_provider.controlled_fallback_decision(
                     public_confirm_provenance=True,
                     primary_status="timeout" if exc.reason == "provider_poll_timeout" else "failed",
                     primary_task_alive=False,
                     fallback_count=0,
                     candidate=fallback,
+                    primary_error=exc.reason,
                 )
                 if not decision.get("allowed"):
                     raise RealVideoRenderError(exc.reason, diagnostics={"ok": False, "selfshot2": True, "scene_index": scene_index, "provider_attempted": True, "attempts": attempts, "no_charge": True, "blocker": exc.reason}) from exc
