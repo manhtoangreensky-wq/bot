@@ -227,3 +227,5 @@ Các case trên phải chạy bằng SQLite tạm trước khi live. Không dùn
 
 FAIL nếu test gọi provider, chạy hai local model song song, thay đổi exact-two,
 hoặc hết timeout mà không fail-closed/cleanup.
+
+| `UI-SM-08` | 🟡 vừa | `/start` khi đang nhập support/broadcast/memory/storage/translation | Pending text/navigation dọn; file upload/protected producer state giữ |

@@ -1636,3 +1636,15 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   `git diff --check` exit `0`. Provider, production DB and wallet mutations are
   `0`; this is source evidence only until an Owner-authorized live job produces
   a real MP4 and Telegram receipt.
+
+## `/start` pending reset — 24/09/2026
+
+- `/start` clears six non-producer text/navigation pending states: support, broadcast, memory, storage addon and translation.
+- Document/archive upload state and protected media producer states remain intact so unsaved files are not lost.
+- Local evidence: `1` focused AST case pass; compile/diff pass. This is not runtime/LIVE evidence.
+
+## `/start` pending reset — 24/09/2026
+
+- `/start` now clears six non-producer text/navigation pending states: support, broadcast, memory, storage addon and translation.
+- Document/archive file upload state is retained because it may contain unsaved file metadata; protected media producer states are not cleared.
+- Local evidence is one RED AST case followed by one GREEN AST case; this is not runtime/LIVE evidence.
