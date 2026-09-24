@@ -186507,6 +186507,7 @@ async def handle_memory_callback(update: Update, context: ContextTypes.DEFAULT_T
     if action == "delete_start":
         notes = memory_list_notes(uid, limit=8)
         if not notes:
+            clear_memory_guided_pending(uid)
             return await safe_edit_or_send(query, memory_notes_list_text([], "🗑 Xóa ghi chú" if normalize_user_language(lang) == "vi" else "🗑 Delete note", lang), parse_mode="HTML", reply_markup=memory_main_keyboard(lang))
         set_memory_guided_pending(uid, "delete_id")
         return await safe_edit_or_send(
