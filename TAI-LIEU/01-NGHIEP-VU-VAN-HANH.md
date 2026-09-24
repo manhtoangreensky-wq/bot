@@ -1636,3 +1636,11 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   `git diff --check` exit `0`. Provider, production DB and wallet mutations are
   `0`; this is source evidence only until an Owner-authorized live job produces
   a real MP4 and Telegram receipt.
+
+## UI small-flow corrections — 24/09/2026
+
+- Phạm vi đợt này là các callback nhỏ ngoài bốn engine khóa: AutoPost caption editor, Hỗ trợ, Broadcast Lite, Ghi chú, Công cụ tài liệu và Hồ sơ nội bộ.
+- Bằng chứng source/test chạy trên callback thật; không gửi Telegram thật, không gọi provider, không sửa ví.
+- Số đo local: `31` test editor/navigation pass ở đợt chat binding; `1` test Back tài liệu; `1` test zero-state Ghi chú; `1` test Back Broadcast Lite. Chưa coi các số này là production/LIVE.
+- Editor chỉ đổi draft sau Save; Home/start dọn riêng AutoPost state. Back của support/broadcast/memory dọn pending nhưng giữ dữ liệu đã lưu.
+- Rewrite/logo/affiliate chưa có chức năng xử lý; UI báo chưa khả dụng tại màn hiện tại, không giả gọi AI/provider.
