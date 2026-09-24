@@ -147,7 +147,6 @@ def test_post_support_ticket_success_and_fields():
         "subject": "Lỗi trừ xu khi tạo video",
         "detail": "Tôi bị trừ 50 xu nhưng tác vụ video bị thất bại, xin vui lòng kiểm tra lại.",
         "idempotency_key": "idemp-create-valid-001",
-        "category": "payment_topup",
     }
     body_bytes = json.dumps(payload).encode("utf-8")
     headers = make_auth_headers("POST", "/internal/v1/support/tickets", body=body_bytes, actor_id=actor_id)
@@ -162,7 +161,7 @@ def test_post_support_ticket_success_and_fields():
     assert ticket["id"] > 0
     assert ticket["ticket_code"].startswith("TA-") or ticket["ticket_code"].startswith("TMP-")
     assert ticket["user_id"] == "10001"
-    assert ticket["category"] == "payment_topup"
+    assert ticket["category"] == bot.DEFAULT_SUPPORT_CATEGORY
     assert ticket["status"] == "new"
     assert ticket["subject"] == payload["subject"]
     assert ticket["detail"] == payload["detail"]
@@ -257,6 +256,7 @@ def test_post_support_ticket_idempotency_conflict_409():
 @pytest.mark.parametrize("forbidden_field,forbidden_value", [
     ("status", "resolved"),
     ("priority", "urgent"),
+    ("category", "payment_topup"),
     ("assigned_admin", "admin_root"),
     ("assigned_admin_id", "admin_root"),
     ("admin_note", "Self-approved"),
@@ -420,3 +420,271 @@ def test_support_tickets_canonical_telegram_prefix_normalization():
     items = res_get.json()["items"]
     assert len(items) == 1
     assert items[0]["user_id"] == raw_uid
+
+
+# ---------------------------------------------------------------------------
+# Section 7: Category Authority & Concurrency Contracts (SPEC-C3)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("category_val", ["payment_topup", "refund", "general_support", "other", "billing"])
+def test_client_category_explicitly_rejected(category_val):
+    """Test A: Customer cannot specify any category (payment_topup, refund, general_support, other, billing)."""
+    client = TestClient(bot.fastapi_app)
+    actor_id = "10001"
+    payload = {
+        "subject": "Customer Specifying Category",
+        "detail": "Customer attempts to set category directly in request body.",
+        "idempotency_key": f"idemp-cat-rej-{category_val}",
+        "category": category_val,
+    }
+    body_bytes = json.dumps(payload).encode("utf-8")
+    headers = make_auth_headers("POST", "/internal/v1/support/tickets", body=body_bytes, actor_id=actor_id)
+    res = client.post("/internal/v1/support/tickets", content=body_bytes, headers=headers)
+    assert res.status_code == 400
+    data = res.json()
+    assert data["ok"] is False
+    assert data["error_code"] == "CLIENT_AUTHORITY_FIELD_NOT_ALLOWED"
+    assert "category" in data["message"]
+
+
+def test_client_cannot_raise_priority_or_manipulate_category():
+    """Test B: Customer cannot manipulate priority directly or via payment_topup/refund.
+    Normal creation always enters DEFAULT_SUPPORT_CATEGORY and default priority ('normal').
+    """
+    client = TestClient(bot.fastapi_app)
+    actor_id = "10001"
+
+    # Attempting to supply priority directly is blocked
+    for forbidden_priority in ["urgent", "high", "low"]:
+        p = {
+            "subject": "Urgent Problem",
+            "detail": "Need urgent fix immediately!",
+            "idempotency_key": f"idemp-forbid-prio-{forbidden_priority}",
+            "priority": forbidden_priority,
+        }
+        b = json.dumps(p).encode("utf-8")
+        h = make_auth_headers("POST", "/internal/v1/support/tickets", body=b, actor_id=actor_id)
+        res = client.post("/internal/v1/support/tickets", content=b, headers=h)
+        assert res.status_code == 400
+        assert res.json()["error_code"] == "CLIENT_AUTHORITY_FIELD_NOT_ALLOWED"
+
+    # Attempting to supply category=payment_topup or refund is blocked
+    for forbidden_cat in ["payment_topup", "refund"]:
+        p = {
+            "subject": "Payment issue",
+            "detail": "Payment not credited to my balance.",
+            "idempotency_key": f"idemp-forbid-cat-{forbidden_cat}",
+            "category": forbidden_cat,
+        }
+        b = json.dumps(p).encode("utf-8")
+        h = make_auth_headers("POST", "/internal/v1/support/tickets", body=b, actor_id=actor_id)
+        res = client.post("/internal/v1/support/tickets", content=b, headers=h)
+        assert res.status_code == 400
+        assert res.json()["error_code"] == "CLIENT_AUTHORITY_FIELD_NOT_ALLOWED"
+
+    # Valid creation without category / priority always receives DEFAULT_SUPPORT_CATEGORY and normal priority
+    valid_p = {
+        "subject": "Regular issue inquiry",
+        "detail": "Need some help with regular bot usage.",
+        "idempotency_key": "idemp-valid-normal-priority-001",
+    }
+    b = json.dumps(valid_p).encode("utf-8")
+    h = make_auth_headers("POST", "/internal/v1/support/tickets", body=b, actor_id=actor_id)
+    res = client.post("/internal/v1/support/tickets", content=b, headers=h)
+    assert res.status_code == 200
+    ticket = res.json()["ticket"]
+    assert ticket["category"] == bot.DEFAULT_SUPPORT_CATEGORY
+    assert ticket["priority"] == "normal"
+
+
+def test_get_with_query_user_id_missing_actor_header():
+    """Test C: GET with query user_id but missing actor header => HTTP 401 ACTOR_ID_REQUIRED."""
+    client = TestClient(bot.fastapi_app)
+    headers = make_auth_headers("GET", "/internal/v1/support/tickets", actor_id="")
+    res = client.get("/internal/v1/support/tickets?user_id=10001", headers=headers)
+    assert res.status_code == 401
+    assert res.json()["error_code"] == "ACTOR_ID_REQUIRED"
+
+
+def test_post_with_body_user_id_missing_actor_header():
+    """Test D: POST with body user_id but missing actor header => HTTP 401 ACTOR_ID_REQUIRED."""
+    client = TestClient(bot.fastapi_app)
+    payload = {
+        "user_id": "10001",
+        "subject": "Missing Header Actor",
+        "detail": "Payload contains user_id but header actor_id is missing.",
+        "idempotency_key": "idemp-no-header-actor-001",
+    }
+    body_bytes = json.dumps(payload).encode("utf-8")
+    headers = make_auth_headers("POST", "/internal/v1/support/tickets", body=body_bytes, actor_id="")
+    res = client.post("/internal/v1/support/tickets", content=body_bytes, headers=headers)
+    assert res.status_code == 401
+    assert res.json()["error_code"] == "ACTOR_ID_REQUIRED"
+
+
+def test_matching_redundant_user_id_accepted():
+    """Test E: Matching redundant user_id accepted in both POST and GET => HTTP 200."""
+    client = TestClient(bot.fastapi_app)
+    actor_id = "10001"
+
+    # POST with matching body user_id
+    payload = {
+        "user_id": actor_id,
+        "subject": "Redundant matching user_id POST",
+        "detail": "Payload user_id matches header actor_id exactly.",
+        "idempotency_key": "idemp-redundant-matching-001",
+    }
+    body_bytes = json.dumps(payload).encode("utf-8")
+    headers_post = make_auth_headers("POST", "/internal/v1/support/tickets", body=body_bytes, actor_id=actor_id)
+    res_post = client.post("/internal/v1/support/tickets", content=body_bytes, headers=headers_post)
+    assert res_post.status_code == 200
+    assert res_post.json()["ok"] is True
+    assert res_post.json()["ticket"]["user_id"] == actor_id
+
+    # GET with matching query user_id
+    headers_get = make_auth_headers("GET", "/internal/v1/support/tickets", actor_id=actor_id)
+    res_get = client.get(f"/internal/v1/support/tickets?user_id={actor_id}", headers=headers_get)
+    assert res_get.status_code == 200
+    assert res_get.json()["ok"] is True
+    assert len(res_get.json()["items"]) == 1
+    assert res_get.json()["items"][0]["user_id"] == actor_id
+
+
+def test_atomic_concurrent_identical_creation():
+    """Test F: Concurrent creation with same idempotency_key + same payload => 1 DB row, other replays."""
+    import concurrent.futures
+    uid = "10001"
+    key = "idemp-concurrent-identical-001"
+    subj = "Concurrent Identical Creation"
+    detail = "This ticket is created concurrently with identical payload."
+    hash_val = hashlib.sha256(f"{subj}|{detail}".encode("utf-8")).hexdigest()
+
+    def run_create():
+        return bot.create_or_replay_support_ticket_atomic(
+            user=uid,
+            category=bot.DEFAULT_SUPPORT_CATEGORY,
+            message=detail,
+            subject=subj,
+            detail=detail,
+            idempotency_key=key,
+            payload_hash=hash_val,
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(run_create) for _ in range(5)]
+        results = [f.result() for f in futures]
+
+    tickets = [r[0] for r in results]
+    replays = [r[1] for r in results]
+    errors = [r[2] for r in results]
+
+    assert all(err is None for err in errors)
+    assert all(t is not None for t in tickets)
+    assert replays.count(False) == 1
+    assert replays.count(True) == 4
+
+    ticket_ids = {t["id"] for t in tickets}
+    assert len(ticket_ids) == 1
+
+    db_tickets = bot.list_support_tickets(user_id=uid)
+    assert len(db_tickets) == 1
+    assert db_tickets[0]["id"] == list(ticket_ids)[0]
+
+
+def test_atomic_concurrent_different_payload_conflict():
+    """Test G: Concurrent different payload with same key => 1 wins, other receives 409 IDEMPOTENCY_CONFLICT, no duplicate rows."""
+    import concurrent.futures
+    uid = "10001"
+    key = "idemp-concurrent-diff-001"
+
+    # Pre-create the first ticket
+    ticket1, replayed1, err1 = bot.create_or_replay_support_ticket_atomic(
+        user=uid,
+        category=bot.DEFAULT_SUPPORT_CATEGORY,
+        message="Initial message",
+        subject="Initial subject",
+        detail="Initial message",
+        idempotency_key=key,
+        payload_hash=hashlib.sha256(b"Initial subject|Initial message").hexdigest(),
+    )
+    assert err1 is None
+    assert replayed1 is False
+    assert ticket1 is not None
+
+    def run_diff_create(index: int):
+        diff_subj = f"Different subject {index}"
+        diff_detail = f"Different detail {index}"
+        diff_hash = hashlib.sha256(f"{diff_subj}|{diff_detail}".encode("utf-8")).hexdigest()
+        return bot.create_or_replay_support_ticket_atomic(
+            user=uid,
+            category=bot.DEFAULT_SUPPORT_CATEGORY,
+            message=diff_detail,
+            subject=diff_subj,
+            detail=diff_detail,
+            idempotency_key=key,
+            payload_hash=diff_hash,
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [executor.submit(run_diff_create, i) for i in range(4)]
+        results = [f.result() for f in futures]
+
+    for ticket, replayed, error_code in results:
+        assert error_code == "IDEMPOTENCY_CONFLICT"
+        assert ticket is None
+        assert replayed is False
+
+    db_tickets = bot.list_support_tickets(user_id=uid)
+    assert len(db_tickets) == 1
+    assert db_tickets[0]["id"] == ticket1["id"]
+
+
+def test_update_support_ticket_cannot_mutate_idempotency_key():
+    """Test H: update_support_ticket cannot mutate idempotency_key."""
+    uid = "10001"
+    key = "idemp-immutable-key-001"
+    ticket, _, _ = bot.create_or_replay_support_ticket_atomic(
+        user=uid,
+        category=bot.DEFAULT_SUPPORT_CATEGORY,
+        message="Immutable key test detail",
+        subject="Immutable key test subject",
+        detail="Immutable key test detail",
+        idempotency_key=key,
+        payload_hash="somehashvalue",
+    )
+    assert ticket is not None
+    ticket_id = ticket["id"]
+    assert ticket["idempotency_key"] == key
+
+    updated = bot.update_support_ticket(ticket_id, idempotency_key="forged-new-key-12345")
+    assert updated is not None
+    assert updated["idempotency_key"] == key
+
+    refetched = bot.get_support_ticket(ticket_id)
+    assert refetched["idempotency_key"] == key
+
+
+def test_update_support_ticket_cannot_mutate_payload_hash():
+    """Test I: update_support_ticket cannot mutate payload_hash."""
+    uid = "10001"
+    key = "idemp-immutable-hash-001"
+    orig_hash = hashlib.sha256(b"original|hash").hexdigest()
+    ticket, _, _ = bot.create_or_replay_support_ticket_atomic(
+        user=uid,
+        category=bot.DEFAULT_SUPPORT_CATEGORY,
+        message="Immutable hash test detail",
+        subject="Immutable hash test subject",
+        detail="Immutable hash test detail",
+        idempotency_key=key,
+        payload_hash=orig_hash,
+    )
+    assert ticket is not None
+    ticket_id = ticket["id"]
+    assert ticket["payload_hash"] == orig_hash
+
+    updated = bot.update_support_ticket(ticket_id, payload_hash="forgedhash1234567890abcdef")
+    assert updated is not None
+    assert updated["payload_hash"] == orig_hash
+
+    refetched = bot.get_support_ticket(ticket_id)
+    assert refetched["payload_hash"] == orig_hash
