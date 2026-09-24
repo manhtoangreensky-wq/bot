@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - bot.py
+      - tests/test_customer_support_tickets.py
       - scripts/check_bot_source_compile.py
       - .github/workflows/bot-source-compile.yml
   push:
@@ -11,6 +12,7 @@ on:
       - main
     paths:
       - bot.py
+      - tests/test_customer_support_tickets.py
       - scripts/check_bot_source_compile.py
       - .github/workflows/bot-source-compile.yml
   workflow_dispatch:
@@ -24,12 +26,21 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
       - name: Compile complete bot source
         run: python scripts/check_bot_source_compile.py
       - name: Run py_compile
         run: python -m py_compile bot.py
       - name: Tokenize complete bot source
         run: python -m tokenize bot.py > /dev/null
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run customer support tickets pytest
+        run: python -m pytest tests/test_customer_support_tickets.py -q

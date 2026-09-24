@@ -278306,7 +278306,7 @@ async def api_internal_customer_support_tickets_create(request: Request):
         )
 
     forbidden_fields = {
-        "account_id", "owner_id", "status", "priority", "assigned_admin", "assigned_admin_id",
+        "account_id", "owner_id", "status", "priority", "category", "assigned_admin", "assigned_admin_id",
         "admin_note", "suggested_reply", "refund", "refund_status", "amount", "credits", "xu",
         "closed_at", "ticket_code", "created_at", "updated_at", "id", "delta", "balance_after",
     }
@@ -278383,15 +278383,11 @@ async def api_internal_customer_support_tickets_create(request: Request):
             content={"ok": False, "error_code": "INVALID_IDEMPOTENCY_KEY_LENGTH", "message": "Idempotency key must be between 12 and 160 characters"},
         )
 
-    category = str(data.get("category") or DEFAULT_SUPPORT_CATEGORY).strip()
-    if category not in SUPPORT_CATEGORIES:
-        category = DEFAULT_SUPPORT_CATEGORY
-
     payload_hash = hashlib.sha256(f"{subject}|{detail}".encode("utf-8")).hexdigest()
 
     ticket, replayed, error_code = create_or_replay_support_ticket_atomic(
         user=target_user_id,
-        category=category,
+        category=DEFAULT_SUPPORT_CATEGORY,
         message=detail,
         subject=subject,
         detail=detail,
