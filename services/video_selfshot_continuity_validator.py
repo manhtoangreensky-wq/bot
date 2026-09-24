@@ -125,6 +125,7 @@ def validate_selfshot_scene_continuity(
         "relationship_distance_max": CALIBRATED_RELATIONSHIP_DISTANCE_MAX,
     }
 
+    is_mock = mock_frame_observations is not None
     base_result: dict[str, Any] = {
         "ok": False,
         "blocker": "",
@@ -142,7 +143,7 @@ def validate_selfshot_scene_continuity(
         "object_observations": [],
         "relationship_observations": [],
         "threshold_profile": threshold_profile,
-        "evidence_source": EVIDENCE_SOURCE,
+        "evidence_source": "test_mock" if is_mock else EVIDENCE_SOURCE,
         "independent_visual_validation": "NOT_PERFORMED",
         "wall_clock_seconds": 0.0,
     }
@@ -157,11 +158,9 @@ def validate_selfshot_scene_continuity(
         return base_result
 
     # Resolve references and options from asset_pack or job if not explicitly provided
-    if mock_frame_observations is None:
-        mock_frame_observations = (
-            (asset_pack or {}).get("mock_frame_observations")
-            or (job or {}).get("mock_frame_observations")
-        )
+    # STRICT SAFETY: asset_pack and job can NEVER inject mock_frame_observations.
+    # mock_frame_observations is strictly reserved for unit test temporal aggregation harnesses
+    # passed directly as a function argument.
     if person_reference is None:
         person_reference = (
             (asset_pack or {}).get("person_reference")
@@ -278,9 +277,11 @@ def validate_selfshot_scene_continuity(
             # 2. Object Identity
             if object_required:
                 try:
-                    o_res = verify_object_identity(object_reference, frame, reference_roi=object_reference_roi)
+                    c_roi = [0, 0, fw, fh]
+                    o_res = verify_object_identity(object_reference, frame, reference_roi=object_reference_roi, candidate_roi=c_roi)
                     f_obs["object_ok"] = bool(o_res.get("decision"))
-                    f_obs["object_bbox"] = o_res.get("candidate_roi")
+                    f_obs["object_bbox"] = o_res.get("candidate_object_bbox")
+                    f_obs["object_quad"] = o_res.get("candidate_object_quad")
                 except Exception as exc:
                     base_result["blocker"] = f"object_validator_exception: {exc}"
                     base_result["failure_reason"] = "validator_exception"
@@ -324,11 +325,11 @@ def validate_selfshot_scene_continuity(
 
     base_result["sampled_frame_count"] = sampled_count
     base_result["person_observations"] = [
-        {"frame_index": obs.get("frame_index"), "person_ok": obs.get("person_ok")}
+        {"frame_index": obs.get("frame_index"), "person_ok": obs.get("person_ok"), "person_bbox": obs.get("person_bbox")}
         for obs in frame_observations
     ]
     base_result["object_observations"] = [
-        {"frame_index": obs.get("frame_index"), "object_ok": obs.get("object_ok")}
+        {"frame_index": obs.get("frame_index"), "object_ok": obs.get("object_ok"), "object_bbox": obs.get("object_bbox")}
         for obs in frame_observations
     ]
     base_result["relationship_observations"] = [
@@ -373,11 +374,14 @@ def validate_selfshot_scene_continuity(
 
     if passing_integrated >= required_passes:
         base_result["ok"] = True
-        base_result["independent_visual_validation"] = "LOCAL_MODEL"
+        base_result["independent_visual_validation"] = "NOT_PERFORMED" if is_mock else "LOCAL_MODEL"
+        base_result["evidence_source"] = "test_mock" if is_mock else EVIDENCE_SOURCE
         base_result["blocker"] = ""
         base_result["failure_reason"] = ""
     else:
         base_result["ok"] = False
+        base_result["independent_visual_validation"] = "NOT_PERFORMED"
+        base_result["evidence_source"] = "test_mock" if is_mock else EVIDENCE_SOURCE
         base_result["blocker"] = "insufficient_temporal_evidence"
         base_result["failure_reason"] = "insufficient_temporal_evidence"
 

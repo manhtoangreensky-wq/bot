@@ -71,6 +71,7 @@ def verify_person_identity(
         "threshold_operator": THRESHOLD_OPERATOR,
         "decision": False,
         "person_identity": False,
+        "face_bbox": None,
         "failure_reason": "",
     }
 
@@ -125,6 +126,14 @@ def verify_person_identity(
     if face_count_c > 1:
         evidence["failure_reason"] = "multiple_ambiguous_faces_in_candidate"
         return evidence
+
+    fx, fy, fw, fh = faces_c[0][:4]
+    evidence["face_bbox"] = [
+        round(float(fx), 2),
+        round(float(fy), 2),
+        round(float(fw), 2),
+        round(float(fh), 2),
+    ]
 
     recognizer = cv2.FaceRecognizerSF.create(str(SFACE_PATH), "")
 
@@ -196,6 +205,7 @@ def evaluate_person_continuity_from_provider_payload(
             "transport_success": transport_success,
             "visual_evidence_present": False,
             "person_identity": False,
+            "face_bbox": None,
             "failure_reason": "transport_success_without_visual_evidence",
         }
 

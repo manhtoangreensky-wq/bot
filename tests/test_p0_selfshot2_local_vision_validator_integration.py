@@ -129,8 +129,8 @@ def test_local_validator_all_three_lanes_pass() -> None:
     assert res["person_identity"] is True
     assert res["object_identity"] is True
     assert res["person_object_relationship"] is True
-    assert res["evidence_source"] == EVIDENCE_SOURCE
-    assert res["independent_visual_validation"] == "LOCAL_MODEL"
+    assert res["evidence_source"] == "test_mock"
+    assert res["independent_visual_validation"] == "NOT_PERFORMED"
     assert res["blocker"] == ""
 
 
@@ -288,7 +288,8 @@ def test_temporal_aggregation_2_of_3_pass() -> None:
         mock_frame_observations=mock_frames,
     )
     assert res["ok"] is True
-    assert res["independent_visual_validation"] == "LOCAL_MODEL"
+    assert res["evidence_source"] == "test_mock"
+    assert res["independent_visual_validation"] == "NOT_PERFORMED"
 
 
 def test_temporal_aggregation_1_of_3_fails() -> None:
@@ -331,7 +332,8 @@ def test_temporal_aggregation_3_of_5_pass() -> None:
     )
     assert res["ok"] is True
     assert res["sampled_frame_count"] == 5
-    assert res["independent_visual_validation"] == "LOCAL_MODEL"
+    assert res["evidence_source"] == "test_mock"
+    assert res["independent_visual_validation"] == "NOT_PERFORMED"
 
 
 def test_temporal_aggregation_2_of_5_fails() -> None:
@@ -482,7 +484,7 @@ def test_object_only_cardinality_contract() -> None:
 
 
 def test_render_connector_passes_when_all_lanes_pass(tmp_path: Path) -> None:
-    """16. Render connector accepts scene when local visual continuity passes."""
+    """16. Render connector accepts scene when genuine local visual continuity passes."""
     source_file = tmp_path / "source.mp4"
     source_file.write_bytes(b"dummy-source-video")
     out_file = tmp_path / "raw_out.mp4"
@@ -514,18 +516,25 @@ def test_render_connector_passes_when_all_lanes_pass(tmp_path: Path) -> None:
                 "person_subject_ids": ["p1"],
                 "object_subject_ids": ["o1"],
             },
-            "mock_frame_observations": [
-                {"person_ok": True, "object_ok": True, "relationship_ok": True},
-                {"person_ok": True, "object_ok": True, "relationship_ok": True},
-                {"person_ok": True, "object_ok": True, "relationship_ok": True},
-            ],
         },
+    }
+
+    genuine_evidence = {
+        "ok": True,
+        "evidence_source": EVIDENCE_SOURCE,
+        "independent_visual_validation": "LOCAL_MODEL",
+        "person_identity": True,
+        "object_identity": True,
+        "person_object_relationship": True,
+        "blocker": "",
+        "failure_reason": "",
     }
 
     with patch("services.video_real_render_connector._selfshot3_provider_configs", return_value=[fake_config]), \
          patch("services.video_real_render_connector._materialize_selfshot2_source_segment", return_value=str(source_file)), \
          patch("services.video_ai_edit_provider.submit_video_edit", side_effect=fake_submit), \
-         patch("services.video_ai_edit_provider.download_result", side_effect=fake_download):
+         patch("services.video_ai_edit_provider.download_result", side_effect=fake_download), \
+         patch("services.video_selfshot_continuity_validator.validate_selfshot_scene_continuity", return_value=genuine_evidence) as mock_val:
 
         result = _render_selfshot2_video_to_video(
             job=job,
@@ -537,6 +546,7 @@ def test_render_connector_passes_when_all_lanes_pass(tmp_path: Path) -> None:
             scene_index=1,
         )
 
+        assert mock_val.called
         assert result["ok"] is True
         assert result["continuity_evidence_present"] is True
         evidence = result["continuity_evidence"]
@@ -545,3 +555,236 @@ def test_render_connector_passes_when_all_lanes_pass(tmp_path: Path) -> None:
         assert evidence["person_identity"] is True
         assert evidence["object_identity"] is True
         assert evidence["person_object_relationship"] is True
+
+
+def test_asset_pack_mock_observations_rejected_and_connector_fails_closed(tmp_path: Path) -> None:
+    """17. asset_pack['mock_frame_observations'] is rejected by validator and connector fails closed."""
+    # 1. Direct validator invocation with asset_pack containing mock_frame_observations
+    asset_pack = {
+        "subject_manifest": {"person_subject_ids": ["p1"], "object_subject_ids": ["o1"]},
+        "mock_frame_observations": [
+            {"person_ok": True, "object_ok": True, "relationship_ok": True},
+            {"person_ok": True, "object_ok": True, "relationship_ok": True},
+            {"person_ok": True, "object_ok": True, "relationship_ok": True},
+        ],
+    }
+    # No real person_reference provided -> validator must NOT consume asset_pack mock and must fail closed
+    res = validate_selfshot_scene_continuity(
+        "dummy.mp4",
+        scene_index=1,
+        scene_duration_seconds=5,
+        asset_pack=asset_pack,
+    )
+    assert res["ok"] is False
+    assert res["independent_visual_validation"] == "NOT_PERFORMED"
+    assert res["blocker"] == "selfshot2_person_reference_missing"
+
+    # 2. Render connector with asset_pack mock fails closed
+    source_file = tmp_path / "source.mp4"
+    source_file.write_bytes(b"dummy-source-video")
+    out_file = tmp_path / "raw_out.mp4"
+    fake_config = _mock_provider_config()
+
+    def fake_submit(config, **kwargs):
+        return {"provider_task_id": "test-task", "status": "completed", "result_url": "https://example.com/v.mp4", "result_url_present": True}
+
+    def fake_download(url, target_path):
+        p = Path(target_path)
+        p.write_bytes(b"dummy-downloaded-video")
+        return {"path": str(p)}
+
+    job = {
+        "job_id": "job-mock-bypass-test",
+        "product_type": "self_shot_scene_change",
+        "source_video_local_path": str(source_file),
+        "public_user_confirmed": True,
+        "submit_source": "public_user_final_confirm",
+        "quality_tier": 500,
+        "asset_pack": asset_pack,
+    }
+
+    with patch("services.video_real_render_connector._selfshot3_provider_configs", return_value=[fake_config]), \
+         patch("services.video_real_render_connector._materialize_selfshot2_source_segment", return_value=str(source_file)), \
+         patch("services.video_ai_edit_provider.submit_video_edit", side_effect=fake_submit), \
+         patch("services.video_ai_edit_provider.download_result", side_effect=fake_download):
+
+        with pytest.raises(RealVideoRenderError) as exc_info:
+            _render_selfshot2_video_to_video(
+                job=job,
+                asset_pack=job["asset_pack"],
+                raw_path=str(out_file),
+                provider_order=["key4u_video"],
+                fallback_prompt="test",
+                aspect_ratio="9:16",
+                scene_index=1,
+            )
+        assert "selfshot2_person_reference_missing" in str(exc_info.value)
+
+
+def test_job_mock_observations_rejected_and_connector_fails_closed(tmp_path: Path) -> None:
+    """18. job['mock_frame_observations'] is rejected by validator and connector fails closed."""
+    job = {
+        "job_id": "job-mock-job-bypass-test",
+        "product_type": "self_shot_scene_change",
+        "quality_tier": 500,
+        "mock_frame_observations": [
+            {"person_ok": True, "object_ok": True, "relationship_ok": True},
+            {"person_ok": True, "object_ok": True, "relationship_ok": True},
+            {"person_ok": True, "object_ok": True, "relationship_ok": True},
+        ],
+        "asset_pack": {
+            "subject_manifest": {"person_subject_ids": ["p1"], "object_subject_ids": ["o1"]},
+        },
+    }
+    # No real person_reference provided -> validator must NOT consume job mock and must fail closed
+    res = validate_selfshot_scene_continuity(
+        "dummy.mp4",
+        scene_index=1,
+        scene_duration_seconds=5,
+        job=job,
+    )
+    assert res["ok"] is False
+    assert res["independent_visual_validation"] == "NOT_PERFORMED"
+    assert res["blocker"] == "selfshot2_person_reference_missing"
+
+
+def test_real_local_model_path_executes_validators_and_produces_local_model() -> None:
+    """19. Legitimate real local validation executes models and produces LOCAL_MODEL provenance."""
+    import cv2
+    repo_root = Path(__file__).resolve().parents[1]
+    person_ref_path = repo_root / "tests" / "fixtures" / "selfshot_vision" / "person_calibration" / "obama_obs1.jpg"
+    person_cand_path = repo_root / "tests" / "fixtures" / "selfshot_vision" / "person_calibration" / "obama_obs2.jpg"
+
+    assert person_ref_path.is_file(), f"Missing fixture {person_ref_path}"
+    assert person_cand_path.is_file(), f"Missing fixture {person_cand_path}"
+
+    cand_frame = cv2.imread(str(person_cand_path))
+    frames = [cand_frame, cand_frame, cand_frame]
+
+    res = validate_selfshot_scene_continuity(
+        frames,
+        scene_index=1,
+        scene_duration_seconds=5,
+        person_required=True,
+        object_required=False,
+        relationship_required=False,
+        person_reference=str(person_ref_path),
+    )
+    assert res["ok"] is True
+    assert res["person_identity"] is True
+    assert res["evidence_source"] == EVIDENCE_SOURCE
+    assert res["independent_visual_validation"] == "LOCAL_MODEL"
+    assert res["blocker"] == ""
+    assert res["failure_reason"] == ""
+    assert len(res["person_observations"]) == 3
+    assert all(obs["person_ok"] is True for obs in res["person_observations"])
+
+
+def test_real_object_homography_localization_and_ground_truth_sanity() -> None:
+    """20. Real SIFT/FLANN/RANSAC homography derives candidate object localization matching ground truth."""
+    import math
+    import cv2
+    from services.video_selfshot_object_validator import verify_object_identity
+    repo_root = Path(__file__).resolve().parents[1]
+    obj_ref_path = repo_root / "tests" / "fixtures" / "selfshot_vision" / "object_calibration" / "snuff_bottle_coins_obs1.jpg"
+    obj_cand_path = repo_root / "tests" / "fixtures" / "selfshot_vision" / "object_calibration" / "snuff_bottle_coins_obs2.jpg"
+
+    assert obj_ref_path.is_file(), f"Missing fixture {obj_ref_path}"
+    assert obj_cand_path.is_file(), f"Missing fixture {obj_cand_path}"
+
+    ref_roi = [130, 120, 200, 390]
+    gt_cand_roi = [129, 119, 194, 382]
+
+    # Verify with full candidate frame search space
+    cand_img = cv2.imread(str(obj_cand_path))
+    ch, cw = cand_img.shape[:2]
+    res = verify_object_identity(
+        obj_ref_path,
+        obj_cand_path,
+        reference_roi=ref_roi,
+        candidate_roi=[0, 0, cw, ch],
+    )
+    assert res["decision"] is True
+    assert res["homography_available"] is True
+    assert res["ransac_inlier_count"] >= 25
+    assert res["candidate_object_bbox"] is not None
+
+    proj_bbox = res["candidate_object_bbox"]
+    px, py, pw, ph = proj_bbox
+    assert pw > 0 and ph > 0
+    assert 0 <= px < cw and 0 <= py < ch
+
+    # Ground truth sanity comparison
+    gx, gy, gw, gh = gt_cand_roi
+    center_dist = math.hypot((px + pw / 2) - (gx + gw / 2), (py + ph / 2) - (gy + gh / 2))
+    assert center_dist < 10.0, f"Projected center deviated too far from ground truth: {center_dist}"
+
+    # IoU
+    ix1, iy1 = max(px, gx), max(py, gy)
+    ix2, iy2 = min(px + pw, gx + gw), min(py + ph, gy + gh)
+    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    union = (pw * ph) + (gw * gh) - inter
+    iou = inter / union if union > 0.0 else 0.0
+    assert iou > 0.80, f"Projected bbox IoU below expectation: {iou}"
+
+
+def test_real_person_plus_object_plus_relationship_all_three_lanes_end_to_end() -> None:
+    """21. Real execution across person + object + relationship lanes with same-frame localization."""
+    import cv2
+    import numpy as np
+    repo_root = Path(__file__).resolve().parents[1]
+    person_ref_path = repo_root / "tests" / "fixtures" / "selfshot_vision" / "person_calibration" / "obama_obs1.jpg"
+    person_cand_path = repo_root / "tests" / "fixtures" / "selfshot_vision" / "person_calibration" / "obama_obs2.jpg"
+    object_ref_path = repo_root / "tests" / "fixtures" / "selfshot_vision" / "object_calibration" / "snuff_bottle_coins_obs1.jpg"
+    object_cand_path = repo_root / "tests" / "fixtures" / "selfshot_vision" / "object_calibration" / "snuff_bottle_coins_obs2.jpg"
+
+    assert person_ref_path.is_file(), f"Missing fixture {person_ref_path}"
+    assert person_cand_path.is_file(), f"Missing fixture {person_cand_path}"
+    assert object_ref_path.is_file(), f"Missing fixture {object_ref_path}"
+    assert object_cand_path.is_file(), f"Missing fixture {object_cand_path}"
+
+    img_p2 = cv2.imread(str(person_cand_path))
+    img_o2 = cv2.imread(str(object_cand_path))
+
+    # Composite onto wide canvas: Obama on left, snuff bottle adjacent to ensure Drel <= 0.281528
+    canvas = np.zeros((800, 1400, 3), dtype=np.uint8)
+    hp, wp = img_p2.shape[:2]
+    canvas[50:50+hp, 50:50+wp] = img_p2
+    ho, wo = img_o2.shape[:2]
+    canvas[50:50+ho, 400:400+wo] = img_o2
+
+    frames = [canvas, canvas, canvas]
+
+    res = validate_selfshot_scene_continuity(
+        frames,
+        scene_index=1,
+        scene_duration_seconds=5,
+        person_required=True,
+        object_required=True,
+        relationship_required=True,
+        person_reference=str(person_ref_path),
+        object_reference=str(object_ref_path),
+        object_reference_roi=[130, 120, 200, 390],
+    )
+
+    assert res["ok"] is True
+    assert res["person_identity"] is True
+    assert res["object_identity"] is True
+    assert res["person_object_relationship"] is True
+    assert res["evidence_source"] == EVIDENCE_SOURCE
+    assert res["independent_visual_validation"] == "LOCAL_MODEL"
+    assert res["blocker"] == ""
+    assert res["failure_reason"] == ""
+
+    # Verify same-frame geometry inputs
+    assert len(res["person_observations"]) == 3
+    assert len(res["object_observations"]) == 3
+    assert len(res["relationship_observations"]) == 3
+    for p_obs, o_obs, r_obs in zip(res["person_observations"], res["object_observations"], res["relationship_observations"]):
+        assert p_obs["person_ok"] is True
+        assert p_obs["person_bbox"] is not None
+        assert o_obs["object_ok"] is True
+        assert o_obs["object_bbox"] is not None
+        assert r_obs["relationship_ok"] is True
+
+

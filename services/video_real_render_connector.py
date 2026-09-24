@@ -3898,8 +3898,20 @@ def _render_selfshot2_video_to_video(
                 asset_pack=asset_pack,
                 job=job,
             )
-            if not continuity_res.get("ok"):
-                blocker = str(continuity_res.get("blocker") or "selfshot2_continuity_validation_failed")
+            evidence_source = str(continuity_res.get("evidence_source") or "")
+            validation_mode = str(continuity_res.get("independent_visual_validation") or "")
+            person_req = bool(continuity_res.get("person_required"))
+            object_req = bool(continuity_res.get("object_required"))
+
+            is_valid_evidence = (
+                bool(continuity_res.get("ok"))
+                and evidence_source == "local_vision_validator"
+                and (validation_mode == "LOCAL_MODEL" if (person_req or object_req) else True)
+            )
+            if not is_valid_evidence:
+                blocker = str(continuity_res.get("blocker") or "")
+                if not blocker or blocker == "None":
+                    blocker = "mock_or_unverified_visual_evidence"
                 raise RealVideoRenderError(
                     blocker,
                     diagnostics={
@@ -3911,7 +3923,7 @@ def _render_selfshot2_video_to_video(
                         "no_charge": True,
                         "blocker": blocker,
                         "continuity_evidence": continuity_res,
-                        "failure_reason": continuity_res.get("failure_reason"),
+                        "failure_reason": continuity_res.get("failure_reason") or blocker,
                     },
                 )
 

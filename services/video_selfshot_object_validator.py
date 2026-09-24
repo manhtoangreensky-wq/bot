@@ -6,6 +6,7 @@ Thresholds derived empirically from safe local CC0 object calibration fixtures.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any
 
@@ -104,6 +105,8 @@ def verify_object_identity(
         "inlier_ratio_operator": INLIER_RATIO_OPERATOR,
         "decision": False,
         "object_identity": False,
+        "candidate_object_bbox": None,
+        "candidate_object_quad": None,
         "failure_reason": "",
     }
 
@@ -217,6 +220,65 @@ def verify_object_identity(
         evidence["failure_reason"] = f"ratio_below_threshold:{ratio:.4f}<{min_ratio}"
         return evidence
 
+    # Homography-derived candidate object localization
+    ref_h, ref_w = ref_roi_img.shape[:2]
+    ref_corners = np.float32([[0.0, 0.0], [float(ref_w), 0.0], [float(ref_w), float(ref_h)], [0.0, float(ref_h)]]).reshape(-1, 1, 2)
+
+    try:
+        projected = cv2.perspectiveTransform(ref_corners, H)
+        if projected is None or len(projected) != 4:
+            evidence["localization_failure_reason"] = "invalid_perspective_transform"
+        else:
+            cand_offset_x = float(candidate_roi[0]) if candidate_roi is not None and len(candidate_roi) >= 1 else 0.0
+            cand_offset_y = float(candidate_roi[1]) if candidate_roi is not None and len(candidate_roi) >= 2 else 0.0
+
+            quad: list[list[float]] = []
+            coords_finite = True
+            for pt in projected:
+                qx = float(pt[0][0]) + cand_offset_x
+                qy = float(pt[0][1]) + cand_offset_y
+                if not (math.isfinite(qx) and math.isfinite(qy)):
+                    coords_finite = False
+                    break
+                quad.append([round(qx, 2), round(qy, 2)])
+
+            if not coords_finite or len(quad) != 4:
+                evidence["localization_failure_reason"] = "nonfinite_projected_coordinates"
+            else:
+                contour = np.array(quad, dtype=np.float32)
+                quad_area = float(cv2.contourArea(contour))
+                if quad_area <= 0.0 or not math.isfinite(quad_area):
+                    evidence["localization_failure_reason"] = "degenerate_quad_area"
+                else:
+                    cand_h_full, cand_w_full = cand_img.shape[:2]
+                    xs = [p[0] for p in quad]
+                    ys = [p[1] for p in quad]
+                    min_x, max_x = min(xs), max(xs)
+                    min_y, max_y = min(ys), max(ys)
+
+                    if max_x <= 0.0 or min_x >= float(cand_w_full) or max_y <= 0.0 or min_y >= float(cand_h_full):
+                        evidence["localization_failure_reason"] = "projected_bbox_outside_frame"
+                    else:
+                        clamped_min_x = max(0.0, min_x)
+                        clamped_max_x = min(float(cand_w_full), max_x)
+                        clamped_min_y = max(0.0, min_y)
+                        clamped_max_y = min(float(cand_h_full), max_y)
+                        bbox_w = clamped_max_x - clamped_min_x
+                        bbox_h = clamped_max_y - clamped_min_y
+
+                        if bbox_w <= 0.0 or bbox_h <= 0.0:
+                            evidence["localization_failure_reason"] = "degenerate_clamped_bbox"
+                        else:
+                            evidence["candidate_object_bbox"] = [
+                                round(clamped_min_x, 2),
+                                round(clamped_min_y, 2),
+                                round(bbox_w, 2),
+                                round(bbox_h, 2),
+                            ]
+                            evidence["candidate_object_quad"] = quad
+    except Exception as loc_exc:
+        evidence["localization_failure_reason"] = f"localization_exception:{loc_exc}"
+
     evidence["decision"] = True
     evidence["object_identity"] = True
     return evidence
@@ -235,17 +297,31 @@ def evaluate_object_continuity_from_provider_payload(
     Fails closed if local visual verification has not been performed.
     """
     if provider_task_payload is None:
-        return {"decision": False, "object_identity": False, "failure_reason": "missing_provider_payload"}
+        return {
+            "decision": False,
+            "object_identity": False,
+            "candidate_object_bbox": None,
+            "candidate_object_quad": None,
+            "failure_reason": "missing_provider_payload",
+        }
 
     status = provider_task_payload.get("status") or provider_task_payload.get("task_status")
     if status not in {"SUCCESS", "COMPLETED", "200"}:
-        return {"decision": False, "object_identity": False, "failure_reason": f"provider_status_not_success:{status}"}
+        return {
+            "decision": False,
+            "object_identity": False,
+            "candidate_object_bbox": None,
+            "candidate_object_quad": None,
+            "failure_reason": f"provider_status_not_success:{status}",
+        }
 
     # If no local images provided, provider success alone cannot certify identity
     if reference_path is None or candidate_path is None:
         return {
             "decision": False,
             "object_identity": False,
+            "candidate_object_bbox": None,
+            "candidate_object_quad": None,
             "failure_reason": "transport_success_without_local_visual_evidence",
         }
 
