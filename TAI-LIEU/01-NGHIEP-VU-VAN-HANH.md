@@ -1636,3 +1636,8 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   `git diff --check` exit `0`. Provider, production DB and wallet mutations are
   `0`; this is source evidence only until an Owner-authorized live job produces
   a real MP4 and Telegram receipt.
+
+## Support admin pending reset — 24/09/2026
+
+- Ticket admin navigation to list, statistics or reply templates clears an old `admin_search` pending state.
+- This is a local handler correction with `1` focused case pass; tickets and search data are not deleted.
