@@ -273,3 +273,66 @@ def test_transport_success_without_object_evidence_fails_closed() -> None:
     assert res["decision"] is False
     assert res["object_identity"] is False
     assert res["failure_reason"] == "transport_success_without_local_visual_evidence"
+
+
+def test_canonical_r3_decision_rule_omits_ratio_threshold_by_default(expanded_data: dict) -> None:
+    """Proves production default implements canonical R3 (homography + inliers >= 25) without ratio threshold."""
+    fixtures_map = {f["fixture_id"]: f for f in expanded_data["fixtures"]}
+    f1 = fixtures_map["id_snuff_bottle_coins_obs1"]
+    f2 = fixtures_map["id_snuff_bottle_coins_obs2"]
+    p1 = EXPANDED_DIR / f1["filename"]
+    p2 = EXPANDED_DIR / f2["filename"]
+
+    # Boundary scenario: homography_available=True, ransac_inlier_count=25, ransac_inlier_ratio < 0.70, min_ratio OMITTED
+    res_low_ratio = verify_object_identity(
+        p1, p2,
+        reference_roi=f1["roi_bbox"],
+        candidate_roi=f2["roi_bbox"],
+        forced_inliers=OBJECT_MIN_RANSAC_INLIERS_FINAL,  # 25
+        forced_ratio=0.50,  # < 0.70
+        # min_ratio intentionally omitted to test production default!
+    )
+    assert res_low_ratio["homography_available"] is True
+    assert res_low_ratio["ransac_inlier_count"] == 25
+    assert res_low_ratio["ransac_inlier_ratio"] == 0.50
+    assert res_low_ratio["min_ratio_threshold"] is None
+    assert res_low_ratio["object_identity"] is True
+    assert res_low_ratio["decision"] is True
+
+    # Boundary test: inliers = 24 -> False
+    res_24 = verify_object_identity(
+        p1, p2,
+        reference_roi=f1["roi_bbox"],
+        candidate_roi=f2["roi_bbox"],
+        forced_inliers=OBJECT_MIN_RANSAC_INLIERS_FINAL - 1,  # 24
+        forced_ratio=0.50,
+        # min_ratio omitted
+    )
+    assert res_24["decision"] is False
+    assert res_24["object_identity"] is False
+    assert "inliers_below_threshold" in res_24["failure_reason"]
+
+    # Boundary test: inliers = 25 -> True
+    res_25 = verify_object_identity(
+        p1, p2,
+        reference_roi=f1["roi_bbox"],
+        candidate_roi=f2["roi_bbox"],
+        forced_inliers=OBJECT_MIN_RANSAC_INLIERS_FINAL,  # 25
+        forced_ratio=0.50,
+        # min_ratio omitted
+    )
+    assert res_25["decision"] is True
+    assert res_25["object_identity"] is True
+
+    # Boundary test: inliers = 26 -> True
+    res_26 = verify_object_identity(
+        p1, p2,
+        reference_roi=f1["roi_bbox"],
+        candidate_roi=f2["roi_bbox"],
+        forced_inliers=OBJECT_MIN_RANSAC_INLIERS_FINAL + 1,  # 26
+        forced_ratio=0.50,
+        # min_ratio omitted
+    )
+    assert res_26["decision"] is True
+    assert res_26["object_identity"] is True
+

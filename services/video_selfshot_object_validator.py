@@ -17,10 +17,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Empirically calibrated from local safe CC0 object fixtures:
 # POSITIVE_INLIER_RANGE: [45, 218], NEGATIVE_INLIER_RANGE: [0, 5], GAP: 40 inliers
-# POSITIVE_RATIO_RANGE: [0.8824, 0.9820], NEGATIVE_RATIO_RANGE: [0.0, 1.0 (at 4 trivial inliers)]
-# Selected minimal fail-closed dual boundary: inliers >= 25, inlier_ratio >= 0.70
+# Canonical R3 decision rule: homography_available AND ransac_inlier_count >= 25
+# Secondary metric: NONE (inlier ratio is diagnostic only)
 CALIBRATED_OBJECT_MIN_RANSAC_INLIERS: int = 25
-CALIBRATED_OBJECT_MIN_INLIER_RATIO: float = 0.70
+CALIBRATED_OBJECT_MIN_INLIER_RATIO: float = 0.70  # Diagnostic reference only
 CALIBRATED_OBJECT_MIN_GOOD_MATCHES: int = 25
 
 RATIO_TEST_CUTOFF: float = 0.75
@@ -68,7 +68,7 @@ def verify_object_identity(
     reference_identity_id: str = "",
     candidate_identity_id: str = "",
     min_inliers: int = CALIBRATED_OBJECT_MIN_RANSAC_INLIERS,
-    min_ratio: float | None = CALIBRATED_OBJECT_MIN_INLIER_RATIO,
+    min_ratio: float | None = None,
     forced_inliers: int | None = None,
     forced_ratio: float | None = None,
     rng_seed: int = 42,
@@ -84,7 +84,7 @@ def verify_object_identity(
     - good matches < 4 -> False
     - homography unavailable / RANSAC failure -> False
     - ransac_inliers < min_inliers -> False
-    - ransac_inlier_ratio < min_ratio -> False
+    - ransac_inlier_ratio < min_ratio (if min_ratio is provided) -> False
     """
     evidence: dict[str, Any] = {
         "reference_fixture_id": reference_fixture_id,
