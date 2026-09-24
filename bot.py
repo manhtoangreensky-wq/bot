@@ -64935,14 +64935,15 @@ def _is_transient_key4u_tts_error(result: dict, status: str, http_status: int) -
         return False
 
     # Explicit provider rate limit (HTTP 429)
-    if code == 429 or stat == "FAIL_RATE_LIMIT":
+    if code == 429:
         return True
 
-    # Explicit provider unavailable / group unavailable (HTTP 503)
-    if code == 503 or stat == "FAIL_PROVIDER_GROUP_UNAVAILABLE":
+    # Explicit provider unavailable (HTTP 503)
+    if code == 503:
         return True
 
-    # Explicit server-side transient rejection markers with confirmed HTTP error response
+    # Explicit server-side transient rejection markers with confirmed HTTP error response.
+    # Structured status alone MUST NOT bypass this gate for HTTP 500/502.
     if code in {500, 502}:
         explicit_transient_markers = (
             "temporarily unavailable",
@@ -64952,7 +64953,11 @@ def _is_transient_key4u_tts_error(result: dict, status: str, http_status: int) -
             "overloaded",
             "rate limit",
         )
-        return any(marker in err_text for marker in explicit_transient_markers)
+        msg_text = " ".join([
+            str(res_dict.get("error_message_safe") or ""),
+            str(res_dict.get("detail") or ""),
+        ]).lower()
+        return any(marker in msg_text for marker in explicit_transient_markers)
 
     return False
 

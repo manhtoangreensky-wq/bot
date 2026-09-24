@@ -43,6 +43,46 @@ def test_is_transient_explicit_safe_status(status_code):
     assert bot._is_transient_key4u_tts_error(result, status_code, 503) is True
 
 
+@pytest.mark.parametrize("http_status", [500, 502])
+@pytest.mark.parametrize("status_code", [
+    "FAIL_RATE_LIMIT",
+    "FAIL_PROVIDER_GROUP_UNAVAILABLE",
+    "FAIL_PROVIDER_UNAVAILABLE",
+    "FAIL",
+    "FAIL_EXCEPTION",
+])
+def test_is_transient_500_502_structured_status_cannot_bypass_capacity_gate(http_status, status_code):
+    """HTTP 500/502 with structured status but lacking capacity markers must fail closed (False)."""
+    result = {
+        "ok": False,
+        "status": status_code,
+        "http_status": http_status,
+        "error_message_safe": "Internal server error occurred",
+        "detail": "upstream failure",
+    }
+    assert bot._is_transient_key4u_tts_error(result, status_code, http_status) is False
+
+
+@pytest.mark.parametrize("http_status", [500, 502])
+@pytest.mark.parametrize("status_code", [
+    "FAIL_RATE_LIMIT",
+    "FAIL_PROVIDER_GROUP_UNAVAILABLE",
+    "FAIL_PROVIDER_UNAVAILABLE",
+    "FAIL",
+])
+def test_is_transient_500_502_with_explicit_capacity_marker_retries(http_status, status_code):
+    """HTTP 500/502 with explicit capacity marker in body text is retry-safe (True)."""
+    result = {
+        "ok": False,
+        "status": status_code,
+        "http_status": http_status,
+        "error_message_safe": "The model service is temporarily unavailable. Please try again later.",
+        "detail": "cluster overloaded",
+    }
+    assert bot._is_transient_key4u_tts_error(result, status_code, http_status) is True
+
+
+
 @pytest.mark.parametrize("status_code", [
     "FAIL_TIMEOUT",
     "FAIL_EXCEPTION",
