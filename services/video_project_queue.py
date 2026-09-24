@@ -5140,32 +5140,56 @@ def build_product_video_confirm_kickoff_payload(
         or project.get("quality_key")
         or ""
     ).strip()
-    is_tier_700 = _as_int(tier, 0) == 700 or quality_key == "kling_long_audio_15"
+    tier_int = _as_int(tier, 0)
+    canonical_tier_seconds = 0
+    if tier_int > 0:
+        try:
+            from services import video_ai_real_pricing
+            canonical_tier_seconds = int(
+                video_ai_real_pricing.product_video_route_by_tier(tier_int).get("seconds_per_scene") or 0
+            )
+        except Exception:
+            pass
+    is_tier_700 = tier_int == 700 or quality_key == "kling_long_audio_15"
+    if is_tier_700:
+        default_scene_seconds = 15
+    elif canonical_tier_seconds > 0:
+        default_scene_seconds = canonical_tier_seconds
+    else:
+        default_scene_seconds = PRODUCT_VIDEO_SCENE_SECONDS
+
     scene_duration_limit = (
         PRODUCT_VIDEO_MAX_UIFLOW3_SCENE_SECONDS
         if (
             is_tier_700
+            or default_scene_seconds > PRODUCT_VIDEO_SCENE_SECONDS
             or str(asset_pack.get("uiflow3_handoff_sha256") or "").strip()
         )
-        else PRODUCT_VIDEO_SCENE_SECONDS
-    )
-    default_scene_seconds = 15 if is_tier_700 else PRODUCT_VIDEO_SCENE_SECONDS
-    scene_duration = max(
-        1,
-        min(
-            scene_duration_limit,
-            _as_int(
-                invoice.get("scene_duration_seconds")
-                or invoice.get("scene_seconds")
-                or asset_pack.get("scene_duration_seconds")
-                or asset_pack.get("scene_seconds"),
-                default_scene_seconds,
-            ),
-        ),
+        else max(PRODUCT_VIDEO_SCENE_SECONDS, default_scene_seconds)
     )
     requested_product_type = _product_video_requested_product_type(project, asset_pack, invoice)
     engine_contract = product_video_engine_contract(requested_product_type)
     execution_product_type = str(engine_contract.get("product_type") or requested_product_type)
+    is_selfshot = (
+        requested_product_type in {"self_shot_scene_change", "self_shot_cinematic_transform"}
+        or execution_product_type in {"self_shot_scene_change", "self_shot_cinematic_transform"}
+    )
+    if is_selfshot and canonical_tier_seconds > 0:
+        scene_duration = canonical_tier_seconds
+    else:
+        scene_duration = max(
+            1,
+            min(
+                scene_duration_limit,
+                _as_int(
+                    invoice.get("scene_duration_seconds")
+                    or invoice.get("scene_seconds")
+                    or asset_pack.get("scene_duration_seconds")
+                    or asset_pack.get("scene_seconds"),
+                    default_scene_seconds,
+                ),
+            ),
+        )
     required_capability = str(engine_contract.get("required_capability") or "text_to_video")
     eligibility_snapshot = (
         asset_pack.get("provider_eligibility_snapshot")

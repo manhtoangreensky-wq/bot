@@ -1256,8 +1256,24 @@ def product_video_scene_duration_seconds(job: dict | None = None) -> int:
         or asset_pack.get("quality_key")
         or ""
     ).strip()
-    is_tier_700 = _safe_int(tier, 0) == 700 or quality_key == "kling_long_audio_15"
-    default_scene_seconds = 15 if is_tier_700 else PRODUCT_VIDEO_SCENE_SECONDS
+    tier_int = _safe_int(tier, 0)
+    canonical_tier_seconds = 0
+    if tier_int > 0:
+        try:
+            from services import video_ai_real_pricing
+            canonical_tier_seconds = int(
+                video_ai_real_pricing.product_video_route_by_tier(tier_int).get("seconds_per_scene") or 0
+            )
+        except Exception:
+            pass
+    is_tier_700 = tier_int == 700 or quality_key == "kling_long_audio_15"
+    is_selfshot = product_type in {"self_shot_scene_change", "self_shot_cinematic_transform"}
+    if is_tier_700:
+        default_scene_seconds = 15
+    elif canonical_tier_seconds > 0 and is_selfshot:
+        default_scene_seconds = canonical_tier_seconds
+    else:
+        default_scene_seconds = PRODUCT_VIDEO_SCENE_SECONDS
     scene_seconds = _safe_int(
         job.get("scene_duration_seconds")
         or job.get("scene_seconds")
@@ -1265,10 +1281,13 @@ def product_video_scene_duration_seconds(job: dict | None = None) -> int:
         or invoice.get("scene_seconds"),
         default_scene_seconds,
     )
+    if is_selfshot and canonical_tier_seconds > 0:
+        scene_seconds = canonical_tier_seconds
     scene_duration_limit = (
         PRODUCT_VIDEO_MAX_UIFLOW3_SCENE_SECONDS
         if (
             is_tier_700
+            or default_scene_seconds > PRODUCT_VIDEO_SCENE_SECONDS
             or str(
                 job.get("uiflow3_handoff_sha256")
                 or asset_pack.get("uiflow3_handoff_sha256")
@@ -1276,7 +1295,7 @@ def product_video_scene_duration_seconds(job: dict | None = None) -> int:
                 or ""
             ).strip()
         )
-        else PRODUCT_VIDEO_SCENE_SECONDS
+        else max(PRODUCT_VIDEO_SCENE_SECONDS, default_scene_seconds)
     )
     return max(1, min(scene_duration_limit, scene_seconds))
 
@@ -3796,11 +3815,23 @@ def _render_selfshot2_video_to_video(
         or asset_pack.get("quality_key")
         or ""
     ).strip()
-    is_tier_700 = _safe_int(tier, 0) == 700 or quality_key == "kling_long_audio_15"
+    tier_int = _safe_int(tier, 0)
+    canonical_tier_seconds = 0
+    if tier_int > 0:
+        try:
+            from services import video_ai_real_pricing
+            canonical_tier_seconds = int(
+                video_ai_real_pricing.product_video_route_by_tier(tier_int).get("seconds_per_scene") or 0
+            )
+        except Exception:
+            pass
+    is_tier_700 = tier_int == 700 or quality_key == "kling_long_audio_15"
     if is_tier_700:
         target_duration = 15
-    elif _safe_int(tier, 0) == 800 or quality_key == "motion_pro_audio_10":
+    elif tier_int == 800 or quality_key == "motion_pro_audio_10":
         target_duration = 10
+    elif canonical_tier_seconds > 0:
+        target_duration = canonical_tier_seconds
     else:
         target_duration = max(
             1,
@@ -3856,7 +3887,35 @@ def _render_selfshot2_video_to_video(
             if not result_url:
                 raise video_ai_edit_provider.AiEditProviderError("provider_result_url_missing")
             downloaded = video_ai_edit_provider.download_result(result_url, raw_path)
-            continuity_evidence = _selfshot2_continuity_evidence_from_payload(provider_result)
+            output_clip_path = str(downloaded.get("path") or raw_path)
+
+            from services.video_selfshot_continuity_validator import validate_selfshot_scene_continuity
+
+            continuity_res = validate_selfshot_scene_continuity(
+                clip_source=output_clip_path,
+                scene_index=scene_index,
+                scene_duration_seconds=target_duration,
+                asset_pack=asset_pack,
+                job=job,
+            )
+            if not continuity_res.get("ok"):
+                blocker = str(continuity_res.get("blocker") or "selfshot2_continuity_validation_failed")
+                raise RealVideoRenderError(
+                    blocker,
+                    diagnostics={
+                        "ok": False,
+                        "selfshot2": True,
+                        "scene_index": scene_index,
+                        "provider_attempted": True,
+                        "attempts": attempts,
+                        "no_charge": True,
+                        "blocker": blocker,
+                        "continuity_evidence": continuity_res,
+                        "failure_reason": continuity_res.get("failure_reason"),
+                    },
+                )
+
+            continuity_evidence = continuity_res
             attempts.append({"provider": config.provider_name, "model": config.model, "task_id_present": bool(task_id), "fallback": bool(index)})
             return {
                 "ok": True,
@@ -3868,7 +3927,7 @@ def _render_selfshot2_video_to_video(
                 "provider_task_ids": [task_id] if task_id else [],
                 "provider_video_ids": [],
                 "result_url_present": True,
-                "output_path": str(downloaded.get("path") or raw_path),
+                "output_path": output_clip_path,
                 "duration": target_duration,
                 "scene_duration_seconds": target_duration,
                 "clip_duration_seconds": target_duration,
@@ -4012,6 +4071,7 @@ def selfshot2_continuity_validation(
     )
 
     evidence_by_scene: dict[int, dict[str, bool]] = {}
+    evidence_sources: dict[int, str] = {}
     evidence_rows = [
         *[dict(item) for item in (debug_results or []) if isinstance(item, dict)],
         *task_rows,
@@ -4030,6 +4090,15 @@ def selfshot2_continuity_validation(
         current = evidence_by_scene.setdefault(index, {})
         for key, value in evidence.items():
             current[key] = bool(current.get(key)) or value
+        src = (
+            row.get("evidence_source")
+            or nested.get("evidence_source")
+            or (row.get("continuity_evidence") or {}).get("evidence_source")
+            or (nested.get("continuity_evidence") or {}).get("evidence_source")
+            or ""
+        )
+        if src:
+            evidence_sources[index] = str(src)
 
     person_ok = not person_required or all(evidence_by_scene.get(index, {}).get("person_identity") is True for index in expected_indexes)
     object_ok = not object_required or all(evidence_by_scene.get(index, {}).get("object_identity") is True for index in expected_indexes)
@@ -4074,15 +4143,30 @@ def selfshot2_continuity_validation(
     continuity_metadata_present = bool(evidence_by_scene)
     is_debug_metadata = bool(debug_results and any("continuity_evidence" in d for d in debug_results if isinstance(d, dict)))
     authority = "manual_debug_metadata" if is_debug_metadata else ("provider_or_scene_metadata" if continuity_metadata_present else "none")
+
+    all_local_proven = bool(
+        expected_indexes
+        and not blocker
+        and all(
+            evidence_sources.get(index) == "local_vision_validator"
+            and (not person_required or evidence_by_scene.get(index, {}).get("person_identity") is True)
+            and (not object_required or evidence_by_scene.get(index, {}).get("object_identity") is True)
+            and (not relationship_required or evidence_by_scene.get(index, {}).get("person_object_relationship") is True)
+            for index in expected_indexes
+        )
+    )
+    independent_visual_validation = "LOCAL_MODEL" if all_local_proven else "NOT_PERFORMED"
+    independent_visual_validation_pass = all_local_proven
+    independent_visual_continuity_proven = all_local_proven
     return {
         "ok": metadata_contract_pass,
         "blocker": blocker,
         "metadata_contract_pass": metadata_contract_pass,
         "continuity_metadata_present": continuity_metadata_present,
         "continuity_metadata_authority": authority,
-        "independent_visual_validation": "NOT_PERFORMED",
-        "independent_visual_validation_pass": False,
-        "independent_visual_continuity_proven": False,
+        "independent_visual_validation": independent_visual_validation,
+        "independent_visual_validation_pass": independent_visual_validation_pass,
+        "independent_visual_continuity_proven": independent_visual_continuity_proven,
         "required": required_metrics,
         "metrics": metrics,
         "expected_scene_indexes": sorted(expected_indexes),

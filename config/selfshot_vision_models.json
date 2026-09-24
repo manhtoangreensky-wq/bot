@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0.0",
+  "canonical_storage_directory": "assets/models/selfshot_vision",
+  "models": [
+    {
+      "name": "face_detection_yunet",
+      "role": "person_face_detector",
+      "filename": "face_detection_yunet_2023mar.onnx",
+      "source_repository": "https://github.com/opencv/opencv_zoo",
+      "source_commit_or_tag": "master",
+      "source_path": "models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+      "source_url": "https://huggingface.co/opencv/face_detection_yunet/resolve/main/face_detection_yunet_2023mar.onnx",
+      "bytes": 232589,
+      "sha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
+      "framework": "onnx",
+      "license": "MIT",
+      "license_source": "https://github.com/opencv/opencv_zoo/blob/master/models/face_detection_yunet/LICENSE",
+      "provenance_status": "OFFICIAL_OPENCV_ZOO"
+    },
+    {
+      "name": "face_recognition_sface",
+      "role": "person_face_recognizer",
+      "filename": "face_recognition_sface_2021dec.onnx",
+      "source_repository": "https://github.com/opencv/opencv_zoo",
+      "source_commit_or_tag": "master",
+      "source_path": "models/face_recognition_sface/face_recognition_sface_2021dec.onnx",
+      "source_url": "https://huggingface.co/opencv/face_recognition_sface/resolve/main/face_recognition_sface_2021dec.onnx",
+      "bytes": 38696353,
+      "sha256": "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
+      "framework": "onnx",
+      "license": "Apache-2.0",
+      "license_source": "https://github.com/opencv/opencv_zoo/blob/master/models/face_recognition_sface/LICENSE",
+      "provenance_status": "OFFICIAL_OPENCV_ZOO",
+      "training_data_provenance": "not_fully_documented_upstream"
+    }
+  ]
+}
