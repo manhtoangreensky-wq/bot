@@ -1636,3 +1636,8 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   `git diff --check` exit `0`. Provider, production DB and wallet mutations are
   `0`; this is source evidence only until an Owner-authorized live job produces
   a real MP4 and Telegram receipt.
+
+## Ghi chú zero-state correction — 24/09/2026
+
+- Khi danh sách ghi chú rỗng và admin/user bấm Xóa, bot dọn pending delete cũ trước khi hiển thị màn rỗng.
+- Không xóa ghi chú, không mutate dữ liệu, không gọi provider; local evidence gồm `1` RED trước sửa và `1` GREEN sau sửa.

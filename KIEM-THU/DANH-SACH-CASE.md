@@ -227,3 +227,5 @@ Các case trên phải chạy bằng SQLite tạm trước khi live. Không dùn
 
 FAIL nếu test gọi provider, chạy hai local model song song, thay đổi exact-two,
 hoặc hết timeout mà không fail-closed/cleanup.
+
+| `UI-SM-06` | 🟡 vừa | Ghi chú: empty delete state | Pending delete dọn; danh sách và dữ liệu ghi chú không đổi |
