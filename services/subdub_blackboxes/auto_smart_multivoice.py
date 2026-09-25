@@ -1723,11 +1723,24 @@ async def run_auto_smart_multivoice(
             ch_item = dict(chunk, cue_id=cid)
             ch_item["cue_locked_timing"] = True
 
-            # Intelligibility fit-ratio check (Section N)
+            # Intelligibility fit-ratio check (Section N) and timeline metadata enrichment
             c_match = next((c for c in decision.tts_cues if str(c.get("cue_id") or c.get("id")) == cid), None)
             if c_match:
                 s_sec = float(c_match.get("start_ms", 0)) / 1000.0 if "start_ms" in c_match else float(c_match.get("start", 0.0) or 0.0)
                 e_sec = float(c_match.get("end_ms", 0)) / 1000.0 if "end_ms" in c_match else float(c_match.get("end", 0.0) or 0.0)
+                if "start" not in ch_item:
+                    ch_item["start"] = s_sec
+                if "end" not in ch_item:
+                    ch_item["end"] = e_sec
+                if "start_ms" not in ch_item and "start_ms" in c_match:
+                    ch_item["start_ms"] = c_match["start_ms"]
+                if "end_ms" not in ch_item and "end_ms" in c_match:
+                    ch_item["end_ms"] = c_match["end_ms"]
+                if "text" not in ch_item and "text" in c_match:
+                    ch_item["text"] = c_match["text"]
+                if "speaker_id" not in ch_item and ("speaker_id" in c_match or "speaker" in c_match):
+                    ch_item["speaker_id"] = str(c_match.get("speaker_id") or c_match.get("speaker") or "")
+
                 cue_window = e_sec - s_sec
                 gen_sec = float(ch_item.get("audio_duration") or ch_item.get("raw_audio_duration") or 0.0)
                 if cue_window > 0.05 and gen_sec > 0:
@@ -1757,6 +1770,10 @@ async def run_auto_smart_multivoice(
                 "blocker": f"missing_tts_cues:{sorted(missing_cues)}",
                 "auto_smart_verified": False,
             }
+
+        # Canonical production ordering: sort synth_artifacts by expected_cue_ids sequence
+        cue_order_map = {cue_id: idx for idx, cue_id in enumerate(expected_cue_ids)}
+        synth_artifacts.sort(key=lambda item: cue_order_map.get(str(item.get("cue_id") or item.get("id")), 999999))
 
     # Checkpoint 3: After synthesis
     if _is_stopped():
@@ -2132,6 +2149,20 @@ def create_smart_synth_adapter(
                         ch_copy = dict(ch)
                         ch_copy.setdefault("cue_id", cid)
                         ch_copy["cue_locked_timing"] = True
+                        if "start" not in ch_copy:
+                            if "start_ms" in cue:
+                                ch_copy["start"] = float(cue["start_ms"]) / 1000.0
+                            elif "start" in cue:
+                                ch_copy["start"] = float(cue["start"] or 0.0)
+                        if "end" not in ch_copy:
+                            if "end_ms" in cue:
+                                ch_copy["end"] = float(cue["end_ms"]) / 1000.0
+                            elif "end" in cue:
+                                ch_copy["end"] = float(cue["end"] or 0.0)
+                        if "text" not in ch_copy and "text" in cue:
+                            ch_copy["text"] = cue["text"]
+                        if "speaker_id" not in ch_copy and ("speaker_id" in cue or "speaker" in cue):
+                            ch_copy["speaker_id"] = str(cue.get("speaker_id") or cue.get("speaker") or "")
                         if "audio" not in ch_copy and "audio_bytes" in ch_copy:
                             ch_copy["audio"] = ch_copy["audio_bytes"]
                         elif "audio_bytes" not in ch_copy and "audio" in ch_copy:
@@ -2223,6 +2254,20 @@ def create_smart_synth_adapter(
                     or 0.0
                 )
                 for ch in matched_chunks:
+                    if "start" not in ch:
+                        if "start_ms" in cue:
+                            ch["start"] = float(cue["start_ms"]) / 1000.0
+                        elif "start" in cue:
+                            ch["start"] = float(cue["start"] or 0.0)
+                    if "end" not in ch:
+                        if "end_ms" in cue:
+                            ch["end"] = float(cue["end_ms"]) / 1000.0
+                        elif "end" in cue:
+                            ch["end"] = float(cue["end"] or 0.0)
+                    if "text" not in ch and "text" in cue:
+                        ch["text"] = cue["text"]
+                    if "speaker_id" not in ch and ("speaker_id" in cue or "speaker" in cue):
+                        ch["speaker_id"] = str(cue.get("speaker_id") or cue.get("speaker") or "")
                     if "audio" not in ch and "audio_bytes" in ch:
                         ch["audio"] = ch["audio_bytes"]
                     elif "audio_bytes" not in ch and "audio" in ch:
@@ -2603,14 +2648,24 @@ async def run_auto_smart_multivoice_blackbox(
             nonlocal captured_audio
             norm_audio = b""
             if callable(build_timeline_audio):
-                raw_audio, _ = await _maybe_await(build_timeline_audio(tts_chunks, canonical_duration))
-                if callable(normalize_audio):
-                    norm_audio, _ = await _maybe_await(normalize_audio(raw_audio))
+                timeline_res = await _maybe_await(build_timeline_audio(tts_chunks, canonical_duration))
+                if isinstance(timeline_res, tuple) and len(timeline_res) >= 1:
+                    raw_audio = timeline_res[0]
                 else:
-                    norm_audio = raw_audio if isinstance(raw_audio, bytes) else b""
+                    raw_audio = timeline_res
+
+                if callable(normalize_audio):
+                    norm_res = await _maybe_await(normalize_audio(raw_audio))
+                    if isinstance(norm_res, tuple) and len(norm_res) >= 1:
+                        norm_audio = norm_res[0]
+                    else:
+                        norm_audio = norm_res
+                else:
+                    norm_audio = raw_audio if isinstance(raw_audio, (bytes, bytearray)) else b""
+
                 if callable(validate_audio):
                     await _maybe_await(validate_audio(norm_audio))
-                captured_audio = norm_audio
+                captured_audio = norm_audio if isinstance(norm_audio, (bytes, bytearray)) else b""
 
             src_bytes = b""
             if Path(source_media).is_file():

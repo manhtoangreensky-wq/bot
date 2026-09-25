@@ -2362,3 +2362,165 @@ def test_96_blackbox_runner_forwards_cue_acoustic_classifications_to_smoothing(t
         assert not c2_out.get("anti_flapping_smoothed", False)
 
     asyncio.run(_run())
+
+
+def test_97_synth_artifacts_canonical_production_ordering_and_metadata(tmp_path):
+    """synth_artifacts are sorted canonically according to expected_cue_ids and enriched with metadata."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src.mp4")
+        output_mp4 = tmp_path / "out.mp4"
+
+        cues = [
+            {"cue_id": "c1", "speaker_id": "spk_1", "text": "One", "start_ms": 0, "end_ms": 1000},
+            {"cue_id": "c2", "speaker_id": "spk_2", "text": "Two", "start_ms": 1200, "end_ms": 2200},
+            {"cue_id": "c3", "speaker_id": "spk_1", "text": "Three", "start_ms": 2400, "end_ms": 3400},
+        ]
+        acoustics = {
+            "spk_1": {"voice_register": "high", "voice_gender": "female", "confidence": 0.95},
+            "spk_2": {"voice_register": "low", "voice_gender": "male", "confidence": 0.95},
+        }
+
+        # Return chunks in reversed order: c3, c1, c2
+        async def mock_permuted_synth(cues_arg, speaker_voice_map, **kwargs):
+            return [
+                {"cue_id": "c3", "audio": b"AUDIO_C3", "audio_duration": 0.9},
+                {"cue_id": "c1", "audio": b"AUDIO_C1", "audio_duration": 0.9},
+                {"cue_id": "c2", "audio": b"AUDIO_C2", "audio_duration": 0.9},
+            ]
+
+        captured_tts_chunks = []
+
+        async def spy_render(source_media, output_path, **kwargs):
+            nonlocal captured_tts_chunks
+            captured_tts_chunks = list(kwargs.get("tts_chunks") or [])
+            return _create_real_valid_mp4(Path(output_path))
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=mock_permuted_synth,
+            render_pipeline=spy_render,
+            probe_fn=lambda p: {"format": {"duration": "3.5"}},
+        )
+
+        assert res.get("ok") is True
+        # Verify captured_tts_chunks are canonically ordered c1, c2, c3
+        assert [c["cue_id"] for c in captured_tts_chunks] == ["c1", "c2", "c3"]
+        # Verify metadata enrichment
+        assert captured_tts_chunks[0]["start"] == 0.0
+        assert captured_tts_chunks[0]["end"] == 1.0
+        assert captured_tts_chunks[0]["text"] == "One"
+        assert captured_tts_chunks[0]["speaker_id"] == "spk_1"
+
+        assert captured_tts_chunks[1]["start"] == 1.2
+        assert captured_tts_chunks[1]["end"] == 2.2
+        assert captured_tts_chunks[1]["text"] == "Two"
+        assert captured_tts_chunks[1]["speaker_id"] == "spk_2"
+
+        assert captured_tts_chunks[2]["start"] == 2.4
+        assert captured_tts_chunks[2]["end"] == 3.4
+        assert captured_tts_chunks[2]["text"] == "Three"
+        assert captured_tts_chunks[2]["speaker_id"] == "spk_1"
+
+    asyncio.run(_run())
+
+
+def test_98_adapted_render_pipeline_scalar_and_tuple_audio_returns(tmp_path):
+    """_adapted_render_pipeline handles both tuple and scalar returns for build_timeline_audio and normalize_audio."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src.mp4")
+        output_mp4 = tmp_path / "out.mp4"
+
+        cues = [
+            {"cue_id": "c1", "speaker_id": "spk_1", "text": "Hello", "start_ms": 0, "end_ms": 1000},
+        ]
+        acoustics = {"spk_1": {"voice_register": "high", "voice_gender": "female", "confidence": 0.95}}
+
+        async def synth_fn(cues_arg, speaker_voice_map, **kwargs):
+            return [{"cue_id": "c1", "audio": b"AUDIO_RAW", "audio_duration": 0.9}]
+
+        async def scalar_build_timeline(tts_chunks, duration):
+            # Returns scalar bytes directly, not (bytes, detail) tuple
+            return b"SCALAR_RAW_AUDIO_BYTES"
+
+        async def scalar_normalize(raw_bytes):
+            # Returns scalar bytes directly, not (bytes, detail) tuple
+            return b"SCALAR_NORM_AUDIO_BYTES"
+
+        rendered_audio = []
+
+        async def mock_render_video(source_bytes, **kwargs):
+            rendered_audio.append(kwargs.get("dubbed_audio"))
+            return _create_real_valid_mp4(tmp_path / "rendered.mp4").read_bytes(), "detail"
+
+        res = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth_fn,
+            render_video=mock_render_video,
+            build_timeline_audio=scalar_build_timeline,
+            normalize_audio=scalar_normalize,
+            state={"auto_speaker_lane": "auto_smart_multivoice"},
+        )
+
+        assert res.get("ok") is True
+        assert rendered_audio == [b"SCALAR_NORM_AUDIO_BYTES"]
+
+    asyncio.run(_run())
+
+
+def test_99_smart_synth_adapter_metadata_enrichment(tmp_path):
+    """create_smart_synth_adapter enriches both fresh and reconstructed chunks with cue metadata."""
+    async def _run():
+        ws = str(tmp_path / "checkpoint_ws")
+        os.makedirs(ws, exist_ok=True)
+        job_id = "test_job_ordering_metadata"
+
+        cue = {
+            "cue_id": "cue_meta_1",
+            "speaker_id": "speaker_x",
+            "text": "Metadata test",
+            "start_ms": 500,
+            "end_ms": 1500,
+            "target_text": "Thu nghiem metadata",
+        }
+
+        async def base_synth(cues_list, voice_id):
+            return [{"cue_id": "cue_meta_1", "audio": b"MOCK_TTS_BYTES", "audio_duration": 0.9}]
+
+        adapter = smart.create_smart_synth_adapter(
+            base_synth,
+            workspace=ws,
+            job_id=job_id,
+            target_language="vi",
+        )
+
+        # 1. Fresh synthesis call
+        res1 = await adapter([cue], voice_id="voice_alpha")
+        chunks1 = res1.get("chunks") or []
+        assert len(chunks1) == 1
+        ch1 = chunks1[0]
+        assert ch1["cue_id"] == "cue_meta_1"
+        assert ch1["start"] == 0.5
+        assert ch1["end"] == 1.5
+        assert ch1["text"] == "Metadata test"
+        assert ch1["speaker_id"] == "speaker_x"
+
+        # 2. Reconstructed cache call (re-run with same adapter)
+        res2 = await adapter([cue], voice_id="voice_alpha")
+        chunks2 = res2.get("chunks") or []
+        assert len(chunks2) == 1
+        ch2 = chunks2[0]
+        assert ch2["cue_id"] == "cue_meta_1"
+        assert ch2["start"] == 0.5
+        assert ch2["end"] == 1.5
+        assert ch2["text"] == "Metadata test"
+        assert ch2["speaker_id"] == "speaker_x"
+
+    asyncio.run(_run())
