@@ -1723,7 +1723,7 @@ async def run_auto_smart_multivoice(
                     "auto_smart_verified": False,
                 }
             # Check zero-length audio if audio payload present
-            if "audio" in chunk and chunk["audio"] == b"":
+            if ("audio" in chunk and chunk["audio"] == b"") or ("audio_bytes" in chunk and chunk["audio_bytes"] == b""):
                 return {
                     "ok": False,
                     "strategy": decision.strategy,
@@ -1734,6 +1734,10 @@ async def run_auto_smart_multivoice(
             seen_cue_ids.add(cid)
             ch_item = dict(chunk, cue_id=cid)
             ch_item["cue_locked_timing"] = True
+            aud_data = ch_item.get("audio_bytes") if ch_item.get("audio_bytes") is not None else ch_item.get("audio")
+            if aud_data is not None:
+                ch_item["audio"] = aud_data
+                ch_item["audio_bytes"] = aud_data
 
             # Intelligibility fit-ratio check (Section N) and timeline metadata enrichment
             c_match = next((c for c in decision.tts_cues if str(c.get("cue_id") or c.get("id")) == cid), None)
@@ -1754,10 +1758,6 @@ async def run_auto_smart_multivoice(
                     ch_item["speaker_id"] = str(c_match.get("speaker_id") or c_match.get("speaker") or "")
 
                 cue_window = e_sec - s_sec
-                explicit_dur_provided = (
-                    ("audio_duration" in ch_item and ch_item["audio_duration"] is not None)
-                    or ("raw_audio_duration" in ch_item and ch_item["raw_audio_duration"] is not None)
-                )
                 gen_sec = float(ch_item.get("audio_duration") or ch_item.get("raw_audio_duration") or 0.0)
                 if gen_sec <= 0.0:
                     raw_aud = chunk.get("audio") or chunk.get("audio_bytes")
@@ -1780,22 +1780,20 @@ async def run_auto_smart_multivoice(
                             gen_sec = 0.0
 
                 if gen_sec <= 0.0:
-                    if explicit_dur_provided:
-                        return {
-                            "ok": False,
-                            "strategy": decision.strategy,
-                            "status": "TTS_DURATION_AUTHORITY_MISSING",
-                            "error_code": "missing_synth_duration_authority",
-                            "blocker": f"missing_synth_duration_authority:{cid}",
-                            "output_mode": OUTPUT_MODE_FAILED,
-                            "final_mp4_path": None,
-                            "cue_id": cid,
-                            "auto_smart_verified": False,
-                        }
-                    else:
-                        gen_sec = max(cue_window, 0.0)
+                    return {
+                        "ok": False,
+                        "strategy": decision.strategy,
+                        "status": "TTS_DURATION_AUTHORITY_MISSING",
+                        "error_code": "missing_synth_duration_authority",
+                        "blocker": f"missing_synth_duration_authority:{cid}",
+                        "output_mode": OUTPUT_MODE_FAILED,
+                        "final_mp4_path": None,
+                        "cue_id": cid,
+                        "auto_smart_verified": False,
+                    }
 
                 ch_item["audio_duration"] = gen_sec
+                ch_item["raw_audio_duration"] = gen_sec
 
                 if cue_window > 0.05 and gen_sec > 0:
                     fit_ratio = gen_sec / cue_window
@@ -2487,6 +2485,7 @@ async def run_auto_smart_multivoice_blackbox(
         or (prepared.get("stereo_pcm_path") if isinstance(prepared, dict) else None)
     )
     extracted_pcm_path: str | None = None
+    pcm_extraction_error: str | None = None
     if stereo_pcm_path is None and callable(extract_pcm):
         try:
             from services import subdub_two_speaker_gender_onnx
@@ -2508,11 +2507,48 @@ async def run_auto_smart_multivoice_blackbox(
                 raw_p = extracted.get("pcm_path") or extracted.get("path")
             else:
                 raw_p = extracted
-            if raw_p and Path(str(raw_p)).is_file():
+            if raw_p and Path(str(raw_p)).is_file() and Path(str(raw_p)).stat().st_size > 0:
                 stereo_pcm_path = str(raw_p)
                 extracted_pcm_path = stereo_pcm_path
-        except Exception:
+            else:
+                pcm_extraction_error = f"invalid_pcm_path:{raw_p}"
+        except Exception as pcm_err:
             stereo_pcm_path = None
+            pcm_extraction_error = f"{type(pcm_err).__name__}:{str(pcm_err)[:120]}"
+
+        if pcm_extraction_error is not None:
+            has_pre_acoustics = bool(
+                payload.get("acoustic_classifications")
+                or current.get("acoustic_classifications")
+                or (prepared.get("acoustic_classifications") if isinstance(prepared, dict) else None)
+                or payload.get("cue_acoustic_classifications")
+                or current.get("cue_acoustic_classifications")
+                or (prepared.get("cue_acoustic_classifications") if isinstance(prepared, dict) else None)
+            )
+            if not has_pre_acoustics:
+                if temp_source_path and os.path.exists(temp_source_path):
+                    try:
+                        os.unlink(temp_source_path)
+                    except OSError:
+                        pass
+                return {
+                    "ok": False,
+                    "status": "PCM_EXTRACTION_FAILED",
+                    "error_code": "pcm_extraction_failed",
+                    "blocker": f"pcm_extraction_failed:{pcm_extraction_error}",
+                    "admin_debug_summary": f"pcm_extraction_failed:{pcm_extraction_error}",
+                    "strategy": STRATEGY_FAILED,
+                    "detected_speaker_count": 0,
+                    "effective_speaker_count": 0,
+                    "effective_voice_count": 0,
+                    "speaker_voice_map": {},
+                    "fallback_level": -1,
+                    "fallback_reason": None,
+                    "output_mode": OUTPUT_MODE_FAILED,
+                    "final_mp4_path": None,
+                    "auto_smart_verified": False,
+                    "state": dict(current),
+                }
 
     cues = smooth_smart_multivoice_cues(
         cues,
@@ -2656,7 +2692,10 @@ async def run_auto_smart_multivoice_blackbox(
             chunks = []
             for c in cues_list:
                 cid = str(c.get("cue_id") or c.get("id"))
-                chunks.append({"cue_id": cid, "audio": b"DUMMY_AUDIO_BYTES"})
+                s = float(c.get("start_ms", 0)) / 1000.0 if "start_ms" in c else float(c.get("start", 0.0) or 0.0)
+                e = float(c.get("end_ms", 0)) / 1000.0 if "end_ms" in c else float(c.get("end", 0.0) or 0.0)
+                dur = max(0.1, e - s) if e > s else 1.0
+                chunks.append({"cue_id": cid, "audio": b"DUMMY_AUDIO_BYTES", "audio_duration": dur})
             return {"chunks": chunks, "provider": "runner_mock"}
         smart_synthesizer = _mock_runner_synth
 
@@ -2751,10 +2790,15 @@ async def run_auto_smart_multivoice_blackbox(
             norm_audio = b""
             if callable(build_timeline_audio):
                 timeline_res = await _maybe_await(build_timeline_audio(tts_chunks, canonical_duration))
-                if isinstance(timeline_res, tuple) and len(timeline_res) >= 1:
-                    raw_audio = timeline_res[0]
+                err_detail = ""
+                if isinstance(timeline_res, tuple):
+                    raw_audio = timeline_res[0] if len(timeline_res) >= 1 else b""
+                    err_detail = str(timeline_res[1]) if len(timeline_res) >= 2 else ""
                 else:
                     raw_audio = timeline_res
+
+                if tts_chunks and (not raw_audio or not isinstance(raw_audio, (bytes, bytearray))):
+                    raise RuntimeError(f"TIMELINE_AUDIO_BUILD_FAILED:{err_detail or 'empty_timeline_audio'}")
 
                 if callable(normalize_audio):
                     norm_res = await _maybe_await(normalize_audio(raw_audio))

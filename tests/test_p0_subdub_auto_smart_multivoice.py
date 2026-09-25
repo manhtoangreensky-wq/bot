@@ -468,7 +468,7 @@ def test_22_valid_final_mp4(tmp_path):
         cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Chào", "start_ms": 0, "end_ms": 1000}]
 
         async def mock_synth(cues, speaker_voice_map):
-            return [{"cue_id": "c1", "audio": b"dummy_pcm_bytes"}]
+            return [{"cue_id": "c1", "audio": b"dummy_pcm_bytes", "audio_duration": 1.0}]
 
         async def mock_render(source_media, output_path, **kwargs):
             return _create_real_valid_mp4(Path(output_path))
@@ -496,7 +496,7 @@ def test_23_invalid_final_mp4_rejected(tmp_path):
         cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Chào", "start_ms": 0, "end_ms": 1000}]
 
         async def mock_synth(cues, speaker_voice_map):
-            return [{"cue_id": "c1", "audio": b"dummy"}]
+            return [{"cue_id": "c1", "audio": b"dummy", "audio_duration": 1.0}]
 
         async def mock_render(source_media, output_path, **kwargs):
             Path(output_path).write_bytes(b"")
@@ -540,7 +540,7 @@ def test_25_render_failure_fails_truthfully(tmp_path):
         cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Chào", "start_ms": 0, "end_ms": 1000}]
 
         async def mock_synth(cues, speaker_voice_map):
-            return [{"cue_id": "c1", "audio": b"dummy"}]
+            return [{"cue_id": "c1", "audio": b"dummy", "audio_duration": 1.0}]
 
         async def failing_render(**kwargs):
             raise RuntimeError("ffmpeg_mux_failure_code_1")
@@ -907,7 +907,7 @@ def test_47_partial_tts_coverage_cannot_succeed_as_dubbed(tmp_path):
         ]
         # Synthesizer only returns c1, omitting c2
         async def partial_synth(cues, speaker_voice_map):
-            return [{"cue_id": "c1", "audio": b"chunk1_data"}]
+            return [{"cue_id": "c1", "audio": b"chunk1_data", "audio_duration": 1.0}]
 
         res = await smart.run_auto_smart_multivoice(
             source_media=source_media,
@@ -930,8 +930,8 @@ def test_48_duplicate_tts_artifact_rejected(tmp_path):
 
         async def dup_synth(cues, speaker_voice_map):
             return [
-                {"cue_id": "c1", "audio": b"chunk1_a"},
-                {"cue_id": "c1", "audio": b"chunk1_b"},
+                {"cue_id": "c1", "audio": b"chunk1_a", "audio_duration": 1.0},
+                {"cue_id": "c1", "audio": b"chunk1_b", "audio_duration": 1.0},
             ]
 
         res = await smart.run_auto_smart_multivoice(
@@ -955,8 +955,8 @@ def test_49_unknown_tts_artifact_rejected(tmp_path):
 
         async def unknown_synth(cues, speaker_voice_map):
             return [
-                {"cue_id": "c1", "audio": b"chunk1"},
-                {"cue_id": "c_unknown_99", "audio": b"chunk99"},
+                {"cue_id": "c1", "audio": b"chunk1", "audio_duration": 1.0},
+                {"cue_id": "c_unknown_99", "audio": b"chunk99", "audio_duration": 1.0},
             ]
 
         res = await smart.run_auto_smart_multivoice(
@@ -979,7 +979,7 @@ def test_50_non_empty_garbage_mp4_rejected_without_caller_probe(tmp_path):
         cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Thoại", "start_ms": 0, "end_ms": 1000}]
 
         async def mock_synth(cues, speaker_voice_map):
-            return [{"cue_id": "c1", "audio": b"data"}]
+            return [{"cue_id": "c1", "audio": b"data", "audio_duration": 1.0}]
 
         async def garbage_render(source_media, output_path, **kwargs):
             # Write 4KB of garbage non-mp4 bytes
@@ -1012,7 +1012,7 @@ def test_51_stale_pre_existing_output_rejected(tmp_path):
         cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Thoại", "start_ms": 0, "end_ms": 1000}]
 
         async def mock_synth(cues, speaker_voice_map):
-            return [{"cue_id": "c1", "audio": b"data"}]
+            return [{"cue_id": "c1", "audio": b"data", "audio_duration": 1.0}]
 
         # Render pipeline fails to create any file
         async def failing_render(source_media, output_path, **kwargs):
@@ -1039,7 +1039,7 @@ def test_52_render_pipeline_absent_cannot_claim_current_run_output(tmp_path):
         cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Thoại", "start_ms": 0, "end_ms": 1000}]
 
         async def mock_synth(cues, speaker_voice_map):
-            return [{"cue_id": "c1", "audio": b"data"}]
+            return [{"cue_id": "c1", "audio": b"data", "audio_duration": 1.0}]
 
         res = await smart.run_auto_smart_multivoice(
             source_media=source_media,
@@ -1067,7 +1067,7 @@ def test_53_bar_fixture_full_runner(tmp_path):
         synth_cues_called = []
         async def mock_synth(cues, speaker_voice_map):
             synth_cues_called.extend(cues)
-            return [{"cue_id": c["cue_id"], "audio": b"data"} for c in cues]
+            return [{"cue_id": c["cue_id"], "audio": b"data", "audio_duration": 1.0} for c in cues]
 
         async def mock_render(source_media, output_path, **kwargs):
             return _create_real_valid_mp4(Path(output_path))
@@ -1102,7 +1102,7 @@ def test_54_bar_singing_music_never_sent_to_tts(tmp_path):
         async def mock_synth(cues, speaker_voice_map):
             for c in cues:
                 tts_received_ids.append(c["cue_id"])
-            return [{"cue_id": c["cue_id"], "audio": b"data"} for c in cues]
+            return [{"cue_id": c["cue_id"], "audio": b"data", "audio_duration": 1.0} for c in cues]
 
         async def mock_render(source_media, output_path, **kwargs):
             return _create_real_valid_mp4(Path(output_path))
@@ -1133,7 +1133,7 @@ def test_55_preserved_bar_cues_reach_renderer(tmp_path):
         ]
         render_spy_kwargs = {}
         async def mock_synth(cues, speaker_voice_map):
-            return [{"cue_id": "c1", "audio": b"data"}]
+            return [{"cue_id": "c1", "audio": b"data", "audio_duration": 1.0}]
 
         async def mock_render(source_media, output_path, **kwargs):
             render_spy_kwargs.update(kwargs)
@@ -1171,7 +1171,14 @@ def test_56_cooking_fixture_full_runner(tmp_path):
             }
 
         async def mock_synth(cues, speaker_voice_map):
-            return [{"cue_id": c["cue_id"], "audio": b"data"} for c in cues]
+            return [
+                {
+                    "cue_id": c["cue_id"],
+                    "audio": b"data",
+                    "audio_duration": (float(c.get("end_ms", 0)) - float(c.get("start_ms", 0))) / 1000.0,
+                }
+                for c in cues
+            ]
 
         async def mock_render(source_media, output_path, **kwargs):
             return _create_real_valid_mp4(Path(output_path))
@@ -1203,7 +1210,7 @@ def test_57_cancellation_after_synthesis_cannot_succeed(tmp_path):
         async def mock_synth(cues, speaker_voice_map):
             nonlocal cancelled_state
             cancelled_state = True # Trigger cancel during/after synth
-            return [{"cue_id": "c1", "audio": b"data"}]
+            return [{"cue_id": "c1", "audio": b"data", "audio_duration": 1.0}]
 
         async def mock_render(source_media, output_path, **kwargs):
             return _create_real_valid_mp4(Path(output_path))
@@ -1233,7 +1240,7 @@ def test_58_cancellation_before_render_cannot_succeed(tmp_path):
         async def mock_synth(cues, speaker_voice_map):
             nonlocal cancel_flag
             cancel_flag = True
-            return [{"cue_id": "c1", "audio": b"data"}]
+            return [{"cue_id": "c1", "audio": b"data", "audio_duration": 1.0}]
 
         render_called = False
         async def mock_render(source_media, output_path, **kwargs):
@@ -1585,7 +1592,7 @@ def test_72_resume_map_immutable(tmp_path):
         async def mock_synth(cues, speaker_voice_map):
             nonlocal synth_called
             synth_called = True
-            return [{"cue_id": c["cue_id"], "audio": b"dummy_mp3_data"} for c in cues]
+            return [{"cue_id": c["cue_id"], "audio": b"dummy_mp3_data", "audio_duration": 1.0} for c in cues]
 
         def mock_render(**kwargs):
             out = Path(kwargs["output_path"])
@@ -1852,8 +1859,8 @@ def test_80_cue_locked_timing_propagation(tmp_path):
         async def spy_synth(cues, speaker_voice_map, **kwargs):
             observed_call_kw.update(kwargs)
             return [
-                {"cue_id": "c1", "audio": b"audio_c1", "cue_locked_timing": True},
-                {"cue_id": "c2", "audio": b"audio_c2", "cue_locked_timing": True},
+                {"cue_id": "c1", "audio": b"audio_c1", "audio_duration": 1.0, "cue_locked_timing": True},
+                {"cue_id": "c2", "audio": b"audio_c2", "audio_duration": 1.5, "cue_locked_timing": True},
             ]
 
         async def mock_render(source_media, output_path, **kwargs):
@@ -2280,6 +2287,19 @@ def test_92_77_cue_actual_timing_regression(tmp_path):
             assert abs(float(chunk["end"]) - expected_end) < 0.001
 
         assert max_start_drift < 0.0001, f"Expected 0.0 start drift, got {max_start_drift}"
+
+        # Real 77-cue timeline planner contract verification
+        import bot
+        plan = bot.subdub_plan_dub_timeline(recorded_timeline_chunks, total_expected_duration)
+        assert plan.get("ok") is True
+        assert plan.get("cue_locked_timing") is True
+        assert plan.get("shifted_cue_count") == 0
+        assert len(plan.get("scheduled", [])) == 77
+        for sched in plan.get("scheduled", []):
+            assert sched.get("drift_seconds") == 0.0
+            assert sched.get("cue_locked_timing") is True
+            assert sched.get("cue_window_seconds") > 0.0
+            assert sched.get("post_fit_audio_seconds") > 0.0
 
     asyncio.run(_run())
 
@@ -2745,7 +2765,7 @@ def test_102_synth_duration_probed_from_raw_bytes_when_missing(tmp_path):
 
 
 def test_103_missing_synth_duration_authority_fails_closed(tmp_path):
-    """When synth output has 0.0/missing duration and invalid unprobeable audio, fails closed with TTS_DURATION_AUTHORITY_MISSING."""
+    """When synth output has 0.0 or omitted duration and unprobeable audio, fails closed with TTS_DURATION_AUTHORITY_MISSING."""
     async def _run():
         source_media = _create_real_valid_mp4(tmp_path / "src_103.mp4")
         output_mp4 = tmp_path / "out_103.mp4"
@@ -2756,23 +2776,136 @@ def test_103_missing_synth_duration_authority_fails_closed(tmp_path):
         cues = [{"cue_id": "c_missing", "speaker_id": "spk_1", "text": "Missing dur test", "start_ms": 0, "end_ms": 2000}]
         acoustics = {"spk_1": {"voice_register": "high", "confidence": 0.9}}
 
-        # 0.0 audio duration and corrupt/empty audio that cannot be probed
-        async def synth_corrupt(*args, **kwargs):
+        # Case A: 0.0 audio duration and corrupt audio
+        async def synth_corrupt_zero(*args, **kwargs):
             return [{"cue_id": "c_missing", "audio": b"NOT_AN_AUDIO_FILE", "audio_duration": 0.0}]
 
-        res = await smart.run_auto_smart_multivoice(
+        res_zero = await smart.run_auto_smart_multivoice(
             source_media=source_media,
             segments=cues,
             output_path=output_mp4,
             validated_pools=TEST_POOLS,
             acoustic_classifications=acoustics,
-            synthesize_segments=synth_corrupt,
+            synthesize_segments=synth_corrupt_zero,
             render_pipeline=mock_render,
             probe_fn=lambda p: {"format": {"duration": "2.0"}},
         )
-        assert res["ok"] is False
-        assert res["status"] == "TTS_DURATION_AUTHORITY_MISSING"
-        assert res["error_code"] == "missing_synth_duration_authority"
-        assert res["blocker"] == "missing_synth_duration_authority:c_missing"
+        assert res_zero["ok"] is False
+        assert res_zero["status"] == "TTS_DURATION_AUTHORITY_MISSING"
+        assert res_zero["error_code"] == "missing_synth_duration_authority"
+        assert res_zero["blocker"] == "missing_synth_duration_authority:c_missing"
+
+        # Case B: completely omitted audio_duration and corrupt audio (formerly leaked via fallback)
+        async def synth_corrupt_omitted(*args, **kwargs):
+            return [{"cue_id": "c_missing", "audio": b"NOT_AN_AUDIO_FILE"}]
+
+        res_omitted = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth_corrupt_omitted,
+            render_pipeline=mock_render,
+            probe_fn=lambda p: {"format": {"duration": "2.0"}},
+        )
+        assert res_omitted["ok"] is False
+        assert res_omitted["status"] == "TTS_DURATION_AUTHORITY_MISSING"
+        assert res_omitted["error_code"] == "missing_synth_duration_authority"
+        assert res_omitted["blocker"] == "missing_synth_duration_authority:c_missing"
+
+    asyncio.run(_run())
+
+
+def test_104_pcm_extraction_failure_fails_closed(tmp_path):
+    """When extract_pcm fails and no pre-existing acoustic classifications were supplied, fails closed with PCM_EXTRACTION_FAILED."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_104.mp4")
+        output_mp4 = tmp_path / "out_104.mp4"
+
+        cues = [
+            {"cue_id": "c1", "speaker_id": "spk_1", "text": "Câu 1", "start_ms": 0, "end_ms": 1000},
+            {"cue_id": "c2", "speaker_id": "spk_2", "text": "Câu 2", "start_ms": 1100, "end_ms": 2000},
+        ]
+
+        # Case A: extract_pcm raises an exception
+        async def mock_extract_raises(*args, **kwargs):
+            raise RuntimeError("ffmpeg_pcm_decode_error")
+
+        res_raised = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            extract_pcm=mock_extract_raises,
+            checkpoint_workspace=str(tmp_path / "ws_104a"),
+            job_id="job_104a",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_104a"), "job_id": "job_104a"},
+        )
+        assert res_raised["ok"] is False
+        assert res_raised["status"] == "PCM_EXTRACTION_FAILED"
+        assert res_raised["error_code"] == "pcm_extraction_failed"
+        assert "RuntimeError:ffmpeg_pcm_decode_error" in res_raised["blocker"]
+
+        # Case B: extract_pcm returns invalid / non-existent path
+        async def mock_extract_invalid_path(*args, **kwargs):
+            return {"pcm_path": str(tmp_path / "non_existent.pcm")}
+
+        res_invalid = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            extract_pcm=mock_extract_invalid_path,
+            checkpoint_workspace=str(tmp_path / "ws_104b"),
+            job_id="job_104b",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_104b"), "job_id": "job_104b"},
+        )
+        assert res_invalid["ok"] is False
+        assert res_invalid["status"] == "PCM_EXTRACTION_FAILED"
+        assert res_invalid["error_code"] == "pcm_extraction_failed"
+        assert "invalid_pcm_path" in res_invalid["blocker"]
+
+    asyncio.run(_run())
+
+
+def test_105_adapted_render_pipeline_timeline_audio_build_failed_fails_closed(tmp_path):
+    """When build_timeline_audio returns empty audio for non-empty tts_chunks, _adapted_render_pipeline fails closed."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_105.mp4")
+        output_mp4 = tmp_path / "out_105.mp4"
+
+        cues = [
+            {"cue_id": "c1", "speaker_id": "spk_1", "text": "Hello", "start_ms": 0, "end_ms": 1000},
+        ]
+        acoustics = {"spk_1": {"voice_register": "high", "voice_gender": "female", "confidence": 0.95}}
+
+        async def synth_fn(*args, **kwargs):
+            return [{"cue_id": "c1", "audio": SAMPLE_VALID_MP3, "audio_duration": 0.9}]
+
+        async def failing_build_timeline(tts_chunks, duration):
+            # Returns empty audio and error detail
+            return b"", "subdub_timeline_mux_error_code_42"
+
+        async def mock_render_video(source_bytes, **kwargs):
+            return _create_real_valid_mp4(tmp_path / "rendered.mp4").read_bytes(), "detail"
+
+        res = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth_fn,
+            render_video=mock_render_video,
+            build_timeline_audio=failing_build_timeline,
+            checkpoint_workspace=str(tmp_path / "ws_105"),
+            job_id="job_105",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_105"), "job_id": "job_105"},
+        )
+
+        assert res.get("ok") is False
+        assert res.get("output_mode") == smart.OUTPUT_MODE_FAILED
+        assert "TIMELINE_AUDIO_BUILD_FAILED:subdub_timeline_mux_error_code_42" in str(res.get("blocker"))
 
     asyncio.run(_run())
