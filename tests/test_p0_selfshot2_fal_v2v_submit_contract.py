@@ -8,9 +8,12 @@ Zero external provider calls made. All network I/O isolated via mocks.
 
 from __future__ import annotations
 
+import hashlib
+import io
 import json
 import os
 from pathlib import Path
+import urllib.error
 from unittest.mock import MagicMock, patch
 import pytest
 
@@ -337,6 +340,8 @@ def test_10_selfshot2_connector_with_fal_provider(tmp_path: Path):
                         "start_seconds": 0.0,
                         "end_seconds": 5.0,
                         "source_video_url": "https://storage.toanaas.vn/media/scene_input.mp4",
+                        "source_video_url_verified_bound": True,
+                        "source_sha256": hashlib.sha256(b"USER_SHOT_VIDEO_DATA").hexdigest(),
                     }
                 ]
             },
@@ -541,8 +546,11 @@ def test_14_missing_remote_scene_url_fails_closed(tmp_path: Path):
                 scene_index=1,
             )
 
-        assert "fal_v2v_local_transport_unsupported_remote_url_required" in str(exc_info.value)
-        assert exc_info.value.diagnostics.get("blocker") == "fal_v2v_local_transport_unsupported_remote_url_required"
+        assert "fal_scene_upload_file_missing" in str(exc_info.value)
+        assert exc_info.value.diagnostics.get("blocker") == "fal_scene_upload_file_missing"
+        assert exc_info.value.diagnostics.get("fallback_blocked_reason") == "upload_failure_fallback_forbidden"
+        assert exc_info.value.diagnostics.get("provider_attempted") is False
+        assert exc_info.value.diagnostics.get("no_charge") is True
         assert mock_transport.call_count == 0
 
 
@@ -579,3 +587,516 @@ def test_16_local_data_uri_unsupported_invariant():
     assert video_ai_edit_provider.LOCAL_VIDEO_DATA_URI_SUPPORTED_BY_PROVIDER_CONTRACT is False
     assert video_ai_edit_provider.FAL_NUM_FRAMES_MIN == 17
     assert video_ai_edit_provider.FAL_NUM_FRAMES_MAX == 161
+
+
+# ---------------------------------------------------------------------------
+# 17. upload_fal_media_file: local file validation errors
+# ---------------------------------------------------------------------------
+
+def test_17_upload_fal_media_file_validation_errors(tmp_path: Path):
+    """upload_fal_media_file must validate file existence, non-emptiness, media type, and auth."""
+    cfg = video_ai_edit_provider.provider_config_from_env("fal_video", {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "fal_secret_key",
+    })
+
+    # Missing file
+    non_existent = tmp_path / "does_not_exist.mp4"
+    with pytest.raises(video_ai_edit_provider.AiEditProviderError) as exc_info:
+        video_ai_edit_provider.upload_fal_media_file(cfg, non_existent)
+    assert exc_info.value.reason == "fal_scene_upload_file_missing"
+
+    # Empty file
+    empty_file = tmp_path / "empty.mp4"
+    empty_file.write_bytes(b"")
+    with pytest.raises(video_ai_edit_provider.AiEditProviderError) as exc_info:
+        video_ai_edit_provider.upload_fal_media_file(cfg, empty_file)
+    assert exc_info.value.reason == "fal_scene_upload_file_empty"
+
+    # Unsupported media type
+    text_file = tmp_path / "script.txt"
+    text_file.write_text("not a video")
+    with pytest.raises(video_ai_edit_provider.AiEditProviderError) as exc_info:
+        video_ai_edit_provider.upload_fal_media_file(cfg, text_file)
+    assert exc_info.value.reason == "fal_scene_upload_unsupported_media_type"
+
+    # Auth missing / placeholder
+    valid_vid = tmp_path / "sample.mp4"
+    valid_vid.write_bytes(b"VIDEO_HEADER_AND_BYTES")
+
+    cfg_no_auth = video_ai_edit_provider.provider_config_from_env("fal_video", {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "",
+    })
+    with pytest.raises(video_ai_edit_provider.AiEditProviderError) as exc_info:
+        video_ai_edit_provider.upload_fal_media_file(cfg_no_auth, valid_vid)
+    assert exc_info.value.reason == "fal_scene_upload_auth_missing"
+
+    cfg_placeholder_auth = video_ai_edit_provider.provider_config_from_env("fal_video", {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "placeholder_fal_key",
+    })
+    with pytest.raises(video_ai_edit_provider.AiEditProviderError) as exc_info:
+        video_ai_edit_provider.upload_fal_media_file(cfg_placeholder_auth, valid_vid)
+    assert exc_info.value.reason == "fal_scene_upload_auth_missing"
+
+
+# ---------------------------------------------------------------------------
+# 18. upload_fal_media_file: initiate endpoint error handling
+# ---------------------------------------------------------------------------
+
+def test_18_upload_fal_media_file_initiate_http_errors(tmp_path: Path):
+    """upload_fal_media_file handles initiate HTTP 500, invalid JSON, and missing/invalid URLs."""
+    valid_vid = tmp_path / "scene.mp4"
+    valid_vid.write_bytes(b"SCENE_BYTES_DATA")
+    cfg = video_ai_edit_provider.provider_config_from_env("fal_video", {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "fal_secret_key",
+    })
+
+    # Initiate HTTP 500
+    mock_opener_500 = MagicMock()
+    mock_opener_500.side_effect = urllib.error.HTTPError(
+        url=video_ai_edit_provider.FAL_STORAGE_INITIATE_URL,
+        code=500,
+        msg="Internal Server Error",
+        hdrs={},
+        fp=io.BytesIO(b""),
+    )
+    with pytest.raises(video_ai_edit_provider.AiEditProviderError) as exc_info:
+        video_ai_edit_provider.upload_fal_media_file(cfg, valid_vid, opener=mock_opener_500)
+    assert exc_info.value.reason == "fal_scene_upload_initiate_failed_http_500"
+
+    # Initiate invalid JSON
+    resp_invalid_json = MagicMock()
+    resp_invalid_json.status = 200
+    resp_invalid_json.read.return_value = b"<html>Not JSON</html>"
+    mock_opener_json = MagicMock(return_value=resp_invalid_json)
+    with pytest.raises(video_ai_edit_provider.AiEditProviderError) as exc_info:
+        video_ai_edit_provider.upload_fal_media_file(cfg, valid_vid, opener=mock_opener_json)
+    assert exc_info.value.reason == "fal_scene_upload_initiate_invalid_response"
+
+    # Missing upload_url
+    resp_no_upload_url = MagicMock()
+    resp_no_upload_url.status = 200
+    resp_no_upload_url.read.return_value = json.dumps({"file_url": "https://v3.fal.media/files/out.mp4"}).encode("utf-8")
+    mock_opener_no_upload = MagicMock(return_value=resp_no_upload_url)
+    with pytest.raises(video_ai_edit_provider.AiEditProviderError) as exc_info:
+        video_ai_edit_provider.upload_fal_media_file(cfg, valid_vid, opener=mock_opener_no_upload)
+    assert exc_info.value.reason == "fal_scene_upload_upload_url_missing"
+
+    # Missing file_url
+    resp_no_file_url = MagicMock()
+    resp_no_file_url.status = 200
+    resp_no_file_url.read.return_value = json.dumps({"upload_url": "https://fal-storage.aws/upload/123"}).encode("utf-8")
+    mock_opener_no_file = MagicMock(return_value=resp_no_file_url)
+    with pytest.raises(video_ai_edit_provider.AiEditProviderError) as exc_info:
+        video_ai_edit_provider.upload_fal_media_file(cfg, valid_vid, opener=mock_opener_no_file)
+    assert exc_info.value.reason == "fal_scene_upload_result_url_missing"
+
+    # Invalid file_url scheme (http instead of https)
+    resp_insecure_url = MagicMock()
+    resp_insecure_url.status = 200
+    resp_insecure_url.read.return_value = json.dumps({
+        "upload_url": "https://fal-storage.aws/upload/123",
+        "file_url": "http://v3.fal.media/files/insecure.mp4",
+    }).encode("utf-8")
+    mock_opener_insecure = MagicMock(return_value=resp_insecure_url)
+    with pytest.raises(video_ai_edit_provider.AiEditProviderError) as exc_info:
+        video_ai_edit_provider.upload_fal_media_file(cfg, valid_vid, opener=mock_opener_insecure)
+    assert exc_info.value.reason == "fal_scene_upload_result_url_invalid"
+
+
+# ---------------------------------------------------------------------------
+# 19. upload_fal_media_file: PUT upload HTTP 500 error handling
+# ---------------------------------------------------------------------------
+
+def test_19_upload_fal_media_file_put_upload_errors(tmp_path: Path):
+    """upload_fal_media_file handles PUT upload HTTP error."""
+    valid_vid = tmp_path / "scene.mp4"
+    valid_vid.write_bytes(b"SCENE_BYTES_DATA")
+    cfg = video_ai_edit_provider.provider_config_from_env("fal_video", {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "fal_secret_key",
+    })
+
+    resp_initiate = MagicMock()
+    resp_initiate.status = 200
+    resp_initiate.read.return_value = json.dumps({
+        "upload_url": "https://fal-storage.aws/upload/123",
+        "file_url": "https://v3.fal.media/files/scene.mp4",
+    }).encode("utf-8")
+
+    def mock_opener(req, **kwargs):
+        if req.get_method() == "POST":
+            return resp_initiate
+        raise urllib.error.HTTPError(
+            url=req.get_full_url(),
+            code=500,
+            msg="Storage PUT Failed",
+            hdrs={},
+            fp=io.BytesIO(b""),
+        )
+
+    with pytest.raises(video_ai_edit_provider.AiEditProviderError) as exc_info:
+        video_ai_edit_provider.upload_fal_media_file(cfg, valid_vid, opener=mock_opener)
+    assert exc_info.value.reason == "fal_scene_upload_failed_http_500"
+
+
+# ---------------------------------------------------------------------------
+# 20. upload_fal_media_file: success contract & byte integrity
+# ---------------------------------------------------------------------------
+
+def test_20_upload_fal_media_file_success_contract(tmp_path: Path):
+    """upload_fal_media_file successfully initiates and uploads exact scene bytes."""
+    valid_vid = tmp_path / "scene_0.mp4"
+    file_bytes = b"SCENE_0_RAW_BYTES_EXACT"
+    valid_vid.write_bytes(file_bytes)
+    cfg = video_ai_edit_provider.provider_config_from_env("fal_video", {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "fal_secret_key",
+    })
+
+    captured_requests = []
+
+    resp_initiate = MagicMock()
+    resp_initiate.status = 200
+    resp_initiate.read.return_value = json.dumps({
+        "upload_url": "https://fal-storage.aws/upload/presigned_123",
+        "file_url": "https://v3.fal.media/files/scene_0_uploaded.mp4",
+    }).encode("utf-8")
+
+    resp_put = MagicMock()
+    resp_put.status = 200
+    resp_put.read.return_value = b""
+
+    def mock_opener(req, **kwargs):
+        captured_requests.append(req)
+        if req.get_method() == "POST":
+            return resp_initiate
+        if req.get_method() == "PUT":
+            return resp_put
+        raise ValueError(f"Unexpected method: {req.get_method()}")
+
+    res = video_ai_edit_provider.upload_fal_media_file(cfg, valid_vid, opener=mock_opener)
+
+    assert res["ok"] is True
+    assert res["provider"] == "fal_video"
+    assert res["file_url"] == "https://v3.fal.media/files/scene_0_uploaded.mp4"
+    assert res["local_path"] == str(valid_vid)
+    assert res["local_sha256"] == hashlib.sha256(file_bytes).hexdigest()
+    assert res["local_size_bytes"] == len(file_bytes)
+    assert res["content_type"] == "video/mp4"
+
+    assert len(captured_requests) == 2
+    post_req, put_req = captured_requests
+    assert post_req.get_full_url() == video_ai_edit_provider.FAL_STORAGE_INITIATE_URL
+    assert post_req.get_header("Authorization") == "Key fal_secret_key"
+    assert put_req.get_full_url() == "https://fal-storage.aws/upload/presigned_123"
+    assert put_req.data == file_bytes
+    assert put_req.get_header("Content-type") == "video/mp4"
+
+
+# ---------------------------------------------------------------------------
+# 21. SelfShot2 connector uploads local scene bytes and binds to submit
+# ---------------------------------------------------------------------------
+
+def test_21_selfshot2_connector_uploads_local_scene_bytes_and_binds_to_submit(tmp_path: Path):
+    """SelfShot2 connector automatically uploads local scene segment and binds returned HTTPS URL to submit."""
+    source_file = tmp_path / "full_source.mp4"
+    source_file.write_bytes(b"FULL_SOURCE_BYTES")
+    scene_file = tmp_path / "scene_segment_1.mp4"
+    scene_bytes = b"SCENE_SEGMENT_1_SLICED_BYTES"
+    scene_file.write_bytes(scene_bytes)
+    raw_output = tmp_path / "raw_out.mp4"
+
+    mock_upload = MagicMock(return_value={
+        "ok": True,
+        "provider": "fal_video",
+        "file_url": "https://v3.fal.media/files/scene_segment_1_remote.mp4",
+        "local_path": str(scene_file),
+        "local_sha256": hashlib.sha256(scene_bytes).hexdigest(),
+        "local_size_bytes": len(scene_bytes),
+        "content_type": "video/mp4",
+    })
+
+    captured_submits = []
+    def mock_submit(cfg, **kwargs):
+        captured_submits.append(kwargs)
+        return {
+            "provider_task_id": "fal-ss2-upload-bind-1",
+            "status": "completed",
+            "accepted": True,
+            "result_url_present": True,
+            "result_url": "https://v3.fal.media/files/result_1.mp4",
+        }
+
+    fake_continuity = {
+        "ok": True,
+        "evidence_source": "local_vision_validator",
+        "independent_visual_validation": "LOCAL_MODEL",
+        "person_required": False,
+        "object_required": False,
+    }
+
+    env_overrides = {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "fal_key_test",
+        "VIDEO_AI_EDIT_PROVIDER_CHAIN": "fal_video",
+    }
+
+    with patch.dict(os.environ, env_overrides), \
+         patch("services.video_ai_edit_provider.upload_fal_media_file", mock_upload), \
+         patch("services.video_ai_edit_provider.submit_video_edit", side_effect=mock_submit), \
+         patch("services.video_ai_edit_provider.download_result", return_value={"ok": True, "path": str(raw_output), "bytes": 100}), \
+         patch("services.video_real_render_connector._materialize_selfshot2_source_segment", return_value=str(scene_file)), \
+         patch("services.video_selfshot_continuity_validator.validate_selfshot_scene_continuity", return_value=fake_continuity):
+
+        result = video_real_render_connector._render_selfshot2_video_to_video(
+            job={
+                "source_video_local_path": str(source_file),
+                "quality_tier": 500,
+                "public_user_confirmed": True,
+                "submit_source": "public_user_final_confirm",
+            },
+            asset_pack={
+                "scene_source_segments": [
+                    {"scene_index": 1, "start_seconds": 5.0, "end_seconds": 10.0}
+                ]
+            },
+            raw_path=str(raw_output),
+            provider_order=["fal_video"],
+            fallback_prompt="cinematic product scene",
+            aspect_ratio="9:16",
+            scene_index=1,
+        )
+
+        assert mock_upload.call_count == 1
+        cfg_arg, path_arg = mock_upload.call_args[0]
+        assert cfg_arg.provider_name == "fal_video"
+        assert path_arg == str(scene_file)
+
+        assert len(captured_submits) == 1
+        assert captured_submits[0]["source_video_path"] == "https://v3.fal.media/files/scene_segment_1_remote.mp4"
+        assert result["ok"] is True
+        assert result["provider"] == "fal_video"
+
+
+# ---------------------------------------------------------------------------
+# 22. Multi-scene simulation: distinct byte binding and isolation across scenes
+# ---------------------------------------------------------------------------
+
+def test_22_selfshot2_multi_scene_simulation_distinct_byte_binding(tmp_path: Path):
+    """Simulating 3 scenes proves each scene uploads distinct bytes and receives distinct remote URLs."""
+    source_file = tmp_path / "long_source.mp4"
+    source_file.write_bytes(b"ENTIRE_SOURCE_VIDEO_30_SECONDS")
+
+    scene_files = [
+        tmp_path / f"scene_{i}.mp4" for i in range(3)
+    ]
+    scene_bytes = [
+        b"SCENE_0_BYTES_AAA",
+        b"SCENE_1_BYTES_BBB",
+        b"SCENE_2_BYTES_CCC",
+    ]
+    for p, b in zip(scene_files, scene_bytes):
+        p.write_bytes(b)
+
+    uploaded_urls = {}
+    def mock_upload(cfg, path):
+        idx = next(i for i, sf in enumerate(scene_files) if str(sf) == str(path))
+        url = f"https://v3.fal.media/files/uploaded_scene_{idx}.mp4"
+        uploaded_urls[idx] = url
+        return {
+            "ok": True,
+            "provider": "fal_video",
+            "file_url": url,
+            "local_path": str(path),
+            "local_sha256": hashlib.sha256(scene_bytes[idx]).hexdigest(),
+            "local_size_bytes": len(scene_bytes[idx]),
+            "content_type": "video/mp4",
+        }
+
+    submitted_sources = {}
+    def mock_submit(cfg, **kwargs):
+        job_id = kwargs.get("job_id", "")
+        submitted_sources[job_id] = kwargs.get("source_video_path")
+        return {
+            "provider_task_id": f"fal-task-{job_id}",
+            "status": "completed",
+            "accepted": True,
+            "result_url_present": True,
+            "result_url": f"https://v3.fal.media/files/result-{job_id}.mp4",
+        }
+
+    fake_continuity = {
+        "ok": True,
+        "evidence_source": "local_vision_validator",
+        "independent_visual_validation": "LOCAL_MODEL",
+        "person_required": False,
+        "object_required": False,
+    }
+
+    env_overrides = {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "fal_key_test",
+        "VIDEO_AI_EDIT_PROVIDER_CHAIN": "fal_video",
+    }
+
+    with patch.dict(os.environ, env_overrides), \
+         patch("services.video_ai_edit_provider.upload_fal_media_file", side_effect=mock_upload), \
+         patch("services.video_ai_edit_provider.submit_video_edit", side_effect=mock_submit), \
+         patch("services.video_ai_edit_provider.download_result", return_value={"ok": True, "path": str(tmp_path / "out.mp4"), "bytes": 100}), \
+         patch("services.video_selfshot_continuity_validator.validate_selfshot_scene_continuity", return_value=fake_continuity):
+
+        for scene_idx in range(3):
+            with patch("services.video_real_render_connector._materialize_selfshot2_source_segment", return_value=str(scene_files[scene_idx])):
+                res = video_real_render_connector._render_selfshot2_video_to_video(
+                    job={
+                        "job_id": "test_job_123",
+                        "source_video_local_path": str(source_file),
+                        "quality_tier": 500,
+                        "public_user_confirmed": True,
+                        "submit_source": "public_user_final_confirm",
+                    },
+                    asset_pack={
+                        "scene_source_segments": [
+                            {"scene_index": i, "start_seconds": float(i * 5), "end_seconds": float((i + 1) * 5)}
+                            for i in range(3)
+                        ]
+                    },
+                    raw_path=str(tmp_path / f"raw_{scene_idx}.mp4"),
+                    provider_order=["fal_video"],
+                    fallback_prompt=f"scene prompt {scene_idx}",
+                    aspect_ratio="9:16",
+                    scene_index=scene_idx,
+                )
+                assert res["ok"] is True
+
+    # Assert 3 distinct uploads and 3 distinct submits matching scene indices
+    assert len(uploaded_urls) == 3
+    assert len(set(uploaded_urls.values())) == 3
+    assert submitted_sources["test_job_123:scene:0"] == "https://v3.fal.media/files/uploaded_scene_0.mp4"
+    assert submitted_sources["test_job_123:scene:1"] == "https://v3.fal.media/files/uploaded_scene_1.mp4"
+    assert submitted_sources["test_job_123:scene:2"] == "https://v3.fal.media/files/uploaded_scene_2.mp4"
+
+
+# ---------------------------------------------------------------------------
+# 23. Upload failure blocks fallback to second provider
+# ---------------------------------------------------------------------------
+
+def test_23_upload_failure_blocks_fallback_to_second_provider(tmp_path: Path):
+    """When Fal scene upload fails, the connector must fail closed with 0 submits and forbid fallback to key4u."""
+    source_file = tmp_path / "full_source.mp4"
+    source_file.write_bytes(b"FULL_SOURCE_BYTES")
+    scene_file = tmp_path / "scene_0.mp4"
+    scene_file.write_bytes(b"SCENE_BYTES")
+    raw_output = tmp_path / "raw_out.mp4"
+
+    mock_upload = MagicMock(side_effect=video_ai_edit_provider.AiEditProviderError("fal_scene_upload_failed_http_500"))
+    spy_submit = MagicMock()
+
+    env_overrides = {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "fal_key_test",
+        "KEY4U_VIDEO_TO_VIDEO_ENABLED": "1",
+        "KEY4U_VIDEO_TO_VIDEO_API_KEY": "key4u_key_test",
+        "VIDEO_AI_EDIT_PROVIDER_CHAIN": "fal_video,key4u_video",
+    }
+
+    with patch.dict(os.environ, env_overrides), \
+         patch("services.video_ai_edit_provider.upload_fal_media_file", mock_upload), \
+         patch("services.video_ai_edit_provider.submit_video_edit", spy_submit), \
+         patch("services.video_real_render_connector._materialize_selfshot2_source_segment", return_value=str(scene_file)):
+
+        with pytest.raises(RealVideoRenderError) as exc_info:
+            video_real_render_connector._render_selfshot2_video_to_video(
+                job={
+                    "source_video_local_path": str(source_file),
+                    "quality_tier": 500,
+                    "public_user_confirmed": True,
+                    "submit_source": "public_user_final_confirm",
+                },
+                asset_pack={},
+                raw_path=str(raw_output),
+                provider_order=["fal_video", "key4u_video"],
+                fallback_prompt="cinematic product scene",
+                aspect_ratio="9:16",
+                scene_index=0,
+            )
+
+        assert "fal_scene_upload_failed_http_500" in str(exc_info.value)
+        diag = exc_info.value.diagnostics
+        assert diag["ok"] is False
+        assert diag["no_charge"] is True
+        assert diag["provider_attempted"] is False
+        assert diag["fallback_blocked_reason"] == "upload_failure_fallback_forbidden"
+
+        # Assert 0 generation submit calls across all providers
+        assert spy_submit.call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# 24. Job isolation: upload state not leaked between jobs
+# ---------------------------------------------------------------------------
+
+def test_24_job_isolation_upload_state_not_leaked(tmp_path: Path):
+    """Job A upload does not leak into Job B with different scene bytes."""
+    file_a = tmp_path / "job_a_scene.mp4"
+    file_a.write_bytes(b"JOB_A_BYTES_111")
+    file_b = tmp_path / "job_b_scene.mp4"
+    file_b.write_bytes(b"JOB_B_BYTES_222")
+
+    cfg = video_ai_edit_provider.provider_config_from_env("fal_video", {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "fal_key_test",
+    })
+
+    upload_targets = []
+    def mock_opener(req, **kwargs):
+        if req.get_method() == "POST":
+            req_data = json.loads(req.data.decode("utf-8"))
+            fname = req_data["file_name"]
+            resp = MagicMock()
+            resp.status = 200
+            resp.read.return_value = json.dumps({
+                "upload_url": f"https://fal-storage.aws/upload/{fname}",
+                "file_url": f"https://v3.fal.media/files/{fname}",
+            }).encode("utf-8")
+            return resp
+        if req.get_method() == "PUT":
+            upload_targets.append(req.data)
+            resp = MagicMock()
+            resp.status = 200
+            resp.read.return_value = b""
+            return resp
+        raise ValueError("unexpected")
+
+    res_a = video_ai_edit_provider.upload_fal_media_file(cfg, file_a, opener=mock_opener)
+    res_b = video_ai_edit_provider.upload_fal_media_file(cfg, file_b, opener=mock_opener)
+
+    assert res_a["file_url"] != res_b["file_url"]
+    assert res_a["local_sha256"] != res_b["local_sha256"]
+    assert upload_targets[0] == b"JOB_A_BYTES_111"
+    assert upload_targets[1] == b"JOB_B_BYTES_222"
+
+
+# ---------------------------------------------------------------------------
+# 25. SelfShot3 isolation: unaffected by Fal upload logic
+# ---------------------------------------------------------------------------
+
+def test_25_selfshot3_isolation_unaffected_by_fal_upload(tmp_path: Path):
+    """SelfShot3 video-to-video connector does NOT invoke Fal upload logic."""
+    spy_upload = MagicMock()
+    with patch("services.video_ai_edit_provider.upload_fal_media_file", spy_upload):
+        with pytest.raises(RealVideoRenderError) as exc_info:
+            video_real_render_connector._render_selfshot3_video_to_video(
+                job={"source_video_local_path": ""},
+                asset_pack={},
+                raw_path=str(tmp_path / "raw.mp4"),
+                provider_order=["fal_video"],
+                fallback_prompt="prompt",
+                aspect_ratio="9:16",
+            )
+        assert "selfshot3_source_video_not_materialized" in str(exc_info.value)
+        assert spy_upload.call_count == 0

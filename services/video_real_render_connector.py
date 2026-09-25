@@ -3687,6 +3687,8 @@ def _selfshot2_scene_source_segment(asset_pack: dict[str, Any], scene_index: int
         "end_seconds": end_seconds,
         "duration_seconds": end_seconds - start_seconds,
         "source_video_url": remote_scene_url,
+        "source_video_url_verified_bound": bool(selected.get("source_video_url_verified_bound")),
+        "source_sha256": str(selected.get("source_sha256") or "").strip(),
     }
 
 
@@ -3901,6 +3903,17 @@ def _render_selfshot2_video_to_video(
         start_seconds=float(segment["start_seconds"]),
         duration_seconds=float(segment["duration_seconds"]),
     )
+    local_scene_sha256 = ""
+    local_scene_size = 0
+    if os.path.isfile(scene_source_path):
+        try:
+            with open(scene_source_path, "rb") as f:
+                local_scene_bytes = f.read()
+            local_scene_sha256 = hashlib.sha256(local_scene_bytes).hexdigest()
+            local_scene_size = len(local_scene_bytes)
+        except OSError:
+            pass
+
     job_id = str((job or {}).get("job_id") or (job or {}).get("id") or "selfshot2")
     selected = configs[0]
     fallback = configs[1] if len(configs) > 1 else None
@@ -3909,7 +3922,22 @@ def _render_selfshot2_video_to_video(
         if config is None:
             break
         try:
-            target_source = str(segment.get("source_video_url") or scene_source_path).strip()
+            proven_bound_remote_url = ""
+            if (
+                bool(segment.get("source_video_url_verified_bound"))
+                and str(segment.get("source_sha256") or "") == local_scene_sha256
+                and str(segment.get("source_video_url") or "").startswith("https://")
+            ):
+                proven_bound_remote_url = str(segment.get("source_video_url")).strip()
+
+            if config.provider_name in video_ai_edit_provider.CANONICAL_PROVEN_V2V_PROVIDERS:
+                if proven_bound_remote_url:
+                    target_source = proven_bound_remote_url
+                else:
+                    upload_res = video_ai_edit_provider.upload_fal_media_file(config, scene_source_path)
+                    target_source = upload_res["file_url"]
+            else:
+                target_source = proven_bound_remote_url or scene_source_path
             submitted = video_ai_edit_provider.submit_video_edit(
                 config,
                 source_video_path=target_source,
@@ -4004,7 +4032,13 @@ def _render_selfshot2_video_to_video(
         except video_ai_edit_provider.AiEditProviderError as exc:
             attempts.append({"provider": config.provider_name, "model": config.model, "error": exc.reason, "fallback": bool(index)})
             if index == 0:
-                if exc.reason in {"provider_capability_contract_mismatch", "ai_edit_provider_contract_invalid"}:
+                is_upload_error = exc.reason.startswith("fal_scene_upload_")
+                is_contract_error = exc.reason in {
+                    "provider_capability_contract_mismatch",
+                    "ai_edit_provider_contract_invalid",
+                    "fal_v2v_duration_exceeds_max_frames",
+                }
+                if is_contract_error or is_upload_error:
                     raise RealVideoRenderError(
                         exc.reason,
                         diagnostics={
@@ -4015,7 +4049,7 @@ def _render_selfshot2_video_to_video(
                             "attempts": attempts,
                             "no_charge": True,
                             "blocker": exc.reason,
-                            "fallback_blocked_reason": "capability_contract_mismatch_fallback_forbidden",
+                            "fallback_blocked_reason": "upload_failure_fallback_forbidden" if is_upload_error else "capability_contract_mismatch_fallback_forbidden",
                         },
                     ) from exc
                 decision = video_ai_edit_provider.controlled_fallback_decision(

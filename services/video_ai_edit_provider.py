@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -236,6 +237,7 @@ VALID_V2V_INTERFACES = frozenset({"video_to_video_multipart", "video_to_video_js
 LOCAL_VIDEO_DATA_URI_SUPPORTED_BY_PROVIDER_CONTRACT: bool = False
 FAL_NUM_FRAMES_MIN: int = 17
 FAL_NUM_FRAMES_MAX: int = 161
+FAL_STORAGE_INITIATE_URL: str = "https://rest.fal.ai/storage/upload/initiate"
 
 
 def classify_endpoint_capability(url: str) -> str:
@@ -504,6 +506,121 @@ def parse_provider_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def upload_fal_media_file(
+    config: AiEditProviderConfig,
+    local_path: str | os.PathLike[str],
+    *,
+    opener: Callable[..., Any] | None = None,
+    timeout: float = 120.0,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> dict[str, Any]:
+    """Upload a local scene artifact to Fal official storage (POST /storage/upload/initiate -> PUT)."""
+    p = Path(local_path)
+    if not p.is_file():
+        raise AiEditProviderError("fal_scene_upload_file_missing")
+    size_bytes = p.stat().st_size
+    if size_bytes <= 0:
+        raise AiEditProviderError("fal_scene_upload_file_empty")
+    suffix = p.suffix.lower()
+    mime_types = {
+        ".mp4": "video/mp4",
+        ".mov": "video/quicktime",
+        ".webm": "video/webm",
+        ".mkv": "video/x-matroska",
+    }
+    if suffix not in mime_types:
+        raise AiEditProviderError("fal_scene_upload_unsupported_media_type")
+    content_type = mime_types[suffix]
+
+    auth_val = str(config.auth_header_value or "").strip()
+    if not auth_val or any(tok in auth_val.lower() for tok in PLACEHOLDER_TOKENS):
+        raise AiEditProviderError("fal_scene_upload_auth_missing")
+
+    with open(p, "rb") as f:
+        file_bytes = f.read()
+    digest = hashlib.sha256(file_bytes).hexdigest()
+
+    transport = opener or urllib.request.urlopen
+
+    # 1. Initiate upload
+    initiate_payload = {
+        "file_name": p.name,
+        "content_type": content_type,
+    }
+    initiate_body = json.dumps(initiate_payload).encode("utf-8")
+    initiate_req = urllib.request.Request(
+        FAL_STORAGE_INITIATE_URL,
+        data=initiate_body,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "TOAN-AAS-AI-Edit/1.0",
+            config.auth_header_name: auth_val,
+        },
+        method="POST",
+    )
+    try:
+        initiate_resp = transport(initiate_req, timeout=timeout)
+    except urllib.error.HTTPError as exc:
+        raise AiEditProviderError(f"fal_scene_upload_initiate_failed_http_{exc.code}") from exc
+    except Exception as exc:
+        raise AiEditProviderError("fal_scene_upload_initiate_failed") from exc
+
+    status = getattr(initiate_resp, "status", None) or getattr(initiate_resp, "code", 200)
+    if status < 200 or status >= 300:
+        raise AiEditProviderError(f"fal_scene_upload_initiate_failed_http_{status}")
+
+    try:
+        raw_text = initiate_resp.read().decode("utf-8")
+        parsed_initiate = json.loads(raw_text)
+    except Exception as exc:
+        raise AiEditProviderError("fal_scene_upload_initiate_invalid_response") from exc
+
+    if not isinstance(parsed_initiate, dict):
+        raise AiEditProviderError("fal_scene_upload_initiate_invalid_response")
+
+    upload_url = str(parsed_initiate.get("upload_url") or "").strip()
+    file_url = str(parsed_initiate.get("file_url") or "").strip()
+
+    if not upload_url:
+        raise AiEditProviderError("fal_scene_upload_upload_url_missing")
+    if not file_url:
+        raise AiEditProviderError("fal_scene_upload_result_url_missing")
+    if not file_url.startswith("https://"):
+        raise AiEditProviderError("fal_scene_upload_result_url_invalid")
+
+    # 2. PUT upload bytes
+    put_req = urllib.request.Request(
+        upload_url,
+        data=file_bytes,
+        headers={
+            "Content-Type": content_type,
+            "User-Agent": "TOAN-AAS-AI-Edit/1.0",
+        },
+        method="PUT",
+    )
+    try:
+        put_resp = transport(put_req, timeout=timeout)
+    except urllib.error.HTTPError as exc:
+        raise AiEditProviderError(f"fal_scene_upload_failed_http_{exc.code}") from exc
+    except Exception as exc:
+        raise AiEditProviderError("fal_scene_upload_failed") from exc
+
+    put_status = getattr(put_resp, "status", None) or getattr(put_resp, "code", 200)
+    if put_status < 200 or put_status >= 300:
+        raise AiEditProviderError(f"fal_scene_upload_failed_http_{put_status}")
+
+    return {
+        "ok": True,
+        "provider": "fal_video",
+        "file_url": file_url,
+        "local_path": str(p),
+        "local_sha256": digest,
+        "local_size_bytes": size_bytes,
+        "content_type": content_type,
+    }
+
+
 def submit_video_edit(
     config: AiEditProviderConfig,
     *,
@@ -531,13 +648,10 @@ def submit_video_edit(
         video_url = source_url
 
         dur = float(duration_seconds or 5.0)
-        if dur <= 5.0:
-            num_frames = 81
-        elif dur <= 10.0:
-            num_frames = 161
-        else:
-            num_frames = int(round(dur * 16))
-
+        # Wan 2.2 requires (num_frames - 1) % 4 == 0 (e.g. 5s -> 81 frames, 10s -> 161 frames)
+        # fps = 16
+        k = int(round((dur * 16.0) / 4.0))
+        num_frames = 4 * k + 1
         if num_frames < FAL_NUM_FRAMES_MIN or num_frames > FAL_NUM_FRAMES_MAX:
             raise AiEditProviderError("fal_v2v_duration_exceeds_max_frames")
         json_fields = {
@@ -759,7 +873,10 @@ def controlled_fallback_decision(
 ) -> dict[str, Any]:
     if not public_confirm_provenance:
         return {"allowed": False, "reason": "public_confirm_provenance_missing"}
-    if primary_error in {"provider_capability_contract_mismatch", "ai_edit_provider_contract_invalid"}:
+    if (
+        primary_error in {"provider_capability_contract_mismatch", "ai_edit_provider_contract_invalid", "fal_v2v_duration_exceeds_max_frames"}
+        or primary_error.startswith("fal_scene_upload_")
+    ):
         return {"allowed": False, "reason": "capability_contract_mismatch_fallback_forbidden"}
     if "contract_mismatch" in str(primary_status or "").lower() or "contract_mismatch" in str(primary_error or "").lower():
         return {"allowed": False, "reason": "capability_contract_mismatch_fallback_forbidden"}
