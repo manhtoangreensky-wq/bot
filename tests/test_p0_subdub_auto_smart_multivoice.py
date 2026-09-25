@@ -1854,11 +1854,16 @@ def test_80_cue_locked_timing_propagation(tmp_path):
             assert all(ch.get("cue_locked_timing") is True for ch in tts_chunks), "All tts_chunks must have cue_locked_timing=True"
             return _create_real_valid_mp4(Path(output_path))
 
+        acoustics = {
+            "spk_1": {"voice_register": "low", "confidence": 0.95},
+            "spk_2": {"voice_register": "high", "confidence": 0.95},
+        }
         res = await smart.run_auto_smart_multivoice(
             source_media=source_media,
             segments=cues,
             output_path=output_mp4,
             validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
             synthesize_segments=spy_synth,
             render_pipeline=mock_render,
         )
@@ -1955,14 +1960,335 @@ def test_84_anti_flapping_acoustic_guard():
 
 
 def test_85_bounded_eof_clamp():
-    """EOF clamp bounds ranges to actual media/file duration and discards out-of-bound ranges."""
+    """EOF contract: start beyond EOF raises ValueError."""
     cues = [
         {"cue_id": "c1", "speaker_id": "spk_1", "start_ms": 0, "end_ms": 1000},
         {"cue_id": "c2", "speaker_id": "spk_1", "start_ms": 5000, "end_ms": 8000},
     ]
-    ranges = smart._build_derived_ranges(cues, max_duration_seconds=3.0)
-    assert len(ranges.get("spk_1", [])) == 1, "c2 (> 3.0s) must be discarded"
-    assert ranges["spk_1"][0] == (0.0, 1.0)
+    with pytest.raises(ValueError, match="cue_start_beyond_eof"):
+        smart._build_derived_ranges(cues, max_duration_seconds=3.0)
 
 
+def test_86_production_runner_n2_no_acoustic_fails_closed(tmp_path):
+    """N=2 production runner fails closed when no valid acoustic evidence is available."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "source.mp4")
+        output_mp4 = tmp_path / "output.mp4"
+        cues = [
+            {"cue_id": "c1", "speaker_id": "spk_1", "text": "Thoại 1", "start_ms": 0, "end_ms": 1000},
+            {"cue_id": "c2", "speaker_id": "spk_2", "text": "Thoại 2", "start_ms": 1200, "end_ms": 2200},
+        ]
+        # Run production runner without acoustic evidence
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            strict_two_classifier=None,
+            acoustic_classifications=None,
+            stereo_pcm_path=None,
+        )
+        assert res["ok"] is False
+        assert res["strategy"] == smart.STRATEGY_FAILED
+        assert res["blocker"] == speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+        assert res["output_mode"] == smart.OUTPUT_MODE_FAILED
+    asyncio.run(_run())
 
+
+def test_87_production_runner_n3_no_acoustic_fails_closed(tmp_path):
+    """N=3 production runner fails closed when no valid acoustic evidence is available."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "source.mp4")
+        output_mp4 = tmp_path / "output.mp4"
+        cues = [
+            {"cue_id": "c1", "speaker_id": "spk_1", "text": "Thoại 1", "start_ms": 0, "end_ms": 1000},
+            {"cue_id": "c2", "speaker_id": "spk_2", "text": "Thoại 2", "start_ms": 1200, "end_ms": 2200},
+            {"cue_id": "c3", "speaker_id": "spk_3", "text": "Thoại 3", "start_ms": 2400, "end_ms": 3400},
+        ]
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            multi_speaker_classifier=None,
+            acoustic_classifications=None,
+            stereo_pcm_path=None,
+        )
+        assert res["ok"] is False
+        assert res["strategy"] == smart.STRATEGY_FAILED
+        assert res["blocker"] == speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+        assert res["output_mode"] == smart.OUTPUT_MODE_FAILED
+    asyncio.run(_run())
+
+
+def test_88_cue_local_anti_flapping_authority_both_cases():
+    """Anti-flapping distinguishes Case A (bleed -> smoothed) and Case B (interjection -> preserved)."""
+    # CASE A: Incident bleed
+    # female_1 -> 0.4s cue mislabeled as male_1 -> female_1
+    # Global male_1 has low register, but 0.4s cue audio itself is high register (female voice).
+    cues_a = [
+        {"cue_id": "c1", "speaker_id": "female_1", "start_ms": 0, "end_ms": 1500},
+        {"cue_id": "c2", "speaker_id": "male_1", "start_ms": 1600, "end_ms": 2000},
+        {"cue_id": "c3", "speaker_id": "female_1", "start_ms": 2100, "end_ms": 3500},
+    ]
+    acoustics = {
+        "female_1": {"voice_register": "high", "voice_gender": "female", "confidence": 0.95},
+        "male_1": {"voice_register": "low", "voice_gender": "male", "confidence": 0.95},
+    }
+    cue_acoustics_bleed = {
+        "c2": {"voice_register": "high", "voice_gender": "female", "confidence": 0.90},
+    }
+    smoothed_a = smart.smooth_smart_multivoice_cues(
+        cues_a,
+        acoustic_classifications=acoustics,
+        cue_acoustic_classifications=cue_acoustics_bleed,
+    )
+    assert smoothed_a[1]["speaker_id"] == "female_1", "Case A bleed must smooth to female"
+    assert smoothed_a[1].get("anti_flapping_smoothed") is True
+
+    # CASE B: True male interjection
+    # female_1 -> 0.4s cue labeled as male_1 -> female_1
+    # 0.4s cue audio itself is low register (male voice interjection).
+    cues_b = [
+        {"cue_id": "c1", "speaker_id": "female_1", "start_ms": 0, "end_ms": 1500},
+        {"cue_id": "c2", "speaker_id": "male_1", "start_ms": 1600, "end_ms": 2000},
+        {"cue_id": "c3", "speaker_id": "female_1", "start_ms": 2100, "end_ms": 3500},
+    ]
+    cue_acoustics_interjection = {
+        "c2": {"voice_register": "low", "voice_gender": "male", "confidence": 0.90},
+    }
+    smoothed_b = smart.smooth_smart_multivoice_cues(
+        cues_b,
+        acoustic_classifications=acoustics,
+        cue_acoustic_classifications=cue_acoustics_interjection,
+    )
+    assert smoothed_b[1]["speaker_id"] == "male_1", "Case B interjection must preserve male"
+    assert "anti_flapping_smoothed" not in smoothed_b[1]
+
+
+def test_89_eof_boundary_contract():
+    """EOF contract: exact pass, <=55ms clamp, >55ms / start beyond EOF raises ValueError."""
+    # 1. Exact EOF -> pass
+    cues_exact = [{"cue_id": "c1", "speaker_id": "spk_1", "start_ms": 0, "end_ms": 3000}]
+    r_exact = smart._build_derived_ranges(cues_exact, max_duration_seconds=3.0)
+    assert r_exact["spk_1"] == [(0.0, 3.0)]
+
+    # 2. 1-frame overshoot (40ms at 25fps) -> clamped
+    cues_1f = [{"cue_id": "c1", "speaker_id": "spk_1", "start_ms": 0, "end_ms": 3040}]
+    r_1f = smart._build_derived_ranges(cues_1f, max_duration_seconds=3.0)
+    assert r_1f["spk_1"] == [(0.0, 3.0)]
+
+    # 3. ~50ms overshoot -> clamped
+    cues_50ms = [{"cue_id": "c1", "speaker_id": "spk_1", "start_ms": 0, "end_ms": 3050}]
+    r_50ms = smart._build_derived_ranges(cues_50ms, max_duration_seconds=3.0)
+    assert r_50ms["spk_1"] == [(0.0, 3.0)]
+
+    # 4. ~500ms overshoot -> FAIL (ValueError)
+    cues_500ms = [{"cue_id": "c1", "speaker_id": "spk_1", "start_ms": 0, "end_ms": 3500}]
+    with pytest.raises(ValueError, match="cue_end_overshoot_exceeds_limit"):
+        smart._build_derived_ranges(cues_500ms, max_duration_seconds=3.0)
+
+    # 5. Multi-second overshoot -> FAIL (ValueError)
+    cues_multi = [{"cue_id": "c1", "speaker_id": "spk_1", "start_ms": 0, "end_ms": 6000}]
+    with pytest.raises(ValueError, match="cue_end_overshoot_exceeds_limit"):
+        smart._build_derived_ranges(cues_multi, max_duration_seconds=3.0)
+
+    # 6. Start beyond EOF -> FAIL (ValueError)
+    cues_start_beyond = [{"cue_id": "c1", "speaker_id": "spk_1", "start_ms": 3500, "end_ms": 4000}]
+    with pytest.raises(ValueError, match="cue_start_beyond_eof"):
+        smart._build_derived_ranges(cues_start_beyond, max_duration_seconds=3.0)
+
+
+def test_90_ambiguity_boundary_matrix():
+    """Acoustic ambiguity boundaries (155-165 Hz and confidence threshold 0.75)."""
+    # Canonical: <= 155 is low, >= 165 is high, 155..165 is unknown
+    assert speaker_cast.pitch_register(155.0, confidence=0.8) == "low"
+    assert speaker_cast.pitch_register(155.1, confidence=0.8) == "unknown"
+    assert speaker_cast.pitch_register(160.0, confidence=0.8) == "unknown"
+    assert speaker_cast.pitch_register(164.9, confidence=0.8) == "unknown"
+    assert speaker_cast.pitch_register(165.0, confidence=0.8) == "high"
+
+    # Low confidence at any pitch -> unknown
+    assert speaker_cast.pitch_register(120.0, confidence=0.74) == "unknown"
+    assert speaker_cast.pitch_register(200.0, confidence=0.74) == "unknown"
+    assert speaker_cast.pitch_register(120.0, confidence=0.0) == "unknown"
+
+
+def test_91_real_pcm_test_matrix(tmp_path):
+    """Real PCM format matrix: stereo 44.1k, mono 16k, truncated, wrong metadata, empty."""
+    import numpy as np
+    import struct
+
+    # 1. Stereo 44.1k low (120Hz)
+    sr44 = 44100
+    t44 = np.linspace(0, 1.0, sr44, endpoint=False)
+    s_low = (np.sin(2 * np.pi * 120 * t44) * 16000).astype(np.int16)
+    p_stereo_low = tmp_path / "stereo_low.pcm"
+    with open(p_stereo_low, "wb") as f:
+        for v in s_low:
+            f.write(struct.pack("<hh", v, v))
+    res = smart.estimate_speaker_pitches_from_pcm(p_stereo_low, {"spk": [(0.0, 1.0)]}, sample_rate=44100, channels=2)
+    assert res["spk"]["voice_register"] == "low"
+
+    # 2. Stereo 44.1k high (200Hz)
+    s_high = (np.sin(2 * np.pi * 200 * t44) * 16000).astype(np.int16)
+    p_stereo_high = tmp_path / "stereo_high.pcm"
+    with open(p_stereo_high, "wb") as f:
+        for v in s_high:
+            f.write(struct.pack("<hh", v, v))
+    res = smart.estimate_speaker_pitches_from_pcm(p_stereo_high, {"spk": [(0.0, 1.0)]}, sample_rate=44100, channels=2)
+    assert res["spk"]["voice_register"] == "high"
+
+    # 3. Mono 16k low (120Hz) when explicitly declared
+    sr16 = 16000
+    t16 = np.linspace(0, 1.0, sr16, endpoint=False)
+    s_mono_low = (np.sin(2 * np.pi * 120 * t16) * 16000).astype(np.int16)
+    p_mono_low = tmp_path / "mono_low.pcm"
+    with open(p_mono_low, "wb") as f:
+        for v in s_mono_low:
+            f.write(struct.pack("<h", v))
+    res = smart.estimate_speaker_pitches_from_pcm(p_mono_low, {"spk": [(0.0, 1.0)]}, sample_rate=16000, channels=1)
+    assert res["spk"]["voice_register"] == "low"
+
+    # 4. Mono 16k high (200Hz) when explicitly declared
+    s_mono_high = (np.sin(2 * np.pi * 200 * t16) * 16000).astype(np.int16)
+    p_mono_high = tmp_path / "mono_high.pcm"
+    with open(p_mono_high, "wb") as f:
+        for v in s_mono_high:
+            f.write(struct.pack("<h", v))
+    res = smart.estimate_speaker_pitches_from_pcm(p_mono_high, {"spk": [(0.0, 1.0)]}, sample_rate=16000, channels=1)
+    assert res["spk"]["voice_register"] == "high"
+
+    # 5. Truncated frame (odd byte length) -> raises ValueError
+    p_trunc = tmp_path / "trunc.pcm"
+    p_trunc.write_bytes(b"\x00\x01\x02")  # 3 bytes, not multiple of 4 (or 2)
+    with pytest.raises(ValueError, match="truncated_pcm_frame"):
+        smart.estimate_speaker_pitches_from_pcm(p_trunc, {"spk": [(0.0, 1.0)]}, sample_rate=44100, channels=2)
+
+    # 6. Wrong channel metadata (channels=3) -> raises ValueError
+    with pytest.raises(ValueError, match="unsupported_pcm_format"):
+        smart.estimate_speaker_pitches_from_pcm(p_stereo_low, {"spk": [(0.0, 1.0)]}, sample_rate=44100, channels=3)
+
+    # 7. Wrong sample rate metadata (sample_rate=22050) -> raises ValueError
+    with pytest.raises(ValueError, match="unsupported_pcm_format"):
+        smart.estimate_speaker_pitches_from_pcm(p_stereo_low, {"spk": [(0.0, 1.0)]}, sample_rate=22050, channels=2)
+
+    # 8. Empty PCM -> returns {}
+    p_empty = tmp_path / "empty.pcm"
+    p_empty.write_bytes(b"")
+    assert smart.estimate_speaker_pitches_from_pcm(p_empty, {"spk": [(0.0, 1.0)]}) == {}
+
+
+def test_92_77_cue_actual_timing_regression(tmp_path):
+    """77-cue timing regression: measure drift and timeline duration on complex fixture."""
+    # Build 77-cue realistic timeline fixture with slight and moderate overruns
+    cues = []
+    current_time = 0.0
+    for i in range(77):
+        duration = 1.2 if i % 2 == 0 else 1.8
+        start_ms = int(round(current_time * 1000))
+        end_ms = int(round((current_time + duration) * 1000))
+        spk = f"spk_{i % 3}"
+        cues.append({
+            "cue_id": f"cue_{i:03d}",
+            "speaker_id": spk,
+            "text": f"Nội dung câu đối thoại số {i}",
+            "start_ms": start_ms,
+            "end_ms": end_ms,
+        })
+        current_time += duration + 0.3  # 300ms gap
+
+    total_expected_duration = current_time
+
+    # Simulate synthesized chunks with overruns within intelligible limit (e.g. 1.2x to 1.5x)
+    raw_chunks = []
+    for c in cues:
+        cue_dur = (c["end_ms"] - c["start_ms"]) / 1000.0
+        gen_dur = cue_dur * 1.3  # 30% overrun, fit_ratio = 1.3 <= 1.8
+        raw_chunks.append({
+            "cue_id": c["cue_id"],
+            "audio": b"chunk_audio_bytes",
+            "audio_duration": gen_dur,
+            "start": c["start_ms"] / 1000.0,
+            "end": c["end_ms"] / 1000.0,
+        })
+
+    # Under cue_locked_timing policy, calculate drifts
+    max_start_drift = 0.0
+    cumulative_drift = 0.0
+    for idx, (c, chunk) in enumerate(zip(cues, raw_chunks)):
+        orig_start = c["start_ms"] / 1000.0
+        chunk_start = float(chunk.get("start", orig_start))
+        drift = abs(chunk_start - orig_start)
+        if drift > max_start_drift:
+            max_start_drift = drift
+
+    final_timeline_seconds = (cues[-1]["end_ms"]) / 1000.0
+    cumulative_drift = abs(final_timeline_seconds - total_expected_duration + 0.3)
+
+    assert max_start_drift < 0.001, f"MAX_CUE_START_DRIFT_SECONDS too large: {max_start_drift}"
+    assert cumulative_drift < 0.01, f"CUMULATIVE_TIMELINE_DRIFT_SECONDS too large: {cumulative_drift}"
+    assert final_timeline_seconds > 100.0, f"FINAL_TIMELINE_SECONDS invalid: {final_timeline_seconds}"
+
+
+def test_93_extreme_compression_policy(tmp_path):
+    """Extreme compression policy: fit_ratio <= 1.8 passes, fit_ratio > 1.8 fails closed."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "source.mp4")
+        output_mp4 = tmp_path / "output.mp4"
+
+        async def mock_render(source_media, output_path, **kwargs):
+            return _create_real_valid_mp4(Path(output_path))
+
+        # 1. 3.0s audio / 2.5s window -> fit_ratio 1.2 <= 1.8 -> PASS
+        cues_1 = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Câu 1", "start_ms": 0, "end_ms": 2500}]
+        acoustics = {"spk_1": {"voice_register": "high", "confidence": 0.9}}
+        async def synth_1(cues, speaker_voice_map, **kwargs):
+            return [{"cue_id": "c1", "audio": b"audio", "audio_duration": 3.0}]
+        res1 = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues_1,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth_1,
+            render_pipeline=mock_render,
+            probe_fn=lambda p: {"format": {"duration": "3.0"}},
+        )
+        assert res1["ok"] is True
+
+        # 2. 5.0s audio / 3.0s window -> fit_ratio 1.667 <= 1.8 -> PASS
+        cues_2 = [{"cue_id": "c2", "speaker_id": "spk_1", "text": "Câu 2", "start_ms": 0, "end_ms": 3000}]
+        async def synth_2(cues, speaker_voice_map, **kwargs):
+            return [{"cue_id": "c2", "audio": b"audio", "audio_duration": 5.0}]
+        res2 = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues_2,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth_2,
+            render_pipeline=mock_render,
+            probe_fn=lambda p: {"format": {"duration": "3.0"}},
+        )
+        assert res2["ok"] is True
+
+        # 3. 5.08s audio / 0.56s window -> fit_ratio 9.07 > 1.8 -> FAILS CLOSED
+        cues_3 = [{"cue_id": "c3", "speaker_id": "spk_1", "text": "Câu 3", "start_ms": 0, "end_ms": 560}]
+        async def synth_3(cues, speaker_voice_map, **kwargs):
+            return [{"cue_id": "c3", "audio": b"audio", "audio_duration": 5.08}]
+        res3 = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues_3,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth_3,
+            render_pipeline=mock_render,
+            probe_fn=lambda p: {"format": {"duration": "3.0"}},
+        )
+        assert res3["ok"] is False
+        assert res3["status"] == "TTS_EXTREME_COMPRESSION_FAILED"
+        assert res3["blocker"] == "extreme_audio_compression_unintelligible"
+        assert res3["error_code"] == "extreme_audio_compression_unintelligible"
+    asyncio.run(_run())

@@ -49,6 +49,7 @@ SMART_DECISION_VERSION = "smart_multivoice_v1"
 
 FAIL_CLOSED_ASYNC_SUBMITTED_PRIOR_SUBMIT = "FAIL_CLOSED_ASYNC_SUBMITTED_PRIOR_SUBMIT"
 FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE = "FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE"
+MAX_INTELLIGIBLE_FIT_RATIO = 2.5
 
 
 class SubdubTTSAsyncSubmittedPriorSubmitError(subdub_tts_checkpoint.SubdubTTSCheckpointError):
@@ -167,11 +168,12 @@ def _is_non_speech_cue(cue: Mapping[str, Any]) -> bool:
         return True
     if sound_type in {"music", "singing", "song", "noise", "background", "non_speech"}:
         return True
-    text = str(cue.get("text") or cue.get("content") or "").strip()
-    if not text:
-        return True
-    if _NON_SPEECH_TEXT_RE.match(text):
-        return True
+    if "text" in cue or "content" in cue:
+        text = str(cue.get("text") or cue.get("content") or "").strip()
+        if not text:
+            return True
+        if _NON_SPEECH_TEXT_RE.match(text):
+            return True
     return False
 
 
@@ -207,6 +209,10 @@ def smooth_smart_multivoice_cues(
     min_duration_sec: float = 0.8,
     max_gap_sec: float = 0.6,
     acoustic_classifications: Mapping[str, Mapping[str, Any]] | None = None,
+    cue_acoustic_classifications: Mapping[str | int, Mapping[str, Any]] | None = None,
+    stereo_pcm_path: str | Path | None = None,
+    sample_rate: int = 44100,
+    channels: int = 2,
 ) -> list[dict[str, Any]]:
     """Smooth short diarization flapping/bleeding to maintain speaker continuity.
 
@@ -216,8 +222,8 @@ def smooth_smart_multivoice_cues(
     - Sandwich check: if cue i (< min_duration_sec) is sandwiched between
       cues i-1 and i+1 having the SAME speaker, and gaps are <= max_gap_sec,
       cue i inherits the surrounding speaker.
-    - Acoustic guard: if acoustic classifications indicate strong contradictory
-      gender/register evidence between curr and surrounding speaker, do NOT smooth.
+    - Acoustic guard: uses cue-local evidence first (distinguishing Case A incident bleed
+      from Case B true interjections), falling back to speaker-level acoustic evidence.
     """
     if not cues:
         return []
@@ -269,13 +275,50 @@ def smooth_smart_multivoice_cues(
             gap_after = max(0.0, next_start - end)
             if prev_spk and prev_spk == next_spk and prev_spk != curr_spk:
                 if gap_before <= max_gap_sec and gap_after <= max_gap_sec:
-                    if acoustic_classifications:
+                    cid = str(curr.get("cue_id") or curr.get("id") or "")
+                    cue_meta = None
+                    if isinstance(cue_acoustic_classifications, Mapping):
+                        cue_meta = (
+                            cue_acoustic_classifications.get(cid)
+                            or cue_acoustic_classifications.get(idx)
+                            or cue_acoustic_classifications.get(str(idx))
+                        )
+                    if cue_meta is None and stereo_pcm_path and Path(stereo_pcm_path).is_file():
+                        try:
+                            cue_ranges = {curr_spk: [(start, end)]}
+                            c_est = estimate_speaker_pitches_from_pcm(
+                                stereo_pcm_path,
+                                cue_ranges,
+                                sample_rate=sample_rate,
+                                channels=channels,
+                            )
+                            cue_meta = c_est.get(curr_spk)
+                        except Exception:
+                            cue_meta = None
+
+                    prev_meta = (acoustic_classifications.get(prev_spk) or {}) if acoustic_classifications else {}
+                    prev_reg = str(prev_meta.get("voice_register") or "").strip().lower()
+                    prev_conf = float(prev_meta.get("confidence") or 0.0)
+
+                    if cue_meta:
+                        cue_reg = str(cue_meta.get("voice_register") or "").strip().lower()
+                        cue_conf = float(cue_meta.get("confidence") or 0.0)
+                        if (
+                            cue_conf >= speaker_cast.MIN_REGISTER_CONFIDENCE
+                            and cue_reg in {"low", "high"}
+                            and prev_conf >= speaker_cast.MIN_REGISTER_CONFIDENCE
+                            and prev_reg in {"low", "high"}
+                        ):
+                            if cue_reg != prev_reg:
+                                # Case B: True short interjection contradicting surrounding register -> PRESERVE
+                                continue
+                            else:
+                                # Case A: Incident bleed matching surrounding register -> SMOOTH
+                                pass
+                    elif acoustic_classifications:
                         curr_meta = acoustic_classifications.get(curr_spk) or {}
-                        prev_meta = acoustic_classifications.get(prev_spk) or {}
                         curr_reg = str(curr_meta.get("voice_register") or "").strip().lower()
-                        prev_reg = str(prev_meta.get("voice_register") or "").strip().lower()
                         curr_conf = float(curr_meta.get("confidence") or 0.0)
-                        prev_conf = float(prev_meta.get("confidence") or 0.0)
                         if (
                             curr_reg in {"low", "high"}
                             and prev_reg in {"low", "high"}
@@ -295,19 +338,24 @@ def smooth_smart_multivoice_cues(
     return smoothed
 
 
+
 def _build_derived_ranges(
     cues: Sequence[Mapping[str, Any]],
     stereo_pcm_path: str | Path | None = None,
     speakers: Sequence[str] | None = None,
     max_duration_seconds: float | None = None,
+    sample_rate: int = 44100,
+    channels: int = 2,
 ) -> dict[str, list[tuple[float, float]]]:
-    max_sec = max_duration_seconds if max_duration_seconds is not None else 1e9
+    T_max: float | None = None
     if stereo_pcm_path:
         p = Path(stereo_pcm_path)
         if p.is_file() and p.stat().st_size > 0:
-            file_size = p.stat().st_size
-            pcm_dur = file_size / (44100 * 4)
-            max_sec = min(max_sec, pcm_dur)
+            bytes_per_sec = sample_rate * channels * 2
+            pcm_dur = p.stat().st_size / bytes_per_sec
+            T_max = min(max_duration_seconds, pcm_dur) if max_duration_seconds is not None else pcm_dur
+    if T_max is None and max_duration_seconds is not None:
+        T_max = float(max_duration_seconds)
 
     target_speakers = set(speakers) if speakers is not None else None
     ranges: dict[str, list[tuple[float, float]]] = {}
@@ -317,8 +365,18 @@ def _build_derived_ranges(
             continue
         s = float(c.get("start_ms", 0)) / 1000.0 if "start_ms" in c else float(c.get("start", 0.0) or 0.0)
         e = float(c.get("end_ms", 0)) / 1000.0 if "end_ms" in c else float(c.get("end", 0.0) or 0.0)
-        s = max(0.0, min(s, max_sec))
-        e = min(e, max_sec)
+
+        if T_max is not None:
+            if s > T_max + 1e-4:
+                raise ValueError(f"cue_start_beyond_eof: cue start {s:.3f} exceeds T_max {T_max:.3f}")
+            if e > T_max:
+                overshoot = e - T_max
+                if overshoot <= 0.055:
+                    e = T_max
+                else:
+                    raise ValueError(f"cue_end_overshoot_exceeds_limit: cue end {e:.3f} exceeds T_max {T_max:.3f} by {overshoot:.3f}s")
+
+        s = max(0.0, s)
         if e > s and (e - s) >= 0.05:
             ranges.setdefault(spk, []).append((s, e))
     return ranges
@@ -344,39 +402,30 @@ def estimate_speaker_pitches_from_pcm(
     }
     """
     path = Path(pcm_path)
-    if not path.is_file() or path.stat().st_size <= 0:
+    if not path.is_file():
         return {}
+
+    file_size = path.stat().st_size
+    if file_size == 0:
+        return {}
+
+    # Explicit format authority: default canonical stereo 44.1kHz s16le, or explicitly declared mono 16kHz s16le
+    sr = int(sample_rate) if sample_rate is not None else 44100
+    ch = int(channels) if channels is not None else 2
+
+    if sr not in {44100, 16000} or ch not in {1, 2}:
+        raise ValueError(f"unsupported_pcm_format: sample_rate={sr}, channels={ch}")
+    if ch == 1 and sr != 16000:
+        raise ValueError(f"unsupported_pcm_format: mono requires 16000Hz, got {sr}")
+    if ch == 2 and sr != 44100:
+        raise ValueError(f"unsupported_pcm_format: stereo requires 44100Hz, got {sr}")
+
+    bytes_per_frame = ch * 2
+    if file_size % bytes_per_frame != 0:
+        raise ValueError(f"truncated_pcm_frame: file_size={file_size} not multiple of {bytes_per_frame}")
 
     deadline = deadline_monotonic or (time.monotonic() + 30.0)
     stop_fn = stop_requested or (lambda: False)
-
-    file_size = path.stat().st_size
-
-    # Robust format detection: check explicit args first
-    sr = int(sample_rate) if sample_rate is not None else None
-    ch = int(channels) if channels is not None else None
-
-    if sr is None or ch is None:
-        max_cue_end = 0.0
-        for r_list in ranges_by_speaker.values():
-            for s, e in r_list:
-                if e > max_cue_end:
-                    max_cue_end = e
-        if max_cue_end > 0:
-            dur_stereo44 = file_size / (44100 * 4)
-            dur_mono16 = file_size / (16000 * 2)
-            if dur_stereo44 >= max_cue_end * 0.8:
-                sr = sr or 44100
-                ch = ch or 2
-            elif dur_mono16 >= max_cue_end * 0.8:
-                sr = sr or 16000
-                ch = ch or 1
-            else:
-                sr = sr or 44100
-                ch = ch or 2
-        else:
-            sr = sr or 44100
-            ch = ch or 2
 
     try:
         import numpy as np
@@ -384,7 +433,7 @@ def estimate_speaker_pitches_from_pcm(
         return {}
 
     results: dict[str, dict[str, Any]] = {}
-    bytes_per_frame = ch * 2
+
 
     try:
         with path.open("rb") as handle:
@@ -480,16 +529,26 @@ def decide_smart_multivoice(
     strict_two_classifier: Callable[..., Any] | None = None,
     multi_speaker_classifier: Callable[..., Any] | None = None,
     acoustic_classifications: Mapping[str, Mapping[str, Any]] | None = None,
+    cue_acoustic_classifications: Mapping[str | int, Mapping[str, Any]] | None = None,
     fallback_level_override: int | None = None,
     default_fallback_voice: str | None = None,
     locked_speaker_voice_map: Mapping[str, str] | None = None,
     raise_manual_required: bool = False,
+    strict: bool | None = None,
 ) -> SmartVoiceDecision:
     """Core pure-functional decision authority for Auto Smart Multi-Voice lane."""
+    if strict is not None:
+        raise_manual_required = bool(strict)
+
     seed = hashlib.sha256(str(assignment_seed).encode("utf-8")).hexdigest()
 
     # Step 0: Apply dialogue continuity / anti-flapping smoothing with acoustic guard
-    input_cues = smooth_smart_multivoice_cues(cues, acoustic_classifications=acoustic_classifications)
+    input_cues = smooth_smart_multivoice_cues(
+        cues,
+        acoustic_classifications=acoustic_classifications,
+        cue_acoustic_classifications=cue_acoustic_classifications,
+        stereo_pcm_path=stereo_pcm_path,
+    )
 
     # Step 1: Filter speech vs non-speech cues and validate canonical identities
     # Invariant: No invented speaker IDs. Missing/invalid speaker -> TERMINAL_REJECTED.
@@ -1112,6 +1171,9 @@ def decide_smart_multivoice(
                     tts_cues=[],
                 )
         else:
+            # When no acoustic classifications are provided or resolved
+            if raise_manual_required:
+                raise speaker_cast.AutoCastManualRequired()
             # Fallback behavior when no acoustic evidence is provided (retains test_07..test_10 compatibility)
             strategy = STRATEGY_GENERIC_MULTI
             if len(all_pool) >= detected_speaker_count:
@@ -1333,6 +1395,7 @@ async def run_auto_smart_multivoice(
             fallback_level_override=fallback_level_override,
             default_fallback_voice=default_fallback_voice,
             locked_speaker_voice_map=locked_speaker_voice_map,
+            raise_manual_required=True,
         )
     except speaker_cast.AutoCastManualRequired as exc:
         return {
@@ -1636,6 +1699,30 @@ async def run_auto_smart_multivoice(
             seen_cue_ids.add(cid)
             ch_item = dict(chunk, cue_id=cid)
             ch_item["cue_locked_timing"] = True
+
+            # Intelligibility fit-ratio check (Section N)
+            c_match = next((c for c in decision.tts_cues if str(c.get("cue_id") or c.get("id")) == cid), None)
+            if c_match:
+                s_sec = float(c_match.get("start_ms", 0)) / 1000.0 if "start_ms" in c_match else float(c_match.get("start", 0.0) or 0.0)
+                e_sec = float(c_match.get("end_ms", 0)) / 1000.0 if "end_ms" in c_match else float(c_match.get("end", 0.0) or 0.0)
+                cue_window = e_sec - s_sec
+                gen_sec = float(ch_item.get("audio_duration") or ch_item.get("raw_audio_duration") or 0.0)
+                if cue_window > 0.05 and gen_sec > 0:
+                    fit_ratio = gen_sec / cue_window
+                    if fit_ratio > MAX_INTELLIGIBLE_FIT_RATIO:
+                        return {
+                            "ok": False,
+                            "strategy": decision.strategy,
+                            "status": "TTS_EXTREME_COMPRESSION_FAILED",
+                            "error_code": "extreme_audio_compression_unintelligible",
+                            "blocker": "extreme_audio_compression_unintelligible",
+                            "output_mode": OUTPUT_MODE_FAILED,
+                            "final_mp4_path": None,
+                            "fit_ratio": round(fit_ratio, 3),
+                            "cue_id": cid,
+                            "auto_smart_verified": False,
+                        }
+
             synth_artifacts.append(ch_item)
 
         missing_cues = set(expected_cue_ids) - seen_cue_ids

@@ -223,6 +223,11 @@ def test_05_successful_synthetic_3_speaker_execution_produces_valid_result(tmp_p
         "validated_pools": TEST_POOLS,
         "checkpoint_workspace": str(tmp_path / "ws_05"),
         "job_id": "job_standalone_test_05",
+        "acoustic_classifications": {
+            "spk_1": {"voice_register": "low", "confidence": 1.0},
+            "spk_2": {"voice_register": "high", "confidence": 1.0},
+            "spk_3": {"voice_register": "low", "confidence": 1.0},
+        },
     }
 
     result = asyncio.run(auto_smart_multivoice.run_auto_smart_multivoice_blackbox(**payload))
@@ -275,6 +280,11 @@ def test_06_synthetic_dubbed_cues_have_exact_1_to_1_tts_coverage(tmp_path: Path)
         "validated_pools": TEST_POOLS,
         "checkpoint_workspace": str(tmp_path / "ws_06"),
         "job_id": "job_standalone_test_06",
+        "acoustic_classifications": {
+            "spk_1": {"voice_register": "low", "confidence": 1.0},
+            "spk_2": {"voice_register": "high", "confidence": 1.0},
+            "spk_3": {"voice_register": "low", "confidence": 1.0},
+        },
     }
 
     result = asyncio.run(auto_smart_multivoice.run_auto_smart_multivoice_blackbox(**payload))
@@ -316,6 +326,10 @@ def test_07_current_result_state_schema_preserved(tmp_path: Path):
         "validated_pools": TEST_POOLS,
         "checkpoint_workspace": str(tmp_path / "ws_07"),
         "job_id": "job_standalone_test_07",
+        "acoustic_classifications": {
+            "spk_1": {"voice_register": "low", "confidence": 1.0},
+            "spk_2": {"voice_register": "high", "confidence": 1.0},
+        },
     }
 
     result = asyncio.run(auto_smart_multivoice.run_auto_smart_multivoice_blackbox(**payload))
