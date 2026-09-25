@@ -64,6 +64,7 @@ Covers all 58 test requirements:
 from __future__ import annotations
 
 import asyncio
+import base64
 from collections.abc import Mapping
 import hashlib
 import os
@@ -77,6 +78,11 @@ import pytest
 from services import subdub_speaker_cast as speaker_cast
 from services.subdub_blackboxes import auto_speaker, auto_multi_speaker
 from services.subdub_blackboxes import auto_smart_multivoice as smart
+
+
+SAMPLE_VALID_MP3 = base64.b64decode(
+    "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYyLjEyLjEwMQAAAAAAAAAAAAAA//sQxAAABHQTVVSQgDCmCa83GiACAAGtOUAAAVk6PVBQCAYJAfB8HwfKAgCAYRB8H9QIOxOH+INwBJP2wGA4HA4AAAAAACiJKpkUZAjpAkgWo/eFAfATG/AilC+oGhL8JA0qCgAYMAD/+xLEAoPFWB0gHeAAKKSDpIK8AAXMCQC8QASGAOB4Z+72pmMDlmHEESYMAH5gQgYGBSBMYF4DxZq0lflI8wEwETAAA2MDYIQzblDTLrF3ML8H0wWQHTALAtMCUB8wIwG0T59JA5JIAAr/+xDEAoAEtENSuZKAEJcGpuuYMARhEdKhTBbpmtFc+iKq+RLMu79/N5ZP4GFfx4sXwMd+FVAMXYXAAAAmEoRic8ySQagdXkkSQpUtPJRJFBQFYxhTvEt0qC3EqkxBTUUzLjEwMKqqqg=="
+)
 
 
 TEST_POOLS = {
@@ -2441,7 +2447,7 @@ def test_98_adapted_render_pipeline_scalar_and_tuple_audio_returns(tmp_path):
         acoustics = {"spk_1": {"voice_register": "high", "voice_gender": "female", "confidence": 0.95}}
 
         async def synth_fn(*args, **kwargs):
-            return [{"cue_id": "c1", "audio": b"AUDIO_RAW", "audio_duration": 0.9}]
+            return [{"cue_id": "c1", "audio": SAMPLE_VALID_MP3, "audio_duration": 0.9}]
 
         async def scalar_build_timeline(tts_chunks, duration):
             # Returns scalar bytes directly, not (bytes, detail) tuple
@@ -2495,7 +2501,7 @@ def test_99_smart_synth_adapter_metadata_enrichment(tmp_path):
         }
 
         async def base_synth(cues_list, voice_id):
-            return [{"cue_id": "cue_meta_1", "audio": b"MOCK_TTS_BYTES", "audio_duration": 0.9}]
+            return [{"cue_id": "cue_meta_1", "audio": SAMPLE_VALID_MP3, "audio_duration": 0.9}]
 
         adapter = smart.create_smart_synth_adapter(
             base_synth,
