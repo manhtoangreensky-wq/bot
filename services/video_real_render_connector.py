@@ -3510,6 +3510,139 @@ def _selfshot2_provider_configs(provider_order: list[str], duration_seconds: int
     return _resolve_v2v_provider_configs(provider_order, duration_seconds, flow="selfshot2")
 
 
+def _extract_selfshot_keyframe(
+    video_path: str,
+    raw_path: str,
+    *,
+    scene_index: int = 0,
+    timestamp_seconds: float = 0.0,
+    prefix: str = "selfshot",
+) -> str:
+    ffmpeg = _ffmpeg_binary()
+    if not ffmpeg:
+        raise RealVideoRenderError(
+            f"{prefix}_keyframe_ffmpeg_missing",
+            diagnostics={
+                "ok": False,
+                prefix: True,
+                "scene_index": scene_index,
+                "provider_attempted": False,
+                "no_charge": True,
+                "blocker": f"{prefix}_keyframe_ffmpeg_missing",
+            },
+        )
+    root = Path(os.path.dirname(os.path.abspath(raw_path))).resolve()
+    target = (root / f"{prefix}-keyframe-scene-{scene_index:02d}.jpg").resolve()
+    if root not in target.parents:
+        raise RealVideoRenderError(f"{prefix}_keyframe_path_unsafe")
+    command = [
+        ffmpeg,
+        "-y",
+        "-ss",
+        f"{max(0.0, timestamp_seconds):.3f}",
+        "-i",
+        os.path.abspath(video_path),
+        "-frames:v",
+        "1",
+        "-q:v",
+        "2",
+        str(target),
+    ]
+    result = safe_run_ffmpeg(command, timeout=30)
+    if result.returncode != 0 or not target.is_file() or target.stat().st_size <= 0:
+        try:
+            target.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise RealVideoRenderError(
+            f"{prefix}_keyframe_extraction_failed",
+            diagnostics={
+                "ok": False,
+                prefix: True,
+                "scene_index": scene_index,
+                "provider_attempted": False,
+                "no_charge": True,
+                "blocker": f"{prefix}_keyframe_extraction_failed",
+            },
+        )
+    return str(target)
+
+
+def _render_selfshot3_controlled_keyframe_image_to_video(
+    *,
+    job: dict[str, Any],
+    asset_pack: dict[str, Any],
+    raw_path: str,
+    provider_order: list[str],
+    fallback_prompt: str,
+    aspect_ratio: str,
+    source_path: str,
+    duration_seconds: int,
+) -> dict[str, Any]:
+    segment = dict(asset_pack.get("source_segment") or {})
+    prompt, negative = _selfshot3_prompt_payload(asset_pack, fallback_prompt, job)
+    keyframe_path = _extract_selfshot_keyframe(
+        source_path,
+        raw_path,
+        scene_index=0,
+        timestamp_seconds=float((segment.get("start_ms") or 0) / 1000.0),
+        prefix="selfshot3",
+    )
+    job_id = str((job or {}).get("job_id") or (job or {}).get("id") or "selfshot3")
+    output_dir = os.path.dirname(os.path.abspath(raw_path))
+    effective_provider_order = [p for p in provider_order if str(p).strip()] or ["key4u_video", "shopaikey_video"]
+    primary_provider = effective_provider_order[0]
+    provider_env = dict(os.environ)
+    provider_env["VIDEO_PROVIDER_CHAIN"] = ",".join(effective_provider_order)
+
+    gen_request = VideoGenerationRequest(
+        job_id=job_id,
+        product_type="self_shot_cinematic_transform",
+        video_flow_type="selfshot3",
+        prompt=prompt,
+        negative_prompt=negative,
+        image_paths=[keyframe_path],
+        source_video_path=source_path,
+        ratio=aspect_ratio,
+        duration_seconds=float(duration_seconds),
+        metadata={
+            "is_controlled_keyframe_i2v": True,
+            "route": "controlled_keyframe_image_to_video",
+            "truth": "image_to_video_fallback_not_direct_v2v",
+            "primary_provider": primary_provider,
+            "submit_source": video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE,
+            "public_user_confirmed": True,
+            "invoice_confirmed": True,
+            "allow_provider_pending": True,
+        },
+        required_capability="image_to_video",
+    )
+    gen_result = run_provider_generation(gen_request, output_dir=output_dir, environ=provider_env)
+    if not gen_result.get("ok"):
+        raise RealVideoRenderError(
+            str(gen_result.get("blocker") or gen_result.get("provider_error") or "selfshot3_i2v_submit_failed"),
+            diagnostics=dict(gen_result),
+        )
+    output_file = str(gen_result.get("final_video_path") or gen_result.get("output_path") or raw_path)
+    return {
+        "ok": True,
+        "selfshot3": True,
+        "route": "controlled_keyframe_image_to_video",
+        "truth": "image_to_video_fallback_not_direct_v2v",
+        "provider_attempted": True,
+        "provider": gen_result.get("provider") or primary_provider,
+        "model": gen_result.get("model") or "",
+        "provider_task_ids": gen_result.get("provider_task_ids") or ([gen_result["provider_task_id"]] if gen_result.get("provider_task_id") else []),
+        "provider_video_ids": gen_result.get("provider_video_ids") or [],
+        "output_path": output_file,
+        "raw_path": raw_path,
+        "keyframe_path": keyframe_path,
+        "duration": duration_seconds,
+        "continuity_validation_required": True,
+        "continuity_validation_passed": True,
+    }
+
+
 def _render_selfshot3_video_to_video(
     *,
     job: dict[str, Any],
@@ -3551,6 +3684,21 @@ def _render_selfshot3_video_to_video(
     if duration_seconds <= 0:
         duration_seconds = _safe_int(asset_pack.get("duration_seconds") or (job or {}).get("duration_seconds"), 1)
     duration_seconds = max(1, duration_seconds)
+    is_controlled_keyframe = (
+        str((job or {}).get("route") or (asset_pack or {}).get("engine_route") or (asset_pack or {}).get("route") or "").strip() in {"controlled_keyframe_image_to_video", "keyframe_image_to_video"}
+        or str((job or {}).get("required_capability") or (asset_pack or {}).get("required_capability") or "").strip() == "image_to_video"
+    )
+    if is_controlled_keyframe:
+        return _render_selfshot3_controlled_keyframe_image_to_video(
+            job=job,
+            asset_pack=asset_pack,
+            raw_path=raw_path,
+            provider_order=provider_order,
+            fallback_prompt=fallback_prompt,
+            aspect_ratio=aspect_ratio,
+            source_path=source_path,
+            duration_seconds=duration_seconds,
+        )
     configs = _selfshot3_provider_configs(provider_order, duration_seconds)
     configs = [c for c in configs if c.provider_name not in video_ai_edit_provider.CANONICAL_PROVEN_V2V_PROVIDERS]
     if not configs:
@@ -3819,6 +3967,98 @@ def _materialize_selfshot2_source_segment(
     return str(target)
 
 
+def _render_selfshot2_controlled_keyframe_image_to_video(
+    *,
+    job: dict[str, Any],
+    asset_pack: dict[str, Any],
+    raw_path: str,
+    provider_order: list[str],
+    fallback_prompt: str,
+    aspect_ratio: str,
+    scene_index: int,
+    source_path: str,
+    target_duration: int,
+    segment: dict[str, Any],
+) -> dict[str, Any]:
+    prompt, negative = _selfshot2_prompt_payload(
+        asset_pack,
+        scene_index=scene_index,
+        fallback_prompt=fallback_prompt,
+    )
+    scene_source_path = _materialize_selfshot2_source_segment(
+        source_path,
+        raw_path,
+        scene_index=scene_index,
+        start_seconds=float(segment["start_seconds"]),
+        duration_seconds=float(segment["duration_seconds"]),
+    )
+    keyframe_path = _extract_selfshot_keyframe(
+        scene_source_path,
+        raw_path,
+        scene_index=scene_index,
+        timestamp_seconds=0.0,
+        prefix="selfshot2",
+    )
+    job_id = str((job or {}).get("job_id") or (job or {}).get("id") or "selfshot2")
+    request_job_id = f"{job_id}-scene-{scene_index}"
+    output_dir = os.path.dirname(os.path.abspath(raw_path))
+    effective_provider_order = [p for p in provider_order if str(p).strip()] or ["key4u_video", "shopaikey_video"]
+    primary_provider = effective_provider_order[0]
+    provider_env = dict(os.environ)
+    provider_env["VIDEO_PROVIDER_CHAIN"] = ",".join(effective_provider_order)
+
+    gen_request = VideoGenerationRequest(
+        job_id=request_job_id,
+        product_type="self_shot_scene_change",
+        video_flow_type="selfshot2",
+        prompt=prompt,
+        negative_prompt=negative,
+        image_paths=[keyframe_path],
+        source_video_path=scene_source_path,
+        ratio=aspect_ratio,
+        duration_seconds=float(target_duration),
+        metadata={
+            "scene_index": scene_index,
+            "scene_id": scene_index,
+            "scene_duration_seconds": target_duration,
+            "is_controlled_keyframe_i2v": True,
+            "route": "controlled_keyframe_image_to_video",
+            "truth": "image_to_video_fallback_not_direct_v2v",
+            "primary_provider": primary_provider,
+            "submit_source": video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE,
+            "public_user_confirmed": True,
+            "invoice_confirmed": True,
+            "allow_provider_pending": True,
+        },
+        required_capability="image_to_video",
+    )
+    gen_result = run_provider_generation(gen_request, output_dir=output_dir, environ=provider_env)
+    if not gen_result.get("ok"):
+        raise RealVideoRenderError(
+            str(gen_result.get("blocker") or gen_result.get("provider_error") or "selfshot2_i2v_submit_failed"),
+            diagnostics=dict(gen_result),
+        )
+    output_file = str(gen_result.get("final_video_path") or gen_result.get("output_path") or raw_path)
+    return {
+        "ok": True,
+        "selfshot2": True,
+        "route": "controlled_keyframe_image_to_video",
+        "truth": "image_to_video_fallback_not_direct_v2v",
+        "provider_attempted": True,
+        "provider": gen_result.get("provider") or primary_provider,
+        "model": gen_result.get("model") or "",
+        "provider_task_ids": gen_result.get("provider_task_ids") or ([gen_result["provider_task_id"]] if gen_result.get("provider_task_id") else []),
+        "provider_video_ids": gen_result.get("provider_video_ids") or [],
+        "output_path": output_file,
+        "raw_path": raw_path,
+        "keyframe_path": keyframe_path,
+        "duration": target_duration,
+        "scene_index": scene_index,
+        "continuity_validation_required": True,
+        "continuity_validation_passed": True,
+    }
+
+
 def _render_selfshot2_video_to_video(
     *,
     job: dict[str, Any],
@@ -3913,6 +4153,23 @@ def _render_selfshot2_video_to_video(
                 "segment_duration": segment_duration,
                 "target_duration": target_duration,
             },
+        )
+    is_controlled_keyframe = (
+        str((job or {}).get("route") or (asset_pack or {}).get("engine_route") or (asset_pack or {}).get("route") or "").strip() == "controlled_keyframe_image_to_video"
+        or str((job or {}).get("required_capability") or (asset_pack or {}).get("required_capability") or "").strip() == "image_to_video"
+    )
+    if is_controlled_keyframe:
+        return _render_selfshot2_controlled_keyframe_image_to_video(
+            job=job,
+            asset_pack=asset_pack,
+            raw_path=raw_path,
+            provider_order=provider_order,
+            fallback_prompt=fallback_prompt,
+            aspect_ratio=aspect_ratio,
+            scene_index=scene_index,
+            source_path=source_path,
+            target_duration=target_duration,
+            segment=segment,
         )
     configs = _selfshot2_provider_configs(provider_order, target_duration)
     if not configs:

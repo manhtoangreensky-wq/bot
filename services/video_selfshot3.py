@@ -1149,6 +1149,8 @@ def capability_route(
         available.add("person_identity_reference")
     if "first_last_frame_video" in available:
         available.add("first_last_frame")
+    if "image_to_video" in available or "controlled_keyframe_image_to_video" in available:
+        available.add("controlled_keyframe_image_to_video")
     rules = dict(layer_rules or DEFAULT_LAYER_STATES)
     wardrobe_only = rules.get("wardrobe") == "transform" and rules.get("identity") == "preserve"
     routes = (
@@ -1156,12 +1158,13 @@ def capability_route(
         ("performance_capture", "performance_capture", "Dùng chuyển động và biểu cảm từ video nguồn"),
         ("regional_mask_transform", "masked_regional_transform", "Biến đổi vùng chọn, giữ chủ thể"),
         ("person_identity_reference", "reference_assisted_video", "Dùng tham chiếu nhận diện cùng chuyển động nguồn"),
+        ("controlled_keyframe_image_to_video", "controlled_keyframe_image_to_video", "Chế độ dự phòng keyframe có kiểm soát, không phải biến đổi video trực tiếp"),
         ("first_last_frame", "keyframe_image_to_video", "Chế độ dự phòng sử dụng keyframe, không phải biến đổi video trực tiếp"),
     )
     for capability, route, public_label in routes:
         if capability not in available:
             continue
-        if route == "keyframe_image_to_video":
+        if route in {"keyframe_image_to_video", "controlled_keyframe_image_to_video"}:
             return {
                 "ok": True,
                 "route": route,
