@@ -207,7 +207,48 @@ def configured_provider_chain(env: dict[str, str] | os._Environ[str] | None = No
     return [provider_config_from_env(name, source) for name in names]
 
 
-def validate_provider_config(config: AiEditProviderConfig) -> dict[str, Any]:
+KEY4U_V2V_WIRE_CONTRACT = "UNAVAILABLE_FAIL_CLOSED"
+CURRENT_KEY4U_MULTIPART_V2V_ADAPTER_PROVEN = False
+ALL_KEY4U_V2V_GLOBALLY_DECLARED_UNAVAILABLE = False
+MOTION_CONTROL_AUTO_ENABLED = False
+MOTION_CONTROL_REUSED_AS_MULTIPART = False
+UNVERIFIED_V2V_ENDPOINT_INVENTED = False
+
+# Production authority: Zero test/harness URLs permitted in production authority.
+PROVEN_V2V_WIRE_ADAPTERS: set[str] = set()
+
+
+def classify_endpoint_capability(url: str) -> str:
+    """Classify the capability of an endpoint URL from its path."""
+    text = str(url or "").strip().lower()
+    if not text:
+        return "unknown"
+    try:
+        parsed = urllib.parse.urlparse(text)
+        path = (parsed.path or "").lower()
+    except Exception:
+        path = text
+    if "/text2video" in path or "text2video" in path:
+        return "text_to_video"
+    if "/image2video" in path or "image2video" in path:
+        return "image_to_video"
+    return "unknown"
+
+
+def has_proven_v2v_wire_contract(provider_name: str, model: str = "", submit_url: str = "") -> bool:
+    """Check if a real, provider-specific, source-bound V2V wire contract has been proven."""
+    name = str(provider_name or "").strip().lower()
+    url = str(submit_url or "").strip().lower()
+    if url in PROVEN_V2V_WIRE_ADAPTERS:
+        return True
+    if name == "key4u_video":
+        return False
+    if (name, model) in PROVEN_V2V_WIRE_ADAPTERS or name in PROVEN_V2V_WIRE_ADAPTERS:
+        return True
+    return False
+
+
+def validate_provider_config(config: AiEditProviderConfig, required_capability: str = "video_to_video") -> dict[str, Any]:
     invalid: list[str] = []
     if not config.enabled:
         invalid.append("enabled")
@@ -226,13 +267,27 @@ def validate_provider_config(config: AiEditProviderConfig) -> dict[str, Any]:
     contract = model_contract(config.provider_name, config.model)
     if not contract.get("known") or not contract.get("video_to_video"):
         invalid.append("model_contract")
+
+    endpoint_cap = classify_endpoint_capability(config.submit_url)
+    if required_capability == "video_to_video":
+        proven_wire = has_proven_v2v_wire_contract(config.provider_name, config.model, config.submit_url)
+        if endpoint_cap in {"text_to_video", "image_to_video", "unknown"} and not proven_wire:
+            invalid.append("provider_capability_contract_mismatch")
+
+    reason = ""
+    if "provider_capability_contract_mismatch" in invalid:
+        reason = "provider_capability_contract_mismatch"
+    elif invalid:
+        reason = "ai_edit_provider_contract_invalid"
+
     return {
         "ok": not invalid,
         "invalid_fields": invalid,
-        "reason": "" if not invalid else "ai_edit_provider_contract_invalid",
+        "reason": reason,
         "provider_name": config.provider_name,
         "model": config.model,
         "contract": contract,
+        "endpoint_capability": endpoint_cap,
     }
 
 
@@ -617,9 +672,14 @@ def controlled_fallback_decision(
     primary_task_alive: bool,
     fallback_count: int,
     candidate: AiEditProviderConfig | None,
+    primary_error: str = "",
 ) -> dict[str, Any]:
     if not public_confirm_provenance:
         return {"allowed": False, "reason": "public_confirm_provenance_missing"}
+    if primary_error in {"provider_capability_contract_mismatch", "ai_edit_provider_contract_invalid"}:
+        return {"allowed": False, "reason": "capability_contract_mismatch_fallback_forbidden"}
+    if "contract_mismatch" in str(primary_status or "").lower() or "contract_mismatch" in str(primary_error or "").lower():
+        return {"allowed": False, "reason": "capability_contract_mismatch_fallback_forbidden"}
     if primary_task_alive or str(primary_status or "").lower() in {"running", "pending", "processing", "in_progress"}:
         return {"allowed": False, "reason": "primary_task_alive"}
     if str(primary_status or "").lower() not in {"failed", "failure", "rejected", "cancelled", "timeout", "error"}:
