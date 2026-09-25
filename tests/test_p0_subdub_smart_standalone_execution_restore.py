@@ -16,6 +16,7 @@ Verifies:
 """
 
 import asyncio
+import base64
 from pathlib import Path
 import tempfile
 from typing import Any
@@ -23,6 +24,10 @@ import pytest
 
 from services.subdub_blackboxes import auto_smart_multivoice
 from tests.test_p0_subdub_auto_smart_multivoice import _create_real_valid_mp4
+
+SAMPLE_VALID_MP3 = base64.b64decode(
+    "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYyLjEyLjEwMQAAAAAAAAAAAAAA//sQxAAABHQTVVSQgDCmCa83GiACAAGtOUAAAVk6PVBQCAYJAfB8HwfKAgCAYRB8H9QIOxOH+INwBJP2wGA4HA4AAAAAACiJKpkUZAjpAkgWo/eFAfATG/AilC+oGhL8JA0qCgAYMAD/+xLEAoPFWB0gHeAAKKSDpIK8AAXMCQC8QASGAOB4Z+72pmMDlmHEESYMAH5gQgYGBSBMYF4DxZq0lflI8wEwETAAA2MDYIQzblDTLrF3ML8H0wWQHTALAtMCUB8wIwG0T59JA5JIAAr/+xDEAoAEtENSuZKAEJcGpuuYMARhEdKhTBbpmtFc+iKq+RLMu79/N5ZP4GFfx4sXwMd+FVAMXYXAAAAmEoRic8ySQagdXkkSQpUtPJRJFBQFYxhTvEt0qC3EqkxBTUUzLjEwMKqqqg=="
+)
 
 TEST_POOLS = {
     "low": ["voice_male_1", "voice_male_2", "voice_male_3", "voice_male_4"],
@@ -86,16 +91,19 @@ def test_02_exact_production_runtimeerror_contained_after_fix():
             "content_type": "video/mp4",
         }
 
-    payload = {
-        "lane_mode": "dub",
-        "state": state,
-        "prepare_subtitles": fake_prep,
-        "synthesize_segments": failing_synth,
-        "validated_pools": TEST_POOLS,
-    }
+    with tempfile.TemporaryDirectory() as td:
+        payload = {
+            "lane_mode": "dub",
+            "state": state,
+            "prepare_subtitles": fake_prep,
+            "synthesize_segments": failing_synth,
+            "validated_pools": TEST_POOLS,
+            "checkpoint_workspace": td,
+            "job_id": "job_standalone_test_02",
+        }
 
-    # Must NOT raise RuntimeError
-    result = asyncio.run(auto_smart_multivoice.run_auto_smart_multivoice_blackbox(**payload))
+        # Must NOT raise RuntimeError
+        result = asyncio.run(auto_smart_multivoice.run_auto_smart_multivoice_blackbox(**payload))
 
     assert isinstance(result, dict)
     assert result.get("ok") is False
@@ -192,7 +200,7 @@ def test_05_successful_synthetic_3_speaker_execution_produces_valid_result(tmp_p
     async def mock_synth(cues: list[dict] | None = None, speaker_voice_map: dict | None = None, *args: Any, **kwargs: Any) -> list[dict]:
         chunks = []
         for c in (cues or []):
-            chunks.append({"cue_id": c["cue_id"], "audio": b"MOCK_PCM_TTS_AUDIO_DATA"})
+            chunks.append({"cue_id": c["cue_id"], "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 2.0})
         return chunks
 
     async def mock_render(source_media: str, output_path: str, **kwargs: Any) -> str:
@@ -213,6 +221,8 @@ def test_05_successful_synthetic_3_speaker_execution_produces_valid_result(tmp_p
         "synthesize_segments": mock_synth,
         "render_pipeline": mock_render,
         "validated_pools": TEST_POOLS,
+        "checkpoint_workspace": str(tmp_path / "ws_05"),
+        "job_id": "job_standalone_test_05",
     }
 
     result = asyncio.run(auto_smart_multivoice.run_auto_smart_multivoice_blackbox(**payload))
@@ -242,7 +252,7 @@ def test_06_synthetic_dubbed_cues_have_exact_1_to_1_tts_coverage(tmp_path: Path)
         chunks = []
         for c in (cues or []):
             tts_submitted_cues.append(c["cue_id"])
-            chunks.append({"cue_id": c["cue_id"], "audio": b"AUDIO_DATA"})
+            chunks.append({"cue_id": c["cue_id"], "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 2.0})
         return chunks
 
     async def mock_render(source_media: str, output_path: str, **kwargs: Any) -> str:
@@ -263,6 +273,8 @@ def test_06_synthetic_dubbed_cues_have_exact_1_to_1_tts_coverage(tmp_path: Path)
         "synthesize_segments": mock_synth,
         "render_pipeline": mock_render,
         "validated_pools": TEST_POOLS,
+        "checkpoint_workspace": str(tmp_path / "ws_06"),
+        "job_id": "job_standalone_test_06",
     }
 
     result = asyncio.run(auto_smart_multivoice.run_auto_smart_multivoice_blackbox(**payload))
@@ -282,7 +294,7 @@ def test_07_current_result_state_schema_preserved(tmp_path: Path):
     ]
 
     async def mock_synth(cues: list[dict] | None = None, speaker_voice_map: dict | None = None, *args: Any, **kwargs: Any) -> list[dict]:
-        return [{"cue_id": c["cue_id"], "audio": b"AUDIO"} for c in (cues or [])]
+        return [{"cue_id": c["cue_id"], "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 2.0} for c in (cues or [])]
 
     async def mock_render(source_media: str, output_path: str, **kwargs: Any) -> str:
         _create_real_valid_mp4(Path(output_path))
@@ -302,6 +314,8 @@ def test_07_current_result_state_schema_preserved(tmp_path: Path):
         "synthesize_segments": mock_synth,
         "render_pipeline": mock_render,
         "validated_pools": TEST_POOLS,
+        "checkpoint_workspace": str(tmp_path / "ws_07"),
+        "job_id": "job_standalone_test_07",
     }
 
     result = asyncio.run(auto_smart_multivoice.run_auto_smart_multivoice_blackbox(**payload))
@@ -328,7 +342,7 @@ def test_08_video_output_remains_bytes_never_str_path(tmp_path: Path):
     ]
 
     async def mock_synth(cues: list[dict] | None = None, speaker_voice_map: dict | None = None, *args: Any, **kwargs: Any) -> list[dict]:
-        return [{"cue_id": c["cue_id"], "audio": b"AUDIO"} for c in (cues or [])]
+        return [{"cue_id": c["cue_id"], "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 2.0} for c in (cues or [])]
 
     async def mock_render(source_media: str, output_path: str, **kwargs: Any) -> str:
         _create_real_valid_mp4(Path(output_path))
@@ -348,6 +362,8 @@ def test_08_video_output_remains_bytes_never_str_path(tmp_path: Path):
         "synthesize_segments": mock_synth,
         "render_pipeline": mock_render,
         "validated_pools": TEST_POOLS,
+        "checkpoint_workspace": str(tmp_path / "ws_08"),
+        "job_id": "job_standalone_test_08",
     }
 
     result = asyncio.run(auto_smart_multivoice.run_auto_smart_multivoice_blackbox(**payload))
@@ -359,7 +375,7 @@ def test_08_video_output_remains_bytes_never_str_path(tmp_path: Path):
     assert len(video_out) > 0
 
 
-def test_09_require_auto_cast_preserved():
+def test_09_require_auto_cast_preserved(tmp_path: Path):
     """Requirement 9: require_auto_cast=True preserved."""
     observed_require_auto_cast = None
 
@@ -373,7 +389,7 @@ def test_09_require_auto_cast_preserved():
         }
 
     async def mock_synth(*args: Any, **kwargs: Any) -> list[dict]:
-        return [{"cue_id": "c1", "audio": b"AUDIO"}]
+        return [{"cue_id": "c1", "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 2.0}]
 
     async def mock_render(source_media: str, output_path: str, **kwargs: Any) -> str:
         _create_real_valid_mp4(Path(output_path))
@@ -393,6 +409,8 @@ def test_09_require_auto_cast_preserved():
         "synthesize_segments": mock_synth,
         "render_pipeline": mock_render,
         "validated_pools": TEST_POOLS,
+        "checkpoint_workspace": str(tmp_path / "ws_09"),
+        "job_id": "job_standalone_test_09",
     }
 
     asyncio.run(auto_smart_multivoice.run_auto_smart_multivoice_blackbox(**payload))
@@ -417,7 +435,7 @@ def test_10_saved_source_path_fallback_preserved(tmp_path: Path):
         }
 
     async def mock_synth(*args: Any, **kwargs: Any) -> list[dict]:
-        return [{"cue_id": "c1", "audio": b"AUDIO"}]
+        return [{"cue_id": "c1", "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 2.0}]
 
     async def mock_render(source_media: str, output_path: str, **kwargs: Any) -> str:
         _create_real_valid_mp4(Path(output_path))
@@ -430,6 +448,8 @@ def test_10_saved_source_path_fallback_preserved(tmp_path: Path):
         "synthesize_segments": mock_synth,
         "render_pipeline": mock_render,
         "validated_pools": TEST_POOLS,
+        "checkpoint_workspace": str(tmp_path / "ws_10"),
+        "job_id": "job_standalone_test_10",
     }
 
     result = asyncio.run(auto_smart_multivoice.run_auto_smart_multivoice_blackbox(**payload))

@@ -8,14 +8,20 @@ PRODUCTION_EVIDENCE_JOB: #F22E5919
 from __future__ import annotations
 
 import asyncio
+import base64
 import inspect
 from pathlib import Path
+import tempfile
 from typing import Any
 import pytest
 
 from services.subdub_blackboxes import auto_smart_multivoice
 from services.subdub_blackboxes import run_subdub_lane_blackbox
 from services.subtitle_dub_product_pipeline import process_subtitle_dub_job, run_subdub_pipeline
+
+SAMPLE_VALID_MP3 = base64.b64decode(
+    "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYyLjEyLjEwMQAAAAAAAAAAAAAA//sQxAAABHQTVVSQgDCmCa83GiACAAGtOUAAAVk6PVBQCAYJAfB8HwfKAgCAYRB8H9QIOxOH+INwBJP2wGA4HA4AAAAAACiJKpkUZAjpAkgWo/eFAfATG/AilC+oGhL8JA0qCgAYMAD/+xLEAoPFWB0gHeAAKKSDpIK8AAXMCQC8QASGAOB4Z+72pmMDlmHEESYMAH5gQgYGBSBMYF4DxZq0lflI8wEwETAAA2MDYIQzblDTLrF3ML8H0wWQHTALAtMCUB8wIwG0T59JA5JIAAr/+xDEAoAEtENSuZKAEJcGpuuYMARhEdKhTBbpmtFc+iKq+RLMu79/N5ZP4GFfx4sXwMd+FVAMXYXAAAAmEoRic8ySQagdXkkSQpUtPJRJFBQFYxhTvEt0qC3EqkxBTUUzLjEwMKqqqg=="
+)
 
 
 TEST_POOLS = {
@@ -175,7 +181,10 @@ def test_smart_multivoice_excludes_all_smart_control_keys_from_lane_payload():
         "user_id": 12345,
         "job_id": "smart_test_contract_check",
         "resolve_voice_id": lambda uid, st: "voice_male_1",
-        "synthesize_segments": lambda *a, **k: [{"cue_id": "cue_1", "audio": b"A"}, {"cue_id": "cue_2", "audio": b"B"}],
+        "synthesize_segments": lambda *a, **k: [
+            {"cue_id": "cue_1", "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 2.0},
+            {"cue_id": "cue_2", "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 2.0},
+        ],
         "build_timeline_audio": lambda chunks, dur: (b"AUDIO", "ok"),
         "normalize_audio": lambda b: (b, "ok"),
         "validate_audio": lambda b: {"ok": True},
@@ -191,26 +200,28 @@ def test_smart_multivoice_excludes_all_smart_control_keys_from_lane_payload():
         "is_admin": False,
     }
 
-    payload = {
-        "lane_mode": "subtitle_plus_dub",
-        "mode": "subtitle_plus_dub",
-        "state": sample_state,
-        "run_lane_blackbox": spy_run_lane_blackbox,
-        "runner": spy_runner,
-        "prepare_subtitles": spy_prepare_subtitles,
-        **smart_control_keys_passed,
-        **standard_keys_passed,
-    }
+    with tempfile.TemporaryDirectory() as td:
+        payload = {
+            "lane_mode": "subtitle_plus_dub",
+            "mode": "subtitle_plus_dub",
+            "state": sample_state,
+            "checkpoint_workspace": td,
+            "run_lane_blackbox": spy_run_lane_blackbox,
+            "runner": spy_runner,
+            "prepare_subtitles": spy_prepare_subtitles,
+            **smart_control_keys_passed,
+            **standard_keys_passed,
+        }
 
-    result = asyncio.run(auto_smart_multivoice.run_auto_smart_multivoice_blackbox(**payload))
-    assert result.get("ok") is True
-    assert result.get("auto_smart_verified") is True
+        result = asyncio.run(auto_smart_multivoice.run_auto_smart_multivoice_blackbox(**payload))
+        assert result.get("ok") is True
+        assert result.get("auto_smart_verified") is True
 
-    # STALE_ARCHITECTURE_ASSERTION updated: under standalone execution, run_lane_blackbox is not called
-    assert captured_lane_payload == {}
-    for key in auto_smart_multivoice.SMART_CONTROL_ONLY_KEYS:
-        assert key not in captured_lane_payload, f"Smart control key '{key}' leaked into lane_payload!"
-    assert len(auto_smart_multivoice.SMART_CONTROL_ONLY_KEYS) >= 15
+        # STALE_ARCHITECTURE_ASSERTION updated: under standalone execution, run_lane_blackbox is not called
+        assert captured_lane_payload == {}
+        for key in auto_smart_multivoice.SMART_CONTROL_ONLY_KEYS:
+            assert key not in captured_lane_payload, f"Smart control key '{key}' leaked into lane_payload!"
+        assert len(auto_smart_multivoice.SMART_CONTROL_ONLY_KEYS) >= 15
 
 
 def test_smart_multivoice_standard_pipeline_delegation_succeeds_without_typeerror():
@@ -247,8 +258,8 @@ def test_smart_multivoice_standard_pipeline_delegation_succeeds_without_typeerro
             cid = str(s.get("cue_id") or s.get("id"))
             chunks.append({
                 "cue_id": cid,
-                "audio_bytes": b"AUDIO_" + cid.encode("utf-8"),
-                "audio": b"AUDIO_" + cid.encode("utf-8"),
+                "audio_bytes": SAMPLE_VALID_MP3,
+                "audio": SAMPLE_VALID_MP3,
                 "audio_duration": 2.0,
                 "start": float(s.get("start") or 0.0),
                 "end": float(s.get("end") or 2.0),
@@ -266,42 +277,44 @@ def test_smart_multivoice_standard_pipeline_delegation_succeeds_without_typeerro
         "_pipeline_job_id": "smart_test_job_full_delegation",
     }
 
-    payload = {
-        "lane_mode": "subtitle_plus_dub",
-        "mode": "subtitle_plus_dub",
-        "state": sample_state,
-        "user_id": 12345,
-        "job_id": "smart_test_job_full_delegation",
-        "run_lane_blackbox": run_subdub_lane_blackbox,
-        "runner": run_subdub_pipeline,
-        "prepare_subtitles": spy_prepare_subtitles,
-        "resolve_voice_id": lambda uid, st: "voice_male_1",
-        "synthesize_segments": mock_synthesize_segments,
-        "build_timeline_audio": lambda chunks, dur: (b"TIMELINE_AUDIO_BYTES", "ok"),
-        "normalize_audio": lambda b: (b"NORMALIZED_AUDIO_BYTES", "ok"),
-        "validate_audio": lambda b: {"ok": True},
-        "render_video": lambda src, **kw: (b"FINAL_MP4_BYTES", "ok"),
-        "srt_from_text": lambda t, d: "",
-        "segments_from_text": lambda t, d: [],
-        "segments_from_subtitle": lambda s: [],
-        "subtitle_output_items": lambda s, o, m: [],
-        "parse_voice_speed": lambda s: 1.0,
-        "video_render_ready": lambda o: True,
-        "ffmpeg_ready": lambda: True,
-        "dub_mux_enabled": True,
-        "is_admin": False,
-        # Control-plane keys that were leaking into process_subtitle_dub_job:
-        "validated_pools": TEST_POOLS,
-        "required_pool_capacity": 2,
-        "post_prepare_gate": lambda prep, st: True,
-        "extract_pcm": lambda src: b"PCM",
-    }
+    with tempfile.TemporaryDirectory() as td:
+        payload = {
+            "lane_mode": "subtitle_plus_dub",
+            "mode": "subtitle_plus_dub",
+            "state": sample_state,
+            "user_id": 12345,
+            "job_id": "smart_test_job_full_delegation",
+            "checkpoint_workspace": td,
+            "run_lane_blackbox": run_subdub_lane_blackbox,
+            "runner": run_subdub_pipeline,
+            "prepare_subtitles": spy_prepare_subtitles,
+            "resolve_voice_id": lambda uid, st: "voice_male_1",
+            "synthesize_segments": mock_synthesize_segments,
+            "build_timeline_audio": lambda chunks, dur: (b"TIMELINE_AUDIO_BYTES", "ok"),
+            "normalize_audio": lambda b: (b"NORMALIZED_AUDIO_BYTES", "ok"),
+            "validate_audio": lambda b: {"ok": True},
+            "render_video": lambda src, **kw: (b"FINAL_MP4_BYTES", "ok"),
+            "srt_from_text": lambda t, d: "",
+            "segments_from_text": lambda t, d: [],
+            "segments_from_subtitle": lambda s: [],
+            "subtitle_output_items": lambda s, o, m: [],
+            "parse_voice_speed": lambda s: 1.0,
+            "video_render_ready": lambda o: True,
+            "ffmpeg_ready": lambda: True,
+            "dub_mux_enabled": True,
+            "is_admin": False,
+            # Control-plane keys that were leaking into process_subtitle_dub_job:
+            "validated_pools": TEST_POOLS,
+            "required_pool_capacity": 2,
+            "post_prepare_gate": lambda prep, st: True,
+            "extract_pcm": lambda src: b"PCM",
+        }
 
-    result = asyncio.run(auto_smart_multivoice.run_auto_smart_multivoice_blackbox(**payload))
-    assert isinstance(result, dict)
-    assert result.get("ok") is True, f"Delegation failed: {result}"
-    # STALE_ARCHITECTURE_ASSERTION updated: standalone execution succeeds with auto_smart_verified
-    assert result.get("auto_smart_verified") is True
+        result = asyncio.run(auto_smart_multivoice.run_auto_smart_multivoice_blackbox(**payload))
+        assert isinstance(result, dict)
+        assert result.get("ok") is True, f"Delegation failed: {result}"
+        # STALE_ARCHITECTURE_ASSERTION updated: standalone execution succeeds with auto_smart_verified
+        assert result.get("auto_smart_verified") is True
 
 
 def test_require_auto_cast_remains_true():

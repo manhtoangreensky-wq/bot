@@ -1577,38 +1577,38 @@ def resolve_synth_call_shape(
         try:
             sig.bind(dummy_cues, speaker_voice_map={"__probe__": dummy_voice})
             return "cues_speaker_voice_map", sig
-        except TypeError:
+        except Exception:
             pass
 
     if "voice_id" in param_names:
         try:
             sig.bind(dummy_cues, voice_id=dummy_voice)
             return "cues_voice_id_kw", sig
-        except TypeError:
+        except Exception:
             pass
         try:
             sig.bind(dummy_cues, dummy_voice)
             return "cues_voice_id_pos", sig
-        except TypeError:
+        except Exception:
             pass
 
     if has_varkw:
         try:
             sig.bind(dummy_cues, **kw)
             return "kwargs_voice_id", sig
-        except TypeError:
+        except Exception:
             pass
 
     try:
         sig.bind(dummy_cues, voice_id=dummy_voice)
         return "cues_voice_id_kw", sig
-    except TypeError:
+    except Exception:
         pass
 
     try:
         sig.bind(dummy_cues, speaker_voice_map={"__probe__": dummy_voice})
         return "cues_speaker_voice_map", sig
-    except TypeError:
+    except Exception:
         pass
 
     raise SubdubTTSUnprovenSynthSignatureError(
@@ -1830,6 +1830,8 @@ async def run_auto_smart_multivoice_blackbox(
             "lane_mode": str(payload.get("lane_mode") or current.get("mode") or ""),
             "public_copy_key": "voice_auto_manual_required",
         }
+
+    resolved_lane_mode = str(payload.get("lane_mode") or current.get("mode") or "dub")
 
     source_media = (
         payload.get("source_media")
@@ -2054,6 +2056,71 @@ async def run_auto_smart_multivoice_blackbox(
     captured_audio: bytes | None = None
     probe_fn = payload.get("probe_fn") or payload.get("probe_video")
 
+    pipeline_state = (
+        prepared.get("state")
+        if (isinstance(prepared, dict) and isinstance(prepared.get("state"), dict))
+        else None
+    ) or (current if isinstance(current, dict) else {})
+
+    raw_dur_authority = (
+        pipeline_state.get("input_duration_seconds")
+        or pipeline_state.get("input_duration")
+        or pipeline_state.get("video_duration")
+        or pipeline_state.get("source_duration")
+        or 0.0
+    )
+    try:
+        dur_authority = float(raw_dur_authority or 0.0)
+    except (ValueError, TypeError):
+        dur_authority = 0.0
+
+    max_cue_end = 0.0
+    if cues:
+        for c in cues:
+            c_end = float(c.get("end_ms", 0)) / 1000.0 if c.get("end_ms") else float(c.get("end", 0.0) or 0.0)
+            if c_end > max_cue_end:
+                max_cue_end = c_end
+
+    canonical_duration = max(dur_authority, max_cue_end, 1.0)
+
+    raw_output_subtitle = str(
+        (prepared.get("output_subtitle") if isinstance(prepared, dict) else "")
+        or current.get("output_subtitle")
+        or ""
+    )
+    raw_output_text = str(
+        (prepared.get("output_script") if isinstance(prepared, dict) else "")
+        or (prepared.get("output_text") if isinstance(prepared, dict) else "")
+        or current.get("output_script")
+        or current.get("output_text")
+        or ""
+    )
+
+    srt_from_text_fn = (
+        payload.get("srt_from_text")
+        or current.get("srt_from_text")
+        or (prepared.get("srt_from_text") if isinstance(prepared, dict) else None)
+    )
+    if not callable(srt_from_text_fn):
+        try:
+            import bot
+            srt_from_text_fn = getattr(bot, "video_dubbing_srt_from_text", None)
+        except Exception:
+            srt_from_text_fn = None
+
+    canonical_srt_text = ""
+    if "-->" in raw_output_subtitle:
+        canonical_srt_text = raw_output_subtitle
+    elif raw_output_text.strip() and callable(srt_from_text_fn):
+        try:
+            canonical_srt_text = str(srt_from_text_fn(raw_output_text.strip(), int(canonical_duration)) or "")
+        except Exception:
+            canonical_srt_text = ""
+    elif "-->" in raw_output_text:
+        canonical_srt_text = raw_output_text
+
+    canonical_srt_bytes = canonical_srt_text.encode("utf-8") if canonical_srt_text else b""
+
     if not callable(render_pipeline) and callable(payload.get("render_video")):
         render_video_fn = payload["render_video"]
         build_timeline_audio = payload.get("build_timeline_audio")
@@ -2075,11 +2142,11 @@ async def run_auto_smart_multivoice_blackbox(
             nonlocal captured_audio
             norm_audio = b""
             if callable(build_timeline_audio):
-                raw_audio, _ = await _maybe_await(build_timeline_audio(tts_chunks, 5.0))
+                raw_audio, _ = await _maybe_await(build_timeline_audio(tts_chunks, canonical_duration))
                 if callable(normalize_audio):
                     norm_audio, _ = await _maybe_await(normalize_audio(raw_audio))
                 else:
-                    norm_audio = raw_audio
+                    norm_audio = raw_audio if isinstance(raw_audio, bytes) else b""
                 if callable(validate_audio):
                     await _maybe_await(validate_audio(norm_audio))
                 captured_audio = norm_audio
@@ -2093,13 +2160,39 @@ async def run_auto_smart_multivoice_blackbox(
             if not src_bytes and isinstance(prepared, dict) and prepared.get("source_bytes"):
                 src_bytes = prepared["source_bytes"]
 
-            render_res = await _maybe_await(
-                render_video_fn(
-                    src_bytes,
-                    dubbed_audio=norm_audio,
-                    subtitle_bytes=b"",
-                )
+            render_sub_bytes = b""
+            effective_mode = str(resolved_lane_mode or output_mode or "").lower()
+            wants_subtitle = effective_mode in {"subtitle_plus_dub", "subdub"} or "subtitle" in effective_mode
+            if wants_subtitle:
+                if not canonical_srt_text or "-->" not in canonical_srt_text:
+                    raise RuntimeError("empty_translation: subtitle_plus_dub requires valid canonical SRT with timestamp markers ('-->') for render")
+                render_sub_bytes = canonical_srt_bytes
+
+            dub_policy = (prepared.get("dub_audio_policy") if isinstance(prepared, dict) else None) or {}
+            keep_orig_audio = bool(
+                pipeline_state.get("keep_original_audio")
+                or current.get("keep_original_audio")
+                or dub_policy.get("keep_original_audio")
+                or (prepared.get("keep_original_audio") if isinstance(prepared, dict) else False)
             )
+
+            render_kw: dict[str, Any] = {
+                "dubbed_audio": norm_audio,
+                "subtitle_bytes": render_sub_bytes,
+            }
+            try:
+                sig = inspect.signature(render_video_fn)
+                params = sig.parameters
+                has_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+                if has_varkw or "keep_original_audio" in params:
+                    render_kw["keep_original_audio"] = keep_orig_audio
+                if has_varkw or "target_duration_seconds" in params:
+                    render_kw["target_duration_seconds"] = canonical_duration
+            except Exception:
+                render_kw["keep_original_audio"] = keep_orig_audio
+                render_kw["target_duration_seconds"] = canonical_duration
+
+            render_res = await _maybe_await(render_video_fn(src_bytes, **render_kw))
             video_bytes = None
             if isinstance(render_res, tuple) and len(render_res) >= 1:
                 video_bytes = render_res[0]
@@ -2218,6 +2311,26 @@ async def run_auto_smart_multivoice_blackbox(
             response["audio_bytes"] = captured_audio
         elif "audio_bytes" not in response:
             response["audio_bytes"] = b""
+
+        if prepared is not None:
+            response["prepared"] = prepared
+
+        segments_list = list(cues) if isinstance(cues, list) else []
+        if isinstance(prepared, dict) and prepared.get("output_segments"):
+            segments_list = list(prepared["output_segments"])
+        elif isinstance(current, dict) and current.get("output_segments"):
+            segments_list = list(current["output_segments"])
+
+        response["output_subtitle"] = raw_output_subtitle
+        response["output_text"] = raw_output_text
+        response["output_segments"] = segments_list
+        response["srt_text"] = canonical_srt_text
+        response["srt_bytes"] = canonical_srt_bytes
+
+        result_state["output_subtitle"] = response["output_subtitle"]
+        result_state["output_text"] = response["output_text"]
+        result_state["output_segments"] = segments_list
+        result_state["srt_text"] = response["srt_text"]
     else:
         blocker = str(smart_result.get("blocker") or "smart_multivoice_failed")
         response["ok"] = False

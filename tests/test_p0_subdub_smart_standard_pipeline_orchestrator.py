@@ -8,12 +8,18 @@ BUG_ID: SUBDUB_SMART_RENDER_CONTRACT_MISMATCH
 from __future__ import annotations
 
 import asyncio
+import base64
+from pathlib import Path
+import tempfile
 from typing import Any
 import pytest
 
 from services.subdub_blackboxes import auto_smart_multivoice
 from services import subdub_blackboxes
 
+SAMPLE_VALID_MP3 = base64.b64decode(
+    "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYyLjEyLjEwMQAAAAAAAAAAAAAA//sQxAAABHQTVVSQgDCmCa83GiACAAGtOUAAAVk6PVBQCAYJAfB8HwfKAgCAYRB8H9QIOxOH+INwBJP2wGA4HA4AAAAAACiJKpkUZAjpAkgWo/eFAfATG/AilC+oGhL8JA0qCgAYMAD/+xLEAoPFWB0gHeAAKKSDpIK8AAXMCQC8QASGAOB4Z+72pmMDlmHEESYMAH5gQgYGBSBMYF4DxZq0lflI8wEwETAAA2MDYIQzblDTLrF3ML8H0wWQHTALAtMCUB8wIwG0T59JA5JIAAr/+xDEAoAEtENSuZKAEJcGpuuYMARhEdKhTBbpmtFc+iKq+RLMu79/N5ZP4GFfx4sXwMd+FVAMXYXAAAAmEoRic8ySQagdXkkSQpUtPJRJFBQFYxhTvEt0qC3EqkxBTUUzLjEwMKqqqg=="
+)
 
 TEST_POOLS = {
     "low": ["voice_male_1", "voice_male_2"],
@@ -74,8 +80,8 @@ def _create_standard_harness():
                 spies["tts_used_voices"].add(vid)
             chunks.append({
                 "cue_id": cid,
-                "audio_bytes": b"FAKE_AUDIO_" + cid.encode("utf-8"),
-                "audio": b"FAKE_AUDIO_" + cid.encode("utf-8"),
+                "audio_bytes": SAMPLE_VALID_MP3,
+                "audio": SAMPLE_VALID_MP3,
                 "audio_duration": 2.0,
                 "start": float(seg.get("start") or 0.0),
                 "end": float(seg.get("end") or 2.0),
@@ -145,6 +151,7 @@ def _create_standard_harness():
         spies["run_lane_blackbox_calls"] += 1
         return await runner(lane_mode=lane_mode, **lane_payload)
 
+    td = tempfile.mkdtemp(prefix="smart_orch_")
     sample_state = {
         "mode": "dub",
         "video_processing_mode": "dub",
@@ -152,6 +159,9 @@ def _create_standard_harness():
         "auto_speaker_lane": "auto_smart_multivoice",
         "target_language": "vi",
         "_pipeline_job_id": "smart_test_job_1",
+        "_pipeline_workspace": td,
+        "job_id": "smart_test_job_1",
+        "checkpoint_workspace": td,
     }
 
     return spies, {
@@ -168,6 +178,8 @@ def _create_standard_harness():
         "validated_pools": TEST_POOLS,
         "state": sample_state,
         "mode": "dub",
+        "checkpoint_workspace": td,
+        "job_id": "smart_test_job_1",
     }
 
 
