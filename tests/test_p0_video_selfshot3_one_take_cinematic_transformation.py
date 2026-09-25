@@ -86,8 +86,8 @@ def _provider(name: str, model: str) -> video_ai_edit_provider.AiEditProviderCon
     return video_ai_edit_provider.AiEditProviderConfig(
         provider_name=name,
         enabled=True,
-        submit_url=f"https://provider.invalid/{name}/submit",
-        poll_url=f"https://provider.invalid/{name}/tasks/{{task_id}}",
+        submit_url=f"https://provider.example/{name}/video-to-video",
+        poll_url=f"https://provider.example/{name}/video-to-video/tasks/{{task_id}}",
         auth_header_name="Authorization",
         auth_header_value="Bearer configured-secret",
         model=model,
@@ -528,6 +528,7 @@ def test_engine_uses_at_most_one_mocked_terminal_fallback(
         Path(destination).write_bytes(b"fallback-final-mp4")
         return {"ok": True, "path": destination, "bytes": 18}
 
+    monkeypatch.setattr(video_ai_edit_provider, "validate_provider_config", lambda _cfg, **_kw: {"ok": True})
     monkeypatch.setattr(video_ai_edit_provider, "submit_video_edit", fake_submit)
     monkeypatch.setattr(video_ai_edit_provider, "download_result", fake_download)
 

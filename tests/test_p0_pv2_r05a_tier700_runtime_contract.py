@@ -89,7 +89,7 @@ def test_case_a_r05a_tier700_route_and_source_binding_and_duration(tmp_path: Pat
         capabilities=("video_to_video",),
     )
 
-    with patch.object(video_real_render_connector, "_selfshot3_provider_configs", return_value=[fake_config]), \
+    with patch.object(video_real_render_connector, "_selfshot2_provider_configs", return_value=[fake_config]), \
          patch.object(video_real_render_connector, "_materialize_selfshot2_source_segment", return_value=str(source_video)), \
          patch.object(video_ai_edit_provider, "submit_video_edit", side_effect=fake_submit_video_edit), \
          patch.object(video_ai_edit_provider, "download_result", side_effect=fake_download_result):

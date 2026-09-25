@@ -647,7 +647,7 @@ def test_16_text_only_fallback_forbidden(tmp_path: Path):
         capabilities=("video_to_video",),
     )
 
-    with patch("services.video_real_render_connector._selfshot3_provider_configs", return_value=[mock_cfg]), \
+    with patch("services.video_real_render_connector._selfshot2_provider_configs", return_value=[mock_cfg]), \
          patch("services.video_real_render_connector._materialize_selfshot2_source_segment", return_value=str(source_file)):
 
         with pytest.raises(RealVideoRenderError) as exc_info:
