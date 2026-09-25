@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -131,18 +132,36 @@ def test_submit_video_edit_propagates_continuity_evidence(tmp_path: Path) -> Non
     def fake_opener(req, timeout=None):
         return MockHttpResponse(provider_response, 200)
 
-    result = submit_video_edit(
-        config,
-        source_video_path=str(source_file),
-        prompt="Self-shot scene",
-        negative_prompt="blurry",
-        aspect_ratio="9:16",
-        duration_seconds=5,
-        job_id="job-ss2-submit",
-        submit_source=PUBLIC_FINAL_CONFIRM_SOURCE,
-        public_user_confirmed=True,
-        opener=fake_opener,
-    )
+    with patch(
+        "services.video_ai_edit_provider.validate_provider_config",
+        return_value={
+            "ok": True,
+            "invalid_fields": [],
+            "reason": "",
+            "provider_name": "key4u_video",
+            "model": "kling-video",
+            "contract": {
+                "known": True,
+                "video_to_video": True,
+                "capabilities": ["image_to_video", "scene_video", "short_video", "text_to_video", "video_to_video"],
+                "max_single_task_seconds": 8,
+                "payload_adapter": "key4u_kling_small_clip",
+            },
+            "endpoint_capability": "video_to_video_test_seam",
+        },
+    ):
+        result = submit_video_edit(
+            config,
+            source_video_path=str(source_file),
+            prompt="Self-shot scene",
+            negative_prompt="blurry",
+            aspect_ratio="9:16",
+            duration_seconds=5,
+            job_id="job-ss2-submit",
+            submit_source=PUBLIC_FINAL_CONFIRM_SOURCE,
+            public_user_confirmed=True,
+            opener=fake_opener,
+        )
 
     assert result["provider_task_id"] == "submit-task-123"
     assert result["status"] == "completed"
