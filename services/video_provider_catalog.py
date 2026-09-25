@@ -19,6 +19,9 @@ DEFAULT_CATALOG_PATH = ROOT_DIR / "config" / "video_provider_catalog.json"
 DEFAULT_ROUTING_PATH = ROOT_DIR / "config" / "product_video_model_routing.json"
 DEFAULT_PROVIDER_CHAIN = ["shopaikey_video", "key4u_video", "toanaas_video", "veo", "kling", "generic_http"]
 PROVIDER_ENV_PREFIX = {
+    "fal_video": "FAL_VIDEO",
+    "fal.ai": "FAL_VIDEO",
+    "fal": "FAL_VIDEO",
     "shopaikey_video": "SHOPAIKEY_VIDEO",
     "key4u_video": "KEY4U_VIDEO",
     "toanaas_video": "VIDEO_TOANAAS",
@@ -123,6 +126,9 @@ def load_product_video_model_routing(path: str | os.PathLike[str] | None = None)
 
 def split_provider_chain(value: Any) -> list[str]:
     aliases = {
+        "fal": "fal_video",
+        "fal.ai": "fal_video",
+        "fal_video": "fal_video",
         "shopaikey": "shopaikey_video",
         "shopai": "shopaikey_video",
         "key4u": "key4u_video",
