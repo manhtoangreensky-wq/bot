@@ -3591,14 +3591,15 @@ def _render_selfshot3_controlled_keyframe_image_to_video(
     )
     job_id = str((job or {}).get("job_id") or (job or {}).get("id") or "selfshot3")
     output_dir = os.path.dirname(os.path.abspath(raw_path))
-    effective_provider_order = [p for p in provider_order if str(p).strip()] or ["key4u_video", "shopaikey_video"]
+    effective_provider_order = [p for p in (provider_order or []) if str(p).strip()] or ["key4u_video", "shopaikey_video"]
+    if "key4u_video" in effective_provider_order and effective_provider_order[0] != "key4u_video":
+        effective_provider_order = ["key4u_video"] + [p for p in effective_provider_order if p != "key4u_video"]
     primary_provider = effective_provider_order[0]
     provider_env = dict(os.environ)
     provider_env["VIDEO_PROVIDER_CHAIN"] = ",".join(effective_provider_order)
 
     pinned_model = "kling-v3"
-    if primary_provider == "key4u_video":
-        provider_env["KEY4U_VIDEO_MODEL"] = pinned_model
+    provider_env["KEY4U_VIDEO_MODEL"] = pinned_model
 
     req_meta = {
         "is_controlled_keyframe_i2v": True,
@@ -3610,7 +3611,7 @@ def _render_selfshot3_controlled_keyframe_image_to_video(
         "invoice_confirmed": True,
         "allow_provider_pending": True,
     }
-    if primary_provider == "key4u_video":
+    if primary_provider == "key4u_video" or "key4u_video" in effective_provider_order:
         req_meta["model"] = pinned_model
         req_meta["model_name"] = pinned_model
         req_meta["selected_model"] = pinned_model
@@ -3704,7 +3705,7 @@ def _render_selfshot3_controlled_keyframe_image_to_video(
         "truth": "image_to_video_fallback_not_direct_v2v",
         "provider_attempted": True,
         "provider": gen_result.get("provider") or primary_provider,
-        "model": pinned_model if primary_provider == "key4u_video" else (gen_result.get("model") or ""),
+        "model": pinned_model if (primary_provider == "key4u_video" or "key4u_video" in effective_provider_order) else (gen_result.get("model") or ""),
         "provider_task_ids": gen_result.get("provider_task_ids") or ([gen_result["provider_task_id"]] if gen_result.get("provider_task_id") else []),
         "provider_video_ids": gen_result.get("provider_video_ids") or [],
         "output_path": output_file,
@@ -3715,8 +3716,11 @@ def _render_selfshot3_controlled_keyframe_image_to_video(
         "continuity_validation_passed": bool(continuity_res.get("ok")),
         "continuity_evidence": continuity_res,
         "continuity_evidence_present": bool(continuity_res),
+        "continuity_metadata_authority": "local_vision_validator" if evidence_source == "local_vision_validator" else "none",
         "evidence_source": evidence_source,
         "independent_visual_validation": validation_mode,
+        "independent_visual_validation_pass": bool(continuity_res.get("ok") and evidence_source == "local_vision_validator"),
+        "independent_visual_continuity_proven": bool(continuity_res.get("ok") and evidence_source == "local_vision_validator"),
         "continuity_scores": scores,
     }
 
@@ -3726,7 +3730,7 @@ def _render_selfshot3_video_to_video(
     job: dict[str, Any],
     asset_pack: dict[str, Any],
     raw_path: str,
-    provider_order: list[str],
+    provider_order: list[str] | None = None,
     fallback_prompt: str,
     aspect_ratio: str,
 ) -> dict[str, Any]:
@@ -4080,14 +4084,15 @@ def _render_selfshot2_controlled_keyframe_image_to_video(
     job_id = str((job or {}).get("job_id") or (job or {}).get("id") or "selfshot2")
     request_job_id = f"{job_id}-scene-{scene_index}"
     output_dir = os.path.dirname(os.path.abspath(raw_path))
-    effective_provider_order = [p for p in provider_order if str(p).strip()] or ["key4u_video", "shopaikey_video"]
+    effective_provider_order = [p for p in (provider_order or []) if str(p).strip()] or ["key4u_video", "shopaikey_video"]
+    if "key4u_video" in effective_provider_order and effective_provider_order[0] != "key4u_video":
+        effective_provider_order = ["key4u_video"] + [p for p in effective_provider_order if p != "key4u_video"]
     primary_provider = effective_provider_order[0]
     provider_env = dict(os.environ)
     provider_env["VIDEO_PROVIDER_CHAIN"] = ",".join(effective_provider_order)
 
     pinned_model = "kling-v3"
-    if primary_provider == "key4u_video":
-        provider_env["KEY4U_VIDEO_MODEL"] = pinned_model
+    provider_env["KEY4U_VIDEO_MODEL"] = pinned_model
 
     req_meta = {
         "scene_index": scene_index,
@@ -4102,7 +4107,7 @@ def _render_selfshot2_controlled_keyframe_image_to_video(
         "invoice_confirmed": True,
         "allow_provider_pending": True,
     }
-    if primary_provider == "key4u_video":
+    if primary_provider == "key4u_video" or "key4u_video" in effective_provider_order:
         req_meta["model"] = pinned_model
         req_meta["model_name"] = pinned_model
         req_meta["selected_model"] = pinned_model
@@ -4181,7 +4186,7 @@ def _render_selfshot2_controlled_keyframe_image_to_video(
         "truth": "image_to_video_fallback_not_direct_v2v",
         "provider_attempted": True,
         "provider": gen_result.get("provider") or primary_provider,
-        "model": pinned_model if primary_provider == "key4u_video" else (gen_result.get("model") or ""),
+        "model": pinned_model if (primary_provider == "key4u_video" or "key4u_video" in effective_provider_order) else (gen_result.get("model") or ""),
         "provider_task_ids": gen_result.get("provider_task_ids") or ([gen_result["provider_task_id"]] if gen_result.get("provider_task_id") else []),
         "provider_video_ids": gen_result.get("provider_video_ids") or [],
         "output_path": output_file,
@@ -4193,8 +4198,11 @@ def _render_selfshot2_controlled_keyframe_image_to_video(
         "continuity_validation_passed": bool(continuity_res.get("ok")),
         "continuity_evidence": continuity_res,
         "continuity_evidence_present": bool(continuity_res),
+        "continuity_metadata_authority": "local_vision_validator" if evidence_source == "local_vision_validator" else "none",
         "evidence_source": evidence_source,
         "independent_visual_validation": validation_mode,
+        "independent_visual_validation_pass": bool(continuity_res.get("ok") and evidence_source == "local_vision_validator"),
+        "independent_visual_continuity_proven": bool(continuity_res.get("ok") and evidence_source == "local_vision_validator"),
         "person_identity": bool(continuity_res.get("person_identity")),
         "object_identity": bool(continuity_res.get("object_identity")),
         "person_object_relationship": bool(continuity_res.get("person_object_relationship")),
@@ -4206,7 +4214,7 @@ def _render_selfshot2_video_to_video(
     job: dict[str, Any],
     asset_pack: dict[str, Any],
     raw_path: str,
-    provider_order: list[str],
+    provider_order: list[str] | None = None,
     fallback_prompt: str,
     aspect_ratio: str,
     scene_index: int,
@@ -4816,13 +4824,6 @@ def selfshot3_continuity_validation(
                         if k not in scores_candidate:
                             scores_candidate[k] = v
 
-    validation_result = video_selfshot3.continuity_validation(scores_candidate)
-    blocker = ""
-    if not final_mp4_valid:
-        blocker = "selfshot3_valid_final_mp4_required"
-    elif not validation_result.get("ok"):
-        blocker = "selfshot3_continuity_validation_failed"
-
     evidence_source = str(
         output.get("evidence_source")
         or (output.get("continuity_evidence") or {}).get("evidence_source")
@@ -4834,6 +4835,27 @@ def selfshot3_continuity_validation(
         or ""
     )
 
+    validation_result = video_selfshot3.continuity_validation(scores_candidate)
+    blocker = ""
+    if not final_mp4_valid:
+        blocker = "selfshot3_valid_final_mp4_required"
+    elif output.get("result_rejected_locally"):
+        blocker = str(output.get("blocker") or "result_rejected_locally")
+    elif evidence_source in {"unverified_mock_source", "mock"}:
+        blocker = "mock_or_unverified_visual_evidence"
+    elif not validation_result.get("ok"):
+        blocker = "selfshot3_continuity_validation_failed"
+
+    all_local_proven = bool(
+        not blocker
+        and final_mp4_valid
+        and validation_result.get("ok")
+        and evidence_source == "local_vision_validator"
+        and (independent_mode == "LOCAL_MODEL" or not (output.get("person_required") or output.get("object_required")))
+    )
+    authority = "local_vision_validator" if evidence_source == "local_vision_validator" else ("none" if not scores_candidate else "provider_or_scene_metadata")
+    independent_validation_mode = "LOCAL_MODEL" if all_local_proven else (independent_mode or "NOT_PERFORMED")
+
     return {
         "ok": not blocker,
         "selfshot3": True,
@@ -4841,8 +4863,13 @@ def selfshot3_continuity_validation(
         "final_mp4_valid": final_mp4_valid,
         "continuity_validation_required": True,
         "continuity_validation_passed": not blocker,
+        "continuity_metadata_present": bool(scores_candidate),
+        "continuity_metadata_authority": authority,
+        "continuity_evidence_present": bool(evidence_candidate or output.get("continuity_evidence_present")),
         "evidence_source": evidence_source,
-        "independent_visual_validation": independent_mode,
+        "independent_visual_validation": independent_validation_mode,
+        "independent_visual_validation_pass": all_local_proven,
+        "independent_visual_continuity_proven": all_local_proven,
         "scores": validation_result.get("scores") or {},
         "failures": validation_result.get("failures") or [],
     }

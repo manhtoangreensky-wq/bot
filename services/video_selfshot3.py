@@ -1299,10 +1299,21 @@ def continuity_validation(metrics: Mapping[str, Any] | None) -> dict[str, Any]:
     values = dict(metrics or {})
     required = ("identity", "body", "motion", "object", "interaction", "temporal")
     failures = [key for key in required if float(values.get(key, 0)) < 0.8]
+    evidence_source = str(values.get("evidence_source") or "")
+    independent_mode = str(values.get("independent_visual_validation") or "")
+    if evidence_source in {"unverified_mock_source", "mock"}:
+        failures.append("mock_or_unverified_visual_evidence")
+    is_local = evidence_source == "local_vision_validator"
+    authority = "local_vision_validator" if is_local else ("none" if not values else "scene_metadata")
+    local_proven = bool(not failures and is_local and (independent_mode == "LOCAL_MODEL" if independent_mode else True))
     return {
         "ok": not failures,
         "failures": failures,
         "scores": {key: float(values.get(key, 0)) for key in required},
+        "evidence_source": evidence_source,
+        "independent_visual_validation": independent_mode or ("LOCAL_MODEL" if is_local else "NOT_PERFORMED"),
+        "continuity_metadata_authority": authority,
+        "independent_visual_continuity_proven": local_proven,
     }
 
 
