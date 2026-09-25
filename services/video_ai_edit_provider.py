@@ -26,7 +26,7 @@ HIDDEN_SUBMIT_SOURCES = frozenset({
 TERMINAL_FAILURES = frozenset({"failed", "failure", "rejected", "cancelled", "canceled", "error", "timeout"})
 RUNNING_STATUSES = frozenset({"queued", "pending", "submitted", "processing", "running", "in_progress", "not_start", "in_queue"})
 SUCCESS_STATUSES = frozenset({"success", "succeeded", "completed", "complete", "done", "finished"})
-PLACEHOLDER_TOKENS = ("example", "placeholder", "your_", "todo", "changeme", "xxx", "demo", "test_url", "submit_url_thật", "poll_url_thật")
+PLACEHOLDER_TOKENS = ("placeholder", "your_", "todo", "changeme", "xxx", "demo", "test_url", "submit_url_thật", "poll_url_thật")
 
 
 class AiEditProviderError(RuntimeError):
@@ -183,9 +183,26 @@ def provider_config_from_env(provider_name: str, env: dict[str, str] | os._Envir
     default_poll = "https://queue.fal.run/fal-ai/wan/v2.2-a14b/video-to-video/requests/{task_id}/status" if is_fal else ""
     default_model = "fal-ai/wan/v2.2-a14b/video-to-video" if is_fal else ""
     default_interface = "video_to_video_json" if is_fal else "video_to_video_multipart"
-    submit_url = _text(source, f"{prefix}_SUBMIT_URL", f"{prefix}_ENDPOINT") or default_submit
-    poll_url = _text(source, f"{prefix}_POLL_URL", f"{prefix}_POLL_ENDPOINT", f"{prefix}_STATUS_ENDPOINT") or default_poll
+    submit_url = _text(source, f"{prefix}_SUBMIT_URL", f"{prefix}_ENDPOINT")
+    poll_url = _text(source, f"{prefix}_POLL_URL", f"{prefix}_POLL_ENDPOINT", f"{prefix}_STATUS_ENDPOINT")
     auth_value = _text(source, f"{prefix}_AUTH_HEADER_VALUE", f"{prefix}_API_KEY", f"{prefix}_KEY")
+    enabled = _flag(source, f"{prefix}_ENABLED", "false")
+    model = _text(source, f"{prefix}_MODEL")
+    if is_fal:
+        if not submit_url:
+            submit_url = _text(source, "FAL_VIDEO_SUBMIT_URL", "FAL_VIDEO_ENDPOINT") or default_submit
+        if not poll_url:
+            poll_url = _text(source, "FAL_VIDEO_POLL_URL", "FAL_VIDEO_POLL_ENDPOINT", "FAL_VIDEO_STATUS_ENDPOINT") or default_poll
+        if not auth_value:
+            auth_value = _text(source, "FAL_VIDEO_AUTH_HEADER_VALUE", "FAL_VIDEO_API_KEY", "FAL_VIDEO_KEY", "FAL_KEY", "FAL_API_KEY")
+        if not enabled:
+            enabled = _flag(source, "FAL_VIDEO_ENABLED", "false")
+        if not model:
+            model = _text(source, "FAL_VIDEO_MODEL") or default_model
+    else:
+        submit_url = submit_url or default_submit
+        poll_url = poll_url or default_poll
+        model = model or default_model
     if is_fal and auth_value:
         stripped_auth = auth_value.strip()
         parts = stripped_auth.split(None, 1)
@@ -195,11 +212,10 @@ def provider_config_from_env(provider_name: str, env: dict[str, str] | os._Envir
             auth_value = stripped_auth
         else:
             auth_value = stripped_auth
-    model = _text(source, f"{prefix}_MODEL") or default_model
     capabilities = tuple(item.strip() for item in _text(source, f"{prefix}_CAPABILITIES").split(",") if item.strip()) or ("video_to_video",)
     return AiEditProviderConfig(
         provider_name=name,
-        enabled=_flag(source, f"{prefix}_ENABLED", "false"),
+        enabled=enabled,
         submit_url=submit_url,
         poll_url=poll_url,
         auth_header_name=_safe_header_name(_text(source, f"{prefix}_AUTH_HEADER_NAME") or "Authorization"),
@@ -261,7 +277,7 @@ def classify_endpoint_capability(url: str) -> str:
         return "text_to_video"
     if "/image2video" in path or "image2video" in path:
         return "image_to_video"
-    if "/video-to-video" in path or "video2video" in path or "video_to_video" in path or parsed.netloc.endswith(".invalid"):
+    if "/video-to-video" in path or "video2video" in path or "video_to_video" in path:
         return "video_to_video"
     return "unknown"
 
@@ -309,7 +325,7 @@ def validate_provider_config(config: AiEditProviderConfig, required_capability: 
     endpoint_cap = classify_endpoint_capability(config.submit_url)
     if required_capability == "video_to_video":
         proven_wire = has_proven_v2v_wire_contract(config.provider_name, config.model, config.submit_url)
-        if endpoint_cap in {"text_to_video", "image_to_video", "unknown"} and not proven_wire:
+        if not proven_wire or endpoint_cap != "video_to_video":
             invalid.append("provider_capability_contract_mismatch")
 
     reason = ""
@@ -967,6 +983,8 @@ def controlled_fallback_decision(
         return {"allowed": False, "reason": "primary_task_alive"}
     if stat not in {"failed", "failure", "rejected", "cancelled"}:
         return {"allowed": False, "reason": "primary_not_terminal_failed"}
+    if not primary_terminal_failure_proven:
+        return {"allowed": False, "reason": "primary_terminal_failure_unproven"}
     if int(fallback_count or 0) >= 1:
         return {"allowed": False, "reason": "fallback_limit_reached"}
     if candidate is None or not validate_provider_config(candidate).get("ok"):

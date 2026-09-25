@@ -81,7 +81,7 @@ def test_first_red_render_connector_fails_closed_when_local_continuity_fails(tmp
         },
     }
 
-    with patch("services.video_real_render_connector._selfshot3_provider_configs", return_value=[fake_config]), \
+    with patch("services.video_real_render_connector._selfshot2_provider_configs", return_value=[fake_config]), \
          patch("services.video_real_render_connector._materialize_selfshot2_source_segment", return_value=str(source_file)), \
          patch("services.video_ai_edit_provider.submit_video_edit", side_effect=fake_submit), \
          patch("services.video_ai_edit_provider.download_result", side_effect=fake_download), \
@@ -530,7 +530,7 @@ def test_render_connector_passes_when_all_lanes_pass(tmp_path: Path) -> None:
         "failure_reason": "",
     }
 
-    with patch("services.video_real_render_connector._selfshot3_provider_configs", return_value=[fake_config]), \
+    with patch("services.video_real_render_connector._selfshot2_provider_configs", return_value=[fake_config]), \
          patch("services.video_real_render_connector._materialize_selfshot2_source_segment", return_value=str(source_file)), \
          patch("services.video_ai_edit_provider.submit_video_edit", side_effect=fake_submit), \
          patch("services.video_ai_edit_provider.download_result", side_effect=fake_download), \
@@ -603,7 +603,7 @@ def test_asset_pack_mock_observations_rejected_and_connector_fails_closed(tmp_pa
         "asset_pack": asset_pack,
     }
 
-    with patch("services.video_real_render_connector._selfshot3_provider_configs", return_value=[fake_config]), \
+    with patch("services.video_real_render_connector._selfshot2_provider_configs", return_value=[fake_config]), \
          patch("services.video_real_render_connector._materialize_selfshot2_source_segment", return_value=str(source_file)), \
          patch("services.video_ai_edit_provider.submit_video_edit", side_effect=fake_submit), \
          patch("services.video_ai_edit_provider.download_result", side_effect=fake_download):

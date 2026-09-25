@@ -32,7 +32,7 @@ def _capture_v2v_submit_duration(tier_id: int) -> int:
         }
 
     with patch(
-        "services.video_real_render_connector._selfshot3_provider_configs",
+        "services.video_real_render_connector._selfshot2_provider_configs",
         return_value=[mock_cfg],
     ), patch(
         "services.video_ai_edit_provider.submit_video_edit",

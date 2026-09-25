@@ -3507,8 +3507,6 @@ def _selfshot3_provider_configs(provider_order: list[str], duration_seconds: int
 
 
 def _selfshot2_provider_configs(provider_order: list[str], duration_seconds: int) -> list[Any]:
-    if getattr(_selfshot3_provider_configs, "_is_mock", False) or hasattr(_selfshot3_provider_configs, "mock") or hasattr(_selfshot3_provider_configs, "assert_called") or hasattr(_selfshot3_provider_configs, "return_value"):
-        return _selfshot3_provider_configs(provider_order, duration_seconds)
     return _resolve_v2v_provider_configs(provider_order, duration_seconds, flow="selfshot2")
 
 
@@ -3627,13 +3625,15 @@ def _render_selfshot3_video_to_video(
                             "fallback_blocked_reason": "capability_contract_mismatch_fallback_forbidden",
                         },
                     ) from exc
+                terminal_proven = exc.reason in {"provider_terminal_failure", "provider_rejected", "provider_cancelled"}
                 decision = video_ai_edit_provider.controlled_fallback_decision(
                     public_confirm_provenance=True,
-                    primary_status="timeout" if exc.reason == "provider_poll_timeout" else "failed",
+                    primary_status="timeout" if exc.reason == "provider_poll_timeout" else ("failed" if terminal_proven else "unknown"),
                     primary_task_alive=False,
                     fallback_count=0,
                     candidate=fallback,
                     primary_error=exc.reason,
+                    primary_terminal_failure_proven=terminal_proven,
                 )
                 if not decision.get("allowed"):
                     raise RealVideoRenderError(exc.reason, diagnostics={"ok": False, "selfshot3": True, "provider_attempted": True, "attempts": attempts, "no_charge": True, "blocker": exc.reason}) from exc
@@ -4123,7 +4123,7 @@ def _render_selfshot2_video_to_video(
                             "generation_submit_attempted": generation_submit_attempted,
                             "generation_task_id_obtained": bool(task_id),
                             "attempts": attempts,
-                            "no_charge": not (generation_submit_attempted and bool(task_id)),
+                            "no_charge": False if generation_submit_attempted else True,
                             "no_charge_proven": not generation_submit_attempted,
                             "blocker": exc.reason,
                             "fallback_blocked_reason": fallback_blocked_reason,
@@ -4141,7 +4141,7 @@ def _render_selfshot2_video_to_video(
                     "generation_submit_attempted": generation_submit_attempted,
                     "generation_task_id_obtained": bool(task_id),
                     "attempts": attempts,
-                    "no_charge": not (generation_submit_attempted and bool(task_id)),
+                    "no_charge": False if generation_submit_attempted else True,
                     "no_charge_proven": not generation_submit_attempted,
                     "blocker": exc.reason,
                     "fallback_blocked_reason": "ambiguous_state_fallback_forbidden",

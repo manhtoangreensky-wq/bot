@@ -1297,7 +1297,49 @@ def test_28_poll_timeout_with_known_task_id_forbids_secondary_fallback(tmp_path:
 # ---------------------------------------------------------------------------
 
 def test_29_fallback_permitted_only_on_explicit_terminal_failure(tmp_path: Path):
-    """When Fal explicitly fails with terminal failure (task proven dead), controlled fallback to key4u is permitted."""
+    """Fallback authority: helper permits fallback only on proven terminal dead states with valid candidate;
+    in production routing, Key4U is not wire-proven so secondary fallback is blocked (KEY4U_SECONDARY_V2V_ELIGIBLE=NO)."""
+    # 1. Direct helper seam testing with bounded synthetic/stub candidate
+    stub_candidate = video_ai_edit_provider.AiEditProviderConfig(
+        provider_name="fal_video",
+        enabled=True,
+        submit_url="https://queue.fal.run/fal-ai/wan/v2.2-a14b/video-to-video",
+        poll_url="https://queue.fal.run/fal-ai/wan/v2.2-a14b/video-to-video/requests/{task_id}/status",
+        auth_header_name="Authorization",
+        auth_header_value="Key valid_secret",
+        model="fal-ai/wan/v2.2-a14b/video-to-video",
+        interface="video_to_video_json",
+        capabilities=("video_to_video",),
+    )
+
+    # Proven terminal dead states allow fallback
+    for terminal_status in ["failed", "rejected", "cancelled"]:
+        dec = video_ai_edit_provider.controlled_fallback_decision(
+            public_confirm_provenance=True,
+            primary_status=terminal_status,
+            primary_task_alive=False,
+            fallback_count=0,
+            candidate=stub_candidate,
+            primary_error="",
+            primary_terminal_failure_proven=True,
+        )
+        assert dec["allowed"] is True
+        assert dec["reason"] == "controlled_terminal_fallback"
+
+    # Terminal failure unproven blocks fallback
+    dec_unproven = video_ai_edit_provider.controlled_fallback_decision(
+        public_confirm_provenance=True,
+        primary_status="failed",
+        primary_task_alive=False,
+        fallback_count=0,
+        candidate=stub_candidate,
+        primary_error="",
+        primary_terminal_failure_proven=False,
+    )
+    assert dec_unproven["allowed"] is False
+    assert dec_unproven["reason"] == "primary_terminal_failure_unproven"
+
+    # 2. End-to-end SelfShot2 production routing: Key4U has no proven V2V wire contract
     source_file = tmp_path / "source.mp4"
     source_file.write_bytes(b"SOURCE_BYTES")
     scene_file = tmp_path / "scene.mp4"
@@ -1314,39 +1356,14 @@ def test_29_fallback_permitted_only_on_explicit_terminal_failure(tmp_path: Path)
         "content_type": "video/mp4",
     })
 
-    def mock_submit(cfg, **kwargs):
-        if cfg.provider_name == "fal_video":
-            return {
-                "provider_task_id": "fal-term-task-1",
-                "status": "running",
-                "accepted": True,
-                "result_url_present": False,
-            }
-        return {
-            "provider_task_id": "key4u-fallback-task-2",
-            "status": "completed",
-            "accepted": True,
-            "result_url_present": True,
-            "result_url": "https://key4u.ai/results/out.mp4",
-        }
+    spy_submit = MagicMock(return_value={
+        "provider_task_id": "fal-term-task-1",
+        "status": "running",
+        "accepted": True,
+        "result_url_present": False,
+    })
 
-    def mock_wait(cfg, task_id, **kwargs):
-        if cfg.provider_name == "fal_video":
-            raise video_ai_edit_provider.AiEditProviderError("provider_terminal_failure")
-        return {
-            "provider_task_id": task_id,
-            "status": "completed",
-            "result_url": "https://key4u.ai/results/out.mp4",
-            "result_url_present": True,
-        }
-
-    fake_continuity = {
-        "ok": True,
-        "evidence_source": "local_vision_validator",
-        "independent_visual_validation": "LOCAL_MODEL",
-        "person_required": False,
-        "object_required": False,
-    }
+    mock_wait = MagicMock(side_effect=video_ai_edit_provider.AiEditProviderError("provider_terminal_failure"))
 
     env_overrides = {
         "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
@@ -1356,49 +1373,36 @@ def test_29_fallback_permitted_only_on_explicit_terminal_failure(tmp_path: Path)
         "VIDEO_AI_EDIT_PROVIDER_CHAIN": "fal_video,key4u_video",
     }
 
-    fal_cfg = video_ai_edit_provider.provider_config_from_env("fal_video", env_overrides)
-    key4u_cfg = video_ai_edit_provider.AiEditProviderConfig(
-        provider_name="key4u_video",
-        enabled=True,
-        submit_url="https://api.key4u.click/custom/video-to-video",
-        poll_url="https://api.key4u.click/custom/video-to-video/{task_id}",
-        auth_header_name="Authorization",
-        auth_header_value="Bearer key4u_key_test",
-        model="kling-video",
-        interface="video_to_video_multipart",
-        capabilities=("video_to_video",),
-    )
-
     with patch.dict(os.environ, env_overrides), \
-         patch("services.video_real_render_connector._selfshot2_provider_configs", return_value=[fal_cfg, key4u_cfg]), \
          patch("services.video_ai_edit_provider.upload_fal_media_file", mock_upload), \
-         patch("services.video_ai_edit_provider.submit_video_edit", side_effect=mock_submit) as spy_submit, \
-         patch("services.video_ai_edit_provider.wait_for_result", side_effect=mock_wait), \
-         patch("services.video_ai_edit_provider.download_result", return_value={"ok": True, "path": str(raw_output), "bytes": 100}), \
-         patch("services.video_real_render_connector._materialize_selfshot2_source_segment", return_value=str(scene_file)), \
-         patch("services.video_selfshot_continuity_validator.validate_selfshot_scene_continuity", return_value=fake_continuity):
+         patch("services.video_ai_edit_provider.submit_video_edit", spy_submit), \
+         patch("services.video_ai_edit_provider.wait_for_result", mock_wait), \
+         patch("services.video_real_render_connector._materialize_selfshot2_source_segment", return_value=str(scene_file)):
 
-        res = video_real_render_connector._render_selfshot2_video_to_video(
-            job={
-                "source_video_local_path": str(source_file),
-                "quality_tier": 500,
-                "public_user_confirmed": True,
-                "submit_source": "public_user_final_confirm",
-            },
-            asset_pack={},
-            raw_path=str(raw_output),
-            provider_order=["fal_video", "key4u_video"],
-            fallback_prompt="prompt",
-            aspect_ratio="9:16",
-            scene_index=0,
-        )
+        with pytest.raises(RealVideoRenderError) as exc_info:
+            video_real_render_connector._render_selfshot2_video_to_video(
+                job={
+                    "source_video_local_path": str(source_file),
+                    "quality_tier": 500,
+                    "public_user_confirmed": True,
+                    "submit_source": "public_user_final_confirm",
+                },
+                asset_pack={},
+                raw_path=str(raw_output),
+                provider_order=["fal_video", "key4u_video"],
+                fallback_prompt="prompt",
+                aspect_ratio="9:16",
+                scene_index=0,
+            )
 
-        assert res["ok"] is True
-        assert res["provider"] == "key4u_video"
-        assert spy_submit.call_count == 2
-        # First call was fal_video, second was key4u_video
-        assert spy_submit.call_args_list[0][0][0].provider_name == "fal_video"
-        assert spy_submit.call_args_list[1][0][0].provider_name == "key4u_video"
+        assert "provider_terminal_failure" in str(exc_info.value)
+        # Fal submitted once, Key4U never submitted (KEY4U_SECONDARY_V2V_ELIGIBLE=NO)
+        assert spy_submit.call_count == 1
+        assert spy_submit.call_args[0][0].provider_name == "fal_video"
+        diag = exc_info.value.diagnostics
+        assert diag["ok"] is False
+        assert diag["generation_submit_attempted"] is True
+        assert diag["generation_task_id_obtained"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -1765,7 +1769,7 @@ def test_36_failure_injection_matrix_across_all_stages(tmp_path: Path):
     stages = [
         ("upload_http_error", video_ai_edit_provider.AiEditProviderError("fal_scene_upload_failed_http_502"), "fal_scene_upload_failed_http_502", True, 0),
         ("upload_invalid_url", video_ai_edit_provider.AiEditProviderError("fal_scene_upload_upload_url_invalid"), "fal_scene_upload_upload_url_invalid", True, 0),
-        ("submit_transport_error", video_ai_edit_provider.AiEditProviderError("provider_submit_connection_failed"), "provider_submit_connection_failed", True, 0),
+        ("submit_transport_error", video_ai_edit_provider.AiEditProviderError("provider_submit_connection_failed"), "provider_submit_connection_failed", False, 0),
         ("poll_timeout", video_ai_edit_provider.AiEditProviderError("provider_poll_timeout"), "provider_poll_timeout", False, 0),
         ("result_fetch_error", video_ai_edit_provider.AiEditProviderError("provider_result_fetch_http_500"), "provider_result_fetch_http_500", False, 0),
     ]
@@ -1809,3 +1813,305 @@ def test_36_failure_injection_matrix_across_all_stages(tmp_path: Path):
                 assert expected_blocker in str(exc_info.value), f"Failed for stage {stage_name}"
                 diag = exc_info.value.diagnostics
                 assert diag["no_charge"] is expect_no_charge, f"no_charge mismatch for stage {stage_name}"
+
+
+# ---------------------------------------------------------------------------
+# 37. Key4U proven-wire bypass rejected: canonical rule (Section B FIRST RED)
+# ---------------------------------------------------------------------------
+
+def test_37_key4u_proven_wire_bypass_rejected_canonical_rule():
+    """Section B FIRST RED: For an unproven V2V provider, a V2V-looking URL path alone is NEVER proof."""
+    cfg = video_ai_edit_provider.AiEditProviderConfig(
+        provider_name="key4u_video",
+        enabled=True,
+        submit_url="https://example.test/custom/video-to-video",
+        poll_url="https://example.test/custom/video-to-video/{task_id}",
+        auth_header_name="Authorization",
+        auth_header_value="Bearer real_token_abc",
+        model="kling-video",
+        interface="video_to_video_multipart",
+        capabilities=("video_to_video",),
+    )
+    # 1. Unproven wire contract
+    assert video_ai_edit_provider.has_proven_v2v_wire_contract(cfg.provider_name, cfg.model, cfg.submit_url) is False
+
+    # 2. Validation MUST fail closed with provider_capability_contract_mismatch
+    val = video_ai_edit_provider.validate_provider_config(cfg, required_capability="video_to_video")
+    assert val["ok"] is False
+    assert val["reason"] == "provider_capability_contract_mismatch"
+    assert "provider_capability_contract_mismatch" in val["invalid_fields"]
+
+    # 3. Invariant holds regardless of naming convention in URL
+    for v2v_path in [
+        "https://api.key4u.click/custom/video-to-video",
+        "https://api.key4u.click/custom/video2video",
+        "https://api.key4u.click/custom/video_to_video",
+        "https://example.test/api/v1/video-to-video",
+    ]:
+        v_cfg = video_ai_edit_provider.AiEditProviderConfig(
+            provider_name="key4u_video",
+            enabled=True,
+            submit_url=v2v_path,
+            poll_url=f"{v2v_path}/{{task_id}}",
+            auth_header_name="Authorization",
+            auth_header_value="Bearer real_token_abc",
+            model="kling-video",
+            interface="video_to_video_multipart",
+            capabilities=("video_to_video",),
+        )
+        assert video_ai_edit_provider.has_proven_v2v_wire_contract(v_cfg.provider_name, v_cfg.model, v_cfg.submit_url) is False
+        res = video_ai_edit_provider.validate_provider_config(v_cfg, required_capability="video_to_video")
+        assert res["ok"] is False
+        assert res["reason"] == "provider_capability_contract_mismatch"
+
+
+# ---------------------------------------------------------------------------
+# 38. Key4U fail-closed invariant across all URL patterns (Section C)
+# ---------------------------------------------------------------------------
+
+def test_38_key4u_fail_closed_invariant_all_url_patterns():
+    """Section C: has_proven_v2v_wire_contract('key4u_video') == False forever; all URLs blocked."""
+    assert video_ai_edit_provider.has_proven_v2v_wire_contract("key4u_video") is False
+
+    test_urls = [
+        "https://api.key4u.click/kling/v1/videos/text2video",
+        "https://api.key4u.click/kling/v1/videos/image2video",
+        "https://api.key4u.click/custom/unverified/endpoint",
+        "https://api.key4u.click/custom/video-to-video",
+    ]
+    for url in test_urls:
+        cfg = video_ai_edit_provider.AiEditProviderConfig(
+            provider_name="key4u_video",
+            enabled=True,
+            submit_url=url,
+            poll_url=f"{url}/{{task_id}}",
+            auth_header_name="Authorization",
+            auth_header_value="Bearer real_token",
+            model="kling-video",
+            interface="video_to_video_multipart",
+            capabilities=("video_to_video",),
+        )
+        res = video_ai_edit_provider.validate_provider_config(cfg, required_capability="video_to_video")
+        assert res["ok"] is False
+        assert res["reason"] == "provider_capability_contract_mismatch"
+
+
+# ---------------------------------------------------------------------------
+# 39. Dot-invalid production authority removed (Section D)
+# ---------------------------------------------------------------------------
+
+def test_39_dot_invalid_production_authority_removed():
+    """Section D: The hostname .invalid must never grant capability; path semantics determine capability."""
+    # Arbitrary .invalid URL must return unknown, NOT video_to_video
+    assert video_ai_edit_provider.classify_endpoint_capability("https://anything.invalid/foo") == "unknown"
+    assert video_ai_edit_provider.classify_endpoint_capability("https://mock.invalid/submit") == "unknown"
+
+    # Realistic path with fake domain classifies purely on path
+    assert video_ai_edit_provider.classify_endpoint_capability("https://provider.example/video-to-video") == "video_to_video"
+    assert video_ai_edit_provider.classify_endpoint_capability("https://provider.invalid/custom/video-to-video") == "video_to_video"
+
+
+# ---------------------------------------------------------------------------
+# 40. MagicMock production authority removed (Section E)
+# ---------------------------------------------------------------------------
+
+def test_40_magicmock_production_authority_removed():
+    """Section E: Production _selfshot2_provider_configs must never introspect MagicMock attributes."""
+    import inspect
+    src = inspect.getsource(video_real_render_connector._selfshot2_provider_configs)
+    assert "_is_mock" not in src
+    assert "return_value" not in src
+    assert "assert_called" not in src
+    assert "mock" not in src.lower()
+
+
+# ---------------------------------------------------------------------------
+# 41. Terminal failure proof authoritative & terminal state matrix (Section F & G)
+# ---------------------------------------------------------------------------
+
+def test_41_terminal_failure_proof_enforcement_and_state_matrix():
+    """Section F & G: Fallback only allowed when primary_terminal_failure_proven=True and status is terminal dead."""
+    candidate = video_ai_edit_provider.AiEditProviderConfig(
+        provider_name="fal_video",
+        enabled=True,
+        submit_url="https://queue.fal.run/fal-ai/wan/v2.2-a14b/video-to-video",
+        poll_url="https://queue.fal.run/fal-ai/wan/v2.2-a14b/video-to-video/requests/{task_id}/status",
+        auth_header_name="Authorization",
+        auth_header_value="Key valid_secret",
+        model="fal-ai/wan/v2.2-a14b/video-to-video",
+        interface="video_to_video_json",
+        capabilities=("video_to_video",),
+    )
+
+    # 1. Terminal proof authoritative check: status=failed + proven=False -> BLOCKED
+    res_unproven = video_ai_edit_provider.controlled_fallback_decision(
+        public_confirm_provenance=True,
+        primary_status="failed",
+        primary_task_alive=False,
+        fallback_count=0,
+        candidate=candidate,
+        primary_terminal_failure_proven=False,
+    )
+    assert res_unproven["allowed"] is False
+    assert res_unproven["reason"] == "primary_terminal_failure_unproven"
+
+    # 2. Terminal state matrix
+    for terminal_status in ["failed", "rejected", "cancelled"]:
+        res = video_ai_edit_provider.controlled_fallback_decision(
+            public_confirm_provenance=True,
+            primary_status=terminal_status,
+            primary_task_alive=False,
+            fallback_count=0,
+            candidate=candidate,
+            primary_terminal_failure_proven=True,
+        )
+        assert res["allowed"] is True
+        assert res["reason"] == "controlled_terminal_fallback"
+
+    # Non-terminal or ambiguous states -> BLOCKED
+    for non_terminal in ["running", "pending", "processing", "timeout", "unknown"]:
+        res = video_ai_edit_provider.controlled_fallback_decision(
+            public_confirm_provenance=True,
+            primary_status=non_terminal,
+            primary_task_alive=(non_terminal in {"running", "pending"}),
+            fallback_count=0,
+            candidate=candidate,
+            primary_terminal_failure_proven=True,
+        )
+        assert res["allowed"] is False
+
+    # Ambiguous errors -> BLOCKED
+    for amb_err in [
+        "provider_submit_connection_failed",
+        "provider_submit_timeout",
+        "provider_poll_connection_failed",
+        "provider_poll_timeout",
+        "provider_result_fetch_http_500",
+        "provider_result_download_failed:Timeout",
+        "fal_scene_upload_failed_http_502",
+        "provider_capability_contract_mismatch",
+    ]:
+        res = video_ai_edit_provider.controlled_fallback_decision(
+            public_confirm_provenance=True,
+            primary_status="failed",
+            primary_task_alive=False,
+            fallback_count=0,
+            candidate=candidate,
+            primary_error=amb_err,
+            primary_terminal_failure_proven=True,
+        )
+        assert res["allowed"] is False
+
+
+# ---------------------------------------------------------------------------
+# 42. Fal environment configuration namespace reconciliation (Section K)
+# ---------------------------------------------------------------------------
+
+def test_42_fal_env_configuration_reconciliation():
+    """Section K: Support both FAL_VIDEO_TO_VIDEO_* and FAL_VIDEO_* / FAL_KEY with FAL_ENV_CONFIGURATION_AMBIGUITY=NO."""
+    # 1. Canonical FAL_VIDEO_* + FAL_KEY
+    canonical_env = {
+        "FAL_VIDEO_ENABLED": "1",
+        "FAL_KEY": "fal_canonical_token",
+        "FAL_VIDEO_MODEL": "fal-ai/wan/v2.2-a14b/video-to-video",
+    }
+    cfg_canon = video_ai_edit_provider.provider_config_from_env("fal_video", canonical_env)
+    assert cfg_canon.enabled is True
+    assert cfg_canon.auth_header_value == "Key fal_canonical_token"
+    assert cfg_canon.model == "fal-ai/wan/v2.2-a14b/video-to-video"
+
+    # 2. Adapter-specific FAL_VIDEO_TO_VIDEO_* overrides canonical FAL_VIDEO_*
+    override_env = {
+        "FAL_VIDEO_ENABLED": "1",
+        "FAL_KEY": "fal_canonical_token",
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "fal_v2v_override_token",
+    }
+    cfg_override = video_ai_edit_provider.provider_config_from_env("fal_video", override_env)
+    assert cfg_override.auth_header_value == "Key fal_v2v_override_token"
+
+
+# ---------------------------------------------------------------------------
+# 43. End-to-end SelfShot2 Fal routing without Key4U hidden fallback (Section J & H)
+# ---------------------------------------------------------------------------
+
+def test_43_end_to_end_selfshot2_fal_routing_no_key4u_fallback(tmp_path: Path):
+    """Section J & H: Materialized local segment uploads to Fal storage; Key4U is never secondary eligible."""
+    source_file = tmp_path / "source.mp4"
+    source_file.write_bytes(b"SOURCE_BYTES_REAL")
+    scene_file = tmp_path / "scene.mp4"
+    scene_file.write_bytes(b"SCENE_BYTES_REAL")
+    raw_output = tmp_path / "raw.mp4"
+
+    uploaded_urls = []
+    def fake_upload(config, local_path, **kwargs):
+        uploaded_urls.append(str(local_path))
+        return {
+            "ok": True,
+            "provider": "fal_video",
+            "file_url": "https://v3.fal.media/files/scene_real.mp4",
+            "local_path": str(local_path),
+            "local_sha256": "abc_hash",
+            "local_size_bytes": 16,
+            "content_type": "video/mp4",
+        }
+
+    submits = []
+    def fake_submit(config, **kwargs):
+        submits.append(config.provider_name)
+        return {
+            "provider_task_id": "fal-wan-task-real",
+            "status": "completed",
+            "accepted": True,
+            "result_url_present": True,
+            "result_url": "https://v3.fal.media/results/out.mp4",
+        }
+
+    def fake_download(url, dest, **kwargs):
+        Path(dest).write_bytes(b"FINAL_VIDEO_BYTES")
+        return {"ok": True, "path": dest, "bytes": 17}
+
+    fake_continuity = {
+        "ok": True,
+        "evidence_source": "local_vision_validator",
+        "independent_visual_validation": "LOCAL_MODEL",
+        "person_required": False,
+        "object_required": False,
+    }
+
+    env = {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "fal_key_test",
+        "KEY4U_VIDEO_TO_VIDEO_ENABLED": "1",
+        "KEY4U_VIDEO_TO_VIDEO_API_KEY": "key4u_key_test",
+        "VIDEO_AI_EDIT_PROVIDER_CHAIN": "fal_video,key4u_video",
+    }
+
+    with patch.dict(os.environ, env), \
+         patch("services.video_ai_edit_provider.upload_fal_media_file", side_effect=fake_upload), \
+         patch("services.video_ai_edit_provider.submit_video_edit", side_effect=fake_submit), \
+         patch("services.video_ai_edit_provider.download_result", side_effect=fake_download), \
+         patch("services.video_real_render_connector._materialize_selfshot2_source_segment", return_value=str(scene_file)), \
+         patch("services.video_selfshot_continuity_validator.validate_selfshot_scene_continuity", return_value=fake_continuity):
+
+        res = video_real_render_connector._render_selfshot2_video_to_video(
+            job={
+                "source_video_local_path": str(source_file),
+                "quality_tier": 500,
+                "public_user_confirmed": True,
+                "submit_source": "public_user_final_confirm",
+            },
+            asset_pack={},
+            raw_path=str(raw_output),
+            provider_order=["fal_video", "key4u_video"],
+            fallback_prompt="prompt",
+            aspect_ratio="9:16",
+            scene_index=0,
+        )
+
+        assert res["ok"] is True
+        assert res["provider"] == "fal_video"
+        assert len(uploaded_urls) == 1
+        assert uploaded_urls[0] == str(scene_file)
+        assert submits == ["fal_video"]
+        assert raw_output.read_bytes() == b"FINAL_VIDEO_BYTES"
