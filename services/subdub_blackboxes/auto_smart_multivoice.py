@@ -2517,15 +2517,12 @@ async def run_auto_smart_multivoice_blackbox(
             pcm_extraction_error = f"{type(pcm_err).__name__}:{str(pcm_err)[:120]}"
 
         if pcm_extraction_error is not None:
-            has_pre_acoustics = bool(
-                payload.get("acoustic_classifications")
-                or current.get("acoustic_classifications")
-                or (prepared.get("acoustic_classifications") if isinstance(prepared, dict) else None)
-                or payload.get("cue_acoustic_classifications")
+            has_cue_local_acoustics = bool(
+                payload.get("cue_acoustic_classifications")
                 or current.get("cue_acoustic_classifications")
                 or (prepared.get("cue_acoustic_classifications") if isinstance(prepared, dict) else None)
             )
-            if not has_pre_acoustics:
+            if not has_cue_local_acoustics:
                 if temp_source_path and os.path.exists(temp_source_path):
                     try:
                         os.unlink(temp_source_path)
@@ -2770,9 +2767,15 @@ async def run_auto_smart_multivoice_blackbox(
 
     if not callable(render_pipeline) and callable(payload.get("render_video")):
         render_video_fn = payload["render_video"]
-        build_timeline_audio = payload.get("build_timeline_audio")
-        normalize_audio = payload.get("normalize_audio")
-        validate_audio = payload.get("validate_audio")
+        build_timeline_audio = payload.get("build_timeline_audio") or current.get("build_timeline_audio")
+        if not callable(build_timeline_audio):
+            try:
+                import bot
+                build_timeline_audio = getattr(bot, "build_dub_timeline_audio", None)
+            except Exception:
+                build_timeline_audio = None
+        normalize_audio = payload.get("normalize_audio") or current.get("normalize_audio")
+        validate_audio = payload.get("validate_audio") or current.get("validate_audio")
 
         async def _adapted_render_pipeline(
             *,
@@ -2796,6 +2799,9 @@ async def run_auto_smart_multivoice_blackbox(
                     err_detail = str(timeline_res[1]) if len(timeline_res) >= 2 else ""
                 else:
                     raw_audio = timeline_res
+
+                if err_detail:
+                    current["timeline_audio_detail"] = err_detail
 
                 if tts_chunks and (not raw_audio or not isinstance(raw_audio, (bytes, bytearray))):
                     raise RuntimeError(f"TIMELINE_AUDIO_BUILD_FAILED:{err_detail or 'empty_timeline_audio'}")
@@ -3011,6 +3017,10 @@ async def run_auto_smart_multivoice_blackbox(
         result_state["output_text"] = response["output_text"]
         result_state["output_segments"] = segments_list
         result_state["srt_text"] = response["srt_text"]
+
+        if current.get("timeline_audio_detail"):
+            response["timeline_audio_detail"] = current["timeline_audio_detail"]
+            result_state["timeline_audio_detail"] = current["timeline_audio_detail"]
     else:
         blocker = str(smart_result.get("blocker") or "smart_multivoice_failed")
         response["ok"] = False

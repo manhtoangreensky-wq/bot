@@ -2194,7 +2194,8 @@ def test_91_real_pcm_test_matrix(tmp_path):
 
 
 def test_92_77_cue_actual_timing_regression(tmp_path):
-    """77-cue timing regression: end-to-end integration test through blackbox, smart synth adapter, build_timeline_audio, and render_video, measuring 0.0 drift."""
+    """77-cue timing regression: end-to-end integration test through blackbox, smart synth adapter,
+    real production build_dub_timeline_audio, and render_video, measuring 0.0 drift and verifying cue-locked audio."""
     async def _run():
         source_media = _create_real_valid_mp4(tmp_path / "src_77.mp4")
         output_mp4 = tmp_path / "out_77.mp4"
@@ -2222,6 +2223,15 @@ def test_92_77_cue_actual_timing_regression(tmp_path):
             "spk_2": {"voice_register": "high", "confidence": 0.95},
         }
 
+        # Generate a real decodable MP3 fixture so the real production audio builder can decode and mix it
+        real_chunk_path = tmp_path / "chunk_fixture.mp3"
+        subprocess.run(
+            ["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=1000:duration=2", "-c:a", "libmp3lame", "-b:a", "64k", str(real_chunk_path)],
+            check=True,
+            capture_output=True,
+        )
+        real_chunk_bytes = real_chunk_path.read_bytes()
+
         async def mock_base_synth(cues_arg, voice_id=None, **kwargs):
             results = []
             for c in cues_arg:
@@ -2229,24 +2239,19 @@ def test_92_77_cue_actual_timing_regression(tmp_path):
                 dur = (float(c.get("end_ms", 0)) - float(c.get("start_ms", 0))) / 1000.0
                 results.append({
                     "cue_id": cid,
-                    "audio": SAMPLE_VALID_MP3,
+                    "audio": real_chunk_bytes,
+                    "audio_bytes": real_chunk_bytes,
                     "audio_duration": dur,
                 })
             return results
-
-        recorded_timeline_chunks = []
-        async def mock_build_timeline(tts_chunks, canonical_duration):
-            recorded_timeline_chunks.extend(tts_chunks)
-            return b"MOCK_TIMELINE_AUDIO_77_BYTES", {"detail": "timeline_ok"}
-
-        async def mock_normalize(raw_audio):
-            return b"NORM_AUDIO_77_BYTES", {"detail": "norm_ok"}
 
         rendered_calls = []
         async def mock_render_video(source_bytes, **kwargs):
             rendered_calls.append(kwargs)
             return _create_real_valid_mp4(Path(output_mp4)).read_bytes(), "render_ok"
 
+        # Execute end-to-end with real production build_dub_timeline_audio
+        import bot
         res = await smart.run_auto_smart_multivoice_blackbox(
             source_media=source_media,
             output_path=output_mp4,
@@ -2255,8 +2260,7 @@ def test_92_77_cue_actual_timing_regression(tmp_path):
             acoustic_classifications=acoustics,
             synthesize_segments=mock_base_synth,
             render_video=mock_render_video,
-            build_timeline_audio=mock_build_timeline,
-            normalize_audio=mock_normalize,
+            build_timeline_audio=bot.build_dub_timeline_audio,
             checkpoint_workspace=str(tmp_path / "ws_77"),
             job_id="job_77_timing_regression",
             state={
@@ -2272,25 +2276,31 @@ def test_92_77_cue_actual_timing_regression(tmp_path):
         assert res.get("state", {}).get("auto_smart_multivoice_verified") is True
         assert res.get("effective_speaker_count") == 2
         assert len(rendered_calls) == 1
-        assert rendered_calls[0].get("dubbed_audio") == b"NORM_AUDIO_77_BYTES"
-        assert len(recorded_timeline_chunks) == 77
 
-        max_start_drift = 0.0
-        for idx, (cue, chunk) in enumerate(zip(cues, recorded_timeline_chunks)):
-            assert chunk["cue_id"] == cue["cue_id"]
-            expected_start = cue["start_ms"] / 1000.0
-            chunk_start = float(chunk["start"])
-            drift = abs(chunk_start - expected_start)
-            if drift > max_start_drift:
-                max_start_drift = drift
-            expected_end = cue["end_ms"] / 1000.0
-            assert abs(float(chunk["end"]) - expected_end) < 0.001
+        dubbed_audio = rendered_calls[0].get("dubbed_audio")
+        assert isinstance(dubbed_audio, (bytes, bytearray))
+        assert len(dubbed_audio) > 100_000, f"Expected real mixed audio > 100KB, got {len(dubbed_audio)} bytes"
 
-        assert max_start_drift < 0.0001, f"Expected 0.0 start drift, got {max_start_drift}"
+        # Verify real timeline detail confirms all 77 cues, cue_locked=yes, 0 shifted cues, 0 overlaps
+        timeline_detail = res.get("timeline_audio_detail") or res.get("state", {}).get("timeline_audio_detail", "")
+        assert "cues=77" in timeline_detail
+        assert "cue_locked=yes" in timeline_detail
+        assert "timeline_extended=no" in timeline_detail
+        assert "shifted_cues=0" in timeline_detail
+        assert "overlap_count=0" in timeline_detail
 
         # Real 77-cue timeline planner contract verification
-        import bot
-        plan = bot.subdub_plan_dub_timeline(recorded_timeline_chunks, total_expected_duration)
+        plan = bot.subdub_plan_dub_timeline([
+            {
+                "cue_id": c["cue_id"],
+                "start": c["start_ms"] / 1000.0,
+                "end": c["end_ms"] / 1000.0,
+                "audio_bytes": real_chunk_bytes,
+                "audio_duration": (c["end_ms"] - c["start_ms"]) / 1000.0,
+                "cue_locked_timing": True,
+            }
+            for c in cues
+        ], total_expected_duration)
         assert plan.get("ok") is True
         assert plan.get("cue_locked_timing") is True
         assert plan.get("shifted_cue_count") == 0
@@ -2865,6 +2875,48 @@ def test_104_pcm_extraction_failure_fails_closed(tmp_path):
         assert res_invalid["status"] == "PCM_EXTRACTION_FAILED"
         assert res_invalid["error_code"] == "pcm_extraction_failed"
         assert "invalid_pcm_path" in res_invalid["blocker"]
+
+        # Case C: Global speaker-level acoustic_classifications provided, but cue_acoustic_classifications is missing
+        # Under cue-local authority contract, speaker metadata CANNOT bypass PCM extraction failure.
+        res_speaker_only = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications={"spk_1": {"voice_register": "low", "confidence": 0.95}},
+            cue_acoustic_classifications=None,
+            extract_pcm=mock_extract_invalid_path,
+            checkpoint_workspace=str(tmp_path / "ws_104c"),
+            job_id="job_104c",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_104c"), "job_id": "job_104c"},
+        )
+        assert res_speaker_only["ok"] is False
+        assert res_speaker_only["status"] == "PCM_EXTRACTION_FAILED"
+        assert res_speaker_only["error_code"] == "pcm_extraction_failed"
+        assert "invalid_pcm_path" in res_speaker_only["blocker"]
+
+        # Case D: cue_acoustic_classifications (cue-local authority) IS provided
+        # Since cue-local acoustic authority is already provided, PCM extraction failure does NOT trigger PCM_EXTRACTION_FAILED
+        res_cue_authority = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications={
+                "spk_1": {"voice_register": "low", "confidence": 0.95},
+                "spk_2": {"voice_register": "high", "confidence": 0.95},
+            },
+            cue_acoustic_classifications={"c1": {"voice_register": "low", "confidence": 0.95}},
+            extract_pcm=mock_extract_invalid_path,
+            synthesize_segments=lambda cues, **kw: [{"cue_id": str(c.get("cue_id")), "audio": SAMPLE_VALID_MP3, "audio_duration": 1.0} for c in cues],
+            render_pipeline=lambda **kw: _create_real_valid_mp4(Path(kw.get("output_path") or output_mp4)),
+            probe_fn=lambda p: {"format": {"duration": "2.0"}},
+            checkpoint_workspace=str(tmp_path / "ws_104d"),
+            job_id="job_104d",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_104d"), "job_id": "job_104d"},
+        )
+        assert res_cue_authority.get("status") != "PCM_EXTRACTION_FAILED"
+        assert res_cue_authority.get("ok") is True
 
     asyncio.run(_run())
 
