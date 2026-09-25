@@ -66,6 +66,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 import hashlib
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -2381,7 +2382,7 @@ def test_97_synth_artifacts_canonical_production_ordering_and_metadata(tmp_path)
         }
 
         # Return chunks in reversed order: c3, c1, c2
-        async def mock_permuted_synth(cues_arg, speaker_voice_map, **kwargs):
+        async def mock_permuted_synth(*args, **kwargs):
             return [
                 {"cue_id": "c3", "audio": b"AUDIO_C3", "audio_duration": 0.9},
                 {"cue_id": "c1", "audio": b"AUDIO_C1", "audio_duration": 0.9},
@@ -2439,7 +2440,7 @@ def test_98_adapted_render_pipeline_scalar_and_tuple_audio_returns(tmp_path):
         ]
         acoustics = {"spk_1": {"voice_register": "high", "voice_gender": "female", "confidence": 0.95}}
 
-        async def synth_fn(cues_arg, speaker_voice_map, **kwargs):
+        async def synth_fn(*args, **kwargs):
             return [{"cue_id": "c1", "audio": b"AUDIO_RAW", "audio_duration": 0.9}]
 
         async def scalar_build_timeline(tts_chunks, duration):
@@ -2466,7 +2467,9 @@ def test_98_adapted_render_pipeline_scalar_and_tuple_audio_returns(tmp_path):
             render_video=mock_render_video,
             build_timeline_audio=scalar_build_timeline,
             normalize_audio=scalar_normalize,
-            state={"auto_speaker_lane": "auto_smart_multivoice"},
+            checkpoint_workspace=str(tmp_path / "ws"),
+            job_id="test_job_98",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws"), "job_id": "test_job_98"},
         )
 
         assert res.get("ok") is True
