@@ -340,6 +340,17 @@ async def test_case_4_pure_dub_mode_keeps_subtitle_bytes_empty():
         assert render_received.get("subtitle_bytes") == b"", "Pure dub must not burn subtitles into video"
 
 
+def _format_srt_timestamp(seconds_float: float) -> str:
+    total_ms = int(round(seconds_float * 1000))
+    hours = total_ms // 3600000
+    rem = total_ms % 3600000
+    minutes = rem // 60000
+    rem = rem % 60000
+    seconds = rem // 1000
+    millis = rem % 1000
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
+
+
 @_sync
 async def test_case_5_incident_shape_77_cue_checkpoint_reuse_and_render():
     """Section I: 77-cue incident-shape checkpoint reuse with 0 provider calls and valid post-65 render."""
@@ -366,9 +377,13 @@ async def test_case_5_incident_shape_77_cue_checkpoint_reuse_and_render():
                 "start_ms": int(start_s * 1000),
                 "end_ms": int(end_s * 1000),
             })
-            lines.append(f"{i+1}\n00:00:{int(start_s):02d},000 --> 00:00:{int(end_s):02d},800\nCâu thoại thử nghiệm số {i+1}.\n")
+            lines.append(f"{i+1}\n{_format_srt_timestamp(start_s)} --> {_format_srt_timestamp(end_s)}\nCâu thoại thử nghiệm số {i+1}.\n")
 
         full_srt = "\n".join(lines) + "\n"
+
+        # Verify incident timestamps roll correctly past minute boundary
+        assert "00:01:00,000" in full_srt, "Timestamp must roll past minute boundary (not 00:00:60,000)"
+        assert "00:00:60,000" not in full_srt, "Malformed minute timestamp detected"
 
         mgr = subdub_tts_checkpoint.SubdubTTSCheckpointManager(
             workspace=ws,
@@ -461,4 +476,272 @@ async def test_case_5_incident_shape_77_cue_checkpoint_reuse_and_render():
         assert b"RENDERED_77_CUE_VIDEO" in result.get("video_output")
         assert result.get("srt_text") == full_srt
         assert render_received_subtitles[0] != b"", "Render received empty subtitle_bytes on 77-cue incident resume"
+
+
+@_sync
+async def test_case_6_plain_output_text_materializes_valid_srt():
+    """CASE 6: When output_subtitle is empty but output_script is plain text,
+    canonical SRT containing '-->' must be materialized and passed to renderer.
+    """
+    with tempfile.TemporaryDirectory() as td:
+        tmp_path = Path(td)
+        render_received = {}
+        ws = str(tmp_path / "ws_case6")
+        dummy_source = tmp_path / "source.mp4"
+        dummy_source.write_bytes(b"DUMMY_MP4_HEADER_BYTES_FOR_TESTING" * 50)
+
+        async def fake_render_video(src_bytes: bytes, dubbed_audio: bytes = b"", subtitle_bytes: bytes = b"", **kw):
+            render_received["subtitle_bytes"] = subtitle_bytes
+            render_received["dubbed_audio"] = dubbed_audio
+            return (b"RENDERED_VIDEO_WITH_SUBTITLES", "success")
+
+        async def fake_build_timeline_audio(tts_chunks: list, duration: float):
+            return SAMPLE_VALID_MP3, {"duration": duration}
+
+        async def fake_synthesize(cues, *args, **kwargs):
+            return {
+                "chunks": [{"cue_id": "c1", "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 2.0}],
+                "provider": "key4u_mock",
+            }
+
+        cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Xin chào", "start": 1.0, "end": 3.0, "start_ms": 1000, "end_ms": 3000}]
+
+        async def fake_prepare(st: dict, *, require_auto_cast: bool = False):
+            return {
+                "source_bytes": dummy_source.read_bytes(),
+                "source_file": str(dummy_source),
+                "output_subtitle": "",  # Empty subtitle
+                "output_script": "Xin chào",  # Plain text script
+                "output_segments": cues,
+                "content_type": "video/mp4",
+            }
+
+        state = {
+            "mode": "subtitle_plus_dub",
+            "video_processing_mode": "subtitle_plus_dub",
+            "auto_smart_multivoice_opt_in": True,
+            "auto_speaker_lane": "auto_smart_multivoice",
+            "source": str(dummy_source),
+            "source_bytes": dummy_source.read_bytes(),
+            "input_duration": 10.0,
+            "video_duration": 10.0,
+            "_pipeline_job_id": "job_case6",
+            "_pipeline_workspace": ws,
+        }
+
+        payload = {
+            "lane_mode": "subtitle_plus_dub",
+            "state": state,
+            "job_id": "job_case6",
+            "checkpoint_workspace": ws,
+            "prepare_subtitles": fake_prepare,
+            "synthesize_segments": fake_synthesize,
+            "render_video": fake_render_video,
+            "build_timeline_audio": fake_build_timeline_audio,
+            "validated_pools": TEST_POOLS,
+            "segments": cues,
+            "acoustic_classifications": MOCK_ACOUSTIC,
+        }
+
+        result = await smart.run_auto_smart_multivoice_blackbox(**payload)
+
+        assert result.get("ok") is True, f"Expected ok=True, got {result}"
+        assert "-->" in result.get("srt_text", ""), "SRT_TEXT does not contain '-->'"
+        assert b"-->" in render_received.get("subtitle_bytes", b""), "RENDER_SUBTITLE_BYTES does not contain b'-->'"
+
+
+@_sync
+async def test_case_7_input_duration_seconds_authority():
+    """CASE 7: prepared['state']['input_duration_seconds'] = 30.0 must take authority over latest cue end = 14.5."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp_path = Path(td)
+        ws = str(tmp_path / "ws_case7")
+        dummy_source = tmp_path / "source.mp4"
+        dummy_source.write_bytes(b"DUMMY_MP4_HEADER_BYTES_FOR_TESTING" * 50)
+
+        captured_timeline_durations = []
+
+        async def fake_render_video(src_bytes: bytes, dubbed_audio: bytes = b"", subtitle_bytes: bytes = b"", **kw):
+            return (b"RENDERED_VIDEO_BYTES", "success")
+
+        async def fake_build_timeline_audio(tts_chunks: list, duration: float):
+            captured_timeline_durations.append(duration)
+            return SAMPLE_VALID_MP3, {"duration": duration}
+
+        async def fake_synthesize(cues, *args, **kwargs):
+            return {
+                "chunks": [{"cue_id": "c1", "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 2.0}],
+                "provider": "key4u_mock",
+            }
+
+        cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Hi", "start": 10.0, "end": 14.5, "start_ms": 10000, "end_ms": 14500}]
+
+        async def fake_prepare(st: dict, *, require_auto_cast: bool = False):
+            return {
+                "source_bytes": dummy_source.read_bytes(),
+                "source_file": str(dummy_source),
+                "output_subtitle": "1\n00:00:10,000 --> 00:00:14,500\nHi\n\n",
+                "output_script": "Hi",
+                "output_segments": cues,
+                "content_type": "video/mp4",
+                "state": {
+                    "input_duration_seconds": 30.0,
+                    "mode": "dub",
+                },
+            }
+
+        state = {
+            "mode": "dub",
+            "auto_smart_multivoice_opt_in": True,
+            "auto_speaker_lane": "auto_smart_multivoice",
+            "source": str(dummy_source),
+            "source_bytes": dummy_source.read_bytes(),
+            "input_duration": 10.0,
+            "_pipeline_job_id": "job_case7",
+            "_pipeline_workspace": ws,
+        }
+
+        payload = {
+            "lane_mode": "dub",
+            "state": state,
+            "job_id": "job_case7",
+            "checkpoint_workspace": ws,
+            "prepare_subtitles": fake_prepare,
+            "synthesize_segments": fake_synthesize,
+            "render_video": fake_render_video,
+            "build_timeline_audio": fake_build_timeline_audio,
+            "validated_pools": TEST_POOLS,
+            "segments": cues,
+            "acoustic_classifications": MOCK_ACOUSTIC,
+        }
+
+        result = await smart.run_auto_smart_multivoice_blackbox(**payload)
+        assert result.get("ok") is True
+
+        assert len(captured_timeline_durations) == 1
+        assert captured_timeline_durations[0] == 30.0, f"Expected timeline duration 30.0, got {captured_timeline_durations[0]}"
+
+
+@_sync
+async def test_case_8_render_policy_parity():
+    """CASE 8: Verify keep_original_audio and target_duration_seconds propagation,
+    and subtitle_bytes parity (non-empty for subtitle_plus_dub, empty for dub).
+    """
+    with tempfile.TemporaryDirectory() as td:
+        tmp_path = Path(td)
+        dummy_source = tmp_path / "source.mp4"
+        dummy_source.write_bytes(b"DUMMY_MP4_HEADER_BYTES_FOR_TESTING" * 50)
+
+        cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Hi", "start": 0.0, "end": 2.0, "start_ms": 0, "end_ms": 2000}]
+
+        async def fake_build_timeline_audio(tts_chunks: list, duration: float):
+            return SAMPLE_VALID_MP3, {"duration": duration}
+
+        async def fake_synthesize(cues, *args, **kwargs):
+            return {
+                "chunks": [{"cue_id": "c1", "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 2.0}],
+                "provider": "key4u_mock",
+            }
+
+        # 1. subtitle_plus_dub with keep_original_audio=True
+        render_captured_subdub = {}
+
+        async def fake_render_subdub(src_bytes: bytes, dubbed_audio: bytes = b"", subtitle_bytes: bytes = b"", **kw):
+            render_captured_subdub.update(kw)
+            render_captured_subdub["subtitle_bytes"] = subtitle_bytes
+            render_captured_subdub["dubbed_audio"] = dubbed_audio
+            return (b"RENDERED_SUBDUB_MP4", "success")
+
+        async def fake_prepare_subdub(st: dict, *, require_auto_cast: bool = False):
+            return {
+                "source_bytes": dummy_source.read_bytes(),
+                "source_file": str(dummy_source),
+                "output_subtitle": VALID_SRT_TEXT,
+                "output_script": "Hi",
+                "output_segments": cues,
+                "content_type": "video/mp4",
+                "keep_original_audio": True,
+                "state": {
+                    "input_duration_seconds": 12.0,
+                    "keep_original_audio": True,
+                },
+            }
+
+        res_subdub = await smart.run_auto_smart_multivoice_blackbox(
+            lane_mode="subtitle_plus_dub",
+            state={
+                "mode": "subtitle_plus_dub",
+                "auto_smart_multivoice_opt_in": True,
+                "auto_speaker_lane": "auto_smart_multivoice",
+                "source": str(dummy_source),
+                "source_bytes": dummy_source.read_bytes(),
+                "keep_original_audio": True,
+                "_pipeline_job_id": "job_case8_subdub",
+                "_pipeline_workspace": str(tmp_path / "ws_subdub"),
+            },
+            job_id="job_case8_subdub",
+            checkpoint_workspace=str(tmp_path / "ws_subdub"),
+            prepare_subtitles=fake_prepare_subdub,
+            synthesize_segments=fake_synthesize,
+            render_video=fake_render_subdub,
+            build_timeline_audio=fake_build_timeline_audio,
+            validated_pools=TEST_POOLS,
+            segments=cues,
+            acoustic_classifications=MOCK_ACOUSTIC,
+        )
+        assert res_subdub.get("ok") is True
+        assert render_captured_subdub.get("keep_original_audio") is True
+        assert render_captured_subdub.get("target_duration_seconds") == 12.0
+        assert render_captured_subdub.get("subtitle_bytes") != b""
+
+        # 2. pure dub with keep_original_audio=False
+        render_captured_dub = {}
+
+        async def fake_render_dub(src_bytes: bytes, dubbed_audio: bytes = b"", subtitle_bytes: bytes = b"", **kw):
+            render_captured_dub.update(kw)
+            render_captured_dub["subtitle_bytes"] = subtitle_bytes
+            render_captured_dub["dubbed_audio"] = dubbed_audio
+            return (b"RENDERED_DUB_MP4", "success")
+
+        async def fake_prepare_dub(st: dict, *, require_auto_cast: bool = False):
+            return {
+                "source_bytes": dummy_source.read_bytes(),
+                "source_file": str(dummy_source),
+                "output_subtitle": VALID_SRT_TEXT,
+                "output_script": "Hi",
+                "output_segments": cues,
+                "content_type": "video/mp4",
+                "keep_original_audio": False,
+                "state": {
+                    "input_duration_seconds": 15.0,
+                    "keep_original_audio": False,
+                },
+            }
+
+        res_dub = await smart.run_auto_smart_multivoice_blackbox(
+            lane_mode="dub",
+            state={
+                "mode": "dub",
+                "auto_smart_multivoice_opt_in": True,
+                "auto_speaker_lane": "auto_smart_multivoice",
+                "source": str(dummy_source),
+                "source_bytes": dummy_source.read_bytes(),
+                "keep_original_audio": False,
+                "_pipeline_job_id": "job_case8_dub",
+                "_pipeline_workspace": str(tmp_path / "ws_dub"),
+            },
+            job_id="job_case8_dub",
+            checkpoint_workspace=str(tmp_path / "ws_dub"),
+            prepare_subtitles=fake_prepare_dub,
+            synthesize_segments=fake_synthesize,
+            render_video=fake_render_dub,
+            build_timeline_audio=fake_build_timeline_audio,
+            validated_pools=TEST_POOLS,
+            segments=cues,
+            acoustic_classifications=MOCK_ACOUSTIC,
+        )
+        assert res_dub.get("ok") is True
+        assert render_captured_dub.get("keep_original_audio") is False
+        assert render_captured_dub.get("target_duration_seconds") == 15.0
+        assert render_captured_dub.get("subtitle_bytes") == b""
 
