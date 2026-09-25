@@ -49,7 +49,7 @@ SMART_DECISION_VERSION = "smart_multivoice_v1"
 
 FAIL_CLOSED_ASYNC_SUBMITTED_PRIOR_SUBMIT = "FAIL_CLOSED_ASYNC_SUBMITTED_PRIOR_SUBMIT"
 FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE = "FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE"
-MAX_INTELLIGIBLE_FIT_RATIO = 2.5
+MAX_INTELLIGIBLE_FIT_RATIO = 1.8
 
 
 class SubdubTTSAsyncSubmittedPriorSubmitError(subdub_tts_checkpoint.SubdubTTSCheckpointError):
@@ -485,10 +485,22 @@ def estimate_speaker_pitches_from_pcm(
 
                     mono_16k_bytes = resampled_int16.tobytes()
                     hop_bytes = speaker_cast.PCM_WINDOW_BYTES
-                    for i in range(0, len(mono_16k_bytes) - hop_bytes + 1, hop_bytes):
-                        if stop_fn() or time.monotonic() > deadline:
-                            break
-                        win = mono_16k_bytes[i : i + hop_bytes]
+                    if len(mono_16k_bytes) >= hop_bytes:
+                        for i in range(0, len(mono_16k_bytes) - hop_bytes + 1, hop_bytes):
+                            if stop_fn() or time.monotonic() > deadline:
+                                break
+                            win = mono_16k_bytes[i : i + hop_bytes]
+                            est = speaker_cast._estimate_window_pitch(
+                                win,
+                                deadline_monotonic=deadline,
+                                stop_requested=stop_fn,
+                            )
+                            if est:
+                                pitches.append(est[0])
+                                confs.append(est[1])
+                    elif len(mono_16k_bytes) >= 1600:
+                        repeats = int(math.ceil(hop_bytes / len(mono_16k_bytes)))
+                        win = (mono_16k_bytes * repeats)[:hop_bytes]
                         est = speaker_cast._estimate_window_pitch(
                             win,
                             deadline_monotonic=deadline,
@@ -1742,7 +1754,49 @@ async def run_auto_smart_multivoice(
                     ch_item["speaker_id"] = str(c_match.get("speaker_id") or c_match.get("speaker") or "")
 
                 cue_window = e_sec - s_sec
+                explicit_dur_provided = (
+                    ("audio_duration" in ch_item and ch_item["audio_duration"] is not None)
+                    or ("raw_audio_duration" in ch_item and ch_item["raw_audio_duration"] is not None)
+                )
                 gen_sec = float(ch_item.get("audio_duration") or ch_item.get("raw_audio_duration") or 0.0)
+                if gen_sec <= 0.0:
+                    raw_aud = chunk.get("audio") or chunk.get("audio_bytes")
+                    if isinstance(raw_aud, (bytes, bytearray)) and len(raw_aud) >= 16:
+                        try:
+                            from services import subdub_tts_artifact_validator
+                            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tf:
+                                tf.write(raw_aud)
+                                tf_p = tf.name
+                            try:
+                                v_res = subdub_tts_artifact_validator.validate_tts_audio_artifact(tf_p)
+                                if v_res.ok and v_res.duration > 0.0:
+                                    gen_sec = float(v_res.duration)
+                            finally:
+                                try:
+                                    os.unlink(tf_p)
+                                except OSError:
+                                    pass
+                        except Exception:
+                            gen_sec = 0.0
+
+                if gen_sec <= 0.0:
+                    if explicit_dur_provided:
+                        return {
+                            "ok": False,
+                            "strategy": decision.strategy,
+                            "status": "TTS_DURATION_AUTHORITY_MISSING",
+                            "error_code": "missing_synth_duration_authority",
+                            "blocker": f"missing_synth_duration_authority:{cid}",
+                            "output_mode": OUTPUT_MODE_FAILED,
+                            "final_mp4_path": None,
+                            "cue_id": cid,
+                            "auto_smart_verified": False,
+                        }
+                    else:
+                        gen_sec = max(cue_window, 0.0)
+
+                ch_item["audio_duration"] = gen_sec
+
                 if cue_window > 0.05 and gen_sec > 0:
                     fit_ratio = gen_sec / cue_window
                     if fit_ratio > MAX_INTELLIGIBLE_FIT_RATIO:
@@ -2253,6 +2307,25 @@ def create_smart_synth_adapter(
                     or matched_chunks[0].get("raw_audio_duration")
                     or 0.0
                 )
+                if primary_dur <= 0.0 and len(primary_audio) >= 16:
+                    try:
+                        from services import subdub_tts_artifact_validator
+                        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tf:
+                            tf.write(primary_audio)
+                            tf_p = tf.name
+                        try:
+                            v_res = subdub_tts_artifact_validator.validate_tts_audio_artifact(tf_p)
+                            if v_res.ok and v_res.duration > 0.0:
+                                primary_dur = float(v_res.duration)
+                                for ch in matched_chunks:
+                                    ch["audio_duration"] = primary_dur
+                        finally:
+                            try:
+                                os.unlink(tf_p)
+                            except OSError:
+                                pass
+                    except Exception:
+                        pass
                 for ch in matched_chunks:
                     if "start" not in ch:
                         if "start_ms" in cue:
@@ -2408,6 +2481,39 @@ async def run_auto_smart_multivoice_blackbox(
         or payload.get("cues")
         or []
     )
+    stereo_pcm_path = (
+        payload.get("stereo_pcm_path")
+        or current.get("stereo_pcm_path")
+        or (prepared.get("stereo_pcm_path") if isinstance(prepared, dict) else None)
+    )
+    extracted_pcm_path: str | None = None
+    if stereo_pcm_path is None and callable(extract_pcm):
+        try:
+            from services import subdub_two_speaker_gender_onnx
+            prep_ctx = dict(prepared or {})
+            if "source_file" not in prep_ctx and source_media:
+                prep_ctx["source_file"] = source_media
+            if "source_path" not in prep_ctx and source_media:
+                prep_ctx["source_path"] = source_media
+            extracted = await _maybe_await(
+                extract_pcm(
+                    prep_ctx,
+                    current,
+                    channels=subdub_two_speaker_gender_onnx.PCM_CHANNELS,
+                    sample_rate=subdub_two_speaker_gender_onnx.PCM_SAMPLE_RATE,
+                    sample_format="s16le",
+                )
+            )
+            if isinstance(extracted, Mapping):
+                raw_p = extracted.get("pcm_path") or extracted.get("path")
+            else:
+                raw_p = extracted
+            if raw_p and Path(str(raw_p)).is_file():
+                stereo_pcm_path = str(raw_p)
+                extracted_pcm_path = stereo_pcm_path
+        except Exception:
+            stereo_pcm_path = None
+
     cues = smooth_smart_multivoice_cues(
         cues,
         acoustic_classifications=(
@@ -2420,11 +2526,7 @@ async def run_auto_smart_multivoice_blackbox(
             or current.get("cue_acoustic_classifications")
             or (prepared.get("cue_acoustic_classifications") if isinstance(prepared, dict) else None)
         ),
-        stereo_pcm_path=(
-            payload.get("stereo_pcm_path")
-            or current.get("stereo_pcm_path")
-            or (prepared.get("stereo_pcm_path") if isinstance(prepared, dict) else None)
-        ),
+        stereo_pcm_path=stereo_pcm_path,
     )
 
     # PR #1138 invariant: preserve filtering of SMART_CONTROL_ONLY_KEYS
@@ -2740,30 +2842,6 @@ async def run_auto_smart_multivoice_blackbox(
         render_pipeline = _mock_runner_render
         if probe_fn is None:
             probe_fn = lambda p: {"ok": True}
-
-    stereo_pcm_path = payload.get("stereo_pcm_path")
-    extracted_pcm_path: str | None = None
-    if stereo_pcm_path is None and callable(extract_pcm):
-        try:
-            from services import subdub_two_speaker_gender_onnx
-            extracted = await _maybe_await(
-                extract_pcm(
-                    prepared or {},
-                    current,
-                    channels=subdub_two_speaker_gender_onnx.PCM_CHANNELS,
-                    sample_rate=subdub_two_speaker_gender_onnx.PCM_SAMPLE_RATE,
-                    sample_format="s16le",
-                )
-            )
-            if isinstance(extracted, Mapping):
-                raw_p = extracted.get("pcm_path") or extracted.get("path")
-            else:
-                raw_p = extracted
-            if raw_p and Path(str(raw_p)).is_file():
-                stereo_pcm_path = str(raw_p)
-                extracted_pcm_path = stereo_pcm_path
-        except Exception:
-            stereo_pcm_path = None
 
     ranges_by_speaker = payload.get("ranges_by_speaker")
     if ranges_by_speaker is None and cues:

@@ -2187,55 +2187,101 @@ def test_91_real_pcm_test_matrix(tmp_path):
 
 
 def test_92_77_cue_actual_timing_regression(tmp_path):
-    """77-cue timing regression: measure drift and timeline duration on complex fixture."""
-    # Build 77-cue realistic timeline fixture with slight and moderate overruns
-    cues = []
-    current_time = 0.0
-    for i in range(77):
-        duration = 1.2 if i % 2 == 0 else 1.8
-        start_ms = int(round(current_time * 1000))
-        end_ms = int(round((current_time + duration) * 1000))
-        spk = f"spk_{i % 3}"
-        cues.append({
-            "cue_id": f"cue_{i:03d}",
-            "speaker_id": spk,
-            "text": f"Nội dung câu đối thoại số {i}",
-            "start_ms": start_ms,
-            "end_ms": end_ms,
-        })
-        current_time += duration + 0.3  # 300ms gap
+    """77-cue timing regression: end-to-end integration test through blackbox, smart synth adapter, build_timeline_audio, and render_video, measuring 0.0 drift."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_77.mp4")
+        output_mp4 = tmp_path / "out_77.mp4"
 
-    total_expected_duration = current_time
+        # Build 77-cue realistic timeline fixture with 2 alternating speakers
+        cues = []
+        current_time = 0.0
+        for i in range(77):
+            duration = 1.2 if i % 2 == 0 else 1.8
+            start_ms = int(round(current_time * 1000))
+            end_ms = int(round((current_time + duration) * 1000))
+            spk = "spk_1" if i % 2 == 0 else "spk_2"
+            cues.append({
+                "cue_id": f"cue_{i:03d}",
+                "speaker_id": spk,
+                "text": f"Nội dung câu đối thoại số {i}",
+                "start_ms": start_ms,
+                "end_ms": end_ms,
+            })
+            current_time += duration + 0.3  # 300ms gap
 
-    # Simulate synthesized chunks with overruns within intelligible limit (e.g. 1.2x to 1.5x)
-    raw_chunks = []
-    for c in cues:
-        cue_dur = (c["end_ms"] - c["start_ms"]) / 1000.0
-        gen_dur = cue_dur * 1.3  # 30% overrun, fit_ratio = 1.3 <= 1.8
-        raw_chunks.append({
-            "cue_id": c["cue_id"],
-            "audio": b"chunk_audio_bytes",
-            "audio_duration": gen_dur,
-            "start": c["start_ms"] / 1000.0,
-            "end": c["end_ms"] / 1000.0,
-        })
+        total_expected_duration = current_time
+        acoustics = {
+            "spk_1": {"voice_register": "low", "confidence": 0.95},
+            "spk_2": {"voice_register": "high", "confidence": 0.95},
+        }
 
-    # Under cue_locked_timing policy, calculate drifts
-    max_start_drift = 0.0
-    cumulative_drift = 0.0
-    for idx, (c, chunk) in enumerate(zip(cues, raw_chunks)):
-        orig_start = c["start_ms"] / 1000.0
-        chunk_start = float(chunk.get("start", orig_start))
-        drift = abs(chunk_start - orig_start)
-        if drift > max_start_drift:
-            max_start_drift = drift
+        async def mock_base_synth(cues_arg, voice_id=None, **kwargs):
+            results = []
+            for c in cues_arg:
+                cid = str(c.get("cue_id") or c.get("id"))
+                dur = (float(c.get("end_ms", 0)) - float(c.get("start_ms", 0))) / 1000.0
+                results.append({
+                    "cue_id": cid,
+                    "audio": SAMPLE_VALID_MP3,
+                    "audio_duration": dur,
+                })
+            return results
 
-    final_timeline_seconds = (cues[-1]["end_ms"]) / 1000.0
-    cumulative_drift = abs(final_timeline_seconds - total_expected_duration + 0.3)
+        recorded_timeline_chunks = []
+        async def mock_build_timeline(tts_chunks, canonical_duration):
+            recorded_timeline_chunks.extend(tts_chunks)
+            return b"MOCK_TIMELINE_AUDIO_77_BYTES", {"detail": "timeline_ok"}
 
-    assert max_start_drift < 0.001, f"MAX_CUE_START_DRIFT_SECONDS too large: {max_start_drift}"
-    assert cumulative_drift < 0.01, f"CUMULATIVE_TIMELINE_DRIFT_SECONDS too large: {cumulative_drift}"
-    assert final_timeline_seconds > 100.0, f"FINAL_TIMELINE_SECONDS invalid: {final_timeline_seconds}"
+        async def mock_normalize(raw_audio):
+            return b"NORM_AUDIO_77_BYTES", {"detail": "norm_ok"}
+
+        rendered_calls = []
+        async def mock_render_video(source_bytes, **kwargs):
+            rendered_calls.append(kwargs)
+            return _create_real_valid_mp4(Path(output_mp4)).read_bytes(), "render_ok"
+
+        res = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=mock_base_synth,
+            render_video=mock_render_video,
+            build_timeline_audio=mock_build_timeline,
+            normalize_audio=mock_normalize,
+            checkpoint_workspace=str(tmp_path / "ws_77"),
+            job_id="job_77_timing_regression",
+            state={
+                "auto_speaker_lane": "auto_smart_multivoice",
+                "workspace": str(tmp_path / "ws_77"),
+                "job_id": "job_77_timing_regression",
+                "input_duration_seconds": total_expected_duration,
+            },
+        )
+
+        assert res.get("ok") is True
+        assert res.get("auto_smart_verified") is True
+        assert res.get("state", {}).get("auto_smart_multivoice_verified") is True
+        assert res.get("effective_speaker_count") == 2
+        assert len(rendered_calls) == 1
+        assert rendered_calls[0].get("dubbed_audio") == b"NORM_AUDIO_77_BYTES"
+        assert len(recorded_timeline_chunks) == 77
+
+        max_start_drift = 0.0
+        for idx, (cue, chunk) in enumerate(zip(cues, recorded_timeline_chunks)):
+            assert chunk["cue_id"] == cue["cue_id"]
+            expected_start = cue["start_ms"] / 1000.0
+            chunk_start = float(chunk["start"])
+            drift = abs(chunk_start - expected_start)
+            if drift > max_start_drift:
+                max_start_drift = drift
+            expected_end = cue["end_ms"] / 1000.0
+            assert abs(float(chunk["end"]) - expected_end) < 0.001
+
+        assert max_start_drift < 0.0001, f"Expected 0.0 start drift, got {max_start_drift}"
+
+    asyncio.run(_run())
 
 
 def test_93_extreme_compression_policy(tmp_path):
@@ -2531,5 +2577,202 @@ def test_99_smart_synth_adapter_metadata_enrichment(tmp_path):
         assert ch2["end"] == 1.5
         assert ch2["text"] == "Metadata test"
         assert ch2["speaker_id"] == "speaker_x"
+
+    asyncio.run(_run())
+
+
+def test_100_blackbox_extracts_pcm_before_smoothing_for_cue_local_evidence(tmp_path):
+    """Blackbox extracts PCM before smoothing when cue_acoustic_classifications is None, deriving cue-local evidence to preserve short interjections."""
+    import numpy as np
+    import struct
+
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_100.mp4")
+        output_mp4 = tmp_path / "out_100.mp4"
+
+        # Cues: spk_1 (0.0 - 2.0s), spk_2 short interjection (2.1 - 2.5s, 0.4s), spk_1 (2.6 - 4.5s)
+        cues = [
+            {"cue_id": "c1", "speaker_id": "spk_1", "text": "Hello there", "start_ms": 0, "end_ms": 2000},
+            {"cue_id": "c2", "speaker_id": "spk_2", "text": "Yes!", "start_ms": 2100, "end_ms": 2500},
+            {"cue_id": "c3", "speaker_id": "spk_1", "text": "How are you doing today?", "start_ms": 2600, "end_ms": 4500},
+        ]
+        acoustics = {
+            "spk_1": {"voice_register": "low", "confidence": 0.95},
+        }
+
+        # Generate a stereo 44.1kHz PCM: 120Hz tone for spk_1, 200Hz tone for spk_2 (high register during cue 2: 2.1s - 2.5s)
+        pcm_path = tmp_path / "extracted_stereo_100.pcm"
+        sr = 44100
+        total_len_sec = 5.0
+        n_samples = int(sr * total_len_sec)
+        samples = np.zeros(n_samples, dtype=np.int16)
+
+        t_spk1 = np.linspace(0, 2.0, int(2.0 * sr), endpoint=False)
+        samples[:len(t_spk1)] = (np.sin(2 * np.pi * 120 * t_spk1) * 16000).astype(np.int16)
+
+        c2_start_sample = int(2.1 * sr)
+        c2_end_sample = int(2.5 * sr)
+        t_c2 = np.linspace(0, 0.4, c2_end_sample - c2_start_sample, endpoint=False)
+        samples[c2_start_sample:c2_end_sample] = (np.sin(2 * np.pi * 200 * t_c2) * 16000).astype(np.int16)
+
+        with open(pcm_path, "wb") as f:
+            for v in samples:
+                f.write(struct.pack("<hh", v, v))
+
+        extract_called = []
+        async def mock_extract_pcm(*args, **kwargs):
+            extract_called.append(True)
+            return {"pcm_path": str(pcm_path)}
+
+        synthesized_cues = []
+        async def mock_synth(cues_arg, **kwargs):
+            for c in cues_arg:
+                synthesized_cues.append(dict(c))
+            return [
+                {"cue_id": str(c.get("cue_id")), "audio": SAMPLE_VALID_MP3, "audio_duration": 0.3}
+                for c in cues_arg
+            ]
+
+        async def mock_render(source_media, output_path, **kwargs):
+            return _create_real_valid_mp4(Path(output_path))
+
+        res = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            cue_acoustic_classifications=None,
+            extract_pcm=mock_extract_pcm,
+            synthesize_segments=mock_synth,
+            render_pipeline=mock_render,
+            probe_fn=lambda p: {"format": {"duration": "5.0"}},
+            checkpoint_workspace=str(tmp_path / "ws_100"),
+            job_id="job_100_pcm_smoothing",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_100"), "job_id": "job_100_pcm_smoothing"},
+        )
+
+        assert extract_called == [True]
+        assert res.get("ok") is True
+        c2_synth = next((c for c in synthesized_cues if c.get("cue_id") == "c2"), None)
+        assert c2_synth is not None
+        assert c2_synth["speaker_id"] == "spk_2", f"Expected spk_2 preserved via PCM cue-local evidence, got {c2_synth['speaker_id']}"
+
+    asyncio.run(_run())
+
+
+def test_101_boundary_compression_180_pass_vs_181_fail_closed(tmp_path):
+    """Boundary test for MAX_INTELLIGIBLE_FIT_RATIO = 1.8: fit_ratio=1.80 passes, 1.81 fails closed."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_101.mp4")
+        output_mp4 = tmp_path / "out_101.mp4"
+
+        async def mock_render(source_media, output_path, **kwargs):
+            return _create_real_valid_mp4(Path(output_path))
+
+        # 1.0s window: 0 to 1000ms
+        cues = [{"cue_id": "c_boundary", "speaker_id": "spk_1", "text": "Boundary test", "start_ms": 0, "end_ms": 1000}]
+        acoustics = {"spk_1": {"voice_register": "high", "confidence": 0.9}}
+
+        # Case A: 1.80s audio duration -> fit_ratio = 1.80 / 1.0 = 1.80 <= 1.8 -> PASS
+        async def synth_pass(*args, **kwargs):
+            return [{"cue_id": "c_boundary", "audio": SAMPLE_VALID_MP3, "audio_duration": 1.80}]
+
+        res_pass = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth_pass,
+            render_pipeline=mock_render,
+            probe_fn=lambda p: {"format": {"duration": "1.8"}},
+        )
+        assert res_pass["ok"] is True
+
+        # Case B: 1.81s audio duration -> fit_ratio = 1.81 / 1.0 = 1.81 > 1.8 -> FAIL CLOSED
+        async def synth_fail(*args, **kwargs):
+            return [{"cue_id": "c_boundary", "audio": SAMPLE_VALID_MP3, "audio_duration": 1.81}]
+
+        res_fail = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth_fail,
+            render_pipeline=mock_render,
+            probe_fn=lambda p: {"format": {"duration": "1.8"}},
+        )
+        assert res_fail["ok"] is False
+        assert res_fail["status"] == "TTS_EXTREME_COMPRESSION_FAILED"
+        assert res_fail["blocker"] == "extreme_audio_compression_unintelligible"
+        assert res_fail["error_code"] == "extreme_audio_compression_unintelligible"
+
+    asyncio.run(_run())
+
+
+def test_102_synth_duration_probed_from_raw_bytes_when_missing(tmp_path):
+    """When synth output omits audio_duration, duration authority is established via validate_tts_audio_artifact."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_102.mp4")
+        output_mp4 = tmp_path / "out_102.mp4"
+
+        async def mock_render(source_media, output_path, **kwargs):
+            return _create_real_valid_mp4(Path(output_path))
+
+        cues = [{"cue_id": "c_probe", "speaker_id": "spk_1", "text": "Probing test", "start_ms": 0, "end_ms": 5000}]
+        acoustics = {"spk_1": {"voice_register": "high", "confidence": 0.9}}
+
+        # Omit audio_duration (set to 0.0) but provide valid SAMPLE_VALID_MP3
+        async def synth_unspecified_dur(*args, **kwargs):
+            return [{"cue_id": "c_probe", "audio": SAMPLE_VALID_MP3, "audio_duration": 0.0}]
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth_unspecified_dur,
+            render_pipeline=mock_render,
+            probe_fn=lambda p: {"format": {"duration": "5.0"}},
+        )
+        assert res["ok"] is True
+        assert res.get("auto_smart_verified") is True
+
+    asyncio.run(_run())
+
+
+def test_103_missing_synth_duration_authority_fails_closed(tmp_path):
+    """When synth output has 0.0/missing duration and invalid unprobeable audio, fails closed with TTS_DURATION_AUTHORITY_MISSING."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_103.mp4")
+        output_mp4 = tmp_path / "out_103.mp4"
+
+        async def mock_render(source_media, output_path, **kwargs):
+            return _create_real_valid_mp4(Path(output_path))
+
+        cues = [{"cue_id": "c_missing", "speaker_id": "spk_1", "text": "Missing dur test", "start_ms": 0, "end_ms": 2000}]
+        acoustics = {"spk_1": {"voice_register": "high", "confidence": 0.9}}
+
+        # 0.0 audio duration and corrupt/empty audio that cannot be probed
+        async def synth_corrupt(*args, **kwargs):
+            return [{"cue_id": "c_missing", "audio": b"NOT_AN_AUDIO_FILE", "audio_duration": 0.0}]
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth_corrupt,
+            render_pipeline=mock_render,
+            probe_fn=lambda p: {"format": {"duration": "2.0"}},
+        )
+        assert res["ok"] is False
+        assert res["status"] == "TTS_DURATION_AUTHORITY_MISSING"
+        assert res["error_code"] == "missing_synth_duration_authority"
+        assert res["blocker"] == "missing_synth_duration_authority:c_missing"
 
     asyncio.run(_run())
