@@ -304,8 +304,22 @@ def test_11_selfshot3_controlled_keyframe_i2v_execution(tmp_path: Path):
         },
     }
 
+    mock_continuity = {
+        "ok": True,
+        "blocker": "",
+        "evidence_source": "local_vision_validator",
+        "independent_visual_validation": "LOCAL_MODEL",
+        "person_required": True,
+        "object_required": False,
+        "relationship_required": False,
+        "person_identity": True,
+        "object_identity": True,
+        "person_object_relationship": True,
+    }
+
     with patch("services.video_real_render_connector._extract_selfshot_keyframe", return_value=str(keyframe_file)), \
-         patch("services.video_real_render_connector.run_provider_generation", return_value=mock_gen_result) as mock_gen:
+         patch("services.video_real_render_connector.run_provider_generation", return_value=mock_gen_result) as mock_gen, \
+         patch("services.video_selfshot_continuity_validator.validate_selfshot_scene_continuity", return_value=mock_continuity):
 
         res = video_real_render_connector._render_selfshot3_video_to_video(
             job={
@@ -331,7 +345,11 @@ def test_11_selfshot3_controlled_keyframe_i2v_execution(tmp_path: Path):
         assert res["route"] == "controlled_keyframe_image_to_video"
         assert res["truth"] == "image_to_video_fallback_not_direct_v2v"
         assert res["provider"] == "key4u_video"
+        assert res["model"] == "kling-v3"
         assert res["continuity_validation_required"] is True
+        assert res["continuity_validation_passed"] is True
+        assert res["evidence_source"] == "local_vision_validator"
+        assert res["independent_visual_validation"] == "LOCAL_MODEL"
         assert res["continuity_scores"]["identity"] >= 0.8
 
         assert mock_gen.call_count == 1
@@ -542,8 +560,22 @@ def test_19_key4u_i2v_wire_model_pinning_in_selfshot3_connector(tmp_path: Path):
         },
     }
 
+    mock_continuity = {
+        "ok": True,
+        "blocker": "",
+        "evidence_source": "local_vision_validator",
+        "independent_visual_validation": "LOCAL_MODEL",
+        "person_required": True,
+        "object_required": True,
+        "relationship_required": True,
+        "person_identity": True,
+        "object_identity": True,
+        "person_object_relationship": True,
+    }
+
     with patch("services.video_real_render_connector._extract_selfshot_keyframe", return_value=str(keyframe)), \
-         patch("services.video_real_render_connector.run_provider_generation", return_value=mock_gen) as mock_run:
+         patch("services.video_real_render_connector.run_provider_generation", return_value=mock_gen) as mock_run, \
+         patch("services.video_selfshot_continuity_validator.validate_selfshot_scene_continuity", return_value=mock_continuity):
 
         res = video_real_render_connector._render_selfshot3_video_to_video(
             job={"source_video_local_path": str(source_video), "public_user_confirmed": True, "submit_source": "public_user_final_confirm", "route": "controlled_keyframe_image_to_video"},
@@ -556,6 +588,9 @@ def test_19_key4u_i2v_wire_model_pinning_in_selfshot3_connector(tmp_path: Path):
 
         assert res["ok"] is True
         assert res["model"] == "kling-v3"
+        assert res["continuity_validation_passed"] is True
+        assert res["evidence_source"] == "local_vision_validator"
+        assert res["independent_visual_validation"] == "LOCAL_MODEL"
         for layer in ("identity", "body", "motion", "object", "interaction", "temporal"):
             assert res["continuity_scores"][layer] >= 0.8
         gen_req = mock_run.call_args[0][0]
@@ -775,6 +810,344 @@ def test_27_router_preflight_accepts_kling_v3_model_as_valid():
     assert bad_adapter.env["KEY4U_VIDEO_MODEL"] == ""
     assert bad_adapter.env["KEY4U_VIDEO_ENABLED"] == ""
     assert bad_adapter._configured() is False
+
+
+# ---------------------------------------------------------------------------
+# 10. End-to-End Key4U I2V Wire & Local Continuity Verification
+# ---------------------------------------------------------------------------
+
+def test_28_end_to_end_key4u_i2v_wire_selfshot2(tmp_path: Path, monkeypatch):
+    """End-to-end Key4U I2V wire test for SelfShot2 intercepting GenericHttpVideoProvider._open_json."""
+    from providers.video_generic_http_provider import GenericHttpVideoProvider
+    from services.video_provider_base import VideoArtifactResult
+    import base64
+
+    source_video = tmp_path / "source.mp4"
+    source_video.write_bytes(b"VALID_SOURCE_MP4_CONTENT")
+    raw_path = str(tmp_path / "raw_ss2.mp4")
+    keyframe = tmp_path / "kf_ss2.jpg"
+    keyframe_bytes = b"BINARY_IMAGE_BYTES_FOR_KEY4U_I2V_SS2_KEYFRAME"
+    keyframe.write_bytes(keyframe_bytes)
+
+    captured_wire_payloads: list[tuple[str, dict]] = []
+    def fake_open_json(self, url, payload=None, *, method="POST", **_kwargs):
+        if method == "POST":
+            captured_wire_payloads.append((url, dict(payload or {})))
+            return {
+                "ok": True,
+                "status_code": 200,
+                "body": {"code": 0, "data": {"task_id": "key4u_wire_task_ss2_001"}},
+                "response_shape": {"type": "dict"},
+            }
+        return {
+            "ok": True,
+            "status_code": 200,
+            "body": {
+                "code": 0,
+                "data": {
+                    "task_status": "succeed",
+                    "task_result": {"videos": [{"url": "https://api.key4u.vn/media/ss2_rendered.mp4"}]},
+                },
+            },
+            "response_shape": {"type": "dict"},
+        }
+
+    mock_continuity = {
+        "ok": True,
+        "blocker": "",
+        "evidence_source": "local_vision_validator",
+        "independent_visual_validation": "LOCAL_MODEL",
+        "person_required": True,
+        "object_required": False,
+        "relationship_required": False,
+        "person_identity": True,
+        "object_identity": True,
+        "person_object_relationship": True,
+    }
+
+    def fake_materialize(url, *args, **kwargs):
+        out = tmp_path / "downloaded_ss2.mp4"
+        out.write_bytes(b"DOWNLOADED_MP4_CONTENT_SS2")
+        return VideoArtifactResult(
+            ok=True,
+            local_path=str(out),
+            bytes=len(b"DOWNLOADED_MP4_CONTENT_SS2"),
+            duration=5.0,
+            has_video_stream=True,
+        )
+
+    monkeypatch.setattr(GenericHttpVideoProvider, "_open_json", fake_open_json)
+    monkeypatch.setattr("providers.video_generic_http_provider.materialize_video_url", fake_materialize)
+    monkeypatch.setattr(
+        "services.video_real_render_connector._materialize_selfshot2_source_segment",
+        lambda *args, **kwargs: str(source_video),
+    )
+    monkeypatch.setattr(
+        "services.video_real_render_connector._extract_selfshot_keyframe",
+        lambda *args, **kwargs: str(keyframe),
+    )
+    monkeypatch.setattr(
+        "services.video_selfshot_continuity_validator.validate_selfshot_scene_continuity",
+        lambda *args, **kwargs: mock_continuity,
+    )
+
+    env_overrides = {
+        "KEY4U_API_KEY": "test_wire_api_key_valid",
+        "KEY4U_VIDEO_ENABLED": "1",
+        "KEY4U_VIDEO_SUBMIT_URL": "https://api.key4u.vn/kling/v1/videos/image2video",
+        "KEY4U_VIDEO_POLL_URL": "https://api.key4u.vn/kling/v1/videos/query?id={task_id}",
+        "KEY4U_BASE_URL": "https://api.key4u.vn",
+    }
+    for k, v in env_overrides.items():
+        monkeypatch.setenv(k, v)
+
+    res = video_real_render_connector._render_selfshot2_video_to_video(
+        job={
+            "source_video_local_path": str(source_video),
+            "public_user_confirmed": True,
+            "submit_source": "public_user_final_confirm",
+            "route": "controlled_keyframe_image_to_video",
+        },
+        asset_pack={
+            "route": "controlled_keyframe_image_to_video",
+            "public_user_confirmed": True,
+            "submit_source": "public_user_final_confirm",
+            "scene_duration_seconds": 5,
+        },
+        raw_path=raw_path,
+        provider_order=["key4u_video"],
+        fallback_prompt="SelfShot2 cinematic scene replacement",
+        aspect_ratio="9:16",
+        scene_index=0,
+    )
+
+    assert res["ok"] is True
+    assert res["provider"] == "key4u_video"
+    assert res["model"] == "kling-v3"
+    assert res["continuity_validation_passed"] is True
+    assert res["continuity_evidence"]["evidence_source"] == "local_vision_validator"
+
+    assert len(captured_wire_payloads) == 1
+    wire_url, wire_body = captured_wire_payloads[0]
+    assert wire_url == "https://api.key4u.vn/kling/v1/videos/image2video"
+    assert wire_body["model_name"] == "kling-v3"
+    assert wire_body["aspect_ratio"] == "9:16"
+    assert wire_body["duration"] == 5
+    assert "image" in wire_body
+    decoded_img = base64.b64decode(wire_body["image"])
+    assert decoded_img == keyframe_bytes
+
+
+def test_29_end_to_end_key4u_i2v_wire_selfshot3(tmp_path: Path, monkeypatch):
+    """End-to-end Key4U I2V wire test for SelfShot3 intercepting GenericHttpVideoProvider._open_json."""
+    from providers.video_generic_http_provider import GenericHttpVideoProvider
+    from services.video_provider_base import VideoArtifactResult
+    import base64
+
+    source_video = tmp_path / "source.mp4"
+    source_video.write_bytes(b"VALID_SOURCE_MP4_CONTENT")
+    raw_path = str(tmp_path / "raw_ss3.mp4")
+    keyframe = tmp_path / "kf_ss3.jpg"
+    keyframe_bytes = b"BINARY_IMAGE_BYTES_FOR_KEY4U_I2V_SS3_KEYFRAME"
+    keyframe.write_bytes(keyframe_bytes)
+
+    captured_wire_payloads: list[tuple[str, dict]] = []
+    def fake_open_json(self, url, payload=None, *, method="POST", **_kwargs):
+        if method == "POST":
+            captured_wire_payloads.append((url, dict(payload or {})))
+            return {
+                "ok": True,
+                "status_code": 200,
+                "body": {"code": 0, "data": {"task_id": "key4u_wire_task_ss3_001"}},
+                "response_shape": {"type": "dict"},
+            }
+        return {
+            "ok": True,
+            "status_code": 200,
+            "body": {
+                "code": 0,
+                "data": {
+                    "task_status": "succeed",
+                    "task_result": {"videos": [{"url": "https://api.key4u.vn/media/ss3_rendered.mp4"}]},
+                },
+            },
+            "response_shape": {"type": "dict"},
+        }
+
+    mock_continuity = {
+        "ok": True,
+        "blocker": "",
+        "evidence_source": "local_vision_validator",
+        "independent_visual_validation": "LOCAL_MODEL",
+        "person_required": True,
+        "object_required": False,
+        "relationship_required": False,
+        "person_identity": True,
+        "object_identity": True,
+        "person_object_relationship": True,
+    }
+
+    def fake_materialize(url, *args, **kwargs):
+        out = tmp_path / "downloaded_ss3.mp4"
+        out.write_bytes(b"DOWNLOADED_MP4_CONTENT_SS3")
+        return VideoArtifactResult(
+            ok=True,
+            local_path=str(out),
+            bytes=len(b"DOWNLOADED_MP4_CONTENT_SS3"),
+            duration=5.0,
+            has_video_stream=True,
+        )
+
+    monkeypatch.setattr(GenericHttpVideoProvider, "_open_json", fake_open_json)
+    monkeypatch.setattr("providers.video_generic_http_provider.materialize_video_url", fake_materialize)
+    monkeypatch.setattr(
+        "services.video_real_render_connector._extract_selfshot_keyframe",
+        lambda *args, **kwargs: str(keyframe),
+    )
+    monkeypatch.setattr(
+        "services.video_selfshot_continuity_validator.validate_selfshot_scene_continuity",
+        lambda *args, **kwargs: mock_continuity,
+    )
+
+    env_overrides = {
+        "KEY4U_API_KEY": "test_wire_api_key_valid",
+        "KEY4U_VIDEO_ENABLED": "1",
+        "KEY4U_VIDEO_SUBMIT_URL": "https://api.key4u.vn/kling/v1/videos/image2video",
+        "KEY4U_VIDEO_POLL_URL": "https://api.key4u.vn/kling/v1/videos/query?id={task_id}",
+        "KEY4U_BASE_URL": "https://api.key4u.vn",
+    }
+    for k, v in env_overrides.items():
+        monkeypatch.setenv(k, v)
+
+    res = video_real_render_connector._render_selfshot3_video_to_video(
+        job={
+            "source_video_local_path": str(source_video),
+            "public_user_confirmed": True,
+            "submit_source": "public_user_final_confirm",
+            "route": "controlled_keyframe_image_to_video",
+        },
+        asset_pack={
+            "route": "controlled_keyframe_image_to_video",
+            "public_user_confirmed": True,
+            "submit_source": "public_user_final_confirm",
+            "duration_seconds": 5,
+        },
+        raw_path=raw_path,
+        provider_order=["key4u_video"],
+        fallback_prompt="SelfShot3 cinematic one-take",
+        aspect_ratio="9:16",
+    )
+
+    assert res["ok"] is True
+    assert res["selfshot3"] is True
+    assert res["provider"] == "key4u_video"
+    assert res["model"] == "kling-v3"
+    assert res["continuity_validation_passed"] is True
+    assert res["evidence_source"] == "local_vision_validator"
+    assert res["independent_visual_validation"] == "LOCAL_MODEL"
+    for layer in ("identity", "body", "motion", "object", "interaction", "temporal"):
+        assert res["continuity_scores"][layer] >= 0.8
+
+    assert len(captured_wire_payloads) == 1
+    wire_url, wire_body = captured_wire_payloads[0]
+    assert wire_url == "https://api.key4u.vn/kling/v1/videos/image2video"
+    assert wire_body["model_name"] == "kling-v3"
+    assert wire_body["aspect_ratio"] == "9:16"
+    assert wire_body["duration"] == 5
+    assert "image" in wire_body
+    decoded_img = base64.b64decode(wire_body["image"])
+    assert decoded_img == keyframe_bytes
+
+
+def test_30_selfshot3_controlled_keyframe_i2v_fails_when_local_vision_validator_fails(tmp_path: Path):
+    """SelfShot3 controlled keyframe I2V fails closed when local vision validator detects continuity failure."""
+    source_video = tmp_path / "source.mp4"
+    source_video.write_bytes(b"VALID_SOURCE")
+    raw_path = str(tmp_path / "raw.mp4")
+    keyframe = tmp_path / "kf.jpg"
+    keyframe.write_bytes(b"KEYFRAME")
+
+    mock_gen = {
+        "ok": True,
+        "provider": "key4u_video",
+        "model": "kling-v3",
+        "provider_task_ids": ["task-1"],
+        "final_video_path": raw_path,
+        "output_path": raw_path,
+        "output_bytes": 1000,
+    }
+
+    mock_failed_continuity = {
+        "ok": False,
+        "blocker": "person_identity_unverified",
+        "failure_reason": "person_identity_unverified",
+        "evidence_source": "local_vision_validator",
+        "independent_visual_validation": "LOCAL_MODEL",
+        "person_required": True,
+        "object_required": False,
+    }
+
+    with patch("services.video_real_render_connector._extract_selfshot_keyframe", return_value=str(keyframe)), \
+         patch("services.video_real_render_connector.run_provider_generation", return_value=mock_gen), \
+         patch("services.video_selfshot_continuity_validator.validate_selfshot_scene_continuity", return_value=mock_failed_continuity):
+
+        with pytest.raises(RealVideoRenderError) as exc_info:
+            video_real_render_connector._render_selfshot3_video_to_video(
+                job={"source_video_local_path": str(source_video), "public_user_confirmed": True, "submit_source": "public_user_final_confirm", "route": "controlled_keyframe_image_to_video"},
+                asset_pack={"route": "controlled_keyframe_image_to_video", "public_user_confirmed": True, "submit_source": "public_user_final_confirm"},
+                raw_path=raw_path,
+                provider_order=["key4u_video"],
+                fallback_prompt="test",
+                aspect_ratio="9:16",
+            )
+
+        assert exc_info.value.diagnostics["blocker"] == "person_identity_unverified"
+        assert exc_info.value.diagnostics["result_rejected_locally"] is True
+
+
+def test_31_selfshot3_controlled_keyframe_i2v_rejects_mock_visual_evidence(tmp_path: Path):
+    """SelfShot3 controlled keyframe I2V rejects mock or non-local evidence and fails closed."""
+    source_video = tmp_path / "source.mp4"
+    source_video.write_bytes(b"VALID_SOURCE")
+    raw_path = str(tmp_path / "raw.mp4")
+    keyframe = tmp_path / "kf.jpg"
+    keyframe.write_bytes(b"KEYFRAME")
+
+    mock_gen = {
+        "ok": True,
+        "provider": "key4u_video",
+        "model": "kling-v3",
+        "provider_task_ids": ["task-1"],
+        "final_video_path": raw_path,
+        "output_path": raw_path,
+        "output_bytes": 1000,
+    }
+
+    mock_unverified = {
+        "ok": True,
+        "blocker": "",
+        "evidence_source": "unverified_mock_source",
+        "independent_visual_validation": "NOT_PERFORMED",
+        "person_required": True,
+    }
+
+    with patch("services.video_real_render_connector._extract_selfshot_keyframe", return_value=str(keyframe)), \
+         patch("services.video_real_render_connector.run_provider_generation", return_value=mock_gen), \
+         patch("services.video_selfshot_continuity_validator.validate_selfshot_scene_continuity", return_value=mock_unverified):
+
+        with pytest.raises(RealVideoRenderError) as exc_info:
+            video_real_render_connector._render_selfshot3_video_to_video(
+                job={"source_video_local_path": str(source_video), "public_user_confirmed": True, "submit_source": "public_user_final_confirm", "route": "controlled_keyframe_image_to_video"},
+                asset_pack={"route": "controlled_keyframe_image_to_video", "public_user_confirmed": True, "submit_source": "public_user_final_confirm"},
+                raw_path=raw_path,
+                provider_order=["key4u_video"],
+                fallback_prompt="test",
+                aspect_ratio="9:16",
+            )
+
+        assert exc_info.value.diagnostics["blocker"] == "mock_or_unverified_visual_evidence"
+        assert exc_info.value.diagnostics["result_rejected_locally"] is True
+
 
 
 
