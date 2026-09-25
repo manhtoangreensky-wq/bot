@@ -837,7 +837,16 @@ def _key4u_wire_payload(
             # 1. Model identifier mapping check
             # Official documented models include kling-v3, kling-v2-6, kling-v2-5-turbo, kling-v2-5-pro, kling-v2-1, kling-3.0-turbo
             # Internal alias 'kling-video' must NOT be sent directly on wire if unmapped.
-            model_candidate = str(data.get("model_name") or defaults.get("model_name") or "").strip()
+            model_candidate = str(
+                metadata.get("pinned_wire_model")
+                or data.get("model_name")
+                or defaults.get("model_name")
+                or data.get("model")
+                or defaults.get("model")
+                or metadata.get("selected_model")
+                or metadata.get("model_name")
+                or ""
+            ).strip()
             if not model_candidate or model_candidate == "kling-video":
                 raise VideoProviderContractError(
                     "I2V_MODEL_IDENTIFIER_MAPPING_GAP",
