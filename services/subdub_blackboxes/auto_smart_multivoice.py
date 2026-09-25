@@ -1577,38 +1577,38 @@ def resolve_synth_call_shape(
         try:
             sig.bind(dummy_cues, speaker_voice_map={"__probe__": dummy_voice})
             return "cues_speaker_voice_map", sig
-        except TypeError:
+        except Exception:
             pass
 
     if "voice_id" in param_names:
         try:
             sig.bind(dummy_cues, voice_id=dummy_voice)
             return "cues_voice_id_kw", sig
-        except TypeError:
+        except Exception:
             pass
         try:
             sig.bind(dummy_cues, dummy_voice)
             return "cues_voice_id_pos", sig
-        except TypeError:
+        except Exception:
             pass
 
     if has_varkw:
         try:
             sig.bind(dummy_cues, **kw)
             return "kwargs_voice_id", sig
-        except TypeError:
+        except Exception:
             pass
 
     try:
         sig.bind(dummy_cues, voice_id=dummy_voice)
         return "cues_voice_id_kw", sig
-    except TypeError:
+    except Exception:
         pass
 
     try:
         sig.bind(dummy_cues, speaker_voice_map={"__probe__": dummy_voice})
         return "cues_speaker_voice_map", sig
-    except TypeError:
+    except Exception:
         pass
 
     raise SubdubTTSUnprovenSynthSignatureError(
@@ -2085,9 +2085,7 @@ async def run_auto_smart_multivoice_blackbox(
 
     raw_output_subtitle = str(
         (prepared.get("output_subtitle") if isinstance(prepared, dict) else "")
-        or (prepared.get("srt_text") if isinstance(prepared, dict) else "")
         or current.get("output_subtitle")
-        or current.get("srt_text")
         or ""
     )
     raw_output_text = str(
@@ -2113,10 +2111,9 @@ async def run_auto_smart_multivoice_blackbox(
     canonical_srt_text = ""
     if "-->" in raw_output_subtitle:
         canonical_srt_text = raw_output_subtitle
-    elif (raw_output_text.strip() or raw_output_subtitle.strip()) and callable(srt_from_text_fn):
-        candidate_text = raw_output_text.strip() or raw_output_subtitle.strip()
+    elif raw_output_text.strip() and callable(srt_from_text_fn):
         try:
-            canonical_srt_text = str(srt_from_text_fn(candidate_text, int(canonical_duration)) or "")
+            canonical_srt_text = str(srt_from_text_fn(raw_output_text.strip(), int(canonical_duration)) or "")
         except Exception:
             canonical_srt_text = ""
     elif "-->" in raw_output_text:
@@ -2324,15 +2321,11 @@ async def run_auto_smart_multivoice_blackbox(
         elif isinstance(current, dict) and current.get("output_segments"):
             segments_list = list(current["output_segments"])
 
-        final_sub_text = canonical_srt_text if canonical_srt_text else (raw_output_subtitle if raw_output_subtitle else (raw_output_text if "-->" in raw_output_text else ""))
-        final_script_text = raw_output_text if raw_output_text else raw_output_subtitle
-        final_srt_text = canonical_srt_text if ("-->" in canonical_srt_text) else (raw_output_subtitle if ("-->" in raw_output_subtitle) else (raw_output_text if "-->" in raw_output_text else ""))
-
-        response["output_subtitle"] = final_sub_text
-        response["output_text"] = final_script_text
+        response["output_subtitle"] = raw_output_subtitle
+        response["output_text"] = raw_output_text
         response["output_segments"] = segments_list
-        response["srt_text"] = final_srt_text
-        response["srt_bytes"] = final_srt_text.encode("utf-8") if final_srt_text else b""
+        response["srt_text"] = canonical_srt_text
+        response["srt_bytes"] = canonical_srt_bytes
 
         result_state["output_subtitle"] = response["output_subtitle"]
         result_state["output_text"] = response["output_text"]

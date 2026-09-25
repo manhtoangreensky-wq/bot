@@ -745,3 +745,141 @@ async def test_case_8_render_policy_parity():
         assert render_captured_dub.get("target_duration_seconds") == 15.0
         assert render_captured_dub.get("subtitle_bytes") == b""
 
+
+@_sync
+async def test_case_9_output_subtitle_and_srt_fields_remain_distinct():
+    """CASE 9: When prepared provides output_subtitle="" and output_script="Xin chào",
+    response must retain output_subtitle="" and output_text="Xin chào",
+    while derived srt_text and srt_bytes contain "-->".
+    """
+    with tempfile.TemporaryDirectory() as td:
+        tmp_path = Path(td)
+        ws = str(tmp_path / "ws_case9")
+        dummy_source = tmp_path / "source.mp4"
+        dummy_source.write_bytes(b"DUMMY_MP4_HEADER_BYTES_FOR_TESTING" * 50)
+
+        cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Xin chào", "start": 0.0, "end": 2.0, "start_ms": 0, "end_ms": 2000}]
+
+        async def fake_build_timeline_audio(tts_chunks: list, duration: float):
+            return SAMPLE_VALID_MP3, {"duration": duration}
+
+        async def fake_synthesize(cues, *args, **kwargs):
+            return {
+                "chunks": [{"cue_id": "c1", "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 2.0}],
+                "provider": "key4u_mock",
+            }
+
+        async def fake_render(src_bytes: bytes, dubbed_audio: bytes = b"", subtitle_bytes: bytes = b"", **kw):
+            return (b"RENDERED_MP4", "success")
+
+        async def fake_prepare(st: dict, *, require_auto_cast: bool = False):
+            return {
+                "source_bytes": dummy_source.read_bytes(),
+                "source_file": str(dummy_source),
+                "output_subtitle": "",
+                "output_script": "Xin chào",
+                "output_segments": cues,
+                "content_type": "video/mp4",
+                "state": {
+                    "input_duration_seconds": 10.0,
+                },
+            }
+
+        state = {
+            "mode": "subtitle_plus_dub",
+            "auto_smart_multivoice_opt_in": True,
+            "auto_speaker_lane": "auto_smart_multivoice",
+            "source": str(dummy_source),
+            "source_bytes": dummy_source.read_bytes(),
+            "input_duration": 10.0,
+            "_pipeline_job_id": "job_case9",
+            "_pipeline_workspace": ws,
+        }
+
+        res = await smart.run_auto_smart_multivoice_blackbox(
+            lane_mode="subtitle_plus_dub",
+            state=state,
+            job_id="job_case9",
+            checkpoint_workspace=ws,
+            prepare_subtitles=fake_prepare,
+            synthesize_segments=fake_synthesize,
+            render_video=fake_render,
+            build_timeline_audio=fake_build_timeline_audio,
+            validated_pools=TEST_POOLS,
+            segments=cues,
+            acoustic_classifications=MOCK_ACOUSTIC,
+        )
+
+        assert res.get("ok") is True
+        assert res.get("output_subtitle") == "", f"Expected output_subtitle to be empty string, got: {res.get('output_subtitle')!r}"
+        assert res.get("output_text") == "Xin chào", f"Expected output_text to be 'Xin chào', got: {res.get('output_text')!r}"
+        assert "-->" in res.get("srt_text", ""), f"Expected '-->' in srt_text, got: {res.get('srt_text')!r}"
+        assert b"-->" in res.get("srt_bytes", b""), f"Expected b'-->' in srt_bytes, got: {res.get('srt_bytes')!r}"
+
+
+@_sync
+async def test_case_10_plain_output_subtitle_with_empty_output_text_follows_standard_fail_closed_behavior():
+    """CASE 10: When prepared provides plain output_subtitle without '-->' and output_text is empty,
+    subtitle_plus_dub mode MUST fail closed (not silently use plain output_subtitle as text).
+    """
+    with tempfile.TemporaryDirectory() as td:
+        tmp_path = Path(td)
+        ws = str(tmp_path / "ws_case10")
+        dummy_source = tmp_path / "source.mp4"
+        dummy_source.write_bytes(b"DUMMY_MP4_HEADER_BYTES_FOR_TESTING" * 50)
+
+        cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Hi", "start": 0.0, "end": 2.0, "start_ms": 0, "end_ms": 2000}]
+
+        async def fake_build_timeline_audio(tts_chunks: list, duration: float):
+            return SAMPLE_VALID_MP3, {"duration": duration}
+
+        async def fake_synthesize(cues, *args, **kwargs):
+            return {
+                "chunks": [{"cue_id": "c1", "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 2.0}],
+                "provider": "key4u_mock",
+            }
+
+        async def fake_render(src_bytes: bytes, dubbed_audio: bytes = b"", subtitle_bytes: bytes = b"", **kw):
+            return (b"RENDERED_MP4", "success")
+
+        async def fake_prepare(st: dict, *, require_auto_cast: bool = False):
+            return {
+                "source_bytes": dummy_source.read_bytes(),
+                "source_file": str(dummy_source),
+                "output_subtitle": "Plain subtitle without timestamp markers",
+                "output_script": "",
+                "output_segments": cues,
+                "content_type": "video/mp4",
+                "state": {
+                    "input_duration_seconds": 10.0,
+                },
+            }
+
+        state = {
+            "mode": "subtitle_plus_dub",
+            "auto_smart_multivoice_opt_in": True,
+            "auto_speaker_lane": "auto_smart_multivoice",
+            "source": str(dummy_source),
+            "source_bytes": dummy_source.read_bytes(),
+            "input_duration": 10.0,
+            "_pipeline_job_id": "job_case10",
+            "_pipeline_workspace": ws,
+        }
+
+        res = await smart.run_auto_smart_multivoice_blackbox(
+            lane_mode="subtitle_plus_dub",
+            state=state,
+            job_id="job_case10",
+            checkpoint_workspace=ws,
+            prepare_subtitles=fake_prepare,
+            synthesize_segments=fake_synthesize,
+            render_video=fake_render,
+            build_timeline_audio=fake_build_timeline_audio,
+            validated_pools=TEST_POOLS,
+            segments=cues,
+            acoustic_classifications=MOCK_ACOUSTIC,
+        )
+
+        assert res.get("ok") is False
+        assert "empty_translation" in str(res.get("blocker") or "") or "subtitle" in str(res.get("blocker") or "")
+
