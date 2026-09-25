@@ -278767,6 +278767,155 @@ async def api_internal_admin_packages_update(package_key: str, request: Request)
     return JSONResponse(status_code=status_code, content=result)
 
 
+# ─── CANONICAL SUBDUB WEB UPLOAD STAGING ENDPOINTS (BOT-SUBDUB-D1) ───
+
+@fastapi_app.post("/internal/v1/uploads")
+async def api_internal_subdub_upload_create(request: Request):
+    """Canonical Bot Core upload staging CREATE endpoint for Web SubDub media intake (BOT-SUBDUB-D1)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.subdub_upload_staging import create_staged_upload
+
+    raw_body = await request.body()
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path="/internal/v1/uploads",
+        body_bytes=raw_body,
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    content_type_header = str(request.headers.get("content-type") or "").lower()
+    file_bytes = b""
+    file_name = "media.bin"
+    detected_mime = "application/octet-stream"
+    idempotency_key = str(request.headers.get("idempotency-key") or "").strip()
+    client_meta = {}
+
+    if "application/json" in content_type_header:
+        try:
+            data = json.loads(raw_body.decode("utf-8") or "{}")
+        except Exception:
+            return JSONResponse(
+                status_code=400,
+                content={"ok": False, "error_code": "INVALID_JSON", "message": "Invalid JSON payload"},
+            )
+        if not isinstance(data, dict):
+            return JSONResponse(
+                status_code=400,
+                content={"ok": False, "error_code": "INVALID_PAYLOAD", "message": "Expected JSON object"},
+            )
+
+        client_uid = str(data.get("user_id") or data.get("owner_id") or "").strip()
+        if client_uid:
+            clean_client_uid = normalize_target_user_id(client_uid)
+            if clean_client_uid and clean_client_uid != clean_actor:
+                return JSONResponse(
+                    status_code=403,
+                    content={"ok": False, "error_code": "ACTOR_ID_MISMATCH", "message": "Supplied user_id does not match authenticated actor"},
+                )
+
+        file_name = str(data.get("file_name") or data.get("name") or "media.bin").strip()
+        detected_mime = str(data.get("content_type") or data.get("mime_type") or "application/octet-stream").strip()
+        idempotency_key = str(data.get("idempotency_key") or idempotency_key).strip()
+
+        b64_content = data.get("content_base64")
+        if b64_content is not None:
+            if not isinstance(b64_content, str) or not b64_content.strip():
+                file_bytes = b""
+            else:
+                try:
+                    file_bytes = base64.b64decode(b64_content, validate=True)
+                except Exception:
+                    return JSONResponse(
+                        status_code=400,
+                        content={"ok": False, "error_code": "INVALID_BASE64", "message": "Failed to decode content_base64"},
+                    )
+        else:
+            file_bytes = b""
+
+        client_meta = data
+    else:
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error_code": "UNSUPPORTED_CONTENT_TYPE", "message": "Expected application/json payload"},
+        )
+
+    ok, reason, status_code, result = create_staged_upload(
+        file_bytes=file_bytes,
+        file_name=file_name,
+        content_type=detected_mime,
+        actor_id=clean_actor,
+        idempotency_key=idempotency_key,
+        client_metadata=client_meta,
+    )
+    if not ok:
+        return JSONResponse(
+            status_code=status_code,
+            content={"ok": False, "error_code": reason, "message": f"Upload staging failed: {reason}"},
+        )
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.get("/internal/v1/uploads/{upload_id}")
+async def api_internal_subdub_upload_consume(upload_id: str, request: Request):
+    """Canonical Bot Core upload staging owner-bound LOOKUP/CONSUME endpoint (BOT-SUBDUB-D1)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.subdub_upload_staging import get_staged_upload, to_public_metadata
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = f"/internal/v1/uploads/{upload_id}"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path=path,
+        body_bytes=b"",
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    ok, reason, status_code, record = get_staged_upload(upload_id, actor_id=clean_actor)
+    if not ok:
+        return JSONResponse(
+            status_code=status_code,
+            content={"ok": False, "error_code": reason, "message": f"Lookup failed: {reason}"},
+        )
+
+    public_meta = to_public_metadata(record)
+    return JSONResponse(status_code=status_code, content=public_meta)
+
+
 # ─── ENTRY POINT ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     uvicorn.run(
