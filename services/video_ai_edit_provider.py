@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import math
 import os
@@ -23,7 +24,7 @@ HIDDEN_SUBMIT_SOURCES = frozenset({
     "fallback", "startup", "watchdog", "worker", "background",
 })
 TERMINAL_FAILURES = frozenset({"failed", "failure", "rejected", "cancelled", "canceled", "error", "timeout"})
-RUNNING_STATUSES = frozenset({"queued", "pending", "submitted", "processing", "running", "in_progress", "not_start"})
+RUNNING_STATUSES = frozenset({"queued", "pending", "submitted", "processing", "running", "in_progress", "not_start", "in_queue"})
 SUCCESS_STATUSES = frozenset({"success", "succeeded", "completed", "complete", "done", "finished"})
 PLACEHOLDER_TOKENS = ("example", "placeholder", "your_", "todo", "changeme", "xxx", "demo", "test_url", "submit_url_thật", "poll_url_thật")
 
@@ -114,8 +115,9 @@ def _catalog() -> dict[str, Any]:
 
 
 def model_contract(provider_name: str, model: str) -> dict[str, Any]:
+    p_name = {"fal.ai": "fal_video", "fal": "fal_video"}.get(str(provider_name or "").strip().lower(), str(provider_name or "").strip().lower())
     providers = (_catalog().get("providers") or {})
-    provider = providers.get(str(provider_name or "")) if isinstance(providers, dict) else {}
+    provider = providers.get(p_name) if isinstance(providers, dict) else {}
     models = provider.get("models") if isinstance(provider, dict) else {}
     contract = models.get(str(model or "")) if isinstance(models, dict) else {}
     capabilities = set(contract.get("capabilities") or []) if isinstance(contract, dict) else set()
@@ -163,20 +165,30 @@ def _safe_url_label(value: str) -> str:
 
 def _provider_prefix(provider_name: str) -> str:
     return {
+        "fal_video": "FAL_VIDEO_TO_VIDEO",
+        "fal.ai": "FAL_VIDEO_TO_VIDEO",
+        "fal": "FAL_VIDEO_TO_VIDEO",
         "key4u_video": "KEY4U_VIDEO_TO_VIDEO",
         "shopaikey_video": "SHOPAIKEY_VIDEO_TO_VIDEO",
         "generic_http": "VIDEO_AI_EDIT",
-    }.get(str(provider_name or ""), "VIDEO_AI_EDIT")
+    }.get(str(provider_name or "").strip().lower(), "VIDEO_AI_EDIT")
 
 
 def provider_config_from_env(provider_name: str, env: dict[str, str] | os._Environ[str] | None = None) -> AiEditProviderConfig:
     source = env if env is not None else os.environ
     name = str(provider_name or "").strip()
     prefix = _provider_prefix(name)
-    submit_url = _text(source, f"{prefix}_SUBMIT_URL", f"{prefix}_ENDPOINT")
-    poll_url = _text(source, f"{prefix}_POLL_URL", f"{prefix}_POLL_ENDPOINT", f"{prefix}_STATUS_ENDPOINT")
-    auth_value = _text(source, f"{prefix}_AUTH_HEADER_VALUE", f"{prefix}_API_KEY")
-    model = _text(source, f"{prefix}_MODEL")
+    is_fal = name.lower() in {"fal_video", "fal.ai", "fal"}
+    default_submit = "https://queue.fal.run/fal-ai/wan/v2.2-a14b/video-to-video" if is_fal else ""
+    default_poll = "https://queue.fal.run/fal-ai/wan/v2.2-a14b/video-to-video/requests/{task_id}/status" if is_fal else ""
+    default_model = "fal-ai/wan/v2.2-a14b/video-to-video" if is_fal else ""
+    default_interface = "video_to_video_json" if is_fal else "video_to_video_multipart"
+    submit_url = _text(source, f"{prefix}_SUBMIT_URL", f"{prefix}_ENDPOINT") or default_submit
+    poll_url = _text(source, f"{prefix}_POLL_URL", f"{prefix}_POLL_ENDPOINT", f"{prefix}_STATUS_ENDPOINT") or default_poll
+    auth_value = _text(source, f"{prefix}_AUTH_HEADER_VALUE", f"{prefix}_API_KEY", f"{prefix}_KEY")
+    if is_fal and auth_value and not auth_value.startswith(("Key ", "Bearer ")):
+        auth_value = f"Key {auth_value}"
+    model = _text(source, f"{prefix}_MODEL") or default_model
     capabilities = tuple(item.strip() for item in _text(source, f"{prefix}_CAPABILITIES").split(",") if item.strip()) or ("video_to_video",)
     return AiEditProviderConfig(
         provider_name=name,
@@ -186,7 +198,7 @@ def provider_config_from_env(provider_name: str, env: dict[str, str] | os._Envir
         auth_header_name=_safe_header_name(_text(source, f"{prefix}_AUTH_HEADER_NAME") or "Authorization"),
         auth_header_value=auth_value,
         model=model,
-        interface=_text(source, f"{prefix}_INTERFACE") or "video_to_video_multipart",
+        interface=_text(source, f"{prefix}_INTERFACE") or default_interface,
         capabilities=capabilities,
         upload_field=_text(source, f"{prefix}_UPLOAD_FIELD") or "video",
         prompt_field=_text(source, f"{prefix}_PROMPT_FIELD") or "prompt",
@@ -216,6 +228,12 @@ UNVERIFIED_V2V_ENDPOINT_INVENTED = False
 
 # Production authority: Zero test/harness URLs permitted in production authority.
 PROVEN_V2V_WIRE_ADAPTERS: set[str] = set()
+CANONICAL_PROVEN_V2V_PROVIDERS: frozenset[str] = frozenset({
+    "fal_video",
+    "fal.ai",
+    "fal",
+})
+VALID_V2V_INTERFACES = frozenset({"video_to_video_multipart", "video_to_video_json", "fal_wan_v2v_json"})
 
 
 def classify_endpoint_capability(url: str) -> str:
@@ -232,6 +250,8 @@ def classify_endpoint_capability(url: str) -> str:
         return "text_to_video"
     if "/image2video" in path or "image2video" in path:
         return "image_to_video"
+    if "/video-to-video" in path or "video2video" in path or "video_to_video" in path:
+        return "video_to_video"
     return "unknown"
 
 
@@ -239,11 +259,13 @@ def has_proven_v2v_wire_contract(provider_name: str, model: str = "", submit_url
     """Check if a real, provider-specific, source-bound V2V wire contract has been proven."""
     name = str(provider_name or "").strip().lower()
     url = str(submit_url or "").strip().lower()
-    if url in PROVEN_V2V_WIRE_ADAPTERS:
-        return True
     if name == "key4u_video":
         return False
+    if url in PROVEN_V2V_WIRE_ADAPTERS:
+        return True
     if (name, model) in PROVEN_V2V_WIRE_ADAPTERS or name in PROVEN_V2V_WIRE_ADAPTERS:
+        return True
+    if name in CANONICAL_PROVEN_V2V_PROVIDERS and model in {"fal-ai/wan/v2.2-a14b/video-to-video", ""}:
         return True
     return False
 
@@ -260,7 +282,7 @@ def validate_provider_config(config: AiEditProviderConfig, required_capability: 
         invalid.append("auth")
     if not config.model:
         invalid.append("model")
-    if config.interface != "video_to_video_multipart":
+    if config.interface not in VALID_V2V_INTERFACES:
         invalid.append("interface")
     if "video_to_video" not in config.capabilities:
         invalid.append("capability")
@@ -454,9 +476,9 @@ def _extract_continuity_metadata(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def parse_provider_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    task_id = _nested(payload, "data.task_id", "data.id", "data.id_base", "task_id", "id", "job_id")
+    task_id = _nested(payload, "data.task_id", "data.id", "data.id_base", "task_id", "id", "job_id", "request_id")
     raw_status = _nested(payload, "data.status", "status", "state")
-    result_url = _nested(payload, "data.result_url", "data.video_url", "data.url", "result_url", "video_url", "url")
+    result_url = _nested(payload, "data.result_url", "data.video_url", "data.url", "result_url", "video_url", "url", "video.url")
     raw = str(raw_status or "").strip()
     normalized = raw.lower().replace("-", "_").replace(" ", "_")
     if result_url:
@@ -500,17 +522,36 @@ def submit_video_edit(
         raise AiEditProviderError(str(validation.get("reason") or "ai_edit_provider_invalid"))
     if submit_source != PUBLIC_FINAL_CONFIRM_SOURCE or not public_user_confirmed:
         raise AiEditProviderError("ai_edit_hidden_submit_blocked")
-    fields = {
-        config.prompt_field: str(prompt or "")[:12_000],
-        "negative_prompt": str(negative_prompt or "")[:8_000],
-        "model": config.model,
-        "ratio": str(aspect_ratio or "9:16"),
-        "duration": int(duration_seconds or 0),
-        "job_id": str(job_id or "")[:120],
-        "source": PUBLIC_FINAL_CONFIRM_SOURCE,
-        "capability": "video_to_video",
-    }
-    body, content_type = _multipart_body(fields, config.upload_field, source_video_path)
+    if config.interface in {"video_to_video_json", "fal_wan_v2v_json"}:
+        source_url = str(source_video_path or "").strip()
+        if not source_url.startswith(("http://", "https://")):
+            raise AiEditProviderError("fal_v2v_local_transport_unsupported_remote_url_required")
+        video_url = source_url
+
+        num_frames = int(duration_seconds * 16) if duration_seconds else 81
+        json_fields = {
+            config.prompt_field: str(prompt or "")[:12_000],
+            "video_url": video_url,
+            "num_frames": num_frames,
+            "frames_per_second": 16,
+            "aspect_ratio": str(aspect_ratio or "9:16"),
+        }
+        if negative_prompt:
+            json_fields["negative_prompt"] = str(negative_prompt or "")[:8_000]
+        body = json.dumps(json_fields).encode("utf-8")
+        content_type = "application/json"
+    else:
+        fields = {
+            config.prompt_field: str(prompt or "")[:12_000],
+            "negative_prompt": str(negative_prompt or "")[:8_000],
+            "model": config.model,
+            "ratio": str(aspect_ratio or "9:16"),
+            "duration": int(duration_seconds or 0),
+            "job_id": str(job_id or "")[:120],
+            "source": PUBLIC_FINAL_CONFIRM_SOURCE,
+            "capability": "video_to_video",
+        }
+        body, content_type = _multipart_body(fields, config.upload_field, source_video_path)
     headers = {
         "Content-Type": content_type,
         "Accept": "application/json",
@@ -597,8 +638,39 @@ def poll_video_edit(
         raise AiEditProviderError("provider_poll_connection_failed", terminal=False) from exc
     if status < 200 or status >= 300:
         raise AiEditProviderError(f"provider_poll_http_{status or 0}", terminal=False)
+    parsed = parse_provider_payload(payload)
+    if parsed.get("status") == "completed" and not parsed.get("result_url_present"):
+        result_endpoint = str(payload.get("response_url") or "").strip()
+        if not result_endpoint and "/status" in url:
+            result_endpoint = url.replace("/status", "")
+        if result_endpoint and _valid_url(result_endpoint):
+            try:
+                res_req = urllib.request.Request(
+                    result_endpoint,
+                    headers={
+                        "Accept": "application/json",
+                        "User-Agent": "TOAN-AAS-AI-Edit/1.0",
+                        config.auth_header_name: config.auth_header_value,
+                    },
+                    method="GET",
+                )
+                res_resp = transport(
+                    res_req,
+                    timeout=_remaining_timeout(
+                        config.timeout_seconds,
+                        deadline_monotonic=deadline_monotonic,
+                        monotonic=monotonic,
+                    ),
+                )
+                _, res_payload = _json_response(res_resp)
+                res_parsed = parse_provider_payload(res_payload)
+                if res_parsed.get("result_url"):
+                    parsed["result_url"] = res_parsed["result_url"]
+                    parsed["result_url_present"] = True
+            except Exception:
+                pass
     return {
-        **parse_provider_payload(payload),
+        **parsed,
         "provider_task_id": provider_task_id,
         "poll_http_status": status,
         "provider_name": config.provider_name,

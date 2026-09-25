@@ -3462,6 +3462,9 @@ def _selfshot3_provider_configs(provider_order: list[str], duration_seconds: int
 
     configured = video_ai_edit_provider.configured_provider_chain(os.environ)
     aliases = {
+        "fal": "fal_video",
+        "fal.ai": "fal_video",
+        "fal_video": "fal_video",
         "key4u": "key4u_video",
         "shopaikey": "shopaikey_video",
         "generic_http": "generic_http",
@@ -3896,9 +3899,14 @@ def _render_selfshot2_video_to_video(
         if config is None:
             break
         try:
+            target_source = str(
+                (job or {}).get("source_video_url")
+                or (asset_pack or {}).get("source_video_url")
+                or scene_source_path
+            ).strip()
             submitted = video_ai_edit_provider.submit_video_edit(
                 config,
-                source_video_path=scene_source_path,
+                source_video_path=target_source,
                 prompt=prompt,
                 negative_prompt=negative,
                 aspect_ratio=aspect_ratio,

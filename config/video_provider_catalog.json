@@ -212,6 +212,22 @@
           "payload_adapter": "key4u_seedance_small_clip"
         }
       }
+    },
+    "fal_video": {
+      "display_name": "Fal.ai Video",
+      "default_capabilities": ["video_to_video"],
+      "models": {
+        "fal-ai/wan/v2.2-a14b/video-to-video": {
+          "family": "wan_v2v",
+          "quality": "standard",
+          "cost_tier": "common",
+          "capabilities": ["video_to_video", "short_video"],
+          "clip_seconds": 5,
+          "max_single_task_seconds": 15,
+          "supports_concat": true,
+          "payload_adapter": "fal_wan_v2v"
+        }
+      }
     }
   },
   "payload_adapters": {
@@ -318,6 +334,15 @@
       "allowed_fields": ["job_id", "source", "wallet_charge", "product_type", "capability", "model", "prompt", "negative_prompt", "ratio", "aspect_ratio", "aspectRatio", "duration", "duration_seconds", "quality", "style", "seed", "sound", "resolution", "metadata"],
       "result_fields": ["data.status", "data.result_url", "status", "result_url"],
       "poll_status_fields": ["data.status", "status"],
+      "duration_support": "short_clip",
+      "scene_fields_allowed": false
+    },
+    "fal_wan_v2v": {
+      "family": "wan_v2v",
+      "required_fields": ["prompt"],
+      "allowed_fields": ["prompt", "negative_prompt", "video_url", "num_frames", "frames_per_second", "aspect_ratio", "seed"],
+      "result_fields": ["video.url", "video.content_type", "video.file_size"],
+      "poll_status_fields": ["status"],
       "duration_support": "short_clip",
       "scene_fields_allowed": false
     }
