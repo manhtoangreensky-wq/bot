@@ -354,7 +354,11 @@ def _build_derived_ranges(
             bytes_per_sec = sample_rate * channels * 2
             pcm_dur = p.stat().st_size / bytes_per_sec
             T_max = min(max_duration_seconds, pcm_dur) if max_duration_seconds is not None else pcm_dur
-    if T_max is None and max_duration_seconds is not None:
+        elif max_duration_seconds is not None:
+            T_max = float(max_duration_seconds)
+        else:
+            raise ValueError(f"invalid_or_missing_pcm: {stereo_pcm_path}")
+    elif max_duration_seconds is not None:
         T_max = float(max_duration_seconds)
 
     target_speakers = set(speakers) if speakers is not None else None
@@ -1042,8 +1046,12 @@ def decide_smart_multivoice(
                     multi_classifications = pitch_res
                     classifier_failed = False
                     classifier_error_reason = None
-            except Exception:
-                pass
+                else:
+                    classifier_failed = True
+                    classifier_error_reason = "pitch_estimation_failed_or_ambiguous"
+            except Exception as exc:
+                classifier_failed = True
+                classifier_error_reason = str(exc)
 
         fail_dispositions = {
             str(c.get("cue_id") or c.get("id")): DISPOSITION_TERMINAL_REJECTED
@@ -1172,8 +1180,21 @@ def decide_smart_multivoice(
                 )
         else:
             # When no acoustic classifications are provided or resolved
-            if raise_manual_required:
-                raise speaker_cast.AutoCastManualRequired()
+            if raise_manual_required or stereo_pcm_path is not None or multi_speaker_classifier is not None:
+                if raise_manual_required:
+                    raise speaker_cast.AutoCastManualRequired()
+                return SmartVoiceDecision(
+                    strategy=STRATEGY_FAILED,
+                    detected_speaker_count=detected_speaker_count,
+                    effective_speaker_count=0,
+                    effective_voice_count=0,
+                    speaker_voice_map={},
+                    fallback_level=-1,
+                    fallback_reason="ACOUSTIC_CLASSIFICATION_UNAVAILABLE_OR_FAILED",
+                    output_mode=OUTPUT_MODE_FAILED,
+                    cue_dispositions=fail_dispositions,
+                    tts_cues=[],
+                )
             # Fallback behavior when no acoustic evidence is provided (retains test_07..test_10 compatibility)
             strategy = STRATEGY_GENERIC_MULTI
             if len(all_pool) >= detected_speaker_count:
@@ -1295,6 +1316,7 @@ async def run_auto_smart_multivoice(
     strict_two_classifier: Callable[..., Any] | None = None,
     multi_speaker_classifier: Callable[..., Any] | None = None,
     acoustic_classifications: Mapping[str, Mapping[str, Any]] | None = None,
+    cue_acoustic_classifications: Mapping[str | int, Mapping[str, Any]] | None = None,
     synthesize_segments: Callable[..., Any] | None = None,
     render_pipeline: Callable[..., Any] | None = None,
     probe_fn: Callable[[str], Mapping[str, Any]] | None = None,
@@ -1392,6 +1414,7 @@ async def run_auto_smart_multivoice(
             strict_two_classifier=strict_two_classifier,
             multi_speaker_classifier=multi_speaker_classifier,
             acoustic_classifications=acoustic_classifications,
+            cue_acoustic_classifications=cue_acoustic_classifications,
             fallback_level_override=fallback_level_override,
             default_fallback_voice=default_fallback_voice,
             locked_speaker_voice_map=locked_speaker_voice_map,
@@ -2340,7 +2363,24 @@ async def run_auto_smart_multivoice_blackbox(
         or payload.get("cues")
         or []
     )
-    cues = smooth_smart_multivoice_cues(cues)
+    cues = smooth_smart_multivoice_cues(
+        cues,
+        acoustic_classifications=(
+            payload.get("acoustic_classifications")
+            or current.get("acoustic_classifications")
+            or (prepared.get("acoustic_classifications") if isinstance(prepared, dict) else None)
+        ),
+        cue_acoustic_classifications=(
+            payload.get("cue_acoustic_classifications")
+            or current.get("cue_acoustic_classifications")
+            or (prepared.get("cue_acoustic_classifications") if isinstance(prepared, dict) else None)
+        ),
+        stereo_pcm_path=(
+            payload.get("stereo_pcm_path")
+            or current.get("stereo_pcm_path")
+            or (prepared.get("stereo_pcm_path") if isinstance(prepared, dict) else None)
+        ),
+    )
 
     # PR #1138 invariant: preserve filtering of SMART_CONTROL_ONLY_KEYS
     clean_payload = dict(payload)
@@ -2687,7 +2727,16 @@ async def run_auto_smart_multivoice_blackbox(
             stop_requested=payload.get("stop_requested"),
             strict_two_classifier=payload.get("strict_two_classifier"),
             multi_speaker_classifier=payload.get("multi_speaker_classifier"),
-            acoustic_classifications=payload.get("acoustic_classifications"),
+            acoustic_classifications=(
+                payload.get("acoustic_classifications")
+                or current.get("acoustic_classifications")
+                or (prepared.get("acoustic_classifications") if isinstance(prepared, dict) else None)
+            ),
+            cue_acoustic_classifications=(
+                payload.get("cue_acoustic_classifications")
+                or current.get("cue_acoustic_classifications")
+                or (prepared.get("cue_acoustic_classifications") if isinstance(prepared, dict) else None)
+            ),
             synthesize_segments=smart_synthesizer,
             render_pipeline=render_pipeline,
             probe_fn=probe_fn,

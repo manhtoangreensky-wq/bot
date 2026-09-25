@@ -2292,3 +2292,73 @@ def test_93_extreme_compression_policy(tmp_path):
         assert res3["blocker"] == "extreme_audio_compression_unintelligible"
         assert res3["error_code"] == "extreme_audio_compression_unintelligible"
     asyncio.run(_run())
+
+
+def test_94_decide_smart_multivoice_n3_pitch_estimation_failure_fails_closed_no_blind_hash(tmp_path):
+    """N>=3 with stereo_pcm_path provided fails closed when pitch estimation is ambiguous/fails."""
+    # Create empty/unusable PCM
+    pcm_path = tmp_path / "silent.pcm"
+    pcm_path.write_bytes(b"\x00" * (44100 * 4 * 2))  # 2s of silence (no voiced pitch)
+
+    cues = [
+        {"cue_id": "c1", "speaker_id": "spk_1", "text": "Câu 1", "start_ms": 0, "end_ms": 600},
+        {"cue_id": "c2", "speaker_id": "spk_2", "text": "Câu 2", "start_ms": 700, "end_ms": 1300},
+        {"cue_id": "c3", "speaker_id": "spk_3", "text": "Câu 3", "start_ms": 1400, "end_ms": 2000},
+    ]
+
+    # Without raise_manual_required, acoustic failure still fails closed (never falls back to blind hash)
+    decision = smart.decide_smart_multivoice(
+        cues,
+        validated_pools=TEST_POOLS,
+        stereo_pcm_path=pcm_path,
+        raise_manual_required=False,
+    )
+    assert decision.strategy == smart.STRATEGY_FAILED
+    assert decision.output_mode == smart.OUTPUT_MODE_FAILED
+    assert "CLASSIFIER_UNAVAILABLE" in str(decision.fallback_reason)
+
+
+def test_95_build_derived_ranges_missing_pcm_raises_value_error():
+    """_build_derived_ranges raises ValueError when stereo_pcm_path does not exist and max_duration is None."""
+    cues = [
+        {"cue_id": "c1", "speaker_id": "spk_1", "start_ms": 0, "end_ms": 1000},
+    ]
+    with pytest.raises(ValueError, match="invalid_or_missing_pcm"):
+        smart._build_derived_ranges(cues, stereo_pcm_path="/nonexistent/missing_file.pcm")
+
+
+def test_96_blackbox_runner_forwards_cue_acoustic_classifications_to_smoothing(tmp_path):
+    """Blackbox runner forwards cue_acoustic_classifications to preserve distinct short cue."""
+    source_mp4 = _create_real_valid_mp4(tmp_path / "src.mp4")
+    out_mp4 = tmp_path / "out.mp4"
+    cues = [
+        {"cue_id": "c1", "speaker_id": "female_1", "start_ms": 0, "end_ms": 2000},
+        {"cue_id": "c2", "speaker_id": "male_1", "start_ms": 2100, "end_ms": 2350},  # short 250ms
+        {"cue_id": "c3", "speaker_id": "female_1", "start_ms": 2450, "end_ms": 4000},
+    ]
+    acoustics = {
+        "female_1": {"voice_register": "high", "voice_gender": "female", "confidence": 0.95},
+        "male_1": {"voice_register": "low", "voice_gender": "male", "confidence": 0.95},
+    }
+    cue_acoustics = {
+        "c2": {"voice_register": "low", "voice_gender": "male", "confidence": 0.95},
+    }
+
+    async def _run():
+        res = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_mp4,
+            output_path=out_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            cue_acoustic_classifications=cue_acoustics,
+            state={"auto_speaker_lane": "auto_smart_multivoice"},
+            runner=lambda *args, **kwargs: True,
+        )
+        assert res.get("ok") is True
+        # Verify cue c2 was NOT smoothed to female_1
+        c2_out = next(c for c in res["output_segments"] if c["cue_id"] == "c2")
+        assert c2_out["speaker_id"] == "male_1"
+        assert not c2_out.get("anti_flapping_smoothed", False)
+
+    asyncio.run(_run())
