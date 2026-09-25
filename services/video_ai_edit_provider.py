@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import json
 import math
 import os
@@ -234,6 +233,9 @@ CANONICAL_PROVEN_V2V_PROVIDERS: frozenset[str] = frozenset({
     "fal",
 })
 VALID_V2V_INTERFACES = frozenset({"video_to_video_multipart", "video_to_video_json", "fal_wan_v2v_json"})
+LOCAL_VIDEO_DATA_URI_SUPPORTED_BY_PROVIDER_CONTRACT: bool = False
+FAL_NUM_FRAMES_MIN: int = 17
+FAL_NUM_FRAMES_MAX: int = 161
 
 
 def classify_endpoint_capability(url: str) -> str:
@@ -528,7 +530,16 @@ def submit_video_edit(
             raise AiEditProviderError("fal_v2v_local_transport_unsupported_remote_url_required")
         video_url = source_url
 
-        num_frames = int(duration_seconds * 16) if duration_seconds else 81
+        dur = float(duration_seconds or 5.0)
+        if dur <= 5.0:
+            num_frames = 81
+        elif dur <= 10.0:
+            num_frames = 161
+        else:
+            num_frames = int(round(dur * 16))
+
+        if num_frames < FAL_NUM_FRAMES_MIN or num_frames > FAL_NUM_FRAMES_MAX:
+            raise AiEditProviderError("fal_v2v_duration_exceeds_max_frames")
         json_fields = {
             config.prompt_field: str(prompt or "")[:12_000],
             "video_url": video_url,

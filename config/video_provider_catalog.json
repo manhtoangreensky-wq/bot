@@ -223,7 +223,7 @@
           "cost_tier": "common",
           "capabilities": ["video_to_video", "short_video"],
           "clip_seconds": 5,
-          "max_single_task_seconds": 15,
+          "max_single_task_seconds": 10,
           "supports_concat": true,
           "payload_adapter": "fal_wan_v2v"
         }

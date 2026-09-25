@@ -3642,6 +3642,7 @@ def _selfshot2_scene_source_segment(asset_pack: dict[str, Any], scene_index: int
     )
     start_seconds = float(selected.get("start_seconds") or 0)
     end_seconds = float(selected.get("end_seconds") or 0)
+    plan_selected: dict[str, Any] = {}
     if start_seconds < 0 or end_seconds <= start_seconds:
         plan_rows = asset_pack.get("scene_plan")
         if isinstance(plan_rows, list):
@@ -3672,11 +3673,20 @@ def _selfshot2_scene_source_segment(asset_pack: dict[str, Any], scene_index: int
                 "blocker": "selfshot2_scene_source_segment_invalid",
             },
         )
+    remote_scene_url = str(
+        selected.get("source_video_url")
+        or selected.get("remote_url")
+        or selected.get("video_url")
+        or plan_selected.get("source_video_url")
+        or plan_selected.get("remote_url")
+        or ""
+    ).strip()
     return {
         "scene_index": scene_index,
         "start_seconds": start_seconds,
         "end_seconds": end_seconds,
         "duration_seconds": end_seconds - start_seconds,
+        "source_video_url": remote_scene_url,
     }
 
 
@@ -3899,11 +3909,7 @@ def _render_selfshot2_video_to_video(
         if config is None:
             break
         try:
-            target_source = str(
-                (job or {}).get("source_video_url")
-                or (asset_pack or {}).get("source_video_url")
-                or scene_source_path
-            ).strip()
+            target_source = str(segment.get("source_video_url") or scene_source_path).strip()
             submitted = video_ai_edit_provider.submit_video_edit(
                 config,
                 source_video_path=target_source,

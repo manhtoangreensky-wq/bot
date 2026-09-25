@@ -8,7 +8,6 @@ Zero external provider calls made. All network I/O isolated via mocks.
 
 from __future__ import annotations
 
-import base64
 import json
 import os
 from pathlib import Path
@@ -331,7 +330,16 @@ def test_10_selfshot2_connector_with_fal_provider(tmp_path: Path):
                 "public_user_confirmed": True,
                 "submit_source": "public_user_final_confirm",
             },
-            asset_pack={},
+            asset_pack={
+                "scene_source_segments": [
+                    {
+                        "scene_index": 0,
+                        "start_seconds": 0.0,
+                        "end_seconds": 5.0,
+                        "source_video_url": "https://storage.toanaas.vn/media/scene_input.mp4",
+                    }
+                ]
+            },
             raw_path=str(raw_output),
             provider_order=["fal_video", "key4u_video"],
             fallback_prompt="cinematic product scene",
@@ -345,3 +353,229 @@ def test_10_selfshot2_connector_with_fal_provider(tmp_path: Path):
         assert spy_submit.call_args[1]["source_video_path"] == "https://storage.toanaas.vn/media/scene_input.mp4"
         assert result["ok"] is True
         assert result["provider"] == "fal_video"
+
+
+# ---------------------------------------------------------------------------
+# 11. Later-scene source binding must NOT receive full-source video URL (FIRST RED FIXED)
+# ---------------------------------------------------------------------------
+
+def test_11_selfshot2_later_scene_must_not_receive_full_source_video_url(tmp_path: Path):
+    """For scene_index > 0, Fal must NOT receive the unsliced full-source URL when intended source is materialized segment."""
+    source_file = tmp_path / "full_source_30s.mp4"
+    source_file.write_bytes(b"FULL_30S_SOURCE_VIDEO_BYTES")
+    raw_output = tmp_path / "raw_output_scene1.mp4"
+
+    def mock_submit(cfg, **kwargs):
+        source = kwargs.get("source_video_path")
+        # Assert that the full unsliced source video URL is NOT passed for scene 1
+        assert source != "https://storage.toanaas.vn/media/full_source_30s.mp4", (
+            "Violation: scene_index 1 received the full unsliced source_video_url, "
+            "violating scene start_seconds, duration_seconds, and source-bound continuity!"
+        )
+        return {
+            "provider_task_id": "fal-ss2-task-101",
+            "status": "running",
+            "accepted": True,
+            "result_url_present": False,
+        }
+
+    env_overrides = {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "fal_key_test",
+        "VIDEO_AI_EDIT_PROVIDER_CHAIN": "fal_video",
+    }
+
+    with patch.dict(os.environ, env_overrides), \
+         patch("services.video_ai_edit_provider.submit_video_edit", side_effect=mock_submit) as spy_submit, \
+         patch("services.video_real_render_connector._materialize_selfshot2_source_segment", return_value=str(tmp_path / "selfshot2-source-scene-01.mp4")), \
+         patch("services.video_selfshot_continuity_validator.validate_selfshot_scene_continuity", return_value={"ok": True}):
+
+        try:
+            video_real_render_connector._render_selfshot2_video_to_video(
+                job={
+                    "source_video_url": "https://storage.toanaas.vn/media/full_source_30s.mp4",
+                    "source_video_local_path": str(source_file),
+                    "quality_tier": 500,
+                    "public_user_confirmed": True,
+                    "submit_source": "public_user_final_confirm",
+                },
+                asset_pack={
+                    "scene_source_segments": [
+                        {"scene_index": 0, "start_seconds": 0.0, "end_seconds": 5.0},
+                        {"scene_index": 1, "start_seconds": 5.0, "end_seconds": 10.0},
+                    ]
+                },
+                raw_path=str(raw_output),
+                provider_order=["fal_video"],
+                fallback_prompt="cinematic product scene",
+                aspect_ratio="9:16",
+                scene_index=1,
+            )
+        except RealVideoRenderError:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# 12. 15-second tier request must NOT reach transport with 240 frames (FIRST RED FIXED)
+# ---------------------------------------------------------------------------
+
+def test_12_fal_15s_duration_must_not_reach_transport_with_240_frames():
+    """Fal Wan 2.2 V2V has num_frames limit of 17..161. 15s (240 frames) must fail closed before transport."""
+    cfg = video_ai_edit_provider.provider_config_from_env("fal_video", {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "fal_secret_key",
+    })
+
+    mock_transport = MagicMock()
+
+    with pytest.raises(video_ai_edit_provider.AiEditProviderError) as exc_info:
+        video_ai_edit_provider.submit_video_edit(
+            cfg,
+            source_video_path="https://storage.toanaas.vn/media/input_scene.mp4",
+            prompt="transform scene",
+            negative_prompt="",
+            aspect_ratio="9:16",
+            duration_seconds=15,
+            job_id="fal-15s-job",
+            submit_source=video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE,
+            public_user_confirmed=True,
+            opener=mock_transport,
+        )
+
+    assert exc_info.value.reason in {
+        "fal_v2v_duration_exceeds_max_frames",
+        "fal_v2v_duration_out_of_bounds",
+        "fal_v2v_frame_limit_exceeded",
+    }
+    assert mock_transport.call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# 13. Valid 5s and 10s frame counts reach transport with canonical frames
+# ---------------------------------------------------------------------------
+
+def test_13_fal_5s_and_10s_valid_frame_counts():
+    """5s produces 81 frames, 10s produces 161 frames in Wan 2.2 format."""
+    cfg = video_ai_edit_provider.provider_config_from_env("fal_video", {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "fal_secret_key",
+    })
+
+    captured_requests = []
+
+    def mock_transport(req, timeout=120):
+        captured_requests.append(req)
+        resp = MagicMock()
+        resp.status = 200
+        resp.read.return_value = json.dumps({"request_id": "req-1", "status": "IN_QUEUE"}).encode("utf-8")
+        return resp
+
+    # 5s duration test
+    video_ai_edit_provider.submit_video_edit(
+        cfg,
+        source_video_path="https://storage.toanaas.vn/media/scene5s.mp4",
+        prompt="transform scene 5s",
+        negative_prompt="",
+        aspect_ratio="9:16",
+        duration_seconds=5,
+        job_id="job-5s",
+        submit_source=video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE,
+        public_user_confirmed=True,
+        opener=mock_transport,
+    )
+    p5 = json.loads(captured_requests[0].data.decode("utf-8"))
+    assert p5["num_frames"] == 81
+
+    # 10s duration test
+    video_ai_edit_provider.submit_video_edit(
+        cfg,
+        source_video_path="https://storage.toanaas.vn/media/scene10s.mp4",
+        prompt="transform scene 10s",
+        negative_prompt="",
+        aspect_ratio="9:16",
+        duration_seconds=10,
+        job_id="job-10s",
+        submit_source=video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE,
+        public_user_confirmed=True,
+        opener=mock_transport,
+    )
+    p10 = json.loads(captured_requests[1].data.decode("utf-8"))
+    assert p10["num_frames"] == 161
+
+
+# ---------------------------------------------------------------------------
+# 14. Missing remote scene URL fails closed without provider HTTP call
+# ---------------------------------------------------------------------------
+
+def test_14_missing_remote_scene_url_fails_closed(tmp_path: Path):
+    """When a local scene segment is materialized and no remote URL exists, Fal must fail closed with 0 HTTP calls."""
+    source_file = tmp_path / "full_source.mp4"
+    source_file.write_bytes(b"FULL_SOURCE_BYTES")
+    raw_output = tmp_path / "raw_out.mp4"
+
+    mock_transport = MagicMock()
+
+    env_overrides = {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "fal_key_test",
+        "VIDEO_AI_EDIT_PROVIDER_CHAIN": "fal_video",
+    }
+
+    with patch.dict(os.environ, env_overrides), \
+         patch("services.video_real_render_connector._materialize_selfshot2_source_segment", return_value=str(tmp_path / "selfshot2-source-scene-01.mp4")), \
+         patch("urllib.request.urlopen", mock_transport):
+
+        with pytest.raises(RealVideoRenderError) as exc_info:
+            video_real_render_connector._render_selfshot2_video_to_video(
+                job={
+                    "source_video_local_path": str(source_file),
+                    "quality_tier": 500,
+                    "public_user_confirmed": True,
+                    "submit_source": "public_user_final_confirm",
+                },
+                asset_pack={},
+                raw_path=str(raw_output),
+                provider_order=["fal_video"],
+                fallback_prompt="cinematic product scene",
+                aspect_ratio="9:16",
+                scene_index=1,
+            )
+
+        assert "fal_v2v_local_transport_unsupported_remote_url_required" in str(exc_info.value)
+        assert exc_info.value.diagnostics.get("blocker") == "fal_v2v_local_transport_unsupported_remote_url_required"
+        assert mock_transport.call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# 15. Catalog max_single_task_seconds=10 blocks 15s tier selection for Fal
+# ---------------------------------------------------------------------------
+
+def test_15_catalog_max_seconds_blocks_15s_tier_for_fal():
+    """Fal Wan 2.2 model advertises max_single_task_seconds=10, so 15s duration tier excludes Fal."""
+    env_overrides = {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "fal_key_test",
+        "VIDEO_AI_EDIT_PROVIDER_CHAIN": "fal_video",
+    }
+    with patch.dict(os.environ, env_overrides):
+        configs_15 = video_real_render_connector._selfshot3_provider_configs(["fal_video"], duration_seconds=15)
+        assert len(configs_15) == 0
+
+        configs_10 = video_real_render_connector._selfshot3_provider_configs(["fal_video"], duration_seconds=10)
+        assert len(configs_10) == 1
+        assert configs_10[0].provider_name == "fal_video"
+
+        configs_5 = video_real_render_connector._selfshot3_provider_configs(["fal_video"], duration_seconds=5)
+        assert len(configs_5) == 1
+        assert configs_5[0].provider_name == "fal_video"
+
+
+# ---------------------------------------------------------------------------
+# 16. Invariant: local video data URI unsupported by provider contract
+# ---------------------------------------------------------------------------
+
+def test_16_local_data_uri_unsupported_invariant():
+    """Fal provider contract explicitly asserts LOCAL_VIDEO_DATA_URI_SUPPORTED_BY_PROVIDER_CONTRACT is False."""
+    assert video_ai_edit_provider.LOCAL_VIDEO_DATA_URI_SUPPORTED_BY_PROVIDER_CONTRACT is False
+    assert video_ai_edit_provider.FAL_NUM_FRAMES_MIN == 17
+    assert video_ai_edit_provider.FAL_NUM_FRAMES_MAX == 161
