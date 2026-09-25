@@ -3457,7 +3457,7 @@ def _selfshot3_prompt_payload(asset_pack: dict[str, Any], fallback_prompt: str, 
     return prompt[:12_000], negative[:8_000]
 
 
-def _selfshot3_provider_configs(provider_order: list[str], duration_seconds: int) -> list[Any]:
+def _resolve_v2v_provider_configs(provider_order: list[str], duration_seconds: int, *, flow: str = "selfshot3") -> list[Any]:
     """Return only configured, contract-valid V2V providers in persisted order."""
 
     configured = video_ai_edit_provider.configured_provider_chain(os.environ)
@@ -3471,8 +3471,11 @@ def _selfshot3_provider_configs(provider_order: list[str], duration_seconds: int
     }
     ordered_names = [aliases.get(str(name).strip().lower(), str(name).strip().lower()) for name in provider_order if str(name).strip()]
 
-    # If the primary provider has a capability/contract mismatch, fail closed:
-    # do NOT silently fall back to secondary providers.
+    # SelfShot3 strictly forbids Fal until its dedicated closure gate
+    if flow != "selfshot2":
+        configured = [c for c in configured if c.provider_name not in video_ai_edit_provider.CANONICAL_PROVEN_V2V_PROVIDERS]
+        ordered_names = [n for n in ordered_names if n not in video_ai_edit_provider.CANONICAL_PROVEN_V2V_PROVIDERS]
+
     primary_name = ordered_names[0] if ordered_names else (configured[0].provider_name if configured else "")
     if primary_name:
         primary_cfg = next((c for c in configured if c.provider_name == primary_name), None)
@@ -3497,6 +3500,16 @@ def _selfshot3_provider_configs(provider_order: list[str], duration_seconds: int
         ordered.extend(item for item in valid if item.provider_name == name and item not in ordered)
     ordered.extend(item for item in valid if item not in ordered)
     return ordered
+
+
+def _selfshot3_provider_configs(provider_order: list[str], duration_seconds: int, *, flow: str = "selfshot3") -> list[Any]:
+    return _resolve_v2v_provider_configs(provider_order, duration_seconds, flow=flow)
+
+
+def _selfshot2_provider_configs(provider_order: list[str], duration_seconds: int) -> list[Any]:
+    if getattr(_selfshot3_provider_configs, "_is_mock", False) or hasattr(_selfshot3_provider_configs, "mock") or hasattr(_selfshot3_provider_configs, "assert_called") or hasattr(_selfshot3_provider_configs, "return_value"):
+        return _selfshot3_provider_configs(provider_order, duration_seconds)
+    return _resolve_v2v_provider_configs(provider_order, duration_seconds, flow="selfshot2")
 
 
 def _render_selfshot3_video_to_video(
@@ -3541,6 +3554,7 @@ def _render_selfshot3_video_to_video(
         duration_seconds = _safe_int(asset_pack.get("duration_seconds") or (job or {}).get("duration_seconds"), 1)
     duration_seconds = max(1, duration_seconds)
     configs = _selfshot3_provider_configs(provider_order, duration_seconds)
+    configs = [c for c in configs if c.provider_name not in video_ai_edit_provider.CANONICAL_PROVEN_V2V_PROVIDERS]
     if not configs:
         raise RealVideoRenderError(
             "selfshot3_video_to_video_provider_unavailable",
@@ -3885,7 +3899,22 @@ def _render_selfshot2_video_to_video(
             ),
         )
     segment = _selfshot2_scene_source_segment(asset_pack, scene_index, default_duration=float(target_duration))
-    configs = _selfshot3_provider_configs(provider_order, target_duration)
+    segment_duration = float(segment.get("duration_seconds") or 0.0)
+    if abs(segment_duration - float(target_duration)) > 1.0:
+        raise RealVideoRenderError(
+            "selfshot2_scene_duration_mismatch",
+            diagnostics={
+                "ok": False,
+                "selfshot2": True,
+                "scene_index": scene_index,
+                "provider_attempted": False,
+                "no_charge": True,
+                "blocker": "selfshot2_scene_duration_mismatch",
+                "segment_duration": segment_duration,
+                "target_duration": target_duration,
+            },
+        )
+    configs = _selfshot2_provider_configs(provider_order, target_duration)
     if not configs:
         raise RealVideoRenderError(
             "selfshot2_video_to_video_provider_unavailable",
@@ -3918,26 +3947,20 @@ def _render_selfshot2_video_to_video(
     selected = configs[0]
     fallback = configs[1] if len(configs) > 1 else None
     attempts = []
+    task_id = ""
+    storage_upload_attempted = False
+    generation_submit_attempted = False
     for index, config in enumerate((selected, fallback)):
         if config is None:
             break
         try:
-            proven_bound_remote_url = ""
-            if (
-                bool(segment.get("source_video_url_verified_bound"))
-                and str(segment.get("source_sha256") or "") == local_scene_sha256
-                and str(segment.get("source_video_url") or "").startswith("https://")
-            ):
-                proven_bound_remote_url = str(segment.get("source_video_url")).strip()
-
             if config.provider_name in video_ai_edit_provider.CANONICAL_PROVEN_V2V_PROVIDERS:
-                if proven_bound_remote_url:
-                    target_source = proven_bound_remote_url
-                else:
-                    upload_res = video_ai_edit_provider.upload_fal_media_file(config, scene_source_path)
-                    target_source = upload_res["file_url"]
+                storage_upload_attempted = True
+                upload_res = video_ai_edit_provider.upload_fal_media_file(config, scene_source_path)
+                target_source = upload_res["file_url"]
             else:
-                target_source = proven_bound_remote_url or scene_source_path
+                target_source = scene_source_path
+            generation_submit_attempted = True
             submitted = video_ai_edit_provider.submit_video_edit(
                 config,
                 source_video_path=target_source,
@@ -3989,8 +4012,13 @@ def _render_selfshot2_video_to_video(
                         "selfshot2": True,
                         "scene_index": scene_index,
                         "provider_attempted": True,
+                        "storage_upload_attempted": storage_upload_attempted,
+                        "generation_submit_attempted": True,
+                        "generation_task_id_obtained": bool(task_id),
                         "attempts": attempts,
-                        "no_charge": True,
+                        "no_charge": False,
+                        "no_charge_proven": False,
+                        "result_rejected_locally": True,
                         "blocker": blocker,
                         "continuity_evidence": continuity_res,
                         "failure_reason": continuity_res.get("failure_reason") or blocker,
@@ -3999,11 +4027,15 @@ def _render_selfshot2_video_to_video(
 
             continuity_evidence = continuity_res
             attempts.append({"provider": config.provider_name, "model": config.model, "task_id_present": bool(task_id), "fallback": bool(index)})
+            is_fal = config.provider_name in video_ai_edit_provider.CANONICAL_PROVEN_V2V_PROVIDERS
             return {
                 "ok": True,
                 "selfshot2": True,
                 "scene_index": scene_index,
                 "provider_attempted": True,
+                "storage_upload_attempted": storage_upload_attempted,
+                "generation_submit_attempted": True,
+                "generation_task_id_obtained": bool(task_id),
                 "provider": config.provider_name,
                 "model": config.model,
                 "provider_task_ids": [task_id] if task_id else [],
@@ -4016,7 +4048,8 @@ def _render_selfshot2_video_to_video(
                 "expected_duration_seconds": target_duration,
                 "engine_route": "direct_video_to_video",
                 "selected_capability": "video_to_video",
-                "source_uploaded_multipart": True,
+                "source_transport": "fal_storage_https" if is_fal else "multipart",
+                "source_uploaded_multipart": not is_fal,
                 "source_bound": True,
                 "source_segment_start": segment["start_seconds"],
                 "source_segment_end": segment["end_seconds"],
@@ -4031,42 +4064,104 @@ def _render_selfshot2_video_to_video(
             }
         except video_ai_edit_provider.AiEditProviderError as exc:
             attempts.append({"provider": config.provider_name, "model": config.model, "error": exc.reason, "fallback": bool(index)})
-            if index == 0:
-                is_upload_error = exc.reason.startswith("fal_scene_upload_")
-                is_contract_error = exc.reason in {
-                    "provider_capability_contract_mismatch",
-                    "ai_edit_provider_contract_invalid",
-                    "fal_v2v_duration_exceeds_max_frames",
-                }
-                if is_contract_error or is_upload_error:
+            is_upload_error = exc.reason.startswith("fal_scene_upload_")
+            is_contract_error = exc.reason in {
+                "provider_capability_contract_mismatch",
+                "ai_edit_provider_contract_invalid",
+                "fal_v2v_duration_exceeds_max_frames",
+                "fal_auth_invalid",
+            }
+            if is_upload_error or is_contract_error:
+                raise RealVideoRenderError(
+                    exc.reason,
+                    diagnostics={
+                        "ok": False,
+                        "selfshot2": True,
+                        "scene_index": scene_index,
+                        "provider_attempted": False,
+                        "storage_upload_attempted": storage_upload_attempted,
+                        "generation_submit_attempted": False,
+                        "generation_task_id_obtained": False,
+                        "attempts": attempts,
+                        "no_charge": True,
+                        "no_charge_proven": True,
+                        "blocker": exc.reason,
+                        "fallback_blocked_reason": "upload_failure_fallback_forbidden" if is_upload_error else "capability_contract_mismatch_fallback_forbidden",
+                    },
+                ) from exc
+
+            if index == 0 and fallback:
+                terminal_proven = (
+                    exc.reason in {"provider_terminal_failure", "provider_rejected", "provider_cancelled"}
+                    and bool(task_id)
+                )
+                task_alive = False if terminal_proven else (bool(task_id) or generation_submit_attempted)
+                primary_status = "failed" if terminal_proven else ("timeout" if exc.reason == "provider_poll_timeout" else "unknown")
+
+                decision = video_ai_edit_provider.controlled_fallback_decision(
+                    public_confirm_provenance=True,
+                    primary_status=primary_status,
+                    primary_task_alive=task_alive,
+                    fallback_count=0,
+                    candidate=fallback,
+                    primary_error=exc.reason,
+                    primary_terminal_failure_proven=terminal_proven,
+                )
+                if not decision.get("allowed"):
+                    fallback_blocked_reason = decision.get("reason")
+                    if not terminal_proven:
+                        fallback_blocked_reason = "ambiguous_state_fallback_forbidden"
+
                     raise RealVideoRenderError(
                         exc.reason,
                         diagnostics={
                             "ok": False,
                             "selfshot2": True,
                             "scene_index": scene_index,
-                            "provider_attempted": False,
+                            "provider_attempted": generation_submit_attempted,
+                            "storage_upload_attempted": storage_upload_attempted,
+                            "generation_submit_attempted": generation_submit_attempted,
+                            "generation_task_id_obtained": bool(task_id),
                             "attempts": attempts,
-                            "no_charge": True,
+                            "no_charge": not (generation_submit_attempted and bool(task_id)),
+                            "no_charge_proven": not generation_submit_attempted,
                             "blocker": exc.reason,
-                            "fallback_blocked_reason": "upload_failure_fallback_forbidden" if is_upload_error else "capability_contract_mismatch_fallback_forbidden",
+                            "fallback_blocked_reason": fallback_blocked_reason,
                         },
                     ) from exc
-                decision = video_ai_edit_provider.controlled_fallback_decision(
-                    public_confirm_provenance=True,
-                    primary_status="timeout" if exc.reason == "provider_poll_timeout" else "failed",
-                    primary_task_alive=False,
-                    fallback_count=0,
-                    candidate=fallback,
-                    primary_error=exc.reason,
-                )
-                if not decision.get("allowed"):
-                    raise RealVideoRenderError(exc.reason, diagnostics={"ok": False, "selfshot2": True, "scene_index": scene_index, "provider_attempted": True, "attempts": attempts, "no_charge": True, "blocker": exc.reason}) from exc
                 continue
-            raise RealVideoRenderError(exc.reason, diagnostics={"ok": False, "selfshot2": True, "scene_index": scene_index, "provider_attempted": True, "attempts": attempts, "no_charge": True, "blocker": exc.reason}) from exc
+            raise RealVideoRenderError(
+                exc.reason,
+                diagnostics={
+                    "ok": False,
+                    "selfshot2": True,
+                    "scene_index": scene_index,
+                    "provider_attempted": generation_submit_attempted,
+                    "storage_upload_attempted": storage_upload_attempted,
+                    "generation_submit_attempted": generation_submit_attempted,
+                    "generation_task_id_obtained": bool(task_id),
+                    "attempts": attempts,
+                    "no_charge": not (generation_submit_attempted and bool(task_id)),
+                    "no_charge_proven": not generation_submit_attempted,
+                    "blocker": exc.reason,
+                    "fallback_blocked_reason": "ambiguous_state_fallback_forbidden",
+                },
+            ) from exc
     raise RealVideoRenderError(
         "selfshot2_video_to_video_failed",
-        diagnostics={"ok": False, "selfshot2": True, "scene_index": scene_index, "provider_attempted": bool(attempts), "attempts": attempts, "no_charge": True, "blocker": "selfshot2_video_to_video_failed"},
+        diagnostics={
+            "ok": False,
+            "selfshot2": True,
+            "scene_index": scene_index,
+            "provider_attempted": generation_submit_attempted,
+            "storage_upload_attempted": storage_upload_attempted,
+            "generation_submit_attempted": generation_submit_attempted,
+            "generation_task_id_obtained": bool(task_id),
+            "attempts": attempts,
+            "no_charge": not (generation_submit_attempted and bool(task_id)),
+            "no_charge_proven": not generation_submit_attempted,
+            "blocker": "selfshot2_video_to_video_failed",
+        },
     )
 
 

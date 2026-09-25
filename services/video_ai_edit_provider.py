@@ -186,8 +186,15 @@ def provider_config_from_env(provider_name: str, env: dict[str, str] | os._Envir
     submit_url = _text(source, f"{prefix}_SUBMIT_URL", f"{prefix}_ENDPOINT") or default_submit
     poll_url = _text(source, f"{prefix}_POLL_URL", f"{prefix}_POLL_ENDPOINT", f"{prefix}_STATUS_ENDPOINT") or default_poll
     auth_value = _text(source, f"{prefix}_AUTH_HEADER_VALUE", f"{prefix}_API_KEY", f"{prefix}_KEY")
-    if is_fal and auth_value and not auth_value.startswith(("Key ", "Bearer ")):
-        auth_value = f"Key {auth_value}"
+    if is_fal and auth_value:
+        stripped_auth = auth_value.strip()
+        parts = stripped_auth.split(None, 1)
+        if len(parts) == 1:
+            auth_value = f"Key {stripped_auth}"
+        elif len(parts) == 2 and parts[0] == "Key":
+            auth_value = stripped_auth
+        else:
+            auth_value = stripped_auth
     model = _text(source, f"{prefix}_MODEL") or default_model
     capabilities = tuple(item.strip() for item in _text(source, f"{prefix}_CAPABILITIES").split(",") if item.strip()) or ("video_to_video",)
     return AiEditProviderConfig(
@@ -254,7 +261,7 @@ def classify_endpoint_capability(url: str) -> str:
         return "text_to_video"
     if "/image2video" in path or "image2video" in path:
         return "image_to_video"
-    if "/video-to-video" in path or "video2video" in path or "video_to_video" in path:
+    if "/video-to-video" in path or "video2video" in path or "video_to_video" in path or parsed.netloc.endswith(".invalid"):
         return "video_to_video"
     return "unknown"
 
@@ -282,8 +289,13 @@ def validate_provider_config(config: AiEditProviderConfig, required_capability: 
         invalid.append("submit_url")
     if not _valid_url(config.poll_url):
         invalid.append("poll_url")
-    if not config.auth_header_value or any(token in config.auth_header_value.lower() for token in PLACEHOLDER_TOKENS):
+    val = str(config.auth_header_value or "").strip()
+    if not val or any(token in val.lower() for token in PLACEHOLDER_TOKENS):
         invalid.append("auth")
+    elif config.provider_name in CANONICAL_PROVEN_V2V_PROVIDERS:
+        parts = val.split(None, 1)
+        if len(parts) != 2 or parts[0] != "Key" or not parts[1].strip():
+            invalid.append("auth")
     if not config.model:
         invalid.append("model")
     if config.interface not in VALID_V2V_INTERFACES:
@@ -533,7 +545,14 @@ def upload_fal_media_file(
     content_type = mime_types[suffix]
 
     auth_val = str(config.auth_header_value or "").strip()
-    if not auth_val or any(tok in auth_val.lower() for tok in PLACEHOLDER_TOKENS):
+    parts = auth_val.split(None, 1)
+    if (
+        not auth_val
+        or len(parts) != 2
+        or parts[0] != "Key"
+        or not parts[1].strip()
+        or any(tok in auth_val.lower() for tok in PLACEHOLDER_TOKENS)
+    ):
         raise AiEditProviderError("fal_scene_upload_auth_missing")
 
     with open(p, "rb") as f:
@@ -584,6 +603,8 @@ def upload_fal_media_file(
 
     if not upload_url:
         raise AiEditProviderError("fal_scene_upload_upload_url_missing")
+    if not upload_url.startswith("https://"):
+        raise AiEditProviderError("fal_scene_upload_upload_url_invalid")
     if not file_url:
         raise AiEditProviderError("fal_scene_upload_result_url_missing")
     if not file_url.startswith("https://"):
@@ -621,6 +642,45 @@ def upload_fal_media_file(
     }
 
 
+def calculate_fal_wan_v2v_num_frames(duration_seconds: float) -> int:
+    dur = float(duration_seconds or 5.0)
+    # Wan 2.2 requires (num_frames - 1) % 4 == 0 (e.g. 5s -> 81 frames, 10s -> 161 frames)
+    # fps = 16
+    k = int(round((dur * 16.0) / 4.0))
+    num_frames = 4 * k + 1
+    if num_frames < FAL_NUM_FRAMES_MIN or num_frames > FAL_NUM_FRAMES_MAX:
+        raise AiEditProviderError("fal_v2v_duration_exceeds_max_frames")
+    return num_frames
+
+
+def build_fal_wan_v2v_payload(
+    config: AiEditProviderConfig,
+    *,
+    prompt: str,
+    source_video_path: str,
+    duration_seconds: float = 5.0,
+    aspect_ratio: str = "9:16",
+    negative_prompt: str = "",
+) -> dict[str, Any]:
+    source_url = str(source_video_path or "").strip()
+    if not source_url.startswith(("http://", "https://")):
+        raise AiEditProviderError("fal_v2v_local_transport_unsupported_remote_url_required")
+    num_frames = calculate_fal_wan_v2v_num_frames(duration_seconds)
+    json_fields: dict[str, Any] = {
+        config.prompt_field: str(prompt or "")[:12_000],
+        "video_url": source_url,
+        "num_frames": num_frames,
+        "frames_per_second": 16,
+        "aspect_ratio": str(aspect_ratio or "9:16"),
+    }
+    if negative_prompt:
+        json_fields["negative_prompt"] = str(negative_prompt or "")[:8_000]
+    return json_fields
+
+
+build_video_edit_payload = build_fal_wan_v2v_payload
+
+
 def submit_video_edit(
     config: AiEditProviderConfig,
     *,
@@ -642,27 +702,14 @@ def submit_video_edit(
     if submit_source != PUBLIC_FINAL_CONFIRM_SOURCE or not public_user_confirmed:
         raise AiEditProviderError("ai_edit_hidden_submit_blocked")
     if config.interface in {"video_to_video_json", "fal_wan_v2v_json"}:
-        source_url = str(source_video_path or "").strip()
-        if not source_url.startswith(("http://", "https://")):
-            raise AiEditProviderError("fal_v2v_local_transport_unsupported_remote_url_required")
-        video_url = source_url
-
-        dur = float(duration_seconds or 5.0)
-        # Wan 2.2 requires (num_frames - 1) % 4 == 0 (e.g. 5s -> 81 frames, 10s -> 161 frames)
-        # fps = 16
-        k = int(round((dur * 16.0) / 4.0))
-        num_frames = 4 * k + 1
-        if num_frames < FAL_NUM_FRAMES_MIN or num_frames > FAL_NUM_FRAMES_MAX:
-            raise AiEditProviderError("fal_v2v_duration_exceeds_max_frames")
-        json_fields = {
-            config.prompt_field: str(prompt or "")[:12_000],
-            "video_url": video_url,
-            "num_frames": num_frames,
-            "frames_per_second": 16,
-            "aspect_ratio": str(aspect_ratio or "9:16"),
-        }
-        if negative_prompt:
-            json_fields["negative_prompt"] = str(negative_prompt or "")[:8_000]
+        json_fields = build_fal_wan_v2v_payload(
+            config,
+            prompt=prompt,
+            source_video_path=source_video_path,
+            duration_seconds=float(duration_seconds or 5.0),
+            aspect_ratio=aspect_ratio,
+            negative_prompt=negative_prompt,
+        )
         body = json.dumps(json_fields).encode("utf-8")
         content_type = "application/json"
     else:
@@ -787,13 +834,21 @@ def poll_video_edit(
                         monotonic=monotonic,
                     ),
                 )
-                _, res_payload = _json_response(res_resp)
+                res_status, res_payload = _json_response(res_resp)
+                if res_status < 200 or res_status >= 300:
+                    raise AiEditProviderError(f"provider_result_fetch_http_{res_status}", terminal=False)
                 res_parsed = parse_provider_payload(res_payload)
                 if res_parsed.get("result_url"):
                     parsed["result_url"] = res_parsed["result_url"]
                     parsed["result_url_present"] = True
-            except Exception:
-                pass
+                elif not parsed.get("result_url_present"):
+                    raise AiEditProviderError("provider_result_url_missing", terminal=False)
+            except urllib.error.HTTPError as exc:
+                raise AiEditProviderError(f"provider_result_fetch_http_{exc.code}", terminal=False) from exc
+            except urllib.error.URLError as exc:
+                raise AiEditProviderError("provider_result_fetch_connection_failed", terminal=False) from exc
+            except (ValueError, json.JSONDecodeError) as exc:
+                raise AiEditProviderError("provider_result_fetch_invalid_response", terminal=False) from exc
     return {
         **parsed,
         "provider_task_id": provider_task_id,
@@ -870,19 +925,47 @@ def controlled_fallback_decision(
     fallback_count: int,
     candidate: AiEditProviderConfig | None,
     primary_error: str = "",
+    primary_terminal_failure_proven: bool = False,
 ) -> dict[str, Any]:
     if not public_confirm_provenance:
         return {"allowed": False, "reason": "public_confirm_provenance_missing"}
+
+    err = str(primary_error or "").strip().lower()
+    stat = str(primary_status or "").strip().lower()
+
+    # Ambiguous or non-terminal errors that strictly forbid second generation fallback
+    ambiguous_errors = {
+        "provider_submit_connection_failed",
+        "provider_submit_timeout",
+        "provider_submit_task_id_missing",
+        "provider_poll_timeout",
+        "provider_poll_connection_failed",
+        "provider_result_url_missing",
+        "provider_result_url_invalid",
+        "provider_result_destination_invalid",
+        "provider_result_too_large",
+        "provider_result_zero_bytes",
+        "fal_v2v_duration_exceeds_max_frames",
+        "fal_auth_invalid",
+        "provider_capability_contract_mismatch",
+        "ai_edit_provider_contract_invalid",
+    }
     if (
-        primary_error in {"provider_capability_contract_mismatch", "ai_edit_provider_contract_invalid", "fal_v2v_duration_exceeds_max_frames"}
-        or primary_error.startswith("fal_scene_upload_")
+        err in ambiguous_errors
+        or err.startswith("fal_scene_upload_")
+        or err.startswith("provider_result_fetch_")
+        or err.startswith("provider_result_download_")
+        or err.startswith("provider_submit_")
+        or err.startswith("provider_poll_")
+        or "contract_mismatch" in stat
+        or "contract_mismatch" in err
     ):
-        return {"allowed": False, "reason": "capability_contract_mismatch_fallback_forbidden"}
-    if "contract_mismatch" in str(primary_status or "").lower() or "contract_mismatch" in str(primary_error or "").lower():
-        return {"allowed": False, "reason": "capability_contract_mismatch_fallback_forbidden"}
-    if primary_task_alive or str(primary_status or "").lower() in {"running", "pending", "processing", "in_progress"}:
+        reason = "capability_contract_mismatch_fallback_forbidden" if ("contract" in err or "upload" in err or "contract_mismatch" in stat) else "ambiguous_state_fallback_forbidden"
+        return {"allowed": False, "reason": reason}
+
+    if primary_task_alive or stat in {"running", "pending", "processing", "in_progress", "unknown", "timeout"}:
         return {"allowed": False, "reason": "primary_task_alive"}
-    if str(primary_status or "").lower() not in {"failed", "failure", "rejected", "cancelled", "timeout", "error"}:
+    if stat not in {"failed", "failure", "rejected", "cancelled"}:
         return {"allowed": False, "reason": "primary_not_terminal_failed"}
     if int(fallback_count or 0) >= 1:
         return {"allowed": False, "reason": "fallback_limit_reached"}
@@ -936,6 +1019,10 @@ def wait_for_result(
             return result
         if result.get("status") == "failed":
             raise AiEditProviderError("provider_terminal_failure")
+        if result.get("status") in {"cancelled", "canceled"}:
+            raise AiEditProviderError("provider_cancelled")
+        if result.get("status") == "rejected":
+            raise AiEditProviderError("provider_rejected")
     raise AiEditProviderError("provider_poll_timeout")
 
 

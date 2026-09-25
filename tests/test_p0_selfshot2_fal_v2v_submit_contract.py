@@ -319,6 +319,7 @@ def test_10_selfshot2_connector_with_fal_provider(tmp_path: Path):
     }
 
     with patch.dict(os.environ, env_overrides), \
+         patch("services.video_ai_edit_provider.upload_fal_media_file", return_value={"ok": True, "provider": "fal_video", "file_url": "https://storage.toanaas.vn/media/scene_input.mp4", "local_path": str(source_file), "local_sha256": "abc", "local_size_bytes": 100, "content_type": "video/mp4"}) as spy_upload, \
          patch("services.video_ai_edit_provider.submit_video_edit", side_effect=mock_submit) as spy_submit, \
          patch("services.video_ai_edit_provider.wait_for_result", side_effect=mock_poll), \
          patch("services.video_ai_edit_provider.download_result", side_effect=mock_download), \
@@ -339,9 +340,6 @@ def test_10_selfshot2_connector_with_fal_provider(tmp_path: Path):
                         "scene_index": 0,
                         "start_seconds": 0.0,
                         "end_seconds": 5.0,
-                        "source_video_url": "https://storage.toanaas.vn/media/scene_input.mp4",
-                        "source_video_url_verified_bound": True,
-                        "source_sha256": hashlib.sha256(b"USER_SHOT_VIDEO_DATA").hexdigest(),
                     }
                 ]
             },
@@ -352,12 +350,15 @@ def test_10_selfshot2_connector_with_fal_provider(tmp_path: Path):
             scene_index=0,
         )
 
+        assert spy_upload.call_count == 1
         assert spy_submit.call_count == 1
         cfg_arg = spy_submit.call_args[0][0]
         assert cfg_arg.provider_name == "fal_video"
         assert spy_submit.call_args[1]["source_video_path"] == "https://storage.toanaas.vn/media/scene_input.mp4"
         assert result["ok"] is True
         assert result["provider"] == "fal_video"
+        assert result["source_transport"] == "fal_storage_https"
+        assert result["source_uploaded_multipart"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -566,16 +567,20 @@ def test_15_catalog_max_seconds_blocks_15s_tier_for_fal():
         "VIDEO_AI_EDIT_PROVIDER_CHAIN": "fal_video",
     }
     with patch.dict(os.environ, env_overrides):
-        configs_15 = video_real_render_connector._selfshot3_provider_configs(["fal_video"], duration_seconds=15)
+        configs_15 = video_real_render_connector._selfshot2_provider_configs(["fal_video"], duration_seconds=15)
         assert len(configs_15) == 0
 
-        configs_10 = video_real_render_connector._selfshot3_provider_configs(["fal_video"], duration_seconds=10)
+        configs_10 = video_real_render_connector._selfshot2_provider_configs(["fal_video"], duration_seconds=10)
         assert len(configs_10) == 1
         assert configs_10[0].provider_name == "fal_video"
 
-        configs_5 = video_real_render_connector._selfshot3_provider_configs(["fal_video"], duration_seconds=5)
+        configs_5 = video_real_render_connector._selfshot2_provider_configs(["fal_video"], duration_seconds=5)
         assert len(configs_5) == 1
         assert configs_5[0].provider_name == "fal_video"
+
+        # SelfShot3 isolation: fal_video is strictly excluded
+        configs_ss3 = video_real_render_connector._selfshot3_provider_configs(["fal_video"], duration_seconds=10)
+        assert len(configs_ss3) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -1100,3 +1105,707 @@ def test_25_selfshot3_isolation_unaffected_by_fal_upload(tmp_path: Path):
             )
         assert "selfshot3_source_video_not_materialized" in str(exc_info.value)
         assert spy_upload.call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# 26. SelfShot3 strictly blocks fal provider order
+# ---------------------------------------------------------------------------
+
+def test_26_selfshot3_strictly_blocks_fal_provider_order(tmp_path: Path):
+    """SelfShot3 with valid local file and provider_order=['fal_video'] must raise provider_unavailable with 0 generation submits."""
+    source_file = tmp_path / "valid_source.mp4"
+    source_file.write_bytes(b"VALID_SOURCE_BYTES")
+    raw_output = tmp_path / "raw_ss3.mp4"
+
+    spy_upload = MagicMock()
+    spy_submit = MagicMock()
+
+    env_overrides = {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "fal_key_test",
+        "VIDEO_AI_EDIT_PROVIDER_CHAIN": "fal_video",
+    }
+
+    with patch.dict(os.environ, env_overrides), \
+         patch("services.video_ai_edit_provider.upload_fal_media_file", spy_upload), \
+         patch("services.video_ai_edit_provider.submit_video_edit", spy_submit):
+
+        with pytest.raises(RealVideoRenderError) as exc_info:
+            video_real_render_connector._render_selfshot3_video_to_video(
+                job={
+                    "source_video_local_path": str(source_file),
+                    "quality_tier": 500,
+                    "public_user_confirmed": True,
+                    "submit_source": "public_user_final_confirm",
+                },
+                asset_pack={},
+                raw_path=str(raw_output),
+                provider_order=["fal_video"],
+                fallback_prompt="prompt",
+                aspect_ratio="9:16",
+            )
+
+        assert "selfshot3_video_to_video_provider_unavailable" in str(exc_info.value)
+        diag = exc_info.value.diagnostics
+        assert diag["ok"] is False
+        assert diag["provider_attempted"] is False
+        assert diag["no_charge"] is True
+        assert spy_upload.call_count == 0
+        assert spy_submit.call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# 27. Submit ambiguity: transport error forbids secondary fallback
+# ---------------------------------------------------------------------------
+
+def test_27_submit_ambiguity_transport_error_forbids_secondary_fallback(tmp_path: Path):
+    """Network/timeout during primary Fal submit leaves task state ambiguous; fallback to key4u is forbidden."""
+    source_file = tmp_path / "source.mp4"
+    source_file.write_bytes(b"SOURCE_BYTES")
+    scene_file = tmp_path / "scene.mp4"
+    scene_file.write_bytes(b"SCENE_BYTES")
+    raw_output = tmp_path / "raw.mp4"
+
+    mock_upload = MagicMock(return_value={
+        "ok": True,
+        "provider": "fal_video",
+        "file_url": "https://v3.fal.media/files/scene.mp4",
+        "local_path": str(scene_file),
+        "local_sha256": "abc",
+        "local_size_bytes": 100,
+        "content_type": "video/mp4",
+    })
+
+    def mock_submit(cfg, **kwargs):
+        if cfg.provider_name == "fal_video":
+            raise video_ai_edit_provider.AiEditProviderError("provider_submit_timeout")
+        raise AssertionError("Secondary provider must NOT be submitted on ambiguous submit error!")
+
+    spy_submit = MagicMock(side_effect=mock_submit)
+
+    env_overrides = {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "fal_key_test",
+        "KEY4U_VIDEO_TO_VIDEO_ENABLED": "1",
+        "KEY4U_VIDEO_TO_VIDEO_API_KEY": "key4u_key_test",
+        "VIDEO_AI_EDIT_PROVIDER_CHAIN": "fal_video,key4u_video",
+    }
+
+    with patch.dict(os.environ, env_overrides), \
+         patch("services.video_ai_edit_provider.upload_fal_media_file", mock_upload), \
+         patch("services.video_ai_edit_provider.submit_video_edit", spy_submit), \
+         patch("services.video_real_render_connector._materialize_selfshot2_source_segment", return_value=str(scene_file)):
+
+        with pytest.raises(RealVideoRenderError) as exc_info:
+            video_real_render_connector._render_selfshot2_video_to_video(
+                job={
+                    "source_video_local_path": str(source_file),
+                    "quality_tier": 500,
+                    "public_user_confirmed": True,
+                    "submit_source": "public_user_final_confirm",
+                },
+                asset_pack={},
+                raw_path=str(raw_output),
+                provider_order=["fal_video", "key4u_video"],
+                fallback_prompt="prompt",
+                aspect_ratio="9:16",
+                scene_index=0,
+            )
+
+        assert "provider_submit_timeout" in str(exc_info.value)
+        diag = exc_info.value.diagnostics
+        assert diag["ok"] is False
+        assert diag["fallback_blocked_reason"] == "ambiguous_state_fallback_forbidden"
+        # Total generation submits across ALL providers <= 1 (here exactly 1 attempt on Fal, 0 on key4u)
+        assert spy_submit.call_count == 1
+        assert spy_submit.call_args[0][0].provider_name == "fal_video"
+
+
+# ---------------------------------------------------------------------------
+# 28. Poll timeout with known task_id forbids secondary fallback
+# ---------------------------------------------------------------------------
+
+def test_28_poll_timeout_with_known_task_id_forbids_secondary_fallback(tmp_path: Path):
+    """When Fal submit succeeds returning task_id, client poll timeout must NOT declare primary dead or fall back."""
+    source_file = tmp_path / "source.mp4"
+    source_file.write_bytes(b"SOURCE_BYTES")
+    scene_file = tmp_path / "scene.mp4"
+    scene_file.write_bytes(b"SCENE_BYTES")
+    raw_output = tmp_path / "raw.mp4"
+
+    mock_upload = MagicMock(return_value={
+        "ok": True,
+        "provider": "fal_video",
+        "file_url": "https://v3.fal.media/files/scene.mp4",
+        "local_path": str(scene_file),
+        "local_sha256": "abc",
+        "local_size_bytes": 100,
+        "content_type": "video/mp4",
+    })
+
+    spy_submit = MagicMock(return_value={
+        "provider_task_id": "fal-live-task-999",
+        "status": "running",
+        "accepted": True,
+        "result_url_present": False,
+    })
+
+    mock_poll = MagicMock(side_effect=video_ai_edit_provider.AiEditProviderError("provider_poll_timeout"))
+
+    env_overrides = {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "fal_key_test",
+        "KEY4U_VIDEO_TO_VIDEO_ENABLED": "1",
+        "KEY4U_VIDEO_TO_VIDEO_API_KEY": "key4u_key_test",
+        "VIDEO_AI_EDIT_PROVIDER_CHAIN": "fal_video,key4u_video",
+    }
+
+    with patch.dict(os.environ, env_overrides), \
+         patch("services.video_ai_edit_provider.upload_fal_media_file", mock_upload), \
+         patch("services.video_ai_edit_provider.submit_video_edit", spy_submit), \
+         patch("services.video_ai_edit_provider.wait_for_result", mock_poll), \
+         patch("services.video_real_render_connector._materialize_selfshot2_source_segment", return_value=str(scene_file)):
+
+        with pytest.raises(RealVideoRenderError) as exc_info:
+            video_real_render_connector._render_selfshot2_video_to_video(
+                job={
+                    "source_video_local_path": str(source_file),
+                    "quality_tier": 500,
+                    "public_user_confirmed": True,
+                    "submit_source": "public_user_final_confirm",
+                },
+                asset_pack={},
+                raw_path=str(raw_output),
+                provider_order=["fal_video", "key4u_video"],
+                fallback_prompt="prompt",
+                aspect_ratio="9:16",
+                scene_index=0,
+            )
+
+        assert "provider_poll_timeout" in str(exc_info.value)
+        diag = exc_info.value.diagnostics
+        assert diag["ok"] is False
+        assert diag["generation_task_id_obtained"] is True
+        assert diag["fallback_blocked_reason"] == "ambiguous_state_fallback_forbidden"
+        # Zero submits to secondary provider
+        assert spy_submit.call_count == 1
+        assert spy_submit.call_args[0][0].provider_name == "fal_video"
+
+
+# ---------------------------------------------------------------------------
+# 29. Fallback permitted only on explicit terminal failure
+# ---------------------------------------------------------------------------
+
+def test_29_fallback_permitted_only_on_explicit_terminal_failure(tmp_path: Path):
+    """When Fal explicitly fails with terminal failure (task proven dead), controlled fallback to key4u is permitted."""
+    source_file = tmp_path / "source.mp4"
+    source_file.write_bytes(b"SOURCE_BYTES")
+    scene_file = tmp_path / "scene.mp4"
+    scene_file.write_bytes(b"SCENE_BYTES")
+    raw_output = tmp_path / "raw.mp4"
+
+    mock_upload = MagicMock(return_value={
+        "ok": True,
+        "provider": "fal_video",
+        "file_url": "https://v3.fal.media/files/scene.mp4",
+        "local_path": str(scene_file),
+        "local_sha256": "abc",
+        "local_size_bytes": 100,
+        "content_type": "video/mp4",
+    })
+
+    def mock_submit(cfg, **kwargs):
+        if cfg.provider_name == "fal_video":
+            return {
+                "provider_task_id": "fal-term-task-1",
+                "status": "running",
+                "accepted": True,
+                "result_url_present": False,
+            }
+        return {
+            "provider_task_id": "key4u-fallback-task-2",
+            "status": "completed",
+            "accepted": True,
+            "result_url_present": True,
+            "result_url": "https://key4u.ai/results/out.mp4",
+        }
+
+    def mock_wait(cfg, task_id, **kwargs):
+        if cfg.provider_name == "fal_video":
+            raise video_ai_edit_provider.AiEditProviderError("provider_terminal_failure")
+        return {
+            "provider_task_id": task_id,
+            "status": "completed",
+            "result_url": "https://key4u.ai/results/out.mp4",
+            "result_url_present": True,
+        }
+
+    fake_continuity = {
+        "ok": True,
+        "evidence_source": "local_vision_validator",
+        "independent_visual_validation": "LOCAL_MODEL",
+        "person_required": False,
+        "object_required": False,
+    }
+
+    env_overrides = {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "fal_key_test",
+        "KEY4U_VIDEO_TO_VIDEO_ENABLED": "1",
+        "KEY4U_VIDEO_TO_VIDEO_API_KEY": "key4u_key_test",
+        "VIDEO_AI_EDIT_PROVIDER_CHAIN": "fal_video,key4u_video",
+    }
+
+    fal_cfg = video_ai_edit_provider.provider_config_from_env("fal_video", env_overrides)
+    key4u_cfg = video_ai_edit_provider.AiEditProviderConfig(
+        provider_name="key4u_video",
+        enabled=True,
+        submit_url="https://api.key4u.click/custom/video-to-video",
+        poll_url="https://api.key4u.click/custom/video-to-video/{task_id}",
+        auth_header_name="Authorization",
+        auth_header_value="Bearer key4u_key_test",
+        model="kling-video",
+        interface="video_to_video_multipart",
+        capabilities=("video_to_video",),
+    )
+
+    with patch.dict(os.environ, env_overrides), \
+         patch("services.video_real_render_connector._selfshot2_provider_configs", return_value=[fal_cfg, key4u_cfg]), \
+         patch("services.video_ai_edit_provider.upload_fal_media_file", mock_upload), \
+         patch("services.video_ai_edit_provider.submit_video_edit", side_effect=mock_submit) as spy_submit, \
+         patch("services.video_ai_edit_provider.wait_for_result", side_effect=mock_wait), \
+         patch("services.video_ai_edit_provider.download_result", return_value={"ok": True, "path": str(raw_output), "bytes": 100}), \
+         patch("services.video_real_render_connector._materialize_selfshot2_source_segment", return_value=str(scene_file)), \
+         patch("services.video_selfshot_continuity_validator.validate_selfshot_scene_continuity", return_value=fake_continuity):
+
+        res = video_real_render_connector._render_selfshot2_video_to_video(
+            job={
+                "source_video_local_path": str(source_file),
+                "quality_tier": 500,
+                "public_user_confirmed": True,
+                "submit_source": "public_user_final_confirm",
+            },
+            asset_pack={},
+            raw_path=str(raw_output),
+            provider_order=["fal_video", "key4u_video"],
+            fallback_prompt="prompt",
+            aspect_ratio="9:16",
+            scene_index=0,
+        )
+
+        assert res["ok"] is True
+        assert res["provider"] == "key4u_video"
+        assert spy_submit.call_count == 2
+        # First call was fal_video, second was key4u_video
+        assert spy_submit.call_args_list[0][0][0].provider_name == "fal_video"
+        assert spy_submit.call_args_list[1][0][0].provider_name == "key4u_video"
+
+
+# ---------------------------------------------------------------------------
+# 30. Result retrieval failure forbids secondary fallback
+# ---------------------------------------------------------------------------
+
+def test_30_result_retrieval_failure_forbids_secondary_fallback(tmp_path: Path):
+    """When generation completed on Fal but result fetch fails (5xx, invalid json, missing url), fallback is forbidden."""
+    source_file = tmp_path / "source.mp4"
+    source_file.write_bytes(b"SOURCE_BYTES")
+    scene_file = tmp_path / "scene.mp4"
+    scene_file.write_bytes(b"SCENE_BYTES")
+    raw_output = tmp_path / "raw.mp4"
+
+    mock_upload = MagicMock(return_value={
+        "ok": True,
+        "provider": "fal_video",
+        "file_url": "https://v3.fal.media/files/scene.mp4",
+        "local_path": str(scene_file),
+        "local_sha256": "abc",
+        "local_size_bytes": 100,
+        "content_type": "video/mp4",
+    })
+
+    spy_submit = MagicMock(return_value={
+        "provider_task_id": "fal-res-fetch-task-1",
+        "status": "running",
+        "accepted": True,
+        "result_url_present": False,
+    })
+
+    mock_wait = MagicMock(side_effect=video_ai_edit_provider.AiEditProviderError("provider_result_fetch_http_500"))
+
+    env_overrides = {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "fal_key_test",
+        "KEY4U_VIDEO_TO_VIDEO_ENABLED": "1",
+        "KEY4U_VIDEO_TO_VIDEO_API_KEY": "key4u_key_test",
+        "VIDEO_AI_EDIT_PROVIDER_CHAIN": "fal_video,key4u_video",
+    }
+
+    with patch.dict(os.environ, env_overrides), \
+         patch("services.video_ai_edit_provider.upload_fal_media_file", mock_upload), \
+         patch("services.video_ai_edit_provider.submit_video_edit", spy_submit), \
+         patch("services.video_ai_edit_provider.wait_for_result", mock_wait), \
+         patch("services.video_real_render_connector._materialize_selfshot2_source_segment", return_value=str(scene_file)):
+
+        with pytest.raises(RealVideoRenderError) as exc_info:
+            video_real_render_connector._render_selfshot2_video_to_video(
+                job={
+                    "source_video_local_path": str(source_file),
+                    "quality_tier": 500,
+                    "public_user_confirmed": True,
+                    "submit_source": "public_user_final_confirm",
+                },
+                asset_pack={},
+                raw_path=str(raw_output),
+                provider_order=["fal_video", "key4u_video"],
+                fallback_prompt="prompt",
+                aspect_ratio="9:16",
+                scene_index=0,
+            )
+
+        assert "provider_result_fetch_http_500" in str(exc_info.value)
+        diag = exc_info.value.diagnostics
+        assert diag["ok"] is False
+        assert diag["fallback_blocked_reason"] == "ambiguous_state_fallback_forbidden"
+        # Total generation submits across ALL providers == 1
+        assert spy_submit.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# 31. Fal auth scheme strict canonical validation
+# ---------------------------------------------------------------------------
+
+def test_31_fal_auth_scheme_strict_canonical_validation(tmp_path: Path):
+    """FAL auth must strictly normalize raw token to 'Key <raw>', preserve 'Key <token>', and fail closed on 'Bearer <token>'."""
+    # 1. Raw token normalization
+    cfg_raw = video_ai_edit_provider.provider_config_from_env("fal_video", {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "raw_secret_xyz",
+    })
+    assert cfg_raw.auth_header_value == "Key raw_secret_xyz"
+    errs_raw = video_ai_edit_provider.validate_provider_config(cfg_raw)
+    assert "auth" not in errs_raw.get("invalid_fields", [])
+    assert errs_raw.get("ok") is True
+
+    # 2. Canonical 'Key <token>' preservation
+    cfg_canonical = video_ai_edit_provider.provider_config_from_env("fal_video", {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "Key canonical_secret_xyz",
+    })
+    assert cfg_canonical.auth_header_value == "Key canonical_secret_xyz"
+    errs_canonical = video_ai_edit_provider.validate_provider_config(cfg_canonical)
+    assert "auth" not in errs_canonical.get("invalid_fields", [])
+    assert errs_canonical.get("ok") is True
+
+    # 3. Disallowed scheme 'Bearer <token>' fails closed
+    cfg_bearer = video_ai_edit_provider.provider_config_from_env("fal_video", {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "Bearer unexpected_scheme_token",
+    })
+    assert cfg_bearer.auth_header_value == "Bearer unexpected_scheme_token"
+    errs_bearer = video_ai_edit_provider.validate_provider_config(cfg_bearer)
+    assert "auth" in errs_bearer.get("invalid_fields", [])
+    assert errs_bearer.get("ok") is False
+
+    # 4. Upload fails closed on invalid auth scheme
+    test_file = tmp_path / "test.mp4"
+    test_file.write_bytes(b"BYTES")
+    with pytest.raises(video_ai_edit_provider.AiEditProviderError) as exc_info:
+        video_ai_edit_provider.upload_fal_media_file(cfg_bearer, test_file)
+    assert exc_info.value.reason == "fal_scene_upload_auth_missing"
+
+
+# ---------------------------------------------------------------------------
+# 32. Storage upload URL security invariants
+# ---------------------------------------------------------------------------
+
+def test_32_storage_upload_url_security_invariants(tmp_path: Path):
+    """upload_fal_media_file must enforce upload_url strictly starts with https://, forbidding http://, file://, etc."""
+    test_file = tmp_path / "test_sec.mp4"
+    test_file.write_bytes(b"TEST_BYTES_SEC")
+
+    cfg = video_ai_edit_provider.provider_config_from_env("fal_video", {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "fal_valid_key",
+    })
+
+    insecure_urls = [
+        "http://insecure.fal-storage.aws/upload/123",
+        "file:///etc/passwd",
+        "ftp://storage.fal.ai/upload",
+        "javascript:alert(1)",
+    ]
+
+    put_calls = []
+    for bad_url in insecure_urls:
+        def mock_opener(req, **kwargs):
+            if req.get_method() == "POST":
+                resp = MagicMock()
+                resp.status = 200
+                resp.read.return_value = json.dumps({
+                    "upload_url": bad_url,
+                    "file_url": "https://v3.fal.media/files/out.mp4",
+                }).encode("utf-8")
+                return resp
+            if req.get_method() == "PUT":
+                put_calls.append(req.get_full_url())
+                resp = MagicMock()
+                resp.status = 200
+                resp.read.return_value = b""
+                return resp
+            raise ValueError(f"unexpected method {req.get_method()}")
+
+        with pytest.raises(video_ai_edit_provider.AiEditProviderError) as exc_info:
+            video_ai_edit_provider.upload_fal_media_file(cfg, test_file, opener=mock_opener)
+        assert exc_info.value.reason == "fal_scene_upload_upload_url_invalid"
+
+    # Crucial security invariant: 0 PUT requests issued
+    assert len(put_calls) == 0
+
+
+# ---------------------------------------------------------------------------
+# 33. Fal frame boundary matrix
+# ---------------------------------------------------------------------------
+
+def test_33_fal_frame_boundary_matrix():
+    """Fal Wan 2.2 frame calculation matrix covering boundary conditions."""
+    cfg = video_ai_edit_provider.provider_config_from_env("fal_video", {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "fal_key_test",
+    })
+
+    # Valid duration tests (all must be in [17, 161] and satisfy (f - 1) % 4 == 0)
+    valid_test_cases = [
+        (1.0, 17),
+        (2.0, 33),
+        (4.9, 81),
+        (5.0, 81),
+        (5.1, 81),
+        (7.5, 121),
+        (9.9, 161),
+        (10.0, 161),
+    ]
+    for dur, expected_frames in valid_test_cases:
+        p = video_ai_edit_provider.build_video_edit_payload(
+            cfg,
+            prompt="cinematic product scene",
+            source_video_path="https://v3.fal.media/files/test.mp4",
+            duration_seconds=dur,
+            aspect_ratio="9:16",
+        )
+        frames = p["num_frames"]
+        assert frames == expected_frames
+        assert (frames - 1) % 4 == 0
+        assert 17 <= frames <= 161
+
+    # Invalid duration tests (must raise fal_v2v_duration_exceeds_max_frames)
+    invalid_durations = [0.5, 11.0, 15.0, 30.0]
+    for bad_dur in invalid_durations:
+        with pytest.raises(video_ai_edit_provider.AiEditProviderError) as exc_info:
+            video_ai_edit_provider.build_video_edit_payload(
+                cfg,
+                prompt="cinematic product scene",
+                source_video_path="https://v3.fal.media/files/test.mp4",
+                duration_seconds=bad_dur,
+                aspect_ratio="9:16",
+            )
+        assert exc_info.value.reason == "fal_v2v_duration_exceeds_max_frames"
+
+
+# ---------------------------------------------------------------------------
+# 34. Duration segment consistency preflight
+# ---------------------------------------------------------------------------
+
+def test_34_duration_segment_consistency_preflight(tmp_path: Path):
+    """Segment duration mismatch with target duration must fail closed before upload or submit."""
+    source_file = tmp_path / "source.mp4"
+    source_file.write_bytes(b"SOURCE_BYTES")
+    raw_output = tmp_path / "raw.mp4"
+
+    spy_upload = MagicMock()
+    spy_submit = MagicMock()
+
+    env_overrides = {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "fal_key_test",
+        "VIDEO_AI_EDIT_PROVIDER_CHAIN": "fal_video",
+    }
+
+    with patch.dict(os.environ, env_overrides), \
+         patch("services.video_ai_edit_provider.upload_fal_media_file", spy_upload), \
+         patch("services.video_ai_edit_provider.submit_video_edit", spy_submit):
+
+        with pytest.raises(RealVideoRenderError) as exc_info:
+            video_real_render_connector._render_selfshot2_video_to_video(
+                job={
+                    "source_video_local_path": str(source_file),
+                    "quality_tier": 500,
+                    "public_user_confirmed": True,
+                    "submit_source": "public_user_final_confirm",
+                    "scene_duration_seconds": 5,
+                },
+                asset_pack={
+                    "scene_source_segments": [
+                        {"scene_index": 0, "start_seconds": 0.0, "end_seconds": 2.0, "duration_seconds": 2.0}
+                    ]
+                },
+                raw_path=str(raw_output),
+                provider_order=["fal_video"],
+                fallback_prompt="prompt",
+                aspect_ratio="9:16",
+                scene_index=0,
+            )
+
+        assert "selfshot2_scene_duration_mismatch" in str(exc_info.value)
+        diag = exc_info.value.diagnostics
+        assert diag["ok"] is False
+        assert diag["provider_attempted"] is False
+        assert diag["no_charge"] is True
+        assert spy_upload.call_count == 0
+        assert spy_submit.call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# 35. Continuity failure cost diagnostics
+# ---------------------------------------------------------------------------
+
+def test_35_continuity_failure_cost_diagnostics(tmp_path: Path):
+    """When Fal generates video but local continuity rejects it, no_charge must be False (costs occurred)."""
+    source_file = tmp_path / "source.mp4"
+    source_file.write_bytes(b"SOURCE_BYTES")
+    scene_file = tmp_path / "scene.mp4"
+    scene_file.write_bytes(b"SCENE_BYTES")
+    raw_output = tmp_path / "raw.mp4"
+
+    mock_upload = MagicMock(return_value={
+        "ok": True,
+        "provider": "fal_video",
+        "file_url": "https://v3.fal.media/files/scene.mp4",
+        "local_path": str(scene_file),
+        "local_sha256": "abc",
+        "local_size_bytes": 100,
+        "content_type": "video/mp4",
+    })
+
+    spy_submit = MagicMock(return_value={
+        "provider_task_id": "fal-cost-task-1",
+        "status": "completed",
+        "accepted": True,
+        "result_url_present": True,
+        "result_url": "https://v3.fal.media/files/gen_out.mp4",
+    })
+
+    failed_continuity = {
+        "ok": False,
+        "evidence_source": "local_vision_validator",
+        "independent_visual_validation": "LOCAL_MODEL",
+        "failure_reason": "continuity_identity_drift_detected",
+        "person_match": False,
+    }
+
+    env_overrides = {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "fal_key_test",
+        "VIDEO_AI_EDIT_PROVIDER_CHAIN": "fal_video",
+    }
+
+    with patch.dict(os.environ, env_overrides), \
+         patch("services.video_ai_edit_provider.upload_fal_media_file", mock_upload), \
+         patch("services.video_ai_edit_provider.submit_video_edit", spy_submit), \
+         patch("services.video_ai_edit_provider.download_result", return_value={"ok": True, "path": str(raw_output), "bytes": 100}), \
+         patch("services.video_real_render_connector._materialize_selfshot2_source_segment", return_value=str(scene_file)), \
+         patch("services.video_selfshot_continuity_validator.validate_selfshot_scene_continuity", return_value=failed_continuity):
+
+        with pytest.raises(RealVideoRenderError) as exc_info:
+            video_real_render_connector._render_selfshot2_video_to_video(
+                job={
+                    "source_video_local_path": str(source_file),
+                    "quality_tier": 500,
+                    "public_user_confirmed": True,
+                    "submit_source": "public_user_final_confirm",
+                },
+                asset_pack={},
+                raw_path=str(raw_output),
+                provider_order=["fal_video"],
+                fallback_prompt="prompt",
+                aspect_ratio="9:16",
+                scene_index=0,
+            )
+
+        diag = exc_info.value.diagnostics
+        assert diag["ok"] is False
+        assert diag["provider_attempted"] is True
+        assert diag["storage_upload_attempted"] is True
+        assert diag["generation_submit_attempted"] is True
+        assert diag["generation_task_id_obtained"] is True
+        assert diag["no_charge"] is False
+        assert diag["no_charge_proven"] is False
+        assert diag["result_rejected_locally"] is True
+
+
+# ---------------------------------------------------------------------------
+# 36. Failure injection matrix across all stages
+# ---------------------------------------------------------------------------
+
+def test_36_failure_injection_matrix_across_all_stages(tmp_path: Path):
+    """Matrix testing failure injection across all stages of the SelfShot2 Fal pipeline."""
+    source_file = tmp_path / "source.mp4"
+    source_file.write_bytes(b"SOURCE_BYTES")
+    scene_file = tmp_path / "scene.mp4"
+    scene_file.write_bytes(b"SCENE_BYTES")
+    raw_output = tmp_path / "raw.mp4"
+
+    env_overrides = {
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        "FAL_VIDEO_TO_VIDEO_API_KEY": "fal_key_test",
+        "KEY4U_VIDEO_TO_VIDEO_ENABLED": "1",
+        "KEY4U_VIDEO_TO_VIDEO_API_KEY": "key4u_key_test",
+        "VIDEO_AI_EDIT_PROVIDER_CHAIN": "fal_video,key4u_video",
+    }
+
+    stages = [
+        ("upload_http_error", video_ai_edit_provider.AiEditProviderError("fal_scene_upload_failed_http_502"), "fal_scene_upload_failed_http_502", True, 0),
+        ("upload_invalid_url", video_ai_edit_provider.AiEditProviderError("fal_scene_upload_upload_url_invalid"), "fal_scene_upload_upload_url_invalid", True, 0),
+        ("submit_transport_error", video_ai_edit_provider.AiEditProviderError("provider_submit_connection_failed"), "provider_submit_connection_failed", True, 0),
+        ("poll_timeout", video_ai_edit_provider.AiEditProviderError("provider_poll_timeout"), "provider_poll_timeout", False, 0),
+        ("result_fetch_error", video_ai_edit_provider.AiEditProviderError("provider_result_fetch_http_500"), "provider_result_fetch_http_500", False, 0),
+    ]
+
+    for stage_name, err, expected_blocker, expect_no_charge, expected_second_submits in stages:
+        with patch.dict(os.environ, env_overrides), \
+             patch("services.video_real_render_connector._materialize_selfshot2_source_segment", return_value=str(scene_file)):
+
+            if "upload" in stage_name:
+                mock_up = MagicMock(side_effect=err)
+                mock_sub = MagicMock()
+                mock_poll = MagicMock()
+            elif "submit" in stage_name:
+                mock_up = MagicMock(return_value={"ok": True, "provider": "fal_video", "file_url": "https://v3.fal.media/files/scene.mp4", "local_path": str(scene_file), "local_sha256": "abc", "local_size_bytes": 100, "content_type": "video/mp4"})
+                mock_sub = MagicMock(side_effect=err)
+                mock_poll = MagicMock()
+            elif "poll" in stage_name or "result" in stage_name:
+                mock_up = MagicMock(return_value={"ok": True, "provider": "fal_video", "file_url": "https://v3.fal.media/files/scene.mp4", "local_path": str(scene_file), "local_sha256": "abc", "local_size_bytes": 100, "content_type": "video/mp4"})
+                mock_sub = MagicMock(return_value={"provider_task_id": "task-inj-1", "status": "running", "accepted": True, "result_url_present": False})
+                mock_poll = MagicMock(side_effect=err)
+
+            with patch("services.video_ai_edit_provider.upload_fal_media_file", mock_up), \
+                 patch("services.video_ai_edit_provider.submit_video_edit", mock_sub), \
+                 patch("services.video_ai_edit_provider.wait_for_result", mock_poll):
+
+                with pytest.raises(RealVideoRenderError) as exc_info:
+                    video_real_render_connector._render_selfshot2_video_to_video(
+                        job={
+                            "source_video_local_path": str(source_file),
+                            "quality_tier": 500,
+                            "public_user_confirmed": True,
+                            "submit_source": "public_user_final_confirm",
+                        },
+                        asset_pack={},
+                        raw_path=str(raw_output),
+                        provider_order=["fal_video", "key4u_video"],
+                        fallback_prompt="prompt",
+                        aspect_ratio="9:16",
+                        scene_index=0,
+                    )
+                assert expected_blocker in str(exc_info.value), f"Failed for stage {stage_name}"
+                diag = exc_info.value.diagnostics
+                assert diag["no_charge"] is expect_no_charge, f"no_charge mismatch for stage {stage_name}"
