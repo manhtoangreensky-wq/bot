@@ -1868,3 +1868,101 @@ def test_80_cue_locked_timing_propagation(tmp_path):
     asyncio.run(_run())
 
 
+def test_81_stereo_pcm_f0_real_execution(tmp_path):
+    """Stereo 44.1kHz s16le PCM pitch extraction executes without TypeError and returns classifications."""
+    import numpy as np
+    import struct
+    sr = 44100
+    dur = 1.0
+    t = np.linspace(0, dur, int(sr * dur), endpoint=False)
+    s1 = (np.sin(2 * np.pi * 120 * t) * 16000).astype(np.int16)
+    s2 = (np.sin(2 * np.pi * 200 * t) * 16000).astype(np.int16)
+
+    pcm_file = tmp_path / "stereo_test.pcm"
+    with open(pcm_file, "wb") as f:
+        for val in s1:
+            f.write(struct.pack("<hh", val, val))
+        for val in s2:
+            f.write(struct.pack("<hh", val, val))
+
+    ranges = {
+        "spk_male": [(0.0, 1.0)],
+        "spk_female": [(1.0, 2.0)],
+    }
+    results = smart.estimate_speaker_pitches_from_pcm(pcm_file, ranges)
+    assert "spk_male" in results, "spk_male must be in results (not swallowed by TypeError)"
+    assert "spk_female" in results, "spk_female must be in results (not swallowed by TypeError)"
+    assert results["spk_male"]["voice_register"] == "low"
+    assert results["spk_male"]["voice_gender"] == "male"
+    assert results["spk_female"]["voice_register"] == "high"
+    assert results["spk_female"]["voice_gender"] == "female"
+
+
+def test_82_pcm_format_detection_not_file_size_mod_4(tmp_path):
+    """16kHz mono PCM with even sample count (file_size % 4 == 0) is not misrouted as stereo 44.1k."""
+    import numpy as np
+    import struct
+    sr = 16000
+    dur = 1.0
+    t = np.linspace(0, dur, int(sr * dur), endpoint=False)
+    s1 = (np.sin(2 * np.pi * 120 * t) * 16000).astype(np.int16)
+    pcm_file = tmp_path / "mono_test.pcm"
+    with open(pcm_file, "wb") as f:
+        for val in s1:
+            f.write(struct.pack("<h", val))
+    assert pcm_file.stat().st_size % 4 == 0, "Precondition: file_size % 4 == 0"
+
+    ranges = {"spk_mono": [(0.0, 1.0)]}
+    results = smart.estimate_speaker_pitches_from_pcm(pcm_file, ranges, sample_rate=16000, channels=1)
+    assert "spk_mono" in results
+    assert results["spk_mono"]["voice_register"] == "low"
+
+
+def test_83_ambiguity_band_155_165_hz(tmp_path):
+    """Pitches in the 155-165 Hz band are labeled as ambiguous/unknown, not forced into low/high."""
+    import numpy as np
+    import struct
+    sr = 44100
+    dur = 1.0
+    t = np.linspace(0, dur, int(sr * dur), endpoint=False)
+    s_amb = (np.sin(2 * np.pi * 160 * t) * 16000).astype(np.int16)
+    pcm_file = tmp_path / "amb_test.pcm"
+    with open(pcm_file, "wb") as f:
+        for val in s_amb:
+            f.write(struct.pack("<hh", val, val))
+
+    ranges = {"spk_amb": [(0.0, 1.0)]}
+    results = smart.estimate_speaker_pitches_from_pcm(pcm_file, ranges)
+    assert "spk_amb" in results
+    assert results["spk_amb"]["voice_register"] == "unknown"
+    assert results["spk_amb"]["voice_gender"] == "ambiguous"
+
+
+def test_84_anti_flapping_acoustic_guard():
+    """Short cue smoothing does NOT reassign if cue has contradictory acoustic evidence."""
+    cues = [
+        {"cue_id": "c1", "speaker_id": "female_1", "start_ms": 0, "end_ms": 1500},
+        {"cue_id": "c2", "speaker_id": "male_1", "start_ms": 1600, "end_ms": 2000},
+        {"cue_id": "c3", "speaker_id": "female_1", "start_ms": 2100, "end_ms": 3500},
+    ]
+    acoustics = {
+        "female_1": {"voice_register": "high", "voice_gender": "female", "confidence": 0.95},
+        "male_1": {"voice_register": "low", "voice_gender": "male", "confidence": 0.95},
+    }
+    smoothed = smart.smooth_smart_multivoice_cues(cues, acoustic_classifications=acoustics)
+    assert smoothed[1]["speaker_id"] == "male_1", "Should NOT smooth when acoustics clearly contradict"
+    assert "anti_flapping_smoothed" not in smoothed[1]
+
+
+def test_85_bounded_eof_clamp():
+    """EOF clamp bounds ranges to actual media/file duration and discards out-of-bound ranges."""
+    cues = [
+        {"cue_id": "c1", "speaker_id": "spk_1", "start_ms": 0, "end_ms": 1000},
+        {"cue_id": "c2", "speaker_id": "spk_1", "start_ms": 5000, "end_ms": 8000},
+    ]
+    ranges = smart._build_derived_ranges(cues, max_duration_seconds=3.0)
+    assert len(ranges.get("spk_1", [])) == 1, "c2 (> 3.0s) must be discarded"
+    assert ranges["spk_1"][0] == (0.0, 1.0)
+
+
+

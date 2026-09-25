@@ -206,6 +206,7 @@ def smooth_smart_multivoice_cues(
     *,
     min_duration_sec: float = 0.8,
     max_gap_sec: float = 0.6,
+    acoustic_classifications: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Smooth short diarization flapping/bleeding to maintain speaker continuity.
 
@@ -215,8 +216,8 @@ def smooth_smart_multivoice_cues(
     - Sandwich check: if cue i (< min_duration_sec) is sandwiched between
       cues i-1 and i+1 having the SAME speaker, and gaps are <= max_gap_sec,
       cue i inherits the surrounding speaker.
-    - Immediate follow check: if cue i (< 0.5s) immediately follows cue i-1
-      with gap <= 0.15s, cue i inherits cue i-1's speaker.
+    - Acoustic guard: if acoustic classifications indicate strong contradictory
+      gender/register evidence between curr and surrounding speaker, do NOT smooth.
     """
     if not cues:
         return []
@@ -268,6 +269,22 @@ def smooth_smart_multivoice_cues(
             gap_after = max(0.0, next_start - end)
             if prev_spk and prev_spk == next_spk and prev_spk != curr_spk:
                 if gap_before <= max_gap_sec and gap_after <= max_gap_sec:
+                    if acoustic_classifications:
+                        curr_meta = acoustic_classifications.get(curr_spk) or {}
+                        prev_meta = acoustic_classifications.get(prev_spk) or {}
+                        curr_reg = str(curr_meta.get("voice_register") or "").strip().lower()
+                        prev_reg = str(prev_meta.get("voice_register") or "").strip().lower()
+                        curr_conf = float(curr_meta.get("confidence") or 0.0)
+                        prev_conf = float(prev_meta.get("confidence") or 0.0)
+                        if (
+                            curr_reg in {"low", "high"}
+                            and prev_reg in {"low", "high"}
+                            and curr_reg != prev_reg
+                            and curr_conf >= speaker_cast.MIN_REGISTER_CONFIDENCE
+                            and prev_conf >= speaker_cast.MIN_REGISTER_CONFIDENCE
+                        ):
+                            continue
+
                     if curr.get("speaker_id"):
                         curr["speaker_id"] = prev_spk
                     if curr.get("speaker"):
@@ -282,12 +299,15 @@ def _build_derived_ranges(
     cues: Sequence[Mapping[str, Any]],
     stereo_pcm_path: str | Path | None = None,
     speakers: Sequence[str] | None = None,
+    max_duration_seconds: float | None = None,
 ) -> dict[str, list[tuple[float, float]]]:
-    max_sec = 1e9
+    max_sec = max_duration_seconds if max_duration_seconds is not None else 1e9
     if stereo_pcm_path:
         p = Path(stereo_pcm_path)
-        if p.is_file() and p.stat().st_size > 0 and p.stat().st_size % 4 == 0:
-            max_sec = p.stat().st_size / (44100 * 4)
+        if p.is_file() and p.stat().st_size > 0:
+            file_size = p.stat().st_size
+            pcm_dur = file_size / (44100 * 4)
+            max_sec = min(max_sec, pcm_dur)
 
     target_speakers = set(speakers) if speakers is not None else None
     ranges: dict[str, list[tuple[float, float]]] = {}
@@ -297,8 +317,9 @@ def _build_derived_ranges(
             continue
         s = float(c.get("start_ms", 0)) / 1000.0 if "start_ms" in c else float(c.get("start", 0.0) or 0.0)
         e = float(c.get("end_ms", 0)) / 1000.0 if "end_ms" in c else float(c.get("end", 0.0) or 0.0)
+        s = max(0.0, min(s, max_sec))
         e = min(e, max_sec)
-        if e > s:
+        if e > s and (e - s) >= 0.05:
             ranges.setdefault(spk, []).append((s, e))
     return ranges
 
@@ -307,13 +328,20 @@ def estimate_speaker_pitches_from_pcm(
     pcm_path: str | Path,
     ranges_by_speaker: Mapping[str, Sequence[tuple[float, float]]],
     *,
+    sample_rate: int | None = None,
+    channels: int | None = None,
     deadline_monotonic: float | None = None,
     stop_requested: Callable[[], bool] | None = None,
 ) -> dict[str, dict[str, Any]]:
-    """Estimate pitch register (low/male vs high/female) per speaker directly from PCM audio.
+    """Estimate pitch register per speaker directly from PCM audio.
 
-    Supports stereo 44.1kHz s16le PCM or mono 16kHz s16le PCM.
-    Returns mapping: speaker_id -> {voice_register: "low"|"high", voice_gender: "male"|"female", confidence: float, median_f0: float}
+    Supports Stereo 44.1kHz s16le PCM or Mono 16kHz s16le PCM.
+    Returns mapping: speaker_id -> {
+        voice_register: "low" | "high" | "unknown",
+        voice_gender: "male" | "female" | "ambiguous",
+        confidence: float,
+        median_f0: float,
+    }
     """
     path = Path(pcm_path)
     if not path.is_file() or path.stat().st_size <= 0:
@@ -322,91 +350,122 @@ def estimate_speaker_pitches_from_pcm(
     deadline = deadline_monotonic or (time.monotonic() + 30.0)
     stop_fn = stop_requested or (lambda: False)
 
+    file_size = path.stat().st_size
+
+    # Robust format detection: check explicit args first
+    sr = int(sample_rate) if sample_rate is not None else None
+    ch = int(channels) if channels is not None else None
+
+    if sr is None or ch is None:
+        max_cue_end = 0.0
+        for r_list in ranges_by_speaker.values():
+            for s, e in r_list:
+                if e > max_cue_end:
+                    max_cue_end = e
+        if max_cue_end > 0:
+            dur_stereo44 = file_size / (44100 * 4)
+            dur_mono16 = file_size / (16000 * 2)
+            if dur_stereo44 >= max_cue_end * 0.8:
+                sr = sr or 44100
+                ch = ch or 2
+            elif dur_mono16 >= max_cue_end * 0.8:
+                sr = sr or 16000
+                ch = ch or 1
+            else:
+                sr = sr or 44100
+                ch = ch or 2
+        else:
+            sr = sr or 44100
+            ch = ch or 2
+
     try:
         import numpy as np
-        file_size = path.stat().st_size
-        results: dict[str, dict[str, Any]] = {}
-        is_stereo_44k = (file_size % 4 == 0)
+    except ImportError:
+        return {}
 
-        for spk, ranges in ranges_by_speaker.items():
-            if stop_fn() or time.monotonic() > deadline:
-                break
-            if not ranges:
-                continue
+    results: dict[str, dict[str, Any]] = {}
+    bytes_per_frame = ch * 2
 
-            pitches: list[float] = []
-            confs: list[float] = []
+    try:
+        with path.open("rb") as handle:
+            for spk, ranges in ranges_by_speaker.items():
+                if stop_fn() or time.monotonic() > deadline:
+                    break
+                if not ranges:
+                    continue
 
-            if is_stereo_44k:
-                from services import subdub_two_speaker_gender_onnx as exact_gender
-                try:
-                    signal, _ = exact_gender._read_montage(
-                        path,
-                        list(ranges)[:12],
-                        deadline_monotonic=deadline,
-                        stop_requested=stop_fn,
-                    )
-                    mono = signal.mean(axis=0)
-                    resampled = exact_gender._resample_for_panns(np, mono)
-                    resampled_int16 = np.clip(resampled, -32768, 32767).astype(np.int16)
+                pitches: list[float] = []
+                confs: list[float] = []
 
-                    hop = speaker_cast.PCM_WINDOW_SAMPLES
-                    for i in range(0, len(resampled_int16) - hop + 1, hop):
+                for s, e in list(ranges)[:12]:
+                    if stop_fn() or time.monotonic() > deadline:
+                        break
+                    start_frame = int(round(s * sr))
+                    frame_count = int(round((e - s) * sr))
+                    byte_offset = start_frame * bytes_per_frame
+                    byte_count = frame_count * bytes_per_frame
+                    if byte_count <= 0 or byte_offset + byte_count > file_size:
+                        continue
+                    handle.seek(byte_offset)
+                    raw = handle.read(byte_count)
+                    if len(raw) != byte_count:
+                        continue
+
+                    values = np.frombuffer(raw, dtype="<i2")
+                    if ch == 2:
+                        if values.size % 2 != 0:
+                            continue
+                        mono = values.reshape(-1, 2).mean(axis=1)
+                    else:
+                        mono = values.astype(np.float64)
+
+                    if sr != 16000:
+                        target_len = int(round(len(mono) * 16000 / sr))
+                        if target_len < 2:
+                            continue
+                        src_pos = np.arange(len(mono), dtype=np.float64)
+                        dst_pos = np.arange(target_len, dtype=np.float64) * (sr / 16000)
+                        resampled = np.interp(dst_pos, src_pos, mono)
+                        resampled_int16 = np.clip(resampled, -32768, 32767).astype(np.int16)
+                    else:
+                        resampled_int16 = np.clip(mono, -32768, 32767).astype(np.int16)
+
+                    mono_16k_bytes = resampled_int16.tobytes()
+                    hop_bytes = speaker_cast.PCM_WINDOW_BYTES
+                    for i in range(0, len(mono_16k_bytes) - hop_bytes + 1, hop_bytes):
                         if stop_fn() or time.monotonic() > deadline:
                             break
-                        win_bytes = resampled_int16[i : i + hop].tobytes()
+                        win = mono_16k_bytes[i : i + hop_bytes]
                         est = speaker_cast._estimate_window_pitch(
-                            win_bytes,
+                            win,
                             deadline_monotonic=deadline,
                             stop_requested=stop_fn,
                         )
                         if est:
                             pitches.append(est[0])
                             confs.append(est[1])
-                except Exception:
-                    pass
-            else:
-                try:
-                    with path.open("rb") as handle:
-                        offsets = speaker_cast._speaker_window_offsets(
-                            list(ranges),
-                            deadline_monotonic=deadline,
-                            stop_requested=stop_fn,
-                            max_windows=40,
-                        )
-                        for off in offsets:
-                            if stop_fn() or time.monotonic() > deadline:
-                                break
-                            handle.seek(off)
-                            raw = handle.read(speaker_cast.PCM_WINDOW_BYTES)
-                            if len(raw) == speaker_cast.PCM_WINDOW_BYTES:
-                                est = speaker_cast._estimate_window_pitch(
-                                    raw,
-                                    deadline_monotonic=deadline,
-                                    stop_requested=stop_fn,
-                                )
-                                if est:
-                                    pitches.append(est[0])
-                                    confs.append(est[1])
-                except Exception:
-                    pass
 
-            if pitches:
-                med_f0 = float(np.median(pitches))
-                mean_conf = float(np.mean(confs))
-                reg = "low" if med_f0 <= 155.0 else "high"
-                gender = "male" if reg == "low" else "female"
-                results[spk] = {
-                    "speaker_id": spk,
-                    "voice_register": reg,
-                    "voice_gender": gender,
-                    "confidence": round(mean_conf, 4),
-                    "median_f0": round(med_f0, 1),
-                }
+                if pitches:
+                    med_f0 = float(np.median(pitches))
+                    mean_conf = float(np.mean(confs))
+                    reg = speaker_cast.pitch_register(med_f0, confidence=mean_conf)
+                    if reg == "low":
+                        gender = "male"
+                    elif reg == "high":
+                        gender = "female"
+                    else:
+                        gender = "ambiguous"
+                    results[spk] = {
+                        "speaker_id": spk,
+                        "voice_register": reg,
+                        "voice_gender": gender,
+                        "confidence": round(mean_conf, 4),
+                        "median_f0": round(med_f0, 1),
+                    }
+    except (OSError, ValueError, TypeError):
+        pass
 
-        return results
-    except Exception:
-        return {}
+    return results
 
 
 def decide_smart_multivoice(
@@ -429,8 +488,8 @@ def decide_smart_multivoice(
     """Core pure-functional decision authority for Auto Smart Multi-Voice lane."""
     seed = hashlib.sha256(str(assignment_seed).encode("utf-8")).hexdigest()
 
-    # Step 0: Apply dialogue continuity / anti-flapping smoothing to eliminate short diarization bleeds
-    input_cues = smooth_smart_multivoice_cues(cues)
+    # Step 0: Apply dialogue continuity / anti-flapping smoothing with acoustic guard
+    input_cues = smooth_smart_multivoice_cues(cues, acoustic_classifications=acoustic_classifications)
 
     # Step 1: Filter speech vs non-speech cues and validate canonical identities
     # Invariant: No invented speaker IDs. Missing/invalid speaker -> TERMINAL_REJECTED.
@@ -845,6 +904,8 @@ def decide_smart_multivoice(
                 strict_succeeded = False
 
         if not strict_succeeded:
+            if raise_manual_required:
+                raise speaker_cast.AutoCastManualRequired()
             # Caught strict failure or ambiguity: Fallback internally without manual halt!
             if len(all_pool) >= 2:
                 idx1 = _hash_seed_int(seed, spk1, "n2_spk1") % len(all_pool)
@@ -914,7 +975,11 @@ def decide_smart_multivoice(
                     deadline_monotonic=deadline_monotonic,
                     stop_requested=stop_requested,
                 )
-                if pitch_res and len(pitch_res) == len(ordered_speakers):
+                if (
+                    pitch_res
+                    and len(pitch_res) == len(ordered_speakers)
+                    and all(pitch_res.get(spk, {}).get("voice_register") in {"low", "high"} for spk in ordered_speakers)
+                ):
                     multi_classifications = pitch_res
                     classifier_failed = False
                     classifier_error_reason = None
