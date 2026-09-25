@@ -3644,7 +3644,7 @@ def _render_selfshot3_controlled_keyframe_image_to_video(
             diagnostics=dict(gen_result),
         )
     output_file = str(gen_result.get("final_video_path") or gen_result.get("output_path") or raw_path)
-    return {
+    res = {
         "ok": True,
         "selfshot3": True,
         "route": "controlled_keyframe_image_to_video",
@@ -3659,25 +3659,14 @@ def _render_selfshot3_controlled_keyframe_image_to_video(
         "keyframe_path": keyframe_path,
         "duration": duration_seconds,
         "continuity_validation_required": True,
-        "continuity_validation_passed": True,
-        "continuity_evidence": {
-            "identity": 0.95,
-            "body": 0.95,
-            "motion": 0.95,
-            "object": 0.95,
-            "interaction": 0.95,
-            "temporal": 0.95,
-            "evidence_source": "controlled_keyframe_image_to_video",
-        },
-        "continuity_scores": {
-            "identity": 0.95,
-            "body": 0.95,
-            "motion": 0.95,
-            "object": 0.95,
-            "interaction": 0.95,
-            "temporal": 0.95,
-        },
     }
+    scores = gen_result.get("continuity_scores") or asset_pack.get("continuity_scores") or (job or {}).get("continuity_scores")
+    if isinstance(scores, dict):
+        res["continuity_scores"] = dict(scores)
+    evidence = gen_result.get("continuity_evidence") or asset_pack.get("continuity_evidence") or (job or {}).get("continuity_evidence")
+    if isinstance(evidence, dict):
+        res["continuity_evidence"] = dict(evidence)
+    return res
 
 
 def _render_selfshot3_video_to_video(
@@ -4095,6 +4084,47 @@ def _render_selfshot2_controlled_keyframe_image_to_video(
             diagnostics=dict(gen_result),
         )
     output_file = str(gen_result.get("final_video_path") or gen_result.get("output_path") or raw_path)
+
+    from services.video_selfshot_continuity_validator import validate_selfshot_scene_continuity
+
+    continuity_res = validate_selfshot_scene_continuity(
+        clip_source=output_file,
+        scene_index=scene_index,
+        scene_duration_seconds=target_duration,
+        asset_pack=asset_pack,
+        job=job,
+    )
+    evidence_source = str(continuity_res.get("evidence_source") or "")
+    validation_mode = str(continuity_res.get("independent_visual_validation") or "")
+    person_req = bool(continuity_res.get("person_required"))
+    object_req = bool(continuity_res.get("object_required"))
+
+    is_valid_evidence = (
+        bool(continuity_res.get("ok"))
+        and evidence_source == "local_vision_validator"
+        and (validation_mode == "LOCAL_MODEL" if (person_req or object_req) else True)
+    )
+    if not is_valid_evidence:
+        blocker = str(continuity_res.get("blocker") or "")
+        if not blocker or blocker == "None":
+            blocker = "mock_or_unverified_visual_evidence"
+        raise RealVideoRenderError(
+            blocker,
+            diagnostics={
+                "ok": False,
+                "selfshot2": True,
+                "scene_index": scene_index,
+                "provider_attempted": True,
+                "generation_submit_attempted": True,
+                "no_charge": False,
+                "no_charge_proven": False,
+                "result_rejected_locally": True,
+                "blocker": blocker,
+                "continuity_evidence": continuity_res,
+                "failure_reason": continuity_res.get("failure_reason") or blocker,
+            },
+        )
+
     return {
         "ok": True,
         "selfshot2": True,
@@ -4111,16 +4141,14 @@ def _render_selfshot2_controlled_keyframe_image_to_video(
         "duration": target_duration,
         "scene_index": scene_index,
         "continuity_validation_required": True,
-        "continuity_validation_passed": True,
-        "continuity_evidence": {
-            "person_identity": True,
-            "object_identity": True,
-            "person_object_relationship": True,
-            "evidence_source": "controlled_keyframe_image_to_video",
-        },
-        "person_identity": True,
-        "object_identity": True,
-        "person_object_relationship": True,
+        "continuity_validation_passed": bool(continuity_res.get("ok")),
+        "continuity_evidence": continuity_res,
+        "continuity_evidence_present": bool(continuity_res),
+        "evidence_source": evidence_source,
+        "independent_visual_validation": validation_mode,
+        "person_identity": bool(continuity_res.get("person_identity")),
+        "object_identity": bool(continuity_res.get("object_identity")),
+        "person_object_relationship": bool(continuity_res.get("person_object_relationship")),
     }
 
 
@@ -4738,18 +4766,6 @@ def selfshot3_continuity_validation(
                     for k, v in val.items():
                         if k not in scores_candidate:
                             scores_candidate[k] = v
-
-    if output.get("continuity_validation_passed") is True:
-        default_scores = {
-            "identity": 0.95,
-            "body": 0.95,
-            "motion": 0.95,
-            "object": 0.95,
-            "interaction": 0.95,
-            "temporal": 0.95,
-        }
-        for k, v in default_scores.items():
-            scores_candidate.setdefault(k, v)
 
     validation_result = video_selfshot3.continuity_validation(scores_candidate)
     blocker = ""
