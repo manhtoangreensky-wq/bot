@@ -52,7 +52,9 @@ def _mode_needs_subtitle(mode: str) -> bool:
 
 def _cue_locked_timing_requested(state: dict) -> bool:
     current = dict(state or {})
-    if str(current.get("auto_speaker_lane") or "").strip().lower() == "multi":
+    if str(current.get("auto_speaker_lane") or "").strip().lower() in {"multi", "smart", "auto_smart_multivoice"}:
+        return True
+    if str(current.get("subdub_engine_selected") or "").strip().lower() in {"auto_smart_multivoice", "smart_multivoice"}:
         return True
     voice_mode = str(
         current.get("voice_selection_mode")
@@ -63,6 +65,8 @@ def _cue_locked_timing_requested(state: dict) -> bool:
     return voice_mode in {
         "auto_speaker",
         "auto_speaker_gender",
+        "auto_smart_multivoice",
+        "smart_multivoice",
     }
 
 

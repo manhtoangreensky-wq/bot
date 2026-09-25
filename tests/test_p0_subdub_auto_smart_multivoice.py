@@ -1788,3 +1788,83 @@ def test_75_smart_multivoice_prepare_subtitles_missing_require_auto_cast_regress
 
     asyncio.run(_run())
 
+
+def test_78_anti_flapping_sandwich_smoothing():
+    """Anti-flapping smoother corrects short-cue diarization bleeds sandwiched between same speaker."""
+    cues = [
+        {"cue_id": "c1", "speaker_id": "spk_female", "start_ms": 1000, "end_ms": 3000, "text": "Câu đầu"},
+        # 0.3s cue sandwiched between spk_female cues, misattributed as spk_male
+        {"cue_id": "c2", "speaker_id": "spk_male", "start_ms": 3000, "end_ms": 3300, "text": "Nếu tôi"},
+        {"cue_id": "c3", "speaker_id": "spk_female", "start_ms": 3400, "end_ms": 5000, "text": "Câu tiếp"},
+    ]
+    smoothed = smart.smooth_smart_multivoice_cues(cues)
+    assert len(smoothed) == 3
+    assert smoothed[0]["speaker_id"] == "spk_female"
+    assert smoothed[1]["speaker_id"] == "spk_female", "Sandwiched cue c2 must inherit spk_female"
+    assert smoothed[1].get("anti_flapping_smoothed") is True
+    assert smoothed[2]["speaker_id"] == "spk_female"
+
+
+def test_79_gender_fidelity_matching():
+    """Decide smart multivoice strictly assigns low register to male and high register to female voices."""
+    cues = [
+        {"cue_id": "c1", "speaker_id": "speaker_female_1", "start_ms": 0, "end_ms": 2000, "text": "Hello"},
+        {"cue_id": "c2", "speaker_id": "speaker_male_1", "start_ms": 2500, "end_ms": 4000, "text": "Hi"},
+        {"cue_id": "c3", "speaker_id": "speaker_female_2", "start_ms": 4500, "end_ms": 6000, "text": "How are you"},
+    ]
+    acoustic_classifications = {
+        "speaker_female_1": {"voice_register": "high", "voice_gender": "female", "confidence": 0.95},
+        "speaker_male_1": {"voice_register": "low", "voice_gender": "male", "confidence": 0.98},
+        "speaker_female_2": {"voice_register": "high", "voice_gender": "female", "confidence": 0.90},
+    }
+    decision = smart.decide_smart_multivoice(
+        cues,
+        validated_pools=TEST_POOLS,
+        acoustic_classifications=acoustic_classifications,
+        assignment_seed="test_seed_79",
+    )
+    assert decision.output_mode == smart.OUTPUT_MODE_DUBBED_MULTI
+    spk_map = decision.speaker_voice_map
+    assert spk_map["speaker_male_1"] in TEST_POOLS["low"], "Male speaker must receive voice from low_pool"
+    assert spk_map["speaker_female_1"] in TEST_POOLS["high"], "Female speaker 1 must receive voice from high_pool"
+    assert spk_map["speaker_female_2"] in TEST_POOLS["high"], "Female speaker 2 must receive voice from high_pool"
+    assert spk_map["speaker_female_1"] != spk_map["speaker_female_2"], "Female speakers must receive distinct voices"
+
+
+def test_80_cue_locked_timing_propagation(tmp_path):
+    """Runner forwards cue_locked_timing to synthesis and sets cue_locked_timing=True on chunks."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "source.mp4")
+        output_mp4 = tmp_path / "output.mp4"
+        cues = [
+            {"cue_id": "c1", "speaker_id": "spk_1", "text": "Xin chào", "start_ms": 0, "end_ms": 1000},
+            {"cue_id": "c2", "speaker_id": "spk_2", "text": "Tạm biệt", "start_ms": 1500, "end_ms": 3000},
+        ]
+        observed_call_kw = {}
+
+        async def spy_synth(cues, speaker_voice_map, **kwargs):
+            observed_call_kw.update(kwargs)
+            return [
+                {"cue_id": "c1", "audio": b"audio_c1", "cue_locked_timing": True},
+                {"cue_id": "c2", "audio": b"audio_c2", "cue_locked_timing": True},
+            ]
+
+        async def mock_render(source_media, output_path, **kwargs):
+            tts_chunks = kwargs.get("tts_chunks") or []
+            assert all(ch.get("cue_locked_timing") is True for ch in tts_chunks), "All tts_chunks must have cue_locked_timing=True"
+            return _create_real_valid_mp4(Path(output_path))
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            synthesize_segments=spy_synth,
+            render_pipeline=mock_render,
+        )
+        assert res["ok"] is True
+        assert observed_call_kw.get("cue_locked_timing") is True, "synthesize_segments must receive cue_locked_timing=True"
+
+    asyncio.run(_run())
+
+
