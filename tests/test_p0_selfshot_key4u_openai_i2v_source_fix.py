@@ -292,7 +292,7 @@ def test_8_unknown_or_non_i2v_model_fails_closed(fake_keyframe: Path, tmp_path: 
                 source_path=str(tmp_path / "source.mp4"),
                 duration_seconds=5,
             )
-        assert "unknown" in str(exc_info.value).lower() or "unsupported" in str(exc_info.value).lower() or "contract" in str(exc_info.value).lower()
+        assert "selfshot_i2v_model_not_proven_no_charge" in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------
@@ -482,3 +482,128 @@ def test_12_model_identity_remains_grok_end_to_end(fake_keyframe: Path, tmp_path
     assert captured_multipart.get("watermark") == "false"
     assert "input_reference" in captured_multipart
     assert isinstance(captured_multipart["input_reference"], tuple)
+
+
+# ---------------------------------------------------------------------------
+# 13. Unproven SelfShot I2V models rejected fail-closed
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("unproven_model", [
+    "veo_3_1-fast",
+    "MiniMax-Hailuo-02",
+    "MiniMax-Hailuo-2.3",
+    "pixverse-video",
+    "completely-unknown-model",
+    "t2v-only-unsupported-model",
+])
+def test_13_unproven_models_rejected_fail_closed(unproven_model: str, fake_keyframe: Path, tmp_path: Path):
+    """Explicitly providing any unproven model fails closed with selfshot_i2v_model_not_proven_no_charge."""
+    job = {"id": f"test-{unproven_model}", "selected_model": unproven_model}
+    asset_pack = {"source_segment": {"start_ms": 0}, "selected_model": unproven_model}
+
+    with patch.object(vrrc, "_extract_selfshot_keyframe", return_value=str(fake_keyframe)):
+        with pytest.raises(RealVideoRenderError) as exc_info:
+            vrrc._render_selfshot3_controlled_keyframe_image_to_video(
+                job=job,
+                asset_pack=asset_pack,
+                raw_path=str(tmp_path / "raw.mp4"),
+                provider_order=["key4u_video"],
+                fallback_prompt="prompt",
+                aspect_ratio="9:16",
+                source_path=str(tmp_path / "source.mp4"),
+                duration_seconds=5,
+            )
+        assert "selfshot_i2v_model_not_proven_no_charge" in str(exc_info.value)
+
+
+def test_14_rejected_explicit_model_produces_zero_provider_submit(fake_keyframe: Path, tmp_path: Path):
+    """When an unproven model is supplied, run_provider_generation is never called (zero submit)."""
+    job = {"id": "test-zero-submit", "selected_model": "veo_3_1-fast"}
+    asset_pack = {"source_segment": {"start_ms": 0}, "selected_model": "veo_3_1-fast"}
+
+    mock_run_gen = MagicMock()
+    with patch.object(vrrc, "_extract_selfshot_keyframe", return_value=str(fake_keyframe)), \
+         patch.object(vrrc, "run_provider_generation", mock_run_gen):
+        with pytest.raises(RealVideoRenderError) as exc_info:
+            vrrc._render_selfshot3_controlled_keyframe_image_to_video(
+                job=job,
+                asset_pack=asset_pack,
+                raw_path=str(tmp_path / "raw.mp4"),
+                provider_order=["key4u_video"],
+                fallback_prompt="prompt",
+                aspect_ratio="9:16",
+                source_path=str(tmp_path / "source.mp4"),
+                duration_seconds=5,
+            )
+        assert "selfshot_i2v_model_not_proven_no_charge" in str(exc_info.value)
+        mock_run_gen.assert_not_called()
+
+
+def test_15_rejected_explicit_model_does_not_silently_fallback_to_kling(fake_keyframe: Path, tmp_path: Path):
+    """Supplying an unsupported model does not silently fall back to Kling-v3."""
+    job = {"id": "test-no-kling-fallback", "selected_model": "pixverse-video"}
+    asset_pack = {"source_segment": {"start_ms": 0}, "selected_model": "pixverse-video"}
+
+    mock_run_gen = MagicMock()
+    with patch.object(vrrc, "_extract_selfshot_keyframe", return_value=str(fake_keyframe)), \
+         patch.object(vrrc, "run_provider_generation", mock_run_gen):
+        with pytest.raises(RealVideoRenderError) as exc_info:
+            vrrc._render_selfshot3_controlled_keyframe_image_to_video(
+                job=job,
+                asset_pack=asset_pack,
+                raw_path=str(tmp_path / "raw.mp4"),
+                provider_order=["key4u_video"],
+                fallback_prompt="prompt",
+                aspect_ratio="9:16",
+                source_path=str(tmp_path / "source.mp4"),
+                duration_seconds=5,
+            )
+        assert "selfshot_i2v_model_not_proven_no_charge" in str(exc_info.value)
+        mock_run_gen.assert_not_called()
+
+
+def test_16_selfshot2_rejects_unproven_model_fail_closed(fake_keyframe: Path, tmp_path: Path):
+    """SelfShot2 also fails closed with selfshot_i2v_model_not_proven_no_charge for unproven models."""
+    job = {"id": "test-ss2-unproven", "selected_model": "veo_3_1-fast"}
+    asset_pack = {"selected_model": "veo_3_1-fast"}
+    segment = {"start_seconds": 0.0, "duration_seconds": 5.0}
+
+    mock_run_gen = MagicMock()
+    with patch.object(vrrc, "_extract_selfshot_keyframe", return_value=str(fake_keyframe)), \
+         patch.object(vrrc, "_materialize_selfshot2_source_segment", return_value=str(fake_keyframe)), \
+         patch.object(vrrc, "run_provider_generation", mock_run_gen):
+        with pytest.raises(RealVideoRenderError) as exc_info:
+            vrrc._render_selfshot2_controlled_keyframe_image_to_video(
+                job=job,
+                asset_pack=asset_pack,
+                raw_path=str(tmp_path / "raw.mp4"),
+                scene_index=0,
+                segment=segment,
+                provider_order=["key4u_video"],
+                fallback_prompt="a cinematic scene",
+                aspect_ratio="9:16",
+                target_duration=5,
+                source_path=str(tmp_path / "source.mp4"),
+            )
+        assert "selfshot_i2v_model_not_proven_no_charge" in str(exc_info.value)
+        mock_run_gen.assert_not_called()
+
+
+def test_17_proven_model_allowlist_accepts_kling_and_grok():
+    """_resolve_selfshot_i2v_model accepts exactly kling-v3 and grok-imagine-video."""
+    env = {
+        "KEY4U_BASE_URL": "https://api.key4u.vn",
+        "KEY4U_API_KEY": "fake_key",
+        "KEY4U_KLING_I2V_SUBMIT_URL": "https://api.key4u.vn/kling/v1/videos/image2video",
+    }
+    model_kling, fam_kling = vrrc._resolve_selfshot_i2v_model(
+        {"selected_model": "kling-v3"}, {}, env
+    )
+    assert model_kling == "kling-v3"
+    assert fam_kling == "kling"
+
+    model_grok, fam_grok = vrrc._resolve_selfshot_i2v_model(
+        {"selected_model": "grok-imagine-video"}, {}, env
+    )
+    assert model_grok == "grok-imagine-video"
+    assert fam_grok == "xai_grok"

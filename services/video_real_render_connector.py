@@ -3663,6 +3663,10 @@ def _extract_selfshot_keyframe(
     return str(target)
 
 
+SELFSHOT_PROVEN_I2V_MODELS: set[str] = {"kling-v3", "grok-imagine-video"}
+SELFSHOT_I2V_MODEL_NOT_PROVEN_BLOCKER = "selfshot_i2v_model_not_proven_no_charge"
+
+
 def _resolve_selfshot_i2v_model(
     job: dict[str, Any] | None,
     asset_pack: dict[str, Any] | None,
@@ -3680,6 +3684,18 @@ def _resolve_selfshot_i2v_model(
         or ""
     ).strip()
     if candidate:
+        if candidate not in SELFSHOT_PROVEN_I2V_MODELS:
+            raise RealVideoRenderError(
+                SELFSHOT_I2V_MODEL_NOT_PROVEN_BLOCKER,
+                diagnostics={
+                    "ok": False,
+                    "provider": "key4u_video",
+                    "model": candidate,
+                    "blocker": SELFSHOT_I2V_MODEL_NOT_PROVEN_BLOCKER,
+                    "allowed_models": sorted(SELFSHOT_PROVEN_I2V_MODELS),
+                    "no_charge": True,
+                },
+            )
         cfg = provider_model_config("key4u_video", candidate)
         if not cfg:
             raise RealVideoRenderError(
