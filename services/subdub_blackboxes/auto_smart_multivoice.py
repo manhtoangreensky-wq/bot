@@ -50,6 +50,7 @@ SMART_DECISION_VERSION = "smart_multivoice_v1"
 FAIL_CLOSED_ASYNC_SUBMITTED_PRIOR_SUBMIT = "FAIL_CLOSED_ASYNC_SUBMITTED_PRIOR_SUBMIT"
 FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE = "FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE"
 MAX_INTELLIGIBLE_FIT_RATIO = 1.8
+MAX_CUE_END_OVERSHOOT_SECONDS = 0.100
 
 
 class SubdubTTSAsyncSubmittedPriorSubmitError(subdub_tts_checkpoint.SubdubTTSCheckpointError):
@@ -439,7 +440,7 @@ def _build_derived_ranges(
                 raise ValueError(f"cue_start_beyond_eof: cue start {s:.3f} exceeds T_max {T_max:.3f}")
             if e > T_max:
                 overshoot = e - T_max
-                if overshoot <= 0.055:
+                if overshoot <= MAX_CUE_END_OVERSHOOT_SECONDS + 1e-9:
                     e = T_max
                 else:
                     raise ValueError(f"cue_end_overshoot_exceeds_limit: cue end {e:.3f} exceeds T_max {T_max:.3f} by {overshoot:.3f}s")
