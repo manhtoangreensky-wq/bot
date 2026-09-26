@@ -44434,6 +44434,7 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
     uid = update.effective_user.id
     try:
         if action in {"back", "menu"}:
+            clear_broadcast_lite_pending(uid)
             return await _broadcast_lite_edit(query, broadcast_lite_admin_menu_text(), broadcast_lite_admin_menu_keyboard())
 
         if action == "compose":
