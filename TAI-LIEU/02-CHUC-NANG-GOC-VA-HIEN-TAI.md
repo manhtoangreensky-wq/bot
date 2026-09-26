@@ -807,3 +807,7 @@ Evidence source: ONNX `136`, blackbox `68`, continuity `7`, recovery `162`,
 provider-fallback `56`, exact-two `3` passed; changed-file compile và
 `git diff --check` exit `0`. Chưa có live MP4/receipt cho correction nên chưa
 được ghi `LIVE PASS`.
+
+## Support ticket navigation reset — 24/09/2026
+
+Ticket view/list/stats/templates navigation now clears stale support input/search ownership while retaining ticket data.

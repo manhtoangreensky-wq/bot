@@ -139880,6 +139880,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         text, keyboard = public_support_ticket_list_keyboard(uid, lang)
         return await safe_edit_or_send(query, text, reply_markup=keyboard)
     if action == "pv" and len(parts) >= 3:
+        clear_support_ticket_pending(uid)
         ticket = get_support_ticket(int(parts[2]), uid)
         if not ticket:
             return await query.answer(copy["support_ticket_not_found"], show_alert=True)
@@ -139933,11 +139934,13 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         clear_support_ticket_pending(uid)
         return await safe_edit_or_send(query, support_admin_menu_text(), reply_markup=support_admin_menu_keyboard())
     if action == "al" and len(parts) >= 4:
+        clear_support_ticket_pending(uid)
         kind = parts[2]
         offset = max(0, int(parts[3] or 0))
         text, keyboard = support_admin_list_payload(kind, offset)
         return await safe_edit_or_send(query, text, reply_markup=keyboard)
     if action == "av" and len(parts) >= 3:
+        clear_support_ticket_pending(uid)
         ticket = get_support_ticket(int(parts[2]))
         if not ticket:
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
@@ -139948,8 +139951,10 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         prompt = "Nhập user ID để tìm ticket." if parts[2] == "user" else "Nhập mã ticket, user ID, username hoặc từ khóa."
         return await safe_edit_or_send(query, f"🔍 <b>Tìm ticket</b>\n\n{prompt}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ CSKH/Ticket", callback_data="ticket|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]]))
     if action == "stats":
+        clear_support_ticket_pending(uid)
         return await safe_edit_or_send(query, support_ticket_stats_text(), reply_markup=support_admin_menu_keyboard())
     if action == "templates":
+        clear_support_ticket_pending(uid)
         return await safe_edit_or_send(query, support_reply_templates_text(), reply_markup=support_admin_menu_keyboard())
     if action == "st" and len(parts) >= 4:
         ticket_id = int(parts[2])
