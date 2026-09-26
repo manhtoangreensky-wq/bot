@@ -25,9 +25,36 @@ jobs:
 
       - name: Python Compile Guard
         run: |
-          python -m py_compile bot.py remote_worker.py services/remote_worker_api.py services/*.py
+          python -m py_compile bot.py remote_worker.py services/remote_worker_api.py services/*.py tests/test_deploy_vps_workflow_hygiene.py
+
+      - name: Run Workflow Hygiene Unit Tests
+        run: |
+          python -m unittest tests/test_deploy_vps_workflow_hygiene.py
+
+      - name: Discover Current Production Deployed SHA
+        id: prod_sha
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY_B64: ${{ secrets.VPS_SSH_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          echo "$VPS_SSH_KEY_B64" | base64 -d > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          PREV_SHA="$(ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o ConnectTimeout=30 "$VPS_USER@$VPS_HOST" "git -c safe.directory=* -C /opt/toanaas/bot rev-parse refs/heads/main")"
+          if [[ ! "$PREV_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "ERROR: Discovered deployed SHA is not a valid 40-character hex string: '$PREV_SHA'" >&2
+            exit 1
+          fi
+
+          echo "Discovered previous deployed SHA: $PREV_SHA"
+          echo "prev_deployed_sha=$PREV_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Package Release Artifacts
+        env:
+          PREV_DEPLOYED_SHA: ${{ steps.prod_sha.outputs.prev_deployed_sha }}
         run: |
           set -euo pipefail
           RELEASE_DIR="/tmp/bot-release-${GITHUB_SHA}"
@@ -35,8 +62,23 @@ jobs:
 
           git archive --format=tar --output="${RELEASE_DIR}/release.tar" "${GITHUB_SHA}"
 
+          if [[ ! "$PREV_DEPLOYED_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "ERROR: PREV_DEPLOYED_SHA is not a valid 40-character hex string: '$PREV_DEPLOYED_SHA'" >&2
+            exit 1
+          fi
+
+          if ! git cat-file -e "${PREV_DEPLOYED_SHA}^{commit}"; then
+            echo "ERROR: PREV_DEPLOYED_SHA ($PREV_DEPLOYED_SHA) not found in runner checkout" >&2
+            exit 1
+          fi
+
+          if ! git merge-base --is-ancestor "${PREV_DEPLOYED_SHA}" "${GITHUB_SHA}"; then
+            echo "ERROR: PREV_DEPLOYED_SHA ($PREV_DEPLOYED_SHA) is not an ancestor of GITHUB_SHA ($GITHUB_SHA)" >&2
+            exit 1
+          fi
+
           git update-ref refs/deployments/bot-release "${GITHUB_SHA}"
-          git bundle create "${RELEASE_DIR}/release.bundle" refs/deployments/bot-release
+          git bundle create "${RELEASE_DIR}/release.bundle" refs/deployments/bot-release "^${PREV_DEPLOYED_SHA}"
           git bundle verify "${RELEASE_DIR}/release.bundle"
 
           ADVERTISED_SHA="$(git bundle list-heads "${RELEASE_DIR}/release.bundle" | awk '{print $1}')"
@@ -57,6 +99,7 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_SSH_KEY_B64: ${{ secrets.VPS_SSH_KEY_B64 }}
           TARGET_SHA: ${{ github.sha }}
+          EXPECTED_PREV_SHA: ${{ steps.prod_sha.outputs.prev_deployed_sha }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
@@ -78,7 +121,15 @@ jobs:
               exit 1
             fi
 
+            EXPECTED_PREV_SHA='${EXPECTED_PREV_SHA}'
+            if [[ ! \"\$EXPECTED_PREV_SHA\" =~ ^[0-9a-fA-F]{40}\$ ]]; then
+              echo 'ERROR: EXPECTED_PREV_SHA is not a valid 40-character hex string' >&2
+              exit 1
+            fi
+
             STAGING_DIR=\"/tmp/deploy-bot-\$TARGET_SHA\"
+            trap 'echo \"[DEPLOY_FAILURE] Deployment failed; preserving staging directory for diagnostics: \$STAGING_DIR\" >&2' ERR
+
             cd \"\$STAGING_DIR\"
             sha256sum -c checksums.sha256
 
@@ -89,6 +140,11 @@ jobs:
             cd \"\$WEBAPP_DIR\"
 
             PREV_HEAD=\"\$(git rev-parse refs/heads/main)\"
+            if [[ \"\$PREV_HEAD\" != \"\$EXPECTED_PREV_SHA\" ]]; then
+              echo \"ERROR: Production drift detected! Live PREV_HEAD (\$PREV_HEAD) != EXPECTED_PREV_SHA (\$EXPECTED_PREV_SHA)\" >&2
+              exit 1
+            fi
+
             UTC_TIMESTAMP=\"\$(date -u +%Y%m%d%H%M%S)\"
             BACKUP_DIR=\"\$WEBAPP_DIR/delete/deploy-\$TARGET_SHA-\$UTC_TIMESTAMP\"
             mkdir -p \"\$BACKUP_DIR\"
@@ -138,13 +194,13 @@ jobs:
             git diff --exit-code -- . ':(exclude)delete/**'
 
             echo '=== Syncing Hash-Locked Runtime Dependencies ==='
-            if [[ ! -x "\$WEBAPP_DIR/.venv/bin/python" ]]; then
+            if [[ ! -x \"\$WEBAPP_DIR/.venv/bin/python\" ]]; then
               echo 'ERROR: Bot virtualenv Python is missing or not executable' >&2
               exit 1
             fi
-            "\$WEBAPP_DIR/.venv/bin/python" -m pip install --require-hashes -r "\$WEBAPP_DIR/requirements.lock"
-            "\$WEBAPP_DIR/.venv/bin/python" -m pip check
-            "\$WEBAPP_DIR/.venv/bin/python" -c 'import numpy, onnxruntime; print(onnxruntime.__version__)'
+            \"\$WEBAPP_DIR/.venv/bin/python\" -m pip install --require-hashes -r \"\$WEBAPP_DIR/requirements.lock\"
+            \"\$WEBAPP_DIR/.venv/bin/python\" -m pip check
+            \"\$WEBAPP_DIR/.venv/bin/python\" -c 'import numpy, onnxruntime; print(onnxruntime.__version__)'
 
             echo '=== Restarting Bot Service ==='
             systemctl restart toanaas-bot.service
@@ -171,6 +227,40 @@ jobs:
 
             activate_product_video_worker_release
             commit_product_video_release_transaction
+
+            echo '=== Cleaning up Remote Staging Directory ==='
+            CLEANUP_TARGET=\"/tmp/deploy-bot-\$TARGET_SHA\"
+            if [[ \"\$STAGING_DIR\" != \"\$CLEANUP_TARGET\" ]]; then
+              echo \"ERROR: STAGING_DIR (\$STAGING_DIR) != CLEANUP_TARGET (\$CLEANUP_TARGET)\" >&2
+              exit 1
+            fi
+            if [[ -d \"\$CLEANUP_TARGET\" ]]; then
+              rm -rf \"\$CLEANUP_TARGET\"
+              echo \"Successfully removed staging directory: \$CLEANUP_TARGET\"
+            fi
+
+            echo '=== Pruning Old Rollback Backups (Retaining 2 Newest) ==='
+            VALID_BACKUPS=()
+            while IFS= read -r bpath; do
+              bname=\"\$(basename \"\$bpath\")\"
+              if [[ \"\$bname\" =~ ^deploy-[0-9a-fA-F]{40}-[0-9]{14}\$ ]]; then
+                VALID_BACKUPS+=(\"\$bpath\")
+              fi
+            done < <(ls -dt \"\$WEBAPP_DIR\"/delete/deploy-* 2>/dev/null || true)
+
+            echo \"Total valid deploy backups found: \${#VALID_BACKUPS[@]}\"
+            if [[ \"\${#VALID_BACKUPS[@]}\" -gt 2 ]]; then
+              for ((i=2; i<\${#VALID_BACKUPS[@]}; i++)); do
+                OLD_BK=\"\${VALID_BACKUPS[\$i]}\"
+                echo \"Retiring old rollback backup: \$OLD_BK\"
+                rm -rf \"\$OLD_BK\"
+              done
+            fi
+
+            echo '=== Active Retained Rollback Backups ==='
+            for ((i=0; i<2 && i<\${#VALID_BACKUPS[@]}; i++)); do
+              echo \"Retained rollback [\$i]: \${VALID_BACKUPS[\$i]}\"
+            done
 
             echo '=== BOT DEPLOY SUCCESS ==='
             echo \"PREVIOUS_HEAD=\$PREV_HEAD\"
