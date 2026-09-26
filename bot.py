@@ -139895,6 +139895,7 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
             reply_markup=support_consult_keyboard(lang),
         )
     if action == "consult_type" and len(parts) >= 3:
+        clear_support_ticket_pending(uid)
         service_type = parts[2] if parts[2] in SUPPORT_CONSULT_DETAILS else "video"
         return await safe_edit_or_send(
             query,
