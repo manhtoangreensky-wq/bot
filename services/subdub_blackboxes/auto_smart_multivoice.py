@@ -2517,23 +2517,54 @@ async def run_auto_smart_multivoice_blackbox(
             pcm_extraction_error = f"{type(pcm_err).__name__}:{str(pcm_err)[:120]}"
 
         if pcm_extraction_error is not None:
-            has_cue_local_acoustics = bool(
+            cue_acoustics = (
                 payload.get("cue_acoustic_classifications")
                 or current.get("cue_acoustic_classifications")
                 or (prepared.get("cue_acoustic_classifications") if isinstance(prepared, dict) else None)
             )
-            if not has_cue_local_acoustics:
+            has_full_cue_local_acoustics = False
+            missing_cue_ids: list[str] = []
+            speech_cues = [
+                (idx, c)
+                for idx, c in enumerate(cues)
+                if isinstance(c, Mapping) and not _is_non_speech_cue(c) and str(c.get("speaker_id") or c.get("speaker") or "").strip()
+            ] if cues else []
+
+            target_cues = speech_cues if speech_cues else [(idx, c) for idx, c in enumerate(cues) if isinstance(c, Mapping)]
+            if isinstance(cue_acoustics, Mapping) and target_cues:
+                for idx, c in target_cues:
+                    cid = str(c.get("cue_id") or c.get("id") or "").strip()
+                    meta = None
+                    if cid and cid in cue_acoustics:
+                        meta = cue_acoustics[cid]
+                    elif cid and cid.isdigit() and int(cid) in cue_acoustics:
+                        meta = cue_acoustics[int(cid)]
+                    elif idx in cue_acoustics:
+                        meta = cue_acoustics[idx]
+                    elif str(idx) in cue_acoustics:
+                        meta = cue_acoustics[str(idx)]
+                    if not meta or not isinstance(meta, Mapping) or not (meta.get("voice_register") or meta.get("pitch_hz")):
+                        missing_cue_ids.append(cid or str(idx))
+                if not missing_cue_ids:
+                    has_full_cue_local_acoustics = True
+            elif isinstance(cue_acoustics, Mapping) and not cues:
+                has_full_cue_local_acoustics = True
+
+            if not has_full_cue_local_acoustics:
                 if temp_source_path and os.path.exists(temp_source_path):
                     try:
                         os.unlink(temp_source_path)
                     except OSError:
                         pass
+                blocker_msg = f"pcm_extraction_failed:{pcm_extraction_error}"
+                if missing_cue_ids:
+                    blocker_msg = f"{blocker_msg}:partial_cue_coverage_gap:{','.join(missing_cue_ids[:5])}"
                 return {
                     "ok": False,
                     "status": "PCM_EXTRACTION_FAILED",
                     "error_code": "pcm_extraction_failed",
-                    "blocker": f"pcm_extraction_failed:{pcm_extraction_error}",
-                    "admin_debug_summary": f"pcm_extraction_failed:{pcm_extraction_error}",
+                    "blocker": blocker_msg,
+                    "admin_debug_summary": blocker_msg,
                     "strategy": STRATEGY_FAILED,
                     "detected_speaker_count": 0,
                     "effective_speaker_count": 0,

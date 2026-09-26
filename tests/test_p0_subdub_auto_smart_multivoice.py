@@ -2895,9 +2895,10 @@ def test_104_pcm_extraction_failure_fails_closed(tmp_path):
         assert res_speaker_only["error_code"] == "pcm_extraction_failed"
         assert "invalid_pcm_path" in res_speaker_only["blocker"]
 
-        # Case D: cue_acoustic_classifications (cue-local authority) IS provided
-        # Since cue-local acoustic authority is already provided, PCM extraction failure does NOT trigger PCM_EXTRACTION_FAILED
-        res_cue_authority = await smart.run_auto_smart_multivoice_blackbox(
+        # Case D: Partial cue-local acoustic coverage gap on PCM failure
+        # cue_acoustic_classifications provides c1 but leaves c2 missing.
+        # Under cue-local authority contract, partial coverage gap on PCM failure MUST fail closed.
+        res_partial_coverage = await smart.run_auto_smart_multivoice_blackbox(
             source_media=source_media,
             output_path=output_mp4,
             segments=cues,
@@ -2908,15 +2909,42 @@ def test_104_pcm_extraction_failure_fails_closed(tmp_path):
             },
             cue_acoustic_classifications={"c1": {"voice_register": "low", "confidence": 0.95}},
             extract_pcm=mock_extract_invalid_path,
-            synthesize_segments=lambda cues, **kw: [{"cue_id": str(c.get("cue_id")), "audio": SAMPLE_VALID_MP3, "audio_duration": 1.0} for c in cues],
-            render_pipeline=lambda **kw: _create_real_valid_mp4(Path(kw.get("output_path") or output_mp4)),
-            probe_fn=lambda p: {"format": {"duration": "2.0"}},
             checkpoint_workspace=str(tmp_path / "ws_104d"),
             job_id="job_104d",
             state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_104d"), "job_id": "job_104d"},
         )
-        assert res_cue_authority.get("status") != "PCM_EXTRACTION_FAILED"
-        assert res_cue_authority.get("ok") is True
+        assert res_partial_coverage["ok"] is False
+        assert res_partial_coverage["status"] == "PCM_EXTRACTION_FAILED"
+        assert res_partial_coverage["error_code"] == "pcm_extraction_failed"
+        assert "partial_cue_coverage_gap" in res_partial_coverage["blocker"]
+        assert "c2" in res_partial_coverage["blocker"]
+
+        # Case E: Full cue-local acoustic coverage across all cues on PCM failure
+        # Both c1 and c2 are fully covered in cue_acoustic_classifications.
+        # Since full cue-local acoustic authority is provided, PCM extraction failure does NOT trigger PCM_EXTRACTION_FAILED.
+        res_full_authority = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications={
+                "spk_1": {"voice_register": "low", "confidence": 0.95},
+                "spk_2": {"voice_register": "high", "confidence": 0.95},
+            },
+            cue_acoustic_classifications={
+                "c1": {"voice_register": "low", "confidence": 0.95},
+                "c2": {"voice_register": "high", "confidence": 0.95},
+            },
+            extract_pcm=mock_extract_invalid_path,
+            synthesize_segments=lambda cues, **kw: [{"cue_id": str(c.get("cue_id")), "audio": SAMPLE_VALID_MP3, "audio_duration": 1.0} for c in cues],
+            render_pipeline=lambda **kw: _create_real_valid_mp4(Path(kw.get("output_path") or output_mp4)),
+            probe_fn=lambda p: {"format": {"duration": "2.0"}},
+            checkpoint_workspace=str(tmp_path / "ws_104e"),
+            job_id="job_104e",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_104e"), "job_id": "job_104e"},
+        )
+        assert res_full_authority.get("status") != "PCM_EXTRACTION_FAILED"
+        assert res_full_authority.get("ok") is True
 
     asyncio.run(_run())
 
