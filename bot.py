@@ -139962,6 +139962,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         text, keyboard = public_support_ticket_list_keyboard(uid, lang)
         return await safe_edit_or_send(query, text, reply_markup=keyboard)
     if action == "pv" and len(parts) >= 3:
+        clear_support_ticket_pending(uid)
         ticket = get_support_ticket(int(parts[2]), uid)
         if not ticket:
             return await query.answer(copy["support_ticket_not_found"], show_alert=True)
