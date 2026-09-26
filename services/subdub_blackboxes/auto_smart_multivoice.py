@@ -203,6 +203,54 @@ def _normalize_voice_pools(
     return low_pool, high_pool, all_pool
 
 
+def is_valid_cue_local_acoustic_authority(meta: Any) -> bool:
+    """Validate that cue-local acoustic metadata meets canonical authority requirements.
+
+    Contract:
+    - Must be a Mapping.
+    - If confidence is present, it must be a finite float (not bool) >= MIN_REGISTER_CONFIDENCE (0.75).
+      If omitted, defaults to 1.0 (authoritative).
+    - Either:
+      1) voice_register is strictly 'low' or 'high' AND confidence >= MIN_REGISTER_CONFIDENCE.
+      2) pitch_hz (or f0_hz / median_hz / median_f0) is canonically classifiable via
+         speaker_cast.pitch_register into 'low' or 'high' (outside ambiguity band [155.0, 165.0] Hz
+         with sufficient confidence >= 0.75).
+    - Any ambiguous, unknown, non-finite, or low-confidence evidence returns False.
+    """
+    if not isinstance(meta, Mapping):
+        return False
+
+    conf_raw = meta.get("confidence")
+    if isinstance(conf_raw, bool):
+        return False
+    try:
+        conf = float(conf_raw) if conf_raw is not None else 1.0
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+    if not math.isfinite(conf) or conf < speaker_cast.MIN_REGISTER_CONFIDENCE:
+        return False
+
+    reg = str(meta.get("voice_register") or "").strip().lower()
+    if reg in {"low", "high"}:
+        return True
+
+    pitch_val = meta.get("pitch_hz")
+    if pitch_val is None:
+        pitch_val = meta.get("f0_hz")
+    if pitch_val is None:
+        pitch_val = meta.get("median_hz")
+    if pitch_val is None:
+        pitch_val = meta.get("median_f0")
+
+    if pitch_val is not None and not isinstance(pitch_val, bool):
+        classified = speaker_cast.pitch_register(pitch_val, confidence=conf)
+        if classified in {"low", "high"}:
+            return True
+
+    return False
+
+
 def smooth_smart_multivoice_cues(
     cues: Sequence[Mapping[str, Any]],
     *,
@@ -302,7 +350,20 @@ def smooth_smart_multivoice_cues(
 
                     if cue_meta:
                         cue_reg = str(cue_meta.get("voice_register") or "").strip().lower()
-                        cue_conf = float(cue_meta.get("confidence") or 0.0)
+                        conf_val = cue_meta.get("confidence")
+                        try:
+                            cue_conf = float(conf_val) if conf_val is not None else 1.0
+                        except (TypeError, ValueError, OverflowError):
+                            cue_conf = 0.0
+                        if cue_reg not in {"low", "high"}:
+                            pitch_val = (
+                                cue_meta.get("pitch_hz")
+                                or cue_meta.get("f0_hz")
+                                or cue_meta.get("median_f0")
+                                or cue_meta.get("median_hz")
+                            )
+                            if pitch_val is not None and not isinstance(pitch_val, bool):
+                                cue_reg = speaker_cast.pitch_register(pitch_val, confidence=cue_conf)
                         if (
                             cue_conf >= speaker_cast.MIN_REGISTER_CONFIDENCE
                             and cue_reg in {"low", "high"}
@@ -2543,7 +2604,7 @@ async def run_auto_smart_multivoice_blackbox(
                         meta = cue_acoustics[idx]
                     elif str(idx) in cue_acoustics:
                         meta = cue_acoustics[str(idx)]
-                    if not meta or not isinstance(meta, Mapping) or not (meta.get("voice_register") or meta.get("pitch_hz")):
+                    if not is_valid_cue_local_acoustic_authority(meta):
                         missing_cue_ids.append(cid or str(idx))
                 if not missing_cue_ids:
                     has_full_cue_local_acoustics = True

@@ -2989,3 +2989,193 @@ def test_105_adapted_render_pipeline_timeline_audio_build_failed_fails_closed(tm
         assert "TIMELINE_AUDIO_BUILD_FAILED:subdub_timeline_mux_error_code_42" in str(res.get("blocker"))
 
     asyncio.run(_run())
+
+
+def test_106_cue_local_acoustic_authority_semantic_validation(tmp_path):
+    """Semantic validation of cue-local acoustic authority under CUE_AUTHORITY_RULE.
+
+    Contract:
+    - Low confidence register (< 0.75) must NOT bypass PCM extraction failure.
+    - Ambiguous / uncertain register must NOT bypass PCM extraction failure.
+    - Ambiguity band pitch [155.0, 165.0] Hz must NOT bypass PCM extraction failure.
+    - Non-finite pitch (NaN, inf) must NOT bypass PCM extraction failure.
+    - Valid classifiable pitch (outside ambiguity band with confidence >= 0.75) DOES bypass PCM failure.
+    - Direct helper unit checks verify canonical boundary conditions.
+    """
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_106.mp4")
+        output_mp4 = tmp_path / "out_106.mp4"
+        cues = [
+            {"cue_id": "c1", "speaker_id": "spk_1", "text": "Low cue", "start_ms": 0, "end_ms": 1000},
+            {"cue_id": "c2", "speaker_id": "spk_2", "text": "Second cue", "start_ms": 1000, "end_ms": 2000},
+        ]
+        mock_extract_invalid = lambda **kw: "/nonexistent/invalid.pcm"
+        synth_mock = lambda cues, **kw: [{"cue_id": str(c.get("cue_id")), "audio": SAMPLE_VALID_MP3, "audio_duration": 1.0} for c in cues]
+        render_mock = lambda **kw: _create_real_valid_mp4(Path(kw.get("output_path") or output_mp4))
+        probe_mock = lambda p: {"format": {"duration": "2.0"}}
+
+        # Subcase 1: Low confidence register (confidence = 0.50 < 0.75) on c2 -> MUST FAIL CLOSED
+        res_low_conf = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications={
+                "spk_1": {"voice_register": "low", "confidence": 0.95},
+                "spk_2": {"voice_register": "high", "confidence": 0.95},
+            },
+            cue_acoustic_classifications={
+                "c1": {"voice_register": "low", "confidence": 0.95},
+                "c2": {"voice_register": "high", "confidence": 0.50},
+            },
+            extract_pcm=mock_extract_invalid,
+            synthesize_segments=synth_mock,
+            render_pipeline=render_mock,
+            probe_fn=probe_mock,
+            checkpoint_workspace=str(tmp_path / "ws_106_1"),
+            job_id="job_106_1",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_106_1"), "job_id": "job_106_1"},
+        )
+        assert res_low_conf["ok"] is False
+        assert res_low_conf["status"] == "PCM_EXTRACTION_FAILED"
+        assert res_low_conf["error_code"] == "pcm_extraction_failed"
+        assert "partial_cue_coverage_gap" in res_low_conf["blocker"]
+        assert "c2" in res_low_conf["blocker"]
+
+        # Subcase 2: Ambiguous/uncertain register on c2 -> MUST FAIL CLOSED
+        res_uncertain = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications={
+                "spk_1": {"voice_register": "low", "confidence": 0.95},
+                "spk_2": {"voice_register": "high", "confidence": 0.95},
+            },
+            cue_acoustic_classifications={
+                "c1": {"voice_register": "low", "confidence": 0.95},
+                "c2": {"voice_register": "uncertain", "confidence": 0.95},
+            },
+            extract_pcm=mock_extract_invalid,
+            synthesize_segments=synth_mock,
+            render_pipeline=render_mock,
+            probe_fn=probe_mock,
+            checkpoint_workspace=str(tmp_path / "ws_106_2"),
+            job_id="job_106_2",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_106_2"), "job_id": "job_106_2"},
+        )
+        assert res_uncertain["ok"] is False
+        assert res_uncertain["status"] == "PCM_EXTRACTION_FAILED"
+        assert res_uncertain["error_code"] == "pcm_extraction_failed"
+        assert "partial_cue_coverage_gap" in res_uncertain["blocker"]
+        assert "c2" in res_uncertain["blocker"]
+
+        # Subcase 3: Pitch inside ambiguity band (160.0 Hz) on c2 -> MUST FAIL CLOSED
+        res_ambiguous_pitch = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications={
+                "spk_1": {"voice_register": "low", "confidence": 0.95},
+                "spk_2": {"voice_register": "high", "confidence": 0.95},
+            },
+            cue_acoustic_classifications={
+                "c1": {"voice_register": "low", "confidence": 0.95},
+                "c2": {"pitch_hz": 160.0, "confidence": 0.95},
+            },
+            extract_pcm=mock_extract_invalid,
+            synthesize_segments=synth_mock,
+            render_pipeline=render_mock,
+            probe_fn=probe_mock,
+            checkpoint_workspace=str(tmp_path / "ws_106_3"),
+            job_id="job_106_3",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_106_3"), "job_id": "job_106_3"},
+        )
+        assert res_ambiguous_pitch["ok"] is False
+        assert res_ambiguous_pitch["status"] == "PCM_EXTRACTION_FAILED"
+        assert res_ambiguous_pitch["error_code"] == "pcm_extraction_failed"
+        assert "partial_cue_coverage_gap" in res_ambiguous_pitch["blocker"]
+        assert "c2" in res_ambiguous_pitch["blocker"]
+
+        # Subcase 4: Non-finite pitch (NaN) on c2 -> MUST FAIL CLOSED
+        res_nan_pitch = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications={
+                "spk_1": {"voice_register": "low", "confidence": 0.95},
+                "spk_2": {"voice_register": "high", "confidence": 0.95},
+            },
+            cue_acoustic_classifications={
+                "c1": {"voice_register": "low", "confidence": 0.95},
+                "c2": {"pitch_hz": float("nan"), "confidence": 0.95},
+            },
+            extract_pcm=mock_extract_invalid,
+            synthesize_segments=synth_mock,
+            render_pipeline=render_mock,
+            probe_fn=probe_mock,
+            checkpoint_workspace=str(tmp_path / "ws_106_4"),
+            job_id="job_106_4",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_106_4"), "job_id": "job_106_4"},
+        )
+        assert res_nan_pitch["ok"] is False
+        assert res_nan_pitch["status"] == "PCM_EXTRACTION_FAILED"
+        assert res_nan_pitch["error_code"] == "pcm_extraction_failed"
+        assert "partial_cue_coverage_gap" in res_nan_pitch["blocker"]
+        assert "c2" in res_nan_pitch["blocker"]
+
+        # Subcase 5: Valid classifiable pitch (120.0 Hz low, 210.0 Hz high) -> SUCCEEDS
+        res_valid_pitch = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications={
+                "spk_1": {"voice_register": "low", "confidence": 0.95},
+                "spk_2": {"voice_register": "high", "confidence": 0.95},
+            },
+            cue_acoustic_classifications={
+                "c1": {"pitch_hz": 120.0, "confidence": 0.95},
+                "c2": {"pitch_hz": 210.0, "confidence": 0.95},
+            },
+            extract_pcm=mock_extract_invalid,
+            synthesize_segments=synth_mock,
+            render_pipeline=render_mock,
+            probe_fn=probe_mock,
+            checkpoint_workspace=str(tmp_path / "ws_106_5"),
+            job_id="job_106_5",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_106_5"), "job_id": "job_106_5"},
+        )
+        assert res_valid_pitch.get("status") != "PCM_EXTRACTION_FAILED"
+        assert res_valid_pitch.get("ok") is True
+
+    asyncio.run(_run())
+
+    # Direct helper unit checks
+    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "low", "confidence": 0.95}) is True
+    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "high", "confidence": 0.75}) is True
+    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "low"}) is True  # defaults confidence 1.0
+    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "LOW"}) is True
+    assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": 120.0, "confidence": 0.95}) is True
+    assert smart.is_valid_cue_local_acoustic_authority({"f0_hz": 200.0, "confidence": 0.80}) is True
+    assert smart.is_valid_cue_local_acoustic_authority({"median_hz": 150.0, "confidence": 0.85}) is True
+    assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": 155.0, "confidence": 0.95}) is True
+    assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": 165.0, "confidence": 0.95}) is True
+
+    # Negative boundary conditions
+    assert smart.is_valid_cue_local_acoustic_authority(None) is False
+    assert smart.is_valid_cue_local_acoustic_authority("not_a_mapping") is False
+    assert smart.is_valid_cue_local_acoustic_authority({}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "low", "confidence": 0.50}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "uncertain", "confidence": 0.95}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "unknown", "confidence": 0.95}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "female", "confidence": 0.95}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "low", "confidence": True}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": 160.0, "confidence": 0.95}) is False  # ambiguity band
+    assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": float("nan"), "confidence": 0.95}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": float("inf"), "confidence": 0.95}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": 120.0, "confidence": 0.50}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": True, "confidence": 0.95}) is False
+
