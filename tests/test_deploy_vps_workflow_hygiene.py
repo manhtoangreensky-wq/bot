@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """
-Unit tests for Bot VPS deployment workflow hygiene:
+Unit tests for Bot VPS deployment workflow hygiene and idempotency reconciliation:
 - Incremental bundle generation excluding PREV_DEPLOYED_SHA
-- Production drift guard
-- Staging directory cleanup post transaction commit
+- Empty bundle regression simulation and prevention
+- ALREADY_DEPLOYED reconciliation path (same SHA skips bundle, fetch, source apply, restart, and rollback creation)
+- Production drift guard on new SHA
+- Truthful diagnostics (only reporting staging preservation if directory exists)
+- Staging directory cleanup post transaction commit and during reconciliation
 - Rollback backup retention (retaining exactly 2 newest)
 - Preserving non-deploy entries
-- Preserving staging on failure
 - Verifying no automatic Git gc/prune/repack is added
 """
 
 import os
 import re
+import subprocess
 import tempfile
 import unittest
 
@@ -35,56 +38,113 @@ class TestDeployVpsWorkflowHygiene(unittest.TestCase):
         self.assertIn("Discover Current Production Deployed SHA", self.content)
         self.assertIn("prev_deployed_sha", self.content)
         self.assertIn("refs/heads/main", self.content)
-        # Check step output assignment
-        self.assertRegex(self.content, r'echo "prev_deployed_sha=\$PREV_SHA" >> "\$GITHUB_OUTPUT"')
+        self.assertIn('echo "prev_deployed_sha=$PREV_SHA" >> "$GITHUB_OUTPUT"', self.content)
 
     def test_incremental_bundle_excludes_previous_sha(self):
         """2. Bundle command excludes previous deployed SHA and validates ancestry."""
         self.assertIn("git merge-base --is-ancestor", self.content)
         self.assertIn("PREV_DEPLOYED_SHA", self.content)
-        # Check bundle creation syntax: refs/deployments/bot-release "^${PREV_DEPLOYED_SHA}"
-        bundle_pattern = r'git bundle create "[^"]*release\.bundle" refs/deployments/bot-release "\^(\$\{PREV_DEPLOYED_SHA\}|\$PREV_DEPLOYED_SHA)"'
-        self.assertRegex(self.content, bundle_pattern)
-        # Ensure it verifies bundle and fails closed if ancestry fails
+        bundle_cmd = 'git bundle create "${RELEASE_DIR}/release.bundle" refs/deployments/bot-release "^${PREV_DEPLOYED_SHA}"'
+        self.assertIn(bundle_cmd, self.content)
         self.assertIn("git bundle verify", self.content)
 
-    def test_drift_guard_stops_on_mismatch(self):
-        """3. Workflow fails closed on deployed-SHA drift."""
+    def test_empty_bundle_regression_simulation(self):
+        """3. Regression test: git bundle create fails when excluding HEAD if same SHA."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # Initialize a git repo and make a commit
+            subprocess.run(["git", "init"], cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_dir, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_dir, check=True)
+            readme = os.path.join(tmp_dir, "README.md")
+            with open(readme, "w") as f:
+                f.write("hello")
+            subprocess.run(["git", "add", "README.md"], cwd=tmp_dir, check=True)
+            subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_dir, check=True)
+
+            head_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_dir, stdout=subprocess.PIPE, text=True, check=True).stdout.strip()
+            bundle_out = os.path.join(tmp_dir, "test.bundle")
+
+            # Creating bundle excluding current HEAD must fail with 'Refusing to create empty bundle'
+            proc = subprocess.run(
+                ["git", "bundle", "create", bundle_out, "HEAD", f"^{head_sha}"],
+                cwd=tmp_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("Refusing to create empty bundle", proc.stderr + proc.stdout)
+
+    def test_same_sha_skips_bundle_creation(self):
+        """4. Packaging step skips bundle generation when PREV_DEPLOYED_SHA == GITHUB_SHA."""
+        self.assertIn('if [[ "$PREV_DEPLOYED_SHA" == "$GITHUB_SHA" ]]; then', self.content)
+        self.assertIn("Skipping bundle and tar generation", self.content)
+
+    def test_same_sha_reconciliation_path_properties(self):
+        """5. ALREADY_DEPLOYED path does not fetch bundle, apply source, restart, or create rollback."""
+        path1_marker = "PATH 1: ALREADY_DEPLOYED Reconciliation Path"
+        path2_marker = "PATH 2: Normal NEW_SHA Deployment Path"
+        self.assertIn(path1_marker, self.content)
+        self.assertIn(path2_marker, self.content)
+
+        idx1 = self.content.find(path1_marker)
+        idx2 = self.content.find(path2_marker)
+        self.assertGreater(idx2, idx1)
+
+        path1_block = self.content[idx1:idx2]
+
+        # Path 1 MUST NOT contain:
+        self.assertNotIn("git fetch", path1_block, "ALREADY_DEPLOYED must NOT fetch bundle")
+        self.assertNotIn("release.tar", path1_block, "ALREADY_DEPLOYED must NOT extract release tar")
+        self.assertNotIn("systemctl restart toanaas-bot.service", path1_block, "ALREADY_DEPLOYED must NOT restart service")
+        self.assertNotIn("pip install", path1_block, "ALREADY_DEPLOYED must NOT pip install")
+        self.assertNotIn('BACKUP_DIR=\\"\\$WEBAPP_DIR/delete/deploy-', path1_block, "ALREADY_DEPLOYED must NOT create new rollback")
+
+        # Path 1 MUST contain:
+        self.assertIn("systemctl is-active toanaas-bot.service", path1_block)
+        self.assertIn("systemctl is-active nginx.service", path1_block)
+        self.assertIn("curl -s -f http://127.0.0.1:8080/health", path1_block)
+        self.assertIn("HEALTH_PAYLOAD_VALIDATED", path1_block)
+        self.assertIn("Successfully removed leftover staging directory", path1_block)
+        self.assertIn("Staging directory is already clean", path1_block)
+        self.assertIn("Retaining 2 Newest", path1_block)
+        self.assertIn("BOT ALREADY DEPLOYED RECONCILIATION SUCCESS", path1_block)
+
+    def test_drift_guard_stops_on_mismatch_in_new_sha_path(self):
+        """6. Workflow fails closed on deployed-SHA drift in normal path."""
         self.assertIn("EXPECTED_PREV_SHA", self.content)
         self.assertIn('if [[ \\"\\$PREV_HEAD\\" != \\"\\$EXPECTED_PREV_SHA\\" ]]; then', self.content)
         self.assertIn("Production drift detected", self.content)
 
     def test_staging_cleanup_post_transaction_commit_only(self):
-        """4. Successful staging cleanup occurs only after transaction commit."""
+        """7. In normal path, successful staging cleanup occurs only after transaction commit."""
         commit_idx = self.content.find("commit_product_video_release_transaction")
-        cleanup_idx = self.content.find("Cleaning up Remote Staging Directory")
+        cleanup_idx = self.content.rfind("Cleaning up Remote Staging Directory")
         self.assertNotEqual(commit_idx, -1, "commit_product_video_release_transaction step missing")
         self.assertNotEqual(cleanup_idx, -1, "Staging cleanup step missing")
         self.assertGreater(cleanup_idx, commit_idx, "Staging cleanup must occur AFTER commit_product_video_release_transaction")
 
     def test_cleanup_targets_exact_target_sha_staging_path(self):
-        """5. Cleanup targets the exact target-SHA staging path without wildcards."""
+        """8. Cleanup targets the exact target-SHA staging path without wildcards."""
         self.assertIn('CLEANUP_TARGET=\\"/tmp/deploy-bot-\\$TARGET_SHA\\"', self.content)
         self.assertIn('rm -rf \\"\\$CLEANUP_TARGET\\"', self.content)
-        # Ensure no wildcard rm -rf /tmp/deploy-bot-* is present
         self.assertNotIn("rm -rf /tmp/deploy-bot-*", self.content)
         self.assertNotIn('rm -rf "$STAGING_DIR"/*', self.content)
 
     def test_rollback_pruning_logic_retains_two_newest(self):
-        """6. Rollback pruning retains exactly two newest valid deploy backups."""
+        """9. Rollback pruning retains exactly two newest valid deploy backups."""
         self.assertIn("Retaining 2 Newest", self.content)
         self.assertIn("VALID_BACKUPS", self.content)
         self.assertIn('VALID_BACKUPS+=(\\"\\$bpath\\")', self.content)
         self.assertIn('for ((i=2; i<\\${#VALID_BACKUPS[@]}; i++)); do', self.content)
 
     def test_non_matching_delete_entries_untouched(self):
-        """7. Non-matching files/directories in delete/ are not pruning targets."""
-        # Check strict regex pattern for deploy backups: deploy-<40hex>-<14digits>
+        """10. Non-matching files/directories in delete/ are not pruning targets."""
         pattern = r'\^deploy-\[0-9a-fA-F\]\{40\}-\[0-9\]\{14\}\\\$'
         self.assertRegex(self.content, pattern)
 
     def test_no_automatic_git_maintenance(self):
-        """8. Workflow does not introduce automatic Git gc/prune/repack/reflog expire."""
+        """11. Workflow does not introduce automatic Git gc/prune/repack/reflog expire."""
         forbidden_commands = [
             "git gc",
             "git prune",
@@ -95,15 +155,12 @@ class TestDeployVpsWorkflowHygiene(unittest.TestCase):
         for cmd in forbidden_commands:
             self.assertNotIn(cmd, self.content, f"Forbidden automatic git maintenance command found: {cmd}")
 
-    def test_failure_preserves_staging_diagnostics(self):
-        """9. Failure path preserves current staging for diagnostics."""
-        # Ensure trap on ERR logs preservation message
-        self.assertIn("trap ", self.content)
-        self.assertIn("preserving staging directory for diagnostics", self.content)
-        self.assertIn("ERR", self.content)
+    def test_truthful_failure_diagnostics(self):
+        """12. Failure path only prints preserving staging if staging directory exists."""
+        self.assertIn("trap 'if [[ -d \\\"\\$STAGING_DIR\\\" ]]; then echo \\\"[DEPLOY_FAILURE] Deployment failed; preserving staging directory for diagnostics: \\$STAGING_DIR\\\" >&2; fi' ERR", self.content)
 
     def test_simulation_of_rollback_retention_regex(self):
-        """Empirical regex simulation: verify only valid deploy directories match."""
+        """13. Empirical regex simulation: verify only valid deploy directories match."""
         regex = re.compile(r"^deploy-[0-9a-fA-F]{40}-[0-9]{14}$")
         valid_samples = [
             "deploy-068b051d99ee6b4c3a20cf8e9e345c36e68343cb-20260926102120",

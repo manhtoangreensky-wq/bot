@@ -57,15 +57,25 @@ jobs:
           PREV_DEPLOYED_SHA: ${{ steps.prod_sha.outputs.prev_deployed_sha }}
         run: |
           set -euo pipefail
-          RELEASE_DIR="/tmp/bot-release-${GITHUB_SHA}"
-          mkdir -p "${RELEASE_DIR}"
-
-          git archive --format=tar --output="${RELEASE_DIR}/release.tar" "${GITHUB_SHA}"
 
           if [[ ! "$PREV_DEPLOYED_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
             echo "ERROR: PREV_DEPLOYED_SHA is not a valid 40-character hex string: '$PREV_DEPLOYED_SHA'" >&2
             exit 1
           fi
+
+          # Idempotency / Already deployed check:
+          # If production is already running GITHUB_SHA, skip bundle and tar packaging
+          # to prevent empty bundle error ('fatal: Refusing to create empty bundle').
+          if [[ "$PREV_DEPLOYED_SHA" == "$GITHUB_SHA" ]]; then
+            echo "Production is already running GITHUB_SHA ($GITHUB_SHA)."
+            echo "Skipping bundle and tar generation; will perform live health verification and hygiene reconciliation only."
+            exit 0
+          fi
+
+          RELEASE_DIR="/tmp/bot-release-${GITHUB_SHA}"
+          mkdir -p "${RELEASE_DIR}"
+
+          git archive --format=tar --output="${RELEASE_DIR}/release.tar" "${GITHUB_SHA}"
 
           if ! git cat-file -e "${PREV_DEPLOYED_SHA}^{commit}"; then
             echo "ERROR: PREV_DEPLOYED_SHA ($PREV_DEPLOYED_SHA) not found in runner checkout" >&2
@@ -109,8 +119,11 @@ jobs:
           RELEASE_DIR="/tmp/bot-release-${TARGET_SHA}"
           REMOTE_STAGING="/tmp/deploy-bot-${TARGET_SHA}"
 
-          ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o ConnectTimeout=30 "$VPS_USER@$VPS_HOST" "mkdir -p '${REMOTE_STAGING}'"
-          scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no "${RELEASE_DIR}/release.tar" "${RELEASE_DIR}/release.bundle" "${RELEASE_DIR}/sync_product_video_worker_release.sh" "${RELEASE_DIR}/checksums.sha256" "$VPS_USER@$VPS_HOST:${REMOTE_STAGING}/"
+          # Only stage artifacts to remote host if this is a new deployment
+          if [[ "$EXPECTED_PREV_SHA" != "$TARGET_SHA" ]]; then
+            ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o ConnectTimeout=30 "$VPS_USER@$VPS_HOST" "mkdir -p '${REMOTE_STAGING}'"
+            scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no "${RELEASE_DIR}/release.tar" "${RELEASE_DIR}/release.bundle" "${RELEASE_DIR}/sync_product_video_worker_release.sh" "${RELEASE_DIR}/checksums.sha256" "$VPS_USER@$VPS_HOST:${REMOTE_STAGING}/"
+          fi
 
           ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ServerAliveInterval=10 "$VPS_USER@$VPS_HOST" "
             set -euo pipefail
@@ -127,16 +140,90 @@ jobs:
               exit 1
             fi
 
+            WEBAPP_DIR='/opt/toanaas/bot'
             STAGING_DIR=\"/tmp/deploy-bot-\$TARGET_SHA\"
-            trap 'echo \"[DEPLOY_FAILURE] Deployment failed; preserving staging directory for diagnostics: \$STAGING_DIR\" >&2' ERR
 
+            trap 'if [[ -d \"\$STAGING_DIR\" ]]; then echo \"[DEPLOY_FAILURE] Deployment failed; preserving staging directory for diagnostics: \$STAGING_DIR\" >&2; fi' ERR
+
+            # =============================================================
+            # PATH 1: ALREADY_DEPLOYED Reconciliation Path
+            # =============================================================
+            if [[ \"\$EXPECTED_PREV_SHA\" == \"\$TARGET_SHA\" ]]; then
+              echo '=== ALREADY DEPLOYED: Reconciling Live State and Hygiene ==='
+              cd \"\$WEBAPP_DIR\"
+
+              PREV_HEAD=\"\$(git rev-parse refs/heads/main)\"
+              if [[ \"\$PREV_HEAD\" != \"\$TARGET_SHA\" ]]; then
+                echo \"ERROR: Expected already-deployed SHA (\$TARGET_SHA) but live PREV_HEAD is (\$PREV_HEAD)\" >&2
+                exit 1
+              fi
+
+              echo '=== Verifying Active Services (No Restart) ==='
+              systemctl is-active toanaas-bot.service
+              systemctl is-active nginx.service
+
+              echo '=== Verifying Health Endpoint ==='
+              HEALTH_JSON=''
+              for attempt in {1..30}; do
+                if HEALTH_JSON=\$(curl -s -f http://127.0.0.1:8080/health); then
+                  break
+                fi
+                sleep 2
+              done
+
+              if [[ -z \"\$HEALTH_JSON\" ]]; then
+                echo 'ERROR: Health endpoint did not respond during reconciliation' >&2
+                exit 1
+              fi
+
+              printf '%s' \"\$HEALTH_JSON\" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get(\"status\") == \"ok\"; print(\"HEALTH_PAYLOAD_VALIDATED:\", data.get(\"status\"))'
+
+              echo '=== Cleaning up Remote Staging Directory (If Present) ==='
+              CLEANUP_TARGET=\"/tmp/deploy-bot-\$TARGET_SHA\"
+              if [[ -d \"\$CLEANUP_TARGET\" ]]; then
+                rm -rf \"\$CLEANUP_TARGET\"
+                echo \"Successfully removed leftover staging directory: \$CLEANUP_TARGET\"
+              else
+                echo \"Staging directory is already clean: \$CLEANUP_TARGET\"
+              fi
+
+              echo '=== Pruning Old Rollback Backups (Retaining 2 Newest) ==='
+              VALID_BACKUPS=()
+              while IFS= read -r bpath; do
+                bname=\"\$(basename \"\$bpath\")\"
+                if [[ \"\$bname\" =~ ^deploy-[0-9a-fA-F]{40}-[0-9]{14}\$ ]]; then
+                  VALID_BACKUPS+=(\"\$bpath\")
+                fi
+              done < <(ls -dt \"\$WEBAPP_DIR\"/delete/deploy-* 2>/dev/null || true)
+
+              echo \"Total valid deploy backups found: \${#VALID_BACKUPS[@]}\"
+              if [[ \"\${#VALID_BACKUPS[@]}\" -gt 2 ]]; then
+                for ((i=2; i<\${#VALID_BACKUPS[@]}; i++)); do
+                  OLD_BK=\"\${VALID_BACKUPS[\$i]}\"
+                  echo \"Retiring old rollback backup: \$OLD_BK\"
+                  rm -rf \"\$OLD_BK\"
+                done
+              fi
+
+              echo '=== Active Retained Rollback Backups ==='
+              for ((i=0; i<2 && i<\${#VALID_BACKUPS[@]}; i++)); do
+                echo \"Retained rollback [\$i]: \${VALID_BACKUPS[\$i]}\"
+              done
+
+              echo '=== BOT ALREADY DEPLOYED RECONCILIATION SUCCESS ==='
+              echo \"DEPLOYED_SHA=\$TARGET_SHA\"
+              exit 0
+            fi
+
+            # =============================================================
+            # PATH 2: Normal NEW_SHA Deployment Path
+            # =============================================================
             cd \"\$STAGING_DIR\"
             sha256sum -c checksums.sha256
 
             source \"\$STAGING_DIR/sync_product_video_worker_release.sh\"
             prepare_product_video_worker_release
 
-            WEBAPP_DIR='/opt/toanaas/bot'
             cd \"\$WEBAPP_DIR\"
 
             PREV_HEAD=\"\$(git rev-parse refs/heads/main)\"
