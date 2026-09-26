@@ -1422,8 +1422,226 @@ def test_authoritative_source_metadata_defeats_conflicting_tts_chunk_metadata_au
         assert res["status"] == "TTS_EXTREME_COMPRESSION_FAILED"
         assert res["cue_id"] == "c2"
 
+
+def test_shared_pipeline_duplicate_tts_cue_id_fails_closed(tmp_path):
+    """MANDATORY FIRST RED A: Duplicate TTS cue ID must not pass by count only.
+
+    Source cues: c1, c2. TTS chunks: c1, c1.
+    Pre-fix: passed initial count check (tts_dropped_segments=0) and consumed c1 twice while silently dropping c2.
+    Required: fail closed with TTS_SEGMENT_COVERAGE_FAILED before timeline build / recovery.
+    """
+    import asyncio
+    from services.subtitle_dub_product_pipeline import process_subtitle_dub_job
+
+    source_media = tmp_path / "src_dup.mp4"
+    source_media.write_bytes(b"dummy")
+
+    state = {
+        "mode": "dub",
+        "voice_kind": "auto_speaker_gender",
+        "input_file": str(source_media),
+        "source_path": str(source_media),
+        "media_path": str(source_media),
+        "segments": [
+            {"cue_id": "c1", "start": 0.0, "end": 1.0, "text": "one", "speaker": "spk_1"},
+            {"cue_id": "c2", "start": 1.0, "end": 2.0, "text": "two", "speaker": "spk_1"},
+        ],
+        "input_duration_seconds": 2.0,
+    }
+
+    async def fake_tts_dup(*args, **kwargs):
+        return {
+            "ok": True,
+            "provider": "mock",
+            "chunks": [
+                {"cue_id": "c1", "start": 0.0, "end": 1.0, "audio_duration": 0.8, "audio_bytes": b"a1", "text": "one", "speaker_id": "spk_1"},
+                {"cue_id": "c1", "start": 0.0, "end": 1.0, "audio_duration": 0.8, "audio_bytes": b"a1", "text": "one", "speaker_id": "spk_1"},
+            ],
+        }
+
+    async def _run():
+        res = await process_subtitle_dub_job(
+            mode="dub",
+            state=state,
+            user_id=1,
+            prepare_subtitles=lambda s: {
+                "state": s,
+                "source_bytes": b"src",
+                "content_type": "video/mp4",
+                "source_segments": s["segments"],
+                "output_segments": s["segments"],
+                "output_script": "one two",
+                "output_subtitle": "1\n00:00:00,000 --> 00:00:01,000\none\n\n2\n00:00:01,000 --> 00:00:02,000\ntwo\n",
+            },
+            srt_from_text=lambda *a: "",
+            segments_from_text=lambda *a: [],
+            segments_from_subtitle=lambda *a: [],
+            subtitle_output_items=lambda *a: [],
+            resolve_voice_id=lambda *a: "v1",
+            parse_voice_speed=lambda *a: 1.0,
+            synthesize_segments=fake_tts_dup,
+            build_timeline_audio=lambda chunks, *a: (b"tl", "ok"),
+            normalize_audio=lambda a, *args: (a, "ok"),
+            validate_audio=lambda a, *args: {"ok": True},
+            render_video=lambda *a, **k: (b"mp4", "ok"),
+            video_render_ready=lambda *a: True,
+            ffmpeg_ready=lambda: True,
+            dub_mux_enabled=True,
+        )
+        assert res["ok"] is False, "Duplicate TTS chunk cue_id must not pass"
+        assert res["status"] == "TTS_SEGMENT_COVERAGE_FAILED"
+        assert res["error_code"] == "duplicate_tts_chunk"
+        assert res["cue_id"] == "c1"
+
     asyncio.run(_run())
 
 
+def test_shared_pipeline_explicit_unknown_cue_id_does_not_positionally_rebind(tmp_path):
+    """MANDATORY FIRST RED B: Explicit unknown TTS cue ID must not positionally rebind.
+
+    Source cues: c1, c2. TTS chunks: x1, x2.
+    Pre-fix: positional fallback silently rebound x1->c1, x2->c2 when count matched.
+    Required: fail closed with TTS_SEGMENT_COVERAGE_FAILED before timeline build / recovery.
+    """
+    import asyncio
+    from services.subtitle_dub_product_pipeline import process_subtitle_dub_job
+
+    source_media = tmp_path / "src_unknown.mp4"
+    source_media.write_bytes(b"dummy")
+
+    state = {
+        "mode": "dub",
+        "voice_kind": "auto_speaker_gender",
+        "input_file": str(source_media),
+        "source_path": str(source_media),
+        "media_path": str(source_media),
+        "segments": [
+            {"cue_id": "c1", "start": 0.0, "end": 1.0, "text": "one", "speaker": "spk_1"},
+            {"cue_id": "c2", "start": 1.0, "end": 2.0, "text": "two", "speaker": "spk_1"},
+        ],
+        "input_duration_seconds": 2.0,
+    }
+
+    async def fake_tts_unknown(*args, **kwargs):
+        return {
+            "ok": True,
+            "provider": "mock",
+            "chunks": [
+                {"cue_id": "x1", "start": 0.0, "end": 1.0, "audio_duration": 0.8, "audio_bytes": b"a1", "text": "one", "speaker_id": "spk_1"},
+                {"cue_id": "x2", "start": 1.0, "end": 2.0, "audio_duration": 0.8, "audio_bytes": b"a2", "text": "two", "speaker_id": "spk_1"},
+            ],
+        }
+
+    async def _run():
+        res = await process_subtitle_dub_job(
+            mode="dub",
+            state=state,
+            user_id=1,
+            prepare_subtitles=lambda s: {
+                "state": s,
+                "source_bytes": b"src",
+                "content_type": "video/mp4",
+                "source_segments": s["segments"],
+                "output_segments": s["segments"],
+                "output_script": "one two",
+                "output_subtitle": "1\n00:00:00,000 --> 00:00:01,000\none\n\n2\n00:00:01,000 --> 00:00:02,000\ntwo\n",
+            },
+            srt_from_text=lambda *a: "",
+            segments_from_text=lambda *a: [],
+            segments_from_subtitle=lambda *a: [],
+            subtitle_output_items=lambda *a: [],
+            resolve_voice_id=lambda *a: "v1",
+            parse_voice_speed=lambda *a: 1.0,
+            synthesize_segments=fake_tts_unknown,
+            build_timeline_audio=lambda chunks, *a: (b"tl", "ok"),
+            normalize_audio=lambda a, *args: (a, "ok"),
+            validate_audio=lambda a, *args: {"ok": True},
+            render_video=lambda *a, **k: (b"mp4", "ok"),
+            video_render_ready=lambda *a: True,
+            ffmpeg_ready=lambda: True,
+            dub_mux_enabled=True,
+        )
+        assert res["ok"] is False, "Explicit unknown cue_id must fail closed"
+        assert res["status"] == "TTS_SEGMENT_COVERAGE_FAILED"
+        assert res["error_code"] == "unknown_tts_chunk"
+        assert res["cue_id"] == "x1"
+
+    asyncio.run(_run())
 
 
+def test_shared_pipeline_positional_fallback_when_cue_id_omitted(tmp_path):
+    """AUTHORITATIVE_ONE_TO_ONE_COVERAGE_RULE: Positional fallback permitted when chunks have NO cue_id/id metadata.
+
+    Source cues: c1, c2. TTS chunks: [no cue_id], [no cue_id].
+    Count matches (2 == 2), strict 1-to-1 mapping, no duplicate consumption.
+    Required: maps chunks to authoritative cues positionally and succeeds.
+    """
+    import asyncio
+    from services.subtitle_dub_product_pipeline import process_subtitle_dub_job
+
+    source_media = tmp_path / "src_positional.mp4"
+    source_media.write_bytes(b"dummy")
+
+    state = {
+        "mode": "dub",
+        "voice_kind": "auto_speaker_gender",
+        "input_file": str(source_media),
+        "source_path": str(source_media),
+        "media_path": str(source_media),
+        "segments": [
+            {"cue_id": "c1", "start": 0.0, "end": 1.0, "text": "one", "speaker": "spk_1"},
+            {"cue_id": "c2", "start": 1.0, "end": 2.0, "text": "two", "speaker": "spk_1"},
+        ],
+        "input_duration_seconds": 2.0,
+    }
+
+    async def fake_tts_no_ids(*args, **kwargs):
+        return {
+            "ok": True,
+            "provider": "mock",
+            "chunks": [
+                {"start": 0.0, "end": 1.0, "audio_duration": 0.8, "audio_bytes": b"a1", "text": "one"},
+                {"start": 1.0, "end": 2.0, "audio_duration": 0.8, "audio_bytes": b"a2", "text": "two"},
+            ],
+        }
+
+    timeline_cues_received = []
+
+    async def fake_timeline(chunks, *args):
+        for c in chunks:
+            timeline_cues_received.append(c.get("cue_id"))
+        return b"tl", "ok"
+
+    async def _run():
+        res = await process_subtitle_dub_job(
+            mode="dub",
+            state=state,
+            user_id=1,
+            prepare_subtitles=lambda s: {
+                "state": s,
+                "source_bytes": b"src",
+                "content_type": "video/mp4",
+                "source_segments": s["segments"],
+                "output_segments": s["segments"],
+                "output_script": "one two",
+                "output_subtitle": "1\n00:00:00,000 --> 00:00:01,000\none\n\n2\n00:00:01,000 --> 00:00:02,000\ntwo\n",
+            },
+            srt_from_text=lambda *a: "",
+            segments_from_text=lambda *a: [],
+            segments_from_subtitle=lambda *a: [],
+            subtitle_output_items=lambda *a: [],
+            resolve_voice_id=lambda *a: "v1",
+            parse_voice_speed=lambda *a: 1.0,
+            synthesize_segments=fake_tts_no_ids,
+            build_timeline_audio=fake_timeline,
+            normalize_audio=lambda a, *args: (a, "ok"),
+            validate_audio=lambda a, *args: {"ok": True},
+            render_video=lambda *a, **k: (b"mp4", "ok"),
+            video_render_ready=lambda *a: True,
+            ffmpeg_ready=lambda: True,
+            dub_mux_enabled=True,
+        )
+        assert res["ok"] is True, f"Positional fallback when cue_id omitted must succeed, got {res}"
+        assert timeline_cues_received == ["c1", "c2"]
+
+    asyncio.run(_run())
