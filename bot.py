@@ -106263,6 +106263,65 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
             "engine_route": str((preflight_snapshot.get("engine_route") or {}).get("route") or ""),
             "continuity_validation_required": True,
         })
+    if product_type in {"storyboard_prompt", "storyboard_to_video"}:
+        raw_cards = (
+            draft.get("scene_cards")
+            or draft.get("storyboard_panels")
+            or asset_pack_payload.get("scene_cards")
+            or plan.get("scenes")
+            or []
+        )
+        panels = list(draft.get("storyboard_panels") or [])
+        panel_map = {}
+        for p in panels:
+            if isinstance(p, dict):
+                idx = safe_int(p.get("scene_index") or p.get("panel_index"), 0)
+                if idx:
+                    panel_map[idx] = p.get("local_path") or p.get("image_path") or p.get("file_path") or ""
+
+        materialized_cards = []
+        for i, card in enumerate(raw_cards, 1):
+            if not isinstance(card, dict):
+                continue
+            card_copy = dict(card)
+            idx = safe_int(card_copy.get("scene_index") or card_copy.get("card_index"), i)
+            card_copy["scene_index"] = idx
+            card_copy["card_index"] = idx
+            card_copy["scene_id"] = card_copy.get("scene_id") or f"scene_{idx}"
+            img = card_copy.get("image_path") or card_copy.get("local_path") or card_copy.get("file_path") or panel_map.get(idx) or ""
+            if img:
+                card_copy["image_path"] = img
+                card_copy["local_path"] = img
+                card_copy["file_path"] = img
+            card_copy.setdefault("duration_seconds", float(draft.get("b14_scene_seconds") or 8.0))
+            materialized_cards.append(card_copy)
+
+        scene_count = max(1, len(materialized_cards) or safe_int(draft.get("b14_scene_count"), 1))
+        scene_seconds = safe_int(draft.get("b14_scene_seconds"), 8) or 8
+        asset_pack_payload.update({
+            "product_type": "storyboard_prompt",
+            "engine_route": "storyboard_to_video",
+            "engine_adapter": "storyboard_scene_image_video_engine",
+            "required_capability": "image_to_video",
+            "provider_capability": "image_to_video",
+            "scene_cards": materialized_cards,
+            "storyboard_panels": panels or [
+                {"scene_index": c["scene_index"], "local_path": c.get("local_path") or c.get("image_path")}
+                for c in materialized_cards
+            ],
+            "scene_count": scene_count,
+            "scene_duration_seconds": scene_seconds,
+            "duration_seconds": scene_count * scene_seconds,
+        })
+        invoice.update({
+            "job_type": "video_render",
+            "product_type": "storyboard_prompt",
+            "engine_route": "storyboard_to_video",
+            "engine_adapter": "storyboard_scene_image_video_engine",
+            "scene_count": scene_count,
+            "scene_duration_seconds": scene_seconds,
+            "duration_seconds": scene_count * scene_seconds,
+        })
     invoice.update({
         "product_type": product_type,
         "engine_adapter": route.get("adapter") or "",
@@ -106339,6 +106398,7 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
         addons_disabled_by_package=1 if invoice["addons_disabled_by_package"] else 0,
         invoice_json=invoice,
         total_xu_estimated=invoice["total_xu"],
+        scene_cards_json=asset_pack_payload.get("scene_cards") or [],
     )
     draft["b14_project_id"] = project_id
     draft["b14_invoice"] = invoice

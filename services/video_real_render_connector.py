@@ -1102,6 +1102,14 @@ def _scene_cards(job: dict | None = None) -> list[dict]:
     cards = job.get("scene_cards")
     if not cards and isinstance(job.get("project"), dict):
         cards = _json_loads((job.get("project") or {}).get("scene_cards_json"), [])
+        if not cards:
+            asset_pack = (job.get("project") or {}).get("asset_pack_json") or (job.get("project") or {}).get("asset_pack")
+            if isinstance(asset_pack, str):
+                asset_pack = _json_loads(asset_pack, {})
+            if isinstance(asset_pack, dict):
+                cards = asset_pack.get("scene_cards")
+    if not cards and isinstance(job.get("asset_pack"), dict):
+        cards = job.get("asset_pack", {}).get("scene_cards")
     if isinstance(cards, list):
         return [dict(item or {}) for item in cards if isinstance(item, dict)]
     return []
@@ -1136,6 +1144,12 @@ def _scene_count(job: dict | None = None) -> int:
     value = job.get("scene_count")
     if not value and isinstance(job.get("project"), dict):
         value = (job.get("project") or {}).get("scene_count")
+    if not value and isinstance(job.get("asset_pack"), dict):
+        value = job.get("asset_pack", {}).get("scene_count")
+    if not value:
+        cards = _scene_cards(job)
+        if cards:
+            value = len(cards)
     return max(1, min(20, _safe_int(value, 3)))
 
 
@@ -5621,6 +5635,23 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         },
         required_capability=required_capability,
     )
+    if product_type in PRODUCT_VIDEO_SCENE_IMAGE_INPUT_TYPES or required_capability == "image_to_video" or (job or {}).get("required_capability") == "image_to_video":
+        if not pending_matches_request:
+            if not request.image_paths or any(not os.path.isfile(p) or os.path.getsize(p) <= 0 for p in request.image_paths):
+                raise RealVideoRenderError(
+                    "storyboard_panel_image_missing_no_charge",
+                    diagnostics={
+                        "ok": False,
+                        "scene_index": scene_index,
+                        "scene_id": scene_index,
+                        "request_job_id": request_job_id,
+                        "provider_error": "storyboard_panel_image_missing_no_charge",
+                        "blocker": "storyboard_panel_image_missing_no_charge",
+                        "provider_attempted": False,
+                        "provider_submit_called": False,
+                        "no_charge": True,
+                    },
+                )
     output_dir = os.path.dirname(os.path.abspath(raw_path))
     provider_env = dict(os.environ)
     if provider_order:
@@ -7528,7 +7559,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         or job.get("validated_local_renderer_route")
     )
     product_contract_requires_provider = bool(
-        engine_adapter in {"text_to_video", "text_to_video_or_scene_engine", "text_to_video_or_scene_video", "script_scene_engine"}
+        engine_adapter in {"text_to_video", "text_to_video_or_scene_engine", "text_to_video_or_scene_video", "script_scene_engine", "storyboard_scene_image_video_engine"}
         and orchestration_contract in {"per_scene_8s", "scene_orchestrator", "per_scene"}
         and not explicit_local_renderer
     )
