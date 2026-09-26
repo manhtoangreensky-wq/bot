@@ -396,7 +396,10 @@ async def process_subtitle_dub_job(
                 recover_cue_locked_micro_cues,
                 MAX_INTELLIGIBLE_FIT_RATIO,
             )
-            tts_chunks = recover_cue_locked_micro_cues(tts_chunks)
+            is_fail_closed_lane = not (
+                str(pipeline_state.get("auto_speaker_lane") or "").strip().lower() == "multi"
+                and not pipeline_state.get("cue_locked_timing")
+            )
             for item in tts_chunks:
                 cue_window = max(
                     0.001,
@@ -404,7 +407,7 @@ async def process_subtitle_dub_job(
                 )
                 generated_seconds = max(0.0, float(item.get("audio_duration") or 0.0))
                 raw_fit_ratio = generated_seconds / cue_window if cue_window > 0.05 and generated_seconds > 0 else 1.0
-                if bool(pipeline_state.get("cue_locked_timing")) and raw_fit_ratio > MAX_INTELLIGIBLE_FIT_RATIO:
+                if is_fail_closed_lane and raw_fit_ratio > MAX_INTELLIGIBLE_FIT_RATIO:
                     fail_cid = str(item.get("cue_id") or (item.get("original_cue_ids") or [""])[-1])
                     return {
                         "ok": False,

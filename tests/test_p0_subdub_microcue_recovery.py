@@ -454,3 +454,292 @@ def test_exact_1_80_shared_pipeline_must_pass(tmp_path):
 
     asyncio.run(_run())
 
+
+def test_ffmpeg_failure_cannot_return_raw_concat_media(monkeypatch, tmp_path):
+    """MANDATORY FIRST RED: FFmpeg failure cannot fall back to raw concat media."""
+    import subprocess
+    from services.subdub_microcue_recovery import coalesce_cue_pair
+
+    p1 = tmp_path / "c1.mp3"
+    p2 = tmp_path / "c2.mp3"
+    b1 = _generate_test_mp3(p1, 0.8, 440)
+    b2 = _generate_test_mp3(p2, 0.4, 880)
+
+    c1 = {"cue_id": "c1", "speaker_id": "s1", "start": 0.0, "end": 1.0, "audio": b1, "audio_duration": 0.8, "text": "one"}
+    c2 = {"cue_id": "c2", "speaker_id": "s1", "start": 1.0, "end": 1.5, "audio": b2, "audio_duration": 0.4, "text": "two"}
+
+    # Simulate ffmpeg failure
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(args=args[0], returncode=1, stdout=b"", stderr=b"ffmpeg error")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    merged = coalesce_cue_pair(c1, c2)
+    # Must decline recovery and must NEVER return raw concat bytes
+    assert merged.get("coalesced") is False or merged.get("audio") is None, "FFmpeg failure must decline recovery"
+    assert merged.get("audio") != b1 + b2, "FFmpeg failure must never return raw byte concatenation"
+
+
+def test_media_validation_failure_cannot_return_raw_concat_media(monkeypatch, tmp_path):
+    """MANDATORY FIRST RED: Media validation failure cannot return raw concat media."""
+    from types import SimpleNamespace
+    import services.subdub_microcue_recovery as smr
+
+    p1 = tmp_path / "c1.mp3"
+    p2 = tmp_path / "c2.mp3"
+    b1 = _generate_test_mp3(p1, 0.8, 440)
+    b2 = _generate_test_mp3(p2, 0.4, 880)
+
+    c1 = {"cue_id": "c1", "speaker_id": "s1", "start": 0.0, "end": 1.0, "audio": b1, "audio_duration": 0.8, "text": "one"}
+    c2 = {"cue_id": "c2", "speaker_id": "s1", "start": 1.0, "end": 1.5, "audio": b2, "audio_duration": 0.4, "text": "two"}
+
+    # Simulate validator rejecting output
+    monkeypatch.setattr(
+        smr,
+        "validate_tts_audio_artifact",
+        lambda *args, **kwargs: SimpleNamespace(ok=False, duration=0.0, status="INVALID", detail="corrupt audio"),
+    )
+
+    merged = smr.coalesce_cue_pair(c1, c2)
+    assert merged.get("coalesced") is False or merged.get("audio") is None, "Validation failure must decline recovery"
+    assert merged.get("audio") != b1 + b2, "Validation failure must never return raw byte concatenation"
+
+
+def test_auto_speaker_gender_without_explicit_cue_lock_flag_gt_1_80_fails(tmp_path):
+    """MANDATORY FIRST RED: auto_speaker_gender without explicit cue_locked_timing fails closed on > 1.80."""
+    import asyncio
+    from services.subtitle_dub_product_pipeline import process_subtitle_dub_job
+
+    async def _run():
+        source_media = tmp_path / "src_asg.mp4"
+        source_media.write_bytes(b"dummy")
+
+        state = {
+            "mode": "dub",
+            "voice_kind": "auto_speaker_gender",
+            "voice_selection_mode": "auto_speaker",
+            "input_file": str(source_media),
+            "source_path": str(source_media),
+            "media_path": str(source_media),
+            "segments": [{"start": 0.0, "end": 1.0, "text": "Test"}],
+            "input_duration_seconds": 1.0,
+        }
+
+        async def fake_tts(*args, **kwargs):
+            return {
+                "ok": True,
+                "provider": "mock",
+                "chunks": [{"start": 0.0, "end": 1.0, "audio_duration": 2.2, "audio_bytes": b"mock_audio"}],
+            }
+
+        res = await process_subtitle_dub_job(
+            mode="dub",
+            state=state,
+            user_id=1,
+            prepare_subtitles=lambda s: {
+                "state": s,
+                "source_bytes": b"src",
+                "content_type": "video/mp4",
+                "source_segments": s["segments"],
+                "output_segments": s["segments"],
+                "output_script": "Test",
+                "output_subtitle": "1\n00:00:00,000 --> 00:00:01,000\nTest\n",
+            },
+            srt_from_text=lambda *a: "",
+            segments_from_text=lambda *a: [],
+            segments_from_subtitle=lambda *a: [],
+            subtitle_output_items=lambda *a: [],
+            resolve_voice_id=lambda *a: "v1",
+            parse_voice_speed=lambda *a: 1.0,
+            synthesize_segments=fake_tts,
+            build_timeline_audio=lambda *args, **kwargs: (b"timeline", "ok"),
+            normalize_audio=lambda a, *args: (a, "ok"),
+            validate_audio=lambda a, *args: {"ok": True},
+            render_video=lambda *args, **kwargs: (b"mp4", "ok"),
+            video_render_ready=lambda *a: True,
+            ffmpeg_ready=lambda: True,
+            dub_mux_enabled=True,
+        )
+        assert res["ok"] is False
+        assert res["status"] == "TTS_EXTREME_COMPRESSION_FAILED"
+        assert res["error_code"] == "extreme_audio_compression_unintelligible"
+
+    asyncio.run(_run())
+
+
+def test_smart_multivoice_without_explicit_cue_lock_flag_gt_1_80_fails(tmp_path):
+    """MANDATORY FIRST RED: smart_multivoice without explicit cue_locked_timing fails closed on > 1.80."""
+    import asyncio
+    from services.subtitle_dub_product_pipeline import process_subtitle_dub_job
+
+    async def _run():
+        source_media = tmp_path / "src_smv.mp4"
+        source_media.write_bytes(b"dummy")
+
+        state = {
+            "mode": "dub",
+            "subdub_engine_selected": "smart_multivoice",
+            "input_file": str(source_media),
+            "source_path": str(source_media),
+            "media_path": str(source_media),
+            "segments": [{"start": 0.0, "end": 1.0, "text": "Test"}],
+            "input_duration_seconds": 1.0,
+        }
+
+        async def fake_tts(*args, **kwargs):
+            return {
+                "ok": True,
+                "provider": "mock",
+                "chunks": [{"start": 0.0, "end": 1.0, "audio_duration": 2.2, "audio_bytes": b"mock_audio"}],
+            }
+
+        res = await process_subtitle_dub_job(
+            mode="dub",
+            state=state,
+            user_id=1,
+            prepare_subtitles=lambda s: {
+                "state": s,
+                "source_bytes": b"src",
+                "content_type": "video/mp4",
+                "source_segments": s["segments"],
+                "output_segments": s["segments"],
+                "output_script": "Test",
+                "output_subtitle": "1\n00:00:00,000 --> 00:00:01,000\nTest\n",
+            },
+            srt_from_text=lambda *a: "",
+            segments_from_text=lambda *a: [],
+            segments_from_subtitle=lambda *a: [],
+            subtitle_output_items=lambda *a: [],
+            resolve_voice_id=lambda *a: "v1",
+            parse_voice_speed=lambda *a: 1.0,
+            synthesize_segments=fake_tts,
+            build_timeline_audio=lambda *args, **kwargs: (b"timeline", "ok"),
+            normalize_audio=lambda a, *args: (a, "ok"),
+            validate_audio=lambda a, *args: {"ok": True},
+            render_video=lambda *args, **kwargs: (b"mp4", "ok"),
+            video_render_ready=lambda *a: True,
+            ffmpeg_ready=lambda: True,
+            dub_mux_enabled=True,
+        )
+        assert res["ok"] is False
+        assert res["status"] == "TTS_EXTREME_COMPRESSION_FAILED"
+        assert res["error_code"] == "extreme_audio_compression_unintelligible"
+
+    asyncio.run(_run())
+
+
+def test_left_tts_longer_than_right_source_offset_must_not_shift_right_cue():
+    """MANDATORY FIRST RED: Left TTS longer than right cue offset must NOT shift right cue, declines recovery."""
+    from services.subdub_microcue_recovery import can_coalesce_cues, coalesce_cue_pair
+
+    c1 = {
+        "cue_id": "c1",
+        "speaker_id": "s1",
+        "start": 0.0,
+        "end": 1.0,
+        "audio_duration": 1.5,  # 1.5s > 1.0s (exceeds right cue start)
+        "text": "left is too long",
+    }
+    c2 = {
+        "cue_id": "c2",
+        "speaker_id": "s1",
+        "start": 1.0,
+        "end": 1.5,
+        "audio_duration": 0.4,
+        "text": "right",
+    }
+    assert can_coalesce_cues(c1, c2) is False, "Overlapping left TTS must decline coalescing"
+
+    merged = coalesce_cue_pair(c1, c2)
+    assert merged.get("coalesced") is False or merged.get("right_cue_offset") == pytest.approx(1.0), (
+        "Right cue offset must remain bound to original source offset 1.0s, not delayed to 1.5s"
+    )
+
+
+def test_unpreservable_internal_timing_must_decline_recovery():
+    """MANDATORY FIRST RED: Unpreservable internal timing must decline recovery."""
+    from services.subdub_microcue_recovery import recover_cue_locked_micro_cues
+
+    c1 = {
+        "cue_id": "c1",
+        "speaker_id": "s1",
+        "start": 0.0,
+        "end": 0.8,
+        "audio_duration": 1.2,  # Left TTS exceeds offset 0.8s
+        "text": "Long left speech",
+    }
+    c2 = {
+        "cue_id": "c2",
+        "speaker_id": "s1",
+        "start": 0.8,
+        "end": 1.5,
+        "audio_duration": 0.5,
+        "text": "micro right",
+    }
+    recovered = recover_cue_locked_micro_cues([c1, c2])
+    assert len(recovered) == 2, "Unpreservable timing must decline recovery"
+    assert recovered[0]["cue_id"] == "c1"
+    assert recovered[1]["cue_id"] == "c2"
+
+
+def test_auto_smart_multivoice_without_explicit_cue_lock_flag_gt_1_80_fails(tmp_path):
+    """MANDATORY FIRST RED: auto_smart_multivoice without explicit cue_locked_timing fails closed on > 1.80."""
+    import asyncio
+    from services.subtitle_dub_product_pipeline import process_subtitle_dub_job
+
+    async def _run():
+        source_media = tmp_path / "src_asmv.mp4"
+        source_media.write_bytes(b"dummy")
+
+        state = {
+            "mode": "dub",
+            "auto_speaker_lane": "auto_smart_multivoice",
+            "input_file": str(source_media),
+            "source_path": str(source_media),
+            "media_path": str(source_media),
+            "segments": [{"start": 0.0, "end": 1.0, "text": "Test"}],
+            "input_duration_seconds": 1.0,
+        }
+
+        async def fake_tts(*args, **kwargs):
+            return {
+                "ok": True,
+                "provider": "mock",
+                "chunks": [{"start": 0.0, "end": 1.0, "audio_duration": 2.2, "audio_bytes": b"mock_audio"}],
+            }
+
+        res = await process_subtitle_dub_job(
+            mode="dub",
+            state=state,
+            user_id=1,
+            prepare_subtitles=lambda s: {
+                "state": s,
+                "source_bytes": b"src",
+                "content_type": "video/mp4",
+                "source_segments": s["segments"],
+                "output_segments": s["segments"],
+                "output_script": "Test",
+                "output_subtitle": "1\n00:00:00,000 --> 00:00:01,000\nTest\n",
+            },
+            srt_from_text=lambda *a: "",
+            segments_from_text=lambda *a: [],
+            segments_from_subtitle=lambda *a: [],
+            subtitle_output_items=lambda *a: [],
+            resolve_voice_id=lambda *a: "v1",
+            parse_voice_speed=lambda *a: 1.0,
+            synthesize_segments=fake_tts,
+            build_timeline_audio=lambda *args, **kwargs: (b"timeline", "ok"),
+            normalize_audio=lambda a, *args: (a, "ok"),
+            validate_audio=lambda a, *args: {"ok": True},
+            render_video=lambda *args, **kwargs: (b"mp4", "ok"),
+            video_render_ready=lambda *a: True,
+            ffmpeg_ready=lambda: True,
+            dub_mux_enabled=True,
+        )
+        assert res["ok"] is False
+        assert res["status"] == "TTS_EXTREME_COMPRESSION_FAILED"
+        assert res["error_code"] == "extreme_audio_compression_unintelligible"
+
+    asyncio.run(_run())
+
+

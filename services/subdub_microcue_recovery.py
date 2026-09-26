@@ -54,6 +54,18 @@ def _get_cue_start_end(cue: dict[str, Any]) -> tuple[float, float]:
     return start, end
 
 
+def _is_encoded_audio(data: bytes | bytearray | None) -> bool:
+    """Detect whether byte buffer represents real encoded audio container format."""
+    if not isinstance(data, (bytes, bytearray)) or len(data) < 4:
+        return False
+    prefix = bytes(data[:4])
+    if prefix.startswith(b"ID3") or prefix[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2", b"\xff\xe3"):
+        return True
+    if prefix.startswith(b"RIFF") or prefix.startswith(b"OggS") or prefix.startswith(b"fLaC"):
+        return True
+    return False
+
+
 def assemble_coalesced_audio(
     aud_l: bytes | bytearray | None,
     dur_l: float,
@@ -63,11 +75,14 @@ def assemble_coalesced_audio(
 ) -> tuple[Any, float]:
     """Assemble real decodable audio using ffmpeg with exact delay and gap preservation.
 
-    If inputs are valid real audio, uses ffmpeg adelay + amix to produce a clean,
+    If inputs are real encoded audio, uses ffmpeg adelay + amix to produce a clean,
     decodable audio track where the right cue starts at offset_r without collapsing silence.
-    If ffmpeg fails or inputs are mock byte strings, falls back gracefully.
+    If ffmpeg fails or media validation fails on encoded audio, returns (None, 0.0)
+    to decline recovery. Raw encoded audio byte concatenation is strictly prohibited.
     """
     expected_dur = offset_r + dur_r
+    is_encoded = _is_encoded_audio(aud_l) or _is_encoded_audio(aud_r)
+
     if (
         isinstance(aud_l, (bytes, bytearray))
         and isinstance(aud_r, (bytes, bytearray))
@@ -117,7 +132,11 @@ def assemble_coalesced_audio(
                     except OSError:
                         pass
 
-    # Mock / fallback handling for synthetic test bytes
+    # Mandatory Fix 1: Encoded audio must never fall back to naive byte concatenation
+    if is_encoded:
+        return None, 0.0
+
+    # Non-encoded synthetic test string fallback (e.g. b"AUDIO_1_")
     if isinstance(aud_l, (bytes, bytearray)) and isinstance(aud_r, (bytes, bytearray)):
         combined_fallback = bytes(aud_l) + bytes(aud_r)
     else:
@@ -162,7 +181,13 @@ def can_coalesce_cues(
     if gap < -0.055 or gap > max_gap_seconds:
         return False
 
-    # 4. Optional fragment duration gate
+    # 4. Internal timing preservation: left utterance cannot spill past right cue start offset
+    dur_l = float(left.get("audio_duration") or left.get("raw_audio_duration") or 0.0)
+    raw_offset_r = s_r - s_l
+    if dur_l > 0 and raw_offset_r > 0 and dur_l > (raw_offset_r + 0.001):
+        return False
+
+    # 5. Optional fragment duration gate
     if max_fragment_duration_seconds is not None:
         win_l = e_l - s_l
         win_r = e_r - s_r
@@ -190,16 +215,44 @@ def coalesce_cue_pair(left: dict[str, Any], right: dict[str, Any]) -> dict[str, 
     dur_l = float(left.get("audio_duration") or left.get("raw_audio_duration") or 0.0)
     dur_r = float(right.get("audio_duration") or right.get("raw_audio_duration") or 0.0)
 
+    # Mandatory Fix 4: Right internal cue offset strictly bound to original source offset
     raw_offset_r = s_r - s_l
-    effective_offset_r = max(raw_offset_r, dur_l)
+    effective_offset_r = raw_offset_r
     gap_silence = max(0.0, raw_offset_r - dur_l)
+
+    # Mandatory Fix 5: If left utterance spills past right source start, decline recovery
+    if dur_l > 0 and raw_offset_r > 0 and dur_l > (raw_offset_r + 0.001):
+        declined = dict(left)
+        declined.update({
+            "coalesced": False,
+            "audio": None,
+            "audio_bytes": None,
+            "right_cue_offset": raw_offset_r,
+            "gap_silence_seconds": 0.0,
+        })
+        return declined
 
     # Audio assembly with ffmpeg delay and gap silence preservation
     aud_l = left.get("audio") if left.get("audio") is not None else left.get("audio_bytes")
     aud_r = right.get("audio") if right.get("audio") is not None else right.get("audio_bytes")
+    media_requested = bool(aud_l is not None or aud_r is not None)
+
     combined_audio, measured_dur = assemble_coalesced_audio(
         aud_l, dur_l, aud_r, dur_r, effective_offset_r
     )
+
+    # Mandatory Fix 1: FFmpeg or media validation failure must decline recovery
+    if media_requested and combined_audio is None:
+        declined = dict(left)
+        declined.update({
+            "coalesced": False,
+            "audio": None,
+            "audio_bytes": None,
+            "right_cue_offset": raw_offset_r,
+            "gap_silence_seconds": gap_silence,
+        })
+        return declined
+
     tot_dur = measured_dur if measured_dur > 0 else (effective_offset_r + dur_r)
     fit_ratio = tot_dur / combined_window
 
@@ -326,8 +379,7 @@ def recover_cue_locked_micro_cues(
                         win = max(0.001, e - s_l)
                         dur_l = float(left.get("audio_duration") or left.get("raw_audio_duration") or 0.0)
                         raw_off_r = s - s_l
-                        eff_off_r = max(raw_off_r, dur_l)
-                        comb_dur = eff_off_r + d
+                        comb_dur = raw_off_r + d
                         comb_fit = comb_dur / win
                         if comb_fit <= max_fit_ratio:
                             left_candidate = (comb_fit, i - 1, i)
@@ -338,12 +390,10 @@ def recover_cue_locked_micro_cues(
                     if can_coalesce_cues(item, right, max_gap_seconds):
                         _, e_r = _get_cue_start_end(right)
                         win = max(0.001, e_r - s)
-                        dur_l = d
                         dur_r = float(right.get("audio_duration") or right.get("raw_audio_duration") or 0.0)
                         s_r, _ = _get_cue_start_end(right)
                         raw_off_r = s_r - s
-                        eff_off_r = max(raw_off_r, dur_l)
-                        comb_dur = eff_off_r + dur_r
+                        comb_dur = raw_off_r + dur_r
                         comb_fit = comb_dur / win
                         if comb_fit <= max_fit_ratio:
                             right_candidate = (comb_fit, i, i + 1)
@@ -362,10 +412,11 @@ def recover_cue_locked_micro_cues(
                 if chosen:
                     idx_a, idx_b = chosen[1], chosen[2]
                     merged = coalesce_cue_pair(res[idx_a], res[idx_b])
-                    res[idx_a] = merged
-                    del res[idx_b]
-                    changed = True
-                    break
+                    if merged.get("coalesced") is not False:
+                        res[idx_a] = merged
+                        del res[idx_b]
+                        changed = True
+                        break
             i += 1
 
     return res
