@@ -135746,6 +135746,7 @@ async def cmd_linkweb(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_command_received("start", update)
     uid = update.effective_user.id
+    clear_support_ticket_pending(uid)
     user_existed_before = user_exists(uid)
     get_user(uid, update.effective_user.first_name)
     record_usage_event(
