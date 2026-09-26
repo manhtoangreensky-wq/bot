@@ -365,3 +365,55 @@ def test_first_red_n3_pann_margin_boundary_conditions():
     assert res["voice_register"] == "low"
     assert res["confidence"] >= speaker_cast.MIN_REGISTER_CONFIDENCE
 
+
+def test_boundary_case_01_median_margin_0_079999_fails_closed():
+    """Case 1: median_margin = 0.079999 (< 0.08) -> Gate A (margin gate) blocks -> FAIL_CLOSED."""
+    from services import subdub_multi_speaker_gender_onnx as multi_onnx
+    cues = [
+        {"start": 0.0, "end": 1.0, "male_score": 0.5399995, "female_score": 0.4600005},
+        {"start": 1.0, "end": 2.0, "male_score": 0.5399995, "female_score": 0.4600005},
+        {"start": 2.0, "end": 3.0, "male_score": 0.5399995, "female_score": 0.4600005},
+    ]
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        multi_onnx._aggregate_one_gender_result("spk_margin_0_079999", cues)
+
+
+def test_boundary_case_02_median_margin_0_080000_fails_closed():
+    """Case 2: median_margin = 0.080000 (== 0.08) -> Gate A passes, Gate B (conf 0.58 < 0.75) blocks -> FAIL_CLOSED."""
+    from services import subdub_multi_speaker_gender_onnx as multi_onnx
+    cues = [
+        {"start": 0.0, "end": 1.0, "male_score": 0.5400000, "female_score": 0.4600000},
+        {"start": 1.0, "end": 2.0, "male_score": 0.5400000, "female_score": 0.4600000},
+        {"start": 2.0, "end": 3.0, "male_score": 0.5400000, "female_score": 0.4600000},
+    ]
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        multi_onnx._aggregate_one_gender_result("spk_margin_0_080000", cues)
+
+
+def test_boundary_case_03_median_margin_0_080001_fails_closed():
+    """Case 3: median_margin = 0.080001 (> 0.08) -> Gate A passes, Gate B (conf 0.580001 < 0.75) blocks -> FAIL_CLOSED."""
+    from services import subdub_multi_speaker_gender_onnx as multi_onnx
+    cues = [
+        {"start": 0.0, "end": 1.0, "male_score": 0.5400005, "female_score": 0.4599995},
+        {"start": 1.0, "end": 2.0, "male_score": 0.5400005, "female_score": 0.4599995},
+        {"start": 2.0, "end": 3.0, "male_score": 0.5400005, "female_score": 0.4599995},
+    ]
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        multi_onnx._aggregate_one_gender_result("spk_margin_0_080001", cues)
+
+
+def test_boundary_case_04_authoritative_margin_passes():
+    """Case 4: clearly authoritative margin (margin = 0.60) -> Gate A passes, Gate B passes -> PASS."""
+    from services import subdub_multi_speaker_gender_onnx as multi_onnx
+    cues = [
+        {"start": 0.0, "end": 1.0, "male_score": 0.80, "female_score": 0.20},
+        {"start": 1.0, "end": 2.0, "male_score": 0.80, "female_score": 0.20},
+        {"start": 2.0, "end": 3.0, "male_score": 0.80, "female_score": 0.20},
+    ]
+    res, _ = multi_onnx._aggregate_one_gender_result("spk_authoritative", cues)
+    assert res["voice_gender"] == "male"
+    assert res["voice_register"] == "low"
+    assert res["pann_score_margin"] == 0.60
+    assert res["confidence"] >= speaker_cast.MIN_REGISTER_CONFIDENCE
+
+
