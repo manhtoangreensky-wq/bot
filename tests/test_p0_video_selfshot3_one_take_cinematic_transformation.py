@@ -360,6 +360,8 @@ def test_delivery_requires_valid_mp4_continuity_and_real_telegram_message_id() -
         "object": 0.95,
         "interaction": 0.95,
         "temporal": 0.95,
+        "evidence_source": "local_vision_validator",
+        "independent_visual_validation": "LOCAL_MODEL",
     }
     with pytest.raises(ValueError, match="valid_final_mp4_required"):
         video_selfshot3.record_delivery(
@@ -369,6 +371,7 @@ def test_delivery_requires_valid_mp4_continuity_and_real_telegram_message_id() -
         video_selfshot3.record_delivery(
             {}, final_mp4_valid=True, message_id=0, receipt_key="job:99"
         )
+    # Rejection of degraded score
     with pytest.raises(ValueError, match="continuity_validation_required"):
         video_selfshot3.record_delivery(
             {},
@@ -376,6 +379,22 @@ def test_delivery_requires_valid_mp4_continuity_and_real_telegram_message_id() -
             message_id=99,
             receipt_key="job:99",
             continuity={**good_scores, "identity": 0.2},
+        )
+    # Rejection of scores without local vision validator authority
+    with pytest.raises(ValueError, match="continuity_validation_required"):
+        video_selfshot3.record_delivery(
+            {},
+            final_mp4_valid=True,
+            message_id=99,
+            receipt_key="job:99",
+            continuity={
+                "identity": 0.95,
+                "body": 0.95,
+                "motion": 0.95,
+                "object": 0.95,
+                "interaction": 0.95,
+                "temporal": 0.95,
+            },
         )
     delivered = video_selfshot3.record_delivery(
         {},

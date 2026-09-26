@@ -607,6 +607,8 @@ def test_20_selfshot3_continuity_validation_success(tmp_path: Path):
         job={"product_type": "self_shot_cinematic_transform"},
         result={
             "final_video_path": str(final_mp4),
+            "evidence_source": "local_vision_validator",
+            "independent_visual_validation": "LOCAL_MODEL",
             "continuity_scores": {
                 "identity": 0.95,
                 "body": 0.95,
@@ -622,6 +624,8 @@ def test_20_selfshot3_continuity_validation_success(tmp_path: Path):
     assert val["blocker"] == ""
     assert val["final_mp4_valid"] is True
     assert val["continuity_validation_passed"] is True
+    assert val["continuity_metadata_authority"] == "local_vision_validator"
+    assert val["independent_visual_continuity_proven"] is True
     assert val["failures"] == []
 
 
@@ -634,6 +638,8 @@ def test_21_selfshot3_continuity_validation_degraded_scores_fails_closed(tmp_pat
         job={"product_type": "self_shot_cinematic_transform"},
         result={
             "final_video_path": str(final_mp4),
+            "evidence_source": "local_vision_validator",
+            "independent_visual_validation": "LOCAL_MODEL",
             "continuity_scores": {
                 "identity": 0.3,
                 "body": 0.95,
@@ -678,12 +684,14 @@ def test_23_selfshot3_continuity_validation_missing_scores_fails_closed(tmp_path
         job={"product_type": "self_shot_cinematic_transform"},
         result={
             "final_video_path": str(final_mp4),
+            "evidence_source": "local_vision_validator",
+            "independent_visual_validation": "LOCAL_MODEL",
         },
     )
     assert val["ok"] is False
     assert val["blocker"] == "selfshot3_continuity_validation_failed"
     assert val["continuity_validation_passed"] is False
-    assert len(val["failures"]) == 6
+    assert any(k in val["failures"] for k in ("identity", "body", "motion", "object", "interaction", "temporal"))
 
 
 def test_24_selfshot2_controlled_keyframe_i2v_fails_when_local_vision_validator_fails(tmp_path: Path):
@@ -1477,6 +1485,241 @@ def test_36_video_selfshot3_module_continuity_authority():
     assert val_mock["ok"] is False
     assert "mock_or_unverified_visual_evidence" in val_mock["failures"]
     assert val_mock["independent_visual_continuity_proven"] is False
+
+
+def test_37_selfshot3_continuity_validation_rejects_synthetic_0_95_without_local_authority(tmp_path: Path):
+    """selfshot3_continuity_validation fails closed when scores lack local vision authority."""
+    final_mp4 = tmp_path / "final.mp4"
+    final_mp4.write_bytes(b"VALID_FINAL_MP4_CONTENT")
+
+    val = video_real_render_connector.selfshot3_continuity_validation(
+        job={"product_type": "self_shot_cinematic_transform"},
+        result={
+            "final_video_path": str(final_mp4),
+            "continuity_scores": {
+                "identity": 0.95,
+                "body": 0.95,
+                "motion": 0.95,
+                "object": 0.95,
+                "interaction": 0.95,
+                "temporal": 0.95,
+            },
+        },
+    )
+    assert val["ok"] is False
+    assert val["blocker"] == "missing_local_vision_authority"
+    assert val["continuity_validation_passed"] is False
+    assert val["continuity_metadata_authority"] != "local_vision_validator"
+    assert val["independent_visual_continuity_proven"] is False
+
+
+def test_38_selfshot3_continuity_validation_rejects_provider_metadata_and_forged_high_scores(tmp_path: Path):
+    """selfshot3_continuity_validation rejects provider-claimed scores without local validator."""
+    final_mp4 = tmp_path / "final.mp4"
+    final_mp4.write_bytes(b"VALID_FINAL_MP4_CONTENT")
+
+    val = video_real_render_connector.selfshot3_continuity_validation(
+        job={"product_type": "self_shot_cinematic_transform"},
+        result={
+            "final_video_path": str(final_mp4),
+            "continuity_scores": {
+                "identity": 0.99,
+                "body": 0.99,
+                "motion": 0.99,
+                "object": 0.99,
+                "interaction": 0.99,
+                "temporal": 0.99,
+            },
+            "evidence_source": "provider_kling_ai",
+            "independent_visual_validation": "PROVIDER_CLAIM",
+        },
+    )
+    assert val["ok"] is False
+    assert val["blocker"] == "missing_local_vision_authority"
+    assert val["continuity_validation_passed"] is False
+    assert val["continuity_metadata_authority"] != "local_vision_validator"
+    assert val["independent_visual_continuity_proven"] is False
+
+
+def test_39_selfshot3_continuity_validation_requires_local_model_independent_visual_validation(tmp_path: Path):
+    """selfshot3_continuity_validation requires independent_visual_validation == LOCAL_MODEL."""
+    final_mp4 = tmp_path / "final.mp4"
+    final_mp4.write_bytes(b"VALID_FINAL_MP4_CONTENT")
+
+    val = video_real_render_connector.selfshot3_continuity_validation(
+        job={"product_type": "self_shot_cinematic_transform"},
+        result={
+            "final_video_path": str(final_mp4),
+            "evidence_source": "local_vision_validator",
+            "independent_visual_validation": "NOT_PERFORMED",
+            "continuity_evidence_present": True,
+            "continuity_scores": {
+                "identity": 1.0,
+                "body": 1.0,
+                "motion": 1.0,
+                "object": 1.0,
+                "interaction": 1.0,
+                "temporal": 1.0,
+            },
+        },
+    )
+    assert val["ok"] is False
+    assert val["blocker"] == "independent_visual_validation_required"
+    assert val["continuity_validation_passed"] is False
+    assert val["independent_visual_validation_pass"] is False
+    assert val["independent_visual_continuity_proven"] is False
+
+
+def test_40_video_selfshot3_record_delivery_rejects_scores_missing_local_authority():
+    """video_selfshot3.record_delivery rejects scores missing local vision validator authority."""
+    with pytest.raises(ValueError, match="continuity_validation_required"):
+        video_selfshot3.record_delivery(
+            {},
+            final_mp4_valid=True,
+            message_id=99,
+            receipt_key="job:99",
+            continuity={
+                "identity": 0.95,
+                "body": 0.95,
+                "motion": 0.95,
+                "object": 0.95,
+                "interaction": 0.95,
+                "temporal": 0.95,
+            },
+        )
+
+
+def test_41_video_selfshot3_continuity_validation_requires_local_authority():
+    """video_selfshot3.continuity_validation rejects scores missing local vision validator authority."""
+    raw_scores = {
+        "identity": 0.95,
+        "body": 0.95,
+        "motion": 0.95,
+        "object": 0.95,
+        "interaction": 0.95,
+        "temporal": 0.95,
+    }
+    val = video_selfshot3.continuity_validation(raw_scores)
+    assert val["ok"] is False
+    assert "missing_local_vision_authority" in val["failures"]
+    assert val["continuity_metadata_authority"] != "local_vision_validator"
+    assert val["independent_visual_continuity_proven"] is False
+
+
+def test_42_selfshot3_i2v_connector_rejects_gen_result_and_job_continuity_scores(tmp_path: Path, monkeypatch):
+    """SelfShot3 connector ignores unverified gen_result/job scores and fails closed on local validator failure."""
+    from services.video_real_render_connector import RealVideoRenderError
+    from services.video_provider_base import VideoGenerationRequest
+
+    source_video = tmp_path / "source.mp4"
+    source_video.write_bytes(b"VALID_SOURCE_MP4_CONTENT")
+    raw_path = str(tmp_path / "raw_ss3.mp4")
+    keyframe = tmp_path / "kf_ss3.jpg"
+    keyframe.write_bytes(b"BINARY_KEYFRAME_SS3")
+
+    fake_gen_result = {
+        "ok": True,
+        "provider": "key4u_video",
+        "model": "kling-v3",
+        "output_path": raw_path,
+        "continuity_scores": {
+            "identity": 0.99,
+            "body": 0.99,
+            "motion": 0.99,
+            "object": 0.99,
+            "interaction": 0.99,
+            "temporal": 0.99,
+        },
+    }
+
+    mock_failed_continuity = {
+        "ok": False,
+        "blocker": "insufficient_temporal_evidence",
+        "evidence_source": "local_vision_validator",
+        "independent_visual_validation": "LOCAL_MODEL",
+    }
+
+    monkeypatch.setattr(
+        "services.video_real_render_connector.run_provider_generation",
+        lambda *args, **kwargs: fake_gen_result,
+    )
+    monkeypatch.setattr(
+        "services.video_real_render_connector._extract_selfshot_keyframe",
+        lambda *args, **kwargs: str(keyframe),
+    )
+    monkeypatch.setattr(
+        "services.video_selfshot_continuity_validator.validate_selfshot_scene_continuity",
+        lambda *args, **kwargs: mock_failed_continuity,
+    )
+
+    with pytest.raises(RealVideoRenderError) as exc_info:
+        video_real_render_connector._render_selfshot3_video_to_video(
+            job={
+                "source_video_local_path": str(source_video),
+                "public_user_confirmed": True,
+                "submit_source": "public_user_final_confirm",
+                "route": "controlled_keyframe_image_to_video",
+                "continuity_scores": {"identity": 0.99, "body": 0.99, "motion": 0.99, "object": 0.99, "interaction": 0.99, "temporal": 0.99},
+            },
+            asset_pack={
+                "route": "controlled_keyframe_image_to_video",
+                "public_user_confirmed": True,
+                "submit_source": "public_user_final_confirm",
+                "duration_seconds": 5,
+                "continuity_scores": {"identity": 0.99, "body": 0.99, "motion": 0.99, "object": 0.99, "interaction": 0.99, "temporal": 0.99},
+            },
+            raw_path=raw_path,
+            provider_order=["key4u_video"],
+            fallback_prompt="test prompt",
+            aspect_ratio="9:16",
+        )
+    assert str(exc_info.value) == "insufficient_temporal_evidence"
+    diag = exc_info.value.diagnostics
+    assert diag["result_rejected_locally"] is True
+
+    # Now verify success case: genuine local validator passes
+    mock_good_continuity = {
+        "ok": True,
+        "blocker": "",
+        "evidence_source": "local_vision_validator",
+        "independent_visual_validation": "LOCAL_MODEL",
+        "person_identity": True,
+        "object_identity": True,
+        "person_object_relationship": True,
+        "person_required": True,
+        "object_required": False,
+        "relationship_required": False,
+        "person_observations": [{"frame_index": 0, "person_ok": True}, {"frame_index": 1, "person_ok": True}],
+    }
+    monkeypatch.setattr(
+        "services.video_selfshot_continuity_validator.validate_selfshot_scene_continuity",
+        lambda *args, **kwargs: mock_good_continuity,
+    )
+    res = video_real_render_connector._render_selfshot3_video_to_video(
+        job={
+            "source_video_local_path": str(source_video),
+            "public_user_confirmed": True,
+            "submit_source": "public_user_final_confirm",
+            "route": "controlled_keyframe_image_to_video",
+            "continuity_scores": {"identity": 0.99, "body": 0.99, "motion": 0.99, "object": 0.99, "interaction": 0.99, "temporal": 0.99},
+        },
+        asset_pack={
+            "route": "controlled_keyframe_image_to_video",
+            "public_user_confirmed": True,
+            "submit_source": "public_user_final_confirm",
+            "duration_seconds": 5,
+            "continuity_scores": {"identity": 0.99, "body": 0.99, "motion": 0.99, "object": 0.99, "interaction": 0.99, "temporal": 0.99},
+        },
+        raw_path=raw_path,
+        provider_order=["key4u_video"],
+        fallback_prompt="test prompt",
+        aspect_ratio="9:16",
+    )
+    assert res["ok"] is True
+    # Verify that scores did NOT come from the unverified 0.99 dict in job/asset_pack
+    assert res["continuity_scores"]["identity"] != 0.99
+    assert res["continuity_metadata_authority"] == "local_vision_validator"
+
 
 
 

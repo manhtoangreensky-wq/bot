@@ -1303,9 +1303,13 @@ def continuity_validation(metrics: Mapping[str, Any] | None) -> dict[str, Any]:
     independent_mode = str(values.get("independent_visual_validation") or "")
     if evidence_source in {"unverified_mock_source", "mock"}:
         failures.append("mock_or_unverified_visual_evidence")
-    is_local = evidence_source == "local_vision_validator"
-    authority = "local_vision_validator" if is_local else ("none" if not values else "scene_metadata")
-    local_proven = bool(not failures and is_local and (independent_mode == "LOCAL_MODEL" if independent_mode else True))
+    elif evidence_source != "local_vision_validator":
+        failures.append("missing_local_vision_authority")
+    if independent_mode != "LOCAL_MODEL":
+        failures.append("independent_visual_validation_required")
+    is_local = evidence_source == "local_vision_validator" and independent_mode == "LOCAL_MODEL"
+    authority = "local_vision_validator" if is_local else ("none" if not values else "unauthorized_metadata")
+    local_proven = bool(not failures and is_local)
     return {
         "ok": not failures,
         "failures": failures,
@@ -1329,8 +1333,10 @@ def record_delivery(
         raise ValueError("valid_final_mp4_required")
     if int(message_id or 0) <= 0 or not str(receipt_key or "").strip():
         raise ValueError("valid_telegram_delivery_required")
-    if continuity is not None and not continuity_validation(continuity).get("ok"):
-        raise ValueError("continuity_validation_required")
+    if continuity is not None:
+        val = continuity_validation(continuity)
+        if not val.get("ok") or val.get("continuity_metadata_authority") != "local_vision_validator" or not val.get("independent_visual_continuity_proven"):
+            raise ValueError("continuity_validation_required")
     current = deepcopy(dict(state or {}))
     existing = dict(current.get("delivery") or {})
     expected = {"delivered": True, "message_id": int(message_id), "receipt_key": str(receipt_key)}

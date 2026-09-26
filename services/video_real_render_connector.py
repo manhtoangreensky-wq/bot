@@ -3682,20 +3682,27 @@ def _render_selfshot3_controlled_keyframe_image_to_video(
             },
         )
 
-    explicit_scores = gen_result.get("continuity_scores") or asset_pack.get("continuity_scores") or (job or {}).get("continuity_scores")
-    if isinstance(explicit_scores, dict) and explicit_scores:
-        scores = dict(explicit_scores)
+    # Derive continuity scores strictly from local vision validator evidence (never gen_result, asset_pack, or job)
+    local_explicit = continuity_res.get("continuity_scores") or continuity_res.get("scores")
+    if isinstance(local_explicit, dict) and local_explicit and all(k in local_explicit for k in ("identity", "body", "motion", "object", "interaction", "temporal")):
+        scores = {k: float(local_explicit[k]) for k in ("identity", "body", "motion", "object", "interaction", "temporal")}
     else:
-        p_ok = continuity_res.get("person_identity") or not person_req
-        o_ok = continuity_res.get("object_identity") or not object_req
-        r_ok = continuity_res.get("person_object_relationship") or not (person_req and object_req)
+        p_obs = continuity_res.get("person_observations") or []
+        o_obs = continuity_res.get("object_observations") or []
+        r_obs = continuity_res.get("relationship_observations") or []
+        total_frames = max(1, len(p_obs) or len(o_obs) or int(continuity_res.get("sampled_frame_count") or 1))
+        p_ratio = round(sum(1 for x in p_obs if x.get("person_ok")) / total_frames, 4) if (person_req and p_obs) else (1.0 if (continuity_res.get("person_identity") or not person_req) else 0.0)
+        o_ratio = round(sum(1 for x in o_obs if x.get("object_ok")) / total_frames, 4) if (object_req and o_obs) else (1.0 if (continuity_res.get("object_identity") or not object_req) else 0.0)
+        r_ratio = round(sum(1 for x in r_obs if x.get("relationship_ok")) / total_frames, 4) if (person_req and object_req and r_obs) else (1.0 if (continuity_res.get("person_object_relationship") or not (person_req and object_req)) else 0.0)
+        m_ratio = 1.0 if continuity_res.get("ok") else 0.0
+        t_ratio = 1.0 if continuity_res.get("ok") else 0.0
         scores = {
-            "identity": 0.95 if p_ok else 0.0,
-            "body": 0.95 if p_ok else 0.0,
-            "motion": 0.95 if continuity_res.get("ok") else 0.0,
-            "object": 0.95 if o_ok else 0.0,
-            "interaction": 0.95 if r_ok else 0.0,
-            "temporal": 0.95 if continuity_res.get("ok") else 0.0,
+            "identity": p_ratio,
+            "body": p_ratio,
+            "motion": m_ratio,
+            "object": o_ratio,
+            "interaction": r_ratio,
+            "temporal": t_ratio,
         }
 
     return {
@@ -4804,26 +4811,6 @@ def selfshot3_continuity_validation(
         and os.path.getsize(final_path) > 0
     )
 
-    scores_candidate: dict[str, Any] = {}
-    evidence_candidate = (
-        output.get("continuity_scores")
-        or output.get("continuity_evidence")
-        or output.get("continuity_metrics")
-        or {}
-    )
-    if isinstance(evidence_candidate, dict):
-        scores_candidate.update(evidence_candidate)
-
-    all_rows = [*(scene_tasks or []), *(debug_results or [])]
-    for row in all_rows:
-        if isinstance(row, dict):
-            for key in ("continuity_scores", "continuity_evidence", "continuity_metrics"):
-                val = row.get(key)
-                if isinstance(val, dict):
-                    for k, v in val.items():
-                        if k not in scores_candidate:
-                            scores_candidate[k] = v
-
     evidence_source = str(
         output.get("evidence_source")
         or (output.get("continuity_evidence") or {}).get("evidence_source")
@@ -4835,7 +4822,35 @@ def selfshot3_continuity_validation(
         or ""
     )
 
-    validation_result = video_selfshot3.continuity_validation(scores_candidate)
+    scores_candidate: dict[str, Any] = {}
+    evidence_candidate = (
+        output.get("continuity_scores")
+        or output.get("continuity_evidence")
+        or output.get("continuity_metrics")
+        or {}
+    )
+    if isinstance(evidence_candidate, dict):
+        scores_candidate.update(evidence_candidate)
+
+    if evidence_source == "local_vision_validator":
+        all_rows = [*(scene_tasks or []), *(debug_results or [])]
+        for row in all_rows:
+            if isinstance(row, dict):
+                row_src = str(row.get("evidence_source") or (row.get("continuity_evidence") or {}).get("evidence_source") or "")
+                if row_src == "local_vision_validator":
+                    for key in ("continuity_scores", "continuity_evidence", "continuity_metrics"):
+                        val = row.get(key)
+                        if isinstance(val, dict):
+                            for k, v in val.items():
+                                if k not in scores_candidate:
+                                    scores_candidate[k] = v
+
+    scores_with_authority = {
+        **scores_candidate,
+        "evidence_source": evidence_source,
+        "independent_visual_validation": independent_mode,
+    }
+    validation_result = video_selfshot3.continuity_validation(scores_with_authority)
     blocker = ""
     if not final_mp4_valid:
         blocker = "selfshot3_valid_final_mp4_required"
@@ -4843,6 +4858,10 @@ def selfshot3_continuity_validation(
         blocker = str(output.get("blocker") or "result_rejected_locally")
     elif evidence_source in {"unverified_mock_source", "mock"}:
         blocker = "mock_or_unverified_visual_evidence"
+    elif evidence_source != "local_vision_validator":
+        blocker = "missing_local_vision_authority"
+    elif independent_mode != "LOCAL_MODEL":
+        blocker = "independent_visual_validation_required"
     elif not validation_result.get("ok"):
         blocker = "selfshot3_continuity_validation_failed"
 
@@ -4851,18 +4870,18 @@ def selfshot3_continuity_validation(
         and final_mp4_valid
         and validation_result.get("ok")
         and evidence_source == "local_vision_validator"
-        and (independent_mode == "LOCAL_MODEL" or not (output.get("person_required") or output.get("object_required")))
+        and independent_mode == "LOCAL_MODEL"
     )
-    authority = "local_vision_validator" if evidence_source == "local_vision_validator" else ("none" if not scores_candidate else "provider_or_scene_metadata")
+    authority = "local_vision_validator" if (evidence_source == "local_vision_validator" and independent_mode == "LOCAL_MODEL") else "none"
     independent_validation_mode = "LOCAL_MODEL" if all_local_proven else (independent_mode or "NOT_PERFORMED")
 
     return {
-        "ok": not blocker,
+        "ok": bool(not blocker and all_local_proven),
         "selfshot3": True,
         "blocker": blocker,
         "final_mp4_valid": final_mp4_valid,
         "continuity_validation_required": True,
-        "continuity_validation_passed": not blocker,
+        "continuity_validation_passed": bool(not blocker and all_local_proven),
         "continuity_metadata_present": bool(scores_candidate),
         "continuity_metadata_authority": authority,
         "continuity_evidence_present": bool(evidence_candidate or output.get("continuity_evidence_present")),
@@ -8168,7 +8187,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         result["continuity_validation_passed"] = continuity.get("ok") is True
         result["continuity_blocker"] = str(continuity.get("blocker") or "")
         result["continuity_metrics"] = dict(continuity.get("scores") or {})
-        if continuity.get("ok") is not True:
+        if continuity.get("ok") is not True or continuity.get("continuity_metadata_authority") != "local_vision_validator" or not continuity.get("independent_visual_continuity_proven"):
             result["delivery_blocked"] = True
             result["terminal_state"] = "failed_no_charge"
             result["no_charge"] = True
