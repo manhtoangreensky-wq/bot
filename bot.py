@@ -68934,6 +68934,11 @@ GUIDE_SECTION_ALIASES = {
     "pricing": "credits",
     "topup": "credits",
     "refund": "faq",
+    "link": "telegram_link",
+    "lienket": "telegram_link",
+    "web": "telegram_link",
+    "webapp": "telegram_link",
+    "telegram": "telegram_link",
 }
 
 def normalize_guide_section_key(section_key_or_number: str) -> str:
