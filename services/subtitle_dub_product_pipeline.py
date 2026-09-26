@@ -396,16 +396,52 @@ async def process_subtitle_dub_job(
                 str(pipeline_state.get("auto_speaker_lane") or "").strip().lower() == "multi"
                 and not pipeline_state.get("cue_locked_timing")
             )
-            # Enrich/normalize TTS chunks metadata needed by recovery
+            # Map authoritative tts_segments by stable cue identity/index
+            auth_by_id: dict[str, dict] = {}
+            for s_item in tts_segments:
+                if isinstance(s_item, dict):
+                    cid = str(s_item.get("cue_id") or s_item.get("id") or "").strip()
+                    if cid:
+                        auth_by_id[cid] = s_item
+
+            # Enrich/normalize TTS chunks metadata from authoritative source/segments
             for idx, item in enumerate(tts_chunks):
-                s = float(item.get("start") or 0.0)
-                e = float(item.get("end") or 0.0)
+                cid_cand = str(item.get("cue_id") or item.get("id") or "").strip()
+                auth_seg = auth_by_id.get(cid_cand)
+                if auth_seg is None and idx < len(tts_segments) and isinstance(tts_segments[idx], dict):
+                    auth_seg = tts_segments[idx]
+
+                cid = str(
+                    item.get("cue_id")
+                    or item.get("id")
+                    or (auth_seg.get("cue_id") or auth_seg.get("id") if auth_seg else None)
+                    or f"cue_{idx + 1}"
+                ).strip()
+                item["cue_id"] = cid
+
+                # Speaker authority: preserve authoritative speaker, never invent common "speaker_0"
+                speaker = (
+                    item.get("speaker_id")
+                    or item.get("speaker")
+                    or (auth_seg.get("speaker_id") or auth_seg.get("speaker") if auth_seg else None)
+                )
+                speaker_str = str(speaker).strip() if speaker is not None else ""
+                if speaker_str:
+                    item["speaker_id"] = speaker_str
+                    item["speaker"] = speaker_str
+                else:
+                    item["speaker_id"] = ""
+                    item["speaker"] = ""
+                    item["recovery_eligible"] = False
+
+                # Non-speech boundary authority
+                if item.get("non_speech_boundary") is None and auth_seg and auth_seg.get("non_speech_boundary") is not None:
+                    item["non_speech_boundary"] = bool(auth_seg.get("non_speech_boundary"))
+
+                s = float(item.get("start") if item.get("start") is not None else (auth_seg.get("start") if auth_seg else 0.0) or 0.0)
+                e = float(item.get("end") if item.get("end") is not None else (auth_seg.get("end") if auth_seg else 0.0) or 0.0)
                 w = max(0.001, e - s)
-                dur = max(0.0, float(item.get("audio_duration") or item.get("generated_audio_seconds") or 0.0))
-                if not item.get("cue_id"):
-                    item["cue_id"] = str(item.get("id") or f"cue_{idx + 1}")
-                if not item.get("speaker_id"):
-                    item["speaker_id"] = str(item.get("speaker") or "speaker_0")
+                dur = max(0.0, float(item.get("audio_duration") or item.get("raw_audio_duration") or item.get("generated_audio_seconds") or 0.0))
                 item["start"] = s
                 item["end"] = e
                 item["cue_window"] = w
@@ -420,8 +456,9 @@ async def process_subtitle_dub_job(
                 recover_cue_locked_micro_cues,
                 MAX_INTELLIGIBLE_FIT_RATIO,
             )
-            # Mandatory Fix A: Invoke recover_cue_locked_micro_cues BEFORE final MAX_INTELLIGIBLE_FIT_RATIO rejection
-            tts_chunks = recover_cue_locked_micro_cues(tts_chunks)
+            # Mandatory Fix B: Legacy multi must NOT enter micro-cue recovery
+            if not is_legacy_multi:
+                tts_chunks = recover_cue_locked_micro_cues(tts_chunks)
 
             for item in tts_chunks:
                 cue_window = max(
@@ -431,7 +468,12 @@ async def process_subtitle_dub_job(
                 generated_seconds = max(0.0, float(item.get("audio_duration") or 0.0))
                 raw_fit_ratio = generated_seconds / cue_window if cue_window > 0.05 and generated_seconds > 0 else 1.0
                 if not is_legacy_multi and raw_fit_ratio > MAX_INTELLIGIBLE_FIT_RATIO:
-                    fail_cid = str(item.get("cue_id") or (item.get("original_cue_ids") or [""])[-1])
+                    fail_cid = str(
+                        item.get("recovery_trigger_cue_id")
+                        or item.get("original_trigger_cue_id")
+                        or item.get("cue_id")
+                        or (item.get("original_cue_ids") or [""])[-1]
+                    )
                     return {
                         "ok": False,
                         "status": "TTS_EXTREME_COMPRESSION_FAILED",
@@ -445,6 +487,7 @@ async def process_subtitle_dub_job(
                         "route_attempts": route_attempts,
                         "fit_ratio": round(raw_fit_ratio, 3),
                         "cue_id": fail_cid,
+                        "recovery_trigger_cue_id": str(item.get("recovery_trigger_cue_id") or fail_cid),
                     }
                 fit_ratio = max(1.0, raw_fit_ratio)
                 item.update({

@@ -943,3 +943,275 @@ def test_unsupported_unknown_encoded_bytes_cannot_raw_concat():
     assert merged.get("audio") != c1["audio"] + c2["audio"], "Must never raw-concat arbitrary byte streams"
 
 
+def test_shared_pipeline_missing_speaker_metadata_must_not_invent_identity(tmp_path):
+    """MANDATORY FIRST RED A: Pipeline recovers speaker from authoritative tts_segments and forbids cross-speaker merge.
+
+    If speaker authority cannot be resolved, recovery_eligible=False; never invent common 'speaker_0'.
+    """
+    import asyncio
+    from services.subtitle_dub_product_pipeline import process_subtitle_dub_job
+
+    source_media = tmp_path / "src_speaker.mp4"
+    source_media.write_bytes(b"dummy")
+
+    # Case 1: Chunks omit speaker, but source segments have authoritative different speakers (Alice vs Bob)
+    state = {
+        "mode": "dub",
+        "voice_kind": "auto_speaker_gender",
+        "input_file": str(source_media),
+        "source_path": str(source_media),
+        "media_path": str(source_media),
+        "segments": [
+            {"cue_id": "c1", "start": 0.0, "end": 2.0, "text": "one", "speaker": "Alice"},
+            {"cue_id": "c2", "start": 2.0, "end": 2.5, "text": "two", "speaker": "Bob"},
+        ],
+        "input_duration_seconds": 3.0,
+    }
+
+    async def fake_tts_no_speaker(*args, **kwargs):
+        return {
+            "ok": True,
+            "provider": "mock",
+            "chunks": [
+                {"cue_id": "c1", "start": 0.0, "end": 2.0, "audio_duration": 1.5, "audio_bytes": b"a1", "text": "one"},
+                {"cue_id": "c2", "start": 2.0, "end": 2.5, "audio_duration": 1.0, "audio_bytes": b"a2", "text": "two"},
+            ],
+        }
+
+    async def _run_diff_speakers():
+        res = await process_subtitle_dub_job(
+            mode="dub",
+            state=state,
+            user_id=1,
+            prepare_subtitles=lambda s: {
+                "state": s,
+                "source_bytes": b"src",
+                "content_type": "video/mp4",
+                "source_segments": s["segments"],
+                "output_segments": s["segments"],
+                "output_script": "one two",
+                "output_subtitle": "1\n00:00:00,000 --> 00:00:02,000\none\n\n2\n00:00:02,000 --> 00:00:02,500\ntwo\n",
+            },
+            srt_from_text=lambda *a: "",
+            segments_from_text=lambda *a: [],
+            segments_from_subtitle=lambda *a: [],
+            subtitle_output_items=lambda *a: [],
+            resolve_voice_id=lambda *a: "v1",
+            parse_voice_speed=lambda *a: 1.0,
+            synthesize_segments=fake_tts_no_speaker,
+            build_timeline_audio=lambda *a, **k: (b"tl", "ok"),
+            normalize_audio=lambda a, *args: (a, "ok"),
+            validate_audio=lambda a, *args: {"ok": True},
+            render_video=lambda *a, **k: (b"mp4", "ok"),
+            video_render_ready=lambda *a: True,
+            ffmpeg_ready=lambda: True,
+            dub_mux_enabled=True,
+        )
+        assert res["ok"] is False, "Cross-speaker cues must not be merged"
+        assert res["status"] == "TTS_EXTREME_COMPRESSION_FAILED"
+        assert res["error_code"] == "extreme_audio_compression_unintelligible"
+        assert res["cue_id"] == "c2"
+
+    asyncio.run(_run_diff_speakers())
+
+    # Case 2: Neither segments nor chunks have speaker metadata -> must not invent 'speaker_0'
+    state_no_spk = {
+        "mode": "dub",
+        "voice_kind": "auto_speaker_gender",
+        "input_file": str(source_media),
+        "source_path": str(source_media),
+        "media_path": str(source_media),
+        "segments": [
+            {"cue_id": "c1", "start": 0.0, "end": 2.0, "text": "one"},
+            {"cue_id": "c2", "start": 2.0, "end": 2.5, "text": "two"},
+        ],
+        "input_duration_seconds": 3.0,
+    }
+
+    async def _run_no_speakers():
+        res = await process_subtitle_dub_job(
+            mode="dub",
+            state=state_no_spk,
+            user_id=1,
+            prepare_subtitles=lambda s: {
+                "state": s,
+                "source_bytes": b"src",
+                "content_type": "video/mp4",
+                "source_segments": s["segments"],
+                "output_segments": s["segments"],
+                "output_script": "one two",
+                "output_subtitle": "1\n00:00:00,000 --> 00:00:02,000\none\n\n2\n00:00:02,000 --> 00:00:02,500\ntwo\n",
+            },
+            srt_from_text=lambda *a: "",
+            segments_from_text=lambda *a: [],
+            segments_from_subtitle=lambda *a: [],
+            subtitle_output_items=lambda *a: [],
+            resolve_voice_id=lambda *a: "v1",
+            parse_voice_speed=lambda *a: 1.0,
+            synthesize_segments=fake_tts_no_speaker,
+            build_timeline_audio=lambda *a, **k: (b"tl", "ok"),
+            normalize_audio=lambda a, *args: (a, "ok"),
+            validate_audio=lambda a, *args: {"ok": True},
+            render_video=lambda *a, **k: (b"mp4", "ok"),
+            video_render_ready=lambda *a: True,
+            ffmpeg_ready=lambda: True,
+            dub_mux_enabled=True,
+        )
+        assert res["ok"] is False, "Missing speaker authority must decline recovery"
+        assert res["status"] == "TTS_EXTREME_COMPRESSION_FAILED"
+        assert res["error_code"] == "extreme_audio_compression_unintelligible"
+        assert res["cue_id"] == "c2"
+
+    asyncio.run(_run_no_speakers())
+
+
+def test_legacy_multi_must_not_enter_microcue_recovery(tmp_path):
+    """MANDATORY FIRST RED B: Legacy multi lane must preserve historical stretch behavior without coalescing."""
+    import asyncio
+    from services.subtitle_dub_product_pipeline import process_subtitle_dub_job
+
+    source_media = tmp_path / "src_multi.mp4"
+    source_media.write_bytes(b"dummy")
+
+    state = {
+        "mode": "dub",
+        "auto_speaker_lane": "multi",
+        "input_file": str(source_media),
+        "source_path": str(source_media),
+        "media_path": str(source_media),
+        "segments": [
+            {"cue_id": "c1", "start": 0.0, "end": 2.0, "text": "one", "speaker": "spk_1"},
+            {"cue_id": "c2", "start": 2.0, "end": 2.5, "text": "two", "speaker": "spk_1"},
+        ],
+        "input_duration_seconds": 3.0,
+    }
+
+    async def fake_tts(*args, **kwargs):
+        return {
+            "ok": True,
+            "provider": "mock",
+            "chunks": [
+                {"cue_id": "c1", "start": 0.0, "end": 2.0, "audio_duration": 1.5, "audio_bytes": b"a1", "text": "one", "speaker_id": "spk_1"},
+                {"cue_id": "c2", "start": 2.0, "end": 2.5, "audio_duration": 1.0, "audio_bytes": b"a2", "text": "two", "speaker_id": "spk_1"},
+            ],
+        }
+
+    timeline_passed_chunks = []
+
+    async def tl(chunks, *args):
+        timeline_passed_chunks.extend(chunks)
+        return b"tl_audio", "ok"
+
+    async def _run():
+        res = await process_subtitle_dub_job(
+            mode="dub",
+            state=state,
+            user_id=1,
+            prepare_subtitles=lambda s: {
+                "state": s,
+                "source_bytes": b"src",
+                "content_type": "video/mp4",
+                "source_segments": s["segments"],
+                "output_segments": s["segments"],
+                "output_script": "one two",
+                "output_subtitle": "1\n00:00:00,000 --> 00:00:02,000\none\n\n2\n00:00:02,000 --> 00:00:02,500\ntwo\n",
+            },
+            srt_from_text=lambda *a: "",
+            segments_from_text=lambda *a: [],
+            segments_from_subtitle=lambda *a: [],
+            subtitle_output_items=lambda *a: [],
+            resolve_voice_id=lambda *a: "v1",
+            parse_voice_speed=lambda *a: 1.0,
+            synthesize_segments=fake_tts,
+            build_timeline_audio=tl,
+            normalize_audio=lambda a, *args: (a, "ok"),
+            validate_audio=lambda a, *args: {"ok": True},
+            render_video=lambda *a, **k: (b"mp4", "ok"),
+            video_render_ready=lambda *a: True,
+            ffmpeg_ready=lambda: True,
+            dub_mux_enabled=True,
+        )
+        assert res["ok"] is True
+        # Must retain all 2 chunks untouched, preserving downstream stretch behavior
+        assert len(timeline_passed_chunks) == 2, "Legacy multi must not coalesce chunks"
+        assert [c.get("cue_id") for c in timeline_passed_chunks] == ["c1", "c2"]
+        assert timeline_passed_chunks[0].get("coalesced") is not True
+
+    asyncio.run(_run())
+
+
+def test_post_coalescence_gt_1_80_must_report_original_trigger_cue_id(tmp_path):
+    """MANDATORY FIRST RED C: Post-coalescence > 1.80 failure must report original trigger cue_id, not 'c1+c2'."""
+    import asyncio
+    from unittest.mock import patch
+    from services.subtitle_dub_product_pipeline import process_subtitle_dub_job
+
+    source_media = tmp_path / "src_fail.mp4"
+    source_media.write_bytes(b"dummy")
+
+    state = {
+        "mode": "dub",
+        "voice_kind": "auto_speaker_gender",
+        "input_file": str(source_media),
+        "source_path": str(source_media),
+        "media_path": str(source_media),
+        "segments": [
+            {"cue_id": "c1", "start": 0.0, "end": 1.0, "text": "one", "speaker": "spk_1"},
+            {"cue_id": "c2", "start": 1.0, "end": 1.5, "text": "two", "speaker": "spk_1"},
+        ],
+        "input_duration_seconds": 2.0,
+    }
+
+    async def fake_tts(*args, **kwargs):
+        return {
+            "ok": True,
+            "provider": "mock",
+            "chunks": [
+                {"cue_id": "c1", "start": 0.0, "end": 1.0, "audio_duration": 0.8, "audio_bytes": b"a1", "text": "one", "speaker_id": "spk_1", "_synthetic_fixture": True},
+                {"cue_id": "c2", "start": 1.0, "end": 1.5, "audio_duration": 1.0, "audio_bytes": b"a2", "text": "two", "speaker_id": "spk_1", "_synthetic_fixture": True},
+            ],
+        }
+
+    async def _run():
+        # Mock assemble_coalesced_audio to simulate real ffmpeg assembly measuring 2.8s (> 1.5 * 1.80 = 2.70)
+        with patch("services.subdub_microcue_recovery.assemble_coalesced_audio", return_value=(b"coalesced_audio", 2.8)):
+            res = await process_subtitle_dub_job(
+                mode="dub",
+                state=state,
+                user_id=1,
+                prepare_subtitles=lambda s: {
+                    "state": s,
+                    "source_bytes": b"src",
+                    "content_type": "video/mp4",
+                    "source_segments": s["segments"],
+                    "output_segments": s["segments"],
+                    "output_script": "one two",
+                    "output_subtitle": "1\n00:00:00,000 --> 00:00:01,000\none\n\n2\n00:00:01,000 --> 00:00:01,500\ntwo\n",
+                },
+                srt_from_text=lambda *a: "",
+                segments_from_text=lambda *a: [],
+                segments_from_subtitle=lambda *a: [],
+                subtitle_output_items=lambda *a: [],
+                resolve_voice_id=lambda *a: "v1",
+                parse_voice_speed=lambda *a: 1.0,
+                synthesize_segments=fake_tts,
+                build_timeline_audio=lambda *a, **k: (b"tl", "ok"),
+                normalize_audio=lambda a, *args: (a, "ok"),
+                validate_audio=lambda a, *args: {"ok": True},
+                render_video=lambda *a, **k: (b"mp4", "ok"),
+                video_render_ready=lambda *a: True,
+                ffmpeg_ready=lambda: True,
+                dub_mux_enabled=True,
+            )
+            assert res["ok"] is False
+            assert res["status"] == "TTS_EXTREME_COMPRESSION_FAILED"
+            assert res["error_code"] == "extreme_audio_compression_unintelligible"
+            # MUST equal original offending trigger cue "c2", NOT synthetic "c1+c2"
+            assert res["cue_id"] == "c2", f"Expected trigger cue c2, got {res.get('cue_id')}"
+            assert res["cue_id"] != "c1+c2", "Must not report synthetic concatenated cue_id"
+            assert res.get("recovery_trigger_cue_id") == "c2"
+
+    asyncio.run(_run())
+
+
+

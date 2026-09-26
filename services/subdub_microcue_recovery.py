@@ -167,6 +167,9 @@ def can_coalesce_cues(
     if not isinstance(left, dict) or not isinstance(right, dict):
         return False
 
+    if left.get("recovery_eligible") is False or right.get("recovery_eligible") is False:
+        return False
+
     # 1. Speaker identity authority
     spk_l = str(left.get("speaker_id") or left.get("speaker") or "").strip()
     spk_r = str(right.get("speaker_id") or right.get("speaker") or "").strip()
@@ -203,7 +206,11 @@ def can_coalesce_cues(
     return True
 
 
-def coalesce_cue_pair(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+def coalesce_cue_pair(
+    left: dict[str, Any],
+    right: dict[str, Any],
+    recovery_trigger_cue_id: str | None = None,
+) -> dict[str, Any]:
     """Coalesce two adjacent cue items into a unified cue item with internal timing preserved.
 
     Preserves full text, internal original cue timing (right cue offset and gap silence),
@@ -300,6 +307,19 @@ def coalesce_cue_pair(left: dict[str, Any], right: dict[str, Any]) -> dict[str, 
     orig_r = list(right.get("original_cue_ids") or ([str(right.get("cue_id"))] if right.get("cue_id") else []))
     combined_orig = orig_l + [cid for cid in orig_r if cid not in orig_l]
 
+    trigger_cid = str(recovery_trigger_cue_id or "").strip()
+    if not trigger_cid:
+        trigger_cid = str(right.get("recovery_trigger_cue_id") or left.get("recovery_trigger_cue_id") or "").strip()
+    if not trigger_cid:
+        w_l = max(0.001, e_l - s_l)
+        w_r = max(0.001, e_r - s_r)
+        fit_l = dur_l / w_l if w_l > 0.05 and dur_l > 0 else 1.0
+        fit_r = dur_r / w_r if w_r > 0.05 and dur_r > 0 else 1.0
+        if fit_r > fit_l:
+            trigger_cid = str(right.get("cue_id") or "")
+        else:
+            trigger_cid = str(left.get("cue_id") or "")
+
     # Text concatenation
     t_l = str(left.get("text") or "").strip()
     t_r = str(right.get("text") or "").strip()
@@ -328,6 +348,8 @@ def coalesce_cue_pair(left: dict[str, Any], right: dict[str, Any]) -> dict[str, 
         "coalesced": True,
         "cue_locked_timing": True,
         "original_cue_ids": combined_orig,
+        "recovery_trigger_cue_id": trigger_cid,
+        "original_trigger_cue_id": trigger_cid,
         "right_cue_offset": effective_offset_r,
         "gap_silence_seconds": gap_silence,
         "internal_cues": internal_cues,
@@ -418,7 +440,8 @@ def recover_cue_locked_micro_cues(
 
                 if chosen:
                     idx_a, idx_b = chosen[1], chosen[2]
-                    merged = coalesce_cue_pair(res[idx_a], res[idx_b])
+                    trigger_cid = str(item.get("recovery_trigger_cue_id") or item.get("cue_id") or "")
+                    merged = coalesce_cue_pair(res[idx_a], res[idx_b], recovery_trigger_cue_id=trigger_cid)
                     if merged.get("coalesced") is not False:
                         res[idx_a] = merged
                         del res[idx_b]
