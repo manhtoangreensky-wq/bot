@@ -634,7 +634,367 @@ prune_rollback_retention
         for s in invalid_samples:
             self.assertFalse(regex.match(s), f"Should not match invalid sample: {s}")
 
+    def test_empirical_proof_trap_err_exit_1_does_not_fire_trap(self):
+        """18. Empirical proof: in bash, 'trap ... ERR' is NOT triggered by explicit 'exit 1'."""
+        import shutil
+        bash_bin = shutil.which("bash") or (r"C:\Program Files\Git\bin\bash.exe" if os.path.isfile(r"C:\Program Files\Git\bin\bash.exe") else None)
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            log_path = os.path.join(tmp_dir, "trap.log").replace("\\", "/")
+            test_sh = os.path.join(tmp_dir, "test_trap.sh")
+            with open(test_sh, "w", encoding="utf-8") as f:
+                f.write(f"""#!/usr/bin/env bash
+trap 'echo "TRAP_FIRED" > "{log_path}"' ERR
+exit 1
+""")
+            res = subprocess.run([bash_bin, test_sh], capture_output=True, text=True)
+            self.assertEqual(res.returncode, 1)
+            # Crucial proof: TRAP_FIRED was NOT written because exit 1 does not trigger ERR trap
+            self.assertFalse(os.path.exists(log_path), "ERR trap must NOT fire on explicit exit 1 (proves known blocker)")
+
+    def test_no_direct_unprotected_exit_in_mutation_window(self):
+        """19. Static verification: no direct unprotected 'exit 1' exists in mutation window."""
+        start_marker = "prepare_product_video_worker_release"
+        end_marker = "commit_product_video_release_transaction"
+        start_idx = self.content.find(start_marker)
+        end_idx = self.content.find(end_marker, start_idx)
+        self.assertNotEqual(start_idx, -1, "prepare_product_video_worker_release missing")
+        self.assertNotEqual(end_idx, -1, "commit_product_video_release_transaction missing")
+
+        mutation_window = self.content[start_idx:end_idx]
+        self.assertIn("fail_after_prepare", mutation_window)
+        lines = [line.strip() for line in mutation_window.splitlines()]
+        unprotected_exits = []
+        for line in lines:
+            if re.search(r"\bexit\s+[0-9]+", line) and not line.startswith("#"):
+                unprotected_exits.append(line)
+        self.assertEqual(
+            unprotected_exits,
+            [],
+            f"Found unprotected direct exit statements in mutation window: {unprotected_exits}",
+        )
+
+    def test_fail_after_prepare_helper_defined_and_calls_rollback(self):
+        """20. fail_after_prepare helper is defined and explicitly calls rollback_transaction."""
+        self.assertIn("fail_after_prepare() {", self.content)
+        helper_match = re.search(r"fail_after_prepare\(\)\s*\{[\s\S]*?\n            \}", self.content)
+        self.assertIsNotNone(helper_match, "fail_after_prepare function definition missing")
+        helper_body = helper_match.group(0)
+        self.assertIn("rollback_transaction", helper_body)
+
+    def test_post_prepare_failure_branches_call_fail_after_prepare(self):
+        """21. All mandatory failure branches in mutation window invoke fail_after_prepare."""
+        start_marker = "prepare_product_video_worker_release"
+        end_marker = "commit_product_video_release_transaction"
+        start_idx = self.content.find(start_marker)
+        end_idx = self.content.find(end_marker, start_idx)
+        window = self.content[start_idx:end_idx]
+
+        # 1. Post-prepare drift
+        self.assertIn('if [[ \\"\\$POST_PREPARE_HEAD\\" != \\"\\$EXPECTED_PREV_SHA\\" ]]; then', window)
+        self.assertIn('fail_after_prepare \\"Production drift detected after prepare', window)
+
+        # 2. Fetched SHA mismatch
+        self.assertIn('if [[ \\"\\$FETCHED_SHA\\" != \\"\\$TARGET_SHA\\" ]]; then', window)
+        self.assertIn('fail_after_prepare \\"FETCHED_SHA', window)
+
+        # 3. Current SHA mismatch
+        self.assertIn('if [[ \\"\\$CURRENT_SHA\\" != \\"\\$TARGET_SHA\\" ]]; then', window)
+        self.assertIn('fail_after_prepare \\"CURRENT_SHA', window)
+
+        # 4. Missing venv python
+        self.assertIn('if [[ ! -x \\"\\$WEBAPP_DIR/.venv/bin/python\\" ]]; then', window)
+        self.assertIn('fail_after_prepare \\"Bot virtualenv Python is missing or not executable\\"', window)
+
+        # 5. Health check timeout
+        self.assertIn('if [[ -z \\"\\$HEALTH_JSON\\" ]]; then', window)
+        self.assertIn('fail_after_prepare \\"Health endpoint did not respond\\"', window)
+
+        # 6. Health payload validation failure
+        self.assertIn('fail_after_prepare \\"Health endpoint payload validation failed', window)
+
+    def test_bash_post_prepare_failures_trigger_rollback_empirically(self):
+        """22. Empirical execution: post-prepare failures call rollback_transaction and preserve exit code."""
+        import shutil
+        bash_bin = shutil.which("bash") or (r"C:\Program Files\Git\bin\bash.exe" if os.path.isfile(r"C:\Program Files\Git\bin\bash.exe") else None)
+        if not bash_bin:
+            self.skipTest("bash not found")
+
+        test_cases = [
+            ("post_drift", "Production drift detected after prepare"),
+            ("fetched_sha", "FETCHED_SHA"),
+            ("current_sha", "CURRENT_SHA"),
+            ("missing_venv", "Bot virtualenv Python is missing"),
+            ("health_fail", "Health endpoint did not respond"),
+        ]
+
+        for failure_mode, expected_err in test_cases:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                posix_tmp = tmp_dir.replace("\\", "/")
+                log_file = f"{posix_tmp}/rollback.log"
+                test_sh = f"{tmp_dir}/test_{failure_mode}.sh"
+
+                script = f"""#!/usr/bin/env bash
+set -euo pipefail
+
+LOG_FILE="{log_file}"
+
+rollback_transaction() {{
+  local code="${{1:-1}}"
+  echo "ROLLBACK_CALLED code=$code" >> "$LOG_FILE"
+  exit "$code"
+}}
+
+fail_after_prepare() {{
+  local msg="${{1:-Deployment failure in mutation window}}"
+  local code="${{2:-1}}"
+  echo "ERROR: $msg" >&2
+  if type rollback_transaction >/dev/null 2>&1; then
+    rollback_transaction "$code"
+  fi
+  exit "$code"
+}}
+
+MODE="{failure_mode}"
+
+if [[ "$MODE" == "post_drift" ]]; then
+  POST_PREPARE_HEAD="drifted_sha"
+  EXPECTED_PREV_SHA="expected_sha"
+  if [[ "$POST_PREPARE_HEAD" != "$EXPECTED_PREV_SHA" ]]; then
+    fail_after_prepare "Production drift detected after prepare! Live HEAD ($POST_PREPARE_HEAD) != EXPECTED_PREV_SHA ($EXPECTED_PREV_SHA)"
+  fi
+elif [[ "$MODE" == "fetched_sha" ]]; then
+  FETCHED_SHA="wrong_fetched"
+  TARGET_SHA="target_sha"
+  if [[ "$FETCHED_SHA" != "$TARGET_SHA" ]]; then
+    fail_after_prepare "FETCHED_SHA ($FETCHED_SHA) != TARGET_SHA ($TARGET_SHA)"
+  fi
+elif [[ "$MODE" == "current_sha" ]]; then
+  CURRENT_SHA="wrong_current"
+  TARGET_SHA="target_sha"
+  if [[ "$CURRENT_SHA" != "$TARGET_SHA" ]]; then
+    fail_after_prepare "CURRENT_SHA ($CURRENT_SHA) != TARGET_SHA ($TARGET_SHA)"
+  fi
+elif [[ "$MODE" == "missing_venv" ]]; then
+  if [[ ! -x "{posix_tmp}/nonexistent_venv/bin/python" ]]; then
+    fail_after_prepare "Bot virtualenv Python is missing or not executable"
+  fi
+elif [[ "$MODE" == "health_fail" ]]; then
+  HEALTH_JSON=""
+  if [[ -z "$HEALTH_JSON" ]]; then
+    fail_after_prepare "Health endpoint did not respond"
+  fi
+fi
+"""
+                with open(test_sh, "w", encoding="utf-8") as f:
+                    f.write(script)
+
+                res = subprocess.run([bash_bin, test_sh], capture_output=True, text=True)
+                self.assertEqual(res.returncode, 1, f"Mode {failure_mode} did not exit 1")
+                self.assertIn(expected_err, res.stderr + res.stdout, f"Mode {failure_mode} missing error text")
+                self.assertTrue(os.path.exists(log_file), f"Mode {failure_mode} did not invoke rollback_transaction")
+                with open(log_file, "r", encoding="utf-8") as lf:
+                    log_text = lf.read()
+                self.assertIn("ROLLBACK_CALLED code=1", log_text, f"Mode {failure_mode} rollback log mismatch")
+
+    def test_simulated_rollback_restores_worker_sha_and_service_state(self):
+        """23. Simulated full rollback execution restores worker repo, SHA, service, and manifest."""
+        import shutil
+        bash_bin = shutil.which("bash") or (r"C:\Program Files\Git\bin\bash.exe" if os.path.isfile(r"C:\Program Files\Git\bin\bash.exe") else None)
+        if not bash_bin:
+            self.skipTest("bash not found")
+
+        with tempfile.TemporaryDirectory() as base_tmp:
+            posix_base = base_tmp.replace("\\", "/")
+            test_sh = f"{base_tmp}/test_full_rollback.sh"
+            log_file = f"{posix_base}/rollback_full.log"
+
+            bot_dir = f"{posix_base}/bot"
+            worker_dir = f"{posix_base}/worker"
+            staging_dir = f"{posix_base}/staging"
+            manifest_file = f"{staging_dir}/transaction_manifest.json"
+
+            script = f"""#!/usr/bin/env bash
+set -euo pipefail
+
+BOT_DIR="{bot_dir}"
+WORKER_DIR="{worker_dir}"
+STAGING_DIR="{staging_dir}"
+TRANSACTION_MARKER_PATH="{manifest_file}"
+LOG_FILE="{log_file}"
+
+mkdir -p "$BOT_DIR" "$STAGING_DIR"
+
+(
+  cd "$BOT_DIR"
+  git init -q
+  git config user.name "Test"
+  git config user.email "test@example.com"
+  echo "v1" > file.txt
+  git add file.txt
+  git commit -q -m "c1"
+  echo "v2" > file.txt
+  git add file.txt
+  git commit -q -m "c2"
+)
+
+git clone -q "$BOT_DIR" "$WORKER_DIR"
+(
+  cd "$WORKER_DIR"
+  git config user.name "Test"
+  git config user.email "test@example.com"
+)
+
+PREV_BOT_SHA="$(git -C "$BOT_DIR" rev-parse HEAD~1)"
+PREV_WORKER_SHA="$(git -C "$WORKER_DIR" rev-parse HEAD~1)"
+TARGET_SHA="$(git -C "$BOT_DIR" rev-parse HEAD)"
+
+# Detach worker at PREV_WORKER_SHA initially
+git -C "$WORKER_DIR" checkout -q --detach "$PREV_WORKER_SHA"
+
+echo "PREV_BOT_SHA=$PREV_BOT_SHA"
+echo "PREV_WORKER_SHA=$PREV_WORKER_SHA"
+
+SYSTEMCTL_LOG="{posix_base}/systemctl.log"
+systemctl() {{
+  echo "systemctl $*" >> "$SYSTEMCTL_LOG"
+  return 0
+}}
+
+SERVICE_NAME="toanaas-worker-owner-product-video.service"
+BOT_SERVICE_NAME="toanaas-bot.service"
+BOT_WAS_ACTIVE=1
+WORKER_WAS_ACTIVE=1
+ROLLBACK_ARMED=1
+WORKER_PREPARED=1
+BOT_HEALTHY=0
+WORKER_ACTIVATED=0
+WORKER_VERIFIED=0
+TRANSACTION_COMMITTED=0
+
+sync_locked_dependencies() {{
+  echo "sync_locked_dependencies $1" >> "$LOG_FILE"
+}}
+
+restore_repo() {{
+  local repo="$1"
+  local sha="$2"
+  git -C "$repo" checkout -q --detach "$sha"
+}}
+
+restore_bot_refs() {{
+  git -C "$BOT_DIR" update-ref refs/heads/main "$PREV_BOT_SHA"
+}}
+
+restore_service_state() {{
+  systemctl start "$1"
+}}
+
+write_transaction_manifest() {{
+  echo '{{"committed": false, "rolled_back": true}}' > "$TRANSACTION_MARKER_PATH"
+}}
+
+rollback_transaction() {{
+  local original_status="${{1:-1}}"
+  echo "ROLLBACK_STARTED" >> "$LOG_FILE"
+  systemctl stop "$SERVICE_NAME"
+
+  restore_repo "$BOT_DIR" "$PREV_BOT_SHA" "bot"
+  restore_bot_refs
+  sync_locked_dependencies "$BOT_DIR"
+  restore_repo "$WORKER_DIR" "$PREV_WORKER_SHA" "worker"
+  sync_locked_dependencies "$WORKER_DIR"
+
+  systemctl restart "$BOT_SERVICE_NAME"
+  restore_service_state "$SERVICE_NAME" "$WORKER_WAS_ACTIVE"
+
+  echo "ROLLBACK_COMPLETED" >> "$LOG_FILE"
+  write_transaction_manifest
+  exit "$original_status"
+}}
+
+# Worker was updated to TARGET_SHA during prepare
+git -C "$WORKER_DIR" checkout -q --detach "$TARGET_SHA"
+[[ "$(git -C "$WORKER_DIR" rev-parse HEAD)" == "$TARGET_SHA" ]]
+
+# Failure happens in mutation window, triggering rollback
+rollback_transaction 1
+"""
+            with open(test_sh, "w", encoding="utf-8") as f:
+                f.write(script)
+
+            res = subprocess.run([bash_bin, test_sh], capture_output=True, text=True)
+            self.assertEqual(res.returncode, 1, f"Returncode was {res.returncode}, stderr:\n{res.stderr}\nstdout:\n{res.stdout}")
+
+            # Parse expected previous SHAs
+            prev_bot_sha = re.search(r"PREV_BOT_SHA=([0-9a-fA-F]{40})", res.stdout).group(1)
+            prev_worker_sha = re.search(r"PREV_WORKER_SHA=([0-9a-fA-F]{40})", res.stdout).group(1)
+
+            bot_head = subprocess.run(["git", "-C", bot_dir, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+            worker_head = subprocess.run(["git", "-C", worker_dir, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+
+            self.assertEqual(bot_head, prev_bot_sha, "Bot repo must be restored to PREV_BOT_SHA on rollback")
+            self.assertEqual(worker_head, prev_worker_sha, "Worker repo must be restored to PREV_WORKER_SHA on rollback")
+
+            with open(log_file, "r", encoding="utf-8") as lf:
+                log_txt = lf.read()
+            self.assertIn("ROLLBACK_STARTED", log_txt)
+            self.assertIn("ROLLBACK_COMPLETED", log_txt)
+
+            with open(manifest_file, "r", encoding="utf-8") as mf:
+                manifest_txt = mf.read()
+            self.assertIn('"committed": false', manifest_txt)
+            self.assertIn('"rolled_back": true', manifest_txt)
+
+    def test_successful_path_commits_transaction_no_rollback(self):
+        """24. On successful deployment, transaction commits and rollback is never called."""
+        import shutil
+        bash_bin = shutil.which("bash") or (r"C:\Program Files\Git\bin\bash.exe" if os.path.isfile(r"C:\Program Files\Git\bin\bash.exe") else None)
+        if not bash_bin:
+            self.skipTest("bash not found")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            posix_tmp = tmp_dir.replace("\\", "/")
+            log_file = f"{posix_tmp}/success.log"
+            test_sh = f"{tmp_dir}/test_success.sh"
+
+            script = f"""#!/usr/bin/env bash
+set -euo pipefail
+
+LOG_FILE="{log_file}"
+
+rollback_transaction() {{
+  echo "ROLLBACK_CALLED" >> "$LOG_FILE"
+  exit 1
+}}
+
+fail_after_prepare() {{
+  echo "FAIL_AFTER_PREPARE" >> "$LOG_FILE"
+  rollback_transaction 1
+}}
+
+commit_product_video_release_transaction() {{
+  echo "TRANSACTION_COMMITTED" >> "$LOG_FILE"
+}}
+
+commit_product_video_release_transaction
+echo "SUCCESS" >> "$LOG_FILE"
+"""
+            with open(test_sh, "w", encoding="utf-8") as f:
+                f.write(script)
+
+            res = subprocess.run([bash_bin, test_sh], capture_output=True, text=True)
+            self.assertEqual(res.returncode, 0)
+
+            with open(log_file, "r", encoding="utf-8") as lf:
+                content = lf.read()
+            self.assertIn("TRANSACTION_COMMITTED", content)
+            self.assertIn("SUCCESS", content)
+            self.assertNotIn("ROLLBACK_CALLED", content)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

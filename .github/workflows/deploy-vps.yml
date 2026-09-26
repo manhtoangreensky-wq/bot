@@ -205,6 +205,16 @@ jobs:
               done
             }
 
+            fail_after_prepare() {
+              local msg=\"\${1:-Deployment failure in mutation window}\"
+              local code=\"\${2:-1}\"
+              echo \"ERROR: \$msg\" >&2
+              if type rollback_transaction >/dev/null 2>&1; then
+                rollback_transaction \"\$code\"
+              fi
+              exit \"\$code\"
+            }
+
             # =============================================================
             # PATH 1: ALREADY_DEPLOYED Reconciliation Path
             # =============================================================
@@ -272,78 +282,74 @@ jobs:
             source \"\$STAGING_DIR/sync_product_video_worker_release.sh\"
             prepare_product_video_worker_release
 
-            cd \"\$WEBAPP_DIR\"
+            cd \"\$WEBAPP_DIR\" || fail_after_prepare \"Failed to cd to WEBAPP_DIR (\$WEBAPP_DIR)\"
 
             # Defense-in-depth: second drift assertion after worker prepare
-            POST_PREPARE_HEAD=\"\$(git rev-parse refs/heads/main)\"
+            POST_PREPARE_HEAD=\"\$(git rev-parse refs/heads/main)\" || fail_after_prepare \"Failed to rev-parse refs/heads/main after prepare\"
             if [[ \"\$POST_PREPARE_HEAD\" != \"\$EXPECTED_PREV_SHA\" ]]; then
-              echo \"ERROR: Production drift detected after prepare! Live HEAD (\$POST_PREPARE_HEAD) != EXPECTED_PREV_SHA (\$EXPECTED_PREV_SHA)\" >&2
-              exit 1
+              fail_after_prepare \"Production drift detected after prepare! Live HEAD (\$POST_PREPARE_HEAD) != EXPECTED_PREV_SHA (\$EXPECTED_PREV_SHA)\"
             fi
 
             UTC_TIMESTAMP=\"\$(date -u +%Y%m%d%H%M%S)\"
             BACKUP_DIR=\"\$WEBAPP_DIR/delete/deploy-\$TARGET_SHA-\$UTC_TIMESTAMP\"
-            mkdir -p \"\$BACKUP_DIR\"
+            mkdir -p \"\$BACKUP_DIR\" || fail_after_prepare \"Failed to create BACKUP_DIR (\$BACKUP_DIR)\"
 
             echo '=== Fetching Bundle Objects and Verifying Target ==='
-            git fetch \"\$STAGING_DIR/release.bundle\" refs/deployments/bot-release:refs/deployments/bot-release
-            FETCHED_SHA=\"\$(git rev-parse refs/deployments/bot-release)\"
+            git fetch \"\$STAGING_DIR/release.bundle\" refs/deployments/bot-release:refs/deployments/bot-release || fail_after_prepare \"Failed to fetch release bundle into bot repo\"
+            FETCHED_SHA=\"\$(git rev-parse refs/deployments/bot-release)\" || fail_after_prepare \"Failed to rev-parse fetched release ref\"
             if [[ \"\$FETCHED_SHA\" != \"\$TARGET_SHA\" ]]; then
-              echo \"ERROR: FETCHED_SHA (\$FETCHED_SHA) != TARGET_SHA (\$TARGET_SHA)\" >&2
-              exit 1
+              fail_after_prepare \"FETCHED_SHA (\$FETCHED_SHA) != TARGET_SHA (\$TARGET_SHA)\"
             fi
-            git cat-file -e \"\$TARGET_SHA^{commit}\"
+            git cat-file -e \"\$TARGET_SHA^{commit}\" || fail_after_prepare \"Target commit \$TARGET_SHA^{commit} is missing in bot repo\"
 
             echo '=== Creating Incremental Tracked Source Backup ==='
-            git diff --name-only -z --diff-filter=MTUXB \"\$PREV_HEAD\" \"\$TARGET_SHA\" > \"\$BACKUP_DIR/changed-files.z\"
-            BACKED_UP_COUNT=\"\$(tr -cd '\\000' < \"\$BACKUP_DIR/changed-files.z\" | wc -c)\"
+            git diff --name-only -z --diff-filter=MTUXB \"\$PREV_HEAD\" \"\$TARGET_SHA\" > \"\$BACKUP_DIR/changed-files.z\" || fail_after_prepare \"Failed to diff changed files for backup\"
+            BACKED_UP_COUNT=\"\$(tr -cd '\\000' < \"\$BACKUP_DIR/changed-files.z\" | wc -c)\" || fail_after_prepare \"Failed to count backed up files\"
             if [[ \"\$BACKED_UP_COUNT\" -gt 0 ]]; then
-              tar -c --null -T \"\$BACKUP_DIR/changed-files.z\" | tar -x -C \"\$BACKUP_DIR\"
+              tar -c --null -T \"\$BACKUP_DIR/changed-files.z\" | tar -x -C \"\$BACKUP_DIR\" || fail_after_prepare \"Failed to archive changed files to backup\"
             fi
-            printf 'previous_head: %s\ntarget_sha: %s\nbackup_timestamp_utc: %s\nbacked_up_file_count: %s\n' \"\$PREV_HEAD\" \"\$TARGET_SHA\" \"\$UTC_TIMESTAMP\" \"\$BACKED_UP_COUNT\" > \"\$BACKUP_DIR/manifest.txt\"
+            printf 'previous_head: %s\ntarget_sha: %s\nbackup_timestamp_utc: %s\nbacked_up_file_count: %s\n' \"\$PREV_HEAD\" \"\$TARGET_SHA\" \"\$UTC_TIMESTAMP\" \"\$BACKED_UP_COUNT\" > \"\$BACKUP_DIR/manifest.txt\" || fail_after_prepare \"Failed to write backup manifest\"
 
             echo '=== Quarantining Removed Tracked Files ==='
-            git ls-tree -r --name-only \"\$TARGET_SHA\" > \"\$STAGING_DIR/target-files.txt\"
-            git ls-files > \"\$STAGING_DIR/current-files.txt\"
-            comm -23 <(sort \"\$STAGING_DIR/current-files.txt\") <(sort \"\$STAGING_DIR/target-files.txt\") > \"\$STAGING_DIR/removed-files.txt\"
+            git ls-tree -r --name-only \"\$TARGET_SHA\" > \"\$STAGING_DIR/target-files.txt\" || fail_after_prepare \"Failed to list target files\"
+            git ls-files > \"\$STAGING_DIR/current-files.txt\" || fail_after_prepare \"Failed to list current files\"
+            comm -23 <(sort \"\$STAGING_DIR/current-files.txt\") <(sort \"\$STAGING_DIR/target-files.txt\") > \"\$STAGING_DIR/removed-files.txt\" || fail_after_prepare \"Failed to compute removed files\"
             while IFS= read -r rel_path; do
               if [[ -n \"\$rel_path\" && -f \"\$WEBAPP_DIR/\$rel_path\" ]]; then
-                mkdir -p \"\$BACKUP_DIR/removed/\$(dirname \"\$rel_path\")\"
-                mv -- \"\$WEBAPP_DIR/\$rel_path\" \"\$BACKUP_DIR/removed/\$rel_path\"
+                mkdir -p \"\$BACKUP_DIR/removed/\$(dirname \"\$rel_path\")\" || fail_after_prepare \"Failed to create directory in backup for \$rel_path\"
+                mv -- \"\$WEBAPP_DIR/\$rel_path\" \"\$BACKUP_DIR/removed/\$rel_path\" || fail_after_prepare \"Failed to quarantine removed file \$rel_path\"
               fi
             done < \"\$STAGING_DIR/removed-files.txt\"
 
             echo '=== Applying Release Source ==='
-            tar -xf \"\$STAGING_DIR/release.tar\" -C \"\$WEBAPP_DIR\"
+            tar -xf \"\$STAGING_DIR/release.tar\" -C \"\$WEBAPP_DIR\" || fail_after_prepare \"Failed to extract release.tar to WEBAPP_DIR\"
 
-            git update-ref refs/heads/main \"\$TARGET_SHA\" \"\$PREV_HEAD\"
-            git update-ref refs/remotes/origin/main \"\$TARGET_SHA\"
-            git symbolic-ref HEAD refs/heads/main
-            git read-tree \"\$TARGET_SHA\"
+            git update-ref refs/heads/main \"\$TARGET_SHA\" \"\$PREV_HEAD\" || fail_after_prepare \"Failed to update refs/heads/main to \$TARGET_SHA\"
+            git update-ref refs/remotes/origin/main \"\$TARGET_SHA\" || fail_after_prepare \"Failed to update refs/remotes/origin/main to \$TARGET_SHA\"
+            git symbolic-ref HEAD refs/heads/main || fail_after_prepare \"Failed to set symbolic-ref HEAD to refs/heads/main\"
+            git read-tree \"\$TARGET_SHA\" || fail_after_prepare \"Failed to git read-tree \$TARGET_SHA\"
 
-            CURRENT_SHA=\"\$(git rev-parse HEAD)\"
+            CURRENT_SHA=\"\$(git rev-parse HEAD)\" || fail_after_prepare \"Failed to rev-parse HEAD after read-tree\"
             if [[ \"\$CURRENT_SHA\" != \"\$TARGET_SHA\" ]]; then
-              echo \"ERROR: CURRENT_SHA (\$CURRENT_SHA) != TARGET_SHA (\$TARGET_SHA)\" >&2
-              exit 1
+              fail_after_prepare \"CURRENT_SHA (\$CURRENT_SHA) != TARGET_SHA (\$TARGET_SHA)\"
             fi
 
-            git diff --exit-code -- . ':(exclude)delete/**'
+            git diff --exit-code -- . ':(exclude)delete/**' || fail_after_prepare \"Worktree diff mismatch after release source apply\"
 
             echo '=== Syncing Hash-Locked Runtime Dependencies ==='
             if [[ ! -x \"\$WEBAPP_DIR/.venv/bin/python\" ]]; then
-              echo 'ERROR: Bot virtualenv Python is missing or not executable' >&2
-              exit 1
+              fail_after_prepare \"Bot virtualenv Python is missing or not executable\"
             fi
-            \"\$WEBAPP_DIR/.venv/bin/python\" -m pip install --require-hashes -r \"\$WEBAPP_DIR/requirements.lock\"
-            \"\$WEBAPP_DIR/.venv/bin/python\" -m pip check
-            \"\$WEBAPP_DIR/.venv/bin/python\" -c 'import numpy, onnxruntime; print(onnxruntime.__version__)'
+            \"\$WEBAPP_DIR/.venv/bin/python\" -m pip install --require-hashes -r \"\$WEBAPP_DIR/requirements.lock\" || fail_after_prepare \"Bot pip install dependencies failed\"
+            \"\$WEBAPP_DIR/.venv/bin/python\" -m pip check || fail_after_prepare \"Bot pip check failed\"
+            \"\$WEBAPP_DIR/.venv/bin/python\" -c 'import numpy, onnxruntime; print(onnxruntime.__version__)' || fail_after_prepare \"Bot runtime verification failed\"
 
             echo '=== Restarting Bot Service ==='
-            systemctl restart toanaas-bot.service
+            systemctl restart toanaas-bot.service || fail_after_prepare \"Failed to restart toanaas-bot.service\"
 
             echo '=== Verifying Active Services ==='
-            systemctl is-active toanaas-bot.service
-            systemctl is-active nginx.service
+            systemctl is-active toanaas-bot.service || fail_after_prepare \"toanaas-bot.service is not active after restart\"
+            systemctl is-active nginx.service || fail_after_prepare \"nginx.service is not active\"
 
             echo '=== Verifying Health Endpoint ==='
             HEALTH_JSON=''
@@ -355,14 +361,15 @@ jobs:
             done
 
             if [[ -z \"\$HEALTH_JSON\" ]]; then
-              echo 'ERROR: Health endpoint did not respond' >&2
-              exit 1
+              fail_after_prepare \"Health endpoint did not respond\"
             fi
 
-            printf '%s' \"\$HEALTH_JSON\" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get(\"status\") == \"ok\"; print(\"HEALTH_PAYLOAD_VALIDATED:\", data.get(\"status\"))'
+            if ! printf '%s' \"\$HEALTH_JSON\" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get(\"status\") == \"ok\"; print(\"HEALTH_PAYLOAD_VALIDATED:\", data.get(\"status\"))'; then
+              fail_after_prepare \"Health endpoint payload validation failed (status != ok)\"
+            fi
 
-            activate_product_video_worker_release
-            commit_product_video_release_transaction
+            activate_product_video_worker_release || fail_after_prepare \"activate_product_video_worker_release failed\"
+            commit_product_video_release_transaction || fail_after_prepare \"commit_product_video_release_transaction failed\"
 
             echo '=== Cleaning up Remote Staging Directory ==='
             CLEANUP_TARGET=\"/tmp/deploy-bot-\$TARGET_SHA\"
