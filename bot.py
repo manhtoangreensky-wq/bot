@@ -53131,6 +53131,12 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
     text = "\n".join(lines)
     if len(text) <= VIDEO_DEBUG_REPLY_LIMIT:
         return text
+    has_scene_ledger = bool(
+        result.get("scene_task_map")
+        or result.get("scene_tasks_total")
+        or result.get("aggregate_job_status")
+        or result.get("scene_status_by_index")
+    )
     compact_lines = [
         "🎬 <b>Video Provider Job Debug</b>",
         "Provider job diagnostic partial",
@@ -53140,7 +53146,7 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• job id: <code>{jid}</code>",
         f"• project id: <code>{safe_int((project or {}).get('project_id'), 0) or '-'}</code>",
         f"• provider: <code>{_video_debug_safe_value(provider, 80)}</code>",
-        *_video_scene_ledger_debug_lines(result),
+        *(_video_scene_ledger_debug_lines(result) if has_scene_ledger else []),
         f"• configured provider chain: <code>{_video_debug_safe_value(','.join(str(item) for item in (result.get('configured_provider_chain') or [])) or '-', 180)}</code>",
         f"• selected provider before submit: <code>{_video_debug_safe_value(result.get('selected_provider_before_submit'), 80)}</code>",
         f"• selected provider after fallback: <code>{_video_debug_safe_value(result.get('selected_provider_after_fallback'), 80)}</code>",
@@ -53165,13 +53171,6 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• charge policy: <code>{_video_debug_safe_value(result.get('charge_policy') or 'after_valid_mp4_delivery', 80)}</code>",
         f"• submit accepted: <code>{'yes' if result.get('submit_accepted') else 'no'}</code>",
         f"• submit http: <code>{safe_int(result.get('provider_submit_http_status'), 0)}</code>",
-        f"• ShopAIKey exact status endpoint: <code>{'yes' if result.get('shopaikey_status_endpoint_exact') else 'no'}</code>",
-        f"• ShopAIKey status HTTP: <code>{safe_int(result.get('shopaikey_status_http_code'), 0)}</code>",
-        f"• ShopAIKey data.status: <code>{_video_debug_safe_value(result.get('shopaikey_raw_status'), 80)}</code>",
-        f"• ShopAIKey data.progress: <code>{_video_debug_safe_value(result.get('shopaikey_data_progress_raw'), 60)}</code>",
-        f"• ShopAIKey data.result_url: <code>{'yes' if result.get('shopaikey_result_url_from_data') else 'no'}</code>",
-        f"• HTTP 200 ignored as progress: <code>{'yes' if result.get('http_200_not_used_as_progress') else 'no'}</code>",
-        f"• result URL source path: <code>{_video_debug_safe_value(result.get('result_url_source_path') or result.get('result_field_path'), 80)}</code>",
         f"• submit url host: <code>{_video_debug_safe_value(result.get('provider_submit_url_host'), 120)}</code>",
         f"• auth header: <code>{_video_debug_safe_value(result.get('provider_auth_header_name'), 80)}</code> present=<code>{'yes' if result.get('auth_header_value_present') or result.get('provider_auth_value_present') or result.get('auth_present') or result.get('auth_configured') else 'no'}</code> scheme=<code>{_video_debug_safe_value(result.get('provider_auth_scheme_prefix') or result.get('auth_scheme'), 40)}</code>",
         f"• provider model present: <code>{'yes' if result.get('provider_model_present') or result.get('provider_payload_model') else 'no'}</code>",
@@ -53182,36 +53181,16 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• canonical reason: <code>{_video_debug_safe_value(result.get('canonical_task_selected_reason'), 100)}</code>",
         f"• provider progress percent: <code>{safe_int(result.get('provider_progress_percent'), 0)}%</code>",
         f"• render video progress: <code>{safe_int(result.get('render_video_progress_percent') or result.get('provider_render_progress_percent'), 0)}%</code>",
-        f"• render video progress public: <code>{_video_debug_safe_value(result.get('render_video_progress_percent_public'), 40)}</code>",
-        f"• render progress public mode: <code>{_video_debug_safe_value(result.get('render_progress_public_mode'), 60)}</code>",
-        f"• public zero bar due to untrusted provider: <code>{'yes' if result.get('public_zero_bar_due_to_untrusted_provider') else 'no'}</code>",
-        f"• fake progress prevented: <code>{'yes' if result.get('fake_progress_prevented') else 'no'}</code>",
-        f"• render progress source: <code>{_video_debug_safe_value(result.get('render_progress_source'), 80)}</code>",
         f"• provider elapsed/max: <code>{safe_int(result.get('provider_elapsed_seconds') or result.get('provider_wait_elapsed_seconds'), 0)}/{safe_int(result.get('provider_wait_max_seconds'), 0)}</code>",
-        f"• timeout at: <code>{_video_debug_safe_value(result.get('timeout_at'), 80)}</code>",
-        f"• provider poll count: <code>{safe_int(result.get('provider_poll_count'), 0)}</code>",
-        f"• provider poll count source: <code>{_video_debug_safe_value(result.get('provider_poll_count_source'), 60)}</code>",
-        f"• provider status payload source: <code>{_video_debug_safe_value(result.get('provider_status_payload_source'), 100)}</code>",
-        f"• raw provider status before source fix: <code>{_video_debug_safe_value(result.get('raw_provider_status_before_source_fix'), 80)}</code>",
         f"• raw provider status: <code>{_video_debug_safe_value(result.get('raw_provider_status') or result.get('provider_status_raw'), 80)}</code>",
-        f"• canonical status before NOT_START override: <code>{_video_debug_safe_value(result.get('canonical_status_before_not_start_override'), 80)}</code>",
-        f"• NOT_START override applied: <code>{'yes' if result.get('not_start_override_applied') else 'no'}</code>",
-        f"• scene NOT_START elapsed/threshold: <code>{safe_int(result.get('scene_not_start_elapsed'), 0)}/{safe_int(result.get('not_start_threshold_seconds') or result.get('stall_threshold'), 0)}</code>",
-        f"• NOT_START threshold source: <code>{_video_debug_safe_value(result.get('not_start_threshold_source'), 100)}</code>",
-        f"• provider stalled NOT_START: <code>{'yes' if result.get('provider_stalled_not_start') else 'no'}</code>",
         f"• progress_monotonic_applied: <code>{'yes' if result.get('progress_monotonic_applied') else 'no'}</code>",
-        f"• summary fields from primary alive task: <code>{'yes' if result.get('summary_fields_from_primary_alive_task') else 'no'}</code>",
         f"• provider fallback attempted: <code>{'yes' if result.get('provider_fallback_attempted') else 'no'}</code>",
         f"• provider fallback reason: <code>{_video_debug_safe_value(result.get('provider_fallback_reason') or result.get('fallback_reason'), 120)}</code>",
         f"• fallback allowed: <code>{'yes' if result.get('fallback_allowed') is not False else 'no'}</code>",
         f"• fallback blocked reason: <code>{_video_debug_safe_value(result.get('fallback_blocked_reason') or result.get('fallback_block_reason'), 120)}</code>",
         f"• fallback provider candidate: <code>{_video_debug_safe_value(result.get('fallback_provider_candidate') or result.get('next_provider_or_model_candidate'), 80)}</code>",
-        f"• primary provider continue polling: <code>{'yes' if result.get('primary_provider_continue_polling') else 'no'}</code>",
-        f"• primary provider task alive: <code>{'yes' if result.get('primary_provider_task_alive') else 'no'}</code>",
-        f"• primary provider task id present: <code>{'yes' if result.get('primary_provider_task_id_present') else 'no'}</code>",
         f"• key4u submit suppressed: <code>{'yes' if result.get('key4u_submit_suppressed') else 'no'}</code>",
         f"• key4u submit suppressed reason: <code>{_video_debug_safe_value(result.get('key4u_submit_suppressed_reason'), 120)}</code>",
-        f"• next poll scheduled: <code>{'yes' if result.get('next_poll_scheduled') else 'no'}</code>",
         f"• provider wait: <code>{safe_int(result.get('provider_wait_elapsed_seconds'), 0)}/{safe_int(result.get('provider_wait_max_seconds'), 0)}</code>",
         f"• provider task id saved: <code>{'yes' if result.get('provider_task_id_saved') or task_ids or video_ids else 'no'}</code>",
         f"• provider task id: <code>{_video_debug_safe_value(masked_tasks, 160)}</code>",

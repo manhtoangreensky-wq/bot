@@ -1696,9 +1696,17 @@ def run_once(
                 continue_polling = False
             else:
                 continue_polling = bool(diagnostics.get("continue_polling")) or "provider_in_progress" in message
+            fail_message = message
+            if "provider_capability_missing" in message:
+                readiness = diagnostics.get("provider_readiness") or {}
+                missing_env = diagnostics.get("missing_env") or (readiness.get("missing_env") if isinstance(readiness, dict) else {}) or {}
+                missing_providers = list(missing_env.keys()) if isinstance(missing_env, dict) and missing_env else ["shopaikey_video", "key4u_video"]
+                missing_tokens = [f"{p}_config_missing" if not str(p).endswith("_config_missing") else str(p) for p in missing_providers]
+                if missing_tokens:
+                    fail_message = f"{message}:{';'.join(missing_tokens)}"
             fail_result = fail_job(
                 job_id,
-                f"{type(exc).__name__}:{message}",
+                f"{type(exc).__name__}:{fail_message}",
                 retryable=bool(continue_polling)
                 or not bool(
                     unavailable
