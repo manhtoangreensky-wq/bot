@@ -180,6 +180,10 @@ def _create_standard_harness():
         "mode": "dub",
         "checkpoint_workspace": td,
         "job_id": "smart_test_job_1",
+        "acoustic_classifications": {
+            "spk_1": {"voice_register": "low", "confidence": 1.0},
+            "spk_2": {"voice_register": "high", "confidence": 1.0},
+        },
     }
 
 
@@ -478,9 +482,10 @@ def test_smart_multivoice_lane_payload_contract_strict_runner():
     payload["ranges_by_speaker"] = {}
     payload["deadline_monotonic"] = 999999.0
     payload["stop_requested"] = lambda: False
-    payload["strict_two_classifier"] = None
-    payload["acoustic_classifications"] = {}
-    payload["fallback_level_override"] = None
+    payload["acoustic_classifications"] = {
+        "spk_1": {"voice_register": "low", "confidence": 1.0},
+        "spk_2": {"voice_register": "high", "confidence": 1.0},
+    }
     payload["default_fallback_voice"] = "voice_male_1"
     payload["locked_speaker_voice_map"] = None
     payload["segments"] = []

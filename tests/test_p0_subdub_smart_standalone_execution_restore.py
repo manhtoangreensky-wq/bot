@@ -200,7 +200,7 @@ def test_05_successful_synthetic_3_speaker_execution_produces_valid_result(tmp_p
     async def mock_synth(cues: list[dict] | None = None, speaker_voice_map: dict | None = None, *args: Any, **kwargs: Any) -> list[dict]:
         chunks = []
         for c in (cues or []):
-            chunks.append({"cue_id": c["cue_id"], "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 2.0})
+            chunks.append({"cue_id": c["cue_id"], "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 1.5})
         return chunks
 
     async def mock_render(source_media: str, output_path: str, **kwargs: Any) -> str:
@@ -223,6 +223,11 @@ def test_05_successful_synthetic_3_speaker_execution_produces_valid_result(tmp_p
         "validated_pools": TEST_POOLS,
         "checkpoint_workspace": str(tmp_path / "ws_05"),
         "job_id": "job_standalone_test_05",
+        "acoustic_classifications": {
+            "spk_1": {"voice_register": "low", "confidence": 1.0},
+            "spk_2": {"voice_register": "high", "confidence": 1.0},
+            "spk_3": {"voice_register": "low", "confidence": 1.0},
+        },
     }
 
     result = asyncio.run(auto_smart_multivoice.run_auto_smart_multivoice_blackbox(**payload))
@@ -252,7 +257,7 @@ def test_06_synthetic_dubbed_cues_have_exact_1_to_1_tts_coverage(tmp_path: Path)
         chunks = []
         for c in (cues or []):
             tts_submitted_cues.append(c["cue_id"])
-            chunks.append({"cue_id": c["cue_id"], "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 2.0})
+            chunks.append({"cue_id": c["cue_id"], "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 1.5})
         return chunks
 
     async def mock_render(source_media: str, output_path: str, **kwargs: Any) -> str:
@@ -275,6 +280,11 @@ def test_06_synthetic_dubbed_cues_have_exact_1_to_1_tts_coverage(tmp_path: Path)
         "validated_pools": TEST_POOLS,
         "checkpoint_workspace": str(tmp_path / "ws_06"),
         "job_id": "job_standalone_test_06",
+        "acoustic_classifications": {
+            "spk_1": {"voice_register": "low", "confidence": 1.0},
+            "spk_2": {"voice_register": "high", "confidence": 1.0},
+            "spk_3": {"voice_register": "low", "confidence": 1.0},
+        },
     }
 
     result = asyncio.run(auto_smart_multivoice.run_auto_smart_multivoice_blackbox(**payload))
@@ -294,7 +304,7 @@ def test_07_current_result_state_schema_preserved(tmp_path: Path):
     ]
 
     async def mock_synth(cues: list[dict] | None = None, speaker_voice_map: dict | None = None, *args: Any, **kwargs: Any) -> list[dict]:
-        return [{"cue_id": c["cue_id"], "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 2.0} for c in (cues or [])]
+        return [{"cue_id": c["cue_id"], "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 1.5} for c in (cues or [])]
 
     async def mock_render(source_media: str, output_path: str, **kwargs: Any) -> str:
         _create_real_valid_mp4(Path(output_path))
@@ -316,6 +326,10 @@ def test_07_current_result_state_schema_preserved(tmp_path: Path):
         "validated_pools": TEST_POOLS,
         "checkpoint_workspace": str(tmp_path / "ws_07"),
         "job_id": "job_standalone_test_07",
+        "acoustic_classifications": {
+            "spk_1": {"voice_register": "low", "confidence": 1.0},
+            "spk_2": {"voice_register": "high", "confidence": 1.0},
+        },
     }
 
     result = asyncio.run(auto_smart_multivoice.run_auto_smart_multivoice_blackbox(**payload))
@@ -342,7 +356,7 @@ def test_08_video_output_remains_bytes_never_str_path(tmp_path: Path):
     ]
 
     async def mock_synth(cues: list[dict] | None = None, speaker_voice_map: dict | None = None, *args: Any, **kwargs: Any) -> list[dict]:
-        return [{"cue_id": c["cue_id"], "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 2.0} for c in (cues or [])]
+        return [{"cue_id": c["cue_id"], "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 1.5} for c in (cues or [])]
 
     async def mock_render(source_media: str, output_path: str, **kwargs: Any) -> str:
         _create_real_valid_mp4(Path(output_path))
@@ -389,7 +403,7 @@ def test_09_require_auto_cast_preserved(tmp_path: Path):
         }
 
     async def mock_synth(*args: Any, **kwargs: Any) -> list[dict]:
-        return [{"cue_id": "c1", "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 2.0}]
+        return [{"cue_id": "c1", "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 1.5}]
 
     async def mock_render(source_media: str, output_path: str, **kwargs: Any) -> str:
         _create_real_valid_mp4(Path(output_path))
@@ -435,7 +449,7 @@ def test_10_saved_source_path_fallback_preserved(tmp_path: Path):
         }
 
     async def mock_synth(*args: Any, **kwargs: Any) -> list[dict]:
-        return [{"cue_id": "c1", "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 2.0}]
+        return [{"cue_id": "c1", "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 1.5}]
 
     async def mock_render(source_media: str, output_path: str, **kwargs: Any) -> str:
         _create_real_valid_mp4(Path(output_path))

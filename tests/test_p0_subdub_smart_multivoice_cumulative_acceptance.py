@@ -74,7 +74,14 @@ class TestSubDubSmartMultiVoiceCumulativeAcceptanceR1(unittest.TestCase):
         async def mock_synth(cues=None, **kwargs):
             nonlocal synth_cues_received
             synth_cues_received = list(cues or [])
-            return [{"cue_id": c["cue_id"], "audio": b"AUDIO_BYTES_OK"} for c in synth_cues_received]
+            return [
+                {
+                    "cue_id": c["cue_id"],
+                    "audio": b"AUDIO_BYTES_OK",
+                    "audio_duration": (float(c.get("end_ms", 0)) - float(c.get("start_ms", 0))) / 1000.0,
+                }
+                for c in synth_cues_received
+            ]
 
         # Mock render
         render_call_count = 0

@@ -402,6 +402,7 @@ async def test_smart_multivoice_blackbox_end_to_end_resume(tmp_path: Path):
         probe_fn=mock_probe,
         validated_pools={"low": ["v1", "v2"], "high": ["v3", "v4"]},
         source_media=str(src_mp4),
+        acoustic_classifications={"spk_1": {"voice_register": "low", "confidence": 1.0}, "spk_2": {"voice_register": "high", "confidence": 1.0}},
     )
 
     assert res1.get("ok") is True
@@ -425,6 +426,7 @@ async def test_smart_multivoice_blackbox_end_to_end_resume(tmp_path: Path):
         probe_fn=mock_probe,
         validated_pools={"low": ["v1", "v2"], "high": ["v3", "v4"]},
         source_media=str(src_mp4),
+        acoustic_classifications={"spk_1": {"voice_register": "low", "confidence": 1.0}, "spk_2": {"voice_register": "high", "confidence": 1.0}},
     )
 
     assert res2.get("ok") is True
