@@ -7,6 +7,7 @@ Verifies:
 4. Strictly unchanged MAX_INTELLIGIBLE_FIT_RATIO = 1.80
 """
 
+from pathlib import Path
 import pytest
 from services.subdub_microcue_recovery import (
     MAX_INTELLIGIBLE_FIT_RATIO,
@@ -98,8 +99,10 @@ def test_coalesce_cue_pair_preservation():
     assert merged["cue_window"] == pytest.approx(5.6)
     assert merged["text"] == "Hello world again"
     assert merged["audio"] == b"AUDIO_1_AUDIO_2"
-    assert merged["audio_duration"] == pytest.approx(5.6)
-    assert merged["fit_ratio"] == pytest.approx(1.0, abs=0.01)
+    assert merged["audio_duration"] == pytest.approx(6.1)
+    assert merged["fit_ratio"] == pytest.approx(6.1 / 5.6, abs=0.01)
+    assert merged["right_cue_offset"] == pytest.approx(5.0)
+    assert merged["gap_silence_seconds"] == pytest.approx(0.5)
     assert merged["coalesced"] is True
     assert merged["cue_locked_timing"] is True
     assert merged["original_cue_ids"] == ["c1", "c2"]
@@ -138,3 +141,316 @@ def test_recover_prefers_lower_fit_ratio():
     # c_left and c_mid must coalesce
     assert recovered[0]["original_cue_ids"] == ["left", "mid"]
     assert recovered[1]["cue_id"] == "right"
+
+
+def _generate_test_mp3(path, duration_sec: float, freq: int = 1000) -> bytes:
+    from services.subdub_tts_artifact_validator import resolve_ffmpeg_path
+    import subprocess
+    ffmpeg_bin = resolve_ffmpeg_path()
+    assert ffmpeg_bin and Path(ffmpeg_bin).is_file()
+    cmd = [
+        ffmpeg_bin, "-y",
+        "-f", "lavfi",
+        "-i", f"sine=frequency={freq}:duration={duration_sec}",
+        "-c:a", "libmp3lame",
+        "-b:a", "128k",
+        str(path),
+    ]
+    subprocess.run(cmd, capture_output=True, check=True)
+    return Path(path).read_bytes()
+
+
+def test_real_decodable_mp3_pair_recovery_and_full_decode(tmp_path):
+    """MANDATORY FIRST RED: Coalescing real MP3s produces valid ffmpeg-decodable audio."""
+    from services.subdub_tts_artifact_validator import validate_tts_audio_artifact, resolve_ffmpeg_path
+    import subprocess
+
+    p1 = tmp_path / "c1.mp3"
+    p2 = tmp_path / "c2.mp3"
+    b1 = _generate_test_mp3(p1, 1.0, 440)
+    b2 = _generate_test_mp3(p2, 0.5, 880)
+
+    c1 = {
+        "cue_id": "c1",
+        "speaker_id": "spk_1",
+        "start": 0.0,
+        "end": 2.0,
+        "audio": b1,
+        "audio_duration": 1.0,
+        "text": "First phrase",
+    }
+    c2 = {
+        "cue_id": "c2",
+        "speaker_id": "spk_1",
+        "start": 2.0,
+        "end": 2.5,
+        "audio": b2,
+        "audio_duration": 0.5,
+        "text": "micro",
+    }
+    merged = coalesce_cue_pair(c1, c2)
+    assert merged["coalesced"] is True
+    assert merged["right_cue_offset"] == pytest.approx(2.0)
+    assert merged["gap_silence_seconds"] == pytest.approx(1.0)
+    assert merged["audio_duration"] == pytest.approx(2.5, abs=0.08)
+
+    # Output MUST NOT be raw byte concatenation (e.g. b1 + b2)
+    assert merged["audio"] != b1 + b2
+
+    out_p = tmp_path / "recovered.mp3"
+    out_p.write_bytes(merged["audio"])
+
+    v_res = validate_tts_audio_artifact(out_p)
+    assert v_res.ok is True, f"Decodable audio validation failed: {v_res.detail}"
+    assert v_res.status == "VALID"
+    assert v_res.duration == pytest.approx(2.5, abs=0.1)
+
+    # Full ffmpeg decode check
+    ffmpeg_bin = resolve_ffmpeg_path()
+    dec_cmd = [ffmpeg_bin, "-v", "error", "-i", str(out_p), "-f", "null", "-"]
+    res = subprocess.run(dec_cmd, capture_output=True)
+    assert res.returncode == 0, f"FFmpeg decode failed: {res.stderr.decode()}"
+
+
+def test_gap_silence_and_offset_preserved_no_early_second_utterance(tmp_path):
+    """MANDATORY FIRST RED: Silence gap is not collapsed, right cue starts at correct offset."""
+    from services.subdub_tts_artifact_validator import resolve_ffmpeg_path
+    import subprocess
+    import struct
+
+    p1 = tmp_path / "c1_silence.mp3"
+    p2 = tmp_path / "c2_silence.mp3"
+    b1 = _generate_test_mp3(p1, 1.0, 440)
+    b2 = _generate_test_mp3(p2, 0.5, 880)
+
+    c1 = {
+        "cue_id": "c1",
+        "speaker_id": "spk_1",
+        "start": 0.0,
+        "end": 2.0,
+        "audio": b1,
+        "audio_duration": 1.0,
+        "text": "First",
+    }
+    c2 = {
+        "cue_id": "c2",
+        "speaker_id": "spk_1",
+        "start": 2.0,
+        "end": 2.5,
+        "audio": b2,
+        "audio_duration": 0.5,
+        "text": "Second",
+    }
+    merged = coalesce_cue_pair(c1, c2)
+    out_p = tmp_path / "merged_pcm.mp3"
+    out_p.write_bytes(merged["audio"])
+
+    # Decode to raw PCM s16le 16000Hz mono
+    ffmpeg_bin = resolve_ffmpeg_path()
+    dec_cmd = [
+        ffmpeg_bin, "-y", "-i", str(out_p),
+        "-f", "s16le", "-ac", "1", "-ar", "16000",
+        "-"
+    ]
+    res = subprocess.run(dec_cmd, capture_output=True, check=True)
+    pcm_bytes = res.stdout
+    num_samples = len(pcm_bytes) // 2
+    samples = struct.unpack(f"<{num_samples}h", pcm_bytes)
+
+    # First utterance (0.0 to 1.0s = samples 0 to 16000): active sound
+    max_part1 = max(abs(s) for s in samples[1600:14400])
+    assert max_part1 > 1000, "Part 1 should have audible sound"
+
+    # Gap silence (1.05s to 1.95s = samples 16800 to 31200): must be silence!
+    max_silence = max(abs(s) for s in samples[17600:30400])
+    assert max_silence < 100, f"Gap should be silent but got amplitude {max_silence}"
+
+    # Second utterance (2.05s to 2.45s = samples 32800 to 39200): active sound
+    max_part2 = max(abs(s) for s in samples[32800:39200])
+    assert max_part2 > 1000, "Part 2 should have audible sound at offset 2.0s"
+
+
+def test_incident_shape_7_36_plus_0_72_recovers_without_early_second_utterance():
+    """MANDATORY FIRST RED: Incident shape 7.36s + 0.72s preserves 7.36s right cue offset."""
+    c1 = {
+        "cue_id": "c1",
+        "speaker_id": "spk_1",
+        "start": 30.24,
+        "end": 37.60,
+        "audio_duration": 6.17,
+        "text": "Chiếc khóa này còn mới",
+    }
+    c2 = {
+        "cue_id": "c2",
+        "speaker_id": "spk_1",
+        "start": 37.60,
+        "end": 38.32,
+        "audio_duration": 1.56,
+        "text": "càng",
+    }
+    recovered = recover_cue_locked_micro_cues([c1, c2])
+    assert len(recovered) == 1
+    merged = recovered[0]
+    assert merged["coalesced"] is True
+    assert merged["right_cue_offset"] == pytest.approx(7.36)
+    assert merged["gap_silence_seconds"] == pytest.approx(1.19, abs=0.01)
+    assert merged["audio_duration"] == pytest.approx(8.92, abs=0.01)
+    assert merged["cue_window"] == pytest.approx(8.08, abs=0.01)
+    assert merged["fit_ratio"] == pytest.approx(1.104, abs=0.01)
+    assert merged["fit_ratio"] <= 1.80
+
+
+def test_long_offending_cue_with_short_neighbor_must_not_recover():
+    """MANDATORY FIRST RED: A long offending cue (> 1.5s) must NOT recover with a short neighbor."""
+    # c1 is offending (2.0s window, 4.0s audio -> fit_ratio = 2.0 > 1.80)
+    # c2 is non-offending (0.5s window, 0.4s audio -> fit_ratio = 0.8 <= 1.80)
+    c1 = {
+        "cue_id": "c1_long",
+        "speaker_id": "spk_1",
+        "start": 0.0,
+        "end": 2.0,
+        "audio_duration": 4.0,
+        "text": "Offending speech longer than microcue limit",
+    }
+    c2 = {
+        "cue_id": "c2_short",
+        "speaker_id": "spk_1",
+        "start": 2.0,
+        "end": 2.5,
+        "audio_duration": 0.4,
+        "text": "short",
+    }
+    recovered = recover_cue_locked_micro_cues([c1, c2])
+    assert len(recovered) == 2, "Long offending cue must not trigger recovery!"
+    assert recovered[0]["cue_id"] == "c1_long"
+    assert recovered[1]["cue_id"] == "c2_short"
+    assert "coalesced" not in recovered[0]
+
+
+def test_shared_pipeline_post_recovery_gt_1_80_must_fail(tmp_path):
+    """MANDATORY FIRST RED: Subtitle dub product pipeline must fail closed when post-recovery fit ratio > 1.80."""
+    import asyncio
+    from services.subtitle_dub_product_pipeline import process_subtitle_dub_job
+
+    async def _run():
+        source_media = tmp_path / "src.mp4"
+        source_media.write_bytes(b"dummy")
+
+        state = {
+            "mode": "dub",
+            "cue_locked_timing": True,
+            "input_file": str(source_media),
+            "source_path": str(source_media),
+            "media_path": str(source_media),
+            "segments": [
+                {"start": 0.0, "end": 1.0, "text": "Sentence 1", "speaker": "spk_1"},
+            ],
+            "input_duration_seconds": 1.0,
+        }
+
+        async def fake_tts(*args, **kwargs):
+            return {
+                "ok": True,
+                "provider": "mock",
+                "chunks": [
+                    {"start": 0.0, "end": 1.0, "audio_duration": 2.5, "audio_bytes": b"mock_audio"},
+                ]
+            }
+
+        res = await process_subtitle_dub_job(
+            mode="dub",
+            state=state,
+            user_id=1,
+            prepare_subtitles=lambda s: {
+                "state": s,
+                "source_bytes": b"src",
+                "content_type": "video/mp4",
+                "source_segments": s["segments"],
+                "output_segments": s["segments"],
+                "output_script": "Sentence 1",
+                "output_subtitle": "1\n00:00:00,000 --> 00:00:01,000\nSentence 1\n",
+            },
+            srt_from_text=lambda *a: "",
+            segments_from_text=lambda *a: [],
+            segments_from_subtitle=lambda *a: [],
+            subtitle_output_items=lambda *a: [],
+            resolve_voice_id=lambda *a: "v1",
+            parse_voice_speed=lambda *a: 1.0,
+            synthesize_segments=fake_tts,
+            build_timeline_audio=lambda *args, **kwargs: (b"timeline", "ok"),
+            normalize_audio=lambda a, *args: (a, "ok"),
+            validate_audio=lambda a, *args: {"ok": True},
+            render_video=lambda *args, **kwargs: (b"mp4", "ok"),
+            video_render_ready=lambda *a: True,
+            ffmpeg_ready=lambda: True,
+            dub_mux_enabled=True,
+        )
+        assert res["ok"] is False
+        assert res["status"] == "TTS_EXTREME_COMPRESSION_FAILED"
+        assert res["error_code"] == "extreme_audio_compression_unintelligible"
+
+    asyncio.run(_run())
+
+
+def test_exact_1_80_shared_pipeline_must_pass(tmp_path):
+    """MANDATORY FIRST RED: Subtitle dub product pipeline with exact 1.800 fit ratio must pass."""
+    import asyncio
+    from services.subtitle_dub_product_pipeline import process_subtitle_dub_job
+
+    async def _run():
+        source_media = tmp_path / "src2.mp4"
+        source_media.write_bytes(b"dummy")
+
+        state = {
+            "mode": "dub",
+            "cue_locked_timing": True,
+            "input_file": str(source_media),
+            "source_path": str(source_media),
+            "media_path": str(source_media),
+            "segments": [
+                {"start": 0.0, "end": 1.0, "text": "Sentence 1", "speaker": "spk_1"},
+            ],
+            "input_duration_seconds": 1.0,
+        }
+
+        async def fake_tts(*args, **kwargs):
+            return {
+                "ok": True,
+                "provider": "mock",
+                "chunks": [
+                    {"start": 0.0, "end": 1.0, "audio_duration": 1.800, "audio_bytes": b"mock_audio"},
+                ]
+            }
+
+        res = await process_subtitle_dub_job(
+            mode="dub",
+            state=state,
+            user_id=1,
+            prepare_subtitles=lambda s: {
+                "state": s,
+                "source_bytes": b"src",
+                "content_type": "video/mp4",
+                "source_segments": s["segments"],
+                "output_segments": s["segments"],
+                "output_script": "Sentence 1",
+                "output_subtitle": "1\n00:00:00,000 --> 00:00:01,000\nSentence 1\n",
+            },
+            srt_from_text=lambda *a: "",
+            segments_from_text=lambda *a: [],
+            segments_from_subtitle=lambda *a: [],
+            subtitle_output_items=lambda *a: [],
+            resolve_voice_id=lambda *a: "v1",
+            parse_voice_speed=lambda *a: 1.0,
+            synthesize_segments=fake_tts,
+            build_timeline_audio=lambda *args, **kwargs: (b"timeline", "ok"),
+            normalize_audio=lambda a, *args: (a, "ok"),
+            validate_audio=lambda a, *args: {"ok": True},
+            render_video=lambda *args, **kwargs: (b"mp4", "ok"),
+            video_render_ready=lambda *a: True,
+            ffmpeg_ready=lambda: True,
+            dub_mux_enabled=True,
+        )
+        assert res.get("status") != "TTS_EXTREME_COMPRESSION_FAILED"
+
+    asyncio.run(_run())
+

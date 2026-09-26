@@ -52,6 +52,8 @@ def _mode_needs_subtitle(mode: str) -> bool:
 
 def _cue_locked_timing_requested(state: dict) -> bool:
     current = dict(state or {})
+    if bool(current.get("cue_locked_timing")):
+        return True
     if str(current.get("auto_speaker_lane") or "").strip().lower() in {"multi", "smart", "auto_smart_multivoice"}:
         return True
     if str(current.get("subdub_engine_selected") or "").strip().lower() in {"auto_smart_multivoice", "smart_multivoice"}:
@@ -390,7 +392,10 @@ async def process_subtitle_dub_job(
             }
         tts_provider = str(segment_tts.get("provider") or "")
         if cue_locked_timing:
-            from services.subdub_microcue_recovery import recover_cue_locked_micro_cues
+            from services.subdub_microcue_recovery import (
+                recover_cue_locked_micro_cues,
+                MAX_INTELLIGIBLE_FIT_RATIO,
+            )
             tts_chunks = recover_cue_locked_micro_cues(tts_chunks)
             for item in tts_chunks:
                 cue_window = max(
@@ -398,7 +403,24 @@ async def process_subtitle_dub_job(
                     float(item.get("end") or 0.0) - float(item.get("start") or 0.0),
                 )
                 generated_seconds = max(0.0, float(item.get("audio_duration") or 0.0))
-                fit_ratio = max(1.0, generated_seconds / cue_window)
+                raw_fit_ratio = generated_seconds / cue_window if cue_window > 0.05 and generated_seconds > 0 else 1.0
+                if bool(pipeline_state.get("cue_locked_timing")) and raw_fit_ratio > MAX_INTELLIGIBLE_FIT_RATIO:
+                    fail_cid = str(item.get("cue_id") or (item.get("original_cue_ids") or [""])[-1])
+                    return {
+                        "ok": False,
+                        "status": "TTS_EXTREME_COMPRESSION_FAILED",
+                        "error_code": "extreme_audio_compression_unintelligible",
+                        "blocker": "extreme_audio_compression_unintelligible",
+                        "provider_called": True,
+                        "charged": False,
+                        "created_files": [],
+                        "state": pipeline_state,
+                        "prepared": prepared,
+                        "route_attempts": route_attempts,
+                        "fit_ratio": round(raw_fit_ratio, 3),
+                        "cue_id": fail_cid,
+                    }
+                fit_ratio = max(1.0, raw_fit_ratio)
                 item.update({
                     "cue_window_seconds": cue_window,
                     "generated_audio_seconds": generated_seconds,
