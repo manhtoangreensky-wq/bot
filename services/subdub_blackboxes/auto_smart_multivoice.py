@@ -1820,6 +1820,8 @@ async def run_auto_smart_multivoice(
                     ch_item["text"] = c_match["text"]
                 if "speaker_id" not in ch_item and ("speaker_id" in c_match or "speaker" in c_match):
                     ch_item["speaker_id"] = str(c_match.get("speaker_id") or c_match.get("speaker") or "")
+                if "non_speech_boundary" in c_match:
+                    ch_item["non_speech_boundary"] = bool(c_match["non_speech_boundary"])
 
                 cue_window = e_sec - s_sec
                 gen_sec = float(ch_item.get("audio_duration") or ch_item.get("raw_audio_duration") or 0.0)
@@ -1858,23 +1860,14 @@ async def run_auto_smart_multivoice(
 
                 ch_item["audio_duration"] = gen_sec
                 ch_item["raw_audio_duration"] = gen_sec
-
+                ch_item["cue_window"] = cue_window
+                ch_item["original_cue_ids"] = [cid]
                 if cue_window > 0.05 and gen_sec > 0:
-                    fit_ratio = gen_sec / cue_window
-                    if fit_ratio > MAX_INTELLIGIBLE_FIT_RATIO:
-                        return {
-                            "ok": False,
-                            "strategy": decision.strategy,
-                            "status": "TTS_EXTREME_COMPRESSION_FAILED",
-                            "error_code": "extreme_audio_compression_unintelligible",
-                            "blocker": "extreme_audio_compression_unintelligible",
-                            "output_mode": OUTPUT_MODE_FAILED,
-                            "final_mp4_path": None,
-                            "fit_ratio": round(fit_ratio, 3),
-                            "cue_id": cid,
-                            "auto_smart_verified": False,
-                        }
+                    ch_item["fit_ratio"] = gen_sec / cue_window
+                else:
+                    ch_item["fit_ratio"] = 1.0
 
+            ch_item.setdefault("original_cue_ids", [cid])
             synth_artifacts.append(ch_item)
 
         missing_cues = set(expected_cue_ids) - seen_cue_ids
@@ -1890,6 +1883,31 @@ async def run_auto_smart_multivoice(
         # Canonical production ordering: sort synth_artifacts by expected_cue_ids sequence
         cue_order_map = {cue_id: idx for idx, cue_id in enumerate(expected_cue_ids)}
         synth_artifacts.sort(key=lambda item: cue_order_map.get(str(item.get("cue_id") or item.get("id")), 999999))
+
+        # Safe shared micro-cue recovery for cue-locked lanes without relaxing MAX_INTELLIGIBLE_FIT_RATIO
+        from services.subdub_microcue_recovery import recover_cue_locked_micro_cues
+        synth_artifacts = recover_cue_locked_micro_cues(synth_artifacts, max_fit_ratio=MAX_INTELLIGIBLE_FIT_RATIO)
+
+        # Final compression check: every item in synth_artifacts must satisfy MAX_INTELLIGIBLE_FIT_RATIO
+        for item in synth_artifacts:
+            i_win = float(item.get("cue_window") or (float(item.get("end", 0.0)) - float(item.get("start", 0.0))))
+            i_dur = float(item.get("audio_duration") or item.get("raw_audio_duration") or 0.0)
+            if i_win > 0.05 and i_dur > 0:
+                item_fit_ratio = i_dur / i_win
+                if item_fit_ratio > MAX_INTELLIGIBLE_FIT_RATIO:
+                    fail_cid = str(item.get("cue_id") or (item.get("original_cue_ids") or [""])[-1])
+                    return {
+                        "ok": False,
+                        "strategy": decision.strategy,
+                        "status": "TTS_EXTREME_COMPRESSION_FAILED",
+                        "error_code": "extreme_audio_compression_unintelligible",
+                        "blocker": "extreme_audio_compression_unintelligible",
+                        "output_mode": OUTPUT_MODE_FAILED,
+                        "final_mp4_path": None,
+                        "fit_ratio": round(item_fit_ratio, 3),
+                        "cue_id": fail_cid,
+                        "auto_smart_verified": False,
+                    }
 
     # Checkpoint 3: After synthesis
     if _is_stopped():

@@ -390,6 +390,8 @@ async def process_subtitle_dub_job(
             }
         tts_provider = str(segment_tts.get("provider") or "")
         if cue_locked_timing:
+            from services.subdub_microcue_recovery import recover_cue_locked_micro_cues
+            tts_chunks = recover_cue_locked_micro_cues(tts_chunks)
             for item in tts_chunks:
                 cue_window = max(
                     0.001,
