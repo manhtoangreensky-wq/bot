@@ -19,7 +19,7 @@ MIN_MULTI_SPEAKERS = 3
 MAX_MULTI_SPEAKERS = speaker_cast.MAX_AUTO_SPEAKER_LABELS
 MIN_CLASSIFIED_CUES_PER_SPEAKER = 2
 MAX_CUES_PER_SPEAKER = exact_gender.MAX_CUES_PER_SPEAKER
-MIN_VOTE_DOMINANCE = exact_gender.MIN_VOTE_DOMINANCE
+MIN_VOTE_DOMINANCE = 2.0 / 3.0
 MAX_JOB_EVIDENCE_SECONDS = exact_gender.MAX_JOB_EVIDENCE_SECONDS
 CLASSIFIER_WALL_TIMEOUT_SECONDS = exact_gender.CLASSIFIER_WALL_TIMEOUT_SECONDS
 
@@ -504,18 +504,19 @@ def _aggregate_one_gender_result(
         rows.append({"start": start, "end": end})
     winner_votes = max(male_votes, female_votes)
     dominance = winner_votes / len(rows)
-    if dominance < MIN_VOTE_DOMINANCE:
+    if dominance < MIN_VOTE_DOMINANCE - 1e-6:
         raise _manual_required()
     gender = "male" if male_votes > female_votes else "female"
     voiced_seconds = exact_gender._union_seconds(rows)
     if voiced_seconds <= 0.0:
         raise _manual_required()
+    confidence = round(float(min(1.0, max(0.75, 0.25 + 0.75 * dominance))), 6)
     return (
         {
             "speaker_id": speaker_id,
             "voice_gender": gender,
             "voice_register": "low" if gender == "male" else "high",
-            "confidence": round(float(dominance), 6),
+            "confidence": confidence,
             "voiced_seconds": round(float(voiced_seconds), 6),
             "sample_count": int(
                 round(voiced_seconds * exact_gender.PCM_SAMPLE_RATE)

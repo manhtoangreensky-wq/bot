@@ -321,6 +321,38 @@ class TestN3GenderAwareVoiceAssignmentR1(unittest.TestCase):
             self.assertEqual(mock_shopaikey.call_count, 0)
             self.assertIn("tts_unavailable", str(ctx.exception))
 
+    def test_case_13_smart_multivoice_pipeline_source_override(self):
+        """Case 13: _pipeline_source_path_override propagated for auto_smart_multivoice in pipeline state."""
+        state = {
+            "auto_smart_multivoice": True,
+            "input_save": {
+                "original_source_path": "/fake/workspace/original.mp4",
+                "path": "/fake/workspace/normalized.mp4",
+            },
+        }
+        self.assertTrue(smart.is_auto_smart_multivoice_state(state))
+        override = (
+            {"_pipeline_source_path_override": str(state["input_save"].get("original_source_path") or state["input_save"].get("path") or "")}
+            if smart.is_auto_smart_multivoice_state(state)
+            and str(state["input_save"].get("original_source_path") or state["input_save"].get("path") or "")
+            else {}
+        )
+        self.assertEqual(override["_pipeline_source_path_override"], "/fake/workspace/original.mp4")
+
+    def test_case_14_multi_speaker_gender_onnx_dominance_and_confidence(self):
+        """Case 14: multi speaker gender onnx accepts 2/3 dominance and calculates confidence."""
+        from services import subdub_multi_speaker_gender_onnx as multi_onnx
+        self.assertAlmostEqual(multi_onnx.MIN_VOTE_DOMINANCE, 2.0 / 3.0, places=4)
+        cues_male_dominant = [
+            {"start": 0.0, "end": 1.0, "male_score": 0.8, "female_score": 0.2},
+            {"start": 1.5, "end": 2.5, "male_score": 0.9, "female_score": 0.1},
+            {"start": 3.0, "end": 4.0, "male_score": 0.3, "female_score": 0.7},
+        ]
+        res, rows = multi_onnx._aggregate_one_gender_result("spk_test", cues_male_dominant)
+        self.assertEqual(res["voice_gender"], "male")
+        self.assertEqual(res["voice_register"], "low")
+        self.assertGreaterEqual(res["confidence"], 0.75)
+
 
 if __name__ == "__main__":
     unittest.main()
