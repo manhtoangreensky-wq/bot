@@ -974,7 +974,110 @@ def _key4u_wire_payload(
                 data.get("duration") or data.get("duration_seconds") or 8
             ),
         }
+    if (family == "xai_grok" and is_i2v) or str(metadata.get("provider_interface") or "") == "key4u_openai_video_multipart_i2v":
+        return _key4u_openai_video_i2v_fields(data)
     return data
+
+
+def _key4u_openai_video_i2v_fields(payload: dict[str, Any]) -> dict[str, Any]:
+    data = dict(payload or {})
+    metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+    defaults = metadata.get("selected_request_defaults") if isinstance(metadata.get("selected_request_defaults"), dict) else {}
+
+    model_name = str(
+        metadata.get("pinned_wire_model")
+        or data.get("model")
+        or metadata.get("selected_model")
+        or metadata.get("model_name")
+        or defaults.get("model_name")
+        or "grok-imagine-video"
+    ).strip()
+
+    image_src = (
+        data.get("image")
+        or data.get("image_paths")
+        or data.get("storyboard")
+        or data.get("image_url")
+        or metadata.get("image_path")
+        or metadata.get("image_url")
+        or metadata.get("image")
+    )
+    if isinstance(image_src, (list, tuple)):
+        items = [x for x in image_src if x]
+        if not items:
+            raise VideoProviderContractError(
+                "provider_image_input_missing_or_invalid",
+                stage="payload_build",
+                debug={"blocker": "provider_image_input_missing_or_invalid", "no_charge": True},
+            )
+        image_src = items[0]
+
+    if isinstance(image_src, dict):
+        image_src = (
+            image_src.get("url")
+            or image_src.get("image_url")
+            or image_src.get("path")
+            or image_src.get("image_path")
+            or image_src.get("image")
+            or ""
+        )
+
+    val = str(image_src or "").strip()
+    if not val:
+        raise VideoProviderContractError(
+            "provider_image_input_missing_or_invalid",
+            stage="payload_build",
+            debug={"blocker": "provider_image_input_missing_or_invalid", "no_charge": True},
+        )
+
+    path = Path(val)
+    try:
+        exists = path.is_file()
+    except Exception:
+        exists = False
+
+    if not exists:
+        raise VideoProviderContractError(
+            "provider_image_input_missing_or_invalid",
+            stage="payload_build",
+            debug={"blocker": "provider_image_input_missing_or_invalid", "no_charge": True},
+        )
+
+    try:
+        size = path.stat().st_size
+    except Exception as exc:
+        raise VideoProviderContractError(
+            "provider_image_input_missing_or_invalid",
+            stage="payload_build",
+            debug={"blocker": "provider_image_input_missing_or_invalid", "no_charge": True},
+        ) from exc
+
+    if size == 0:
+        raise VideoProviderContractError(
+            "provider_image_input_empty",
+            stage="payload_build",
+            debug={"blocker": "provider_image_input_empty", "no_charge": True},
+        )
+
+    file_bytes = path.read_bytes()
+    filename = path.name or "input_reference.jpg"
+    mime = "image/png" if filename.lower().endswith(".png") else "image/jpeg"
+
+    ratio = str(data.get("aspect_ratio") or data.get("ratio") or "9:16").strip()
+    size_str = ratio.replace("/", "x").replace(":", "x")
+
+    seconds = int(data.get("duration") or data.get("duration_seconds") or defaults.get("duration") or 5)
+
+    prompt = str(data.get("prompt") or "")[:4000]
+
+    return {
+        "model": model_name,
+        "prompt": prompt,
+        "seconds": str(seconds),
+        "size": size_str,
+        "input_reference": (filename, file_bytes, mime),
+        "watermark": "false",
+    }
 
 
 def _key4u_openai_video_fields(payload: dict[str, Any]) -> dict[str, str]:
@@ -1106,9 +1209,10 @@ class GenericHttpVideoProvider:
         model_env: str = "VIDEO_GENERIC_HTTP_MODEL",
         capabilities_env: str = "VIDEO_GENERIC_HTTP_CAPABILITIES",
         environ: dict[str, str] | None = None,
+        env: dict[str, str] | None = None,
     ):
         self.provider_name = provider_name
-        self.env = environ or os.environ
+        self.env = environ or env or os.environ
         self.enabled_env = enabled_env
         self.submit_url_env = submit_url_env
         self.poll_url_env = poll_url_env
@@ -1307,14 +1411,26 @@ class GenericHttpVideoProvider:
         boundary = f"toanaas-{time.time_ns():x}"
         chunks: list[bytes] = []
         for name, value in fields.items():
-            chunks.extend(
-                [
-                    f"--{boundary}\r\n".encode("ascii"),
-                    f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("ascii"),
-                    str(value).encode("utf-8"),
-                    b"\r\n",
-                ]
-            )
+            if isinstance(value, tuple) and len(value) == 3:
+                filename, file_bytes, content_type = value
+                chunks.extend(
+                    [
+                        f"--{boundary}\r\n".encode("ascii"),
+                        f'Content-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'.encode("ascii"),
+                        f"Content-Type: {content_type}\r\n\r\n".encode("ascii"),
+                        file_bytes if isinstance(file_bytes, bytes) else str(file_bytes).encode("utf-8"),
+                        b"\r\n",
+                    ]
+                )
+            else:
+                chunks.extend(
+                    [
+                        f"--{boundary}\r\n".encode("ascii"),
+                        f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("ascii"),
+                        str(value).encode("utf-8"),
+                        b"\r\n",
+                    ]
+                )
         chunks.append(f"--{boundary}--\r\n".encode("ascii"))
         headers = self._headers()
         headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
@@ -1516,12 +1632,19 @@ class GenericHttpVideoProvider:
             )
         if (
             self.provider_name == "key4u_video"
-            and str(payload_metadata.get("provider_interface") or "") == "key4u_google_veo_exclusive"
+            and str(payload_metadata.get("provider_interface") or "") in {
+                "key4u_openai_video_multipart_i2v",
+                "key4u_google_veo_exclusive",
+            }
             and urllib.parse.urlparse(submit_url).path.rstrip("/").endswith("/v1/videos")
         ):
+            if str(payload_metadata.get("provider_interface") or "") == "key4u_openai_video_multipart_i2v":
+                multipart_fields = wire_payload if (isinstance(wire_payload, dict) and "input_reference" in wire_payload) else _key4u_openai_video_i2v_fields(payload)
+            else:
+                multipart_fields = _key4u_openai_video_fields(payload)
             result = self._open_multipart_form(
                 submit_url,
-                _key4u_openai_video_fields(payload),
+                multipart_fields,
                 timeout=int(self.env.get("VIDEO_PROVIDER_SUBMIT_TIMEOUT_SECONDS") or 90),
             )
         else:
