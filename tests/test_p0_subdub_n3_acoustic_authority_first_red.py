@@ -285,3 +285,83 @@ def test_first_red_n3_target_contract_requires_acoustic_authority_success(tmp_pa
     assert decision.speaker_voice_map["speaker_2"] in pools["low"]
     # Distinct voice assignment
     assert len(set(decision.speaker_voice_map.values())) == 3
+
+
+def test_first_red_n3_dominance_2_3_near_zero_margin_fails_closed():
+    """FIRST RED 1: dominance=2/3 + near-zero PANN margin => FAIL CLOSED (AutoCastManualRequired)."""
+    from services import subdub_multi_speaker_gender_onnx as multi_onnx
+    cues = [
+        {"start": 0.0, "end": 1.0, "male_score": 0.500001, "female_score": 0.500000},
+        {"start": 1.0, "end": 2.0, "male_score": 0.500001, "female_score": 0.500000},
+        {"start": 2.0, "end": 3.0, "male_score": 0.500000, "female_score": 0.500001},
+    ]
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        multi_onnx._aggregate_one_gender_result("spk_dom_2_3", cues)
+
+
+def test_first_red_n3_dominance_075_near_zero_margin_fails_closed():
+    """FIRST RED 2: dominance=0.75 + near-zero margin => FAIL CLOSED (AutoCastManualRequired)."""
+    from services import subdub_multi_speaker_gender_onnx as multi_onnx
+    cues = [
+        {"start": 0.0, "end": 1.0, "male_score": 0.500001, "female_score": 0.500000},
+        {"start": 1.0, "end": 2.0, "male_score": 0.500001, "female_score": 0.500000},
+        {"start": 2.0, "end": 3.0, "male_score": 0.500001, "female_score": 0.500000},
+        {"start": 3.0, "end": 4.0, "male_score": 0.500000, "female_score": 0.500001},
+    ]
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        multi_onnx._aggregate_one_gender_result("spk_dom_075", cues)
+
+
+def test_first_red_n3_dominance_080_near_zero_margin_fails_closed():
+    """FIRST RED 3: dominance=0.80 + near-zero margin => FAIL CLOSED (AutoCastManualRequired)."""
+    from services import subdub_multi_speaker_gender_onnx as multi_onnx
+    cues = [
+        {"start": 0.0, "end": 1.0, "male_score": 0.500001, "female_score": 0.500000},
+        {"start": 1.0, "end": 2.0, "male_score": 0.500001, "female_score": 0.500000},
+        {"start": 2.0, "end": 3.0, "male_score": 0.500001, "female_score": 0.500000},
+        {"start": 3.0, "end": 4.0, "male_score": 0.500001, "female_score": 0.500000},
+        {"start": 4.0, "end": 5.0, "male_score": 0.500000, "female_score": 0.500001},
+    ]
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        multi_onnx._aggregate_one_gender_result("spk_dom_080", cues)
+
+
+def test_first_red_n3_strong_dominance_and_strong_acoustic_margin_passes():
+    """FIRST RED 4: strong dominance + independently strong acoustic margin => PASS."""
+    from services import subdub_multi_speaker_gender_onnx as multi_onnx
+    cues = [
+        {"start": 0.0, "end": 1.0, "male_score": 0.85, "female_score": 0.15},
+        {"start": 1.5, "end": 2.5, "male_score": 0.90, "female_score": 0.10},
+        {"start": 3.0, "end": 4.0, "male_score": 0.20, "female_score": 0.80},
+    ]
+    res, rows = multi_onnx._aggregate_one_gender_result("spk_strong", cues)
+    assert res["voice_gender"] == "male"
+    assert res["voice_register"] == "low"
+    assert res["confidence"] >= speaker_cast.MIN_REGISTER_CONFIDENCE
+    assert res["pann_score_margin"] >= 0.08
+
+
+def test_first_red_n3_pann_margin_boundary_conditions():
+    """Boundary testing for PANN margin threshold (0.08): below and above boundary."""
+    from services import subdub_multi_speaker_gender_onnx as multi_onnx
+
+    # 1. Below boundary: margin = 0.06 < 0.08 (e.g. 0.53 vs 0.47) -> must fail closed
+    cues_below = [
+        {"start": 0.0, "end": 1.0, "male_score": 0.53, "female_score": 0.47},
+        {"start": 1.0, "end": 2.0, "male_score": 0.53, "female_score": 0.47},
+        {"start": 2.0, "end": 3.0, "male_score": 0.53, "female_score": 0.47},
+    ]
+    with pytest.raises(speaker_cast.AutoCastManualRequired):
+        multi_onnx._aggregate_one_gender_result("spk_below", cues_below)
+
+    # 2. Above boundary: margin = 0.60 > 0.08 (e.g. 0.80 vs 0.20) -> authoritative pass
+    cues_above = [
+        {"start": 0.0, "end": 1.0, "male_score": 0.80, "female_score": 0.20},
+        {"start": 1.0, "end": 2.0, "male_score": 0.80, "female_score": 0.20},
+        {"start": 2.0, "end": 3.0, "male_score": 0.80, "female_score": 0.20},
+    ]
+    res, _ = multi_onnx._aggregate_one_gender_result("spk_above", cues_above)
+    assert res["voice_gender"] == "male"
+    assert res["voice_register"] == "low"
+    assert res["confidence"] >= speaker_cast.MIN_REGISTER_CONFIDENCE
+

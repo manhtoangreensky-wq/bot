@@ -353,6 +353,18 @@ class TestN3GenderAwareVoiceAssignmentR1(unittest.TestCase):
         self.assertEqual(res["voice_register"], "low")
         self.assertGreaterEqual(res["confidence"], 0.75)
 
+    def test_case_15_weak_acoustic_margin_fails_closed(self):
+        """Case 15: vote dominance with weak acoustic margins (< 0.08) fails closed."""
+        from services import subdub_multi_speaker_gender_onnx as multi_onnx
+        weak_cues = [
+            {"start": 0.0, "end": 1.0, "male_score": 0.53, "female_score": 0.47},
+            {"start": 1.0, "end": 2.0, "male_score": 0.53, "female_score": 0.47},
+            {"start": 2.0, "end": 3.0, "male_score": 0.47, "female_score": 0.53},
+        ]
+        with self.assertRaises(speaker_cast.AutoCastManualRequired):
+            multi_onnx._aggregate_one_gender_result("spk_weak", weak_cues)
+
 
 if __name__ == "__main__":
     unittest.main()
+
