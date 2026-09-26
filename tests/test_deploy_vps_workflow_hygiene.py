@@ -111,10 +111,196 @@ class TestDeployVpsWorkflowHygiene(unittest.TestCase):
         self.assertIn("BOT ALREADY DEPLOYED RECONCILIATION SUCCESS", path1_block)
 
     def test_drift_guard_stops_on_mismatch_in_new_sha_path(self):
-        """6. Workflow fails closed on deployed-SHA drift in normal path."""
+        """6. Workflow fails closed on deployed-SHA drift before any mutation."""
         self.assertIn("EXPECTED_PREV_SHA", self.content)
-        self.assertIn('if [[ \\"\\$PREV_HEAD\\" != \\"\\$EXPECTED_PREV_SHA\\" ]]; then', self.content)
-        self.assertIn("Production drift detected", self.content)
+        self.assertIn('LIVE_PREV_HEAD=\\"\\$(git -C \\"\\$WEBAPP_DIR\\" rev-parse refs/heads/main)\\"', self.content)
+        self.assertIn('if [[ \\"\\$LIVE_PREV_HEAD\\" != \\"\\$EXPECTED_PREV_SHA\\" ]]; then', self.content)
+        self.assertIn("Production drift detected before mutation", self.content)
+
+    def test_premutation_drift_guard_order_before_all_mutations(self):
+        """6b. Pre-mutation drift guard runs strictly BEFORE prepare_product_video_worker_release and all mutations."""
+        path2_marker = "PATH 2: Normal NEW_SHA Deployment Path"
+        path2_idx = self.content.find(path2_marker)
+        self.assertNotEqual(path2_idx, -1, "PATH 2 marker not found")
+        path2_block = self.content[path2_idx:]
+
+        drift_idx = path2_block.find('LIVE_PREV_HEAD=')
+        prepare_idx = path2_block.find('prepare_product_video_worker_release')
+        fetch_idx = path2_block.find('git fetch \\"\\$STAGING_DIR/release.bundle\\"')
+        backup_idx = path2_block.find('BACKUP_DIR=')
+        apply_idx = path2_block.find('tar -xf \\"\\$STAGING_DIR/release.tar\\"')
+        pip_idx = path2_block.find('pip install')
+        restart_idx = path2_block.find('systemctl restart toanaas-bot.service')
+
+        self.assertNotEqual(drift_idx, -1, "Pre-mutation drift guard missing in PATH 2")
+        self.assertNotEqual(prepare_idx, -1, "prepare_product_video_worker_release missing in PATH 2")
+        self.assertNotEqual(fetch_idx, -1, "git fetch missing in PATH 2")
+        self.assertNotEqual(backup_idx, -1, "BACKUP_DIR missing in PATH 2")
+        self.assertNotEqual(apply_idx, -1, "tar -xf missing in PATH 2")
+        self.assertNotEqual(pip_idx, -1, "pip install missing in PATH 2")
+        self.assertNotEqual(restart_idx, -1, "systemctl restart missing in PATH 2")
+
+        # Drift guard must strictly precede all mutation steps
+        self.assertLess(drift_idx, prepare_idx, "Drift guard must run BEFORE prepare_product_video_worker_release")
+        self.assertLess(drift_idx, fetch_idx, "Drift guard must run BEFORE production git fetch")
+        self.assertLess(drift_idx, backup_idx, "Drift guard must run BEFORE backup refs creation")
+        self.assertLess(drift_idx, apply_idx, "Drift guard must run BEFORE source apply")
+        self.assertLess(drift_idx, pip_idx, "Drift guard must run BEFORE pip sync")
+        self.assertLess(drift_idx, restart_idx, "Drift guard must run BEFORE Bot restart")
+
+    def test_bash_drift_guard_fails_closed_preventing_all_mutations(self):
+        """6c. Empirical execution: on drift mismatch, script exits 1 and zero mutations occur."""
+        import shutil
+        bash_bin = shutil.which("bash")
+        if not bash_bin and os.path.isfile(r"C:\Program Files\Git\bin\bash.exe"):
+            bash_bin = r"C:\Program Files\Git\bin\bash.exe"
+
+        if not bash_bin:
+            self.skipTest("bash not found in environment")
+
+        with tempfile.TemporaryDirectory() as base_tmp:
+            log_file = os.path.join(base_tmp, "execution.log")
+            test_sh = os.path.join(base_tmp, "test_drift.sh")
+
+            posix_base = base_tmp.replace("\\", "/")
+            posix_log = log_file.replace("\\", "/")
+
+            script_body = f"""#!/usr/bin/env bash
+set -euo pipefail
+
+WEBAPP_DIR="{posix_base}/webapp"
+STAGING_DIR="{posix_base}/staging"
+mkdir -p "$WEBAPP_DIR" "$STAGING_DIR"
+
+LOG_FILE="{posix_log}"
+touch "$LOG_FILE"
+
+git() {{
+  if [[ "$*" == *"-C $WEBAPP_DIR rev-parse refs/heads/main"* ]] || [[ "$*" == *"rev-parse refs/heads/main"* ]]; then
+    echo "$MOCK_LIVE_SHA"
+    return 0
+  fi
+  echo "git $*" >> "$LOG_FILE"
+}}
+
+prepare_product_video_worker_release() {{
+  echo "prepare_product_video_worker_release" >> "$LOG_FILE"
+}}
+
+systemctl() {{
+  echo "systemctl $*" >> "$LOG_FILE"
+}}
+
+pip() {{
+  echo "pip $*" >> "$LOG_FILE"
+}}
+
+tar() {{
+  echo "tar $*" >> "$LOG_FILE"
+}}
+
+TARGET_SHA="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+EXPECTED_PREV_SHA="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+# Run with DRIFT (LIVE != EXPECTED)
+MOCK_LIVE_SHA="cccccccccccccccccccccccccccccccccccccccc"
+
+echo '=== PATH 2 EXECUTION UNDER DRIFT ==='
+LIVE_PREV_HEAD="$(git -C "$WEBAPP_DIR" rev-parse refs/heads/main)"
+if [[ "$LIVE_PREV_HEAD" != "$EXPECTED_PREV_SHA" ]]; then
+  echo "ERROR: Production drift detected before mutation! Live LIVE_PREV_HEAD ($LIVE_PREV_HEAD) != EXPECTED_PREV_SHA ($EXPECTED_PREV_SHA)" >&2
+  exit 1
+fi
+PREV_HEAD="$LIVE_PREV_HEAD"
+
+# The following mutations should NEVER be reached on drift:
+prepare_product_video_worker_release
+git fetch "$STAGING_DIR/release.bundle"
+tar -xf "$STAGING_DIR/release.tar"
+pip install something
+systemctl restart toanaas-bot.service
+"""
+            with open(test_sh, "w", encoding="utf-8") as f:
+                f.write(script_body)
+
+            res = subprocess.run([bash_bin, test_sh], capture_output=True, text=True)
+            self.assertEqual(res.returncode, 1, f"Expected non-zero exit on drift mismatch, got {res.returncode}")
+            self.assertIn("Production drift detected before mutation", res.stderr + res.stdout)
+
+            with open(log_file, "r", encoding="utf-8") as f:
+                log_content = f.read()
+
+            self.assertNotIn("prepare_product_video_worker_release", log_content, "prepare must NOT run on drift")
+            self.assertNotIn("systemctl", log_content, "worker stop / restart must NOT run on drift")
+            self.assertNotIn("git fetch", log_content, "production git fetch must NOT run on drift")
+            self.assertNotIn("tar", log_content, "source apply must NOT run on drift")
+            self.assertNotIn("pip", log_content, "pip sync must NOT run on drift")
+
+    def test_bash_drift_guard_passes_when_sha_matches(self):
+        """6d. Empirical execution: on matching SHA, pre-mutation guard passes and execution proceeds."""
+        import shutil
+        bash_bin = shutil.which("bash")
+        if not bash_bin and os.path.isfile(r"C:\Program Files\Git\bin\bash.exe"):
+            bash_bin = r"C:\Program Files\Git\bin\bash.exe"
+
+        if not bash_bin:
+            self.skipTest("bash not found in environment")
+
+        with tempfile.TemporaryDirectory() as base_tmp:
+            log_file = os.path.join(base_tmp, "execution_match.log")
+            test_sh = os.path.join(base_tmp, "test_match.sh")
+
+            posix_base = base_tmp.replace("\\", "/")
+            posix_log = log_file.replace("\\", "/")
+
+            script_body = f"""#!/usr/bin/env bash
+set -euo pipefail
+
+WEBAPP_DIR="{posix_base}/webapp"
+mkdir -p "$WEBAPP_DIR"
+
+LOG_FILE="{posix_log}"
+touch "$LOG_FILE"
+
+git() {{
+  if [[ "$*" == *"-C $WEBAPP_DIR rev-parse refs/heads/main"* ]] || [[ "$*" == *"rev-parse refs/heads/main"* ]]; then
+    echo "$MOCK_LIVE_SHA"
+    return 0
+  fi
+  echo "git $*" >> "$LOG_FILE"
+}}
+
+prepare_product_video_worker_release() {{
+  echo "prepare_product_video_worker_release" >> "$LOG_FILE"
+}}
+
+TARGET_SHA="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+EXPECTED_PREV_SHA="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+# Run with MATCH (LIVE == EXPECTED)
+MOCK_LIVE_SHA="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+LIVE_PREV_HEAD="$(git -C "$WEBAPP_DIR" rev-parse refs/heads/main)"
+if [[ "$LIVE_PREV_HEAD" != "$EXPECTED_PREV_SHA" ]]; then
+  echo "ERROR: Production drift detected before mutation! Live LIVE_PREV_HEAD ($LIVE_PREV_HEAD) != EXPECTED_PREV_SHA ($EXPECTED_PREV_SHA)" >&2
+  exit 1
+fi
+PREV_HEAD="$LIVE_PREV_HEAD"
+
+prepare_product_video_worker_release
+echo "PREV_HEAD_SET=$PREV_HEAD" >> "$LOG_FILE"
+"""
+            with open(test_sh, "w", encoding="utf-8") as f:
+                f.write(script_body)
+
+            res = subprocess.run([bash_bin, test_sh], capture_output=True, text=True)
+            self.assertEqual(res.returncode, 0, f"Expected 0 on matching SHA, got {res.returncode}. Output:\n{res.stderr}\n{res.stdout}")
+
+            with open(log_file, "r", encoding="utf-8") as f:
+                log_content = f.read()
+
+            self.assertIn("prepare_product_video_worker_release", log_content)
+            self.assertIn("PREV_HEAD_SET=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", log_content)
 
     def test_staging_cleanup_post_transaction_commit_only(self):
         """7. In normal path, successful staging cleanup occurs only after transaction commit."""

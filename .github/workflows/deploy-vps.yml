@@ -258,6 +258,14 @@ jobs:
             # =============================================================
             # PATH 2: Normal NEW_SHA Deployment Path
             # =============================================================
+            echo '=== Validating Pre-Mutation Production Drift Guard ==='
+            LIVE_PREV_HEAD=\"\$(git -C \"\$WEBAPP_DIR\" rev-parse refs/heads/main)\"
+            if [[ \"\$LIVE_PREV_HEAD\" != \"\$EXPECTED_PREV_SHA\" ]]; then
+              echo \"ERROR: Production drift detected before mutation! Live LIVE_PREV_HEAD (\$LIVE_PREV_HEAD) != EXPECTED_PREV_SHA (\$EXPECTED_PREV_SHA)\" >&2
+              exit 1
+            fi
+            PREV_HEAD=\"\$LIVE_PREV_HEAD\"
+
             cd \"\$STAGING_DIR\"
             sha256sum -c checksums.sha256
 
@@ -266,9 +274,10 @@ jobs:
 
             cd \"\$WEBAPP_DIR\"
 
-            PREV_HEAD=\"\$(git rev-parse refs/heads/main)\"
-            if [[ \"\$PREV_HEAD\" != \"\$EXPECTED_PREV_SHA\" ]]; then
-              echo \"ERROR: Production drift detected! Live PREV_HEAD (\$PREV_HEAD) != EXPECTED_PREV_SHA (\$EXPECTED_PREV_SHA)\" >&2
+            # Defense-in-depth: second drift assertion after worker prepare
+            POST_PREPARE_HEAD=\"\$(git rev-parse refs/heads/main)\"
+            if [[ \"\$POST_PREPARE_HEAD\" != \"\$EXPECTED_PREV_SHA\" ]]; then
+              echo \"ERROR: Production drift detected after prepare! Live HEAD (\$POST_PREPARE_HEAD) != EXPECTED_PREV_SHA (\$EXPECTED_PREV_SHA)\" >&2
               exit 1
             fi
 
