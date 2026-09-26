@@ -52,6 +52,8 @@ def _mode_needs_subtitle(mode: str) -> bool:
 
 def _cue_locked_timing_requested(state: dict) -> bool:
     current = dict(state or {})
+    if bool(current.get("cue_locked_timing")):
+        return True
     if str(current.get("auto_speaker_lane") or "").strip().lower() in {"multi", "smart", "auto_smart_multivoice"}:
         return True
     if str(current.get("subdub_engine_selected") or "").strip().lower() in {"auto_smart_multivoice", "smart_multivoice"}:
@@ -390,13 +392,214 @@ async def process_subtitle_dub_job(
             }
         tts_provider = str(segment_tts.get("provider") or "")
         if cue_locked_timing:
+            is_legacy_multi = (
+                str(pipeline_state.get("auto_speaker_lane") or "").strip().lower() == "multi"
+                and not pipeline_state.get("cue_locked_timing")
+            )
+            # Map authoritative tts_segments by stable cue identity/index
+            expected_source_ids: list[str] = []
+            auth_by_id: dict[str, dict] = {}
+            for s_idx, s_item in enumerate(tts_segments):
+                if isinstance(s_item, dict):
+                    cid = str(s_item.get("cue_id") or s_item.get("id") or f"cue_{s_idx + 1}").strip()
+                    expected_source_ids.append(cid)
+                    auth_by_id[cid] = s_item
+
+            # Authoritative 1-to-1 cue identity coverage validation
+            consumed_source_ids: set[str] = set()
+            mapped_source_ids: list[str] = []
+            chunk_bindings: list[tuple[dict, dict, str]] = []
+
+            for idx, item in enumerate(tts_chunks):
+                if not isinstance(item, dict):
+                    continue
+                cid_cand = str(item.get("cue_id") or item.get("id") or "").strip()
+                if cid_cand:
+                    # Explicit chunk cue ID must match authoritative source cue
+                    if cid_cand not in auth_by_id:
+                        return {
+                            "ok": False,
+                            "status": "TTS_SEGMENT_COVERAGE_FAILED",
+                            "error_code": "unknown_tts_chunk",
+                            "cue_id": cid_cand,
+                            "provider_called": True,
+                            "charged": False,
+                            "created_files": [],
+                            "state": pipeline_state,
+                            "prepared": prepared,
+                            "route_attempts": route_attempts,
+                            "tts_expected_segments": tts_expected_segments,
+                            "tts_generated_segments": tts_generated_segments,
+                            "tts_mixed_segments": 0,
+                            "tts_dropped_segments": max(0, tts_expected_segments - len(consumed_source_ids)),
+                        }
+                    # Explicit chunk cue ID must not be consumed more than once
+                    if cid_cand in consumed_source_ids:
+                        return {
+                            "ok": False,
+                            "status": "TTS_SEGMENT_COVERAGE_FAILED",
+                            "error_code": "duplicate_tts_chunk",
+                            "cue_id": cid_cand,
+                            "provider_called": True,
+                            "charged": False,
+                            "created_files": [],
+                            "state": pipeline_state,
+                            "prepared": prepared,
+                            "route_attempts": route_attempts,
+                            "tts_expected_segments": tts_expected_segments,
+                            "tts_generated_segments": tts_generated_segments,
+                            "tts_mixed_segments": 0,
+                            "tts_dropped_segments": max(0, tts_expected_segments - len(consumed_source_ids)),
+                        }
+                    auth_seg = auth_by_id[cid_cand]
+                    consumed_source_ids.add(cid_cand)
+                    mapped_source_ids.append(cid_cand)
+                    chunk_bindings.append((item, auth_seg, cid_cand))
+                else:
+                    # Positional fallback permitted ONLY when chunk has NO cue_id/id metadata at all,
+                    # count matches exactly, mapping is strict 1-to-1, and no source cue was already consumed
+                    if (
+                        len(tts_chunks) == len(tts_segments)
+                        and idx < len(expected_source_ids)
+                        and idx < len(tts_segments)
+                        and isinstance(tts_segments[idx], dict)
+                    ):
+                        pos_cid = expected_source_ids[idx]
+                        if pos_cid in consumed_source_ids:
+                            return {
+                                "ok": False,
+                                "status": "TTS_SEGMENT_COVERAGE_FAILED",
+                                "error_code": "duplicate_tts_chunk",
+                                "cue_id": pos_cid,
+                                "provider_called": True,
+                                "charged": False,
+                                "created_files": [],
+                                "state": pipeline_state,
+                                "prepared": prepared,
+                                "route_attempts": route_attempts,
+                                "tts_expected_segments": tts_expected_segments,
+                                "tts_generated_segments": tts_generated_segments,
+                                "tts_mixed_segments": 0,
+                                "tts_dropped_segments": max(0, tts_expected_segments - len(consumed_source_ids)),
+                            }
+                        auth_seg = tts_segments[idx]
+                        consumed_source_ids.add(pos_cid)
+                        mapped_source_ids.append(pos_cid)
+                        chunk_bindings.append((item, auth_seg, pos_cid))
+                    else:
+                        return {
+                            "ok": False,
+                            "status": "TTS_SEGMENT_COVERAGE_FAILED",
+                            "error_code": "tts_segments_dropped",
+                            "provider_called": True,
+                            "charged": False,
+                            "created_files": [],
+                            "state": pipeline_state,
+                            "prepared": prepared,
+                            "route_attempts": route_attempts,
+                            "tts_expected_segments": tts_expected_segments,
+                            "tts_generated_segments": tts_generated_segments,
+                            "tts_mixed_segments": 0,
+                            "tts_dropped_segments": max(0, tts_expected_segments - len(consumed_source_ids)),
+                        }
+
+            # Enforce 1-to-1 full coverage: mapped == expected and unique
+            if (
+                mapped_source_ids != expected_source_ids
+                or len(mapped_source_ids) != len(set(mapped_source_ids))
+                or len(consumed_source_ids) != len(expected_source_ids)
+            ):
+                return {
+                    "ok": False,
+                    "status": "TTS_SEGMENT_COVERAGE_FAILED",
+                    "error_code": "tts_segments_dropped",
+                    "provider_called": True,
+                    "charged": False,
+                    "created_files": [],
+                    "state": pipeline_state,
+                    "prepared": prepared,
+                    "route_attempts": route_attempts,
+                    "tts_expected_segments": tts_expected_segments,
+                    "tts_generated_segments": tts_generated_segments,
+                    "tts_mixed_segments": 0,
+                    "tts_dropped_segments": max(0, len(expected_source_ids) - len(consumed_source_ids)),
+                }
+
+            # Enrich/normalize TTS chunks metadata from authoritative source/segments
+            for item, auth_seg, cid in chunk_bindings:
+                item["cue_id"] = cid
+
+                # Source speaker authority defeats conflicting/stale chunk speaker metadata
+                speaker = auth_seg.get("speaker_id") or auth_seg.get("speaker")
+                speaker_str = str(speaker).strip() if speaker is not None else ""
+                if speaker_str:
+                    item["speaker_id"] = speaker_str
+                    item["speaker"] = speaker_str
+                else:
+                    item["speaker_id"] = ""
+                    item["speaker"] = ""
+                    item["recovery_eligible"] = False
+
+                # Source non-speech boundary authority defeats chunk False
+                if auth_seg.get("non_speech_boundary") is not None:
+                    item["non_speech_boundary"] = bool(auth_seg.get("non_speech_boundary"))
+
+                # Source start/end timeline authority defeats conflicting chunk timing
+                s = float(auth_seg.get("start_ms", 0)) / 1000.0 if "start_ms" in auth_seg else float(auth_seg.get("start", 0.0) or 0.0)
+                e = float(auth_seg.get("end_ms", 0)) / 1000.0 if "end_ms" in auth_seg else float(auth_seg.get("end", 0.0) or 0.0)
+                w = max(0.001, e - s)
+                item["start"] = s
+                item["end"] = e
+                item["cue_window"] = w
+                item["cue_window_seconds"] = w
+
+                # Generated TTS owns audio bytes and duration
+                dur = max(0.0, float(item.get("audio_duration") or item.get("raw_audio_duration") or item.get("generated_audio_seconds") or 0.0))
+                item["audio_duration"] = dur
+                if item.get("audio") is None and item.get("audio_bytes") is not None:
+                    item["audio"] = item["audio_bytes"]
+                elif item.get("audio_bytes") is None and item.get("audio") is not None:
+                    item["audio_bytes"] = item["audio"]
+
+            from services.subdub_microcue_recovery import (
+                recover_cue_locked_micro_cues,
+                MAX_INTELLIGIBLE_FIT_RATIO,
+            )
+            # Mandatory Fix B: Legacy multi must NOT enter micro-cue recovery
+            if not is_legacy_multi:
+                tts_chunks = recover_cue_locked_micro_cues(tts_chunks)
+
             for item in tts_chunks:
                 cue_window = max(
                     0.001,
                     float(item.get("end") or 0.0) - float(item.get("start") or 0.0),
                 )
                 generated_seconds = max(0.0, float(item.get("audio_duration") or 0.0))
-                fit_ratio = max(1.0, generated_seconds / cue_window)
+                raw_fit_ratio = generated_seconds / cue_window if cue_window > 0.05 and generated_seconds > 0 else 1.0
+                if not is_legacy_multi and raw_fit_ratio > MAX_INTELLIGIBLE_FIT_RATIO:
+                    fail_cid = str(
+                        item.get("recovery_trigger_cue_id")
+                        or item.get("original_trigger_cue_id")
+                        or (item.get("original_cue_ids") or [""])[-1]
+                        or item.get("cue_id")
+                        or ""
+                    )
+                    return {
+                        "ok": False,
+                        "status": "TTS_EXTREME_COMPRESSION_FAILED",
+                        "error_code": "extreme_audio_compression_unintelligible",
+                        "blocker": "extreme_audio_compression_unintelligible",
+                        "provider_called": True,
+                        "charged": False,
+                        "created_files": [],
+                        "state": pipeline_state,
+                        "prepared": prepared,
+                        "route_attempts": route_attempts,
+                        "fit_ratio": round(raw_fit_ratio, 3),
+                        "cue_id": fail_cid,
+                        "recovery_trigger_cue_id": str(item.get("recovery_trigger_cue_id") or fail_cid),
+                    }
+                fit_ratio = max(1.0, raw_fit_ratio)
                 item.update({
                     "cue_window_seconds": cue_window,
                     "generated_audio_seconds": generated_seconds,
