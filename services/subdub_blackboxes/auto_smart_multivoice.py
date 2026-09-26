@@ -221,10 +221,10 @@ def is_valid_cue_local_acoustic_authority(meta: Any) -> bool:
         return False
 
     conf_raw = meta.get("confidence")
-    if isinstance(conf_raw, bool):
+    if conf_raw is None or isinstance(conf_raw, bool):
         return False
     try:
-        conf = float(conf_raw) if conf_raw is not None else 1.0
+        conf = float(conf_raw)
     except (TypeError, ValueError, OverflowError):
         return False
 
@@ -331,7 +331,7 @@ def smooth_smart_multivoice_cues(
                             or cue_acoustic_classifications.get(idx)
                             or cue_acoustic_classifications.get(str(idx))
                         )
-                    if cue_meta is None and stereo_pcm_path and Path(stereo_pcm_path).is_file():
+                    if (cue_meta is None or not is_valid_cue_local_acoustic_authority(cue_meta)) and stereo_pcm_path and Path(stereo_pcm_path).is_file():
                         try:
                             cue_ranges = {curr_spk: [(start, end)]}
                             c_est = estimate_speaker_pitches_from_pcm(
@@ -340,21 +340,19 @@ def smooth_smart_multivoice_cues(
                                 sample_rate=sample_rate,
                                 channels=channels,
                             )
-                            cue_meta = c_est.get(curr_spk)
+                            pcm_meta = c_est.get(curr_spk)
+                            if is_valid_cue_local_acoustic_authority(pcm_meta):
+                                cue_meta = pcm_meta
                         except Exception:
-                            cue_meta = None
+                            pass
 
                     prev_meta = (acoustic_classifications.get(prev_spk) or {}) if acoustic_classifications else {}
                     prev_reg = str(prev_meta.get("voice_register") or "").strip().lower()
                     prev_conf = float(prev_meta.get("confidence") or 0.0)
 
-                    if cue_meta:
+                    if is_valid_cue_local_acoustic_authority(cue_meta):
                         cue_reg = str(cue_meta.get("voice_register") or "").strip().lower()
-                        conf_val = cue_meta.get("confidence")
-                        try:
-                            cue_conf = float(conf_val) if conf_val is not None else 1.0
-                        except (TypeError, ValueError, OverflowError):
-                            cue_conf = 0.0
+                        cue_conf = float(cue_meta.get("confidence") or 0.0)
                         if cue_reg not in {"low", "high"}:
                             pitch_val = (
                                 cue_meta.get("pitch_hz")
@@ -376,6 +374,11 @@ def smooth_smart_multivoice_cues(
                             else:
                                 # Case A: Incident bleed matching surrounding register -> SMOOTH
                                 pass
+                    elif cue_meta is not None:
+                        # Non-authoritative cue_meta without valid PCM authority cannot authorize smoothing
+                        # Under R10: INVALID_CUE_META_WITHOUT_PCM_CANNOT_AUTHORIZE_SMOOTHING
+                        # Must NOT cause blind smoothing -> PRESERVE original speaker
+                        continue
                     elif acoustic_classifications:
                         curr_meta = acoustic_classifications.get(curr_spk) or {}
                         curr_reg = str(curr_meta.get("voice_register") or "").strip().lower()

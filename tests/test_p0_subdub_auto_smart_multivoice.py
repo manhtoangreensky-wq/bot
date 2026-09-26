@@ -3156,8 +3156,7 @@ def test_106_cue_local_acoustic_authority_semantic_validation(tmp_path):
     # Direct helper unit checks
     assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "low", "confidence": 0.95}) is True
     assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "high", "confidence": 0.75}) is True
-    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "low"}) is True  # defaults confidence 1.0
-    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "LOW"}) is True
+    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "LOW", "confidence": 0.95}) is True
     assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": 120.0, "confidence": 0.95}) is True
     assert smart.is_valid_cue_local_acoustic_authority({"f0_hz": 200.0, "confidence": 0.80}) is True
     assert smart.is_valid_cue_local_acoustic_authority({"median_hz": 150.0, "confidence": 0.85}) is True
@@ -3168,14 +3167,122 @@ def test_106_cue_local_acoustic_authority_semantic_validation(tmp_path):
     assert smart.is_valid_cue_local_acoustic_authority(None) is False
     assert smart.is_valid_cue_local_acoustic_authority("not_a_mapping") is False
     assert smart.is_valid_cue_local_acoustic_authority({}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "low"}) is False  # missing confidence rejected
     assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "low", "confidence": 0.50}) is False
     assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "uncertain", "confidence": 0.95}) is False
     assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "unknown", "confidence": 0.95}) is False
     assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "female", "confidence": 0.95}) is False
     assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "low", "confidence": True}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": 120.0}) is False  # missing confidence rejected
     assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": 160.0, "confidence": 0.95}) is False  # ambiguity band
     assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": float("nan"), "confidence": 0.95}) is False
     assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": float("inf"), "confidence": 0.95}) is False
     assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": 120.0, "confidence": 0.50}) is False
     assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": True, "confidence": 0.95}) is False
+
+
+def test_107_missing_confidence_rejected(tmp_path):
+    """Missing explicit finite confidence >= MIN_REGISTER_CONFIDENCE (0.75) must NOT be authoritative."""
+    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "low"}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "high"}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": 120.0}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"f0_hz": 200.0}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"median_hz": 140.0}) is False
+
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_107.mp4")
+        output_mp4 = tmp_path / "out_107.mp4"
+        cues = [
+            {"cue_id": "c1", "speaker_id": "spk_1", "text": "Cue 1", "start_ms": 0, "end_ms": 1000},
+            {"cue_id": "c2", "speaker_id": "spk_2", "text": "Cue 2", "start_ms": 1000, "end_ms": 2000},
+        ]
+        res = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            cue_acoustic_classifications={
+                "c1": {"voice_register": "low", "confidence": 0.95},
+                "c2": {"voice_register": "high"},  # Missing confidence!
+            },
+            extract_pcm=lambda **kw: "/invalid.pcm",
+            checkpoint_workspace=str(tmp_path / "ws_107"),
+            job_id="job_107",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_107"), "job_id": "job_107"},
+        )
+        assert res["ok"] is False
+        assert res["status"] == "PCM_EXTRACTION_FAILED"
+        assert res["error_code"] == "pcm_extraction_failed"
+        assert "partial_cue_coverage_gap" in res["blocker"]
+        assert "c2" in res["blocker"]
+
+    asyncio.run(_run())
+
+
+def test_108_invalid_cue_meta_with_valid_pcm_falls_back_to_pcm_evidence(tmp_path):
+    """Invalid or low-confidence cue_meta must NOT suppress available PCM re-evaluation.
+    When PCM is available and valid, it re-evaluates PCM and preserves contrasting register interjection."""
+    import numpy as np
+    import struct
+
+    cues = [
+        {"cue_id": "c0", "speaker_id": "spk_1", "start_ms": 0, "end_ms": 2000},
+        {"cue_id": "c1", "speaker_id": "spk_2", "start_ms": 2100, "end_ms": 2500},
+        {"cue_id": "c2", "speaker_id": "spk_1", "start_ms": 2600, "end_ms": 4500},
+    ]
+    invalid_cue_acoustics = {
+        "c1": {"voice_register": "low", "confidence": 0.40},
+    }
+    speaker_acoustics = {
+        "spk_1": {"voice_register": "low", "confidence": 0.95},
+        "spk_2": {"voice_register": "high", "confidence": 0.95},
+    }
+
+    pcm_path = tmp_path / "test_108.pcm"
+    sr = 44100
+    n_samples = int(sr * 4.5)
+    samples = np.zeros(n_samples, dtype=np.int16)
+    c1_s = int(2.1 * sr)
+    c1_e = int(2.5 * sr)
+    t_c1 = np.linspace(0, 0.4, c1_e - c1_s, endpoint=False)
+    samples[c1_s:c1_e] = (np.sin(2 * np.pi * 210 * t_c1) * 16000).astype(np.int16)
+
+    with open(pcm_path, "wb") as f:
+        for v in samples:
+            f.write(struct.pack("<hh", v, v))
+
+    smoothed = smart.smooth_smart_multivoice_cues(
+        cues,
+        acoustic_classifications=speaker_acoustics,
+        cue_acoustic_classifications=invalid_cue_acoustics,
+        stereo_pcm_path=pcm_path,
+    )
+    assert smoothed[1]["speaker_id"] == "spk_2"
+    assert smoothed[1].get("anti_flapping_smoothed") is not True
+
+
+def test_109_invalid_cue_meta_without_pcm_cannot_authorize_smoothing():
+    """When cue_meta is invalid/non-authoritative and there is NO PCM, it cannot authorize smoothing.
+    The system must NOT cause blind smoothing into surrounding speaker."""
+    cues = [
+        {"cue_id": "c0", "speaker_id": "spk_1", "start_ms": 0, "end_ms": 2000},
+        {"cue_id": "c1", "speaker_id": "spk_2", "start_ms": 2100, "end_ms": 2500},
+        {"cue_id": "c2", "speaker_id": "spk_1", "start_ms": 2600, "end_ms": 4500},
+    ]
+    invalid_cue_acoustics = {
+        "c1": {"voice_register": "uncertain", "confidence": 0.20},
+    }
+    speaker_acoustics = {
+        "spk_1": {"voice_register": "low", "confidence": 0.95},
+        "spk_2": {"voice_register": "low", "confidence": 0.95},
+    }
+
+    smoothed = smart.smooth_smart_multivoice_cues(
+        cues,
+        acoustic_classifications=speaker_acoustics,
+        cue_acoustic_classifications=invalid_cue_acoustics,
+        stereo_pcm_path=None,
+    )
+    assert smoothed[1]["speaker_id"] == "spk_2"
+    assert smoothed[1].get("anti_flapping_smoothed") is not True
 
