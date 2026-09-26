@@ -232247,7 +232247,7 @@ def internal_archive_upload_prompt_text(department: str, document_type: str) -> 
         "Bạn hãy gửi file muốn lưu. Nên gửi từng file một để tránh lỗi Telegram."
     )
 
-def internal_archive_type_keyboard(department: str) -> InlineKeyboardMarkup:
+def internal_archive_type_keyboard(department: str, back_to_preview: bool = False) -> InlineKeyboardMarkup:
     values = INTERNAL_DOC_TYPES.get(department, ())
     buttons = [
         (document_type_label(value), f"archive|type|{value}")
@@ -232259,7 +232259,10 @@ def internal_archive_type_keyboard(department: str) -> InlineKeyboardMarkup:
         for index in range(0, len(buttons), 2)
     ]
     rows.append([
-        InlineKeyboardButton("⬅️ Phòng ban", callback_data="archive|back_department"),
+        InlineKeyboardButton(
+            "⬅️ Xem lại hồ sơ" if back_to_preview else "⬅️ Phòng ban",
+            callback_data="archive|back_department",
+        ),
         InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
     ])
     return InlineKeyboardMarkup(rows)
@@ -232573,7 +232576,11 @@ async def handle_internal_archive_callback(update: Update, context: ContextTypes
             return await safe_edit_query_message(query, internal_archive_menu_text(), reply_markup=internal_archive_menu_keyboard())
         fields = {key: value for key, value in state.items() if key not in {"pending_action", "step", "created_at_ts"}}
         set_internal_archive_pending(uid, "choosing_type", **fields)
-        return await safe_edit_query_message(query, internal_archive_type_text(department), reply_markup=internal_archive_type_keyboard(department))
+        return await safe_edit_query_message(
+            query,
+            internal_archive_type_text(department),
+            reply_markup=internal_archive_type_keyboard(department, back_to_preview=bool(state.get("file_info"))),
+        )
     if action == "type" and len(parts) > 2:
         department = state.get("department")
         document_type = parts[2]
