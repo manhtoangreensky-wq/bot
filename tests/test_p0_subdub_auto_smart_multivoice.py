@@ -2081,7 +2081,7 @@ def test_88_cue_local_anti_flapping_authority_both_cases():
 
 
 def test_89_eof_boundary_contract():
-    """EOF contract: exact pass, <=55ms clamp, >55ms / start beyond EOF raises ValueError."""
+    """EOF contract: exact pass, <=100ms clamp, >100ms / start beyond EOF raises ValueError."""
     # 1. Exact EOF -> pass
     cues_exact = [{"cue_id": "c1", "speaker_id": "spk_1", "start_ms": 0, "end_ms": 3000}]
     r_exact = smart._build_derived_ranges(cues_exact, max_duration_seconds=3.0)
@@ -2097,7 +2097,7 @@ def test_89_eof_boundary_contract():
     r_50ms = smart._build_derived_ranges(cues_50ms, max_duration_seconds=3.0)
     assert r_50ms["spk_1"] == [(0.0, 3.0)]
 
-    # 4. ~500ms overshoot -> FAIL (ValueError)
+    # 4. ~500ms overshoot -> FAIL (ValueError, well above MAX_CUE_END_OVERSHOOT_SECONDS=0.100)
     cues_500ms = [{"cue_id": "c1", "speaker_id": "spk_1", "start_ms": 0, "end_ms": 3500}]
     with pytest.raises(ValueError, match="cue_end_overshoot_exceeds_limit"):
         smart._build_derived_ranges(cues_500ms, max_duration_seconds=3.0)
