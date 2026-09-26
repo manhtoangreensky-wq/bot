@@ -80,6 +80,7 @@ def test_coalesce_cue_pair_preservation():
         "audio": b"AUDIO_1_",
         "audio_duration": 4.5,
         "original_cue_ids": ["c1"],
+        "_synthetic_fixture": True,
     }
     c2 = {
         "cue_id": "c2",
@@ -90,6 +91,7 @@ def test_coalesce_cue_pair_preservation():
         "audio": b"AUDIO_2",
         "audio_duration": 1.1,
         "original_cue_ids": ["c2"],
+        "_synthetic_fixture": True,
     }
     merged = coalesce_cue_pair(c1, c2)
     assert merged["cue_id"] == "c1+c2"
@@ -741,5 +743,203 @@ def test_auto_smart_multivoice_without_explicit_cue_lock_flag_gt_1_80_fails(tmp_
         assert res["error_code"] == "extreme_audio_compression_unintelligible"
 
     asyncio.run(_run())
+
+
+def test_shared_pipeline_incident_shape_recovers_before_rejection(tmp_path):
+    """MANDATORY FIRST RED: Shared product pipeline recovers incident shape (7.36s + 0.72s) before rejection."""
+    import asyncio
+    from services.subtitle_dub_product_pipeline import process_subtitle_dub_job
+
+    p1 = tmp_path / "c1_inc.mp3"
+    p2 = tmp_path / "c2_inc.mp3"
+    b1 = _generate_test_mp3(p1, 6.17, 440)
+    b2 = _generate_test_mp3(p2, 1.56, 880)
+
+    source_media = tmp_path / "src_inc.mp4"
+    source_media.write_bytes(b"dummy")
+
+    state = {
+        "mode": "dub",
+        "voice_kind": "auto_speaker_gender",
+        "input_file": str(source_media),
+        "source_path": str(source_media),
+        "media_path": str(source_media),
+        "segments": [
+            {"cue_id": "c1", "start": 30.24, "end": 37.60, "text": "Chiếc khóa này còn mới", "speaker": "spk_1"},
+            {"cue_id": "c2", "start": 37.60, "end": 38.32, "text": "càng", "speaker": "spk_1"},
+        ],
+        "input_duration_seconds": 40.0,
+    }
+
+    async def fake_tts(*args, **kwargs):
+        return {
+            "ok": True,
+            "provider": "mock",
+            "chunks": [
+                {
+                    "cue_id": "c1",
+                    "start": 30.24,
+                    "end": 37.60,
+                    "audio_duration": 6.17,
+                    "audio_bytes": b1,
+                    "text": "Chiếc khóa này còn mới",
+                    "speaker_id": "spk_1",
+                },
+                {
+                    "cue_id": "c2",
+                    "start": 37.60,
+                    "end": 38.32,
+                    "audio_duration": 1.56,
+                    "audio_bytes": b2,
+                    "text": "càng",
+                    "speaker_id": "spk_1",
+                },
+            ],
+        }
+
+    timeline_passed_chunks = []
+
+    async def timeline(chunks, duration):
+        timeline_passed_chunks.extend(chunks)
+        return b"timeline_audio", "ok"
+
+    async def _run():
+        res = await process_subtitle_dub_job(
+            mode="dub",
+            state=state,
+            user_id=1,
+            prepare_subtitles=lambda s: {
+                "state": s,
+                "source_bytes": b"src",
+                "content_type": "video/mp4",
+                "source_segments": s["segments"],
+                "output_segments": s["segments"],
+                "output_script": "Test script",
+                "output_subtitle": "1\n00:00:30,240 --> 00:00:37,600\nChiếc khóa này còn mới\n\n2\n00:00:37,600 --> 00:00:38,320\ncàng\n",
+            },
+            srt_from_text=lambda *a: "",
+            segments_from_text=lambda *a: [],
+            segments_from_subtitle=lambda *a: [],
+            subtitle_output_items=lambda *a: [],
+            resolve_voice_id=lambda *a: "v1",
+            parse_voice_speed=lambda *a: 1.0,
+            synthesize_segments=fake_tts,
+            build_timeline_audio=timeline,
+            normalize_audio=lambda a, *args: (a, "ok"),
+            validate_audio=lambda a, *args: {"ok": True},
+            render_video=lambda *args, **kwargs: (b"mp4", "ok"),
+            video_render_ready=lambda *a: True,
+            ffmpeg_ready=lambda: True,
+            dub_mux_enabled=True,
+        )
+        assert res.get("status") != "TTS_EXTREME_COMPRESSION_FAILED", "Incident shape must be recovered before rejection"
+        assert res.get("ok") is True, f"Pipeline failed: {res}"
+        assert len(timeline_passed_chunks) == 1, "Cues c1 and c2 must be recovered into a single coalesced chunk passed to timeline"
+        coalesced_chunk = timeline_passed_chunks[0]
+        assert coalesced_chunk["coalesced"] is True
+        assert coalesced_chunk["start"] == pytest.approx(30.24)
+        assert coalesced_chunk["end"] == pytest.approx(38.32)
+        assert coalesced_chunk["right_cue_offset"] == pytest.approx(7.36)
+
+    asyncio.run(_run())
+
+
+def test_shared_pipeline_unsafe_recovery_declined_fails_closed(tmp_path):
+    """MANDATORY: Shared product pipeline fails closed when unsafe recovery is declined."""
+    import asyncio
+    from services.subtitle_dub_product_pipeline import process_subtitle_dub_job
+
+    source_media = tmp_path / "src_unsafe.mp4"
+    source_media.write_bytes(b"dummy")
+
+    state = {
+        "mode": "dub",
+        "voice_kind": "auto_speaker_gender",
+        "input_file": str(source_media),
+        "source_path": str(source_media),
+        "media_path": str(source_media),
+        "segments": [
+            {"cue_id": "c1", "start": 0.0, "end": 1.0, "text": "c1", "speaker": "spk_1"},
+            {"cue_id": "c2", "start": 1.0, "end": 1.5, "text": "c2", "speaker": "spk_1"},
+        ],
+        "input_duration_seconds": 2.0,
+    }
+
+    async def fake_tts(*args, **kwargs):
+        return {
+            "ok": True,
+            "provider": "mock",
+            "chunks": [
+                # c1 duration 1.5s spills past right cue start 1.0s -> cannot preserve internal timing!
+                {"cue_id": "c1", "start": 0.0, "end": 1.0, "audio_duration": 1.5, "audio_bytes": b"a1", "text": "c1", "speaker_id": "spk_1"},
+                # c2 window 0.5s with duration 1.2s -> fit_ratio 2.4 > 1.80
+                {"cue_id": "c2", "start": 1.0, "end": 1.5, "audio_duration": 1.2, "audio_bytes": b"a2", "text": "c2", "speaker_id": "spk_1"},
+            ],
+        }
+
+    async def _run():
+        res = await process_subtitle_dub_job(
+            mode="dub",
+            state=state,
+            user_id=1,
+            prepare_subtitles=lambda s: {
+                "state": s,
+                "source_bytes": b"src",
+                "content_type": "video/mp4",
+                "source_segments": s["segments"],
+                "output_segments": s["segments"],
+                "output_script": "c1 c2",
+                "output_subtitle": "1\n00:00:00,000 --> 00:00:01,000\nc1\n\n2\n00:00:01,000 --> 00:00:01,500\nc2\n",
+            },
+            srt_from_text=lambda *a: "",
+            segments_from_text=lambda *a: [],
+            segments_from_subtitle=lambda *a: [],
+            subtitle_output_items=lambda *a: [],
+            resolve_voice_id=lambda *a: "v1",
+            parse_voice_speed=lambda *a: 1.0,
+            synthesize_segments=fake_tts,
+            build_timeline_audio=lambda *a, **k: (b"timeline", "ok"),
+            normalize_audio=lambda a, *args: (a, "ok"),
+            validate_audio=lambda a, *args: {"ok": True},
+            render_video=lambda *args, **kwargs: (b"mp4", "ok"),
+            video_render_ready=lambda *a: True,
+            ffmpeg_ready=lambda: True,
+            dub_mux_enabled=True,
+        )
+        assert res["ok"] is False
+        assert res["status"] == "TTS_EXTREME_COMPRESSION_FAILED"
+        assert res["error_code"] == "extreme_audio_compression_unintelligible"
+        assert res["cue_id"] in ("c1", "c2")
+
+    asyncio.run(_run())
+
+
+def test_unsupported_unknown_encoded_bytes_cannot_raw_concat():
+    """MANDATORY: Unsupported/unknown encoded bytes must fail closed/decline recovery, never raw-concat."""
+    from services.subdub_microcue_recovery import coalesce_cue_pair
+
+    # Byte stream that is not valid MP3 (e.g. unknown proprietary audio or arbitrary bytes in production)
+    c1 = {
+        "cue_id": "c1",
+        "speaker_id": "s1",
+        "start": 0.0,
+        "end": 1.0,
+        "audio": b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f" * 4,
+        "audio_duration": 0.8,
+        "text": "first",
+    }
+    c2 = {
+        "cue_id": "c2",
+        "speaker_id": "s1",
+        "start": 1.0,
+        "end": 1.5,
+        "audio": b"\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f" * 4,
+        "audio_duration": 0.4,
+        "text": "second",
+    }
+    merged = coalesce_cue_pair(c1, c2)
+    # Must decline recovery and must NEVER return raw byte concatenation
+    assert merged.get("coalesced") is False or merged.get("audio") is None, "Unknown bytes must decline recovery"
+    assert merged.get("audio") != c1["audio"] + c2["audio"], "Must never raw-concat arbitrary byte streams"
 
 

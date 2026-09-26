@@ -392,14 +392,37 @@ async def process_subtitle_dub_job(
             }
         tts_provider = str(segment_tts.get("provider") or "")
         if cue_locked_timing:
+            is_legacy_multi = (
+                str(pipeline_state.get("auto_speaker_lane") or "").strip().lower() == "multi"
+                and not pipeline_state.get("cue_locked_timing")
+            )
+            # Enrich/normalize TTS chunks metadata needed by recovery
+            for idx, item in enumerate(tts_chunks):
+                s = float(item.get("start") or 0.0)
+                e = float(item.get("end") or 0.0)
+                w = max(0.001, e - s)
+                dur = max(0.0, float(item.get("audio_duration") or item.get("generated_audio_seconds") or 0.0))
+                if not item.get("cue_id"):
+                    item["cue_id"] = str(item.get("id") or f"cue_{idx + 1}")
+                if not item.get("speaker_id"):
+                    item["speaker_id"] = str(item.get("speaker") or "speaker_0")
+                item["start"] = s
+                item["end"] = e
+                item["cue_window"] = w
+                item["cue_window_seconds"] = w
+                item["audio_duration"] = dur
+                if item.get("audio") is None and item.get("audio_bytes") is not None:
+                    item["audio"] = item["audio_bytes"]
+                elif item.get("audio_bytes") is None and item.get("audio") is not None:
+                    item["audio_bytes"] = item["audio"]
+
             from services.subdub_microcue_recovery import (
                 recover_cue_locked_micro_cues,
                 MAX_INTELLIGIBLE_FIT_RATIO,
             )
-            is_fail_closed_lane = not (
-                str(pipeline_state.get("auto_speaker_lane") or "").strip().lower() == "multi"
-                and not pipeline_state.get("cue_locked_timing")
-            )
+            # Mandatory Fix A: Invoke recover_cue_locked_micro_cues BEFORE final MAX_INTELLIGIBLE_FIT_RATIO rejection
+            tts_chunks = recover_cue_locked_micro_cues(tts_chunks)
+
             for item in tts_chunks:
                 cue_window = max(
                     0.001,
@@ -407,7 +430,7 @@ async def process_subtitle_dub_job(
                 )
                 generated_seconds = max(0.0, float(item.get("audio_duration") or 0.0))
                 raw_fit_ratio = generated_seconds / cue_window if cue_window > 0.05 and generated_seconds > 0 else 1.0
-                if is_fail_closed_lane and raw_fit_ratio > MAX_INTELLIGIBLE_FIT_RATIO:
+                if not is_legacy_multi and raw_fit_ratio > MAX_INTELLIGIBLE_FIT_RATIO:
                     fail_cid = str(item.get("cue_id") or (item.get("original_cue_ids") or [""])[-1])
                     return {
                         "ok": False,
