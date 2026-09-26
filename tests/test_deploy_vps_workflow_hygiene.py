@@ -131,20 +131,287 @@ class TestDeployVpsWorkflowHygiene(unittest.TestCase):
         self.assertNotIn("rm -rf /tmp/deploy-bot-*", self.content)
         self.assertNotIn('rm -rf "$STAGING_DIR"/*', self.content)
 
-    def test_rollback_pruning_logic_retains_two_newest(self):
-        """9. Rollback pruning retains exactly two newest valid deploy backups."""
-        self.assertIn("Retaining 2 Newest", self.content)
-        self.assertIn("VALID_BACKUPS", self.content)
-        self.assertIn('VALID_BACKUPS+=(\\"\\$bpath\\")', self.content)
-        self.assertIn('for ((i=2; i<\\${#VALID_BACKUPS[@]}; i++)); do', self.content)
+    def test_rollback_pruning_function_defined_with_strict_boundaries(self):
+        """9. Rollback pruning function enforces directory, symlink, and canonical parent boundaries."""
+        self.assertIn("prune_rollback_retention() {", self.content)
+        self.assertIn('local delete_dir=\\"\\$WEBAPP_DIR/delete\\"', self.content)
+        self.assertIn('canonical_delete_dir=\\"\\$(cd \\"\\$delete_dir\\" && pwd -P)\\"', self.content)
+        self.assertIn('[[ \\"\\$bname\\" =~ ^deploy-[0-9a-fA-F]{40}-[0-9]{14}\\$ ]]', self.content)
+        self.assertIn('[[ ! -L \\"\\$entry\\" ]]', self.content)
+        self.assertIn('[[ -d \\"\\$entry\\" ]]', self.content)
+        self.assertIn('canonical_parent=\\"\\$(cd \\"\\$entry_parent\\" && pwd -P)\\"', self.content)
+        self.assertIn('[[ \\"\\$canonical_parent\\" == \\"\\$canonical_delete_dir\\" ]]', self.content)
+        self.assertIn('ls -dt \\"\\${candidates[@]}\\"', self.content)
+        self.assertIn('for ((i=2; i<\\${#valid_backups[@]}; i++)); do', self.content)
 
-    def test_non_matching_delete_entries_untouched(self):
-        """10. Non-matching files/directories in delete/ are not pruning targets."""
-        pattern = r'\^deploy-\[0-9a-fA-F\]\{40\}-\[0-9\]\{14\}\\\$'
-        self.assertRegex(self.content, pattern)
+    def test_already_deployed_path_calls_prune_rollback_retention(self):
+        """10. ALREADY_DEPLOYED path calls prune_rollback_retention."""
+        path1_marker = "PATH 1: ALREADY_DEPLOYED Reconciliation Path"
+        path2_marker = "PATH 2: Normal NEW_SHA Deployment Path"
+        idx1 = self.content.find(path1_marker)
+        idx2 = self.content.find(path2_marker)
+        path1_block = self.content[idx1:idx2]
+        self.assertIn("prune_rollback_retention", path1_block)
+
+    def test_new_sha_path_calls_prune_rollback_retention(self):
+        """11. NEW_SHA path calls prune_rollback_retention."""
+        path2_marker = "PATH 2: Normal NEW_SHA Deployment Path"
+        idx2 = self.content.find(path2_marker)
+        path2_block = self.content[idx2:]
+        self.assertIn("prune_rollback_retention", path2_block)
+
+    def test_rollback_candidate_validation_cases_1_to_7(self):
+        """12. Simulation of rollback qualification logic covering cases 1 to 7."""
+        deploy_regex = re.compile(r"^deploy-[0-9a-fA-F]{40}-[0-9]{14}$")
+
+        with tempfile.TemporaryDirectory() as base_tmp:
+            delete_dir = os.path.join(base_tmp, "delete")
+            os.makedirs(delete_dir)
+            canonical_delete_dir = os.path.realpath(delete_dir)
+
+            # Case 1: valid immediate deploy directories
+            valid_immediate_1 = os.path.join(delete_dir, "deploy-1111111111111111111111111111111111111111-20260926010000")
+            valid_immediate_2 = os.path.join(delete_dir, "deploy-2222222222222222222222222222222222222222-20260926020000")
+            valid_immediate_3 = os.path.join(delete_dir, "deploy-3333333333333333333333333333333333333333-20260926030000")
+            os.makedirs(valid_immediate_1)
+            os.makedirs(valid_immediate_2)
+            os.makedirs(valid_immediate_3)
+
+            # Case 2: regular file with deploy regex name
+            regular_file = os.path.join(delete_dir, "deploy-5555555555555555555555555555555555555555-20260926050000")
+            with open(regular_file, "w") as f:
+                f.write("not a directory")
+
+            # Case 3: symlink with deploy regex name
+            symlink_entry = os.path.join(delete_dir, "deploy-6666666666666666666666666666666666666666-20260926060000")
+            # If OS supports symlinks, create one, otherwise simulate check
+            symlink_created = False
+            try:
+                os.symlink(base_tmp, symlink_entry)
+                symlink_created = True
+            except (OSError, NotImplementedError):
+                symlink_created = False
+
+            # Case 4: nested deploy-looking directory inside a subdirectory
+            sub_dir = os.path.join(delete_dir, "nested_folder")
+            os.makedirs(sub_dir)
+            nested_deploy_dir = os.path.join(sub_dir, "deploy-7777777777777777777777777777777777777777-20260926070000")
+            os.makedirs(nested_deploy_dir)
+
+            # Case 5 & 7: non-matching entries in delete/
+            other_file = os.path.join(delete_dir, "manual-payment.txt")
+            with open(other_file, "w") as f:
+                f.write("important notes")
+            other_dir = os.path.join(delete_dir, "random_backup")
+            os.makedirs(other_dir)
+
+            def is_eligible_rollback(entry):
+                bname = os.path.basename(entry)
+                # 1. Regex check
+                if not deploy_regex.match(bname):
+                    return False
+                # 2. Symlink rejection
+                if os.path.islink(entry):
+                    return False
+                # 3. Must be an actual directory
+                if not os.path.isdir(entry):
+                    return False
+                # 4. Immediate parent check
+                parent = os.path.dirname(entry)
+                if os.path.realpath(parent) != canonical_delete_dir:
+                    return False
+                return True
+
+            # 1. valid immediate deploy dirs -> eligible
+            self.assertTrue(is_eligible_rollback(valid_immediate_1))
+            self.assertTrue(is_eligible_rollback(valid_immediate_2))
+            self.assertTrue(is_eligible_rollback(valid_immediate_3))
+
+            # 2. regular file with deploy name -> NOT eligible (untouched)
+            self.assertFalse(is_eligible_rollback(regular_file))
+
+            # 3. symlink with deploy name -> NOT eligible (untouched)
+            if symlink_created:
+                self.assertFalse(is_eligible_rollback(symlink_entry))
+
+            # 4. nested deploy-looking dir -> NOT eligible (untouched)
+            self.assertFalse(is_eligible_rollback(nested_deploy_dir))
+
+            # 5. invalid basename -> NOT eligible (untouched)
+            self.assertFalse(is_eligible_rollback(other_file))
+            self.assertFalse(is_eligible_rollback(other_dir))
+
+            # 6. Keep exactly 2 newest valid immediate dirs
+            candidates = [
+                entry for entry in [os.path.join(delete_dir, e) for e in os.listdir(delete_dir)]
+                if is_eligible_rollback(entry)
+            ]
+            self.assertEqual(len(candidates), 3)
+
+            # Sort by mtime descending (simulating ls -dt)
+            # Set distinct mtimes: valid_immediate_3 newest, then 2, then 1
+            os.utime(valid_immediate_1, (1000, 1000))
+            os.utime(valid_immediate_2, (2000, 2000))
+            os.utime(valid_immediate_3, (3000, 3000))
+
+            sorted_candidates = sorted(candidates, key=lambda p: os.path.getmtime(p), reverse=True)
+            self.assertEqual(sorted_candidates[0], valid_immediate_3)
+            self.assertEqual(sorted_candidates[1], valid_immediate_2)
+            self.assertEqual(sorted_candidates[2], valid_immediate_1)
+
+            # Prune older than 2
+            to_prune = sorted_candidates[2:]
+            self.assertEqual(len(to_prune), 1)
+            self.assertEqual(to_prune[0], valid_immediate_1)
+
+    def test_filesystem_simulation_retains_two_newest_and_preserves_others(self):
+        """13. Full filesystem simulation: prune older valid dirs, preserve files/nested/non-matching."""
+        deploy_regex = re.compile(r"^deploy-[0-9a-fA-F]{40}-[0-9]{14}$")
+
+        with tempfile.TemporaryDirectory() as base_tmp:
+            delete_dir = os.path.join(base_tmp, "delete")
+            os.makedirs(delete_dir)
+            canonical_delete = os.path.realpath(delete_dir)
+
+            # 4 valid immediate directories
+            dirs = [
+                os.path.join(delete_dir, f"deploy-{'a'*40}-2026092601000{i}")
+                for i in range(1, 5)
+            ]
+            for i, d in enumerate(dirs):
+                os.makedirs(d)
+                os.utime(d, (1000 * (i + 1), 1000 * (i + 1)))
+
+            # 1 regular file with deploy name
+            file_deploy = os.path.join(delete_dir, f"deploy-{'b'*40}-20260926010009")
+            with open(file_deploy, "w") as f:
+                f.write("regular file")
+
+            # 1 nested dir
+            nested_parent = os.path.join(delete_dir, "nested_dir")
+            os.makedirs(nested_parent)
+            nested_deploy = os.path.join(nested_parent, f"deploy-{'c'*40}-20260926010008")
+            os.makedirs(nested_deploy)
+
+            # Non-matching entries
+            other_file = os.path.join(delete_dir, "manual-payment.txt")
+            with open(other_file, "w") as f:
+                f.write("notes")
+
+            # Enumerate immediate children and filter candidates
+            candidates = []
+            for entry_name in os.listdir(delete_dir):
+                entry_path = os.path.join(delete_dir, entry_name)
+                bname = os.path.basename(entry_path)
+                if not deploy_regex.match(bname):
+                    continue
+                if os.path.islink(entry_path):
+                    continue
+                if not os.path.isdir(entry_path):
+                    continue
+                if os.path.realpath(os.path.dirname(entry_path)) != canonical_delete:
+                    continue
+                candidates.append(entry_path)
+
+            self.assertEqual(len(candidates), 4)
+
+            # Sort descending by mtime
+            sorted_candidates = sorted(candidates, key=lambda p: os.path.getmtime(p), reverse=True)
+            self.assertEqual(sorted_candidates[0], dirs[3])
+            self.assertEqual(sorted_candidates[1], dirs[2])
+
+            # Prune older than 2
+            for old_dir in sorted_candidates[2:]:
+                import shutil
+                shutil.rmtree(old_dir)
+
+            # Assertions:
+            # 2 newest valid directories exist
+            self.assertTrue(os.path.isdir(dirs[3]), "Newest valid dir must exist")
+            self.assertTrue(os.path.isdir(dirs[2]), "Second newest valid dir must exist")
+            # 2 older valid directories pruned
+            self.assertFalse(os.path.exists(dirs[1]), "Older valid dir must be pruned")
+            self.assertFalse(os.path.exists(dirs[0]), "Oldest valid dir must be pruned")
+            # Regular file with deploy name is UNTOUCHED
+            self.assertTrue(os.path.isfile(file_deploy), "Regular file with deploy name must be UNTOUCHED")
+            # Nested deploy dir is UNTOUCHED
+            self.assertTrue(os.path.isdir(nested_deploy), "Nested deploy dir must be UNTOUCHED")
+            # Non-matching file is UNTOUCHED
+            self.assertTrue(os.path.isfile(other_file), "Non-matching file must be UNTOUCHED")
+
+    def test_bash_prune_rollback_retention_execution(self):
+        """14. Test bash execution of prune_rollback_retention if bash is available."""
+        import shutil
+        bash_bin = shutil.which("bash")
+        if not bash_bin and os.path.isfile(r"C:\Program Files\Git\bin\bash.exe"):
+            bash_bin = r"C:\Program Files\Git\bin\bash.exe"
+
+        if not bash_bin:
+            self.skipTest("bash not found in environment")
+
+        # Extract function from workflow
+        func_match = re.search(r"(prune_rollback_retention\(\)\s*\{[\s\S]*?\n            \})", self.content)
+        self.assertIsNotNone(func_match, "prune_rollback_retention function must exist in workflow")
+        bash_func = func_match.group(1).replace('\\"', '"').replace('\\$', '$')
+
+        with tempfile.TemporaryDirectory() as base_tmp:
+            # Use forward slashes for bash script
+            posix_base = base_tmp.replace("\\", "/")
+            test_sh = os.path.join(base_tmp, "test_prune.sh")
+
+            script_body = f"""#!/usr/bin/env bash
+set -euo pipefail
+export MSYS="winsymlinks:nativestrict"
+
+WEBAPP_DIR="{posix_base}/webapp"
+mkdir -p "$WEBAPP_DIR/delete"
+
+{bash_func}
+
+# 4 valid immediate directories
+mkdir -p "$WEBAPP_DIR/delete/deploy-1111111111111111111111111111111111111111-20260926010000"
+sleep 0.05
+mkdir -p "$WEBAPP_DIR/delete/deploy-2222222222222222222222222222222222222222-20260926020000"
+sleep 0.05
+mkdir -p "$WEBAPP_DIR/delete/deploy-3333333333333333333333333333333333333333-20260926030000"
+sleep 0.05
+mkdir -p "$WEBAPP_DIR/delete/deploy-4444444444444444444444444444444444444444-20260926040000"
+
+# Regular file with deploy name
+touch "$WEBAPP_DIR/delete/deploy-5555555555555555555555555555555555555555-20260926050000"
+
+# Nested deploy-looking dir
+mkdir -p "$WEBAPP_DIR/delete/nested_dir/deploy-7777777777777777777777777777777777777777-20260926070000"
+
+# Non-matching entries
+touch "$WEBAPP_DIR/delete/manual-payment.txt"
+mkdir -p "$WEBAPP_DIR/delete/random-dir"
+
+prune_rollback_retention
+"""
+            with open(test_sh, "w", encoding="utf-8") as f:
+                f.write(script_body)
+
+            res = subprocess.run([bash_bin, test_sh], capture_output=True, text=True)
+            self.assertEqual(res.returncode, 0, f"Bash script failed: {res.stderr}\nStdout: {res.stdout}")
+
+            del_dir = os.path.join(base_tmp, "webapp", "delete")
+            # 2 newest valid directories exist
+            self.assertTrue(os.path.isdir(os.path.join(del_dir, "deploy-4444444444444444444444444444444444444444-20260926040000")))
+            self.assertTrue(os.path.isdir(os.path.join(del_dir, "deploy-3333333333333333333333333333333333333333-20260926030000")))
+            # Older valid directories pruned
+            self.assertFalse(os.path.exists(os.path.join(del_dir, "deploy-2222222222222222222222222222222222222222-20260926020000")))
+            self.assertFalse(os.path.exists(os.path.join(del_dir, "deploy-1111111111111111111111111111111111111111-20260926010000")))
+            # Regular file with deploy name untouched
+            self.assertTrue(os.path.isfile(os.path.join(del_dir, "deploy-5555555555555555555555555555555555555555-20260926050000")))
+            # Nested dir untouched
+            self.assertTrue(os.path.isdir(os.path.join(del_dir, "nested_dir", "deploy-7777777777777777777777777777777777777777-20260926070000")))
+            # Non-matching entries untouched
+            self.assertTrue(os.path.isfile(os.path.join(del_dir, "manual-payment.txt")))
+            self.assertTrue(os.path.isdir(os.path.join(del_dir, "random-dir")))
 
     def test_no_automatic_git_maintenance(self):
-        """11. Workflow does not introduce automatic Git gc/prune/repack/reflog expire."""
+        """15. Workflow does not introduce automatic Git gc/prune/repack/reflog expire."""
         forbidden_commands = [
             "git gc",
             "git prune",
@@ -156,11 +423,11 @@ class TestDeployVpsWorkflowHygiene(unittest.TestCase):
             self.assertNotIn(cmd, self.content, f"Forbidden automatic git maintenance command found: {cmd}")
 
     def test_truthful_failure_diagnostics(self):
-        """12. Failure path only prints preserving staging if staging directory exists."""
+        """16. Failure path only prints preserving staging if staging directory exists."""
         self.assertIn("trap 'if [[ -d \\\"\\$STAGING_DIR\\\" ]]; then echo \\\"[DEPLOY_FAILURE] Deployment failed; preserving staging directory for diagnostics: \\$STAGING_DIR\\\" >&2; fi' ERR", self.content)
 
     def test_simulation_of_rollback_retention_regex(self):
-        """13. Empirical regex simulation: verify only valid deploy directories match."""
+        """17. Empirical regex simulation: verify only valid deploy directories match."""
         regex = re.compile(r"^deploy-[0-9a-fA-F]{40}-[0-9]{14}$")
         valid_samples = [
             "deploy-068b051d99ee6b4c3a20cf8e9e345c36e68343cb-20260926102120",
@@ -184,3 +451,4 @@ class TestDeployVpsWorkflowHygiene(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
