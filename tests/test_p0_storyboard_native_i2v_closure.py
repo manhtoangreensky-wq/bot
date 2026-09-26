@@ -21,6 +21,7 @@ from services import (
     remote_worker_api,
     video_final_output,
     video_project_queue as queue,
+    video_provider_catalog,
     video_provider_router,
     video_real_render_connector,
     video_storyboard2,
@@ -667,4 +668,375 @@ def test_end_to_end_provider_free_storyboard_execution(sample_panels, tmp_path, 
     assert wire2["duration"] == 8
     assert wire2["aspect_ratio"] == "9:16"
     assert wire2["image"].startswith("data:image/") or len(wire2["image"]) > 20
+
+
+def test_first_red_1_remote_worker_result_json_and_asset_pack_scene_card_recovery():
+    """MANDATORY FIRST RED 1: REMOTE_WORKER_RESULT_JSON_AND_ASSET_PACK_SCENE_CARD_RECOVERY
+
+    build_worker_job_payload() input with:
+    - no project.scene_cards_json
+    - no hydrated top-level scene_cards
+    - scene_cards present only in result_json, then separately only in asset_pack_json.
+    Must parse persisted_result + asset_pack BEFORE resolving scene_cards without UnboundLocalError.
+    """
+    card1 = {"scene_index": 1, "image_path": "/path/to/panel1.png", "prompt": "Scene 1"}
+
+    # Case A: scene_cards present only in result_json
+    job_result_only = {
+        "id": 1001,
+        "product_type": "storyboard_prompt",
+        "project": {},
+        "result_json": json.dumps({"scene_cards": [card1]}),
+    }
+    payload_a = remote_worker_api.build_worker_job_payload(job_result_only)
+    assert len(payload_a.get("scene_cards") or []) == 1
+    assert payload_a["scene_cards"][0]["scene_index"] == 1
+
+    # Case B: scene_cards present only in asset_pack_json
+    job_asset_pack_only = {
+        "id": 1002,
+        "product_type": "storyboard_prompt",
+        "project": {
+            "asset_pack_json": json.dumps({"scene_cards": [card1]}),
+        },
+        "result_json": "{}",
+    }
+    payload_b = remote_worker_api.build_worker_job_payload(job_asset_pack_only)
+    assert len(payload_b.get("scene_cards") or []) == 1
+    assert payload_b["scene_cards"][0]["scene_index"] == 1
+
+
+def test_first_red_2_non_storyboard_worker_payload_must_not_inherit_storyboard_defaults():
+    """MANDATORY FIRST RED 2: NON_STORYBOARD_WORKER_PAYLOAD_MUST_NOT_INHERIT_STORYBOARD_DEFAULTS
+
+    Construct legacy/non-storyboard Product Video jobs with missing optional route metadata.
+    Must NOT invent:
+    - orchestration_mode=per_scene_8s
+    - required_capability=image_to_video
+    - selected_provider=key4u_video
+    - selected_model/model=kling-v3
+    """
+    legacy_job = {
+        "id": 2001,
+        "product_type": "video_ai_prompt",
+        "project": {
+            "product_type": "video_ai_prompt",
+            "profile_id": "standard_promo",
+            "scene_cards_json": "[]",
+        },
+        "result_json": "{}",
+    }
+    payload = remote_worker_api.build_worker_job_payload(legacy_job)
+    assert payload.get("orchestration_mode") != "per_scene_8s"
+    assert payload.get("required_capability") != "image_to_video"
+    assert payload.get("selected_provider") != "key4u_video"
+    assert payload.get("selected_model") != "kling-v3"
+    assert payload.get("model") != "kling-v3"
+
+
+def test_first_red_3_pinned_wire_model_must_survive_to_video_generation_request(sample_panels, tmp_path):
+    """MANDATORY FIRST RED 3: PINNED_WIRE_MODEL_MUST_SURVIVE_TO_VIDEO_GENERATION_REQUEST
+
+    invoice.pinned_wire_model
+    -> kickoff result_json
+    -> hydrate
+    -> remote worker payload
+    -> connector model context
+    -> VideoGenerationRequest metadata
+    must remain exactly the approved model.
+    """
+    panel1, panel2 = sample_panels
+    approved_wire_model = "kling-v3"
+
+    job = {
+        "id": 3001,
+        "job_id": 3001,
+        "product_type": "storyboard_prompt",
+        "engine_route": "storyboard_to_video",
+        "engine_adapter": "storyboard_scene_image_video_engine",
+        "orchestration_mode": "per_scene_8s",
+        "required_capability": "image_to_video",
+        "selected_provider": "key4u_video",
+        "selected_model": approved_wire_model,
+        "model": approved_wire_model,
+        "pinned_wire_model": approved_wire_model,
+        "scene_count": 2,
+        "scene_cards": [
+            {"scene_index": 1, "image_path": panel1, "video_prompt": "Scene 1"},
+            {"scene_index": 2, "image_path": panel2, "video_prompt": "Scene 2"},
+        ],
+    }
+
+    # Verify worker payload retains pinned_wire_model
+    worker_payload = remote_worker_api.build_worker_job_payload(job)
+    assert worker_payload.get("pinned_wire_model") == approved_wire_model
+
+    captured_requests: list[VideoGenerationRequest] = []
+
+    def mock_run_provider(req, **kwargs):
+        captured_requests.append(req)
+        clip_file = tmp_path / "clip.mp4"
+        clip_file.write_bytes(b"\x00\x00\x00 ftypisom" + b"\x00" * 256)
+        return {
+            "ok": True,
+            "status": "completed",
+            "provider": "key4u_video",
+            "provider_task_id": "test_wire_pin_task",
+            "output_path": str(clip_file),
+        }
+
+    raw_output = str(tmp_path / "scene_01_wire.mp4")
+    Path(raw_output).write_bytes(b"\x00\x00\x00 ftypisom" + b"\x00" * 256)
+
+    scene_obj = MagicMock()
+    scene_obj.scene_id = 1
+    scene_obj.video_prompt = "Scene 1 with wire pin"
+    scene_obj._toan_aas_job = worker_payload
+
+    with patch("services.video_real_render_connector.run_provider_generation", side_effect=mock_run_provider):
+        asyncio.run(
+            video_real_render_connector._render_scene_async(
+                scene_obj,
+                raw_output,
+                ["key4u_video"],
+            )
+        )
+
+    assert len(captured_requests) == 1
+    req = captured_requests[0]
+    assert req.metadata.get("pinned_wire_model") == approved_wire_model
+    assert req.metadata.get("selected_model") == approved_wire_model
+
+
+def test_first_red_4_scene_index_binds_card_prompt_and_panel_together(sample_panels):
+    """MANDATORY FIRST RED 4: SCENE_INDEX_BINDS_CARD_PROMPT_AND_PANEL_TOGETHER
+
+    Create shuffled scene_cards: [scene_index=2, scene_index=1].
+    Scene 1 must resolve Scene 1 prompt/card and Panel 1 image.
+    Scene 2 must resolve Scene 2 prompt/card and Panel 2 image.
+    real_video_scene_plan() must resolve cards by scene_index, not list position.
+    """
+    panel1, panel2 = sample_panels
+    job = {
+        "product_type": "storyboard_prompt",
+        "scene_count": 2,
+        "scene_cards": [
+            {"scene_index": 2, "video_prompt": "Unique Prompt Scene 2 Moon", "image_path": panel2},
+            {"scene_index": 1, "video_prompt": "Unique Prompt Scene 1 Planet", "image_path": panel1},
+        ],
+    }
+
+    # 1. real_video_scene_plan must resolve Scene 1 to Prompt 1 and Scene 2 to Prompt 2
+    plan = video_real_render_connector.real_video_scene_plan(job)
+    scenes = plan.get("scenes") or []
+    assert len(scenes) == 2
+    assert "Unique Prompt Scene 1 Planet" in scenes[0]["video_prompt"], f"Scene 1 received wrong prompt: {scenes[0]['video_prompt']}"
+    assert "Unique Prompt Scene 2 Moon" in scenes[1]["video_prompt"], f"Scene 2 received wrong prompt: {scenes[1]['video_prompt']}"
+
+    # 2. storyboard_scene_image_paths must resolve Scene 1 to panel1 and Scene 2 to panel2
+    paths1 = video_real_render_connector.storyboard_scene_image_paths(job, scene_index=1)
+    assert paths1 == [panel1]
+    paths2 = video_real_render_connector.storyboard_scene_image_paths(job, scene_index=2)
+    assert paths2 == [panel2]
+
+
+def test_first_red_5_partial_storyboard_card_coverage_must_fail_closed(sample_panels, tmp_path):
+    """MANDATORY FIRST RED 5: PARTIAL_STORYBOARD_CARD_COVERAGE_MUST_FAIL_CLOSED
+
+    Declared scene_count=2, but only scene_index=1 materializes.
+    - Do not silently reduce scene_count to 1
+    - Fail provider-free before submit/delivery, no charge, provider calls=0
+    - Missing Scene 1 while Scene 2 exists must return NO panel for Scene 1 (no positional leakage).
+    """
+    panel1, panel2 = sample_panels
+
+    # A: Positional leakage test: Scene 1 missing while Scene 2 exists
+    job_missing_scene_1 = {
+        "product_type": "storyboard_prompt",
+        "scene_count": 2,
+        "scene_cards": [
+            {"scene_index": 2, "image_path": panel2, "video_prompt": "Scene 2 only"},
+        ],
+    }
+    # storyboard_scene_image_paths(scene_index=1) MUST return empty, NOT panel2!
+    scene_1_paths = video_real_render_connector.storyboard_scene_image_paths(job_missing_scene_1, scene_index=1)
+    assert scene_1_paths == [], f"Expected empty paths for missing Scene 1, got: {scene_1_paths}"
+
+    # B: Partial coverage test: declared scene_count=2, only scene 1 card exists
+    job_partial = {
+        "id": 5001,
+        "product_type": "storyboard_prompt",
+        "engine_adapter": "storyboard_scene_image_video_engine",
+        "required_capability": "image_to_video",
+        "scene_count": 2,
+        "scene_cards": [
+            {"scene_index": 1, "image_path": panel1, "video_prompt": "Scene 1 only"},
+        ],
+    }
+    assert video_real_render_connector._scene_count(job_partial) == 2
+
+    # Attempting to render Scene 2 must fail closed before calling provider
+    scene_2_obj = MagicMock()
+    scene_2_obj.scene_id = 2
+    scene_2_obj.video_prompt = "Scene 2 prompt"
+    scene_2_obj._toan_aas_job = job_partial
+
+    provider_called = False
+
+    def mock_run_provider(req, **kwargs):
+        nonlocal provider_called
+        provider_called = True
+        return {"ok": True}
+
+    with patch("services.video_real_render_connector.run_provider_generation", side_effect=mock_run_provider):
+        with pytest.raises(RealVideoRenderError) as exc_info:
+            asyncio.run(
+                video_real_render_connector._render_scene_async(
+                    scene_2_obj,
+                    str(tmp_path / "scene_02_partial.mp4"),
+                    ["key4u_video"],
+                )
+            )
+
+    assert provider_called is False, "Provider MUST NOT be called when Scene 2 card is missing"
+    assert exc_info.value.diagnostics.get("no_charge") is True
+
+
+def test_first_red_6_i2v_cost_tier_exception_must_be_exactly_scoped():
+    """MANDATORY FIRST RED 6: I2V_COST_TIER_EXCEPTION_MUST_BE_EXACTLY_SCOPED
+
+    High/advanced I2V models cannot bypass lower product tiers merely because
+    their catalog capability contains image_to_video.
+    Only approved Key4U Kling exception on storyboard/i2v is permitted.
+    """
+    advanced_model = {
+        "provider": "runway_video",
+        "model": "runway-gen3",
+        "family": "runway",
+        "cost_tier": "advanced",
+        "capabilities": ["image_to_video"],
+    }
+    # Advanced model must be rejected on low and basic tiers
+    assert video_provider_catalog._cost_tier_allowed("low", advanced_model, required_capability="image_to_video") is False
+    assert video_provider_catalog._cost_tier_allowed("basic", advanced_model, required_capability="image_to_video") is False
+
+    # Key4U Kling-v3 must be allowed on low and basic tiers for image_to_video
+    k4u_kling = {
+        "provider": "key4u_video",
+        "model": "kling-v3",
+        "family": "kling",
+        "cost_tier": "common",
+        "capabilities": ["image_to_video"],
+    }
+    assert video_provider_catalog._cost_tier_allowed(
+        "low", k4u_kling, required_capability="image_to_video", provider="key4u_video", model="kling-v3"
+    ) is True
+    assert video_provider_catalog._cost_tier_allowed(
+        "basic", k4u_kling, required_capability="image_to_video", provider="key4u_video", model="kling-v3"
+    ) is True
+
+
+def test_first_red_7_duplicate_confirm_true_no_new_submit(sample_panels, tmp_path):
+    """MANDATORY FIRST RED 7: DUPLICATE_CONFIRM_TRUE_NO_NEW_SUBMIT
+
+    Existing scene with accepted provider_task_id:
+    - Provider polling/recovery may run
+    - NEW submit transport call count MUST equal 0
+    - Same task identity retained, no double charge
+    """
+    panel1, _ = sample_panels
+    existing_task_id = "accepted_k4u_task_999"
+
+    job = {
+        "id": 7001,
+        "product_type": "storyboard_prompt",
+        "scene_count": 1,
+        "scene_cards": [{"scene_index": 1, "image_path": panel1}],
+        "scene_tasks": [
+            {
+                "scene_index": 1,
+                "scene_id": 1,
+                "provider": "key4u_video",
+                "provider_task_id": existing_task_id,
+                "status": "task_submitted",
+                "provider_submit_called": True,
+            }
+        ],
+    }
+
+    scene_obj = MagicMock()
+    scene_obj.scene_id = 1
+    scene_obj.video_prompt = "Scene 1"
+    scene_obj._toan_aas_job = job
+
+    submit_called = False
+
+    def mock_run_provider(req, **kwargs):
+        nonlocal submit_called
+        # Verify req.metadata carries provider_task_id of the existing task
+        assert req.metadata.get("provider_task_id") == existing_task_id or req.metadata.get("provider_pending_task_id") == existing_task_id
+        if not req.metadata.get("provider_task_id") and not req.metadata.get("provider_pending_task_id"):
+            submit_called = True
+        return {
+            "ok": True,
+            "status": "completed",
+            "provider": "key4u_video",
+            "provider_task_id": existing_task_id,
+            "output_path": str(tmp_path / "dup_scene_1.mp4"),
+        }
+
+    raw_output = str(tmp_path / "dup_scene_1.mp4")
+    Path(raw_output).write_bytes(b"\x00\x00\x00 ftypisom" + b"\x00" * 256)
+
+    with patch("services.video_real_render_connector.run_provider_generation", side_effect=mock_run_provider):
+        result = asyncio.run(
+            video_real_render_connector._render_scene_async(
+                scene_obj,
+                raw_output,
+                ["key4u_video"],
+            )
+        )
+
+    assert submit_called is False
+    assert result.get("provider_task_id") == existing_task_id
+
+
+def test_worker_payload_duration_consistency(sample_panels):
+    """WORKER_PAYLOAD_DURATION_CONSISTENCY:
+    For storyboard per_scene_8s:
+    scene_count=2
+    scene_duration_seconds=8
+    expected_duration_seconds=16
+    duration_seconds=16
+
+    No 6-second legacy value may survive in the canonical Storyboard worker payload.
+    """
+    panel1, panel2 = sample_panels
+    storyboard_job = {
+        "id": 8001,
+        "product_type": "storyboard_prompt",
+        "engine_route": "storyboard_to_video",
+        "engine_adapter": "storyboard_scene_image_video_engine",
+        "orchestration_mode": "per_scene_8s",
+        "required_capability": "image_to_video",
+        "scene_count": 2,
+        "scene_cards": [
+            {"scene_index": 1, "image_path": panel1},
+            {"scene_index": 2, "image_path": panel2},
+        ],
+        "project": {
+            "product_type": "storyboard_prompt",
+            "scene_count": 2,
+        },
+    }
+
+    payload = remote_worker_api.build_worker_job_payload(storyboard_job)
+    assert payload.get("scene_count") == 2
+    assert payload.get("scene_duration_seconds") == 8
+    assert payload.get("expected_duration_seconds") == 16
+    assert payload.get("duration_seconds") == 16
+    # Assert 6 or 12 does not appear
+    assert payload.get("expected_duration_seconds") != 12
+    assert payload.get("expected_duration_seconds") != 6
+
 

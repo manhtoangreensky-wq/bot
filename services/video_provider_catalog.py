@@ -279,10 +279,27 @@ def _normalize_key4u_official_google_veo_submit_endpoint(
     return submit_url, submit_source
 
 
-def _cost_tier_allowed(product_tier: str, model_cfg: dict[str, Any], *, required_capability: str = "") -> bool:
-    if required_capability == "image_to_video" and (model_cfg.get("family") == "kling" or "image_to_video" in (model_cfg.get("capabilities") or [])):
-        return True
+def _cost_tier_allowed(
+    product_tier: str,
+    model_cfg: dict[str, Any],
+    *,
+    required_capability: str = "",
+    provider: str = "",
+    model: str = "",
+) -> bool:
+    cfg_provider = str(provider or model_cfg.get("provider") or "").strip().lower()
+    cfg_model = str(model or model_cfg.get("model") or "").strip().lower()
+    cfg_family = str(model_cfg.get("family") or "").strip().lower()
     model_cost = str(model_cfg.get("cost_tier") or model_cfg.get("tier") or "").strip().lower()
+
+    if (
+        required_capability == "image_to_video"
+        and (cfg_provider in {"key4u_video", ""} or not cfg_provider)
+        and (cfg_family == "kling" or "kling" in cfg_model)
+        and model_cost in {"", "common"}
+    ):
+        return True
+
     if not model_cost:
         return True
     product_score = _TIER_COST_ORDER.get(normalize_tier(product_tier), 2)
@@ -680,7 +697,7 @@ def resolve_product_video_model(
         if not cfg:
             rejected.append({"provider": provider, "model": model, "reason": MODEL_UNKNOWN, "source": item.get("source")})
             continue
-        if not _cost_tier_allowed(tier_key, cfg, required_capability=required_capability):
+        if not _cost_tier_allowed(tier_key, cfg, required_capability=required_capability, provider=provider, model=model):
             rejected.append({"provider": provider, "model": model, "reason": "model_cost_tier_exceeds_product_tier", "source": item.get("source")})
             continue
         if requires_concat and not cfg.get("supports_concat"):
@@ -749,7 +766,7 @@ def resolve_product_video_model(
             )
             if (
                 not fallback_cfg
-                or not _cost_tier_allowed(tier_key, fallback_cfg, required_capability=required_capability)
+                or not _cost_tier_allowed(tier_key, fallback_cfg, required_capability=required_capability, provider=fallback_provider, model=fallback_model)
                 or (requires_concat and not fallback_cfg.get("supports_concat"))
                 or not _model_supports(
                     fallback_cfg,

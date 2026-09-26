@@ -1283,8 +1283,11 @@ def product_video_scene_duration_seconds(job: dict | None = None) -> int:
             pass
     is_tier_700 = tier_int == 700 or quality_key == "kling_long_audio_15"
     is_selfshot = product_type in {"self_shot_scene_change", "self_shot_cinematic_transform"}
+    is_storyboard = product_type in {"storyboard_prompt", "storyboard_to_video"} or str(job.get("orchestration_mode") or "").strip().lower() == "per_scene_8s"
     if is_tier_700:
         default_scene_seconds = 15
+    elif is_storyboard:
+        default_scene_seconds = 8
     elif canonical_tier_seconds > 0 and is_selfshot:
         default_scene_seconds = canonical_tier_seconds
     else:
@@ -3024,15 +3027,23 @@ def storyboard_scene_image_paths(job: dict | None = None, scene_index: int = 1) 
     target_index = max(1, _safe_int(scene_index, 1))
     cards = _scene_cards(job)
     for fallback_index, card in enumerate(cards, start=1):
+        if not isinstance(card, dict):
+            continue
         card_index = max(1, _safe_int(card.get("scene_index") or card.get("scene_id"), fallback_index))
         if card_index != target_index:
             continue
         paths = video_final_output.extract_local_image_paths(card, limit=2)
         if paths:
             return paths
-    all_paths = _local_image_sequence_paths(job)
-    if target_index <= len(all_paths):
-        return [all_paths[target_index - 1]]
+    panels = (job or {}).get("storyboard_panels") or ((job or {}).get("draft") or {}).get("storyboard_panels") or []
+    if isinstance(panels, list):
+        for fallback_index, panel in enumerate(panels, start=1):
+            if isinstance(panel, dict):
+                p_idx = max(1, _safe_int(panel.get("scene_index") or panel.get("scene_id"), fallback_index))
+                if p_idx == target_index:
+                    paths = video_final_output.extract_local_image_paths(panel, limit=2)
+                    if paths:
+                        return paths
     return []
 
 
@@ -3124,7 +3135,14 @@ def real_video_scene_plan(job: dict | None = None) -> dict:
     cards = _scene_cards(job)
     scenes = []
     for index in range(1, count + 1):
-        card = cards[index - 1] if index - 1 < len(cards) else {}
+        card = {}
+        for fallback_idx, c in enumerate(cards, start=1):
+            if not isinstance(c, dict):
+                continue
+            c_idx = max(1, _safe_int(c.get("scene_index") or c.get("scene_id"), fallback_idx))
+            if c_idx == index:
+                card = c
+                break
         prompt = _safe_text(
             card.get("provider_prompt")
             or card.get("video_prompt")
@@ -5263,6 +5281,7 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "product_video_tier",
             "selected_provider",
             "selected_model",
+            "pinned_wire_model",
             "selected_family",
             "selected_model_source",
             "selected_quality",
@@ -5621,10 +5640,13 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "allow_provider_pending": True,
             "claim_payload_provider_key": str((job or {}).get("selected_provider") or (job or {}).get("submit_provider_key") or ""),
             "claim_payload_has_provider_config": bool((job or {}).get("provider_config") or (job or {}).get("provider_submit_url") or (job or {}).get("provider_auth_header_value")),
-            "provider_pending_provider": str(pending_scene_task.get("provider") or (job or {}).get("provider_pending_provider") or "") if pending_matches_request else "",
+            "provider_pending_provider": str(pending_scene_task.get("provider") or (job or {}).get("provider_pending_provider") or pending_provider_key or "") if pending_matches_request else "",
             "provider_pending_task_id": pending_task_id if pending_matches_request else "",
+            "provider_task_id": pending_task_id if pending_matches_request else "",
             "provider_pending_video_id": pending_video_id if pending_matches_request else "",
+            "provider_video_id": pending_video_id if pending_matches_request else "",
             "provider_pending_request_job_id": pending_request_job_id if pending_matches_request else "",
+            "pinned_wire_model": str(model_context.get("pinned_wire_model") or (job or {}).get("pinned_wire_model") or (asset_pack or {}).get("pinned_wire_model") or (invoice or {}).get("pinned_wire_model") or ""),
             "provider_pending_attempts": ((job or {}).get("provider_pending_attempts") or []) if pending_matches_request else [],
             "provider_started_at": str((job or {}).get("provider_started_at") or "") if pending_matches_request else "",
             "provider_started_at_epoch": (job or {}).get("provider_started_at_epoch") if pending_matches_request else "",

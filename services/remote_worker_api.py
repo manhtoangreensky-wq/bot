@@ -1464,20 +1464,26 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         return {}
     project = dict(hydrated_job.get("project") or {})
     scenes = list(hydrated_job.get("scenes") or [])
-    scene_cards = _scene_cards_from_project(project, scenes) or list(hydrated_job.get("scene_cards") or []) or list((persisted_result or {}).get("scene_cards") or []) or list(asset_pack.get("scene_cards") or [])
     persisted_result = _json_loads(hydrated_job.get("result_json"), {})
     if not isinstance(persisted_result, dict):
         persisted_result = {}
     asset_pack = strip_secret_fields(_json_loads(project.get("asset_pack_json"), {}))
     invoice = strip_secret_fields(_json_loads(project.get("invoice_json"), {}))
     addon_plan = strip_secret_fields(_json_loads(project.get("addon_plan_json"), {}))
+    scene_cards = (
+        _scene_cards_from_project(project, scenes)
+        or list(hydrated_job.get("scene_cards") or [])
+        or list(persisted_result.get("scene_cards") or [])
+        or list(asset_pack.get("scene_cards") or [])
+        or list(invoice.get("scene_cards") or [])
+    )
     quality_source = project.get("quality_tier")
     if quality_source in (None, ""):
         quality_source = hydrated_job.get("quality_tier")
     quality_tier = _safe_int(quality_source, 200)
-    scene_count = max(1, _safe_int(project.get("scene_count") or len(scene_cards) or 1, 1))
-    ratio = str(project.get("ratio") or "9:16")
-    render_mode = str(asset_pack.get("render_mode") or invoice.get("render_mode") or RENDER_MODE_REAL).strip().lower().replace("-", "_")
+    scene_count = max(1, _safe_int(project.get("scene_count") or hydrated_job.get("scene_count") or len(scene_cards) or 1, 1))
+    ratio = str(project.get("ratio") or hydrated_job.get("aspect_ratio") or hydrated_job.get("ratio") or "9:16")
+    render_mode = str(asset_pack.get("render_mode") or invoice.get("render_mode") or hydrated_job.get("render_mode") or RENDER_MODE_REAL).strip().lower().replace("-", "_")
     if render_mode in {"test_pattern", "admin_test"}:
         render_mode = RENDER_MODE_ADMIN_TEST_PATTERN
     if render_mode not in {RENDER_MODE_REAL, RENDER_MODE_ADMIN_TEST_PATTERN, RENDER_MODE_UNAVAILABLE}:
@@ -1490,16 +1496,83 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         or ""
     )[:8000]
     cleaned_user_prompt = re.sub(r"\s+", " ", str(asset_pack.get("cleaned_user_prompt") or original_user_prompt or "")).strip()[:8000]
-    provider_order = asset_pack.get("provider_order") or invoice.get("provider_order") or "shopaikey,key4u"
-    source = str(asset_pack.get("source") or invoice.get("source") or REMOTE_WORKER_PRODUCT_VIDEO_SOURCE)
+    provider_order = asset_pack.get("provider_order") or invoice.get("provider_order") or hydrated_job.get("provider_order") or "shopaikey,key4u"
+    source = str(asset_pack.get("source") or invoice.get("source") or hydrated_job.get("source") or REMOTE_WORKER_PRODUCT_VIDEO_SOURCE)
     product_type = str(
-        asset_pack.get("product_type")
+        hydrated_job.get("product_type")
+        or asset_pack.get("product_type")
         or asset_pack.get("video_product_type")
         or invoice.get("product_type")
+        or project.get("product_type")
         or project.get("profile_id")
         or ""
     )
-    engine_adapter = str(asset_pack.get("engine_adapter") or invoice.get("engine_adapter") or hydrated_job.get("engine_adapter") or "")
+    is_storyboard = product_type in {"storyboard_prompt", "storyboard_to_video"}
+    engine_adapter = str(
+        hydrated_job.get("engine_adapter")
+        or asset_pack.get("engine_adapter")
+        or invoice.get("engine_adapter")
+        or persisted_result.get("engine_adapter")
+        or ("storyboard_scene_image_video_engine" if is_storyboard else "")
+    )
+    orchestration_mode = str(
+        hydrated_job.get("orchestration_mode")
+        or asset_pack.get("orchestration_mode")
+        or invoice.get("orchestration_mode")
+        or persisted_result.get("orchestration_mode")
+        or ("per_scene_8s" if is_storyboard else "")
+    )
+    required_capability = str(
+        hydrated_job.get("required_capability")
+        or asset_pack.get("required_capability")
+        or invoice.get("required_capability")
+        or persisted_result.get("required_capability")
+        or ("image_to_video" if is_storyboard else "")
+    )
+    selected_provider = str(
+        hydrated_job.get("selected_provider")
+        or asset_pack.get("selected_provider")
+        or invoice.get("selected_provider")
+        or persisted_result.get("selected_provider")
+        or ("key4u_video" if is_storyboard else "")
+    )
+    selected_model = str(
+        hydrated_job.get("selected_model")
+        or asset_pack.get("selected_model")
+        or invoice.get("selected_model")
+        or hydrated_job.get("model")
+        or persisted_result.get("selected_model")
+        or persisted_result.get("model")
+        or ("kling-v3" if is_storyboard else "")
+    )
+    model = str(
+        hydrated_job.get("model")
+        or asset_pack.get("model")
+        or invoice.get("model")
+        or hydrated_job.get("selected_model")
+        or persisted_result.get("model")
+        or persisted_result.get("selected_model")
+        or ("kling-v3" if is_storyboard else "")
+    )
+    pinned_wire_model = str(
+        hydrated_job.get("pinned_wire_model")
+        or asset_pack.get("pinned_wire_model")
+        or invoice.get("pinned_wire_model")
+        or persisted_result.get("pinned_wire_model")
+        or (selected_model if is_storyboard else "")
+    )
+    scene_duration_seconds = (
+        8 if (is_storyboard or orchestration_mode == "per_scene_8s")
+        else _safe_int(
+            hydrated_job.get("scene_duration_seconds")
+            or asset_pack.get("scene_duration_seconds")
+            or invoice.get("scene_duration_seconds")
+            or persisted_result.get("scene_duration_seconds")
+            or 6,
+            6,
+        )
+    )
+    expected_duration_seconds = max(1, scene_count * scene_duration_seconds)
     admin_only = _safe_bool(asset_pack.get("admin_only") or invoice.get("admin_only"))
     no_charge = _safe_bool(asset_pack.get("no_charge") or invoice.get("no_charge"))
     public_user = _safe_bool(asset_pack.get("public_user") or invoice.get("public_user"))
@@ -1519,13 +1592,14 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         "profile_id": str(project.get("profile_id") or ""),
         "product_type": product_type,
         "video_flow": product_type,
-        "engine_route": str(hydrated_job.get("engine_route") or asset_pack.get("engine_route") or invoice.get("engine_route") or (persisted_result or {}).get("engine_route") or ""),
+        "engine_route": str(hydrated_job.get("engine_route") or asset_pack.get("engine_route") or invoice.get("engine_route") or persisted_result.get("engine_route") or ("storyboard_to_video" if is_storyboard else "")),
         "engine_adapter": engine_adapter,
-        "orchestration_mode": str(hydrated_job.get("orchestration_mode") or asset_pack.get("orchestration_mode") or invoice.get("orchestration_mode") or (persisted_result or {}).get("orchestration_mode") or "per_scene_8s"),
-        "required_capability": str(hydrated_job.get("required_capability") or asset_pack.get("required_capability") or invoice.get("required_capability") or (persisted_result or {}).get("required_capability") or "image_to_video"),
-        "selected_provider": str(hydrated_job.get("selected_provider") or asset_pack.get("selected_provider") or invoice.get("selected_provider") or (persisted_result or {}).get("selected_provider") or "key4u_video"),
-        "selected_model": str(hydrated_job.get("selected_model") or asset_pack.get("selected_model") or invoice.get("selected_model") or hydrated_job.get("model") or (persisted_result or {}).get("selected_model") or (persisted_result or {}).get("model") or "kling-v3"),
-        "model": str(hydrated_job.get("model") or asset_pack.get("model") or invoice.get("model") or hydrated_job.get("selected_model") or (persisted_result or {}).get("model") or "kling-v3"),
+        "orchestration_mode": orchestration_mode,
+        "required_capability": required_capability,
+        "selected_provider": selected_provider,
+        "selected_model": selected_model,
+        "model": model,
+        "pinned_wire_model": pinned_wire_model,
         "topic": str(project.get("topic") or "")[:500],
         "prompt_text": str(project.get("prompt_text") or "")[:8000],
         "original_user_prompt": original_user_prompt,
@@ -1536,8 +1610,10 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         "quality_tier": quality_tier,
         "package_xu": quality_tier,
         "scene_count": scene_count,
+        "scene_duration_seconds": scene_duration_seconds,
+        "duration_seconds": expected_duration_seconds,
         "aspect_ratio": ratio,
-        "expected_duration_seconds": max(1, scene_count * 6),
+        "expected_duration_seconds": expected_duration_seconds,
         "provider_order": provider_order,
         "render_mode": render_mode,
         "test_pattern": False,
