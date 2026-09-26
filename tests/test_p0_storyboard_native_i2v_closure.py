@@ -1040,3 +1040,231 @@ def test_worker_payload_duration_consistency(sample_panels):
     assert payload.get("expected_duration_seconds") != 6
 
 
+def test_storyboard_model_authority_constants():
+    """Verify Storyboard I2V model authority constants in both connector and bot."""
+    assert video_real_render_connector.STORYBOARD_DEFAULT_I2V_MODEL == "kling-v3"
+    assert video_real_render_connector.STORYBOARD_PROVEN_I2V_MODELS == {"kling-v3", "kling-3.0-turbo"}
+    assert video_real_render_connector.STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER == "storyboard_i2v_model_not_proven_no_charge"
+    assert video_real_render_connector.STORYBOARD_I2V_MODEL_NOT_PROVEN == "storyboard_i2v_model_not_proven_no_charge"
+    assert bot.STORYBOARD_DEFAULT_I2V_MODEL == "kling-v3"
+    assert bot.STORYBOARD_PROVEN_I2V_MODELS == {"kling-v3", "kling-3.0-turbo"}
+    assert bot.STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER == "storyboard_i2v_model_not_proven_no_charge"
+    assert bot.STORYBOARD_I2V_MODEL_NOT_PROVEN == "storyboard_i2v_model_not_proven_no_charge"
+
+
+def test_storyboard_kling_3_turbo_wire_payload_construction(sample_panels):
+    """Key4U I2V wire payload with kling-3.0-turbo must serialize model_name as 'kling-3.0-turbo'."""
+    panel1, _ = sample_panels
+    req = VideoGenerationRequest(
+        job_id=9902,
+        product_type="storyboard_prompt",
+        prompt="Astronaut cat in crystal cave",
+        image_paths=[panel1],
+        ratio="9:16",
+        duration_seconds=8.0,
+        required_capability="image_to_video",
+        metadata={
+            "selected_family": "kling",
+            "selected_model": "kling-3.0-turbo",
+            "pinned_wire_model": "kling-3.0-turbo",
+            "required_capability": "image_to_video",
+        },
+    )
+    env = {
+        "KEY4U_VIDEO_MODEL": "kling-3.0-turbo",
+        "KEY4U_KLING_I2V_ENDPOINT": "https://api.key4u.shop/api/v1/kling/image2video",
+    }
+    built_payload = video_generic_http_provider.build_key4u_video_payload(req, env=env)
+    assert built_payload["model"] == "kling-3.0-turbo"
+    wire_payload = video_generic_http_provider._key4u_wire_payload(
+        built_payload, submit_url="https://api.key4u.shop/api/v1/kling/image2video"
+    )
+    assert wire_payload["model_name"] == "kling-3.0-turbo"
+    assert wire_payload["duration"] == 8
+    assert wire_payload["aspect_ratio"] == "9:16"
+
+
+@pytest.mark.parametrize(
+    "unproven_model",
+    [
+        "grok-imagine-video",
+        "sora",
+        "seedance",
+        "veo_3_1-fast",
+        "MiniMax-Hailuo-02",
+        "unsupported-model-x",
+    ],
+)
+def test_storyboard_unproven_models_fail_closed_at_draft_prepare(sample_panels, unproven_model):
+    """Any unproven I2V model in storyboard draft fails closed with zero charge."""
+    panel1, panel2 = sample_panels
+    session = {
+        "user_id": 7001,
+        "product": "storyboard_prompt",
+        "aspect_ratio": "9:16",
+        "draft": {
+            "product_id": "storyboard_prompt",
+            "b14_scene_count": 2,
+            "b14_scene_seconds": 8,
+            "b14_aspect_ratio": "9:16",
+            "b14_quality_xu": 80,
+            "b14_profile_id": "storytelling",
+            "selected_model": unproven_model,
+            "provider_order": "key4u_video",
+            "provider_chain": ["key4u_video"],
+            "scene_cards": [
+                {"scene_index": 1, "image_path": panel1, "prompt": "Scene 1"},
+                {"scene_index": 2, "image_path": panel2, "prompt": "Scene 2"},
+            ],
+            "storyboard_panels": [
+                {"scene_index": 1, "local_path": panel1},
+                {"scene_index": 2, "local_path": panel2},
+            ],
+        },
+    }
+    with pytest.raises(RealVideoRenderError) as exc_info:
+        bot.video_b14_prepare_project_for_invoice(user_id=7001, session=session)
+    assert exc_info.value.args[0] == video_real_render_connector.STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER
+    diag = exc_info.value.diagnostics
+    assert diag.get("no_charge") is True
+    assert diag.get("blocker") == video_real_render_connector.STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER
+    assert diag.get("model") == unproven_model
+    assert diag.get("allowed_models") == ["kling-3.0-turbo", "kling-v3"]
+
+
+def test_storyboard_unproven_model_fails_closed_at_render_real_video_job(tmp_path, sample_panels):
+    """Direct render_real_video_job execution fails closed if job specifies an unproven model."""
+    panel1, panel2 = sample_panels
+    job = _build_storyboard_job(panel1, panel2, job_id=9888)
+    job["selected_model"] = "grok-imagine-video"
+    with pytest.raises(RealVideoRenderError) as exc_info:
+        video_real_render_connector.render_real_video_job(job, work_dir=str(tmp_path))
+    assert exc_info.value.args[0] == video_real_render_connector.STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER
+    diag = exc_info.value.diagnostics
+    assert diag.get("no_charge") is True
+    assert diag.get("model") == "grok-imagine-video"
+
+
+def test_storyboard_kling_3_turbo_proven_expansion_e2e(tmp_path, sample_panels, monkeypatch):
+    """End-to-end verification of kling-3.0-turbo in Storyboard I2V pipeline."""
+    panel1, panel2 = sample_panels
+    db_path = str(tmp_path / "test_storyboard_turbo.db")
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    monkeypatch.setenv("KEY4U_VIDEO_ENABLED", "1")
+    monkeypatch.setenv("KEY4U_VIDEO_AUTH_HEADER_VALUE", "Bearer test_token")
+    monkeypatch.setenv("KEY4U_VIDEO_MODEL", "kling-3.0-turbo")
+    monkeypatch.setenv("KEY4U_KLING_I2V_ENDPOINT", "https://api.key4u.shop/kling/v1/videos/image2video")
+    monkeypatch.setenv("KEY4U_KLING_VIDEO_POLL_URL", "https://api.key4u.shop/kling/v1/videos/image2video/{task_id}")
+    monkeypatch.setenv("KEY4U_VIDEO_SUBMIT_URL", "https://api.key4u.shop/kling/v1/videos/image2video")
+    monkeypatch.setenv("KEY4U_VIDEO_POLL_URL", "https://api.key4u.shop/kling/v1/videos/image2video/{task_id}")
+    monkeypatch.setenv("KEY4U_VIDEO_ENDPOINT", "https://api.key4u.shop/kling/v1/videos/image2video")
+
+    conn = sqlite3.connect(db_path)
+    queue.ensure_video_project_queue_schema(conn)
+
+    session = {
+        "user_id": 7002,
+        "product": "storyboard_prompt",
+        "aspect_ratio": "9:16",
+        "draft": {
+            "product_id": "storyboard_prompt",
+            "b14_scene_count": 2,
+            "b14_scene_seconds": 8,
+            "b14_aspect_ratio": "9:16",
+            "b14_quality_xu": 80,
+            "b14_profile_id": "storytelling",
+            "selected_model": "kling-3.0-turbo",
+            "provider_order": "key4u_video",
+            "provider_chain": ["key4u_video"],
+            "scene_cards": [
+                {"scene_index": 1, "image_path": panel1, "prompt": "Scene 1: Turbo zoom"},
+                {"scene_index": 2, "image_path": panel2, "prompt": "Scene 2: Turbo pan"},
+            ],
+            "storyboard_panels": [
+                {"scene_index": 1, "local_path": panel1},
+                {"scene_index": 2, "local_path": panel2},
+            ],
+        },
+    }
+
+    # 1. Prepare project for invoice
+    project = bot.video_b14_prepare_project_for_invoice(user_id=7002, session=session)
+    project_id = int(project["project_id"])
+    persisted_project = queue.get_video_project(conn, project_id)
+    asset_pack = json.loads(persisted_project.get("asset_pack_json") or "{}")
+    invoice = json.loads(persisted_project.get("invoice_json") or "{}")
+
+    assert asset_pack.get("selected_model") == "kling-3.0-turbo"
+    assert asset_pack.get("pinned_wire_model") == "kling-3.0-turbo"
+    assert asset_pack.get("model") == "kling-3.0-turbo"
+    assert invoice.get("selected_model") == "kling-3.0-turbo"
+    assert invoice.get("pinned_wire_model") == "kling-3.0-turbo"
+    assert invoice.get("model") == "kling-3.0-turbo"
+
+    # 2. Confirm project invoice
+    confirm_res = queue.confirm_video_project_invoice(
+        conn, project_id=project_id, user_id=7002, billing_exempt=True
+    )
+    assert confirm_res["ok"] is True
+    job_id = int(confirm_res["job"]["id"])
+
+    # 3. Verify queued job persisted fields
+    job_row = queue.get_video_render_job(conn, job_id)
+    result_json = json.loads(str(job_row.get("result_json") or "{}"))
+    assert result_json.get("selected_model") == "kling-3.0-turbo"
+    assert result_json.get("pinned_wire_model") == "kling-3.0-turbo"
+    assert result_json.get("model") == "kling-3.0-turbo"
+
+    # 4. Hydrated & Worker payload
+    hydrated = queue.hydrate_video_job_payload(conn, job_row)
+    assert hydrated.get("selected_model") == "kling-3.0-turbo"
+    assert hydrated.get("pinned_wire_model") == "kling-3.0-turbo"
+    worker_payload = remote_worker_api.build_worker_job_payload(hydrated)
+    assert worker_payload.get("selected_model") == "kling-3.0-turbo"
+    assert worker_payload.get("pinned_wire_model") == "kling-3.0-turbo"
+
+    # 5. Render execution mock
+    captured_requests: list[VideoGenerationRequest] = []
+
+    def mock_run_provider(req: VideoGenerationRequest, **kwargs):
+        captured_requests.append(req)
+        scene_idx = req.metadata.get("scene_index") or len(captured_requests)
+        raw_output_path = req.metadata.get("raw_output_path") or str(tmp_path / f"scene_{scene_idx:02d}.mp4")
+        Path(raw_output_path).write_bytes(b"\x00\x00\x00 ftypisom" + b"\x00" * 256)
+        return {
+            "ok": True,
+            "status": "completed",
+            "provider": "key4u_video",
+            "provider_task_id": f"k4u_turbo_task_{scene_idx}",
+            "task_id_present": True,
+            "result_url": f"https://cdn.key4u.shop/turbo_scene_{scene_idx}.mp4",
+            "output_path": raw_output_path,
+            "raw_output_path": raw_output_path,
+            "duration": 8.0,
+            "scene_index": scene_idx,
+        }
+
+    work_dir = str(tmp_path / "turbo_workspace")
+    with patch("services.video_real_render_connector.run_provider_generation", side_effect=mock_run_provider):
+        render_res = video_real_render_connector.render_real_video_job(
+            worker_payload, work_dir
+        )
+
+    assert len(captured_requests) == 2
+    test_env = {
+        "KEY4U_VIDEO_MODEL": "kling-3.0-turbo",
+        "KEY4U_KLING_I2V_ENDPOINT": "https://api.key4u.shop/api/v1/kling/image2video",
+    }
+    for req in captured_requests:
+        assert req.metadata.get("selected_model") == "kling-3.0-turbo"
+        assert req.metadata.get("pinned_wire_model") == "kling-3.0-turbo"
+        built_payload = video_generic_http_provider.build_key4u_video_payload(
+            req, env=test_env
+        )
+        assert built_payload["model"] == "kling-3.0-turbo"
+        wire_payload = video_generic_http_provider._key4u_wire_payload(
+            built_payload, submit_url="https://api.key4u.shop/api/v1/kling/image2video"
+        )
+        assert wire_payload["model_name"] == "kling-3.0-turbo"
+
+

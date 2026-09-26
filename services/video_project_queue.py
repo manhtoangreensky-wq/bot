@@ -5245,6 +5245,47 @@ def build_product_video_confirm_kickoff_payload(
         requires_concat=per_scene_orchestration,
     )
     model_metadata = model_metadata_from_resolution(model_resolution)
+    is_storyboard_job = bool(
+        execution_product_type in {"storyboard_prompt", "storyboard_to_video"}
+        or requested_product_type in {"storyboard_prompt", "storyboard_to_video"}
+        or str(engine_contract.get("engine_route") or "").strip().lower() == "storyboard_to_video"
+        or str(engine_contract.get("engine_adapter") or "").strip().lower() == "storyboard_scene_image_video_engine"
+    )
+    if is_storyboard_job:
+        explicit_storyboard_model = str(
+            invoice.get("pinned_wire_model")
+            or invoice.get("selected_model")
+            or invoice.get("model")
+            or asset_pack.get("pinned_wire_model")
+            or asset_pack.get("selected_model")
+            or asset_pack.get("model")
+            or ""
+        ).strip()
+        if explicit_storyboard_model:
+            from services.video_real_render_connector import (
+                STORYBOARD_PROVEN_I2V_MODELS,
+                STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER,
+                RealVideoRenderError,
+            )
+            if explicit_storyboard_model not in STORYBOARD_PROVEN_I2V_MODELS:
+                raise RealVideoRenderError(
+                    STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER,
+                    diagnostics={
+                        "ok": False,
+                        "provider": "key4u_video",
+                        "model": explicit_storyboard_model,
+                        "blocker": STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER,
+                        "allowed_models": sorted(STORYBOARD_PROVEN_I2V_MODELS),
+                        "no_charge": True,
+                    },
+                )
+            model_metadata["selected_model"] = explicit_storyboard_model
+            model_metadata["pinned_wire_model"] = explicit_storyboard_model
+            model_metadata["model"] = explicit_storyboard_model
+            if "provider_model_map" in model_metadata and isinstance(model_metadata["provider_model_map"], dict):
+                model_metadata["provider_model_map"]["key4u_video"] = explicit_storyboard_model
+            else:
+                model_metadata["provider_model_map"] = {"key4u_video": explicit_storyboard_model}
     if scene_tasks:
         for task in scene_tasks:
             task.update(

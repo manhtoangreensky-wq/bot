@@ -573,6 +573,7 @@ def _base_video_payload(request: VideoGenerationRequest, env: dict[str, str] | o
         "expected_duration_seconds",
         "selected_provider",
         "selected_model",
+        "pinned_wire_model",
         "selected_family",
         "selected_model_source",
         "selected_quality",
@@ -840,10 +841,10 @@ def _key4u_wire_payload(
             model_candidate = str(
                 metadata.get("pinned_wire_model")
                 or data.get("model_name")
-                or defaults.get("model_name")
                 or data.get("model")
-                or defaults.get("model")
                 or metadata.get("selected_model")
+                or defaults.get("model_name")
+                or defaults.get("model")
                 or metadata.get("model_name")
                 or ""
             ).strip()

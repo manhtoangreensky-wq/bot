@@ -3740,6 +3740,59 @@ def _resolve_selfshot_i2v_model(
     return "kling-v3", "kling"
 
 
+STORYBOARD_DEFAULT_I2V_MODEL: str = "kling-v3"
+STORYBOARD_PROVEN_I2V_MODELS: set[str] = {"kling-v3", "kling-3.0-turbo"}
+STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER = "storyboard_i2v_model_not_proven_no_charge"
+STORYBOARD_I2V_MODEL_NOT_PROVEN = STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER
+
+
+def _resolve_storyboard_i2v_model(
+    job: dict[str, Any] | None,
+    asset_pack: dict[str, Any] | None = None,
+    invoice: dict[str, Any] | None = None,
+    environ: dict[str, str] | None = None,
+    *,
+    scene_index: int = 1,
+    request_job_id: str = "",
+) -> str:
+    candidate = str(
+        (job or {}).get("selected_model")
+        or (job or {}).get("model")
+        or (job or {}).get("pinned_wire_model")
+        or (job or {}).get("model_name")
+        or (asset_pack or {}).get("selected_model")
+        or (asset_pack or {}).get("model")
+        or (asset_pack or {}).get("pinned_wire_model")
+        or (asset_pack or {}).get("model_name")
+        or (invoice or {}).get("selected_model")
+        or (invoice or {}).get("model")
+        or (invoice or {}).get("pinned_wire_model")
+        or ((job or {}).get("metadata") or {}).get("selected_model")
+        or ((job or {}).get("metadata") or {}).get("pinned_wire_model")
+        or ""
+    ).strip()
+    if not candidate:
+        return STORYBOARD_DEFAULT_I2V_MODEL
+    if candidate not in STORYBOARD_PROVEN_I2V_MODELS:
+        raise RealVideoRenderError(
+            STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER,
+            diagnostics={
+                "ok": False,
+                "scene_index": scene_index,
+                "scene_id": scene_index,
+                "request_job_id": request_job_id,
+                "provider": "key4u_video",
+                "model": candidate,
+                "blocker": STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER,
+                "allowed_models": sorted(STORYBOARD_PROVEN_I2V_MODELS),
+                "provider_attempted": False,
+                "provider_submit_called": False,
+                "no_charge": True,
+            },
+        )
+    return candidate
+
+
 def _render_selfshot3_controlled_keyframe_image_to_video(
     *,
     job: dict[str, Any],
@@ -5492,6 +5545,29 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             requires_concat=orchestration_mode == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S,
         )
         model_context.update(model_metadata_from_resolution(model_resolution))
+    is_storyboard = (
+        product_type in {"storyboard_prompt", "storyboard_to_video"}
+        or str((job or {}).get("engine_adapter") or "").strip().lower() == "storyboard_scene_image_video_engine"
+        or str((job or {}).get("engine_route") or "").strip().lower() == "storyboard_to_video"
+    )
+    if is_storyboard:
+        storyboard_model = _resolve_storyboard_i2v_model(
+            job,
+            asset_pack,
+            invoice,
+            scene_index=scene_index,
+            request_job_id=request_job_id,
+        )
+        model_context["selected_model"] = storyboard_model
+        model_context["pinned_wire_model"] = storyboard_model
+        model_context["model"] = storyboard_model
+        model_context["model_name"] = storyboard_model
+        model_context["selected_family"] = "kling"
+        model_context["selected_provider"] = "key4u_video"
+        if "provider_model_map" in model_context and isinstance(model_context["provider_model_map"], dict):
+            model_context["provider_model_map"]["key4u_video"] = storyboard_model
+        else:
+            model_context["provider_model_map"] = {"key4u_video": storyboard_model}
     if (
         recovery_existing_tasks_only
         and not pending_matches_request
@@ -5827,6 +5903,8 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         provider_env["SHOPAIKEY_VIDEO_MODEL"] = str(provider_model_map.get("shopaikey_video") or "")
     if provider_model_map.get("key4u_video"):
         provider_env["KEY4U_VIDEO_MODEL"] = str(provider_model_map.get("key4u_video") or "")
+    if is_storyboard:
+        provider_env["KEY4U_VIDEO_MODEL"] = storyboard_model
     if product_type == "self_shot_scene_change":
         result = _render_selfshot2_video_to_video(
             job=dict(job or {}),
@@ -7695,6 +7773,13 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     readiness = real_video_provider_readiness(job)
     product_type = _product_type(job)
     product_route = video_final_output.route_for_product_type(product_type)
+    is_storyboard_job = (
+        product_type in {"storyboard_prompt", "storyboard_to_video"}
+        or str(job.get("engine_adapter") or "").strip().lower() == "storyboard_scene_image_video_engine"
+        or str(job.get("engine_route") or "").strip().lower() == "storyboard_to_video"
+    )
+    if is_storyboard_job:
+        _resolve_storyboard_i2v_model(job)
     required_capability = product_video_required_capability(job)
     fallback_capability = str(product_route.get("fallback_capability") or "")
     render_mode = str(job.get("render_mode") or "").strip().lower().replace("-", "_")
