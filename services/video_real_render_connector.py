@@ -1153,6 +1153,54 @@ def _scene_count(job: dict | None = None) -> int:
     return max(1, min(20, _safe_int(value, 3)))
 
 
+def validate_storyboard_scene_coverage(
+    cards: list[dict], declared_count: int = 1
+) -> dict:
+    """Validate that scene cards cover all declared scenes without gaps.
+
+    Returns a dict with:
+      valid (bool): True if coverage is complete and correct.
+      missing (list[int]): Scene indexes without a matching card.
+      duplicates (list[int]): Scene indexes appearing more than once.
+      out_of_range (list[int]): Scene indexes outside 1..declared_count.
+      missing_index_count (int): Number of cards without explicit scene_index.
+    """
+    declared_count = max(1, min(20, _safe_int(declared_count, 1)))
+    expected = set(range(1, declared_count + 1))
+    seen: dict[int, int] = {}  # scene_index -> count
+    missing_index_count = 0
+    out_of_range: list[int] = []
+
+    for card in (cards or []):
+        if not isinstance(card, dict):
+            continue
+        raw_idx = card.get("scene_index") or card.get("scene_id")
+        if raw_idx is None:
+            missing_index_count += 1
+            continue
+        idx = _safe_int(raw_idx, 0)
+        if idx < 1 or idx > declared_count:
+            out_of_range.append(idx)
+            continue
+        seen[idx] = seen.get(idx, 0) + 1
+
+    duplicates = sorted(idx for idx, cnt in seen.items() if cnt > 1)
+    covered = set(seen.keys())
+    missing = sorted(expected - covered)
+    valid = (
+        not missing
+        and not duplicates
+        and not out_of_range
+        and missing_index_count == 0
+    )
+    return {
+        "valid": valid,
+        "missing": missing,
+        "duplicates": duplicates,
+        "out_of_range": sorted(set(out_of_range)),
+        "missing_index_count": missing_index_count,
+    }
+
 def _job_base_id(job: dict | None = None) -> str:
     job = dict(job or {})
     return str(job.get("id") or job.get("job_id") or "video_job").strip() or "video_job"
@@ -3026,10 +3074,13 @@ def storyboard_scene_image_paths(job: dict | None = None, scene_index: int = 1) 
 
     target_index = max(1, _safe_int(scene_index, 1))
     cards = _scene_cards(job)
-    for fallback_index, card in enumerate(cards, start=1):
+    for card in cards:
         if not isinstance(card, dict):
             continue
-        card_index = max(1, _safe_int(card.get("scene_index") or card.get("scene_id"), fallback_index))
+        raw_idx = card.get("scene_index") or card.get("scene_id")
+        if raw_idx is None:
+            continue  # skip cards without explicit scene_index
+        card_index = max(1, _safe_int(raw_idx, 0))
         if card_index != target_index:
             continue
         paths = video_final_output.extract_local_image_paths(card, limit=2)
@@ -3037,9 +3088,12 @@ def storyboard_scene_image_paths(job: dict | None = None, scene_index: int = 1) 
             return paths
     panels = (job or {}).get("storyboard_panels") or ((job or {}).get("draft") or {}).get("storyboard_panels") or []
     if isinstance(panels, list):
-        for fallback_index, panel in enumerate(panels, start=1):
+        for panel in panels:
             if isinstance(panel, dict):
-                p_idx = max(1, _safe_int(panel.get("scene_index") or panel.get("scene_id"), fallback_index))
+                raw_idx = panel.get("scene_index") or panel.get("scene_id")
+                if raw_idx is None:
+                    continue  # skip panels without explicit scene_index
+                p_idx = max(1, _safe_int(raw_idx, 0))
                 if p_idx == target_index:
                     paths = video_final_output.extract_local_image_paths(panel, limit=2)
                     if paths:
@@ -3136,10 +3190,13 @@ def real_video_scene_plan(job: dict | None = None) -> dict:
     scenes = []
     for index in range(1, count + 1):
         card = {}
-        for fallback_idx, c in enumerate(cards, start=1):
+        for c in cards:
             if not isinstance(c, dict):
                 continue
-            c_idx = max(1, _safe_int(c.get("scene_index") or c.get("scene_id"), fallback_idx))
+            raw_idx = c.get("scene_index") or c.get("scene_id")
+            if raw_idx is None:
+                continue  # skip cards without explicit scene_index
+            c_idx = max(1, _safe_int(raw_idx, 0))
             if c_idx == index:
                 card = c
                 break
@@ -5482,8 +5539,9 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         storyboard=(
             [
                 card
-                for fallback_index, card in enumerate(_scene_cards(job), start=1)
-                if max(1, _safe_int(card.get("scene_index") or card.get("scene_id"), fallback_index)) == scene_index
+                for card in _scene_cards(job)
+                if (card.get("scene_index") or card.get("scene_id")) is not None
+                and max(1, _safe_int(card.get("scene_index") or card.get("scene_id"), 0)) == scene_index
             ]
             if product_type in PRODUCT_VIDEO_SCENE_IMAGE_INPUT_TYPES
             else _scene_cards(job)
