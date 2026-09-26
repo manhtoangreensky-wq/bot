@@ -323,9 +323,9 @@ activate_product_video_worker_release() {
 
 commit_product_video_release_transaction() {
   TRANSACTION_COMMITTED=1
+  write_transaction_manifest
   ROLLBACK_ARMED=0
   trap - ERR INT TERM
-  write_transaction_manifest
   log "PRODUCT_VIDEO_DEPLOY_TRANSACTION_COMMITTED bot_sha=$TARGET_SHA worker_sha=$TARGET_SHA"
 }
 

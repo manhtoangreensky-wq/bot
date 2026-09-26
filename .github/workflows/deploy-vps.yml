@@ -25,18 +25,70 @@ jobs:
 
       - name: Python Compile Guard
         run: |
-          python -m py_compile bot.py remote_worker.py services/remote_worker_api.py services/*.py
+          python -m py_compile bot.py remote_worker.py services/remote_worker_api.py services/*.py tests/test_deploy_vps_workflow_hygiene.py
 
-      - name: Package Release Artifacts
+      - name: Run Workflow Hygiene Unit Tests
+        run: |
+          python -m unittest tests/test_deploy_vps_workflow_hygiene.py
+
+      - name: Discover Current Production Deployed SHA
+        id: prod_sha
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY_B64: ${{ secrets.VPS_SSH_KEY_B64 }}
         run: |
           set -euo pipefail
+          mkdir -p ~/.ssh
+          echo "$VPS_SSH_KEY_B64" | base64 -d > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          PREV_SHA="$(ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o ConnectTimeout=30 "$VPS_USER@$VPS_HOST" "git -c safe.directory=* -C /opt/toanaas/bot rev-parse refs/heads/main")"
+          if [[ ! "$PREV_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "ERROR: Discovered deployed SHA is not a valid 40-character hex string: '$PREV_SHA'" >&2
+            exit 1
+          fi
+
+          echo "Discovered previous deployed SHA: $PREV_SHA"
+          echo "prev_deployed_sha=$PREV_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Package Release Artifacts
+        env:
+          PREV_DEPLOYED_SHA: ${{ steps.prod_sha.outputs.prev_deployed_sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$PREV_DEPLOYED_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "ERROR: PREV_DEPLOYED_SHA is not a valid 40-character hex string: '$PREV_DEPLOYED_SHA'" >&2
+            exit 1
+          fi
+
+          # Idempotency / Already deployed check:
+          # If production is already running GITHUB_SHA, skip bundle and tar generation
+          # to prevent empty bundle error ('fatal: Refusing to create empty bundle').
+          if [[ "$PREV_DEPLOYED_SHA" == "$GITHUB_SHA" ]]; then
+            echo "Production is already running GITHUB_SHA ($GITHUB_SHA)."
+            echo "Skipping bundle and tar generation; will perform live health verification and hygiene reconciliation only."
+            exit 0
+          fi
+
           RELEASE_DIR="/tmp/bot-release-${GITHUB_SHA}"
           mkdir -p "${RELEASE_DIR}"
 
           git archive --format=tar --output="${RELEASE_DIR}/release.tar" "${GITHUB_SHA}"
 
+          if ! git cat-file -e "${PREV_DEPLOYED_SHA}^{commit}"; then
+            echo "ERROR: PREV_DEPLOYED_SHA ($PREV_DEPLOYED_SHA) not found in runner checkout" >&2
+            exit 1
+          fi
+
+          if ! git merge-base --is-ancestor "${PREV_DEPLOYED_SHA}" "${GITHUB_SHA}"; then
+            echo "ERROR: PREV_DEPLOYED_SHA ($PREV_DEPLOYED_SHA) is not an ancestor of GITHUB_SHA ($GITHUB_SHA)" >&2
+            exit 1
+          fi
+
           git update-ref refs/deployments/bot-release "${GITHUB_SHA}"
-          git bundle create "${RELEASE_DIR}/release.bundle" refs/deployments/bot-release
+          git bundle create "${RELEASE_DIR}/release.bundle" refs/deployments/bot-release "^${PREV_DEPLOYED_SHA}"
           git bundle verify "${RELEASE_DIR}/release.bundle"
 
           ADVERTISED_SHA="$(git bundle list-heads "${RELEASE_DIR}/release.bundle" | awk '{print $1}')"
@@ -57,6 +109,7 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_SSH_KEY_B64: ${{ secrets.VPS_SSH_KEY_B64 }}
           TARGET_SHA: ${{ github.sha }}
+          EXPECTED_PREV_SHA: ${{ steps.prod_sha.outputs.prev_deployed_sha }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
@@ -66,8 +119,11 @@ jobs:
           RELEASE_DIR="/tmp/bot-release-${TARGET_SHA}"
           REMOTE_STAGING="/tmp/deploy-bot-${TARGET_SHA}"
 
-          ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o ConnectTimeout=30 "$VPS_USER@$VPS_HOST" "mkdir -p '${REMOTE_STAGING}'"
-          scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no "${RELEASE_DIR}/release.tar" "${RELEASE_DIR}/release.bundle" "${RELEASE_DIR}/sync_product_video_worker_release.sh" "${RELEASE_DIR}/checksums.sha256" "$VPS_USER@$VPS_HOST:${REMOTE_STAGING}/"
+          # Only stage artifacts to remote host if this is a new deployment
+          if [[ "$EXPECTED_PREV_SHA" != "$TARGET_SHA" ]]; then
+            ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o ConnectTimeout=30 "$VPS_USER@$VPS_HOST" "mkdir -p '${REMOTE_STAGING}'"
+            scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no "${RELEASE_DIR}/release.tar" "${RELEASE_DIR}/release.bundle" "${RELEASE_DIR}/sync_product_video_worker_release.sh" "${RELEASE_DIR}/checksums.sha256" "$VPS_USER@$VPS_HOST:${REMOTE_STAGING}/"
+          fi
 
           ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ServerAliveInterval=10 "$VPS_USER@$VPS_HOST" "
             set -euo pipefail
@@ -78,80 +134,222 @@ jobs:
               exit 1
             fi
 
+            EXPECTED_PREV_SHA='${EXPECTED_PREV_SHA}'
+            if [[ ! \"\$EXPECTED_PREV_SHA\" =~ ^[0-9a-fA-F]{40}\$ ]]; then
+              echo 'ERROR: EXPECTED_PREV_SHA is not a valid 40-character hex string' >&2
+              exit 1
+            fi
+
+            WEBAPP_DIR='/opt/toanaas/bot'
             STAGING_DIR=\"/tmp/deploy-bot-\$TARGET_SHA\"
+
+            trap 'if [[ -d \"\$STAGING_DIR\" ]]; then echo \"[DEPLOY_FAILURE] Deployment failed; preserving staging directory for diagnostics: \$STAGING_DIR\" >&2; fi' ERR
+
+            # Shared rollback retention function ensuring strict boundary validation:
+            # - Immediate children of /opt/toanaas/bot/delete only
+            # - Basename matches strict deploy regex
+            # - Must be a real directory
+            # - Must NOT be a symlink
+            # - Canonical parent must exactly equal canonical delete directory
+            prune_rollback_retention() {
+              local delete_dir=\"\$WEBAPP_DIR/delete\"
+              if [[ ! -d \"\$delete_dir\" ]]; then
+                echo \"Delete directory absent (\$delete_dir); skipping rollback pruning.\"
+                return 0
+              fi
+
+              local canonical_delete_dir
+              canonical_delete_dir=\"\$(cd \"\$delete_dir\" && pwd -P)\"
+
+              local candidates=()
+              for entry in \"\$delete_dir\"/*; do
+                [[ -e \"\$entry\" || -L \"\$entry\" ]] || continue
+
+                local bname=\"\$(basename \"\$entry\")\"
+                # 1. Strict regex match
+                [[ \"\$bname\" =~ ^deploy-[0-9a-fA-F]{40}-[0-9]{14}\$ ]] || continue
+
+                # 2. Strict rejection of symlinks
+                [[ ! -L \"\$entry\" ]] || continue
+
+                # 3. Must be an actual directory (rejects regular files)
+                [[ -d \"\$entry\" ]] || continue
+
+                # 4. Immediate child & canonical parent boundary check (rejects nested or outside paths)
+                local entry_parent=\"\$(dirname \"\$entry\")\"
+                local canonical_parent=\"\$(cd \"\$entry_parent\" && pwd -P)\"
+                [[ \"\$canonical_parent\" == \"\$canonical_delete_dir\" ]] || continue
+
+                candidates+=(\"\$entry\")
+              done
+
+              local valid_backups=()
+              if [[ \${#candidates[@]} -gt 0 ]]; then
+                while IFS= read -r sorted_path; do
+                  [[ -n \"\$sorted_path\" ]] && valid_backups+=(\"\$sorted_path\")
+                done < <(ls -dt \"\${candidates[@]}\")
+              fi
+
+              echo \"Total valid deploy directories found: \${#valid_backups[@]}\"
+              if [[ \${#valid_backups[@]} -gt 2 ]]; then
+                for ((i=2; i<\${#valid_backups[@]}; i++)); do
+                  local old_bk=\"\${valid_backups[\$i]}\"
+                  echo \"Retiring old rollback directory: \$old_bk\"
+                  rm -rf \"\$old_bk\"
+                done
+              fi
+
+              echo '=== Active Retained Rollback Backups ==='
+              for ((i=0; i<2 && i<\${#valid_backups[@]}; i++)); do
+                echo \"Retained rollback [\$i]: \${valid_backups[\$i]}\"
+              done
+            }
+
+            fail_after_prepare() {
+              local msg=\"\${1:-Deployment failure in mutation window}\"
+              local code=\"\${2:-1}\"
+              echo \"ERROR: \$msg\" >&2
+              if type rollback_transaction >/dev/null 2>&1; then
+                rollback_transaction \"\$code\"
+              fi
+              exit \"\$code\"
+            }
+
+            # =============================================================
+            # PATH 1: ALREADY_DEPLOYED Reconciliation Path
+            # =============================================================
+            if [[ \"\$EXPECTED_PREV_SHA\" == \"\$TARGET_SHA\" ]]; then
+              echo '=== ALREADY DEPLOYED: Reconciling Live State and Hygiene ==='
+              cd \"\$WEBAPP_DIR\"
+
+              PREV_HEAD=\"\$(git rev-parse refs/heads/main)\"
+              if [[ \"\$PREV_HEAD\" != \"\$TARGET_SHA\" ]]; then
+                echo \"ERROR: Expected already-deployed SHA (\$TARGET_SHA) but live PREV_HEAD is (\$PREV_HEAD)\" >&2
+                exit 1
+              fi
+
+              echo '=== Verifying Active Services (No Restart) ==='
+              systemctl is-active toanaas-bot.service
+              systemctl is-active nginx.service
+
+              echo '=== Verifying Health Endpoint ==='
+              HEALTH_JSON=''
+              for attempt in {1..30}; do
+                if HEALTH_JSON=\$(curl -s -f http://127.0.0.1:8080/health); then
+                  break
+                fi
+                sleep 2
+              done
+
+              if [[ -z \"\$HEALTH_JSON\" ]]; then
+                echo 'ERROR: Health endpoint did not respond during reconciliation' >&2
+                exit 1
+              fi
+
+              printf '%s' \"\$HEALTH_JSON\" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get(\"status\") == \"ok\"; print(\"HEALTH_PAYLOAD_VALIDATED:\", data.get(\"status\"))'
+
+              echo '=== Cleaning up Remote Staging Directory (If Present) ==='
+              CLEANUP_TARGET=\"/tmp/deploy-bot-\$TARGET_SHA\"
+              if [[ -d \"\$CLEANUP_TARGET\" ]]; then
+                rm -rf \"\$CLEANUP_TARGET\"
+                echo \"Successfully removed leftover staging directory: \$CLEANUP_TARGET\"
+              else
+                echo \"Staging directory is already clean: \$CLEANUP_TARGET\"
+              fi
+
+              echo '=== Pruning Old Rollback Backups (Retaining 2 Newest Valid Immediate Directories) ==='
+              prune_rollback_retention
+
+              echo '=== BOT ALREADY DEPLOYED RECONCILIATION SUCCESS ==='
+              echo \"DEPLOYED_SHA=\$TARGET_SHA\"
+              exit 0
+            fi
+
+            # =============================================================
+            # PATH 2: Normal NEW_SHA Deployment Path
+            # =============================================================
+            echo '=== Validating Pre-Mutation Production Drift Guard ==='
+            LIVE_PREV_HEAD=\"\$(git -C \"\$WEBAPP_DIR\" rev-parse refs/heads/main)\"
+            if [[ \"\$LIVE_PREV_HEAD\" != \"\$EXPECTED_PREV_SHA\" ]]; then
+              echo \"ERROR: Production drift detected before mutation! Live LIVE_PREV_HEAD (\$LIVE_PREV_HEAD) != EXPECTED_PREV_SHA (\$EXPECTED_PREV_SHA)\" >&2
+              exit 1
+            fi
+            PREV_HEAD=\"\$LIVE_PREV_HEAD\"
+
             cd \"\$STAGING_DIR\"
             sha256sum -c checksums.sha256
 
             source \"\$STAGING_DIR/sync_product_video_worker_release.sh\"
             prepare_product_video_worker_release
 
-            WEBAPP_DIR='/opt/toanaas/bot'
-            cd \"\$WEBAPP_DIR\"
+            cd \"\$WEBAPP_DIR\" || fail_after_prepare \"Failed to cd to WEBAPP_DIR (\$WEBAPP_DIR)\"
 
-            PREV_HEAD=\"\$(git rev-parse refs/heads/main)\"
+            # Defense-in-depth: second drift assertion after worker prepare
+            POST_PREPARE_HEAD=\"\$(git rev-parse refs/heads/main)\" || fail_after_prepare \"Failed to rev-parse refs/heads/main after prepare\"
+            if [[ \"\$POST_PREPARE_HEAD\" != \"\$EXPECTED_PREV_SHA\" ]]; then
+              fail_after_prepare \"Production drift detected after prepare! Live HEAD (\$POST_PREPARE_HEAD) != EXPECTED_PREV_SHA (\$EXPECTED_PREV_SHA)\"
+            fi
+
             UTC_TIMESTAMP=\"\$(date -u +%Y%m%d%H%M%S)\"
             BACKUP_DIR=\"\$WEBAPP_DIR/delete/deploy-\$TARGET_SHA-\$UTC_TIMESTAMP\"
-            mkdir -p \"\$BACKUP_DIR\"
+            mkdir -p \"\$BACKUP_DIR\" || fail_after_prepare \"Failed to create BACKUP_DIR (\$BACKUP_DIR)\"
 
             echo '=== Fetching Bundle Objects and Verifying Target ==='
-            git fetch \"\$STAGING_DIR/release.bundle\" refs/deployments/bot-release:refs/deployments/bot-release
-            FETCHED_SHA=\"\$(git rev-parse refs/deployments/bot-release)\"
+            git fetch \"\$STAGING_DIR/release.bundle\" refs/deployments/bot-release:refs/deployments/bot-release || fail_after_prepare \"Failed to fetch release bundle into bot repo\"
+            FETCHED_SHA=\"\$(git rev-parse refs/deployments/bot-release)\" || fail_after_prepare \"Failed to rev-parse fetched release ref\"
             if [[ \"\$FETCHED_SHA\" != \"\$TARGET_SHA\" ]]; then
-              echo \"ERROR: FETCHED_SHA (\$FETCHED_SHA) != TARGET_SHA (\$TARGET_SHA)\" >&2
-              exit 1
+              fail_after_prepare \"FETCHED_SHA (\$FETCHED_SHA) != TARGET_SHA (\$TARGET_SHA)\"
             fi
-            git cat-file -e \"\$TARGET_SHA^{commit}\"
+            git cat-file -e \"\$TARGET_SHA^{commit}\" || fail_after_prepare \"Target commit \$TARGET_SHA^{commit} is missing in bot repo\"
 
             echo '=== Creating Incremental Tracked Source Backup ==='
-            git diff --name-only -z --diff-filter=MTUXB \"\$PREV_HEAD\" \"\$TARGET_SHA\" > \"\$BACKUP_DIR/changed-files.z\"
-            BACKED_UP_COUNT=\"\$(tr -cd '\\000' < \"\$BACKUP_DIR/changed-files.z\" | wc -c)\"
+            git diff --name-only -z --diff-filter=MTUXB \"\$PREV_HEAD\" \"\$TARGET_SHA\" > \"\$BACKUP_DIR/changed-files.z\" || fail_after_prepare \"Failed to diff changed files for backup\"
+            BACKED_UP_COUNT=\"\$(tr -cd '\\000' < \"\$BACKUP_DIR/changed-files.z\" | wc -c)\" || fail_after_prepare \"Failed to count backed up files\"
             if [[ \"\$BACKED_UP_COUNT\" -gt 0 ]]; then
-              tar -c --null -T \"\$BACKUP_DIR/changed-files.z\" | tar -x -C \"\$BACKUP_DIR\"
+              tar -c --null -T \"\$BACKUP_DIR/changed-files.z\" | tar -x -C \"\$BACKUP_DIR\" || fail_after_prepare \"Failed to archive changed files to backup\"
             fi
-            printf 'previous_head: %s\ntarget_sha: %s\nbackup_timestamp_utc: %s\nbacked_up_file_count: %s\n' \"\$PREV_HEAD\" \"\$TARGET_SHA\" \"\$UTC_TIMESTAMP\" \"\$BACKED_UP_COUNT\" > \"\$BACKUP_DIR/manifest.txt\"
+            printf 'previous_head: %s\ntarget_sha: %s\nbackup_timestamp_utc: %s\nbacked_up_file_count: %s\n' \"\$PREV_HEAD\" \"\$TARGET_SHA\" \"\$UTC_TIMESTAMP\" \"\$BACKED_UP_COUNT\" > \"\$BACKUP_DIR/manifest.txt\" || fail_after_prepare \"Failed to write backup manifest\"
 
             echo '=== Quarantining Removed Tracked Files ==='
-            git ls-tree -r --name-only \"\$TARGET_SHA\" > \"\$STAGING_DIR/target-files.txt\"
-            git ls-files > \"\$STAGING_DIR/current-files.txt\"
-            comm -23 <(sort \"\$STAGING_DIR/current-files.txt\") <(sort \"\$STAGING_DIR/target-files.txt\") > \"\$STAGING_DIR/removed-files.txt\"
+            git ls-tree -r --name-only \"\$TARGET_SHA\" > \"\$STAGING_DIR/target-files.txt\" || fail_after_prepare \"Failed to list target files\"
+            git ls-files > \"\$STAGING_DIR/current-files.txt\" || fail_after_prepare \"Failed to list current files\"
+            comm -23 <(sort \"\$STAGING_DIR/current-files.txt\") <(sort \"\$STAGING_DIR/target-files.txt\") > \"\$STAGING_DIR/removed-files.txt\" || fail_after_prepare \"Failed to compute removed files\"
             while IFS= read -r rel_path; do
               if [[ -n \"\$rel_path\" && -f \"\$WEBAPP_DIR/\$rel_path\" ]]; then
-                mkdir -p \"\$BACKUP_DIR/removed/\$(dirname \"\$rel_path\")\"
-                mv -- \"\$WEBAPP_DIR/\$rel_path\" \"\$BACKUP_DIR/removed/\$rel_path\"
+                mkdir -p \"\$BACKUP_DIR/removed/\$(dirname \"\$rel_path\")\" || fail_after_prepare \"Failed to create directory in backup for \$rel_path\"
+                mv -- \"\$WEBAPP_DIR/\$rel_path\" \"\$BACKUP_DIR/removed/\$rel_path\" || fail_after_prepare \"Failed to quarantine removed file \$rel_path\"
               fi
             done < \"\$STAGING_DIR/removed-files.txt\"
 
             echo '=== Applying Release Source ==='
-            tar -xf \"\$STAGING_DIR/release.tar\" -C \"\$WEBAPP_DIR\"
+            tar -xf \"\$STAGING_DIR/release.tar\" -C \"\$WEBAPP_DIR\" || fail_after_prepare \"Failed to extract release.tar to WEBAPP_DIR\"
 
-            git update-ref refs/heads/main \"\$TARGET_SHA\" \"\$PREV_HEAD\"
-            git update-ref refs/remotes/origin/main \"\$TARGET_SHA\"
-            git symbolic-ref HEAD refs/heads/main
-            git read-tree \"\$TARGET_SHA\"
+            git update-ref refs/heads/main \"\$TARGET_SHA\" \"\$PREV_HEAD\" || fail_after_prepare \"Failed to update refs/heads/main to \$TARGET_SHA\"
+            git update-ref refs/remotes/origin/main \"\$TARGET_SHA\" || fail_after_prepare \"Failed to update refs/remotes/origin/main to \$TARGET_SHA\"
+            git symbolic-ref HEAD refs/heads/main || fail_after_prepare \"Failed to set symbolic-ref HEAD to refs/heads/main\"
+            git read-tree \"\$TARGET_SHA\" || fail_after_prepare \"Failed to git read-tree \$TARGET_SHA\"
 
-            CURRENT_SHA=\"\$(git rev-parse HEAD)\"
+            CURRENT_SHA=\"\$(git rev-parse HEAD)\" || fail_after_prepare \"Failed to rev-parse HEAD after read-tree\"
             if [[ \"\$CURRENT_SHA\" != \"\$TARGET_SHA\" ]]; then
-              echo \"ERROR: CURRENT_SHA (\$CURRENT_SHA) != TARGET_SHA (\$TARGET_SHA)\" >&2
-              exit 1
+              fail_after_prepare \"CURRENT_SHA (\$CURRENT_SHA) != TARGET_SHA (\$TARGET_SHA)\"
             fi
 
-            git diff --exit-code -- . ':(exclude)delete/**'
+            git diff --exit-code -- . ':(exclude)delete/**' || fail_after_prepare \"Worktree diff mismatch after release source apply\"
 
             echo '=== Syncing Hash-Locked Runtime Dependencies ==='
-            if [[ ! -x "\$WEBAPP_DIR/.venv/bin/python" ]]; then
-              echo 'ERROR: Bot virtualenv Python is missing or not executable' >&2
-              exit 1
+            if [[ ! -x \"\$WEBAPP_DIR/.venv/bin/python\" ]]; then
+              fail_after_prepare \"Bot virtualenv Python is missing or not executable\"
             fi
-            "\$WEBAPP_DIR/.venv/bin/python" -m pip install --require-hashes -r "\$WEBAPP_DIR/requirements.lock"
-            "\$WEBAPP_DIR/.venv/bin/python" -m pip check
-            "\$WEBAPP_DIR/.venv/bin/python" -c 'import numpy, onnxruntime; print(onnxruntime.__version__)'
+            \"\$WEBAPP_DIR/.venv/bin/python\" -m pip install --require-hashes -r \"\$WEBAPP_DIR/requirements.lock\" || fail_after_prepare \"Bot pip install dependencies failed\"
+            \"\$WEBAPP_DIR/.venv/bin/python\" -m pip check || fail_after_prepare \"Bot pip check failed\"
+            \"\$WEBAPP_DIR/.venv/bin/python\" -c 'import numpy, onnxruntime; print(onnxruntime.__version__)' || fail_after_prepare \"Bot runtime verification failed\"
 
             echo '=== Restarting Bot Service ==='
-            systemctl restart toanaas-bot.service
+            systemctl restart toanaas-bot.service || fail_after_prepare \"Failed to restart toanaas-bot.service\"
 
             echo '=== Verifying Active Services ==='
-            systemctl is-active toanaas-bot.service
-            systemctl is-active nginx.service
+            systemctl is-active toanaas-bot.service || fail_after_prepare \"toanaas-bot.service is not active after restart\"
+            systemctl is-active nginx.service || fail_after_prepare \"nginx.service is not active\"
 
             echo '=== Verifying Health Endpoint ==='
             HEALTH_JSON=''
@@ -163,14 +361,29 @@ jobs:
             done
 
             if [[ -z \"\$HEALTH_JSON\" ]]; then
-              echo 'ERROR: Health endpoint did not respond' >&2
-              exit 1
+              fail_after_prepare \"Health endpoint did not respond\"
             fi
 
-            printf '%s' \"\$HEALTH_JSON\" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get(\"status\") == \"ok\"; print(\"HEALTH_PAYLOAD_VALIDATED:\", data.get(\"status\"))'
+            if ! printf '%s' \"\$HEALTH_JSON\" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get(\"status\") == \"ok\"; print(\"HEALTH_PAYLOAD_VALIDATED:\", data.get(\"status\"))'; then
+              fail_after_prepare \"Health endpoint payload validation failed (status != ok)\"
+            fi
 
             activate_product_video_worker_release
             commit_product_video_release_transaction
+
+            echo '=== Cleaning up Remote Staging Directory ==='
+            CLEANUP_TARGET=\"/tmp/deploy-bot-\$TARGET_SHA\"
+            if [[ \"\$STAGING_DIR\" != \"\$CLEANUP_TARGET\" ]]; then
+              echo \"ERROR: STAGING_DIR (\$STAGING_DIR) != CLEANUP_TARGET (\$CLEANUP_TARGET)\" >&2
+              exit 1
+            fi
+            if [[ -d \"\$CLEANUP_TARGET\" ]]; then
+              rm -rf \"\$CLEANUP_TARGET\"
+              echo \"Successfully removed staging directory: \$CLEANUP_TARGET\"
+            fi
+
+            echo '=== Pruning Old Rollback Backups (Retaining 2 Newest Valid Immediate Directories) ==='
+            prune_rollback_retention
 
             echo '=== BOT DEPLOY SUCCESS ==='
             echo \"PREVIOUS_HEAD=\$PREV_HEAD\"
