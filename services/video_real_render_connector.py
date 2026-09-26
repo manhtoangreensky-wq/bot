@@ -37,6 +37,7 @@ from services import video_final_output
 from services import video_ai_edit_provider
 from services import product_video_addon_materialization
 from services import video_project_queue as video_project_queue_service
+from services import video_selfshot2, video_selfshot3
 from services.video_provider_base import VideoGenerationRequest
 from services.video_provider_router import (
     PUBLIC_NO_VIDEO_PROVIDER_COPY,
@@ -3510,12 +3511,293 @@ def _selfshot2_provider_configs(provider_order: list[str], duration_seconds: int
     return _resolve_v2v_provider_configs(provider_order, duration_seconds, flow="selfshot2")
 
 
-def _render_selfshot3_video_to_video(
+def _extract_selfshot_keyframe(
+    video_path: str,
+    raw_path: str,
+    *,
+    scene_index: int = 0,
+    timestamp_seconds: float = 0.0,
+    prefix: str = "selfshot",
+) -> str:
+    ffmpeg = _ffmpeg_binary()
+    if not ffmpeg:
+        raise RealVideoRenderError(
+            f"{prefix}_keyframe_ffmpeg_missing",
+            diagnostics={
+                "ok": False,
+                prefix: True,
+                "scene_index": scene_index,
+                "provider_attempted": False,
+                "no_charge": True,
+                "blocker": f"{prefix}_keyframe_ffmpeg_missing",
+            },
+        )
+    root = Path(os.path.dirname(os.path.abspath(raw_path))).resolve()
+    target = (root / f"{prefix}-keyframe-scene-{scene_index:02d}.jpg").resolve()
+    if root not in target.parents:
+        raise RealVideoRenderError(f"{prefix}_keyframe_path_unsafe")
+    command = [
+        ffmpeg,
+        "-y",
+        "-ss",
+        f"{max(0.0, timestamp_seconds):.3f}",
+        "-i",
+        os.path.abspath(video_path),
+        "-frames:v",
+        "1",
+        "-q:v",
+        "2",
+        str(target),
+    ]
+    result = safe_run_ffmpeg(command, timeout=30)
+    if result.returncode != 0 or not target.is_file() or target.stat().st_size <= 0:
+        try:
+            target.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise RealVideoRenderError(
+            f"{prefix}_keyframe_extraction_failed",
+            diagnostics={
+                "ok": False,
+                prefix: True,
+                "scene_index": scene_index,
+                "provider_attempted": False,
+                "no_charge": True,
+                "blocker": f"{prefix}_keyframe_extraction_failed",
+            },
+        )
+    return str(target)
+
+
+def _render_selfshot3_controlled_keyframe_image_to_video(
     *,
     job: dict[str, Any],
     asset_pack: dict[str, Any],
     raw_path: str,
     provider_order: list[str],
+    fallback_prompt: str,
+    aspect_ratio: str,
+    source_path: str,
+    duration_seconds: int,
+) -> dict[str, Any]:
+    segment = dict(asset_pack.get("source_segment") or {})
+    prompt, negative = _selfshot3_prompt_payload(asset_pack, fallback_prompt, job)
+    keyframe_path = _extract_selfshot_keyframe(
+        source_path,
+        raw_path,
+        scene_index=0,
+        timestamp_seconds=float((segment.get("start_ms") or 0) / 1000.0),
+        prefix="selfshot3",
+    )
+    job_id = str((job or {}).get("job_id") or (job or {}).get("id") or "selfshot3")
+    output_dir = os.path.dirname(os.path.abspath(raw_path))
+    effective_provider_order = [p for p in (provider_order or []) if str(p).strip()] or ["key4u_video", "shopaikey_video"]
+    if "key4u_video" in effective_provider_order and effective_provider_order[0] != "key4u_video":
+        effective_provider_order = ["key4u_video"] + [p for p in effective_provider_order if p != "key4u_video"]
+    primary_provider = effective_provider_order[0]
+    provider_env = dict(os.environ)
+    provider_env["VIDEO_PROVIDER_CHAIN"] = ",".join(effective_provider_order)
+
+    pinned_model = "kling-v3"
+    provider_env["KEY4U_VIDEO_MODEL"] = pinned_model
+
+    req_meta = {
+        "is_controlled_keyframe_i2v": True,
+        "route": "controlled_keyframe_image_to_video",
+        "truth": "image_to_video_fallback_not_direct_v2v",
+        "primary_provider": primary_provider,
+        "submit_source": video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE,
+        "public_user_confirmed": True,
+        "invoice_confirmed": True,
+        "allow_provider_pending": True,
+    }
+    if primary_provider == "key4u_video" or "key4u_video" in effective_provider_order:
+        req_meta["model"] = pinned_model
+        req_meta["model_name"] = pinned_model
+        req_meta["selected_model"] = pinned_model
+        req_meta["pinned_wire_model"] = pinned_model
+        req_meta["selected_family"] = "kling"
+        req_meta["selected_request_defaults"] = {
+            "model_name": pinned_model,
+            "duration": int(duration_seconds),
+        }
+
+    gen_request = VideoGenerationRequest(
+        job_id=job_id,
+        product_type="self_shot_cinematic_transform",
+        video_flow_type="selfshot3",
+        prompt=prompt,
+        negative_prompt=negative,
+        image_paths=[keyframe_path],
+        source_video_path=source_path,
+        ratio=aspect_ratio,
+        duration_seconds=float(duration_seconds),
+        metadata=req_meta,
+        required_capability="image_to_video",
+    )
+    gen_result = run_provider_generation(gen_request, output_dir=output_dir, environ=provider_env)
+    if not gen_result.get("ok"):
+        raise RealVideoRenderError(
+            str(gen_result.get("blocker") or gen_result.get("provider_error") or "selfshot3_i2v_submit_failed"),
+            diagnostics=dict(gen_result),
+        )
+    output_file = str(gen_result.get("final_video_path") or gen_result.get("output_path") or raw_path)
+
+    from services.video_selfshot_continuity_validator import validate_selfshot_scene_continuity
+
+    continuity_res = validate_selfshot_scene_continuity(
+        clip_source=output_file,
+        scene_index=1,
+        scene_duration_seconds=duration_seconds,
+        asset_pack=asset_pack,
+        job=job,
+    )
+    evidence_source = str(continuity_res.get("evidence_source") or "")
+    validation_mode = str(continuity_res.get("independent_visual_validation") or "")
+    person_req = bool(continuity_res.get("person_required"))
+    object_req = bool(continuity_res.get("object_required"))
+
+    is_valid_evidence = (
+        bool(continuity_res.get("ok"))
+        and evidence_source == "local_vision_validator"
+        and (validation_mode == "LOCAL_MODEL" if (person_req or object_req) else True)
+    )
+    if not is_valid_evidence:
+        blocker = str(continuity_res.get("blocker") or "")
+        if not blocker or blocker == "None":
+            blocker = "mock_or_unverified_visual_evidence"
+        raise RealVideoRenderError(
+            blocker,
+            diagnostics={
+                "ok": False,
+                "selfshot3": True,
+                "provider_attempted": True,
+                "generation_submit_attempted": True,
+                "no_charge": False,
+                "no_charge_proven": False,
+                "result_rejected_locally": True,
+                "blocker": blocker,
+                "continuity_evidence": continuity_res,
+                "failure_reason": continuity_res.get("failure_reason") or blocker,
+            },
+        )
+
+    # Derive continuity scores strictly from local vision validator evidence (never gen_result, asset_pack, or job)
+    local_explicit = continuity_res.get("continuity_scores") or continuity_res.get("scores")
+    if isinstance(local_explicit, dict) and local_explicit and all(k in local_explicit for k in ("identity", "body", "motion", "object", "interaction", "temporal")):
+        scores = {k: float(local_explicit[k]) for k in ("identity", "body", "motion", "object", "interaction", "temporal")}
+    else:
+        p_obs = continuity_res.get("person_observations") or []
+        o_obs = continuity_res.get("object_observations") or []
+        r_obs = continuity_res.get("relationship_observations") or []
+        total_frames = max(1, len(p_obs) or len(o_obs) or int(continuity_res.get("sampled_frame_count") or 1))
+        # Check if continuity_res already provides authoritative measured continuity_scores
+        existing_scores = continuity_res.get("continuity_scores") if isinstance(continuity_res.get("continuity_scores"), dict) else None
+        if existing_scores:
+            p_ratio = round(float(existing_scores.get("identity", 0.0)), 4)
+            o_ratio = round(float(existing_scores.get("object", 1.0 if not object_req else 0.0)), 4)
+            r_ratio = round(float(existing_scores.get("interaction", 1.0 if not (person_req and object_req) else 0.0)), 4)
+            body_score = round(float(existing_scores.get("body", 1.0 if not person_req else 0.0)), 4)
+            motion_score = round(float(existing_scores.get("motion", 0.0)), 4)
+            temporal_score = round(float(existing_scores.get("temporal", 0.0)), 4)
+        else:
+            p_obs = continuity_res.get("person_observations") or []
+            o_obs = continuity_res.get("object_observations") or []
+            r_obs = continuity_res.get("relationship_observations") or []
+            total_frames = max(1, continuity_res.get("sampled_frame_count") or 3)
+
+            p_ratio = round(sum(1 for x in p_obs if x.get("person_ok")) / total_frames, 4) if (person_req and p_obs) else (1.0 if not person_req else 0.0)
+            o_ratio = round(sum(1 for x in o_obs if x.get("object_ok")) / total_frames, 4) if (object_req and o_obs) else (1.0 if not object_req else 0.0)
+            r_ratio = round(sum(1 for x in r_obs if x.get("relationship_ok")) / total_frames, 4) if (person_req and object_req and r_obs) else (1.0 if not (person_req and object_req) else 0.0)
+
+            # Temporal score MUST use actual frame or integrated pass ratio (never proxy ok boolean or boolean success)
+            passing_integrated = continuity_res.get("passing_integrated")
+            if passing_integrated is not None:
+                temporal_score = round(float(passing_integrated) / total_frames, 4)
+            elif continuity_res.get("temporal_pass_ratio") is not None:
+                temporal_score = round(float(continuity_res["temporal_pass_ratio"]), 4)
+            elif p_obs or o_obs or r_obs:
+                integrated_cnt = sum(
+                    1 for idx in range(total_frames)
+                    if (not person_req or (idx < len(p_obs) and p_obs[idx].get("person_ok")))
+                    and (not object_req or (idx < len(o_obs) and o_obs[idx].get("object_ok")))
+                    and (not (person_req and object_req) or (idx < len(r_obs) and r_obs[idx].get("relationship_ok")))
+                )
+                temporal_score = round(integrated_cnt / total_frames, 4)
+            else:
+                temporal_score = 0.0
+
+            # Body: measured local values or fail closed (0.0) if unmeasured
+            body_meas = continuity_res.get("body_score")
+            if body_meas is not None:
+                body_score = round(float(body_meas), 4)
+            elif not person_req:
+                body_score = 1.0
+            elif p_obs and any(x.get("person_bbox") for x in p_obs):
+                boxes = [x["person_bbox"] for x in p_obs if x.get("person_bbox")]
+                ratios = [b[3] / max(1.0, b[2]) for b in boxes if len(b) >= 4]
+                if len(ratios) >= 2:
+                    mean_r = sum(ratios) / len(ratios)
+                    max_dev = max(abs(r - mean_r) / mean_r for r in ratios)
+                    body_score = round(max(0.0, min(1.0, 1.0 - max_dev)), 4)
+                else:
+                    body_score = 0.0
+            else:
+                body_score = 0.0
+
+            # Motion: measured local values or fail closed (0.0) if unmeasured
+            motion_meas = continuity_res.get("motion_score")
+            if motion_meas is not None:
+                motion_score = round(float(motion_meas), 4)
+            elif continuity_res.get("motion_pass_ratio") is not None:
+                motion_score = round(float(continuity_res["motion_pass_ratio"]), 4)
+            elif not person_req and not object_req:
+                motion_score = 1.0
+            else:
+                motion_score = 0.0
+
+        scores = {
+            "identity": p_ratio,
+            "body": body_score,
+            "motion": motion_score,
+            "object": o_ratio,
+            "interaction": r_ratio,
+            "temporal": temporal_score,
+        }
+
+    return {
+        "ok": True,
+        "selfshot3": True,
+        "route": "controlled_keyframe_image_to_video",
+        "truth": "image_to_video_fallback_not_direct_v2v",
+        "provider_attempted": True,
+        "provider": gen_result.get("provider") or primary_provider,
+        "model": pinned_model if (primary_provider == "key4u_video" or "key4u_video" in effective_provider_order) else (gen_result.get("model") or ""),
+        "provider_task_ids": gen_result.get("provider_task_ids") or ([gen_result["provider_task_id"]] if gen_result.get("provider_task_id") else []),
+        "provider_video_ids": gen_result.get("provider_video_ids") or [],
+        "output_path": output_file,
+        "raw_path": raw_path,
+        "keyframe_path": keyframe_path,
+        "duration": duration_seconds,
+        "continuity_validation_required": True,
+        "continuity_validation_passed": bool(continuity_res.get("ok")),
+        "continuity_evidence": continuity_res,
+        "continuity_evidence_present": bool(continuity_res),
+        "continuity_metadata_authority": "local_vision_validator" if evidence_source == "local_vision_validator" else "none",
+        "evidence_source": evidence_source,
+        "independent_visual_validation": validation_mode,
+        "independent_visual_validation_pass": bool(continuity_res.get("ok") and evidence_source == "local_vision_validator"),
+        "independent_visual_continuity_proven": bool(continuity_res.get("ok") and evidence_source == "local_vision_validator"),
+        "continuity_scores": scores,
+    }
+
+
+def _render_selfshot3_video_to_video(
+    *,
+    job: dict[str, Any],
+    asset_pack: dict[str, Any],
+    raw_path: str,
+    provider_order: list[str] | None = None,
     fallback_prompt: str,
     aspect_ratio: str,
 ) -> dict[str, Any]:
@@ -3551,6 +3833,21 @@ def _render_selfshot3_video_to_video(
     if duration_seconds <= 0:
         duration_seconds = _safe_int(asset_pack.get("duration_seconds") or (job or {}).get("duration_seconds"), 1)
     duration_seconds = max(1, duration_seconds)
+    is_controlled_keyframe = (
+        str((job or {}).get("route") or (asset_pack or {}).get("engine_route") or (asset_pack or {}).get("route") or "").strip() in {"controlled_keyframe_image_to_video", "keyframe_image_to_video"}
+        or str((job or {}).get("required_capability") or (asset_pack or {}).get("required_capability") or "").strip() == "image_to_video"
+    )
+    if is_controlled_keyframe:
+        return _render_selfshot3_controlled_keyframe_image_to_video(
+            job=job,
+            asset_pack=asset_pack,
+            raw_path=raw_path,
+            provider_order=provider_order,
+            fallback_prompt=fallback_prompt,
+            aspect_ratio=aspect_ratio,
+            source_path=source_path,
+            duration_seconds=duration_seconds,
+        )
     configs = _selfshot3_provider_configs(provider_order, duration_seconds)
     configs = [c for c in configs if c.provider_name not in video_ai_edit_provider.CANONICAL_PROVEN_V2V_PROVIDERS]
     if not configs:
@@ -3819,12 +4116,172 @@ def _materialize_selfshot2_source_segment(
     return str(target)
 
 
-def _render_selfshot2_video_to_video(
+def _render_selfshot2_controlled_keyframe_image_to_video(
     *,
     job: dict[str, Any],
     asset_pack: dict[str, Any],
     raw_path: str,
     provider_order: list[str],
+    fallback_prompt: str,
+    aspect_ratio: str,
+    scene_index: int,
+    source_path: str,
+    target_duration: int,
+    segment: dict[str, Any],
+) -> dict[str, Any]:
+    prompt, negative = _selfshot2_prompt_payload(
+        asset_pack,
+        scene_index=scene_index,
+        fallback_prompt=fallback_prompt,
+    )
+    scene_source_path = _materialize_selfshot2_source_segment(
+        source_path,
+        raw_path,
+        scene_index=scene_index,
+        start_seconds=float(segment["start_seconds"]),
+        duration_seconds=float(segment["duration_seconds"]),
+    )
+    keyframe_path = _extract_selfshot_keyframe(
+        scene_source_path,
+        raw_path,
+        scene_index=scene_index,
+        timestamp_seconds=0.0,
+        prefix="selfshot2",
+    )
+    job_id = str((job or {}).get("job_id") or (job or {}).get("id") or "selfshot2")
+    request_job_id = f"{job_id}-scene-{scene_index}"
+    output_dir = os.path.dirname(os.path.abspath(raw_path))
+    effective_provider_order = [p for p in (provider_order or []) if str(p).strip()] or ["key4u_video", "shopaikey_video"]
+    if "key4u_video" in effective_provider_order and effective_provider_order[0] != "key4u_video":
+        effective_provider_order = ["key4u_video"] + [p for p in effective_provider_order if p != "key4u_video"]
+    primary_provider = effective_provider_order[0]
+    provider_env = dict(os.environ)
+    provider_env["VIDEO_PROVIDER_CHAIN"] = ",".join(effective_provider_order)
+
+    pinned_model = "kling-v3"
+    provider_env["KEY4U_VIDEO_MODEL"] = pinned_model
+
+    req_meta = {
+        "scene_index": scene_index,
+        "scene_id": scene_index,
+        "scene_duration_seconds": target_duration,
+        "is_controlled_keyframe_i2v": True,
+        "route": "controlled_keyframe_image_to_video",
+        "truth": "image_to_video_fallback_not_direct_v2v",
+        "primary_provider": primary_provider,
+        "submit_source": video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE,
+        "public_user_confirmed": True,
+        "invoice_confirmed": True,
+        "allow_provider_pending": True,
+    }
+    if primary_provider == "key4u_video" or "key4u_video" in effective_provider_order:
+        req_meta["model"] = pinned_model
+        req_meta["model_name"] = pinned_model
+        req_meta["selected_model"] = pinned_model
+        req_meta["pinned_wire_model"] = pinned_model
+        req_meta["selected_family"] = "kling"
+        req_meta["selected_request_defaults"] = {
+            "model_name": pinned_model,
+            "duration": int(target_duration),
+        }
+
+    gen_request = VideoGenerationRequest(
+        job_id=request_job_id,
+        product_type="self_shot_scene_change",
+        video_flow_type="selfshot2",
+        prompt=prompt,
+        negative_prompt=negative,
+        image_paths=[keyframe_path],
+        source_video_path=scene_source_path,
+        ratio=aspect_ratio,
+        duration_seconds=float(target_duration),
+        metadata=req_meta,
+        required_capability="image_to_video",
+    )
+    gen_result = run_provider_generation(gen_request, output_dir=output_dir, environ=provider_env)
+    if not gen_result.get("ok"):
+        raise RealVideoRenderError(
+            str(gen_result.get("blocker") or gen_result.get("provider_error") or "selfshot2_i2v_submit_failed"),
+            diagnostics=dict(gen_result),
+        )
+    output_file = str(gen_result.get("final_video_path") or gen_result.get("output_path") or raw_path)
+
+    from services.video_selfshot_continuity_validator import validate_selfshot_scene_continuity
+
+    continuity_res = validate_selfshot_scene_continuity(
+        clip_source=output_file,
+        scene_index=scene_index,
+        scene_duration_seconds=target_duration,
+        asset_pack=asset_pack,
+        job=job,
+    )
+    evidence_source = str(continuity_res.get("evidence_source") or "")
+    validation_mode = str(continuity_res.get("independent_visual_validation") or "")
+    person_req = bool(continuity_res.get("person_required"))
+    object_req = bool(continuity_res.get("object_required"))
+
+    is_valid_evidence = (
+        bool(continuity_res.get("ok"))
+        and evidence_source == "local_vision_validator"
+        and (validation_mode == "LOCAL_MODEL" if (person_req or object_req) else True)
+    )
+    if not is_valid_evidence:
+        blocker = str(continuity_res.get("blocker") or "")
+        if not blocker or blocker == "None":
+            blocker = "mock_or_unverified_visual_evidence"
+        raise RealVideoRenderError(
+            blocker,
+            diagnostics={
+                "ok": False,
+                "selfshot2": True,
+                "scene_index": scene_index,
+                "provider_attempted": True,
+                "generation_submit_attempted": True,
+                "no_charge": False,
+                "no_charge_proven": False,
+                "result_rejected_locally": True,
+                "blocker": blocker,
+                "continuity_evidence": continuity_res,
+                "failure_reason": continuity_res.get("failure_reason") or blocker,
+            },
+        )
+
+    return {
+        "ok": True,
+        "selfshot2": True,
+        "route": "controlled_keyframe_image_to_video",
+        "truth": "image_to_video_fallback_not_direct_v2v",
+        "provider_attempted": True,
+        "provider": gen_result.get("provider") or primary_provider,
+        "model": pinned_model if (primary_provider == "key4u_video" or "key4u_video" in effective_provider_order) else (gen_result.get("model") or ""),
+        "provider_task_ids": gen_result.get("provider_task_ids") or ([gen_result["provider_task_id"]] if gen_result.get("provider_task_id") else []),
+        "provider_video_ids": gen_result.get("provider_video_ids") or [],
+        "output_path": output_file,
+        "raw_path": raw_path,
+        "keyframe_path": keyframe_path,
+        "duration": target_duration,
+        "scene_index": scene_index,
+        "continuity_validation_required": True,
+        "continuity_validation_passed": bool(continuity_res.get("ok")),
+        "continuity_evidence": continuity_res,
+        "continuity_evidence_present": bool(continuity_res),
+        "continuity_metadata_authority": "local_vision_validator" if evidence_source == "local_vision_validator" else "none",
+        "evidence_source": evidence_source,
+        "independent_visual_validation": validation_mode,
+        "independent_visual_validation_pass": bool(continuity_res.get("ok") and evidence_source == "local_vision_validator"),
+        "independent_visual_continuity_proven": bool(continuity_res.get("ok") and evidence_source == "local_vision_validator"),
+        "person_identity": bool(continuity_res.get("person_identity")),
+        "object_identity": bool(continuity_res.get("object_identity")),
+        "person_object_relationship": bool(continuity_res.get("person_object_relationship")),
+    }
+
+
+def _render_selfshot2_video_to_video(
+    *,
+    job: dict[str, Any],
+    asset_pack: dict[str, Any],
+    raw_path: str,
+    provider_order: list[str] | None = None,
     fallback_prompt: str,
     aspect_ratio: str,
     scene_index: int,
@@ -3913,6 +4370,23 @@ def _render_selfshot2_video_to_video(
                 "segment_duration": segment_duration,
                 "target_duration": target_duration,
             },
+        )
+    is_controlled_keyframe = (
+        str((job or {}).get("route") or (asset_pack or {}).get("engine_route") or (asset_pack or {}).get("route") or "").strip() == "controlled_keyframe_image_to_video"
+        or str((job or {}).get("required_capability") or (asset_pack or {}).get("required_capability") or "").strip() == "image_to_video"
+    )
+    if is_controlled_keyframe:
+        return _render_selfshot2_controlled_keyframe_image_to_video(
+            job=job,
+            asset_pack=asset_pack,
+            raw_path=raw_path,
+            provider_order=provider_order,
+            fallback_prompt=fallback_prompt,
+            aspect_ratio=aspect_ratio,
+            scene_index=scene_index,
+            source_path=source_path,
+            target_duration=target_duration,
+            segment=segment,
         )
     configs = _selfshot2_provider_configs(provider_order, target_duration)
     if not configs:
@@ -4372,6 +4846,111 @@ def selfshot2_continuity_validation(
         "continuity_evidence_scene_indexes": evidence_scene_indexes,
         "continuity_missing_scene_indexes": sorted(expected_indexes - set(evidence_scene_indexes)),
         "continuity_evidence_by_scene": {str(key): value for key, value in sorted(evidence_by_scene.items())},
+    }
+
+
+def selfshot3_continuity_validation(
+    job: dict[str, Any] | None,
+    result: dict[str, Any] | None,
+    *,
+    scene_tasks: list[dict[str, Any]] | None = None,
+    debug_results: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Validate one-take cinematic transformation continuity constraints and final MP4."""
+
+    output = dict(result or {})
+    final_path = str(
+        output.get("final_video_path")
+        or output.get("master_video_path")
+        or output.get("output_path")
+        or ""
+    ).strip()
+    final_mp4_valid = bool(
+        final_path
+        and os.path.isfile(final_path)
+        and os.path.getsize(final_path) > 0
+    )
+
+    evidence_source = str(
+        output.get("evidence_source")
+        or (output.get("continuity_evidence") or {}).get("evidence_source")
+        or ""
+    )
+    independent_mode = str(
+        output.get("independent_visual_validation")
+        or (output.get("continuity_evidence") or {}).get("independent_visual_validation")
+        or ""
+    )
+
+    scores_candidate: dict[str, Any] = {}
+    evidence_candidate = (
+        output.get("continuity_scores")
+        or output.get("continuity_evidence")
+        or output.get("continuity_metrics")
+        or {}
+    )
+    if isinstance(evidence_candidate, dict):
+        scores_candidate.update(evidence_candidate)
+
+    if evidence_source == "local_vision_validator":
+        all_rows = [*(scene_tasks or []), *(debug_results or [])]
+        for row in all_rows:
+            if isinstance(row, dict):
+                row_src = str(row.get("evidence_source") or (row.get("continuity_evidence") or {}).get("evidence_source") or "")
+                if row_src == "local_vision_validator":
+                    for key in ("continuity_scores", "continuity_evidence", "continuity_metrics"):
+                        val = row.get(key)
+                        if isinstance(val, dict):
+                            for k, v in val.items():
+                                if k not in scores_candidate:
+                                    scores_candidate[k] = v
+
+    scores_with_authority = {
+        **scores_candidate,
+        "evidence_source": evidence_source,
+        "independent_visual_validation": independent_mode,
+    }
+    validation_result = video_selfshot3.continuity_validation(scores_with_authority)
+    blocker = ""
+    if not final_mp4_valid:
+        blocker = "selfshot3_valid_final_mp4_required"
+    elif output.get("result_rejected_locally"):
+        blocker = str(output.get("blocker") or "result_rejected_locally")
+    elif evidence_source in {"unverified_mock_source", "mock"}:
+        blocker = "mock_or_unverified_visual_evidence"
+    elif evidence_source != "local_vision_validator":
+        blocker = "missing_local_vision_authority"
+    elif independent_mode != "LOCAL_MODEL":
+        blocker = "independent_visual_validation_required"
+    elif not validation_result.get("ok"):
+        blocker = "selfshot3_continuity_validation_failed"
+
+    all_local_proven = bool(
+        not blocker
+        and final_mp4_valid
+        and validation_result.get("ok")
+        and evidence_source == "local_vision_validator"
+        and independent_mode == "LOCAL_MODEL"
+    )
+    authority = "local_vision_validator" if (evidence_source == "local_vision_validator" and independent_mode == "LOCAL_MODEL") else "none"
+    independent_validation_mode = "LOCAL_MODEL" if all_local_proven else (independent_mode or "NOT_PERFORMED")
+
+    return {
+        "ok": bool(not blocker and all_local_proven),
+        "selfshot3": True,
+        "blocker": blocker,
+        "final_mp4_valid": final_mp4_valid,
+        "continuity_validation_required": True,
+        "continuity_validation_passed": bool(not blocker and all_local_proven),
+        "continuity_metadata_present": bool(scores_candidate),
+        "continuity_metadata_authority": authority,
+        "continuity_evidence_present": bool(evidence_candidate or output.get("continuity_evidence_present")),
+        "evidence_source": evidence_source,
+        "independent_visual_validation": independent_validation_mode,
+        "independent_visual_validation_pass": all_local_proven,
+        "independent_visual_continuity_proven": all_local_proven,
+        "scores": validation_result.get("scores") or {},
+        "failures": validation_result.get("failures") or [],
     }
 
 
@@ -7657,6 +8236,22 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
             result["terminal_state"] = "failed_no_charge"
             result["no_charge"] = True
             _raise_render_error(str(continuity.get("blocker") or "selfshot2_continuity_validation_failed"), result)
+    elif product_type == "self_shot_cinematic_transform":
+        continuity = selfshot3_continuity_validation(
+            job,
+            result,
+            scene_tasks=scene_tasks,
+            debug_results=provider_runtime_debug,
+        )
+        result["selfshot3_continuity_validation"] = continuity
+        result["continuity_validation_passed"] = continuity.get("ok") is True
+        result["continuity_blocker"] = str(continuity.get("blocker") or "")
+        result["continuity_metrics"] = dict(continuity.get("scores") or {})
+        if continuity.get("ok") is not True or continuity.get("continuity_metadata_authority") != "local_vision_validator" or not continuity.get("independent_visual_continuity_proven"):
+            result["delivery_blocked"] = True
+            result["terminal_state"] = "failed_no_charge"
+            result["no_charge"] = True
+            _raise_render_error(str(continuity.get("blocker") or "selfshot3_continuity_validation_failed"), result)
     result["visual_classification"] = classify_visual_result(result)
     result["final_classification"] = result["visual_classification"]
     if result["visual_classification"] != FINAL_AI_VIDEO:

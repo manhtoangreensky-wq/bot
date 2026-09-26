@@ -1149,6 +1149,8 @@ def capability_route(
         available.add("person_identity_reference")
     if "first_last_frame_video" in available:
         available.add("first_last_frame")
+    if "image_to_video" in available or "controlled_keyframe_image_to_video" in available:
+        available.add("controlled_keyframe_image_to_video")
     rules = dict(layer_rules or DEFAULT_LAYER_STATES)
     wardrobe_only = rules.get("wardrobe") == "transform" and rules.get("identity") == "preserve"
     routes = (
@@ -1156,12 +1158,13 @@ def capability_route(
         ("performance_capture", "performance_capture", "Dùng chuyển động và biểu cảm từ video nguồn"),
         ("regional_mask_transform", "masked_regional_transform", "Biến đổi vùng chọn, giữ chủ thể"),
         ("person_identity_reference", "reference_assisted_video", "Dùng tham chiếu nhận diện cùng chuyển động nguồn"),
+        ("controlled_keyframe_image_to_video", "controlled_keyframe_image_to_video", "Chế độ dự phòng keyframe có kiểm soát, không phải biến đổi video trực tiếp"),
         ("first_last_frame", "keyframe_image_to_video", "Chế độ dự phòng sử dụng keyframe, không phải biến đổi video trực tiếp"),
     )
     for capability, route, public_label in routes:
         if capability not in available:
             continue
-        if route == "keyframe_image_to_video":
+        if route in {"keyframe_image_to_video", "controlled_keyframe_image_to_video"}:
             return {
                 "ok": True,
                 "route": route,
@@ -1296,10 +1299,25 @@ def continuity_validation(metrics: Mapping[str, Any] | None) -> dict[str, Any]:
     values = dict(metrics or {})
     required = ("identity", "body", "motion", "object", "interaction", "temporal")
     failures = [key for key in required if float(values.get(key, 0)) < 0.8]
+    evidence_source = str(values.get("evidence_source") or "")
+    independent_mode = str(values.get("independent_visual_validation") or "")
+    if evidence_source in {"unverified_mock_source", "mock"}:
+        failures.append("mock_or_unverified_visual_evidence")
+    elif evidence_source != "local_vision_validator":
+        failures.append("missing_local_vision_authority")
+    if independent_mode != "LOCAL_MODEL":
+        failures.append("independent_visual_validation_required")
+    is_local = evidence_source == "local_vision_validator" and independent_mode == "LOCAL_MODEL"
+    authority = "local_vision_validator" if is_local else ("none" if not values else "unauthorized_metadata")
+    local_proven = bool(not failures and is_local)
     return {
         "ok": not failures,
         "failures": failures,
         "scores": {key: float(values.get(key, 0)) for key in required},
+        "evidence_source": evidence_source,
+        "independent_visual_validation": independent_mode or ("LOCAL_MODEL" if is_local else "NOT_PERFORMED"),
+        "continuity_metadata_authority": authority,
+        "independent_visual_continuity_proven": local_proven,
     }
 
 
@@ -1315,8 +1333,10 @@ def record_delivery(
         raise ValueError("valid_final_mp4_required")
     if int(message_id or 0) <= 0 or not str(receipt_key or "").strip():
         raise ValueError("valid_telegram_delivery_required")
-    if continuity is not None and not continuity_validation(continuity).get("ok"):
-        raise ValueError("continuity_validation_required")
+    if continuity is not None:
+        val = continuity_validation(continuity)
+        if not val.get("ok") or val.get("continuity_metadata_authority") != "local_vision_validator" or not val.get("independent_visual_continuity_proven"):
+            raise ValueError("continuity_validation_required")
     current = deepcopy(dict(state or {}))
     existing = dict(current.get("delivery") or {})
     expected = {"delivered": True, "message_id": int(message_id), "receipt_key": str(receipt_key)}

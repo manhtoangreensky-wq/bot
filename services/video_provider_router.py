@@ -4413,21 +4413,42 @@ def _run_provider_generation_impl(
             }
     product_type_val = str(request.product_type or metadata.get("product_type") or "").strip()
     if product_type_val in {"self_shot_scene_change", "self_shot_cinematic_transform"}:
-        return {
-            "ok": False,
-            "provider_attempted": False,
-            "provider_submit_called": False,
-            "external_provider_spend_prevented": True,
-            "paid_submit_allowed": False,
-            "paid_submit_blocked_reason": "selfshot2_text_to_video_route_forbidden",
-            "provider_error": "selfshot2_text_to_video_route_forbidden",
-            "blocker": "selfshot2_text_to_video_route_forbidden",
-            "status": "failed_no_charge",
-            "charge": 0,
-            "charged_xu": 0,
-            "no_charge": True,
-            "provider_readiness": status,
-        }
+        required_cap = str(request.required_capability or metadata.get("required_capability") or "").strip().lower()
+        if required_cap not in {"image_to_video", "controlled_keyframe_image_to_video"}:
+            return {
+                "ok": False,
+                "provider_attempted": False,
+                "provider_submit_called": False,
+                "external_provider_spend_prevented": True,
+                "paid_submit_allowed": False,
+                "paid_submit_blocked_reason": "selfshot2_text_to_video_route_forbidden",
+                "provider_error": "selfshot2_text_to_video_route_forbidden",
+                "blocker": "selfshot2_text_to_video_route_forbidden",
+                "status": "failed_no_charge",
+                "charge": 0,
+                "charged_xu": 0,
+                "no_charge": True,
+                "provider_readiness": status,
+            }
+        has_image = bool(request.image_paths or metadata.get("image_path") or metadata.get("image_paths") or metadata.get("image"))
+        if not has_image:
+            return {
+                "ok": False,
+                "provider_attempted": False,
+                "provider_submit_called": False,
+                "external_provider_spend_prevented": True,
+                "paid_submit_allowed": False,
+                "paid_submit_blocked_reason": "selfshot_keyframe_missing",
+                "provider_error": "selfshot_keyframe_missing",
+                "blocker": "selfshot_keyframe_missing",
+                "status": "failed_no_charge",
+                "charge": 0,
+                "charged_xu": 0,
+                "no_charge": True,
+                "provider_readiness": status,
+            }
+        if request.required_capability != "image_to_video":
+            request.required_capability = "image_to_video"
     required_capability_original = str(request.required_capability or "").strip()
     normalized_capability_candidates = capability_options(required_capability_original)
     candidate_adapters = provider_candidate_adapters(request.required_capability, env, status)

@@ -131,6 +131,16 @@
           "supports_concat": true,
           "payload_adapter": "key4u_kling_small_clip"
         },
+        "kling-v3": {
+          "family": "kling",
+          "quality": "standard",
+          "cost_tier": "common",
+          "capabilities": ["text_to_video", "image_to_video", "video_to_video", "scene_video", "short_video"],
+          "clip_seconds": 8,
+          "max_single_task_seconds": 10,
+          "supports_concat": true,
+          "payload_adapter": "key4u_kling_small_clip"
+        },
         "kling-video-extend": {
           "family": "kling",
           "quality": "extend",

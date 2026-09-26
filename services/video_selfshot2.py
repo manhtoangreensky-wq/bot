@@ -715,7 +715,11 @@ def preflight(
         capabilities=capabilities,
         subject_manifest=draft.get("subject_manifest") or {},
         direction=direction,
-        reference_keyframes_ready=bool(draft.get("reference_keyframes_ready")),
+        reference_keyframes_ready=bool(
+            draft.get("reference_keyframes_ready")
+            or draft.get("keyframes_ready")
+            or draft.get("reference_keyframes")
+        ),
     ) if direction else {"ok": False, "blocker": "transformation_direction_missing", "route": "", "missing": []}
     if not route.get("ok"):
         blockers.append(route.get("blocker") or "selfshot2_required_capability_unavailable")
