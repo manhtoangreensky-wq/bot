@@ -368,8 +368,8 @@ jobs:
               fail_after_prepare \"Health endpoint payload validation failed (status != ok)\"
             fi
 
-            activate_product_video_worker_release || fail_after_prepare \"activate_product_video_worker_release failed\"
-            commit_product_video_release_transaction || fail_after_prepare \"commit_product_video_release_transaction failed\"
+            activate_product_video_worker_release
+            commit_product_video_release_transaction
 
             echo '=== Cleaning up Remote Staging Directory ==='
             CLEANUP_TARGET=\"/tmp/deploy-bot-\$TARGET_SHA\"

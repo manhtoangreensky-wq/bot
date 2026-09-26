@@ -25,6 +25,12 @@ WORKFLOW_PATH = os.path.join(
     "workflows",
     "deploy-vps.yml",
 )
+SYNC_SCRIPT_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "scripts",
+    "vps",
+    "sync_product_video_worker_release.sh",
+)
 
 
 class TestDeployVpsWorkflowHygiene(unittest.TestCase):
@@ -32,6 +38,11 @@ class TestDeployVpsWorkflowHygiene(unittest.TestCase):
         self.assertTrue(os.path.isfile(WORKFLOW_PATH), f"Workflow file not found: {WORKFLOW_PATH}")
         with open(WORKFLOW_PATH, "r", encoding="utf-8") as f:
             self.content = f.read()
+        if os.path.isfile(SYNC_SCRIPT_PATH):
+            with open(SYNC_SCRIPT_PATH, "r", encoding="utf-8") as sf:
+                self.sync_script_content = sf.read()
+        else:
+            self.sync_script_content = ""
 
     def test_workflow_discovers_previous_deployed_sha(self):
         """1. Workflow discovers previous deployed SHA before bundle creation."""
@@ -1063,8 +1074,230 @@ fi
             POST_COMMIT_HYGIENE_FAILURE_DOES_NOT_ROLLBACK_COMMITTED_RELEASE = "YES" if "ROLLBACK_CALLED" not in content else "NO"
             self.assertEqual(POST_COMMIT_HYGIENE_FAILURE_DOES_NOT_ROLLBACK_COMMITTED_RELEASE, "YES")
 
+    def test_transaction_functions_not_called_in_or_lists(self):
+        """26. R4: activate and commit transaction functions must not be invoked under OR-lists (||)."""
+        activate_match = re.search(r"activate_product_video_worker_release\s*\|\|", self.content)
+        commit_match = re.search(r"commit_product_video_release_transaction\s*\|\|", self.content)
+        self.assertIsNone(activate_match, "activate_product_video_worker_release must not be called with ||")
+        self.assertIsNone(commit_match, "commit_product_video_release_transaction must not be called with ||")
+
+        self.assertIn("activate_product_video_worker_release", self.content)
+        self.assertIn("commit_product_video_release_transaction", self.content)
+        ACTIVATE_CALLED_UNDER_OR_LIST = "NO" if activate_match is None else "YES"
+        COMMIT_CALLED_UNDER_OR_LIST = "NO" if commit_match is None else "YES"
+        self.assertEqual(ACTIVATE_CALLED_UNDER_OR_LIST, "NO")
+        self.assertEqual(COMMIT_CALLED_UNDER_OR_LIST, "NO")
+
+    def test_commit_ordering_in_sync_script(self):
+        """27. R4: commit_product_video_release_transaction must write manifest before disarming rollback/trap."""
+        self.assertTrue(self.sync_script_content, "sync_product_video_worker_release.sh must be present")
+        match = re.search(r"commit_product_video_release_transaction\(\)\s*\{([^}]+)\}", self.sync_script_content)
+        self.assertIsNotNone(match, "commit_product_video_release_transaction function must exist")
+        body = match.group(1)
+
+        idx_committed = body.find("TRANSACTION_COMMITTED=1")
+        idx_manifest = body.find("write_transaction_manifest")
+        idx_disarm_armed = body.find("ROLLBACK_ARMED=0")
+        idx_disarm_trap = body.find("trap - ERR INT TERM")
+
+        self.assertNotEqual(idx_committed, -1, "TRANSACTION_COMMITTED=1 must be in commit function")
+        self.assertNotEqual(idx_manifest, -1, "write_transaction_manifest must be in commit function")
+        self.assertNotEqual(idx_disarm_armed, -1, "ROLLBACK_ARMED=0 must be in commit function")
+        self.assertNotEqual(idx_disarm_trap, -1, "trap - ERR INT TERM must be in commit function")
+
+        self.assertLess(idx_manifest, idx_disarm_armed, "write_transaction_manifest must occur before ROLLBACK_ARMED=0")
+        self.assertLess(idx_manifest, idx_disarm_trap, "write_transaction_manifest must occur before trap - ERR INT TERM")
+        COMMIT_DISARM_AFTER_PERSISTENCE = "YES" if (idx_manifest < idx_disarm_armed and idx_manifest < idx_disarm_trap) else "NO"
+        self.assertEqual(COMMIT_DISARM_AFTER_PERSISTENCE, "YES")
+
+    def test_activate_failure_triggers_armed_rollback(self):
+        """28. R4: Internal failure inside activate_product_video_worker_release triggers armed rollback."""
+        import shutil
+        bash_bin = shutil.which("bash") or (r"C:\Program Files\Git\bin\bash.exe" if os.path.isfile(r"C:\Program Files\Git\bin\bash.exe") else None)
+        if not bash_bin:
+            self.skipTest("bash not found")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            posix_tmp = tmp_dir.replace("\\", "/")
+            log_file = f"{posix_tmp}/activate_fail.log"
+            test_sh = f"{tmp_dir}/test_activate_fail.sh"
+
+            script = f"""#!/usr/bin/env bash
+set -Eeuo pipefail
+
+LOG_FILE="{log_file}"
+ROLLBACK_ARMED=1
+TRANSACTION_COMMITTED=0
+
+rollback_transaction() {{
+  local code="${{1:-1}}"
+  echo "ROLLBACK_STARTED" >> "$LOG_FILE"
+  echo "ROLLBACK_COMPLETED" >> "$LOG_FILE"
+  TRANSACTION_COMMITTED=0
+  echo "FINAL_COMMITTED=$TRANSACTION_COMMITTED" >> "$LOG_FILE"
+  exit "$code"
+}}
+
+trap 'rollback_transaction $?' ERR
+
+fail() {{
+  echo "FAIL_CALLED: $*" >> "$LOG_FILE"
+  return 1
+}}
+
+prove_worker_capability() {{
+  fail "safe worker dry-run probe failed"
+}}
+
+activate_product_video_worker_release() {{
+  prove_worker_capability
+  echo "UNREACHABLE_AFTER_FAIL" >> "$LOG_FILE"
+}}
+
+activate_product_video_worker_release
+"""
+            with open(test_sh, "w", encoding="utf-8") as f:
+                f.write(script)
+
+            res = subprocess.run([bash_bin, test_sh], capture_output=True, text=True)
+            self.assertEqual(res.returncode, 1)
+
+            with open(log_file, "r", encoding="utf-8") as lf:
+                content = lf.read()
+
+            self.assertIn("FAIL_CALLED: safe worker dry-run probe failed", content)
+            self.assertIn("ROLLBACK_STARTED", content)
+            self.assertIn("ROLLBACK_COMPLETED", content)
+            self.assertIn("FINAL_COMMITTED=0", content)
+            self.assertNotIn("UNREACHABLE_AFTER_FAIL", content)
+
+    def test_commit_manifest_failure_enters_armed_rollback(self):
+        """29. R4: Deterministic manifest write failure during commit triggers rollback."""
+        import shutil
+        bash_bin = shutil.which("bash") or (r"C:\Program Files\Git\bin\bash.exe" if os.path.isfile(r"C:\Program Files\Git\bin\bash.exe") else None)
+        if not bash_bin:
+            self.skipTest("bash not found")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            posix_tmp = tmp_dir.replace("\\", "/")
+            log_file = f"{posix_tmp}/commit_fail.log"
+            test_sh = f"{tmp_dir}/test_commit_fail.sh"
+
+            script = f"""#!/usr/bin/env bash
+set -Eeuo pipefail
+
+LOG_FILE="{log_file}"
+ROLLBACK_ARMED=1
+TRANSACTION_COMMITTED=0
+CALL_COUNT=0
+
+rollback_transaction() {{
+  local code="${{1:-1}}"
+  echo "ROLLBACK_STARTED" >> "$LOG_FILE"
+  echo "ROLLBACK_COMPLETED" >> "$LOG_FILE"
+  TRANSACTION_COMMITTED=0
+  echo "FINAL_COMMITTED=$TRANSACTION_COMMITTED" >> "$LOG_FILE"
+  exit "$code"
+}}
+
+trap 'rollback_transaction $?' ERR
+
+write_transaction_manifest() {{
+  CALL_COUNT=$((CALL_COUNT + 1))
+  if [[ "$CALL_COUNT" -eq 1 ]]; then
+    echo "MANIFEST_WRITE_FAILED_ON_COMMIT" >> "$LOG_FILE"
+    return 1
+  fi
+  echo "MANIFEST_WRITE_SUCCEEDED_IN_ROLLBACK" >> "$LOG_FILE"
+}}
+
+commit_product_video_release_transaction() {{
+  echo "BEFORE_COMMIT_ARMED=$ROLLBACK_ARMED" >> "$LOG_FILE"
+  TRANSACTION_COMMITTED=1
+  echo "TEMPORARILY_COMMITTED=$TRANSACTION_COMMITTED" >> "$LOG_FILE"
+  write_transaction_manifest
+  ROLLBACK_ARMED=0
+  trap - ERR INT TERM
+  echo "PRODUCT_VIDEO_DEPLOY_TRANSACTION_COMMITTED" >> "$LOG_FILE"
+}}
+
+commit_product_video_release_transaction
+"""
+            with open(test_sh, "w", encoding="utf-8") as f:
+                f.write(script)
+
+            res = subprocess.run([bash_bin, test_sh], capture_output=True, text=True)
+            self.assertEqual(res.returncode, 1)
+
+            with open(log_file, "r", encoding="utf-8") as lf:
+                content = lf.read()
+
+            self.assertIn("BEFORE_COMMIT_ARMED=1", content)
+            self.assertIn("TEMPORARILY_COMMITTED=1", content)
+            self.assertIn("MANIFEST_WRITE_FAILED_ON_COMMIT", content)
+            self.assertIn("ROLLBACK_STARTED", content)
+            self.assertIn("ROLLBACK_COMPLETED", content)
+            self.assertIn("FINAL_COMMITTED=0", content)
+            self.assertNotIn("PRODUCT_VIDEO_DEPLOY_TRANSACTION_COMMITTED", content)
+
+    def test_successful_commit_disarms_rollback_after_persistence(self):
+        """30. R4: Successful commit persists manifest then disarms rollback and logs success."""
+        import shutil
+        bash_bin = shutil.which("bash") or (r"C:\Program Files\Git\bin\bash.exe" if os.path.isfile(r"C:\Program Files\Git\bin\bash.exe") else None)
+        if not bash_bin:
+            self.skipTest("bash not found")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            posix_tmp = tmp_dir.replace("\\", "/")
+            log_file = f"{posix_tmp}/commit_success.log"
+            test_sh = f"{tmp_dir}/test_commit_success.sh"
+
+            script = f"""#!/usr/bin/env bash
+set -Eeuo pipefail
+
+LOG_FILE="{log_file}"
+ROLLBACK_ARMED=1
+TRANSACTION_COMMITTED=0
+
+rollback_transaction() {{
+  echo "ROLLBACK_CALLED" >> "$LOG_FILE"
+  exit 1
+}}
+
+trap 'rollback_transaction $?' ERR
+
+write_transaction_manifest() {{
+  echo "MANIFEST_PERSISTED" >> "$LOG_FILE"
+}}
+
+commit_product_video_release_transaction() {{
+  TRANSACTION_COMMITTED=1
+  write_transaction_manifest
+  ROLLBACK_ARMED=0
+  trap - ERR INT TERM
+  echo "PRODUCT_VIDEO_DEPLOY_TRANSACTION_COMMITTED" >> "$LOG_FILE"
+}}
+
+commit_product_video_release_transaction
+echo "ROLLBACK_ARMED_AFTER=$ROLLBACK_ARMED" >> "$LOG_FILE"
+"""
+            with open(test_sh, "w", encoding="utf-8") as f:
+                f.write(script)
+
+            res = subprocess.run([bash_bin, test_sh], capture_output=True, text=True)
+            self.assertEqual(res.returncode, 0)
+
+            with open(log_file, "r", encoding="utf-8") as lf:
+                content = lf.read()
+
+            self.assertIn("MANIFEST_PERSISTED", content)
+            self.assertIn("PRODUCT_VIDEO_DEPLOY_TRANSACTION_COMMITTED", content)
+            self.assertIn("ROLLBACK_ARMED_AFTER=0", content)
+            self.assertNotIn("ROLLBACK_CALLED", content)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
