@@ -3286,3 +3286,272 @@ def test_109_invalid_cue_meta_without_pcm_cannot_authorize_smoothing():
     assert smoothed[1]["speaker_id"] == "spk_2"
     assert smoothed[1].get("anti_flapping_smoothed") is not True
 
+
+def test_110_reported_shape_0_72s_window_1_56s_audio_exceeds_1_80(tmp_path):
+    """MANDATORY FIRST RED: Isolated incident shape (0.72s window with 1.56s audio) exceeds 1.80 and fails."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_110.mp4")
+        output_mp4 = tmp_path / "out_110.mp4"
+        cues = [
+            {"cue_id": "cue_isolated", "speaker_id": "spk_1", "text": "càng", "start_ms": 37600, "end_ms": 38320}
+        ]
+        acoustics = {"spk_1": {"voice_register": "low", "confidence": 0.95}}
+
+        async def synth(cues, speaker_voice_map, **kwargs):
+            return [{"cue_id": "cue_isolated", "audio": b"audio_bytes", "audio_duration": 1.56}]
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth,
+            render_pipeline=lambda **kwargs: str(output_mp4),
+        )
+        assert res["ok"] is False
+        assert res["status"] == "TTS_EXTREME_COMPRESSION_FAILED"
+        assert res["error_code"] == "extreme_audio_compression_unintelligible"
+        assert res["blocker"] == "extreme_audio_compression_unintelligible"
+        assert res["fit_ratio"] == pytest.approx(2.167, abs=0.01)
+
+    asyncio.run(_run())
+
+
+def test_111_safe_same_speaker_microcue_can_be_coalesced(tmp_path):
+    """MANDATORY FIRST RED: Safe adjacent same-speaker microcue coalesces and avoids 1.80 rejection."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_111.mp4")
+        output_mp4 = tmp_path / "out_111.mp4"
+        cues = [
+            {"cue_id": "cue_1", "speaker_id": "spk_1", "text": "Chiếc khóa này còn mới", "start_ms": 30240, "end_ms": 37600},
+            {"cue_id": "cue_2", "speaker_id": "spk_1", "text": "càng", "start_ms": 37600, "end_ms": 38320},
+        ]
+        acoustics = {"spk_1": {"voice_register": "low", "confidence": 0.95}}
+        observed_render_chunks = []
+
+        async def synth(cues, speaker_voice_map, **kwargs):
+            return [
+                {"cue_id": "cue_1", "audio": b"audio_part1", "audio_duration": 6.17},
+                {"cue_id": "cue_2", "audio": b"audio_part2", "audio_duration": 1.56},
+            ]
+
+        async def mock_render(source_media, output_path, **kwargs):
+            observed_render_chunks.extend(kwargs.get("tts_chunks") or [])
+            return _create_real_valid_mp4(Path(output_path))
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth,
+            render_pipeline=mock_render,
+        )
+        assert res["ok"] is True, f"Expected successful recovery but got {res}"
+        assert len(observed_render_chunks) == 1
+        coalesced = observed_render_chunks[0]
+        assert "cue_1" in coalesced.get("original_cue_ids", [])
+        assert "cue_2" in coalesced.get("original_cue_ids", [])
+        assert coalesced.get("coalesced") is True
+        assert coalesced.get("cue_locked_timing") is True
+        assert coalesced.get("fit_ratio") <= 1.80
+
+    asyncio.run(_run())
+
+
+def test_112_cross_speaker_microcue_must_not_coalesce(tmp_path):
+    """MANDATORY FIRST RED: Cross-speaker microcue must NOT coalesce and must fail compression check."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_112.mp4")
+        output_mp4 = tmp_path / "out_112.mp4"
+        cues = [
+            {"cue_id": "cue_1", "speaker_id": "spk_1", "text": "Câu một", "start_ms": 30240, "end_ms": 37600},
+            {"cue_id": "cue_2", "speaker_id": "spk_2", "text": "càng", "start_ms": 37600, "end_ms": 38320},
+        ]
+        acoustics = {
+            "spk_1": {"voice_register": "low", "confidence": 0.95},
+            "spk_2": {"voice_register": "high", "confidence": 0.95},
+        }
+
+        async def synth(cues, speaker_voice_map, **kwargs):
+            return [
+                {"cue_id": "cue_1", "audio": b"audio_part1", "audio_duration": 6.17},
+                {"cue_id": "cue_2", "audio": b"audio_part2", "audio_duration": 1.56},
+            ]
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth,
+            render_pipeline=lambda **kwargs: str(output_mp4),
+        )
+        assert res["ok"] is False
+        assert res["status"] == "TTS_EXTREME_COMPRESSION_FAILED"
+        assert res["error_code"] == "extreme_audio_compression_unintelligible"
+        assert res["cue_id"] == "cue_2"
+
+    asyncio.run(_run())
+
+
+def test_113_long_gap_microcue_must_not_coalesce(tmp_path):
+    """MANDATORY FIRST RED: Microcue with long gap (>0.5s) to same speaker must NOT coalesce."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_113.mp4")
+        output_mp4 = tmp_path / "out_113.mp4"
+        cues = [
+            {"cue_id": "cue_1", "speaker_id": "spk_1", "text": "Câu trước", "start_ms": 10000, "end_ms": 15000},
+            {"cue_id": "cue_2", "speaker_id": "spk_1", "text": "càng", "start_ms": 17000, "end_ms": 17500},  # gap = 2.0s
+        ]
+        acoustics = {"spk_1": {"voice_register": "low", "confidence": 0.95}}
+
+        async def synth(cues, speaker_voice_map, **kwargs):
+            return [
+                {"cue_id": "cue_1", "audio": b"audio_part1", "audio_duration": 4.0},
+                {"cue_id": "cue_2", "audio": b"audio_part2", "audio_duration": 1.5},
+            ]
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth,
+            render_pipeline=lambda **kwargs: str(output_mp4),
+        )
+        assert res["ok"] is False
+        assert res["status"] == "TTS_EXTREME_COMPRESSION_FAILED"
+        assert res["error_code"] == "extreme_audio_compression_unintelligible"
+        assert res["cue_id"] == "cue_2"
+
+    asyncio.run(_run())
+
+
+def test_114_non_speech_boundary_must_not_coalesce(tmp_path):
+    """MANDATORY FIRST RED: Microcue across non-speech boundary must NOT coalesce."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_114.mp4")
+        output_mp4 = tmp_path / "out_114.mp4"
+        cues = [
+            {"cue_id": "cue_1", "speaker_id": "spk_1", "text": "Câu trước", "start_ms": 10000, "end_ms": 15000, "non_speech_boundary": True},
+            {"cue_id": "cue_2", "speaker_id": "spk_1", "text": "càng", "start_ms": 15000, "end_ms": 15500},
+        ]
+        acoustics = {"spk_1": {"voice_register": "low", "confidence": 0.95}}
+
+        async def synth(cues, speaker_voice_map, **kwargs):
+            return [
+                {"cue_id": "cue_1", "audio": b"audio_part1", "audio_duration": 4.0},
+                {"cue_id": "cue_2", "audio": b"audio_part2", "audio_duration": 1.5},
+            ]
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth,
+            render_pipeline=lambda **kwargs: str(output_mp4),
+        )
+        assert res["ok"] is False
+        assert res["status"] == "TTS_EXTREME_COMPRESSION_FAILED"
+        assert res["error_code"] == "extreme_audio_compression_unintelligible"
+        assert res["cue_id"] == "cue_2"
+
+    asyncio.run(_run())
+
+
+def test_115_recovered_combined_cue_still_gt_1_80_must_fail(tmp_path):
+    """MANDATORY FIRST RED: Even if coalesced, if combined fit ratio is still > 1.80, it must fail."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_115.mp4")
+        output_mp4 = tmp_path / "out_115.mp4"
+        cues = [
+            {"cue_id": "cue_1", "speaker_id": "spk_1", "text": "Câu một", "start_ms": 10000, "end_ms": 11000},  # 1.0s window
+            {"cue_id": "cue_2", "speaker_id": "spk_1", "text": "Câu hai", "start_ms": 11000, "end_ms": 12000},  # 1.0s window
+        ]
+        acoustics = {"spk_1": {"voice_register": "low", "confidence": 0.95}}
+
+        async def synth(cues, speaker_voice_map, **kwargs):
+            return [
+                {"cue_id": "cue_1", "audio": b"audio_part1", "audio_duration": 2.5},  # combined: 5.0s / 2.0s = 2.5 > 1.80
+                {"cue_id": "cue_2", "audio": b"audio_part2", "audio_duration": 2.5},
+            ]
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth,
+            render_pipeline=lambda **kwargs: str(output_mp4),
+        )
+        assert res["ok"] is False
+        assert res["status"] == "TTS_EXTREME_COMPRESSION_FAILED"
+        assert res["error_code"] == "extreme_audio_compression_unintelligible"
+
+    asyncio.run(_run())
+
+
+def test_116_exact_1_80_must_still_pass(tmp_path):
+    """MANDATORY FIRST RED: Cue with exact 1.800 fit ratio must still pass."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_116.mp4")
+        output_mp4 = tmp_path / "out_116.mp4"
+        cues = [
+            {"cue_id": "cue_exact", "speaker_id": "spk_1", "text": "Câu chuẩn", "start_ms": 0, "end_ms": 1000}
+        ]
+        acoustics = {"spk_1": {"voice_register": "low", "confidence": 0.95}}
+
+        async def synth(cues, speaker_voice_map, **kwargs):
+            return [{"cue_id": "cue_exact", "audio": b"audio_exact", "audio_duration": 1.80}]
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth,
+            render_pipeline=lambda **kwargs: _create_real_valid_mp4(Path(output_mp4)),
+        )
+        assert res["ok"] is True
+
+    asyncio.run(_run())
+
+
+def test_117_gt_1_80_without_safe_recovery_must_still_fail(tmp_path):
+    """MANDATORY FIRST RED: Cue with > 1.80 (e.g. 1.801) without safe recovery must still fail."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_117.mp4")
+        output_mp4 = tmp_path / "out_117.mp4"
+        cues = [
+            {"cue_id": "cue_exceed", "speaker_id": "spk_1", "text": "Câu quá", "start_ms": 0, "end_ms": 1000}
+        ]
+        acoustics = {"spk_1": {"voice_register": "low", "confidence": 0.95}}
+
+        async def synth(cues, speaker_voice_map, **kwargs):
+            return [{"cue_id": "cue_exceed", "audio": b"audio_exceed", "audio_duration": 1.805}]
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth,
+            render_pipeline=lambda **kwargs: str(output_mp4),
+        )
+        assert res["ok"] is False
+        assert res["status"] == "TTS_EXTREME_COMPRESSION_FAILED"
+        assert res["error_code"] == "extreme_audio_compression_unintelligible"
+
+    asyncio.run(_run())
+
+
