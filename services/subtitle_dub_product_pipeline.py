@@ -408,44 +408,50 @@ async def process_subtitle_dub_job(
             for idx, item in enumerate(tts_chunks):
                 cid_cand = str(item.get("cue_id") or item.get("id") or "").strip()
                 auth_seg = auth_by_id.get(cid_cand)
-                if auth_seg is None and idx < len(tts_segments) and isinstance(tts_segments[idx], dict):
+                # Treat positional matching only as guarded fallback where count and order are unambiguous
+                if auth_seg is None and len(tts_chunks) == len(tts_segments) and idx < len(tts_segments) and isinstance(tts_segments[idx], dict):
                     auth_seg = tts_segments[idx]
 
-                cid = str(
-                    item.get("cue_id")
-                    or item.get("id")
-                    or (auth_seg.get("cue_id") or auth_seg.get("id") if auth_seg else None)
-                    or f"cue_{idx + 1}"
-                ).strip()
-                item["cue_id"] = cid
+                if auth_seg is not None:
+                    cid = str(auth_seg.get("cue_id") or auth_seg.get("id") or cid_cand or f"cue_{idx + 1}").strip()
+                    item["cue_id"] = cid
 
-                # Speaker authority: preserve authoritative speaker, never invent common "speaker_0"
-                speaker = (
-                    item.get("speaker_id")
-                    or item.get("speaker")
-                    or (auth_seg.get("speaker_id") or auth_seg.get("speaker") if auth_seg else None)
-                )
-                speaker_str = str(speaker).strip() if speaker is not None else ""
-                if speaker_str:
-                    item["speaker_id"] = speaker_str
-                    item["speaker"] = speaker_str
+                    # Source speaker authority defeats conflicting/stale chunk speaker metadata
+                    speaker = auth_seg.get("speaker_id") or auth_seg.get("speaker")
+                    speaker_str = str(speaker).strip() if speaker is not None else ""
+                    if speaker_str:
+                        item["speaker_id"] = speaker_str
+                        item["speaker"] = speaker_str
+                    else:
+                        item["speaker_id"] = ""
+                        item["speaker"] = ""
+                        item["recovery_eligible"] = False
+
+                    # Source non-speech boundary authority defeats chunk False
+                    if auth_seg.get("non_speech_boundary") is not None:
+                        item["non_speech_boundary"] = bool(auth_seg.get("non_speech_boundary"))
+
+                    # Source start/end timeline authority defeats conflicting chunk timing
+                    s = float(auth_seg.get("start_ms", 0)) / 1000.0 if "start_ms" in auth_seg else float(auth_seg.get("start", 0.0) or 0.0)
+                    e = float(auth_seg.get("end_ms", 0)) / 1000.0 if "end_ms" in auth_seg else float(auth_seg.get("end", 0.0) or 0.0)
+                    w = max(0.001, e - s)
+                    item["start"] = s
+                    item["end"] = e
+                    item["cue_window"] = w
+                    item["cue_window_seconds"] = w
                 else:
-                    item["speaker_id"] = ""
-                    item["speaker"] = ""
+                    # If chunk cannot be safely matched to one authoritative source cue: RECOVERY_ELIGIBLE=FALSE
                     item["recovery_eligible"] = False
+                    s = float(item.get("start") or 0.0)
+                    e = float(item.get("end") or 0.0)
+                    w = max(0.001, e - s)
+                    item["start"] = s
+                    item["end"] = e
+                    item["cue_window"] = w
+                    item["cue_window_seconds"] = w
 
-                # Non-speech boundary authority
-                if item.get("non_speech_boundary") is None and auth_seg and auth_seg.get("non_speech_boundary") is not None:
-                    item["non_speech_boundary"] = bool(auth_seg.get("non_speech_boundary"))
-
-                s = float(item.get("start") if item.get("start") is not None else (auth_seg.get("start") if auth_seg else 0.0) or 0.0)
-                e = float(item.get("end") if item.get("end") is not None else (auth_seg.get("end") if auth_seg else 0.0) or 0.0)
-                w = max(0.001, e - s)
+                # Generated TTS owns audio bytes and duration
                 dur = max(0.0, float(item.get("audio_duration") or item.get("raw_audio_duration") or item.get("generated_audio_seconds") or 0.0))
-                item["start"] = s
-                item["end"] = e
-                item["cue_window"] = w
-                item["cue_window_seconds"] = w
                 item["audio_duration"] = dur
                 if item.get("audio") is None and item.get("audio_bytes") is not None:
                     item["audio"] = item["audio_bytes"]
@@ -471,8 +477,9 @@ async def process_subtitle_dub_job(
                     fail_cid = str(
                         item.get("recovery_trigger_cue_id")
                         or item.get("original_trigger_cue_id")
-                        or item.get("cue_id")
                         or (item.get("original_cue_ids") or [""])[-1]
+                        or item.get("cue_id")
+                        or ""
                     )
                     return {
                         "ok": False,

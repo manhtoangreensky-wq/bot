@@ -1214,4 +1214,216 @@ def test_post_coalescence_gt_1_80_must_report_original_trigger_cue_id(tmp_path):
     asyncio.run(_run())
 
 
+def test_auto_smart_post_coalescence_failure_must_report_original_trigger(tmp_path):
+    """MANDATORY FIRST RED A: Auto Smart post-coalescence > 1.80 failure must report original trigger cue_id, not 'c1+c2'."""
+    import asyncio
+    from unittest.mock import patch
+    from services.subdub_blackboxes import auto_smart_multivoice as smart
+
+    src = tmp_path / "src_smart_fail.mp4"
+    src.write_bytes(b"dummy_video_source")
+    out = tmp_path / "out_smart_fail.mp4"
+
+    cues = [
+        {"cue_id": "c1", "speaker_id": "spk_1", "text": "one", "start_ms": 0, "end_ms": 1000},
+        {"cue_id": "c2", "speaker_id": "spk_1", "text": "two", "start_ms": 1000, "end_ms": 1500},
+    ]
+    pools = {"low": ["v1", "v2"], "high": ["v3", "v4"]}
+
+    async def fake_synth(*args, **kwargs):
+        return [
+            {"cue_id": "c1", "audio_bytes": b"a1", "audio_duration": 0.8, "_synthetic_fixture": True},
+            {"cue_id": "c2", "audio_bytes": b"a2", "audio_duration": 1.0, "_synthetic_fixture": True},
+        ]
+
+    async def _run():
+        with patch("services.subdub_microcue_recovery.assemble_coalesced_audio", return_value=(b"coalesced_bytes", 2.8)):
+            res = await smart.run_auto_smart_multivoice(
+                source_media=src,
+                segments=cues,
+                output_path=out,
+                validated_pools=pools,
+                synthesize_segments=fake_synth,
+                render_pipeline=lambda *a, **k: str(out),
+            )
+            assert res["ok"] is False
+            assert res["status"] == "TTS_EXTREME_COMPRESSION_FAILED"
+            assert res["error_code"] == "extreme_audio_compression_unintelligible"
+            assert res["cue_id"] == "c2", f"Expected trigger cue c2, got {res.get('cue_id')}"
+            assert res["cue_id"] != "c1+c2", "Must not report synthetic concatenated cue_id in auto_smart"
+            assert res.get("recovery_trigger_cue_id") == "c2"
+
+    asyncio.run(_run())
+
+
+def test_authoritative_source_metadata_defeats_conflicting_tts_chunk_metadata_shared_pipeline(tmp_path):
+    """MANDATORY FIRST RED B: In shared pipeline, authoritative source cue metadata defeats conflicting chunk metadata."""
+    import asyncio
+    from services.subtitle_dub_product_pipeline import process_subtitle_dub_job
+
+    source_media = tmp_path / "src_pipe_auth.mp4"
+    source_media.write_bytes(b"dummy")
+
+    # 1. Cross-speaker defeat: Source has Alice and Bob; chunk has conflicting speaker_id="same_speaker"
+    state = {
+        "mode": "dub",
+        "voice_kind": "auto_speaker_gender",
+        "input_file": str(source_media),
+        "source_path": str(source_media),
+        "media_path": str(source_media),
+        "segments": [
+            {"cue_id": "c1", "start": 0.0, "end": 2.0, "text": "one", "speaker": "Alice"},
+            {"cue_id": "c2", "start": 2.0, "end": 2.5, "text": "two", "speaker": "Bob"},
+        ],
+        "input_duration_seconds": 3.0,
+    }
+
+    async def fake_tts_conflicting_spk(*args, **kwargs):
+        return {
+            "ok": True,
+            "provider": "mock",
+            "chunks": [
+                {"cue_id": "c1", "start": 0.0, "end": 2.0, "audio_duration": 1.5, "audio_bytes": b"a1", "text": "one", "speaker_id": "same_speaker"},
+                {"cue_id": "c2", "start": 2.0, "end": 2.5, "audio_duration": 1.0, "audio_bytes": b"a2", "text": "two", "speaker_id": "same_speaker"},
+            ],
+        }
+
+    async def _run_spk():
+        res = await process_subtitle_dub_job(
+            mode="dub",
+            state=state,
+            user_id=1,
+            prepare_subtitles=lambda s: {
+                "state": s,
+                "source_bytes": b"src",
+                "content_type": "video/mp4",
+                "source_segments": s["segments"],
+                "output_segments": s["segments"],
+                "output_script": "one two",
+                "output_subtitle": "1\n00:00:00,000 --> 00:00:02,000\none\n\n2\n00:00:02,000 --> 00:00:02,500\ntwo\n",
+            },
+            srt_from_text=lambda *a: "",
+            segments_from_text=lambda *a: [],
+            segments_from_subtitle=lambda *a: [],
+            subtitle_output_items=lambda *a: [],
+            resolve_voice_id=lambda *a: "v1",
+            parse_voice_speed=lambda *a: 1.0,
+            synthesize_segments=fake_tts_conflicting_spk,
+            build_timeline_audio=lambda chunks, *a: (b"tl", "ok"),
+            normalize_audio=lambda a, *args: (a, "ok"),
+            validate_audio=lambda a, *args: {"ok": True},
+            render_video=lambda *a, **k: (b"mp4", "ok"),
+            video_render_ready=lambda *a: True,
+            ffmpeg_ready=lambda: True,
+            dub_mux_enabled=True,
+        )
+        assert res["ok"] is False, "Cross-speaker merge must not occur despite conflicting chunk speaker"
+        assert res["status"] == "TTS_EXTREME_COMPRESSION_FAILED"
+        assert res["cue_id"] == "c2"
+
+    asyncio.run(_run_spk())
+
+    # 2. Non-speech boundary defeat: Source has non_speech_boundary=True; chunk tries False
+    state_nsb = {
+        "mode": "dub",
+        "voice_kind": "auto_speaker_gender",
+        "input_file": str(source_media),
+        "source_path": str(source_media),
+        "media_path": str(source_media),
+        "segments": [
+            {"cue_id": "c1", "start": 0.0, "end": 2.0, "text": "one", "speaker": "spk_1", "non_speech_boundary": True},
+            {"cue_id": "c2", "start": 2.0, "end": 2.5, "text": "two", "speaker": "spk_1", "non_speech_boundary": False},
+        ],
+        "input_duration_seconds": 3.0,
+    }
+
+    async def fake_tts_nsb_override(*args, **kwargs):
+        return {
+            "ok": True,
+            "provider": "mock",
+            "chunks": [
+                {"cue_id": "c1", "start": 0.0, "end": 2.0, "audio_duration": 1.5, "audio_bytes": b"a1", "text": "one", "speaker_id": "spk_1", "non_speech_boundary": False},
+                {"cue_id": "c2", "start": 2.0, "end": 2.5, "audio_duration": 1.0, "audio_bytes": b"a2", "text": "two", "speaker_id": "spk_1", "non_speech_boundary": False},
+            ],
+        }
+
+    async def _run_nsb():
+        res = await process_subtitle_dub_job(
+            mode="dub",
+            state=state_nsb,
+            user_id=1,
+            prepare_subtitles=lambda s: {
+                "state": s,
+                "source_bytes": b"src",
+                "content_type": "video/mp4",
+                "source_segments": s["segments"],
+                "output_segments": s["segments"],
+                "output_script": "one two",
+                "output_subtitle": "1\n00:00:00,000 --> 00:00:02,000\none\n\n2\n00:00:02,000 --> 00:00:02,500\ntwo\n",
+            },
+            srt_from_text=lambda *a: "",
+            segments_from_text=lambda *a: [],
+            segments_from_subtitle=lambda *a: [],
+            subtitle_output_items=lambda *a: [],
+            resolve_voice_id=lambda *a: "v1",
+            parse_voice_speed=lambda *a: 1.0,
+            synthesize_segments=fake_tts_nsb_override,
+            build_timeline_audio=lambda chunks, *a: (b"tl", "ok"),
+            normalize_audio=lambda a, *args: (a, "ok"),
+            validate_audio=lambda a, *args: {"ok": True},
+            render_video=lambda *a, **k: (b"mp4", "ok"),
+            video_render_ready=lambda *a: True,
+            ffmpeg_ready=lambda: True,
+            dub_mux_enabled=True,
+        )
+        assert res["ok"] is False, "Source non_speech_boundary=True cannot be overridden by chunk False"
+        assert res["status"] == "TTS_EXTREME_COMPRESSION_FAILED"
+        assert res["cue_id"] == "c2"
+
+    asyncio.run(_run_nsb())
+
+
+def test_authoritative_source_metadata_defeats_conflicting_tts_chunk_metadata_auto_smart(tmp_path):
+    """MANDATORY FIRST RED B: In auto_smart_multivoice, source cue metadata defeats conflicting chunk metadata."""
+    import asyncio
+    from services.subdub_blackboxes import auto_smart_multivoice as smart
+
+    src = tmp_path / "src_smart_auth.mp4"
+    src.write_bytes(b"dummy_video_source")
+    out = tmp_path / "out_smart_auth.mp4"
+
+    # Source has Alice and Bob; chunk has conflicting speaker_id="same_speaker"
+    cues = [
+        {"cue_id": "c1", "speaker_id": "Alice", "text": "one", "start_ms": 0, "end_ms": 2000},
+        {"cue_id": "c2", "speaker_id": "Bob", "text": "two", "start_ms": 2000, "end_ms": 2500},
+    ]
+    pools = {"low": ["v1", "v2"], "high": ["v3", "v4"]}
+
+    async def fake_synth(*args, **kwargs):
+        return [
+            {"cue_id": "c1", "audio_bytes": b"a1", "audio_duration": 1.5, "speaker_id": "same_speaker", "_synthetic_fixture": True},
+            {"cue_id": "c2", "audio_bytes": b"a2", "audio_duration": 1.0, "speaker_id": "same_speaker", "_synthetic_fixture": True},
+        ]
+
+    def spy_strict(*args, **kwargs):
+        return {"Alice": {"voice_register": "low", "confidence": 0.95}, "Bob": {"voice_register": "high", "confidence": 0.96}}
+
+    async def _run():
+        res = await smart.run_auto_smart_multivoice(
+            source_media=src,
+            segments=cues,
+            output_path=out,
+            validated_pools=pools,
+            synthesize_segments=fake_synth,
+            strict_two_classifier=spy_strict,
+            render_pipeline=lambda *a, **k: str(out),
+        )
+        assert res["ok"] is False, "Cross-speaker merge in auto_smart must not occur despite conflicting chunk speaker"
+        assert res["status"] == "TTS_EXTREME_COMPRESSION_FAILED"
+        assert res["cue_id"] == "c2"
+
+    asyncio.run(_run())
+
+
+
 

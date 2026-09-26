@@ -1804,68 +1804,91 @@ async def run_auto_smart_multivoice(
                 ch_item["audio_bytes"] = aud_data
 
             # Intelligibility fit-ratio check (Section N) and timeline metadata enrichment
+            # Source cue identity is authoritative: stable cue_id/id mapping first, positional only as guarded fallback
             c_match = next((c for c in decision.tts_cues if str(c.get("cue_id") or c.get("id")) == cid), None)
+            if not c_match and len(raw_chunks) == len(decision.tts_cues):
+                c_idx = len(seen_cue_ids) - 1
+                if 0 <= c_idx < len(decision.tts_cues):
+                    c_match = decision.tts_cues[c_idx]
+
             if c_match:
+                # Source owns: cue_id, speaker_id/speaker, source start/end timeline, non_speech_boundary
                 s_sec = float(c_match.get("start_ms", 0)) / 1000.0 if "start_ms" in c_match else float(c_match.get("start", 0.0) or 0.0)
                 e_sec = float(c_match.get("end_ms", 0)) / 1000.0 if "end_ms" in c_match else float(c_match.get("end", 0.0) or 0.0)
-                if "start" not in ch_item:
-                    ch_item["start"] = s_sec
-                if "end" not in ch_item:
-                    ch_item["end"] = e_sec
-                if "start_ms" not in ch_item and "start_ms" in c_match:
+                ch_item["start"] = s_sec
+                ch_item["end"] = e_sec
+                if "start_ms" in c_match:
                     ch_item["start_ms"] = c_match["start_ms"]
-                if "end_ms" not in ch_item and "end_ms" in c_match:
+                if "end_ms" in c_match:
                     ch_item["end_ms"] = c_match["end_ms"]
-                if "text" not in ch_item and "text" in c_match:
+                if "text" in c_match:
                     ch_item["text"] = c_match["text"]
-                if "speaker_id" not in ch_item and ("speaker_id" in c_match or "speaker" in c_match):
-                    ch_item["speaker_id"] = str(c_match.get("speaker_id") or c_match.get("speaker") or "")
-                if "non_speech_boundary" in c_match:
+
+                # Source speaker authority defeats conflicting/stale chunk speaker metadata
+                spk = c_match.get("speaker_id") or c_match.get("speaker")
+                if spk is not None and str(spk).strip():
+                    ch_item["speaker_id"] = str(spk).strip()
+                    ch_item["speaker"] = str(spk).strip()
+                else:
+                    ch_item["speaker_id"] = ""
+                    ch_item["speaker"] = ""
+                    ch_item["recovery_eligible"] = False
+
+                # Source non_speech_boundary authority: source True cannot be overridden by chunk False
+                if c_match.get("non_speech_boundary") is not None:
                     ch_item["non_speech_boundary"] = bool(c_match["non_speech_boundary"])
 
-                cue_window = e_sec - s_sec
-                gen_sec = float(ch_item.get("audio_duration") or ch_item.get("raw_audio_duration") or 0.0)
-                if gen_sec <= 0.0:
-                    raw_aud = chunk.get("audio") or chunk.get("audio_bytes")
-                    if isinstance(raw_aud, (bytes, bytearray)) and len(raw_aud) >= 16:
-                        try:
-                            from services import subdub_tts_artifact_validator
-                            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tf:
-                                tf.write(raw_aud)
-                                tf_p = tf.name
-                            try:
-                                v_res = subdub_tts_artifact_validator.validate_tts_audio_artifact(tf_p)
-                                if v_res.ok and v_res.duration > 0.0:
-                                    gen_sec = float(v_res.duration)
-                            finally:
-                                try:
-                                    os.unlink(tf_p)
-                                except OSError:
-                                    pass
-                        except Exception:
-                            gen_sec = 0.0
-
-                if gen_sec <= 0.0:
-                    return {
-                        "ok": False,
-                        "strategy": decision.strategy,
-                        "status": "TTS_DURATION_AUTHORITY_MISSING",
-                        "error_code": "missing_synth_duration_authority",
-                        "blocker": f"missing_synth_duration_authority:{cid}",
-                        "output_mode": OUTPUT_MODE_FAILED,
-                        "final_mp4_path": None,
-                        "cue_id": cid,
-                        "auto_smart_verified": False,
-                    }
-
-                ch_item["audio_duration"] = gen_sec
-                ch_item["raw_audio_duration"] = gen_sec
+                cue_window = max(0.001, e_sec - s_sec)
                 ch_item["cue_window"] = cue_window
-                ch_item["original_cue_ids"] = [cid]
-                if cue_window > 0.05 and gen_sec > 0:
-                    ch_item["fit_ratio"] = gen_sec / cue_window
-                else:
-                    ch_item["fit_ratio"] = 1.0
+                ch_item["cue_window_seconds"] = cue_window
+            else:
+                # Chunk cannot be safely matched to one authoritative source cue: RECOVERY_ELIGIBLE=FALSE
+                ch_item["recovery_eligible"] = False
+                cue_window = max(0.001, float(ch_item.get("cue_window") or (float(ch_item.get("end", 0.0)) - float(ch_item.get("start", 0.0)))))
+                ch_item["cue_window"] = cue_window
+                ch_item["cue_window_seconds"] = cue_window
+
+            gen_sec = float(ch_item.get("audio_duration") or ch_item.get("raw_audio_duration") or 0.0)
+            if gen_sec <= 0.0:
+                raw_aud = chunk.get("audio") or chunk.get("audio_bytes")
+                if isinstance(raw_aud, (bytes, bytearray)) and len(raw_aud) >= 16:
+                    try:
+                        from services import subdub_tts_artifact_validator
+                        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tf:
+                            tf.write(raw_aud)
+                            tf_p = tf.name
+                        try:
+                            v_res = subdub_tts_artifact_validator.validate_tts_audio_artifact(tf_p)
+                            if v_res.ok and v_res.duration > 0.0:
+                                gen_sec = float(v_res.duration)
+                        finally:
+                            try:
+                                os.unlink(tf_p)
+                            except OSError:
+                                pass
+                    except Exception:
+                        gen_sec = 0.0
+
+            if gen_sec <= 0.0:
+                return {
+                    "ok": False,
+                    "strategy": decision.strategy,
+                    "status": "TTS_DURATION_AUTHORITY_MISSING",
+                    "error_code": "missing_synth_duration_authority",
+                    "blocker": f"missing_synth_duration_authority:{cid}",
+                    "output_mode": OUTPUT_MODE_FAILED,
+                    "final_mp4_path": None,
+                    "cue_id": cid,
+                    "auto_smart_verified": False,
+                }
+
+            ch_item["audio_duration"] = gen_sec
+            ch_item["raw_audio_duration"] = gen_sec
+            ch_item["original_cue_ids"] = [cid]
+            if cue_window > 0.05 and gen_sec > 0:
+                ch_item["fit_ratio"] = gen_sec / cue_window
+            else:
+                ch_item["fit_ratio"] = 1.0
 
             ch_item.setdefault("original_cue_ids", [cid])
             synth_artifacts.append(ch_item)
@@ -1895,7 +1918,13 @@ async def run_auto_smart_multivoice(
             if i_win > 0.05 and i_dur > 0:
                 item_fit_ratio = i_dur / i_win
                 if item_fit_ratio > MAX_INTELLIGIBLE_FIT_RATIO:
-                    fail_cid = str(item.get("cue_id") or (item.get("original_cue_ids") or [""])[-1])
+                    fail_cid = str(
+                        item.get("recovery_trigger_cue_id")
+                        or item.get("original_trigger_cue_id")
+                        or (item.get("original_cue_ids") or [""])[-1]
+                        or item.get("cue_id")
+                        or ""
+                    )
                     return {
                         "ok": False,
                         "strategy": decision.strategy,
@@ -1906,6 +1935,7 @@ async def run_auto_smart_multivoice(
                         "final_mp4_path": None,
                         "fit_ratio": round(item_fit_ratio, 3),
                         "cue_id": fail_cid,
+                        "recovery_trigger_cue_id": str(item.get("recovery_trigger_cue_id") or fail_cid),
                         "auto_smart_verified": False,
                     }
 
