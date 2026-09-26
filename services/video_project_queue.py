@@ -5357,6 +5357,7 @@ def build_product_video_confirm_kickoff_payload(
         "duration_seconds": scene_count * scene_duration,
         "scene_tasks": scene_tasks,
         "provider_scene_tasks": scene_tasks,
+        "scene_cards": [dict(item) for item in (project_scene_cards or asset_pack.get("scene_cards") or invoice.get("scene_cards") or []) if isinstance(item, dict)],
         "scene_tasks_total": scene_count if per_scene_orchestration else 0,
         "scene_tasks_created_count": scene_count if per_scene_orchestration else 0,
         "scene_tasks_submitted": 0,
@@ -5396,6 +5397,9 @@ def build_product_video_confirm_kickoff_payload(
         "provider_degraded_reason": str(asset_pack.get("provider_degraded_reason") or invoice.get("provider_degraded_reason") or ""),
         "effective_primary_for_low_basic": str(asset_pack.get("effective_primary_for_low_basic") or invoice.get("effective_primary_for_low_basic") or (chain[0] if chain else "")),
         **model_metadata,
+        "model": str(model_metadata.get("selected_model") or invoice.get("model") or (model_metadata.get("provider_model_map") or {}).get("key4u_video") or "kling-v3"),
+        "selected_model": str(model_metadata.get("selected_model") or invoice.get("selected_model") or (model_metadata.get("provider_model_map") or {}).get("key4u_video") or "kling-v3"),
+        "pinned_wire_model": str(model_metadata.get("selected_model") or invoice.get("pinned_wire_model") or "kling-v3"),
         "public_confirm_kickoff_attempted": True,
         "public_confirm_kickoff_success": provider_chain_resolved,
         "worker_dispatch_attempted": True,
@@ -10771,6 +10775,40 @@ def hydrate_video_job_payload(conn: sqlite3.Connection, job: dict[str, Any]) -> 
         for key in product_video_public_seam.WORKER_ROUTE_PAYLOAD_KEYS
         if key in persisted_payload
     }
+    worker_hydration_keys = (
+        "product_type",
+        "public_product_type",
+        "video_product_type",
+        "engine_route",
+        "engine_adapter",
+        "orchestration_mode",
+        "provider_orchestration_mode",
+        "required_capability",
+        "provider_capability",
+        "selected_provider",
+        "selected_model",
+        "model",
+        "pinned_wire_model",
+        "selected_family",
+        "scene_count",
+        "scene_cards",
+        "scene_tasks",
+        "duration_seconds",
+        "scene_duration_seconds",
+        "scene_seconds",
+        "charge_policy",
+        "source",
+        "render_mode",
+        "real_renderer_required",
+        "provider_call",
+        "provider_chain",
+        "provider_order",
+        "provider_interface",
+        "provider_submit_url_override",
+    )
+    for key in worker_hydration_keys:
+        if key in persisted_payload and key not in route_payload:
+            route_payload[key] = persisted_payload[key]
     return {
         **job,
         **route_payload,

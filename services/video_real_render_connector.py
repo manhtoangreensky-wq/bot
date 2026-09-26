@@ -1102,6 +1102,14 @@ def _scene_cards(job: dict | None = None) -> list[dict]:
     cards = job.get("scene_cards")
     if not cards and isinstance(job.get("project"), dict):
         cards = _json_loads((job.get("project") or {}).get("scene_cards_json"), [])
+        if not cards:
+            asset_pack = (job.get("project") or {}).get("asset_pack_json") or (job.get("project") or {}).get("asset_pack")
+            if isinstance(asset_pack, str):
+                asset_pack = _json_loads(asset_pack, {})
+            if isinstance(asset_pack, dict):
+                cards = asset_pack.get("scene_cards")
+    if not cards and isinstance(job.get("asset_pack"), dict):
+        cards = job.get("asset_pack", {}).get("scene_cards")
     if isinstance(cards, list):
         return [dict(item or {}) for item in cards if isinstance(item, dict)]
     return []
@@ -1136,8 +1144,62 @@ def _scene_count(job: dict | None = None) -> int:
     value = job.get("scene_count")
     if not value and isinstance(job.get("project"), dict):
         value = (job.get("project") or {}).get("scene_count")
+    if not value and isinstance(job.get("asset_pack"), dict):
+        value = job.get("asset_pack", {}).get("scene_count")
+    if not value:
+        cards = _scene_cards(job)
+        if cards:
+            value = len(cards)
     return max(1, min(20, _safe_int(value, 3)))
 
+
+def validate_storyboard_scene_coverage(
+    cards: list[dict], declared_count: int = 1
+) -> dict:
+    """Validate that scene cards cover all declared scenes without gaps.
+
+    Returns a dict with:
+      valid (bool): True if coverage is complete and correct.
+      missing (list[int]): Scene indexes without a matching card.
+      duplicates (list[int]): Scene indexes appearing more than once.
+      out_of_range (list[int]): Scene indexes outside 1..declared_count.
+      missing_index_count (int): Number of cards without explicit scene_index.
+    """
+    declared_count = max(1, min(20, _safe_int(declared_count, 1)))
+    expected = set(range(1, declared_count + 1))
+    seen: dict[int, int] = {}  # scene_index -> count
+    missing_index_count = 0
+    out_of_range: list[int] = []
+
+    for card in (cards or []):
+        if not isinstance(card, dict):
+            continue
+        raw_idx = card.get("scene_index") or card.get("scene_id")
+        if raw_idx is None:
+            missing_index_count += 1
+            continue
+        idx = _safe_int(raw_idx, 0)
+        if idx < 1 or idx > declared_count:
+            out_of_range.append(idx)
+            continue
+        seen[idx] = seen.get(idx, 0) + 1
+
+    duplicates = sorted(idx for idx, cnt in seen.items() if cnt > 1)
+    covered = set(seen.keys())
+    missing = sorted(expected - covered)
+    valid = (
+        not missing
+        and not duplicates
+        and not out_of_range
+        and missing_index_count == 0
+    )
+    return {
+        "valid": valid,
+        "missing": missing,
+        "duplicates": duplicates,
+        "out_of_range": sorted(set(out_of_range)),
+        "missing_index_count": missing_index_count,
+    }
 
 def _job_base_id(job: dict | None = None) -> str:
     job = dict(job or {})
@@ -1269,8 +1331,11 @@ def product_video_scene_duration_seconds(job: dict | None = None) -> int:
             pass
     is_tier_700 = tier_int == 700 or quality_key == "kling_long_audio_15"
     is_selfshot = product_type in {"self_shot_scene_change", "self_shot_cinematic_transform"}
+    is_storyboard = product_type in {"storyboard_prompt", "storyboard_to_video"} or str(job.get("orchestration_mode") or "").strip().lower() == "per_scene_8s"
     if is_tier_700:
         default_scene_seconds = 15
+    elif is_storyboard:
+        default_scene_seconds = 8
     elif canonical_tier_seconds > 0 and is_selfshot:
         default_scene_seconds = canonical_tier_seconds
     else:
@@ -3009,16 +3074,30 @@ def storyboard_scene_image_paths(job: dict | None = None, scene_index: int = 1) 
 
     target_index = max(1, _safe_int(scene_index, 1))
     cards = _scene_cards(job)
-    for fallback_index, card in enumerate(cards, start=1):
-        card_index = max(1, _safe_int(card.get("scene_index") or card.get("scene_id"), fallback_index))
+    for card in cards:
+        if not isinstance(card, dict):
+            continue
+        raw_idx = card.get("scene_index") or card.get("scene_id")
+        if raw_idx is None:
+            continue  # skip cards without explicit scene_index
+        card_index = max(1, _safe_int(raw_idx, 0))
         if card_index != target_index:
             continue
         paths = video_final_output.extract_local_image_paths(card, limit=2)
         if paths:
             return paths
-    all_paths = _local_image_sequence_paths(job)
-    if target_index <= len(all_paths):
-        return [all_paths[target_index - 1]]
+    panels = (job or {}).get("storyboard_panels") or ((job or {}).get("draft") or {}).get("storyboard_panels") or []
+    if isinstance(panels, list):
+        for panel in panels:
+            if isinstance(panel, dict):
+                raw_idx = panel.get("scene_index") or panel.get("scene_id")
+                if raw_idx is None:
+                    continue  # skip panels without explicit scene_index
+                p_idx = max(1, _safe_int(raw_idx, 0))
+                if p_idx == target_index:
+                    paths = video_final_output.extract_local_image_paths(panel, limit=2)
+                    if paths:
+                        return paths
     return []
 
 
@@ -3110,7 +3189,17 @@ def real_video_scene_plan(job: dict | None = None) -> dict:
     cards = _scene_cards(job)
     scenes = []
     for index in range(1, count + 1):
-        card = cards[index - 1] if index - 1 < len(cards) else {}
+        card = {}
+        for c in cards:
+            if not isinstance(c, dict):
+                continue
+            raw_idx = c.get("scene_index") or c.get("scene_id")
+            if raw_idx is None:
+                continue  # skip cards without explicit scene_index
+            c_idx = max(1, _safe_int(raw_idx, 0))
+            if c_idx == index:
+                card = c
+                break
         prompt = _safe_text(
             card.get("provider_prompt")
             or card.get("video_prompt")
@@ -5249,6 +5338,7 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "product_video_tier",
             "selected_provider",
             "selected_model",
+            "pinned_wire_model",
             "selected_family",
             "selected_model_source",
             "selected_quality",
@@ -5449,8 +5539,9 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         storyboard=(
             [
                 card
-                for fallback_index, card in enumerate(_scene_cards(job), start=1)
-                if max(1, _safe_int(card.get("scene_index") or card.get("scene_id"), fallback_index)) == scene_index
+                for card in _scene_cards(job)
+                if (card.get("scene_index") or card.get("scene_id")) is not None
+                and max(1, _safe_int(card.get("scene_index") or card.get("scene_id"), 0)) == scene_index
             ]
             if product_type in PRODUCT_VIDEO_SCENE_IMAGE_INPUT_TYPES
             else _scene_cards(job)
@@ -5607,10 +5698,13 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "allow_provider_pending": True,
             "claim_payload_provider_key": str((job or {}).get("selected_provider") or (job or {}).get("submit_provider_key") or ""),
             "claim_payload_has_provider_config": bool((job or {}).get("provider_config") or (job or {}).get("provider_submit_url") or (job or {}).get("provider_auth_header_value")),
-            "provider_pending_provider": str(pending_scene_task.get("provider") or (job or {}).get("provider_pending_provider") or "") if pending_matches_request else "",
+            "provider_pending_provider": str(pending_scene_task.get("provider") or (job or {}).get("provider_pending_provider") or pending_provider_key or "") if pending_matches_request else "",
             "provider_pending_task_id": pending_task_id if pending_matches_request else "",
+            "provider_task_id": pending_task_id if pending_matches_request else "",
             "provider_pending_video_id": pending_video_id if pending_matches_request else "",
+            "provider_video_id": pending_video_id if pending_matches_request else "",
             "provider_pending_request_job_id": pending_request_job_id if pending_matches_request else "",
+            "pinned_wire_model": str(model_context.get("pinned_wire_model") or (job or {}).get("pinned_wire_model") or (asset_pack or {}).get("pinned_wire_model") or (invoice or {}).get("pinned_wire_model") or ""),
             "provider_pending_attempts": ((job or {}).get("provider_pending_attempts") or []) if pending_matches_request else [],
             "provider_started_at": str((job or {}).get("provider_started_at") or "") if pending_matches_request else "",
             "provider_started_at_epoch": (job or {}).get("provider_started_at_epoch") if pending_matches_request else "",
@@ -5621,6 +5715,23 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         },
         required_capability=required_capability,
     )
+    if product_type in PRODUCT_VIDEO_SCENE_IMAGE_INPUT_TYPES or required_capability == "image_to_video" or (job or {}).get("required_capability") == "image_to_video":
+        if not pending_matches_request:
+            if not request.image_paths or any(not os.path.isfile(p) or os.path.getsize(p) <= 0 for p in request.image_paths):
+                raise RealVideoRenderError(
+                    "storyboard_panel_image_missing_no_charge",
+                    diagnostics={
+                        "ok": False,
+                        "scene_index": scene_index,
+                        "scene_id": scene_index,
+                        "request_job_id": request_job_id,
+                        "provider_error": "storyboard_panel_image_missing_no_charge",
+                        "blocker": "storyboard_panel_image_missing_no_charge",
+                        "provider_attempted": False,
+                        "provider_submit_called": False,
+                        "no_charge": True,
+                    },
+                )
     output_dir = os.path.dirname(os.path.abspath(raw_path))
     provider_env = dict(os.environ)
     if provider_order:
@@ -7528,7 +7639,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         or job.get("validated_local_renderer_route")
     )
     product_contract_requires_provider = bool(
-        engine_adapter in {"text_to_video", "text_to_video_or_scene_engine", "text_to_video_or_scene_video", "script_scene_engine"}
+        engine_adapter in {"text_to_video", "text_to_video_or_scene_engine", "text_to_video_or_scene_video", "script_scene_engine", "storyboard_scene_image_video_engine"}
         and orchestration_contract in {"per_scene_8s", "scene_orchestrator", "per_scene"}
         and not explicit_local_renderer
     )
@@ -7886,6 +7997,41 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         )
     elif readiness.get("ok") or not is_product_video or bool(job.get("recovery_existing_tasks_only")):
         provider_attempted = True
+        # -- Storyboard coverage gate: validate before provider dispatch --
+        if (
+            is_product_video
+            and product_type in PRODUCT_VIDEO_SCENE_IMAGE_INPUT_TYPES
+            and product_video_orchestration_mode(job) == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S
+            and not bool(job.get("recovery_existing_tasks_only"))
+        ):
+            _cov_cards = _scene_cards(job)
+            _cov_declared = _scene_count(job)
+            _cov = validate_storyboard_scene_coverage(_cov_cards, _cov_declared)
+            if not _cov.get("valid"):
+                _cov_blocker = (
+                    f"storyboard_scene_coverage_invalid: "
+                    f"missing={_cov.get('missing')}, "
+                    f"duplicates={_cov.get('duplicates')}, "
+                    f"out_of_range={_cov.get('out_of_range')}, "
+                    f"missing_index_count={_cov.get('missing_index_count')}"
+                )
+                raise RealVideoRenderError(
+                    _cov_blocker,
+                    diagnostics={
+                        "ok": False,
+                        "status": "failed_no_charge",
+                        "terminal_state": "failed_no_charge",
+                        "final_decision": "failed_no_charge",
+                        "provider_attempted": False,
+                        "provider_submit_called": False,
+                        "provider_poll_called": False,
+                        "provider_submit_allowed": False,
+                        "no_charge": True,
+                        "blocker": _cov_blocker,
+                        "provider_error": _cov_blocker,
+                        "storyboard_coverage": dict(_cov),
+                    },
+                )
         try:
             if is_product_video and product_video_orchestration_mode(job) == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S:
                 result = _run_per_scene_provider_orchestrator(

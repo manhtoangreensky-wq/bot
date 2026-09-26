@@ -279,8 +279,27 @@ def _normalize_key4u_official_google_veo_submit_endpoint(
     return submit_url, submit_source
 
 
-def _cost_tier_allowed(product_tier: str, model_cfg: dict[str, Any]) -> bool:
+def _cost_tier_allowed(
+    product_tier: str,
+    model_cfg: dict[str, Any],
+    *,
+    required_capability: str = "",
+    provider: str = "",
+    model: str = "",
+) -> bool:
+    cfg_provider = str(provider or model_cfg.get("provider") or "").strip().lower()
+    cfg_model = str(model or model_cfg.get("model") or "").strip().lower()
+    cfg_family = str(model_cfg.get("family") or "").strip().lower()
     model_cost = str(model_cfg.get("cost_tier") or model_cfg.get("tier") or "").strip().lower()
+
+    if (
+        required_capability == "image_to_video"
+        and (cfg_provider in {"key4u_video", ""} or not cfg_provider)
+        and (cfg_family == "kling" or "kling" in cfg_model)
+        and model_cost in {"", "common"}
+    ):
+        return True
+
     if not model_cost:
         return True
     product_score = _TIER_COST_ORDER.get(normalize_tier(product_tier), 2)
@@ -557,6 +576,8 @@ def _routing_candidates(
     catalog: dict[str, Any],
     routing: dict[str, Any],
     env: dict[str, str] | os._Environ[str],
+    *,
+    required_capability: str = "",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool]:
     candidates: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
@@ -607,6 +628,18 @@ def _routing_candidates(
                 candidates.append(candidate)
                 break
 
+    if required_capability == "image_to_video" and "key4u_video" in provider_chain:
+        has_kling = any(
+            str(c.get("provider") or "") == "key4u_video" and str(c.get("model") or "") == "kling-v3"
+            for c in candidates
+        )
+        if not has_kling:
+            kling_cand = _candidate_from_entry("key4u_video", "kling-v3", f"config:i2v:{tier}", catalog)
+            kling_cand["role"] = "primary"
+            kling_cand["cost_tier"] = "common"
+            kling_cand["request_defaults"] = {"model_name": "kling-v3", "duration": 8}
+            candidates.insert(0, kling_cand)
+
     deduped: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str]] = set()
     for item in candidates:
@@ -633,7 +666,7 @@ def resolve_product_video_model(
     route = routing or load_product_video_model_routing()
     tier_key = normalize_tier(tier, route)
     chain = split_provider_chain(provider_chain) if provider_chain not in (None, "", []) else effective_provider_chain(data, route)
-    candidates, rejected, env_override_detected = _routing_candidates(tier_key, chain, cat, route, data)
+    candidates, rejected, env_override_detected = _routing_candidates(tier_key, chain, cat, route, data, required_capability=required_capability)
     default_chain = split_provider_chain(route.get("default_provider_chain") or DEFAULT_PROVIDER_CHAIN)
     key4u_primary_override = bool(tier_key in {"low", "basic"} and chain and chain[0] == "key4u_video")
     candidate_list_compact: list[dict[str, Any]] = []
@@ -641,7 +674,7 @@ def resolve_product_video_model(
         provider = str(candidate.get("provider") or "")
         model = str(candidate.get("model") or "")
         cfg = dict(candidate.get("config") or {})
-        candidate_interface = model_interface_contract(provider, model, env=data, catalog=cat)
+        candidate_interface = model_interface_contract(provider, model, capability=required_capability, env=data, catalog=cat)
         candidate_list_compact.append(
             {
                 "provider": provider,
@@ -660,11 +693,11 @@ def resolve_product_video_model(
         provider = str(item.get("provider") or "")
         model = str(item.get("model") or "")
         cfg = dict(item.get("config") or {})
-        candidate_interface = model_interface_contract(provider, model, env=data, catalog=cat)
+        candidate_interface = model_interface_contract(provider, model, capability=required_capability, env=data, catalog=cat)
         if not cfg:
             rejected.append({"provider": provider, "model": model, "reason": MODEL_UNKNOWN, "source": item.get("source")})
             continue
-        if not _cost_tier_allowed(tier_key, cfg):
+        if not _cost_tier_allowed(tier_key, cfg, required_capability=required_capability, provider=provider, model=model):
             rejected.append({"provider": provider, "model": model, "reason": "model_cost_tier_exceeds_product_tier", "source": item.get("source")})
             continue
         if requires_concat and not cfg.get("supports_concat"):
@@ -727,12 +760,13 @@ def resolve_product_video_model(
             fallback_interface = model_interface_contract(
                 fallback_provider,
                 fallback_model,
+                capability=required_capability,
                 env=data,
                 catalog=cat,
             )
             if (
                 not fallback_cfg
-                or not _cost_tier_allowed(tier_key, fallback_cfg)
+                or not _cost_tier_allowed(tier_key, fallback_cfg, required_capability=required_capability, provider=fallback_provider, model=fallback_model)
                 or (requires_concat and not fallback_cfg.get("supports_concat"))
                 or not _model_supports(
                     fallback_cfg,
