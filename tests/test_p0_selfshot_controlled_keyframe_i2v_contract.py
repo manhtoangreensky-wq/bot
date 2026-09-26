@@ -315,6 +315,19 @@ def test_11_selfshot3_controlled_keyframe_i2v_execution(tmp_path: Path):
         "person_identity": True,
         "object_identity": True,
         "person_object_relationship": True,
+        "continuity_scores": {
+            "identity": 0.95,
+            "body": 0.95,
+            "motion": 0.95,
+            "object": 1.0,
+            "interaction": 1.0,
+            "temporal": 1.0,
+        },
+        "passing_integrated": 3,
+        "sampled_frame_count": 3,
+        "temporal_pass_ratio": 1.0,
+        "body_score": 0.95,
+        "motion_score": 0.95,
     }
 
     with patch("services.video_real_render_connector._extract_selfshot_keyframe", return_value=str(keyframe_file)), \
@@ -571,6 +584,19 @@ def test_19_key4u_i2v_wire_model_pinning_in_selfshot3_connector(tmp_path: Path):
         "person_identity": True,
         "object_identity": True,
         "person_object_relationship": True,
+        "continuity_scores": {
+            "identity": 0.95,
+            "body": 0.95,
+            "motion": 0.95,
+            "object": 0.95,
+            "interaction": 0.95,
+            "temporal": 0.95,
+        },
+        "passing_integrated": 3,
+        "sampled_frame_count": 3,
+        "temporal_pass_ratio": 0.95,
+        "body_score": 0.95,
+        "motion_score": 0.95,
     }
 
     with patch("services.video_real_render_connector._extract_selfshot_keyframe", return_value=str(keyframe)), \
@@ -993,6 +1019,19 @@ def test_29_end_to_end_key4u_i2v_wire_selfshot3(tmp_path: Path, monkeypatch):
         "person_identity": True,
         "object_identity": True,
         "person_object_relationship": True,
+        "continuity_scores": {
+            "identity": 0.95,
+            "body": 0.95,
+            "motion": 0.95,
+            "object": 1.0,
+            "interaction": 1.0,
+            "temporal": 1.0,
+        },
+        "passing_integrated": 3,
+        "sampled_frame_count": 3,
+        "temporal_pass_ratio": 1.0,
+        "body_score": 0.95,
+        "motion_score": 0.95,
     }
 
     def fake_materialize(url, *args, **kwargs):
@@ -1823,11 +1862,11 @@ def test_45_local_vision_validator_computes_measured_continuity_scores(tmp_path:
     from services.video_selfshot_continuity_validator import validate_selfshot_scene_continuity
     import numpy as np
 
-    # Frame observations where 3 of 3 pass
+    # Frame observations where 3 of 3 pass with explicit measured motion
     mock_obs = [
-        {"frame_index": 0, "person_ok": True, "object_ok": True, "relationship_ok": True, "person_bbox": [10, 10, 50, 100], "integrated_ok": True},
-        {"frame_index": 1, "person_ok": True, "object_ok": True, "relationship_ok": True, "person_bbox": [12, 10, 50, 102], "integrated_ok": True},
-        {"frame_index": 2, "person_ok": True, "object_ok": True, "relationship_ok": True, "person_bbox": [11, 11, 50, 100], "integrated_ok": True},
+        {"frame_index": 0, "person_ok": True, "object_ok": True, "relationship_ok": True, "person_bbox": [10, 10, 50, 100], "integrated_ok": True, "motion_score": 0.95},
+        {"frame_index": 1, "person_ok": True, "object_ok": True, "relationship_ok": True, "person_bbox": [12, 10, 50, 102], "integrated_ok": True, "motion_score": 0.95},
+        {"frame_index": 2, "person_ok": True, "object_ok": True, "relationship_ok": True, "person_bbox": [11, 11, 50, 100], "integrated_ok": True, "motion_score": 0.95},
     ]
 
     res = validate_selfshot_scene_continuity(
@@ -1847,6 +1886,176 @@ def test_45_local_vision_validator_computes_measured_continuity_scores(tmp_path:
     assert scores["interaction"] == 1.0
     assert scores["body"] >= 0.8
     assert scores["motion"] >= 0.8
+
+
+def test_46_person_identity_pass_without_body_bbox_must_fail_body():
+    """Person identity pass without body bbox must score 0.0 for body and fail delivery."""
+    from services.video_selfshot_continuity_validator import validate_selfshot_scene_continuity
+    # Observations with person_ok=True, but NO person_bbox
+    obs_no_bbox = [
+        {"frame_index": 0, "person_ok": True, "object_ok": True, "relationship_ok": True, "integrated_ok": True},
+        {"frame_index": 1, "person_ok": True, "object_ok": True, "relationship_ok": True, "integrated_ok": True},
+        {"frame_index": 2, "person_ok": True, "object_ok": True, "relationship_ok": True, "integrated_ok": True},
+    ]
+    res = validate_selfshot_scene_continuity(
+        clip_source="dummy_path",
+        scene_duration_seconds=5,
+        person_required=True,
+        object_required=False,
+        relationship_required=False,
+        mock_frame_observations=obs_no_bbox,
+    )
+    # Must NOT fall back to identity_score (1.0). Must score 0.0 for body!
+    assert res["continuity_scores"]["body"] == 0.0
+
+
+def test_47_local_ok_without_motion_measurement_must_fail_motion():
+    """Local validation ok without motion measurement must score 0.0 for motion."""
+    from services.video_selfshot_continuity_validator import validate_selfshot_scene_continuity
+    # Observations without motion measurement or sampled frames
+    obs = [
+        {"frame_index": 0, "person_ok": True, "object_ok": True, "relationship_ok": True, "person_bbox": [10, 10, 50, 100], "integrated_ok": True},
+        {"frame_index": 1, "person_ok": True, "object_ok": True, "relationship_ok": True, "person_bbox": [10, 10, 50, 100], "integrated_ok": True},
+        {"frame_index": 2, "person_ok": True, "object_ok": True, "relationship_ok": True, "person_bbox": [10, 10, 50, 100], "integrated_ok": True},
+    ]
+    res = validate_selfshot_scene_continuity(
+        clip_source="dummy_path",
+        scene_duration_seconds=5,
+        person_required=True,
+        object_required=False,
+        relationship_required=False,
+        mock_frame_observations=obs,
+    )
+    # Motion is unmeasured -> must NOT fall back to temporal_pass_ratio or 1.0! Must be 0.0!
+    assert res["continuity_scores"]["motion"] == 0.0
+
+
+def test_48_local_ok_without_temporal_frame_ratio_must_fail_temporal(tmp_path: Path, monkeypatch):
+    """Local continuity claiming ok without temporal frame ratio must fail temporal (0.0)."""
+    source_video = tmp_path / "source.mp4"
+    source_video.write_bytes(b"VALID_SOURCE_MP4_CONTENT")
+    raw_path = str(tmp_path / "raw_ss3.mp4")
+    keyframe = tmp_path / "kf_ss3.jpg"
+    keyframe.write_bytes(b"BINARY_KEYFRAME_SS3")
+
+    fake_gen_result = {
+        "ok": True,
+        "provider": "key4u_video",
+        "model": "kling-v3",
+        "output_path": raw_path,
+    }
+
+    # Continuity claims ok=True and person_identity=True, but NO frame observations, no passing_integrated, no temporal_pass_ratio
+    mock_no_temporal = {
+        "ok": True,
+        "blocker": "",
+        "evidence_source": "local_vision_validator",
+        "independent_visual_validation": "LOCAL_MODEL",
+        "person_required": True,
+        "person_identity": True,
+        "motion_score": 0.9,
+        "body_score": 0.9,
+    }
+
+    monkeypatch.setattr(
+        "services.video_real_render_connector.run_provider_generation",
+        lambda *args, **kwargs: fake_gen_result,
+    )
+    monkeypatch.setattr(
+        "services.video_real_render_connector._extract_selfshot_keyframe",
+        lambda *args, **kwargs: str(keyframe),
+    )
+    monkeypatch.setattr(
+        "services.video_selfshot_continuity_validator.validate_selfshot_scene_continuity",
+        lambda *args, **kwargs: mock_no_temporal,
+    )
+
+    res = video_real_render_connector._render_selfshot3_video_to_video(
+        job={
+            "source_video_local_path": str(source_video),
+            "public_user_confirmed": True,
+            "submit_source": "public_user_final_confirm",
+            "route": "controlled_keyframe_image_to_video",
+        },
+        asset_pack={
+            "route": "controlled_keyframe_image_to_video",
+            "public_user_confirmed": True,
+            "submit_source": "public_user_final_confirm",
+            "duration_seconds": 5,
+        },
+        raw_path=raw_path,
+        provider_order=["key4u_video"],
+        fallback_prompt="test prompt",
+        aspect_ratio="9:16",
+    )
+    # Must NOT fall back to 1.0! Must score 0.0 and fail closed!
+    assert res["continuity_scores"]["temporal"] == 0.0
+
+
+def test_49_incomplete_local_continuity_payload_must_not_be_synthesized_in_connector(tmp_path: Path, monkeypatch):
+    """Connector must not synthesize proxy scores when local vision payload is missing required dimensions."""
+    source_video = tmp_path / "source.mp4"
+    source_video.write_bytes(b"VALID_SOURCE_MP4_CONTENT")
+    raw_path = str(tmp_path / "raw_ss3.mp4")
+    keyframe = tmp_path / "kf_ss3.jpg"
+    keyframe.write_bytes(b"BINARY_KEYFRAME_SS3")
+
+    fake_gen_result = {
+        "ok": True,
+        "provider": "key4u_video",
+        "model": "kling-v3",
+        "output_path": raw_path,
+    }
+
+    # Incomplete continuity payload missing motion and body measurements
+    incomplete_continuity = {
+        "ok": True,
+        "blocker": "",
+        "evidence_source": "local_vision_validator",
+        "independent_visual_validation": "LOCAL_MODEL",
+        "person_required": True,
+        "person_identity": True,
+        "passing_integrated": 3,
+        "sampled_frame_count": 3,
+        "temporal_pass_ratio": 1.0,
+        "person_observations": [{"person_ok": True}, {"person_ok": True}, {"person_ok": True}],
+    }
+
+    monkeypatch.setattr(
+        "services.video_real_render_connector.run_provider_generation",
+        lambda *args, **kwargs: fake_gen_result,
+    )
+    monkeypatch.setattr(
+        "services.video_real_render_connector._extract_selfshot_keyframe",
+        lambda *args, **kwargs: str(keyframe),
+    )
+    monkeypatch.setattr(
+        "services.video_selfshot_continuity_validator.validate_selfshot_scene_continuity",
+        lambda *args, **kwargs: incomplete_continuity,
+    )
+
+    res = video_real_render_connector._render_selfshot3_video_to_video(
+        job={
+            "source_video_local_path": str(source_video),
+            "public_user_confirmed": True,
+            "submit_source": "public_user_final_confirm",
+            "route": "controlled_keyframe_image_to_video",
+        },
+        asset_pack={
+            "route": "controlled_keyframe_image_to_video",
+            "public_user_confirmed": True,
+            "submit_source": "public_user_final_confirm",
+            "duration_seconds": 5,
+        },
+        raw_path=raw_path,
+        provider_order=["key4u_video"],
+        fallback_prompt="test prompt",
+        aspect_ratio="9:16",
+    )
+    # Connector must NOT synthesize body or motion from person_identity or ok!
+    assert res["continuity_scores"]["body"] == 0.0
+    assert res["continuity_scores"]["motion"] == 0.0
+
 
 
 

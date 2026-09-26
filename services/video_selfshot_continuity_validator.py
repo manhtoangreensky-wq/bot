@@ -215,6 +215,7 @@ def validate_selfshot_scene_continuity(
         return base_result
 
     # Frame extraction or mock injection
+    sampled_frames: list[Any] = []
     if mock_frame_observations is not None:
         frame_observations = []
         for f_idx, item in enumerate(mock_frame_observations):
@@ -378,9 +379,9 @@ def validate_selfshot_scene_continuity(
     object_score = round(object_passes / max(1, sampled_count), 4) if object_required else 1.0
     relationship_score = round(relationship_passes / max(1, sampled_count), 4) if relationship_required else 1.0
 
-    # Measured motion score from inter-frame differences
+    # Measured motion score from inter-frame differences or explicit motion observation measurements
     motion_scores_list = []
-    if not is_mock and isinstance(sampled_frames, list) and len(sampled_frames) >= 2:
+    if isinstance(sampled_frames, list) and len(sampled_frames) >= 2:
         for idx in range(len(sampled_frames) - 1):
             f1 = sampled_frames[idx]
             f2 = sampled_frames[idx + 1]
@@ -391,9 +392,16 @@ def validate_selfshot_scene_continuity(
                     diff = cv2.absdiff(g1, g2)
                     diff_val = float(np.mean(diff) / 255.0)
                     motion_scores_list.append(max(0.0, min(1.0, 1.0 - diff_val)))
-    measured_motion_score = round(float(np.mean(motion_scores_list)), 4) if motion_scores_list else (
-        temporal_pass_ratio if is_mock else 0.0
-    )
+    if not motion_scores_list and frame_observations:
+        for obs in frame_observations:
+            if obs.get("motion_score") is not None:
+                motion_scores_list.append(float(obs["motion_score"]))
+            elif obs.get("motion_diff") is not None:
+                diff_val = float(obs["motion_diff"])
+                motion_scores_list.append(max(0.0, min(1.0, 1.0 - diff_val)))
+
+    # Measured motion score: strictly zero if unmeasured, never falls back to temporal_pass_ratio or boolean ok
+    measured_motion_score = round(float(np.mean(motion_scores_list)), 4) if motion_scores_list else 0.0
 
     # Measured body proportion score from bounding box stability
     person_boxes = [obs["person_bbox"] for obs in frame_observations if obs.get("person_bbox")]
@@ -406,10 +414,9 @@ def validate_selfshot_scene_continuity(
             max_dev = max(abs(r - mean_r) / mean_r for r in ratios)
             measured_body_score = round(max(0.0, min(1.0, 1.0 - max_dev)), 4)
         else:
-            measured_body_score = identity_score
-    elif person_required and person_passes >= required_passes:
-        measured_body_score = identity_score
+            measured_body_score = 0.0
     else:
+        # Person required but bounding boxes missing or insufficient -> strictly fail closed 0.0
         measured_body_score = 0.0
 
     base_result["passing_integrated"] = passing_integrated

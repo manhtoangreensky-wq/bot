@@ -3691,59 +3691,70 @@ def _render_selfshot3_controlled_keyframe_image_to_video(
         o_obs = continuity_res.get("object_observations") or []
         r_obs = continuity_res.get("relationship_observations") or []
         total_frames = max(1, len(p_obs) or len(o_obs) or int(continuity_res.get("sampled_frame_count") or 1))
-        p_ratio = round(sum(1 for x in p_obs if x.get("person_ok")) / total_frames, 4) if (person_req and p_obs) else (1.0 if (continuity_res.get("person_identity") or not person_req) else 0.0)
-        o_ratio = round(sum(1 for x in o_obs if x.get("object_ok")) / total_frames, 4) if (object_req and o_obs) else (1.0 if (continuity_res.get("object_identity") or not object_req) else 0.0)
-        r_ratio = round(sum(1 for x in r_obs if x.get("relationship_ok")) / total_frames, 4) if (person_req and object_req and r_obs) else (1.0 if (continuity_res.get("person_object_relationship") or not (person_req and object_req)) else 0.0)
-        # Temporal score MUST use actual frame or integrated pass ratio (never proxy ok boolean)
-        passing_integrated = continuity_res.get("passing_integrated")
-        if passing_integrated is not None:
-            temporal_score = round(float(passing_integrated) / total_frames, 4)
-        elif continuity_res.get("temporal_pass_ratio") is not None:
-            temporal_score = round(float(continuity_res["temporal_pass_ratio"]), 4)
-        elif p_obs or o_obs or r_obs:
-            integrated_cnt = sum(
-                1 for idx in range(total_frames)
-                if (not person_req or (idx < len(p_obs) and p_obs[idx].get("person_ok")))
-                and (not object_req or (idx < len(o_obs) and o_obs[idx].get("object_ok")))
-                and (not (person_req and object_req) or (idx < len(r_obs) and r_obs[idx].get("relationship_ok")))
-            )
-            temporal_score = round(integrated_cnt / total_frames, 4)
-        elif continuity_res.get("person_identity") and (not object_req or continuity_res.get("object_identity")):
-            temporal_score = 1.0
+        # Check if continuity_res already provides authoritative measured continuity_scores
+        existing_scores = continuity_res.get("continuity_scores") if isinstance(continuity_res.get("continuity_scores"), dict) else None
+        if existing_scores:
+            p_ratio = round(float(existing_scores.get("identity", 0.0)), 4)
+            o_ratio = round(float(existing_scores.get("object", 1.0 if not object_req else 0.0)), 4)
+            r_ratio = round(float(existing_scores.get("interaction", 1.0 if not (person_req and object_req) else 0.0)), 4)
+            body_score = round(float(existing_scores.get("body", 1.0 if not person_req else 0.0)), 4)
+            motion_score = round(float(existing_scores.get("motion", 0.0)), 4)
+            temporal_score = round(float(existing_scores.get("temporal", 0.0)), 4)
         else:
-            temporal_score = 0.0
+            p_obs = continuity_res.get("person_observations") or []
+            o_obs = continuity_res.get("object_observations") or []
+            r_obs = continuity_res.get("relationship_observations") or []
+            total_frames = max(1, continuity_res.get("sampled_frame_count") or 3)
 
-        # Body and Motion: measured local values or fail closed if unmeasured
-        body_meas = continuity_res.get("body_score")
-        if body_meas is not None:
-            body_score = round(float(body_meas), 4)
-        elif not person_req:
-            body_score = 1.0
-        elif p_obs and any(x.get("person_bbox") for x in p_obs):
-            boxes = [x["person_bbox"] for x in p_obs if x.get("person_bbox")]
-            ratios = [b[3] / max(1.0, b[2]) for b in boxes if len(b) >= 4]
-            if len(ratios) >= 2:
-                mean_r = sum(ratios) / len(ratios)
-                max_dev = max(abs(r - mean_r) / mean_r for r in ratios)
-                body_score = round(max(0.0, min(1.0, 1.0 - max_dev)), 4)
+            p_ratio = round(sum(1 for x in p_obs if x.get("person_ok")) / total_frames, 4) if (person_req and p_obs) else (1.0 if not person_req else 0.0)
+            o_ratio = round(sum(1 for x in o_obs if x.get("object_ok")) / total_frames, 4) if (object_req and o_obs) else (1.0 if not object_req else 0.0)
+            r_ratio = round(sum(1 for x in r_obs if x.get("relationship_ok")) / total_frames, 4) if (person_req and object_req and r_obs) else (1.0 if not (person_req and object_req) else 0.0)
+
+            # Temporal score MUST use actual frame or integrated pass ratio (never proxy ok boolean or boolean success)
+            passing_integrated = continuity_res.get("passing_integrated")
+            if passing_integrated is not None:
+                temporal_score = round(float(passing_integrated) / total_frames, 4)
+            elif continuity_res.get("temporal_pass_ratio") is not None:
+                temporal_score = round(float(continuity_res["temporal_pass_ratio"]), 4)
+            elif p_obs or o_obs or r_obs:
+                integrated_cnt = sum(
+                    1 for idx in range(total_frames)
+                    if (not person_req or (idx < len(p_obs) and p_obs[idx].get("person_ok")))
+                    and (not object_req or (idx < len(o_obs) and o_obs[idx].get("object_ok")))
+                    and (not (person_req and object_req) or (idx < len(r_obs) and r_obs[idx].get("relationship_ok")))
+                )
+                temporal_score = round(integrated_cnt / total_frames, 4)
             else:
-                body_score = p_ratio
-        elif continuity_res.get("person_identity"):
-            body_score = p_ratio
-        else:
-            body_score = 0.0
+                temporal_score = 0.0
 
-        motion_meas = continuity_res.get("motion_score")
-        if motion_meas is not None:
-            motion_score = round(float(motion_meas), 4)
-        elif continuity_res.get("motion_pass_ratio") is not None:
-            motion_score = round(float(continuity_res["motion_pass_ratio"]), 4)
-        elif not person_req and not object_req:
-            motion_score = 1.0
-        elif continuity_res.get("person_identity") and continuity_res.get("ok"):
-            motion_score = p_ratio
-        else:
-            motion_score = 0.0
+            # Body: measured local values or fail closed (0.0) if unmeasured
+            body_meas = continuity_res.get("body_score")
+            if body_meas is not None:
+                body_score = round(float(body_meas), 4)
+            elif not person_req:
+                body_score = 1.0
+            elif p_obs and any(x.get("person_bbox") for x in p_obs):
+                boxes = [x["person_bbox"] for x in p_obs if x.get("person_bbox")]
+                ratios = [b[3] / max(1.0, b[2]) for b in boxes if len(b) >= 4]
+                if len(ratios) >= 2:
+                    mean_r = sum(ratios) / len(ratios)
+                    max_dev = max(abs(r - mean_r) / mean_r for r in ratios)
+                    body_score = round(max(0.0, min(1.0, 1.0 - max_dev)), 4)
+                else:
+                    body_score = 0.0
+            else:
+                body_score = 0.0
+
+            # Motion: measured local values or fail closed (0.0) if unmeasured
+            motion_meas = continuity_res.get("motion_score")
+            if motion_meas is not None:
+                motion_score = round(float(motion_meas), 4)
+            elif continuity_res.get("motion_pass_ratio") is not None:
+                motion_score = round(float(continuity_res["motion_pass_ratio"]), 4)
+            elif not person_req and not object_req:
+                motion_score = 1.0
+            else:
+                motion_score = 0.0
 
         scores = {
             "identity": p_ratio,
