@@ -508,7 +508,14 @@ def _aggregate_one_gender_result(
     dominance = winner_votes / len(rows)
     if dominance < MIN_VOTE_DOMINANCE - 1e-6:
         raise _manual_required()
-    median_margin = float(sorted(score_margins)[len(score_margins) // 2])
+    sorted_margins = sorted(score_margins)
+    n_margins = len(sorted_margins)
+    if n_margins % 2 == 1:
+        median_margin = float(sorted_margins[n_margins // 2])
+    else:
+        median_margin = float(
+            (sorted_margins[n_margins // 2 - 1] + sorted_margins[n_margins // 2]) / 2.0
+        )
     if median_margin < MIN_PANN_SCORE_MARGIN:
         raise _manual_required()
     gender = "male" if male_votes > female_votes else "female"
@@ -516,12 +523,7 @@ def _aggregate_one_gender_result(
     if voiced_seconds <= 0.0:
         raise _manual_required()
     confidence = round(
-        float(
-            min(
-                1.0,
-                (0.25 + 0.75 * dominance) * min(1.0, 0.50 + median_margin),
-            )
-        ),
+        float(min(1.0, max(0.0, 0.25 + 0.75 * dominance))),
         6,
     )
     if confidence < speaker_cast.MIN_REGISTER_CONFIDENCE:
