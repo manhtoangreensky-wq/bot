@@ -12,11 +12,13 @@ import asyncio
 import json
 import os
 from pathlib import Path
+import sqlite3
 from unittest.mock import MagicMock, patch
 import pytest
 
 import bot
 from services import (
+    remote_worker_api,
     video_final_output,
     video_project_queue as queue,
     video_provider_router,
@@ -468,3 +470,201 @@ def test_incomplete_scene_coverage_does_not_deliver(sample_panels, tmp_path):
     assert charge_decision["ok"] is False
     assert charge_decision["amount_xu"] == 0
     assert charge_decision["charge_skip_reason"] == "delivery_required_before_charge"
+
+
+def test_end_to_end_provider_free_storyboard_execution(sample_panels, tmp_path, monkeypatch):
+    """MANDATORY TRUE FINAL E2E EXECUTION HANDOFF:
+    Proves end-to-end provider-free path:
+    FINAL_CONFIRM -> PROJECT_PERSISTENCE -> ASSET_PACK -> INVOICE -> QUEUE_OR_JOB_CREATION
+    -> WORKER_JOB_PAYLOAD -> RENDER_REAL_VIDEO_JOB -> SCENE_N_PANEL_N_BINDING -> VIDEO_GENERATION_REQUEST.
+    """
+    panel1, panel2 = sample_panels
+    db_path = str(tmp_path / "test_e2e_storyboard.db")
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    monkeypatch.setenv("KEY4U_VIDEO_ENABLED", "1")
+    monkeypatch.setenv("KEY4U_VIDEO_AUTH_HEADER_VALUE", "Bearer test_token")
+    monkeypatch.setenv("KEY4U_VIDEO_MODEL", "kling-v3")
+    monkeypatch.setenv("KEY4U_KLING_I2V_ENDPOINT", "https://api.key4u.shop/kling/v1/videos/image2video")
+    monkeypatch.setenv("KEY4U_KLING_VIDEO_POLL_URL", "https://api.key4u.shop/kling/v1/videos/image2video/{task_id}")
+    monkeypatch.setenv("KEY4U_VIDEO_SUBMIT_URL", "https://api.key4u.shop/kling/v1/videos/image2video")
+    monkeypatch.setenv("KEY4U_VIDEO_POLL_URL", "https://api.key4u.shop/kling/v1/videos/image2video/{task_id}")
+    monkeypatch.setenv("KEY4U_VIDEO_ENDPOINT", "https://api.key4u.shop/kling/v1/videos/image2video")
+
+    conn = sqlite3.connect(db_path)
+    queue.ensure_video_project_queue_schema(conn)
+
+    session = {
+        "product_id": "storyboard_prompt",
+        "topic": "Astronaut cat exploring crystal planet",
+        "aspect_ratio": "9:16",
+        "draft": {
+            "product_id": "storyboard_prompt",
+            "b14_scene_count": 2,
+            "b14_scene_seconds": 8,
+            "b14_aspect_ratio": "9:16",
+            "b14_quality_xu": 80,
+            "b14_profile_id": "storytelling",
+            "provider_order": "key4u_video",
+            "provider_chain": ["key4u_video"],
+            "scene_cards": [
+                {"scene_index": 1, "image_path": panel1, "prompt": "Scene 1: Cat lands on crystal surface, cinematic zoom"},
+                {"scene_index": 2, "image_path": panel2, "prompt": "Scene 2: Cat watches glowing twin moons, pan"},
+            ],
+            "storyboard_panels": [
+                {"scene_index": 1, "local_path": panel1},
+                {"scene_index": 2, "local_path": panel2},
+            ],
+        },
+    }
+
+    # 1. FINAL_CONFIRM initiation: Prepare project for invoice (NO preinjected synthetic job)
+    project = bot.video_b14_prepare_project_for_invoice(user_id=7001, session=session)
+    assert project is not None
+    project_id = int(project["project_id"])
+    assert project_id > 0
+
+    # 2. PROJECT_PERSISTENCE & ASSET_PACK & INVOICE verification
+    persisted_project = queue.get_video_project(conn, project_id)
+    assert persisted_project is not None
+    asset_pack = json.loads(persisted_project.get("asset_pack_json") or "{}")
+    invoice = json.loads(persisted_project.get("invoice_json") or "{}")
+
+    # Invariants on asset_pack
+    assert asset_pack.get("product_type") == "storyboard_prompt"
+    assert asset_pack.get("engine_route") == "storyboard_to_video"
+    assert asset_pack.get("engine_adapter") == "storyboard_scene_image_video_engine"
+    assert asset_pack.get("orchestration_mode") == "per_scene_8s"
+    assert asset_pack.get("required_capability") == "image_to_video"
+    assert asset_pack.get("selected_provider") == "key4u_video"
+    assert asset_pack.get("selected_model") == "kling-v3"
+    assert asset_pack.get("model") == "kling-v3"
+    assert len(asset_pack.get("scene_cards") or []) == 2
+
+    # Invariants on invoice
+    assert invoice.get("product_type") == "storyboard_prompt"
+    assert invoice.get("engine_route") == "storyboard_to_video"
+    assert invoice.get("engine_adapter") == "storyboard_scene_image_video_engine"
+    assert invoice.get("orchestration_mode") == "per_scene_8s"
+    assert invoice.get("required_capability") == "image_to_video"
+    assert invoice.get("selected_provider") == "key4u_video"
+    assert invoice.get("selected_model") == "kling-v3"
+    assert invoice.get("model") == "kling-v3"
+
+    # Confirm project invoice (Public confirm)
+    confirm_res = queue.confirm_video_project_invoice(
+        conn, project_id=project_id, user_id=7001, billing_exempt=True
+    )
+    assert confirm_res["ok"] is True, f"Expected confirm ok, got reason: {confirm_res.get('reason')}"
+    job = confirm_res["job"]
+    assert job is not None
+    job_id = int(job["id"])
+    assert job_id > 0
+
+    # Verify project status updated
+    project_after_confirm = queue.get_video_project(conn, project_id)
+    assert project_after_confirm["status"] in {"queued_for_worker", "queued"}
+    assert project_after_confirm["is_confirmed"] == 1
+
+    # 3. QUEUE_OR_JOB_CREATION & PERSISTED_FIELDS in result_json
+    job_row = queue.get_video_render_job(conn, job_id)
+    assert job_row is not None
+    result_json = json.loads(str(job_row.get("result_json") or "{}"))
+    assert result_json.get("product_type") == "storyboard_prompt"
+    assert result_json.get("engine_route") == "storyboard_to_video"
+    assert result_json.get("engine_adapter") == "storyboard_scene_image_video_engine"
+    assert result_json.get("orchestration_mode") == "per_scene_8s"
+    assert result_json.get("required_capability") == "image_to_video"
+    assert result_json.get("selected_provider") == "key4u_video"
+    assert result_json.get("selected_model") == "kling-v3"
+    assert result_json.get("model") == "kling-v3"
+    assert result_json.get("scene_count") == 2
+    cards = result_json.get("scene_cards") or []
+    assert len(cards) == 2
+    assert cards[0].get("image_path") == panel1 or cards[0].get("local_path") == panel1
+    assert cards[1].get("image_path") == panel2 or cards[1].get("local_path") == panel2
+
+    # 4. WORKER_JOB_PAYLOAD: Hydrate and build worker payload
+    hydrated = queue.hydrate_video_job_payload(conn, job_row)
+    assert hydrated.get("product_type") == "storyboard_prompt"
+    assert hydrated.get("engine_route") == "storyboard_to_video"
+    assert hydrated.get("engine_adapter") == "storyboard_scene_image_video_engine"
+    assert hydrated.get("orchestration_mode") == "per_scene_8s"
+    assert hydrated.get("required_capability") == "image_to_video"
+    assert hydrated.get("selected_provider") == "key4u_video"
+    assert hydrated.get("selected_model") == "kling-v3"
+    assert hydrated.get("model") == "kling-v3"
+    assert len(hydrated.get("scene_cards") or []) == 2
+
+    worker_payload = remote_worker_api.build_worker_job_payload(hydrated)
+    assert worker_payload.get("product_type") == "storyboard_prompt"
+    assert worker_payload.get("engine_route") == "storyboard_to_video"
+    assert worker_payload.get("engine_adapter") == "storyboard_scene_image_video_engine"
+    assert worker_payload.get("orchestration_mode") == "per_scene_8s"
+    assert worker_payload.get("required_capability") == "image_to_video"
+    assert worker_payload.get("selected_provider") == "key4u_video"
+    assert worker_payload.get("selected_model") == "kling-v3"
+    assert worker_payload.get("model") == "kling-v3"
+    assert len(worker_payload.get("scene_cards") or []) == 2
+
+    # 5. RENDER_REAL_VIDEO_JOB, SCENE_N_PANEL_N_BINDING, VIDEO_GENERATION_REQUEST
+    captured_requests: list[VideoGenerationRequest] = []
+
+    def mock_run_provider(req: VideoGenerationRequest, **kwargs):
+        captured_requests.append(req)
+        scene_idx = req.metadata.get("scene_index") or len(captured_requests)
+        raw_output_path = req.metadata.get("raw_output_path") or str(tmp_path / f"scene_{scene_idx:02d}.mp4")
+        Path(raw_output_path).write_bytes(b"\x00\x00\x00 ftypisom" + b"\x00" * 256)
+        return {
+            "ok": True,
+            "status": "completed",
+            "provider": "key4u_video",
+            "provider_task_id": f"k4u_scene_{scene_idx}_task",
+            "task_id_present": True,
+            "result_url": f"https://cdn.key4u.shop/scene_{scene_idx}.mp4",
+            "output_path": raw_output_path,
+            "raw_output_path": raw_output_path,
+        }
+
+    render_workspace = str(tmp_path / "render_work")
+    with patch("services.video_real_render_connector.run_provider_generation", side_effect=mock_run_provider):
+        render_result = video_real_render_connector.render_real_video_job(worker_payload, render_workspace)
+
+    assert len(captured_requests) == 2, f"Expected exactly 2 scene generation requests, got {len(captured_requests)}"
+
+    # Invariant: Scene 1 must receive Panel 1
+    req1 = captured_requests[0]
+    assert req1.image_paths == [panel1], f"Scene 1 must bind to Panel 1, got {req1.image_paths}"
+    assert req1.required_capability == "image_to_video"
+    assert req1.duration_seconds == 8.0
+    assert req1.ratio == "9:16"
+
+    # Invariant: Scene 2 must receive Panel 2
+    req2 = captured_requests[1]
+    assert req2.image_paths == [panel2], f"Scene 2 must bind to Panel 2, got {req2.image_paths}"
+    assert req2.required_capability == "image_to_video"
+    assert req2.duration_seconds == 8.0
+    assert req2.ratio == "9:16"
+
+    # Verify Key4U wire payload for Scene 1 and Scene 2
+    env = {
+        "KEY4U_VIDEO_MODEL": "kling-v3",
+        "KEY4U_KLING_I2V_ENDPOINT": "https://api.key4u.shop/kling/v1/videos/image2video",
+    }
+    built_payload1 = video_generic_http_provider.build_key4u_video_payload(req1, env=env)
+    wire1 = video_generic_http_provider._key4u_wire_payload(
+        built_payload1, submit_url="https://api.key4u.shop/kling/v1/videos/image2video"
+    )
+    assert wire1["model_name"] == "kling-v3"
+    assert wire1["duration"] == 8
+    assert wire1["aspect_ratio"] == "9:16"
+    assert wire1["image"].startswith("data:image/") or len(wire1["image"]) > 20
+
+    built_payload2 = video_generic_http_provider.build_key4u_video_payload(req2, env=env)
+    wire2 = video_generic_http_provider._key4u_wire_payload(
+        built_payload2, submit_url="https://api.key4u.shop/kling/v1/videos/image2video"
+    )
+    assert wire2["model_name"] == "kling-v3"
+    assert wire2["duration"] == 8
+    assert wire2["aspect_ratio"] == "9:16"
+    assert wire2["image"].startswith("data:image/") or len(wire2["image"]) > 20
+

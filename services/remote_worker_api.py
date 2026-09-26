@@ -1464,7 +1464,7 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         return {}
     project = dict(hydrated_job.get("project") or {})
     scenes = list(hydrated_job.get("scenes") or [])
-    scene_cards = _scene_cards_from_project(project, scenes)
+    scene_cards = _scene_cards_from_project(project, scenes) or list(hydrated_job.get("scene_cards") or []) or list((persisted_result or {}).get("scene_cards") or []) or list(asset_pack.get("scene_cards") or [])
     persisted_result = _json_loads(hydrated_job.get("result_json"), {})
     if not isinstance(persisted_result, dict):
         persisted_result = {}
@@ -1499,7 +1499,7 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         or project.get("profile_id")
         or ""
     )
-    engine_adapter = str(asset_pack.get("engine_adapter") or invoice.get("engine_adapter") or "")
+    engine_adapter = str(asset_pack.get("engine_adapter") or invoice.get("engine_adapter") or hydrated_job.get("engine_adapter") or "")
     admin_only = _safe_bool(asset_pack.get("admin_only") or invoice.get("admin_only"))
     no_charge = _safe_bool(asset_pack.get("no_charge") or invoice.get("no_charge"))
     public_user = _safe_bool(asset_pack.get("public_user") or invoice.get("public_user"))
@@ -1519,7 +1519,13 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         "profile_id": str(project.get("profile_id") or ""),
         "product_type": product_type,
         "video_flow": product_type,
+        "engine_route": str(hydrated_job.get("engine_route") or asset_pack.get("engine_route") or invoice.get("engine_route") or (persisted_result or {}).get("engine_route") or ""),
         "engine_adapter": engine_adapter,
+        "orchestration_mode": str(hydrated_job.get("orchestration_mode") or asset_pack.get("orchestration_mode") or invoice.get("orchestration_mode") or (persisted_result or {}).get("orchestration_mode") or "per_scene_8s"),
+        "required_capability": str(hydrated_job.get("required_capability") or asset_pack.get("required_capability") or invoice.get("required_capability") or (persisted_result or {}).get("required_capability") or "image_to_video"),
+        "selected_provider": str(hydrated_job.get("selected_provider") or asset_pack.get("selected_provider") or invoice.get("selected_provider") or (persisted_result or {}).get("selected_provider") or "key4u_video"),
+        "selected_model": str(hydrated_job.get("selected_model") or asset_pack.get("selected_model") or invoice.get("selected_model") or hydrated_job.get("model") or (persisted_result or {}).get("selected_model") or (persisted_result or {}).get("model") or "kling-v3"),
+        "model": str(hydrated_job.get("model") or asset_pack.get("model") or invoice.get("model") or hydrated_job.get("selected_model") or (persisted_result or {}).get("model") or "kling-v3"),
         "topic": str(project.get("topic") or "")[:500],
         "prompt_text": str(project.get("prompt_text") or "")[:8000],
         "original_user_prompt": original_user_prompt,
