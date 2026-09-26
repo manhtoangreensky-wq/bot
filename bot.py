@@ -251487,6 +251487,8 @@ async def _extract_subdub_auto_pcm(
     exact_acoustic_multi = bool(
         auto_multi_speaker.is_auto_multi_speaker_state(prepared_state)
         or auto_multi_speaker.is_auto_multi_speaker_state(state or {})
+        or auto_smart_multivoice.is_auto_smart_multivoice_state(prepared_state)
+        or auto_smart_multivoice.is_auto_smart_multivoice_state(state or {})
     )
     original_acoustic_source = str(
         prepared_state.get("_pipeline_source_path_override")
@@ -251499,6 +251501,10 @@ async def _extract_subdub_auto_pcm(
         saved_source = str(
             prepared_state.get("_pipeline_saved_source_path")
             or (state or {}).get("_pipeline_saved_source_path")
+            or (prepared or {}).get("source_path")
+            or (prepared or {}).get("source_file")
+            or ((state or {}).get("input_save") or {}).get("normalized_path")
+            or ((state or {}).get("input_save") or {}).get("path")
             or ""
         ).strip()
     source_path = ""
@@ -251904,7 +251910,10 @@ async def _execute_video_dubbing_pipeline_core(
             **state,
             **(
                 {"_pipeline_source_path_override": str(input_save.get("original_source_path") or input_save.get("path") or "")}
-                if auto_multi_speaker.is_auto_multi_speaker_state(state)
+                if (
+                    auto_multi_speaker.is_auto_multi_speaker_state(state)
+                    or auto_smart_multivoice.is_auto_smart_multivoice_state(state)
+                )
                 and str(input_save.get("original_source_path") or input_save.get("path") or "")
                 else {}
             ),

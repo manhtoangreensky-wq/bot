@@ -2602,6 +2602,8 @@ async def run_auto_smart_multivoice_blackbox(
         try:
             from services import subdub_two_speaker_gender_onnx
             prep_ctx = dict(prepared or {})
+            if "state" not in prep_ctx and isinstance(current, Mapping):
+                prep_ctx["state"] = dict(current)
             if "source_file" not in prep_ctx and source_media:
                 prep_ctx["source_file"] = source_media
             if "source_path" not in prep_ctx and source_media:
