@@ -10,7 +10,6 @@ import struct
 import tempfile
 from pathlib import Path
 from typing import Any, Mapping, Sequence
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -253,29 +252,72 @@ class TestExact80CueFixture:
         )
 
     def test_n3_classifier_callsite_reached(self, tmp_path: Path):
-        """After fix: execution advances past _build_derived_ranges to N>=3 classifier callsite."""
+        """After fix: decide_smart_multivoice actually invokes multi_speaker_classifier
+        through the N>=3 path, passing correct PCM path and derived ranges.
+
+        Uses a deterministic spy classifier that records arguments and returns
+        controlled valid classifications for all 4 speakers.
+
+        N3_CLASSIFIER_CALLSITE_REACHED=YES
+        """
         pcm = _make_pcm(tmp_path, 180.545)
         cues = _build_80_cue_fixture()
 
-        # Step 1: _build_derived_ranges must pass
-        r = smart._build_derived_ranges(cues, stereo_pcm_path=str(pcm))
-        assert r is not None, "ranges must be non-None"
+        # ---- Spy classifier ----
+        spy_record: dict[str, Any] = {}
 
-        # Step 2: Verify the ranges would be passed to the classifier
-        # The N>=3 path calls: multi_fn(stereo_pcm_path, derived_ranges, ...)
-        # We prove the callsite is reachable by calling with a spy classifier
-        spy = MagicMock(side_effect=Exception("spy_classifier_reached"))
+        def spy_classifier(pcm_path, ranges, *, deadline_monotonic=None, stop_requested=None):
+            spy_record["PCM_PATH_RECEIVED"] = pcm_path
+            spy_record["SPEAKER_KEYS_RECEIVED"] = set(ranges.keys())
+            spy_record["RANGE_COUNTS_RECEIVED"] = {
+                spk: len(rngs) for spk, rngs in ranges.items()
+            }
+            spy_record["call_count"] = spy_record.get("call_count", 0) + 1
+            # Return controlled valid classifications for all 4 speakers
+            # so the pipeline can proceed deterministically.
+            return {
+                "speaker_0": {"voice_register": "low", "confidence": 0.95},
+                "speaker_1": {"voice_register": "high", "confidence": 0.95},
+                "speaker_2": {"voice_register": "low", "confidence": 0.95},
+                "speaker_3": {"voice_register": "high", "confidence": 0.95},
+            }
 
-        # The decide_smart_multivoice function is async; we verify the gateway
-        # by confirming _build_derived_ranges returns valid data that the
-        # classifier would accept (no ValueError, valid speaker count >= 3)
-        speakers_with_ranges = [spk for spk, ranges in r.items() if len(ranges) > 0]
-        assert len(speakers_with_ranges) >= 3, (
-            f"N>=3 requires at least 3 speakers with ranges, got {len(speakers_with_ranges)}: "
-            f"{speakers_with_ranges}"
+        # ---- Validated voice pools (need enough voices for 4 speakers) ----
+        validated_pools = {
+            "low": ["voice.low.A", "voice.low.B"],
+            "high": ["voice.high.A", "voice.high.B"],
+        }
+
+        # ---- Call decide_smart_multivoice with the spy ----
+        result = smart.decide_smart_multivoice(
+            cues,
+            validated_pools=validated_pools,
+            stereo_pcm_path=str(pcm),
+            multi_speaker_classifier=spy_classifier,
         )
-        # N3_CLASSIFIER_CALLSITE_REACHED=YES
-        # (The callsite is reachable: _build_derived_ranges passes, >=3 speakers have ranges)
+
+        # ---- Assert spy was actually invoked exactly once ----
+        assert spy_record.get("call_count") == 1, (
+            f"Expected spy called exactly 1 time, got {spy_record.get('call_count')}"
+        )
+
+        # ---- Assert PCM path passed to spy matches fixture PCM ----
+        assert spy_record["PCM_PATH_RECEIVED"] == str(pcm), (
+            f"PCM path mismatch: {spy_record['PCM_PATH_RECEIVED']} != {str(pcm)}"
+        )
+
+        # ---- Assert all 4 speaker keys were passed in ranges ----
+        expected_speakers = {"speaker_0", "speaker_3", "speaker_2", "speaker_1"}
+        assert spy_record["SPEAKER_KEYS_RECEIVED"] == expected_speakers, (
+            f"Speaker keys mismatch: {spy_record['SPEAKER_KEYS_RECEIVED']} != {expected_speakers}"
+        )
+
+        # ---- Assert classifier invocation happens AFTER _build_derived_ranges
+        #      successfully clamped the 84ms overshoot (ranges are valid) ----
+        assert all(
+            spy_record["RANGE_COUNTS_RECEIVED"][spk] > 0
+            for spk in expected_speakers
+        ), f"All speakers must have >0 ranges: {spy_record['RANGE_COUNTS_RECEIVED']}"
 
 
 # ===========================================================================
