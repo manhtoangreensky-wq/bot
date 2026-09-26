@@ -64,8 +64,10 @@ Covers all 58 test requirements:
 from __future__ import annotations
 
 import asyncio
+import base64
 from collections.abc import Mapping
 import hashlib
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -76,6 +78,11 @@ import pytest
 from services import subdub_speaker_cast as speaker_cast
 from services.subdub_blackboxes import auto_speaker, auto_multi_speaker
 from services.subdub_blackboxes import auto_smart_multivoice as smart
+
+
+SAMPLE_VALID_MP3 = base64.b64decode(
+    "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYyLjEyLjEwMQAAAAAAAAAAAAAA//sQxAAABHQTVVSQgDCmCa83GiACAAGtOUAAAVk6PVBQCAYJAfB8HwfKAgCAYRB8H9QIOxOH+INwBJP2wGA4HA4AAAAAACiJKpkUZAjpAkgWo/eFAfATG/AilC+oGhL8JA0qCgAYMAD/+xLEAoPFWB0gHeAAKKSDpIK8AAXMCQC8QASGAOB4Z+72pmMDlmHEESYMAH5gQgYGBSBMYF4DxZq0lflI8wEwETAAA2MDYIQzblDTLrF3ML8H0wWQHTALAtMCUB8wIwG0T59JA5JIAAr/+xDEAoAEtENSuZKAEJcGpuuYMARhEdKhTBbpmtFc+iKq+RLMu79/N5ZP4GFfx4sXwMd+FVAMXYXAAAAmEoRic8ySQagdXkkSQpUtPJRJFBQFYxhTvEt0qC3EqkxBTUUzLjEwMKqqqg=="
+)
 
 
 TEST_POOLS = {
@@ -461,7 +468,7 @@ def test_22_valid_final_mp4(tmp_path):
         cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Chào", "start_ms": 0, "end_ms": 1000}]
 
         async def mock_synth(cues, speaker_voice_map):
-            return [{"cue_id": "c1", "audio": b"dummy_pcm_bytes"}]
+            return [{"cue_id": "c1", "audio": b"dummy_pcm_bytes", "audio_duration": 1.0}]
 
         async def mock_render(source_media, output_path, **kwargs):
             return _create_real_valid_mp4(Path(output_path))
@@ -489,7 +496,7 @@ def test_23_invalid_final_mp4_rejected(tmp_path):
         cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Chào", "start_ms": 0, "end_ms": 1000}]
 
         async def mock_synth(cues, speaker_voice_map):
-            return [{"cue_id": "c1", "audio": b"dummy"}]
+            return [{"cue_id": "c1", "audio": b"dummy", "audio_duration": 1.0}]
 
         async def mock_render(source_media, output_path, **kwargs):
             Path(output_path).write_bytes(b"")
@@ -533,7 +540,7 @@ def test_25_render_failure_fails_truthfully(tmp_path):
         cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Chào", "start_ms": 0, "end_ms": 1000}]
 
         async def mock_synth(cues, speaker_voice_map):
-            return [{"cue_id": "c1", "audio": b"dummy"}]
+            return [{"cue_id": "c1", "audio": b"dummy", "audio_duration": 1.0}]
 
         async def failing_render(**kwargs):
             raise RuntimeError("ffmpeg_mux_failure_code_1")
@@ -900,7 +907,7 @@ def test_47_partial_tts_coverage_cannot_succeed_as_dubbed(tmp_path):
         ]
         # Synthesizer only returns c1, omitting c2
         async def partial_synth(cues, speaker_voice_map):
-            return [{"cue_id": "c1", "audio": b"chunk1_data"}]
+            return [{"cue_id": "c1", "audio": b"chunk1_data", "audio_duration": 1.0}]
 
         res = await smart.run_auto_smart_multivoice(
             source_media=source_media,
@@ -923,8 +930,8 @@ def test_48_duplicate_tts_artifact_rejected(tmp_path):
 
         async def dup_synth(cues, speaker_voice_map):
             return [
-                {"cue_id": "c1", "audio": b"chunk1_a"},
-                {"cue_id": "c1", "audio": b"chunk1_b"},
+                {"cue_id": "c1", "audio": b"chunk1_a", "audio_duration": 1.0},
+                {"cue_id": "c1", "audio": b"chunk1_b", "audio_duration": 1.0},
             ]
 
         res = await smart.run_auto_smart_multivoice(
@@ -948,8 +955,8 @@ def test_49_unknown_tts_artifact_rejected(tmp_path):
 
         async def unknown_synth(cues, speaker_voice_map):
             return [
-                {"cue_id": "c1", "audio": b"chunk1"},
-                {"cue_id": "c_unknown_99", "audio": b"chunk99"},
+                {"cue_id": "c1", "audio": b"chunk1", "audio_duration": 1.0},
+                {"cue_id": "c_unknown_99", "audio": b"chunk99", "audio_duration": 1.0},
             ]
 
         res = await smart.run_auto_smart_multivoice(
@@ -972,7 +979,7 @@ def test_50_non_empty_garbage_mp4_rejected_without_caller_probe(tmp_path):
         cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Thoại", "start_ms": 0, "end_ms": 1000}]
 
         async def mock_synth(cues, speaker_voice_map):
-            return [{"cue_id": "c1", "audio": b"data"}]
+            return [{"cue_id": "c1", "audio": b"data", "audio_duration": 1.0}]
 
         async def garbage_render(source_media, output_path, **kwargs):
             # Write 4KB of garbage non-mp4 bytes
@@ -1005,7 +1012,7 @@ def test_51_stale_pre_existing_output_rejected(tmp_path):
         cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Thoại", "start_ms": 0, "end_ms": 1000}]
 
         async def mock_synth(cues, speaker_voice_map):
-            return [{"cue_id": "c1", "audio": b"data"}]
+            return [{"cue_id": "c1", "audio": b"data", "audio_duration": 1.0}]
 
         # Render pipeline fails to create any file
         async def failing_render(source_media, output_path, **kwargs):
@@ -1032,7 +1039,7 @@ def test_52_render_pipeline_absent_cannot_claim_current_run_output(tmp_path):
         cues = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Thoại", "start_ms": 0, "end_ms": 1000}]
 
         async def mock_synth(cues, speaker_voice_map):
-            return [{"cue_id": "c1", "audio": b"data"}]
+            return [{"cue_id": "c1", "audio": b"data", "audio_duration": 1.0}]
 
         res = await smart.run_auto_smart_multivoice(
             source_media=source_media,
@@ -1060,7 +1067,7 @@ def test_53_bar_fixture_full_runner(tmp_path):
         synth_cues_called = []
         async def mock_synth(cues, speaker_voice_map):
             synth_cues_called.extend(cues)
-            return [{"cue_id": c["cue_id"], "audio": b"data"} for c in cues]
+            return [{"cue_id": c["cue_id"], "audio": b"data", "audio_duration": 1.0} for c in cues]
 
         async def mock_render(source_media, output_path, **kwargs):
             return _create_real_valid_mp4(Path(output_path))
@@ -1095,7 +1102,7 @@ def test_54_bar_singing_music_never_sent_to_tts(tmp_path):
         async def mock_synth(cues, speaker_voice_map):
             for c in cues:
                 tts_received_ids.append(c["cue_id"])
-            return [{"cue_id": c["cue_id"], "audio": b"data"} for c in cues]
+            return [{"cue_id": c["cue_id"], "audio": b"data", "audio_duration": 1.0} for c in cues]
 
         async def mock_render(source_media, output_path, **kwargs):
             return _create_real_valid_mp4(Path(output_path))
@@ -1126,7 +1133,7 @@ def test_55_preserved_bar_cues_reach_renderer(tmp_path):
         ]
         render_spy_kwargs = {}
         async def mock_synth(cues, speaker_voice_map):
-            return [{"cue_id": "c1", "audio": b"data"}]
+            return [{"cue_id": "c1", "audio": b"data", "audio_duration": 1.0}]
 
         async def mock_render(source_media, output_path, **kwargs):
             render_spy_kwargs.update(kwargs)
@@ -1164,7 +1171,14 @@ def test_56_cooking_fixture_full_runner(tmp_path):
             }
 
         async def mock_synth(cues, speaker_voice_map):
-            return [{"cue_id": c["cue_id"], "audio": b"data"} for c in cues]
+            return [
+                {
+                    "cue_id": c["cue_id"],
+                    "audio": b"data",
+                    "audio_duration": (float(c.get("end_ms", 0)) - float(c.get("start_ms", 0))) / 1000.0,
+                }
+                for c in cues
+            ]
 
         async def mock_render(source_media, output_path, **kwargs):
             return _create_real_valid_mp4(Path(output_path))
@@ -1196,7 +1210,7 @@ def test_57_cancellation_after_synthesis_cannot_succeed(tmp_path):
         async def mock_synth(cues, speaker_voice_map):
             nonlocal cancelled_state
             cancelled_state = True # Trigger cancel during/after synth
-            return [{"cue_id": "c1", "audio": b"data"}]
+            return [{"cue_id": "c1", "audio": b"data", "audio_duration": 1.0}]
 
         async def mock_render(source_media, output_path, **kwargs):
             return _create_real_valid_mp4(Path(output_path))
@@ -1226,7 +1240,7 @@ def test_58_cancellation_before_render_cannot_succeed(tmp_path):
         async def mock_synth(cues, speaker_voice_map):
             nonlocal cancel_flag
             cancel_flag = True
-            return [{"cue_id": "c1", "audio": b"data"}]
+            return [{"cue_id": "c1", "audio": b"data", "audio_duration": 1.0}]
 
         render_called = False
         async def mock_render(source_media, output_path, **kwargs):
@@ -1578,7 +1592,7 @@ def test_72_resume_map_immutable(tmp_path):
         async def mock_synth(cues, speaker_voice_map):
             nonlocal synth_called
             synth_called = True
-            return [{"cue_id": c["cue_id"], "audio": b"dummy_mp3_data"} for c in cues]
+            return [{"cue_id": c["cue_id"], "audio": b"dummy_mp3_data", "audio_duration": 1.0} for c in cues]
 
         def mock_render(**kwargs):
             out = Path(kwargs["output_path"])
@@ -1845,8 +1859,8 @@ def test_80_cue_locked_timing_propagation(tmp_path):
         async def spy_synth(cues, speaker_voice_map, **kwargs):
             observed_call_kw.update(kwargs)
             return [
-                {"cue_id": "c1", "audio": b"audio_c1", "cue_locked_timing": True},
-                {"cue_id": "c2", "audio": b"audio_c2", "cue_locked_timing": True},
+                {"cue_id": "c1", "audio": b"audio_c1", "audio_duration": 1.0, "cue_locked_timing": True},
+                {"cue_id": "c2", "audio": b"audio_c2", "audio_duration": 1.5, "cue_locked_timing": True},
             ]
 
         async def mock_render(source_media, output_path, **kwargs):
@@ -1854,11 +1868,16 @@ def test_80_cue_locked_timing_propagation(tmp_path):
             assert all(ch.get("cue_locked_timing") is True for ch in tts_chunks), "All tts_chunks must have cue_locked_timing=True"
             return _create_real_valid_mp4(Path(output_path))
 
+        acoustics = {
+            "spk_1": {"voice_register": "low", "confidence": 0.95},
+            "spk_2": {"voice_register": "high", "confidence": 0.95},
+        }
         res = await smart.run_auto_smart_multivoice(
             source_media=source_media,
             segments=cues,
             output_path=output_mp4,
             validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
             synthesize_segments=spy_synth,
             render_pipeline=mock_render,
         )
@@ -1867,4 +1886,1403 @@ def test_80_cue_locked_timing_propagation(tmp_path):
 
     asyncio.run(_run())
 
+
+def test_81_stereo_pcm_f0_real_execution(tmp_path):
+    """Stereo 44.1kHz s16le PCM pitch extraction executes without TypeError and returns classifications."""
+    import numpy as np
+    import struct
+    sr = 44100
+    dur = 1.0
+    t = np.linspace(0, dur, int(sr * dur), endpoint=False)
+    s1 = (np.sin(2 * np.pi * 120 * t) * 16000).astype(np.int16)
+    s2 = (np.sin(2 * np.pi * 200 * t) * 16000).astype(np.int16)
+
+    pcm_file = tmp_path / "stereo_test.pcm"
+    with open(pcm_file, "wb") as f:
+        for val in s1:
+            f.write(struct.pack("<hh", val, val))
+        for val in s2:
+            f.write(struct.pack("<hh", val, val))
+
+    ranges = {
+        "spk_male": [(0.0, 1.0)],
+        "spk_female": [(1.0, 2.0)],
+    }
+    results = smart.estimate_speaker_pitches_from_pcm(pcm_file, ranges)
+    assert "spk_male" in results, "spk_male must be in results (not swallowed by TypeError)"
+    assert "spk_female" in results, "spk_female must be in results (not swallowed by TypeError)"
+    assert results["spk_male"]["voice_register"] == "low"
+    assert results["spk_male"]["voice_gender"] == "male"
+    assert results["spk_female"]["voice_register"] == "high"
+    assert results["spk_female"]["voice_gender"] == "female"
+
+
+def test_82_pcm_format_detection_not_file_size_mod_4(tmp_path):
+    """16kHz mono PCM with even sample count (file_size % 4 == 0) is not misrouted as stereo 44.1k."""
+    import numpy as np
+    import struct
+    sr = 16000
+    dur = 1.0
+    t = np.linspace(0, dur, int(sr * dur), endpoint=False)
+    s1 = (np.sin(2 * np.pi * 120 * t) * 16000).astype(np.int16)
+    pcm_file = tmp_path / "mono_test.pcm"
+    with open(pcm_file, "wb") as f:
+        for val in s1:
+            f.write(struct.pack("<h", val))
+    assert pcm_file.stat().st_size % 4 == 0, "Precondition: file_size % 4 == 0"
+
+    ranges = {"spk_mono": [(0.0, 1.0)]}
+    results = smart.estimate_speaker_pitches_from_pcm(pcm_file, ranges, sample_rate=16000, channels=1)
+    assert "spk_mono" in results
+    assert results["spk_mono"]["voice_register"] == "low"
+
+
+def test_83_ambiguity_band_155_165_hz(tmp_path):
+    """Pitches in the 155-165 Hz band are labeled as ambiguous/unknown, not forced into low/high."""
+    import numpy as np
+    import struct
+    sr = 44100
+    dur = 1.0
+    t = np.linspace(0, dur, int(sr * dur), endpoint=False)
+    s_amb = (np.sin(2 * np.pi * 160 * t) * 16000).astype(np.int16)
+    pcm_file = tmp_path / "amb_test.pcm"
+    with open(pcm_file, "wb") as f:
+        for val in s_amb:
+            f.write(struct.pack("<hh", val, val))
+
+    ranges = {"spk_amb": [(0.0, 1.0)]}
+    results = smart.estimate_speaker_pitches_from_pcm(pcm_file, ranges)
+    assert "spk_amb" in results
+    assert results["spk_amb"]["voice_register"] == "unknown"
+    assert results["spk_amb"]["voice_gender"] == "ambiguous"
+
+
+def test_84_anti_flapping_acoustic_guard():
+    """Short cue smoothing does NOT reassign if cue has contradictory acoustic evidence."""
+    cues = [
+        {"cue_id": "c1", "speaker_id": "female_1", "start_ms": 0, "end_ms": 1500},
+        {"cue_id": "c2", "speaker_id": "male_1", "start_ms": 1600, "end_ms": 2000},
+        {"cue_id": "c3", "speaker_id": "female_1", "start_ms": 2100, "end_ms": 3500},
+    ]
+    acoustics = {
+        "female_1": {"voice_register": "high", "voice_gender": "female", "confidence": 0.95},
+        "male_1": {"voice_register": "low", "voice_gender": "male", "confidence": 0.95},
+    }
+    smoothed = smart.smooth_smart_multivoice_cues(cues, acoustic_classifications=acoustics)
+    assert smoothed[1]["speaker_id"] == "male_1", "Should NOT smooth when acoustics clearly contradict"
+    assert "anti_flapping_smoothed" not in smoothed[1]
+
+
+def test_85_bounded_eof_clamp():
+    """EOF contract: start beyond EOF raises ValueError."""
+    cues = [
+        {"cue_id": "c1", "speaker_id": "spk_1", "start_ms": 0, "end_ms": 1000},
+        {"cue_id": "c2", "speaker_id": "spk_1", "start_ms": 5000, "end_ms": 8000},
+    ]
+    with pytest.raises(ValueError, match="cue_start_beyond_eof"):
+        smart._build_derived_ranges(cues, max_duration_seconds=3.0)
+
+
+def test_86_production_runner_n2_no_acoustic_fails_closed(tmp_path):
+    """N=2 production runner fails closed when no valid acoustic evidence is available."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "source.mp4")
+        output_mp4 = tmp_path / "output.mp4"
+        cues = [
+            {"cue_id": "c1", "speaker_id": "spk_1", "text": "Thoại 1", "start_ms": 0, "end_ms": 1000},
+            {"cue_id": "c2", "speaker_id": "spk_2", "text": "Thoại 2", "start_ms": 1200, "end_ms": 2200},
+        ]
+        # Run production runner without acoustic evidence
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            strict_two_classifier=None,
+            acoustic_classifications=None,
+            stereo_pcm_path=None,
+        )
+        assert res["ok"] is False
+        assert res["strategy"] == smart.STRATEGY_FAILED
+        assert res["blocker"] == speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+        assert res["output_mode"] == smart.OUTPUT_MODE_FAILED
+    asyncio.run(_run())
+
+
+def test_87_production_runner_n3_no_acoustic_fails_closed(tmp_path):
+    """N=3 production runner fails closed when no valid acoustic evidence is available."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "source.mp4")
+        output_mp4 = tmp_path / "output.mp4"
+        cues = [
+            {"cue_id": "c1", "speaker_id": "spk_1", "text": "Thoại 1", "start_ms": 0, "end_ms": 1000},
+            {"cue_id": "c2", "speaker_id": "spk_2", "text": "Thoại 2", "start_ms": 1200, "end_ms": 2200},
+            {"cue_id": "c3", "speaker_id": "spk_3", "text": "Thoại 3", "start_ms": 2400, "end_ms": 3400},
+        ]
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            multi_speaker_classifier=None,
+            acoustic_classifications=None,
+            stereo_pcm_path=None,
+        )
+        assert res["ok"] is False
+        assert res["strategy"] == smart.STRATEGY_FAILED
+        assert res["blocker"] == speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+        assert res["output_mode"] == smart.OUTPUT_MODE_FAILED
+    asyncio.run(_run())
+
+
+def test_88_cue_local_anti_flapping_authority_both_cases():
+    """Anti-flapping distinguishes Case A (bleed -> smoothed) and Case B (interjection -> preserved)."""
+    # CASE A: Incident bleed
+    # female_1 -> 0.4s cue mislabeled as male_1 -> female_1
+    # Global male_1 has low register, but 0.4s cue audio itself is high register (female voice).
+    cues_a = [
+        {"cue_id": "c1", "speaker_id": "female_1", "start_ms": 0, "end_ms": 1500},
+        {"cue_id": "c2", "speaker_id": "male_1", "start_ms": 1600, "end_ms": 2000},
+        {"cue_id": "c3", "speaker_id": "female_1", "start_ms": 2100, "end_ms": 3500},
+    ]
+    acoustics = {
+        "female_1": {"voice_register": "high", "voice_gender": "female", "confidence": 0.95},
+        "male_1": {"voice_register": "low", "voice_gender": "male", "confidence": 0.95},
+    }
+    cue_acoustics_bleed = {
+        "c2": {"voice_register": "high", "voice_gender": "female", "confidence": 0.90},
+    }
+    smoothed_a = smart.smooth_smart_multivoice_cues(
+        cues_a,
+        acoustic_classifications=acoustics,
+        cue_acoustic_classifications=cue_acoustics_bleed,
+    )
+    assert smoothed_a[1]["speaker_id"] == "female_1", "Case A bleed must smooth to female"
+    assert smoothed_a[1].get("anti_flapping_smoothed") is True
+
+    # CASE B: True male interjection
+    # female_1 -> 0.4s cue labeled as male_1 -> female_1
+    # 0.4s cue audio itself is low register (male voice interjection).
+    cues_b = [
+        {"cue_id": "c1", "speaker_id": "female_1", "start_ms": 0, "end_ms": 1500},
+        {"cue_id": "c2", "speaker_id": "male_1", "start_ms": 1600, "end_ms": 2000},
+        {"cue_id": "c3", "speaker_id": "female_1", "start_ms": 2100, "end_ms": 3500},
+    ]
+    cue_acoustics_interjection = {
+        "c2": {"voice_register": "low", "voice_gender": "male", "confidence": 0.90},
+    }
+    smoothed_b = smart.smooth_smart_multivoice_cues(
+        cues_b,
+        acoustic_classifications=acoustics,
+        cue_acoustic_classifications=cue_acoustics_interjection,
+    )
+    assert smoothed_b[1]["speaker_id"] == "male_1", "Case B interjection must preserve male"
+    assert "anti_flapping_smoothed" not in smoothed_b[1]
+
+
+def test_89_eof_boundary_contract():
+    """EOF contract: exact pass, <=55ms clamp, >55ms / start beyond EOF raises ValueError."""
+    # 1. Exact EOF -> pass
+    cues_exact = [{"cue_id": "c1", "speaker_id": "spk_1", "start_ms": 0, "end_ms": 3000}]
+    r_exact = smart._build_derived_ranges(cues_exact, max_duration_seconds=3.0)
+    assert r_exact["spk_1"] == [(0.0, 3.0)]
+
+    # 2. 1-frame overshoot (40ms at 25fps) -> clamped
+    cues_1f = [{"cue_id": "c1", "speaker_id": "spk_1", "start_ms": 0, "end_ms": 3040}]
+    r_1f = smart._build_derived_ranges(cues_1f, max_duration_seconds=3.0)
+    assert r_1f["spk_1"] == [(0.0, 3.0)]
+
+    # 3. ~50ms overshoot -> clamped
+    cues_50ms = [{"cue_id": "c1", "speaker_id": "spk_1", "start_ms": 0, "end_ms": 3050}]
+    r_50ms = smart._build_derived_ranges(cues_50ms, max_duration_seconds=3.0)
+    assert r_50ms["spk_1"] == [(0.0, 3.0)]
+
+    # 4. ~500ms overshoot -> FAIL (ValueError)
+    cues_500ms = [{"cue_id": "c1", "speaker_id": "spk_1", "start_ms": 0, "end_ms": 3500}]
+    with pytest.raises(ValueError, match="cue_end_overshoot_exceeds_limit"):
+        smart._build_derived_ranges(cues_500ms, max_duration_seconds=3.0)
+
+    # 5. Multi-second overshoot -> FAIL (ValueError)
+    cues_multi = [{"cue_id": "c1", "speaker_id": "spk_1", "start_ms": 0, "end_ms": 6000}]
+    with pytest.raises(ValueError, match="cue_end_overshoot_exceeds_limit"):
+        smart._build_derived_ranges(cues_multi, max_duration_seconds=3.0)
+
+    # 6. Start beyond EOF -> FAIL (ValueError)
+    cues_start_beyond = [{"cue_id": "c1", "speaker_id": "spk_1", "start_ms": 3500, "end_ms": 4000}]
+    with pytest.raises(ValueError, match="cue_start_beyond_eof"):
+        smart._build_derived_ranges(cues_start_beyond, max_duration_seconds=3.0)
+
+
+def test_90_ambiguity_boundary_matrix():
+    """Acoustic ambiguity boundaries (155-165 Hz and confidence threshold 0.75)."""
+    # Canonical: <= 155 is low, >= 165 is high, 155..165 is unknown
+    assert speaker_cast.pitch_register(155.0, confidence=0.8) == "low"
+    assert speaker_cast.pitch_register(155.1, confidence=0.8) == "unknown"
+    assert speaker_cast.pitch_register(160.0, confidence=0.8) == "unknown"
+    assert speaker_cast.pitch_register(164.9, confidence=0.8) == "unknown"
+    assert speaker_cast.pitch_register(165.0, confidence=0.8) == "high"
+
+    # Low confidence at any pitch -> unknown
+    assert speaker_cast.pitch_register(120.0, confidence=0.74) == "unknown"
+    assert speaker_cast.pitch_register(200.0, confidence=0.74) == "unknown"
+    assert speaker_cast.pitch_register(120.0, confidence=0.0) == "unknown"
+
+
+def test_91_real_pcm_test_matrix(tmp_path):
+    """Real PCM format matrix: stereo 44.1k, mono 16k, truncated, wrong metadata, empty."""
+    import numpy as np
+    import struct
+
+    # 1. Stereo 44.1k low (120Hz)
+    sr44 = 44100
+    t44 = np.linspace(0, 1.0, sr44, endpoint=False)
+    s_low = (np.sin(2 * np.pi * 120 * t44) * 16000).astype(np.int16)
+    p_stereo_low = tmp_path / "stereo_low.pcm"
+    with open(p_stereo_low, "wb") as f:
+        for v in s_low:
+            f.write(struct.pack("<hh", v, v))
+    res = smart.estimate_speaker_pitches_from_pcm(p_stereo_low, {"spk": [(0.0, 1.0)]}, sample_rate=44100, channels=2)
+    assert res["spk"]["voice_register"] == "low"
+
+    # 2. Stereo 44.1k high (200Hz)
+    s_high = (np.sin(2 * np.pi * 200 * t44) * 16000).astype(np.int16)
+    p_stereo_high = tmp_path / "stereo_high.pcm"
+    with open(p_stereo_high, "wb") as f:
+        for v in s_high:
+            f.write(struct.pack("<hh", v, v))
+    res = smart.estimate_speaker_pitches_from_pcm(p_stereo_high, {"spk": [(0.0, 1.0)]}, sample_rate=44100, channels=2)
+    assert res["spk"]["voice_register"] == "high"
+
+    # 3. Mono 16k low (120Hz) when explicitly declared
+    sr16 = 16000
+    t16 = np.linspace(0, 1.0, sr16, endpoint=False)
+    s_mono_low = (np.sin(2 * np.pi * 120 * t16) * 16000).astype(np.int16)
+    p_mono_low = tmp_path / "mono_low.pcm"
+    with open(p_mono_low, "wb") as f:
+        for v in s_mono_low:
+            f.write(struct.pack("<h", v))
+    res = smart.estimate_speaker_pitches_from_pcm(p_mono_low, {"spk": [(0.0, 1.0)]}, sample_rate=16000, channels=1)
+    assert res["spk"]["voice_register"] == "low"
+
+    # 4. Mono 16k high (200Hz) when explicitly declared
+    s_mono_high = (np.sin(2 * np.pi * 200 * t16) * 16000).astype(np.int16)
+    p_mono_high = tmp_path / "mono_high.pcm"
+    with open(p_mono_high, "wb") as f:
+        for v in s_mono_high:
+            f.write(struct.pack("<h", v))
+    res = smart.estimate_speaker_pitches_from_pcm(p_mono_high, {"spk": [(0.0, 1.0)]}, sample_rate=16000, channels=1)
+    assert res["spk"]["voice_register"] == "high"
+
+    # 5. Truncated frame (odd byte length) -> raises ValueError
+    p_trunc = tmp_path / "trunc.pcm"
+    p_trunc.write_bytes(b"\x00\x01\x02")  # 3 bytes, not multiple of 4 (or 2)
+    with pytest.raises(ValueError, match="truncated_pcm_frame"):
+        smart.estimate_speaker_pitches_from_pcm(p_trunc, {"spk": [(0.0, 1.0)]}, sample_rate=44100, channels=2)
+
+    # 6. Wrong channel metadata (channels=3) -> raises ValueError
+    with pytest.raises(ValueError, match="unsupported_pcm_format"):
+        smart.estimate_speaker_pitches_from_pcm(p_stereo_low, {"spk": [(0.0, 1.0)]}, sample_rate=44100, channels=3)
+
+    # 7. Wrong sample rate metadata (sample_rate=22050) -> raises ValueError
+    with pytest.raises(ValueError, match="unsupported_pcm_format"):
+        smart.estimate_speaker_pitches_from_pcm(p_stereo_low, {"spk": [(0.0, 1.0)]}, sample_rate=22050, channels=2)
+
+    # 8. Empty PCM -> returns {}
+    p_empty = tmp_path / "empty.pcm"
+    p_empty.write_bytes(b"")
+    assert smart.estimate_speaker_pitches_from_pcm(p_empty, {"spk": [(0.0, 1.0)]}) == {}
+
+
+def test_92_77_cue_actual_timing_regression(tmp_path):
+    """77-cue timing regression: end-to-end integration test through blackbox, smart synth adapter,
+    real production build_dub_timeline_audio, and render_video, measuring 0.0 drift and verifying cue-locked audio."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_77.mp4")
+        output_mp4 = tmp_path / "out_77.mp4"
+
+        # Build 77-cue realistic timeline fixture with 2 alternating speakers
+        cues = []
+        current_time = 0.0
+        for i in range(77):
+            duration = 1.2 if i % 2 == 0 else 1.8
+            start_ms = int(round(current_time * 1000))
+            end_ms = int(round((current_time + duration) * 1000))
+            spk = "spk_1" if i % 2 == 0 else "spk_2"
+            cues.append({
+                "cue_id": f"cue_{i:03d}",
+                "speaker_id": spk,
+                "text": f"Nội dung câu đối thoại số {i}",
+                "start_ms": start_ms,
+                "end_ms": end_ms,
+            })
+            current_time += duration + 0.3  # 300ms gap
+
+        total_expected_duration = current_time
+        acoustics = {
+            "spk_1": {"voice_register": "low", "confidence": 0.95},
+            "spk_2": {"voice_register": "high", "confidence": 0.95},
+        }
+
+        # Generate a real decodable MP3 fixture so the real production audio builder can decode and mix it
+        real_chunk_path = tmp_path / "chunk_fixture.mp3"
+        subprocess.run(
+            ["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=1000:duration=2", "-c:a", "libmp3lame", "-b:a", "64k", str(real_chunk_path)],
+            check=True,
+            capture_output=True,
+        )
+        real_chunk_bytes = real_chunk_path.read_bytes()
+
+        async def mock_base_synth(cues_arg, voice_id=None, **kwargs):
+            results = []
+            for c in cues_arg:
+                cid = str(c.get("cue_id") or c.get("id"))
+                dur = (float(c.get("end_ms", 0)) - float(c.get("start_ms", 0))) / 1000.0
+                results.append({
+                    "cue_id": cid,
+                    "audio": real_chunk_bytes,
+                    "audio_bytes": real_chunk_bytes,
+                    "audio_duration": dur,
+                })
+            return results
+
+        rendered_calls = []
+        async def mock_render_video(source_bytes, **kwargs):
+            rendered_calls.append(kwargs)
+            return _create_real_valid_mp4(Path(output_mp4)).read_bytes(), "render_ok"
+
+        # Execute end-to-end with real production build_dub_timeline_audio
+        import bot
+        res = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=mock_base_synth,
+            render_video=mock_render_video,
+            build_timeline_audio=bot.build_dub_timeline_audio,
+            checkpoint_workspace=str(tmp_path / "ws_77"),
+            job_id="job_77_timing_regression",
+            state={
+                "auto_speaker_lane": "auto_smart_multivoice",
+                "workspace": str(tmp_path / "ws_77"),
+                "job_id": "job_77_timing_regression",
+                "input_duration_seconds": total_expected_duration,
+            },
+        )
+
+        assert res.get("ok") is True
+        assert res.get("auto_smart_verified") is True
+        assert res.get("state", {}).get("auto_smart_multivoice_verified") is True
+        assert res.get("effective_speaker_count") == 2
+        assert len(rendered_calls) == 1
+
+        dubbed_audio = rendered_calls[0].get("dubbed_audio")
+        assert isinstance(dubbed_audio, (bytes, bytearray))
+        assert len(dubbed_audio) > 100_000, f"Expected real mixed audio > 100KB, got {len(dubbed_audio)} bytes"
+
+        # Verify real timeline detail confirms all 77 cues, cue_locked=yes, 0 shifted cues, 0 overlaps
+        timeline_detail = res.get("timeline_audio_detail") or res.get("state", {}).get("timeline_audio_detail", "")
+        assert "cues=77" in timeline_detail
+        assert "cue_locked=yes" in timeline_detail
+        assert "timeline_extended=no" in timeline_detail
+        assert "shifted_cues=0" in timeline_detail
+        assert "overlap_count=0" in timeline_detail
+
+        # Real 77-cue timeline planner contract verification
+        plan = bot.subdub_plan_dub_timeline([
+            {
+                "cue_id": c["cue_id"],
+                "start": c["start_ms"] / 1000.0,
+                "end": c["end_ms"] / 1000.0,
+                "audio_bytes": real_chunk_bytes,
+                "audio_duration": (c["end_ms"] - c["start_ms"]) / 1000.0,
+                "cue_locked_timing": True,
+            }
+            for c in cues
+        ], total_expected_duration)
+        assert plan.get("ok") is True
+        assert plan.get("cue_locked_timing") is True
+        assert plan.get("shifted_cue_count") == 0
+        assert len(plan.get("scheduled", [])) == 77
+        for sched in plan.get("scheduled", []):
+            assert sched.get("drift_seconds") == 0.0
+            assert sched.get("cue_locked_timing") is True
+            assert sched.get("cue_window_seconds") > 0.0
+            assert sched.get("post_fit_audio_seconds") > 0.0
+
+    asyncio.run(_run())
+
+
+def test_93_extreme_compression_policy(tmp_path):
+    """Extreme compression policy: fit_ratio <= 1.8 passes, fit_ratio > 1.8 fails closed."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "source.mp4")
+        output_mp4 = tmp_path / "output.mp4"
+
+        async def mock_render(source_media, output_path, **kwargs):
+            return _create_real_valid_mp4(Path(output_path))
+
+        # 1. 3.0s audio / 2.5s window -> fit_ratio 1.2 <= 1.8 -> PASS
+        cues_1 = [{"cue_id": "c1", "speaker_id": "spk_1", "text": "Câu 1", "start_ms": 0, "end_ms": 2500}]
+        acoustics = {"spk_1": {"voice_register": "high", "confidence": 0.9}}
+        async def synth_1(cues, speaker_voice_map, **kwargs):
+            return [{"cue_id": "c1", "audio": b"audio", "audio_duration": 3.0}]
+        res1 = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues_1,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth_1,
+            render_pipeline=mock_render,
+            probe_fn=lambda p: {"format": {"duration": "3.0"}},
+        )
+        assert res1["ok"] is True
+
+        # 2. 5.0s audio / 3.0s window -> fit_ratio 1.667 <= 1.8 -> PASS
+        cues_2 = [{"cue_id": "c2", "speaker_id": "spk_1", "text": "Câu 2", "start_ms": 0, "end_ms": 3000}]
+        async def synth_2(cues, speaker_voice_map, **kwargs):
+            return [{"cue_id": "c2", "audio": b"audio", "audio_duration": 5.0}]
+        res2 = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues_2,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth_2,
+            render_pipeline=mock_render,
+            probe_fn=lambda p: {"format": {"duration": "3.0"}},
+        )
+        assert res2["ok"] is True
+
+        # 3. 5.08s audio / 0.56s window -> fit_ratio 9.07 > 1.8 -> FAILS CLOSED
+        cues_3 = [{"cue_id": "c3", "speaker_id": "spk_1", "text": "Câu 3", "start_ms": 0, "end_ms": 560}]
+        async def synth_3(cues, speaker_voice_map, **kwargs):
+            return [{"cue_id": "c3", "audio": b"audio", "audio_duration": 5.08}]
+        res3 = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues_3,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth_3,
+            render_pipeline=mock_render,
+            probe_fn=lambda p: {"format": {"duration": "3.0"}},
+        )
+        assert res3["ok"] is False
+        assert res3["status"] == "TTS_EXTREME_COMPRESSION_FAILED"
+        assert res3["blocker"] == "extreme_audio_compression_unintelligible"
+        assert res3["error_code"] == "extreme_audio_compression_unintelligible"
+    asyncio.run(_run())
+
+
+def test_94_decide_smart_multivoice_n3_pitch_estimation_failure_fails_closed_no_blind_hash(tmp_path):
+    """N>=3 with stereo_pcm_path provided fails closed when pitch estimation is ambiguous/fails."""
+    # Create empty/unusable PCM
+    pcm_path = tmp_path / "silent.pcm"
+    pcm_path.write_bytes(b"\x00" * (44100 * 4 * 2))  # 2s of silence (no voiced pitch)
+
+    cues = [
+        {"cue_id": "c1", "speaker_id": "spk_1", "text": "Câu 1", "start_ms": 0, "end_ms": 600},
+        {"cue_id": "c2", "speaker_id": "spk_2", "text": "Câu 2", "start_ms": 700, "end_ms": 1300},
+        {"cue_id": "c3", "speaker_id": "spk_3", "text": "Câu 3", "start_ms": 1400, "end_ms": 2000},
+    ]
+
+    # Without raise_manual_required, acoustic failure still fails closed (never falls back to blind hash)
+    decision = smart.decide_smart_multivoice(
+        cues,
+        validated_pools=TEST_POOLS,
+        stereo_pcm_path=pcm_path,
+        raise_manual_required=False,
+    )
+    assert decision.strategy == smart.STRATEGY_FAILED
+    assert decision.output_mode == smart.OUTPUT_MODE_FAILED
+    assert "CLASSIFIER_UNAVAILABLE" in str(decision.fallback_reason)
+
+
+def test_95_build_derived_ranges_missing_pcm_raises_value_error():
+    """_build_derived_ranges raises ValueError when stereo_pcm_path does not exist and max_duration is None."""
+    cues = [
+        {"cue_id": "c1", "speaker_id": "spk_1", "start_ms": 0, "end_ms": 1000},
+    ]
+    with pytest.raises(ValueError, match="invalid_or_missing_pcm"):
+        smart._build_derived_ranges(cues, stereo_pcm_path="/nonexistent/missing_file.pcm")
+
+
+def test_96_blackbox_runner_forwards_cue_acoustic_classifications_to_smoothing(tmp_path):
+    """Blackbox runner forwards cue_acoustic_classifications to preserve distinct short cue."""
+    source_mp4 = _create_real_valid_mp4(tmp_path / "src.mp4")
+    out_mp4 = tmp_path / "out.mp4"
+    cues = [
+        {"cue_id": "c1", "speaker_id": "female_1", "start_ms": 0, "end_ms": 2000},
+        {"cue_id": "c2", "speaker_id": "male_1", "start_ms": 2100, "end_ms": 2350},  # short 250ms
+        {"cue_id": "c3", "speaker_id": "female_1", "start_ms": 2450, "end_ms": 4000},
+    ]
+    acoustics = {
+        "female_1": {"voice_register": "high", "voice_gender": "female", "confidence": 0.95},
+        "male_1": {"voice_register": "low", "voice_gender": "male", "confidence": 0.95},
+    }
+    cue_acoustics = {
+        "c2": {"voice_register": "low", "voice_gender": "male", "confidence": 0.95},
+    }
+
+    async def _run():
+        res = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_mp4,
+            output_path=out_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            cue_acoustic_classifications=cue_acoustics,
+            state={"auto_speaker_lane": "auto_smart_multivoice"},
+            runner=lambda *args, **kwargs: True,
+        )
+        assert res.get("ok") is True
+        # Verify cue c2 was NOT smoothed to female_1
+        c2_out = next(c for c in res["output_segments"] if c["cue_id"] == "c2")
+        assert c2_out["speaker_id"] == "male_1"
+        assert not c2_out.get("anti_flapping_smoothed", False)
+
+    asyncio.run(_run())
+
+
+def test_97_synth_artifacts_canonical_production_ordering_and_metadata(tmp_path):
+    """synth_artifacts are sorted canonically according to expected_cue_ids and enriched with metadata."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src.mp4")
+        output_mp4 = tmp_path / "out.mp4"
+
+        cues = [
+            {"cue_id": "c1", "speaker_id": "spk_1", "text": "One", "start_ms": 0, "end_ms": 1000},
+            {"cue_id": "c2", "speaker_id": "spk_2", "text": "Two", "start_ms": 1200, "end_ms": 2200},
+            {"cue_id": "c3", "speaker_id": "spk_1", "text": "Three", "start_ms": 2400, "end_ms": 3400},
+        ]
+        acoustics = {
+            "spk_1": {"voice_register": "high", "voice_gender": "female", "confidence": 0.95},
+            "spk_2": {"voice_register": "low", "voice_gender": "male", "confidence": 0.95},
+        }
+
+        # Return chunks in reversed order: c3, c1, c2
+        async def mock_permuted_synth(*args, **kwargs):
+            return [
+                {"cue_id": "c3", "audio": b"AUDIO_C3", "audio_duration": 0.9},
+                {"cue_id": "c1", "audio": b"AUDIO_C1", "audio_duration": 0.9},
+                {"cue_id": "c2", "audio": b"AUDIO_C2", "audio_duration": 0.9},
+            ]
+
+        captured_tts_chunks = []
+
+        async def spy_render(source_media, output_path, **kwargs):
+            nonlocal captured_tts_chunks
+            captured_tts_chunks = list(kwargs.get("tts_chunks") or [])
+            return _create_real_valid_mp4(Path(output_path))
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=mock_permuted_synth,
+            render_pipeline=spy_render,
+            probe_fn=lambda p: {"format": {"duration": "3.5"}},
+        )
+
+        assert res.get("ok") is True
+        # Verify captured_tts_chunks are canonically ordered c1, c2, c3
+        assert [c["cue_id"] for c in captured_tts_chunks] == ["c1", "c2", "c3"]
+        # Verify metadata enrichment
+        assert captured_tts_chunks[0]["start"] == 0.0
+        assert captured_tts_chunks[0]["end"] == 1.0
+        assert captured_tts_chunks[0]["text"] == "One"
+        assert captured_tts_chunks[0]["speaker_id"] == "spk_1"
+
+        assert captured_tts_chunks[1]["start"] == 1.2
+        assert captured_tts_chunks[1]["end"] == 2.2
+        assert captured_tts_chunks[1]["text"] == "Two"
+        assert captured_tts_chunks[1]["speaker_id"] == "spk_2"
+
+        assert captured_tts_chunks[2]["start"] == 2.4
+        assert captured_tts_chunks[2]["end"] == 3.4
+        assert captured_tts_chunks[2]["text"] == "Three"
+        assert captured_tts_chunks[2]["speaker_id"] == "spk_1"
+
+    asyncio.run(_run())
+
+
+def test_98_adapted_render_pipeline_scalar_and_tuple_audio_returns(tmp_path):
+    """_adapted_render_pipeline handles both tuple and scalar returns for build_timeline_audio and normalize_audio."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src.mp4")
+        output_mp4 = tmp_path / "out.mp4"
+
+        cues = [
+            {"cue_id": "c1", "speaker_id": "spk_1", "text": "Hello", "start_ms": 0, "end_ms": 1000},
+        ]
+        acoustics = {"spk_1": {"voice_register": "high", "voice_gender": "female", "confidence": 0.95}}
+
+        async def synth_fn(*args, **kwargs):
+            return [{"cue_id": "c1", "audio": SAMPLE_VALID_MP3, "audio_duration": 0.9}]
+
+        async def scalar_build_timeline(tts_chunks, duration):
+            # Returns scalar bytes directly, not (bytes, detail) tuple
+            return b"SCALAR_RAW_AUDIO_BYTES"
+
+        async def scalar_normalize(raw_bytes):
+            # Returns scalar bytes directly, not (bytes, detail) tuple
+            return b"SCALAR_NORM_AUDIO_BYTES"
+
+        rendered_audio = []
+
+        async def mock_render_video(source_bytes, **kwargs):
+            rendered_audio.append(kwargs.get("dubbed_audio"))
+            return _create_real_valid_mp4(tmp_path / "rendered.mp4").read_bytes(), "detail"
+
+        res = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth_fn,
+            render_video=mock_render_video,
+            build_timeline_audio=scalar_build_timeline,
+            normalize_audio=scalar_normalize,
+            checkpoint_workspace=str(tmp_path / "ws"),
+            job_id="test_job_98",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws"), "job_id": "test_job_98"},
+        )
+
+        assert res.get("ok") is True
+        assert rendered_audio == [b"SCALAR_NORM_AUDIO_BYTES"]
+
+    asyncio.run(_run())
+
+
+def test_99_smart_synth_adapter_metadata_enrichment(tmp_path):
+    """create_smart_synth_adapter enriches both fresh and reconstructed chunks with cue metadata."""
+    async def _run():
+        ws = str(tmp_path / "checkpoint_ws")
+        os.makedirs(ws, exist_ok=True)
+        job_id = "test_job_ordering_metadata"
+
+        cue = {
+            "cue_id": "cue_meta_1",
+            "speaker_id": "speaker_x",
+            "text": "Metadata test",
+            "start_ms": 500,
+            "end_ms": 1500,
+            "target_text": "Thu nghiem metadata",
+        }
+
+        async def base_synth(cues_list, voice_id):
+            return [{"cue_id": "cue_meta_1", "audio": SAMPLE_VALID_MP3, "audio_duration": 0.9}]
+
+        adapter = smart.create_smart_synth_adapter(
+            base_synth,
+            workspace=ws,
+            job_id=job_id,
+            target_language="vi",
+        )
+
+        # 1. Fresh synthesis call
+        res1 = await adapter([cue], voice_id="voice_alpha")
+        chunks1 = res1.get("chunks") or []
+        assert len(chunks1) == 1
+        ch1 = chunks1[0]
+        assert ch1["cue_id"] == "cue_meta_1"
+        assert ch1["start"] == 0.5
+        assert ch1["end"] == 1.5
+        assert ch1["text"] == "Metadata test"
+        assert ch1["speaker_id"] == "speaker_x"
+
+        # 2. Reconstructed cache call (re-run with same adapter)
+        res2 = await adapter([cue], voice_id="voice_alpha")
+        chunks2 = res2.get("chunks") or []
+        assert len(chunks2) == 1
+        ch2 = chunks2[0]
+        assert ch2["cue_id"] == "cue_meta_1"
+        assert ch2["start"] == 0.5
+        assert ch2["end"] == 1.5
+        assert ch2["text"] == "Metadata test"
+        assert ch2["speaker_id"] == "speaker_x"
+
+    asyncio.run(_run())
+
+
+def test_100_blackbox_extracts_pcm_before_smoothing_for_cue_local_evidence(tmp_path):
+    """Blackbox extracts PCM before smoothing when cue_acoustic_classifications is None, deriving cue-local evidence to preserve short interjections."""
+    import numpy as np
+    import struct
+
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_100.mp4")
+        output_mp4 = tmp_path / "out_100.mp4"
+
+        # Cues: spk_1 (0.0 - 2.0s), spk_2 short interjection (2.1 - 2.5s, 0.4s), spk_1 (2.6 - 4.5s)
+        cues = [
+            {"cue_id": "c1", "speaker_id": "spk_1", "text": "Hello there", "start_ms": 0, "end_ms": 2000},
+            {"cue_id": "c2", "speaker_id": "spk_2", "text": "Yes!", "start_ms": 2100, "end_ms": 2500},
+            {"cue_id": "c3", "speaker_id": "spk_1", "text": "How are you doing today?", "start_ms": 2600, "end_ms": 4500},
+        ]
+        acoustics = {
+            "spk_1": {"voice_register": "low", "confidence": 0.95},
+        }
+
+        # Generate a stereo 44.1kHz PCM: 120Hz tone for spk_1, 200Hz tone for spk_2 (high register during cue 2: 2.1s - 2.5s)
+        pcm_path = tmp_path / "extracted_stereo_100.pcm"
+        sr = 44100
+        total_len_sec = 5.0
+        n_samples = int(sr * total_len_sec)
+        samples = np.zeros(n_samples, dtype=np.int16)
+
+        t_spk1 = np.linspace(0, 2.0, int(2.0 * sr), endpoint=False)
+        samples[:len(t_spk1)] = (np.sin(2 * np.pi * 120 * t_spk1) * 16000).astype(np.int16)
+
+        c2_start_sample = int(2.1 * sr)
+        c2_end_sample = int(2.5 * sr)
+        t_c2 = np.linspace(0, 0.4, c2_end_sample - c2_start_sample, endpoint=False)
+        samples[c2_start_sample:c2_end_sample] = (np.sin(2 * np.pi * 200 * t_c2) * 16000).astype(np.int16)
+
+        with open(pcm_path, "wb") as f:
+            for v in samples:
+                f.write(struct.pack("<hh", v, v))
+
+        extract_called = []
+        async def mock_extract_pcm(*args, **kwargs):
+            extract_called.append(True)
+            return {"pcm_path": str(pcm_path)}
+
+        synthesized_cues = []
+        async def mock_synth(cues_arg, **kwargs):
+            for c in cues_arg:
+                synthesized_cues.append(dict(c))
+            return [
+                {"cue_id": str(c.get("cue_id")), "audio": SAMPLE_VALID_MP3, "audio_duration": 0.3}
+                for c in cues_arg
+            ]
+
+        async def mock_render(source_media, output_path, **kwargs):
+            return _create_real_valid_mp4(Path(output_path))
+
+        res = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            cue_acoustic_classifications=None,
+            extract_pcm=mock_extract_pcm,
+            synthesize_segments=mock_synth,
+            render_pipeline=mock_render,
+            probe_fn=lambda p: {"format": {"duration": "5.0"}},
+            checkpoint_workspace=str(tmp_path / "ws_100"),
+            job_id="job_100_pcm_smoothing",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_100"), "job_id": "job_100_pcm_smoothing"},
+        )
+
+        assert extract_called == [True]
+        assert res.get("ok") is True
+        c2_synth = next((c for c in synthesized_cues if c.get("cue_id") == "c2"), None)
+        assert c2_synth is not None
+        assert c2_synth["speaker_id"] == "spk_2", f"Expected spk_2 preserved via PCM cue-local evidence, got {c2_synth['speaker_id']}"
+
+    asyncio.run(_run())
+
+
+def test_101_boundary_compression_180_pass_vs_181_fail_closed(tmp_path):
+    """Boundary test for MAX_INTELLIGIBLE_FIT_RATIO = 1.8: fit_ratio=1.80 passes, 1.81 fails closed."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_101.mp4")
+        output_mp4 = tmp_path / "out_101.mp4"
+
+        async def mock_render(source_media, output_path, **kwargs):
+            return _create_real_valid_mp4(Path(output_path))
+
+        # 1.0s window: 0 to 1000ms
+        cues = [{"cue_id": "c_boundary", "speaker_id": "spk_1", "text": "Boundary test", "start_ms": 0, "end_ms": 1000}]
+        acoustics = {"spk_1": {"voice_register": "high", "confidence": 0.9}}
+
+        # Case A: 1.80s audio duration -> fit_ratio = 1.80 / 1.0 = 1.80 <= 1.8 -> PASS
+        async def synth_pass(*args, **kwargs):
+            return [{"cue_id": "c_boundary", "audio": SAMPLE_VALID_MP3, "audio_duration": 1.80}]
+
+        res_pass = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth_pass,
+            render_pipeline=mock_render,
+            probe_fn=lambda p: {"format": {"duration": "1.8"}},
+        )
+        assert res_pass["ok"] is True
+
+        # Case B: 1.81s audio duration -> fit_ratio = 1.81 / 1.0 = 1.81 > 1.8 -> FAIL CLOSED
+        async def synth_fail(*args, **kwargs):
+            return [{"cue_id": "c_boundary", "audio": SAMPLE_VALID_MP3, "audio_duration": 1.81}]
+
+        res_fail = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth_fail,
+            render_pipeline=mock_render,
+            probe_fn=lambda p: {"format": {"duration": "1.8"}},
+        )
+        assert res_fail["ok"] is False
+        assert res_fail["status"] == "TTS_EXTREME_COMPRESSION_FAILED"
+        assert res_fail["blocker"] == "extreme_audio_compression_unintelligible"
+        assert res_fail["error_code"] == "extreme_audio_compression_unintelligible"
+
+    asyncio.run(_run())
+
+
+def test_102_synth_duration_probed_from_raw_bytes_when_missing(tmp_path):
+    """When synth output omits audio_duration, duration authority is established via validate_tts_audio_artifact."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_102.mp4")
+        output_mp4 = tmp_path / "out_102.mp4"
+
+        async def mock_render(source_media, output_path, **kwargs):
+            return _create_real_valid_mp4(Path(output_path))
+
+        cues = [{"cue_id": "c_probe", "speaker_id": "spk_1", "text": "Probing test", "start_ms": 0, "end_ms": 5000}]
+        acoustics = {"spk_1": {"voice_register": "high", "confidence": 0.9}}
+
+        # Omit audio_duration (set to 0.0) but provide valid SAMPLE_VALID_MP3
+        async def synth_unspecified_dur(*args, **kwargs):
+            return [{"cue_id": "c_probe", "audio": SAMPLE_VALID_MP3, "audio_duration": 0.0}]
+
+        res = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth_unspecified_dur,
+            render_pipeline=mock_render,
+            probe_fn=lambda p: {"format": {"duration": "5.0"}},
+        )
+        assert res["ok"] is True
+        assert res.get("auto_smart_verified") is True
+
+    asyncio.run(_run())
+
+
+def test_103_missing_synth_duration_authority_fails_closed(tmp_path):
+    """When synth output has 0.0 or omitted duration and unprobeable audio, fails closed with TTS_DURATION_AUTHORITY_MISSING."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_103.mp4")
+        output_mp4 = tmp_path / "out_103.mp4"
+
+        async def mock_render(source_media, output_path, **kwargs):
+            return _create_real_valid_mp4(Path(output_path))
+
+        cues = [{"cue_id": "c_missing", "speaker_id": "spk_1", "text": "Missing dur test", "start_ms": 0, "end_ms": 2000}]
+        acoustics = {"spk_1": {"voice_register": "high", "confidence": 0.9}}
+
+        # Case A: 0.0 audio duration and corrupt audio
+        async def synth_corrupt_zero(*args, **kwargs):
+            return [{"cue_id": "c_missing", "audio": b"NOT_AN_AUDIO_FILE", "audio_duration": 0.0}]
+
+        res_zero = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth_corrupt_zero,
+            render_pipeline=mock_render,
+            probe_fn=lambda p: {"format": {"duration": "2.0"}},
+        )
+        assert res_zero["ok"] is False
+        assert res_zero["status"] == "TTS_DURATION_AUTHORITY_MISSING"
+        assert res_zero["error_code"] == "missing_synth_duration_authority"
+        assert res_zero["blocker"] == "missing_synth_duration_authority:c_missing"
+
+        # Case B: completely omitted audio_duration and corrupt audio (formerly leaked via fallback)
+        async def synth_corrupt_omitted(*args, **kwargs):
+            return [{"cue_id": "c_missing", "audio": b"NOT_AN_AUDIO_FILE"}]
+
+        res_omitted = await smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth_corrupt_omitted,
+            render_pipeline=mock_render,
+            probe_fn=lambda p: {"format": {"duration": "2.0"}},
+        )
+        assert res_omitted["ok"] is False
+        assert res_omitted["status"] == "TTS_DURATION_AUTHORITY_MISSING"
+        assert res_omitted["error_code"] == "missing_synth_duration_authority"
+        assert res_omitted["blocker"] == "missing_synth_duration_authority:c_missing"
+
+    asyncio.run(_run())
+
+
+def test_104_pcm_extraction_failure_fails_closed(tmp_path):
+    """When extract_pcm fails and no pre-existing acoustic classifications were supplied, fails closed with PCM_EXTRACTION_FAILED."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_104.mp4")
+        output_mp4 = tmp_path / "out_104.mp4"
+
+        cues = [
+            {"cue_id": "c1", "speaker_id": "spk_1", "text": "Câu 1", "start_ms": 0, "end_ms": 1000},
+            {"cue_id": "c2", "speaker_id": "spk_2", "text": "Câu 2", "start_ms": 1100, "end_ms": 2000},
+        ]
+
+        # Case A: extract_pcm raises an exception
+        async def mock_extract_raises(*args, **kwargs):
+            raise RuntimeError("ffmpeg_pcm_decode_error")
+
+        res_raised = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            extract_pcm=mock_extract_raises,
+            checkpoint_workspace=str(tmp_path / "ws_104a"),
+            job_id="job_104a",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_104a"), "job_id": "job_104a"},
+        )
+        assert res_raised["ok"] is False
+        assert res_raised["status"] == "PCM_EXTRACTION_FAILED"
+        assert res_raised["error_code"] == "pcm_extraction_failed"
+        assert "RuntimeError:ffmpeg_pcm_decode_error" in res_raised["blocker"]
+
+        # Case B: extract_pcm returns invalid / non-existent path
+        async def mock_extract_invalid_path(*args, **kwargs):
+            return {"pcm_path": str(tmp_path / "non_existent.pcm")}
+
+        res_invalid = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            extract_pcm=mock_extract_invalid_path,
+            checkpoint_workspace=str(tmp_path / "ws_104b"),
+            job_id="job_104b",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_104b"), "job_id": "job_104b"},
+        )
+        assert res_invalid["ok"] is False
+        assert res_invalid["status"] == "PCM_EXTRACTION_FAILED"
+        assert res_invalid["error_code"] == "pcm_extraction_failed"
+        assert "invalid_pcm_path" in res_invalid["blocker"]
+
+        # Case C: Global speaker-level acoustic_classifications provided, but cue_acoustic_classifications is missing
+        # Under cue-local authority contract, speaker metadata CANNOT bypass PCM extraction failure.
+        res_speaker_only = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications={"spk_1": {"voice_register": "low", "confidence": 0.95}},
+            cue_acoustic_classifications=None,
+            extract_pcm=mock_extract_invalid_path,
+            checkpoint_workspace=str(tmp_path / "ws_104c"),
+            job_id="job_104c",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_104c"), "job_id": "job_104c"},
+        )
+        assert res_speaker_only["ok"] is False
+        assert res_speaker_only["status"] == "PCM_EXTRACTION_FAILED"
+        assert res_speaker_only["error_code"] == "pcm_extraction_failed"
+        assert "invalid_pcm_path" in res_speaker_only["blocker"]
+
+        # Case D: Partial cue-local acoustic coverage gap on PCM failure
+        # cue_acoustic_classifications provides c1 but leaves c2 missing.
+        # Under cue-local authority contract, partial coverage gap on PCM failure MUST fail closed.
+        res_partial_coverage = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications={
+                "spk_1": {"voice_register": "low", "confidence": 0.95},
+                "spk_2": {"voice_register": "high", "confidence": 0.95},
+            },
+            cue_acoustic_classifications={"c1": {"voice_register": "low", "confidence": 0.95}},
+            extract_pcm=mock_extract_invalid_path,
+            checkpoint_workspace=str(tmp_path / "ws_104d"),
+            job_id="job_104d",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_104d"), "job_id": "job_104d"},
+        )
+        assert res_partial_coverage["ok"] is False
+        assert res_partial_coverage["status"] == "PCM_EXTRACTION_FAILED"
+        assert res_partial_coverage["error_code"] == "pcm_extraction_failed"
+        assert "partial_cue_coverage_gap" in res_partial_coverage["blocker"]
+        assert "c2" in res_partial_coverage["blocker"]
+
+        # Case E: Full cue-local acoustic coverage across all cues on PCM failure
+        # Both c1 and c2 are fully covered in cue_acoustic_classifications.
+        # Since full cue-local acoustic authority is provided, PCM extraction failure does NOT trigger PCM_EXTRACTION_FAILED.
+        res_full_authority = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications={
+                "spk_1": {"voice_register": "low", "confidence": 0.95},
+                "spk_2": {"voice_register": "high", "confidence": 0.95},
+            },
+            cue_acoustic_classifications={
+                "c1": {"voice_register": "low", "confidence": 0.95},
+                "c2": {"voice_register": "high", "confidence": 0.95},
+            },
+            extract_pcm=mock_extract_invalid_path,
+            synthesize_segments=lambda cues, **kw: [{"cue_id": str(c.get("cue_id")), "audio": SAMPLE_VALID_MP3, "audio_duration": 1.0} for c in cues],
+            render_pipeline=lambda **kw: _create_real_valid_mp4(Path(kw.get("output_path") or output_mp4)),
+            probe_fn=lambda p: {"format": {"duration": "2.0"}},
+            checkpoint_workspace=str(tmp_path / "ws_104e"),
+            job_id="job_104e",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_104e"), "job_id": "job_104e"},
+        )
+        assert res_full_authority.get("status") != "PCM_EXTRACTION_FAILED"
+        assert res_full_authority.get("ok") is True
+
+    asyncio.run(_run())
+
+
+def test_105_adapted_render_pipeline_timeline_audio_build_failed_fails_closed(tmp_path):
+    """When build_timeline_audio returns empty audio for non-empty tts_chunks, _adapted_render_pipeline fails closed."""
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_105.mp4")
+        output_mp4 = tmp_path / "out_105.mp4"
+
+        cues = [
+            {"cue_id": "c1", "speaker_id": "spk_1", "text": "Hello", "start_ms": 0, "end_ms": 1000},
+        ]
+        acoustics = {"spk_1": {"voice_register": "high", "voice_gender": "female", "confidence": 0.95}}
+
+        async def synth_fn(*args, **kwargs):
+            return [{"cue_id": "c1", "audio": SAMPLE_VALID_MP3, "audio_duration": 0.9}]
+
+        async def failing_build_timeline(tts_chunks, duration):
+            # Returns empty audio and error detail
+            return b"", "subdub_timeline_mux_error_code_42"
+
+        async def mock_render_video(source_bytes, **kwargs):
+            return _create_real_valid_mp4(tmp_path / "rendered.mp4").read_bytes(), "detail"
+
+        res = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications=acoustics,
+            synthesize_segments=synth_fn,
+            render_video=mock_render_video,
+            build_timeline_audio=failing_build_timeline,
+            checkpoint_workspace=str(tmp_path / "ws_105"),
+            job_id="job_105",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_105"), "job_id": "job_105"},
+        )
+
+        assert res.get("ok") is False
+        assert res.get("output_mode") == smart.OUTPUT_MODE_FAILED
+        assert "TIMELINE_AUDIO_BUILD_FAILED:subdub_timeline_mux_error_code_42" in str(res.get("blocker"))
+
+    asyncio.run(_run())
+
+
+def test_106_cue_local_acoustic_authority_semantic_validation(tmp_path):
+    """Semantic validation of cue-local acoustic authority under CUE_AUTHORITY_RULE.
+
+    Contract:
+    - Low confidence register (< 0.75) must NOT bypass PCM extraction failure.
+    - Ambiguous / uncertain register must NOT bypass PCM extraction failure.
+    - Ambiguity band pitch [155.0, 165.0] Hz must NOT bypass PCM extraction failure.
+    - Non-finite pitch (NaN, inf) must NOT bypass PCM extraction failure.
+    - Valid classifiable pitch (outside ambiguity band with confidence >= 0.75) DOES bypass PCM failure.
+    - Direct helper unit checks verify canonical boundary conditions.
+    """
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_106.mp4")
+        output_mp4 = tmp_path / "out_106.mp4"
+        cues = [
+            {"cue_id": "c1", "speaker_id": "spk_1", "text": "Low cue", "start_ms": 0, "end_ms": 1000},
+            {"cue_id": "c2", "speaker_id": "spk_2", "text": "Second cue", "start_ms": 1000, "end_ms": 2000},
+        ]
+        mock_extract_invalid = lambda **kw: "/nonexistent/invalid.pcm"
+        synth_mock = lambda cues, **kw: [{"cue_id": str(c.get("cue_id")), "audio": SAMPLE_VALID_MP3, "audio_duration": 1.0} for c in cues]
+        render_mock = lambda **kw: _create_real_valid_mp4(Path(kw.get("output_path") or output_mp4))
+        probe_mock = lambda p: {"format": {"duration": "2.0"}}
+
+        # Subcase 1: Low confidence register (confidence = 0.50 < 0.75) on c2 -> MUST FAIL CLOSED
+        res_low_conf = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications={
+                "spk_1": {"voice_register": "low", "confidence": 0.95},
+                "spk_2": {"voice_register": "high", "confidence": 0.95},
+            },
+            cue_acoustic_classifications={
+                "c1": {"voice_register": "low", "confidence": 0.95},
+                "c2": {"voice_register": "high", "confidence": 0.50},
+            },
+            extract_pcm=mock_extract_invalid,
+            synthesize_segments=synth_mock,
+            render_pipeline=render_mock,
+            probe_fn=probe_mock,
+            checkpoint_workspace=str(tmp_path / "ws_106_1"),
+            job_id="job_106_1",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_106_1"), "job_id": "job_106_1"},
+        )
+        assert res_low_conf["ok"] is False
+        assert res_low_conf["status"] == "PCM_EXTRACTION_FAILED"
+        assert res_low_conf["error_code"] == "pcm_extraction_failed"
+        assert "partial_cue_coverage_gap" in res_low_conf["blocker"]
+        assert "c2" in res_low_conf["blocker"]
+
+        # Subcase 2: Ambiguous/uncertain register on c2 -> MUST FAIL CLOSED
+        res_uncertain = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications={
+                "spk_1": {"voice_register": "low", "confidence": 0.95},
+                "spk_2": {"voice_register": "high", "confidence": 0.95},
+            },
+            cue_acoustic_classifications={
+                "c1": {"voice_register": "low", "confidence": 0.95},
+                "c2": {"voice_register": "uncertain", "confidence": 0.95},
+            },
+            extract_pcm=mock_extract_invalid,
+            synthesize_segments=synth_mock,
+            render_pipeline=render_mock,
+            probe_fn=probe_mock,
+            checkpoint_workspace=str(tmp_path / "ws_106_2"),
+            job_id="job_106_2",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_106_2"), "job_id": "job_106_2"},
+        )
+        assert res_uncertain["ok"] is False
+        assert res_uncertain["status"] == "PCM_EXTRACTION_FAILED"
+        assert res_uncertain["error_code"] == "pcm_extraction_failed"
+        assert "partial_cue_coverage_gap" in res_uncertain["blocker"]
+        assert "c2" in res_uncertain["blocker"]
+
+        # Subcase 3: Pitch inside ambiguity band (160.0 Hz) on c2 -> MUST FAIL CLOSED
+        res_ambiguous_pitch = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications={
+                "spk_1": {"voice_register": "low", "confidence": 0.95},
+                "spk_2": {"voice_register": "high", "confidence": 0.95},
+            },
+            cue_acoustic_classifications={
+                "c1": {"voice_register": "low", "confidence": 0.95},
+                "c2": {"pitch_hz": 160.0, "confidence": 0.95},
+            },
+            extract_pcm=mock_extract_invalid,
+            synthesize_segments=synth_mock,
+            render_pipeline=render_mock,
+            probe_fn=probe_mock,
+            checkpoint_workspace=str(tmp_path / "ws_106_3"),
+            job_id="job_106_3",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_106_3"), "job_id": "job_106_3"},
+        )
+        assert res_ambiguous_pitch["ok"] is False
+        assert res_ambiguous_pitch["status"] == "PCM_EXTRACTION_FAILED"
+        assert res_ambiguous_pitch["error_code"] == "pcm_extraction_failed"
+        assert "partial_cue_coverage_gap" in res_ambiguous_pitch["blocker"]
+        assert "c2" in res_ambiguous_pitch["blocker"]
+
+        # Subcase 4: Non-finite pitch (NaN) on c2 -> MUST FAIL CLOSED
+        res_nan_pitch = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications={
+                "spk_1": {"voice_register": "low", "confidence": 0.95},
+                "spk_2": {"voice_register": "high", "confidence": 0.95},
+            },
+            cue_acoustic_classifications={
+                "c1": {"voice_register": "low", "confidence": 0.95},
+                "c2": {"pitch_hz": float("nan"), "confidence": 0.95},
+            },
+            extract_pcm=mock_extract_invalid,
+            synthesize_segments=synth_mock,
+            render_pipeline=render_mock,
+            probe_fn=probe_mock,
+            checkpoint_workspace=str(tmp_path / "ws_106_4"),
+            job_id="job_106_4",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_106_4"), "job_id": "job_106_4"},
+        )
+        assert res_nan_pitch["ok"] is False
+        assert res_nan_pitch["status"] == "PCM_EXTRACTION_FAILED"
+        assert res_nan_pitch["error_code"] == "pcm_extraction_failed"
+        assert "partial_cue_coverage_gap" in res_nan_pitch["blocker"]
+        assert "c2" in res_nan_pitch["blocker"]
+
+        # Subcase 5: Valid classifiable pitch (120.0 Hz low, 210.0 Hz high) -> SUCCEEDS
+        res_valid_pitch = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            acoustic_classifications={
+                "spk_1": {"voice_register": "low", "confidence": 0.95},
+                "spk_2": {"voice_register": "high", "confidence": 0.95},
+            },
+            cue_acoustic_classifications={
+                "c1": {"pitch_hz": 120.0, "confidence": 0.95},
+                "c2": {"pitch_hz": 210.0, "confidence": 0.95},
+            },
+            extract_pcm=mock_extract_invalid,
+            synthesize_segments=synth_mock,
+            render_pipeline=render_mock,
+            probe_fn=probe_mock,
+            checkpoint_workspace=str(tmp_path / "ws_106_5"),
+            job_id="job_106_5",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_106_5"), "job_id": "job_106_5"},
+        )
+        assert res_valid_pitch.get("status") != "PCM_EXTRACTION_FAILED"
+        assert res_valid_pitch.get("ok") is True
+
+    asyncio.run(_run())
+
+    # Direct helper unit checks
+    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "low", "confidence": 0.95}) is True
+    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "high", "confidence": 0.75}) is True
+    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "LOW", "confidence": 0.95}) is True
+    assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": 120.0, "confidence": 0.95}) is True
+    assert smart.is_valid_cue_local_acoustic_authority({"f0_hz": 200.0, "confidence": 0.80}) is True
+    assert smart.is_valid_cue_local_acoustic_authority({"median_hz": 150.0, "confidence": 0.85}) is True
+    assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": 155.0, "confidence": 0.95}) is True
+    assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": 165.0, "confidence": 0.95}) is True
+
+    # Negative boundary conditions
+    assert smart.is_valid_cue_local_acoustic_authority(None) is False
+    assert smart.is_valid_cue_local_acoustic_authority("not_a_mapping") is False
+    assert smart.is_valid_cue_local_acoustic_authority({}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "low"}) is False  # missing confidence rejected
+    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "low", "confidence": 0.50}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "uncertain", "confidence": 0.95}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "unknown", "confidence": 0.95}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "female", "confidence": 0.95}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "low", "confidence": True}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": 120.0}) is False  # missing confidence rejected
+    assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": 160.0, "confidence": 0.95}) is False  # ambiguity band
+    assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": float("nan"), "confidence": 0.95}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": float("inf"), "confidence": 0.95}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": 120.0, "confidence": 0.50}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": True, "confidence": 0.95}) is False
+
+
+def test_107_missing_confidence_rejected(tmp_path):
+    """Missing explicit finite confidence >= MIN_REGISTER_CONFIDENCE (0.75) must NOT be authoritative."""
+    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "low"}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"voice_register": "high"}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"pitch_hz": 120.0}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"f0_hz": 200.0}) is False
+    assert smart.is_valid_cue_local_acoustic_authority({"median_hz": 140.0}) is False
+
+    async def _run():
+        source_media = _create_real_valid_mp4(tmp_path / "src_107.mp4")
+        output_mp4 = tmp_path / "out_107.mp4"
+        cues = [
+            {"cue_id": "c1", "speaker_id": "spk_1", "text": "Cue 1", "start_ms": 0, "end_ms": 1000},
+            {"cue_id": "c2", "speaker_id": "spk_2", "text": "Cue 2", "start_ms": 1000, "end_ms": 2000},
+        ]
+        res = await smart.run_auto_smart_multivoice_blackbox(
+            source_media=source_media,
+            output_path=output_mp4,
+            segments=cues,
+            validated_pools=TEST_POOLS,
+            cue_acoustic_classifications={
+                "c1": {"voice_register": "low", "confidence": 0.95},
+                "c2": {"voice_register": "high"},  # Missing confidence!
+            },
+            extract_pcm=lambda **kw: "/invalid.pcm",
+            checkpoint_workspace=str(tmp_path / "ws_107"),
+            job_id="job_107",
+            state={"auto_speaker_lane": "auto_smart_multivoice", "workspace": str(tmp_path / "ws_107"), "job_id": "job_107"},
+        )
+        assert res["ok"] is False
+        assert res["status"] == "PCM_EXTRACTION_FAILED"
+        assert res["error_code"] == "pcm_extraction_failed"
+        assert "partial_cue_coverage_gap" in res["blocker"]
+        assert "c2" in res["blocker"]
+
+    asyncio.run(_run())
+
+
+def test_108_invalid_cue_meta_with_valid_pcm_falls_back_to_pcm_evidence(tmp_path):
+    """Invalid or low-confidence cue_meta must NOT suppress available PCM re-evaluation.
+    When PCM is available and valid, it re-evaluates PCM and preserves contrasting register interjection."""
+    import numpy as np
+    import struct
+
+    cues = [
+        {"cue_id": "c0", "speaker_id": "spk_1", "start_ms": 0, "end_ms": 2000},
+        {"cue_id": "c1", "speaker_id": "spk_2", "start_ms": 2100, "end_ms": 2500},
+        {"cue_id": "c2", "speaker_id": "spk_1", "start_ms": 2600, "end_ms": 4500},
+    ]
+    invalid_cue_acoustics = {
+        "c1": {"voice_register": "low", "confidence": 0.40},
+    }
+    speaker_acoustics = {
+        "spk_1": {"voice_register": "low", "confidence": 0.95},
+        "spk_2": {"voice_register": "high", "confidence": 0.95},
+    }
+
+    pcm_path = tmp_path / "test_108.pcm"
+    sr = 44100
+    n_samples = int(sr * 4.5)
+    samples = np.zeros(n_samples, dtype=np.int16)
+    c1_s = int(2.1 * sr)
+    c1_e = int(2.5 * sr)
+    t_c1 = np.linspace(0, 0.4, c1_e - c1_s, endpoint=False)
+    samples[c1_s:c1_e] = (np.sin(2 * np.pi * 210 * t_c1) * 16000).astype(np.int16)
+
+    with open(pcm_path, "wb") as f:
+        for v in samples:
+            f.write(struct.pack("<hh", v, v))
+
+    smoothed = smart.smooth_smart_multivoice_cues(
+        cues,
+        acoustic_classifications=speaker_acoustics,
+        cue_acoustic_classifications=invalid_cue_acoustics,
+        stereo_pcm_path=pcm_path,
+    )
+    assert smoothed[1]["speaker_id"] == "spk_2"
+    assert smoothed[1].get("anti_flapping_smoothed") is not True
+
+
+def test_109_invalid_cue_meta_without_pcm_cannot_authorize_smoothing():
+    """When cue_meta is invalid/non-authoritative and there is NO PCM, it cannot authorize smoothing.
+    The system must NOT cause blind smoothing into surrounding speaker."""
+    cues = [
+        {"cue_id": "c0", "speaker_id": "spk_1", "start_ms": 0, "end_ms": 2000},
+        {"cue_id": "c1", "speaker_id": "spk_2", "start_ms": 2100, "end_ms": 2500},
+        {"cue_id": "c2", "speaker_id": "spk_1", "start_ms": 2600, "end_ms": 4500},
+    ]
+    invalid_cue_acoustics = {
+        "c1": {"voice_register": "uncertain", "confidence": 0.20},
+    }
+    speaker_acoustics = {
+        "spk_1": {"voice_register": "low", "confidence": 0.95},
+        "spk_2": {"voice_register": "low", "confidence": 0.95},
+    }
+
+    smoothed = smart.smooth_smart_multivoice_cues(
+        cues,
+        acoustic_classifications=speaker_acoustics,
+        cue_acoustic_classifications=invalid_cue_acoustics,
+        stereo_pcm_path=None,
+    )
+    assert smoothed[1]["speaker_id"] == "spk_2"
+    assert smoothed[1].get("anti_flapping_smoothed") is not True
 
