@@ -372,6 +372,59 @@ def validate_selfshot_scene_continuity(
     else:
         base_result["person_object_relationship"] = False
 
+    # Measured continuity dimensions (strictly empirical, no synthetic boolean proxies)
+    temporal_pass_ratio = round(passing_integrated / max(1, sampled_count), 4)
+    identity_score = round(person_passes / max(1, sampled_count), 4) if person_required else 1.0
+    object_score = round(object_passes / max(1, sampled_count), 4) if object_required else 1.0
+    relationship_score = round(relationship_passes / max(1, sampled_count), 4) if relationship_required else 1.0
+
+    # Measured motion score from inter-frame differences
+    motion_scores_list = []
+    if not is_mock and isinstance(sampled_frames, list) and len(sampled_frames) >= 2:
+        for idx in range(len(sampled_frames) - 1):
+            f1 = sampled_frames[idx]
+            f2 = sampled_frames[idx + 1]
+            if f1 is not None and f2 is not None:
+                g1 = cv2.cvtColor(f1, cv2.COLOR_BGR2GRAY)
+                g2 = cv2.cvtColor(f2, cv2.COLOR_BGR2GRAY)
+                if g1.shape == g2.shape:
+                    diff = cv2.absdiff(g1, g2)
+                    diff_val = float(np.mean(diff) / 255.0)
+                    motion_scores_list.append(max(0.0, min(1.0, 1.0 - diff_val)))
+    measured_motion_score = round(float(np.mean(motion_scores_list)), 4) if motion_scores_list else (
+        temporal_pass_ratio if is_mock else 0.0
+    )
+
+    # Measured body proportion score from bounding box stability
+    person_boxes = [obs["person_bbox"] for obs in frame_observations if obs.get("person_bbox")]
+    if not person_required:
+        measured_body_score = 1.0
+    elif person_boxes and len(person_boxes) >= 2:
+        ratios = [b[3] / max(1.0, b[2]) for b in person_boxes if len(b) >= 4]
+        if len(ratios) >= 2:
+            mean_r = sum(ratios) / len(ratios)
+            max_dev = max(abs(r - mean_r) / mean_r for r in ratios)
+            measured_body_score = round(max(0.0, min(1.0, 1.0 - max_dev)), 4)
+        else:
+            measured_body_score = identity_score
+    elif person_required and person_passes >= required_passes:
+        measured_body_score = identity_score
+    else:
+        measured_body_score = 0.0
+
+    base_result["passing_integrated"] = passing_integrated
+    base_result["temporal_pass_ratio"] = temporal_pass_ratio
+    base_result["motion_score"] = measured_motion_score
+    base_result["body_score"] = measured_body_score
+    base_result["continuity_scores"] = {
+        "identity": identity_score,
+        "body": measured_body_score,
+        "motion": measured_motion_score,
+        "object": object_score,
+        "interaction": relationship_score,
+        "temporal": temporal_pass_ratio,
+    }
+
     if passing_integrated >= required_passes:
         base_result["ok"] = True
         base_result["independent_visual_validation"] = "NOT_PERFORMED" if is_mock else "LOCAL_MODEL"

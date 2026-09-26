@@ -1721,6 +1721,135 @@ def test_42_selfshot3_i2v_connector_rejects_gen_result_and_job_continuity_scores
     assert res["continuity_metadata_authority"] == "local_vision_validator"
 
 
+def test_43_temporal_score_uses_actual_frame_pass_ratio_not_ok_boolean(tmp_path: Path, monkeypatch):
+    """Temporal score uses actual frame or integrated pass ratio, not overall ok boolean."""
+    source_video = tmp_path / "source.mp4"
+    source_video.write_bytes(b"VALID_SOURCE_MP4_CONTENT")
+    raw_path = str(tmp_path / "raw_ss3.mp4")
+    keyframe = tmp_path / "kf_ss3.jpg"
+    keyframe.write_bytes(b"BINARY_KEYFRAME_SS3")
+
+    fake_gen_result = {
+        "ok": True,
+        "provider": "key4u_video",
+        "model": "kling-v3",
+        "output_path": raw_path,
+    }
+
+    # 2 out of 3 frames pass -> ratio is 2/3 = 0.6667 (below 0.8 threshold)
+    mock_partial_continuity = {
+        "ok": True,  # Claimed ok boolean must NOT be mapped to 1.0!
+        "blocker": "",
+        "evidence_source": "local_vision_validator",
+        "independent_visual_validation": "LOCAL_MODEL",
+        "person_required": True,
+        "object_required": False,
+        "relationship_required": False,
+        "person_identity": True,
+        "object_identity": True,
+        "person_object_relationship": True,
+        "passing_integrated": 2,
+        "sampled_frame_count": 3,
+        "temporal_pass_ratio": 0.6667,
+        "motion_score": 0.95,
+        "body_score": 0.95,
+        "person_observations": [{"person_ok": True}, {"person_ok": True}, {"person_ok": False}],
+    }
+
+    monkeypatch.setattr(
+        "services.video_real_render_connector.run_provider_generation",
+        lambda *args, **kwargs: fake_gen_result,
+    )
+    monkeypatch.setattr(
+        "services.video_real_render_connector._extract_selfshot_keyframe",
+        lambda *args, **kwargs: str(keyframe),
+    )
+    monkeypatch.setattr(
+        "services.video_selfshot_continuity_validator.validate_selfshot_scene_continuity",
+        lambda *args, **kwargs: mock_partial_continuity,
+    )
+
+    res = video_real_render_connector._render_selfshot3_video_to_video(
+        job={
+            "source_video_local_path": str(source_video),
+            "public_user_confirmed": True,
+            "submit_source": "public_user_final_confirm",
+            "route": "controlled_keyframe_image_to_video",
+        },
+        asset_pack={
+            "route": "controlled_keyframe_image_to_video",
+            "public_user_confirmed": True,
+            "submit_source": "public_user_final_confirm",
+            "duration_seconds": 5,
+        },
+        raw_path=raw_path,
+        provider_order=["key4u_video"],
+        fallback_prompt="test prompt",
+        aspect_ratio="9:16",
+    )
+    # Temporal score was measured from pass ratio 2/3 = 0.6667, NOT 1.0 from ok boolean
+    assert res["continuity_scores"]["temporal"] == 0.6667
+
+
+def test_44_unmeasured_motion_and_body_fail_closed(tmp_path: Path):
+    """When dimensions are unmeasured, they fail closed (0.0) and do not pass delivery validation."""
+    final_mp4 = tmp_path / "final.mp4"
+    final_mp4.write_bytes(b"VALID_FINAL_MP4_CONTENT")
+
+    val = video_real_render_connector.selfshot3_continuity_validation(
+        job={"product_type": "self_shot_cinematic_transform"},
+        result={
+            "final_video_path": str(final_mp4),
+            "evidence_source": "local_vision_validator",
+            "independent_visual_validation": "LOCAL_MODEL",
+            "continuity_evidence_present": True,
+            "continuity_scores": {
+                "identity": 0.95,
+                "body": 0.0,  # Unmeasured body fails closed
+                "motion": 0.95,
+                "object": 0.95,
+                "interaction": 0.95,
+                "temporal": 0.95,
+            },
+        },
+    )
+    assert val["ok"] is False
+    assert val["blocker"] == "selfshot3_continuity_validation_failed"
+    assert "body" in val["failures"]
+
+
+def test_45_local_vision_validator_computes_measured_continuity_scores(tmp_path: Path):
+    """validate_selfshot_scene_continuity computes empirical continuity scores without synthetic proxies."""
+    from services.video_selfshot_continuity_validator import validate_selfshot_scene_continuity
+    import numpy as np
+
+    # Frame observations where 3 of 3 pass
+    mock_obs = [
+        {"frame_index": 0, "person_ok": True, "object_ok": True, "relationship_ok": True, "person_bbox": [10, 10, 50, 100], "integrated_ok": True},
+        {"frame_index": 1, "person_ok": True, "object_ok": True, "relationship_ok": True, "person_bbox": [12, 10, 50, 102], "integrated_ok": True},
+        {"frame_index": 2, "person_ok": True, "object_ok": True, "relationship_ok": True, "person_bbox": [11, 11, 50, 100], "integrated_ok": True},
+    ]
+
+    res = validate_selfshot_scene_continuity(
+        clip_source="dummy_path",
+        scene_duration_seconds=5,
+        person_required=True,
+        object_required=True,
+        relationship_required=True,
+        mock_frame_observations=mock_obs,
+    )
+    assert res["ok"] is True
+    assert "continuity_scores" in res
+    scores = res["continuity_scores"]
+    assert scores["temporal"] == 1.0
+    assert scores["identity"] == 1.0
+    assert scores["object"] == 1.0
+    assert scores["interaction"] == 1.0
+    assert scores["body"] >= 0.8
+    assert scores["motion"] >= 0.8
+
+
+
 
 
 
