@@ -416,6 +416,78 @@ def model_interface_contract(
                 }
             )
         return base
+    if family == "xai_grok":
+        norm_cap = str(capability or "").strip().lower().replace("-", "_")
+        if norm_cap == "image_to_video":
+            submit_url, submit_source = _first_endpoint(
+                data,
+                (
+                    "KEY4U_GROK_I2V_SUBMIT_URL",
+                    "KEY4U_GROK_I2V_ENDPOINT",
+                    "KEY4U_OPENAI_VIDEO_SUBMIT_URL",
+                    "KEY4U_OPENAI_VIDEO_ENDPOINT",
+                ),
+            )
+            if not submit_url:
+                candidate_url, candidate_source = _first_endpoint(data, _KEY4U_GENERIC_ENDPOINT_ENVS)
+                if candidate_url:
+                    parsed = urllib.parse.urlsplit(candidate_url)
+                    path = (parsed.path or "").rstrip("/")
+                    if path.endswith("/v1/videos"):
+                        submit_url = candidate_url
+                        submit_source = candidate_source
+                    elif parsed.hostname and ("key4u" in parsed.hostname or parsed.hostname.endswith(".local")):
+                        submit_url = f"{parsed.scheme}://{parsed.netloc}/v1/videos"
+                        submit_source = f"canonical_contract:{candidate_source}"
+            if not submit_url:
+                base_url = next(
+                    (
+                        str(data.get(name) or "").strip().rstrip("/")
+                        for name in ("KEY4U_BASE_URL", "KEY4U_API_BASE")
+                        if _valid_endpoint_url(data.get(name))
+                    ),
+                    "https://api.key4u.vn",
+                )
+                submit_url = f"{base_url}/v1/videos"
+                submit_source = "canonical_contract:key4u_base_url"
+
+            poll_url, poll_source = _first_endpoint(
+                data,
+                (
+                    "KEY4U_GROK_VIDEO_POLL_URL",
+                    "KEY4U_OPENAI_VIDEO_POLL_URL",
+                    "KEY4U_VIDEO_POLL_ENDPOINT",
+                    "KEY4U_VIDEO_POLL_URL",
+                ),
+            )
+            if not poll_url:
+                base_url = next(
+                    (
+                        str(data.get(name) or "").strip().rstrip("/")
+                        for name in ("KEY4U_BASE_URL", "KEY4U_API_BASE")
+                        if _valid_endpoint_url(data.get(name))
+                    ),
+                    "https://api.key4u.vn",
+                )
+                poll_url = f"{base_url}/v1/video/query?id={{task_id}}"
+                poll_source = "canonical_contract:key4u_query"
+
+            base.update(
+                {
+                    "provider_interface": "key4u_openai_video_multipart_i2v",
+                    "provider_endpoint_source": submit_source,
+                    "provider_submit_url_override": submit_url,
+                    "submit_url": submit_url,
+                    "provider_poll_url_override": poll_url,
+                    "poll_url": poll_url,
+                    "provider_poll_endpoint_source": poll_source,
+                    "model_requires_exclusive_interface": True,
+                    "contract_validation_status": "ok",
+                    "contract_block_reason": "",
+                    "submit_skipped_due_to_contract": False,
+                }
+            )
+            return base
     if family in {"minimax_hailuo", "google_veo"}:
         submit_url, submit_source = _first_endpoint(data, _KEY4U_EXCLUSIVE_ENDPOINT_ENVS.get(family, ()))
         poll_url, poll_source = _first_endpoint(data, _KEY4U_EXCLUSIVE_POLL_ENVS.get(family, ()))

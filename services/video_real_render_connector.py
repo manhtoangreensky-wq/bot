@@ -52,7 +52,12 @@ from services.video_provider_router import (
     provider_status_payload,
     run_provider_generation,
 )
-from services.video_provider_catalog import model_metadata_from_resolution, resolve_product_video_model
+from services.video_provider_catalog import (
+    model_interface_contract,
+    model_metadata_from_resolution,
+    provider_model_config,
+    resolve_product_video_model,
+)
 
 
 REAL_VIDEO_RENDER_UNAVAILABLE = "real_video_renderer_unavailable"
@@ -3658,6 +3663,67 @@ def _extract_selfshot_keyframe(
     return str(target)
 
 
+def _resolve_selfshot_i2v_model(
+    job: dict[str, Any] | None,
+    asset_pack: dict[str, Any] | None,
+    environ: dict[str, str],
+) -> tuple[str, str]:
+    candidate = str(
+        (job or {}).get("selected_model")
+        or (job or {}).get("model")
+        or (job or {}).get("model_name")
+        or (asset_pack or {}).get("selected_model")
+        or (asset_pack or {}).get("model")
+        or (asset_pack or {}).get("model_name")
+        or ((job or {}).get("metadata") or {}).get("selected_model")
+        or ((asset_pack or {}).get("metadata") or {}).get("selected_model")
+        or ""
+    ).strip()
+    if candidate:
+        cfg = provider_model_config("key4u_video", candidate)
+        if not cfg:
+            raise RealVideoRenderError(
+                "key4u_model_unknown_no_charge",
+                diagnostics={
+                    "ok": False,
+                    "provider": "key4u_video",
+                    "model": candidate,
+                    "blocker": "key4u_model_unknown_no_charge",
+                    "no_charge": True,
+                },
+            )
+        caps = list(cfg.get("capabilities") or [])
+        if "image_to_video" not in caps:
+            raise RealVideoRenderError(
+                "key4u_model_capability_unsupported_no_charge",
+                diagnostics={
+                    "ok": False,
+                    "provider": "key4u_video",
+                    "model": candidate,
+                    "blocker": "key4u_model_capability_unsupported_no_charge",
+                    "capabilities": caps,
+                    "no_charge": True,
+                },
+            )
+        contract = model_interface_contract("key4u_video", candidate, capability="image_to_video", env=environ)
+        if contract.get("contract_validation_status") == "blocked":
+            blocker = str(contract.get("contract_block_reason") or "key4u_model_contract_missing_no_charge")
+            raise RealVideoRenderError(
+                blocker,
+                diagnostics={
+                    "ok": False,
+                    "provider": "key4u_video",
+                    "model": candidate,
+                    "blocker": blocker,
+                    "contract": contract,
+                    "no_charge": True,
+                },
+            )
+        family = str(cfg.get("family") or "kling")
+        return candidate, family
+    return "kling-v3", "kling"
+
+
 def _render_selfshot3_controlled_keyframe_image_to_video(
     *,
     job: dict[str, Any],
@@ -3687,7 +3753,7 @@ def _render_selfshot3_controlled_keyframe_image_to_video(
     provider_env = dict(os.environ)
     provider_env["VIDEO_PROVIDER_CHAIN"] = ",".join(effective_provider_order)
 
-    pinned_model = "kling-v3"
+    pinned_model, selected_family = _resolve_selfshot_i2v_model(job, asset_pack, provider_env)
     provider_env["KEY4U_VIDEO_MODEL"] = pinned_model
 
     req_meta = {
@@ -3705,7 +3771,7 @@ def _render_selfshot3_controlled_keyframe_image_to_video(
         req_meta["model_name"] = pinned_model
         req_meta["selected_model"] = pinned_model
         req_meta["pinned_wire_model"] = pinned_model
-        req_meta["selected_family"] = "kling"
+        req_meta["selected_family"] = selected_family
         req_meta["selected_request_defaults"] = {
             "model_name": pinned_model,
             "duration": int(duration_seconds),
@@ -4247,7 +4313,7 @@ def _render_selfshot2_controlled_keyframe_image_to_video(
     provider_env = dict(os.environ)
     provider_env["VIDEO_PROVIDER_CHAIN"] = ",".join(effective_provider_order)
 
-    pinned_model = "kling-v3"
+    pinned_model, selected_family = _resolve_selfshot_i2v_model(job, asset_pack, provider_env)
     provider_env["KEY4U_VIDEO_MODEL"] = pinned_model
 
     req_meta = {
@@ -4268,7 +4334,7 @@ def _render_selfshot2_controlled_keyframe_image_to_video(
         req_meta["model_name"] = pinned_model
         req_meta["selected_model"] = pinned_model
         req_meta["pinned_wire_model"] = pinned_model
-        req_meta["selected_family"] = "kling"
+        req_meta["selected_family"] = selected_family
         req_meta["selected_request_defaults"] = {
             "model_name": pinned_model,
             "duration": int(target_duration),
