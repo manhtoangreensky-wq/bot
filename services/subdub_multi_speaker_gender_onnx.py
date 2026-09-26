@@ -20,6 +20,8 @@ MAX_MULTI_SPEAKERS = speaker_cast.MAX_AUTO_SPEAKER_LABELS
 MIN_CLASSIFIED_CUES_PER_SPEAKER = 2
 MAX_CUES_PER_SPEAKER = exact_gender.MAX_CUES_PER_SPEAKER
 MIN_VOTE_DOMINANCE = 2.0 / 3.0
+MIN_PANN_SCORE_MARGIN = 0.08
+MIN_ACOUSTIC_SCORE_MARGIN = MIN_PANN_SCORE_MARGIN
 MAX_JOB_EVIDENCE_SECONDS = exact_gender.MAX_JOB_EVIDENCE_SECONDS
 CLASSIFIER_WALL_TIMEOUT_SECONDS = exact_gender.CLASSIFIER_WALL_TIMEOUT_SECONDS
 
@@ -506,11 +508,24 @@ def _aggregate_one_gender_result(
     dominance = winner_votes / len(rows)
     if dominance < MIN_VOTE_DOMINANCE - 1e-6:
         raise _manual_required()
+    median_margin = float(sorted(score_margins)[len(score_margins) // 2])
+    if median_margin < MIN_PANN_SCORE_MARGIN:
+        raise _manual_required()
     gender = "male" if male_votes > female_votes else "female"
     voiced_seconds = exact_gender._union_seconds(rows)
     if voiced_seconds <= 0.0:
         raise _manual_required()
-    confidence = round(float(min(1.0, max(0.75, 0.25 + 0.75 * dominance))), 6)
+    confidence = round(
+        float(
+            min(
+                1.0,
+                (0.25 + 0.75 * dominance) * min(1.0, 0.50 + median_margin),
+            )
+        ),
+        6,
+    )
+    if confidence < speaker_cast.MIN_REGISTER_CONFIDENCE:
+        raise _manual_required()
     return (
         {
             "speaker_id": speaker_id,
@@ -524,10 +539,7 @@ def _aggregate_one_gender_result(
             "cue_count": len(rows),
             "male_votes": male_votes,
             "female_votes": female_votes,
-            "pann_score_margin": round(
-                float(sorted(score_margins)[len(score_margins) // 2]),
-                6,
-            ),
+            "pann_score_margin": round(median_margin, 6),
             "reason": "classified_panns_multi_after_uvr",
         },
         rows,
