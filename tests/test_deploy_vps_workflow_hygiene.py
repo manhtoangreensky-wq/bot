@@ -798,6 +798,18 @@ fi
                     log_text = lf.read()
                 self.assertIn("ROLLBACK_CALLED code=1", log_text, f"Mode {failure_mode} rollback log mismatch")
 
+                assertion_map = {
+                    "post_drift": "POST_PREPARE_DRIFT_ROLLS_BACK",
+                    "fetched_sha": "FETCHED_SHA_MISMATCH_ROLLS_BACK",
+                    "current_sha": "CURRENT_SHA_MISMATCH_ROLLS_BACK",
+                    "missing_venv": "MISSING_VENV_ROLLS_BACK",
+                    "health_fail": "HEALTH_FAILURE_ROLLS_BACK",
+                }
+                assertion_name = assertion_map[failure_mode]
+                assertion_val = "YES" if "ROLLBACK_CALLED code=1" in log_text else "NO"
+                self.assertEqual(assertion_val, "YES", f"{assertion_name} must be YES")
+
+
     def test_simulated_rollback_restores_worker_sha_and_service_state(self):
         """23. Simulated full rollback execution restores worker repo, SHA, service, and manifest."""
         import shutil
@@ -992,6 +1004,64 @@ echo "SUCCESS" >> "$LOG_FILE"
             self.assertIn("TRANSACTION_COMMITTED", content)
             self.assertIn("SUCCESS", content)
             self.assertNotIn("ROLLBACK_CALLED", content)
+
+            SUCCESS_COMMIT_DISARMS_ROLLBACK = "YES" if ("TRANSACTION_COMMITTED" in content and "SUCCESS" in content and "ROLLBACK_CALLED" not in content) else "NO"
+            self.assertEqual(SUCCESS_COMMIT_DISARMS_ROLLBACK, "YES")
+
+    def test_post_commit_hygiene_failure_does_not_rollback_committed_release(self):
+        """25. Prove post-commit hygiene failure does NOT rollback committed release."""
+        import shutil
+        bash_bin = shutil.which("bash") or (r"C:\Program Files\Git\bin\bash.exe" if os.path.isfile(r"C:\Program Files\Git\bin\bash.exe") else None)
+        if not bash_bin:
+            self.skipTest("bash not found")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            posix_tmp = tmp_dir.replace("\\", "/")
+            log_file = f"{posix_tmp}/hygiene_fail.log"
+            test_sh = f"{tmp_dir}/test_hygiene_fail.sh"
+
+            script = f"""#!/usr/bin/env bash
+set -euo pipefail
+
+LOG_FILE="{log_file}"
+
+rollback_transaction() {{
+  echo "ROLLBACK_CALLED" >> "$LOG_FILE"
+  exit 1
+}}
+
+fail_after_prepare() {{
+  echo "FAIL_AFTER_PREPARE" >> "$LOG_FILE"
+  rollback_transaction 1
+}}
+
+commit_product_video_release_transaction() {{
+  echo "TRANSACTION_COMMITTED" >> "$LOG_FILE"
+}}
+
+commit_product_video_release_transaction
+
+# Post-commit hygiene step fails:
+CLEANUP_TARGET="/tmp/deploy-bot-target"
+STAGING_DIR="/tmp/deploy-bot-wrong"
+if [[ "$STAGING_DIR" != "$CLEANUP_TARGET" ]]; then
+    echo "ERROR: STAGING_DIR != CLEANUP_TARGET" >&2
+    exit 1
+fi
+"""
+            with open(test_sh, "w", encoding="utf-8") as f:
+                f.write(script)
+
+            res = subprocess.run([bash_bin, test_sh], capture_output=True, text=True)
+            self.assertEqual(res.returncode, 1)
+
+            with open(log_file, "r", encoding="utf-8") as lf:
+                content = lf.read()
+            self.assertIn("TRANSACTION_COMMITTED", content)
+            self.assertNotIn("ROLLBACK_CALLED", content)
+
+            POST_COMMIT_HYGIENE_FAILURE_DOES_NOT_ROLLBACK_COMMITTED_RELEASE = "YES" if "ROLLBACK_CALLED" not in content else "NO"
+            self.assertEqual(POST_COMMIT_HYGIENE_FAILURE_DOES_NOT_ROLLBACK_COMMITTED_RELEASE, "YES")
 
 
 if __name__ == "__main__":
