@@ -106280,7 +106280,8 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
             card_copy.setdefault("duration_seconds", float(draft.get("b14_scene_seconds") or 8.0))
             materialized_cards.append(card_copy)
 
-        scene_count = max(1, len(materialized_cards) or safe_int(draft.get("b14_scene_count"), 1))
+        declared = safe_int(draft.get("b14_scene_count"), 0)
+        scene_count = max(1, declared or len(materialized_cards) or 1)
         scene_seconds = safe_int(draft.get("b14_scene_seconds"), 8) or 8
         asset_pack_payload.update({
             "product_type": "storyboard_prompt",

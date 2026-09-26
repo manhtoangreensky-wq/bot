@@ -7997,6 +7997,41 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         )
     elif readiness.get("ok") or not is_product_video or bool(job.get("recovery_existing_tasks_only")):
         provider_attempted = True
+        # -- Storyboard coverage gate: validate before provider dispatch --
+        if (
+            is_product_video
+            and product_type in PRODUCT_VIDEO_SCENE_IMAGE_INPUT_TYPES
+            and product_video_orchestration_mode(job) == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S
+            and not bool(job.get("recovery_existing_tasks_only"))
+        ):
+            _cov_cards = _scene_cards(job)
+            _cov_declared = _scene_count(job)
+            _cov = validate_storyboard_scene_coverage(_cov_cards, _cov_declared)
+            if not _cov.get("valid"):
+                _cov_blocker = (
+                    f"storyboard_scene_coverage_invalid: "
+                    f"missing={_cov.get('missing')}, "
+                    f"duplicates={_cov.get('duplicates')}, "
+                    f"out_of_range={_cov.get('out_of_range')}, "
+                    f"missing_index_count={_cov.get('missing_index_count')}"
+                )
+                raise RealVideoRenderError(
+                    _cov_blocker,
+                    diagnostics={
+                        "ok": False,
+                        "status": "failed_no_charge",
+                        "terminal_state": "failed_no_charge",
+                        "final_decision": "failed_no_charge",
+                        "provider_attempted": False,
+                        "provider_submit_called": False,
+                        "provider_poll_called": False,
+                        "provider_submit_allowed": False,
+                        "no_charge": True,
+                        "blocker": _cov_blocker,
+                        "provider_error": _cov_blocker,
+                        "storyboard_coverage": dict(_cov),
+                    },
+                )
         try:
             if is_product_video and product_video_orchestration_mode(job) == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S:
                 result = _run_per_scene_provider_orchestrator(
