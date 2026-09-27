@@ -135808,6 +135808,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         command="/start",
         status="ok",
     )
+    clear_storage_addon_pending(uid)
     if context.args and (context.args[0].startswith("login_") or context.args[0].startswith("link_") or context.args[0].startswith("web_")):
         deep_arg = context.args[0]
         code = deep_arg.split("_", 1)[1].strip()
@@ -135837,7 +135838,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif ref_result.get("reason") == "self_ref":
             await update.message.reply_text("⚠️ Bạn không thể tự giới thiệu chính mình.")
     pending_notice = clear_pending_start_notice(uid)
-    clear_storage_addon_pending(uid)
     user_is_admin = is_admin_user(uid)
     if not has_user_language(uid):
         if pending_notice:
