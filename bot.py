@@ -141151,6 +141151,8 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
     uid = query.from_user.id
     lang = get_user_language(uid) or "vi"
     if not FREE_HUB_ENABLED:
+        if action == "main":
+            clear_free_hub_pending(uid)
         return await safe_edit_or_send(
             query,
             "🛠 Công cụ miễn phí đang bảo trì. TOAN AAS chưa gọi API và chưa trừ Xu.",
