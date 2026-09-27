@@ -40,7 +40,7 @@ import tempfile
 import time
 from typing import Any, Callable, Mapping, Sequence
 
-from services.subdub_blackboxes import auto_multi_speaker
+from services.subdub_blackboxes import auto_multi_speaker, auto_multi_speaker_v2
 from services import subdub_speaker_cast as speaker_cast
 from services import subdub_tts_checkpoint
 from services import video_local_validation
@@ -2730,6 +2730,70 @@ async def run_auto_smart_multivoice_blackbox(
         or payload.get("cues")
         or []
     )
+    try:
+        prepared_speaker_labels = speaker_cast.ordered_auto_speaker_labels(cues)
+    except speaker_cast.AutoCastUnavailable:
+        prepared_speaker_labels = []
+    dispatch_to_v2 = False
+    if len(prepared_speaker_labels) >= 3 and isinstance(prepared, dict):
+        try:
+            strong_registers = auto_multi_speaker.acoustic_register_classifications(
+                prepared,
+                prepared_speaker_labels,
+            )
+            dispatch_to_v2 = len(strong_registers) == len(prepared_speaker_labels)
+        except (
+            speaker_cast.AutoCastUnavailable,
+            speaker_cast.AutoCastManualRequired,
+        ):
+            dispatch_to_v2 = False
+    if dispatch_to_v2 and isinstance(prepared, dict):
+        prepared_state = (
+            dict(prepared.get("state"))
+            if isinstance(prepared.get("state"), Mapping)
+            else {}
+        )
+        v2_state = {
+            **dict(current),
+            **prepared_state,
+            "voice_selection_mode": "auto_speaker",
+            "auto_speaker_lane": auto_multi_speaker.AUTO_MULTI_SPEAKER_LANE,
+            "auto_multi_engine": "v2",
+            "auto_smart_multivoice_opt_in": True,
+        }
+
+        async def reuse_prepared(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+            return prepared
+
+        v2_payload = dict(payload)
+        v2_payload["prepare_subtitles"] = reuse_prepared
+        v2_payload.pop("state", None)
+        v2_payload.pop("extract_pcm", None)
+        try:
+            v2_result = await auto_multi_speaker_v2.run_auto_multi_speaker_v2_blackbox(
+                extract_pcm=extract_pcm,
+                state=v2_state,
+                **v2_payload,
+            )
+        finally:
+            if temp_source_path and os.path.exists(temp_source_path):
+                try:
+                    os.unlink(temp_source_path)
+                except OSError:
+                    pass
+        v2_result = dict(v2_result or {})
+        v2_result_state = {
+            **v2_state,
+            **dict(v2_result.get("state") or {}),
+            "auto_smart_multivoice_opt_in": True,
+            "subdub_engine_selected": "auto_multi_speaker_v2",
+            "auto_smart_dispatch": "n3_plus_proven_v2",
+        }
+        return {
+            **v2_result,
+            "state": v2_result_state,
+            "auto_smart_dispatch": "n3_plus_proven_v2",
+        }
     acoustic_classifications = (
         payload.get("acoustic_classifications")
         or current.get("acoustic_classifications")
