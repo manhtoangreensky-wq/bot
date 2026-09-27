@@ -5641,7 +5641,7 @@ def _run_provider_generation_impl(
                 },
             )
         else:
-            if is_product_video:
+            if is_product_video or is_storyboard:
                 tier_id_val = (
                     metadata.get("tier_id")
                     or metadata.get("quality_tier")
@@ -5651,6 +5651,7 @@ def _run_provider_generation_impl(
                     or (request.metadata or {}).get("quality_tier_id")
                     or (request.metadata or {}).get("quality")
                     or metadata.get("quality")
+                    or (400 if is_storyboard else None)
                 )
                 tier_id_int = 0
                 if tier_id_val is not None:
@@ -5675,7 +5676,9 @@ def _run_provider_generation_impl(
                         or metadata.get("clip_count")
                         or (request.metadata or {}).get("scene_count")
                         or (request.metadata or {}).get("clip_count")
-                        or 1
+                        or (len(request.storyboard) if request.storyboard else None)
+                        or (len(request.scenes) if request.scenes else None)
+                        or (2 if is_storyboard else 1)
                     )
                     quote_xu_val = (
                         metadata.get("customer_quote_xu")
@@ -5692,9 +5695,23 @@ def _run_provider_generation_impl(
                     )
                     model_candidate = (
                         selected_model_for_provider(provider_metadata, current_adapter.provider_name)
+                        or (provider_metadata.get("storyboard_model") if is_storyboard else "")
+                        or (metadata.get("storyboard_model") if is_storyboard else "")
+                        or (provider_metadata.get("selected_model") if is_storyboard else "")
+                        or (metadata.get("selected_model") if is_storyboard else "")
+                        or (provider_metadata.get("model") if is_storyboard else "")
+                        or (metadata.get("model") if is_storyboard else "")
                         or getattr(current_adapter, "model", "")
                         or getattr(current_adapter, "provider_payload_model", "")
                         or ""
+                    )
+                    provider_submit_sec = (
+                        metadata.get("provider_billable_submit_seconds")
+                        or metadata.get("provider_submit_duration_seconds")
+                        or (request.metadata or {}).get("provider_billable_submit_seconds")
+                        or (request.metadata or {}).get("provider_submit_duration_seconds")
+                        or (10 if (is_storyboard and current_adapter.provider_name == "key4u_video" and str(model_candidate).strip() == "kling-3.0-turbo") else None)
+                        or (float(request.duration_seconds) if (request.duration_seconds and float(request.duration_seconds) > 0 and (is_storyboard or str(model_candidate).strip() == "kling-3.0-turbo")) else None)
                     )
                     econ_check = video_ai_real_pricing.check_product_video_economics(
                         tier_id=tier_id_int,
@@ -5703,56 +5720,73 @@ def _run_provider_generation_impl(
                         model=model_candidate,
                         customer_quote_xu=quote_xu_val,
                         is_fallback=(attempt_index > 0),
+                        provider_submit_seconds=provider_submit_sec,
+                    )
+                    _mark_trace(
+                        "economics_check",
+                        tier_id=tier_id_int,
+                        scene_count=scene_count_val,
+                        provider=current_adapter.provider_name,
+                        model=model_candidate,
+                        provider_submit_seconds=provider_submit_sec,
+                        public_output_seconds_total=econ_check.get("public_output_seconds_total"),
+                        provider_billable_seconds_total=econ_check.get("provider_billable_seconds_total"),
+                        expected_provider_cost_usd=econ_check.get("expected_provider_cost_usd"),
+                        computed_provider_cost_usd=econ_check.get("computed_provider_cost_usd"),
+                        economics_safe=econ_check.get("economics_safe"),
                     )
                     if not econ_check.get("economics_safe"):
-                        blocker = str(
-                            econ_check.get("block_reason")
-                            or (
-                                "PRODUCT_VIDEO_FALLBACK_ECONOMICS_UNSAFE"
-                                if attempt_index > 0
-                                else "PRODUCT_VIDEO_PROVIDER_ECONOMICS_UNSAFE"
+                        if is_storyboard and not bool(metadata.get("enforce_economics_block")):
+                            pass
+                        else:
+                            blocker = str(
+                                econ_check.get("block_reason")
+                                or (
+                                    "PRODUCT_VIDEO_FALLBACK_ECONOMICS_UNSAFE"
+                                    if attempt_index > 0
+                                    else "PRODUCT_VIDEO_PROVIDER_ECONOMICS_UNSAFE"
+                                )
                             )
-                        )
-                        econ_payload = {
-                            **_attempt_base(),
-                            "ok": False,
-                            "provider_attempted": False,
-                            "provider_submit_called": False,
-                            "external_provider_spend_prevented": True,
-                            "paid_submit_allowed": False,
-                            "paid_submit_blocked_reason": blocker,
-                            "provider_error": blocker,
-                            "blocker": blocker,
-                            "provider_status": "blocked_no_charge",
-                            "terminal_state": "blocked_no_charge",
-                            "status": "failed_no_charge",
-                            "charge": 0,
-                            "charged_xu": 0,
-                            "no_charge": True,
-                            "public_message": PUBLIC_PRODUCT_VIDEO_SUBMIT_BLOCKED_COPY,
-                            "provider_readiness": status,
-                            "fallback_used": attempt_index > 0,
-                            "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
-                            "economics_safe": False,
-                            "economics_block_reason": blocker,
-                            "economics_tier_id": econ_check.get("tier_id"),
-                            "economics_scene_count": econ_check.get("scene_count"),
-                            "economics_provider": econ_check.get("provider"),
-                            "economics_model": econ_check.get("model"),
-                            "economics_quote_xu": econ_check.get("customer_quote_xu"),
-                            "economics_provider_cost_vnd": econ_check.get("provider_total_cost_vnd"),
-                            "economics_required_revenue_vnd": econ_check.get("required_revenue_vnd"),
-                            "economics_margin_percent": econ_check.get("margin_percent"),
-                        }
-                        _record_failure(blocker, econ_payload, submit_failure=True)
-                        if attempt_index + 1 < len(candidate_adapters) and attempt_index > 0:
-                            continue
-                        econ_payload["provider_attempts"] = _copy_attempt_traces()
-                        econ_payload["provider_fallback_attempts"] = list(attempt_failures)
-                        econ_payload["fallback_provider_attempts"] = list(attempt_failures)
-                        econ_payload["provider_fallback_attempted"] = bool(attempt_index > 0)
-                        econ_payload["provider_fallback_reason"] = first_fallback_reason if attempt_index > 0 else ""
-                        return econ_payload
+                            econ_payload = {
+                                **_attempt_base(),
+                                "ok": False,
+                                "provider_attempted": False,
+                                "provider_submit_called": False,
+                                "external_provider_spend_prevented": True,
+                                "paid_submit_allowed": False,
+                                "paid_submit_blocked_reason": blocker,
+                                "provider_error": blocker,
+                                "blocker": blocker,
+                                "provider_status": "blocked_no_charge",
+                                "terminal_state": "blocked_no_charge",
+                                "status": "failed_no_charge",
+                                "charge": 0,
+                                "charged_xu": 0,
+                                "no_charge": True,
+                                "public_message": PUBLIC_PRODUCT_VIDEO_SUBMIT_BLOCKED_COPY,
+                                "provider_readiness": status,
+                                "fallback_used": attempt_index > 0,
+                                "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
+                                "economics_safe": False,
+                                "economics_block_reason": blocker,
+                                "economics_tier_id": econ_check.get("tier_id"),
+                                "economics_scene_count": econ_check.get("scene_count"),
+                                "economics_provider": econ_check.get("provider"),
+                                "economics_model": econ_check.get("model"),
+                                "economics_quote_xu": econ_check.get("customer_quote_xu"),
+                                "economics_provider_cost_vnd": econ_check.get("provider_total_cost_vnd"),
+                                "economics_required_revenue_vnd": econ_check.get("required_revenue_vnd"),
+                                "economics_margin_percent": econ_check.get("margin_percent"),
+                            }
+                            _record_failure(blocker, econ_payload, submit_failure=True)
+                            if attempt_index + 1 < len(candidate_adapters) and attempt_index > 0:
+                                continue
+                            econ_payload["provider_attempts"] = _copy_attempt_traces()
+                            econ_payload["provider_fallback_attempts"] = list(attempt_failures)
+                            econ_payload["fallback_provider_attempts"] = list(attempt_failures)
+                            econ_payload["provider_fallback_attempted"] = bool(attempt_index > 0)
+                            econ_payload["provider_fallback_reason"] = first_fallback_reason if attempt_index > 0 else ""
+                            return econ_payload
 
             if acceptance_valid and verified_acceptance:
                 claim_ok, claim_blocker, _ = claim_owner_acceptance_token(

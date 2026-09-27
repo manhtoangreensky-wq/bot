@@ -462,6 +462,11 @@ def test_first_red_cost_authority_calculates_from_10s_provider_submit():
     expected_cost_usd = 30.6002448
     assert abs(cost_info["expected_provider_cost_usd"] - expected_cost_usd) < 1e-6
     assert abs(cost_info["computed_provider_cost_usd"] - expected_cost_usd) < 1e-6
+    assert cost_info["requested_cost_model"] == "kling-3.0-turbo"
+    assert cost_info["resolved_pricing_model"] == "kling-video"
+    assert cost_info["model_cost_alias_authority"] == "EXPLICIT"
+    assert cost_info["generic_kling_substring_match"] is False
+    assert cost_info["unknown_model_economics_fail_closed"] is True
 
     # Verify check_product_video_economics directly
     econ = video_ai_real_pricing.check_product_video_economics(
@@ -476,9 +481,121 @@ def test_first_red_cost_authority_calculates_from_10s_provider_submit():
     assert econ["public_output_seconds_total"] == 16
     assert abs(econ["computed_provider_cost_usd"] - expected_cost_usd) < 1e-6
     assert abs(econ["expected_provider_cost_usd"] - expected_cost_usd) < 1e-6
+    assert econ["requested_cost_model"] == "kling-3.0-turbo"
+    assert econ["resolved_pricing_model"] == "kling-video"
+    assert econ["model_cost_alias_authority"] == "EXPLICIT"
+    assert econ["generic_kling_substring_match"] is False
+    assert econ["unknown_model_economics_fail_closed"] is True
     # Verify customer wallet price is untouched (668 Xu)
     assert econ["customer_quote_xu"] == 668
     assert econ["customer_revenue_vnd"] == 66800
+
+
+def test_unknown_kling_like_models_fail_closed_in_economics():
+    """Requirement 2: Generic substring matching 'kling' in model_name removed.
+    Unknown Kling-like models fail closed and do not inherit another Kling rate.
+    """
+    from services import video_ai_real_pricing
+
+    for unknown_model in ["kling-unknown-variant", "kling-9.9", "kling-experimental-v4"]:
+        econ = video_ai_real_pricing.check_product_video_economics(
+            tier_id=400,
+            scene_count=2,
+            provider="key4u_video",
+            model=unknown_model,
+            customer_quote_xu=668,
+            provider_submit_seconds=10,
+        )
+        assert econ["economics_safe"] is False
+        assert econ["block_reason"] == "PRODUCT_VIDEO_PROVIDER_ECONOMICS_UNSAFE"
+        assert econ["requested_cost_model"] == unknown_model
+        assert econ["resolved_pricing_model"] == ""
+        assert econ["model_cost_alias_authority"] == "EXPLICIT"
+        assert econ["generic_kling_substring_match"] is False
+        assert econ["unknown_model_economics_fail_closed"] is True
+        assert econ["provider_total_cost_usd"] == 0.0
+
+
+def test_production_router_economics_call_delivers_10s_provider_submit(mock_storyboard_files, monkeypatch):
+    """Requirement 3: Test the ACTUAL production router economics call.
+    Capture the arguments delivered by the real router and require:
+    provider=key4u_video, model=kling-3.0-turbo, provider_submit_seconds=10.
+    """
+    from services import video_provider_router, video_ai_real_pricing
+    from services.video_provider_base import VideoSubmitResult
+    from providers.video_generic_http_provider import GenericHttpVideoProvider
+
+    captured_router_calls = []
+    real_econ_fn = video_ai_real_pricing.check_product_video_economics
+
+    def spy_econ_check(*args, **kwargs):
+        res = real_econ_fn(*args, **kwargs)
+        captured_router_calls.append({"args": args, "kwargs": dict(kwargs), "result": res})
+        return res
+
+    req = VideoGenerationRequest(
+        job_id="job_prod_econ_call_test",
+        product_type="storyboard_to_video",
+        prompt="Scene 1 test prompt",
+        ratio="9:16",
+        duration_seconds=10.0,
+        metadata={
+            "product_type": "storyboard_to_video",
+            "is_storyboard": True,
+            "product_video": True,
+            "selected_provider": "key4u_video",
+            "model": "kling-3.0-turbo",
+            "storyboard_model": "kling-3.0-turbo",
+            "selected_model": "kling-3.0-turbo",
+            "pinned_wire_model": "kling-3.0-turbo",
+            "tier_id": 400,
+            "scene_count": 2,
+            "customer_quote_xu": 668,
+            "provider_billable_submit_seconds": 10,
+            "provider_submit_duration_seconds": 10,
+        },
+    )
+
+    with patch.object(video_ai_real_pricing, "check_product_video_economics", side_effect=spy_econ_check):
+        with patch.object(GenericHttpVideoProvider, "submit_video_job") as mock_submit:
+            mock_submit.return_value = VideoSubmitResult(
+                ok=True,
+                provider_name="key4u_video",
+                provider_task_id="k4u_test_task_123",
+                provider_status="queued",
+            )
+            res = video_provider_router.run_provider_generation(
+                req,
+                output_dir=str(mock_storyboard_files["tmp_path"]),
+                allow_pending_result=True,
+                environ={
+                    "KEY4U_API_KEY": "mock_key",
+                    "KEY4U_BASE_URL": "https://mock.key4u.test",
+                    "KEY4U_VIDEO_MODEL": "kling-3.0-turbo",
+                },
+            )
+
+    assert len(captured_router_calls) >= 1, "Real router must execute check_product_video_economics"
+    router_call = captured_router_calls[0]
+    call_kwargs = router_call["kwargs"]
+    call_result = router_call["result"]
+
+    assert call_kwargs.get("provider") == "key4u_video"
+    assert call_kwargs.get("model") == "kling-3.0-turbo"
+    assert call_kwargs.get("provider_submit_seconds") == 10
+    assert call_kwargs.get("tier_id") == 400
+    assert call_kwargs.get("scene_count") == 2
+
+    assert call_result["public_output_seconds_total"] == 16
+    assert call_result["provider_billable_seconds_total"] == 20
+    expected_cost_usd = 30.6002448
+    assert abs(call_result["expected_provider_cost_usd"] - expected_cost_usd) < 1e-6
+    assert abs(call_result["computed_provider_cost_usd"] - expected_cost_usd) < 1e-6
+    assert call_result["requested_cost_model"] == "kling-3.0-turbo"
+    assert call_result["resolved_pricing_model"] == "kling-video"
+    assert call_result["model_cost_alias_authority"] == "EXPLICIT"
+    assert call_result["generic_kling_substring_match"] is False
+    assert call_result["unknown_model_economics_fail_closed"] is True
 
 
 def test_provider_cost_accounting_uses_submit_duration_10s(mock_storyboard_files, monkeypatch):

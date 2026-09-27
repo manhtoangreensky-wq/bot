@@ -1171,6 +1171,25 @@ def _product_video_candidate_cost_vnd(
     return video_cost + audio_cost
 
 
+# Explicit reviewed mapping: (provider, requested_runtime_model) -> canonical pricing candidate model
+MODEL_COST_ALIAS_MAP: dict[tuple[str, str], str] = {
+    ("key4u", "kling-3.0-turbo"): "kling-video",
+    ("key4u_video", "kling-3.0-turbo"): "kling-video",
+    ("key4u", "kling-v3"): "kling-video",
+    ("key4u_video", "kling-v3"): "kling-video",
+    ("key4u", "kling-video"): "kling-video",
+    ("key4u_video", "kling-video"): "kling-video",
+    ("key4u", "veo_3_1-fast"): "veo_3_1-fast",
+    ("key4u_video", "veo_3_1-fast"): "veo_3_1-fast",
+    ("shopaikey", "veo3.1-fast"): "veo3.1-fast",
+    ("shopaikey_video", "veo3.1-fast"): "veo3.1-fast",
+    ("shopaikey", "veo3.1-pro"): "veo3.1-pro",
+    ("shopaikey_video", "veo3.1-pro"): "veo3.1-pro",
+    ("shopaikey", "grok-2-image"): "grok-2-image",
+    ("shopaikey_video", "grok-2-image"): "grok-2-image",
+}
+
+
 def check_product_video_economics(
     tier_id: int | str,
     scene_count: int | str = 1,
@@ -1212,29 +1231,49 @@ def check_product_video_economics(
     ]
 
     candidate = None
+    resolved_pricing_model = ""
     if model_name:
-        candidate = next(
-            (
-                c for c in candidates
-                if str(c.get("provider") or "").lower() == provider_key
-                and (
-                    str(c.get("model") or "") == model_name
-                    or ("kling" in model_name.lower() and "kling" in str(c.get("model") or "").lower())
-                )
-            ),
-            None,
-        )
-    if not candidate:
+        # Explicit reviewed provider+runtime-model -> pricing-model authority
+        target_model = MODEL_COST_ALIAS_MAP.get((provider_key, model_name)) or MODEL_COST_ALIAS_MAP.get((prov_str, model_name))
+        if target_model:
+            resolved_pricing_model = target_model
+            candidate = next(
+                (
+                    c for c in candidates
+                    if str(c.get("provider") or "").lower() == provider_key
+                    and str(c.get("model") or "").strip() == target_model
+                ),
+                None,
+            )
+        else:
+            direct_candidate = next(
+                (
+                    c for c in candidates
+                    if str(c.get("provider") or "").lower() == provider_key
+                    and str(c.get("model") or "").strip() == model_name
+                ),
+                None,
+            )
+            if direct_candidate:
+                candidate = direct_candidate
+                resolved_pricing_model = str(direct_candidate.get("model") or "").strip()
+            else:
+                # Unknown model: FAIL CLOSED! No generic substring match, no default fallback.
+                candidate = None
+                resolved_pricing_model = ""
+    else:
         target_role = "fallback" if is_fallback else "primary"
         candidate = next(
             (c for c in candidates if str(c.get("provider") or "").lower() == provider_key and target_role in str(c.get("role") or "").lower()),
             None,
         )
-    if not candidate:
-        candidate = next(
-            (c for c in candidates if str(c.get("provider") or "").lower() == provider_key),
-            None,
-        )
+        if not candidate:
+            candidate = next(
+                (c for c in candidates if str(c.get("provider") or "").lower() == provider_key),
+                None,
+            )
+        if candidate:
+            resolved_pricing_model = str(candidate.get("model") or "")
 
     submit_sec = (
         provider_submit_seconds
@@ -1255,6 +1294,11 @@ def check_product_video_economics(
             "scene_count": count,
             "provider": provider_key,
             "model": model_name,
+            "requested_cost_model": model_name,
+            "resolved_pricing_model": resolved_pricing_model,
+            "model_cost_alias_authority": "EXPLICIT",
+            "generic_kling_substring_match": False,
+            "unknown_model_economics_fail_closed": True,
             "customer_quote_xu": int(customer_quote_xu or 0),
             "is_fallback": is_fallback,
             "provider_cost_authority_function": "services.video_ai_real_pricing.check_product_video_economics",
@@ -1323,6 +1367,11 @@ def check_product_video_economics(
         "scene_count": count,
         "provider": provider_key,
         "model": str(candidate.get("model") or model_name),
+        "requested_cost_model": model_name,
+        "resolved_pricing_model": resolved_pricing_model or str(candidate.get("model") or ""),
+        "model_cost_alias_authority": "EXPLICIT",
+        "generic_kling_substring_match": False,
+        "unknown_model_economics_fail_closed": True,
         "customer_quote_xu": quote_xu,
         "is_fallback": is_fallback,
         "provider_cost_authority_function": "services.video_ai_real_pricing.check_product_video_economics",
@@ -1366,6 +1415,11 @@ def calculate_product_video_provider_cost(
         "provider_cost_authority_function": "services.video_ai_real_pricing.check_product_video_economics",
         "provider": provider,
         "model": model,
+        "requested_cost_model": econ.get("requested_cost_model") or model,
+        "resolved_pricing_model": econ.get("resolved_pricing_model") or "",
+        "model_cost_alias_authority": "EXPLICIT",
+        "generic_kling_substring_match": False,
+        "unknown_model_economics_fail_closed": True,
         "scene_count": int(scene_count),
         "public_scene_seconds": int(public_scene_seconds),
         "public_output_seconds_total": int(public_scene_seconds) * int(scene_count),
@@ -1374,6 +1428,7 @@ def calculate_product_video_provider_cost(
         "expected_provider_cost_usd": econ.get("computed_provider_cost_usd", 0.0),
         "computed_provider_cost_usd": econ.get("computed_provider_cost_usd", 0.0),
         "provider_total_cost_vnd": econ.get("provider_total_cost_vnd", 0.0),
+        "economics_safe": econ.get("economics_safe", False),
     }
 
 
