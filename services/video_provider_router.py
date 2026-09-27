@@ -4452,9 +4452,24 @@ def _run_provider_generation_impl(
     required_capability_original = str(request.required_capability or "").strip()
     normalized_capability_candidates = capability_options(required_capability_original)
     candidate_adapters = provider_candidate_adapters(request.required_capability, env, status)
+    is_storyboard = bool(
+        str(metadata.get("product_type") or request.product_type or "").strip().lower() in {"storyboard_prompt", "storyboard_to_video"}
+        or str(metadata.get("engine_adapter") or "").strip().lower() == "storyboard_scene_image_video_engine"
+        or str(metadata.get("engine_route") or "").strip().lower() == "storyboard_to_video"
+        or bool(metadata.get("is_storyboard"))
+        or bool(metadata.get("storyboard"))
+    )
+    storyboard_provider = str(metadata.get("selected_provider") or "key4u_video").strip().lower()
+    if is_storyboard:
+        candidate_adapters = [item for item in candidate_adapters if item.provider_name == storyboard_provider][:1]
     if acceptance_valid:
         pinned_provider = verified_acceptance.get("pinned_provider") or CANONICAL_ACCEPTANCE_PROVIDER
         candidate_adapters = [item for item in candidate_adapters if item.provider_name == pinned_provider][:1]
+        adapter = candidate_adapters[0] if candidate_adapters else None
+        provider_candidates = [item.provider_name for item in candidate_adapters]
+        initial_primary_provider = adapter.provider_name if adapter else ""
+        initial_fallback_provider = ""
+    elif is_storyboard:
         adapter = candidate_adapters[0] if candidate_adapters else None
         provider_candidates = [item.provider_name for item in candidate_adapters]
         initial_primary_provider = adapter.provider_name if adapter else ""
@@ -4629,6 +4644,8 @@ def _run_provider_generation_impl(
             candidate_adapters = [
                 item for item in candidate_adapters if item.provider_name == (verified_acceptance.get("pinned_provider") or CANONICAL_ACCEPTANCE_PROVIDER)
             ][:1]
+        elif is_storyboard:
+            candidate_adapters = [item for item in candidate_adapters if item.provider_name == storyboard_provider][:1]
         else:
             candidate_adapters = [
                 item for item in candidate_adapters if item.provider_name in runtime_candidates
@@ -4636,7 +4653,7 @@ def _run_provider_generation_impl(
         adapter = candidate_adapters[0] if candidate_adapters else None
         provider_candidates = [item.provider_name for item in candidate_adapters]
         initial_primary_provider = adapter.provider_name if adapter else ""
-        initial_fallback_provider = "" if acceptance_valid else next((name for name in provider_candidates if name and name != initial_primary_provider), "")
+        initial_fallback_provider = "" if (acceptance_valid or is_storyboard) else next((name for name in provider_candidates if name and name != initial_primary_provider), "")
     try:
         current_fallback_count = int(metadata.get("fallback_count") or metadata.get("provider_fallback_count") or 0)
     except Exception:
@@ -4648,6 +4665,14 @@ def _run_provider_generation_impl(
         provider_candidates = [item.provider_name for item in candidate_adapters]
         initial_primary_provider = adapter.provider_name if adapter else ""
         initial_fallback_provider = ""
+    elif is_storyboard:
+        candidate_adapters = [item for item in candidate_adapters if item.provider_name == storyboard_provider][:1]
+        max_provider_attempts = 1
+        candidate_adapters = candidate_adapters[:max_provider_attempts]
+        adapter = candidate_adapters[0] if candidate_adapters else None
+        provider_candidates = [item.provider_name for item in candidate_adapters]
+        initial_primary_provider = adapter.provider_name if adapter else ""
+        initial_fallback_provider = ""
     elif is_product_video and candidate_adapters:
         max_provider_attempts = 1 if current_fallback_count >= 1 else 2
         candidate_adapters = candidate_adapters[:max_provider_attempts]
@@ -4655,7 +4680,7 @@ def _run_provider_generation_impl(
         provider_candidates = [item.provider_name for item in candidate_adapters]
         initial_primary_provider = adapter.provider_name if adapter else ""
         initial_fallback_provider = next((name for name in provider_candidates if name and name != initial_primary_provider), "")
-    if is_product_video and not acceptance_valid and len(candidate_adapters) > 1:
+    if is_product_video and not acceptance_valid and not is_storyboard and len(candidate_adapters) > 1:
         # Candidate adapters have already passed readiness, capability and
         # contract filtering. This lets the persisted job quote authorize one
         # in-budget fallback without asking the customer to confirm twice.
@@ -4784,7 +4809,9 @@ def _run_provider_generation_impl(
         "fallback_used": False,
         "fallback_reason": "",
         "primary_provider": initial_primary_provider,
+        "initial_primary_provider": initial_primary_provider,
         "fallback_provider": initial_fallback_provider,
+        "initial_fallback_provider": initial_fallback_provider,
         "fallback_attempted": False,
         "fallback_count": current_fallback_count,
         "fallback_submit_source": "",
