@@ -471,7 +471,7 @@ def _valid_three_speaker_acoustic_result(segments: list[dict]) -> dict:
     }
 
 
-def test_smart_n3_real_asr_resolver_preserves_timeline_and_acoustic_cast(tmp_path, monkeypatch):
+def test_smart_n3_bypasses_embedded_subtitle_for_acoustic_asr(tmp_path, monkeypatch):
     words = [
         {
             "word": f"word{index}",
@@ -516,8 +516,8 @@ def test_smart_n3_real_asr_resolver_preserves_timeline_and_acoustic_cast(tmp_pat
             "transcript_json": transcript_json,
         }
 
-    async def no_embedded(*_args, **_kwargs):
-        return "", ""
+    async def embedded_subtitle(*_args, **_kwargs):
+        return "1\n00:00:00,000 --> 00:00:01,000\nvisible subtitle", "embedded"
 
     async def video_probe(*_args, **_kwargs):
         return {"ok": True, "has_video": True, "has_audio": True, "duration": 6.0}
@@ -537,7 +537,7 @@ def test_smart_n3_real_asr_resolver_preserves_timeline_and_acoustic_cast(tmp_pat
     monkeypatch.setattr(bot, "ASR_PROVIDER", "deepgram")
     monkeypatch.setattr(bot, "deepgram_asr_adapter", deepgram)
     monkeypatch.setattr(bot, "save_provider_attempt", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(bot, "video_dubbing_extract_embedded_subtitle", no_embedded)
+    monkeypatch.setattr(bot, "video_dubbing_extract_embedded_subtitle", embedded_subtitle)
     monkeypatch.setattr(bot, "subdub_probe_video_bytes", video_probe)
     monkeypatch.setattr(bot, "video_dubbing_audio_extract_ready", lambda: True)
     monkeypatch.setattr(bot, "video_dubbing_extract_audio", extract_audio)
