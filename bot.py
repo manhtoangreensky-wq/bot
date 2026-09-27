@@ -65782,7 +65782,22 @@ async def asr_transcribe_audio(
             transcript_json = dict(result.get("transcript_json") or {})
             segments = deepgram_segments_from_response(transcript_json)
             word_timeline = []
-            if result.get("ok") and transcript and require_auto_multi_word_timeline:
+            diarized_speaker_count = len(
+                {
+                    item.get("speaker")
+                    for item in segments
+                    if isinstance(item, dict) and item.get("speaker") is not None
+                }
+            )
+            needs_word_timeline = bool(
+                require_auto_multi_word_timeline
+                or (require_diarization and diarized_speaker_count >= 3)
+            )
+            if (
+                result.get("ok")
+                and transcript
+                and needs_word_timeline
+            ):
                 duration_value = media_duration_seconds
                 if type(duration_value) not in {int, float} or not math.isfinite(
                     float(duration_value)
@@ -65797,7 +65812,7 @@ async def asr_transcribe_audio(
                     duration_seconds=duration_value,
                     diagnostics=parse_diagnostics,
                 )
-                if not word_timeline:
+                if not word_timeline and require_auto_multi_word_timeline:
                     rejection_reason = re.sub(
                         r"[^a-z0-9_]+",
                         "_",
@@ -65848,7 +65863,7 @@ async def asr_transcribe_audio(
                     "duration_seconds": float(segments[-1]["end"] if segments else 0),
                     "detail": f"chars={len(transcript)}; segments={len(segments)}",
                 }
-                if require_auto_multi_word_timeline:
+                if needs_word_timeline:
                     success["word_timeline"] = word_timeline
                 return success
             status = str(result.get("status") or "FAIL")
@@ -246944,7 +246959,7 @@ async def transcribe_media_to_segments(
         "subtitle_timing_source": timing_source,
         "global_timing_preserved": global_timing_preserved,
     }
-    if require_auto_multi_word_timeline:
+    if require_auto_multi_word_timeline or "word_timeline" in asr_result:
         success["word_timeline"] = word_timeline
     return success
 
@@ -247085,7 +247100,7 @@ async def video_dubbing_resolve_source_script(
         "speech_chunk_count": int(result.get("speech_chunk_count") or 0),
         "subtitle_timing_source": str(result.get("subtitle_timing_source") or ""),
     }
-    if require_auto_multi_word_timeline:
+    if require_auto_multi_word_timeline or "word_timeline" in result:
         source_result["word_timeline"] = word_timeline
     return source_result
 
@@ -248896,7 +248911,23 @@ async def video_dubbing_prepare_subtitles(
         raise RuntimeError("subtitle_segments_empty")
     if require_auto_cast:
         fresh_auto_asr = str(source_info.get("source_kind") or "") == "asr"
-        if fresh_auto_asr and exact_acoustic_multi:
+        fresh_smart_asr_segments: list[dict] | None = None
+        smart_multi_acoustic = False
+        if (
+            fresh_auto_asr
+            and not exact_acoustic_multi
+            and auto_smart_multivoice.is_auto_smart_multivoice_state(state)
+        ):
+            fresh_smart_asr_segments = subdub_canonical_auto_speaker_segments(
+                source_segments,
+                extraction_source="asr",
+            )
+            smart_multi_acoustic = len(
+                subdub_speaker_cast.ordered_auto_speaker_labels(
+                    fresh_smart_asr_segments
+                )
+            ) >= 3
+        if fresh_auto_asr and (exact_acoustic_multi or smart_multi_acoustic):
             word_timeline = list(source_info.get("word_timeline") or [])
             if not word_timeline:
                 raise subdub_speaker_cast.AutoCastUnavailable()
@@ -248998,7 +249029,7 @@ async def video_dubbing_prepare_subtitles(
                 source_subtitle_ref=acoustic_subtitle_ref,
             )
         elif fresh_auto_asr:
-            source_segments = subdub_canonical_auto_speaker_segments(
+            source_segments = fresh_smart_asr_segments or subdub_canonical_auto_speaker_segments(
                 source_segments,
                 extraction_source="asr",
             )

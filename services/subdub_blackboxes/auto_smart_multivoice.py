@@ -40,6 +40,7 @@ import tempfile
 import time
 from typing import Any, Callable, Mapping, Sequence
 
+from services.subdub_blackboxes import auto_multi_speaker
 from services import subdub_speaker_cast as speaker_cast
 from services import subdub_tts_checkpoint
 from services import video_local_validation
@@ -150,6 +151,37 @@ class SmartVoiceDecision:
     cue_dispositions: dict[str, str]
     tts_cues: list[dict[str, Any]]
     decision_version: str = SMART_DECISION_VERSION
+
+
+def _n3_auto_cast_failure_reason(
+    classifier_error_reason: str | None,
+    unresolved_speaker_ids: Sequence[str],
+) -> str:
+    classifier_reason = str(classifier_error_reason or "unknown").strip() or "unknown"
+    unresolved = ",".join(str(item).strip() for item in unresolved_speaker_ids if str(item).strip())
+    return (
+        "CLASSIFIER_UNAVAILABLE:N3_AUTO_CAST_UNRESOLVED:"
+        f"classifier={classifier_reason};"
+        f"pitch_unresolved={unresolved or 'all'}"
+    )
+
+
+def _n3_auto_cast_manual_required(
+    *,
+    failure_reason: str,
+    detected_speaker_count: int,
+    classifier_error_reason: str | None,
+    unresolved_speaker_ids: Sequence[str],
+) -> speaker_cast.AutoCastManualRequired:
+    error = speaker_cast.AutoCastManualRequired()
+    error.smart_failure_stage = "auto_cast"
+    error.smart_failure_reason = str(failure_reason)
+    error.detected_speaker_count = int(detected_speaker_count)
+    error.classifier_error_reason = str(classifier_error_reason or "unknown")
+    error.unresolved_speaker_ids = [
+        str(item).strip() for item in unresolved_speaker_ids if str(item).strip()
+    ]
+    return error
 
 
 def _hash_seed_int(seed: str, *parts: str) -> int:
@@ -1072,6 +1104,7 @@ def decide_smart_multivoice(
         multi_classifications: dict[str, Any] | None = None
         classifier_failed = False
         classifier_error_reason: str | None = None
+        unresolved_speaker_ids: list[str] = []
 
         multi_fn = multi_speaker_classifier
         if multi_fn is None and stereo_pcm_path is not None:
@@ -1125,10 +1158,20 @@ def decide_smart_multivoice(
                     classifier_error_reason = None
                 else:
                     classifier_failed = True
-                    classifier_error_reason = "pitch_estimation_failed_or_ambiguous"
+                    unresolved_speaker_ids = [
+                        spk
+                        for spk in ordered_speakers
+                        if not isinstance((pitch_res or {}).get(spk), Mapping)
+                        or (pitch_res or {}).get(spk, {}).get("voice_register")
+                        not in {"low", "high"}
+                    ]
+                    if classifier_error_reason is None:
+                        classifier_error_reason = "multi_classifier_unavailable"
             except Exception as exc:
                 classifier_failed = True
-                classifier_error_reason = str(exc)
+                unresolved_speaker_ids = list(ordered_speakers)
+                if classifier_error_reason is None:
+                    classifier_error_reason = str(exc) or type(exc).__name__
 
         fail_dispositions = {
             str(c.get("cue_id") or c.get("id")): DISPOSITION_TERMINAL_REJECTED
@@ -1136,8 +1179,17 @@ def decide_smart_multivoice(
         }
 
         if classifier_failed:
+            failure_reason = _n3_auto_cast_failure_reason(
+                classifier_error_reason,
+                unresolved_speaker_ids,
+            )
             if raise_manual_required:
-                raise speaker_cast.AutoCastManualRequired()
+                raise _n3_auto_cast_manual_required(
+                    failure_reason=failure_reason,
+                    detected_speaker_count=detected_speaker_count,
+                    classifier_error_reason=classifier_error_reason,
+                    unresolved_speaker_ids=unresolved_speaker_ids,
+                )
             return SmartVoiceDecision(
                 strategy=STRATEGY_FAILED,
                 detected_speaker_count=detected_speaker_count,
@@ -1145,7 +1197,7 @@ def decide_smart_multivoice(
                 effective_voice_count=0,
                 speaker_voice_map={},
                 fallback_level=-1,
-                fallback_reason=f"CLASSIFIER_UNAVAILABLE:{classifier_error_reason or 'error'}",
+                fallback_reason=failure_reason,
                 output_mode=OUTPUT_MODE_FAILED,
                 cue_dispositions=fail_dispositions,
                 tts_cues=[],
@@ -1153,23 +1205,12 @@ def decide_smart_multivoice(
 
         if multi_classifications is not None:
             speaker_registers: dict[str, tuple[str, float]] = {}
+            unresolved_register_speakers: list[str] = []
             for spk in ordered_speakers:
                 meta = multi_classifications.get(spk)
                 if not isinstance(meta, Mapping):
-                    if raise_manual_required:
-                        raise speaker_cast.AutoCastManualRequired()
-                    return SmartVoiceDecision(
-                        strategy=STRATEGY_FAILED,
-                        detected_speaker_count=detected_speaker_count,
-                        effective_speaker_count=0,
-                        effective_voice_count=0,
-                        speaker_voice_map={},
-                        fallback_level=-1,
-                        fallback_reason=f"MISSING_SPEAKER_CLASSIFICATION:{spk}",
-                        output_mode=OUTPUT_MODE_FAILED,
-                        cue_dispositions=fail_dispositions,
-                        tts_cues=[],
-                    )
+                    unresolved_register_speakers.append(spk)
+                    continue
                 gender = str(meta.get("voice_gender") or meta.get("gender") or "").strip().lower()
                 register = str(meta.get("voice_register") or meta.get("register") or "").strip().lower()
                 if not register:
@@ -1188,21 +1229,69 @@ def decide_smart_multivoice(
                     or not math.isfinite(conf)
                     or conf < speaker_cast.MIN_REGISTER_CONFIDENCE
                 ):
-                    if raise_manual_required:
-                        raise speaker_cast.AutoCastManualRequired()
-                    return SmartVoiceDecision(
-                        strategy=STRATEGY_FAILED,
-                        detected_speaker_count=detected_speaker_count,
-                        effective_speaker_count=0,
-                        effective_voice_count=0,
-                        speaker_voice_map={},
-                        fallback_level=-1,
-                        fallback_reason="AMBIGUOUS_OR_INVALID_GENDER_CLASSIFICATION",
-                        output_mode=OUTPUT_MODE_FAILED,
-                        cue_dispositions=fail_dispositions,
-                        tts_cues=[],
-                    )
+                    unresolved_register_speakers.append(spk)
+                    continue
                 speaker_registers[spk] = (register, conf)
+
+            if unresolved_register_speakers and stereo_pcm_path is not None:
+                try:
+                    derived_ranges = ranges_by_speaker or _build_derived_ranges(
+                        speech_cues,
+                        stereo_pcm_path,
+                        unresolved_register_speakers,
+                    )
+                    pitch_classifications = estimate_speaker_pitches_from_pcm(
+                        stereo_pcm_path,
+                        derived_ranges,
+                        deadline_monotonic=deadline_monotonic,
+                        stop_requested=stop_requested,
+                    )
+                except Exception:
+                    pitch_classifications = {}
+                for spk in list(unresolved_register_speakers):
+                    meta = pitch_classifications.get(spk)
+                    if not isinstance(meta, Mapping):
+                        continue
+                    register = str(meta.get("voice_register") or "").strip().lower()
+                    try:
+                        confidence = float(meta.get("confidence") or 0.0)
+                    except (TypeError, ValueError, OverflowError):
+                        confidence = 0.0
+                    if (
+                        register in {"low", "high"}
+                        and math.isfinite(confidence)
+                        and confidence >= speaker_cast.MIN_REGISTER_CONFIDENCE
+                    ):
+                        speaker_registers[spk] = (register, confidence)
+                        unresolved_register_speakers.remove(spk)
+
+            if unresolved_register_speakers and (
+                not speaker_registers or len(all_pool) < detected_speaker_count
+            ):
+                failure_reason = (
+                    "N3_REGISTER_EVIDENCE_UNAVAILABLE"
+                    if not speaker_registers
+                    else "N3_DISTINCT_APPROVED_VOICE_POOL_TOO_SMALL"
+                )
+                if raise_manual_required:
+                    raise _n3_auto_cast_manual_required(
+                        failure_reason=failure_reason,
+                        detected_speaker_count=detected_speaker_count,
+                        classifier_error_reason=classifier_error_reason,
+                        unresolved_speaker_ids=unresolved_register_speakers,
+                    )
+                return SmartVoiceDecision(
+                    strategy=STRATEGY_FAILED,
+                    detected_speaker_count=detected_speaker_count,
+                    effective_speaker_count=0,
+                    effective_voice_count=0,
+                    speaker_voice_map={},
+                    fallback_level=-1,
+                    fallback_reason=failure_reason,
+                    output_mode=OUTPUT_MODE_FAILED,
+                    cue_dispositions=fail_dispositions,
+                    tts_cues=[],
+                )
 
             canonical_speaker_map = {}
             reverse_speaker_map = {}
@@ -1214,47 +1303,79 @@ def decide_smart_multivoice(
                 canonical_speaker_map[spk] = canon_id
                 reverse_speaker_map[canon_id] = spk
 
-            cast_classifications = {
-                canonical_speaker_map[spk]: {
-                    "speaker_id": canonical_speaker_map[spk],
-                    "voice_register": reg,
-                    "confidence": conf,
+            if speaker_registers:
+                cast_classifications = {
+                    canonical_speaker_map[spk]: {
+                        "speaker_id": canonical_speaker_map[spk],
+                        "voice_register": reg,
+                        "confidence": conf,
+                    }
+                    for spk, (reg, conf) in speaker_registers.items()
                 }
-                for spk, (reg, conf) in speaker_registers.items()
-            }
-            cast_speaker_order = [canonical_speaker_map[spk] for spk in ordered_speakers]
-            pools_dict = {"low": low_pool, "high": high_pool}
+                cast_speaker_order = [
+                    canonical_speaker_map[spk]
+                    for spk in ordered_speakers
+                    if spk in speaker_registers
+                ]
+                pools_dict = {"low": low_pool, "high": high_pool}
 
-            try:
-                assigned = speaker_cast.assign_stable_voices(
-                    cast_classifications,
-                    speaker_order=cast_speaker_order,
-                    validated_pools=pools_dict,
-                    assignment_seed=seed,
-                )
-                for canon_id, assign_data in assigned.items():
-                    orig_spk = reverse_speaker_map[canon_id]
-                    speaker_voice_map[orig_spk] = assign_data["voice_id"]
+                try:
+                    assigned = speaker_cast.assign_stable_voices(
+                        cast_classifications,
+                        speaker_order=cast_speaker_order,
+                        validated_pools=pools_dict,
+                        assignment_seed=seed,
+                    )
+                    for canon_id, assign_data in assigned.items():
+                        orig_spk = reverse_speaker_map[canon_id]
+                        speaker_voice_map[orig_spk] = assign_data["voice_id"]
+                except speaker_cast.AutoCastManualRequired as exc:
+                    if raise_manual_required:
+                        raise
+                    return SmartVoiceDecision(
+                        strategy=STRATEGY_FAILED,
+                        detected_speaker_count=detected_speaker_count,
+                        effective_speaker_count=0,
+                        effective_voice_count=0,
+                        speaker_voice_map={},
+                        fallback_level=-1,
+                        fallback_reason=f"AUTO_CAST_MANUAL_REQUIRED:{exc or 'capacity_exceeded'}",
+                        output_mode=OUTPUT_MODE_FAILED,
+                        cue_dispositions=fail_dispositions,
+                        tts_cues=[],
+                    )
 
-                strategy = STRATEGY_GENERIC_MULTI
-                fallback_level = 0
-                fallback_reason = None
-                output_mode = OUTPUT_MODE_DUBBED_MULTI
-            except speaker_cast.AutoCastManualRequired as exc:
-                if raise_manual_required:
-                    raise
-                return SmartVoiceDecision(
-                    strategy=STRATEGY_FAILED,
-                    detected_speaker_count=detected_speaker_count,
-                    effective_speaker_count=0,
-                    effective_voice_count=0,
-                    speaker_voice_map={},
-                    fallback_level=-1,
-                    fallback_reason=f"AUTO_CAST_MANUAL_REQUIRED:{exc or 'capacity_exceeded'}",
-                    output_mode=OUTPUT_MODE_FAILED,
-                    cue_dispositions=fail_dispositions,
-                    tts_cues=[],
-                )
+            used_voice_ids = set(speaker_voice_map.values())
+            for spk in unresolved_register_speakers:
+                available = [voice_id for voice_id in all_pool if voice_id not in used_voice_ids]
+                if not available:
+                    if raise_manual_required:
+                        raise speaker_cast.AutoCastManualRequired()
+                    return SmartVoiceDecision(
+                        strategy=STRATEGY_FAILED,
+                        detected_speaker_count=detected_speaker_count,
+                        effective_speaker_count=0,
+                        effective_voice_count=0,
+                        speaker_voice_map={},
+                        fallback_level=-1,
+                        fallback_reason="N3_DISTINCT_APPROVED_VOICE_POOL_TOO_SMALL",
+                        output_mode=OUTPUT_MODE_FAILED,
+                        cue_dispositions=fail_dispositions,
+                        tts_cues=[],
+                    )
+                index = _hash_seed_int(seed, spk, "n3_unknown_register") % len(available)
+                chosen_voice = available[index]
+                speaker_voice_map[spk] = chosen_voice
+                used_voice_ids.add(chosen_voice)
+
+            strategy = STRATEGY_GENERIC_MULTI
+            fallback_level = 1 if unresolved_register_speakers else 0
+            fallback_reason = (
+                "n3_unknown_register_distinct_voice"
+                if unresolved_register_speakers
+                else None
+            )
+            output_mode = OUTPUT_MODE_DUBBED_MULTI
         else:
             # When no acoustic classifications are provided or resolved
             if raise_manual_required or stereo_pcm_path is not None or multi_speaker_classifier is not None:
@@ -1498,18 +1619,35 @@ async def run_auto_smart_multivoice(
             raise_manual_required=True,
         )
     except speaker_cast.AutoCastManualRequired as exc:
+        detected_speaker_count = int(
+            getattr(exc, "detected_speaker_count", 0) or 0
+        )
+        fallback_reason = str(
+            getattr(exc, "smart_failure_reason", "")
+            or str(exc)
+            or speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+        )
         return {
             "ok": False,
             "strategy": STRATEGY_FAILED,
-            "detected_speaker_count": 0,
+            "detected_speaker_count": detected_speaker_count,
             "effective_speaker_count": 0,
             "effective_voice_count": 0,
             "speaker_voice_map": {},
             "fallback_level": -1,
-            "fallback_reason": str(exc) or speaker_cast.AUTO_CAST_MANUAL_REQUIRED,
+            "fallback_reason": fallback_reason,
             "output_mode": OUTPUT_MODE_FAILED,
             "final_mp4_path": None,
             "blocker": speaker_cast.AUTO_CAST_MANUAL_REQUIRED,
+            "failure_stage": str(
+                getattr(exc, "smart_failure_stage", "") or "auto_cast"
+            ),
+            "classifier_error_reason": str(
+                getattr(exc, "classifier_error_reason", "")
+            ),
+            "unresolved_speaker_ids": list(
+                getattr(exc, "unresolved_speaker_ids", []) or []
+            ),
             "auto_smart_verified": False,
         }
 
@@ -2592,6 +2730,58 @@ async def run_auto_smart_multivoice_blackbox(
         or payload.get("cues")
         or []
     )
+    acoustic_classifications = (
+        payload.get("acoustic_classifications")
+        or current.get("acoustic_classifications")
+        or (prepared.get("acoustic_classifications") if isinstance(prepared, dict) else None)
+    )
+    if not acoustic_classifications and isinstance(prepared, dict) and isinstance(cues, list):
+        try:
+            speaker_labels = speaker_cast.ordered_auto_speaker_labels(cues)
+        except speaker_cast.AutoCastUnavailable:
+            speaker_labels = []
+        if len(speaker_labels) >= 3:
+            try:
+                prepared_classifications = auto_multi_speaker.acoustic_register_classifications(
+                    prepared,
+                    speaker_labels,
+                )
+            except speaker_cast.AutoCastManualRequired:
+                acoustic_state = auto_multi_speaker.bounded_multi_acoustic_evidence(
+                    auto_multi_speaker.auto_speaker._prepared_state(prepared)
+                )
+                registers = acoustic_state.get("multi_acoustic_speaker_registers")
+                confidences = acoustic_state.get("multi_acoustic_speaker_register_confidences")
+                if (
+                    acoustic_state.get("multi_acoustic_speaker_count") != len(speaker_labels)
+                    or not isinstance(registers, list)
+                    or not isinstance(confidences, list)
+                    or len(registers) != len(speaker_labels)
+                    or len(confidences) != len(speaker_labels)
+                    or all(
+                        confidence >= speaker_cast.MIN_REGISTER_CONFIDENCE
+                        for confidence in confidences
+                    )
+                ):
+                    raise
+                prepared_classifications = {}
+                for index, label in enumerate(speaker_labels):
+                    chunk_index, speaker_index, canonical = speaker_cast.validated_speaker_identity(
+                        {"speaker_id": label}
+                    )
+                    if chunk_index != 0 or speaker_index != index or canonical != label:
+                        raise
+                    prepared_classifications[label] = {
+                        "speaker_id": label,
+                        "voice_register": (
+                            registers[index]
+                            if confidences[index] >= speaker_cast.MIN_REGISTER_CONFIDENCE
+                            else "unknown"
+                        ),
+                        "confidence": confidences[index],
+                    }
+            if prepared_classifications:
+                acoustic_classifications = prepared_classifications
     stereo_pcm_path = (
         payload.get("stereo_pcm_path")
         or current.get("stereo_pcm_path")
@@ -2695,11 +2885,7 @@ async def run_auto_smart_multivoice_blackbox(
 
     cues = smooth_smart_multivoice_cues(
         cues,
-        acoustic_classifications=(
-            payload.get("acoustic_classifications")
-            or current.get("acoustic_classifications")
-            or (prepared.get("acoustic_classifications") if isinstance(prepared, dict) else None)
-        ),
+        acoustic_classifications=acoustic_classifications,
         cue_acoustic_classifications=(
             payload.get("cue_acoustic_classifications")
             or current.get("cue_acoustic_classifications")
@@ -3056,11 +3242,7 @@ async def run_auto_smart_multivoice_blackbox(
             stop_requested=payload.get("stop_requested"),
             strict_two_classifier=payload.get("strict_two_classifier"),
             multi_speaker_classifier=payload.get("multi_speaker_classifier"),
-            acoustic_classifications=(
-                payload.get("acoustic_classifications")
-                or current.get("acoustic_classifications")
-                or (prepared.get("acoustic_classifications") if isinstance(prepared, dict) else None)
-            ),
+            acoustic_classifications=acoustic_classifications,
             cue_acoustic_classifications=(
                 payload.get("cue_acoustic_classifications")
                 or current.get("cue_acoustic_classifications")
@@ -3095,6 +3277,13 @@ async def run_auto_smart_multivoice_blackbox(
     result_state["auto_effective_speaker_count"] = smart_result.get("effective_speaker_count", 0)
     result_state["auto_distinct_voice_count"] = smart_result.get("effective_voice_count", 0)
     result_state["auto_smart_output_mode"] = smart_result.get("output_mode")
+    result_state["auto_smart_fallback_level"] = smart_result.get("fallback_level", -1)
+    result_state["auto_smart_fallback_reason"] = smart_result.get("fallback_reason")
+    result_state["auto_smart_register_degraded"] = (
+        bool(smart_result.get("ok"))
+        and smart_result.get("fallback_reason")
+        == "n3_unknown_register_distinct_voice"
+    )
     result_state["speaker_voice_map"] = smart_result.get("speaker_voice_map") or {}
     if smart_result.get("locked_speaker_voice_map"):
         result_state["locked_speaker_voice_map"] = dict(smart_result["locked_speaker_voice_map"])
