@@ -257,7 +257,9 @@ def apply_canonical_wallet_credit_conn(
     clean_uid = str(user_id).strip()
     delta = int(amount_xu)
     ts = str(now_str or utc_now_text())
-    admin_actor = str(actor_id or os.environ.get("ADMIN_ID") or DEFAULT_ADMIN_ID)
+    admin_actor = str(actor_id or "").strip()
+    if not admin_actor:
+        raise ValueError("actor_id is required and cannot be blank")
 
     c = conn.cursor()
 
@@ -369,6 +371,14 @@ def process_internal_wallet_credit_in_tx(
             "message": "idempotency_key is required",
         }, 400
 
+    clean_actor = str(actor_id or "").strip()
+    if not clean_actor:
+        return False, {
+            "ok": False,
+            "error_code": "MISSING_ACTOR_ID",
+            "message": "actor_id is required and cannot be blank",
+        }, 400
+
     ensure_admin_wallet_schema(conn)
     c = conn.cursor()
 
@@ -433,7 +443,7 @@ def process_internal_wallet_credit_in_tx(
             amount,
             str(reason or ""),
             str(reference or ""),
-            str(actor_id or ""),
+            clean_actor,
             ts,
         ),
     )
@@ -447,7 +457,7 @@ def process_internal_wallet_credit_in_tx(
         event_type="admin_web_manual_topup",
         ref_id=str(reference or clean_key),
         note=str(reason or f"Admin manual topup credit {clean_key}"),
-        actor_id=actor_id,
+        actor_id=clean_actor,
         now_str=ts,
     )
 
