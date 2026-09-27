@@ -135800,6 +135800,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     user_existed_before = user_exists(uid)
     get_user(uid, update.effective_user.first_name)
+    clear_doc_tool_pending(uid)
     record_usage_event(
         uid,
         username=update.effective_user.username or update.effective_user.first_name or "",
@@ -135837,7 +135838,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif ref_result.get("reason") == "self_ref":
             await update.message.reply_text("⚠️ Bạn không thể tự giới thiệu chính mình.")
     pending_notice = clear_pending_start_notice(uid)
-    clear_doc_tool_pending(uid)
     user_is_admin = is_admin_user(uid)
     if not has_user_language(uid):
         if pending_notice:
