@@ -354,3 +354,81 @@ def test_storyboard_duration_contract_fails_closed_on_single_8s_clip(mock_storyb
 
     contract_16s = product_video_duration_contract(job, 16.0)
     assert contract_16s["ok"] is True
+
+
+def test_storyboard_key4u_submit_failure_fails_closed_no_fallback_to_shopaikey(mock_storyboard_files, monkeypatch):
+    """Defect 1 (R11.0B): When Key4U fails submit/execution, Storyboard MUST fail closed.
+
+    It must NEVER fallback to shopaikey_video or any other secondary provider.
+    Enforces:
+      KEY4U_SUBMIT_CALLS = 1
+      SHOPAIKEY_SUBMIT_CALLS = 0
+      TOTAL_PROVIDER_SUBMITS = 1
+      INITIAL_FALLBACK_PROVIDER = ""
+      PROVIDER_FALLBACK_OCCURRED = NO
+    """
+    monkeypatch.setenv("VIDEO_PROVIDER_CHAIN", "key4u_video,shopaikey_video")
+    monkeypatch.setenv("SHOPAIKEY_API_KEY", "mock_key")
+    monkeypatch.setenv("SHOPAIKEY_BASE_URL", "https://mock.shopaikey.test")
+    monkeypatch.setenv("KEY4U_API_KEY", "mock_key")
+    monkeypatch.setenv("KEY4U_BASE_URL", "https://mock.key4u.test")
+
+    req = VideoGenerationRequest(
+        job_id="test_1155_fail_closed",
+        product_type="storyboard_to_video",
+        prompt="Cat on crystal planet",
+        ratio="9:16",
+        duration_seconds=8,
+        image_paths=[mock_storyboard_files["panel1"]],
+        metadata={
+            "product_type": "storyboard_to_video",
+            "engine_route": "storyboard_to_video",
+            "engine_adapter": "storyboard_scene_image_video_engine",
+            "is_storyboard": True,
+            "selected_provider": "key4u_video",
+            "model": "kling-3.0-turbo",
+            "selected_model": "kling-3.0-turbo",
+            "pinned_wire_model": "kling-3.0-turbo",
+            "required_capability": "image_to_video",
+        },
+    )
+
+    submit_counts = {"key4u_video": 0, "shopaikey_video": 0}
+
+    from services.video_provider_base import VideoSubmitResult
+    from providers.video_generic_http_provider import GenericHttpVideoProvider
+
+    def instrumented_submit(self, request):
+        pname = self.provider_name
+        if pname in submit_counts:
+            submit_counts[pname] += 1
+        if pname == "key4u_video":
+            return VideoSubmitResult(
+                ok=False,
+                provider_name="key4u_video",
+                provider_status="failed",
+                error_code="provider_submit_failed",
+            )
+        return VideoSubmitResult(
+            ok=True,
+            provider_name=pname,
+            provider_task_id=f"{pname}_task_123",
+        )
+
+    with patch.object(GenericHttpVideoProvider, "submit_video_job", new=instrumented_submit):
+        res = run_provider_generation(
+            req,
+            output_dir=str(mock_storyboard_files["tmp_path"]),
+            allow_pending_result=True,
+        )
+
+    assert submit_counts["key4u_video"] == 1, f"Expected 1 key4u submit call, got {submit_counts['key4u_video']}"
+    assert submit_counts["shopaikey_video"] == 0, (
+        f"Defect reproduced! Router leaked fallback submit to shopaikey_video: {submit_counts['shopaikey_video']}"
+    )
+    assert sum(submit_counts.values()) == 1
+    assert res.get("initial_fallback_provider") == ""
+    assert res.get("fallback_used") is False
+    assert res.get("provider_fallback_attempted") in {False, None}
+    assert res.get("ok") is False
+    assert res.get("selected_provider") == "key4u_video"
