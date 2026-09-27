@@ -52,6 +52,7 @@ FAIL_CLOSED_ASYNC_SUBMITTED_PRIOR_SUBMIT = "FAIL_CLOSED_ASYNC_SUBMITTED_PRIOR_SU
 FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE = "FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE"
 MAX_INTELLIGIBLE_FIT_RATIO = 1.8
 MAX_CUE_END_OVERSHOOT_SECONDS = 0.100
+AUTO_SMART_N3_PLUS_DISPATCH_STRATEGY = "n3_plus_proven_v2"
 
 
 class SubdubTTSAsyncSubmittedPriorSubmitError(subdub_tts_checkpoint.SubdubTTSCheckpointError):
@@ -2282,6 +2283,8 @@ def is_auto_smart_multivoice_state(state: Mapping[str, Any] | None) -> bool:
     flag = state.get("auto_smart_multivoice") is True
     engine = str(state.get("auto_multi_engine") or "").strip().lower()
     subdub_mode = str(state.get("subdub_mode") or "").strip().lower()
+    engine_req = str(state.get("subdub_engine_requested") or "").strip().lower()
+    plan_ver = str(state.get("subdub_asr_plan_version") or "").strip().lower()
     return bool(
         lane == AUTO_SMART_MULTIVOICE_LANE
         or mode == AUTO_SMART_MULTIVOICE_LANE
@@ -2289,6 +2292,8 @@ def is_auto_smart_multivoice_state(state: Mapping[str, Any] | None) -> bool:
         or flag
         or engine == "smart"
         or subdub_mode == "smart_multivoice"
+        or engine_req == "auto_smart_multivoice"
+        or plan_ver == "r8_2"
     )
 
 
@@ -2624,6 +2629,15 @@ def create_smart_synth_adapter(
     return _smart_synth_adapter
 
 
+async def execute_smart_multivoice_lane(
+    payload: Mapping[str, Any] | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    args = dict(payload or {})
+    args.update(kwargs)
+    return await run_auto_smart_multivoice_blackbox(**args)
+
+
 async def run_auto_smart_multivoice_blackbox(
     *,
     extract_pcm: Callable[..., Any] | None = None,
@@ -2657,10 +2671,11 @@ async def run_auto_smart_multivoice_blackbox(
     prepare_subtitles = payload.get("prepare_subtitles")
     prepared = None
     if callable(prepare_subtitles):
+        sub_state = dict(current)
         try:
             prepared = await _maybe_await(
                 prepare_subtitles(
-                    dict(current),
+                    sub_state,
                     require_auto_cast=True,
                 )
             )
@@ -2675,7 +2690,7 @@ async def run_auto_smart_multivoice_blackbox(
                 "error_code": "AUTO_CAST_UNAVAILABLE" if is_auto_cast else type(prep_err).__name__,
                 "admin_debug_summary": detail[:160] or type(prep_err).__name__,
                 "detail": detail,
-                "state": dict(current),
+                "state": dict(sub_state),
             }
 
     if isinstance(prepared, dict):
