@@ -1109,6 +1109,37 @@ def _shopaikey_wire_payload(
         data["aspectRatio"] = ratio
         if not data.get("ratio"):
             data["ratio"] = ratio
+
+    image_src = (
+        data.get("image")
+        or data.get("image_paths")
+        or data.get("storyboard")
+        or data.get("image_url")
+    )
+    req_cap = str(
+        (data.get("metadata") or {}).get("required_capability")
+        or data.get("required_capability")
+        or ""
+    ).strip().lower().replace("-", "_")
+    if req_cap == "image_to_video" and not image_src:
+        raise VideoProviderContractError(
+            "provider_image_input_missing_no_charge",
+            stage="wire_payload_build",
+            debug={"provider": "shopaikey_video", "blocker": "provider_image_input_missing_no_charge", "no_charge": True},
+        )
+    if image_src:
+        serialized = serialize_local_image_for_provider_wire(image_src)
+        if req_cap == "image_to_video" and not serialized:
+            raise VideoProviderContractError(
+                "provider_image_input_missing_no_charge",
+                stage="wire_payload_build",
+                debug={"provider": "shopaikey_video", "blocker": "provider_image_input_missing_no_charge", "no_charge": True},
+            )
+        data["image"] = serialized
+
+    data.pop("image_paths", None)
+    data.pop("storyboard", None)
+    data.pop("source_video_path", None)
     return data
 
 
@@ -1130,6 +1161,28 @@ def build_shopaikey_video_payload(request: VideoGenerationRequest, env: dict[str
         data["model"] = model
         data["metadata"] = enrich_metadata_with_model_contract(data.get("metadata"), "shopaikey_video", model, env=env)
         data = _apply_selected_request_defaults(data, request, "shopaikey_video")
+
+    req_cap = str(
+        request.required_capability
+        or (request.metadata or {}).get("required_capability")
+        or (data.get("metadata") or {}).get("required_capability")
+        or ""
+    ).strip().lower().replace("-", "_")
+    if req_cap == "image_to_video":
+        has_image = bool(
+            request.image_paths
+            or data.get("image")
+            or data.get("image_paths")
+            or data.get("storyboard")
+            or data.get("image_url")
+        )
+        if not has_image:
+            raise VideoProviderContractError(
+                "provider_image_input_missing_no_charge",
+                stage="payload_build",
+                debug={"provider": "shopaikey_video", "model": model, "blocker": "provider_image_input_missing_no_charge", "no_charge": True},
+            )
+
     if _shopaikey_uses_historical_small_clip_contract(request):
         small_clip_seconds = _shopaikey_selected_clip_seconds(request, env)
         data["duration"] = small_clip_seconds

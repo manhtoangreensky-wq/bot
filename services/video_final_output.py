@@ -77,13 +77,17 @@ VIDEO_PRODUCT_ENGINE_ROUTES: dict[str, dict[str, Any]] = {
         "engine_family": "image_sequence",
     },
     "self_shot_scene_change": {
-        "adapter": "video_to_video_scene_change_or_clean_fail",
+        "adapter": "controlled_keyframe_image_to_video",
+        "engine_adapter": "controlled_keyframe_image_to_video",
         "input_requirements": ("source_video", "subject_preservation", "scene_change_direction"),
-        "engine_family": "reference_video",
+        "engine_family": "image_video",
+        "provider_capability": "image_to_video",
+        "fallback_capability": "controlled_keyframe_image_to_video",
         "allow_clean_fail": True,
     },
     "self_shot_cinematic_transform": {
-        "adapter": "one_take_cinematic_video_to_video_or_clean_fail",
+        "adapter": "controlled_keyframe_image_to_video",
+        "engine_adapter": "controlled_keyframe_image_to_video",
         "input_requirements": (
             "source_video",
             "source_segment",
@@ -93,7 +97,9 @@ VIDEO_PRODUCT_ENGINE_ROUTES: dict[str, dict[str, Any]] = {
             "prompt_bundle",
             "audio_plan",
         ),
-        "engine_family": "reference_video",
+        "engine_family": "image_video",
+        "provider_capability": "image_to_video",
+        "fallback_capability": "controlled_keyframe_image_to_video",
         "allow_clean_fail": True,
     },
     "multi_scene_film": {
