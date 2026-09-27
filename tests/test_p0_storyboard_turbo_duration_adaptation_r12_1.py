@@ -596,6 +596,192 @@ def test_production_router_economics_call_delivers_10s_provider_submit(mock_stor
     assert call_result["model_cost_alias_authority"] == "EXPLICIT"
     assert call_result["generic_kling_substring_match"] is False
     assert call_result["unknown_model_economics_fail_closed"] is True
+    assert call_result["economics_safe"] is False
+    assert res.get("ok") is False
+    assert res.get("status") == "failed_no_charge"
+    assert res.get("terminal_state") == "blocked_no_charge"
+    assert res.get("provider_attempted") is False
+    assert res.get("provider_submit_called") is False
+    assert res.get("external_provider_spend_prevented") is True
+    assert res.get("paid_submit_allowed") is False
+    assert res.get("charge") == 0
+    assert mock_submit.called is False
+
+
+def test_storyboard_turbo_unsafe_economics_blocks_before_submit(mock_storyboard_files):
+    """Guards STORYBOARD_TURBO_UNSAFE_ECONOMICS_BLOCKS_BEFORE_SUBMIT:
+    Canonical Storyboard with Kling 3.0 Turbo has customer quote 668 xu (66,800 VND),
+    which is less than provider billable cost for 2 scenes x 10s ($30.6002448 ≈ 107,100 VND).
+    Requires actual production router to block BEFORE calling provider submit:
+      ECONOMICS_SAFE=FALSE
+      PROVIDER_ATTEMPTED=FALSE
+      PROVIDER_SUBMIT_CALLED=FALSE
+      PAID_SUBMIT_ALLOWED=FALSE
+      EXTERNAL_PROVIDER_SPEND_PREVENTED=TRUE
+      TERMINAL_STATE=blocked_no_charge
+      STATUS=failed_no_charge
+      CHARGE=0
+    """
+    from services import video_provider_router
+    from services.video_provider_base import VideoSubmitResult
+    from providers.video_generic_http_provider import GenericHttpVideoProvider
+
+    req = VideoGenerationRequest(
+        job_id="job_unsafe_econ_block_test",
+        product_type="storyboard_to_video",
+        prompt="Canonical Storyboard Scene",
+        ratio="9:16",
+        duration_seconds=10.0,
+        metadata={
+            "product_type": "storyboard_to_video",
+            "is_storyboard": True,
+            "product_video": True,
+            "selected_provider": "key4u_video",
+            "model": "kling-3.0-turbo",
+            "storyboard_model": "kling-3.0-turbo",
+            "selected_model": "kling-3.0-turbo",
+            "pinned_wire_model": "kling-3.0-turbo",
+            "tier_id": 400,
+            "scene_count": 2,
+            "customer_quote_xu": 668,
+            "provider_billable_submit_seconds": 10,
+            "provider_submit_duration_seconds": 10,
+        },
+    )
+
+    with patch.object(GenericHttpVideoProvider, "submit_video_job") as mock_submit:
+        mock_submit.return_value = VideoSubmitResult(
+            ok=True,
+            provider_name="key4u_video",
+            provider_task_id="k4u_should_never_be_called",
+        )
+        res = video_provider_router.run_provider_generation(
+            req,
+            output_dir=str(mock_storyboard_files["tmp_path"]),
+            allow_pending_result=True,
+            environ={
+                "KEY4U_API_KEY": "mock_key",
+                "KEY4U_BASE_URL": "https://mock.key4u.test",
+                "KEY4U_VIDEO_MODEL": "kling-3.0-turbo",
+            },
+        )
+
+    assert res.get("ok") is False
+    assert res.get("economics_safe") is False
+    assert res.get("provider_attempted") is False
+    assert res.get("provider_submit_called") is False
+    assert res.get("paid_submit_allowed") is False
+    assert res.get("external_provider_spend_prevented") is True
+    assert res.get("status") == "failed_no_charge"
+    assert res.get("terminal_state") == "blocked_no_charge"
+    assert res.get("charge") == 0
+    assert mock_submit.called is False, "Provider submit MUST NOT be called when economics is unsafe"
+
+
+def test_economics_safe_product_video_route_proceeds_normally(mock_storyboard_files):
+    """Regression: An economics-safe Product Video route proceeds normally and calls provider submit."""
+    from services import video_provider_router
+    from services.video_provider_base import VideoSubmitResult, VideoPollResult
+    from providers.video_generic_http_provider import GenericHttpVideoProvider
+
+    # Quote 5,000 xu (500,000 VND) > provider cost for 2 scenes x 10s ($30.6 ≈ 107,100 VND)
+    req = VideoGenerationRequest(
+        job_id="job_safe_econ_proceeds_test",
+        product_type="storyboard_to_video",
+        prompt="Safe economics scene",
+        ratio="9:16",
+        duration_seconds=10.0,
+        metadata={
+            "product_type": "storyboard_to_video",
+            "is_storyboard": True,
+            "product_video": True,
+            "selected_provider": "key4u_video",
+            "model": "kling-3.0-turbo",
+            "selected_model": "kling-3.0-turbo",
+            "storyboard_model": "kling-3.0-turbo",
+            "tier_id": 400,
+            "scene_count": 2,
+            "customer_quote_xu": 5000,
+            "provider_billable_submit_seconds": 10,
+        },
+    )
+
+    with patch.object(GenericHttpVideoProvider, "submit_video_job") as mock_submit, \
+         patch.object(GenericHttpVideoProvider, "poll_video_job") as mock_poll:
+        mock_submit.return_value = VideoSubmitResult(
+            ok=True,
+            provider_name="key4u_video",
+            provider_task_id="k4u_safe_123",
+            provider_status="queued",
+        )
+        mock_poll.return_value = VideoPollResult(
+            ok=True,
+            provider_name="key4u_video",
+            provider_task_id="k4u_safe_123",
+            status="queued",
+            raw_status="queued",
+        )
+        res = video_provider_router.run_provider_generation(
+            req,
+            output_dir=str(mock_storyboard_files["tmp_path"]),
+            allow_pending_result=True,
+            environ={
+                "KEY4U_API_KEY": "mock_key",
+                "KEY4U_BASE_URL": "https://mock.key4u.test",
+                "KEY4U_VIDEO_MODEL": "kling-3.0-turbo",
+            },
+        )
+
+    assert res.get("provider_submit_called") is True
+    assert mock_submit.called is True
+    assert res.get("external_provider_spend_prevented") is False
+    assert res.get("status") != "failed_no_charge"
+
+
+def test_unknown_model_fails_closed_in_router(mock_storyboard_files):
+    """Regression: Unknown model fails closed in economics and blocks provider submit."""
+    from services import video_provider_router
+    from providers.video_generic_http_provider import GenericHttpVideoProvider
+
+    req = VideoGenerationRequest(
+        job_id="job_unknown_model_router_test",
+        product_type="storyboard_to_video",
+        prompt="Unknown model scene",
+        ratio="9:16",
+        duration_seconds=10.0,
+        metadata={
+            "product_type": "storyboard_to_video",
+            "is_storyboard": True,
+            "product_video": True,
+            "selected_provider": "key4u_video",
+            "model": "kling-unknown-variant-99",
+            "selected_model": "kling-unknown-variant-99",
+            "storyboard_model": "kling-unknown-variant-99",
+            "tier_id": 400,
+            "scene_count": 2,
+            "customer_quote_xu": 5000,
+        },
+    )
+
+    with patch.object(GenericHttpVideoProvider, "submit_video_job") as mock_submit:
+        res = video_provider_router.run_provider_generation(
+            req,
+            output_dir=str(mock_storyboard_files["tmp_path"]),
+            allow_pending_result=True,
+            environ={
+                "KEY4U_API_KEY": "mock_key",
+                "KEY4U_BASE_URL": "https://mock.key4u.test",
+                "KEY4U_VIDEO_MODEL": "kling-3.0-turbo",
+            },
+        )
+
+    assert res.get("ok") is False
+    assert res.get("economics_safe") is False
+    assert res.get("provider_submit_called") is False
+    assert res.get("external_provider_spend_prevented") is True
+    assert res.get("status") == "failed_no_charge"
+    assert res.get("terminal_state") == "blocked_no_charge"
+    assert mock_submit.called is False
 
 
 def test_provider_cost_accounting_uses_submit_duration_10s(mock_storyboard_files, monkeypatch):
