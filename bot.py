@@ -230526,8 +230526,7 @@ def admin_control_center_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🛡 Bảo mật / DB", callback_data="menu|admin_security_db"), InlineKeyboardButton("🖥 Hệ thống", callback_data="menu|admin_system_ops")],
         [InlineKeyboardButton("🤖 Provider / Worker", callback_data="menu|admin_provider_worker"), InlineKeyboardButton("💰 Tài chính", callback_data="menu|admin_finance")],
         [InlineKeyboardButton("🚀 Marketing / Affiliate", callback_data="admin_growth|main"), InlineKeyboardButton("🎧 CSKH / Góp ý", callback_data="menu|admin_support")],
-        [InlineKeyboardButton("📘 Hướng dẫn Admin", callback_data="menu|admin_handbook"), InlineKeyboardButton("📣 Thông báo khách hàng", callback_data="menu|admin_broadcast_lite")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("📣 Thông báo khách hàng", callback_data="menu|admin_broadcast_lite"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ]
     return InlineKeyboardMarkup(rows)
 
