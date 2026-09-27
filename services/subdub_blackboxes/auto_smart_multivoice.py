@@ -2741,10 +2741,45 @@ async def run_auto_smart_multivoice_blackbox(
         except speaker_cast.AutoCastUnavailable:
             speaker_labels = []
         if len(speaker_labels) >= 3:
-            prepared_classifications = auto_multi_speaker.acoustic_register_classifications(
-                prepared,
-                speaker_labels,
-            )
+            try:
+                prepared_classifications = auto_multi_speaker.acoustic_register_classifications(
+                    prepared,
+                    speaker_labels,
+                )
+            except speaker_cast.AutoCastManualRequired:
+                acoustic_state = auto_multi_speaker.bounded_multi_acoustic_evidence(
+                    auto_multi_speaker.auto_speaker._prepared_state(prepared)
+                )
+                registers = acoustic_state.get("multi_acoustic_speaker_registers")
+                confidences = acoustic_state.get("multi_acoustic_speaker_register_confidences")
+                if (
+                    acoustic_state.get("multi_acoustic_speaker_count") != len(speaker_labels)
+                    or not isinstance(registers, list)
+                    or not isinstance(confidences, list)
+                    or len(registers) != len(speaker_labels)
+                    or len(confidences) != len(speaker_labels)
+                    or all(
+                        confidence >= speaker_cast.MIN_REGISTER_CONFIDENCE
+                        for confidence in confidences
+                    )
+                ):
+                    raise
+                prepared_classifications = {}
+                for index, label in enumerate(speaker_labels):
+                    chunk_index, speaker_index, canonical = speaker_cast.validated_speaker_identity(
+                        {"speaker_id": label}
+                    )
+                    if chunk_index != 0 or speaker_index != index or canonical != label:
+                        raise
+                    prepared_classifications[label] = {
+                        "speaker_id": label,
+                        "voice_register": (
+                            registers[index]
+                            if confidences[index] >= speaker_cast.MIN_REGISTER_CONFIDENCE
+                            else "unknown"
+                        ),
+                        "confidence": confidences[index],
+                    }
             if prepared_classifications:
                 acoustic_classifications = prepared_classifications
     stereo_pcm_path = (
