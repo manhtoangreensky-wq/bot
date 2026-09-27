@@ -1423,6 +1423,29 @@ def _product_video_paid_fallback_blocked(
     metadata: dict[str, Any] | None,
 ) -> bool:
     clean = str(blocker or "").strip()
+    meta = dict(metadata or {})
+    is_selfshot = bool(
+        meta.get("is_controlled_keyframe_i2v")
+        or str(meta.get("route") or "").strip() == "controlled_keyframe_image_to_video"
+        or str(meta.get("product_type") or "").startswith("self_shot")
+        or str(meta.get("video_flow_type") or "").startswith("selfshot")
+    )
+    if is_selfshot and (
+        meta.get("provider_http_request_sent")
+        or meta.get("provider_submit_called")
+        or meta.get("provider_task_id")
+        or clean in {
+            "provider_submit_outcome_ambiguous_no_charge",
+            "ambiguous_submit_timeout",
+            "provider_submit_timeout",
+            "provider_poll_timeout",
+            "provider_task_id_present_resubmit_forbidden",
+            "provider_task_already_exists",
+            "provider_submit_failed",
+            "provider_failed_server_error",
+        }
+    ):
+        return True
     # Ambiguous submit timeouts, task-already-present, and poll timeouts on in-flight tasks MUST NEVER fallback to another paid provider.
     if clean in {
         "provider_submit_outcome_ambiguous_no_charge",
@@ -4511,6 +4534,14 @@ def _run_provider_generation_impl(
                 or (request.metadata or {}).get("interactive_product")
             )
     is_product_video = bool(metadata.get("product_video") or metadata.get("interactive_product") or (request.metadata or {}).get("product_video"))
+    is_selfshot = bool(
+        metadata.get("is_controlled_keyframe_i2v")
+        or (request.metadata or {}).get("is_controlled_keyframe_i2v")
+        or str(metadata.get("route") or "").strip() == "controlled_keyframe_image_to_video"
+        or str((request.metadata or {}).get("route") or "").strip() == "controlled_keyframe_image_to_video"
+        or str(request.video_flow_type or "").startswith("selfshot")
+        or str(request.product_type or "").startswith("self_shot")
+    )
     submit_switch = product_video_submit_switch_detail(env)
     submit_switch_enabled = bool(submit_switch.get("resolved"))
     submit_enabled = submit_switch_enabled
@@ -5884,7 +5915,7 @@ def _run_provider_generation_impl(
                     return exc_payload
                 if attempt_index + 1 < len(candidate_adapters):
                     _record_failure(blocker, exc_payload, submit_failure=True)
-                    if is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata):
+                    if (is_selfshot and (is_timeout or submit_called_flag)) or (is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata)):
                         return _paid_fallback_requires_confirmation_payload(blocker, exc_payload)
                     continue
                 _record_failure(blocker, exc_payload, submit_failure=True)
@@ -5968,7 +5999,7 @@ def _run_provider_generation_impl(
                 return _merge_contract_debug(payload, submit.raw)
             if attempt_index + 1 < len(candidate_adapters):
                 _record_failure(blocker, submit.raw, submit_failure=True)
-                if is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata):
+                if (is_selfshot and (provider_http_request_sent or submit_called_flag or is_ambiguous_submit)) or (is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata)):
                     return _paid_fallback_requires_confirmation_payload(blocker, submit.raw)
                 continue
             _record_failure(blocker, submit.raw, submit_failure=True)
@@ -6018,7 +6049,7 @@ def _run_provider_generation_impl(
                 blocker = "provider_task_id_missing"
                 if attempt_index + 1 < len(candidate_adapters):
                     _record_failure(blocker, submit.raw, submit_failure=True)
-                    if is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata):
+                    if (is_selfshot and (provider_http_request_sent or submit_called_flag or is_ambiguous_submit)) or (is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata)):
                         return _paid_fallback_requires_confirmation_payload(blocker, submit.raw)
                     continue
                 _record_failure(blocker, submit.raw, submit_failure=True)
