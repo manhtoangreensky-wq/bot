@@ -2666,11 +2666,15 @@ async def run_auto_smart_multivoice_blackbox(
             )
         except Exception as prep_err:
             lane_mode = str(payload.get("lane_mode") or current.get("mode") or "dub")
+            detail = str(getattr(prep_err, "detail", "") or str(prep_err) or "")
+            is_auto_cast = isinstance(prep_err, speaker_cast.AutoCastUnavailable) or type(prep_err).__name__ == "AutoCastUnavailable"
+            status = "AUTO_CAST_UNAVAILABLE" if is_auto_cast else ("DIALOGUE_UNAVAILABLE" if lane_mode == "dub" else "SUBTITLE_PREPARE_FAILED")
             return {
                 "ok": False,
-                "status": "DIALOGUE_UNAVAILABLE" if lane_mode == "dub" else "SUBTITLE_PREPARE_FAILED",
-                "error_code": type(prep_err).__name__,
-                "admin_debug_summary": str(prep_err)[:160],
+                "status": status,
+                "error_code": "AUTO_CAST_UNAVAILABLE" if is_auto_cast else type(prep_err).__name__,
+                "admin_debug_summary": detail[:160] or type(prep_err).__name__,
+                "detail": detail,
                 "state": dict(current),
             }
 

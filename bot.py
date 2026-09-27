@@ -238885,6 +238885,8 @@ def video_tts_provider_configured_for_dub() -> bool:
 def video_dubbing_mode_needs_asr_provider(mode: str, state: dict | None = None) -> bool:
     mode = normalize_video_translate_mode(mode)
     state = dict(state or {})
+    if auto_smart_multivoice.is_auto_smart_multivoice_state(state):
+        return True
     if video_dubbing_state_has_subtitle_or_transcript(state):
         return False
     return video_dubbing_state_requires_asr(mode, state)
@@ -239339,11 +239341,120 @@ def video_dubbing_dialogue_text_keyboard(lang: str = "vi") -> InlineKeyboardMark
         ],
     ])
 
-def video_dubbing_asr_missing_for_state(mode: str, state: dict | None = None, public: bool = True) -> bool:
-    return bool(
-        video_dubbing_mode_needs_asr_provider(mode, state)
-        and not get_asr_adapter_readiness(public=False).get("configured")
+def resolve_subdub_asr_plan(
+    state: dict | None = None,
+    product_selection: str | None = None,
+    confirmation: bool | None = None,
+    runtime_config: dict | None = None,
+    *,
+    mode: str | None = None,
+    public: bool = True,
+) -> dict:
+    state_dict = dict(state or {})
+    resolved_mode = normalize_video_translate_mode(
+        mode
+        or state_dict.get("video_processing_mode")
+        or state_dict.get("mode")
+        or state_dict.get("process_type")
+        or ""
     )
+    is_smart = bool(
+        product_selection == "auto_smart_multivoice"
+        or auto_smart_multivoice.is_auto_smart_multivoice_state(state_dict)
+    )
+    is_multi = bool(
+        not is_smart
+        and (
+            product_selection in {"auto_multi_speaker", "multi"}
+            or auto_multi_speaker.is_auto_multi_speaker_state(state_dict)
+        )
+    )
+    is_two_speaker = bool(
+        not is_smart
+        and not is_multi
+        and (
+            product_selection in {"auto_speaker", "auto"}
+            or auto_speaker.is_auto_speaker_state(state_dict)
+        )
+    )
+
+    if is_smart:
+        engine_requested = "auto_smart_multivoice"
+        provider = "deepgram"
+        route_id = "smart_multivoice_deepgram"
+        require_word_timeline = True
+        require_provider_speaker_labels = False
+        allow_local_acoustic_diarization = True
+        require_final_confirmation = True
+
+        cfg_deepgram = (runtime_config or {}).get("DEEPGRAM_API_KEY") if isinstance(runtime_config, dict) else None
+        deepgram_key = str(DEEPGRAM_API_KEY if cfg_deepgram is None else cfg_deepgram or "").strip()
+        deepgram_ready = bool(deepgram_key)
+
+        is_confirmed = (
+            bool(confirmation)
+            if confirmation is not None
+            else bool(
+                state_dict.get("confirmed_product")
+                or state_dict.get("subdub_final_confirmed")
+                or state_dict.get("admin_interactive_confirm")
+            )
+        )
+
+        ready = True
+        blocker = ""
+        detail = "ok"
+
+        if not deepgram_ready:
+            ready = False
+            blocker = AUTO_CAST_UNAVAILABLE
+            detail = "deepgram_asr_not_configured"
+        elif require_final_confirmation and not is_confirmed:
+            ready = False
+            blocker = AUTO_CAST_UNAVAILABLE
+            detail = "subdub_final_confirmation_required"
+
+        return {
+            "route_id": route_id,
+            "engine_requested": engine_requested,
+            "provider": provider,
+            "require_word_timeline": require_word_timeline,
+            "require_provider_speaker_labels": require_provider_speaker_labels,
+            "allow_local_acoustic_diarization": allow_local_acoustic_diarization,
+            "require_final_confirmation": require_final_confirmation,
+            "ready": ready,
+            "blocker": blocker,
+            "detail": detail,
+        }
+
+    engine_requested = (
+        "auto_multi_speaker"
+        if is_multi
+        else ("auto_speaker" if is_two_speaker else "standard_subdub")
+    )
+    adapter_readiness = get_asr_adapter_readiness(public=False)
+    configured = bool(adapter_readiness.get("configured"))
+    provider = str(ASR_PROVIDER or adapter_readiness.get("provider") or "auto").lower()
+
+    return {
+        "route_id": f"{engine_requested}_{provider}",
+        "engine_requested": engine_requested,
+        "provider": provider,
+        "require_word_timeline": is_multi,
+        "require_provider_speaker_labels": is_multi or is_two_speaker,
+        "allow_local_acoustic_diarization": is_multi,
+        "require_final_confirmation": False,
+        "ready": configured,
+        "blocker": "" if configured else "ASR_ADAPTER_UNAVAILABLE",
+        "detail": "ok" if configured else "asr_adapter_unconfigured",
+    }
+
+
+def video_dubbing_asr_missing_for_state(mode: str, state: dict | None = None, public: bool = True) -> bool:
+    if not video_dubbing_mode_needs_asr_provider(mode, state):
+        return False
+    plan = resolve_subdub_asr_plan(state=state, mode=mode, public=public)
+    return not bool(plan.get("ready"))
 
 def video_dubbing_guard_text(mode: str, state: dict | None = None, lang: str = "vi", admin: bool = False) -> str:
     mode = normalize_video_translate_mode(mode)
@@ -243016,6 +243127,7 @@ def subtitle_dub_debug_job_payload(
         detail=detail,
         pipeline_attempted=pipeline_attempted,
     )
+    asr_plan = resolve_subdub_asr_plan(state=state, mode=mode)
     return {
         "feature": "subtitle_dub",
         "user_id": str(user_id or ""),
@@ -243204,6 +243316,17 @@ def subtitle_dub_debug_job_payload(
         "cost_line_rendered": bool(state.get("cost_line_rendered")),
         "cost_line_reason": str(state.get("cost_line_reason") or ""),
         "last_technical_error": sanitize_log_text(str(detail or ""))[:220],
+        "detail": str(detail or state.get("detail") or ""),
+        "error_detail": str(detail or state.get("error_detail") or state.get("detail") or ""),
+        "subdub_engine_requested": str(state.get("subdub_engine_requested") or asr_plan.get("engine_requested") or ""),
+        "subdub_engine_selected": str(state.get("subdub_engine_selected") or state.get("engine_selected") or asr_plan.get("engine_requested") or ""),
+        "auto_smart_multivoice_opt_in": bool(state.get("auto_smart_multivoice_opt_in")),
+        "subdub_final_confirmed": bool(state.get("subdub_final_confirmed") or state.get("confirmed_product")),
+        "subdub_asr_route_id": str(state.get("subdub_asr_route_id") or asr_plan.get("route_id") or ""),
+        "subdub_asr_provider": str(state.get("subdub_asr_provider") or asr_plan.get("provider") or ""),
+        "subdub_asr_require_word_timeline": bool(asr_plan.get("require_word_timeline")),
+        "subdub_asr_require_provider_speaker_labels": bool(asr_plan.get("require_provider_speaker_labels")),
+        "subdub_local_acoustic_diarization_allowed": bool(asr_plan.get("allow_local_acoustic_diarization")),
         "public_safe_error": public_safe_error,
         "pipeline_blocker": blocker,
         "provider_route": route,
@@ -248921,15 +249044,23 @@ async def video_dubbing_prepare_subtitles(
             and not exact_acoustic_multi
             and auto_smart_multivoice.is_auto_smart_multivoice_state(state)
         ):
-            fresh_smart_asr_segments = subdub_canonical_auto_speaker_segments(
-                source_segments,
-                extraction_source="asr",
+            _has_provider_speaker_labels = any(
+                subdub_speaker_cast.valid_speaker_index(seg.get("speaker"))
+                for seg in source_segments
             )
-            smart_multi_acoustic = len(
-                subdub_speaker_cast.ordered_auto_speaker_labels(
-                    fresh_smart_asr_segments
+            if _has_provider_speaker_labels:
+                fresh_smart_asr_segments = subdub_canonical_auto_speaker_segments(
+                    source_segments,
+                    extraction_source="asr",
                 )
-            ) >= 3
+                smart_multi_acoustic = len(
+                    subdub_speaker_cast.ordered_auto_speaker_labels(
+                        fresh_smart_asr_segments
+                    )
+                ) >= 3
+            else:
+                # Provider labels absent — local acoustic diarization will prove speakers
+                smart_multi_acoustic = True
         if fresh_auto_asr and (exact_acoustic_multi or smart_multi_acoustic):
             word_timeline = list(source_info.get("word_timeline") or [])
             if not word_timeline:
