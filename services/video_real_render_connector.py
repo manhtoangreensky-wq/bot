@@ -913,6 +913,24 @@ def _provider_order(job: dict | None = None) -> list[str]:
     asset_pack = _json_loads(job.get("asset_pack"), {})
     if not asset_pack and isinstance(job.get("project"), dict):
         asset_pack = _json_loads((job.get("project") or {}).get("asset_pack_json"), {})
+    product_type = str(job.get("product_type") or asset_pack.get("product_type") or "").strip().lower()
+    is_storyboard = bool(
+        product_type in {"storyboard_prompt", "storyboard_to_video"}
+        or str(job.get("engine_adapter") or asset_pack.get("engine_adapter") or "").strip().lower() == "storyboard_scene_image_video_engine"
+        or str(job.get("engine_route") or asset_pack.get("engine_route") or "").strip().lower() == "storyboard_to_video"
+        or bool(job.get("storyboard_panels"))
+        or bool(job.get("is_storyboard"))
+        or bool(job.get("storyboard"))
+    )
+    if is_storyboard:
+        selected_provider = str(
+            job.get("selected_provider")
+            or asset_pack.get("selected_provider")
+            or "key4u_video"
+        ).strip().lower()
+        if selected_provider in {"shopai", "shopaikey", "shopaikey_video"}:
+            return ["shopaikey_video"]
+        return ["key4u_video"]
     raw = (
         job.get("provider_order")
         or asset_pack.get("provider_order")
@@ -5568,6 +5586,8 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             model_context["provider_model_map"]["key4u_video"] = storyboard_model
         else:
             model_context["provider_model_map"] = {"key4u_video": storyboard_model}
+        provider_order = ["key4u_video"]
+        dispatch_provider_key = "key4u_video"
     if (
         recovery_existing_tasks_only
         and not pending_matches_request
@@ -5904,6 +5924,7 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
     if provider_model_map.get("key4u_video"):
         provider_env["KEY4U_VIDEO_MODEL"] = str(provider_model_map.get("key4u_video") or "")
     if is_storyboard:
+        provider_env["VIDEO_PROVIDER_CHAIN"] = "key4u_video"
         provider_env["KEY4U_VIDEO_MODEL"] = storyboard_model
     if product_type == "self_shot_scene_change":
         result = _render_selfshot2_video_to_video(
@@ -7226,6 +7247,12 @@ def _run_per_scene_provider_orchestrator(
         output_height=_canvas_size(_aspect_ratio(job))[1],
     )
     final_result.update(base)
+    final_video = str(final_result.get("final_video_path") or "")
+    if final_video:
+        final_result["output_path"] = final_video
+        final_result["final_output_path"] = final_video
+        final_result["final_video_path"] = final_video
+        final_result["master_video_path"] = final_result.get("master_video_path") or final_video
     final_result["finalizer_invoked"] = True
     final_result["finalizer_error"] = "" if final_result.get("final_video_path") else str(final_result.get("error") or "canonical_multiscene_finalizer_failed")
     final_result["canonical_multiscene_engine"] = "b13_r18c"
@@ -8569,6 +8596,10 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     result["final_classification"] = result["visual_classification"]
     if result["visual_classification"] != FINAL_AI_VIDEO:
         result["no_charge"] = True
+    if final_path:
+        result["final_video_path"] = final_path
+        result["output_path"] = final_path
+        result["final_output_path"] = final_path
     result = _apply_pending_provider_dominance(result, job=job)
     _record_render_diagnostics(result)
     return result
