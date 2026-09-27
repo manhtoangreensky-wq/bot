@@ -246985,10 +246985,13 @@ async def video_dubbing_resolve_source_script(
     require_auto_multi_word_timeline: bool = False,
 ) -> dict:
     require_auto_multi_word_timeline = bool(require_auto_multi_word_timeline)
+    require_speaker_evidence = bool(
+        require_diarization or require_auto_multi_word_timeline
+    )
     embedded_subtitle, subtitle_detail = "", ""
-    if not require_auto_multi_word_timeline:
+    if not require_speaker_evidence:
         embedded_subtitle, subtitle_detail = await video_dubbing_extract_embedded_subtitle(source_bytes, content_type)
-    if embedded_subtitle and not require_auto_multi_word_timeline:
+    if embedded_subtitle and not require_speaker_evidence:
         return {
             "source_kind": "embedded_subtitle",
             "subtitle": embedded_subtitle,
@@ -246997,7 +247000,7 @@ async def video_dubbing_resolve_source_script(
             "detail": subtitle_detail,
             "detected_language": subdub_detect_language_from_text(embedded_subtitle, "auto"),
         }
-    if prefer_visual_subtitles and not require_auto_multi_word_timeline:
+    if prefer_visual_subtitles and not require_speaker_evidence:
         try:
             visual_result = await asyncio.wait_for(
                 video_dubbing_extract_visual_subtitle(
