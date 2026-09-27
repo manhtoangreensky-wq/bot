@@ -213775,7 +213775,7 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{html.escape(copy['profile_policy_note'])}\n\n"
         f"{html.escape(copy['profile_commands'])}"
     )
-    await update.message.reply_text(msg, parse_mode="HTML")
+    await update.message.reply_text(msg, parse_mode="HTML", reply_markup=main_profile_keyboard(lang))
 
 async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
