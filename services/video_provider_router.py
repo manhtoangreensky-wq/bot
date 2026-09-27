@@ -4452,6 +4452,16 @@ def _run_provider_generation_impl(
     required_capability_original = str(request.required_capability or "").strip()
     normalized_capability_candidates = capability_options(required_capability_original)
     candidate_adapters = provider_candidate_adapters(request.required_capability, env, status)
+    is_storyboard = bool(
+        str(metadata.get("product_type") or request.product_type or "").strip().lower() in {"storyboard_prompt", "storyboard_to_video"}
+        or str(metadata.get("engine_adapter") or "").strip().lower() == "storyboard_scene_image_video_engine"
+        or str(metadata.get("engine_route") or "").strip().lower() == "storyboard_to_video"
+        or bool(metadata.get("is_storyboard"))
+        or bool(metadata.get("storyboard"))
+    )
+    storyboard_provider = str(metadata.get("selected_provider") or "key4u_video").strip().lower()
+    if is_storyboard and any(item.provider_name == storyboard_provider for item in candidate_adapters):
+        candidate_adapters = [item for item in candidate_adapters if item.provider_name == storyboard_provider] + [item for item in candidate_adapters if item.provider_name != storyboard_provider]
     if acceptance_valid:
         pinned_provider = verified_acceptance.get("pinned_provider") or CANONICAL_ACCEPTANCE_PROVIDER
         candidate_adapters = [item for item in candidate_adapters if item.provider_name == pinned_provider][:1]
@@ -4629,6 +4639,10 @@ def _run_provider_generation_impl(
             candidate_adapters = [
                 item for item in candidate_adapters if item.provider_name == (verified_acceptance.get("pinned_provider") or CANONICAL_ACCEPTANCE_PROVIDER)
             ][:1]
+        elif is_storyboard and any(item.provider_name == storyboard_provider for item in candidate_adapters):
+            matching_sb = [item for item in candidate_adapters if item.provider_name == storyboard_provider]
+            other_sb = [item for item in candidate_adapters if item.provider_name in runtime_candidates and item.provider_name != storyboard_provider]
+            candidate_adapters = matching_sb + other_sb
         else:
             candidate_adapters = [
                 item for item in candidate_adapters if item.provider_name in runtime_candidates
@@ -4649,6 +4663,8 @@ def _run_provider_generation_impl(
         initial_primary_provider = adapter.provider_name if adapter else ""
         initial_fallback_provider = ""
     elif is_product_video and candidate_adapters:
+        if is_storyboard and any(item.provider_name == storyboard_provider for item in candidate_adapters):
+            candidate_adapters = [item for item in candidate_adapters if item.provider_name == storyboard_provider] + [item for item in candidate_adapters if item.provider_name != storyboard_provider]
         max_provider_attempts = 1 if current_fallback_count >= 1 else 2
         candidate_adapters = candidate_adapters[:max_provider_attempts]
         adapter = candidate_adapters[0] if candidate_adapters else None
