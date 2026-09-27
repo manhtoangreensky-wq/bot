@@ -135851,8 +135851,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         elif ref_result.get("reason") == "self_ref":
             await update.message.reply_text("⚠️ Bạn không thể tự giới thiệu chính mình.")
-    pending_notice = clear_pending_start_notice(uid)
     user_is_admin = is_admin_user(uid)
+    if user_is_admin:
+        clear_broadcast_lite_pending(uid)
+    pending_notice = clear_pending_start_notice(uid)
     if not has_user_language(uid):
         if pending_notice:
             await update.message.reply_text(pending_notice.strip())
