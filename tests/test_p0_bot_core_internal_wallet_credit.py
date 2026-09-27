@@ -780,3 +780,130 @@ def test_internal_wallet_credit_canonical_user_id_prefix_normalized(test_db: str
     assert res2["data"]["ledger_event_id"] == res["data"]["ledger_event_id"]
     assert res2["data"]["balance_after"] == 800
 
+
+def test_fastapi_admin_wallet_credit_four_actor_boundaries(tmp_path: Path, monkeypatch):
+    """Explicitly prove the 4 actor boundaries for /internal/v1/admin/wallet/credit:
+    Boundary 1: header actor == payload actor + actor-bound signature => PASS (200)
+    Boundary 2: header actor == payload actor + legacy non-actor signature => 401 SIGNATURE_INVALID
+    Boundary 3: header actor != payload actor => FAIL CLOSED (401 ACTOR_ID_MISMATCH)
+    Boundary 4: tampered actor-bound signature => FAIL CLOSED (401 SIGNATURE_INVALID)
+    """
+    from fastapi.testclient import TestClient
+    import bot
+
+    db_file = tmp_path / "credit_boundaries.db"
+    conn = create_test_db(db_file)
+    conn.execute("INSERT INTO users (user_id, username, credits) VALUES ('888', 'boundary_user', 100)")
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(bot, "DB_FILE", str(db_file))
+    token = "test-credit-token"
+    secret = "test-credit-secret"
+    monkeypatch.setenv("CORE_BRIDGE_TOKEN", token)
+    monkeypatch.setenv("CORE_BRIDGE_HMAC_SECRET", secret)
+
+    client = TestClient(bot.fastapi_app)
+
+    # 1. Boundary 1: header actor == payload actor + actor-bound signature => PASS (200)
+    payload1 = {
+        "user_id": "888",
+        "amount_xu": 50,
+        "idempotency_key": "k_b1_pass",
+        "reason": "Boundary 1 test",
+        "actor_id": "auditor-01",
+    }
+    body1 = json.dumps(payload1).encode("utf-8")
+    now_ts = str(int(time.time()))
+    req_id1 = "req-b1"
+    digest1 = hashlib.sha256(body1).hexdigest()
+    msg1 = f"{now_ts}.{req_id1}.POST./internal/v1/admin/wallet/credit.{digest1}.auditor-01".encode("utf-8")
+    sig1 = hmac.new(secret.encode("utf-8"), msg1, hashlib.sha256).hexdigest()
+    headers1 = {
+        "Authorization": f"Bearer {token}",
+        "X-TOAN-AAS-Signature": sig1,
+        "X-TOAN-AAS-Timestamp": now_ts,
+        "X-TOAN-AAS-Request-ID": req_id1,
+        "X-TOAN-AAS-Actor-ID": "auditor-01",
+        "Content-Type": "application/json",
+    }
+    resp1 = client.post("/internal/v1/admin/wallet/credit", content=body1, headers=headers1)
+    assert resp1.status_code == 200
+    data1 = resp1.json()
+    assert data1["ok"] is True
+    assert data1["balance_after"] == 150
+
+    # 2. Boundary 2: header actor == payload actor + legacy non-actor signature => 401 SIGNATURE_INVALID
+    payload2 = {
+        "user_id": "888",
+        "amount_xu": 50,
+        "idempotency_key": "k_b2_legacy_fail",
+        "reason": "Boundary 2 test",
+        "actor_id": "auditor-01",
+    }
+    body2 = json.dumps(payload2).encode("utf-8")
+    req_id2 = "req-b2"
+    digest2 = hashlib.sha256(body2).hexdigest()
+    msg2 = f"{now_ts}.{req_id2}.POST./internal/v1/admin/wallet/credit.{digest2}".encode("utf-8")
+    sig2 = hmac.new(secret.encode("utf-8"), msg2, hashlib.sha256).hexdigest()
+    headers2 = {
+        "Authorization": f"Bearer {token}",
+        "X-TOAN-AAS-Signature": sig2,
+        "X-TOAN-AAS-Timestamp": now_ts,
+        "X-TOAN-AAS-Request-ID": req_id2,
+        "X-TOAN-AAS-Actor-ID": "auditor-01",
+        "Content-Type": "application/json",
+    }
+    resp2 = client.post("/internal/v1/admin/wallet/credit", content=body2, headers=headers2)
+    assert resp2.status_code == 401
+    assert resp2.json()["detail"]["error_code"] == "SIGNATURE_INVALID"
+
+    # 3. Boundary 3: header actor != payload actor => FAIL CLOSED (401 ACTOR_ID_MISMATCH)
+    payload3 = {
+        "user_id": "888",
+        "amount_xu": 50,
+        "idempotency_key": "k_b3_mismatch",
+        "reason": "Boundary 3 test",
+        "actor_id": "auditor-01",
+    }
+    body3 = json.dumps(payload3).encode("utf-8")
+    req_id3 = "req-b3"
+    digest3 = hashlib.sha256(body3).hexdigest()
+    msg3 = f"{now_ts}.{req_id3}.POST./internal/v1/admin/wallet/credit.{digest3}.different-actor".encode("utf-8")
+    sig3 = hmac.new(secret.encode("utf-8"), msg3, hashlib.sha256).hexdigest()
+    headers3 = {
+        "Authorization": f"Bearer {token}",
+        "X-TOAN-AAS-Signature": sig3,
+        "X-TOAN-AAS-Timestamp": now_ts,
+        "X-TOAN-AAS-Request-ID": req_id3,
+        "X-TOAN-AAS-Actor-ID": "different-actor",
+        "Content-Type": "application/json",
+    }
+    resp3 = client.post("/internal/v1/admin/wallet/credit", content=body3, headers=headers3)
+    assert resp3.status_code == 401
+    assert resp3.json()["detail"]["error_code"] == "ACTOR_ID_MISMATCH"
+
+    # 4. Boundary 4: tampered actor-bound signature => FAIL CLOSED (401 SIGNATURE_INVALID)
+    payload4 = {
+        "user_id": "888",
+        "amount_xu": 50,
+        "idempotency_key": "k_b4_tamper",
+        "reason": "Boundary 4 test",
+        "actor_id": "auditor-01",
+    }
+    body4 = json.dumps(payload4).encode("utf-8")
+    req_id4 = "req-b4"
+    tampered_sig = "bad" + sig1[3:]
+    headers4 = {
+        "Authorization": f"Bearer {token}",
+        "X-TOAN-AAS-Signature": tampered_sig,
+        "X-TOAN-AAS-Timestamp": now_ts,
+        "X-TOAN-AAS-Request-ID": req_id4,
+        "X-TOAN-AAS-Actor-ID": "auditor-01",
+        "Content-Type": "application/json",
+    }
+    resp4 = client.post("/internal/v1/admin/wallet/credit", content=body4, headers=headers4)
+    assert resp4.status_code == 401
+    assert resp4.json()["detail"]["error_code"] == "SIGNATURE_INVALID"
+
+
