@@ -63294,6 +63294,8 @@ async def get_shopaikey_usage() -> dict:
         return {"status": "MISSING", "http_status": 0, "usage": {}, "error_class": "missing_api_key", "detail": "SHOPAIKEY_API_KEY missing"}
     started = time.perf_counter()
     try:
+        from services.provider_balance_reader import protect_usage_request_logs
+        protect_usage_request_logs()
         async with httpx.AsyncClient(timeout=30.0) as client:
             res = await client.get(SHOPAIKEY_USAGE_URL, params={"apiKey": SHOPAIKEY_API_KEY})
         latency_ms = int((time.perf_counter() - started) * 1000)

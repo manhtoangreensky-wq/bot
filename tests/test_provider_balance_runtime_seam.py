@@ -81,14 +81,15 @@ def test_actual_tick_reads_persists_and_deduplicates(monkeypatch):
 
 def test_only_notification_functions_and_startup_changed():
     root = Path(__file__).resolve().parents[1]
-    base = subprocess.check_output(['git', 'show', '0ec38f1587fbe4f2126bf6975345de63f3da9130:bot.py'], cwd=root).decode('utf-8')
+    base = subprocess.check_output(['git', 'show', 'a77a5e0b13f943eb9fafb82a9fe3e80b6371b921:bot.py'], cwd=root).decode('utf-8')
     current = (root / 'bot.py').read_text(encoding='utf-8')
     def functions(text):
         return {n.name: ast.dump(n, include_attributes=False) for n in ast.parse(text).body
                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
     before, after = functions(base), functions(current)
     changed = {name for name in before if before[name] != after.get(name)}
-    assert changed == {'maybe_alert_shopaikey_low_quota', 'shopaikey_usage_monitor_loop', 'lifespan'}
+    assert changed == {'get_shopaikey_usage', 'maybe_alert_shopaikey_low_quota',
+                       'shopaikey_usage_monitor_loop', 'lifespan'}
     assert set(after) - set(before) == {'provider_balance_notification_tick'}
 
 
@@ -103,3 +104,50 @@ def test_existing_shopaikey_entry_uses_fixed_balance_not_legacy_quota():
     result = asyncio.run(scope[node.name](client, {'balance': 0}, 'manual'))
     assert result is True
     delegated.assert_awaited_once_with(client, 'shopaikey', 'test')
+
+
+def test_first_shopaikey_usage_request_installs_api_key_redaction_before_httpx(monkeypatch):
+    import logging
+    from services import provider_balance_reader
+
+    logger = logging.Logger('httpx')
+    get_logger = logging.getLogger
+    def isolated_logger(name=None):
+        return logger if name == 'httpx' else get_logger(name)
+    monkeypatch.setattr(logging, 'getLogger', isolated_logger)
+    observed = []
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url, *, params):
+            assert url == 'https://api.shopaikey.com/usage'
+            assert params == {'apiKey': 'dummy-test-key'}
+            record = logger.makeRecord(
+                'httpx', logging.INFO, '', 0,
+                f'GET {url}?apiKey={params["apiKey"]}', (), None)
+            logger.filter(record)
+            observed.append(record.getMessage())
+            return SimpleNamespace(status_code=200, json=lambda: {'balance': 12, 'total': 100, 'used': 88})
+
+    scope = {
+        'SHOPAIKEY_API_KEY': 'dummy-test-key',
+        'SHOPAIKEY_USAGE_URL': 'https://api.shopaikey.com/usage',
+        'httpx': SimpleNamespace(AsyncClient=FakeClient),
+        'time': SimpleNamespace(perf_counter=lambda: 1.0),
+        'shopaikey_sanitize_error': lambda value: str(value),
+        'parse_shopaikey_usage': lambda data: {'schema_known': True, **data},
+    }
+    function = _function('get_shopaikey_usage')
+    exec(compile(ast.Module(body=[function], type_ignores=[]), 'actual-usage-reader', 'exec'), scope)
+    result = asyncio.run(scope['get_shopaikey_usage']())
+
+    assert result['status'] == 'PASS'
+    assert observed == ['GET https://api.shopaikey.com/usage?apiKey=[REDACTED]']

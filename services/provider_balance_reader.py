@@ -26,7 +26,7 @@ class _UsageURLRedactor(logging.Filter):
         return True
 
 
-def _protect_usage_request_logs():
+def protect_usage_request_logs():
     logger = logging.getLogger('httpx')
     if not any(isinstance(item, _UsageURLRedactor) for item in logger.filters):
         logger.addFilter(_UsageURLRedactor())
@@ -48,7 +48,7 @@ async def read_balance(provider: str, credential: str, *, transport=None,
     if not isinstance(credential, str) or not credential.strip():
         return {**unknown, 'reason': 'missing_credential'}
     credential = credential.strip()
-    _protect_usage_request_logs()
+    protect_usage_request_logs()
     if provider == 'key4u':
         url = 'https://api.key4u.vn/v1/balance'
         token = credential if credential.lower().startswith('bearer ') else 'Bearer ' + credential
