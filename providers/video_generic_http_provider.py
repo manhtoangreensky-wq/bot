@@ -1096,8 +1096,10 @@ def _shopaikey_wire_payload(
     payload: dict[str, Any],
     *,
     submit_url: str = "",
+    env: dict[str, str] | os._Environ[str] | Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     data = dict(payload or {})
+    env = env or os.environ
     ratio = str(
         data.get("aspect_ratio")
         or data.get("aspectRatio")
@@ -1119,23 +1121,93 @@ def _shopaikey_wire_payload(
     req_cap = str(
         (data.get("metadata") or {}).get("required_capability")
         or data.get("required_capability")
+        or data.get("capability")
         or ""
     ).strip().lower().replace("-", "_")
-    if req_cap == "image_to_video" and not image_src:
+
+    metadata = dict(data.get("metadata") or {})
+    family = str(
+        metadata.get("selected_family")
+        or metadata.get("model_family")
+        or ""
+    ).strip().lower()
+    model_name = str(data.get("model") or "").strip().lower()
+    if not family and "veo" in model_name:
+        family = "google_veo"
+
+    is_veo = family == "google_veo" or "veo" in model_name
+    is_i2v = req_cap in ("image_to_video", "controlled_keyframe_image_to_video")
+
+    if is_i2v and not image_src:
         raise VideoProviderContractError(
             "provider_image_input_missing_no_charge",
             stage="wire_payload_build",
             debug={"provider": "shopaikey_video", "blocker": "provider_image_input_missing_no_charge", "no_charge": True},
         )
+
     if image_src:
-        serialized = serialize_local_image_for_provider_wire(image_src)
-        if req_cap == "image_to_video" and not serialized:
-            raise VideoProviderContractError(
-                "provider_image_input_missing_no_charge",
-                stage="wire_payload_build",
-                debug={"provider": "shopaikey_video", "blocker": "provider_image_input_missing_no_charge", "no_charge": True},
-            )
-        data["image"] = serialized
+        if is_veo and is_i2v:
+            # Google Veo Image-to-Video wire contract:
+            # Wire input must be: metadata.images = ["<reachable HTTPS URL>"]
+            # Top-level raw base64 "image" is strictly FORBIDDEN.
+            # Local filesystem paths must NEVER leak on the wire.
+            if isinstance(image_src, (list, tuple)):
+                items = [x for x in image_src if x]
+                if not items:
+                    raise VideoProviderContractError(
+                        "provider_image_input_missing_no_charge",
+                        stage="wire_payload_build",
+                        debug={"provider": "shopaikey_video", "blocker": "provider_image_input_missing_no_charge", "no_charge": True},
+                    )
+                image_src = items[0]
+            if isinstance(image_src, dict):
+                image_src = image_src.get("url") or image_src.get("image_url") or image_src.get("path") or image_src.get("image") or ""
+            image_val = str(image_src or "").strip()
+            if not image_val:
+                raise VideoProviderContractError(
+                    "provider_image_input_missing_no_charge",
+                    stage="wire_payload_build",
+                    debug={"provider": "shopaikey_video", "blocker": "provider_image_input_missing_no_charge", "no_charge": True},
+                )
+            if image_val.startswith(("https://", "http://")):
+                reference_url = image_val
+            else:
+                from services.provider_reference_transport import prepare_provider_image_reference
+                try:
+                    ref_info = prepare_provider_image_reference(
+                        image_val,
+                        provider="shopaikey_video",
+                        purpose="image_to_video",
+                        job_id=str(data.get("job_id") or metadata.get("job_id") or ""),
+                        env=env,
+                    )
+                    reference_url = ref_info["public_url"]
+                except VideoProviderContractError:
+                    raise
+                except Exception as exc:
+                    raise VideoProviderContractError(
+                        "shopaikey_veo_i2v_public_reference_unavailable_no_charge",
+                        stage="wire_payload_build",
+                        debug={
+                            "provider": "shopaikey_video",
+                            "blocker": "shopaikey_veo_i2v_public_reference_unavailable_no_charge",
+                            "error": type(exc).__name__,
+                            "no_charge": True,
+                        },
+                    ) from exc
+
+            metadata["images"] = [reference_url]
+            data["metadata"] = metadata
+            data.pop("image", None)
+        else:
+            serialized = serialize_local_image_for_provider_wire(image_src)
+            if is_i2v and not serialized:
+                raise VideoProviderContractError(
+                    "provider_image_input_missing_no_charge",
+                    stage="wire_payload_build",
+                    debug={"provider": "shopaikey_video", "blocker": "provider_image_input_missing_no_charge", "no_charge": True},
+                )
+            data["image"] = serialized
 
     data.pop("image_paths", None)
     data.pop("storyboard", None)
@@ -1652,7 +1724,7 @@ class GenericHttpVideoProvider:
             if self.provider_name == "key4u_video":
                 wire_payload = _key4u_wire_payload(payload, submit_url=submit_url)
             elif self.provider_name == "shopaikey_video":
-                wire_payload = _shopaikey_wire_payload(payload, submit_url=submit_url)
+                wire_payload = _shopaikey_wire_payload(payload, submit_url=submit_url, env=self.env)
             else:
                 wire_payload = payload
         except VideoProviderContractError as exc:
