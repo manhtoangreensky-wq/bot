@@ -178,7 +178,8 @@ def test_first_red_2_storyboard_8s_target_adapts_to_wire_duration_10(mock_storyb
         }
 
     with patch("services.video_real_render_connector.run_provider_generation", side_effect=mock_run_provider), \
-         patch("services.video_real_render_connector.normalize_storyboard_provider_clip", return_value=raw_path):
+         patch("services.video_real_render_connector.normalize_storyboard_provider_clip", return_value=raw_path), \
+         patch("services.video_final_output.probe_video", return_value={"ok": True, "has_video": True, "duration": 8.0, "bytes": 512}):
         res = asyncio.run(_render_scene_async(scene_obj, raw_path, ["key4u_video"]))
 
     assert len(captured_requests) == 1
@@ -221,7 +222,7 @@ def test_first_red_4_provider_output_normalization_contract(mock_storyboard_file
         Path(dst).write_bytes(b"\x00\x00\x00 ftypisom" + b"\x00" * 256)
         return dst
 
-    with patch("services.video_real_render_connector.probe_duration", return_value=10.0), \
+    with patch("services.video_final_output.probe_video", return_value={"ok": True, "has_video": True, "duration": 8.0, "bytes": 256}), \
          patch("services.video_real_render_connector.normalize_scene_duration", side_effect=mock_normalize_scene_duration):
         out = normalize_storyboard_provider_clip(source_10s, normalized_8s, target_seconds=8.0)
         assert out == normalized_8s
@@ -265,6 +266,8 @@ def test_first_red_4_two_scenes_concat_to_16s_master(mock_storyboard_files, monk
             "status": "completed",
             "final_video_path": master_path,
             "master_video_path": master_path,
+            "output_path": master_path,
+            "final_output_path": master_path,
             "duration_sec": 16.0,
             "scene_count": 2,
         }
@@ -289,8 +292,194 @@ def test_first_red_4_two_scenes_concat_to_16s_master(mock_storyboard_files, monk
 
 
 # ===========================================================================
-# COST ACCOUNTING INVARIANT
+# BLOCKER 1 REMEDIATION: Fail-closed normalization & post-probe tests
 # ===========================================================================
+
+def test_first_red_a_normalization_failure_fails_closed_no_copy_fallback(mock_storyboard_files):
+    """FIRST_RED_A: Normalization failure must raise storyboard_scene_duration_normalization_failed_no_charge.
+    
+    Must NOT copy original 10s source as fallback.
+    Must NOT mark scene SUCCESS.
+    Must NOT set metadata duration=8.
+    """
+    source_10s = str(mock_storyboard_files["tmp_path"] / "source_fail_closed_10s.mp4")
+    Path(source_10s).write_bytes(b"\x00\x00\x00 ftypisom" + b"\x00" * 512)
+    target_8s = str(mock_storyboard_files["tmp_path"] / "target_fail_closed_8s.mp4")
+
+    # 1. Direct call to normalize_storyboard_provider_clip with failing normalization
+    def mock_failing_normalizer(src, dst, **kwargs):
+        raise RuntimeError("ffmpeg_synthetic_codec_crash")
+
+    with patch("services.video_final_output.probe_video", return_value={"ok": True, "has_video": True, "duration": 10.0, "bytes": 512}), \
+         patch("services.video_real_render_connector.normalize_scene_duration", side_effect=mock_failing_normalizer):
+        with pytest.raises(video_real_render_connector.RealVideoRenderError) as exc_info:
+            normalize_storyboard_provider_clip(source_10s, target_8s, target_seconds=8.0)
+
+        err = exc_info.value
+        assert "storyboard_scene_duration_normalization_failed_no_charge" in str(err)
+        # CRITICAL: Verify NO source copy fallback occurred!
+        assert not os.path.exists(target_8s), "Fallback copy of original 10s clip is strictly forbidden"
+
+    # 2. Scene async execution failure must not mark scene SUCCESS or claim duration=8
+    job = _build_test_storyboard_job(mock_storyboard_files, model="kling-3.0-turbo")
+    scene_payload = {
+        "scene_id": 1,
+        "video_prompt": "Scene 1: Turbo close up",
+        "aspect_ratio": "9:16",
+        "target_duration_sec": 8.0,
+    }
+    from types import SimpleNamespace
+    scene_obj = SimpleNamespace(**scene_payload)
+    scene_obj._toan_aas_job = job
+    raw_path = str(mock_storyboard_files["tmp_path"] / "scene_async_fail.mp4")
+
+    def mock_run_provider(req, **kwargs):
+        Path(raw_path).write_bytes(b"\x00\x00\x00 ftypisom" + b"\x00" * 512)
+        return {
+            "ok": True,
+            "status": "SUCCESS",
+            "provider": "key4u_video",
+            "provider_task_ids": ["task_fail_closed_scene"],
+            "output_path": raw_path,
+            "model": "kling-3.0-turbo",
+            "duration": 10.0,
+            "result_url_present": True,
+        }
+
+    with patch("services.video_real_render_connector.run_provider_generation", side_effect=mock_run_provider), \
+         patch("services.video_real_render_connector.normalize_storyboard_provider_clip", side_effect=video_real_render_connector.RealVideoRenderError("storyboard_scene_duration_normalization_failed_no_charge")):
+        with pytest.raises(video_real_render_connector.RealVideoRenderError) as exc_info2:
+            asyncio.run(_render_scene_async(scene_obj, raw_path, ["key4u_video"]))
+
+        assert "storyboard_scene_duration_normalization_failed_no_charge" in str(exc_info2.value)
+
+
+def test_first_red_b_post_normalization_artifact_probing_10s_fails_closed(mock_storyboard_files):
+    """FIRST_RED_B: If normalizer leaves an artifact that still probes as ~10s, fail closed."""
+    source_10s = str(mock_storyboard_files["tmp_path"] / "source_probe_10s.mp4")
+    Path(source_10s).write_bytes(b"\x00\x00\x00 ftypisom" + b"\x00" * 512)
+    target_8s = str(mock_storyboard_files["tmp_path"] / "target_probe_10s.mp4")
+
+    # Normalizer runs but output artifact still probes as 10.0s (out of tolerance)
+    def mock_bypass_normalizer(src, dst, **kwargs):
+        Path(dst).write_bytes(b"\x00\x00\x00 ftypisom" + b"\x00" * 512)
+        return dst
+
+    # Source probes 10.0s, and target also probes 10.0s
+    with patch("services.video_final_output.probe_video", return_value={"ok": True, "has_video": True, "duration": 10.0, "bytes": 512}), \
+         patch("services.video_real_render_connector.normalize_scene_duration", side_effect=mock_bypass_normalizer):
+        with pytest.raises(video_real_render_connector.RealVideoRenderError) as exc_info:
+            normalize_storyboard_provider_clip(source_10s, target_8s, target_seconds=8.0)
+
+        err = exc_info.value
+        assert "storyboard_scene_duration_normalization_failed_no_charge" in str(err)
+        assert not os.path.exists(target_8s), "Out-of-tolerance artifact must be cleaned up on failure"
+
+
+def test_first_red_c_real_media_normalization_ffmpeg_ffprobe(tmp_path):
+    """FIRST_RED_C: Generate real 10s MP4 with ffmpeg, normalize to 8s, verify with real ffprobe."""
+    import subprocess
+    from services.video_final_output import probe_video
+
+    # Check ffmpeg availability
+    try:
+        ver = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True)
+        if ver.returncode != 0:
+            pytest.skip("ffmpeg not available in test environment")
+    except Exception:
+        pytest.skip("ffmpeg executable missing")
+
+    real_10s_src = str(tmp_path / "real_10s_input.mp4")
+    real_8s_dst = str(tmp_path / "real_8s_output.mp4")
+
+    # 1. Generate real 10s MP4 test pattern
+    gen_cmd = [
+        "ffmpeg", "-y",
+        "-f", "lavfi",
+        "-i", "testsrc=duration=10:size=720x1280:rate=25",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        real_10s_src,
+    ]
+    subprocess.run(gen_cmd, check=True, capture_output=True)
+
+    # 2. Probe real input with ffprobe
+    input_probe = probe_video(real_10s_src)
+    assert input_probe.get("ok") is True
+    assert input_probe.get("has_video") is True
+    input_duration = float(input_probe.get("duration") or 0.0)
+    assert 9.5 <= input_duration <= 10.5, f"Expected input ~10s, got {input_duration}"
+
+    # 3. Call ACTUAL normalization without mocking
+    result_path = normalize_storyboard_provider_clip(real_10s_src, real_8s_dst, target_seconds=8.0)
+    assert result_path == real_8s_dst
+    assert os.path.isfile(real_8s_dst)
+
+    # 4. Probe real output with ffprobe
+    output_probe = probe_video(real_8s_dst)
+    assert output_probe.get("ok") is True
+    assert output_probe.get("has_video") is True
+    output_duration = float(output_probe.get("duration") or 0.0)
+    assert 7.5 <= output_duration <= 8.5, f"Expected output ~8s, got {output_duration}"
+
+
+# ===========================================================================
+# BLOCKER 2 REMEDIATION: Cost Accounting Authority Tests
+# ===========================================================================
+
+def test_first_red_cost_authority_calculates_from_10s_provider_submit():
+    """COST_FIRST_RED & PASS_EVIDENCE:
+    Prove provider cost authority consumes submit duration 10s (20s total billable)
+    while public output remains 8s (16s total) and customer quote is unchanged.
+    """
+    from services import video_ai_real_pricing
+
+    # Canonical parameters:
+    # provider = key4u_video
+    # model = kling-3.0-turbo
+    # scene_count = 2
+    # public_scene_seconds = 8
+    # provider_submit_seconds = 10
+
+    cost_info = video_ai_real_pricing.calculate_product_video_provider_cost(
+        provider="key4u_video",
+        model="kling-3.0-turbo",
+        scene_count=2,
+        public_scene_seconds=8,
+        provider_submit_seconds=10,
+    )
+
+    # Required metrics
+    assert cost_info["provider_cost_authority_function"] == "services.video_ai_real_pricing.check_product_video_economics"
+    assert cost_info["public_scene_seconds"] == 8
+    assert cost_info["public_output_seconds_total"] == 16
+    assert cost_info["provider_billable_submit_seconds"] == 10
+    assert cost_info["provider_billable_seconds_total"] == 20
+
+    # Numeric assertions:
+    # Key4U Kling rate = 1.53001224 USD/s
+    # 20 billable seconds * 1.53001224 = 30.6002448 USD
+    expected_cost_usd = 30.6002448
+    assert abs(cost_info["expected_provider_cost_usd"] - expected_cost_usd) < 1e-6
+    assert abs(cost_info["computed_provider_cost_usd"] - expected_cost_usd) < 1e-6
+
+    # Verify check_product_video_economics directly
+    econ = video_ai_real_pricing.check_product_video_economics(
+        tier_id=400,
+        scene_count=2,
+        provider="key4u_video",
+        model="kling-3.0-turbo",
+        customer_quote_xu=668,
+        provider_submit_seconds=10,
+    )
+    assert econ["provider_billable_seconds_total"] == 20
+    assert econ["public_output_seconds_total"] == 16
+    assert abs(econ["computed_provider_cost_usd"] - expected_cost_usd) < 1e-6
+    assert abs(econ["expected_provider_cost_usd"] - expected_cost_usd) < 1e-6
+    # Verify customer wallet price is untouched (668 Xu)
+    assert econ["customer_quote_xu"] == 668
+    assert econ["customer_revenue_vnd"] == 66800
+
 
 def test_provider_cost_accounting_uses_submit_duration_10s(mock_storyboard_files, monkeypatch):
     """Cost accounting must base estimated provider cost on submit duration 10s, not public 8s."""
@@ -323,7 +512,8 @@ def test_provider_cost_accounting_uses_submit_duration_10s(mock_storyboard_files
         }
 
     with patch("services.video_real_render_connector.run_provider_generation", side_effect=mock_run_provider), \
-         patch("services.video_real_render_connector.normalize_storyboard_provider_clip", return_value=raw_path):
+         patch("services.video_real_render_connector.normalize_storyboard_provider_clip", return_value=raw_path), \
+         patch("services.video_final_output.probe_video", return_value={"ok": True, "has_video": True, "duration": 8.0, "bytes": 512}):
         asyncio.run(_render_scene_async(scene_obj, raw_path, ["key4u_video"]))
 
     assert len(captured_requests) == 1
@@ -332,3 +522,4 @@ def test_provider_cost_accounting_uses_submit_duration_10s(mock_storyboard_files
     assert meta.get("provider_billable_submit_seconds") == 10
     # Customer price remains unchanged
     assert meta.get("public_scene_target_seconds") == 8
+

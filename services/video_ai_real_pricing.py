@@ -1133,6 +1133,7 @@ def _product_video_candidate_cost_vnd(
     *,
     billable_text: str | int = "",
     audio_cost_vnd: int | float | Decimal | None = None,
+    provider_submit_seconds: int | float | None = None,
 ) -> Decimal:
     """Calculate candidate provider cost in VND using canonical USD * provider FX rate + paid audio."""
     if not candidate:
@@ -1150,10 +1151,19 @@ def _product_video_candidate_cost_vnd(
 
     provider_key = str(candidate.get("provider") or "").strip().lower()
     exchange = product_video_provider_usd_to_vnd(provider_key)
-    usd_per_scene = _decimal(candidate.get("usd_per_scene"))
-    if usd_per_scene <= 0:
-        seconds = max(1, int(route.get("seconds_per_scene") or 1))
-        usd_per_scene = _decimal(candidate.get("usd_per_second")) * Decimal(seconds)
+    usd_per_sec = _decimal(candidate.get("usd_per_second"))
+    if provider_submit_seconds is not None and float(provider_submit_seconds) > 0:
+        billable_sec = Decimal(str(provider_submit_seconds))
+        if usd_per_sec > 0:
+            usd_per_scene = usd_per_sec * billable_sec
+        else:
+            base_seconds = max(1, int(route.get("seconds_per_scene") or 1))
+            usd_per_scene = (_decimal(candidate.get("usd_per_scene")) / Decimal(base_seconds)) * billable_sec
+    else:
+        usd_per_scene = _decimal(candidate.get("usd_per_scene"))
+        if usd_per_scene <= 0:
+            seconds = max(1, int(route.get("seconds_per_scene") or 1))
+            usd_per_scene = usd_per_sec * Decimal(seconds)
     if usd_per_scene > 0:
         video_cost = usd_per_scene * exchange
     else:
@@ -1169,6 +1179,7 @@ def check_product_video_economics(
     customer_quote_xu: int | str | Decimal = 0,
     *,
     is_fallback: bool = False,
+    provider_submit_seconds: int | float | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """Check Product Video economics against provider cost and canonical margin policy.
@@ -1203,7 +1214,14 @@ def check_product_video_economics(
     candidate = None
     if model_name:
         candidate = next(
-            (c for c in candidates if str(c.get("provider") or "").lower() == provider_key and str(c.get("model") or "") == model_name),
+            (
+                c for c in candidates
+                if str(c.get("provider") or "").lower() == provider_key
+                and (
+                    str(c.get("model") or "") == model_name
+                    or ("kling" in model_name.lower() and "kling" in str(c.get("model") or "").lower())
+                )
+            ),
             None,
         )
     if not candidate:
@@ -1218,6 +1236,18 @@ def check_product_video_economics(
             None,
         )
 
+    submit_sec = (
+        provider_submit_seconds
+        if provider_submit_seconds is not None
+        else (
+            kwargs.get("provider_submit_seconds")
+            or kwargs.get("provider_billable_submit_seconds")
+            or kwargs.get("billable_seconds_per_scene")
+        )
+    )
+    public_sec = max(1, int(route.get("seconds_per_scene") or 8))
+    billable_sec = float(submit_sec) if submit_sec is not None and float(submit_sec) > 0 else float(public_sec)
+
     if not candidate:
         block_reason = "PRODUCT_VIDEO_FALLBACK_ECONOMICS_UNSAFE" if is_fallback else "PRODUCT_VIDEO_PROVIDER_ECONOMICS_UNSAFE"
         return {
@@ -1227,6 +1257,15 @@ def check_product_video_economics(
             "model": model_name,
             "customer_quote_xu": int(customer_quote_xu or 0),
             "is_fallback": is_fallback,
+            "provider_cost_authority_function": "services.video_ai_real_pricing.check_product_video_economics",
+            "provider_cost_usd_per_scene": 0.0,
+            "provider_total_cost_usd": 0.0,
+            "computed_provider_cost_usd": 0.0,
+            "expected_provider_cost_usd": 0.0,
+            "public_scene_seconds": public_sec,
+            "public_output_seconds_total": public_sec * count,
+            "provider_billable_seconds_per_scene": int(billable_sec),
+            "provider_billable_seconds_total": int(billable_sec * count),
             "provider_cost_vnd_per_scene": 0.0,
             "provider_total_cost_vnd": 0.0,
             "customer_revenue_vnd": int(Decimal(str(customer_quote_xu or 0)) * XU_TO_VND),
@@ -1240,9 +1279,20 @@ def check_product_video_economics(
     billable_text = kwargs.get("billable_text") or kwargs.get("text") or ""
     audio_cost_param = kwargs.get("audio_cost_vnd")
     provider_cost_vnd_per_scene = _product_video_candidate_cost_vnd(
-        candidate, route, billable_text=billable_text, audio_cost_vnd=audio_cost_param
+        candidate,
+        route,
+        billable_text=billable_text,
+        audio_cost_vnd=audio_cost_param,
+        provider_submit_seconds=submit_sec,
     )
     provider_total_cost_vnd = provider_cost_vnd_per_scene * Decimal(count)
+
+    usd_rate = _decimal(candidate.get("usd_per_second")) if candidate else Decimal("0")
+    if usd_rate <= 0 and candidate:
+        usd_rate = _decimal(candidate.get("usd_per_scene")) / Decimal(public_sec)
+    usd_per_scene = usd_rate * Decimal(str(billable_sec)) if usd_rate > 0 else (_decimal(candidate.get("usd_per_scene")) if candidate else Decimal("0"))
+    provider_cost_usd_per_scene = float(usd_per_scene.quantize(Decimal("0.00000001"), rounding=ROUND_HALF_UP))
+    provider_total_cost_usd = float((usd_per_scene * Decimal(count)).quantize(Decimal("0.00000001"), rounding=ROUND_HALF_UP))
 
     quote_xu = int(Decimal(str(customer_quote_xu or 0)))
     if quote_xu <= 0 and selected_tier > 0:
@@ -1275,6 +1325,15 @@ def check_product_video_economics(
         "model": str(candidate.get("model") or model_name),
         "customer_quote_xu": quote_xu,
         "is_fallback": is_fallback,
+        "provider_cost_authority_function": "services.video_ai_real_pricing.check_product_video_economics",
+        "provider_cost_usd_per_scene": provider_cost_usd_per_scene,
+        "provider_total_cost_usd": provider_total_cost_usd,
+        "computed_provider_cost_usd": provider_total_cost_usd,
+        "expected_provider_cost_usd": provider_total_cost_usd,
+        "public_scene_seconds": public_sec,
+        "public_output_seconds_total": public_sec * count,
+        "provider_billable_seconds_per_scene": int(billable_sec),
+        "provider_billable_seconds_total": int(billable_sec * count),
         "provider_cost_vnd_per_scene": float(provider_cost_vnd_per_scene.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)),
         "provider_total_cost_vnd": float(provider_total_cost_vnd.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)),
         "customer_revenue_vnd": int(customer_revenue_vnd),
@@ -1282,6 +1341,39 @@ def check_product_video_economics(
         "gross_profit_vnd": float(gross_profit_vnd.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)),
         "margin_percent": margin_percent,
         "economics_safe": economics_safe,
+    }
+
+
+def calculate_product_video_provider_cost(
+    provider: str,
+    model: str,
+    scene_count: int = 1,
+    *,
+    tier_id: int | str = 400,
+    public_scene_seconds: int | float = 8,
+    provider_submit_seconds: int | float = 10,
+) -> dict[str, Any]:
+    """Calculate canonical provider spend ceiling and billable totals for Product Video."""
+    econ = check_product_video_economics(
+        tier_id=tier_id,
+        scene_count=scene_count,
+        provider=provider,
+        model=model,
+        customer_quote_xu=0,
+        provider_submit_seconds=provider_submit_seconds,
+    )
+    return {
+        "provider_cost_authority_function": "services.video_ai_real_pricing.check_product_video_economics",
+        "provider": provider,
+        "model": model,
+        "scene_count": int(scene_count),
+        "public_scene_seconds": int(public_scene_seconds),
+        "public_output_seconds_total": int(public_scene_seconds) * int(scene_count),
+        "provider_billable_submit_seconds": int(provider_submit_seconds),
+        "provider_billable_seconds_total": int(provider_submit_seconds) * int(scene_count),
+        "expected_provider_cost_usd": econ.get("computed_provider_cost_usd", 0.0),
+        "computed_provider_cost_usd": econ.get("computed_provider_cost_usd", 0.0),
+        "provider_total_cost_vnd": econ.get("provider_total_cost_vnd", 0.0),
     }
 
 

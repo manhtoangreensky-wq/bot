@@ -3818,50 +3818,110 @@ def normalize_storyboard_provider_clip(
     target_seconds: float = 8.0,
     *,
     aspect_ratio: str = "9:16",
+    tolerance_seconds: float = PRODUCT_VIDEO_DURATION_TOLERANCE_SECONDS,
 ) -> str:
     """Deterministically trim provider clip (e.g. 10s) to canonical Storyboard scene duration (e.g. 8s)."""
     source = os.path.abspath(str(source_path or ""))
     target = os.path.abspath(str(target_path or ""))
     if not os.path.isfile(source) or os.path.getsize(source) <= 0:
-        raise RuntimeError("source_clip_missing_or_empty")
+        raise RealVideoRenderError(
+            "storyboard_scene_duration_normalization_failed_no_charge",
+            diagnostics={"reason": "source_clip_missing_or_empty", "source": source},
+        )
 
     is_same = (source == target)
     temp_target = target + ".normalized_trim.mp4" if is_same else target
     os.makedirs(os.path.dirname(temp_target), exist_ok=True)
 
-    try:
-        current_duration = probe_duration(source)
-    except Exception:
-        current_duration = 0.0
-
     target_sec = max(1.0, float(target_seconds or 8.0))
-    if current_duration > 0 and current_duration <= target_sec + 0.05:
+    tolerance = max(0.25, float(tolerance_seconds or PRODUCT_VIDEO_DURATION_TOLERANCE_SECONDS))
+
+    try:
+        source_probe = video_final_output.probe_video(source)
+    except Exception as exc:
+        raise RealVideoRenderError(
+            "storyboard_scene_duration_normalization_failed_no_charge",
+            diagnostics={"reason": "source_probe_failed", "error": str(exc)},
+        ) from exc
+
+    if not source_probe.get("ok") or not source_probe.get("has_video"):
+        raise RealVideoRenderError(
+            "storyboard_scene_duration_normalization_failed_no_charge",
+            diagnostics={"reason": "source_invalid_video", "probe": source_probe},
+        )
+
+    current_duration = float(source_probe.get("duration") or 0.0)
+    if current_duration > 0 and abs(current_duration - target_sec) <= tolerance and current_duration <= target_sec + 0.05:
         if not is_same:
             shutil.copyfile(source, target)
         return target
 
     try:
-        from services.multiscene_video_pipeline import normalize_scene_duration, _has_audio_stream
         normalize_scene_duration(
             source,
             temp_target,
             target_duration_sec=target_sec,
             allow_slowdown=False,
             frame_fit_mode="cover",
-            preserve_audio=_has_audio_stream(source) if os.path.isfile(source) else False,
+            preserve_audio=bool(source_probe.get("has_audio")),
         )
         if is_same:
-            shutil.move(temp_target, target)
-        return target
-    except Exception:
+            if os.path.isfile(temp_target):
+                shutil.move(temp_target, target)
+            else:
+                raise RealVideoRenderError(
+                    "storyboard_scene_duration_normalization_failed_no_charge",
+                    diagnostics={"reason": "temp_target_missing_after_normalization"},
+                )
+    except Exception as exc:
         if is_same and os.path.isfile(temp_target):
             try:
                 os.remove(temp_target)
             except OSError:
                 pass
-        if not is_same and not os.path.exists(target):
-            shutil.copyfile(source, target)
-        return target
+        if not is_same and os.path.isfile(target):
+            try:
+                os.remove(target)
+            except OSError:
+                pass
+        if isinstance(exc, RealVideoRenderError):
+            raise
+        raise RealVideoRenderError(
+            "storyboard_scene_duration_normalization_failed_no_charge",
+            diagnostics={"reason": "normalization_failed", "error": str(exc)},
+        ) from exc
+
+    # Post-normalization validation: probe output artifact
+    probe = video_final_output.probe_video(target)
+    if not probe.get("ok") or not probe.get("has_video") or int(probe.get("bytes") or 0) <= 0:
+        if not is_same and os.path.isfile(target):
+            try:
+                os.remove(target)
+            except OSError:
+                pass
+        raise RealVideoRenderError(
+            "storyboard_scene_duration_normalization_failed_no_charge",
+            diagnostics={"reason": "post_normalization_probe_failed", "probe": probe},
+        )
+
+    probed_duration = float(probe.get("duration") or 0.0)
+    if abs(probed_duration - target_sec) > tolerance:
+        if not is_same and os.path.isfile(target):
+            try:
+                os.remove(target)
+            except OSError:
+                pass
+        raise RealVideoRenderError(
+            "storyboard_scene_duration_normalization_failed_no_charge",
+            diagnostics={
+                "reason": "normalized_duration_out_of_tolerance",
+                "probed_duration": probed_duration,
+                "target_seconds": target_sec,
+                "tolerance": tolerance,
+            },
+        )
+
+    return target
 
 
 
@@ -6063,7 +6123,25 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             raw_path,
             target_seconds=float(scene_duration_seconds or 8.0),
         )
-        final_scene_duration = float(scene_duration_seconds or 8.0)
+        post_probe = video_final_output.probe_video(output_path)
+        if not post_probe.get("ok") or not post_probe.get("has_video"):
+            raise RealVideoRenderError(
+                "storyboard_scene_duration_normalization_failed_no_charge",
+                diagnostics={"reason": "post_normalization_probe_failed", "probe": post_probe},
+            )
+        probed_duration = float(post_probe.get("duration") or 0.0)
+        tolerance = PRODUCT_VIDEO_DURATION_TOLERANCE_SECONDS
+        if abs(probed_duration - float(scene_duration_seconds or 8.0)) > tolerance:
+            raise RealVideoRenderError(
+                "storyboard_scene_duration_normalization_failed_no_charge",
+                diagnostics={
+                    "reason": "normalized_duration_out_of_tolerance",
+                    "probed_duration": probed_duration,
+                    "target_seconds": float(scene_duration_seconds or 8.0),
+                    "tolerance": tolerance,
+                },
+            )
+        final_scene_duration = probed_duration
     else:
         if os.path.abspath(output_path) != os.path.abspath(raw_path):
             shutil.copyfile(output_path, raw_path)
