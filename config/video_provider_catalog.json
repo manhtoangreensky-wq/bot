@@ -116,8 +116,9 @@
           "quality": "fast",
           "cost_tier": "low",
           "capabilities": ["text_to_video", "image_to_video", "video_to_video", "scene_video", "short_video"],
-          "clip_seconds": 8,
-          "max_single_task_seconds": 8,
+          "clip_seconds": 10,
+          "max_single_task_seconds": 10,
+          "supported_durations": [5, 10],
           "supports_concat": true,
           "payload_adapter": "key4u_kling_small_clip"
         },

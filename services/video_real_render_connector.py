@@ -30,6 +30,7 @@ from services.multiscene_video_pipeline import (
     multiscene_manifest_scene_tasks,
     normalize_scene_duration,
     process_multiscene_video_pipeline,
+    probe_duration,
     safe_run_ffmpeg,
     sync_multiscene_manifest,
 )
@@ -3811,6 +3812,59 @@ def _resolve_storyboard_i2v_model(
     return candidate
 
 
+def normalize_storyboard_provider_clip(
+    source_path: str,
+    target_path: str,
+    target_seconds: float = 8.0,
+    *,
+    aspect_ratio: str = "9:16",
+) -> str:
+    """Deterministically trim provider clip (e.g. 10s) to canonical Storyboard scene duration (e.g. 8s)."""
+    source = os.path.abspath(str(source_path or ""))
+    target = os.path.abspath(str(target_path or ""))
+    if not os.path.isfile(source) or os.path.getsize(source) <= 0:
+        raise RuntimeError("source_clip_missing_or_empty")
+
+    is_same = (source == target)
+    temp_target = target + ".normalized_trim.mp4" if is_same else target
+    os.makedirs(os.path.dirname(temp_target), exist_ok=True)
+
+    try:
+        current_duration = probe_duration(source)
+    except Exception:
+        current_duration = 0.0
+
+    target_sec = max(1.0, float(target_seconds or 8.0))
+    if current_duration > 0 and current_duration <= target_sec + 0.05:
+        if not is_same:
+            shutil.copyfile(source, target)
+        return target
+
+    try:
+        from services.multiscene_video_pipeline import normalize_scene_duration, _has_audio_stream
+        normalize_scene_duration(
+            source,
+            temp_target,
+            target_duration_sec=target_sec,
+            allow_slowdown=False,
+            frame_fit_mode="cover",
+            preserve_audio=_has_audio_stream(source) if os.path.isfile(source) else False,
+        )
+        if is_same:
+            shutil.move(temp_target, target)
+        return target
+    except Exception:
+        if is_same and os.path.isfile(temp_target):
+            try:
+                os.remove(temp_target)
+            except OSError:
+                pass
+        if not is_same and not os.path.exists(target):
+            shutil.copyfile(source, target)
+        return target
+
+
+
 def _render_selfshot3_controlled_keyframe_image_to_video(
     *,
     job: dict[str, Any],
@@ -5707,6 +5761,9 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
                 "no_charge": True,
             },
         )
+    submit_duration_seconds = scene_duration_seconds
+    if is_storyboard and storyboard_model == "kling-3.0-turbo":
+        submit_duration_seconds = 10
     request = VideoGenerationRequest(
         job_id=request_job_id,
         product_type=product_type or "video_ai_prompt",
@@ -5727,7 +5784,7 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         image_paths=product_video_scene_image_paths(job, scene_index),
         source_video_path=str((job or {}).get("source_video_path") or ""),
         ratio=aspect_ratio,
-        duration_seconds=float(scene_duration_seconds if orchestration_mode == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S else (getattr(scene, "target_duration_sec", 6.0) or 6.0)),
+        duration_seconds=float(submit_duration_seconds if (is_storyboard and storyboard_model == "kling-3.0-turbo") else (scene_duration_seconds if orchestration_mode == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S else (getattr(scene, "target_duration_sec", 6.0) or 6.0))),
         quality=str((job or {}).get("quality") or ""),
         style=str((job or {}).get("style") or ""),
         add_ons=_addon_plan(job),
@@ -5736,6 +5793,9 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "scene_index": scene_index,
             "scene_count": _scene_count(job),
             "scene_duration_seconds": scene_duration_seconds,
+            "public_scene_target_seconds": scene_duration_seconds,
+            "provider_submit_duration_seconds": submit_duration_seconds,
+            "provider_billable_submit_seconds": submit_duration_seconds,
             "clip_index": scene_index,
             "clip_count": _scene_count(job),
             "clip_duration_seconds": scene_duration_seconds,
@@ -5997,9 +6057,18 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
     output_path = str(result.get("output_path") or result.get("local_path") or "")
     if not output_path:
         raise RealVideoRenderError("provider_result_missing", diagnostics=result)
-    if os.path.abspath(output_path) != os.path.abspath(raw_path):
-        shutil.copyfile(output_path, raw_path)
-        output_path = raw_path
+    if is_storyboard and storyboard_model == "kling-3.0-turbo":
+        output_path = normalize_storyboard_provider_clip(
+            output_path,
+            raw_path,
+            target_seconds=float(scene_duration_seconds or 8.0),
+        )
+        final_scene_duration = float(scene_duration_seconds or 8.0)
+    else:
+        if os.path.abspath(output_path) != os.path.abspath(raw_path):
+            shutil.copyfile(output_path, raw_path)
+            output_path = raw_path
+        final_scene_duration = result.get("duration") or result.get("output_duration") or 0
     scene_result = dict(result)
     scene_result.update(
         {
@@ -6009,9 +6078,14 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "video_id": str((result.get("provider_video_ids") or [""])[0] or ""),
             "status": "SUCCESS",
             "output_path": ensure_video_output(output_path),
+            "clip_path": ensure_video_output(output_path),
             "model": str(result.get("model") or ""),
             "mode": str(result.get("mode") or ""),
-            "duration": result.get("duration") or result.get("output_duration") or 0,
+            "duration": final_scene_duration,
+            "normalized_scene_duration": final_scene_duration,
+            "public_scene_target_seconds": scene_duration_seconds,
+            "provider_submit_duration_seconds": submit_duration_seconds,
+            "provider_billable_submit_seconds": submit_duration_seconds,
             "download_url_present": bool(result.get("result_url_present")),
             "artifact_hash": str(result.get("artifact_hash") or ""),
         }

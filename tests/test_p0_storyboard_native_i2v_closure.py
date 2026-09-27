@@ -1061,13 +1061,15 @@ def test_storyboard_kling_3_turbo_wire_payload_construction(sample_panels):
         prompt="Astronaut cat in crystal cave",
         image_paths=[panel1],
         ratio="9:16",
-        duration_seconds=8.0,
+        duration_seconds=10.0,
         required_capability="image_to_video",
         metadata={
             "selected_family": "kling",
             "selected_model": "kling-3.0-turbo",
             "pinned_wire_model": "kling-3.0-turbo",
             "required_capability": "image_to_video",
+            "provider_submit_duration_seconds": 10,
+            "public_scene_target_seconds": 8,
         },
     )
     env = {
@@ -1080,7 +1082,7 @@ def test_storyboard_kling_3_turbo_wire_payload_construction(sample_panels):
         built_payload, submit_url="https://api.key4u.shop/api/v1/kling/image2video"
     )
     assert wire_payload["model_name"] == "kling-3.0-turbo"
-    assert wire_payload["duration"] == 8
+    assert wire_payload["duration"] == 10
     assert wire_payload["aspect_ratio"] == "9:16"
 
 
@@ -1266,5 +1268,6 @@ def test_storyboard_kling_3_turbo_proven_expansion_e2e(tmp_path, sample_panels, 
             built_payload, submit_url="https://api.key4u.shop/api/v1/kling/image2video"
         )
         assert wire_payload["model_name"] == "kling-3.0-turbo"
+        assert wire_payload["duration"] == 10
 
 
