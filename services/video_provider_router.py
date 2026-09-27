@@ -5641,7 +5641,26 @@ def _run_provider_generation_impl(
                 },
             )
         else:
-            if is_product_video:
+            has_explicit_economics_context = bool(
+                metadata.get("tier_id") is not None
+                or metadata.get("quality_tier") is not None
+                or metadata.get("quality_tier_id") is not None
+                or metadata.get("quality") is not None
+                or metadata.get("customer_quote_xu") is not None
+                or metadata.get("persisted_quoted_price_xu") is not None
+                or metadata.get("user_visible_price_xu") is not None
+                or metadata.get("quote_xu") is not None
+                or (request.metadata or {}).get("tier_id") is not None
+                or (request.metadata or {}).get("quality_tier") is not None
+                or (request.metadata or {}).get("quality_tier_id") is not None
+                or (request.metadata or {}).get("quality") is not None
+                or (request.metadata or {}).get("customer_quote_xu") is not None
+                or (request.metadata or {}).get("persisted_quoted_price_xu") is not None
+                or (request.metadata or {}).get("user_visible_price_xu") is not None
+                or (request.metadata or {}).get("quote_xu") is not None
+                or is_product_video
+            )
+            if is_product_video or (is_storyboard and has_explicit_economics_context):
                 tier_id_val = (
                     metadata.get("tier_id")
                     or metadata.get("quality_tier")
@@ -5651,6 +5670,7 @@ def _run_provider_generation_impl(
                     or (request.metadata or {}).get("quality_tier_id")
                     or (request.metadata or {}).get("quality")
                     or metadata.get("quality")
+                    or (400 if is_storyboard else None)
                 )
                 tier_id_int = 0
                 if tier_id_val is not None:
@@ -5675,7 +5695,9 @@ def _run_provider_generation_impl(
                         or metadata.get("clip_count")
                         or (request.metadata or {}).get("scene_count")
                         or (request.metadata or {}).get("clip_count")
-                        or 1
+                        or (len(request.storyboard) if request.storyboard else None)
+                        or (len(request.scenes) if request.scenes else None)
+                        or (2 if is_storyboard else 1)
                     )
                     quote_xu_val = (
                         metadata.get("customer_quote_xu")
@@ -5692,9 +5714,23 @@ def _run_provider_generation_impl(
                     )
                     model_candidate = (
                         selected_model_for_provider(provider_metadata, current_adapter.provider_name)
+                        or (provider_metadata.get("storyboard_model") if is_storyboard else "")
+                        or (metadata.get("storyboard_model") if is_storyboard else "")
+                        or (provider_metadata.get("selected_model") if is_storyboard else "")
+                        or (metadata.get("selected_model") if is_storyboard else "")
+                        or (provider_metadata.get("model") if is_storyboard else "")
+                        or (metadata.get("model") if is_storyboard else "")
                         or getattr(current_adapter, "model", "")
                         or getattr(current_adapter, "provider_payload_model", "")
                         or ""
+                    )
+                    provider_submit_sec = (
+                        metadata.get("provider_billable_submit_seconds")
+                        or metadata.get("provider_submit_duration_seconds")
+                        or (request.metadata or {}).get("provider_billable_submit_seconds")
+                        or (request.metadata or {}).get("provider_submit_duration_seconds")
+                        or (10 if (is_storyboard and current_adapter.provider_name == "key4u_video" and str(model_candidate).strip() == "kling-3.0-turbo") else None)
+                        or (float(request.duration_seconds) if (request.duration_seconds and float(request.duration_seconds) > 0 and (is_storyboard or str(model_candidate).strip() == "kling-3.0-turbo")) else None)
                     )
                     econ_check = video_ai_real_pricing.check_product_video_economics(
                         tier_id=tier_id_int,
@@ -5703,6 +5739,20 @@ def _run_provider_generation_impl(
                         model=model_candidate,
                         customer_quote_xu=quote_xu_val,
                         is_fallback=(attempt_index > 0),
+                        provider_submit_seconds=provider_submit_sec,
+                    )
+                    _mark_trace(
+                        "economics_check",
+                        tier_id=tier_id_int,
+                        scene_count=scene_count_val,
+                        provider=current_adapter.provider_name,
+                        model=model_candidate,
+                        provider_submit_seconds=provider_submit_sec,
+                        public_output_seconds_total=econ_check.get("public_output_seconds_total"),
+                        provider_billable_seconds_total=econ_check.get("provider_billable_seconds_total"),
+                        expected_provider_cost_usd=econ_check.get("expected_provider_cost_usd"),
+                        computed_provider_cost_usd=econ_check.get("computed_provider_cost_usd"),
+                        economics_safe=econ_check.get("economics_safe"),
                     )
                     if not econ_check.get("economics_safe"):
                         blocker = str(

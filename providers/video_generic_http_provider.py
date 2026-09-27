@@ -164,6 +164,7 @@ class VideoProviderContractError(ValueError):
     def __init__(self, blocker: str, *, stage: str = "payload_build", message: str = "", debug: dict[str, Any] | None = None):
         super().__init__(message or blocker)
         self.blocker = blocker
+        self.code = blocker
         self.stage = stage
         self.debug = dict(debug or {})
 
@@ -506,9 +507,8 @@ def _apply_selected_request_defaults(
     """Apply the immutable tier variant and reject silent duration downgrades."""
 
     defaults = _selected_request_defaults(request, provider_name)
-    if not defaults:
-        return data
-    expected_duration = defaults.get("duration")
+    req_meta = request.metadata if isinstance(request.metadata, dict) else {}
+    expected_duration = req_meta.get("provider_submit_duration_seconds") or defaults.get("duration")
     if expected_duration not in (None, ""):
         try:
             expected = max(1, int(round(float(expected_duration))))
@@ -811,7 +811,7 @@ def build_key4u_video_payload(request: VideoGenerationRequest, env: dict[str, st
 
 KLING_MODEL_SUPPORTED_I2V_DURATIONS: dict[str, set[int]] = {
     "kling-v3": {5, 8, 10},
-    "kling-3.0-turbo": {5, 8, 10},
+    "kling-3.0-turbo": {5, 10},
     "kling-v2-6": {5, 10},
     "kling-v2-5-turbo": {5, 10},
     "kling-v2-5-pro": {5, 10},

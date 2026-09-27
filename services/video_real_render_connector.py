@@ -30,6 +30,7 @@ from services.multiscene_video_pipeline import (
     multiscene_manifest_scene_tasks,
     normalize_scene_duration,
     process_multiscene_video_pipeline,
+    probe_duration,
     safe_run_ffmpeg,
     sync_multiscene_manifest,
 )
@@ -3811,6 +3812,119 @@ def _resolve_storyboard_i2v_model(
     return candidate
 
 
+def normalize_storyboard_provider_clip(
+    source_path: str,
+    target_path: str,
+    target_seconds: float = 8.0,
+    *,
+    aspect_ratio: str = "9:16",
+    tolerance_seconds: float = PRODUCT_VIDEO_DURATION_TOLERANCE_SECONDS,
+) -> str:
+    """Deterministically trim provider clip (e.g. 10s) to canonical Storyboard scene duration (e.g. 8s)."""
+    source = os.path.abspath(str(source_path or ""))
+    target = os.path.abspath(str(target_path or ""))
+    if not os.path.isfile(source) or os.path.getsize(source) <= 0:
+        raise RealVideoRenderError(
+            "storyboard_scene_duration_normalization_failed_no_charge",
+            diagnostics={"reason": "source_clip_missing_or_empty", "source": source},
+        )
+
+    is_same = (source == target)
+    temp_target = target + ".normalized_trim.mp4" if is_same else target
+    os.makedirs(os.path.dirname(temp_target), exist_ok=True)
+
+    target_sec = max(1.0, float(target_seconds or 8.0))
+    tolerance = max(0.25, float(tolerance_seconds or PRODUCT_VIDEO_DURATION_TOLERANCE_SECONDS))
+
+    try:
+        source_probe = video_final_output.probe_video(source)
+    except Exception as exc:
+        raise RealVideoRenderError(
+            "storyboard_scene_duration_normalization_failed_no_charge",
+            diagnostics={"reason": "source_probe_failed", "error": str(exc)},
+        ) from exc
+
+    if not source_probe.get("ok") or not source_probe.get("has_video"):
+        raise RealVideoRenderError(
+            "storyboard_scene_duration_normalization_failed_no_charge",
+            diagnostics={"reason": "source_invalid_video", "probe": source_probe},
+        )
+
+    current_duration = float(source_probe.get("duration") or 0.0)
+    if current_duration > 0 and abs(current_duration - target_sec) <= tolerance and current_duration <= target_sec + 0.05:
+        if not is_same:
+            shutil.copyfile(source, target)
+        return target
+
+    try:
+        normalize_scene_duration(
+            source,
+            temp_target,
+            target_duration_sec=target_sec,
+            allow_slowdown=False,
+            frame_fit_mode="cover",
+            preserve_audio=bool(source_probe.get("has_audio")),
+        )
+        if is_same:
+            if os.path.isfile(temp_target):
+                shutil.move(temp_target, target)
+            else:
+                raise RealVideoRenderError(
+                    "storyboard_scene_duration_normalization_failed_no_charge",
+                    diagnostics={"reason": "temp_target_missing_after_normalization"},
+                )
+    except Exception as exc:
+        if is_same and os.path.isfile(temp_target):
+            try:
+                os.remove(temp_target)
+            except OSError:
+                pass
+        if not is_same and os.path.isfile(target):
+            try:
+                os.remove(target)
+            except OSError:
+                pass
+        if isinstance(exc, RealVideoRenderError):
+            raise
+        raise RealVideoRenderError(
+            "storyboard_scene_duration_normalization_failed_no_charge",
+            diagnostics={"reason": "normalization_failed", "error": str(exc)},
+        ) from exc
+
+    # Post-normalization validation: probe output artifact
+    probe = video_final_output.probe_video(target)
+    if not probe.get("ok") or not probe.get("has_video") or int(probe.get("bytes") or 0) <= 0:
+        if not is_same and os.path.isfile(target):
+            try:
+                os.remove(target)
+            except OSError:
+                pass
+        raise RealVideoRenderError(
+            "storyboard_scene_duration_normalization_failed_no_charge",
+            diagnostics={"reason": "post_normalization_probe_failed", "probe": probe},
+        )
+
+    probed_duration = float(probe.get("duration") or 0.0)
+    if abs(probed_duration - target_sec) > tolerance:
+        if not is_same and os.path.isfile(target):
+            try:
+                os.remove(target)
+            except OSError:
+                pass
+        raise RealVideoRenderError(
+            "storyboard_scene_duration_normalization_failed_no_charge",
+            diagnostics={
+                "reason": "normalized_duration_out_of_tolerance",
+                "probed_duration": probed_duration,
+                "target_seconds": target_sec,
+                "tolerance": tolerance,
+            },
+        )
+
+    return target
+
+
+
 def _render_selfshot3_controlled_keyframe_image_to_video(
     *,
     job: dict[str, Any],
@@ -5707,6 +5821,9 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
                 "no_charge": True,
             },
         )
+    submit_duration_seconds = scene_duration_seconds
+    if is_storyboard and storyboard_model == "kling-3.0-turbo":
+        submit_duration_seconds = 10
     request = VideoGenerationRequest(
         job_id=request_job_id,
         product_type=product_type or "video_ai_prompt",
@@ -5727,7 +5844,7 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         image_paths=product_video_scene_image_paths(job, scene_index),
         source_video_path=str((job or {}).get("source_video_path") or ""),
         ratio=aspect_ratio,
-        duration_seconds=float(scene_duration_seconds if orchestration_mode == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S else (getattr(scene, "target_duration_sec", 6.0) or 6.0)),
+        duration_seconds=float(submit_duration_seconds if (is_storyboard and storyboard_model == "kling-3.0-turbo") else (scene_duration_seconds if orchestration_mode == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S else (getattr(scene, "target_duration_sec", 6.0) or 6.0))),
         quality=str((job or {}).get("quality") or ""),
         style=str((job or {}).get("style") or ""),
         add_ons=_addon_plan(job),
@@ -5736,6 +5853,9 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "scene_index": scene_index,
             "scene_count": _scene_count(job),
             "scene_duration_seconds": scene_duration_seconds,
+            "public_scene_target_seconds": scene_duration_seconds,
+            "provider_submit_duration_seconds": submit_duration_seconds,
+            "provider_billable_submit_seconds": submit_duration_seconds,
             "clip_index": scene_index,
             "clip_count": _scene_count(job),
             "clip_duration_seconds": scene_duration_seconds,
@@ -5997,9 +6117,36 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
     output_path = str(result.get("output_path") or result.get("local_path") or "")
     if not output_path:
         raise RealVideoRenderError("provider_result_missing", diagnostics=result)
-    if os.path.abspath(output_path) != os.path.abspath(raw_path):
-        shutil.copyfile(output_path, raw_path)
-        output_path = raw_path
+    if is_storyboard and storyboard_model == "kling-3.0-turbo":
+        output_path = normalize_storyboard_provider_clip(
+            output_path,
+            raw_path,
+            target_seconds=float(scene_duration_seconds or 8.0),
+        )
+        post_probe = video_final_output.probe_video(output_path)
+        if not post_probe.get("ok") or not post_probe.get("has_video"):
+            raise RealVideoRenderError(
+                "storyboard_scene_duration_normalization_failed_no_charge",
+                diagnostics={"reason": "post_normalization_probe_failed", "probe": post_probe},
+            )
+        probed_duration = float(post_probe.get("duration") or 0.0)
+        tolerance = PRODUCT_VIDEO_DURATION_TOLERANCE_SECONDS
+        if abs(probed_duration - float(scene_duration_seconds or 8.0)) > tolerance:
+            raise RealVideoRenderError(
+                "storyboard_scene_duration_normalization_failed_no_charge",
+                diagnostics={
+                    "reason": "normalized_duration_out_of_tolerance",
+                    "probed_duration": probed_duration,
+                    "target_seconds": float(scene_duration_seconds or 8.0),
+                    "tolerance": tolerance,
+                },
+            )
+        final_scene_duration = probed_duration
+    else:
+        if os.path.abspath(output_path) != os.path.abspath(raw_path):
+            shutil.copyfile(output_path, raw_path)
+            output_path = raw_path
+        final_scene_duration = result.get("duration") or result.get("output_duration") or 0
     scene_result = dict(result)
     scene_result.update(
         {
@@ -6009,9 +6156,14 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "video_id": str((result.get("provider_video_ids") or [""])[0] or ""),
             "status": "SUCCESS",
             "output_path": ensure_video_output(output_path),
+            "clip_path": ensure_video_output(output_path),
             "model": str(result.get("model") or ""),
             "mode": str(result.get("mode") or ""),
-            "duration": result.get("duration") or result.get("output_duration") or 0,
+            "duration": final_scene_duration,
+            "normalized_scene_duration": final_scene_duration,
+            "public_scene_target_seconds": scene_duration_seconds,
+            "provider_submit_duration_seconds": submit_duration_seconds,
+            "provider_billable_submit_seconds": submit_duration_seconds,
             "download_url_present": bool(result.get("result_url_present")),
             "artifact_hash": str(result.get("artifact_hash") or ""),
         }
