@@ -177,6 +177,51 @@ def test_admin_provider_worker_page_warns_about_cost():
     assert "Smoke test có thể tốn provider cost" in bot.admin_module_page_text("provider_worker")
 
 
+def test_admin_provider_worker_action_labels_open_provider_guide(monkeypatch):
+    buttons = [
+        button
+        for row in bot.admin_module_keyboard("provider_worker").inline_keyboard
+        for button in row
+    ]
+    routes = {button.text: button.callback_data for button in buttons}
+    guide_labels = [
+        "📘 Hướng dẫn: TTS/Voice test",
+        "📘 Hướng dẫn: ASR/Sub/Dub test",
+        "📘 Hướng dẫn: Remote Worker Status",
+        "📘 Hướng dẫn: Test worker API",
+        "📘 Hướng dẫn: Remote Worker Canary",
+        "📘 Hướng dẫn: Canary status",
+    ]
+    old_action_labels = [
+        "🔊 TTS/Voice test",
+        "📝 ASR/Sub/Dub test",
+        "🤖 Remote Worker Status",
+        "🧪 Test worker API",
+        "🧪 Remote Worker Canary",
+        "🔄 Canary status",
+    ]
+
+    assert {label: routes.get(label) for label in guide_labels} == {
+        label: "admin_help|provider" for label in guide_labels
+    }
+    assert set(old_action_labels).isdisjoint(routes)
+    assert routes["🎬 Video job"] == "menu|admin_provider_routes"
+    assert routes["📘 Hướng dẫn VPS"] == "admin_help|provider"
+
+    monkeypatch.setattr(bot, "ADMIN_IDS", {"999"})
+    monkeypatch.setattr(bot, "OWNER_IDS", set())
+    query = FakeQuery(999, "admin_help|provider")
+    asyncio.run(
+        bot.handle_admin_help_callback(
+            SimpleNamespace(callback_query=query),
+            SimpleNamespace(),
+        )
+    )
+
+    assert query.edits
+    assert "Smoke test thật có thể tốn cost" in query.edits[-1][0]
+
+
 def test_admin_finance_page_has_all_quick_buttons():
     labels = [label for row in _labels(bot.admin_module_keyboard("finance")) for label in row]
 
