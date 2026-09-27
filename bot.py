@@ -230191,7 +230191,7 @@ def system_help_text(kind: str) -> str:
     pages = {
         "runtime": (
             "🧬 <b>Runtime</b>\n\n"
-            "Dùng <code>/runtime</code> để kiểm tra build, commit, Railway runtime và startup warning. "
+            "Dùng <code>/runtime</code> để kiểm tra build, commit, trạng thái runtime và cảnh báo lúc khởi động. "
             "Trang menu này chỉ hướng dẫn, không gọi healthcheck ngoài."
         ),
         "data_status": (
