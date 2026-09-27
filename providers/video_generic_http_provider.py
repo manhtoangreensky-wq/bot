@@ -1126,16 +1126,44 @@ def _shopaikey_wire_payload(
     ).strip().lower().replace("-", "_")
 
     metadata = dict(data.get("metadata") or {})
-    family = str(
+    exact_model = str(
+        data.get("model")
+        or metadata.get("selected_model")
+        or metadata.get("model")
+        or ""
+    ).strip()
+
+    model_cfg = provider_model_config("shopaikey_video", exact_model) if exact_model else None
+    if exact_model and not model_cfg:
+        raise VideoProviderContractError(
+            MODEL_UNKNOWN,
+            stage="wire_payload_build",
+            debug={"provider": "shopaikey_video", "model": exact_model, "blocker": MODEL_UNKNOWN, "no_charge": True},
+        )
+
+    catalog_family = str(model_cfg.get("family") or "").strip().lower() if model_cfg else ""
+    metadata_family = str(
         metadata.get("selected_family")
         or metadata.get("model_family")
         or ""
     ).strip().lower()
-    model_name = str(data.get("model") or "").strip().lower()
-    if not family and "veo" in model_name:
-        family = "google_veo"
 
-    is_veo = family == "google_veo" or "veo" in model_name
+    if metadata_family and catalog_family and metadata_family != catalog_family:
+        raise VideoProviderContractError(
+            "provider_model_family_mismatch_no_charge",
+            stage="wire_payload_build",
+            debug={
+                "provider": "shopaikey_video",
+                "model": exact_model,
+                "metadata_family": metadata_family,
+                "catalog_family": catalog_family,
+                "blocker": "provider_model_family_mismatch_no_charge",
+                "no_charge": True,
+            },
+        )
+
+    family = catalog_family or metadata_family
+    is_veo = (family == "google_veo")
     is_i2v = req_cap in ("image_to_video", "controlled_keyframe_image_to_video")
 
     if is_i2v and not image_src:
@@ -1169,7 +1197,19 @@ def _shopaikey_wire_payload(
                     stage="wire_payload_build",
                     debug={"provider": "shopaikey_video", "blocker": "provider_image_input_missing_no_charge", "no_charge": True},
                 )
-            if image_val.startswith(("https://", "http://")):
+            if "://" in image_val:
+                from services.provider_reference_transport import validate_external_reference_url
+                valid_url, url_err = validate_external_reference_url(image_val)
+                if not valid_url:
+                    raise VideoProviderContractError(
+                        url_err,
+                        stage="wire_payload_build",
+                        debug={
+                            "provider": "shopaikey_video",
+                            "blocker": url_err,
+                            "no_charge": True,
+                        },
+                    )
                 reference_url = image_val
             else:
                 from services.provider_reference_transport import prepare_provider_image_reference
@@ -1197,6 +1237,9 @@ def _shopaikey_wire_payload(
                     ) from exc
 
             metadata["images"] = [reference_url]
+            metadata["provider_reference_present"] = True
+            metadata["provider_reference_count"] = 1
+            metadata["provider_reference_host"] = urllib.parse.urlsplit(reference_url).netloc
             data["metadata"] = metadata
             data.pop("image", None)
         else:

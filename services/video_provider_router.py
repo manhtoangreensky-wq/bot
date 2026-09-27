@@ -6210,6 +6210,11 @@ def _run_provider_generation_impl(
                     payload["provider_attempts"] = _copy_attempt_traces()
                     return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
                 if poll_result.status in {"failed", "cancelled"}:
+                    try:
+                        from services.provider_reference_transport import cleanup_provider_image_references_for_job
+                        cleanup_provider_image_references_for_job(str(request.job_id or submit.provider_task_id or ""), env=env)
+                    except Exception:
+                        pass
                     terminal_result_url = str(poll_result.result_url or poll_result.file_url or "").strip()
                     result_diagnostic = _failed_result_url_diagnostic(terminal_result_url)
                     blocker = (
@@ -6686,6 +6691,11 @@ def _run_provider_generation_impl(
             "artifact_hash": artifact.artifact_hash,
             "provider_readiness": status,
         }
+        try:
+            from services.provider_reference_transport import cleanup_provider_image_references_for_job
+            cleanup_provider_image_references_for_job(str(request.job_id or submit.provider_task_id or ""), env=env)
+        except Exception:
+            pass
         return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
     return {
         "ok": False,
@@ -6721,4 +6731,39 @@ def run_provider_generation(
         owner_auth["consumed"] = True
         res["owner_acceptance_consumed"] = True
     return res
+
+
+def render_video_payload(
+    request: VideoGenerationRequest,
+    *,
+    output_dir: str = "",
+    env: dict[str, str] | None = None,
+    environ: dict[str, str] | None = None,
+    sleep_func=time.sleep,
+    allow_pending_result: bool | None = None,
+    max_poll_seconds: int | None = None,
+    poll_interval_seconds: int | None = None,
+    poll_existing_task: bool = False,
+    existing_task_id: str = "",
+    **kwargs: Any,
+) -> dict[str, Any]:
+    active_env = dict(env if env is not None else (environ or os.environ))
+    if max_poll_seconds is not None:
+        active_env["VIDEO_PROVIDER_MAX_POLL_SECONDS"] = str(max_poll_seconds)
+    if poll_interval_seconds is not None:
+        active_env["VIDEO_PROVIDER_POLL_INTERVAL_SECONDS"] = str(poll_interval_seconds)
+    out = output_dir or tempfile.mkdtemp(prefix="video_render_")
+    if existing_task_id:
+        request_metadata = dict(request.metadata or {})
+        request_metadata["provider_pending_task_id"] = existing_task_id
+        request_metadata["provider_task_id"] = existing_task_id
+        request.metadata = request_metadata
+    return run_provider_generation(
+        request,
+        output_dir=out,
+        environ=active_env,
+        sleep_func=sleep_func,
+        allow_pending_result=allow_pending_result,
+        **kwargs,
+    )
 

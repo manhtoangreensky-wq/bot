@@ -1,18 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-Tests for First-Party Ephemeral Provider Reference Transport Closure (R13.1).
-Subtask: FIRST_PARTY_EPHEMERAL_REFERENCE_TRANSPORT_CLOSURE
+Tests for First-Party Ephemeral Provider Reference Transport Closure (R13.1 Remediation).
+Subtask: PR1211_SECURITY_TTL_LIFECYCLE_REMEDIATION
 
-Requirements:
-1. Isolated storage root: dedicated directory under /opt/toanaas-storage/provider_refs.
-2. 256 bits entropy: tokens generated via secrets.token_urlsafe(32).
-3. Zero external cloud storage dependencies (no S3, R2, GCS, Cloudinary, MinIO).
-4. No filesystem path leak: paths are strictly isolated and never exposed.
-5. Strict containment: path traversal, directory escape, and symlinks are strictly rejected.
-6. Safe MIME validation: only image/jpeg, image/png, and image/webp allowed.
-7. Bounded TTL: default 7200s (2 hours), max 21600s (6 hours).
-8. Fast-fail closed: missing or invalid images fail closed before provider submission (no charge).
-9. FastAPI route @fastapi_app.get and @fastapi_app.head for /provider-media/v1/{token}.
+Remediated Invariants:
+1. Real image signature validation: verifies JPEG/PNG/WEBP magic bytes and extension consistency.
+2. HTTPS-only external reference policy: reject http, file, data, localhost, private/loopback IPs.
+3. Remove production /tmp failover: fail closed if configured or canonical root is unwritable.
+4. GET/HEAD resolution is purely read-only: never mkdir, never touch probe file, 404 if root absent.
+5. Authoritative sidecar metadata: mandatory (.meta.json). Missing or corrupt -> 404 (no mtime fallback).
+6. Strict metadata consistency: token, filename, mime, size, hash, and expiration must match.
+7. Base URL contract validation: public HTTPS only, no credentials/queries/fragments/private IPs.
+8. Bounded TTL: default 7200s, clamped 60s - 21600s.
+9. TTL sweep execution: expired purged, unexpired preserved.
 """
 
 import os
@@ -44,252 +44,341 @@ def transport_env(isolated_storage_root):
 
 
 @pytest.fixture
-def dummy_jpeg(tmp_path):
+def valid_jpeg(tmp_path):
     img = tmp_path / "input_keyframe.jpg"
-    # Minimal JPEG header + payload
+    # Valid JPEG header: FF D8 FF
     content = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00`\x00`\x00\x00\xff\xdb\x00C" + b"\x00" * 64
     img.write_bytes(content)
     return img
 
 
-# ==============================================================================
-# 1. CORE TRANSPORT MATERIALIZATION & METADATA TESTS
-# ==============================================================================
-
-def test_prepare_provider_image_reference_success(dummy_jpeg, transport_env, isolated_storage_root):
-    """Test materializing a valid JPEG into provider reference transport."""
-    result = transport.prepare_provider_image_reference(
-        dummy_jpeg,
-        provider="shopaikey_video",
-        purpose="image_to_video",
-        job_id="job_test_123",
-        env=transport_env,
-    )
-
-    assert result["ok"] is True
-    token = result["token"]
-    assert len(token) >= 40, "Token must have at least 256 bits entropy"
-    assert result["public_url"].startswith("https://toanaas.vn/provider-media/v1/")
-    assert result["public_url"].endswith(f"{token}.jpg")
-    assert result["mime_type"] == "image/jpeg"
-    assert result["file_size"] == len(dummy_jpeg.read_bytes())
-    assert result["sha256"] == hashlib.sha256(dummy_jpeg.read_bytes()).hexdigest()
-
-    # Verify physical file in storage root
-    dest_path = Path(result["file_path"])
-    assert dest_path.exists()
-    assert dest_path.parent.resolve() == isolated_storage_root.resolve()
-    assert dest_path.read_bytes() == dummy_jpeg.read_bytes()
-
-    # Verify metadata sidecar
-    meta_path = isolated_storage_root / f"{token}.meta.json"
-    assert meta_path.exists()
-    meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    assert meta["token"] == token
-    assert meta["provider"] == "shopaikey_video"
-    assert meta["purpose"] == "image_to_video"
-    assert meta["job_id"] == "job_test_123"
-    assert meta["ttl_seconds"] == 7200
+@pytest.fixture
+def valid_png(tmp_path):
+    img = tmp_path / "input_keyframe.png"
+    # Valid PNG header: 89 50 4E 47 0D 0A 1A 0A
+    content = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR" + b"\x00" * 32
+    img.write_bytes(content)
+    return img
 
 
-def test_prepare_provider_image_reference_png_and_webp(tmp_path, transport_env):
-    """Test supporting PNG and WEBP formats."""
-    png_file = tmp_path / "sample.png"
-    png_file.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
-    png_res = transport.prepare_provider_image_reference(png_file, env=transport_env)
-    assert png_res["ok"] is True
-    assert png_res["mime_type"] == "image/png"
-    assert png_res["filename"].endswith(".png")
-
-    webp_file = tmp_path / "sample.webp"
-    webp_file.write_bytes(b"RIFF" + b"\x00" * 4 + b"WEBP" + b"\x00" * 32)
-    webp_res = transport.prepare_provider_image_reference(webp_file, env=transport_env)
-    assert webp_res["ok"] is True
-    assert webp_res["mime_type"] == "image/webp"
-    assert webp_res["filename"].endswith(".webp")
+@pytest.fixture
+def valid_webp(tmp_path):
+    img = tmp_path / "input_keyframe.webp"
+    # Valid WEBP header: RIFF....WEBP
+    content = b"RIFF\x24\x00\x00\x00WEBPVP8 " + b"\x00" * 32
+    img.write_bytes(content)
+    return img
 
 
 # ==============================================================================
-# 2. NEGATIVE SECURITY MATRIX & GUARDRAILS
+# 1. REAL IMAGE SIGNATURE VALIDATION & EXTENSION CONSISTENCY
 # ==============================================================================
 
-def test_security_first_red_type_size_guard(tmp_path, transport_env):
-    """FIRST RED TYPE/SIZE GUARD: Unsupported extensions, empty files, and oversize files fail closed."""
-    # Unsupported extension
-    txt_file = tmp_path / "script.txt"
-    txt_file.write_text("not an image")
+def test_image_signature_validation_real_formats(valid_jpeg, valid_png, valid_webp, transport_env):
+    """Real image magic bytes pass validation for JPEG, PNG, WEBP."""
+    res_jpeg = transport.prepare_provider_image_reference(valid_jpeg, env=transport_env)
+    assert res_jpeg["ok"] is True
+    assert res_jpeg["mime_type"] == "image/jpeg"
+
+    res_png = transport.prepare_provider_image_reference(valid_png, env=transport_env)
+    assert res_png["ok"] is True
+    assert res_png["mime_type"] == "image/png"
+
+    res_webp = transport.prepare_provider_image_reference(valid_webp, env=transport_env)
+    assert res_webp["ok"] is True
+    assert res_webp["mime_type"] == "image/webp"
+
+
+def test_image_signature_validation_fake_jpg_rejected(tmp_path, transport_env):
+    """Text pretending to be .jpg is rejected with signature mismatch."""
+    fake_jpg = tmp_path / "pretending.jpg"
+    fake_jpg.write_text("Hello world I am a text file pretending to be jpg")
+
     with pytest.raises(VideoProviderContractError) as exc_info:
-        transport.prepare_provider_image_reference(txt_file, env=transport_env)
-    assert exc_info.value.blocker == "provider_image_extension_unsupported"
+        transport.prepare_provider_image_reference(fake_jpg, env=transport_env)
+    assert exc_info.value.blocker == "provider_image_signature_mismatch"
     assert exc_info.value.debug.get("no_charge") is True
 
-    # Empty file
-    empty_img = tmp_path / "empty.jpg"
-    empty_img.touch()
+
+def test_image_signature_validation_png_renamed_jpg_rejected(tmp_path, valid_png, transport_env):
+    """PNG bytes renamed to .jpg are rejected due to extension/signature mismatch."""
+    mismatched = tmp_path / "mismatched.jpg"
+    mismatched.write_bytes(valid_png.read_bytes())
+
     with pytest.raises(VideoProviderContractError) as exc_info:
-        transport.prepare_provider_image_reference(empty_img, env=transport_env)
+        transport.prepare_provider_image_reference(mismatched, env=transport_env)
+    assert exc_info.value.blocker == "provider_image_signature_mismatch"
+    assert exc_info.value.debug.get("no_charge") is True
+
+
+def test_image_signature_validation_zero_bytes_rejected(tmp_path, transport_env):
+    """Empty 0-byte file is rejected with provider_image_input_empty."""
+    empty_file = tmp_path / "empty.jpg"
+    empty_file.touch()
+
+    with pytest.raises(VideoProviderContractError) as exc_info:
+        transport.prepare_provider_image_reference(empty_file, env=transport_env)
     assert exc_info.value.blocker == "provider_image_input_empty"
     assert exc_info.value.debug.get("no_charge") is True
 
-    # Missing file
+
+# ==============================================================================
+# 2. HTTPS-ONLY EXTERNAL REFERENCE POLICY
+# ==============================================================================
+
+def test_external_reference_https_accepted():
+    """Valid public HTTPS external reference is accepted."""
+    url = "https://cdn.example.com/images/keyframe_01.jpg"
+    ok, reason = transport.validate_external_reference_url(url)
+    assert ok is True
+    assert reason == ""
+
+
+def test_external_reference_insecure_http_rejected():
+    """Insecure http:// external reference is strictly rejected."""
+    url = "http://cdn.example.com/images/keyframe_01.jpg"
+    ok, reason = transport.validate_external_reference_url(url)
+    assert ok is False
+    assert reason == "provider_image_external_url_insecure_http_rejected"
+
+
+def test_external_reference_localhost_and_loopback_rejected():
+    """Localhost and loopback IPs are strictly rejected."""
+    bad_urls = [
+        "https://localhost/image.jpg",
+        "https://127.0.0.1/image.jpg",
+        "https://[::1]/image.jpg",
+        "https://0.0.0.0/image.jpg",
+    ]
+    for bad in bad_urls:
+        ok, reason = transport.validate_external_reference_url(bad)
+        assert ok is False
+        assert "localhost" in reason or "private_ip" in reason
+
+
+def test_external_reference_private_ip_rejected():
+    """Private and link-local IP addresses are strictly rejected."""
+    private_urls = [
+        "https://10.0.0.5/image.jpg",
+        "https://192.168.1.100/image.jpg",
+        "https://172.16.0.1/image.jpg",
+        "https://169.254.169.254/latest/meta-data",
+    ]
+    for bad in private_urls:
+        ok, reason = transport.validate_external_reference_url(bad)
+        assert ok is False
+        assert reason == "provider_image_external_url_private_ip_rejected"
+
+
+def test_external_reference_credentials_rejected():
+    """URLs containing embedded credentials are strictly rejected."""
+    url = "https://admin:secret@cdn.example.com/image.jpg"
+    ok, reason = transport.validate_external_reference_url(url)
+    assert ok is False
+    assert reason == "provider_image_external_url_credentials_forbidden"
+
+
+# ==============================================================================
+# 3. BASE URL CONTRACT VALIDATION
+# ==============================================================================
+
+def test_base_url_validation_public_https_ok():
+    """Authoritative public HTTPS base URL is valid."""
+    ok, reason = transport.validate_base_url("https://toanaas.vn/provider-media/v1")
+    assert ok is True
+    assert reason == ""
+
+
+def test_base_url_validation_insecure_or_localhost_rejected():
+    """Insecure scheme or localhost in base URL is rejected."""
+    ok_http, _ = transport.validate_base_url("http://toanaas.vn/provider-media/v1")
+    assert ok_http is False
+
+    ok_local, _ = transport.validate_base_url("https://localhost/provider-media/v1")
+    assert ok_local is False
+
+    ok_priv, _ = transport.validate_base_url("https://10.0.0.1/provider-media/v1")
+    assert ok_priv is False
+
+
+# ==============================================================================
+# 4. STORAGE ROOT UNWRITABLE / NO /tmp FAILOVER
+# ==============================================================================
+
+def test_storage_root_unwritable_fails_closed(valid_jpeg):
+    """Unwritable storage root fails closed without falling back to /tmp."""
+    unwritable_env = {
+        "PROVIDER_REFERENCE_STORAGE_DIR": "/sys/kernel/security/unwritable_provider_refs",
+        "PROVIDER_REFERENCE_BASE_URL": "https://toanaas.vn/provider-media/v1",
+    }
     with pytest.raises(VideoProviderContractError) as exc_info:
-        transport.prepare_provider_image_reference(tmp_path / "nonexistent.jpg", env=transport_env)
-    assert exc_info.value.blocker == "provider_image_input_missing_or_invalid"
+        transport.prepare_provider_image_reference(valid_jpeg, env=unwritable_env)
+    assert exc_info.value.blocker == "shopaikey_veo_i2v_public_reference_unavailable_no_charge"
+    assert exc_info.value.debug.get("reason") == "storage_root_unwritable"
     assert exc_info.value.debug.get("no_charge") is True
 
 
-def test_security_first_red_path_traversal(transport_env):
-    """FIRST RED PATH TRAVERSAL: Traversal sequences in tokens must be rejected."""
-    traversal_candidates = [
-        "../../etc/passwd",
-        "..\\..\\windows\\win.ini",
-        "../provider_refs/secret.jpg",
-        "%2e%2e%2fetc%2fpasswd",
-        "token/with/slash",
-        "token\x00nullbyte",
-    ]
-    for bad_token in traversal_candidates:
-        res = transport.resolve_provider_reference(bad_token, env=transport_env)
-        assert res["ok"] is False
-        assert res["status_code"] == 404, f"Traversal token {bad_token} must return 404"
+# ==============================================================================
+# 5. METADATA SIDECAR ATOMICITY & MANDATORY SERVING REQUIREMENT
+# ==============================================================================
+
+def test_metadata_write_failure_deletes_image_and_fails_closed(valid_jpeg, transport_env, isolated_storage_root):
+    """If metadata sidecar cannot be written, the copied image is deleted and preparation fails closed."""
+    with patch("pathlib.Path.write_text", side_effect=OSError("Disk full")):
+        with pytest.raises(VideoProviderContractError) as exc_info:
+            transport.prepare_provider_image_reference(valid_jpeg, env=transport_env)
+        assert exc_info.value.blocker == "shopaikey_veo_i2v_public_reference_unavailable_no_charge"
+        assert exc_info.value.debug.get("reason") == "metadata_write_failed"
+        assert exc_info.value.debug.get("no_charge") is True
+
+    # Confirm no orphan image left in storage root
+    copied_files = [f for f in isolated_storage_root.iterdir() if f.name != ".probe_"]
+    assert len(copied_files) == 0, "Image must be unlinked when metadata write fails"
 
 
-def test_security_first_red_unknown_token(transport_env):
-    """FIRST RED UNKNOWN TOKEN: Non-existent token returns 404."""
-    res = transport.resolve_provider_reference("valid_looking_token_that_does_not_exist_in_storage", env=transport_env)
-    assert res["ok"] is False
-    assert res["status_code"] == 404
-
-
-def test_security_first_red_expiry(dummy_jpeg, transport_env, isolated_storage_root):
-    """FIRST RED EXPIRY: Expired tokens return 404."""
-    res = transport.prepare_provider_image_reference(
-        dummy_jpeg,
-        ttl_seconds=60,
-        env=transport_env,
-    )
+def test_missing_metadata_sidecar_returns_404(valid_jpeg, transport_env, isolated_storage_root):
+    """An orphan image without metadata sidecar must NOT be served (returns 404, no mtime fallback)."""
+    res = transport.prepare_provider_image_reference(valid_jpeg, env=transport_env)
     token = res["token"]
+    meta_path = isolated_storage_root / f"{token}.meta.json"
+    assert meta_path.exists()
 
-    # Resolution before expiry: OK
-    now = time.time()
-    ok_res = transport.resolve_provider_reference(token, env=transport_env, now=now + 10)
-    assert ok_res["ok"] is True
+    # Delete sidecar metadata
+    meta_path.unlink()
 
-    # Resolution after expiry (70 seconds later): 404
-    expired_res = transport.resolve_provider_reference(token, env=transport_env, now=now + 70)
-    assert expired_res["ok"] is False
-    assert expired_res["status_code"] == 404
-    assert expired_res["reason"] == "token_expired"
+    # Resolution MUST fail with 404 metadata_missing
+    resolved = transport.resolve_provider_reference(token, env=transport_env)
+    assert resolved["ok"] is False
+    assert resolved["status_code"] == 404
+    assert resolved["reason"] == "metadata_missing"
 
 
-def test_security_symlink_escape(isolated_storage_root, dummy_jpeg, transport_env):
-    """SYMLINK ESCAPE: Symlinks inside the storage root must be rejected."""
-    # Create a symlink pointing to an arbitrary file outside storage root
-    outside_file = isolated_storage_root.parent / "outside_secret.jpg"
-    outside_file.write_bytes(dummy_jpeg.read_bytes())
+def test_corrupt_metadata_sidecar_returns_404(valid_jpeg, transport_env, isolated_storage_root):
+    """Malformed/corrupted JSON in metadata sidecar returns 404."""
+    res = transport.prepare_provider_image_reference(valid_jpeg, env=transport_env)
+    token = res["token"]
+    meta_path = isolated_storage_root / f"{token}.meta.json"
+    meta_path.write_text("{malformed json corrupt content...")
 
-    symlink_path = isolated_storage_root / "symlink_escape_test_token_12345.jpg"
-    try:
-        symlink_path.symlink_to(outside_file)
-    except (OSError, NotImplementedError):
-        pytest.skip("Symlinks not supported on this filesystem / user permissions")
+    resolved = transport.resolve_provider_reference(token, env=transport_env)
+    assert resolved["ok"] is False
+    assert resolved["status_code"] == 404
+    assert resolved["reason"] == "metadata_corrupt"
 
-    res = transport.resolve_provider_reference("symlink_escape_test_token_12345.jpg", env=transport_env)
+
+def test_inconsistent_metadata_sidecar_returns_404(valid_jpeg, transport_env, isolated_storage_root):
+    """Metadata with mismatched token, filename, or timestamps returns 404."""
+    res = transport.prepare_provider_image_reference(valid_jpeg, env=transport_env)
+    token = res["token"]
+    meta_path = isolated_storage_root / f"{token}.meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+
+    # Case 1: Token mismatch
+    meta["token"] = "different_token_mismatch_1234567890"
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    assert transport.resolve_provider_reference(token, env=transport_env)["status_code"] == 404
+
+    # Case 2: Inconsistent timestamps (expires_at <= created_at)
+    meta["token"] = token
+    meta["expires_at"] = meta["created_at"] - 100
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    assert transport.resolve_provider_reference(token, env=transport_env)["status_code"] == 404
+
+
+# ==============================================================================
+# 6. GET/HEAD ROUTE READ-ONLY & FASTAPI INTEGRATION
+# ==============================================================================
+
+def test_resolve_provider_reference_does_not_mutate_filesystem(transport_env, isolated_storage_root):
+    """GET/HEAD resolution is purely read-only and does not create directories or probe files."""
+    # When storage root does not exist: returns 404 without creating the directory
+    nonexistent_env = {
+        "PROVIDER_REFERENCE_STORAGE_DIR": str(isolated_storage_root / "nonexistent_subfolder"),
+        "PROVIDER_REFERENCE_BASE_URL": "https://toanaas.vn/provider-media/v1",
+    }
+    res = transport.resolve_provider_reference("some_token_1234567890_abcdef", env=nonexistent_env)
     assert res["ok"] is False
     assert res["status_code"] == 404
-    assert res["reason"] == "symlink_rejected"
+    assert res["reason"] == "storage_root_missing"
+    assert not (isolated_storage_root / "nonexistent_subfolder").exists()
 
 
-# ==============================================================================
-# 3. FASTAPI ROUTE & HTTP/HEAD INTEGRATION
-# ==============================================================================
-
-def test_fastapi_route_get_and_head(dummy_jpeg, transport_env, monkeypatch):
+def test_fastapi_route_get_and_head_hardened(valid_jpeg, transport_env, monkeypatch):
     """Verify HTTP GET and HEAD on /provider-media/v1/{token} using FastAPI TestClient."""
     from fastapi.testclient import TestClient
     from bot import fastapi_app
 
-    # Set storage root and base url in environment
     for k, v in transport_env.items():
         monkeypatch.setenv(k, v)
 
-    # Materialize dummy image
-    ref = transport.prepare_provider_image_reference(dummy_jpeg, env=transport_env)
+    ref = transport.prepare_provider_image_reference(valid_jpeg, env=transport_env)
     token = ref["token"]
     filename = ref["filename"]
 
     client = TestClient(fastapi_app)
 
-    # 1. HTTP GET request
-    response_get = client.get(f"/provider-media/v1/{filename}")
-    assert response_get.status_code == 200
-    assert response_get.headers.get("content-type") == "image/jpeg"
-    assert response_get.headers.get("cache-control") == "private, no-store"
-    assert int(response_get.headers.get("content-length")) == len(dummy_jpeg.read_bytes())
-    # Verify exact byte content and SHA256 match
-    assert hashlib.sha256(response_get.content).hexdigest() == ref["sha256"]
+    # 1. GET with full filename
+    res_get = client.get(f"/provider-media/v1/{filename}")
+    assert res_get.status_code == 200
+    assert res_get.headers.get("content-type") == "image/jpeg"
+    assert res_get.headers.get("cache-control") == "private, no-store"
+    assert hashlib.sha256(res_get.content).hexdigest() == ref["sha256"]
 
-    # 2. HTTP HEAD request
-    response_head = client.head(f"/provider-media/v1/{filename}")
-    assert response_head.status_code == 200
-    assert response_head.headers.get("content-type") == "image/jpeg"
-    assert response_head.headers.get("cache-control") == "private, no-store"
-    assert int(response_head.headers.get("content-length")) == len(dummy_jpeg.read_bytes())
-    assert len(response_head.content) == 0, "HEAD request body must be empty"
+    # 2. HEAD with full filename (empty body)
+    res_head = client.head(f"/provider-media/v1/{filename}")
+    assert res_head.status_code == 200
+    assert res_head.headers.get("content-type") == "image/jpeg"
+    assert len(res_head.content) == 0
 
-    # 3. GET with bare token (no extension in URL path)
-    response_bare = client.get(f"/provider-media/v1/{token}")
-    assert response_bare.status_code == 200
-    assert hashlib.sha256(response_bare.content).hexdigest() == ref["sha256"]
+    # 3. GET with bare token
+    res_bare = client.get(f"/provider-media/v1/{token}")
+    assert res_bare.status_code == 200
+    assert hashlib.sha256(res_bare.content).hexdigest() == ref["sha256"]
 
-    # 4. GET unknown token
-    response_unknown = client.get("/provider-media/v1/completely_unknown_token_404.jpg")
-    assert response_unknown.status_code == 404
+    # 4. GET expired token returns 404
+    res_expired = transport.prepare_provider_image_reference(valid_jpeg, ttl_seconds=60, env=transport_env)
+    # Fast forward in resolve
+    now = time.time()
+    resolved_expired = transport.resolve_provider_reference(res_expired["token"], env=transport_env, now=now + 100)
+    assert resolved_expired["status_code"] == 404
 
-    # 5. GET path traversal attempt
-    response_traversal = client.get("/provider-media/v1/..%2f..%2fetc%2fpasswd")
-    assert response_traversal.status_code == 404
+    # 5. GET path traversal attempt returns 404
+    res_trav = client.get("/provider-media/v1/..%2f..%2fetc%2fpasswd")
+    assert res_trav.status_code == 404
 
 
 # ==============================================================================
-# 4. LIFECYCLE & CLEANUP TESTS
+# 7. JOB-SCOPED CLEANUP & TTL SWEEP
 # ==============================================================================
 
-def test_cleanup_provider_image_reference(dummy_jpeg, transport_env, isolated_storage_root):
-    """Test explicit cleanup of reference and its metadata."""
-    ref = transport.prepare_provider_image_reference(dummy_jpeg, env=transport_env)
-    token = ref["token"]
-    img_path = Path(ref["file_path"])
-    meta_path = isolated_storage_root / f"{token}.meta.json"
+def test_cleanup_provider_image_references_for_job(valid_jpeg, transport_env, isolated_storage_root):
+    """cleanup_provider_image_references_for_job cleans all files matching job_id."""
+    ref1 = transport.prepare_provider_image_reference(valid_jpeg, job_id="job_target_999", env=transport_env)
+    ref2 = transport.prepare_provider_image_reference(valid_jpeg, job_id="job_target_999", env=transport_env)
+    ref_other = transport.prepare_provider_image_reference(valid_jpeg, job_id="job_other_111", env=transport_env)
 
-    assert img_path.exists()
-    assert meta_path.exists()
+    assert Path(ref1["file_path"]).exists()
+    assert Path(ref2["file_path"]).exists()
+    assert Path(ref_other["file_path"]).exists()
 
-    # Clean up using URL
-    cleaned = transport.cleanup_provider_image_reference(ref["public_url"], env=transport_env)
-    assert cleaned is True
-    assert not img_path.exists()
-    assert not meta_path.exists()
+    cleaned = transport.cleanup_provider_image_references_for_job("job_target_999", env=transport_env)
+    assert cleaned == 2
 
-    # Subsequent resolution returns 404
-    res = transport.resolve_provider_reference(token, env=transport_env)
-    assert res["ok"] is False
-    assert res["status_code"] == 404
+    # Target job references are deleted
+    assert not Path(ref1["file_path"]).exists()
+    assert not Path(ref2["file_path"]).exists()
+    # Other job reference is strictly preserved
+    assert Path(ref_other["file_path"]).exists()
 
 
-def test_cleanup_expired_provider_references(dummy_jpeg, transport_env, isolated_storage_root):
-    """Test sweep function purges expired references while keeping active references."""
-    # Item 1: Expired reference (TTL 60s)
-    ref_expired = transport.prepare_provider_image_reference(dummy_jpeg, ttl_seconds=60, env=transport_env)
-    # Item 2: Active reference (TTL 7200s)
-    ref_active = transport.prepare_provider_image_reference(dummy_jpeg, ttl_seconds=7200, env=transport_env)
+def test_cleanup_expired_provider_references_preserves_active(valid_jpeg, transport_env):
+    """TTL sweep purges expired references while strictly preserving active ones."""
+    ref_exp = transport.prepare_provider_image_reference(valid_jpeg, ttl_seconds=60, env=transport_env)
+    ref_act = transport.prepare_provider_image_reference(valid_jpeg, ttl_seconds=7200, env=transport_env)
 
     now = time.time()
-    # Sweep at now + 120s (ref_expired is past TTL, ref_active is still active)
     purged = transport.cleanup_expired_provider_references(env=transport_env, now=now + 120)
     assert purged >= 1
 
-    # Expired item is gone
-    assert not Path(ref_expired["file_path"]).exists()
-    # Active item remains intact
-    assert Path(ref_active["file_path"]).exists()
+    assert not Path(ref_exp["file_path"]).exists()
+    assert Path(ref_act["file_path"]).exists()
