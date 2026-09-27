@@ -239403,15 +239403,18 @@ def resolve_subdub_asr_plan(
 
         ready = True
         blocker = ""
+        blocker_class = ""
         detail = "ok"
 
         if not deepgram_ready:
             ready = False
             blocker = AUTO_CAST_UNAVAILABLE
+            blocker_class = "ASR_CONFIG_MISSING"
             detail = "deepgram_asr_not_configured"
         elif require_final_confirmation and not is_confirmed:
             ready = False
             blocker = AUTO_CAST_UNAVAILABLE
+            blocker_class = "FINAL_CONFIRMATION_MISSING"
             detail = "subdub_final_confirmation_required"
 
         return {
@@ -239424,6 +239427,7 @@ def resolve_subdub_asr_plan(
             "require_final_confirmation": require_final_confirmation,
             "ready": ready,
             "blocker": blocker,
+            "blocker_class": blocker_class,
             "detail": detail,
         }
 
@@ -239446,6 +239450,7 @@ def resolve_subdub_asr_plan(
         "require_final_confirmation": False,
         "ready": configured,
         "blocker": "" if configured else "ASR_ADAPTER_UNAVAILABLE",
+        "blocker_class": "" if configured else "ASR_CONFIG_MISSING",
         "detail": "ok" if configured else "asr_adapter_unconfigured",
     }
 
@@ -239454,7 +239459,75 @@ def video_dubbing_asr_missing_for_state(mode: str, state: dict | None = None, pu
     if not video_dubbing_mode_needs_asr_provider(mode, state):
         return False
     plan = resolve_subdub_asr_plan(state=state, mode=mode, public=public)
-    return not bool(plan.get("ready"))
+    # Invariant §11: Do NOT call confirmation failure "ASR missing"
+    return plan.get("blocker_class") == "ASR_CONFIG_MISSING"
+
+
+def subdub_admission_preflight(
+    state: dict | None = None,
+    mode: str | None = None,
+    public: bool = True,
+    *,
+    confirmation: bool | None = None,
+) -> dict:
+    plan = resolve_subdub_asr_plan(state=state, mode=mode, confirmation=confirmation, public=public)
+    ready = bool(plan.get("ready"))
+    detail = str(plan.get("detail") or "ok")
+    blocker_class = str(plan.get("blocker_class") or "")
+    if not ready:
+        return {
+            "admitted": False,
+            "ready": False,
+            "blocker_class": blocker_class,
+            "detail": detail,
+            "job_inserted": False,
+            "asr_plan_snapshot": {},
+        }
+    snapshot = {
+        "subdub_asr_route_id": str(plan.get("route_id") or ""),
+        "subdub_asr_provider": str(plan.get("provider") or ""),
+        "subdub_asr_require_word_timeline": bool(plan.get("require_word_timeline")),
+        "subdub_asr_require_provider_speaker_labels": bool(plan.get("require_provider_speaker_labels")),
+        "subdub_local_acoustic_diarization_allowed": bool(plan.get("allow_local_acoustic_diarization")),
+        "subdub_asr_plan_version": "r8_1",
+        "subdub_engine_requested": str(plan.get("engine_requested") or ""),
+        "auto_smart_multivoice_opt_in": bool((state or {}).get("auto_smart_multivoice_opt_in")),
+        "subdub_final_confirmed": True,
+        "subdub_engine_selected": "",
+        "asr_route_called": False,
+    }
+    return {
+        "admitted": True,
+        "ready": True,
+        "blocker_class": "",
+        "detail": "ok",
+        "job_inserted": True,
+        "asr_plan_snapshot": snapshot,
+    }
+
+
+def resolve_subdub_execution_asr_kwargs(state: dict | None = None) -> dict:
+    st = dict(state or {})
+    if "subdub_asr_require_word_timeline" in st:
+        require_word_timeline = bool(st.get("subdub_asr_require_word_timeline"))
+        require_provider_speaker_labels = bool(st.get("subdub_asr_require_provider_speaker_labels"))
+        kwargs = {}
+        if require_word_timeline:
+            kwargs["require_auto_multi_word_timeline"] = True
+        if require_provider_speaker_labels:
+            kwargs["require_diarization"] = True
+        else:
+            kwargs["require_diarization"] = False
+        return kwargs
+    plan = resolve_subdub_asr_plan(state=st)
+    require_word_timeline = bool(plan.get("require_word_timeline"))
+    require_provider_speaker_labels = bool(plan.get("require_provider_speaker_labels"))
+    kwargs = {}
+    if require_word_timeline:
+        kwargs["require_auto_multi_word_timeline"] = True
+    if require_provider_speaker_labels:
+        kwargs["require_diarization"] = True
+    return kwargs
 
 def video_dubbing_guard_text(mode: str, state: dict | None = None, lang: str = "vi", admin: bool = False) -> str:
     mode = normalize_video_translate_mode(mode)
@@ -243201,7 +243274,7 @@ def subtitle_dub_debug_job_payload(
         "duration_seconds": int(input_save.get("duration") or _safe_int(state.get("video_duration") or state.get("source_duration"), 0)),
         "extracted_audio_path": str(artifacts.get("audio") or ""),
         "extracted_audio_exists": bool(artifacts.get("audio") and os.path.exists(str(artifacts.get("audio")))),
-        "asr_route_called": bool(attempts.get("asr") or route.get("asr")),
+        "asr_route_called": bool(state.get("asr_route_called") if state.get("asr_route_called") is not None else (attempts.get("asr") or route.get("asr"))),
         "transcript_length": int(attempts.get("transcript_length") or 0),
         "original_srt_path": str((artifacts.get("subtitles") or [""])[0] if isinstance(artifacts.get("subtitles"), list) and artifacts.get("subtitles") else ""),
         "translated_srt_path": str((artifacts.get("translated_subtitles") or [""])[0] if isinstance(artifacts.get("translated_subtitles"), list) and artifacts.get("translated_subtitles") else ""),
@@ -243319,14 +243392,14 @@ def subtitle_dub_debug_job_payload(
         "detail": str(detail or state.get("detail") or ""),
         "error_detail": str(detail or state.get("error_detail") or state.get("detail") or ""),
         "subdub_engine_requested": str(state.get("subdub_engine_requested") or asr_plan.get("engine_requested") or ""),
-        "subdub_engine_selected": str(state.get("subdub_engine_selected") or state.get("engine_selected") or asr_plan.get("engine_requested") or ""),
+        "subdub_engine_selected": str(state.get("subdub_engine_selected") or state.get("engine_selected") or ""),
         "auto_smart_multivoice_opt_in": bool(state.get("auto_smart_multivoice_opt_in")),
         "subdub_final_confirmed": bool(state.get("subdub_final_confirmed") or state.get("confirmed_product")),
         "subdub_asr_route_id": str(state.get("subdub_asr_route_id") or asr_plan.get("route_id") or ""),
         "subdub_asr_provider": str(state.get("subdub_asr_provider") or asr_plan.get("provider") or ""),
-        "subdub_asr_require_word_timeline": bool(asr_plan.get("require_word_timeline")),
-        "subdub_asr_require_provider_speaker_labels": bool(asr_plan.get("require_provider_speaker_labels")),
-        "subdub_local_acoustic_diarization_allowed": bool(asr_plan.get("allow_local_acoustic_diarization")),
+        "subdub_asr_require_word_timeline": bool(state.get("subdub_asr_require_word_timeline") if state.get("subdub_asr_require_word_timeline") is not None else asr_plan.get("require_word_timeline")),
+        "subdub_asr_require_provider_speaker_labels": bool(state.get("subdub_asr_require_provider_speaker_labels") if state.get("subdub_asr_require_provider_speaker_labels") is not None else asr_plan.get("require_provider_speaker_labels")),
+        "subdub_local_acoustic_diarization_allowed": bool(state.get("subdub_local_acoustic_diarization_allowed") if state.get("subdub_local_acoustic_diarization_allowed") is not None else asr_plan.get("allow_local_acoustic_diarization")),
         "public_safe_error": public_safe_error,
         "pipeline_blocker": blocker,
         "provider_route": route,
@@ -248985,11 +249058,17 @@ async def video_dubbing_prepare_subtitles(
                         if workspace
                         else ""
                     )
+                if require_auto_cast:
+                    exec_asr_kwargs = resolve_subdub_execution_asr_kwargs(state)
+                    for k, v in exec_asr_kwargs.items():
+                        if k in resolve_parameters:
+                            resolve_kwargs[k] = v
                 if require_auto_cast and "require_diarization" in resolve_parameters:
-                    if exact_acoustic_multi:
-                        resolve_kwargs.pop("require_diarization", None)
-                    else:
-                        resolve_kwargs["require_diarization"] = True
+                    if "require_diarization" not in resolve_kwargs:
+                        if exact_acoustic_multi:
+                            resolve_kwargs.pop("require_diarization", None)
+                        else:
+                            resolve_kwargs["require_diarization"] = True
                 if exact_acoustic_multi and "require_auto_multi_word_timeline" in resolve_parameters:
                     resolve_kwargs["require_auto_multi_word_timeline"] = True
                     resolve_kwargs.pop("require_diarization", None)
@@ -249011,6 +249090,7 @@ async def video_dubbing_prepare_subtitles(
                     )
             except Exception:
                 pass
+            state["asr_route_called"] = True
             source_info = await video_dubbing_resolve_source_script(
                 source_bytes,
                 content_type,
@@ -249064,7 +249144,8 @@ async def video_dubbing_prepare_subtitles(
         if fresh_auto_asr and (exact_acoustic_multi or smart_multi_acoustic):
             word_timeline = list(source_info.get("word_timeline") or [])
             if not word_timeline:
-                raise subdub_speaker_cast.AutoCastUnavailable()
+                asr_prov = str(source_info.get("asr_provider") or "deepgram")
+                raise subdub_speaker_cast.AutoCastUnavailable(detail=f"{asr_prov}_word_timeline_missing")
             acoustic_prepared = {
                 "state": dict(state),
                 "source_bytes": bytes(source_bytes),

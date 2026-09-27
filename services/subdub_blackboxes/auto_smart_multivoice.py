@@ -2764,6 +2764,8 @@ async def run_auto_smart_multivoice_blackbox(
             "auto_speaker_lane": auto_multi_speaker.AUTO_MULTI_SPEAKER_LANE,
             "auto_multi_engine": "v2",
             "auto_smart_multivoice_opt_in": True,
+            "subdub_engine_selected": "auto_multi_speaker_v2",
+            "auto_smart_dispatch": "n3_plus_proven_v2",
         }
 
         async def reuse_prepared(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
