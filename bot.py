@@ -274552,6 +274552,27 @@ async def status_page():
         "landing": "/",
     }
 
+
+# ─── FIRST-PARTY PROVIDER EPHEMERAL REFERENCE TRANSPORT ───────────────────────
+@fastapi_app.get("/provider-media/v1/{token}")
+@fastapi_app.head("/provider-media/v1/{token}")
+async def serve_provider_media(token: str):
+    from services.provider_reference_transport import resolve_provider_reference
+    resolved = resolve_provider_reference(token)
+    if not resolved.get("ok"):
+        raise HTTPException(status_code=404, detail="Resource not found")
+    file_path = str(resolved["path"])
+    mime_type = str(resolved.get("mime_type") or "application/octet-stream")
+    file_size = resolved.get("file_size") or os.path.getsize(file_path)
+    return FileResponse(
+        path=file_path,
+        media_type=mime_type,
+        headers={
+            "Content-Length": str(file_size),
+            "Cache-Control": "private, no-store",
+        },
+    )
+
 def customer_guide_file_path(filename: str) -> str:
     if filename == GUIDE_DOCX_FILE:
         return find_guide_docx_path()
