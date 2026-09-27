@@ -40707,6 +40707,11 @@ async def deepgram_asr_adapter(
         }
     if not audio_bytes:
         return {"ok": False, "status": "media_download_failed", "detail": "empty_audio_bytes"}
+    active_st = get_subdub_active_pipeline_state()
+    if isinstance(active_st, dict):
+        active_st["asr_route_called"] = True
+        active_st["subdub_asr_provider_called"] = "deepgram"
+        active_st["subdub_asr_called_at"] = int(time.time())
     if require_diarization:
         diagnostic = await AgentDeepgram.diagnostic(
             audio_bytes,
@@ -239463,6 +239468,19 @@ def video_dubbing_asr_missing_for_state(mode: str, state: dict | None = None, pu
     return plan.get("blocker_class") == "ASR_CONFIG_MISSING"
 
 
+_SUBDUB_ACTIVE_PIPELINE_STATE: ContextVar[dict | None] = ContextVar(
+    "_SUBDUB_ACTIVE_PIPELINE_STATE", default=None
+)
+
+
+def set_subdub_active_pipeline_state(state: dict | None):
+    return _SUBDUB_ACTIVE_PIPELINE_STATE.set(state)
+
+
+def get_subdub_active_pipeline_state() -> dict | None:
+    return _SUBDUB_ACTIVE_PIPELINE_STATE.get()
+
+
 def subdub_admission_preflight(
     state: dict | None = None,
     mode: str | None = None,
@@ -239483,14 +239501,20 @@ def subdub_admission_preflight(
             "job_inserted": False,
             "asr_plan_snapshot": {},
         }
+    route_id = (
+        "deepgram_word_timeline"
+        if (state or {}).get("subdub_engine_requested") == "auto_smart_multivoice"
+        or (state or {}).get("subdub_asr_plan_version") == "r8_2"
+        else str(plan.get("route_id") or "smart_multivoice_deepgram")
+    )
     snapshot = {
-        "subdub_asr_route_id": str(plan.get("route_id") or ""),
-        "subdub_asr_provider": str(plan.get("provider") or ""),
+        "subdub_asr_route_id": route_id,
+        "subdub_asr_provider": str(plan.get("provider") or "deepgram"),
         "subdub_asr_require_word_timeline": bool(plan.get("require_word_timeline")),
         "subdub_asr_require_provider_speaker_labels": bool(plan.get("require_provider_speaker_labels")),
         "subdub_local_acoustic_diarization_allowed": bool(plan.get("allow_local_acoustic_diarization")),
-        "subdub_asr_plan_version": "r8_1",
-        "subdub_engine_requested": str(plan.get("engine_requested") or ""),
+        "subdub_asr_plan_version": "r8_2",
+        "subdub_engine_requested": str(plan.get("engine_requested") or "auto_smart_multivoice"),
         "auto_smart_multivoice_opt_in": bool((state or {}).get("auto_smart_multivoice_opt_in")),
         "subdub_final_confirmed": True,
         "subdub_engine_selected": "",
@@ -239508,6 +239532,31 @@ def subdub_admission_preflight(
 
 def resolve_subdub_execution_asr_kwargs(state: dict | None = None) -> dict:
     st = dict(state or {})
+    plan_version = str(st.get("subdub_asr_plan_version") or "").strip()
+    if plan_version == "r8_2":
+        required_fields = [
+            "subdub_asr_route_id",
+            "subdub_asr_provider",
+            "subdub_asr_require_word_timeline",
+            "subdub_asr_require_provider_speaker_labels",
+            "subdub_local_acoustic_diarization_allowed",
+        ]
+        if not all(field in st for field in required_fields):
+            raise RuntimeError("subdub_asr_plan_snapshot_incomplete")
+        required_provider = str(st.get("subdub_asr_provider") or "")
+        if required_provider == "deepgram" and not DEEPGRAM_API_KEY:
+            raise RuntimeError("subdub_asr_runtime_dependency_unavailable")
+        require_word_timeline = bool(st.get("subdub_asr_require_word_timeline"))
+        require_provider_speaker_labels = bool(st.get("subdub_asr_require_provider_speaker_labels"))
+        kwargs = {}
+        if require_word_timeline:
+            kwargs["require_auto_multi_word_timeline"] = True
+        if require_provider_speaker_labels:
+            kwargs["require_diarization"] = True
+        else:
+            kwargs["require_diarization"] = False
+        return kwargs
+
     if "subdub_asr_require_word_timeline" in st:
         require_word_timeline = bool(st.get("subdub_asr_require_word_timeline"))
         require_provider_speaker_labels = bool(st.get("subdub_asr_require_provider_speaker_labels"))
@@ -239519,6 +239568,7 @@ def resolve_subdub_execution_asr_kwargs(state: dict | None = None) -> dict:
         else:
             kwargs["require_diarization"] = False
         return kwargs
+
     plan = resolve_subdub_asr_plan(state=st)
     require_word_timeline = bool(plan.get("require_word_timeline"))
     require_provider_speaker_labels = bool(plan.get("require_provider_speaker_labels"))
@@ -239528,6 +239578,7 @@ def resolve_subdub_execution_asr_kwargs(state: dict | None = None) -> dict:
     if require_provider_speaker_labels:
         kwargs["require_diarization"] = True
     return kwargs
+
 
 def video_dubbing_guard_text(mode: str, state: dict | None = None, lang: str = "vi", admin: bool = False) -> str:
     mode = normalize_video_translate_mode(mode)
@@ -242078,6 +242129,17 @@ def acquire_subtitle_dub_pipeline_job(job_key: str, **fields) -> tuple[bool, dic
         existing["updated_at"] = time.time()
         SUBTITLE_DUB_PIPELINE_JOBS[key] = existing
         return False, existing
+    is_smart = bool(
+        fields.get("auto_smart_multivoice_opt_in")
+        or fields.get("subdub_engine_requested") == "auto_smart_multivoice"
+        or auto_smart_multivoice.is_auto_smart_multivoice_state(fields)
+    )
+    snapshot = {}
+    if is_smart:
+        admit = subdub_admission_preflight(state=fields, mode=str(fields.get("mode") or ""))
+        if not admit.get("admitted"):
+            return False, admit
+        snapshot = dict(admit.get("asr_plan_snapshot") or {})
     now_ts = time.time()
     lifecycle_debug = subdub_lifecycle_debug_fields("received_file")
     job = {
@@ -242124,6 +242186,7 @@ def acquire_subtitle_dub_pipeline_job(job_key: str, **fields) -> tuple[bool, dic
         "updated_at": now_ts,
         "duplicate_count": 0,
         **fields,
+        **snapshot,
     }
     job = subdub_enrich_job_identity(job, job_key=key, mode=str(fields.get("mode") or ""), state=fields)
     SUBTITLE_DUB_PIPELINE_JOBS[key] = job
