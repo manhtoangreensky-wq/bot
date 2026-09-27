@@ -1109,6 +1109,19 @@ def _shopaikey_wire_payload(
         data["aspectRatio"] = ratio
         if not data.get("ratio"):
             data["ratio"] = ratio
+
+    image_src = (
+        data.get("image")
+        or data.get("image_paths")
+        or data.get("storyboard")
+        or data.get("image_url")
+    )
+    if image_src:
+        data["image"] = serialize_local_image_for_provider_wire(image_src)
+
+    data.pop("image_paths", None)
+    data.pop("storyboard", None)
+    data.pop("source_video_path", None)
     return data
 
 

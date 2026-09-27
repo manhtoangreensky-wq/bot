@@ -3583,12 +3583,12 @@ def _resolve_v2v_provider_configs(provider_order: list[str], duration_seconds: i
         "shopaikey": "shopaikey_video",
         "generic_http": "generic_http",
     }
+    provider_order = list(provider_order or [])
     ordered_names = [aliases.get(str(name).strip().lower(), str(name).strip().lower()) for name in provider_order if str(name).strip()]
 
-    # SelfShot3 strictly forbids Fal until its dedicated closure gate
-    if flow != "selfshot2":
-        configured = [c for c in configured if c.provider_name not in video_ai_edit_provider.CANONICAL_PROVEN_V2V_PROVIDERS]
-        ordered_names = [n for n in ordered_names if n not in video_ai_edit_provider.CANONICAL_PROVEN_V2V_PROVIDERS]
+    # Both SelfShot2 and SelfShot3 strictly forbid Fal (FAL_PROVIDER_ELIGIBLE=NO)
+    configured = [c for c in configured if c.provider_name not in video_ai_edit_provider.CANONICAL_PROVEN_V2V_PROVIDERS and c.provider_name != "fal_video"]
+    ordered_names = [n for n in ordered_names if n not in video_ai_edit_provider.CANONICAL_PROVEN_V2V_PROVIDERS and n != "fal_video"]
 
     primary_name = ordered_names[0] if ordered_names else (configured[0].provider_name if configured else "")
     if primary_name:
@@ -3683,6 +3683,18 @@ def _extract_selfshot_keyframe(
 
 
 SELFSHOT_PROVEN_I2V_MODELS: set[str] = {"kling-v3", "grok-imagine-video"}
+SELFSHOT_PROVEN_I2V_MODELS_BY_PROVIDER: dict[str, set[str]] = {
+    "key4u_video": {"kling-v3", "grok-imagine-video"},
+    "shopaikey_video": {"veo3.1-fast"},
+}
+SELFSHOT_DEFAULT_I2V_MODEL_BY_PROVIDER: dict[str, str] = {
+    "key4u_video": "kling-v3",
+    "shopaikey_video": "veo3.1-fast",
+}
+SELFSHOT_PROVEN_I2V_FAMILIES: dict[str, str] = {
+    "key4u_video": "kling",
+    "shopaikey_video": "google_veo",
+}
 SELFSHOT_I2V_MODEL_NOT_PROVEN_BLOCKER = "selfshot_i2v_model_not_proven_no_charge"
 
 
@@ -3690,7 +3702,21 @@ def _resolve_selfshot_i2v_model(
     job: dict[str, Any] | None,
     asset_pack: dict[str, Any] | None,
     environ: dict[str, str],
+    provider: str = "key4u_video",
 ) -> tuple[str, str]:
+    target_provider = str(provider or "key4u_video").strip()
+    if target_provider not in SELFSHOT_PROVEN_I2V_MODELS_BY_PROVIDER:
+        raise RealVideoRenderError(
+            "selfshot_provider_unsupported_no_charge",
+            diagnostics={
+                "ok": False,
+                "provider": target_provider,
+                "blocker": "selfshot_provider_unsupported_no_charge",
+                "allowed_providers": sorted(SELFSHOT_PROVEN_I2V_MODELS_BY_PROVIDER.keys()),
+                "no_charge": True,
+            },
+        )
+    allowed_models = SELFSHOT_PROVEN_I2V_MODELS_BY_PROVIDER[target_provider]
     candidate = str(
         (job or {}).get("selected_model")
         or (job or {}).get("model")
@@ -3703,60 +3729,62 @@ def _resolve_selfshot_i2v_model(
         or ""
     ).strip()
     if candidate:
-        if candidate not in SELFSHOT_PROVEN_I2V_MODELS:
+        if candidate not in allowed_models:
             raise RealVideoRenderError(
                 SELFSHOT_I2V_MODEL_NOT_PROVEN_BLOCKER,
                 diagnostics={
                     "ok": False,
-                    "provider": "key4u_video",
+                    "provider": target_provider,
                     "model": candidate,
                     "blocker": SELFSHOT_I2V_MODEL_NOT_PROVEN_BLOCKER,
-                    "allowed_models": sorted(SELFSHOT_PROVEN_I2V_MODELS),
+                    "allowed_models": sorted(allowed_models),
                     "no_charge": True,
                 },
             )
-        cfg = provider_model_config("key4u_video", candidate)
+        cfg = provider_model_config(target_provider, candidate)
         if not cfg:
             raise RealVideoRenderError(
-                "key4u_model_unknown_no_charge",
+                f"{target_provider}_model_unknown_no_charge",
                 diagnostics={
                     "ok": False,
-                    "provider": "key4u_video",
+                    "provider": target_provider,
                     "model": candidate,
-                    "blocker": "key4u_model_unknown_no_charge",
+                    "blocker": f"{target_provider}_model_unknown_no_charge",
                     "no_charge": True,
                 },
             )
         caps = list(cfg.get("capabilities") or [])
         if "image_to_video" not in caps:
             raise RealVideoRenderError(
-                "key4u_model_capability_unsupported_no_charge",
+                f"{target_provider}_model_capability_unsupported_no_charge",
                 diagnostics={
                     "ok": False,
-                    "provider": "key4u_video",
+                    "provider": target_provider,
                     "model": candidate,
-                    "blocker": "key4u_model_capability_unsupported_no_charge",
+                    "blocker": f"{target_provider}_model_capability_unsupported_no_charge",
                     "capabilities": caps,
                     "no_charge": True,
                 },
             )
-        contract = model_interface_contract("key4u_video", candidate, capability="image_to_video", env=environ)
+        contract = model_interface_contract(target_provider, candidate, capability="image_to_video", env=environ)
         if contract.get("contract_validation_status") == "blocked":
-            blocker = str(contract.get("contract_block_reason") or "key4u_model_contract_missing_no_charge")
+            blocker = str(contract.get("contract_block_reason") or f"{target_provider}_model_contract_missing_no_charge")
             raise RealVideoRenderError(
                 blocker,
                 diagnostics={
                     "ok": False,
-                    "provider": "key4u_video",
+                    "provider": target_provider,
                     "model": candidate,
                     "blocker": blocker,
                     "contract": contract,
                     "no_charge": True,
                 },
             )
-        family = str(cfg.get("family") or "kling")
+        family = str(cfg.get("family") or SELFSHOT_PROVEN_I2V_FAMILIES.get(target_provider, "kling"))
         return candidate, family
-    return "kling-v3", "kling"
+    default_model = SELFSHOT_DEFAULT_I2V_MODEL_BY_PROVIDER.get(target_provider, "kling-v3")
+    default_family = SELFSHOT_PROVEN_I2V_FAMILIES.get(target_provider, "kling")
+    return default_model, default_family
 
 
 STORYBOARD_DEFAULT_I2V_MODEL: str = "kling-v3"
@@ -3954,8 +3982,11 @@ def _render_selfshot3_controlled_keyframe_image_to_video(
     provider_env = dict(os.environ)
     provider_env["VIDEO_PROVIDER_CHAIN"] = ",".join(effective_provider_order)
 
-    pinned_model, selected_family = _resolve_selfshot_i2v_model(job, asset_pack, provider_env)
-    provider_env["KEY4U_VIDEO_MODEL"] = pinned_model
+    pinned_model, selected_family = _resolve_selfshot_i2v_model(job, asset_pack, provider_env, provider=primary_provider)
+    if primary_provider == "shopaikey_video":
+        provider_env["SHOPAIKEY_VIDEO_MODEL"] = pinned_model
+    else:
+        provider_env["KEY4U_VIDEO_MODEL"] = pinned_model
 
     req_meta = {
         "is_controlled_keyframe_i2v": True,
@@ -4204,6 +4235,26 @@ def _render_selfshot3_video_to_video(
             source_path=source_path,
             duration_seconds=duration_seconds,
         )
+
+    # Legacy V2V route is forbidden for fresh submissions (fail-closed without charge)
+    active_task_id = str(
+        (job or {}).get("provider_task_id")
+        or (job or {}).get("task_id")
+        or (asset_pack or {}).get("provider_task_id")
+        or ""
+    ).strip()
+    if not active_task_id:
+        raise RealVideoRenderError(
+            "selfshot_legacy_v2v_route_forbidden_no_charge",
+            diagnostics={
+                "ok": False,
+                "selfshot3": True,
+                "provider_attempted": False,
+                "no_charge": True,
+                "blocker": "selfshot_legacy_v2v_route_forbidden_no_charge",
+            },
+        )
+
     configs = _selfshot3_provider_configs(provider_order, duration_seconds)
     configs = [c for c in configs if c.provider_name not in video_ai_edit_provider.CANONICAL_PROVEN_V2V_PROVIDERS]
     if not configs:
@@ -4514,8 +4565,11 @@ def _render_selfshot2_controlled_keyframe_image_to_video(
     provider_env = dict(os.environ)
     provider_env["VIDEO_PROVIDER_CHAIN"] = ",".join(effective_provider_order)
 
-    pinned_model, selected_family = _resolve_selfshot_i2v_model(job, asset_pack, provider_env)
-    provider_env["KEY4U_VIDEO_MODEL"] = pinned_model
+    pinned_model, selected_family = _resolve_selfshot_i2v_model(job, asset_pack, provider_env, provider=primary_provider)
+    if primary_provider == "shopaikey_video":
+        provider_env["SHOPAIKEY_VIDEO_MODEL"] = pinned_model
+    else:
+        provider_env["KEY4U_VIDEO_MODEL"] = pinned_model
 
     req_meta = {
         "scene_index": scene_index,
@@ -4744,6 +4798,27 @@ def _render_selfshot2_video_to_video(
             target_duration=target_duration,
             segment=segment,
         )
+
+    # Legacy V2V route is forbidden for fresh submissions (fail-closed without charge)
+    active_task_id = str(
+        (job or {}).get("provider_task_id")
+        or (job or {}).get("task_id")
+        or (asset_pack or {}).get("provider_task_id")
+        or ""
+    ).strip()
+    if not active_task_id:
+        raise RealVideoRenderError(
+            "selfshot_legacy_v2v_route_forbidden_no_charge",
+            diagnostics={
+                "ok": False,
+                "selfshot2": True,
+                "scene_index": scene_index,
+                "provider_attempted": False,
+                "no_charge": True,
+                "blocker": "selfshot_legacy_v2v_route_forbidden_no_charge",
+            },
+        )
+
     configs = _selfshot2_provider_configs(provider_order, target_duration)
     if not configs:
         raise RealVideoRenderError(

@@ -37,7 +37,7 @@ KEY4U_COST_ROUTING_OVERRIDE_WARNING = "COST_ROUTING_OVERRIDE_KEY4U_PRIMARY"
 PUBLIC_LOW_TIER_KEY4U_WARNING = "PUBLIC_LOW_TIER_PRIMARY_PROVIDER_NOT_COST_OPTIMAL"
 
 _URL_PREFIXES = ("http://", "https://")
-_MEDIA_INPUT_FIELDS = ("storyboard", "image_paths", "source_video_path")
+_MEDIA_INPUT_FIELDS = ("storyboard", "image_paths", "source_video_path", "image")
 _TIER_COST_ORDER = {
     "low": 1,
     "basic": 2,
