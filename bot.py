@@ -278128,6 +278128,15 @@ async def api_internal_admin_wallet_credit(request: Request):
         execute_admin_wallet_credit,
     )
 
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
+    payload_actor = str(payload.get("actor_id") or "").strip()
+    if header_actor and payload_actor and header_actor != payload_actor:
+        raise HTTPException(
+            status_code=401,
+            detail={"ok": False, "error_code": "ACTOR_ID_MISMATCH", "message": "Header actor_id does not match payload actor_id"},
+        )
+    actor_id = header_actor or payload_actor
+
     auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
         authorization=request.headers.get("authorization", ""),
         signature=request.headers.get("x-toan-aas-signature", ""),
@@ -278136,6 +278145,7 @@ async def api_internal_admin_wallet_credit(request: Request):
         method="POST",
         path="/internal/v1/admin/wallet/credit",
         body_bytes=raw_body,
+        actor_id=header_actor,
     )
     if not auth_ok:
         raise HTTPException(
@@ -278153,7 +278163,6 @@ async def api_internal_admin_wallet_credit(request: Request):
     idempotency_key = str(payload.get("idempotency_key") or "").strip()
     reason = str(payload.get("reason") or payload.get("reference") or "").strip()
     reference = str(payload.get("reference") or payload.get("reason") or "").strip()
-    actor_id = str(request.headers.get("x-toan-aas-actor-id") or payload.get("actor_id") or "").strip()
 
     ok, result, status_code = execute_admin_wallet_credit(
         user_id=user_id,
@@ -278186,6 +278195,7 @@ async def api_internal_admin_wallet_compensate(request: Request):
         execute_admin_wallet_compensation,
     )
 
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
     auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
         authorization=request.headers.get("authorization", ""),
         signature=request.headers.get("x-toan-aas-signature", ""),
@@ -278194,6 +278204,7 @@ async def api_internal_admin_wallet_compensate(request: Request):
         method="POST",
         path="/internal/v1/admin/wallet/compensate",
         body_bytes=raw_body,
+        actor_id=header_actor,
     )
     if not auth_ok:
         raise HTTPException(
