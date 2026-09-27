@@ -278128,14 +278128,58 @@ async def api_internal_admin_wallet_credit(request: Request):
         execute_admin_wallet_credit,
     )
 
-    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
-    payload_actor = str(payload.get("actor_id") or "").strip()
-    if header_actor and payload_actor and header_actor != payload_actor:
+    raw_auth = str(request.headers.get("authorization") or "").strip()
+    bridge_token = (
+        os.environ.get("CORE_BRIDGE_TOKEN", "").strip()
+        or os.environ.get("WEBAPP_LINK_CALLBACK_TOKEN", "").strip()
+        or os.environ.get("INTERNAL_API_SECRET", "").strip()
+        or os.environ.get("BOT_INTERNAL_SECRET", "").strip()
+    )
+    if not bridge_token:
+        raise HTTPException(
+            status_code=503,
+            detail={"ok": False, "error_code": "BRIDGE_NOT_CONFIGURED", "message": "Bridge token not configured"},
+        )
+    if not raw_auth:
         raise HTTPException(
             status_code=401,
-            detail={"ok": False, "error_code": "ACTOR_ID_MISMATCH", "message": "Header actor_id does not match payload actor_id"},
+            detail={"ok": False, "error_code": "AUTH_MISSING", "message": "Authentication failed: AUTH_MISSING"},
         )
-    actor_id = header_actor or payload_actor
+    bearer = (
+        raw_auth.replace("Bearer ", "", 1).strip()
+        if raw_auth.lower().startswith("bearer ")
+        else raw_auth
+    )
+    if not bearer or not hmac.compare_digest(bearer, bridge_token):
+        raise HTTPException(
+            status_code=401,
+            detail={"ok": False, "error_code": "AUTH_INVALID", "message": "Authentication failed: AUTH_INVALID"},
+        )
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
+    raw_payload_actor = payload.get("actor_id")
+    payload_actor = str(raw_payload_actor or "").strip()
+
+    if not header_actor and not payload_actor:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "ok": False,
+                "error_code": "MISSING_ACTOR_ID",
+                "message": "actor_id is required and cannot be blank",
+            },
+        )
+
+    if header_actor != payload_actor:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "ok": False,
+                "error_code": "ACTOR_ID_MISMATCH",
+                "message": "Header actor_id does not match payload actor_id",
+            },
+        )
+    actor_id = header_actor
 
     auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
         authorization=request.headers.get("authorization", ""),
@@ -278145,7 +278189,7 @@ async def api_internal_admin_wallet_credit(request: Request):
         method="POST",
         path="/internal/v1/admin/wallet/credit",
         body_bytes=raw_body,
-        actor_id=header_actor,
+        actor_id=actor_id,
     )
     if not auth_ok:
         raise HTTPException(
@@ -278250,7 +278294,7 @@ async def api_internal_admin_wallet_compensate(request: Request):
     actor_id = str(raw_actor_id).strip()
 
     header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
-    if header_actor and header_actor != actor_id:
+    if header_actor != actor_id:
         return JSONResponse(
             status_code=400,
             content={
