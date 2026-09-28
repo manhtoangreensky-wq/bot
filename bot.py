@@ -239481,6 +239481,14 @@ def get_subdub_active_pipeline_state() -> dict | None:
     return _SUBDUB_ACTIVE_PIPELINE_STATE.get()
 
 
+def reset_subdub_active_pipeline_state(token) -> None:
+    if token is not None:
+        try:
+            _SUBDUB_ACTIVE_PIPELINE_STATE.reset(token)
+        except Exception:
+            _SUBDUB_ACTIVE_PIPELINE_STATE.set(None)
+
+
 def subdub_admission_preflight(
     state: dict | None = None,
     mode: str | None = None,
@@ -243456,6 +243464,7 @@ def subtitle_dub_debug_job_payload(
         "error_detail": str(detail or state.get("error_detail") or state.get("detail") or ""),
         "subdub_engine_requested": str(state.get("subdub_engine_requested") or asr_plan.get("engine_requested") or ""),
         "subdub_engine_selected": str(state.get("subdub_engine_selected") or state.get("engine_selected") or ""),
+        "auto_smart_dispatch": str(state.get("auto_smart_dispatch") or ""),
         "auto_smart_multivoice_opt_in": bool(state.get("auto_smart_multivoice_opt_in")),
         "subdub_final_confirmed": bool(state.get("subdub_final_confirmed") or state.get("confirmed_product")),
         "subdub_asr_route_id": str(state.get("subdub_asr_route_id") or asr_plan.get("route_id") or ""),
@@ -247242,129 +247251,142 @@ async def video_dubbing_resolve_source_script(
     allow_two_speaker_key4u_fallback: bool = False,
     allow_multi_speaker_key4u_fallback: bool = False,
     require_auto_multi_word_timeline: bool = False,
+    state: dict | None = None,
 ) -> dict:
-    require_auto_multi_word_timeline = bool(require_auto_multi_word_timeline)
-    require_speaker_evidence = bool(
-        require_diarization or require_auto_multi_word_timeline
-    )
-    embedded_subtitle, subtitle_detail = "", ""
-    if not require_speaker_evidence:
-        embedded_subtitle, subtitle_detail = await video_dubbing_extract_embedded_subtitle(source_bytes, content_type)
-    if embedded_subtitle and not require_speaker_evidence:
-        return {
-            "source_kind": "embedded_subtitle",
-            "subtitle": embedded_subtitle,
-            "script": video_dubbing_plain_script(embedded_subtitle),
-            "asr_provider": "embedded_subtitle",
-            "detail": subtitle_detail,
-            "detected_language": subdub_detect_language_from_text(embedded_subtitle, "auto"),
-        }
-    if prefer_visual_subtitles and not require_speaker_evidence:
-        try:
-            visual_result = await asyncio.wait_for(
-                video_dubbing_extract_visual_subtitle(
-                    source_bytes,
-                    content_type,
-                    duration_seconds=duration_seconds,
-                    source_language=source_language,
-                    max_seconds=max_seconds,
-                ),
-                timeout=float(SUBDUB_VISUAL_OCR_TOTAL_TIMEOUT_SECONDS),
-            )
-        except asyncio.TimeoutError:
-            visual_result = {"ok": False, "status": "visual_ocr_timeout", "segments": []}
-        except Exception as exc:
-            visual_result = {
-                "ok": False,
-                "status": "visual_ocr_unavailable",
-                "detail": type(exc).__name__,
-                "segments": [],
-            }
-        if visual_result.get("ok") and visual_result.get("subtitle"):
-            return {
-                "source_kind": "visual_hardsub_ocr",
-                "subtitle": str(visual_result.get("subtitle") or ""),
-                "script": str(visual_result.get("script") or ""),
-                "asr_provider": "visual_hardsub_ocr",
-                "detail": str(visual_result.get("detail") or ""),
-                "segments": list(visual_result.get("segments") or []),
-                "detected_language": subdub_detect_language_from_text(
-                    str(visual_result.get("script") or ""),
-                    source_language,
-                ),
-                "duration_seconds": int(duration_seconds or 0),
-                "chunk_count": 1,
-                "chunk_strategy": "visual_frame_ocr",
-                "global_timing_preserved": True,
-                "subtitle_timing_source": "visual_hardsub_ocr",
-                "visual_ocr_frame_count": int(visual_result.get("frame_count") or 0),
-                "visual_ocr_cue_count": int(visual_result.get("cue_count") or 0),
-            }
-    # Media routing stays here; transcribe_media_to_segments calls video_dubbing_transcribe_bytes only after audio is valid.
-    result = await transcribe_media_to_segments(
-        {
-            "bytes": source_bytes,
-            "content_type": content_type,
-            "file_name": file_name,
-            "source_file_name": file_name,
-            "media_kind": media_kind,
-            "source_media_kind": media_kind,
-            "duration_seconds": duration_seconds,
-            "source_hash": source_hash,
-            "asr_checkpoint_path": asr_checkpoint_path,
-        },
-        context=context,
-        duration_seconds=duration_seconds,
-        max_seconds=max_seconds,
-        source_language=source_language,
-        allow_admin=allow_admin,
-        allow_confirmed_product=allow_confirmed_product,
-        updated_by=updated_by,
-        progress_callback=progress_callback,
-        allow_two_speaker_key4u_fallback=allow_two_speaker_key4u_fallback,
-        allow_multi_speaker_key4u_fallback=allow_multi_speaker_key4u_fallback,
-        **(
-            {"require_diarization": True}
-            if require_diarization
-            else {"require_auto_multi_word_timeline": True}
-            if require_auto_multi_word_timeline
-            else {}
-        ),
-    )
-    if not result.get("output_valid"):
-        failure_status = str(result.get("status") or "asr_failed")
-        if (
+    token = None
+    set_fn = globals().get("set_subdub_active_pipeline_state")
+    get_fn = globals().get("get_subdub_active_pipeline_state")
+    reset_fn = globals().get("reset_subdub_active_pipeline_state")
+    if set_fn and get_fn and isinstance(state, dict):
+        current_active = get_fn()
+        if current_active is not state:
+            token = set_fn(state)
+    try:
+        require_auto_multi_word_timeline = bool(require_auto_multi_word_timeline)
+        require_speaker_evidence = bool(
             require_diarization or require_auto_multi_word_timeline
-        ) and failure_status == AUTO_CAST_UNAVAILABLE:
+        )
+        embedded_subtitle, subtitle_detail = "", ""
+        if not require_speaker_evidence:
+            embedded_subtitle, subtitle_detail = await video_dubbing_extract_embedded_subtitle(source_bytes, content_type)
+        if embedded_subtitle and not require_speaker_evidence:
+            return {
+                "source_kind": "embedded_subtitle",
+                "subtitle": embedded_subtitle,
+                "script": video_dubbing_plain_script(embedded_subtitle),
+                "asr_provider": "embedded_subtitle",
+                "detail": subtitle_detail,
+                "detected_language": subdub_detect_language_from_text(embedded_subtitle, "auto"),
+            }
+        if prefer_visual_subtitles and not require_speaker_evidence:
+            try:
+                visual_result = await asyncio.wait_for(
+                    video_dubbing_extract_visual_subtitle(
+                        source_bytes,
+                        content_type,
+                        duration_seconds=duration_seconds,
+                        source_language=source_language,
+                        max_seconds=max_seconds,
+                    ),
+                    timeout=float(SUBDUB_VISUAL_OCR_TOTAL_TIMEOUT_SECONDS),
+                )
+            except asyncio.TimeoutError:
+                visual_result = {"ok": False, "status": "visual_ocr_timeout", "segments": []}
+            except Exception as exc:
+                visual_result = {
+                    "ok": False,
+                    "status": "visual_ocr_unavailable",
+                    "detail": type(exc).__name__,
+                    "segments": [],
+                }
+            if visual_result.get("ok") and visual_result.get("subtitle"):
+                return {
+                    "source_kind": "visual_hardsub_ocr",
+                    "subtitle": str(visual_result.get("subtitle") or ""),
+                    "script": str(visual_result.get("script") or ""),
+                    "asr_provider": "visual_hardsub_ocr",
+                    "detail": str(visual_result.get("detail") or ""),
+                    "segments": list(visual_result.get("segments") or []),
+                    "detected_language": subdub_detect_language_from_text(
+                        str(visual_result.get("script") or ""),
+                        source_language,
+                    ),
+                    "duration_seconds": int(duration_seconds or 0),
+                    "chunk_count": 1,
+                    "chunk_strategy": "visual_frame_ocr",
+                    "global_timing_preserved": True,
+                    "subtitle_timing_source": "visual_hardsub_ocr",
+                    "visual_ocr_frame_count": int(visual_result.get("frame_count") or 0),
+                    "visual_ocr_cue_count": int(visual_result.get("cue_count") or 0),
+                }
+        # Media routing stays here; transcribe_media_to_segments calls video_dubbing_transcribe_bytes only after audio is valid.
+        result = await transcribe_media_to_segments(
+            {
+                "bytes": source_bytes,
+                "content_type": content_type,
+                "file_name": file_name,
+                "source_file_name": file_name,
+                "media_kind": media_kind,
+                "source_media_kind": media_kind,
+                "duration_seconds": duration_seconds,
+                "source_hash": source_hash,
+                "asr_checkpoint_path": asr_checkpoint_path,
+            },
+            context=context,
+            duration_seconds=duration_seconds,
+            max_seconds=max_seconds,
+            source_language=source_language,
+            allow_admin=allow_admin,
+            allow_confirmed_product=allow_confirmed_product,
+            updated_by=updated_by,
+            progress_callback=progress_callback,
+            allow_two_speaker_key4u_fallback=allow_two_speaker_key4u_fallback,
+            allow_multi_speaker_key4u_fallback=allow_multi_speaker_key4u_fallback,
+            **(
+                {"require_diarization": True}
+                if require_diarization
+                else {"require_auto_multi_word_timeline": True}
+                if require_auto_multi_word_timeline
+                else {}
+            ),
+        )
+        if not result.get("output_valid"):
+            failure_status = str(result.get("status") or "asr_failed")
+            if (
+                require_diarization or require_auto_multi_word_timeline
+            ) and failure_status == AUTO_CAST_UNAVAILABLE:
+                raise subdub_speaker_cast.AutoCastUnavailable()
+            raise RuntimeError(failure_status)
+        word_timeline = list(result.get("word_timeline") or [])
+        if require_auto_multi_word_timeline and not word_timeline:
             raise subdub_speaker_cast.AutoCastUnavailable()
-        raise RuntimeError(failure_status)
-    word_timeline = list(result.get("word_timeline") or [])
-    if require_auto_multi_word_timeline and not word_timeline:
-        raise subdub_speaker_cast.AutoCastUnavailable()
-    transcript = str(result.get("transcript_text") or "").strip()
-    subtitle_text = video_dubbing_srt_from_segments(list(result.get("segments") or []))
-    if not subtitle_text:
-        raise RuntimeError("subtitle_generation_failed")
-    source_result = {
-        "source_kind": "asr",
-        "subtitle": subtitle_text,
-        "script": transcript,
-        "asr_provider": str(result.get("provider") or ""),
-        "detail": str(result.get("detail") or ""),
-        "segments": result.get("segments") or [],
-        "detected_language": result.get("detected_language") or "",
-        "duration_seconds": int(result.get("duration_seconds") or duration_seconds or 0),
-        "chunk_count": int(result.get("chunk_count") or (1 if duration_seconds else 0)),
-        "chunk_strategy": str(result.get("chunk_strategy") or "single_pass"),
-        "global_timing_preserved": bool(result.get("global_timing_preserved", True)),
-        "skipped_chunk_count": int(result.get("skipped_chunk_count") or 0),
-        "skipped_chunk_indices": list(result.get("skipped_chunk_indices") or []),
-        "speech_chunk_count": int(result.get("speech_chunk_count") or 0),
-        "subtitle_timing_source": str(result.get("subtitle_timing_source") or ""),
-    }
-    if require_auto_multi_word_timeline or "word_timeline" in result:
-        source_result["word_timeline"] = word_timeline
-    return source_result
+        transcript = str(result.get("transcript_text") or "").strip()
+        subtitle_text = video_dubbing_srt_from_segments(list(result.get("segments") or []))
+        if not subtitle_text:
+            raise RuntimeError("subtitle_generation_failed")
+        source_result = {
+            "source_kind": "asr",
+            "subtitle": subtitle_text,
+            "script": transcript,
+            "asr_provider": str(result.get("provider") or ""),
+            "detail": str(result.get("detail") or ""),
+            "segments": result.get("segments") or [],
+            "detected_language": result.get("detected_language") or "",
+            "duration_seconds": int(result.get("duration_seconds") or duration_seconds or 0),
+            "chunk_count": int(result.get("chunk_count") or (1 if duration_seconds else 0)),
+            "chunk_strategy": str(result.get("chunk_strategy") or "single_pass"),
+            "global_timing_preserved": bool(result.get("global_timing_preserved", True)),
+            "skipped_chunk_count": int(result.get("skipped_chunk_count") or 0),
+            "skipped_chunk_indices": list(result.get("skipped_chunk_indices") or []),
+            "speech_chunk_count": int(result.get("speech_chunk_count") or 0),
+            "subtitle_timing_source": str(result.get("subtitle_timing_source") or ""),
+        }
+        if require_auto_multi_word_timeline or "word_timeline" in result:
+            source_result["word_timeline"] = word_timeline
+        return source_result
+    finally:
+        if reset_fn and token is not None:
+            reset_fn(token)
 
 async def video_dubbing_render_video(
     source_bytes: bytes,
@@ -247698,23 +247720,33 @@ async def execute_video_dubbing_preview(
         return {"ok": False, "guard": True, "text": video_dubbing_custom_voice_guard_text(lang)}
     source_bytes, content_type = await video_dubbing_download_source(context, state)
     preview_seconds = preview_duration_seconds("subtitle_dub_ai")
-    source_info = await video_dubbing_resolve_source_script(
-        source_bytes,
-        content_type,
-        context,
-        duration_seconds=_safe_int(state.get("video_duration") or state.get("source_duration"), 0),
-        max_seconds=preview_seconds,
-        allow_admin=is_admin_user(query.from_user.id),
-        updated_by=query.from_user.id,
-        file_name=str(state.get("source_file_name") or ""),
-        media_kind=str(state.get("source_media_type") or state.get("media_kind") or ""),
-        source_language=str(state.get("source_language") or "auto"),
-        prefer_visual_subtitles=bool(
-            SUBDUB_VISUAL_OCR_PUBLIC_ENABLED
-            and mode in {VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
-            and video_dubbing_has_existing_subtitle_metadata(state) is not False
-        ),
+    token = (
+        set_subdub_active_pipeline_state(state)
+        if isinstance(state, dict)
+        else None
     )
+    try:
+        source_info = await video_dubbing_resolve_source_script(
+            source_bytes,
+            content_type,
+            context,
+            duration_seconds=_safe_int(state.get("video_duration") or state.get("source_duration"), 0),
+            max_seconds=preview_seconds,
+            allow_admin=is_admin_user(query.from_user.id),
+            updated_by=query.from_user.id,
+            file_name=str(state.get("source_file_name") or ""),
+            media_kind=str(state.get("source_media_type") or state.get("media_kind") or ""),
+            source_language=str(state.get("source_language") or "auto"),
+            prefer_visual_subtitles=bool(
+                SUBDUB_VISUAL_OCR_PUBLIC_ENABLED
+                and mode in {VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
+                and video_dubbing_has_existing_subtitle_metadata(state) is not False
+            ),
+            state=state,
+        )
+    finally:
+        if token is not None:
+            reset_subdub_active_pipeline_state(token)
     source_subtitle = str(source_info.get("subtitle") or "").strip()
     source_script = str(source_info.get("script") or "").strip()
     if not source_script:
@@ -248884,12 +248916,23 @@ async def _subdub_auto_bootstrap_cached_media_source(
             if workspace
             else ""
         )
-    source_info = await video_dubbing_resolve_source_script(
-        source_bytes,
-        content_type,
-        context,
-        **resolve_kwargs,
+    if "state" in resolve_parameters:
+        resolve_kwargs["state"] = state
+    token = (
+        set_subdub_active_pipeline_state(state)
+        if isinstance(state, dict)
+        else None
     )
+    try:
+        source_info = await video_dubbing_resolve_source_script(
+            source_bytes,
+            content_type,
+            context,
+            **resolve_kwargs,
+        )
+    finally:
+        if token is not None:
+            reset_subdub_active_pipeline_state(token)
     if (
         str(source_info.get("source_kind") or "") != "asr"
         or not str(source_info.get("subtitle") or "").strip()
@@ -249153,13 +249196,23 @@ async def video_dubbing_prepare_subtitles(
                     )
             except Exception:
                 pass
-            state["asr_route_called"] = True
-            source_info = await video_dubbing_resolve_source_script(
-                source_bytes,
-                content_type,
-                context,
-                **resolve_kwargs,
+            if "state" in resolve_parameters:
+                resolve_kwargs["state"] = state
+            token = (
+                set_subdub_active_pipeline_state(state)
+                if isinstance(state, dict)
+                else None
             )
+            try:
+                source_info = await video_dubbing_resolve_source_script(
+                    source_bytes,
+                    content_type,
+                    context,
+                    **resolve_kwargs,
+                )
+            finally:
+                if token is not None:
+                    reset_subdub_active_pipeline_state(token)
             source_subtitle = str(source_info.get("subtitle") or "").strip()
         subtitle_ref = set_video_dubbing_artifact(user_id, "source_subtitle", source_subtitle)
         sync_fields = video_dubbing_sync_state_fields(state, exclude={"subtitle_ref", "source_subtitle_ref"})
