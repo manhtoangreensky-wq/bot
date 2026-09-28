@@ -106072,12 +106072,25 @@ try:
         STORYBOARD_PROVEN_I2V_MODELS,
         STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER,
         STORYBOARD_I2V_MODEL_NOT_PROVEN,
+        STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER,
+        STORYBOARD_DEFAULT_I2V_MODEL_BY_PROVIDER,
+        _resolve_storyboard_i2v_model,
     )
 except ImportError:
     STORYBOARD_DEFAULT_I2V_MODEL: str = "kling-v3"
     STORYBOARD_PROVEN_I2V_MODELS: set[str] = {"kling-v3", "kling-3.0-turbo"}
     STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER: str = "storyboard_i2v_model_not_proven_no_charge"
     STORYBOARD_I2V_MODEL_NOT_PROVEN: str = STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER
+    STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER = {
+        "key4u_video": {"kling-v3", "kling-3.0-turbo"},
+        "shopaikey_video": {"veo3.1-fast", "veo_3_1-fast"},
+    }
+    STORYBOARD_DEFAULT_I2V_MODEL_BY_PROVIDER = {
+        "key4u_video": "kling-v3",
+        "shopaikey_video": "veo3.1-fast",
+    }
+    def _resolve_storyboard_i2v_model(*args, **kwargs):
+        return "veo3.1-fast"
 
 
 def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
@@ -106279,6 +106292,9 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
             "engine_route": str((preflight_snapshot.get("engine_route") or {}).get("route") or ""),
             "continuity_validation_required": True,
         })
+    storyboard_provider = ""
+    storyboard_model = ""
+    selected_family = ""
     if product_type in {"storyboard_prompt", "storyboard_to_video"}:
         raw_cards = (
             draft.get("scene_cards")
@@ -106315,6 +106331,15 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
         declared = safe_int(draft.get("b14_scene_count"), 0)
         scene_count = max(1, declared or len(materialized_cards) or 1)
         scene_seconds = safe_int(draft.get("b14_scene_seconds"), 8) or 8
+
+        raw_provider = str(
+            draft.get("selected_provider")
+            or draft.get("provider_order")
+            or (draft.get("asset_pack") or {}).get("selected_provider")
+            or (session or {}).get("selected_provider")
+            or ""
+        ).strip().lower()
+
         raw_candidate = (
             draft.get("selected_model")
             or draft.get("model")
@@ -106333,23 +106358,24 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
             or ""
         )
         candidate_model = str(raw_candidate or "").strip()
-        if not candidate_model:
-            storyboard_model = STORYBOARD_DEFAULT_I2V_MODEL
-        elif candidate_model in STORYBOARD_PROVEN_I2V_MODELS:
-            storyboard_model = candidate_model
+
+        if raw_provider in {"shopai", "shopaikey", "shopaikey_video"}:
+            storyboard_provider = "shopaikey_video"
+        elif raw_provider in {"key4u", "k4u", "key4u_video"}:
+            storyboard_provider = "key4u_video"
+        elif candidate_model in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
+            storyboard_provider = "key4u_video"
+        elif candidate_model in {"veo3.1-fast", "veo_3_1-fast"}:
+            storyboard_provider = "shopaikey_video"
         else:
-            from services.video_real_render_connector import RealVideoRenderError
-            raise RealVideoRenderError(
-                STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER,
-                diagnostics={
-                    "ok": False,
-                    "provider": "key4u_video",
-                    "model": candidate_model,
-                    "blocker": STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER,
-                    "allowed_models": sorted(STORYBOARD_PROVEN_I2V_MODELS),
-                    "no_charge": True,
-                },
-            )
+            storyboard_provider = "shopaikey_video"
+
+        storyboard_model = _resolve_storyboard_i2v_model(
+            {"selected_provider": storyboard_provider, "selected_model": candidate_model, "model": candidate_model},
+            provider=storyboard_provider,
+        )
+        selected_family = "google_veo" if storyboard_provider == "shopaikey_video" else "kling"
+
         asset_pack_payload.update({
             "product_type": "storyboard_prompt",
             "engine_route": "storyboard_to_video",
@@ -106358,13 +106384,13 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
             "provider_capability": "image_to_video",
             "orchestration_mode": "per_scene_8s",
             "provider_orchestration_mode": "per_scene_8s",
-            "selected_provider": "key4u_video",
-            "provider_order": "key4u_video",
-            "provider_chain": ["key4u_video"],
+            "selected_provider": storyboard_provider,
+            "provider_order": storyboard_provider,
+            "provider_chain": [storyboard_provider],
             "model": storyboard_model,
             "selected_model": storyboard_model,
             "pinned_wire_model": storyboard_model,
-            "selected_family": "kling",
+            "selected_family": selected_family,
             "routing_quality_tier": "common",
             "quality_tier": "common",
             "scene_cards": materialized_cards,
@@ -106385,13 +106411,13 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
             "provider_capability": "image_to_video",
             "orchestration_mode": "per_scene_8s",
             "provider_orchestration_mode": "per_scene_8s",
-            "selected_provider": "key4u_video",
-            "provider_order": "key4u_video",
-            "provider_chain": ["key4u_video"],
+            "selected_provider": storyboard_provider,
+            "provider_order": storyboard_provider,
+            "provider_chain": [storyboard_provider],
             "model": storyboard_model,
             "selected_model": storyboard_model,
             "pinned_wire_model": storyboard_model,
-            "selected_family": "kling",
+            "selected_family": selected_family,
             "routing_quality_tier": "common",
             "quality_tier": "common",
             "scene_count": scene_count,
@@ -106411,33 +106437,28 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
         "fake_renderer_allowed": False,
         "real_renderer_required": True,
         "provider_call": True,
-        "provider_order": "key4u_video" if is_storyboard else provider_order_csv,
-        "provider_chain": ["key4u_video"] if is_storyboard else (provider_chain or [item.strip() for item in str(provider_order_csv or "").split(",") if item.strip()]),
-        "selected_provider": "key4u_video" if is_storyboard else (provider_chain[0] if provider_chain else ""),
+        "provider_order": storyboard_provider if is_storyboard else provider_order_csv,
+        "provider_chain": [storyboard_provider] if is_storyboard else (provider_chain or [item.strip() for item in str(provider_order_csv or "").split(",") if item.strip()]),
+        "selected_provider": storyboard_provider if is_storyboard else (provider_chain[0] if provider_chain else ""),
         "submit_source": str(draft.get("submit_source") or draft.get("provider_submit_source") or "public_user_final_confirm"),
         "provider_submit_source": str(draft.get("provider_submit_source") or draft.get("submit_source") or "public_user_final_confirm"),
         "public_user_confirmed": bool(draft.get("public_user_confirmed") or draft.get("b14_public_user_confirmed")),
         "charge_policy": "after_valid_mp4_delivery",
     })
     if is_storyboard:
-        storyboard_model = str(
-            asset_pack_payload.get("selected_model")
-            or invoice.get("selected_model")
-            or STORYBOARD_DEFAULT_I2V_MODEL
-        )
         invoice.update({
             "engine_route": "storyboard_to_video",
             "orchestration_mode": "per_scene_8s",
             "provider_orchestration_mode": "per_scene_8s",
             "required_capability": "image_to_video",
             "provider_capability": "image_to_video",
-            "selected_provider": "key4u_video",
-            "provider_order": "key4u_video",
-            "provider_chain": ["key4u_video"],
+            "selected_provider": storyboard_provider,
+            "provider_order": storyboard_provider,
+            "provider_chain": [storyboard_provider],
             "model": storyboard_model,
             "selected_model": storyboard_model,
             "pinned_wire_model": storyboard_model,
-            "selected_family": "kling",
+            "selected_family": selected_family,
             "routing_quality_tier": "common",
             "quality_tier": "common",
         })
