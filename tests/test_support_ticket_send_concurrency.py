@@ -5,6 +5,7 @@ import html
 import re
 import time
 import unittest
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -96,6 +97,7 @@ class SupportTicketSendConcurrencyTests(unittest.TestCase):
             "SUPPORT_CATEGORIES": {"general_support": "Hỗ trợ chung"},
             "html": html,
             "time": time,
+            "uuid": uuid,
             "logger": SimpleNamespace(warning=lambda *args, **kwargs: None),
             "normalize_user_language": lambda language: language,
             "get_user_language": lambda uid: "vi",
