@@ -972,7 +972,28 @@ def _provider_order(job: dict | None = None) -> list[str]:
             continue
         if provider not in result:
             result.append(provider)
-    return result or ["shopaikey_video", "key4u_video", "toanaas_video", "veo", "kling", "generic_http"]
+    resolved = result or ["shopaikey_video", "key4u_video", "toanaas_video", "veo", "kling", "generic_http"]
+    preferred_p = ""
+    selected_p = str(job.get("selected_provider") or asset_pack.get("selected_provider") or "").strip().lower()
+    if selected_p in {"key4u", "k4u", "key4u_video"}:
+        preferred_p = "key4u_video"
+    elif selected_p in {"shopai", "shopaikey", "shopaikey_video"}:
+        preferred_p = "shopaikey_video"
+    if not preferred_p:
+        model_req = str(
+            job.get("selected_model")
+            or job.get("model")
+            or asset_pack.get("selected_model")
+            or ""
+        ).strip().lower()
+        if model_req in {"kling-v3", "kling-3.0-turbo", "kling-video", "grok-imagine-video"}:
+            preferred_p = "key4u_video"
+        elif model_req in {"veo3.1-fast", "veo_3_1-fast"}:
+            preferred_p = "shopaikey_video"
+    if preferred_p and preferred_p in resolved:
+        resolved.remove(preferred_p)
+        resolved.insert(0, preferred_p)
+    return resolved
 
 
 def _durable_product_video_route_forbids(job: dict | None, policy_key: str) -> bool:
@@ -4197,6 +4218,8 @@ def _render_selfshot3_controlled_keyframe_image_to_video(
                     and (not (person_req and object_req) or (idx < len(r_obs) and r_obs[idx].get("relationship_ok")))
                 )
                 temporal_score = round(integrated_cnt / total_frames, 4)
+            elif not person_req and not object_req:
+                temporal_score = 1.0
             else:
                 temporal_score = 0.0
 
@@ -5305,6 +5328,28 @@ def selfshot3_continuity_validation(
         or ""
     )
 
+    all_rows = [*(scene_tasks or []), *(debug_results or [])]
+    if not evidence_source or not independent_mode:
+        for row in all_rows:
+            if isinstance(row, dict):
+                nested = dict(row.get("debug") or {}) if isinstance(row.get("debug"), dict) else {}
+                if not evidence_source:
+                    evidence_source = str(
+                        row.get("evidence_source")
+                        or nested.get("evidence_source")
+                        or (row.get("continuity_evidence") or {}).get("evidence_source")
+                        or (nested.get("continuity_evidence") or {}).get("evidence_source")
+                        or ""
+                    )
+                if not independent_mode:
+                    independent_mode = str(
+                        row.get("independent_visual_validation")
+                        or nested.get("independent_visual_validation")
+                        or (row.get("continuity_evidence") or {}).get("independent_visual_validation")
+                        or (nested.get("continuity_evidence") or {}).get("independent_visual_validation")
+                        or ""
+                    )
+
     scores_candidate: dict[str, Any] = {}
     evidence_candidate = (
         output.get("continuity_scores")
@@ -5316,7 +5361,6 @@ def selfshot3_continuity_validation(
         scores_candidate.update(evidence_candidate)
 
     if evidence_source == "local_vision_validator":
-        all_rows = [*(scene_tasks or []), *(debug_results or [])]
         for row in all_rows:
             if isinstance(row, dict):
                 row_src = str(row.get("evidence_source") or (row.get("continuity_evidence") or {}).get("evidence_source") or "")

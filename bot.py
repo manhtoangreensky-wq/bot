@@ -106233,15 +106233,25 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
             "text_only_fallback_allowed": False,
         })
     if product_type == video_selfshot3.JOB_TYPE:
-        source_video = dict(draft.get("source_video") or draft.get("source_asset") or {})
-        source_analysis = dict(draft.get("source_analysis") or {})
-        source_segment = dict(draft.get("source_segment") or {})
+        source_video = dict(draft.get("source_video") or draft.get("source_asset") or asset_pack_payload.get("source_video") or {})
+        source_analysis = dict(draft.get("source_analysis") or asset_pack_payload.get("source_analysis") or {})
+        source_segment = dict(draft.get("source_segment") or asset_pack_payload.get("source_segment") or {})
         subject_manifest = dict(draft.get("subject_manifest") or {})
         relationship_locks = list(draft.get("relationship_locks") or [])
         transformation_stages = list(draft.get("transformation_stages") or [])
         prompt_bundle = dict(draft.get("prompt_bundle") or {})
         audio_plan = dict(draft.get("audio_plan") or {})
         preflight_snapshot = dict(draft.get("selfshot3_preflight") or {})
+        selfshot3_duration = (
+            max(1, int((source_segment.get("duration_ms") or 0) / 1000))
+            if (source_segment.get("duration_ms") or 0) > 0
+            else max(1, safe_int(
+                asset_pack_payload.get("duration_seconds")
+                or draft.get("b14_scene_seconds")
+                or draft.get("scene_duration_seconds"),
+                15,
+            ))
+        )
         asset_pack_payload.update({
             "source_video": source_video,
             "source_file_id": str(source_video.get("file_id") or draft.get("source_file_id") or ""),
@@ -106277,7 +106287,7 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
             "route_selection": dict(preflight_snapshot.get("route_selection") or {}),
             "one_take": True,
             "scene_count": 1,
-            "duration_seconds": max(1, int((source_segment.get("duration_ms") or 0) / 1000)),
+            "duration_seconds": selfshot3_duration,
             "continuity_validation_required": True,
             "identity_continuity_required": True,
             "object_continuity_required": bool(relationship_locks or subject_manifest.get("selection_type") in {"object", "person_object"}),
@@ -106288,7 +106298,7 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
             "source_hash": str(source_analysis.get("source_hash") or ""),
             "one_take": True,
             "scene_count": 1,
-            "duration_seconds": max(1, int((source_segment.get("duration_ms") or 0) / 1000)),
+            "duration_seconds": selfshot3_duration,
             "engine_route": str((preflight_snapshot.get("engine_route") or {}).get("route") or ""),
             "continuity_validation_required": True,
         })
