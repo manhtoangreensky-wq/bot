@@ -140108,10 +140108,11 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
     if action == "st" and len(parts) >= 4:
         ticket_id = int(parts[2])
         new_status = parts[3]
+        previous_ticket = get_support_ticket(ticket_id) if new_status == "refund_pending" else None
         ticket = update_support_ticket(ticket_id, status=new_status)
         if not ticket:
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
-        if new_status == "refund_pending":
+        if new_status == "refund_pending" and str((previous_ticket or {}).get("status") or "") != new_status:
             await query.message.reply_text("💰 Ticket đã được đánh dấu cần kiểm tra hoàn Xu/refund. Thao tác này chưa cộng hoặc trừ Xu.")
         return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket))
     if action == "reply" and len(parts) >= 3:
