@@ -3825,6 +3825,7 @@ def _resolve_storyboard_i2v_model(
         provider
         or (job or {}).get("selected_provider")
         or (asset_pack or {}).get("selected_provider")
+        or (invoice or {}).get("selected_provider")
         or ""
     ).strip().lower()
     if target_provider in {"shopai", "shopaikey", "shopaikey_video"}:
@@ -3850,18 +3851,36 @@ def _resolve_storyboard_i2v_model(
     ).strip()
 
     if candidate and not target_provider:
-        if candidate in STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER["shopaikey_video"]:
+        if candidate in STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER.get("shopaikey_video", set()):
             target_provider = "shopaikey_video"
-        elif candidate in STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER["key4u_video"]:
+        elif candidate in STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER.get("key4u_video", set()):
             target_provider = "key4u_video"
 
     if not target_provider:
         target_provider = "shopaikey_video"
 
+    if target_provider not in STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER:
+        raise RealVideoRenderError(
+            STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER,
+            diagnostics={
+                "ok": False,
+                "scene_index": scene_index,
+                "scene_id": scene_index,
+                "request_job_id": request_job_id,
+                "provider": target_provider,
+                "model": candidate,
+                "blocker": STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER,
+                "allowed_models": [],
+                "provider_attempted": False,
+                "provider_submit_called": False,
+                "no_charge": True,
+            },
+        )
+
     if not candidate:
         return STORYBOARD_DEFAULT_I2V_MODEL_BY_PROVIDER.get(target_provider, "veo3.1-fast")
 
-    allowed_models = STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER.get(target_provider, STORYBOARD_PROVEN_I2V_MODELS)
+    allowed_models = STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER.get(target_provider, set())
     if candidate not in allowed_models:
         raise RealVideoRenderError(
             STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER,
@@ -5735,22 +5754,27 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             model_context.get("selected_provider")
             or (job or {}).get("selected_provider")
             or (asset_pack or {}).get("selected_provider")
+            or (invoice or {}).get("selected_provider")
             or ""
         ).strip().lower()
         model_req = str(
             (job or {}).get("selected_model")
             or (job or {}).get("model")
             or (asset_pack or {}).get("selected_model")
+            or (invoice or {}).get("selected_model")
             or ""
         ).strip()
-        if model_req in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
-            storyboard_provider = "key4u_video"
-        elif storyboard_provider in {"shopai", "shopaikey", "shopaikey_video"}:
+        if storyboard_provider in {"shopai", "shopaikey", "shopaikey_video"}:
             storyboard_provider = "shopaikey_video"
         elif storyboard_provider in {"key4u", "k4u", "key4u_video"}:
             storyboard_provider = "key4u_video"
-        else:
-            storyboard_provider = "shopaikey_video"
+        elif not storyboard_provider:
+            if model_req in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
+                storyboard_provider = "key4u_video"
+            elif model_req in STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER.get("shopaikey_video", set()):
+                storyboard_provider = "shopaikey_video"
+            else:
+                storyboard_provider = "shopaikey_video"
 
         storyboard_model = _resolve_storyboard_i2v_model(
             job,
