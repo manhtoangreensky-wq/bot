@@ -140010,10 +140010,11 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
 
 async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     data = str(query.data or "")
     parts = data.split("|")
     action = parts[1] if len(parts) > 1 else "start"
+    if action != "send":
+        await query.answer()
     uid = query.from_user.id
     lang = normalize_user_language(get_user_language(uid)) or "vi"
     copy = public_hub_copy(lang)
@@ -140151,18 +140152,32 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         reply_text = str(state.get("reply_text") or "").strip()
         if not ticket or not reply_text:
             return await query.answer("Không có nội dung hợp lệ để gửi.", show_alert=True)
+        send_lock_key = f"support_ticket_send_inflight:{uid}:{ticket_id}"
+        if USER_PENDING.get(send_lock_key) is not None:
+            return await query.answer("Đang gửi phản hồi này. Vui lòng chờ.", show_alert=True)
+        send_lock = object()
+        USER_PENDING[send_lock_key] = send_lock
         try:
+            await query.answer("Đang gửi phản hồi...", show_alert=False)
             await context.bot.send_message(
                 chat_id=ticket["user_id"],
                 text=(f"💬 <b>Phản hồi từ TOAN AAS</b>\nTicket: <code>{html.escape(ticket['ticket_code'])}</code>\n\n{html.escape(reply_text)}"),
                 parse_mode="HTML",
             )
+            if get_support_ticket_pending(uid) is state:
+                clear_support_ticket_pending(uid)
         except Exception as exc:
             logger.warning("support ticket reply send failed | ticket_id=%s error=%s", ticket_id, type(exc).__name__)
-            return await query.answer("Không gửi được phản hồi. Ticket chưa được đánh dấu đã gửi.", show_alert=True)
+            if get_support_ticket_pending(uid) is state:
+                error_text = "⚠️ Không gửi được phản hồi. Bản xem trước vẫn còn; vui lòng thử lại."
+            else:
+                error_text = "⚠️ Không gửi được phản hồi. Trạng thái ticket đã thay đổi; vui lòng kiểm tra trước khi gửi lại."
+            return await query.message.reply_text(error_text)
+        finally:
+            if USER_PENDING.get(send_lock_key) is send_lock:
+                USER_PENDING.pop(send_lock_key, None)
         add_support_ticket_message(ticket_id, "admin", uid, reply_text, "sent")
         ticket = update_support_ticket(ticket_id, status="waiting_user", assigned_admin_id=uid)
-        clear_support_ticket_pending(uid)
         await query.message.reply_text("✅ Đã gửi phản hồi cho đúng user của ticket.")
         return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket))
     if action == "note" and len(parts) >= 3:
