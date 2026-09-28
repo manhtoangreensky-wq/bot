@@ -4482,7 +4482,12 @@ def _run_provider_generation_impl(
         or bool(metadata.get("is_storyboard"))
         or bool(metadata.get("storyboard"))
     )
-    storyboard_provider = str(metadata.get("selected_provider") or "key4u_video").strip().lower()
+    model_req = str(metadata.get("selected_model") or metadata.get("model") or metadata.get("storyboard_model") or "").strip()
+    if model_req in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
+        default_sb_prov = "key4u_video"
+    else:
+        default_sb_prov = "shopaikey_video"
+    storyboard_provider = str(metadata.get("selected_provider") or default_sb_prov).strip().lower()
     if is_storyboard:
         candidate_adapters = [item for item in candidate_adapters if item.provider_name == storyboard_provider][:1]
     if acceptance_valid:
