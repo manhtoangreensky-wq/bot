@@ -140167,6 +140167,8 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket))
     if action == "note" and len(parts) >= 3:
         ticket_id = int(parts[2])
+        if not get_support_ticket(ticket_id):
+            return await query.answer("Không tìm thấy ticket.", show_alert=True)
         set_support_ticket_pending(uid, "admin_note_input", ticket_id=ticket_id)
         return await safe_edit_or_send(query, "📌 Nhập ghi chú nội bộ. Nội dung này không hiển thị cho khách.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new")]]))
     if action == "assign" and len(parts) >= 3:
