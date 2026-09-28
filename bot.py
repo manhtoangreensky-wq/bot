@@ -140202,7 +140202,12 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         if not ticket:
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
         marker = "Cần liên hệ" if parts[3] == "contact" else "Lead tiềm năng"
-        note = f"{ticket.get('admin_note') or ''}\n[{now_text()} admin {uid}] {marker}".strip()
+        existing_note = str(ticket.get("admin_note") or "")
+        note_lines = existing_note.rstrip().splitlines()
+        same_last_marker = bool(note_lines) and note_lines[-1].endswith(f"admin {uid}] {marker}")
+        if same_last_marker and str(ticket.get("status") or "") == "reviewing" and str(ticket.get("assigned_admin_id") or "") == str(uid):
+            return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket))
+        note = existing_note if same_last_marker else f"{existing_note}\n[{now_text()} admin {uid}] {marker}".strip()
         ticket = update_support_ticket(ticket["id"], status="reviewing", assigned_admin_id=uid, admin_note=note)
         return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket))
     if action == "file" and len(parts) >= 3:
