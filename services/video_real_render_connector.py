@@ -927,11 +927,21 @@ def _provider_order(job: dict | None = None) -> list[str]:
         selected_provider = str(
             job.get("selected_provider")
             or asset_pack.get("selected_provider")
-            or "key4u_video"
+            or ""
         ).strip().lower()
+        model_req = str(
+            job.get("selected_model")
+            or job.get("model")
+            or asset_pack.get("selected_model")
+            or ""
+        ).strip()
+        if model_req in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
+            return ["key4u_video"]
         if selected_provider in {"shopai", "shopaikey", "shopaikey_video"}:
             return ["shopaikey_video"]
-        return ["key4u_video"]
+        if selected_provider in {"key4u", "k4u", "key4u_video"}:
+            return ["key4u_video"]
+        return ["shopaikey_video"]
     raw = (
         job.get("provider_order")
         or asset_pack.get("provider_order")
@@ -3788,7 +3798,15 @@ def _resolve_selfshot_i2v_model(
 
 
 STORYBOARD_DEFAULT_I2V_MODEL: str = "kling-v3"
-STORYBOARD_PROVEN_I2V_MODELS: set[str] = {"kling-v3", "kling-3.0-turbo"}
+STORYBOARD_PROVEN_I2V_MODELS: set[str] = {"kling-v3", "kling-3.0-turbo", "veo3.1-fast", "veo_3_1-fast"}
+STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER: dict[str, set[str]] = {
+    "key4u_video": {"kling-v3", "kling-3.0-turbo", "veo_3_1-fast"},
+    "shopaikey_video": {"veo3.1-fast"},
+}
+STORYBOARD_DEFAULT_I2V_MODEL_BY_PROVIDER: dict[str, str] = {
+    "key4u_video": "kling-v3",
+    "shopaikey_video": "veo3.1-fast",
+}
 STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER = "storyboard_i2v_model_not_proven_no_charge"
 STORYBOARD_I2V_MODEL_NOT_PROVEN = STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER
 
@@ -3799,9 +3817,21 @@ def _resolve_storyboard_i2v_model(
     invoice: dict[str, Any] | None = None,
     environ: dict[str, str] | None = None,
     *,
+    provider: str = "",
     scene_index: int = 1,
     request_job_id: str = "",
 ) -> str:
+    target_provider = str(
+        provider
+        or (job or {}).get("selected_provider")
+        or (asset_pack or {}).get("selected_provider")
+        or ""
+    ).strip().lower()
+    if target_provider in {"shopai", "shopaikey", "shopaikey_video"}:
+        target_provider = "shopaikey_video"
+    elif target_provider in {"key4u", "k4u", "key4u_video"}:
+        target_provider = "key4u_video"
+
     candidate = str(
         (job or {}).get("selected_model")
         or (job or {}).get("model")
@@ -3818,9 +3848,21 @@ def _resolve_storyboard_i2v_model(
         or ((job or {}).get("metadata") or {}).get("pinned_wire_model")
         or ""
     ).strip()
+
+    if candidate and not target_provider:
+        if candidate in STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER["shopaikey_video"]:
+            target_provider = "shopaikey_video"
+        elif candidate in STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER["key4u_video"]:
+            target_provider = "key4u_video"
+
+    if not target_provider:
+        target_provider = "shopaikey_video"
+
     if not candidate:
-        return STORYBOARD_DEFAULT_I2V_MODEL
-    if candidate not in STORYBOARD_PROVEN_I2V_MODELS:
+        return STORYBOARD_DEFAULT_I2V_MODEL_BY_PROVIDER.get(target_provider, "veo3.1-fast")
+
+    allowed_models = STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER.get(target_provider, STORYBOARD_PROVEN_I2V_MODELS)
+    if candidate not in allowed_models:
         raise RealVideoRenderError(
             STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER,
             diagnostics={
@@ -3828,10 +3870,10 @@ def _resolve_storyboard_i2v_model(
                 "scene_index": scene_index,
                 "scene_id": scene_index,
                 "request_job_id": request_job_id,
-                "provider": "key4u_video",
+                "provider": target_provider,
                 "model": candidate,
                 "blocker": STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER,
-                "allowed_models": sorted(STORYBOARD_PROVEN_I2V_MODELS),
+                "allowed_models": sorted(allowed_models),
                 "provider_attempted": False,
                 "provider_submit_called": False,
                 "no_charge": True,
@@ -5689,25 +5731,48 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         or str((job or {}).get("engine_route") or "").strip().lower() == "storyboard_to_video"
     )
     if is_storyboard:
+        storyboard_provider = str(
+            model_context.get("selected_provider")
+            or (job or {}).get("selected_provider")
+            or (asset_pack or {}).get("selected_provider")
+            or ""
+        ).strip().lower()
+        model_req = str(
+            (job or {}).get("selected_model")
+            or (job or {}).get("model")
+            or (asset_pack or {}).get("selected_model")
+            or ""
+        ).strip()
+        if model_req in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
+            storyboard_provider = "key4u_video"
+        elif storyboard_provider in {"shopai", "shopaikey", "shopaikey_video"}:
+            storyboard_provider = "shopaikey_video"
+        elif storyboard_provider in {"key4u", "k4u", "key4u_video"}:
+            storyboard_provider = "key4u_video"
+        else:
+            storyboard_provider = "shopaikey_video"
+
         storyboard_model = _resolve_storyboard_i2v_model(
             job,
             asset_pack,
             invoice,
+            provider=storyboard_provider,
             scene_index=scene_index,
             request_job_id=request_job_id,
         )
+        family = "google_veo" if storyboard_provider == "shopaikey_video" else "kling"
         model_context["selected_model"] = storyboard_model
         model_context["pinned_wire_model"] = storyboard_model
         model_context["model"] = storyboard_model
         model_context["model_name"] = storyboard_model
-        model_context["selected_family"] = "kling"
-        model_context["selected_provider"] = "key4u_video"
+        model_context["selected_family"] = family
+        model_context["selected_provider"] = storyboard_provider
         if "provider_model_map" in model_context and isinstance(model_context["provider_model_map"], dict):
-            model_context["provider_model_map"]["key4u_video"] = storyboard_model
+            model_context["provider_model_map"][storyboard_provider] = storyboard_model
         else:
-            model_context["provider_model_map"] = {"key4u_video": storyboard_model}
-        provider_order = ["key4u_video"]
-        dispatch_provider_key = "key4u_video"
+            model_context["provider_model_map"] = {storyboard_provider: storyboard_model}
+        provider_order = [storyboard_provider]
+        dispatch_provider_key = storyboard_provider
     if (
         recovery_existing_tasks_only
         and not pending_matches_request
@@ -6054,8 +6119,11 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
     if provider_model_map.get("key4u_video"):
         provider_env["KEY4U_VIDEO_MODEL"] = str(provider_model_map.get("key4u_video") or "")
     if is_storyboard:
-        provider_env["VIDEO_PROVIDER_CHAIN"] = "key4u_video"
-        provider_env["KEY4U_VIDEO_MODEL"] = storyboard_model
+        provider_env["VIDEO_PROVIDER_CHAIN"] = storyboard_provider
+        if storyboard_provider == "key4u_video":
+            provider_env["KEY4U_VIDEO_MODEL"] = storyboard_model
+        elif storyboard_provider == "shopaikey_video":
+            provider_env["SHOPAIKEY_VIDEO_MODEL"] = storyboard_model
     if product_type == "self_shot_scene_change":
         result = _render_selfshot2_video_to_video(
             job=dict(job or {}),
