@@ -140177,6 +140177,8 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         return await safe_edit_or_send(query, "💬 Nhập nội dung phản hồi cho khách. Bot chỉ gửi sau khi admin xem preview và bấm xác nhận.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]]))
     if action == "ask" and len(parts) >= 3:
         ticket_id = int(parts[2])
+        if not get_support_ticket(ticket_id):
+            return await query.answer("Không tìm thấy ticket.", show_alert=True)
         set_support_ticket_pending(uid, "admin_reply_input", ticket_id=ticket_id, source="new")
         return await safe_edit_or_send(query, "👤 Nhập câu hỏi hoặc thông tin bạn cần khách bổ sung. Bot sẽ cho xem preview trước khi gửi.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new")]]))
     if action == "suggest" and len(parts) >= 4:
