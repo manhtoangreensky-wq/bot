@@ -3798,10 +3798,10 @@ def _resolve_selfshot_i2v_model(
 
 
 STORYBOARD_DEFAULT_I2V_MODEL: str = "kling-v3"
-STORYBOARD_PROVEN_I2V_MODELS: set[str] = {"kling-v3", "kling-3.0-turbo", "veo3.1-fast", "veo_3_1-fast"}
+STORYBOARD_PROVEN_I2V_MODELS: set[str] = {"kling-v3", "kling-3.0-turbo"}
 STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER: dict[str, set[str]] = {
-    "key4u_video": {"kling-v3", "kling-3.0-turbo", "veo_3_1-fast"},
-    "shopaikey_video": {"veo3.1-fast"},
+    "key4u_video": {"kling-v3", "kling-3.0-turbo"},
+    "shopaikey_video": {"veo3.1-fast", "veo_3_1-fast"},
 }
 STORYBOARD_DEFAULT_I2V_MODEL_BY_PROVIDER: dict[str, str] = {
     "key4u_video": "kling-v3",
