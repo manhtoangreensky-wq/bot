@@ -249019,10 +249019,17 @@ async def video_dubbing_prepare_subtitles(
     exact_acoustic_multi = bool(
         require_auto_cast and auto_multi_speaker.is_auto_multi_speaker_state(state)
     )
+    preserve_pipeline_context = bool(
+        exact_acoustic_multi
+        or (
+            require_auto_cast
+            and auto_smart_multivoice.is_auto_smart_multivoice_state(state)
+        )
+    )
     exact_multi_pipeline_context = {
         key: value
         for key, value in state.items()
-        if exact_acoustic_multi and str(key).startswith("_pipeline_")
+        if preserve_pipeline_context and str(key).startswith("_pipeline_")
     }
     if isinstance(source_bytes_override, bytearray):
         source_bytes_override = bytes(source_bytes_override)
@@ -249139,7 +249146,7 @@ async def video_dubbing_prepare_subtitles(
             subtitle_ref=subtitle_ref,
             source_subtitle_ref=subtitle_ref,
         )
-        if exact_acoustic_multi:
+        if preserve_pipeline_context:
             state = {**state, **exact_multi_pipeline_context}
     if not source_subtitle:
         if video_dubbing_is_subtitle_text_source(state, content_type):
@@ -249254,7 +249261,7 @@ async def video_dubbing_prepare_subtitles(
             subtitle_ref=subtitle_ref,
             source_subtitle_ref=subtitle_ref,
         )
-        if exact_acoustic_multi:
+        if preserve_pipeline_context:
             state = {**state, **exact_multi_pipeline_context}
     source_script = video_dubbing_plain_script(source_subtitle)
     source_segments = list(source_info.get("segments") or []) or video_dubbing_segments_from_subtitle(source_subtitle)
@@ -249545,7 +249552,7 @@ async def video_dubbing_prepare_subtitles(
     output_script = video_dubbing_plain_script(output_subtitle)
     if not output_script:
         raise RuntimeError("subtitle_script_empty")
-    if exact_acoustic_multi:
+    if preserve_pipeline_context:
         state = {**state, **exact_multi_pipeline_context}
     return {
         "state": state,
