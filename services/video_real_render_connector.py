@@ -3966,12 +3966,25 @@ def normalize_storyboard_provider_clip(
             shutil.copyfile(source, target)
         return target
 
+    if current_duration > 0 and current_duration < (target_sec - tolerance):
+        raise RealVideoRenderError(
+            "scene_duration_short_no_charge",
+            diagnostics={
+                "reason": "scene_duration_short",
+                "current_duration": current_duration,
+                "target_seconds": target_sec,
+                "tolerance": tolerance,
+                "delta": round(current_duration - target_sec, 4),
+            },
+        )
+
     try:
         normalize_scene_duration(
             source,
             temp_target,
             target_duration_sec=target_sec,
             allow_slowdown=False,
+            allow_frame_padding=False,
             frame_fit_mode="cover",
             preserve_audio=bool(source_probe.get("has_audio")),
         )
@@ -7544,19 +7557,44 @@ def _run_per_scene_provider_orchestrator(
         output_width=_canvas_size(_aspect_ratio(job))[0],
         output_height=_canvas_size(_aspect_ratio(job))[1],
     )
-    final_result.update(base)
+    finalizer_ok = bool(final_result.get("ok", True))
+    finalizer_error = str(final_result.get("error") or "")
+    finalizer_blocker = str(final_result.get("blocker") or "")
     final_video = str(final_result.get("final_video_path") or "")
+
+    final_result.update(base)
     if final_video:
         final_result["output_path"] = final_video
         final_result["final_output_path"] = final_video
         final_result["final_video_path"] = final_video
         final_result["master_video_path"] = final_result.get("master_video_path") or final_video
     final_result["finalizer_invoked"] = True
-    final_result["finalizer_error"] = "" if final_result.get("final_video_path") else str(final_result.get("error") or "canonical_multiscene_finalizer_failed")
+    final_result["finalizer_error"] = "" if final_video else (finalizer_error or "canonical_multiscene_finalizer_failed")
     final_result["canonical_multiscene_engine"] = "b13_r18c"
     final_result["canonical_multiscene_manifest_path"] = str(final_result.get("manifest_path") or manifest_path)
-    final_result["ok"] = bool(final_result.get("final_video_path"))
-    final_result["status"] = "completed" if final_result["ok"] else "error"
+    if not finalizer_ok or not final_video:
+        error_name = finalizer_error or finalizer_blocker or "canonical_multiscene_finalizer_failed"
+        blocker_name = finalizer_blocker or error_name
+        final_result.update(video_project_queue_service.product_video_scene_ledger_state({}, job, final_result))
+        final_result["ok"] = False
+        final_result["status"] = "failed"
+        final_result["continue_polling"] = False
+        final_result["error"] = error_name
+        final_result["blocker"] = blocker_name
+        final_result["final_decision"] = blocker_name
+        final_result["terminal_state"] = "failed"
+        final_result["no_charge"] = True
+        final_result["concat_status"] = "failed"
+        final_result["concat_attempted"] = bool(final_result.get("concat_attempted", False))
+        final_result["concat_output_valid"] = False
+        final_result["final_mp4_valid"] = False
+        final_result["scene_coverage_valid_bool"] = False
+        final_result["delivery_blocked_by_scene_coverage"] = True
+        final_result["invalid_delivery_attempt_prevented"] = True
+        final_result["artifact_valid_for_charge_after_coverage"] = False
+        return final_result
+    final_result["ok"] = True
+    final_result["status"] = "completed"
     final_result["continue_polling"] = False
     final_result["provider_error"] = ""
     final_result["blocker"] = ""
@@ -7573,27 +7611,21 @@ def _run_per_scene_provider_orchestrator(
         + (0 if final_result.get("final_reused_from_manifest") else 1),
     )
     final_result["concat_idempotency_key"] = f"product_video_concat:{job.get('job_id') or job.get('id') or 'job'}:{_scene_count(job)}"
-    final_result["concat_output_valid"] = bool(final_result.get("final_video_path"))
+    final_result["concat_output_valid"] = True
     final_result["concat_duration_seconds"] = final_result.get("duration_sec") or final_result.get("duration_seconds") or 0
-    final_result["final_mp4_valid"] = bool(final_result.get("final_video_path"))
+    final_result["final_mp4_valid"] = True
     final_result["final_duration_seconds"] = final_result.get("duration_sec") or final_result.get("duration_seconds") or 0
     final_result["scene_coverage_count"] = len(scene_outputs)
     final_result["scene_coverage_valid"] = len(scene_outputs)
-    final_result["scene_coverage_valid_bool"] = bool(len(scene_outputs) >= _scene_count(job) and final_result["concat_output_valid"])
+    final_result["scene_coverage_valid_bool"] = bool(len(scene_outputs) >= _scene_count(job))
     final_result["missing_scene_indexes"] = []
     final_result["delivery_blocked_by_scene_coverage"] = False
     final_result["invalid_delivery_attempt_prevented"] = False
-    final_result["artifact_valid_for_charge_after_coverage"] = bool(final_result["scene_coverage_valid_bool"])
+    final_result["artifact_valid_for_charge_after_coverage"] = True
     final_result["missing_scene_action"] = "complete"
     final_result.update(video_project_queue_service.product_video_scene_ledger_state({}, job, final_result))
     final_result["scene_coverage_valid"] = _safe_int(final_result.get("completed_scene_count"), 0)
-    final_result["ok"] = bool(final_result.get("final_video_path"))
-    final_result["final_mp4_valid"] = bool(final_result.get("final_video_path"))
-    if final_result["ok"]:
-        final_result["status"] = "completed"
-        final_result["continue_polling"] = False
-        final_result["final_decision"] = "final_mp4_ready"
-        final_result["terminal_state"] = "final_mp4_ready"
+    final_result["terminal_state"] = "final_mp4_ready"
     return final_result
 
 
