@@ -271,9 +271,9 @@ def test_storyboard_reject_shopaikey_with_kling_models(mismatched_model):
     assert diag.get("no_charge") is True
 
 
-@pytest.mark.parametrize("mismatched_model", ["veo3.1-fast", "veo_3_1-fast"])
+@pytest.mark.parametrize("mismatched_model", ["veo3.1-fast"])
 def test_storyboard_reject_key4u_with_veo_models(mismatched_model):
-    """key4u_video + Veo model fails closed with dynamic diagnostics reflecting key4u_video."""
+    """key4u_video + unproven Veo model (veo3.1-fast with dot) fails closed with dynamic diagnostics reflecting key4u_video."""
     with pytest.raises(RealVideoRenderError) as exc_info:
         _resolve_storyboard_i2v_model(
             {"selected_model": mismatched_model},

@@ -823,6 +823,7 @@ def _key4u_wire_payload(
     payload: dict[str, Any],
     *,
     submit_url: str = "",
+    env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     data = dict(payload or {})
     metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
@@ -831,7 +832,12 @@ def _key4u_wire_payload(
     defaults = defaults if isinstance(defaults, dict) else {}
     capability = str(data.get("capability") or metadata.get("required_capability") or "").strip().lower().replace("-", "_")
     parsed_submit_url = urllib.parse.urlsplit(str(submit_url or ""))
-    is_i2v = capability == "image_to_video" or parsed_submit_url.path.rstrip("/").endswith("/image2video")
+    is_i2v = (
+        capability in {"image_to_video", "i2v"}
+        or parsed_submit_url.path.rstrip("/").endswith("/image2video")
+        or bool(data.get("image_paths") or data.get("storyboard") or data.get("image"))
+        or str(metadata.get("provider_capability") or "").strip().lower().replace("-", "_") == "image_to_video"
+    )
 
     if family in {"kling", "keling"}:
         if is_i2v:
@@ -949,13 +955,104 @@ def _key4u_wire_payload(
         ).path.rstrip("/")
         == "/v1/video/create"
     ):
-        return {
+        ratio = str(data.get("aspect_ratio") or data.get("ratio") or "9:16").strip()
+        if ratio in {"9/16", "9x16"}:
+            ratio = "9:16"
+        elif ratio in {"16/9", "16x9"}:
+            ratio = "16:9"
+        elif ratio in {"1/1", "1x1"}:
+            ratio = "1:1"
+        wire = {
             "model": str(data.get("model") or ""),
             "prompt": str(data.get("prompt") or "")[:4000],
-            "aspect_ratio": str(
-                data.get("aspect_ratio") or data.get("ratio") or "9:16"
-            ),
+            "aspect_ratio": ratio,
         }
+        if is_i2v:
+            wire["duration"] = int(
+                data.get("duration") or data.get("duration_seconds") or 8
+            )
+            image_src = (
+                data.get("image")
+                or data.get("image_paths")
+                or data.get("storyboard")
+                or data.get("image_url")
+                or metadata.get("image_path")
+                or metadata.get("image_url")
+                or metadata.get("image")
+                or metadata.get("images")
+            )
+            if not image_src:
+                raise VideoProviderContractError(
+                    "provider_image_input_missing_no_charge",
+                    stage="wire_payload_build",
+                    debug={"provider": "key4u_video", "blocker": "provider_image_input_missing_no_charge", "no_charge": True},
+                )
+            if isinstance(image_src, (list, tuple)):
+                items = [x for x in image_src if x]
+                if not items:
+                    raise VideoProviderContractError(
+                        "provider_image_input_missing_no_charge",
+                        stage="wire_payload_build",
+                        debug={"provider": "key4u_video", "blocker": "provider_image_input_missing_no_charge", "no_charge": True},
+                    )
+                image_src = items[0]
+            if isinstance(image_src, dict):
+                image_src = image_src.get("url") or image_src.get("image_url") or image_src.get("path") or image_src.get("image") or ""
+            image_val = str(image_src or "").strip()
+            if not image_val:
+                raise VideoProviderContractError(
+                    "provider_image_input_missing_no_charge",
+                    stage="wire_payload_build",
+                    debug={"provider": "key4u_video", "blocker": "provider_image_input_missing_no_charge", "no_charge": True},
+                )
+            if "://" in image_val:
+                from services.provider_reference_transport import validate_external_reference_url
+                valid_url, url_err = validate_external_reference_url(image_val)
+                if not valid_url:
+                    raise VideoProviderContractError(
+                        url_err,
+                        stage="wire_payload_build",
+                        debug={
+                            "provider": "key4u_video",
+                            "blocker": url_err,
+                            "no_charge": True,
+                        },
+                    )
+                reference_url = image_val
+            else:
+                from services.provider_reference_transport import prepare_provider_image_reference
+                try:
+                    ref_info = prepare_provider_image_reference(
+                        image_val,
+                        provider="key4u_video",
+                        purpose="image_to_video",
+                        job_id=str(data.get("job_id") or metadata.get("job_id") or ""),
+                        env=env if isinstance(env, dict) else (metadata.get("env") if isinstance(metadata.get("env"), dict) else None),
+                    )
+                    reference_url = ref_info["public_url"]
+                except VideoProviderContractError:
+                    raise
+                except Exception as exc:
+                    raise VideoProviderContractError(
+                        "key4u_veo_i2v_public_reference_unavailable_no_charge",
+                        stage="wire_payload_build",
+                        debug={
+                            "provider": "key4u_video",
+                            "blocker": "key4u_veo_i2v_public_reference_unavailable_no_charge",
+                            "error": type(exc).__name__,
+                            "no_charge": True,
+                        },
+                    ) from exc
+
+            out_meta = dict(metadata) if isinstance(metadata, dict) else {}
+            out_meta.pop("provider_submit_url_override", None)
+            out_meta.pop("provider_poll_url_override", None)
+            out_meta["images"] = [reference_url]
+            out_meta["provider_reference_present"] = True
+            out_meta["provider_reference_count"] = 1
+            out_meta["provider_reference_host"] = urllib.parse.urlsplit(reference_url).netloc
+            wire["metadata"] = out_meta
+        return wire
     if (
         family == "google_veo"
         and urllib.parse.urlparse(
@@ -1765,7 +1862,7 @@ class GenericHttpVideoProvider:
         auth_name, auth_value = self._auth_header()
         try:
             if self.provider_name == "key4u_video":
-                wire_payload = _key4u_wire_payload(payload, submit_url=submit_url)
+                wire_payload = _key4u_wire_payload(payload, submit_url=submit_url, env=self.env)
             elif self.provider_name == "shopaikey_video":
                 wire_payload = _shopaikey_wire_payload(payload, submit_url=submit_url, env=self.env)
             else:
