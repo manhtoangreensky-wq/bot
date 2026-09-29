@@ -125,28 +125,28 @@ def test_saved_price_route_map_matches_current_customer_prices_and_runtime_order
         row["customer_unit_xu"] for row in rows
     )
     assert [row["customer_unit_xu"] for row in rows] == [
-        80,
-        110,
-        160,
-        200,
-        220,
-        220,
-        370,
-        370,
-        1260,
-        2360,
+        221,
+        259,
+        337,
+        371,
+        804,
+        804,
+        1261,
+        2143,
+        2411,
+        3214,
     ]
     assert [row["label"] for row in rows] == [
-        "Nhanh gon",
-        "Chuyen dong on dinh",
-        "Chuyen dong co am thanh",
-        "Can bang ro net",
-        "Tieu chuan co am thanh",
-        "Canh dai co am thanh",
-        "Cao cap linh hoat",
-        "Dien xuat chan that",
-        "Da goc may",
-        "Dien anh nhieu canh",
+        "Video Khởi Đầu Âm Thanh 5s",
+        "Video Chuyển Động Xã Hội 5s",
+        "Video Diễn Xuất Nhân Vật 6s",
+        "Video Veo Cân Bằng Chi Tiết 8s",
+        "Video Chuyển Động Kiểm Soát 5s",
+        "Video Chuyển Động Đồng Bộ Âm Thanh 5s",
+        "Video Tham Chiếu Đa Góc Nhìn 8s",
+        "Video Chuyển Động Chuyên Nghiệp Kling 10s",
+        "Video Điện Ảnh Đa Phân Cảnh Doubao 10s",
+        "Video Toàn Cảnh Chuyển Động Dài Kling 15s",
     ]
 
     quality = {
