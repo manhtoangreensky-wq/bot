@@ -247861,6 +247861,49 @@ def key4u_minimax_voice_compatible(voice_id: str = "") -> bool:
         pass
     return False
 
+
+def key4u_tts_explicit_rejection_allows_direct_fallback(
+    status: str = "",
+    detail: str = "",
+    http_status: int = 0,
+) -> bool:
+    """Allow direct MiniMax only after a concrete Key4U rejection.
+
+    A timeout or an otherwise ambiguous response may mean Key4U accepted the
+    request, so it must remain fail-closed. Authentication/token failures are
+    pre-submit rejections and are safe to hand to the already-configured
+    direct route once.
+    """
+
+    normalized_status = str(status or "").strip().upper()
+    try:
+        normalized_http_status = int(http_status or 0)
+    except (TypeError, ValueError):
+        normalized_http_status = 0
+    if normalized_http_status in {401, 403} or normalized_status in {
+        "FAIL_AUTH",
+        "FAIL_UNAUTHORIZED",
+        "FAIL_FORBIDDEN",
+    }:
+        return True
+    normalized_detail = str(detail or "").strip().lower()
+    return any(
+        marker in normalized_detail
+        for marker in (
+            "token status is unavailable",
+            "token unavailable",
+            "token disabled",
+            "token expired",
+            "invalid api key",
+            "api key invalid",
+            "credential revoked",
+            "account disabled",
+            "quota exhausted",
+            "insufficient quota",
+            "insufficient balance",
+        )
+    )
+
 async def video_dubbing_tts_bytes(
     text: str,
     voice_style: str = "",
@@ -248016,6 +248059,35 @@ async def video_dubbing_tts_bytes(
             return label, audio_bytes, detail
         safe_detail = sanitize_log_text(str(detail or status))[:120]
         errors.append(f"{label}={status}:{safe_detail}" if safe_detail else f"{label}={status}")
+        if (
+            label == "Key4U MiniMax"
+            and provider == "key4u_minimax"
+            and direct_ready
+            and key4u_tts_explicit_rejection_allows_direct_fallback(
+                status,
+                detail,
+                _http_status,
+            )
+        ):
+            direct_status, direct_audio_bytes, direct_detail, direct_http_status = (
+                await call_direct_minimax_tts_bytes_with_speed(
+                    text[:3500],
+                    voice_id=voice_id,
+                    voice_style=voice_style,
+                    voice_speed=voice_speed,
+                    tts_language_boost=tts_language_boost,
+                )
+            )
+            if direct_status == "PASS" and direct_audio_bytes:
+                return "MiniMax direct fallback", direct_audio_bytes, direct_detail
+            direct_safe_detail = sanitize_log_text(
+                str(direct_detail or direct_status)
+            )[:120]
+            errors.append(
+                f"MiniMax direct fallback={direct_status}:{direct_safe_detail}"
+                if direct_safe_detail
+                else f"MiniMax direct fallback={direct_status}"
+            )
     raise RuntimeError("tts_unavailable:" + ",".join(errors))
 
 def video_dubbing_output_file(data: bytes, filename: str) -> io.BytesIO:

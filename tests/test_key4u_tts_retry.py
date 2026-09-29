@@ -529,3 +529,60 @@ def test_key4u_minimax_tts_unconfigured_fails_fast():
             assert mock_get_provider.call_count == 0
 
     asyncio.run(_test())
+
+
+def test_video_dubbing_key4u_token_rejection_uses_direct_minimax_once(monkeypatch):
+    async def _test():
+        key4u = AsyncMock(
+            return_value=(
+                "FAIL",
+                b"",
+                "This token status is unavailable",
+                200,
+            )
+        )
+        direct = AsyncMock(return_value=("PASS", b"direct-audio", "direct-ok", 200))
+        monkeypatch.setattr(bot, "TTS_PROVIDER", "key4u_minimax")
+        monkeypatch.setattr(bot, "key4u_minimax_tts_configured", lambda require_public=False: True)
+        monkeypatch.setattr(bot, "direct_minimax_tts_configured", lambda: True)
+        monkeypatch.setattr(bot, "call_key4u_minimax_tts_bytes_with_speed", key4u)
+        monkeypatch.setattr(bot, "call_direct_minimax_tts_bytes_with_speed", direct)
+        monkeypatch.setattr(bot, "key4u_minimax_voice_compatible", lambda _voice_id: True)
+
+        provider, audio_bytes, detail = await bot.video_dubbing_tts_bytes(
+            "fallback once",
+            voice_id="English_radiant_girl",
+            allow_confirmed_product=True,
+        )
+
+        assert provider == "MiniMax direct fallback"
+        assert audio_bytes == b"direct-audio"
+        assert detail == "direct-ok"
+        assert key4u.await_count == 1
+        assert direct.await_count == 1
+
+    asyncio.run(_test())
+
+
+def test_video_dubbing_key4u_timeout_does_not_use_direct_fallback(monkeypatch):
+    async def _test():
+        key4u = AsyncMock(return_value=("FAIL_TIMEOUT", b"", "timeout", 0))
+        direct = AsyncMock(return_value=("PASS", b"direct-audio", "direct-ok", 200))
+        monkeypatch.setattr(bot, "TTS_PROVIDER", "key4u_minimax")
+        monkeypatch.setattr(bot, "key4u_minimax_tts_configured", lambda require_public=False: True)
+        monkeypatch.setattr(bot, "direct_minimax_tts_configured", lambda: True)
+        monkeypatch.setattr(bot, "call_key4u_minimax_tts_bytes_with_speed", key4u)
+        monkeypatch.setattr(bot, "call_direct_minimax_tts_bytes_with_speed", direct)
+        monkeypatch.setattr(bot, "key4u_minimax_voice_compatible", lambda _voice_id: True)
+
+        with pytest.raises(RuntimeError, match="tts_unavailable:Key4U MiniMax=FAIL_TIMEOUT"):
+            await bot.video_dubbing_tts_bytes(
+                "ambiguous transport",
+                voice_id="English_radiant_girl",
+                allow_confirmed_product=True,
+            )
+
+        assert key4u.await_count == 1
+        assert direct.await_count == 0
+
+    asyncio.run(_test())
