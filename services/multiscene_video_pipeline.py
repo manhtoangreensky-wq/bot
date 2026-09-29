@@ -27,6 +27,7 @@ DEFAULT_VIDEO_TRACK_TIMESCALE = 90_000
 DEFAULT_NORMALIZED_FPS = 30
 DEFAULT_AUDIO_SAMPLE_RATE = 48_000
 DEFAULT_AUDIO_CHANNELS = 2
+STORYBOARD_DURATION_TOLERANCE_SECONDS: float = 0.25
 
 _XFADE_TRANSITIONS = {
     "fade": "fade",
@@ -600,6 +601,36 @@ def multiscene_manifest_scene_tasks(manifest: MultisceneManifest) -> list[dict[s
     return records
 
 
+def validate_storyboard_scene_duration(
+    actual_duration: float,
+    expected_duration: float,
+    tolerance_seconds: float = STORYBOARD_DURATION_TOLERANCE_SECONDS,
+) -> dict[str, Any]:
+    actual = max(0.0, float(actual_duration or 0.0))
+    expected = max(0.0, float(expected_duration or 0.0))
+    tol = max(0.0, float(tolerance_seconds if tolerance_seconds is not None else STORYBOARD_DURATION_TOLERANCE_SECONDS))
+    min_dur = round(expected - tol, 3)
+    max_dur = round(expected + tol, 3)
+    delta = round(actual - expected, 4)
+    duration_valid = (min_dur <= actual <= max_dur) if expected > 0 else (actual > 0)
+    blocker = ""
+    if not duration_valid and expected > 0:
+        if actual < min_dur:
+            blocker = "scene_duration_short_no_charge"
+        else:
+            blocker = "scene_duration_long_no_charge"
+    return {
+        "expected_duration": expected,
+        "actual_duration": actual,
+        "tolerance_seconds": tol,
+        "minimum_accepted_duration": min_dur,
+        "maximum_accepted_duration": max_dur,
+        "duration_delta": delta,
+        "duration_valid": duration_valid,
+        "blocker": blocker,
+    }
+
+
 def _coerce_render_output(result: Any, raw_path: str) -> str:
     if isinstance(result, (bytes, bytearray)):
         with open(raw_path, "wb") as handle:
@@ -658,6 +689,7 @@ def normalize_scene_duration(
     *,
     allow_slowdown: bool = True,
     allow_speedup: bool = True,
+    allow_frame_padding: bool = False,
     target_width: int | None = None,
     target_height: int | None = None,
     target_fps: int = DEFAULT_NORMALIZED_FPS,
@@ -702,6 +734,10 @@ def normalize_scene_duration(
         video_filters.append(f"setpts={target / max(duration, 0.001):.8f}*PTS")
         audio_tempo = slowdown_ratio
     elif pad > 0.05:
+        if not allow_frame_padding:
+            raise ValueError(
+                f"scene_duration_short_no_charge: duration {duration:.3f}s < target {target:.3f}s (pad {pad:.3f}s forbidden)"
+            )
         video_filters.append(f"tpad=stop_mode=clone:stop_duration={pad:.3f}")
     geometry_filters = (
         [
@@ -1732,19 +1768,80 @@ def finalize_multiscene_scene_clips(
         if os.path.abspath(source) != os.path.abspath(raw_path):
             shutil.copyfile(source, raw_path)
         raw_path = ensure_video_output(raw_path)
-        normalized_path = os.path.join(workspace, f"scene_{index:03d}_normalized.mp4")
-        normalized_path = normalize_scene_duration(
-            raw_path,
-            normalized_path,
-            scene.target_duration_sec,
-            target_width=requested_width,
-            target_height=requested_height,
-            target_fps=selected_fps,
-            frame_fit_mode=frame_fit_mode,
-            preserve_audio=preserve_scene_audio,
-            audio_sample_rate=audio_sample_rate,
-            audio_channels=audio_channels,
+        raw_duration = probe_duration(raw_path)
+        expected_sec = float(scene.target_duration_sec or 8.0)
+        validation = validate_storyboard_scene_duration(
+            raw_duration, expected_sec, tolerance_seconds=STORYBOARD_DURATION_TOLERANCE_SECONDS
         )
+        if not validation["duration_valid"] and raw_duration < (expected_sec - STORYBOARD_DURATION_TOLERANCE_SECONDS):
+            blocker = "scene_duration_short_no_charge"
+            key = str(index)
+            active_manifest.status = "failed"
+            active_manifest.concat_state = "blocked"
+            active_manifest.errors[key] = blocker
+            active_manifest.errors["final"] = blocker
+            active_manifest.provider_status_by_scene[key] = blocker
+            active_manifest.raw_clip_paths_by_scene[key] = raw_path
+            manifest_path = _write_manifest(active_manifest)
+            return {
+                "ok": False,
+                "status": "failed",
+                "error": blocker,
+                "blocker": blocker,
+                "no_charge": True,
+                "continue_polling": False,
+                "concat_attempted": False,
+                "concat_ready": False,
+                "concat_output_valid": False,
+                "final_mp4_valid": False,
+                "manifest_path": manifest_path,
+                "failed_scene_index": index,
+                "raw_duration": raw_duration,
+                "expected_duration": expected_sec,
+                "duration_delta": validation["duration_delta"],
+            }
+
+        normalized_path = os.path.join(workspace, f"scene_{index:03d}_normalized.mp4")
+        try:
+            normalized_path = normalize_scene_duration(
+                raw_path,
+                normalized_path,
+                scene.target_duration_sec,
+                target_width=requested_width,
+                target_height=requested_height,
+                target_fps=selected_fps,
+                frame_fit_mode=frame_fit_mode,
+                preserve_audio=preserve_scene_audio,
+                audio_sample_rate=audio_sample_rate,
+                audio_channels=audio_channels,
+                allow_frame_padding=False,
+            )
+        except Exception as exc:
+            err_msg = str(exc)
+            blocker = "scene_duration_short_no_charge" if "scene_duration_short_no_charge" in err_msg else "scene_normalization_failed"
+            key = str(index)
+            active_manifest.status = "failed"
+            active_manifest.concat_state = "blocked"
+            active_manifest.errors[key] = blocker
+            active_manifest.errors["final"] = blocker
+            active_manifest.provider_status_by_scene[key] = blocker
+            manifest_path = _write_manifest(active_manifest)
+            return {
+                "ok": False,
+                "status": "failed",
+                "error": blocker,
+                "blocker": blocker,
+                "no_charge": True,
+                "continue_polling": False,
+                "concat_attempted": False,
+                "concat_ready": False,
+                "concat_output_valid": False,
+                "final_mp4_valid": False,
+                "manifest_path": manifest_path,
+                "failed_scene_index": index,
+                "diagnostics": {"error": err_msg},
+            }
+
         normalized_duration = probe_duration(normalized_path)
         raw_paths.append(raw_path)
         normalized_paths.append(normalized_path)
