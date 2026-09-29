@@ -43751,9 +43751,9 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
 async def handle_payos_alert_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global PAYOS_ALERT_MUTED_UNTIL
     query = update.callback_query
-    await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("Lệnh này chỉ dành cho admin.", show_alert=True)
+    await query.answer()
     action = (query.data or "").split("|", 1)[-1]
     if action == "manual":
         set_manual_bill_state(query.from_user.id, order_code="MANUAL")
