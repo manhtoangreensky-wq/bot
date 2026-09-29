@@ -213099,10 +213099,10 @@ async def cmd_remote_worker_canary_status(update: Update, context: ContextTypes.
 
 async def handle_remote_worker_canary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     uid = query.from_user.id if query.from_user else 0
     if not is_admin_user(uid):
         return await query.answer("⛔ Khu vực này chỉ dành cho Admin.", show_alert=True)
+    await query.answer()
     data = str(query.data or "")
     if data.startswith("remote_worker_canary_create"):
         flags = worker_auth.worker_api_runtime_flags(LOCAL_WORKER_TOKEN)
