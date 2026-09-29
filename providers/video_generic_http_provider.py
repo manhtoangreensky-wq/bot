@@ -40,16 +40,16 @@ TASK_ID_PATHS = (
     "task_id",
     "id",
     "job_id",
-    "request_id",
     "data_id",
     "data.task_id",
     "data.id",
     "data.job_id",
-    "data.request_id",
     "result.task_id",
     "result.id",
     "result.job_id",
     "output.task_id",
+    "data.request_id",
+    "request_id",
 )
 VIDEO_ID_PATHS = (
     "video_id",
