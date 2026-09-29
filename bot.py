@@ -249420,7 +249420,7 @@ async def video_dubbing_prepare_subtitles(
                 media_sha256=media_sha256,
                 subtitle_sha256=subtitle_sha256,
             )
-            if exact_acoustic_multi:
+            if exact_acoustic_multi or smart_multi_acoustic:
                 sidecar_acoustic = auto_multi_speaker.acoustic_sidecar_evidence(
                     acoustic_fields
                 )
@@ -249822,8 +249822,11 @@ def _subdub_auto_resume_state(state: dict) -> dict:
         if isinstance(value, (str, int, float, bool)) or value is None:
             safe[str(key)] = value
     if (
-        str(state.get("auto_speaker_lane") or "").strip().lower() == "multi"
-        and auto_multi_speaker.is_auto_multi_speaker_state(state)
+        (
+            str(state.get("auto_speaker_lane") or "").strip().lower() == "multi"
+            and auto_multi_speaker.is_auto_multi_speaker_state(state)
+        )
+        or auto_smart_multivoice.is_auto_smart_multivoice_state(state)
     ):
         safe.update(auto_multi_speaker.bounded_multi_acoustic_evidence(state))
     return safe
