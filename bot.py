@@ -222767,9 +222767,9 @@ async def cmd_reference_scan(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def handle_creative_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("Chỉ Admin được dùng.", show_alert=True)
+    await query.answer()
     parts = query.data.split("|")
     if len(parts) != 3 or parts[1] != "select":
         return
