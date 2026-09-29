@@ -235124,6 +235124,8 @@ def subtitle_plus_dub_safe_fail_text(reason: str = "", lang: str = "vi") -> str:
         return "TOAN AAS chưa tạo được phụ đề từ video này. Hệ thống chưa trừ Xu. Anh/chị có thể thử video rõ tiếng hơn hoặc gửi file phụ đề nếu có."
     if "translation" in reason:
         return "TOAN AAS chưa dịch được phụ đề lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử lại hoặc chọn ngôn ngữ khác."
+    if "tts_provider_unavailable" in reason or "provider_unavailable" in reason:
+        return "TOAN AAS chưa kết nối được nhà cung cấp giọng lúc này. Hệ thống chưa trừ Xu. Vui lòng thử lại sau khi nhà cung cấp hoạt động trở lại."
     if "tts" in reason or "voice" in reason:
         return "TOAN AAS chưa tạo được audio lồng tiếng lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử lại hoặc đổi giọng."
     if "mux" in reason:
@@ -253056,6 +253058,13 @@ async def _execute_video_dubbing_pipeline_core(
                 + (f" Anh/chị hãy chọn ngôn ngữ khác thay cho {target_language}." if target_language else "")
             )
             return _failed_product_result("UNSUPPORTED_LANGUAGE_FOR_TTS", unsupported_text, detail or "unsupported_language_for_tts", stage="voice")
+        if status == auto_multi_speaker_v2.TTS_PROVIDER_UNAVAILABLE_STATUS:
+            return _failed_product_result(
+                status,
+                subtitle_plus_dub_safe_fail_text("tts_provider_unavailable", lang),
+                detail or str(product_result.get("reason") or "tts_provider_unavailable"),
+                stage="audio",
+            )
         if status == "VIDEO_RENDER_FAILED":
             return _failed_product_result("VIDEO_RENDER_FAILED", subdub_mode_fail_text(mode, lang), detail, stage="video")
         fail_text = (
