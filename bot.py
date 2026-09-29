@@ -279533,6 +279533,476 @@ async def api_internal_subdub_upload_consume(upload_id: str, request: Request):
     return JSONResponse(status_code=status_code, content=public_meta)
 
 
+# ─── CANONICAL SUBDUB WEB MEDIA PREFLIGHT ENDPOINT (BOT-SUBDUB-D2) ───────────
+
+@fastapi_app.post("/internal/v1/uploads/{upload_id}/preflight")
+async def api_internal_subdub_media_preflight(upload_id: str, request: Request):
+    """Canonical Bot Core media preflight authority for Web SubDub (BOT-SUBDUB-D2).
+
+    Server-probed duration is THE authority. Client-sent duration_seconds is IGNORED.
+    Probe failure fails closed with deterministic error_code.
+    """
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.subdub_upload_staging import get_staged_upload
+
+    # --- Actor ID ---
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    # --- Auth ---
+    raw_body = await request.body()
+    path = f"/internal/v1/uploads/{upload_id}/preflight"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    # --- Upload ID validation ---
+    import re as _re_d2
+    _UPLOAD_ID_SAFE = _re_d2.compile(r"^[A-Za-z0-9_-]{1,80}$")
+    if not _UPLOAD_ID_SAFE.match(upload_id):
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error_code": "INVALID_UPLOAD_ID", "message": "Invalid upload_id format"},
+        )
+
+    # --- D1 Owner-bound lookup ---
+    ok, reason, status_code, record = get_staged_upload(upload_id, actor_id=clean_actor)
+    if not ok:
+        return JSONResponse(
+            status_code=status_code,
+            content={"ok": False, "error_code": reason, "message": f"Upload lookup failed: {reason}"},
+        )
+
+    # --- Read physical bytes ---
+    local_path = record.get("local_path", "")
+    file_bytes = b""
+    if local_path:
+        try:
+            with open(local_path, "rb") as f:
+                file_bytes = f.read()
+        except Exception:
+            return JSONResponse(
+                status_code=404,
+                content={"ok": False, "error_code": "STAGED_FILE_MISSING", "message": "Staged file not accessible"},
+            )
+    if not file_bytes:
+        return JSONResponse(
+            status_code=422,
+            content={"ok": False, "error_code": "EMPTY_MEDIA", "message": "Staged file is empty or missing"},
+        )
+
+    # --- Canonical server-side FFprobe ---
+    probe = await subdub_probe_video_bytes(file_bytes)
+    if not probe.get("ok"):
+        detail = probe.get("detail", "unknown_probe_error")
+        error_code = "PROBE_TIMEOUT" if detail == "ffprobe_timeout" else "PROBE_FAILED"
+        return JSONResponse(
+            status_code=422,
+            content={"ok": False, "error_code": error_code, "detail": detail, "message": f"Media probe failed: {detail}"},
+        )
+
+    # --- Duration gate (server-probed duration is authority) ---
+    probed_duration = probe.get("duration", 0.0)
+    gate = subdub_duration_gate_payload(ffprobe_duration=probed_duration)
+
+    preflight_passed = gate.get("duration_gate_result", "") not in ("fail_over_limit",)
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "ok": True,
+            "upload_id": upload_id,
+            "preflight_passed": preflight_passed,
+            "duration_seconds": gate.get("duration_seconds", 0),
+            "detected_duration_source": gate.get("detected_duration_source", ""),
+            "duration_gate_result": gate.get("duration_gate_result", ""),
+            "duration_limit_seconds": gate.get("duration_limit_seconds", 0),
+            "has_video": bool(probe.get("has_video")),
+            "has_audio": bool(probe.get("has_audio")),
+            "content_type": record.get("content_type", ""),
+            "size_bytes": int(probe.get("size", 0)),
+            "is_long_media": gate.get("is_long_media", False),
+            "chunking_enabled": gate.get("chunking_enabled", False),
+        },
+    )
+
+
+# ─── CANONICAL SUBDUB VOICE RESOLUTION ENDPOINTS (BOT-SUBDUB-D3) ────────────
+
+@fastapi_app.get("/internal/v1/voice/profiles")
+async def api_internal_subdub_voice_profiles(request: Request):
+    """Canonical Bot Core owner-bound Voice Vault listing endpoint (BOT-SUBDUB-D3).
+
+    Returns sanitized voice profiles for the authenticated user without raw provider IDs.
+    """
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.subdub_voice_resolution import get_owner_voice_profiles_safe
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    query_actor = str(request.query_params.get("user_id") or "").strip()
+    actor_candidate = header_actor or query_actor
+    clean_actor = normalize_target_user_id(actor_candidate) if actor_candidate else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = "/internal/v1/voice/profiles"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path=path,
+        body_bytes=b"",
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    items = get_owner_voice_profiles_safe(clean_actor)
+    return JSONResponse(
+        status_code=200,
+        content={
+            "ok": True,
+            "data": {"items": items, "total": len(items)},
+            "items": items,
+            "total": len(items),
+        },
+    )
+
+
+@fastapi_app.post("/internal/v1/voice/resolve")
+async def api_internal_subdub_voice_resolve(request: Request):
+    """Canonical Bot Core SubDub voice resolution authority endpoint (BOT-SUBDUB-D3).
+
+    Enforces server-side voice resolution authority and safe projection.
+    Client-sent provider_voice_id or voice_id are strictly rejected as authority.
+    """
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.subdub_voice_resolution import resolve_subdub_voice_authority, to_safe_voice_resolution_projection
+
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:
+        payload = {}
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    body_actor = str(payload.get("target_user_id") or payload.get("user_id") or "").strip()
+    actor_candidate = header_actor or body_actor
+    clean_actor = normalize_target_user_id(actor_candidate) if actor_candidate else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = "/internal/v1/voice/resolve"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    ok, reason, status_code, result = resolve_subdub_voice_authority(clean_actor, payload)
+    safe_data = to_safe_voice_resolution_projection(result)
+
+    if not ok:
+        return JSONResponse(
+            status_code=status_code,
+            content={
+                "ok": False,
+                "error_code": reason,
+                "message": f"Voice resolution failed: {reason}",
+                "detail": safe_data.get("detail", ""),
+            },
+        )
+
+    return JSONResponse(status_code=status_code, content=safe_data)
+
+
+# ─── CANONICAL SUBDUB DURABLE WORKER CLAIM ENDPOINTS (BOT-SUBDUB-D4) ─────────
+
+@fastapi_app.post("/internal/v1/subdub/jobs")
+async def api_internal_subdub_jobs_enqueue(request: Request):
+    """Enqueue a new SubDub job into durable worker queue (BOT-SUBDUB-D4)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.subdub_worker_claim import enqueue_subdub_job
+
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:
+        payload = {}
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    body_actor = str(payload.get("target_user_id") or payload.get("user_id") or "").strip()
+    actor_candidate = header_actor or body_actor
+    clean_actor = normalize_target_user_id(actor_candidate) if actor_candidate else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = "/internal/v1/subdub/jobs"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    mode = str(payload.get("mode") or "dub")
+    job_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
+    max_attempts = int(payload.get("max_attempts") or 3)
+
+    job = enqueue_subdub_job(clean_actor, mode=mode, payload=job_payload, max_attempts=max_attempts)
+    return JSONResponse(status_code=200, content={"ok": True, "job": job})
+
+
+@fastapi_app.post("/internal/v1/subdub/jobs/claim")
+async def api_internal_subdub_jobs_claim(request: Request):
+    """Atomically claim the next queued SubDub job for worker execution (BOT-SUBDUB-D4)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.subdub_worker_claim import claim_next_subdub_job
+
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:
+        payload = {}
+
+    worker_id = str(payload.get("worker_id") or request.headers.get("x-toan-aas-actor-id") or "worker").strip()
+    path = "/internal/v1/subdub/jobs/claim"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=worker_id,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    lease_seconds = int(payload.get("lease_seconds") or 600)
+    job = claim_next_subdub_job(worker_id=worker_id, lease_seconds=lease_seconds)
+    return JSONResponse(status_code=200, content={"ok": True, "job": job})
+
+
+@fastapi_app.post("/internal/v1/subdub/jobs/{job_id}/heartbeat")
+async def api_internal_subdub_jobs_heartbeat(job_id: str, request: Request):
+    """Extend lease on a currently processing SubDub job (BOT-SUBDUB-D4)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.subdub_worker_claim import heartbeat_subdub_job
+
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:
+        payload = {}
+
+    worker_id = str(payload.get("worker_id") or request.headers.get("x-toan-aas-actor-id") or "").strip()
+    path = f"/internal/v1/subdub/jobs/{job_id}/heartbeat"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=worker_id,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    claim_token = str(payload.get("claim_token") or "").strip()
+    lease_seconds = int(payload.get("lease_seconds") or 600)
+
+    ok, reason, data = heartbeat_subdub_job(job_id, worker_id, claim_token, lease_seconds=lease_seconds)
+    if not ok:
+        status_code = 404 if reason == "JOB_NOT_FOUND" else (403 if reason == "FENCING_TOKEN_MISMATCH" else 422)
+        return JSONResponse(status_code=status_code, content={"ok": False, "error_code": reason, "message": f"Heartbeat failed: {reason}"})
+
+    return JSONResponse(status_code=200, content={"ok": True, **data})
+
+
+@fastapi_app.post("/internal/v1/subdub/jobs/{job_id}/complete")
+async def api_internal_subdub_jobs_complete(job_id: str, request: Request):
+    """Mark SubDub job as completed (BOT-SUBDUB-D4)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.subdub_worker_claim import complete_subdub_job
+
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:
+        payload = {}
+
+    worker_id = str(payload.get("worker_id") or request.headers.get("x-toan-aas-actor-id") or "").strip()
+    path = f"/internal/v1/subdub/jobs/{job_id}/complete"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=worker_id,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    claim_token = str(payload.get("claim_token") or "").strip()
+    result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+
+    ok, reason, data = complete_subdub_job(job_id, worker_id, claim_token, result=result)
+    if not ok:
+        status_code = 404 if reason == "JOB_NOT_FOUND" else (403 if reason == "FENCING_TOKEN_MISMATCH" else 422)
+        return JSONResponse(status_code=status_code, content={"ok": False, "error_code": reason, "message": f"Complete failed: {reason}"})
+
+    return JSONResponse(status_code=200, content={"ok": True, **data})
+
+
+@fastapi_app.post("/internal/v1/subdub/jobs/{job_id}/fail")
+async def api_internal_subdub_jobs_fail(job_id: str, request: Request):
+    """Mark SubDub job as failed (BOT-SUBDUB-D4)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.subdub_worker_claim import fail_subdub_job
+
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:
+        payload = {}
+
+    worker_id = str(payload.get("worker_id") or request.headers.get("x-toan-aas-actor-id") or "").strip()
+    path = f"/internal/v1/subdub/jobs/{job_id}/fail"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=worker_id,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    claim_token = str(payload.get("claim_token") or "").strip()
+    error_code = str(payload.get("error_code") or "worker_failed")
+    message = str(payload.get("message") or "")
+
+    ok, reason, data = fail_subdub_job(job_id, worker_id, claim_token, error_code=error_code, message=message)
+    if not ok:
+        status_code = 404 if reason == "JOB_NOT_FOUND" else (403 if reason == "FENCING_TOKEN_MISMATCH" else 422)
+        return JSONResponse(status_code=status_code, content={"ok": False, "error_code": reason, "message": f"Fail failed: {reason}"})
+
+    return JSONResponse(status_code=200, content={"ok": True, **data})
+
+
+@fastapi_app.get("/internal/v1/subdub/jobs/{job_id}")
+async def api_internal_subdub_jobs_get(job_id: str, request: Request):
+    """Retrieve SubDub job status (BOT-SUBDUB-D4)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.subdub_worker_claim import get_subdub_worker_job
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
+
+    path = f"/internal/v1/subdub/jobs/{job_id}"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path=path,
+        body_bytes=b"",
+        actor_id=clean_actor or "system",
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    job = get_subdub_worker_job(job_id, actor_id=clean_actor if clean_actor else None)
+    if not job:
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error_code": "JOB_NOT_FOUND", "message": f"Job #{job_id} not found"},
+        )
+
+    return JSONResponse(status_code=200, content={"ok": True, "job": job})
+
+
 # ─── ENTRY POINT ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     uvicorn.run(
