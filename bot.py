@@ -222791,9 +222791,9 @@ async def handle_creative_callback(update: Update, context: ContextTypes.DEFAULT
 
 async def handle_task_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("Chỉ Admin được dùng.", show_alert=True)
+    await query.answer()
     parts = query.data.split("|")
     if len(parts) != 4:
         return
