@@ -140010,10 +140010,11 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
 
 async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     data = str(query.data or "")
     parts = data.split("|")
     action = parts[1] if len(parts) > 1 else "start"
+    if action != "file":
+        await query.answer()
     uid = query.from_user.id
     lang = normalize_user_language(get_user_language(uid)) or "vi"
     copy = public_hub_copy(lang)
@@ -140186,15 +140187,24 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         ticket = get_support_ticket(int(parts[2]))
         if not ticket or not ticket.get("attachment_file_id"):
             return await query.answer("Ticket chưa có file đính kèm.", show_alert=True)
+        send_lock_key = f"support_ticket_file_inflight:{uid}:{ticket['id']}"
+        if USER_PENDING.get(send_lock_key) is not None:
+            return await query.answer("File đính kèm đang được gửi. Vui lòng chờ.", show_alert=True)
+        send_lock = object()
+        USER_PENDING[send_lock_key] = send_lock
         caption = f"📎 File của ticket <code>{html.escape(ticket['ticket_code'])}</code>"
         try:
+            await query.answer("Đang gửi file đính kèm...", show_alert=False)
             if ticket.get("attachment_type") == "photo":
                 await context.bot.send_photo(chat_id=query.message.chat_id, photo=ticket["attachment_file_id"], caption=caption, parse_mode="HTML")
             else:
                 await context.bot.send_document(chat_id=query.message.chat_id, document=ticket["attachment_file_id"], caption=caption, parse_mode="HTML")
         except Exception as exc:
             logger.warning("support attachment send failed | ticket_id=%s error=%s", ticket.get("id"), type(exc).__name__)
-            return await query.answer("Không gửi lại được file đính kèm.", show_alert=True)
+            return await query.message.reply_text("⚠️ Không gửi lại được file đính kèm.")
+        finally:
+            if USER_PENDING.get(send_lock_key) is send_lock:
+                USER_PENDING.pop(send_lock_key, None)
         return
     return await query.answer(copy["support_ticket_action_unsupported"], show_alert=True)
 
