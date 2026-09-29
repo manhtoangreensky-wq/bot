@@ -974,7 +974,12 @@ def _provider_order(job: dict | None = None) -> list[str]:
             result.append(provider)
     resolved = result or ["shopaikey_video", "key4u_video", "toanaas_video", "veo", "kling", "generic_http"]
     preferred_p = ""
-    selected_p = str(job.get("selected_provider") or asset_pack.get("selected_provider") or "").strip().lower()
+    selected_p = str(
+        job.get("selected_provider")
+        or asset_pack.get("selected_provider")
+        or (job.get("invoice") or {}).get("selected_provider")
+        or ""
+    ).strip().lower()
     if selected_p in {"key4u", "k4u", "key4u_video"}:
         preferred_p = "key4u_video"
     elif selected_p in {"shopai", "shopaikey", "shopaikey_video"}:
@@ -984,11 +989,12 @@ def _provider_order(job: dict | None = None) -> list[str]:
             job.get("selected_model")
             or job.get("model")
             or asset_pack.get("selected_model")
+            or (job.get("invoice") or {}).get("selected_model")
             or ""
         ).strip().lower()
-        if model_req in {"kling-v3", "kling-3.0-turbo", "kling-video", "grok-imagine-video"}:
+        if model_req in {"kling-v3", "kling-3.0-turbo", "kling-video", "grok-imagine-video", "veo_3_1-fast"}:
             preferred_p = "key4u_video"
-        elif model_req in {"veo3.1-fast", "veo_3_1-fast"}:
+        elif model_req in {"veo3.1-fast"}:
             preferred_p = "shopaikey_video"
     if preferred_p and preferred_p in resolved:
         resolved.remove(preferred_p)
@@ -3821,7 +3827,7 @@ def _resolve_selfshot_i2v_model(
 STORYBOARD_DEFAULT_I2V_MODEL: str = "kling-v3"
 STORYBOARD_PROVEN_I2V_MODELS: set[str] = {"kling-v3", "kling-3.0-turbo"}
 STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER: dict[str, set[str]] = {
-    "key4u_video": {"kling-v3", "kling-3.0-turbo"},
+    "key4u_video": {"kling-v3", "kling-3.0-turbo", "veo_3_1-fast"},
     "shopaikey_video": {"veo3.1-fast", "veo_3_1-fast"},
 }
 STORYBOARD_DEFAULT_I2V_MODEL_BY_PROVIDER: dict[str, str] = {
@@ -5828,6 +5834,8 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         elif not storyboard_provider:
             if model_req in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
                 storyboard_provider = "key4u_video"
+            elif model_req == "veo_3_1-fast":
+                storyboard_provider = "key4u_video"
             elif model_req in STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER.get("shopaikey_video", set()):
                 storyboard_provider = "shopaikey_video"
             else:
@@ -5841,7 +5849,10 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             scene_index=scene_index,
             request_job_id=request_job_id,
         )
-        family = "google_veo" if storyboard_provider == "shopaikey_video" else "kling"
+        if storyboard_provider == "shopaikey_video" or "veo" in storyboard_model:
+            family = "google_veo"
+        else:
+            family = "kling"
         model_context["selected_model"] = storyboard_model
         model_context["pinned_wire_model"] = storyboard_model
         model_context["model"] = storyboard_model

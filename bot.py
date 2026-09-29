@@ -106375,7 +106375,9 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
             storyboard_provider = "key4u_video"
         elif candidate_model in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
             storyboard_provider = "key4u_video"
-        elif candidate_model in {"veo3.1-fast", "veo_3_1-fast"}:
+        elif candidate_model == "veo_3_1-fast":
+            storyboard_provider = "key4u_video"
+        elif candidate_model == "veo3.1-fast":
             storyboard_provider = "shopaikey_video"
         else:
             storyboard_provider = "shopaikey_video"
@@ -106384,7 +106386,10 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
             {"selected_provider": storyboard_provider, "selected_model": candidate_model, "model": candidate_model},
             provider=storyboard_provider,
         )
-        selected_family = "google_veo" if storyboard_provider == "shopaikey_video" else "kling"
+        if storyboard_provider == "shopaikey_video" or "veo" in storyboard_model:
+            selected_family = "google_veo"
+        else:
+            selected_family = "kling"
 
         asset_pack_payload.update({
             "product_type": "storyboard_prompt",
