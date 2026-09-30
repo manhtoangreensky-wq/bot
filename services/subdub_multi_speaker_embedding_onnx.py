@@ -1048,6 +1048,7 @@ def build_gender_constrained_speech_authority(
     female_probabilities: object,
     *,
     speaker_count: int,
+    enforce_gender_consistency: bool = True,
 ) -> dict[str, object]:
     """Choose a stable acoustic partition without mixing strong registers."""
 
@@ -1284,7 +1285,10 @@ def build_gender_constrained_speech_authority(
                         else probabilities_for_identity >= threshold
                     )
                 )
-            if len(identity_registers) == speaker_count:
+            if len(identity_registers) == speaker_count and (
+                not enforce_gender_consistency
+                or identity_gender_outlier_window_count == 0
+            ):
                 canonical_labels = identity_labels
                 quorum_labels = identity_labels
                 quorum_embeddings = aggregate
@@ -1932,6 +1936,7 @@ def _fixed_vocal_speech_window_views(
     deadline_monotonic: float,
     stop_requested: Callable[[], bool],
     session_factory: Callable | None = None,
+    gender_pcm16: np.ndarray | None = None,
 ) -> dict[str, object]:
     """Embed speech-compacted windows without re-reading or re-demixing PCM."""
 
@@ -1942,6 +1947,12 @@ def _fixed_vocal_speech_window_views(
         or not np.any(pcm16)
     ):
         raise _manual_required(ValueError("fixed_vocal_pcm_invalid"))
+    if gender_pcm16 is not None and (
+        not isinstance(gender_pcm16, np.ndarray)
+        or gender_pcm16.dtype != np.dtype(np.int16)
+        or gender_pcm16.shape != pcm16.shape
+    ):
+        raise _manual_required(ValueError("fixed_vocal_gender_pcm_invalid"))
     regions = [
         {
             "index": index,
@@ -1974,8 +1985,23 @@ def _fixed_vocal_speech_window_views(
         )
         for run in plan["runs"]
     }
+    gender_runs = None
+    if gender_pcm16 is not None:
+        gender_regions = {
+            index: gender_pcm16[start:end]
+            for index, (start, end) in region_bounds.items()
+        }
+        gender_runs = {
+            int(run["run_index"]): _compact_run_samples(
+                run,
+                region_samples=gender_regions,
+                region_bounds=region_bounds,
+            )
+            for run in plan["runs"]
+        }
     target_samples = int(round(SUBSEGMENT_WINDOW_SECONDS * PCM_SAMPLE_RATE))
     windows: list[np.ndarray] = []
+    gender_windows: list[np.ndarray] = []
     for window in plan["windows"]:
         signal = run_samples[int(window["run_index"])]
         start = int(
@@ -1991,6 +2017,11 @@ def _fixed_vocal_speech_window_views(
         if not np.any(samples):
             raise _manual_required(ValueError("fixed_vocal_speech_energy_invalid"))
         windows.append(samples)
+        if gender_runs is not None:
+            gender_windows.append(np.resize(
+                gender_runs[int(window["run_index"])][start:end],
+                target_samples,
+            ).astype(np.int16, copy=False))
     if not _EMBEDDING_LOCK.acquire(blocking=False):
         raise _manual_required(RuntimeError("acoustic_embedding_busy"))
     try:
@@ -2036,7 +2067,7 @@ def _fixed_vocal_speech_window_views(
         "shifted_embeddings": views[1],
         "source_positions": positions,
         "speech_seconds": speech_seconds,
-        "window_samples": windows,
+        "window_samples": gender_windows if gender_runs is not None else windows,
     }
 
 
@@ -2962,6 +2993,7 @@ def diarize_fixed_vocal_word_timeline(
     stop_requested: Callable[[], bool],
     session_factory: Callable | None = None,
     vocal_session_factory: Callable | None = None,
+    gender_source_original: bool = False,
 ) -> dict[str, object]:
     """Serialize the bounded local acoustic engine across concurrent public jobs."""
 
@@ -2980,6 +3012,7 @@ def diarize_fixed_vocal_word_timeline(
             stop_requested=stop_requested,
             session_factory=session_factory,
             vocal_session_factory=vocal_session_factory,
+            gender_source_original=gender_source_original,
         )
     finally:
         _FIXED_VOCAL_PIPELINE_LOCK.release()
@@ -2994,6 +3027,7 @@ def _diarize_fixed_vocal_word_timeline_owned(
     stop_requested: Callable[[], bool],
     session_factory: Callable | None = None,
     vocal_session_factory: Callable | None = None,
+    gender_source_original: bool = False,
 ) -> dict[str, object]:
     """Discover speakers on short vocal windows, then attribute every word."""
 
@@ -3024,6 +3058,23 @@ def _diarize_fixed_vocal_word_timeline_owned(
         raw_views["window_energy"],
         raw_views["source_positions"],
     )
+    gender_pcm16 = None
+    if gender_source_original:
+        # Separation stays authoritative for embeddings; source timbre anchors gender.
+        source_frames = np.fromfile(stereo_pcm_path, dtype="<i2").reshape(
+            -1, two_speaker_gender.PCM_CHANNELS,
+        )
+        source_mono = source_frames.astype(np.float32).mean(axis=1)
+        target_positions = (
+            np.arange(len(vocal_pcm), dtype=np.float64)
+            * two_speaker_gender.PCM_SAMPLE_RATE
+            / PCM_SAMPLE_RATE
+        )
+        gender_pcm16 = np.clip(np.interp(
+            target_positions,
+            np.arange(len(source_mono), dtype=np.float64),
+            source_mono,
+        ), -32768.0, 32767.0).astype(np.int16)
     speech_views = _fixed_vocal_speech_window_views(
         vocal_pcm,
         validated_words,
@@ -3031,6 +3082,7 @@ def _diarize_fixed_vocal_word_timeline_owned(
         deadline_monotonic=deadline_monotonic,
         stop_requested=stop_requested,
         session_factory=session_factory,
+        gender_pcm16=gender_pcm16,
     )
     female_probabilities = (
         multi_gender.classify_vocal_window_gender_probabilities(
@@ -3046,6 +3098,7 @@ def _diarize_fixed_vocal_word_timeline_owned(
         speech_views["speech_seconds"],
         female_probabilities,
         speaker_count=int(raw_authority["speaker_count"]),
+        enforce_gender_consistency=gender_source_original,
     )
     speaker_count = int(authority["speaker_count"])
     word_mapping = map_subsegment_clusters_to_regions(
