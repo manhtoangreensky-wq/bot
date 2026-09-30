@@ -327,12 +327,14 @@ class WebProductVideoDispatcherClient:
         except json.JSONDecodeError as exc:
             raise WorkerClientError("MALFORMED_JSON_RESPONSE") from exc
 
-    def claim(self, lease_seconds: int = 300) -> WebClaimResponse:
-        """Claim the oldest queued canonical Product Video job from the Web dispatcher."""
-        payload = {
+    def claim(self, lease_seconds: int = 300, target_job_id: str | None = None) -> WebClaimResponse:
+        """Claim the oldest queued canonical Product Video job (or specific target job) from the Web dispatcher."""
+        payload: dict[str, Any] = {
             "worker_id": self.worker_id,
             "lease_seconds": max(30, int(lease_seconds)),
         }
+        if target_job_id:
+            payload["target_job_id"] = str(target_job_id).strip()
         res = self._request_json("POST", "/api/v1/worker/product-video/claim", payload)
         if not isinstance(res, dict) or not res.get("ok"):
             error_msg = str(res.get("message") or "Claim failed")
