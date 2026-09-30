@@ -31,6 +31,7 @@ from dataclasses import dataclass
 import hashlib
 import inspect
 import json
+import logging
 import math
 import os
 from pathlib import Path
@@ -45,6 +46,8 @@ from services import subdub_speaker_cast as speaker_cast
 from services import subdub_tts_checkpoint
 from services import video_local_validation
 
+
+logger = logging.getLogger(__name__)
 
 SMART_DECISION_VERSION = "smart_multivoice_v1"
 
