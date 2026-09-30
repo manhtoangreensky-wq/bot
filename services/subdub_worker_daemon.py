@@ -406,7 +406,12 @@ class SubDubWorkerDaemon:
             # Custom / test injected runner
             try:
                 transcribe_result = self.transcriber_fn(media_path, payload)
-                if isinstance(transcribe_result, dict):
+                if isinstance(transcribe_result, list):
+                    raw_cues = transcribe_result
+                    vtt_content = format_vtt_text(raw_cues)
+                    cues_count = len([c for c in raw_cues if isinstance(c, dict) and (c.get("text") or "").strip()])
+                    duration_seconds = max((float((c or {}).get("end") or 0.0) for c in raw_cues if isinstance(c, dict)), default=0.0)
+                elif isinstance(transcribe_result, dict):
                     raw_cues = transcribe_result.get("cues") or transcribe_result.get("segments") or []
                     duration_seconds = float(transcribe_result.get("duration") or 0.0)
                     vtt_content = format_vtt_text(raw_cues)
@@ -489,6 +494,17 @@ class SubDubWorkerDaemon:
                 claim_token,
                 error_code="INVALID_VTT_HEADER",
                 message="Produced subtitle output lacks valid WEBVTT header",
+                conn=self.db_conn,
+            )
+            return
+
+        if cues_count <= 0 or vtt_content.strip() == "WEBVTT":
+            fail_subdub_job(
+                job_id,
+                worker_id,
+                claim_token,
+                error_code="EMPTY_SUBTITLE_OUTPUT",
+                message="Produced subtitle output has no cues or content",
                 conn=self.db_conn,
             )
             return
