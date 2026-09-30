@@ -40707,7 +40707,8 @@ async def deepgram_asr_adapter(
         }
     if not audio_bytes:
         return {"ok": False, "status": "media_download_failed", "detail": "empty_audio_bytes"}
-    active_st = get_subdub_active_pipeline_state()
+    get_state_fn = globals().get("get_subdub_active_pipeline_state")
+    active_st = get_state_fn() if callable(get_state_fn) else None
     if isinstance(active_st, dict):
         active_st["asr_route_called"] = True
         active_st["subdub_asr_provider_called"] = "deepgram"
@@ -246762,9 +246763,11 @@ async def transcribe_media_to_segments(
     allow_two_speaker_key4u_fallback: bool = False,
     allow_multi_speaker_key4u_fallback: bool = False,
     require_auto_multi_word_timeline: bool = False,
+    allow_subdub_public: bool = False,
 ) -> dict:
     require_diarization = bool(require_diarization)
     require_auto_multi_word_timeline = bool(require_auto_multi_word_timeline)
+    allow_subdub_public = bool(allow_subdub_public)
     source_bytes = b""
     content_type = "application/octet-stream"
     file_name = ""
@@ -246998,7 +247001,7 @@ async def transcribe_media_to_segments(
                 chunk_content_type,
                 language=source_language,
                 allow_admin=allow_admin,
-                allow_subdub_public=True,
+                allow_subdub_public=allow_subdub_public,
                 allow_confirmed_product=allow_confirmed_product,
                 updated_by=updated_by,
                 context=context,
@@ -247138,7 +247141,7 @@ async def transcribe_media_to_segments(
                 audio_content_type,
                 language=source_language,
                 allow_admin=allow_admin,
-                allow_subdub_public=True,
+                allow_subdub_public=allow_subdub_public,
                 allow_confirmed_product=allow_confirmed_product,
                 updated_by=updated_by,
                 context=context,
