@@ -48,7 +48,7 @@ from services.video_trace_state import (
 )
 
 
-DEFAULT_VIDEO_PROVIDER_CHAIN = "shopaikey_video,key4u_video,toanaas_video,veo,kling,generic_http"
+DEFAULT_VIDEO_PROVIDER_CHAIN = "shopaikey_video,key4u_video,fal_video,toanaas_video,veo,kling,generic_http"
 VIDEO_STUB_PROVIDER_NAME = "stub_video"
 PUBLIC_NO_VIDEO_PROVIDER_COPY = (
     "Hiện hệ thống dựng video AI chưa sẵn sàng. Bot chưa trừ Xu."
@@ -2203,7 +2203,7 @@ def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter
         derived["KEY4U_VIDEO_AUTH_HEADER_NAME"] = env.get("KEY4U_VIDEO_AUTH_HEADER_NAME") or namespace_cfg.get("auth_header_name") or "Authorization"
         derived["KEY4U_VIDEO_AUTH_HEADER_VALUE"] = env.get("KEY4U_VIDEO_AUTH_HEADER_VALUE") or namespace_cfg.get("auth_header_value") or _bearer(env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN") or "")
         derived["KEY4U_VIDEO_MODEL"] = model_name if model_valid else ""
-        derived["KEY4U_VIDEO_CAPABILITIES"] = env.get("KEY4U_VIDEO_CAPABILITIES") or namespace_cfg.get("capabilities") or "text_to_video,image_to_video,video_to_video,multi_scene_video,scene_video"
+        derived["KEY4U_VIDEO_CAPABILITIES"] = env.get("KEY4U_VIDEO_CAPABILITIES") or namespace_cfg.get("capabilities") or "text_to_video,image_to_video,multi_scene_video,scene_video"
 
         return GenericHttpVideoProvider(
             provider_name="key4u_video",
@@ -2215,6 +2215,43 @@ def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter
             result_field_env="KEY4U_VIDEO_RESULT_FIELD",
             model_env="KEY4U_VIDEO_MODEL",
             capabilities_env="KEY4U_VIDEO_CAPABILITIES",
+            environ=derived,
+        )
+    if name == "fal_video":
+        namespace_cfg = video_provider_namespace_config("fal_video", env)
+        submit_url = _endpoint_alias(env, "FAL_VIDEO_SUBMIT_URL", "FAL_VIDEO_ENDPOINT", "VIDEO_FAL_SUBMIT_URL")
+        submit_url = submit_url or str(namespace_cfg.get("submit_url") or "https://queue.fal.run/fal-ai/wan/v2.2-a14b/video-to-video")
+
+        poll_url = _endpoint_alias(env, "FAL_VIDEO_POLL_URL", "FAL_VIDEO_POLL_ENDPOINT", "VIDEO_FAL_POLL_URL")
+        poll_url = poll_url or str(namespace_cfg.get("poll_url") or "https://queue.fal.run/fal-ai/wan/v2.2-a14b/video-to-video/requests/{task_id}/status")
+
+        token = env.get("FAL_KEY") or env.get("FAL_VIDEO_API_KEY") or env.get("FAL_API_KEY") or str(namespace_cfg.get("auth_header_value") or "")
+        auth_value = token if token.startswith("Key ") else (f"Key {token}" if token else "")
+
+        model_name = str(env.get("FAL_VIDEO_MODEL") or namespace_cfg.get("model") or "fal-ai/wan/v2.2-a14b/video-to-video")
+        model_valid = bool(model_name == "fal-ai/wan/v2.2-a14b/video-to-video")
+        explicit_enabled = str(env.get("FAL_VIDEO_TO_VIDEO_ENABLED") or env.get("FAL_VIDEO_ENABLED") or namespace_cfg.get("enabled") or "").strip().lower()
+        derived = dict(env)
+        derived.update(_provider_namespace_metadata("fal_video", namespace_cfg))
+        derived["FAL_VIDEO_ENABLED"] = "1" if explicit_enabled in {"1", "true", "yes", "on"} else "0"
+        derived["FAL_VIDEO_SUBMIT_URL"] = submit_url
+        derived["FAL_VIDEO_POLL_URL"] = poll_url
+        derived["FAL_VIDEO_AUTH_HEADER_NAME"] = env.get("FAL_VIDEO_AUTH_HEADER_NAME") or namespace_cfg.get("auth_header_name") or "Authorization"
+        derived["FAL_VIDEO_AUTH_HEADER_VALUE"] = auth_value
+        derived["FAL_VIDEO_RESULT_FIELD"] = env.get("FAL_VIDEO_RESULT_FIELD") or namespace_cfg.get("result_field") or "video.url"
+        derived["FAL_VIDEO_MODEL"] = model_name if model_valid else ""
+        derived["FAL_VIDEO_CAPABILITIES"] = env.get("FAL_VIDEO_CAPABILITIES") or namespace_cfg.get("capabilities") or "video_to_video,short_video"
+
+        return GenericHttpVideoProvider(
+            provider_name="fal_video",
+            enabled_env="FAL_VIDEO_ENABLED",
+            submit_url_env="FAL_VIDEO_SUBMIT_URL",
+            poll_url_env="FAL_VIDEO_POLL_URL",
+            auth_header_name_env="FAL_VIDEO_AUTH_HEADER_NAME",
+            auth_header_value_env="FAL_VIDEO_AUTH_HEADER_VALUE",
+            result_field_env="FAL_VIDEO_RESULT_FIELD",
+            model_env="FAL_VIDEO_MODEL",
+            capabilities_env="FAL_VIDEO_CAPABILITIES",
             environ=derived,
         )
     if name == "veo":
