@@ -234201,6 +234201,14 @@ def set_video_dubbing_pending(user_id, step: str, **fields) -> dict:
             "source_file_ref", "source_media_type", "source_content_type",
             "active_flow", "output_format", "entry_surface", "media_kind",
             "selected_language", "selected_voice", "speed",
+            "auto_smart_multivoice", "auto_smart_multivoice_opt_in",
+            "auto_smart_dispatch", "auto_smart_degraded_single_voice",
+            "auto_smart_degraded_reason", "auto_multi_engine",
+            "subdub_engine_requested", "subdub_engine_selected",
+            "subdub_asr_route_id", "subdub_asr_provider",
+            "subdub_asr_require_word_timeline",
+            "subdub_asr_require_provider_speaker_labels",
+            "subdub_asr_plan_version", "subdub_local_acoustic_diarization_allowed",
             "preview_seconds", "preview_text", "processing_error", "task2_job_id",
             "dub_source", "segment_count", "subtitle_segment_count",
             "translated_segment_count", "detected_language", "last_ready_step",
@@ -234228,7 +234236,20 @@ def set_video_dubbing_pending(user_id, step: str, **fields) -> dict:
             "dubbed_voice_volume_percent", "audio_mix_mode",
             "volume_config_source", "audio_mix_return_step",
         }:
-            state[key] = _short_pending_text(value)
+            if key in {
+                "auto_smart_multivoice", "auto_smart_multivoice_opt_in",
+                "auto_smart_degraded_single_voice",
+                "subdub_asr_require_word_timeline",
+                "subdub_asr_require_provider_speaker_labels",
+                "subdub_local_acoustic_diarization_allowed",
+            }:
+                state[key] = (
+                    value
+                    if type(value) is bool
+                    else str(value or "").strip().lower() in {"1", "true", "yes"}
+                )
+            else:
+                state[key] = _short_pending_text(value)
     state.update(acoustic_fields)
     if translation_target_changed:
         state["translated_subtitle_ref"] = ""
@@ -242679,6 +242700,7 @@ def subdub_preserve_original_acoustic_source(
 
 def video_dubbing_sync_state_fields(state: dict | None = None, *, exclude: set[str] | None = None) -> dict:
     skipped = {
+        "user_id",
         "step",
         "current_step",
         "previous_step",
@@ -248967,6 +248989,32 @@ def subdub_canonical_auto_speaker_segments(
     return output
 
 
+def subdub_canonical_single_speaker_segments(
+    segments: list[dict],
+    *,
+    extraction_source: str,
+) -> list[dict]:
+    """Map an explicitly degraded Smart Multi result to one honest speaker."""
+
+    canonical = subdub_canonical_cues.canonicalize_segments(
+        segments or [],
+        extraction_source=str(extraction_source or "asr"),
+        source_language="auto",
+    )
+    if not canonical:
+        raise subdub_speaker_cast.AutoCastUnavailable()
+    return [
+        {
+            **cue,
+            "speaker": 0,
+            "speaker_confidence": 0.0,
+            "speaker_id": "chunk_00:speaker_0",
+            "chunk_index": 0,
+        }
+        for cue in canonical
+    ]
+
+
 async def _subdub_auto_bootstrap_cached_media_source(
     context: ContextTypes.DEFAULT_TYPE,
     state: dict,
@@ -249400,6 +249448,7 @@ async def video_dubbing_prepare_subtitles(
             acoustic_duration = float(
                 source_info.get("duration_seconds") or duration_hint or 0.0
             )
+            acoustic_degraded_to_single = False
             try:
                 acoustic_result = await auto_multi_speaker.run_local_acoustic_diarization_off_event_loop(
                     Path(pcm_path),
@@ -249422,7 +249471,34 @@ async def video_dubbing_prepare_subtitles(
                         **acoustic_failure,
                     )
                 raise
-            source_segments = list(acoustic_result.get("segments") or [])
+            except ValueError as exc:
+                if not (
+                    auto_smart_multivoice.is_auto_smart_multivoice_state(state)
+                    and str(exc) == "fixed_vocal_speaker_count_unstable"
+                ):
+                    raise
+                fresh_smart_asr_segments = subdub_canonical_single_speaker_segments(
+                    source_segments,
+                    extraction_source="asr",
+                )
+                smart_multi_acoustic = False
+                acoustic_degraded_to_single = True
+                acoustic_result = {}
+                state = set_video_dubbing_pending(
+                    user_id,
+                    state.get("step") or "processing",
+                    **video_dubbing_sync_state_fields(
+                        state,
+                        exclude={"subtitle_ref", "source_subtitle_ref"},
+                    ),
+                    auto_smart_degraded_single_voice=True,
+                    auto_smart_degraded_reason=str(exc),
+                )
+            source_segments = (
+                list(fresh_smart_asr_segments)
+                if acoustic_degraded_to_single
+                else list(acoustic_result.get("segments") or [])
+            )
             if not source_segments:
                 raise subdub_speaker_cast.AutoCastUnavailable()
             source_subtitle = video_dubbing_srt_from_segments(source_segments)
@@ -249461,24 +249537,25 @@ async def video_dubbing_prepare_subtitles(
                 "multi_acoustic_dropped_non_speech_speaker_labels": acoustic_result.get("dropped_non_speech_speaker_labels"),
                 "multi_acoustic_dropped_non_speech_speaker_count": len(acoustic_result.get("dropped_non_speech_speaker_labels") or []),
             })
-            if not acoustic_fields:
+            if not acoustic_fields and not acoustic_degraded_to_single:
                 raise subdub_speaker_cast.AutoCastUnavailable()
-            acoustic_subtitle_ref = set_video_dubbing_artifact(
-                user_id,
-                "source_subtitle",
-                source_subtitle,
-            )
-            state = set_video_dubbing_pending(
-                user_id,
-                state.get("step") or "processing",
-                **video_dubbing_sync_state_fields(
-                    state,
-                    exclude={"subtitle_ref", "source_subtitle_ref"},
-                ),
-                **acoustic_fields,
-                subtitle_ref=acoustic_subtitle_ref,
-                source_subtitle_ref=acoustic_subtitle_ref,
-            )
+            if not acoustic_degraded_to_single:
+                acoustic_subtitle_ref = set_video_dubbing_artifact(
+                    user_id,
+                    "source_subtitle",
+                    source_subtitle,
+                )
+                state = set_video_dubbing_pending(
+                    user_id,
+                    state.get("step") or "processing",
+                    **video_dubbing_sync_state_fields(
+                        state,
+                        exclude={"subtitle_ref", "source_subtitle_ref"},
+                    ),
+                    **acoustic_fields,
+                    subtitle_ref=acoustic_subtitle_ref,
+                    source_subtitle_ref=acoustic_subtitle_ref,
+                )
         elif fresh_auto_asr:
             source_segments = fresh_smart_asr_segments or subdub_canonical_auto_speaker_segments(
                 source_segments,
