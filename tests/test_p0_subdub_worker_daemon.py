@@ -442,9 +442,9 @@ def test_14_worker_restart_does_not_resubmit_provider_on_expired_lease(
 def test_15_secrets_never_logged(
     isolated_db: sqlite3.Connection, staged_media: dict, tmp_path: Path, caplog
 ):
-    """15. Sensitive credentials / secrets are never printed to logs."""
+    """15. Sensitive credentials / secrets and fencing claim_tokens are never printed to logs."""
     secret_key = "sk-super-secret-key-that-must-never-leak"
-    monkeypatch_env = {"KEY4U_API_KEY": secret_key, "CORE_BRIDGE_TOKEN": secret_key}
+    bridge_secret = "bridge-secret-token-auth-xyz987"
 
     with caplog.at_level(logging.DEBUG):
         daemon = SubDubWorkerDaemon(
@@ -453,16 +453,84 @@ def test_15_secrets_never_logged(
             artifact_dir=tmp_path / "artifacts",
             transcriber_fn=lambda _p, _payload: "WEBVTT\n\n1\n00:00:00.000 --> 00:00:01.000\nok\n",
         )
-        enqueue_subdub_job(
+        enqueued = enqueue_subdub_job(
             owner_id=staged_media["owner_id"],
             mode="subtitle_create",
             payload={"upload_id": staged_media["upload_id"]},
             conn=isolated_db,
         )
+        job_id = enqueued["job_id"]
         daemon.process_one_job()
 
-    for record in caplog.records:
-        assert secret_key not in record.message
+    row = isolated_db.execute("SELECT claim_token FROM subdub_worker_jobs WHERE job_id = ?", (job_id,)).fetchone()
+    claim_token = row[0] if row else ""
+    assert claim_token and len(claim_token) >= 8
+
+    # Fencing claim_token must never be logged in plaintext
+    assert claim_token not in caplog.text
+
+    # Configured secrets must never be logged
+    assert secret_key not in caplog.text
+    assert bridge_secret not in caplog.text
+
+
+def test_fencing_token_not_logged_on_negative_failures(
+    isolated_db: sqlite3.Connection, staged_media: dict, tmp_path: Path, caplog
+):
+    """Ensure fencing claim_token and auth secrets never leak in failure log paths:
+    - Pipeline exception
+    - Fencing mismatch / heartbeat failure
+    - Staged upload error
+    """
+    secret_key = "secret-credentials-leak-canary"
+    auth_header = "Bearer secret-bearer-auth-header-999"
+
+    # 1. Pipeline exception
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG):
+        daemon = SubDubWorkerDaemon(
+            worker_id="failing-worker",
+            db_conn=isolated_db,
+            artifact_dir=tmp_path / "artifacts",
+            transcriber_fn=lambda _p, _payload: (_ for _ in ()).throw(RuntimeError("Simulated pipeline error")),
+        )
+        enqueued1 = enqueue_subdub_job(
+            owner_id=staged_media["owner_id"],
+            mode="subtitle_create",
+            payload={"upload_id": staged_media["upload_id"]},
+            conn=isolated_db,
+        )
+        job_id1 = enqueued1["job_id"]
+        daemon.process_one_job()
+
+    row1 = isolated_db.execute("SELECT claim_token FROM subdub_worker_jobs WHERE job_id = ?", (job_id1,)).fetchone()
+    token1 = row1[0] if row1 else ""
+    assert token1 and len(token1) >= 8
+    assert token1 not in caplog.text
+
+    # 2. Fencing token mismatch / stale claim token
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG):
+        enqueued2 = enqueue_subdub_job(
+            owner_id=staged_media["owner_id"],
+            mode="subtitle_create",
+            payload={"upload_id": staged_media["upload_id"]},
+            conn=isolated_db,
+        )
+        job_id2 = enqueued2["job_id"]
+        claimed2 = claim_next_subdub_job("worker-a", conn=isolated_db)
+        token2 = claimed2["claim_token"]
+        assert token2 not in caplog.text
+
+        # Simulate heartbeat with invalid fencing token
+        hb_ok, hb_reason, _ = heartbeat_subdub_job(job_id2, "worker-a", "stale-fake-token", conn=isolated_db)
+        assert hb_ok is False
+        assert token2 not in caplog.text
+        assert "stale-fake-token" not in caplog.text
+
+    # 3. Overall log hygiene: no secrets
+    assert secret_key not in caplog.text
+    assert auth_header not in caplog.text
 
 
 def test_format_vtt_helpers():

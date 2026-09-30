@@ -240,7 +240,7 @@ class SubDubWorkerDaemon:
         attempts = int(job.get("attempts") or 1)
         max_attempts = int(job.get("max_attempts") or 1)
 
-        logger.info(f"Claimed SubDub job {job_id} (mode={mode}, attempts={attempts}/{max_attempts}, token={claim_token})")
+        logger.info(f"Claimed SubDub job {job_id} (mode={mode}, attempts={attempts}/{max_attempts})")
 
         # 1. Attempt Bound Invariant (Fail-Closed)
         if attempts > max_attempts:
