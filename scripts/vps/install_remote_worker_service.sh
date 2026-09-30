@@ -20,13 +20,15 @@ else
   fi
 fi
 
-if [ "$SERVICE_NAME" = "toanaas-worker-subdub.service" ] && [ "$ENV_FILE" = "/etc/toanaas-worker.env" ] && [ -f "/etc/toanaas/bot.env" ]; then
+if { [ "$SERVICE_NAME" = "toanaas-worker-subdub.service" ] || [ "$SERVICE_NAME" = "toanaas-worker-web-product-video.service" ]; } && [ "$ENV_FILE" = "/etc/toanaas-worker.env" ] && [ -f "/etc/toanaas/bot.env" ]; then
   ENV_FILE="/etc/toanaas/bot.env"
 fi
 
 [ -d "$BOT_DIR" ] || fail "$BOT_DIR does not exist."
 if [ "$SERVICE_NAME" = "toanaas-worker-subdub.service" ]; then
   [ -f "$BOT_DIR/services/subdub_worker_daemon.py" ] || fail "$BOT_DIR/services/subdub_worker_daemon.py does not exist."
+elif [ "$SERVICE_NAME" = "toanaas-worker-web-product-video.service" ]; then
+  [ -f "$BOT_DIR/services/web_product_video_worker_daemon.py" ] || fail "$BOT_DIR/services/web_product_video_worker_daemon.py does not exist."
 else
   [ -f "$BOT_DIR/remote_worker.py" ] || fail "$BOT_DIR/remote_worker.py does not exist."
 fi
@@ -38,7 +40,7 @@ service_source() {
     toanaas-worker.service)
       printf '%s\n' "$BOT_DIR/deploy/systemd/toanaas-remote-worker.service.example"
       ;;
-    toanaas-worker-admin-canary.service|toanaas-worker-owner-product-video.service|toanaas-worker-product-video.service|toanaas-worker-admin-video.service|toanaas-worker-subdub.service)
+    toanaas-worker-admin-canary.service|toanaas-worker-owner-product-video.service|toanaas-worker-product-video.service|toanaas-worker-admin-video.service|toanaas-worker-subdub.service|toanaas-worker-web-product-video.service)
       printf '%s\n' "$BOT_DIR/deploy/systemd/$1"
       ;;
     *)
@@ -47,8 +49,13 @@ service_source() {
   esac
 }
 
-token_line="$(grep -E '^[[:space:]]*LOCAL_WORKER_TOKEN=' "$ENV_FILE" | tail -n 1 || true)"
-[ -n "$token_line" ] || fail "LOCAL_WORKER_TOKEN is missing from $ENV_FILE."
+if [ "$SERVICE_NAME" = "toanaas-worker-web-product-video.service" ]; then
+  token_line="$(grep -E '^[[:space:]]*(LOCAL_WORKER_TOKEN|WEB_PRODUCT_VIDEO_WORKER_SECRET|WEBAPP_INTERNAL_WORKER_TOKEN)=' "$ENV_FILE" | tail -n 1 || true)"
+  [ -n "$token_line" ] || fail "Worker secret (LOCAL_WORKER_TOKEN, WEB_PRODUCT_VIDEO_WORKER_SECRET, or WEBAPP_INTERNAL_WORKER_TOKEN) is missing from $ENV_FILE."
+else
+  token_line="$(grep -E '^[[:space:]]*LOCAL_WORKER_TOKEN=' "$ENV_FILE" | tail -n 1 || true)"
+  [ -n "$token_line" ] || fail "LOCAL_WORKER_TOKEN is missing from $ENV_FILE."
+fi
 token_value="${token_line#*=}"
 token_value="${token_value%\"}"
 token_value="${token_value#\"}"
@@ -57,7 +64,7 @@ token_value="${token_value#\'}"
 
 case "$token_value" in
   ""|CHANGE_ME|CHANGE_ME_DO_NOT_COMMIT_REAL_TOKEN|PASTE_REAL_TOKEN_ON_SERVER_ONLY)
-    fail "LOCAL_WORKER_TOKEN still looks like a placeholder."
+    fail "Worker token/secret still looks like a placeholder."
     ;;
 esac
 
