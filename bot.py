@@ -135854,6 +135854,7 @@ async def cmd_linkweb(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_command_received("start", update)
     uid = update.effective_user.id
+    clear_pending_admin_tool_test(uid)
     user_existed_before = user_exists(uid)
     get_user(uid, update.effective_user.first_name)
     record_usage_event(
@@ -140618,6 +140619,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if action not in {"hint_note", "hint_search_note"}:
         clear_memory_guided_pending(query.from_user.id)
     clear_music_guided_pending(query.from_user.id)
+    clear_pending_admin_tool_test(query.from_user.id)
     if action == "autopost":
         return await safe_edit_query_message(
             query,
