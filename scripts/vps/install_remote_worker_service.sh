@@ -50,8 +50,8 @@ service_source() {
 }
 
 if [ "$SERVICE_NAME" = "toanaas-worker-web-product-video.service" ]; then
-  token_line="$(grep -E '^[[:space:]]*(LOCAL_WORKER_TOKEN|WEB_PRODUCT_VIDEO_WORKER_SECRET|WEBAPP_INTERNAL_WORKER_TOKEN)=' "$ENV_FILE" | tail -n 1 || true)"
-  [ -n "$token_line" ] || fail "Worker secret (LOCAL_WORKER_TOKEN, WEB_PRODUCT_VIDEO_WORKER_SECRET, or WEBAPP_INTERNAL_WORKER_TOKEN) is missing from $ENV_FILE."
+  token_line="$(grep -E '^[[:space:]]*PRODUCT_VIDEO_WORKER_SECRET=' "$ENV_FILE" | tail -n 1 || true)"
+  [ -n "$token_line" ] || fail "PRODUCT_VIDEO_WORKER_SECRET is missing from $ENV_FILE."
 else
   token_line="$(grep -E '^[[:space:]]*LOCAL_WORKER_TOKEN=' "$ENV_FILE" | tail -n 1 || true)"
   [ -n "$token_line" ] || fail "LOCAL_WORKER_TOKEN is missing from $ENV_FILE."

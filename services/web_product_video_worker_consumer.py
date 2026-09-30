@@ -7,15 +7,13 @@ This bounded module consumes canonical Web Product Video jobs for video_ai_promp
 from the Web dispatcher (/api/v1/worker/product-video/*) and maps them into the Bot
 runtime VideoGenerationRequest contract.
 
-Strict Safety Invariants:
-- PROVIDER_SUBMIT_CALLED = False
-- PROVIDER_CALLS = 0
-- PAID_PROVIDER_CALLS = 0
-- VIDEO_RENDERS = 0
-- WALLET_MUTATIONS = 0
-- PAYMENT_MUTATIONS = 0
-- PRODUCTION_WORKER_ACTIVATION = False (Contract-only / provider-blocked by default)
-- LIVE_WEB_CLAIMS = 0 (No background live polling daemon)
+Strict Safety Invariants & Execution Truth:
+- Production capability exists via execute_claimed_web_product_video_job() and services.web_product_video_worker_daemon.
+- Default production activation remains OFF (fail-closed by default).
+- Live execution requires explicit WEB_PRODUCT_VIDEO_WORKER_ENABLED=true in environment.
+- No live claims occur while the gate is false (WEB_PRODUCT_VIDEO_WORKER_ENABLED=false).
+- Zero direct customer wallet mutations (WALLET_MUTATIONS = 0, PAYMENT_MUTATIONS = 0).
+- Canonical Web settlement (Classification A): worker enforces admin_no_charge=True and no_wallet_charge=True.
 """
 
 from __future__ import annotations
