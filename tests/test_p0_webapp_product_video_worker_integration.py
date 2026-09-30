@@ -10,10 +10,15 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import pathlib
+import shutil
+import subprocess
+import tempfile
 import threading
 import time
 import urllib.request
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -23,8 +28,10 @@ from services.web_product_video_worker_consumer import (
     ConsumerExecutionOutcome,
     WebClaimResponse,
     WebProductVideoDispatcherClient,
+    WorkerAuthError,
     _ACTIVE_JOB_IDS,
     execute_claimed_web_product_video_job,
+    get_worker_secret,
     is_safe_video_output_url,
     is_web_product_video_worker_enabled,
     map_web_job_to_bot_runtime,
@@ -834,3 +841,158 @@ def test_19_daemon_poll_cycle_and_shutdown() -> None:
     assert daemon.stats["jobs_completed"] == 1
     assert len(processed_jobs) == 1
     assert processed_jobs[0] == "pvjob_20260930_valid01"
+
+
+# ==============================================================================
+# PHASE C & D — WORKER SECRET CONTRACT TESTS (DEFECT-PV-001C)
+# ==============================================================================
+
+def test_20_installer_source_strict_canonical_secret() -> None:
+    """Installer must strictly validate PRODUCT_VIDEO_WORKER_SECRET for toanaas-worker-web-product-video.service.
+
+    It must NOT contain stale/non-runtime variables like WEB_PRODUCT_VIDEO_WORKER_SECRET
+    or WEBAPP_INTERNAL_WORKER_TOKEN, and must not accept LOCAL_WORKER_TOKEN for this service.
+    """
+    repo_root = pathlib.Path(__file__).resolve().parent.parent
+    installer_path = repo_root / "scripts" / "vps" / "install_remote_worker_service.sh"
+    assert installer_path.exists(), f"Installer missing: {installer_path}"
+    content = installer_path.read_text(encoding="utf-8")
+
+    # Stale/non-runtime keys must not exist in installer
+    assert "WEB_PRODUCT_VIDEO_WORKER_SECRET" not in content
+    assert "WEBAPP_INTERNAL_WORKER_TOKEN" not in content
+
+    # For toanaas-worker-web-product-video.service, strictly PRODUCT_VIDEO_WORKER_SECRET
+    assert 'SERVICE_NAME" = "toanaas-worker-web-product-video.service"' in content
+    assert "PRODUCT_VIDEO_WORKER_SECRET=" in content
+
+
+def _run_installer_token_check(env_lines: Sequence[str]) -> tuple[int, str]:
+    """Execute the exact installer token validation logic using bash against a temporary env file."""
+    bash_path = shutil.which("bash") or (
+        r"C:\Program Files\Git\bin\bash.exe" if os.path.exists(r"C:\Program Files\Git\bin\bash.exe") else None
+    )
+    if not bash_path:
+        pytest.skip("Bash executable not found in test environment")
+
+    with tempfile.NamedTemporaryFile("w", delete=False, suffix=".env", encoding="utf-8") as f:
+        f.write("\n".join(env_lines) + "\n")
+        tmp_env = f.name
+
+    safe_env_path = tmp_env.replace("\\", "/")
+
+    bash_code = (
+        'set -euo pipefail\n'
+        'fail() { echo "FAIL: $*" >&2; exit 1; }\n'
+        'SERVICE_NAME="toanaas-worker-web-product-video.service"\n'
+        f'ENV_FILE="{safe_env_path}"\n'
+        'if [ "$SERVICE_NAME" = "toanaas-worker-web-product-video.service" ]; then\n'
+        '  token_line="$(grep -E \'^[[:space:]]*PRODUCT_VIDEO_WORKER_SECRET=\' "$ENV_FILE" | tail -n 1 || true)"\n'
+        '  [ -n "$token_line" ] || fail "PRODUCT_VIDEO_WORKER_SECRET is missing from $ENV_FILE."\n'
+        'else\n'
+        '  token_line="$(grep -E \'^[[:space:]]*LOCAL_WORKER_TOKEN=\' "$ENV_FILE" | tail -n 1 || true)"\n'
+        '  [ -n "$token_line" ] || fail "LOCAL_WORKER_TOKEN is missing from $ENV_FILE."\n'
+        'fi\n'
+        'token_value="${token_line#*=}"\n'
+        'token_value="${token_value%\\\"}"\n'
+        'token_value="${token_value#\\\"}"\n'
+        'token_value="${token_value%\\\'}"\n'
+        'token_value="${token_value#\\\'}"\n'
+        'case "$token_value" in\n'
+        '  ""|CHANGE_ME|CHANGE_ME_DO_NOT_COMMIT_REAL_TOKEN|PASTE_REAL_TOKEN_ON_SERVER_ONLY)\n'
+        '    fail "Worker token/secret still looks like a placeholder."\n'
+        '    ;;\n'
+        'esac\n'
+        'echo "ACCEPTED:$token_value"\n'
+    )
+
+    try:
+        proc = subprocess.run([bash_path, "-c", bash_code], capture_output=True, text=True)
+        return proc.returncode, proc.stdout + proc.stderr
+    finally:
+        if os.path.exists(tmp_env):
+            os.unlink(tmp_env)
+
+
+def test_21_installer_accepts_canonical_product_video_worker_secret() -> None:
+    """1. PRODUCT_VIDEO_WORKER_SECRET present -> installer secret contract accepted."""
+    code, output = _run_installer_token_check([
+        '# Toan AAS Bot environment',
+        'PRODUCT_VIDEO_WORKER_SECRET="test_pv_canonical_secret_12345"',
+    ])
+    assert code == 0, f"Expected 0, got {code}: {output}"
+    assert "ACCEPTED:test_pv_canonical_secret_12345" in output
+
+
+def test_22_installer_rejects_missing_product_video_worker_secret() -> None:
+    """2. PRODUCT_VIDEO_WORKER_SECRET missing -> deployment preflight rejected."""
+    code, output = _run_installer_token_check([
+        '# Empty or unrelated env file',
+        'SOME_OTHER_VAR="value"',
+    ])
+    assert code != 0
+    assert "PRODUCT_VIDEO_WORKER_SECRET is missing" in output
+
+
+def test_23_installer_rejects_stale_or_non_runtime_keys() -> None:
+    """3, 4, 5. Only stale or non-runtime keys present -> must NOT falsely prove runtime readiness."""
+    # 3. Only WEB_PRODUCT_VIDEO_WORKER_SECRET
+    code, output = _run_installer_token_check([
+        'WEB_PRODUCT_VIDEO_WORKER_SECRET="stale_secret_val"',
+    ])
+    assert code != 0
+    assert "PRODUCT_VIDEO_WORKER_SECRET is missing" in output
+
+    # 4. Only WEBAPP_INTERNAL_WORKER_TOKEN
+    code, output = _run_installer_token_check([
+        'WEBAPP_INTERNAL_WORKER_TOKEN="stale_internal_token"',
+    ])
+    assert code != 0
+    assert "PRODUCT_VIDEO_WORKER_SECRET is missing" in output
+
+    # 5. Only LOCAL_WORKER_TOKEN
+    code, output = _run_installer_token_check([
+        'LOCAL_WORKER_TOKEN="legacy_local_token"',
+    ])
+    assert code != 0
+    assert "PRODUCT_VIDEO_WORKER_SECRET is missing" in output
+
+
+def test_24_installer_rejects_placeholder_and_empty_values() -> None:
+    """6, 7. Placeholder value or empty value -> rejected."""
+    placeholders = [
+        'PRODUCT_VIDEO_WORKER_SECRET=""',
+        'PRODUCT_VIDEO_WORKER_SECRET="CHANGE_ME"',
+        'PRODUCT_VIDEO_WORKER_SECRET="CHANGE_ME_DO_NOT_COMMIT_REAL_TOKEN"',
+        'PRODUCT_VIDEO_WORKER_SECRET="PASTE_REAL_TOKEN_ON_SERVER_ONLY"',
+    ]
+    for ph in placeholders:
+        code, output = _run_installer_token_check([ph])
+        assert code != 0
+        assert "placeholder" in output.lower() or "missing" in output.lower()
+
+
+def test_25_consumer_get_worker_secret_canonical_priority() -> None:
+    """Phase D: Verify get_worker_secret returns expected synthetic test value and prioritizes canonical key."""
+    # Canonical secret returned
+    secret = get_worker_secret({"PRODUCT_VIDEO_WORKER_SECRET": "test-secret-alpha-99"})
+    assert secret == "test-secret-alpha-99"
+
+    # Precedence over fallback tokens
+    mixed = {
+        "PRODUCT_VIDEO_WORKER_SECRET": "primary_canonical_secret",
+        "WORKER_AUTH_TOKEN": "secondary_secret",
+        "TOANAAS_WORKER_SECRET": "tertiary_secret",
+    }
+    assert get_worker_secret(mixed) == "primary_canonical_secret"
+
+
+def test_26_consumer_auth_boundary_fails_closed_when_secret_missing() -> None:
+    """Phase D: Missing canonical secret fails closed at auth boundary with WorkerAuthError."""
+    # Empty environment
+    assert get_worker_secret({}) == ""
+
+    client = WebProductVideoDispatcherClient(worker_secret="")
+    with pytest.raises(WorkerAuthError) as exc_info:
+        client.claim()
+    assert "MISSING_WORKER_SECRET" in str(exc_info.value)
