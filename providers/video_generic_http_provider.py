@@ -948,12 +948,12 @@ def _key4u_wire_payload(
         if resolution:
             wire["resolution"] = resolution
         return wire
+    submit_path = urllib.parse.urlparse(
+        str(submit_url or metadata.get("provider_submit_url_override") or "")
+    ).path.rstrip("/")
     if (
         family == "google_veo"
-        and urllib.parse.urlparse(
-            str(submit_url or metadata.get("provider_submit_url_override") or "")
-        ).path.rstrip("/")
-        == "/v1/video/create"
+        and (submit_path.endswith("/v1/videos") or submit_path == "/v1/video/create")
     ):
         ratio = str(data.get("aspect_ratio") or data.get("ratio") or "9:16").strip()
         if ratio in {"9/16", "9x16"}:
@@ -1051,6 +1051,7 @@ def _key4u_wire_payload(
             out_meta["provider_reference_present"] = True
             out_meta["provider_reference_count"] = 1
             out_meta["provider_reference_host"] = urllib.parse.urlsplit(reference_url).netloc
+            wire["images"] = [reference_url]
             wire["metadata"] = out_meta
         return wire
     if (
@@ -1839,21 +1840,31 @@ class GenericHttpVideoProvider:
             payload_metadata.get("provider_poll_url_override") or ""
         ).strip()
         parsed_submit_url = urllib.parse.urlsplit(submit_url)
+        parsed_submit_host = (parsed_submit_url.hostname or "").lower()
         if (
             self.provider_name == "key4u_video"
-            and (parsed_submit_url.hostname or "").lower()
-            in {"api.key4u.vn", "api.key4u.shop"}
-            and parsed_submit_url.path.rstrip("/") == "/v1/video/create"
+            and parsed_submit_host in {"api.key4u.vn", "api.key4u.shop"}
         ):
-            poll_url_override = urllib.parse.urlunsplit(
-                (
-                    parsed_submit_url.scheme,
-                    parsed_submit_url.netloc,
-                    "/v1/video/query",
-                    "id={task_id}",
-                    "",
+            if parsed_submit_url.path.rstrip("/").endswith("/v1/videos"):
+                poll_url_override = urllib.parse.urlunsplit(
+                    (
+                        parsed_submit_url.scheme,
+                        parsed_submit_url.netloc,
+                        f"{parsed_submit_url.path.rstrip('/')}/{{task_id}}",
+                        "",
+                        "",
+                    )
                 )
-            )
+            elif parsed_submit_url.path.rstrip("/") == "/v1/video/create":
+                poll_url_override = urllib.parse.urlunsplit(
+                    (
+                        parsed_submit_url.scheme,
+                        parsed_submit_url.netloc,
+                        "/v1/video/query",
+                        "id={task_id}",
+                        "",
+                    )
+                )
         if isinstance(payload.get("metadata"), dict):
             clean_metadata = dict(payload["metadata"])
             clean_metadata.pop("provider_submit_url_override", None)
@@ -1898,16 +1909,10 @@ class GenericHttpVideoProvider:
             )
         if (
             self.provider_name == "key4u_video"
-            and str(payload_metadata.get("provider_interface") or "") in {
-                "key4u_openai_video_multipart_i2v",
-                "key4u_google_veo_exclusive",
-            }
+            and str(payload_metadata.get("provider_interface") or "") == "key4u_openai_video_multipart_i2v"
             and urllib.parse.urlparse(submit_url).path.rstrip("/").endswith("/v1/videos")
         ):
-            if str(payload_metadata.get("provider_interface") or "") == "key4u_openai_video_multipart_i2v":
-                multipart_fields = wire_payload if (isinstance(wire_payload, dict) and "input_reference" in wire_payload) else _key4u_openai_video_i2v_fields(payload)
-            else:
-                multipart_fields = _key4u_openai_video_fields(payload)
+            multipart_fields = wire_payload if (isinstance(wire_payload, dict) and "input_reference" in wire_payload) else _key4u_openai_video_i2v_fields(payload)
             result = self._open_multipart_form(
                 submit_url,
                 multipart_fields,

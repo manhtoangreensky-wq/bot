@@ -268,10 +268,10 @@ def _key4u_official_google_veo_endpoints(
         "https://api.key4u.vn",
     )
     return (
-        f"{base}/v1/video/create",
-        "derived:key4u_unified_video_create",
-        f"{base}/v1/video/query?id={{task_id}}",
-        "derived:key4u_unified_video_query",
+        f"{base}/v1/videos",
+        "derived:key4u_official_veo_videos",
+        f"{base}/v1/videos/{{task_id}}",
+        "derived:key4u_official_veo_poll",
     )
 
 
@@ -279,24 +279,6 @@ def _normalize_key4u_official_google_veo_submit_endpoint(
     submit_url: str,
     submit_source: str,
 ) -> tuple[str, str]:
-    parsed = urllib.parse.urlsplit(str(submit_url or "").strip())
-    if (
-        (parsed.hostname or "").lower() in {"api.key4u.vn", "api.key4u.shop"}
-        and parsed.path.rstrip("/")
-        in {"/v1/videos", "/v1/videos/generations"}
-    ):
-        normalized = urllib.parse.urlunsplit(
-            (
-                parsed.scheme,
-                parsed.netloc,
-                "/v1/video/create",
-                "",
-                "",
-            )
-        )
-        return normalized, (
-            f"normalized_unified:{submit_source or 'key4u_official_videos'}"
-        )
     return submit_url, submit_source
 
 
