@@ -188,6 +188,39 @@ class SubDubWorkerDaemon:
         self._running = False
         self._stop_event.set()
 
+    def _resolve_upload(self, upload_id: str, owner_id: str) -> tuple[bool, str, int, dict[str, Any]]:
+        """Resolve staged upload metadata with actor ownership enforcement."""
+        if self.db_conn is not None:
+            clean_id = str(upload_id or "").strip()
+            if not clean_id or not re.fullmatch(r"^[A-Za-z0-9_-]{1,80}$", clean_id):
+                return False, "INVALID_UPLOAD_ID", 400, {}
+            try:
+                cur = self.db_conn.execute("SELECT value FROM system_settings WHERE key = ?", (f"subdub_upload:{clean_id}",))
+                row = cur.fetchone()
+                if not row:
+                    return False, "UPLOAD_NOT_FOUND", 404, {}
+                record = json.loads(row[0] if isinstance(row, (tuple, list)) else row["value"])
+            except Exception:
+                return False, "UPLOAD_NOT_FOUND", 404, {}
+
+            if not isinstance(record, dict) or record.get("upload_id") != clean_id:
+                return False, "UPLOAD_NOT_FOUND", 404, {}
+
+            local_path = str(record.get("local_path") or "").strip()
+            if not local_path or not Path(local_path).is_file():
+                return False, "STAGED_FILE_MISSING", 404, {}
+
+            record_owner = str(record.get("owner_id") or "").strip()
+            clean_actor = str(owner_id or "").strip()
+            if clean_actor.startswith("telegram-"):
+                clean_actor = clean_actor[len("telegram-"):]
+            if record_owner and clean_actor and record_owner != clean_actor:
+                return False, "FORBIDDEN_CROSS_OWNER", 403, {}
+
+            return True, "OK", 200, record
+
+        return get_staged_upload(upload_id, actor_id=owner_id)
+
     def process_one_job(self) -> bool:
         """Claim and process at most one job from the queue. Return True if job was claimed."""
         job = claim_next_subdub_job(
@@ -259,7 +292,7 @@ class SubDubWorkerDaemon:
                 )
                 return True
 
-        upload_ok, upload_reason, upload_code, upload_record = get_staged_upload(upload_id, actor_id=owner_id)
+        upload_ok, upload_reason, upload_code, upload_record = self._resolve_upload(upload_id, owner_id)
         if not upload_ok:
             fail_subdub_job(
                 job_id,
