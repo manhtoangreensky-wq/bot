@@ -238134,6 +238134,12 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
     state = state or {}
     result = result or {}
     receipt_context = {**state, **dict(result.get("state") or {}), **result}
+    smart_multi_selected = (
+        auto_smart_multivoice.is_auto_smart_multivoice_state(receipt_context)
+        or auto_smart_multivoice.is_auto_smart_multivoice_state(
+            receipt_context.get("auto_exact_resume_state")
+        )
+    )
     mode = normalize_video_translate_mode(
         receipt_context.get("requested_mode")
         or receipt_context.get("mode")
@@ -238220,6 +238226,9 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
         )
         multi_detail_lines = ""
         if multi_proof:
+            dubbing_type = "Smart Multi" if smart_multi_selected else (
+                "Tự động nhiều giọng" if is_vi else "Auto-detected multi-speaker"
+            )
             source_name = html.escape(
                 str(multi_proof["source_file_name"])
             )
@@ -238238,7 +238247,7 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
             if is_vi:
                 multi_detail_lines = (
                     f"• Tệp nguồn: <b>{source_name}</b>\n"
-                    "• Loại lồng tiếng: <b>Tự động nhiều giọng</b>\n"
+                    f"• Loại lồng tiếng: <b>{dubbing_type}</b>\n"
                     f"• Số người nói nhận diện: <b>{speaker_count}</b>\n"
                     f"• Số giọng lồng tiếng đã dùng: <b>{voice_count}</b>\n"
                     f"• Giá phụ đề: <b>{subtitle_xu} Xu</b>\n"
@@ -238247,16 +238256,22 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
             else:
                 multi_detail_lines = (
                     f"• Source file: <b>{source_name}</b>\n"
-                    "• Dubbing type: <b>Auto-detected multi-speaker</b>\n"
+                    f"• Dubbing type: <b>{dubbing_type}</b>\n"
                     f"• Detected speakers: <b>{speaker_count}</b>\n"
                     f"• Dubbing voices used: <b>{voice_count}</b>\n"
                     f"• Subtitle price: <b>{subtitle_xu} Xu</b>\n"
                     f"• Dubbing price: <b>{dubbing_xu} Xu</b>\n"
                 )
         elif (
-            auto_speaker.is_auto_speaker_state(receipt_context)
-            and not auto_multi_speaker.is_auto_multi_speaker_state(receipt_context)
+            smart_multi_selected
+            or (
+                auto_speaker.is_auto_speaker_state(receipt_context)
+                and not auto_multi_speaker.is_auto_multi_speaker_state(receipt_context)
+            )
         ):
+            dubbing_type = "Smart Multi" if smart_multi_selected else (
+                "Tự động 2 giọng" if is_vi else "Auto-detected two-speaker"
+            )
             subtitle_xu = max(
                 0,
                 _safe_int(
@@ -238273,7 +238288,7 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
             )
             if is_vi:
                 multi_detail_lines = (
-                    "• Loại lồng tiếng: <b>Tự động 2 giọng</b>\n"
+                    f"• Loại lồng tiếng: <b>{dubbing_type}</b>\n"
                     + (
                         f"• Giá phụ đề: <b>{subtitle_xu} Xu</b>\n"
                         if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
@@ -238283,7 +238298,7 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
                 )
             else:
                 multi_detail_lines = (
-                    "• Dubbing type: <b>Auto-detected two-speaker</b>\n"
+                    f"• Dubbing type: <b>{dubbing_type}</b>\n"
                     + (
                         f"• Subtitle price: <b>{subtitle_xu} Xu</b>\n"
                         if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
@@ -249454,6 +249469,7 @@ async def video_dubbing_prepare_subtitles(
                     Path(pcm_path),
                     word_timeline,
                     duration_seconds=acoustic_duration,
+                    gender_source_original=auto_smart_multivoice.is_auto_smart_multivoice_state(state),
                 )
             except (
                 subdub_speaker_cast.AutoCastUnavailable,
