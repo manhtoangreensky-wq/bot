@@ -20,14 +20,20 @@ Strict Safety Invariants:
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import os
+from pathlib import Path
 import re
+import tempfile
+import threading
+import time
 import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Mapping, Sequence
+from urllib.parse import urlsplit
 
 from services.video_provider_base import VideoGenerationRequest
 
@@ -46,6 +52,18 @@ MIN_DURATION_SECONDS: float = 1.0
 MAX_DURATION_SECONDS: float = 60.0
 MIN_PROMPT_LENGTH: int = 3
 MAX_PROMPT_LENGTH: int = 2000
+
+# Artifact & URL validation constants
+SAFE_VIDEO_EXTENSIONS: frozenset[str] = frozenset({".mp4", ".webm", ".mov"})
+SAFE_HOSTNAME_PATTERN = re.compile(
+    r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+)
+FORBIDDEN_OUTPUT_URL_SCHEMES = frozenset({"javascript:", "vbscript:", "data:", "file:", "blob:", "about:"})
+ACCEPTED_VIDEO_FORMATS = frozenset({"mp4", "mov", "webm", "mkv"})
+ACCEPTED_VIDEO_CODECS = frozenset({"h264", "hevc", "av1", "vp9", "vp8", "prores"})
+MIN_ARTIFACT_BYTES = 4096
+DEFAULT_HEARTBEAT_INTERVAL = 15.0
+DEFAULT_LEASE_SECONDS = 300
 
 # Concurrency / in-memory deduplication
 _ACTIVE_JOB_IDS: set[str] = set()
@@ -118,6 +136,138 @@ class PreparedExecutionOutcome:
     paid_provider_calls: int = 0
     video_renders: int = 0
     wallet_mutations: int = 0
+
+
+@dataclass(frozen=True)
+class ConsumerExecutionOutcome:
+    ok: bool
+    job_id: str
+    request_id: str
+    product_key: str
+    status: str
+    blocker_reason: str = ""
+    output_url: str = ""
+    output_metadata: dict[str, Any] = field(default_factory=dict)
+    provider_task_id: str = ""
+    provider_submit_called: bool = False
+    provider_calls: int = 0
+    paid_provider_calls: int = 0
+    video_renders: int = 0
+    wallet_mutations: int = 0
+
+
+def is_web_product_video_worker_enabled(environ: Mapping[str, str] | None = None) -> bool:
+    """Production gate check. Defaults strictly to False."""
+    source = os.environ if environ is None else environ
+    return str(source.get("WEB_PRODUCT_VIDEO_WORKER_ENABLED") or "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def is_safe_video_output_url(url: Any) -> bool:
+    """Validate that candidate Product Video output URL is safe to deliver."""
+    if not isinstance(url, str):
+        return False
+    trimmed = url.strip()
+    if not trimmed or len(trimmed) > 2048 or trimmed != url:
+        return False
+    if any(ord(c) < 32 or ord(c) == 127 for c in trimmed):
+        return False
+    if "\\" in trimmed:
+        return False
+    lowered = trimmed.lower()
+    if ".." in lowered or "%2e" in lowered:
+        return False
+    if any(lowered.startswith(s) or s in lowered for s in FORBIDDEN_OUTPUT_URL_SCHEMES):
+        return False
+    try:
+        parsed = urlsplit(trimmed)
+    except Exception:
+        return False
+    if parsed.scheme.lower() != "https":
+        return False
+    if not parsed.netloc:
+        return False
+    if parsed.username or parsed.password or "@" in parsed.netloc:
+        return False
+
+    hostname = (parsed.hostname or "").lower()
+    if not hostname:
+        return False
+
+    if hostname == "localhost" or hostname.endswith(".localhost"):
+        return False
+
+    try:
+        ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        ip = None
+
+    if ip is not None:
+        if not ip.is_global:
+            return False
+    else:
+        if not SAFE_HOSTNAME_PATTERN.fullmatch(hostname):
+            return False
+
+    try:
+        port = parsed.port
+    except ValueError:
+        return False
+    if port not in (None, 443):
+        return False
+
+    path = parsed.path.lower()
+    if not any(path.endswith(ext) for ext in SAFE_VIDEO_EXTENSIONS):
+        return False
+
+    return True
+
+
+def validate_video_artifact_metadata(metadata: Any) -> tuple[bool, str, dict[str, Any]]:
+    """Validate that completed video output contains genuine, non-empty artifact metadata."""
+    if not isinstance(metadata, dict):
+        return False, "METADATA_MUST_BE_DICT", {}
+
+    try:
+        duration = float(metadata.get("duration_seconds") or metadata.get("duration") or 0)
+    except (TypeError, ValueError):
+        return False, "INVALID_DURATION", {}
+    if duration <= 0:
+        return False, "DURATION_MUST_BE_POSITIVE", {}
+
+    try:
+        width = int(metadata.get("width") or 0)
+        height = int(metadata.get("height") or 0)
+    except (TypeError, ValueError):
+        return False, "INVALID_DIMENSIONS", {}
+    if width < 64 or height < 64:
+        return False, "DIMENSIONS_TOO_SMALL", {}
+
+    try:
+        file_size = int(metadata.get("file_size_bytes") or metadata.get("file_size") or 0)
+    except (TypeError, ValueError):
+        return False, "INVALID_FILE_SIZE", {}
+    if file_size < MIN_ARTIFACT_BYTES:
+        return False, "FILE_SIZE_TOO_SMALL", {}
+
+    fmt = str(metadata.get("format") or "").strip().lower()
+    if fmt not in ACCEPTED_VIDEO_FORMATS:
+        return False, "INVALID_FORMAT", {}
+
+    codec = str(metadata.get("codec") or "").strip().lower()
+    if codec not in ACCEPTED_VIDEO_CODECS:
+        return False, "INVALID_CODEC", {}
+
+    sanitized = {
+        "duration_seconds": round(duration, 3),
+        "width": width,
+        "height": height,
+        "file_size_bytes": file_size,
+        "format": fmt,
+        "codec": codec,
+        "fps": float(metadata.get("fps") or 30.0),
+        "bitrate_kbps": int(metadata.get("bitrate_kbps") or 0),
+    }
+    return True, "", sanitized
 
 
 class WebProductVideoDispatcherClient:
@@ -425,6 +575,318 @@ def prepare_and_gate_execution(
             provider_submit_called=False,
             provider_calls=0,
             paid_provider_calls=0,
+            video_renders=0,
+            wallet_mutations=0,
+        )
+    finally:
+        _ACTIVE_JOB_IDS.discard(raw_job_id)
+
+
+def execute_claimed_web_product_video_job(
+    job: Mapping[str, Any] | None,
+    client: WebProductVideoDispatcherClient | None = None,
+    *,
+    environ: Mapping[str, str] | None = None,
+    output_dir: str | Path | None = None,
+    heartbeat_interval: float = DEFAULT_HEARTBEAT_INTERVAL,
+    lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    executor_fn: Callable[..., dict[str, Any]] | None = None,
+    stop_event: threading.Event | None = None,
+) -> ConsumerExecutionOutcome:
+    """Execute a claimed Web Product Video job through the canonical Bot runtime.
+
+    Invariants:
+    1. Validation First: Validates envelope before allocating resources or calling provider.
+    2. Fail-Closed Gate: Requires WEB_PRODUCT_VIDEO_WORKER_ENABLED=true in environment.
+    3. Fencing & Deduplication: Prevents concurrent execution of the same job_id.
+    4. Active Heartbeat: Sends periodic heartbeats during execution; fail-closed on lease loss.
+    5. Canonical Runtime: Invokes Bot Product Video runtime (max 1 provider submit).
+    6. Safe Output Truth: Validates HTTPS video output URL and non-zero artifact metadata.
+    7. No Wallet Mutations: Strictly passes admin_no_charge=True and no_wallet_charge=True.
+    8. Factual Reporting: Reports terminal complete or factual failure to Web dispatcher.
+    """
+    env = os.environ if environ is None else environ
+    raw_job_id = str((job or {}).get("job_id") or "").strip()
+    request_id = str((job or {}).get("request_id") or "").strip()
+    product_key = str((job or {}).get("product_key") or "").strip()
+
+    if not raw_job_id:
+        return ConsumerExecutionOutcome(
+            ok=False,
+            job_id="",
+            request_id=request_id,
+            product_key=product_key,
+            status="INVALID_JOB_REJECTED",
+            blocker_reason="MISSING_JOB_ID",
+        )
+
+    # In-memory deduplication check
+    if raw_job_id in _ACTIVE_JOB_IDS:
+        logger.warning("duplicate_execution_rejected job_id=%s", raw_job_id)
+        return ConsumerExecutionOutcome(
+            ok=False,
+            job_id=raw_job_id,
+            request_id=request_id,
+            product_key=product_key,
+            status="DUPLICATE_EXECUTION_BLOCKED",
+            blocker_reason="DUPLICATE_ACTIVE_JOB_EXECUTION",
+        )
+
+    # Envelope validation
+    is_valid, validation_reason = validate_claimed_job(job)
+    if not is_valid:
+        if client:
+            try:
+                client.fail(
+                    job_id=raw_job_id,
+                    error_code="VALIDATION_FAILED",
+                    error_message=validation_reason,
+                    fatal=True,
+                )
+            except Exception as exc:
+                logger.error("fail_reporting_error job_id=%s err=%s", raw_job_id, type(exc).__name__)
+        return ConsumerExecutionOutcome(
+            ok=False,
+            job_id=raw_job_id,
+            request_id=request_id,
+            product_key=product_key,
+            status="INVALID_JOB_REJECTED",
+            blocker_reason=validation_reason,
+        )
+
+    # Fail-closed production activation gate
+    if not is_web_product_video_worker_enabled(env):
+        logger.warning("worker_execution_disabled_by_config job_id=%s", raw_job_id)
+        if client:
+            try:
+                client.fail(
+                    job_id=raw_job_id,
+                    error_code="WORKER_DISABLED",
+                    error_message="Web Product Video worker execution disabled by configuration",
+                    fatal=True,
+                )
+            except Exception as exc:
+                logger.error("fail_reporting_error job_id=%s err=%s", raw_job_id, type(exc).__name__)
+        return ConsumerExecutionOutcome(
+            ok=False,
+            job_id=raw_job_id,
+            request_id=request_id,
+            product_key=product_key,
+            status="WORKER_EXECUTION_DISABLED",
+            blocker_reason="WORKER_DISABLED",
+        )
+
+    _ACTIVE_JOB_IDS.add(raw_job_id)
+    heartbeat_abort = threading.Event()
+    lease_lost = False
+    hb_thread: threading.Thread | None = None
+
+    try:
+        # Map Web job to canonical VideoGenerationRequest
+        gen_request = map_web_job_to_bot_runtime(job)
+
+        # Heartbeat loop for lease extension
+        if client is not None:
+            def _heartbeat_loop():
+                nonlocal lease_lost
+                interval = max(0.05, float(heartbeat_interval))
+                while not heartbeat_abort.wait(timeout=interval):
+                    if stop_event and stop_event.is_set():
+                        break
+                    try:
+                        hb_ok = client.heartbeat(raw_job_id, lease_seconds=lease_seconds)
+                        if not hb_ok:
+                            logger.warning("heartbeat_rejected_lease_lost job_id=%s", raw_job_id)
+                            lease_lost = True
+                            heartbeat_abort.set()
+                            break
+                    except Exception as exc:
+                        logger.warning("heartbeat_exception job_id=%s err=%s", raw_job_id, type(exc).__name__)
+
+            hb_thread = threading.Thread(target=_heartbeat_loop, daemon=True)
+            hb_thread.start()
+
+        # Execute canonical Bot Product Video runtime
+        gen_result: dict[str, Any] = {}
+        try:
+            if executor_fn is not None:
+                fn = executor_fn
+            else:
+                from services.video_provider_router import run_provider_generation
+                fn = run_provider_generation
+
+            with tempfile.TemporaryDirectory(prefix="web_pv_worker_") as tmp_dir:
+                active_out_dir = str(output_dir or tmp_dir)
+                gen_result = fn(gen_request, output_dir=active_out_dir, environ=dict(env))
+        except Exception as exc:
+            logger.exception("provider_runtime_exception job_id=%s err=%s", raw_job_id, type(exc).__name__)
+            gen_result = {
+                "ok": False,
+                "blocker": "PROVIDER_EXCEPTION",
+                "provider_error": type(exc).__name__,
+                "public_message": str(exc)[:200],
+                "provider_submit_called": True,
+            }
+        finally:
+            heartbeat_abort.set()
+            if hb_thread is not None:
+                hb_thread.join(timeout=1.0)
+
+        # Check lease status: if lease lost, fail-closed without completing
+        if lease_lost:
+            logger.error("lease_lost_fail_closed job_id=%s", raw_job_id)
+            return ConsumerExecutionOutcome(
+                ok=False,
+                job_id=raw_job_id,
+                request_id=request_id,
+                product_key=product_key,
+                status="LEASE_LOST_FAIL_CLOSED",
+                blocker_reason="WORKER_LEASE_LOST_DURING_EXECUTION",
+                provider_submit_called=bool(gen_result.get("provider_submit_called") if isinstance(gen_result, dict) else False),
+                provider_calls=1 if isinstance(gen_result, dict) and gen_result.get("provider_submit_called") else 0,
+                paid_provider_calls=1 if isinstance(gen_result, dict) and gen_result.get("provider_submit_called") else 0,
+            )
+
+        # Process execution outcome
+        if isinstance(gen_result, dict) and gen_result.get("ok"):
+            output_url = str(gen_result.get("result_url") or gen_result.get("file_url") or "").strip()
+            output_path = str(gen_result.get("output_path") or gen_result.get("local_path") or "").strip()
+
+            if not output_url or not is_safe_video_output_url(output_url):
+                logger.error("unsafe_output_url_rejected job_id=%s url=%s", raw_job_id, output_url[:80])
+                if client:
+                    try:
+                        client.fail(
+                            job_id=raw_job_id,
+                            error_code="UNSAFE_OUTPUT_URL",
+                            error_message="Provider produced an unsafe or non-HTTPS output URL",
+                            fatal=True,
+                        )
+                    except Exception as exc:
+                        logger.error("fail_reporting_error job_id=%s err=%s", raw_job_id, type(exc).__name__)
+                return ConsumerExecutionOutcome(
+                    ok=False,
+                    job_id=raw_job_id,
+                    request_id=request_id,
+                    product_key=product_key,
+                    status="UNSAFE_OUTPUT_REJECTED",
+                    blocker_reason="UNSAFE_OUTPUT_URL",
+                    output_url=output_url,
+                    provider_submit_called=True,
+                    provider_calls=1,
+                    paid_provider_calls=1,
+                    video_renders=1,
+                )
+
+            # Artifact metadata validation
+            duration = float(gen_result.get("duration") or gen_result.get("duration_seconds") or (job.get("payload") or {}).get("duration") or 5.0)
+            file_size = int(gen_result.get("bytes") or (os.path.getsize(output_path) if output_path and os.path.exists(output_path) else 0))
+            ratio = str((job.get("payload") or {}).get("aspect_ratio") or "9:16").strip()
+            dims = (720, 1280) if ratio == "9:16" else ((1280, 720) if ratio == "16:9" else (1024, 1024))
+            raw_meta = {
+                "duration_seconds": duration,
+                "width": int(gen_result.get("width") or dims[0]),
+                "height": int(gen_result.get("height") or dims[1]),
+                "file_size_bytes": file_size,
+                "format": str(gen_result.get("format") or "mp4").strip().lower(),
+                "codec": str(gen_result.get("codec") or "h264").strip().lower(),
+            }
+            is_valid_meta, meta_err, sanitized_meta = validate_video_artifact_metadata(raw_meta)
+            if not is_valid_meta:
+                logger.error("invalid_artifact_metadata job_id=%s reason=%s", raw_job_id, meta_err)
+                if client:
+                    try:
+                        client.fail(
+                            job_id=raw_job_id,
+                            error_code="INVALID_ARTIFACT_METADATA",
+                            error_message=meta_err,
+                            fatal=True,
+                        )
+                    except Exception as exc:
+                        logger.error("fail_reporting_error job_id=%s err=%s", raw_job_id, type(exc).__name__)
+                return ConsumerExecutionOutcome(
+                    ok=False,
+                    job_id=raw_job_id,
+                    request_id=request_id,
+                    product_key=product_key,
+                    status="INVALID_ARTIFACT_METADATA",
+                    blocker_reason=meta_err,
+                    output_url=output_url,
+                    provider_submit_called=True,
+                    provider_calls=1,
+                    paid_provider_calls=1,
+                    video_renders=1,
+                )
+
+            # Report completion to Web Dispatcher
+            if client:
+                try:
+                    client.complete(
+                        job_id=raw_job_id,
+                        output_url=output_url,
+                        output_metadata=sanitized_meta,
+                    )
+                except Exception as exc:
+                    logger.error("complete_reporting_error job_id=%s err=%s", raw_job_id, type(exc).__name__)
+                    return ConsumerExecutionOutcome(
+                        ok=False,
+                        job_id=raw_job_id,
+                        request_id=request_id,
+                        product_key=product_key,
+                        status="DISPATCHER_COMPLETE_FAILED",
+                        blocker_reason=f"COMPLETE_REPORT_FAILED:{type(exc).__name__}",
+                        output_url=output_url,
+                        output_metadata=sanitized_meta,
+                        provider_submit_called=True,
+                        provider_calls=1,
+                        paid_provider_calls=1,
+                        video_renders=1,
+                    )
+
+            provider_task_ids = gen_result.get("provider_task_ids") or []
+            task_id_str = str(provider_task_ids[0] if provider_task_ids else (gen_result.get("provider_task_id") or ""))
+            logger.info("web_product_video_job_completed job_id=%s task_id=%s", raw_job_id, task_id_str)
+            return ConsumerExecutionOutcome(
+                ok=True,
+                job_id=raw_job_id,
+                request_id=request_id,
+                product_key=product_key,
+                status="COMPLETED",
+                output_url=output_url,
+                output_metadata=sanitized_meta,
+                provider_task_id=task_id_str,
+                provider_submit_called=True,
+                provider_calls=1,
+                paid_provider_calls=1,
+                video_renders=1,
+                wallet_mutations=0,
+            )
+
+        # Provider execution failed
+        blocker = str(gen_result.get("blocker") or gen_result.get("provider_error") or "PROVIDER_FAILED")
+        err_msg = str(gen_result.get("public_message") or gen_result.get("exception_message_safe") or blocker)
+        logger.warning("provider_execution_failed job_id=%s blocker=%s", raw_job_id, blocker)
+        if client:
+            try:
+                client.fail(
+                    job_id=raw_job_id,
+                    error_code=blocker[:64],
+                    error_message=err_msg[:1000],
+                    fatal=True,
+                )
+            except Exception as exc:
+                logger.error("fail_reporting_error job_id=%s err=%s", raw_job_id, type(exc).__name__)
+
+        return ConsumerExecutionOutcome(
+            ok=False,
+            job_id=raw_job_id,
+            request_id=request_id,
+            product_key=product_key,
+            status="PROVIDER_FAILED",
+            blocker_reason=blocker,
+            provider_submit_called=bool(gen_result.get("provider_submit_called")),
+            provider_calls=1 if gen_result.get("provider_submit_called") else 0,
+            paid_provider_calls=1 if gen_result.get("provider_submit_called") else 0,
             video_renders=0,
             wallet_mutations=0,
         )
