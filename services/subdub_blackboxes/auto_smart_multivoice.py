@@ -51,6 +51,8 @@ SMART_DECISION_VERSION = "smart_multivoice_v1"
 FAIL_CLOSED_ASYNC_SUBMITTED_PRIOR_SUBMIT = "FAIL_CLOSED_ASYNC_SUBMITTED_PRIOR_SUBMIT"
 FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE = "FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE"
 MAX_INTELLIGIBLE_FIT_RATIO = 1.8
+HARD_CAP_FIT_RATIO = 5.0  # Fail job only if any single cue exceeds this extreme ratio
+MAX_OVERFIT_CUE_RATIO = 0.30  # Fail job if >30% of cues exceed MAX_INTELLIGIBLE_FIT_RATIO
 MAX_CUE_END_OVERSHOOT_SECONDS = 0.100
 AUTO_SMART_N3_PLUS_DISPATCH_STRATEGY = "n3_plus_proven_v2"
 
@@ -2051,13 +2053,15 @@ async def run_auto_smart_multivoice(
         from services.subdub_microcue_recovery import recover_cue_locked_micro_cues
         synth_artifacts = recover_cue_locked_micro_cues(synth_artifacts, max_fit_ratio=MAX_INTELLIGIBLE_FIT_RATIO)
 
-        # Final compression check: every item in synth_artifacts must satisfy MAX_INTELLIGIBLE_FIT_RATIO
+        # Final compression check: graceful degradation for cues exceeding MAX_INTELLIGIBLE_FIT_RATIO
+        overfit_cues = []
         for item in synth_artifacts:
             i_win = float(item.get("cue_window") or (float(item.get("end", 0.0)) - float(item.get("start", 0.0))))
             i_dur = float(item.get("audio_duration") or item.get("raw_audio_duration") or 0.0)
             if i_win > 0.05 and i_dur > 0:
                 item_fit_ratio = i_dur / i_win
-                if item_fit_ratio > MAX_INTELLIGIBLE_FIT_RATIO:
+                if item_fit_ratio > HARD_CAP_FIT_RATIO:
+                    # Extreme single-cue ratio: fail immediately
                     fail_cid = str(
                         item.get("recovery_trigger_cue_id")
                         or item.get("original_trigger_cue_id")
@@ -2078,6 +2082,34 @@ async def run_auto_smart_multivoice(
                         "recovery_trigger_cue_id": str(item.get("recovery_trigger_cue_id") or fail_cid),
                         "auto_smart_verified": False,
                     }
+                elif item_fit_ratio > MAX_INTELLIGIBLE_FIT_RATIO:
+                    overfit_cues.append((str(item.get("cue_id") or ""), round(item_fit_ratio, 3)))
+
+        if overfit_cues and len(synth_artifacts) > 0:
+            overfit_ratio = len(overfit_cues) / len(synth_artifacts)
+            if overfit_ratio > MAX_OVERFIT_CUE_RATIO:
+                worst = max(overfit_cues, key=lambda x: x[1])
+                return {
+                    "ok": False,
+                    "strategy": decision.strategy,
+                    "status": "TTS_EXTREME_COMPRESSION_FAILED",
+                    "error_code": "extreme_audio_compression_unintelligible",
+                    "blocker": "extreme_audio_compression_unintelligible",
+                    "output_mode": OUTPUT_MODE_FAILED,
+                    "final_mp4_path": None,
+                    "fit_ratio": worst[1],
+                    "cue_id": worst[0],
+                    "recovery_trigger_cue_id": worst[0],
+                    "overfit_cue_count": len(overfit_cues),
+                    "overfit_cue_ratio": round(overfit_ratio, 3),
+                    "auto_smart_verified": False,
+                }
+            # Graceful degradation: log overfit cues but allow render to continue
+            logger.warning(
+                "smart_multi_compression_graceful: %d/%d cues exceed fit_ratio %.2f (ratio=%.1f%%), allowing render",
+                len(overfit_cues), len(synth_artifacts), MAX_INTELLIGIBLE_FIT_RATIO,
+                overfit_ratio * 100,
+            )
 
     # Checkpoint 3: After synthesis
     if _is_stopped():

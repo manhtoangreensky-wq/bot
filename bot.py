@@ -235129,6 +235129,8 @@ def subtitle_plus_dub_safe_fail_text(reason: str = "", lang: str = "vi") -> str:
         return "TOAN AAS chưa tạo được phụ đề từ video này. Hệ thống chưa trừ Xu. Anh/chị có thể thử video rõ tiếng hơn hoặc gửi file phụ đề nếu có."
     if "translation" in reason:
         return "TOAN AAS chưa dịch được phụ đề lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử lại hoặc chọn ngôn ngữ khác."
+    if "tts_provider_unavailable" in reason or "provider_unavailable" in reason:
+        return "TOAN AAS chưa kết nối được nhà cung cấp giọng lúc này. Hệ thống chưa trừ Xu. Vui lòng thử lại sau khi nhà cung cấp hoạt động trở lại."
     if "tts" in reason or "voice" in reason:
         return "TOAN AAS chưa tạo được audio lồng tiếng lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử lại hoặc đổi giọng."
     if "mux" in reason:
@@ -247864,6 +247866,49 @@ def key4u_minimax_voice_compatible(voice_id: str = "") -> bool:
         pass
     return False
 
+
+def key4u_tts_explicit_rejection_allows_direct_fallback(
+    status: str = "",
+    detail: str = "",
+    http_status: int = 0,
+) -> bool:
+    """Allow direct MiniMax only after a concrete Key4U rejection.
+
+    A timeout or an otherwise ambiguous response may mean Key4U accepted the
+    request, so it must remain fail-closed. Authentication/token failures are
+    pre-submit rejections and are safe to hand to the already-configured
+    direct route once.
+    """
+
+    normalized_status = str(status or "").strip().upper()
+    try:
+        normalized_http_status = int(http_status or 0)
+    except (TypeError, ValueError):
+        normalized_http_status = 0
+    if normalized_http_status in {401, 403} or normalized_status in {
+        "FAIL_AUTH",
+        "FAIL_UNAUTHORIZED",
+        "FAIL_FORBIDDEN",
+    }:
+        return True
+    normalized_detail = str(detail or "").strip().lower()
+    return any(
+        marker in normalized_detail
+        for marker in (
+            "token status is unavailable",
+            "token unavailable",
+            "token disabled",
+            "token expired",
+            "invalid api key",
+            "api key invalid",
+            "credential revoked",
+            "account disabled",
+            "quota exhausted",
+            "insufficient quota",
+            "insufficient balance",
+        )
+    )
+
 async def video_dubbing_tts_bytes(
     text: str,
     voice_style: str = "",
@@ -248019,6 +248064,35 @@ async def video_dubbing_tts_bytes(
             return label, audio_bytes, detail
         safe_detail = sanitize_log_text(str(detail or status))[:120]
         errors.append(f"{label}={status}:{safe_detail}" if safe_detail else f"{label}={status}")
+        if (
+            label == "Key4U MiniMax"
+            and provider == "key4u_minimax"
+            and direct_ready
+            and key4u_tts_explicit_rejection_allows_direct_fallback(
+                status,
+                detail,
+                _http_status,
+            )
+        ):
+            direct_status, direct_audio_bytes, direct_detail, direct_http_status = (
+                await call_direct_minimax_tts_bytes_with_speed(
+                    text[:3500],
+                    voice_id=voice_id,
+                    voice_style=voice_style,
+                    voice_speed=voice_speed,
+                    tts_language_boost=tts_language_boost,
+                )
+            )
+            if direct_status == "PASS" and direct_audio_bytes:
+                return "MiniMax direct fallback", direct_audio_bytes, direct_detail
+            direct_safe_detail = sanitize_log_text(
+                str(direct_detail or direct_status)
+            )[:120]
+            errors.append(
+                f"MiniMax direct fallback={direct_status}:{direct_safe_detail}"
+                if direct_safe_detail
+                else f"MiniMax direct fallback={direct_status}"
+            )
     raise RuntimeError("tts_unavailable:" + ",".join(errors))
 
 def video_dubbing_output_file(data: bytes, filename: str) -> io.BytesIO:
@@ -253061,6 +253135,13 @@ async def _execute_video_dubbing_pipeline_core(
                 + (f" Anh/chị hãy chọn ngôn ngữ khác thay cho {target_language}." if target_language else "")
             )
             return _failed_product_result("UNSUPPORTED_LANGUAGE_FOR_TTS", unsupported_text, detail or "unsupported_language_for_tts", stage="voice")
+        if status == auto_multi_speaker_v2.TTS_PROVIDER_UNAVAILABLE_STATUS:
+            return _failed_product_result(
+                status,
+                subtitle_plus_dub_safe_fail_text("tts_provider_unavailable", lang),
+                detail or str(product_result.get("reason") or "tts_provider_unavailable"),
+                stage="audio",
+            )
         if status == "VIDEO_RENDER_FAILED":
             return _failed_product_result("VIDEO_RENDER_FAILED", subdub_mode_fail_text(mode, lang), detail, stage="video")
         fail_text = (
