@@ -569,6 +569,9 @@ async def process_subtitle_dub_job(
             if not is_legacy_multi:
                 tts_chunks = recover_cue_locked_micro_cues(tts_chunks)
 
+            HARD_CAP_FIT_RATIO = 5.0
+            MAX_OVERFIT_CUE_RATIO = 0.30
+            overfit_cues = []
             for item in tts_chunks:
                 cue_window = max(
                     0.001,
@@ -576,7 +579,7 @@ async def process_subtitle_dub_job(
                 )
                 generated_seconds = max(0.0, float(item.get("audio_duration") or 0.0))
                 raw_fit_ratio = generated_seconds / cue_window if cue_window > 0.05 and generated_seconds > 0 else 1.0
-                if not is_legacy_multi and raw_fit_ratio > MAX_INTELLIGIBLE_FIT_RATIO:
+                if not is_legacy_multi and raw_fit_ratio > HARD_CAP_FIT_RATIO:
                     fail_cid = str(
                         item.get("recovery_trigger_cue_id")
                         or item.get("original_trigger_cue_id")
@@ -599,6 +602,8 @@ async def process_subtitle_dub_job(
                         "cue_id": fail_cid,
                         "recovery_trigger_cue_id": str(item.get("recovery_trigger_cue_id") or fail_cid),
                     }
+                elif not is_legacy_multi and raw_fit_ratio > MAX_INTELLIGIBLE_FIT_RATIO:
+                    overfit_cues.append((str(item.get("cue_id") or ""), round(raw_fit_ratio, 3)))
                 fit_ratio = max(1.0, raw_fit_ratio)
                 item.update({
                     "cue_window_seconds": cue_window,
@@ -607,6 +612,27 @@ async def process_subtitle_dub_job(
                     "post_fit_audio_seconds": generated_seconds / fit_ratio,
                     "drift_seconds": 0.0,
                 })
+            if not is_legacy_multi and overfit_cues and len(tts_chunks) > 0:
+                overfit_ratio = len(overfit_cues) / len(tts_chunks)
+                if overfit_ratio > MAX_OVERFIT_CUE_RATIO:
+                    worst = max(overfit_cues, key=lambda x: x[1])
+                    return {
+                        "ok": False,
+                        "status": "TTS_EXTREME_COMPRESSION_FAILED",
+                        "error_code": "extreme_audio_compression_unintelligible",
+                        "blocker": "extreme_audio_compression_unintelligible",
+                        "provider_called": True,
+                        "charged": False,
+                        "created_files": [],
+                        "state": pipeline_state,
+                        "prepared": prepared,
+                        "route_attempts": route_attempts,
+                        "fit_ratio": worst[1],
+                        "cue_id": worst[0],
+                        "recovery_trigger_cue_id": worst[0],
+                        "overfit_cue_count": len(overfit_cues),
+                        "overfit_cue_ratio": round(overfit_ratio, 3),
+                    }
         timeline_duration = max(
             float(
                 pipeline_state.get("input_duration_seconds")
