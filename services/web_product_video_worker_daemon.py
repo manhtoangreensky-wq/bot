@@ -69,6 +69,9 @@ class WebProductVideoWorkerDaemon:
         transport: Callable[..., Any] | None = None,
         client: WebProductVideoDispatcherClient | None = None,
         run_once: bool = False,
+        owner_acceptance_auth: Mapping[str, Any] | None = None,
+        acceptance_context: Mapping[str, Any] | None = None,
+        acceptance_bypass_scope: str | None = None,
     ) -> None:
         self.environ = dict(os.environ if environ is None else environ)
         self.worker_id = str(
@@ -84,6 +87,9 @@ class WebProductVideoWorkerDaemon:
         self.executor_fn = executor_fn
         self.transport = transport
         self.run_once = run_once
+        self.owner_acceptance_auth = dict(owner_acceptance_auth) if owner_acceptance_auth else None
+        self.acceptance_context = dict(acceptance_context) if acceptance_context else None
+        self.acceptance_bypass_scope = str(acceptance_bypass_scope) if acceptance_bypass_scope else None
         if client is not None:
             self.client = client
         else:
@@ -105,7 +111,13 @@ class WebProductVideoWorkerDaemon:
         """Signal daemon to stop gracefully."""
         self.stop_event.set()
 
-    def process_one_tick(self) -> ConsumerExecutionOutcome | None:
+    def process_one_tick(
+        self,
+        *,
+        owner_acceptance_auth: Mapping[str, Any] | None = None,
+        acceptance_context: Mapping[str, Any] | None = None,
+        acceptance_bypass_scope: str | None = None,
+    ) -> ConsumerExecutionOutcome | None:
         """Perform one polling tick against Web Dispatcher."""
         if not is_web_product_video_worker_enabled(self.environ):
             logger.warning(
@@ -134,6 +146,10 @@ class WebProductVideoWorkerDaemon:
             job.get("request_id"),
         )
 
+        effective_auth = owner_acceptance_auth if owner_acceptance_auth is not None else self.owner_acceptance_auth
+        effective_ctx = acceptance_context if acceptance_context is not None else self.acceptance_context
+        effective_scope = acceptance_bypass_scope if acceptance_bypass_scope is not None else self.acceptance_bypass_scope
+
         outcome = execute_claimed_web_product_video_job(
             job=job,
             client=self.client,
@@ -142,7 +158,13 @@ class WebProductVideoWorkerDaemon:
             lease_seconds=self.lease_seconds,
             executor_fn=self.executor_fn,
             stop_event=self.stop_event,
+            owner_acceptance_auth=effective_auth,
+            acceptance_context=effective_ctx,
+            acceptance_bypass_scope=effective_scope,
         )
+
+        if self.owner_acceptance_auth is not None:
+            self.owner_acceptance_auth = None
 
         self.jobs_processed += 1
         if outcome.ok:

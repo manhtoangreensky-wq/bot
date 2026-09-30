@@ -621,7 +621,12 @@ def product_video_freeze_truth(
     blocker_code = public_blocker_code
     blocker_source = public_blocker_source
     if source_kind == OWNER_AUTHORIZED_LIVE_ACCEPTANCE:
-        if provider_spend_freeze:
+        scoped_bypass = (
+            str(env.get("ACCEPTANCE_BYPASS_SCOPE") or "").strip() in {"probation_liveness_only", "owner_acceptance_liveness"}
+            or str(context.get("acceptance_bypass_scope") or "").strip() in {"probation_liveness_only", "owner_acceptance_liveness"}
+        )
+        acceptance_auth_valid = bool(context.get("owner_acceptance_auth_valid")) or _context_bool("owner_acceptance_auth_valid")
+        if provider_spend_freeze and not (acceptance_auth_valid and scoped_bypass):
             blocker_code = "provider_spend_freeze_active"
             blocker_source = "runtime:provider_spend_freeze"
         elif provider_freeze:
@@ -4670,6 +4675,8 @@ def _run_provider_generation_impl(
             "provider_configured": bool(candidate_adapters),
             "worker_available": runtime_worker_compatible,
             "worker_compatible": runtime_worker_compatible,
+            "owner_acceptance_auth_valid": acceptance_valid,
+            "acceptance_bypass_scope": str(metadata.get("acceptance_bypass_scope") or env.get("ACCEPTANCE_BYPASS_SCOPE") or ""),
         },
         environ=env,
     )

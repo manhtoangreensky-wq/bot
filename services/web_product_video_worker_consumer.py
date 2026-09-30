@@ -473,7 +473,55 @@ def validate_claimed_job(job: Mapping[str, Any] | None) -> tuple[bool, str]:
     return True, ""
 
 
-def map_web_job_to_bot_runtime(job: Mapping[str, Any]) -> VideoGenerationRequest:
+def derive_canonical_tier_route(
+    tier: int | str = 200,
+    environ: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Derive canonical Tier runtime identity, provider, model, capability, and cost bounds."""
+    try:
+        tier_int = int(tier)
+    except (ValueError, TypeError):
+        tier_int = 200
+
+    from services import video_ai_real_pricing as real_pricing
+    from services import video_provider_catalog as catalog
+
+    tier_info = real_pricing.public_quality_by_tier(tier_int)
+    route_info = real_pricing.product_video_route_by_tier(tier_int)
+    resolved_model = catalog.resolve_product_video_model(tier=tier_int)
+
+    candidates = route_info.get("candidates") or []
+    primary = candidates[0] if candidates else {}
+    primary_prov = str(primary.get("provider") or "shopaikey").strip()
+    if not primary_prov.endswith("_video"):
+        primary_prov = f"{primary_prov}_video"
+
+    usd_cost = float(primary.get("usd_per_scene") or 0.400)
+    audio_vnd = float(primary.get("audio_addon_cost_vnd") or 0.0)
+    audio_usd = audio_vnd / 25000.0 if audio_vnd else 0.00014
+    total_cost_usd = round(usd_cost + audio_usd, 5)
+
+    return {
+        "tier_id": tier_int,
+        "quality_key": str(tier_info.get("quality_key") or "social_fast_5"),
+        "seconds": int(tier_info.get("seconds") or 5),
+        "unit_xu": int(tier_info.get("unit_xu") or 259),
+        "provider": primary_prov,
+        "model": str(primary.get("model") or resolved_model.get("model") or "grok-video-3"),
+        "required_capability": DEFAULT_REQUIRED_CAPABILITY,
+        "estimated_provider_cost": total_cost_usd,
+        "estimated_provider_cost_unit": "USD",
+        "fallback_allowed": False,
+    }
+
+
+def map_web_job_to_bot_runtime(
+    job: Mapping[str, Any],
+    *,
+    owner_acceptance_auth: Mapping[str, Any] | None = None,
+    acceptance_context: Mapping[str, Any] | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> VideoGenerationRequest:
     """Map canonical Web Product Video job into Bot runtime VideoGenerationRequest."""
     is_valid, reason = validate_claimed_job(job)
     if not is_valid:
@@ -489,7 +537,13 @@ def map_web_job_to_bot_runtime(job: Mapping[str, Any]) -> VideoGenerationRequest
     duration_seconds = float(payload.get("duration") or 5.0)
     quality = str(payload.get("quality_tier") or "standard").strip().lower()
 
-    metadata = {
+    # Security check: Customer payload must never be allowed to self-authorize
+    if "owner_acceptance_auth" in payload or (isinstance(job, Mapping) and "owner_acceptance_auth" in job):
+        logger.warning("customer_payload_owner_auth_forgery_ignored job_id=%s", job_id)
+    if "public_user_confirmed" in payload or (isinstance(job, Mapping) and "public_user_confirmed" in job):
+        logger.warning("customer_payload_public_confirm_forgery_ignored job_id=%s", job_id)
+
+    metadata: dict[str, Any] = {
         "source": "web_dispatcher",
         "web_dispatched": True,
         "web_job_id": job_id,
@@ -501,6 +555,96 @@ def map_web_job_to_bot_runtime(job: Mapping[str, Any]) -> VideoGenerationRequest
         "admin_no_charge": True,  # Worker consumption must not trigger secondary charging
         "no_wallet_charge": True,
     }
+
+    env = dict(os.environ if environ is None else environ)
+
+    if owner_acceptance_auth is not None:
+        from services.video_provider_router import (
+            OWNER_AUTHORIZED_LIVE_ACCEPTANCE,
+            validate_owner_acceptance_authorization,
+        )
+
+        derived_route = derive_canonical_tier_route(quality, environ=env)
+        derived_ctx: dict[str, Any] = {
+            "user_id": str(account_id or job.get("account_id") or "").strip(),
+            "job_id": job_id,
+            "project_id": str(job.get("project_id") or "").strip(),
+            "product_type": BOT_CANONICAL_PRODUCT_KEY,
+            "provider": derived_route["provider"],
+            "required_capability": derived_route["required_capability"],
+            "tier": str(derived_route["tier_id"]),
+            "estimated_provider_cost": derived_route["estimated_provider_cost"],
+            "estimated_provider_cost_unit": derived_route["estimated_provider_cost_unit"],
+        }
+        if acceptance_context and isinstance(acceptance_context, Mapping):
+            derived_ctx.update(dict(acceptance_context))
+
+        # Support user binding against account_id, canonical_user_id, or user_id
+        auth_user_id = str(owner_acceptance_auth.get("user_id") or "").strip()
+        job_user_ids = {
+            str(account_id).strip(),
+            str(job.get("account_id") or "").strip(),
+            str(job.get("user_id") or "").strip(),
+            str(job.get("canonical_user_id") or "").strip(),
+        }
+        job_user_ids.discard("")
+        if auth_user_id and auth_user_id in job_user_ids:
+            derived_ctx["user_id"] = auth_user_id
+
+        # Support tier binding against numeric tier or quality key or model
+        auth_tier = str(owner_acceptance_auth.get("tier") or "").strip()
+        valid_tiers = {
+            str(derived_route["tier_id"]).strip().lower(),
+            derived_route["quality_key"].strip().lower(),
+            derived_route["model"].strip().lower(),
+            quality,
+        }
+        if auth_tier and auth_tier.lower() in valid_tiers:
+            derived_ctx["tier"] = auth_tier
+
+        # Resolve runtime SHA
+        try:
+            from services.remote_worker_api import resolve_runtime_sha
+            current_sha = resolve_runtime_sha(environ=env)
+        except Exception:
+            current_sha = ""
+        if current_sha:
+            derived_ctx["runtime_sha"] = current_sha
+
+        auth_valid, auth_blocker, verified_auth = validate_owner_acceptance_authorization(
+            dict(owner_acceptance_auth),
+            context=derived_ctx,
+            environ=env,
+        )
+
+        if not auth_valid:
+            logger.warning(
+                "owner_acceptance_auth_validation_failed job_id=%s reason=%s",
+                job_id,
+                auth_blocker,
+            )
+            raise InvalidJobEnvelopeError(f"Owner acceptance authorization invalid: {auth_blocker}")
+
+        # Inject verified authorization into request metadata
+        metadata["owner_acceptance_auth"] = dict(owner_acceptance_auth)
+        metadata["owner_authorized"] = True
+        metadata["acceptance_lane_active"] = True
+        metadata["pinned_provider"] = verified_auth.get("pinned_provider") or derived_route["provider"]
+        metadata["provider"] = verified_auth.get("pinned_provider") or derived_route["provider"]
+        metadata["selected_provider"] = verified_auth.get("pinned_provider") or derived_route["provider"]
+        metadata["submit_source"] = OWNER_AUTHORIZED_LIVE_ACCEPTANCE
+        metadata["source"] = OWNER_AUTHORIZED_LIVE_ACCEPTANCE
+        metadata["tier"] = derived_ctx["tier"]
+        metadata["selected_model"] = derived_route["model"]
+        metadata["model"] = derived_route["model"]
+        metadata["user_id"] = derived_ctx["user_id"]
+        metadata["project_id"] = derived_ctx["project_id"]
+        metadata["runtime_sha"] = derived_ctx.get("runtime_sha")
+        metadata["estimated_provider_cost"] = derived_ctx["estimated_provider_cost"]
+        metadata["estimated_provider_cost_unit"] = derived_ctx["estimated_provider_cost_unit"]
+        metadata["acceptance_bypass_scope"] = str(
+            derived_ctx.get("acceptance_bypass_scope") or "probation_liveness_only"
+        )
 
     return VideoGenerationRequest(
         job_id=job_id,
@@ -518,6 +662,11 @@ def map_web_job_to_bot_runtime(job: Mapping[str, Any]) -> VideoGenerationRequest
 def prepare_and_gate_execution(
     job: Mapping[str, Any],
     client: WebProductVideoDispatcherClient | None = None,
+    *,
+    owner_acceptance_auth: Mapping[str, Any] | None = None,
+    acceptance_context: Mapping[str, Any] | None = None,
+    acceptance_bypass_scope: str | None = None,
+    environ: Mapping[str, str] | None = None,
 ) -> PreparedExecutionOutcome:
     """Execute provider-free preparation boundary and gate before provider submit.
 
@@ -561,7 +710,15 @@ def prepare_and_gate_execution(
 
     _ACTIVE_JOB_IDS.add(raw_job_id)
     try:
-        request = map_web_job_to_bot_runtime(job)
+        eff_ctx = dict(acceptance_context or {})
+        if acceptance_bypass_scope:
+            eff_ctx["acceptance_bypass_scope"] = str(acceptance_bypass_scope)
+        request = map_web_job_to_bot_runtime(
+            job,
+            owner_acceptance_auth=owner_acceptance_auth,
+            acceptance_context=eff_ctx,
+            environ=environ,
+        )
         return PreparedExecutionOutcome(
             ok=True,
             job_id=request.job_id,
@@ -575,6 +732,26 @@ def prepare_and_gate_execution(
             paid_provider_calls=0,
             video_renders=0,
             wallet_mutations=0,
+        )
+    except InvalidJobEnvelopeError as exc:
+        if client and raw_job_id:
+            try:
+                client.fail(
+                    job_id=raw_job_id,
+                    error_code="VALIDATION_FAILED",
+                    error_message=str(exc),
+                    fatal=True,
+                )
+            except Exception as e:
+                logger.error("pre_provider_fail_reporting_error job_id=%s err=%s", raw_job_id, type(e).__name__)
+        return PreparedExecutionOutcome(
+            ok=False,
+            job_id=raw_job_id,
+            request_id=str((job or {}).get("request_id") or ""),
+            product_key=str((job or {}).get("product_key") or ""),
+            status="INVALID_JOB_REJECTED",
+            generation_request=None,
+            blocker_reason=str(exc),
         )
     finally:
         _ACTIVE_JOB_IDS.discard(raw_job_id)
@@ -590,6 +767,9 @@ def execute_claimed_web_product_video_job(
     lease_seconds: int = DEFAULT_LEASE_SECONDS,
     executor_fn: Callable[..., dict[str, Any]] | None = None,
     stop_event: threading.Event | None = None,
+    owner_acceptance_auth: Mapping[str, Any] | None = None,
+    acceptance_context: Mapping[str, Any] | None = None,
+    acceptance_bypass_scope: str | None = None,
 ) -> ConsumerExecutionOutcome:
     """Execute a claimed Web Product Video job through the canonical Bot runtime.
 
@@ -681,7 +861,36 @@ def execute_claimed_web_product_video_job(
 
     try:
         # Map Web job to canonical VideoGenerationRequest
-        gen_request = map_web_job_to_bot_runtime(job)
+        eff_ctx = dict(acceptance_context or {})
+        if acceptance_bypass_scope:
+            eff_ctx["acceptance_bypass_scope"] = str(acceptance_bypass_scope)
+        try:
+            gen_request = map_web_job_to_bot_runtime(
+                job,
+                owner_acceptance_auth=owner_acceptance_auth,
+                acceptance_context=eff_ctx,
+                environ=dict(env),
+            )
+        except InvalidJobEnvelopeError as exc:
+            logger.warning("invalid_job_envelope_rejected job_id=%s reason=%s", raw_job_id, exc)
+            if client:
+                try:
+                    client.fail(
+                        job_id=raw_job_id,
+                        error_code="VALIDATION_FAILED",
+                        error_message=str(exc),
+                        fatal=True,
+                    )
+                except Exception as client_exc:
+                    logger.error("fail_reporting_error job_id=%s err=%s", raw_job_id, type(client_exc).__name__)
+            return ConsumerExecutionOutcome(
+                ok=False,
+                job_id=raw_job_id,
+                request_id=request_id,
+                product_key=product_key,
+                status="INVALID_JOB_REJECTED",
+                blocker_reason=str(exc),
+            )
 
         # Heartbeat loop for lease extension
         if client is not None:
@@ -713,9 +922,21 @@ def execute_claimed_web_product_video_job(
                 from services.video_provider_router import run_provider_generation
                 fn = run_provider_generation
 
+            call_env = dict(env)
+            effective_scope = str(
+                acceptance_bypass_scope or eff_ctx.get("acceptance_bypass_scope") or ""
+            ).strip()
+            if (
+                owner_acceptance_auth is not None
+                and gen_request.metadata.get("owner_authorized")
+                and effective_scope in {"probation_liveness_only", "owner_acceptance_liveness"}
+            ):
+                call_env["PROVIDER_SPEND_FREEZE"] = "0"
+                call_env["ACCEPTANCE_BYPASS_SCOPE"] = effective_scope
+
             with tempfile.TemporaryDirectory(prefix="web_pv_worker_") as tmp_dir:
                 active_out_dir = str(output_dir or tmp_dir)
-                gen_result = fn(gen_request, output_dir=active_out_dir, environ=dict(env))
+                gen_result = fn(gen_request, output_dir=active_out_dir, environ=call_env)
         except Exception as exc:
             logger.exception("provider_runtime_exception job_id=%s err=%s", raw_job_id, type(exc).__name__)
             gen_result = {
