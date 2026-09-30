@@ -2230,16 +2230,10 @@ def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter
 
         model_name = str(env.get("FAL_VIDEO_MODEL") or namespace_cfg.get("model") or "fal-ai/wan/v2.2-a14b/video-to-video")
         model_valid = bool(model_name == "fal-ai/wan/v2.2-a14b/video-to-video")
-
-        generic_ready = bool(
-            submit_url
-            and poll_url
-            and token
-            and model_valid
-        )
+        explicit_enabled = str(env.get("FAL_VIDEO_TO_VIDEO_ENABLED") or env.get("FAL_VIDEO_ENABLED") or namespace_cfg.get("enabled") or "").strip().lower()
         derived = dict(env)
         derived.update(_provider_namespace_metadata("fal_video", namespace_cfg))
-        derived["FAL_VIDEO_ENABLED"] = str(env.get("FAL_VIDEO_ENABLED") or env.get("FAL_VIDEO_TO_VIDEO_ENABLED") or namespace_cfg.get("enabled") or ("1" if generic_ready else ""))
+        derived["FAL_VIDEO_ENABLED"] = "1" if explicit_enabled in {"1", "true", "yes", "on"} else "0"
         derived["FAL_VIDEO_SUBMIT_URL"] = submit_url
         derived["FAL_VIDEO_POLL_URL"] = poll_url
         derived["FAL_VIDEO_AUTH_HEADER_NAME"] = env.get("FAL_VIDEO_AUTH_HEADER_NAME") or namespace_cfg.get("auth_header_name") or "Authorization"

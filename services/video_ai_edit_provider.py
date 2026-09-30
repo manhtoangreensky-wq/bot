@@ -196,12 +196,8 @@ def provider_config_from_env(provider_name: str, env: dict[str, str] | os._Envir
         if not auth_value:
             auth_value = _text(source, "FAL_VIDEO_AUTH_HEADER_VALUE", "FAL_VIDEO_API_KEY", "FAL_VIDEO_KEY", "FAL_KEY", "FAL_API_KEY")
         if not enabled:
-            raw_enabled = str(source.get("FAL_VIDEO_ENABLED") or source.get(f"{prefix}_ENABLED") or "").strip().lower()
-            if raw_enabled in {"0", "false", "no", "off"}:
-                enabled = False
-            elif raw_enabled in {"1", "true", "yes", "on"}:
-                enabled = True
-            elif auth_value and not any(tok in auth_value.lower() for tok in PLACEHOLDER_TOKENS):
+            raw_enabled = str(source.get("FAL_VIDEO_TO_VIDEO_ENABLED") or source.get("FAL_VIDEO_ENABLED") or "").strip().lower()
+            if raw_enabled in {"1", "true", "yes", "on"}:
                 enabled = True
             else:
                 enabled = False

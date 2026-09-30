@@ -6,6 +6,7 @@ Provider: fal_video
 Model: fal-ai/wan/v2.2-a14b/video-to-video
 
 Strict zero-real-call policy: all network I/O isolated via mocks.
+Enforces explicit FAL_VIDEO_TO_VIDEO_ENABLED gate: token alone never activates paid provider.
 """
 
 from __future__ import annotations
@@ -47,9 +48,10 @@ def test_1_fal_model_contract_registered_in_catalog():
 
 
 def test_2_fal_provider_router_candidate_and_capabilities():
-    """video_provider_router must expose fal_video with video_to_video capability and Wan 2.2 model."""
+    """video_provider_router must expose fal_video with video_to_video capability and Wan 2.2 model when enabled."""
     env = {
         "FAL_KEY": "test_fal_key_mock",
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
         "VIDEO_PROVIDER_CHAIN": "fal_video",
     }
     adapter = video_provider_router._generic_adapter_for("fal_video", env)
@@ -75,7 +77,80 @@ def test_3_video_ai_video_reference_routes_to_fal_v2v_in_routing_config():
 
 
 # ---------------------------------------------------------------------------
-# 2. Duration Tiers & Frame Calculation (5s -> 81, 10s -> 161)
+# 2. Explicit Fal Enable Authority Gate (R16.04A Core Invariant)
+# ---------------------------------------------------------------------------
+
+def test_fal_key_only_does_not_enable_provider():
+    """FAL_KEY present without FAL_VIDEO_TO_VIDEO_ENABLED leaves enabled=False and fails validation."""
+    cfg = video_ai_edit_provider.provider_config_from_env("fal_video", {"FAL_KEY": "my_secret_token"})
+    assert cfg.enabled is False
+    val = video_ai_edit_provider.validate_provider_config(cfg)
+    assert val["ok"] is False
+    assert "enabled" in val["invalid_fields"]
+
+
+def test_fal_explicit_false_does_not_enable_provider():
+    """Explicit false/0 flag leaves enabled=False even if FAL_KEY is present."""
+    for val_str in ("0", "false", "no", "off"):
+        cfg = video_ai_edit_provider.provider_config_from_env("fal_video", {
+            "FAL_KEY": "my_secret_token",
+            "FAL_VIDEO_TO_VIDEO_ENABLED": val_str,
+        })
+        assert cfg.enabled is False
+        val = video_ai_edit_provider.validate_provider_config(cfg)
+        assert val["ok"] is False
+
+
+def test_fal_explicit_true_allows_validation():
+    """Explicit true/1 flag with valid key enables provider and passes validation."""
+    for val_str in ("1", "true", "yes", "on"):
+        cfg = video_ai_edit_provider.provider_config_from_env("fal_video", {
+            "FAL_KEY": "my_secret_token",
+            "FAL_VIDEO_TO_VIDEO_ENABLED": val_str,
+        })
+        assert cfg.enabled is True
+        val = video_ai_edit_provider.validate_provider_config(cfg)
+        assert val["ok"] is True
+
+
+def test_router_excludes_fal_without_enable_flag():
+    """Router creates fal_video adapter with enabled=False when enable flag is missing."""
+    env = {"FAL_KEY": "valid_token"}
+    adapter = video_provider_router._generic_adapter_for("fal_video", env)
+    assert adapter._configured() is False
+    caps = adapter.capabilities()
+    assert caps["enabled"] is False
+    assert caps["configured"] is False
+
+
+def test_router_excludes_fal_when_disabled():
+    """Router creates fal_video adapter with enabled=False when explicitly disabled."""
+    env = {
+        "FAL_KEY": "valid_token",
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "0",
+    }
+    adapter = video_provider_router._generic_adapter_for("fal_video", env)
+    assert adapter._configured() is False
+    caps = adapter.capabilities()
+    assert caps["enabled"] is False
+    assert caps["configured"] is False
+
+
+def test_router_includes_fal_only_when_explicitly_enabled():
+    """Router configures fal_video as enabled only when FAL_VIDEO_TO_VIDEO_ENABLED=1 and token present."""
+    env = {
+        "FAL_KEY": "valid_token",
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+    }
+    adapter = video_provider_router._generic_adapter_for("fal_video", env)
+    assert adapter._configured() is True
+    caps = adapter.capabilities()
+    assert caps["enabled"] is True
+    assert caps["configured"] is True
+
+
+# ---------------------------------------------------------------------------
+# 3. Duration Tiers & Frame Calculation (5s -> 81, 10s -> 161)
 # ---------------------------------------------------------------------------
 
 def test_4_fal_wan_v2v_frame_calculation():
@@ -89,7 +164,7 @@ def test_4_fal_wan_v2v_frame_calculation():
 
 
 # ---------------------------------------------------------------------------
-# 3. Fal Storage Upload (Initiate POST -> Binary PUT)
+# 4. Fal Storage Upload (Initiate POST -> Binary PUT)
 # ---------------------------------------------------------------------------
 
 def test_5_fal_storage_upload_initiate_and_put(tmp_path: Path):
@@ -99,7 +174,10 @@ def test_5_fal_storage_upload_initiate_and_put(tmp_path: Path):
 
     cfg = video_ai_edit_provider.provider_config_from_env(
         "fal_video",
-        {"FAL_KEY": "valid_fal_secret_key"},
+        {
+            "FAL_KEY": "valid_fal_secret_key",
+            "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        },
     )
 
     mock_initiate_resp = MagicMock()
@@ -133,14 +211,17 @@ def test_5_fal_storage_upload_initiate_and_put(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# 4. Fal Wire Submit, Request ID Parsing, Status Polling, Result URL
+# 5. Fal Wire Submit, Request ID Parsing, Status Polling, Result URL
 # ---------------------------------------------------------------------------
 
 def test_6_fal_wan_v2v_submit_and_poll_contract():
     """Submit binds video_url, num_frames, auth Key header; poll returns status and result URL."""
     cfg = video_ai_edit_provider.provider_config_from_env(
         "fal_video",
-        {"FAL_KEY": "valid_fal_secret_key"},
+        {
+            "FAL_KEY": "valid_fal_secret_key",
+            "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
+        },
     )
 
     # 1. Submit
@@ -196,7 +277,7 @@ def test_6_fal_wan_v2v_submit_and_poll_contract():
 
 
 # ---------------------------------------------------------------------------
-# 5. FX Authority Contract: FAL_USD_TO_VND Positive Integer (Fail-Closed)
+# 6. FX Authority Contract: FAL_USD_TO_VND Positive Integer (Fail-Closed)
 # ---------------------------------------------------------------------------
 
 def test_7_fal_usd_to_vnd_strict_positive_integer_contract():
@@ -264,7 +345,7 @@ def test_8_pricing_snapshot_fails_closed_on_invalid_or_missing_fx():
 
 
 # ---------------------------------------------------------------------------
-# 6. Duration Pricing & Pre-Submit Loss Guard
+# 7. Duration Pricing & Pre-Submit Loss Guard
 # ---------------------------------------------------------------------------
 
 def test_9_duration_pricing_5s_and_10s_routing():
@@ -326,7 +407,7 @@ def test_10_loss_guard_blocks_submit_when_price_below_provider_cost():
 
 
 # ---------------------------------------------------------------------------
-# 7. Execution Route in Render Connector: _render_video_reference_fal_v2v
+# 8. Execution Route in Render Connector: _render_video_reference_fal_v2v
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
@@ -356,6 +437,7 @@ def test_11_render_video_reference_success_execution(tmp_path: Path, valid_sourc
 
     env_patch = {
         "FAL_KEY": "valid_fal_key_mock",
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
         "FAL_USD_TO_VND": "25500",
         "VIDEO_AI_EDIT_PRICE_5S_XU": "250",
     }
@@ -466,7 +548,7 @@ def test_15_render_video_reference_pricing_loss_guard_blocks_submit_no_charge(tm
         "duration_seconds": 5,
     }
     # No price configured in environment
-    with patch.dict(os.environ, {"FAL_KEY": "valid_key", "FAL_USD_TO_VND": "25500"}, clear=False):
+    with patch.dict(os.environ, {"FAL_KEY": "valid_key", "FAL_VIDEO_TO_VIDEO_ENABLED": "1", "FAL_USD_TO_VND": "25500"}, clear=False):
         with pytest.raises(RealVideoRenderError) as exc_info:
             video_real_render_connector._render_video_reference_fal_v2v(
                 job=job,
@@ -492,6 +574,7 @@ def test_16_render_video_reference_provider_failure_fails_closed_no_charge(tmp_p
     }
     env_patch = {
         "FAL_KEY": "valid_fal_key_mock",
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
         "FAL_USD_TO_VND": "25500",
         "VIDEO_AI_EDIT_PRICE_5S_XU": "250",
     }
@@ -526,6 +609,7 @@ def test_17_render_video_reference_timeout_fails_closed_no_charge(tmp_path: Path
     }
     env_patch = {
         "FAL_KEY": "valid_fal_key_mock",
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
         "FAL_USD_TO_VND": "25500",
         "VIDEO_AI_EDIT_PRICE_5S_XU": "250",
     }
@@ -562,6 +646,7 @@ def test_18_render_video_reference_invalid_download_artifact_no_charge(tmp_path:
     }
     env_patch = {
         "FAL_KEY": "valid_fal_key_mock",
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
         "FAL_USD_TO_VND": "25500",
         "VIDEO_AI_EDIT_PRICE_5S_XU": "250",
     }
@@ -605,6 +690,7 @@ def test_19_active_task_recovery_polls_only_no_new_submit(tmp_path: Path, valid_
     }
     env_patch = {
         "FAL_KEY": "valid_fal_key_mock",
+        "FAL_VIDEO_TO_VIDEO_ENABLED": "1",
         "FAL_USD_TO_VND": "25500",
         "VIDEO_AI_EDIT_PRICE_5S_XU": "250",
     }
@@ -638,10 +724,10 @@ def test_19_active_task_recovery_polls_only_no_new_submit(tmp_path: Path, valid_
 
 
 # ---------------------------------------------------------------------------
-# 8. Negative Safety Invariants: Key4U V2V, Motion Control, Text2Video
+# 9. Negative Safety Invariants: Key4U V2V, Missing FX, Missing Price, Loss Guard, Zero Real Calls
 # ---------------------------------------------------------------------------
 
-def test_20_key4u_v2v_still_fail_closed():
+def test_key4u_v2v_still_fail_closed():
     """Key4U V2V must remain disabled and fail closed."""
     assert not video_ai_edit_provider.has_proven_v2v_wire_contract("key4u_video", "kling-video")
     env = {"KEY4U_API_KEY": "dummy_key"}
@@ -649,8 +735,36 @@ def test_20_key4u_v2v_still_fail_closed():
     assert "video_to_video" not in adapter.capabilities()["capabilities"]
 
 
-def test_21_zero_real_provider_calls_verified():
+def test_missing_fx_still_fail_closed():
+    """Missing FAL_USD_TO_VND must fail closed."""
+    with pytest.raises(ValueError, match="fal_usd_to_vnd_runtime_required"):
+        video_ai_real_pricing.fal_provider_usd_to_vnd({})
+
+
+def test_missing_price_still_fail_closed():
+    """Missing customer price fails closed."""
+    snap = video_ai_edit_provider.pricing_snapshot(
+        {"FAL_USD_TO_VND": "25500"},
+        provider_name="fal_video",
+        duration_seconds=5,
+    )
+    assert snap["configured"] is False
+    assert snap["blocker"] == "missing_customer_price_fail_closed"
+
+
+def test_loss_guard_still_blocks_submit():
+    """Pre-submit Loss Guard blocks submit when customer revenue < provider cost."""
+    env = {
+        "FAL_USD_TO_VND": "25500",
+        "VIDEO_AI_EDIT_PRICE_5S_XU": "90",  # 90 * 100 = 9,000 VND < 10,200 VND
+    }
+    snap = video_ai_edit_provider.pricing_snapshot(env, provider_name="fal_video", duration_seconds=5)
+    assert snap["loss_guard_pass"] is False
+    assert snap["provider_submit_allowed"] is False
+    assert snap["blocker"] == "customer_price_below_provider_cost_loss_guard_blocked"
+
+
+def test_zero_real_provider_calls():
     """Contract tests never make external network calls."""
-    # Ensure DEFAULT_PROVIDER_USD_TO_VND is not used as Fal FX
     with pytest.raises(ValueError):
         video_ai_real_pricing.fal_provider_usd_to_vnd({})
