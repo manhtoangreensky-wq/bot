@@ -10,6 +10,9 @@ Ensures:
 
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
+
 import pytest
 from services.subdub_blackboxes import auto_smart_multivoice as smart
 
@@ -113,3 +116,93 @@ def test_compression_hard_cap_fails_immediately():
     assert res["error_code"] == "extreme_audio_compression_unintelligible"
     assert res["fit_ratio"] == 5.5
     assert res["cue_id"] == "cue_extreme"
+
+
+def test_bb7bf97d7c_shape_reaches_production_render(tmp_path):
+    """Replay the measured 12/71 compression shape through the production runner."""
+    measured_overfit = [
+        (0.400, 1.730312),
+        (0.960, 2.678562),
+        (1.040, 2.473250),
+        (1.735, 3.967594),
+        (1.520, 3.470125),
+        (0.640, 1.448469),
+        (3.600, 7.619250),
+        (2.000, 3.938813),
+        (0.480, 0.914906),
+        (0.400, 0.753938),
+        (0.720, 1.318156),
+        (2.796, 5.0650625),
+    ]
+
+    cues = []
+    durations = {}
+    cursor = 0.0
+    for index in range(71):
+        if index < len(measured_overfit):
+            window, duration = measured_overfit[index]
+        else:
+            window, duration = 2.0, 2.0
+        cue_id = f"cue-{index + 1:04d}"
+        speaker_id = f"speaker_{index % 3}"
+        cues.append(
+            {
+                "cue_id": cue_id,
+                "speaker_id": speaker_id,
+                "text": f"cue {index + 1}",
+                "start_ms": round(cursor * 1000),
+                "end_ms": round((cursor + window) * 1000),
+            }
+        )
+        durations[cue_id] = duration
+        cursor += window + 1.0  # Keep recovery from changing the measured ratio set.
+
+    source_media = tmp_path / "bb7bf97d7c-source.mp4"
+    source_media.write_bytes(b"source")
+    output_mp4 = tmp_path / "bb7bf97d7c-output.mp4"
+    render_calls = []
+
+    async def synthesize(cues, speaker_voice_map, **kwargs):
+        del speaker_voice_map, kwargs
+        return [
+            {
+                "cue_id": cue["cue_id"],
+                "audio": b"audio",
+                "audio_duration": durations[cue["cue_id"]],
+            }
+            for cue in cues
+        ]
+
+    async def render(**kwargs):
+        render_calls.append(kwargs)
+        Path(kwargs["output_path"]).write_bytes(
+            b"0" * (smart.video_local_validation.MIN_OUTPUT_BYTES + 1)
+        )
+        return kwargs["output_path"]
+
+    result = asyncio.run(
+        smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools={
+                "low": ["low_1", "low_2", "low_3"],
+                "high": ["high_1", "high_2", "high_3"],
+            },
+            acoustic_classifications={
+                "speaker_0": {"voice_register": "high", "confidence": 0.999966},
+                "speaker_1": {"voice_register": "low", "confidence": 0.994067},
+                "speaker_2": {"voice_register": "low", "confidence": 0.999731},
+            },
+            synthesize_segments=synthesize,
+            render_pipeline=render,
+            probe_fn=lambda path: {"ok": Path(path).is_file()},
+        )
+    )
+
+    assert len(measured_overfit) / len(cues) == pytest.approx(12 / 71)
+    assert round(max(duration / window for window, duration in measured_overfit), 3) == 4.326
+    assert result["ok"] is True, result
+    assert result["blocker"] is None
+    assert len(render_calls) == 1
+    assert len(render_calls[0]["tts_chunks"]) == 71
