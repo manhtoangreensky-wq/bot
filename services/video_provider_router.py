@@ -2154,12 +2154,19 @@ def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter
 
         is_veo = model_name in {"veo_3_1-fast", "veo3.1-fast"}
         if is_veo:
-            submit_url = _endpoint_alias(env, "KEY4U_VEO_VIDEO_ENDPOINT", "KEY4U_GOOGLE_VEO_VIDEO_ENDPOINT", "KEY4U_VEO_VIDEO_SUBMIT_URL", "KEY4U_VIDEO_SUBMIT_URL")
+            submit_url = _endpoint_alias(env, "KEY4U_VEO_VIDEO_ENDPOINT", "KEY4U_BASE_URL", "KEY4U_VEO_VIDEO_SUBMIT_URL", "KEY4U_GOOGLE_VEO_VIDEO_ENDPOINT")
             submit_url = submit_url or str(namespace_cfg.get("submit_url") or "")
+            if submit_url and submit_url.rstrip("/").endswith(("/v1/video/create", "/video/create", "/video/generate", "/generate")):
+                submit_url = ""
             if not submit_url and (env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN") or namespace_cfg.get("auth_header_value")):
                 submit_url = f"{base_url}/v1/videos"
-            poll_url = _endpoint_alias(env, "KEY4U_VEO_VIDEO_POLL_URL", "KEY4U_GOOGLE_VEO_VIDEO_POLL_URL", "KEY4U_VIDEO_POLL_URL")
+            poll_url = _endpoint_alias(env, "KEY4U_VEO_VIDEO_POLL_URL", "KEY4U_BASE_URL", "KEY4U_GOOGLE_VEO_VIDEO_POLL_URL")
             poll_url = poll_url or str(namespace_cfg.get("poll_url") or "")
+            if poll_url and (
+                poll_url.rstrip("/").endswith(("/v1/video/query", "/video/query", "/video/generate", "/generate"))
+                or "query?id=" in poll_url
+            ):
+                poll_url = ""
             if not poll_url and submit_url:
                 poll_url = f"{base_url}/v1/videos/{{task_id}}"
         else:
@@ -5638,14 +5645,6 @@ def _run_provider_generation_impl(
                         )
                         recovered_poll_source = (
                             "recovered:key4u_veo_path_poll_from_persisted_model"
-                        )
-                    elif adapter_submit.path.rstrip("/") == "/v1/video/create":
-                        recovered_poll_url = (
-                            f"{adapter_submit.scheme}://{adapter_submit.netloc}"
-                            "/v1/videos/{task_id}"
-                        )
-                        recovered_poll_source = (
-                            "recovered:key4u_veo_path_poll_from_legacy_create"
                         )
                 adapter_model = str(
                     persisted_model

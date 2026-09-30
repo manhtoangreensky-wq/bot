@@ -54,6 +54,7 @@ def test_key4u_active_defaults_and_video_adapter_use_vn(monkeypatch):
     assert config.openai_base_url == f"{KEY4U_VN}/v1"
     assert config.minimax_base_url == f"{KEY4U_VN}/minimax"
     assert config.minimax_tts_base_url == f"{KEY4U_VN}/minimax"
+    assert config.suno_base_url == f"{KEY4U_VN}/suno"
     assert adapter._submit_url() == f"{KEY4U_VN}/v1/videos"
     assert adapter._poll_url() == f"{KEY4U_VN}/v1/videos/{{task_id}}"
 

@@ -951,9 +951,20 @@ def _key4u_wire_payload(
     submit_path = urllib.parse.urlparse(
         str(submit_url or metadata.get("provider_submit_url_override") or "")
     ).path.rstrip("/")
+    if family == "google_veo" and submit_path.endswith(("/v1/video/create", "/video/create")):
+        raise VideoProviderContractError(
+            "key4u_veo_legacy_create_rejected_no_charge",
+            stage="wire_payload_build",
+            debug={
+                "provider": "key4u_video",
+                "blocker": "key4u_veo_legacy_create_rejected_no_charge",
+                "submit_path": submit_path,
+                "no_charge": True,
+            },
+        )
     if (
         family == "google_veo"
-        and (submit_path.endswith("/v1/videos") or submit_path == "/v1/video/create")
+        and submit_path.endswith("/v1/videos")
     ):
         ratio = str(data.get("aspect_ratio") or data.get("ratio") or "9:16").strip()
         if ratio in {"9/16", "9x16"}:

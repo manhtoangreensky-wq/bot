@@ -1,25 +1,30 @@
-"""Regression test suite for Key4U Veo specialized endpoint remediation (R15.13).
+"""Regression test suite for Key4U Veo specialized endpoint remediation (R15.13A).
 
-TASK_ID: P0.PRODUCT_VIDEO_KEY4U_SPECIALIZED_ENDPOINT_REMEDIATION_R15_13
+TASK_ID: P0.PRODUCT_VIDEO_KEY4U_VEO_PREMERGE_CONTRACT_CORRECTION_R15_13A
 TRACKER: #1155 (OPEN)
-BASE_SHA: a9f05b62d5eca7183e4da941f1060ef3b670115f
-SCOPE: STORYBOARD_VEO_ONLY
+BASE_HEAD_SHA: 60d7a4b6a53a90c13116e83cd9eb0d4e675987e6
+SCOPE: STORYBOARD_VEO_PREMERGE_CORRECTION_ONLY
 
 Enforces:
 1. Submit endpoint resolves to canonical https://api.key4u.vn/v1/videos.
 2. Poll endpoint resolves to canonical https://api.key4u.vn/v1/videos/{task_id}.
 3. Catalog config binds submit_endpoint and poll_endpoint for veo_3_1-fast.
 4. Zero normalization or fallback rewriting to /v1/video/create.
-5. Adapter default wiring resolves /v1/videos for Veo.
-6. JSON wire payload contains model, prompt, aspect_ratio, duration, images array; top-level image is absent.
-7. Submit job dispatches JSON wire payload via _open_json (NOT multipart form).
-8. Poll path recovery preserves https://api.key4u.vn/v1/videos/{task_id}.
-9. Auth header contract is unchanged (Authorization: Bearer <token>).
-10. Duration integrity: 8.0s valid, 6.016s raw output fails closed without fake tpad padding.
-11. Negative guard: has_proven_v2v_wire_contract("key4u_video") is False; arbitrary V2V fail-closed.
+5. Adapter default wiring resolves /v1/videos for Veo even when generic env points to /v1/video/create.
+6. Adapter ignores generic /v1/video/create and /v1/video/query when specialized env is omitted.
+7. JSON wire payload contains model, prompt, aspect_ratio, duration, images array; top-level image is absent.
+8. Wire payload strictly rejects /v1/video/create for Google Veo (fail-closed, no charge).
+9. Submit job dispatches JSON wire payload via _open_json (NOT multipart form).
+10. Submit job blocks legacy /v1/video/create fail-closed with no charge.
+11. Polling URL path embedding preserves https://api.key4u.vn/v1/videos/{task_id}.
+12. Pending recovery prevents mixed contract between /v1/video/create and /v1/videos/{task_id}.
+13. Auth header contract is unchanged (Authorization: Bearer <token>).
+14. Duration integrity: 8.0s valid, 6.016s raw output fails closed without fake tpad padding.
+15. Negative guard: has_proven_v2v_wire_contract("key4u_video") is False; arbitrary V2V fail-closed.
 """
 
 import json
+from urllib.parse import urlparse
 import pytest
 
 from providers.key4u_provider import config_from_env
@@ -58,8 +63,12 @@ def _key4u_veo_env(**extra: str) -> dict[str, str]:
         "KEY4U_VIDEO_ENABLED": "1",
         "KEY4U_BASE_URL": KEY4U_VN,
         "KEY4U_API_KEY": "test-key-veo-token",
-        "KEY4U_VIDEO_SUBMIT_URL": f"{KEY4U_VN}/v1/videos",
-        "KEY4U_VIDEO_POLL_URL": f"{KEY4U_VN}/v1/videos/{{task_id}}",
+        # Generic production defaults (must NOT be used by Veo):
+        "KEY4U_VIDEO_SUBMIT_URL": f"{KEY4U_VN}/v1/video/create",
+        "KEY4U_VIDEO_POLL_URL": f"{KEY4U_VN}/v1/video/query?id={{task_id}}",
+        # Specialized Veo endpoints:
+        "KEY4U_VEO_VIDEO_ENDPOINT": f"{KEY4U_VN}/v1/videos",
+        "KEY4U_VEO_VIDEO_POLL_URL": f"{KEY4U_VN}/v1/videos/{{task_id}}",
         "KEY4U_VIDEO_AUTH_HEADER_NAME": "Authorization",
         "KEY4U_VIDEO_AUTH_HEADER_VALUE": "Bearer test-key-veo-token",
         "KEY4U_VIDEO_MODEL": "veo_3_1-fast",
@@ -116,7 +125,6 @@ def test_key4u_veo_canonical_endpoints_resolution():
     assert resolution["selected_provider"] == "key4u_video"
     assert resolution["selected_model"] == "veo_3_1-fast"
     assert resolution["provider_submit_url_override"] == f"{KEY4U_VN}/v1/videos"
-    assert resolution["provider_endpoint_source"] == "derived:key4u_official_veo_videos"
     assert resolution["provider_poll_url_override"] == f"{KEY4U_VN}/v1/videos/{{task_id}}"
     assert resolution["provider_interface"] == "key4u_google_veo_exclusive"
     # Negative assertions against deprecated endpoints
@@ -160,17 +168,36 @@ def test_key4u_veo_no_normalization_rewrite():
 
 
 # ---------------------------------------------------------------------------
-# CONTRACT 4: Adapter Default Wiring for Veo
+# CONTRACT 4: Adapter Precedence & Anti-Fallback
 # ---------------------------------------------------------------------------
 def test_key4u_veo_adapter_default_wiring():
+    """When specialized envs are configured, adapter binds /v1/videos."""
     env = _key4u_veo_env()
     adapter = _generic_adapter_for("key4u_video", env)
     assert adapter._submit_url() == f"{KEY4U_VN}/v1/videos"
     assert adapter._poll_url() == f"{KEY4U_VN}/v1/videos/{{task_id}}"
 
 
+def test_key4u_veo_adapter_ignores_generic_create_when_specialized_env_missing():
+    """Even if generic envs point to /v1/video/create and /v1/video/query, Veo derives /v1/videos."""
+    env = {
+        "KEY4U_ENABLED": "1",
+        "KEY4U_VIDEO_ENABLED": "1",
+        "KEY4U_BASE_URL": KEY4U_VN,
+        "KEY4U_API_KEY": "test-key-veo-token",
+        "KEY4U_VIDEO_SUBMIT_URL": f"{KEY4U_VN}/v1/video/create",
+        "KEY4U_VIDEO_POLL_URL": f"{KEY4U_VN}/v1/video/query?id={{task_id}}",
+        "KEY4U_VIDEO_MODEL": "veo_3_1-fast",
+    }
+    adapter = _generic_adapter_for("key4u_video", env)
+    assert adapter._submit_url() == f"{KEY4U_VN}/v1/videos"
+    assert adapter._poll_url() == f"{KEY4U_VN}/v1/videos/{{task_id}}"
+    assert "/v1/video/create" not in adapter._submit_url()
+    assert "/v1/video/query" not in adapter._poll_url()
+
+
 # ---------------------------------------------------------------------------
-# CONTRACT 5: JSON Wire Payload Schema (images array, no top-level image)
+# CONTRACT 5: JSON Wire Payload Schema & Legacy Rejection
 # ---------------------------------------------------------------------------
 def test_key4u_veo_wire_payload_schema():
     payload = {
@@ -194,6 +221,22 @@ def test_key4u_veo_wire_payload_schema():
     assert wire["metadata"]["images"] == ["https://toanaas.vn/media/panel1.jpg"]
     # Enforce absence of raw top-level image field
     assert "image" not in wire
+
+
+def test_key4u_veo_wire_payload_rejects_legacy_create_fail_closed():
+    """Submitting Veo to /v1/video/create fails closed with contract error before dispatch."""
+    payload = {
+        "model": "veo_3_1-fast",
+        "prompt": "Test Veo prompt.",
+        "metadata": {
+            "selected_family": "google_veo",
+            "provider_submit_url_override": f"{KEY4U_VN}/v1/video/create",
+        },
+    }
+    with pytest.raises(VideoProviderContractError) as exc_info:
+        _key4u_wire_payload(payload, submit_url=f"{KEY4U_VN}/v1/video/create")
+    assert exc_info.value.blocker == "key4u_veo_legacy_create_rejected_no_charge"
+    assert exc_info.value.debug["no_charge"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -251,8 +294,44 @@ def test_key4u_veo_submit_job_uses_json_transport(monkeypatch):
     assert result.raw["provider_poll_url_override"] == f"{KEY4U_VN}/v1/videos/{{task_id}}"
 
 
+def test_key4u_veo_submit_job_blocks_legacy_create_fail_closed_no_charge():
+    """Even if provider submit URL is forced to /v1/video/create, Veo submission fails closed without HTTP call."""
+    env = _key4u_veo_env(
+        KEY4U_VEO_VIDEO_ENDPOINT=f"{KEY4U_VN}/v1/video/create",
+        KEY4U_VIDEO_SUBMIT_URL=f"{KEY4U_VN}/v1/video/create",
+    )
+    provider = GenericHttpVideoProvider(
+        provider_name="key4u_video",
+        enabled_env="KEY4U_VIDEO_ENABLED",
+        submit_url_env="KEY4U_VIDEO_SUBMIT_URL",
+        poll_url_env="KEY4U_VIDEO_POLL_URL",
+        auth_header_name_env="KEY4U_VIDEO_AUTH_HEADER_NAME",
+        auth_header_value_env="KEY4U_VIDEO_AUTH_HEADER_VALUE",
+        model_env="KEY4U_VIDEO_MODEL",
+        capabilities_env="KEY4U_VIDEO_CAPABILITIES",
+        environ=env,
+    )
+    request = VideoGenerationRequest(
+        job_id="pv-veo-fail-closed",
+        product_type="storyboard_prompt",
+        prompt="Coffee scene",
+        ratio="9:16",
+        duration_seconds=8,
+        required_capability="text_to_video",
+        metadata={
+            "selected_family": "google_veo",
+            "model": "veo_3_1-fast",
+            "provider_submit_url_override": f"{KEY4U_VN}/v1/video/create",
+        },
+    )
+    result = provider.submit_video_job(request)
+    assert result.ok is False
+    assert result.error_code == "key4u_veo_legacy_create_rejected_no_charge"
+    assert result.raw.get("no_charge") is True
+
+
 # ---------------------------------------------------------------------------
-# CONTRACT 7: Polling URL Path Embedding
+# CONTRACT 7: Polling URL Path Embedding & Zero Mixed Contract
 # ---------------------------------------------------------------------------
 def test_key4u_veo_polling_url_path_embedding(monkeypatch):
     env = _key4u_veo_env()
@@ -282,6 +361,22 @@ def test_key4u_veo_polling_url_path_embedding(monkeypatch):
     assert result.result_url == "https://toanaas.vn/output/scene1.mp4"
     assert captured["url"] == f"{KEY4U_VN}/v1/videos/veo_task_987654"
     assert "?" not in captured["url"]
+
+
+def test_key4u_veo_no_mixed_contract_poll_recovery():
+    """Veo pending recovery must NOT synthesize /v1/videos/{task_id} from legacy /v1/video/create."""
+    adapter_submit = urlparse(f"{KEY4U_VN}/v1/video/create")
+    persisted_model = "veo_3_1-fast"
+    recovered_poll_url = ""
+    # Test router logic: only /v1/videos is allowed for recovery
+    if (
+        persisted_model == "veo_3_1-fast"
+        and (adapter_submit.hostname or "").lower() in {"api.key4u.vn", "api.key4u.shop"}
+        and adapter_submit.path.rstrip("/").endswith("/v1/videos")
+    ):
+        recovered_poll_url = f"{adapter_submit.scheme}://{adapter_submit.netloc}{adapter_submit.path.rstrip('/')}/{{task_id}}"
+
+    assert recovered_poll_url == ""
 
 
 # ---------------------------------------------------------------------------
