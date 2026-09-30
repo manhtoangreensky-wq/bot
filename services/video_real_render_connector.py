@@ -5104,6 +5104,349 @@ def _render_selfshot2_video_to_video(
     }
 
 
+def _render_video_reference_fal_v2v(
+    *,
+    job: dict[str, Any],
+    asset_pack: dict[str, Any],
+    raw_path: str,
+    provider_order: list[str] | None = None,
+    fallback_prompt: str,
+    aspect_ratio: str,
+    scene_index: int = 1,
+) -> dict[str, Any]:
+    """Render a video_ai_video_reference scene using Fal Wan 2.2 V2V."""
+    source_path = str(
+        (job or {}).get("source_video_local_path")
+        or (job or {}).get("source_video_path")
+        or (asset_pack or {}).get("source_video_local_path")
+        or (asset_pack or {}).get("source_video_path")
+        or ""
+    ).strip()
+    if not source_path or not os.path.isfile(source_path):
+        raise RealVideoRenderError(
+            "video_reference_source_video_not_materialized",
+            diagnostics={
+                "ok": False,
+                "video_reference": True,
+                "product_type": "video_ai_video_reference",
+                "scene_index": scene_index,
+                "provider_attempted": False,
+                "provider_submit_called": False,
+                "no_charge": True,
+                "blocker": "video_reference_source_video_not_materialized",
+            },
+        )
+    if Path(source_path).suffix.lower() not in {".mp4", ".mov", ".mkv", ".webm"}:
+        raise RealVideoRenderError(
+            "video_reference_source_video_invalid",
+            diagnostics={
+                "ok": False,
+                "video_reference": True,
+                "product_type": "video_ai_video_reference",
+                "scene_index": scene_index,
+                "provider_attempted": False,
+                "provider_submit_called": False,
+                "no_charge": True,
+                "blocker": "video_reference_source_video_invalid",
+            },
+        )
+    confirmed = bool(
+        asset_pack.get("public_user_confirmed")
+        or asset_pack.get("b14_public_user_confirmed")
+        or asset_pack.get("invoice_confirmed")
+        or (job or {}).get("public_user_confirmed")
+        or (job or {}).get("invoice_confirmed")
+    )
+    submit_source = str(asset_pack.get("submit_source") or (job or {}).get("submit_source") or "").strip()
+    if not confirmed or submit_source not in {"public_user_final_confirm", video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE}:
+        raise RealVideoRenderError(
+            "video_reference_public_confirm_required",
+            diagnostics={
+                "ok": False,
+                "video_reference": True,
+                "product_type": "video_ai_video_reference",
+                "scene_index": scene_index,
+                "provider_attempted": False,
+                "provider_submit_called": False,
+                "no_charge": True,
+                "blocker": "video_reference_public_confirm_required",
+            },
+        )
+    target_duration = _safe_int(
+        (job or {}).get("scene_duration_seconds")
+        or (job or {}).get("duration_seconds")
+        or (job or {}).get("duration")
+        or asset_pack.get("scene_duration_seconds")
+        or asset_pack.get("duration_seconds")
+        or asset_pack.get("duration"),
+        5,
+    )
+    if target_duration not in {5, 10}:
+        raise RealVideoRenderError(
+            "video_reference_unsupported_duration_no_charge",
+            diagnostics={
+                "ok": False,
+                "video_reference": True,
+                "product_type": "video_ai_video_reference",
+                "scene_index": scene_index,
+                "target_duration": target_duration,
+                "provider_attempted": False,
+                "provider_submit_called": False,
+                "no_charge": True,
+                "blocker": "video_reference_unsupported_duration_no_charge",
+            },
+        )
+
+    pricing = video_ai_edit_provider.pricing_snapshot(
+        env=os.environ,
+        provider_name="fal_video",
+        duration_seconds=target_duration,
+    )
+    if not pricing.get("configured") or not pricing.get("commercial_enable_allowed") or not pricing.get("loss_guard_pass") or not pricing.get("provider_submit_allowed"):
+        blocker = str(pricing.get("blocker") or "video_reference_pricing_blocked")
+        raise RealVideoRenderError(
+            blocker,
+            diagnostics={
+                "ok": False,
+                "video_reference": True,
+                "product_type": "video_ai_video_reference",
+                "scene_index": scene_index,
+                "target_duration": target_duration,
+                "provider_attempted": False,
+                "provider_submit_called": False,
+                "no_charge": True,
+                "blocker": blocker,
+                "pricing": pricing,
+            },
+        )
+
+    active_provider_task_id = str(
+        (job or {}).get("provider_task_id")
+        or (job or {}).get("provider_video_id")
+        or (job or {}).get("provider_pending_task_id")
+        or (asset_pack or {}).get("provider_task_id")
+        or (asset_pack or {}).get("provider_video_id")
+        or (asset_pack or {}).get("provider_pending_task_id")
+        or ""
+    ).strip()
+
+    config = video_ai_edit_provider.provider_config_from_env("fal_video")
+    check = video_ai_edit_provider.validate_provider_config(config)
+    if not check.get("ok"):
+        raise RealVideoRenderError(
+            str(check.get("reason") or "fal_provider_invalid"),
+            diagnostics={
+                "ok": False,
+                "video_reference": True,
+                "product_type": "video_ai_video_reference",
+                "scene_index": scene_index,
+                "provider_attempted": False,
+                "provider_submit_called": False,
+                "no_charge": True,
+                "blocker": str(check.get("reason") or "fal_provider_invalid"),
+            },
+        )
+
+    if active_provider_task_id:
+        try:
+            wait_res = video_ai_edit_provider.wait_for_result(config, active_provider_task_id)
+            result_url = str(wait_res.get("result_url") or "").strip()
+            if not result_url:
+                raise video_ai_edit_provider.AiEditProviderError("provider_result_url_missing")
+            downloaded = video_ai_edit_provider.download_result(result_url, raw_path)
+        except video_ai_edit_provider.AiEditProviderError as exc:
+            raise RealVideoRenderError(
+                exc.reason,
+                diagnostics={
+                    "ok": False,
+                    "video_reference": True,
+                    "product_type": "video_ai_video_reference",
+                    "scene_index": scene_index,
+                    "provider_attempted": True,
+                    "provider_submit_called": False,
+                    "poll_only": True,
+                    "provider_task_id": active_provider_task_id,
+                    "no_charge": True,
+                    "blocker": exc.reason,
+                },
+            ) from exc
+
+        return {
+            "ok": True,
+            "video_reference": True,
+            "product_type": "video_ai_video_reference",
+            "scene_index": scene_index,
+            "provider_attempted": True,
+            "provider_submit_called": False,
+            "poll_only": True,
+            "provider": config.provider_name,
+            "model": config.model,
+            "provider_task_id": active_provider_task_id,
+            "provider_task_ids": [active_provider_task_id],
+            "result_url_present": True,
+            "output_path": str(downloaded.get("path") or raw_path),
+            "duration": target_duration,
+            "scene_duration_seconds": target_duration,
+            "clip_duration_seconds": target_duration,
+            "expected_duration_seconds": target_duration,
+            "engine_route": "fal_wan_v2v",
+            "selected_capability": "video_to_video",
+            "no_charge": False,
+        }
+
+    if bool((job or {}).get("recovery_existing_tasks_only")):
+        raise RealVideoRenderError(
+            "recovery_existing_tasks_only_no_active_task",
+            diagnostics={
+                "ok": False,
+                "video_reference": True,
+                "product_type": "video_ai_video_reference",
+                "scene_index": scene_index,
+                "provider_attempted": False,
+                "provider_submit_called": False,
+                "no_charge": True,
+                "blocker": "recovery_existing_tasks_only_no_active_task",
+            },
+        )
+
+    prompt = str(
+        (job or {}).get("prompt_text")
+        or (job or {}).get("prompt")
+        or (asset_pack or {}).get("prompt_text")
+        or (asset_pack or {}).get("prompt")
+        or fallback_prompt
+        or ""
+    ).strip()
+    negative_prompt = str(
+        (job or {}).get("negative_prompt")
+        or (asset_pack or {}).get("negative_prompt")
+        or ""
+    ).strip()
+    job_id = str((job or {}).get("job_id") or (job or {}).get("id") or "v2v_job")
+
+    try:
+        upload_res = video_ai_edit_provider.upload_fal_media_file(config, source_path)
+    except video_ai_edit_provider.AiEditProviderError as exc:
+        raise RealVideoRenderError(
+            exc.reason,
+            diagnostics={
+                "ok": False,
+                "video_reference": True,
+                "product_type": "video_ai_video_reference",
+                "scene_index": scene_index,
+                "provider_attempted": True,
+                "provider_submit_called": False,
+                "no_charge": True,
+                "blocker": exc.reason,
+            },
+        ) from exc
+    remote_source_url = str(upload_res.get("file_url") or "").strip()
+
+    try:
+        submit_res = video_ai_edit_provider.submit_video_edit(
+            config,
+            source_video_path=remote_source_url,
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            aspect_ratio=aspect_ratio or "9:16",
+            duration_seconds=target_duration,
+            job_id=job_id,
+            submit_source=video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE,
+            public_user_confirmed=True,
+        )
+    except video_ai_edit_provider.AiEditProviderError as exc:
+        raise RealVideoRenderError(
+            exc.reason,
+            diagnostics={
+                "ok": False,
+                "video_reference": True,
+                "product_type": "video_ai_video_reference",
+                "scene_index": scene_index,
+                "provider_attempted": True,
+                "provider_submit_called": True,
+                "no_charge": True,
+                "blocker": exc.reason,
+            },
+        ) from exc
+
+    task_id = str(submit_res.get("provider_task_id") or "").strip()
+    if not task_id:
+        raise RealVideoRenderError(
+            "provider_submit_task_id_missing",
+            diagnostics={
+                "ok": False,
+                "video_reference": True,
+                "product_type": "video_ai_video_reference",
+                "scene_index": scene_index,
+                "provider_attempted": True,
+                "provider_submit_called": True,
+                "no_charge": True,
+                "blocker": "provider_submit_task_id_missing",
+            },
+        )
+
+    try:
+        wait_res = video_ai_edit_provider.wait_for_result(config, task_id)
+        result_url = str(wait_res.get("result_url") or "").strip()
+        if not result_url:
+            raise video_ai_edit_provider.AiEditProviderError("provider_result_url_missing")
+        downloaded = video_ai_edit_provider.download_result(result_url, raw_path)
+    except video_ai_edit_provider.AiEditProviderError as exc:
+        raise RealVideoRenderError(
+            exc.reason,
+            diagnostics={
+                "ok": False,
+                "video_reference": True,
+                "product_type": "video_ai_video_reference",
+                "scene_index": scene_index,
+                "provider_attempted": True,
+                "provider_submit_called": True,
+                "provider_task_id": task_id,
+                "no_charge": True,
+                "blocker": exc.reason,
+            },
+        ) from exc
+
+    if not os.path.isfile(raw_path) or os.path.getsize(raw_path) <= 0:
+        raise RealVideoRenderError(
+            "video_reference_download_artifact_invalid_no_charge",
+            diagnostics={
+                "ok": False,
+                "video_reference": True,
+                "product_type": "video_ai_video_reference",
+                "scene_index": scene_index,
+                "provider_attempted": True,
+                "provider_submit_called": True,
+                "provider_task_id": task_id,
+                "no_charge": True,
+                "blocker": "video_reference_download_artifact_invalid_no_charge",
+            },
+        )
+
+    return {
+        "ok": True,
+        "video_reference": True,
+        "product_type": "video_ai_video_reference",
+        "scene_index": scene_index,
+        "provider_attempted": True,
+        "provider_submit_called": True,
+        "poll_only": False,
+        "provider": config.provider_name,
+        "model": config.model,
+        "provider_task_id": task_id,
+        "provider_task_ids": [task_id],
+        "result_url_present": True,
+        "output_path": str(downloaded.get("path") or raw_path),
+        "duration": target_duration,
+        "scene_duration_seconds": target_duration,
+        "clip_duration_seconds": target_duration,
+        "expected_duration_seconds": target_duration,
+        "engine_route": "fal_wan_v2v",
+        "selected_capability": "video_to_video",
+        "no_charge": False,
+    }
+
+
 _SELFSHOT2_CONTINUITY_ALIASES = {
     "person_identity": (
         "person_identity",
@@ -6176,7 +6519,7 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         },
         required_capability=required_capability,
     )
-    if product_type not in {"self_shot_scene_change", "self_shot_cinematic_transform"} and (
+    if product_type not in {"self_shot_scene_change", "self_shot_cinematic_transform", "video_ai_video_reference"} and (
         product_type in PRODUCT_VIDEO_SCENE_IMAGE_INPUT_TYPES
         or required_capability == "image_to_video"
         or (job or {}).get("required_capability") == "image_to_video"
@@ -6234,6 +6577,16 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             provider_order=provider_order,
             fallback_prompt=prompt,
             aspect_ratio=aspect_ratio,
+        )
+    elif product_type == "video_ai_video_reference":
+        result = _render_video_reference_fal_v2v(
+            job=dict(job or {}),
+            asset_pack=dict(asset_pack or {}),
+            raw_path=raw_path,
+            provider_order=provider_order,
+            fallback_prompt=prompt,
+            aspect_ratio=aspect_ratio,
+            scene_index=scene_index,
         )
     elif recovery_existing_tasks_only:
         result = run_provider_generation(

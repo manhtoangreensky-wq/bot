@@ -196,7 +196,15 @@ def provider_config_from_env(provider_name: str, env: dict[str, str] | os._Envir
         if not auth_value:
             auth_value = _text(source, "FAL_VIDEO_AUTH_HEADER_VALUE", "FAL_VIDEO_API_KEY", "FAL_VIDEO_KEY", "FAL_KEY", "FAL_API_KEY")
         if not enabled:
-            enabled = _flag(source, "FAL_VIDEO_ENABLED", "false")
+            raw_enabled = str(source.get("FAL_VIDEO_ENABLED") or source.get(f"{prefix}_ENABLED") or "").strip().lower()
+            if raw_enabled in {"0", "false", "no", "off"}:
+                enabled = False
+            elif raw_enabled in {"1", "true", "yes", "on"}:
+                enabled = True
+            elif auth_value and not any(tok in auth_value.lower() for tok in PLACEHOLDER_TOKENS):
+                enabled = True
+            else:
+                enabled = False
         if not model:
             model = _text(source, "FAL_VIDEO_MODEL") or default_model
     else:
@@ -345,16 +353,132 @@ def validate_provider_config(config: AiEditProviderConfig, required_capability: 
     }
 
 
-def pricing_snapshot(env: dict[str, str] | os._Environ[str] | None = None) -> dict[str, Any]:
+from decimal import Decimal
+
+FAL_USD_PER_SECOND_720P = Decimal("0.08")
+FAL_5S_PROVIDER_COST_USD = Decimal("0.40")
+FAL_10S_PROVIDER_COST_USD = Decimal("0.80")
+XU_TO_VND_CANONICAL = 100
+LOSS_GUARD_MULTIPLIER_CANONICAL = 1
+
+
+def _parse_fal_usd_to_vnd(source: Any) -> int | None:
+    if hasattr(source, "get"):
+        raw = source.get("FAL_USD_TO_VND")
+    else:
+        raw = os.environ.get("FAL_USD_TO_VND")
+    if raw is None:
+        return None
+    val_str = str(raw).strip()
+    if not val_str:
+        return None
+    if not val_str.isdigit():
+        return None
+    try:
+        val = int(val_str)
+        if val <= 0:
+            return None
+        return val
+    except Exception:
+        return None
+
+
+def pricing_snapshot(
+    env: dict[str, str] | os._Environ[str] | None = None,
+    *,
+    duration_seconds: int = 5,
+    provider_name: str = "fal_video",
+    model: str = "fal-ai/wan/v2.2-a14b/video-to-video",
+) -> dict[str, Any]:
     source = env if env is not None else os.environ
-    price = _int(source, "VIDEO_AI_EDIT_PRICE_XU", 0, 0, 10_000_000)
+
+    dur = int(duration_seconds or 5)
+    if dur not in {5, 10}:
+        return {
+            "configured": False,
+            "commercial_enable_allowed": False,
+            "provider_submit_allowed": False,
+            "loss_guard_pass": False,
+            "price_xu": 0,
+            "duration_seconds": dur,
+            "provider_name": provider_name,
+            "model": model,
+            "provider_cost_usd": 0.0,
+            "provider_cost_vnd": 0,
+            "usd_to_vnd": 0,
+            "gross_margin_vnd": 0,
+            "gross_margin_percent": 0.0,
+            "source": "unsupported_duration_tier",
+            "product_id": "video_ai_edit",
+            "reused_product_video_price": False,
+            "reused_subdub_price": False,
+            "blocker": "unsupported_duration_tier_fail_closed",
+        }
+
+    price_xu = 0
+    price_source = "quote_unavailable"
+    if dur == 5:
+        p_5s = _int(source, "VIDEO_AI_EDIT_PRICE_5S_XU", 0, 0, 10_000_000)
+        if p_5s > 0:
+            price_xu = p_5s
+            price_source = "VIDEO_AI_EDIT_PRICE_5S_XU"
+        else:
+            p_compat = _int(source, "VIDEO_AI_EDIT_PRICE_XU", 0, 0, 10_000_000)
+            if p_compat > 0:
+                price_xu = p_compat
+                price_source = "VIDEO_AI_EDIT_PRICE_XU"
+    elif dur == 10:
+        p_10s = _int(source, "VIDEO_AI_EDIT_PRICE_10S_XU", 0, 0, 10_000_000)
+        if p_10s > 0:
+            price_xu = p_10s
+            price_source = "VIDEO_AI_EDIT_PRICE_10S_XU"
+
+    is_fal = str(provider_name or "").strip().lower().startswith("fal")
+    fal_fx = _parse_fal_usd_to_vnd(source) if is_fal else 0
+
+    cost_usd = float(FAL_5S_PROVIDER_COST_USD if dur == 5 else FAL_10S_PROVIDER_COST_USD) if is_fal else 0.0
+    cost_vnd = int(Decimal(str(cost_usd)) * Decimal(str(fal_fx))) if (is_fal and fal_fx is not None and fal_fx > 0) else 0
+
+    revenue_vnd = price_xu * XU_TO_VND_CANONICAL
+    margin_vnd = revenue_vnd - cost_vnd if (is_fal and fal_fx is not None) else 0
+    margin_percent = round((margin_vnd / revenue_vnd) * 100.0, 2) if (revenue_vnd > 0 and is_fal and fal_fx is not None) else 0.0
+
+    if is_fal:
+        loss_guard_pass = bool(fal_fx is not None and fal_fx > 0 and price_xu > 0 and revenue_vnd >= cost_vnd * LOSS_GUARD_MULTIPLIER_CANONICAL)
+    else:
+        loss_guard_pass = bool(price_xu > 0)
+
+    blocker = ""
+    if price_xu <= 0:
+        blocker = "missing_customer_price_fail_closed"
+    elif is_fal and (fal_fx is None or fal_fx <= 0):
+        blocker = "missing_fal_fx_authority_fail_closed"
+    elif not loss_guard_pass:
+        blocker = "customer_price_below_provider_cost_loss_guard_blocked"
+
+    configured = bool(price_xu > 0 and (not is_fal or (fal_fx is not None and fal_fx > 0)) and loss_guard_pass)
+    commercial_enable_allowed = configured
+    provider_submit_allowed = configured
+
     return {
-        "configured": price > 0,
-        "price_xu": price,
-        "source": "VIDEO_AI_EDIT_PRICE_XU" if price > 0 else "quote_unavailable",
+        "configured": configured,
+        "commercial_enable_allowed": commercial_enable_allowed,
+        "provider_submit_allowed": provider_submit_allowed,
+        "loss_guard_pass": loss_guard_pass,
+        "price_xu": price_xu,
+        "duration_seconds": dur,
+        "provider_name": provider_name,
+        "model": model,
+        "provider_cost_usd": cost_usd,
+        "provider_cost_vnd": cost_vnd,
+        "usd_to_vnd": fal_fx if fal_fx is not None else 0,
+        "gross_margin_vnd": margin_vnd,
+        "gross_margin_percent": margin_percent,
+        "source": price_source if price_xu > 0 else "quote_unavailable",
         "product_id": "video_ai_edit",
         "reused_product_video_price": False,
         "reused_subdub_price": False,
+        "blocker": blocker,
     }
 
 
@@ -363,13 +487,15 @@ def feature_snapshot(env: dict[str, str] | os._Environ[str] | None = None) -> di
     providers = configured_provider_chain(source)
     validated = [{**item.safe_dict(), **validate_provider_config(item)} for item in providers]
     ready = [item for item in providers if validate_provider_config(item).get("ok")]
+    selected_provider = ready[0].provider_name if ready else (providers[0].provider_name if providers else "fal_video")
+    selected_model = ready[0].model if ready else (providers[0].model if providers else "fal-ai/wan/v2.2-a14b/video-to-video")
     return {
         "public_enabled": _flag(source, "VIDEO_AI_EDIT_PUBLIC_ENABLED", "false"),
         "local_lane_enabled": _flag(source, "VIDEO_AI_EDIT_LOCAL_ENABLED", "true"),
         "generative_lane_enabled": _flag(source, "VIDEO_AI_EDIT_GENERATIVE_ENABLED", "false"),
         "public_maintenance_freeze": _flag(source, "VIDEO_AI_EDIT_PUBLIC_FREEZE", "false"),
         "hidden_submit_freeze": _flag(source, "VIDEO_AI_EDIT_HIDDEN_SUBMIT_FREEZE", "true"),
-        "pricing": pricing_snapshot(source),
+        "pricing": pricing_snapshot(source, provider_name=selected_provider, model=selected_model),
         "providers": validated,
         "provider_capability_available": bool(ready),
         "first_ready_provider": ready[0].provider_name if ready else "",
