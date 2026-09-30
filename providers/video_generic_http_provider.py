@@ -2060,7 +2060,7 @@ class GenericHttpVideoProvider:
         )
         if is_key4u_canonical_videos_poll and ":" in poll_task_id:
             prefix, remainder = poll_task_id.split(":", 1)
-            if prefix in {"veo_3_1-fast", "veo3.1-fast"} or remainder.startswith("task_"):
+            if prefix in {"veo_3_1-fast", "veo3.1-fast"} and remainder.startswith("task_"):
                 poll_task_id = remainder
         poll_task_id_model_qualified = False
         encoded = urllib.parse.quote(poll_task_id)

@@ -340,6 +340,7 @@ def test_key4u_veo_submit_job_blocks_legacy_create_fail_closed_no_charge():
         ("veo_3_1-fast:task_existing_key4u_scene_2", "task_existing_key4u_scene_2"),
         ("veo3.1-fast:task_existing_key4u_scene_2", "task_existing_key4u_scene_2"),
         ("veo_task_987654", "veo_task_987654"),
+        ("unknown_prefix:task_existing_key4u_scene_2", "unknown_prefix%3Atask_existing_key4u_scene_2"),
     ],
 )
 def test_key4u_veo_polling_url_path_embedding(monkeypatch, task_id, expected_path_task_id):
@@ -370,6 +371,36 @@ def test_key4u_veo_polling_url_path_embedding(monkeypatch, task_id, expected_pat
     assert result.result_url == "https://toanaas.vn/output/scene1.mp4"
     assert captured["url"] == f"{KEY4U_VN}/v1/videos/{expected_path_task_id}"
     assert "?" not in captured["url"]
+
+
+def test_key4u_veo_polling_preserves_unknown_prefixed_task_id_negative_guard(monkeypatch):
+    """Negative guard: unknown prefixed task ID is NOT stripped."""
+    env = _key4u_veo_env()
+    provider = _key4u_provider(env)
+    captured = {}
+
+    def fake_json(url, payload=None, **kwargs):
+        captured["url"] = url
+        return {
+            "ok": True,
+            "status_code": 200,
+            "body": {
+                "task_id": "other_model:task_scene_xyz",
+                "status": "success",
+                "video_url": "https://toanaas.vn/output/scene1.mp4",
+            },
+            "response_shape": {"type": "dict"},
+        }
+
+    monkeypatch.setattr(provider, "_open_json", fake_json)
+    result = provider.poll_video_job(
+        "other_model:task_scene_xyz",
+        poll_url_override=f"{KEY4U_VN}/v1/videos/{{task_id}}",
+    )
+    assert result.ok is True
+    assert captured["url"] == f"{KEY4U_VN}/v1/videos/other_model%3Atask_scene_xyz"
+    assert "other_model" in captured["url"]
+
 
 
 

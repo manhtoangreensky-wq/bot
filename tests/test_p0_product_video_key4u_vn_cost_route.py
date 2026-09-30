@@ -572,6 +572,10 @@ def test_key4u_poll_override_is_used_for_family_task(monkeypatch):
             "veo3.1-fast:task_existing_key4u_scene_2",
             "task_existing_key4u_scene_2",
         ),
+        (
+            "unknown_model:task_existing_key4u_scene_2",
+            "unknown_model%3Atask_existing_key4u_scene_2",
+        ),
     ],
 )
 def test_key4u_official_openai_poll_uses_raw_task_id_and_dequalifies_historical_prefixed_ids(
@@ -615,6 +619,35 @@ def test_key4u_official_openai_poll_uses_raw_task_id_and_dequalifies_historical_
         "payload": None,
         "method": "GET",
     }
+
+
+def test_key4u_official_openai_poll_preserves_unknown_prefixed_task_id_negative_guard(monkeypatch):
+    env = _key4u_env(KEY4U_VIDEO_MODEL="veo_3_1-fast")
+    provider = _key4u_provider(env)
+    captured = {}
+
+    def fake_json(url, payload=None, **kwargs):
+        captured["url"] = url
+        return {
+            "ok": True,
+            "status_code": 200,
+            "body": {
+                "id": "unknown_vendor:task_other_model_123",
+                "status": "pending",
+                "video_url": None,
+            },
+            "response_shape": {"type": "dict"},
+        }
+
+    monkeypatch.setattr(provider, "_open_json", fake_json)
+    result = provider.poll_video_job(
+        "unknown_vendor:task_other_model_123",
+        poll_url_override=f"{KEY4U_VN}/v1/videos/{{task_id}}",
+    )
+    assert result.ok is True
+    assert captured["url"] == f"{KEY4U_VN}/v1/videos/unknown_vendor%3Atask_other_model_123"
+    assert "unknown_vendor" in captured["url"]
+
 
 
 @pytest.mark.parametrize(
