@@ -2148,23 +2148,41 @@ def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter
     if name == "key4u_video":
         namespace_cfg = video_provider_namespace_config("key4u_video", env)
         base_url = str(env.get("KEY4U_BASE_URL") or env.get("KEY4U_API_BASE") or "https://api.key4u.vn").rstrip("/")
-        submit_url = _endpoint_alias(env, "KEY4U_VIDEO_SUBMIT_URL", "KEY4U_BASE_URL", "KEY4U_VIDEO_ENDPOINT", "VIDEO_KEY4U_SUBMIT_URL")
-        submit_url = submit_url or str(namespace_cfg.get("submit_url") or "")
-        if submit_url and submit_url.rstrip("/").endswith(("/video/generate", "/generate")):
-            submit_url = ""
-        if not submit_url and (env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN") or namespace_cfg.get("auth_header_value")):
-            submit_url = f"{base_url}/v1/video/create"
-
-        poll_url = _endpoint_alias(env, "KEY4U_VIDEO_POLL_URL", "KEY4U_BASE_URL", "KEY4U_VIDEO_POLL_ENDPOINT", "VIDEO_KEY4U_POLL_URL")
-        poll_url = poll_url or str(namespace_cfg.get("poll_url") or "")
-        if poll_url and poll_url.rstrip("/").endswith(("/video/generate", "/generate")):
-            poll_url = ""
-        if not poll_url and submit_url:
-            poll_url = f"{base_url}/v1/video/query?id={{task_id}}"
-
         model_name = str(env.get("KEY4U_VIDEO_MODEL") or namespace_cfg.get("model") or "")
         if not model_name and (env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN") or namespace_cfg.get("auth_header_value")):
             model_name = "kling-video"
+
+        is_veo = model_name in {"veo_3_1-fast", "veo3.1-fast"}
+        if is_veo:
+            submit_url = _endpoint_alias(env, "KEY4U_VEO_VIDEO_ENDPOINT", "KEY4U_BASE_URL", "KEY4U_VEO_VIDEO_SUBMIT_URL", "KEY4U_GOOGLE_VEO_VIDEO_ENDPOINT")
+            submit_url = submit_url or str(namespace_cfg.get("submit_url") or "")
+            if submit_url and submit_url.rstrip("/").endswith(("/v1/video/create", "/video/create", "/video/generate", "/generate")):
+                submit_url = ""
+            if not submit_url and (env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN") or namespace_cfg.get("auth_header_value")):
+                submit_url = f"{base_url}/v1/videos"
+            poll_url = _endpoint_alias(env, "KEY4U_VEO_VIDEO_POLL_URL", "KEY4U_BASE_URL", "KEY4U_GOOGLE_VEO_VIDEO_POLL_URL")
+            poll_url = poll_url or str(namespace_cfg.get("poll_url") or "")
+            if poll_url and (
+                poll_url.rstrip("/").endswith(("/v1/video/query", "/video/query", "/video/generate", "/generate"))
+                or "query?id=" in poll_url
+            ):
+                poll_url = ""
+            if not poll_url and submit_url:
+                poll_url = f"{base_url}/v1/videos/{{task_id}}"
+        else:
+            submit_url = _endpoint_alias(env, "KEY4U_VIDEO_SUBMIT_URL", "KEY4U_BASE_URL", "KEY4U_VIDEO_ENDPOINT", "VIDEO_KEY4U_SUBMIT_URL")
+            submit_url = submit_url or str(namespace_cfg.get("submit_url") or "")
+            if submit_url and submit_url.rstrip("/").endswith(("/video/generate", "/generate")):
+                submit_url = ""
+            if not submit_url and (env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN") or namespace_cfg.get("auth_header_value")):
+                submit_url = f"{base_url}/v1/video/create"
+
+            poll_url = _endpoint_alias(env, "KEY4U_VIDEO_POLL_URL", "KEY4U_BASE_URL", "KEY4U_VIDEO_POLL_ENDPOINT", "VIDEO_KEY4U_POLL_URL")
+            poll_url = poll_url or str(namespace_cfg.get("poll_url") or "")
+            if poll_url and poll_url.rstrip("/").endswith(("/video/generate", "/generate")):
+                poll_url = ""
+            if not poll_url and submit_url:
+                poll_url = f"{base_url}/v1/video/query?id={{task_id}}"
 
         from services.video_provider_catalog import load_video_provider_catalog
         catalog = load_video_provider_catalog()
@@ -5619,15 +5637,15 @@ def _run_provider_generation_impl(
                     and persisted_model == "veo_3_1-fast"
                     and (adapter_submit.hostname or "").lower()
                     in {"api.key4u.vn", "api.key4u.shop"}
-                    and adapter_submit.path.rstrip("/") == "/v1/video/create"
                 ):
-                    recovered_poll_url = (
-                        f"{adapter_submit.scheme}://{adapter_submit.netloc}"
-                        "/v1/video/query?id={task_id}"
-                    )
-                    recovered_poll_source = (
-                        "recovered:key4u_unified_video_query_from_persisted_model"
-                    )
+                    if adapter_submit.path.rstrip("/").endswith("/v1/videos"):
+                        recovered_poll_url = (
+                            f"{adapter_submit.scheme}://{adapter_submit.netloc}"
+                            f"{adapter_submit.path.rstrip('/')}/{{task_id}}"
+                        )
+                        recovered_poll_source = (
+                            "recovered:key4u_veo_path_poll_from_persisted_model"
+                        )
                 adapter_model = str(
                     persisted_model
                     or current_adapter.env.get(current_adapter.model_env)
