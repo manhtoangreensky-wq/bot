@@ -33,6 +33,7 @@ from services.subdub_worker_claim import (
     ensure_subdub_worker_queue_schema,
     enqueue_subdub_job,
     claim_next_subdub_job,
+    heartbeat_subdub_job,
     complete_subdub_job,
     fail_subdub_job,
     get_subdub_worker_job,
