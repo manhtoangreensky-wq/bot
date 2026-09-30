@@ -562,20 +562,24 @@ def test_key4u_poll_override_is_used_for_family_task(monkeypatch):
     [
         (
             "task_existing_key4u_scene_2",
-            "veo3.1-fast%3Atask_existing_key4u_scene_2",
+            "task_existing_key4u_scene_2",
+        ),
+        (
+            "veo_3_1-fast:task_existing_key4u_scene_2",
+            "task_existing_key4u_scene_2",
         ),
         (
             "veo3.1-fast:task_existing_key4u_scene_2",
-            "veo3.1-fast%3Atask_existing_key4u_scene_2",
+            "task_existing_key4u_scene_2",
         ),
     ],
 )
-def test_key4u_official_openai_poll_uses_model_qualified_task_id_once(
+def test_key4u_official_openai_poll_uses_raw_task_id_and_dequalifies_historical_prefixed_ids(
     monkeypatch,
     task_id,
     expected_suffix,
 ):
-    env = _key4u_env(KEY4U_VIDEO_MODEL="veo3.1-fast")
+    env = _key4u_env(KEY4U_VIDEO_MODEL="veo_3_1-fast")
     provider = _key4u_provider(env)
     captured = {}
 
@@ -591,7 +595,7 @@ def test_key4u_official_openai_poll_uses_model_qualified_task_id_once(
             "ok": True,
             "status_code": 200,
             "body": {
-                "id": "veo3.1-fast:task_existing_key4u_scene_2",
+                "id": expected_suffix,
                 "status": "pending",
                 "video_url": None,
             },

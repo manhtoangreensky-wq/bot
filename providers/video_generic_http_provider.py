@@ -2051,18 +2051,18 @@ class GenericHttpVideoProvider:
         poll_url = str(poll_url_override or self._poll_url()).strip()
         poll_task_id = str(provider_task_id or "").strip()
         parsed_poll_url = urllib.parse.urlsplit(poll_url)
-        poll_task_id_model_qualified = bool(
+        is_key4u_canonical_videos_poll = bool(
             self.provider_name == "key4u_video"
             and (parsed_poll_url.hostname or "").lower()
             in {"api.key4u.vn", "api.key4u.shop"}
             and parsed_poll_url.path.rstrip("/")
             in {"/v1/videos/{task_id}", "/v1/videos/{id}"}
-            and poll_task_id.startswith("task_")
-            and ":" not in poll_task_id
-            and str(self.env.get(self.model_env) or "").strip()
         )
-        if poll_task_id_model_qualified:
-            poll_task_id = f"{str(self.env.get(self.model_env) or '').strip()}:{poll_task_id}"
+        if is_key4u_canonical_videos_poll and ":" in poll_task_id:
+            prefix, remainder = poll_task_id.split(":", 1)
+            if prefix in {"veo_3_1-fast", "veo3.1-fast"} or remainder.startswith("task_"):
+                poll_task_id = remainder
+        poll_task_id_model_qualified = False
         encoded = urllib.parse.quote(poll_task_id)
         if "{task_id}" in poll_url:
             url = poll_url.replace("{task_id}", encoded)
