@@ -20,8 +20,16 @@ else
   fi
 fi
 
+if [ "$SERVICE_NAME" = "toanaas-worker-subdub.service" ] && [ "$ENV_FILE" = "/etc/toanaas-worker.env" ] && [ -f "/etc/toanaas/bot.env" ]; then
+  ENV_FILE="/etc/toanaas/bot.env"
+fi
+
 [ -d "$BOT_DIR" ] || fail "$BOT_DIR does not exist."
-[ -f "$BOT_DIR/remote_worker.py" ] || fail "$BOT_DIR/remote_worker.py does not exist."
+if [ "$SERVICE_NAME" = "toanaas-worker-subdub.service" ]; then
+  [ -f "$BOT_DIR/services/subdub_worker_daemon.py" ] || fail "$BOT_DIR/services/subdub_worker_daemon.py does not exist."
+else
+  [ -f "$BOT_DIR/remote_worker.py" ] || fail "$BOT_DIR/remote_worker.py does not exist."
+fi
 [ -x "$BOT_DIR/.venv/bin/python" ] || fail "$BOT_DIR/.venv/bin/python does not exist or is not executable."
 [ -f "$ENV_FILE" ] || fail "$ENV_FILE does not exist."
 
@@ -30,7 +38,7 @@ service_source() {
     toanaas-worker.service)
       printf '%s\n' "$BOT_DIR/deploy/systemd/toanaas-remote-worker.service.example"
       ;;
-    toanaas-worker-admin-canary.service|toanaas-worker-owner-product-video.service|toanaas-worker-product-video.service|toanaas-worker-admin-video.service)
+    toanaas-worker-admin-canary.service|toanaas-worker-owner-product-video.service|toanaas-worker-product-video.service|toanaas-worker-admin-video.service|toanaas-worker-subdub.service)
       printf '%s\n' "$BOT_DIR/deploy/systemd/$1"
       ;;
     *)
