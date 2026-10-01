@@ -1,0 +1,36 @@
+name: CI Main & PR Quality Guard
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ci-main-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python_hygiene_and_tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Compile Complete Bot Source
+        run: |
+          python scripts/check_bot_source_compile.py
+
+      - name: Python Compile Guard
+        run: |
+          python -m py_compile bot.py remote_worker.py services/remote_worker_api.py services/*.py tests/test_deploy_vps_workflow_hygiene.py
+
+      - name: Run Workflow Hygiene Unit Tests
+        run: |
+          python -m unittest tests/test_deploy_vps_workflow_hygiene.py
