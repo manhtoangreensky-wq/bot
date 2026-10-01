@@ -226264,9 +226264,9 @@ async def handle_trend_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def handle_pipeline_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("Chỉ Admin được dùng.", show_alert=True)
+    await query.answer()
     parts = query.data.split("|")
     if len(parts) != 4:
         return
