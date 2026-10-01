@@ -25,6 +25,12 @@ WORKFLOW_PATH = os.path.join(
     "workflows",
     "deploy-vps.yml",
 )
+CI_WORKFLOW_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    ".github",
+    "workflows",
+    "ci-main.yml",
+)
 SYNC_SCRIPT_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "scripts",
@@ -38,6 +44,9 @@ class TestDeployVpsWorkflowHygiene(unittest.TestCase):
         self.assertTrue(os.path.isfile(WORKFLOW_PATH), f"Workflow file not found: {WORKFLOW_PATH}")
         with open(WORKFLOW_PATH, "r", encoding="utf-8") as f:
             self.content = f.read()
+        self.assertTrue(os.path.isfile(CI_WORKFLOW_PATH), f"CI workflow file not found: {CI_WORKFLOW_PATH}")
+        with open(CI_WORKFLOW_PATH, "r", encoding="utf-8") as cif:
+            self.ci_content = cif.read()
         if os.path.isfile(SYNC_SCRIPT_PATH):
             with open(SYNC_SCRIPT_PATH, "r", encoding="utf-8") as sf:
                 self.sync_script_content = sf.read()
@@ -87,8 +96,8 @@ class TestDeployVpsWorkflowHygiene(unittest.TestCase):
             self.assertIn("Refusing to create empty bundle", proc.stderr + proc.stdout)
 
     def test_same_sha_skips_bundle_creation(self):
-        """4. Packaging step skips bundle generation when PREV_DEPLOYED_SHA == GITHUB_SHA."""
-        self.assertIn('if [[ "$PREV_DEPLOYED_SHA" == "$GITHUB_SHA" ]]; then', self.content)
+        """4. Packaging step skips bundle generation when PREV_DEPLOYED_SHA == TARGET_SHA."""
+        self.assertIn('if [[ "$PREV_DEPLOYED_SHA" == "$TARGET_SHA" ]]; then', self.content)
         self.assertIn("Skipping bundle and tar generation", self.content)
 
     def test_same_sha_reconciliation_path_properties(self):
@@ -1294,6 +1303,48 @@ echo "ROLLBACK_ARMED_AFTER=$ROLLBACK_ARMED" >> "$LOG_FILE"
             self.assertIn("PRODUCT_VIDEO_DEPLOY_TRANSACTION_COMMITTED", content)
             self.assertIn("ROLLBACK_ARMED_AFTER=0", content)
             self.assertNotIn("ROLLBACK_CALLED", content)
+
+    def test_deploy_vps_workflow_has_no_push_trigger(self):
+        """30. Deploy workflow must NOT have any push trigger (NO auto-deploy on push/merge to main)."""
+        self.assertNotIn("push:", self.content)
+        self.assertNotIn("branches:", self.content)
+
+    def test_deploy_vps_workflow_requires_workflow_dispatch_target_sha(self):
+        """31. Deploy workflow must require workflow_dispatch with exact target_sha input."""
+        self.assertIn("workflow_dispatch:", self.content)
+        self.assertIn("target_sha:", self.content)
+        self.assertIn("required: true", self.content)
+
+    def test_deploy_vps_job_has_manual_dispatch_guard(self):
+        """32. Deploy job must have defense-in-depth condition checking for workflow_dispatch."""
+        self.assertIn("if: github.event_name == 'workflow_dispatch'", self.content)
+
+    def test_deploy_vps_uses_target_sha_as_sole_authority_not_github_sha(self):
+        """33. Validated target_sha is the sole deploy SHA authority, never implicit github.sha."""
+        self.assertNotIn("TARGET_SHA: ${{ github.sha }}", self.content)
+        self.assertIn("TARGET_SHA: ${{ steps.validate_target.outputs.target_sha }}", self.content)
+        self.assertIn("ref: ${{ github.event.inputs.target_sha }}", self.content)
+        self.assertIn('echo "target_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"', self.content)
+
+    def test_ci_main_workflow_triggers_and_properties(self):
+        """34. CI workflow triggers on pull_request, push to main, and workflow_dispatch."""
+        self.assertIn("pull_request:", self.ci_content)
+        self.assertIn("push:", self.ci_content)
+        self.assertIn("branches:", self.ci_content)
+        self.assertIn("- main", self.ci_content)
+        self.assertIn("workflow_dispatch:", self.ci_content)
+        self.assertIn("check_bot_source_compile.py", self.ci_content)
+        self.assertIn("test_deploy_vps_workflow_hygiene.py", self.ci_content)
+
+    def test_ci_main_workflow_has_zero_secrets_and_zero_deploy_commands(self):
+        """35. CI workflow must contain ZERO VPS secrets, zero SSH, zero systemctl, zero deploy logic."""
+        self.assertNotIn("VPS_HOST", self.ci_content)
+        self.assertNotIn("VPS_USER", self.ci_content)
+        self.assertNotIn("VPS_SSH_KEY_B64", self.ci_content)
+        self.assertNotIn("secrets.", self.ci_content)
+        self.assertNotIn("ssh -i", self.ci_content)
+        self.assertNotIn("scp -i", self.ci_content)
+        self.assertNotIn("systemctl", self.ci_content)
 
 
 if __name__ == "__main__":

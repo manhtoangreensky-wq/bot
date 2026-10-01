@@ -177,6 +177,11 @@ def test_first_red_e_asr_route_called_on_success(monkeypatch, tmp_path):
     dummy_source.write_bytes(b"dummy_mp4_bytes")
 
     async def fake_resolve(*args, **kwargs):
+        # R8.3: deepgram_asr_adapter sets asr_route_called on ContextVar state.
+        # Since this fake bypasses the real adapter, replicate the event mutation.
+        _cv_state = bot.get_subdub_active_pipeline_state()
+        if isinstance(_cv_state, dict):
+            _cv_state["asr_route_called"] = True
         return {
             "source_kind": "asr",
             "subtitle": "1\n00:00:00,000 --> 00:00:01,000\nHello",
@@ -220,6 +225,10 @@ def test_first_red_f_asr_route_called_on_post_asr_failure(monkeypatch, tmp_path)
 
     # Deepgram returns valid transcript but missing word timeline
     async def fake_resolve(*args, **kwargs):
+        # R8.3: deepgram_asr_adapter sets asr_route_called on ContextVar state.
+        _cv_state = bot.get_subdub_active_pipeline_state()
+        if isinstance(_cv_state, dict):
+            _cv_state["asr_route_called"] = True
         return {
             "source_kind": "asr",
             "subtitle": "1\n00:00:00,000 --> 00:00:01,000\nHello",
