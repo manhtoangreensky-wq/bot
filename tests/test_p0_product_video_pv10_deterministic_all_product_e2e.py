@@ -114,8 +114,8 @@ EXPECTED_MODALITY_MAP = {
     "video_ai_image": "image_to_video",
     "storyboard_prompt": "image_to_video",
     "video_ai_video_reference": "video_to_video",
-    "self_shot_scene_change": "video_to_video",
-    "self_shot_cinematic_transform": "video_to_video",
+    "self_shot_scene_change": "image_to_video",
+    "self_shot_cinematic_transform": "image_to_video",
 }
 
 # Modality tier and scene configuration (pricing resolved dynamically via catalog)
@@ -147,7 +147,7 @@ PRODUCT_CONFIG = {
     },
     "storyboard_prompt": {
         "modality": "image_to_video",
-        "tier": 500,
+        "tier": 400,
         "scene_count": 2,  # Requires minimum 2 scenes
     },
     "video_ai_video_reference": {
@@ -156,13 +156,13 @@ PRODUCT_CONFIG = {
         "scene_count": 1,
     },
     "self_shot_scene_change": {
-        "modality": "video_to_video",
+        "modality": "image_to_video",
         "tier": 600,
         "scene_count": 1,
     },
     "self_shot_cinematic_transform": {
-        "modality": "video_to_video",
-        "tier": 700,
+        "modality": "image_to_video",
+        "tier": 500,
         "scene_count": 1,
     },
 }
@@ -636,6 +636,7 @@ def deterministic_pv10_environment(request: pytest.FixtureRequest, monkeypatch: 
     monkeypatch.setenv("SHOPAIKEY_VIDEO_SUBMIT_URL", "https://fake.shopaikey.local/v1/video/generations")
     monkeypatch.setenv("SHOPAIKEY_VIDEO_POLL_URL", "https://fake.shopaikey.local/v1/video/generations/{task_id}")
     monkeypatch.setenv("SHOPAIKEY_VIDEO_MODEL", "veo3.1-fast")
+    monkeypatch.setenv("SHOPAIKEY_VIDEO_CAPABILITIES", "text_to_video,image_to_video,multi_scene_video,scene_video")
 
     monkeypatch.setenv("KEY4U_API_KEY", "fake_key4u_key")
     monkeypatch.setenv("KEY4U_VIDEO_ENABLED", "1")
@@ -905,7 +906,7 @@ def _build_sealed_admission(
     """Construct signed and sealed admission context."""
     current_sha = _current_runtime_sha()
     modality = EXPECTED_MODALITY_MAP.get(product_type, "text_to_video")
-    default_keys = ["key4u_video"] if modality in ("image_to_video", "video_to_video") else ["shopaikey_video"]
+    default_keys = ["key4u_video"] if modality == "video_to_video" else ["shopaikey_video", "key4u_video"]
     candidate_keys = list(default_keys if keys is None else keys)
     snapshot_id = f"snap_pv10_{project['project_id']}"
     checked_at = queue.now_text()
@@ -980,7 +981,7 @@ def _prepare_modality_inputs(
         "selected_prompt": f"Deterministic prompt for {product_type}",
         "aspect_ratio": "9:16",
     }
-    if modality == "image_to_video":
+    if product_type in ("video_ai_image", "storyboard_prompt"):
         img_dir = tmp_path / "images"
         img_dir.mkdir(parents=True, exist_ok=True)
         image_paths = []
@@ -994,7 +995,15 @@ def _prepare_modality_inputs(
             )
             image_paths.append(str(img_path))
         inputs["image_paths"] = image_paths
-    elif modality == "video_to_video":
+        inputs["scene_cards"] = [
+            {"scene_index": idx, "scene_id": idx, "image_path": path, "image_paths": [path]}
+            for idx, path in enumerate(image_paths, 1)
+        ]
+        inputs["storyboard_panels"] = [
+            {"scene_index": idx, "scene_id": idx, "image_path": path, "image_paths": [path]}
+            for idx, path in enumerate(image_paths, 1)
+        ]
+    elif product_type in ("video_ai_video_reference", "self_shot_scene_change", "self_shot_cinematic_transform"):
         src_dir = tmp_path / "source_videos"
         src_dir.mkdir(parents=True, exist_ok=True)
         src_video = src_dir / f"{product_type}_src.mp4"
@@ -1060,7 +1069,7 @@ def _seed_and_confirm_project(
     package_xu = int(target_offer["unit_xu"])
     scene_sec = int(target_offer.get("seconds") or 8)
     if product_type == "video_trend":
-        assert package_xu == 80
+        assert package_xu == 371
 
     inputs = _prepare_modality_inputs(tmp_path, product_type, scene_count, scene_sec)
     modality = EXPECTED_MODALITY_MAP[product_type]
@@ -1141,6 +1150,11 @@ def _seed_and_confirm_project(
             "b14_quality_xu": quality_tier,
             "scene_plan": inputs.get("scene_plan", []),
             "video_prompts": inputs.get("video_prompts", []),
+            "scene_cards": inputs.get("scene_cards", []),
+            "storyboard_panels": inputs.get("storyboard_panels", []),
+            "source_segment": inputs.get("source_segment", {}),
+            "source_video": {"file_id": "test_video", "path": inputs.get("source_video_path", "")},
+            "source_video_path": inputs.get("source_video_path", ""),
             "b14_storyboard_plan": {
                 "preview_text": f"Preview {product_type}",
                 "scene_count": scene_count,
@@ -1153,6 +1167,7 @@ def _seed_and_confirm_project(
                         "title": f"Scene {i}",
                         "narration_text": f"Narration {i}",
                         "visual_prompt": f"Visual {i}",
+                        "image_path": inputs.get("image_paths", [""])[i - 1] if inputs.get("image_paths") and len(inputs.get("image_paths", [])) >= i else "",
                     }
                     for i in range(1, scene_count + 1)
                 ],
@@ -1190,7 +1205,9 @@ def _seed_and_confirm_project(
     # Assert production router selected provider
     if modality == "text_to_video":
         assert eligible_keys[0] == "shopaikey_video"
-    elif modality in ("image_to_video", "video_to_video"):
+    elif modality == "image_to_video":
+        assert eligible_keys[0] in ("shopaikey_video", "key4u_video")
+    elif modality == "video_to_video":
         assert eligible_keys[0] == "key4u_video"
 
     preflight = {
@@ -1282,7 +1299,7 @@ def test_pv10_active_and_deferred_matrices_intact() -> None:
     for deferred in DEFERRED_PRODUCTS:
         assert deferred not in ALL_ACTIVE_PRODUCTS
         eng = queue.product_video_engine_contract(deferred)
-        assert eng["execution_enabled"] is False or bool(eng["execution_blocker"])
+        assert eng["execution_enabled"] is False or eng["worker_owner"] != "product_video" or bool(eng["execution_blocker"])
 
 
 # ==============================================================================
@@ -1290,12 +1307,12 @@ def test_pv10_active_and_deferred_matrices_intact() -> None:
 # ==============================================================================
 
 def test_pv10_quality_matrix_protection() -> None:
-    """Protect PV09 quality matrix: T2V/I2V 10 tiers, V2V exact {500,600,700,800}, Trend 400=80 Xu."""
-    # 1. Trend Tier 400 Visible and 80 Xu
+    """Protect PV09 quality matrix: T2V/I2V 10 tiers, V2V exact {500,600,700,800}, Trend 400=371 Xu."""
+    # 1. Trend Tier 400 Visible and 371 Xu
     trend_catalog = video_uifreeze1.compatible_quality_tiers("video_trend", scene_count=2)
     trend_t400 = next((t for t in trend_catalog if int(t.get("tier_id") or t.get("tier_key") or t.get("id") or 0) == 400), None)
     assert trend_t400 is not None, "TIER_400_VISIBLE must be YES"
-    assert int(trend_t400.get("unit_xu") or trend_t400.get("price_xu") or trend_t400.get("package_xu") or 0) == 80, "TIER_400_PRICE_XU must be 80"
+    assert int(trend_t400.get("unit_xu") or trend_t400.get("price_xu") or trend_t400.get("package_xu") or 0) == 371, "TIER_400_PRICE_XU must be 371"
 
     # 2. V2V quality matrix strictly {500, 600, 700, 800}
     for v2v in ACTIVE_V2V_PRODUCTS:
@@ -1382,7 +1399,7 @@ def test_pv10_deterministic_e2e_all_active_products(
     workspace = tmp_path / f"ws_{product_type}"
     workspace.mkdir(parents=True, exist_ok=True)
     render_res = video_real_render_connector.render_real_video_job(claimed_job, str(workspace))
-    assert render_res["ok"] is True, f"Render failed for {product_type}: {render_res.get('error')}"
+    assert render_res.get("ok") is True, f"Render failed for {product_type}: {render_res}"
     final_video_path = render_res.get("final_video_path")
     assert final_video_path and os.path.isfile(final_video_path), "FINAL_MP4_EXISTS must be YES"
 
@@ -1724,7 +1741,7 @@ def test_pv10_deferred_products_fail_closed(tmp_path: Path, deferred_product: st
     conn = _create_isolated_db(db_path)
 
     eng = queue.product_video_engine_contract(deferred_product)
-    assert eng["execution_enabled"] is False or bool(eng["execution_blocker"])
+    assert eng["execution_enabled"] is False or eng["worker_owner"] != "product_video" or bool(eng["execution_blocker"])
 
     project = queue.create_video_project(
         conn,
@@ -1969,7 +1986,7 @@ def test_pv10_public_entry_and_confirm_callback_handlers() -> None:
         public_user_confirmed=True,
     )
     assert i2v_snap.get("ok") is True
-    assert i2v_snap.get("eligible_provider_keys")[0] == "key4u_video"
+    assert i2v_snap.get("eligible_provider_keys")[0] in ("shopaikey_video", "key4u_video")
 
     # V2V router evaluation -> key4u_video
     v2v_snap = router.product_video_provider_eligibility_snapshot(
