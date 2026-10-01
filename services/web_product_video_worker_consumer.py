@@ -42,6 +42,7 @@ logger = logging.getLogger("web_product_video_worker_consumer")
 # Supported product scope for R1
 PRIMARY_PRODUCT_KEY = "video_ai_prompt"
 SUPPORTED_PRODUCTS: frozenset[str] = frozenset({PRIMARY_PRODUCT_KEY})
+OWNER_ACCEPTANCE_SUPPORTED_PRODUCTS: frozenset[str] = frozenset({"video_ai_video_reference"})
 
 # Canonical execution / capability parameters
 BOT_CANONICAL_PRODUCT_KEY = "video_ai_prompt"
@@ -564,7 +565,11 @@ class WebProductVideoDispatcherClient:
         return self._request_json("POST", "/api/v1/worker/product-video/fail", payload)
 
 
-def validate_claimed_job(job: Mapping[str, Any] | None) -> tuple[bool, str]:
+def validate_claimed_job(
+    job: Mapping[str, Any] | None,
+    *,
+    owner_acceptance_auth: Mapping[str, Any] | None = None,
+) -> tuple[bool, str]:
     """Strictly validate claimed job envelope before runtime mapping."""
     if not isinstance(job, Mapping) or not job:
         return False, "EMPTY_OR_NON_MAPPING_JOB"
@@ -580,8 +585,42 @@ def validate_claimed_job(job: Mapping[str, Any] | None) -> tuple[bool, str]:
     product_key = str(job.get("product_key") or "").strip()
     if not product_key:
         return False, "MISSING_PRODUCT_KEY"
+
     if product_key not in SUPPORTED_PRODUCTS:
-        return False, f"UNSUPPORTED_PRODUCT:{product_key}"
+        if product_key in OWNER_ACCEPTANCE_SUPPORTED_PRODUCTS:
+            if not owner_acceptance_auth or not isinstance(owner_acceptance_auth, Mapping):
+                return False, f"UNSUPPORTED_PRODUCT:{product_key}"
+            if not bool(owner_acceptance_auth.get("owner_authorized")):
+                return False, "OWNER_ACCEPTANCE_AUTH_UNAUTHORIZED"
+            auth_job_id = str(owner_acceptance_auth.get("job_id") or "").strip()
+            if not auth_job_id or auth_job_id != job_id:
+                return False, f"OWNER_ACCEPTANCE_JOB_ID_MISMATCH:{auth_job_id}!={job_id}"
+            auth_product = str(
+                owner_acceptance_auth.get("product_type")
+                or owner_acceptance_auth.get("product_key")
+                or ""
+            ).strip()
+            if auth_product != product_key:
+                return False, f"OWNER_ACCEPTANCE_PRODUCT_MISMATCH:{auth_product}!={product_key}"
+            auth_provider = str(owner_acceptance_auth.get("provider") or "").strip().lower()
+            if auth_provider not in ("fal_video", "fal.ai", "fal-video"):
+                return False, f"OWNER_ACCEPTANCE_PROVIDER_MISMATCH:{auth_provider}"
+            auth_model = str(
+                owner_acceptance_auth.get("model")
+                or owner_acceptance_auth.get("selected_model")
+                or ""
+            ).strip()
+            if auth_model and auth_model != "fal-ai/wan/v2.2-a14b/video-to-video":
+                return False, f"OWNER_ACCEPTANCE_MODEL_MISMATCH:{auth_model}"
+            auth_cap = str(
+                owner_acceptance_auth.get("capability")
+                or owner_acceptance_auth.get("required_capability")
+                or ""
+            ).strip()
+            if auth_cap and auth_cap != "video_to_video":
+                return False, f"OWNER_ACCEPTANCE_CAPABILITY_MISMATCH:{auth_cap}"
+        else:
+            return False, f"UNSUPPORTED_PRODUCT:{product_key}"
 
     account_id = str(job.get("account_id") or "").strip()
     if not account_id:
@@ -594,6 +633,16 @@ def validate_claimed_job(job: Mapping[str, Any] | None) -> tuple[bool, str]:
     payload = job.get("payload")
     if not isinstance(payload, Mapping):
         return False, "MALFORMED_PAYLOAD_NOT_OBJECT"
+
+    if product_key == "video_ai_video_reference":
+        source_video_path = str(
+            payload.get("source_video_path")
+            or payload.get("video_path")
+            or payload.get("source_video")
+            or ""
+        ).strip()
+        if not source_video_path:
+            return False, "MISSING_SOURCE_VIDEO_PATH"
 
     prompt = str(payload.get("prompt") or "").strip()
     if len(prompt) < MIN_PROMPT_LENGTH:
@@ -669,7 +718,7 @@ def map_web_job_to_bot_runtime(
     environ: Mapping[str, str] | None = None,
 ) -> VideoGenerationRequest:
     """Map canonical Web Product Video job into Bot runtime VideoGenerationRequest."""
-    is_valid, reason = validate_claimed_job(job)
+    is_valid, reason = validate_claimed_job(job, owner_acceptance_auth=owner_acceptance_auth)
     if not is_valid:
         raise InvalidJobEnvelopeError(f"Job validation failed before runtime mapping: {reason}")
 
@@ -704,23 +753,59 @@ def map_web_job_to_bot_runtime(
 
     env = dict(os.environ if environ is None else environ)
 
+    product_key = str(job.get("product_key") or "").strip()
+    is_v2v = (product_key == "video_ai_video_reference")
+
+    if is_v2v:
+        source_video_path = str(
+            payload.get("source_video_path")
+            or payload.get("video_path")
+            or payload.get("source_video")
+            or ""
+        ).strip()
+        if not source_video_path:
+            raise InvalidJobEnvelopeError("SOURCE_VIDEO_PATH_REQUIRED: Missing source_video_path for video_ai_video_reference")
+        image_paths: list[str] = []
+        req_product_type = "video_ai_video_reference"
+        req_video_flow_type = "video_ai_video_reference"
+        req_capability = "video_to_video"
+        derived_route = {
+            "tier_id": 500,
+            "quality_key": "advanced",
+            "seconds": int(duration_seconds) or 5,
+            "provider": "fal_video",
+            "model": "fal-ai/wan/v2.2-a14b/video-to-video",
+            "required_capability": "video_to_video",
+            "estimated_provider_cost": 0.40,
+            "estimated_provider_cost_unit": "USD",
+            "fallback_allowed": False,
+        }
+    else:
+        source_video_path = ""
+        image_paths = []
+        req_product_type = BOT_CANONICAL_PRODUCT_KEY
+        req_video_flow_type = BOT_EXECUTOR_PRODUCT_TYPE
+        req_capability = DEFAULT_REQUIRED_CAPABILITY
+        derived_route = derive_canonical_tier_route(quality, environ=env)
+
     if owner_acceptance_auth is not None:
         from services.video_provider_router import (
             OWNER_AUTHORIZED_LIVE_ACCEPTANCE,
             validate_owner_acceptance_authorization,
         )
 
-        derived_route = derive_canonical_tier_route(quality, environ=env)
         derived_ctx: dict[str, Any] = {
             "user_id": str(account_id or job.get("account_id") or "").strip(),
             "job_id": job_id,
             "project_id": str(job.get("project_id") or "").strip(),
-            "product_type": BOT_CANONICAL_PRODUCT_KEY,
+            "product_type": req_product_type,
             "provider": derived_route["provider"],
             "required_capability": derived_route["required_capability"],
             "tier": str(derived_route["tier_id"]),
             "estimated_provider_cost": derived_route["estimated_provider_cost"],
             "estimated_provider_cost_unit": derived_route["estimated_provider_cost_unit"],
+            "expected_duration_seconds": derived_route.get("seconds", 5),
+            "max_provider_submits": 1,
         }
         if acceptance_context and isinstance(acceptance_context, Mapping):
             derived_ctx.update(dict(acceptance_context))
@@ -745,6 +830,8 @@ def map_web_job_to_bot_runtime(
             derived_route["model"].strip().lower(),
             quality,
         }
+        if is_v2v:
+            valid_tiers.update({"500", "advanced", "fal-ai/wan/v2.2-a14b/video-to-video"})
         if auth_tier and auth_tier.lower() in valid_tiers:
             derived_ctx["tier"] = auth_tier
 
@@ -794,14 +881,16 @@ def map_web_job_to_bot_runtime(
 
     return VideoGenerationRequest(
         job_id=job_id,
-        product_type=BOT_CANONICAL_PRODUCT_KEY,
-        video_flow_type=BOT_EXECUTOR_PRODUCT_TYPE,
+        product_type=req_product_type,
+        video_flow_type=req_video_flow_type,
         prompt=prompt,
         ratio=aspect_ratio,
         duration_seconds=duration_seconds,
         quality=quality,
         metadata=metadata,
-        required_capability=DEFAULT_REQUIRED_CAPABILITY,
+        required_capability=req_capability,
+        source_video_path=source_video_path,
+        image_paths=image_paths,
     )
 
 
@@ -831,7 +920,7 @@ def prepare_and_gate_execution(
             blocker_reason="DUPLICATE_ACTIVE_JOB_EXECUTION",
         )
 
-    is_valid, validation_reason = validate_claimed_job(job)
+    is_valid, validation_reason = validate_claimed_job(job, owner_acceptance_auth=owner_acceptance_auth)
     if not is_valid:
         if client and raw_job_id:
             try:
@@ -957,7 +1046,7 @@ def execute_claimed_web_product_video_job(
         )
 
     # Envelope validation
-    is_valid, validation_reason = validate_claimed_job(job)
+    is_valid, validation_reason = validate_claimed_job(job, owner_acceptance_auth=owner_acceptance_auth)
     if not is_valid:
         if client:
             try:

@@ -38,6 +38,15 @@ from services.web_product_video_worker_consumer import (
 )
 
 
+@pytest.fixture(autouse=True)
+def mock_generic_worker_quiescent(monkeypatch):
+    """Ensure generic worker service is reported quiescent for targeted runner unit tests."""
+    monkeypatch.setattr(
+        "scripts.vps.run_web_product_video_live_acceptance_once.query_systemd_service_state",
+        lambda service_name="toanaas-worker-web-product-video.service": (True, "inactive"),
+    )
+
+
 # --- 1. Client Targeted Claim Serialization ---
 
 def test_dispatcher_client_claim_omits_target_job_id_when_none():
