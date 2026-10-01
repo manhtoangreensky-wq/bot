@@ -135641,6 +135641,8 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
         return broadcast_lite_admin_menu_text(), broadcast_lite_admin_menu_keyboard()
     if action == "admin" and is_admin:
         return menu_text_admin(), menu_nav_keyboard("admin", True)
+    if action == "finance" and is_admin:
+        return finance_menu_text(), finance_admin_keyboard()
     if action in ADMIN_MENU_PAGE_HANDLERS:
         return ADMIN_MENU_PAGE_HANDLERS[action]()
     if action == "doc_tools":
