@@ -17,7 +17,9 @@ WORKFLOW_PATH = ROOT / ".github" / "workflows" / "deploy-vps.yml"
 SCRIPT_PATH = ROOT / "scripts" / "vps" / "sync_product_video_worker_release.sh"
 ALLOWED_CHANGED_FILES = {
     ".github/workflows/deploy-vps.yml",
+    "deploy/systemd/toanaas-worker-owner-product-video.service",
     "scripts/vps/sync_product_video_worker_release.sh",
+    "tests/test_deploy_vps_workflow_hygiene.py",
     "tests/test_p0_product_video_worker_deploy_lock.py",
 }
 TARGET_REF = "refs/deployments/bot-release"
@@ -473,3 +475,22 @@ def test_task_changes_only_allowlisted_deploy_files_and_not_trend_pricing() -> N
     assert "TREND_TIER_400" not in combined
     assert "TREND_80_XU" not in combined
     assert "video_trend" not in combined
+
+
+def test_owner_product_video_worker_systemd_unit_matches_canonical_worker_dir_contract() -> None:
+    unit_path = ROOT / "deploy" / "systemd" / "toanaas-worker-owner-product-video.service"
+    assert unit_path.is_file(), f"missing unit file: {unit_path}"
+    content = unit_path.read_text(encoding="utf-8")
+
+    assert "WorkingDirectory=/opt/toanaas-worker" in content
+    assert "ExecStart=/opt/toanaas-worker/.venv/bin/python /opt/toanaas-worker/remote_worker.py --owner-product-video" in content
+    assert "/opt/toanaas/bot" not in content
+
+    script_content = _script()
+    assert '[[ "$unit" == *"WorkingDirectory=$WORKER_DIR"* ]]' in script_content
+    assert '[[ "$unit" == *"$WORKER_DIR/.venv/bin/python $WORKER_DIR/remote_worker.py --owner-product-video"* ]]' in script_content
+
+    installer_path = ROOT / "scripts" / "vps" / "install_remote_worker_service.sh"
+    assert installer_path.is_file(), f"missing installer script: {installer_path}"
+    installer_content = installer_path.read_text(encoding="utf-8")
+    assert "toanaas-worker-owner-product-video.service" in installer_content

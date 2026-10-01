@@ -3,9 +3,9 @@ Description=TOAN AAS Owner Product Video Worker
 After=network.target
 
 [Service]
-WorkingDirectory=/opt/toanaas/bot
+WorkingDirectory=/opt/toanaas-worker
 EnvironmentFile=/etc/toanaas-worker.env
-ExecStart=/opt/toanaas/bot/.venv/bin/python /opt/toanaas/bot/remote_worker.py --owner-product-video
+ExecStart=/opt/toanaas-worker/.venv/bin/python /opt/toanaas-worker/remote_worker.py --owner-product-video
 Restart=always
 RestartSec=5
 TimeoutStopSec=30
