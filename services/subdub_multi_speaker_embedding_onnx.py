@@ -481,6 +481,8 @@ def _compact_run_samples(
 def map_subsegment_clusters_to_regions(
     plan: object,
     cluster_result: object,
+    *,
+    minimum_speakers: int = MIN_SPEAKERS,
 ) -> dict[str, object]:
     if type(plan) is not dict or type(cluster_result) is not dict:
         raise _manual_required(ValueError("acoustic_region_mapping_invalid"))
@@ -499,7 +501,7 @@ def map_subsegment_clusters_to_regions(
         or len(labels) != len(windows)
         or len(confidences) != len(windows)
         or type(speaker_count) is not int
-        or not MIN_SPEAKERS <= speaker_count <= MAX_SPEAKERS
+        or not minimum_speakers <= speaker_count <= MAX_SPEAKERS
         or any(type(value) is not int or not 0 <= value < speaker_count for value in labels)
         or any(
             type(value) not in {int, float}
@@ -703,6 +705,7 @@ def _align_cluster_labels_to_reference(
     candidate_labels: object,
     *,
     speaker_count: int,
+    minimum_speakers: int = MIN_SPEAKERS,
 ) -> list[int]:
     """Align numeric cluster IDs without changing the candidate partition."""
 
@@ -712,7 +715,7 @@ def _align_cluster_labels_to_reference(
         or not reference_labels
         or len(reference_labels) != len(candidate_labels)
         or type(speaker_count) is not int
-        or not MIN_SPEAKERS <= speaker_count <= MAX_SPEAKERS
+        or not minimum_speakers <= speaker_count <= MAX_SPEAKERS
         or any(
             type(value) is not int or not 0 <= value < speaker_count
             for value in reference_labels + candidate_labels
@@ -745,6 +748,7 @@ def build_fixed_vocal_authority(
     source_positions: object,
     *,
     clusterer: Callable | None = None,
+    minimum_speakers: int = MIN_SPEAKERS,
 ) -> dict[str, object]:
     """Discover speaker identity from fixed vocal windows, never ASR words."""
 
@@ -767,6 +771,8 @@ def build_fixed_vocal_authority(
             or not np.isfinite(energies).all()
             or type(source_positions) not in {list, tuple}
             or len(source_positions) != base.shape[0]
+            or type(minimum_speakers) is not int
+            or not 1 <= minimum_speakers <= MIN_SPEAKERS
         ):
             raise ValueError("fixed_vocal_embeddings_invalid")
         positions = np.asarray(source_positions, dtype=np.float64)
@@ -796,6 +802,7 @@ def build_fixed_vocal_authority(
             cluster_function = lambda matrix, selected_positions: _stable_cluster_view(
                 matrix,
                 np.asarray(selected_positions, dtype=np.float64),
+                minimum_speakers=minimum_speakers,
             )
         if not callable(cluster_function):
             raise ValueError("fixed_vocal_clusterer_invalid")
@@ -804,7 +811,7 @@ def build_fixed_vocal_authority(
         for percentile in FIXED_VOCAL_ENERGY_PERCENTILES:
             threshold = float(np.percentile(energies, percentile))
             indexes = np.flatnonzero(energies >= threshold).astype(np.int64)
-            if len(indexes) < MIN_SPEAKERS * MIN_CLUSTER_UNITS:
+            if len(indexes) < minimum_speakers * MIN_CLUSTER_UNITS:
                 raise ValueError("fixed_vocal_window_support_invalid")
             if float(np.min(view_cosines[indexes])) < MIN_FIXED_VOCAL_VIEW_COSINE:
                 raise ValueError("fixed_vocal_view_unstable")
@@ -817,7 +824,7 @@ def build_fixed_vocal_authority(
             labels = np.asarray(labels, dtype=np.int64)
             if (
                 type(speaker_count) is not int
-                or not MIN_SPEAKERS <= speaker_count <= MAX_SPEAKERS
+                or not minimum_speakers <= speaker_count <= MAX_SPEAKERS
                 or labels.shape != (len(indexes),)
                 or np.any(labels < 0)
                 or np.any(labels >= speaker_count)
@@ -854,6 +861,7 @@ def build_fixed_vocal_authority(
             core_labels,
             broad_core_labels,
             speaker_count=speaker_counts[0],
+            minimum_speakers=minimum_speakers,
         )
         if aligned_broad != core_labels:
             raise ValueError("fixed_vocal_core_partition_unstable")
@@ -1048,6 +1056,8 @@ def build_gender_constrained_speech_authority(
     female_probabilities: object,
     *,
     speaker_count: int,
+    enforce_gender_consistency: bool = True,
+    minimum_speakers: int = MIN_SPEAKERS,
 ) -> dict[str, object]:
     """Choose a stable acoustic partition without mixing strong registers."""
 
@@ -1065,7 +1075,9 @@ def build_gender_constrained_speech_authority(
             or speech.shape != (len(base),)
             or probabilities.shape != (len(base),)
             or type(speaker_count) is not int
-            or not MIN_SPEAKERS <= speaker_count <= MAX_SPEAKERS
+            or type(minimum_speakers) is not int
+            or not 1 <= minimum_speakers <= MIN_SPEAKERS
+            or not minimum_speakers <= speaker_count <= MAX_SPEAKERS
             or not np.isfinite(base).all()
             or not np.isfinite(shifted).all()
             or not np.isfinite(positions).all()
@@ -1163,6 +1175,7 @@ def build_gender_constrained_speech_authority(
                     identity_base.tolist(),
                     identity_views[1].tolist(),
                     speaker_count=speaker_count,
+                    minimum_speakers=minimum_speakers,
                 ),
                 dtype=np.int64,
             )
@@ -1171,6 +1184,7 @@ def build_gender_constrained_speech_authority(
                     identity_base.tolist(),
                     identity_views[2].tolist(),
                     speaker_count=speaker_count,
+                    minimum_speakers=minimum_speakers,
                 ),
                 dtype=np.int64,
             )
@@ -1190,6 +1204,7 @@ def build_gender_constrained_speech_authority(
                 base_labels.tolist(),
                 view_candidates[1][0][2].tolist(),
                 speaker_count=speaker_count,
+                minimum_speakers=minimum_speakers,
             ),
             dtype=np.int64,
         )
@@ -1198,6 +1213,7 @@ def build_gender_constrained_speech_authority(
                 base_labels.tolist(),
                 view_candidates[2][0][2].tolist(),
                 speaker_count=speaker_count,
+                minimum_speakers=minimum_speakers,
             ),
             dtype=np.int64,
         )
@@ -1284,7 +1300,10 @@ def build_gender_constrained_speech_authority(
                         else probabilities_for_identity >= threshold
                     )
                 )
-            if len(identity_registers) == speaker_count:
+            if len(identity_registers) == speaker_count and (
+                not enforce_gender_consistency
+                or identity_gender_outlier_window_count == 0
+            ):
                 canonical_labels = identity_labels
                 quorum_labels = identity_labels
                 quorum_embeddings = aggregate
@@ -1388,6 +1407,7 @@ def map_word_units_to_fixed_vocal_authority(
     *,
     speaker_count: int,
     overlap_dominance_threshold: float = HYBRID_OVERLAP_DOMINANCE,
+    minimum_speakers: int = MIN_SPEAKERS,
 ) -> dict[str, object]:
     """Map words after raw clustering and retain only speech-backed speakers."""
 
@@ -1410,7 +1430,7 @@ def map_word_units_to_fixed_vocal_authority(
             or not np.isfinite(embeddings).all()
             or not np.isfinite(centroid_matrix).all()
             or type(speaker_count) is not int
-            or not MIN_SPEAKERS <= speaker_count <= MAX_SPEAKERS
+            or not minimum_speakers <= speaker_count <= MAX_SPEAKERS
             or type(overlap_dominance_threshold) not in {int, float}
             or not 0.0 <= float(overlap_dominance_threshold) <= 1.0
         ):
@@ -1461,7 +1481,7 @@ def map_word_units_to_fixed_vocal_authority(
             total_overlap = sum(overlap_scores)
             ordered_overlap = sorted(overlap_scores, reverse=True)
             dominance = (
-                (ordered_overlap[0] - ordered_overlap[1]) / total_overlap
+                (ordered_overlap[0] - (ordered_overlap[1] if len(ordered_overlap) > 1 else 0.0)) / total_overlap
                 if total_overlap > 0.0
                 else 0.0
             )
@@ -1496,7 +1516,7 @@ def map_word_units_to_fixed_vocal_authority(
             for label, count in enumerate(raw_overlap_speaker_unit_counts)
             if count > 0
         ]
-        if len(supported_labels) < MIN_SPEAKERS:
+        if len(supported_labels) < minimum_speakers:
             raise ValueError("fixed_vocal_word_speaker_coverage_invalid")
         dropped_labels = [
             label for label in range(speaker_count) if label not in supported_labels
@@ -1932,6 +1952,7 @@ def _fixed_vocal_speech_window_views(
     deadline_monotonic: float,
     stop_requested: Callable[[], bool],
     session_factory: Callable | None = None,
+    gender_pcm16: np.ndarray | None = None,
 ) -> dict[str, object]:
     """Embed speech-compacted windows without re-reading or re-demixing PCM."""
 
@@ -1942,6 +1963,12 @@ def _fixed_vocal_speech_window_views(
         or not np.any(pcm16)
     ):
         raise _manual_required(ValueError("fixed_vocal_pcm_invalid"))
+    if gender_pcm16 is not None and (
+        not isinstance(gender_pcm16, np.ndarray)
+        or gender_pcm16.dtype != np.dtype(np.int16)
+        or gender_pcm16.shape != pcm16.shape
+    ):
+        raise _manual_required(ValueError("fixed_vocal_gender_pcm_invalid"))
     regions = [
         {
             "index": index,
@@ -1974,8 +2001,23 @@ def _fixed_vocal_speech_window_views(
         )
         for run in plan["runs"]
     }
+    gender_runs = None
+    if gender_pcm16 is not None:
+        gender_regions = {
+            index: gender_pcm16[start:end]
+            for index, (start, end) in region_bounds.items()
+        }
+        gender_runs = {
+            int(run["run_index"]): _compact_run_samples(
+                run,
+                region_samples=gender_regions,
+                region_bounds=region_bounds,
+            )
+            for run in plan["runs"]
+        }
     target_samples = int(round(SUBSEGMENT_WINDOW_SECONDS * PCM_SAMPLE_RATE))
     windows: list[np.ndarray] = []
+    gender_windows: list[np.ndarray] = []
     for window in plan["windows"]:
         signal = run_samples[int(window["run_index"])]
         start = int(
@@ -1991,6 +2033,11 @@ def _fixed_vocal_speech_window_views(
         if not np.any(samples):
             raise _manual_required(ValueError("fixed_vocal_speech_energy_invalid"))
         windows.append(samples)
+        if gender_runs is not None:
+            gender_windows.append(np.resize(
+                gender_runs[int(window["run_index"])][start:end],
+                target_samples,
+            ).astype(np.int16, copy=False))
     if not _EMBEDDING_LOCK.acquire(blocking=False):
         raise _manual_required(RuntimeError("acoustic_embedding_busy"))
     try:
@@ -2036,7 +2083,7 @@ def _fixed_vocal_speech_window_views(
         "shifted_embeddings": views[1],
         "source_positions": positions,
         "speech_seconds": speech_seconds,
-        "window_samples": windows,
+        "window_samples": gender_windows if gender_runs is not None else windows,
     }
 
 
@@ -2582,6 +2629,8 @@ def _deterministic_kmeans(
 def _stable_cluster_view(
     embeddings: np.ndarray,
     source_positions: np.ndarray,
+    *,
+    minimum_speakers: int = MIN_SPEAKERS,
 ) -> tuple[int, np.ndarray, np.ndarray]:
     pruned = _pruned_similarity(embeddings)
     laplacian = np.diag(np.sum(np.abs(pruned), axis=1)) - pruned
@@ -2592,24 +2641,30 @@ def _stable_cluster_view(
         or eigenvalues.shape[0] != embeddings.shape[0]
     ):
         raise _manual_required(ValueError("acoustic_eigendecomposition_invalid"))
-    speaker_count = _select_speaker_count_from_eigenvalues(eigenvalues)
+    speaker_count = _select_speaker_count_from_eigenvalues(
+        eigenvalues, minimum_speakers=minimum_speakers,
+    )
     spectral = eigenvectors[:, :speaker_count]
     labels = _deterministic_kmeans(spectral, speaker_count, source_positions)
     return speaker_count, labels, eigenvalues
 
 
-def _select_speaker_count_from_eigenvalues(eigenvalues: object) -> int:
+def _select_speaker_count_from_eigenvalues(
+    eigenvalues: object, *, minimum_speakers: int = MIN_SPEAKERS,
+) -> int:
     values = np.asarray(eigenvalues, dtype=np.float64)
     if (
         values.ndim != 1
-        or values.size <= MIN_SPEAKERS
+        or type(minimum_speakers) is not int
+        or not 1 <= minimum_speakers <= MIN_SPEAKERS
+        or values.size <= minimum_speakers
         or not np.isfinite(values).all()
     ):
         raise _manual_required(ValueError("acoustic_eigengap_invalid"))
     maximum_k = min(MAX_SPEAKERS, values.size - 1)
-    if maximum_k < MIN_SPEAKERS:
+    if maximum_k < minimum_speakers:
         raise _manual_required(ValueError("acoustic_cluster_count_out_of_range"))
-    candidate_ks = np.arange(MIN_SPEAKERS, maximum_k + 1, dtype=np.int64)
+    candidate_ks = np.arange(minimum_speakers, maximum_k + 1, dtype=np.int64)
     candidate_gaps = np.asarray(
         [values[k] - values[k - 1] for k in candidate_ks],
         dtype=np.float64,
@@ -2953,6 +3008,94 @@ def diarize_word_timeline(
     }
 
 
+def _smart_proven_speech_fallback(
+    vocal_pcm: np.ndarray,
+    gender_pcm16: np.ndarray,
+    units: list[dict],
+    words: list[dict],
+    raw_authority: dict,
+    *,
+    deadline_monotonic: float,
+    stop_requested: Callable[[], bool],
+    session_factory: Callable | None = None,
+    original_probabilities: list[float] | None = None,
+) -> dict[str, object]:
+    """Keep the proven speech partition and vote source registers independently."""
+
+    duration_seconds = len(vocal_pcm) / float(PCM_SAMPLE_RATE)
+    legacy_views = _fixed_vocal_speech_window_views(
+        vocal_pcm, words, duration_seconds=duration_seconds,
+        deadline_monotonic=deadline_monotonic, stop_requested=stop_requested,
+        session_factory=session_factory,
+    )
+    legacy_probabilities = multi_gender.classify_vocal_window_gender_probabilities(
+        legacy_views["window_samples"], deadline_monotonic=deadline_monotonic,
+        stop_requested=stop_requested,
+    )
+    authority = build_gender_constrained_speech_authority(
+        legacy_views["base_embeddings"], legacy_views["shifted_embeddings"],
+        legacy_views["source_positions"], legacy_views["speech_seconds"],
+        legacy_probabilities, speaker_count=int(raw_authority["speaker_count"]),
+        enforce_gender_consistency=False, minimum_speakers=1,
+    )
+    count = int(authority["speaker_count"])
+    mapped = map_subsegment_clusters_to_regions(
+        legacy_views["plan"], authority, minimum_speakers=1,
+    )
+    if original_probabilities is None:
+        source_views = _fixed_vocal_speech_window_views(
+            vocal_pcm, words, duration_seconds=duration_seconds,
+            deadline_monotonic=deadline_monotonic, stop_requested=stop_requested,
+            session_factory=session_factory, gender_pcm16=gender_pcm16,
+        )
+        original_probabilities = multi_gender.classify_vocal_window_gender_probabilities(
+            source_views["window_samples"], deadline_monotonic=deadline_monotonic,
+            stop_requested=stop_requested,
+        )
+    # The proven mapper keeps word boundaries even within a shared ASR unit.
+    units = [{
+        "unit_index": index, "word_indexes": [index],
+        "start": float(word["start"]), "end": float(word["end"]),
+        "original_speech_seconds": float(word["end"]) - float(word["start"]),
+    } for index, word in enumerate(words)]
+    classes = {}
+    threshold = multi_gender.MULTI_GENDER_STRONG_CONFIDENCE
+    for label in range(count):
+        votes = [float(p) for assigned, p in zip(authority["labels"], original_probabilities, strict=True) if assigned == label]
+        female = [p for p in votes if p >= threshold]
+        male = [1.0 - p for p in votes if p <= 1.0 - threshold]
+        strongest = female if len(female) > len(male) else male
+        total = len(female) + len(male)
+        dominance = len(strongest) / total if total else 0.0
+        known = total >= multi_gender.MIN_CLASSIFIED_CUES_PER_SPEAKER and dominance >= multi_gender.MIN_VOTE_DOMINANCE
+        register = ("high" if len(female) > len(male) else "low") if known else "unknown"
+        identity = speaker_cast.normalized_speaker_key(0, label)
+        classes[identity] = {
+            "speaker_id": identity,
+            "voice_register": register,
+            "voice_gender": "female" if register == "high" else "male" if register == "low" else "ambiguous",
+            "confidence": round(float(np.median(strongest)) * dominance, 6) if known else 0.0,
+            "reason": "smart_proven_speech_identity_original_gender_vote",
+        }
+    segments = build_clustered_segments(words, units, mapped)
+    for segment in segments:
+        classification = classes[segment["speaker_id"]]
+        segment["voice_register"] = classification["voice_register"]
+        segment["voice_register_confidence"] = classification["confidence"]
+    if len({segment["speaker_id"] for segment in segments}) != count:
+        raise _manual_required(ValueError("fixed_vocal_word_speaker_coverage_invalid"))
+    return {
+        "ok": True, "status": "PASS", "provider": FIXED_VOCAL_PROVIDER,
+        "segments": segments, "detected_speaker_count": count,
+        "raw_speaker_count": int(raw_authority["speaker_count"]),
+        "model_sha256": MODEL_SHA256,
+        "algorithm_version": FIXED_VOCAL_ALGORITHM_VERSION,
+        "word_count": len(words), "word_coverage_count": len(words),
+        "smart_acoustic_generic": True,
+        "smart_acoustic_classifications": classes,
+    }
+
+
 def diarize_fixed_vocal_word_timeline(
     stereo_pcm_path: str,
     words: object,
@@ -2962,6 +3105,8 @@ def diarize_fixed_vocal_word_timeline(
     stop_requested: Callable[[], bool],
     session_factory: Callable | None = None,
     vocal_session_factory: Callable | None = None,
+    gender_source_original: bool = False,
+    minimum_speakers: int = MIN_SPEAKERS,
 ) -> dict[str, object]:
     """Serialize the bounded local acoustic engine across concurrent public jobs."""
 
@@ -2980,6 +3125,8 @@ def diarize_fixed_vocal_word_timeline(
             stop_requested=stop_requested,
             session_factory=session_factory,
             vocal_session_factory=vocal_session_factory,
+            gender_source_original=gender_source_original,
+            minimum_speakers=minimum_speakers,
         )
     finally:
         _FIXED_VOCAL_PIPELINE_LOCK.release()
@@ -2994,6 +3141,8 @@ def _diarize_fixed_vocal_word_timeline_owned(
     stop_requested: Callable[[], bool],
     session_factory: Callable | None = None,
     vocal_session_factory: Callable | None = None,
+    gender_source_original: bool = False,
+    minimum_speakers: int = MIN_SPEAKERS,
 ) -> dict[str, object]:
     """Discover speakers on short vocal windows, then attribute every word."""
 
@@ -3018,12 +3167,47 @@ def _diarize_fixed_vocal_word_timeline_owned(
         stop_requested=stop_requested,
         session_factory=session_factory,
     )
-    raw_authority = build_fixed_vocal_authority(
-        raw_views["base_embeddings"],
-        raw_views["shifted_embeddings"],
-        raw_views["window_energy"],
-        raw_views["source_positions"],
-    )
+    # Retain the proven 3-8 partition; reuse its views for Smart's 1-2 retry.
+    raw_kwargs = {} if minimum_speakers in {1, MIN_SPEAKERS} else {
+        "minimum_speakers": minimum_speakers,
+    }
+    try:
+        raw_authority = build_fixed_vocal_authority(
+            raw_views["base_embeddings"],
+            raw_views["shifted_embeddings"],
+            raw_views["window_energy"],
+            raw_views["source_positions"],
+            **raw_kwargs,
+        )
+    except (ValueError, speaker_cast.AutoCastManualRequired) as error:
+        cause = error.__cause__ or error
+        if minimum_speakers != 1 or str(cause) not in {
+            "fixed_vocal_speaker_count_unstable", "fixed_vocal_window_support_invalid",
+            "acoustic_cluster_unsupported",
+        }:
+            raise
+        raw_authority = build_fixed_vocal_authority(
+            raw_views["base_embeddings"], raw_views["shifted_embeddings"],
+            raw_views["window_energy"], raw_views["source_positions"],
+            minimum_speakers=1,
+        )
+    gender_pcm16 = None
+    if gender_source_original:
+        # Separation stays authoritative for embeddings; source timbre anchors gender.
+        source_frames = np.fromfile(stereo_pcm_path, dtype="<i2").reshape(
+            -1, two_speaker_gender.PCM_CHANNELS,
+        )
+        source_mono = source_frames.astype(np.float32).mean(axis=1)
+        target_positions = (
+            np.arange(len(vocal_pcm), dtype=np.float64)
+            * two_speaker_gender.PCM_SAMPLE_RATE
+            / PCM_SAMPLE_RATE
+        )
+        gender_pcm16 = np.clip(np.interp(
+            target_positions,
+            np.arange(len(source_mono), dtype=np.float64),
+            source_mono,
+        ), -32768.0, 32767.0).astype(np.int16)
     speech_views = _fixed_vocal_speech_window_views(
         vocal_pcm,
         validated_words,
@@ -3031,6 +3215,7 @@ def _diarize_fixed_vocal_word_timeline_owned(
         deadline_monotonic=deadline_monotonic,
         stop_requested=stop_requested,
         session_factory=session_factory,
+        gender_pcm16=gender_pcm16,
     )
     female_probabilities = (
         multi_gender.classify_vocal_window_gender_probabilities(
@@ -3039,14 +3224,31 @@ def _diarize_fixed_vocal_word_timeline_owned(
             stop_requested=stop_requested,
         )
     )
-    authority = build_gender_constrained_speech_authority(
-        speech_views["base_embeddings"],
-        speech_views["shifted_embeddings"],
-        speech_views["source_positions"],
-        speech_views["speech_seconds"],
-        female_probabilities,
-        speaker_count=int(raw_authority["speaker_count"]),
-    )
+    try:
+        authority = build_gender_constrained_speech_authority(
+            speech_views["base_embeddings"],
+            speech_views["shifted_embeddings"],
+            speech_views["source_positions"],
+            speech_views["speech_seconds"],
+            female_probabilities,
+            speaker_count=int(raw_authority["speaker_count"]),
+            enforce_gender_consistency=gender_source_original,
+            minimum_speakers=minimum_speakers,
+        )
+    except (ValueError, speaker_cast.AutoCastManualRequired) as error:
+        cause = error.__cause__ or error
+        if not (minimum_speakers == 1 and gender_pcm16 is not None and str(cause) in {
+            "fixed_vocal_gender_allocation_unstable", "fixed_vocal_gender_allocation_invalid",
+            "fixed_vocal_gender_partition_unstable", "fixed_vocal_gender_evidence_invalid",
+            "fixed_vocal_gender_ambiguity_invalid",
+        }):
+            raise
+        return _smart_proven_speech_fallback(
+            vocal_pcm, gender_pcm16, units, validated_words, raw_authority,
+            deadline_monotonic=deadline_monotonic, stop_requested=stop_requested,
+            session_factory=session_factory,
+            original_probabilities=female_probabilities,
+        )
     speaker_count = int(authority["speaker_count"])
     word_mapping = map_subsegment_clusters_to_regions(
         speech_views["plan"],
@@ -3055,6 +3257,7 @@ def _diarize_fixed_vocal_word_timeline_owned(
             "labels": list(authority["labels"]),
             "unit_confidences": list(authority["unit_confidences"]),
         },
+        minimum_speakers=minimum_speakers,
     )
     word_labels = list(word_mapping["labels"])
     word_confidences = list(word_mapping["unit_confidences"])
@@ -3113,6 +3316,7 @@ def _diarize_fixed_vocal_word_timeline_owned(
         raw_authority["core_windows"],
         raw_authority["centroids"],
         speaker_count=int(raw_authority["speaker_count"]),
+        minimum_speakers=minimum_speakers,
     )
     selected_indexes = np.asarray(
         raw_authority["core_window_indices"],
@@ -3187,4 +3391,15 @@ def _diarize_fixed_vocal_word_timeline_owned(
         ),
         "vocal_view_cosine_min": round(float(np.min(view_cosines)), 6),
         "vocal_view_cosine_mean": round(float(np.mean(view_cosines)), 6),
+        **({
+            "smart_acoustic_generic": speaker_count < MIN_SPEAKERS,
+            "smart_acoustic_classifications": {
+                speaker_cast.normalized_speaker_key(0, label): {
+                    "speaker_id": speaker_cast.normalized_speaker_key(0, label),
+                    "voice_register": authority["speaker_registers"][label],
+                    "confidence": authority["speaker_register_confidences"][label],
+                }
+                for label in range(speaker_count)
+            },
+        } if minimum_speakers == 1 else {}),
     }

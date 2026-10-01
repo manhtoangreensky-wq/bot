@@ -88,7 +88,8 @@ _SIDECAR_METADATA_FIELDS = (
 class AutoCastUnavailable(RuntimeError):
     """Raised when automatic casting cannot prove cue/sidecar identity."""
 
-    def __init__(self, message: str = AUTO_CAST_UNAVAILABLE) -> None:
+    def __init__(self, message: str = AUTO_CAST_UNAVAILABLE, *, detail: str = "") -> None:
+        self.detail = str(detail or (message if str(message or "") != AUTO_CAST_UNAVAILABLE else ""))
         super().__init__(str(message or AUTO_CAST_UNAVAILABLE))
 
 

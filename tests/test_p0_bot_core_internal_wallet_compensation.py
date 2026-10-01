@@ -111,22 +111,28 @@ def make_auth_headers(
     hmac_secret: str = "secret-hmac-456",
     path: str = "/internal/v1/admin/wallet/compensate",
     timestamp_offset: int = 0,
-    actor_id: str = "admin-tester",
+    actor_id: str | None = "admin-tester",
 ) -> dict[str, str]:
     now_ts = str(int(time.time()) + timestamp_offset)
     req_id = f"req-{int(time.time() * 1000)}"
     digest = hashlib.sha256(body_bytes).hexdigest()
     normalized_path = "/" + path.lstrip("/")
-    msg = f"{now_ts}.{req_id}.POST.{normalized_path}.{digest}".encode("utf-8")
+    clean_actor = str(actor_id or "").strip()
+    if clean_actor:
+        msg = f"{now_ts}.{req_id}.POST.{normalized_path}.{digest}.{clean_actor}".encode("utf-8")
+    else:
+        msg = f"{now_ts}.{req_id}.POST.{normalized_path}.{digest}".encode("utf-8")
     sig = hmac.new(hmac_secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()
-    return {
+    headers = {
         "Authorization": f"Bearer {token}",
         "X-TOAN-AAS-Signature": sig,
         "X-TOAN-AAS-Timestamp": now_ts,
         "X-TOAN-AAS-Request-ID": req_id,
-        "X-TOAN-AAS-Actor-ID": actor_id,
         "Content-Type": "application/json",
     }
+    if actor_id is not None:
+        headers["X-TOAN-AAS-Actor-ID"] = str(actor_id)
+    return headers
 
 
 # ---------------------------------------------------------------------------
@@ -1020,3 +1026,117 @@ def test_initial_compensable_event_allowlist_is_bounded():
     assert "manual_deposit" not in ALLOWED_COMPENSABLE_EVENT_TYPES
     assert "admin_add" not in ALLOWED_COMPENSABLE_EVENT_TYPES
     assert "trial_grant" not in ALLOWED_COMPENSABLE_EVENT_TYPES
+
+
+def test_fastapi_admin_wallet_compensate_four_actor_boundaries(test_db, monkeypatch):
+    """Explicitly prove the 4 actor boundaries for /internal/v1/admin/wallet/compensate:
+    Boundary 1: header actor == payload actor + actor-bound signature => PASS (200)
+    Boundary 2: header actor == payload actor + legacy non-actor signature => 401 SIGNATURE_INVALID
+    Boundary 3: header actor != payload actor => FAIL CLOSED (400 ACTOR_ID_MISMATCH)
+    Boundary 4: tampered actor-bound signature => FAIL CLOSED (401 SIGNATURE_INVALID)
+    """
+    monkeypatch.setattr(bot, "DB_FILE", test_db)
+    token = "test-comp-token"
+    secret = "test-comp-secret"
+    monkeypatch.setenv("CORE_BRIDGE_TOKEN", token)
+    monkeypatch.setenv("CORE_BRIDGE_HMAC_SECRET", secret)
+
+    client = TestClient(bot.fastapi_app)
+
+    # 1. Boundary 1: header actor == payload actor + actor-bound signature => PASS (200)
+    payload1 = {
+        "source_ledger_event_id": 19,
+        "idempotency_key": "comp-key-b1-pass",
+        "reason": "Boundary 1 comp test",
+        "actor_id": "signed-owner-actor",
+    }
+    body1 = json.dumps(payload1).encode("utf-8")
+    now_ts = str(int(time.time()))
+    req_id1 = "req-comp-b1"
+    digest1 = hashlib.sha256(body1).hexdigest()
+    msg1 = f"{now_ts}.{req_id1}.POST./internal/v1/admin/wallet/compensate.{digest1}.signed-owner-actor".encode("utf-8")
+    sig1 = hmac.new(secret.encode("utf-8"), msg1, hashlib.sha256).hexdigest()
+    headers1 = {
+        "Authorization": f"Bearer {token}",
+        "X-TOAN-AAS-Signature": sig1,
+        "X-TOAN-AAS-Timestamp": now_ts,
+        "X-TOAN-AAS-Request-ID": req_id1,
+        "X-TOAN-AAS-Actor-ID": "signed-owner-actor",
+        "Content-Type": "application/json",
+    }
+    resp1 = client.post("/internal/v1/admin/wallet/compensate", content=body1, headers=headers1)
+    assert resp1.status_code == 200
+    data1 = resp1.json()
+    assert data1["ok"] is True
+    assert data1["balance_after"] == 400
+
+    # 2. Boundary 2: header actor == payload actor + legacy non-actor signature => 401 SIGNATURE_INVALID
+    payload2 = {
+        "source_ledger_event_id": 19,
+        "idempotency_key": "comp-key-b2-legacy",
+        "reason": "Boundary 2 comp test",
+        "actor_id": "signed-owner-actor",
+    }
+    body2 = json.dumps(payload2).encode("utf-8")
+    req_id2 = "req-comp-b2"
+    digest2 = hashlib.sha256(body2).hexdigest()
+    msg2 = f"{now_ts}.{req_id2}.POST./internal/v1/admin/wallet/compensate.{digest2}".encode("utf-8")
+    sig2 = hmac.new(secret.encode("utf-8"), msg2, hashlib.sha256).hexdigest()
+    headers2 = {
+        "Authorization": f"Bearer {token}",
+        "X-TOAN-AAS-Signature": sig2,
+        "X-TOAN-AAS-Timestamp": now_ts,
+        "X-TOAN-AAS-Request-ID": req_id2,
+        "X-TOAN-AAS-Actor-ID": "signed-owner-actor",
+        "Content-Type": "application/json",
+    }
+    resp2 = client.post("/internal/v1/admin/wallet/compensate", content=body2, headers=headers2)
+    assert resp2.status_code == 401
+    assert resp2.json()["detail"]["error_code"] == "SIGNATURE_INVALID"
+
+    # 3. Boundary 3: header actor != payload actor => FAIL CLOSED (400 ACTOR_ID_MISMATCH)
+    payload3 = {
+        "source_ledger_event_id": 19,
+        "idempotency_key": "comp-key-b3-mismatch",
+        "reason": "Boundary 3 comp test",
+        "actor_id": "signed-owner-actor",
+    }
+    body3 = json.dumps(payload3).encode("utf-8")
+    req_id3 = "req-comp-b3"
+    digest3 = hashlib.sha256(body3).hexdigest()
+    msg3 = f"{now_ts}.{req_id3}.POST./internal/v1/admin/wallet/compensate.{digest3}.different-actor".encode("utf-8")
+    sig3 = hmac.new(secret.encode("utf-8"), msg3, hashlib.sha256).hexdigest()
+    headers3 = {
+        "Authorization": f"Bearer {token}",
+        "X-TOAN-AAS-Signature": sig3,
+        "X-TOAN-AAS-Timestamp": now_ts,
+        "X-TOAN-AAS-Request-ID": req_id3,
+        "X-TOAN-AAS-Actor-ID": "different-actor",
+        "Content-Type": "application/json",
+    }
+    resp3 = client.post("/internal/v1/admin/wallet/compensate", content=body3, headers=headers3)
+    assert resp3.status_code == 400
+    assert resp3.json()["error_code"] == "ACTOR_ID_MISMATCH"
+
+    # 4. Boundary 4: tampered actor-bound signature => FAIL CLOSED (401 SIGNATURE_INVALID)
+    payload4 = {
+        "source_ledger_event_id": 19,
+        "idempotency_key": "comp-key-b4-tamper",
+        "reason": "Boundary 4 comp test",
+        "actor_id": "signed-owner-actor",
+    }
+    body4 = json.dumps(payload4).encode("utf-8")
+    req_id4 = "req-comp-b4"
+    tampered_sig = "bad" + sig1[3:]
+    headers4 = {
+        "Authorization": f"Bearer {token}",
+        "X-TOAN-AAS-Signature": tampered_sig,
+        "X-TOAN-AAS-Timestamp": now_ts,
+        "X-TOAN-AAS-Request-ID": req_id4,
+        "X-TOAN-AAS-Actor-ID": "signed-owner-actor",
+        "Content-Type": "application/json",
+    }
+    resp4 = client.post("/internal/v1/admin/wallet/compensate", content=body4, headers=headers4)
+    assert resp4.status_code == 401
+    assert resp4.json()["detail"]["error_code"] == "SIGNATURE_INVALID"
+
