@@ -140292,9 +140292,9 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
 
 async def handle_admin_help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("⛔ Khu vực này chỉ dành cho Admin.", show_alert=True)
+    await query.answer()
     parts = str(query.data or "").split("|")
     kind = parts[1].strip() if len(parts) > 1 else "payment"
     return_action = parts[2].strip() if len(parts) > 2 else ""
