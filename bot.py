@@ -17418,9 +17418,9 @@ def payos_risk_report_keyboard() -> InlineKeyboardMarkup:
 
 async def handle_payos_risk_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
+    await query.answer()
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "menu"
     value = parts[2] if len(parts) > 2 else ""
@@ -43751,9 +43751,9 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
 async def handle_payos_alert_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global PAYOS_ALERT_MUTED_UNTIL
     query = update.callback_query
-    await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("Lệnh này chỉ dành cho admin.", show_alert=True)
+    await query.answer()
     action = (query.data or "").split("|", 1)[-1]
     if action == "manual":
         set_manual_bill_state(query.from_user.id, order_code="MANUAL")
@@ -59920,7 +59920,7 @@ def set_support_ticket_pending(user_id, step: str, **fields) -> dict:
         if key in {
             "category", "ticket_id", "source", "reply_text", "variant", "lead_type",
             "selected_option", "service_type", "back_to", "needs_admin", "support_flow",
-            "awaiting_support_message", "support_origin", "service_group",
+            "awaiting_support_message", "support_origin", "service_group", "preview_token",
         }:
             state[key] = str(value or "")[:4000]
     USER_PENDING[support_ticket_pending_key(user_id)] = state
@@ -135858,6 +135858,8 @@ async def cmd_linkweb(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_command_received("start", update)
     uid = update.effective_user.id
+    clear_pending_admin_tool_test(uid)
+    clear_support_ticket_pending(uid)
     clear_internal_archive_pending(uid)
     user_existed_before = user_exists(uid)
     clear_memory_guided_pending(uid)
@@ -135872,6 +135874,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status="ok",
     )
     clear_storage_addon_pending(uid)
+    clear_translation_menu_pending(uid)
+    clear_translation_session(uid)
     if context.args and (context.args[0].startswith("login_") or context.args[0].startswith("link_") or context.args[0].startswith("web_")):
         deep_arg = context.args[0]
         code = deep_arg.split("_", 1)[1].strip()
@@ -139872,14 +139876,15 @@ async def handle_support_pending_input(update: Update, context: ContextTypes.DEF
             clear_support_ticket_pending(uid)
             await update.message.reply_text("Không tìm thấy ticket.")
             return True
-        set_support_ticket_pending(uid, "admin_reply_preview", ticket_id=ticket_id, reply_text=text, source=state.get("source") or "new")
+        preview_token = uuid.uuid4().hex[:16]
+        set_support_ticket_pending(uid, "admin_reply_preview", ticket_id=ticket_id, reply_text=text, source=state.get("source") or "new", preview_token=preview_token)
         await update.message.reply_text(
             "📨 <b>Xác nhận gửi phản hồi</b>\n\n"
             f"Gửi tới ticket <code>{html.escape(ticket['ticket_code'])}</code>\n\n"
             f"Nội dung:\n{html.escape(text)}\n\nBạn có muốn gửi cho khách không?",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📨 Gửi cho khách", callback_data=f"ticket|send|{ticket_id}"), InlineKeyboardButton("✍️ Sửa lại", callback_data=f"ticket|reply|{ticket_id}")],
+                [InlineKeyboardButton("📨 Gửi cho khách", callback_data=f"ticket|send|{ticket_id}|{preview_token}"), InlineKeyboardButton("✍️ Sửa lại", callback_data=f"ticket|reply|{ticket_id}")],
                 [InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
             ]),
         )
@@ -140013,6 +140018,7 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
             reply_markup=support_consult_keyboard(lang),
         )
     if action == "consult_type" and len(parts) >= 3:
+        clear_support_ticket_pending(uid)
         service_type = parts[2] if parts[2] in SUPPORT_CONSULT_DETAILS else "video"
         return await safe_edit_or_send(
             query,
@@ -140056,10 +140062,11 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
 
 async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     data = str(query.data or "")
     parts = data.split("|")
     action = parts[1] if len(parts) > 1 else "start"
+    if action not in {"send", "file"}:
+        await query.answer()
     uid = query.from_user.id
     lang = normalize_user_language(get_user_language(uid)) or "vi"
     copy = public_hub_copy(lang)
@@ -140080,6 +140087,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         text, keyboard = public_support_ticket_list_keyboard(uid, lang)
         return await safe_edit_or_send(query, text, reply_markup=keyboard)
     if action == "pv" and len(parts) >= 3:
+        clear_support_ticket_pending(uid)
         ticket = get_support_ticket(int(parts[2]), uid)
         if not ticket:
             return await query.answer(copy["support_ticket_not_found"], show_alert=True)
@@ -140133,11 +140141,13 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         clear_support_ticket_pending(uid)
         return await safe_edit_or_send(query, support_admin_menu_text(), reply_markup=support_admin_menu_keyboard())
     if action == "al" and len(parts) >= 4:
+        clear_support_ticket_pending(uid)
         kind = parts[2]
         offset = max(0, int(parts[3] or 0))
         text, keyboard = support_admin_list_payload(kind, offset)
         return await safe_edit_or_send(query, text, reply_markup=keyboard)
     if action == "av" and len(parts) >= 3:
+        clear_support_ticket_pending(uid)
         ticket = get_support_ticket(int(parts[2]))
         if not ticket:
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
@@ -140149,16 +140159,19 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         prompt = "Nhập user ID để tìm ticket." if parts[2] == "user" else "Nhập mã ticket, user ID, username hoặc từ khóa."
         return await safe_edit_or_send(query, f"🔍 <b>Tìm ticket</b>\n\n{prompt}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ CSKH/Ticket", callback_data="ticket|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]]))
     if action == "stats":
+        clear_support_ticket_pending(uid)
         return await safe_edit_or_send(query, support_ticket_stats_text(), reply_markup=support_admin_menu_keyboard())
     if action == "templates":
+        clear_support_ticket_pending(uid)
         return await safe_edit_or_send(query, support_reply_templates_text(), reply_markup=support_admin_menu_keyboard())
     if action == "st" and len(parts) >= 4:
         ticket_id = int(parts[2])
         new_status = parts[3]
+        previous_ticket = get_support_ticket(ticket_id) if new_status == "refund_pending" else None
         ticket = update_support_ticket(ticket_id, status=new_status)
         if not ticket:
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
-        if new_status == "refund_pending":
+        if new_status == "refund_pending" and str((previous_ticket or {}).get("status") or "") != new_status:
             await query.message.reply_text("💰 Ticket đã được đánh dấu cần kiểm tra hoàn Xu/refund. Thao tác này chưa cộng hoặc trừ Xu.")
         return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket))
     if action == "reply" and len(parts) >= 3:
@@ -140169,6 +140182,8 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         return await safe_edit_or_send(query, "💬 Nhập nội dung phản hồi cho khách. Bot chỉ gửi sau khi admin xem preview và bấm xác nhận.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]]))
     if action == "ask" and len(parts) >= 3:
         ticket_id = int(parts[2])
+        if not get_support_ticket(ticket_id):
+            return await query.answer("Không tìm thấy ticket.", show_alert=True)
         set_support_ticket_pending(uid, "admin_reply_input", ticket_id=ticket_id, source="new")
         return await safe_edit_or_send(query, "👤 Nhập câu hỏi hoặc thông tin bạn cần khách bổ sung. Bot sẽ cho xem preview trước khi gửi.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new")]]))
     if action == "suggest" and len(parts) >= 4:
@@ -140179,41 +140194,64 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
         reply_text = support_suggested_reply(ticket.get("category"), variant, ticket.get("message") or "")
         update_support_ticket(ticket_id, suggested_reply=reply_text)
-        set_support_ticket_pending(uid, "admin_reply_preview", ticket_id=ticket_id, reply_text=reply_text, variant=variant, source="new")
+        preview_token = uuid.uuid4().hex[:16]
+        set_support_ticket_pending(uid, "admin_reply_preview", ticket_id=ticket_id, reply_text=reply_text, variant=variant, source="new", preview_token=preview_token)
         return await safe_edit_or_send(
             query,
             "🤖 <b>Gợi ý trả lời</b>\n\n"
             f"{html.escape(reply_text)}\n\nBot chưa gửi nội dung này cho khách.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📨 Gửi cho khách", callback_data=f"ticket|send|{ticket_id}"), InlineKeyboardButton("✍️ Sửa lại", callback_data=f"ticket|reply|{ticket_id}")],
+                [InlineKeyboardButton("📨 Gửi cho khách", callback_data=f"ticket|send|{ticket_id}|{preview_token}"), InlineKeyboardButton("✍️ Sửa lại", callback_data=f"ticket|reply|{ticket_id}")],
                 [InlineKeyboardButton("🔄 Gợi ý khác", callback_data=f"ticket|suggest|{ticket_id}|{variant + 1}"), InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new")],
             ]),
         )
     if action == "send" and len(parts) >= 3:
         ticket_id = int(parts[2])
         state = get_support_ticket_pending(uid) or {}
-        if state.get("step") != "admin_reply_preview" or int(state.get("ticket_id") or 0) != ticket_id:
+        if (
+            state.get("step") != "admin_reply_preview"
+            or int(state.get("ticket_id") or 0) != ticket_id
+            or len(parts) < 4
+            or not state.get("preview_token")
+            or parts[3] != state.get("preview_token")
+        ):
             return await query.answer("Bản xem trước đã hết hạn. Vui lòng soạn hoặc tạo gợi ý lại.", show_alert=True)
         ticket = get_support_ticket(ticket_id)
         reply_text = str(state.get("reply_text") or "").strip()
         if not ticket or not reply_text:
             return await query.answer("Không có nội dung hợp lệ để gửi.", show_alert=True)
+        send_lock_key = f"support_ticket_send_inflight:{uid}:{ticket_id}"
+        if USER_PENDING.get(send_lock_key) is not None:
+            return await query.answer("Đang gửi phản hồi này. Vui lòng chờ.", show_alert=True)
+        send_lock = object()
+        USER_PENDING[send_lock_key] = send_lock
         try:
+            await query.answer("Đang gửi phản hồi...", show_alert=False)
             await context.bot.send_message(
                 chat_id=ticket["user_id"],
                 text=(f"💬 <b>Phản hồi từ TOAN AAS</b>\nTicket: <code>{html.escape(ticket['ticket_code'])}</code>\n\n{html.escape(reply_text)}"),
                 parse_mode="HTML",
             )
+            if get_support_ticket_pending(uid) is state:
+                clear_support_ticket_pending(uid)
         except Exception as exc:
             logger.warning("support ticket reply send failed | ticket_id=%s error=%s", ticket_id, type(exc).__name__)
-            return await query.answer("Không gửi được phản hồi. Ticket chưa được đánh dấu đã gửi.", show_alert=True)
+            if get_support_ticket_pending(uid) is state:
+                error_text = "⚠️ Không gửi được phản hồi. Bản xem trước vẫn còn; vui lòng thử lại."
+            else:
+                error_text = "⚠️ Không gửi được phản hồi. Trạng thái ticket đã thay đổi; vui lòng kiểm tra trước khi gửi lại."
+            return await query.message.reply_text(error_text)
+        finally:
+            if USER_PENDING.get(send_lock_key) is send_lock:
+                USER_PENDING.pop(send_lock_key, None)
         add_support_ticket_message(ticket_id, "admin", uid, reply_text, "sent")
         ticket = update_support_ticket(ticket_id, status="waiting_user", assigned_admin_id=uid)
-        clear_support_ticket_pending(uid)
         await query.message.reply_text("✅ Đã gửi phản hồi cho đúng user của ticket.")
         return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket))
     if action == "note" and len(parts) >= 3:
         ticket_id = int(parts[2])
+        if not get_support_ticket(ticket_id):
+            return await query.answer("Không tìm thấy ticket.", show_alert=True)
         set_support_ticket_pending(uid, "admin_note_input", ticket_id=ticket_id)
         return await safe_edit_or_send(query, "📌 Nhập ghi chú nội bộ. Nội dung này không hiển thị cho khách.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new")]]))
     if action == "assign" and len(parts) >= 3:
@@ -140226,30 +140264,44 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         if not ticket:
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
         marker = "Cần liên hệ" if parts[3] == "contact" else "Lead tiềm năng"
-        note = f"{ticket.get('admin_note') or ''}\n[{now_text()} admin {uid}] {marker}".strip()
+        existing_note = str(ticket.get("admin_note") or "")
+        note_lines = existing_note.rstrip().splitlines()
+        same_last_marker = bool(note_lines) and note_lines[-1].endswith(f"admin {uid}] {marker}")
+        if same_last_marker and str(ticket.get("status") or "") == "reviewing" and str(ticket.get("assigned_admin_id") or "") == str(uid):
+            return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket))
+        note = existing_note if same_last_marker else f"{existing_note}\n[{now_text()} admin {uid}] {marker}".strip()
         ticket = update_support_ticket(ticket["id"], status="reviewing", assigned_admin_id=uid, admin_note=note)
         return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket))
     if action == "file" and len(parts) >= 3:
         ticket = get_support_ticket(int(parts[2]))
         if not ticket or not ticket.get("attachment_file_id"):
             return await query.answer("Ticket chưa có file đính kèm.", show_alert=True)
+        send_lock_key = f"support_ticket_file_inflight:{uid}:{ticket['id']}"
+        if USER_PENDING.get(send_lock_key) is not None:
+            return await query.answer("File đính kèm đang được gửi. Vui lòng chờ.", show_alert=True)
+        send_lock = object()
+        USER_PENDING[send_lock_key] = send_lock
         caption = f"📎 File của ticket <code>{html.escape(ticket['ticket_code'])}</code>"
         try:
+            await query.answer("Đang gửi file đính kèm...", show_alert=False)
             if ticket.get("attachment_type") == "photo":
                 await context.bot.send_photo(chat_id=query.message.chat_id, photo=ticket["attachment_file_id"], caption=caption, parse_mode="HTML")
             else:
                 await context.bot.send_document(chat_id=query.message.chat_id, document=ticket["attachment_file_id"], caption=caption, parse_mode="HTML")
         except Exception as exc:
             logger.warning("support attachment send failed | ticket_id=%s error=%s", ticket.get("id"), type(exc).__name__)
-            return await query.answer("Không gửi lại được file đính kèm.", show_alert=True)
+            return await query.message.reply_text("⚠️ Không gửi lại được file đính kèm.")
+        finally:
+            if USER_PENDING.get(send_lock_key) is send_lock:
+                USER_PENDING.pop(send_lock_key, None)
         return
     return await query.answer(copy["support_ticket_action_unsupported"], show_alert=True)
 
 async def handle_admin_help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("⛔ Khu vực này chỉ dành cho Admin.", show_alert=True)
+    await query.answer()
     parts = str(query.data or "").split("|")
     kind = parts[1].strip() if len(parts) > 1 else "payment"
     return_action = parts[2].strip() if len(parts) > 2 else ""
@@ -140602,11 +140654,13 @@ exec(compile(autopost_engine_code, f"{__file__}:autopost_engine", "exec"), globa
 
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     action = (query.data.split("|", 1)[1] if "|" in query.data else "main").strip()
+    user_is_admin = is_admin_user(query.from_user.id)
+    if action == "admin" and not user_is_admin:
+        return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
+    await query.answer()
     if isinstance(getattr(context, "user_data", None), dict):
         context.user_data.pop(VIDEO_TAIL9_TEXT_INPUT_KEY, None)
-    user_is_admin = is_admin_user(query.from_user.id)
     if user_is_admin:
         clear_broadcast_lite_pending(query.from_user.id)
     lang = get_user_language(query.from_user.id) or "vi"
@@ -140639,6 +140693,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if action not in {"hint_note", "hint_search_note"}:
         clear_memory_guided_pending(query.from_user.id)
     clear_music_guided_pending(query.from_user.id)
+    clear_pending_admin_tool_test(query.from_user.id)
     if action == "autopost":
         return await safe_edit_query_message(
             query,
@@ -185320,6 +185375,8 @@ async def handle_doc_tool_callback(update: Update, context: ContextTypes.DEFAULT
         USER_PENDING[doc_tool_pending_key(uid)] = state
         return await safe_edit_or_send(query, "🧹 Đã xóa danh sách file tạm. TOAN AAS chưa xử lý và chưa trừ Xu.", reply_markup=doc_tool_start_keyboard(tool, lang, state))
     if action == "back_received":
+        state["awaiting_page_spec"] = "0"
+        USER_PENDING[doc_tool_pending_key(uid)] = state
         return await safe_edit_or_send(query, doc_tool_received_text(state, lang), parse_mode="HTML", reply_markup=doc_tool_after_file_keyboard(state, lang))
     if action == "ask_pages":
         state["awaiting_page_spec"] = "1"
@@ -186822,6 +186879,7 @@ async def handle_memory_callback(update: Update, context: ContextTypes.DEFAULT_T
     if action == "delete_start":
         notes = memory_list_notes(uid, limit=8)
         if not notes:
+            clear_memory_guided_pending(uid)
             return await safe_edit_or_send(query, memory_notes_list_text([], "🗑 Xóa ghi chú" if normalize_user_language(lang) == "vi" else "🗑 Delete note", lang), parse_mode="HTML", reply_markup=memory_main_keyboard(lang))
         set_memory_guided_pending(uid, "delete_id")
         return await safe_edit_or_send(
@@ -213051,10 +213109,10 @@ async def cmd_remote_worker_canary_status(update: Update, context: ContextTypes.
 
 async def handle_remote_worker_canary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     uid = query.from_user.id if query.from_user else 0
     if not is_admin_user(uid):
         return await query.answer("⛔ Khu vực này chỉ dành cho Admin.", show_alert=True)
+    await query.answer()
     data = str(query.data or "")
     if data.startswith("remote_worker_canary_create"):
         flags = worker_auth.worker_api_runtime_flags(LOCAL_WORKER_TOKEN)
@@ -213212,10 +213270,10 @@ async def cmd_remote_worker_prod_canary_status(update: Update, context: ContextT
 
 async def handle_remote_worker_prod_canary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     uid = query.from_user.id if query.from_user else 0
     if not is_admin_user(uid):
         return await query.answer("⛔ Khu vực này chỉ dành cho Admin.", show_alert=True)
+    await query.answer()
     data = str(query.data or "")
     if data.startswith("remote_worker_prod_canary_create"):
         flags = worker_auth.worker_api_runtime_flags(LOCAL_WORKER_TOKEN)
@@ -213841,7 +213899,7 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{html.escape(copy['profile_policy_note'])}\n\n"
         f"{html.escape(copy['profile_commands'])}"
     )
-    await update.message.reply_text(msg, parse_mode="HTML")
+    await update.message.reply_text(msg, parse_mode="HTML", reply_markup=main_profile_keyboard(lang))
 
 async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -221712,9 +221770,9 @@ async def cmd_operator_n8n_workflow(update: Update, context: ContextTypes.DEFAUL
 
 async def handle_operator_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("Chỉ Admin được dùng.", show_alert=True)
+    await query.answer()
     action = query.data.split("|", 1)[1]
     if action == "root":
         return await query.edit_message_text(
@@ -222719,9 +222777,9 @@ async def cmd_reference_scan(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def handle_creative_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("Chỉ Admin được dùng.", show_alert=True)
+    await query.answer()
     parts = query.data.split("|")
     if len(parts) != 3 or parts[1] != "select":
         return
@@ -222743,9 +222801,9 @@ async def handle_creative_callback(update: Update, context: ContextTypes.DEFAULT
 
 async def handle_task_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("Chỉ Admin được dùng.", show_alert=True)
+    await query.answer()
     parts = query.data.split("|")
     if len(parts) != 4:
         return
@@ -226130,9 +226188,9 @@ async def cmd_trend_rank(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_trend_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("Chỉ Admin được dùng.", show_alert=True)
+    await query.answer()
     parts = query.data.split("|")
     if len(parts) != 3 or parts[1] != "video":
         return
@@ -226216,9 +226274,9 @@ async def handle_trend_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def handle_pipeline_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("Chỉ Admin được dùng.", show_alert=True)
+    await query.answer()
     parts = query.data.split("|")
     if len(parts) != 4:
         return
@@ -226247,9 +226305,9 @@ async def handle_pipeline_callback(update: Update, context: ContextTypes.DEFAULT
 
 async def handle_video_job_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("Chỉ Admin được dùng.", show_alert=True)
+    await query.answer()
     parts = query.data.split("|")
     if len(parts) != 3:
         return
@@ -230674,7 +230732,7 @@ ADMIN_CONTROL_MODULES = {
         "when": "Dùng khi cần hỗ trợ gói, combo, monthly plan, storage hoặc rà soát quyền lợi hiện có của user.",
         "buttons": [
             [("📦 Catalog gói", "menu|admin_packages_catalog"), ("🎁 Cấp combo", "menu|admin_packages_grant_combo")],
-            [("📅 Cấp tháng", "menu|admin_packages_grant_monthly"), ("💾 Cấp lưu trữ", "admin_help|packages")],
+            [("📅 Cấp tháng", "menu|admin_packages_grant_monthly"), ("📘 Cách cấp lưu trữ", "admin_help|packages")],
             [("📦 Đơn chờ duyệt", "menu|admin_package_orders"), ("👤 Gói của user", "menu|admin_packages_user")],
         ],
         "commands": [
@@ -230784,10 +230842,10 @@ ADMIN_CONTROL_MODULES = {
         "when": "Dùng khi provider lỗi, cần smoke test nội bộ, cần kiểm tra video job hoặc worker trước khi mở public.",
         "buttons": [
             [("🤖 Provider status", "menu|admin_provider_status"), ("🧪 Smoke Test", "menu|smoke_test")],
-            [("🎬 Video job", "menu|admin_provider_routes"), ("🔊 TTS/Voice test", "admin_help|provider")],
-            [("📝 ASR/Sub/Dub test", "admin_help|provider")],
-            [("🤖 Remote Worker Status", "admin_help|provider"), ("🧪 Test worker API", "admin_help|provider")],
-            [("🧪 Remote Worker Canary", "admin_help|provider"), ("🔄 Canary status", "admin_help|provider")],
+            [("🎬 Video job", "menu|admin_provider_routes"), ("📘 Hướng dẫn: TTS/Voice test", "admin_help|provider")],
+            [("📘 Hướng dẫn: ASR/Sub/Dub test", "admin_help|provider")],
+            [("📘 Hướng dẫn: Remote Worker Status", "admin_help|provider"), ("📘 Hướng dẫn: Test worker API", "admin_help|provider")],
+            [("📘 Hướng dẫn: Remote Worker Canary", "admin_help|provider"), ("📘 Hướng dẫn: Canary status", "admin_help|provider")],
             [("📘 Hướng dẫn VPS", "admin_help|provider")],
         ],
         "commands": [
@@ -259208,10 +259266,10 @@ async def handle_marketing_pending_text(update: Update, context: ContextTypes.DE
 
 async def handle_marketing_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     uid = query.from_user.id
     if not is_admin_user(uid):
         return await query.answer("Tính năng Marketing tự động đang thử nghiệm nội bộ. Hiện chỉ admin sử dụng.", show_alert=True)
+    await query.answer()
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "start"
     value = parts[2] if len(parts) > 2 else ""

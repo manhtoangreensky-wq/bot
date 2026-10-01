@@ -35,13 +35,25 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Mapping, Sequence
 from urllib.parse import urlsplit
 
-from services.video_provider_base import VideoGenerationRequest
+from services.video_provider_base import (
+    FORBIDDEN_OUTPUT_URL_SCHEMES,
+    SAFE_HOSTNAME_PATTERN,
+    SAFE_VIDEO_EXTENSIONS,
+    SHOPAIKEY_EXACT_HOST,
+    SHOPAIKEY_PATH_PATTERN,
+    SHOPAIKEY_TASK_ID_PATTERN,
+    VideoGenerationRequest,
+    is_safe_shopaikey_content_url,
+    is_safe_video_output_url,
+    sanitize_output_url_for_logging,
+)
 
 logger = logging.getLogger("web_product_video_worker_consumer")
 
 # Supported product scope for R1
 PRIMARY_PRODUCT_KEY = "video_ai_prompt"
 SUPPORTED_PRODUCTS: frozenset[str] = frozenset({PRIMARY_PRODUCT_KEY})
+OWNER_ACCEPTANCE_SUPPORTED_PRODUCTS: frozenset[str] = frozenset({"video_ai_video_reference"})
 
 # Canonical execution / capability parameters
 BOT_CANONICAL_PRODUCT_KEY = "video_ai_prompt"
@@ -52,13 +64,6 @@ MIN_DURATION_SECONDS: float = 1.0
 MAX_DURATION_SECONDS: float = 60.0
 MIN_PROMPT_LENGTH: int = 3
 MAX_PROMPT_LENGTH: int = 2000
-
-# Artifact & URL validation constants
-SAFE_VIDEO_EXTENSIONS: frozenset[str] = frozenset({".mp4", ".webm", ".mov"})
-SAFE_HOSTNAME_PATTERN = re.compile(
-    r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
-)
-FORBIDDEN_OUTPUT_URL_SCHEMES = frozenset({"javascript:", "vbscript:", "data:", "file:", "blob:", "about:"})
 ACCEPTED_VIDEO_FORMATS = frozenset({"mp4", "mov", "webm", "mkv"})
 ACCEPTED_VIDEO_CODECS = frozenset({"h264", "hevc", "av1", "vp9", "vp8", "prores"})
 MIN_ARTIFACT_BYTES = 4096
@@ -162,64 +167,7 @@ def is_web_product_video_worker_enabled(environ: Mapping[str, str] | None = None
     return str(source.get("WEB_PRODUCT_VIDEO_WORKER_ENABLED") or "false").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def is_safe_video_output_url(url: Any) -> bool:
-    """Validate that candidate Product Video output URL is safe to deliver."""
-    if not isinstance(url, str):
-        return False
-    trimmed = url.strip()
-    if not trimmed or len(trimmed) > 2048 or trimmed != url:
-        return False
-    if any(ord(c) < 32 or ord(c) == 127 for c in trimmed):
-        return False
-    if "\\" in trimmed:
-        return False
-    lowered = trimmed.lower()
-    if ".." in lowered or "%2e" in lowered:
-        return False
-    if any(lowered.startswith(s) or s in lowered for s in FORBIDDEN_OUTPUT_URL_SCHEMES):
-        return False
-    try:
-        parsed = urlsplit(trimmed)
-    except Exception:
-        return False
-    if parsed.scheme.lower() != "https":
-        return False
-    if not parsed.netloc:
-        return False
-    if parsed.username or parsed.password or "@" in parsed.netloc:
-        return False
 
-    hostname = (parsed.hostname or "").lower()
-    if not hostname:
-        return False
-
-    if hostname == "localhost" or hostname.endswith(".localhost"):
-        return False
-
-    try:
-        ip = ipaddress.ip_address(hostname)
-    except ValueError:
-        ip = None
-
-    if ip is not None:
-        if not ip.is_global:
-            return False
-    else:
-        if not SAFE_HOSTNAME_PATTERN.fullmatch(hostname):
-            return False
-
-    try:
-        port = parsed.port
-    except ValueError:
-        return False
-    if port not in (None, 443):
-        return False
-
-    path = parsed.path.lower()
-    if not any(path.endswith(ext) for ext in SAFE_VIDEO_EXTENSIONS):
-        return False
-
-    return True
 
 
 def validate_video_artifact_metadata(metadata: Any) -> tuple[bool, str, dict[str, Any]]:
@@ -564,7 +512,11 @@ class WebProductVideoDispatcherClient:
         return self._request_json("POST", "/api/v1/worker/product-video/fail", payload)
 
 
-def validate_claimed_job(job: Mapping[str, Any] | None) -> tuple[bool, str]:
+def validate_claimed_job(
+    job: Mapping[str, Any] | None,
+    *,
+    owner_acceptance_auth: Mapping[str, Any] | None = None,
+) -> tuple[bool, str]:
     """Strictly validate claimed job envelope before runtime mapping."""
     if not isinstance(job, Mapping) or not job:
         return False, "EMPTY_OR_NON_MAPPING_JOB"
@@ -580,8 +532,42 @@ def validate_claimed_job(job: Mapping[str, Any] | None) -> tuple[bool, str]:
     product_key = str(job.get("product_key") or "").strip()
     if not product_key:
         return False, "MISSING_PRODUCT_KEY"
+
     if product_key not in SUPPORTED_PRODUCTS:
-        return False, f"UNSUPPORTED_PRODUCT:{product_key}"
+        if product_key in OWNER_ACCEPTANCE_SUPPORTED_PRODUCTS:
+            if not owner_acceptance_auth or not isinstance(owner_acceptance_auth, Mapping):
+                return False, f"UNSUPPORTED_PRODUCT:{product_key}"
+            if not bool(owner_acceptance_auth.get("owner_authorized")):
+                return False, "OWNER_ACCEPTANCE_AUTH_UNAUTHORIZED"
+            auth_job_id = str(owner_acceptance_auth.get("job_id") or "").strip()
+            if not auth_job_id or auth_job_id != job_id:
+                return False, f"OWNER_ACCEPTANCE_JOB_ID_MISMATCH:{auth_job_id}!={job_id}"
+            auth_product = str(
+                owner_acceptance_auth.get("product_type")
+                or owner_acceptance_auth.get("product_key")
+                or ""
+            ).strip()
+            if auth_product != product_key:
+                return False, f"OWNER_ACCEPTANCE_PRODUCT_MISMATCH:{auth_product}!={product_key}"
+            auth_provider = str(owner_acceptance_auth.get("provider") or "").strip().lower()
+            if auth_provider not in ("fal_video", "fal.ai", "fal-video"):
+                return False, f"OWNER_ACCEPTANCE_PROVIDER_MISMATCH:{auth_provider}"
+            auth_model = str(
+                owner_acceptance_auth.get("model")
+                or owner_acceptance_auth.get("selected_model")
+                or ""
+            ).strip()
+            if auth_model and auth_model != "fal-ai/wan/v2.2-a14b/video-to-video":
+                return False, f"OWNER_ACCEPTANCE_MODEL_MISMATCH:{auth_model}"
+            auth_cap = str(
+                owner_acceptance_auth.get("capability")
+                or owner_acceptance_auth.get("required_capability")
+                or ""
+            ).strip()
+            if auth_cap and auth_cap != "video_to_video":
+                return False, f"OWNER_ACCEPTANCE_CAPABILITY_MISMATCH:{auth_cap}"
+        else:
+            return False, f"UNSUPPORTED_PRODUCT:{product_key}"
 
     account_id = str(job.get("account_id") or "").strip()
     if not account_id:
@@ -594,6 +580,16 @@ def validate_claimed_job(job: Mapping[str, Any] | None) -> tuple[bool, str]:
     payload = job.get("payload")
     if not isinstance(payload, Mapping):
         return False, "MALFORMED_PAYLOAD_NOT_OBJECT"
+
+    if product_key == "video_ai_video_reference":
+        source_video_path = str(
+            payload.get("source_video_path")
+            or payload.get("video_path")
+            or payload.get("source_video")
+            or ""
+        ).strip()
+        if not source_video_path:
+            return False, "MISSING_SOURCE_VIDEO_PATH"
 
     prompt = str(payload.get("prompt") or "").strip()
     if len(prompt) < MIN_PROMPT_LENGTH:
@@ -669,7 +665,7 @@ def map_web_job_to_bot_runtime(
     environ: Mapping[str, str] | None = None,
 ) -> VideoGenerationRequest:
     """Map canonical Web Product Video job into Bot runtime VideoGenerationRequest."""
-    is_valid, reason = validate_claimed_job(job)
+    is_valid, reason = validate_claimed_job(job, owner_acceptance_auth=owner_acceptance_auth)
     if not is_valid:
         raise InvalidJobEnvelopeError(f"Job validation failed before runtime mapping: {reason}")
 
@@ -704,23 +700,59 @@ def map_web_job_to_bot_runtime(
 
     env = dict(os.environ if environ is None else environ)
 
+    product_key = str(job.get("product_key") or "").strip()
+    is_v2v = (product_key == "video_ai_video_reference")
+
+    if is_v2v:
+        source_video_path = str(
+            payload.get("source_video_path")
+            or payload.get("video_path")
+            or payload.get("source_video")
+            or ""
+        ).strip()
+        if not source_video_path:
+            raise InvalidJobEnvelopeError("SOURCE_VIDEO_PATH_REQUIRED: Missing source_video_path for video_ai_video_reference")
+        image_paths: list[str] = []
+        req_product_type = "video_ai_video_reference"
+        req_video_flow_type = "video_ai_video_reference"
+        req_capability = "video_to_video"
+        derived_route = {
+            "tier_id": 500,
+            "quality_key": "advanced",
+            "seconds": int(duration_seconds) or 5,
+            "provider": "fal_video",
+            "model": "fal-ai/wan/v2.2-a14b/video-to-video",
+            "required_capability": "video_to_video",
+            "estimated_provider_cost": 0.40,
+            "estimated_provider_cost_unit": "USD",
+            "fallback_allowed": False,
+        }
+    else:
+        source_video_path = ""
+        image_paths = []
+        req_product_type = BOT_CANONICAL_PRODUCT_KEY
+        req_video_flow_type = BOT_EXECUTOR_PRODUCT_TYPE
+        req_capability = DEFAULT_REQUIRED_CAPABILITY
+        derived_route = derive_canonical_tier_route(quality, environ=env)
+
     if owner_acceptance_auth is not None:
         from services.video_provider_router import (
             OWNER_AUTHORIZED_LIVE_ACCEPTANCE,
             validate_owner_acceptance_authorization,
         )
 
-        derived_route = derive_canonical_tier_route(quality, environ=env)
         derived_ctx: dict[str, Any] = {
             "user_id": str(account_id or job.get("account_id") or "").strip(),
             "job_id": job_id,
             "project_id": str(job.get("project_id") or "").strip(),
-            "product_type": BOT_CANONICAL_PRODUCT_KEY,
+            "product_type": req_product_type,
             "provider": derived_route["provider"],
             "required_capability": derived_route["required_capability"],
             "tier": str(derived_route["tier_id"]),
             "estimated_provider_cost": derived_route["estimated_provider_cost"],
             "estimated_provider_cost_unit": derived_route["estimated_provider_cost_unit"],
+            "expected_duration_seconds": derived_route.get("seconds", 5),
+            "max_provider_submits": 1,
         }
         if acceptance_context and isinstance(acceptance_context, Mapping):
             derived_ctx.update(dict(acceptance_context))
@@ -745,6 +777,8 @@ def map_web_job_to_bot_runtime(
             derived_route["model"].strip().lower(),
             quality,
         }
+        if is_v2v:
+            valid_tiers.update({"500", "advanced", "fal-ai/wan/v2.2-a14b/video-to-video"})
         if auth_tier and auth_tier.lower() in valid_tiers:
             derived_ctx["tier"] = auth_tier
 
@@ -794,14 +828,16 @@ def map_web_job_to_bot_runtime(
 
     return VideoGenerationRequest(
         job_id=job_id,
-        product_type=BOT_CANONICAL_PRODUCT_KEY,
-        video_flow_type=BOT_EXECUTOR_PRODUCT_TYPE,
+        product_type=req_product_type,
+        video_flow_type=req_video_flow_type,
         prompt=prompt,
         ratio=aspect_ratio,
         duration_seconds=duration_seconds,
         quality=quality,
         metadata=metadata,
-        required_capability=DEFAULT_REQUIRED_CAPABILITY,
+        required_capability=req_capability,
+        source_video_path=source_video_path,
+        image_paths=image_paths,
     )
 
 
@@ -831,7 +867,7 @@ def prepare_and_gate_execution(
             blocker_reason="DUPLICATE_ACTIVE_JOB_EXECUTION",
         )
 
-    is_valid, validation_reason = validate_claimed_job(job)
+    is_valid, validation_reason = validate_claimed_job(job, owner_acceptance_auth=owner_acceptance_auth)
     if not is_valid:
         if client and raw_job_id:
             try:
@@ -957,7 +993,7 @@ def execute_claimed_web_product_video_job(
         )
 
     # Envelope validation
-    is_valid, validation_reason = validate_claimed_job(job)
+    is_valid, validation_reason = validate_claimed_job(job, owner_acceptance_auth=owner_acceptance_auth)
     if not is_valid:
         if client:
             try:
@@ -1118,7 +1154,8 @@ def execute_claimed_web_product_video_job(
             output_path = str(gen_result.get("output_path") or gen_result.get("local_path") or "").strip()
 
             if not output_url or not is_safe_video_output_url(output_url):
-                logger.error("unsafe_output_url_rejected job_id=%s url=%s", raw_job_id, output_url[:80])
+                sanitized_url = sanitize_output_url_for_logging(output_url)
+                logger.error("unsafe_output_url_rejected job_id=%s url=%s", raw_job_id, sanitized_url)
                 if client:
                     try:
                         client.fail(
