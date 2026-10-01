@@ -140257,6 +140257,12 @@ async def handle_admin_help_callback(update: Update, context: ContextTypes.DEFAU
         reply_markup=admin_handbook_section_keyboard(kind),
     )
 
+async def handle_admin_gopy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    inbox_update = SimpleNamespace(effective_user=query.from_user, message=query.message)
+    return await cmd_admin_gopy(inbox_update, SimpleNamespace(args=[]))
+
 
 # ==============================================================================
 #                      AUTO-POST & MARKETING GROWTH ENGINE
@@ -230862,8 +230868,8 @@ ADMIN_CONTROL_MODULES = {
         "purpose": "Dùng để xem góp ý, ticket, phản hồi user, ghi chú vận hành và theo dõi việc cần xử lý.",
         "when": "Dùng khi có user cần hỗ trợ, cần xem ticket, hoặc cần ghi chú vận hành sau ca trực.",
         "buttons": [
-            [("🎧 Ticket admin", "ticket|admin"), ("📝 Góp ý admin", "admin_help|support")],
-            [("📌 Admin notes", "admin_help|support"), ("📣 Marketing tự động", "marketing|start")],
+            [("🎧 Ticket admin", "ticket|admin"), ("📝 Góp ý admin", "admin_gopy|inbox")],
+            [("📌 Hướng dẫn hỗ trợ", "admin_help|support"), ("📣 Marketing tự động", "marketing|start")],
         ],
         "commands": [
             ("/admin_gopy", "xem/gửi ghi chú góp ý admin"),
@@ -272162,6 +272168,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_remote_worker_canary_callback, pattern=r"^remote_worker_canary_(create|status)(\||$)"))
     tg_app.add_handler(CallbackQueryHandler(handle_remote_worker_prod_canary_callback, pattern=r"^remote_worker_prod_canary_(create|status)(\||$)"))
     tg_app.add_handler(CallbackQueryHandler(handle_knowledge_vault_callback, pattern=r"^vault\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_admin_gopy_callback, pattern=r"^admin_gopy\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_admin_help_callback, pattern=r"^admin_help\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_admin_growth_callback, pattern=r"^admin_growth\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_broadcast_lite_callback, pattern=r"^broadcast_lite\|"))
