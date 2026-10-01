@@ -140250,11 +140250,15 @@ async def handle_admin_help_callback(update: Update, context: ContextTypes.DEFAU
     await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("⛔ Khu vực này chỉ dành cho Admin.", show_alert=True)
-    kind = (query.data.split("|", 1)[1] if "|" in query.data else "payment").strip()
+    parts = str(query.data or "").split("|")
+    kind = parts[1].strip() if len(parts) > 1 else "payment"
+    return_action = parts[2].strip() if len(parts) > 2 else ""
+    if kind not in {"users", "xu"} or return_action != "admin_users":
+        return_action = ""
     return await safe_edit_query_message(
         query,
         admin_handbook_section_text(kind),
-        reply_markup=admin_handbook_section_keyboard(kind),
+        reply_markup=admin_handbook_section_keyboard(kind, return_action),
     )
 
 async def handle_admin_gopy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -230614,9 +230618,9 @@ ADMIN_CONTROL_MODULES = {
         "purpose": "Dùng để xem hồ sơ user, số dư Xu, lịch sử giao dịch và hỗ trợ cộng/trừ Xu thủ công khi cần.",
         "when": "Dùng khi CSKH cần tra user, kiểm tra ledger, chỉnh hạng hoặc hỗ trợ cộng/trừ Xu có lý do rõ.",
         "buttons": [
-            [("🔎 Tra user", "admin_help|users"), ("📒 Ledger user", "admin_help|users")],
-            [("➕ Cộng Xu", "admin_help|xu"), ("➖ Trừ Xu", "admin_help|xu")],
-            [("⭐ Set VIP/Tier", "admin_help|users")],
+            [("📘 Cách tra user", "admin_help|users|admin_users"), ("📘 Cách xem ledger", "admin_help|users|admin_users")],
+            [("📘 Cách cộng Xu", "admin_help|xu|admin_users"), ("📘 Cách trừ Xu", "admin_help|xu|admin_users")],
+            [("📘 Cách set VIP/Tier", "admin_help|users|admin_users")],
         ],
         "commands": [
             ("/profile_user <ID>", "xem hồ sơ user"),
@@ -230918,13 +230922,14 @@ def admin_module_page_text(module_key: str) -> str:
 def admin_module_keyboard(module_key: str) -> InlineKeyboardMarkup:
     module = ADMIN_CONTROL_MODULES.get(module_key) or ADMIN_CONTROL_MODULES["users"]
     action = f"admin_{module_key}"
+    help_context = "|admin_users" if module_key == "users" else ""
     rows = [
         [InlineKeyboardButton(label, callback_data=callback) for label, callback in row]
         for row in module.get("buttons") or []
     ]
     rows.append([
         InlineKeyboardButton("🔄 Làm mới", callback_data=f"menu|{action}"),
-        InlineKeyboardButton("📘 Hướng dẫn", callback_data=f"admin_help|{module.get('guide') or module_key}"),
+        InlineKeyboardButton("📘 Hướng dẫn", callback_data=f"admin_help|{module.get('guide') or module_key}{help_context}"),
     ])
     rows.append([
         InlineKeyboardButton("⬅️ Quản trị", callback_data="menu|admin"),
@@ -231070,7 +231075,12 @@ def admin_handbook_section_text(kind: str) -> str:
     body = pages.get(clean) or pages["payment"]
     return f"{title_map.get(clean, title_map['payment'])}\n\n{body}"
 
-def admin_handbook_section_keyboard(kind: str = "") -> InlineKeyboardMarkup:
+def admin_handbook_section_keyboard(kind: str = "", return_action: str = "") -> InlineKeyboardMarkup:
+    if kind in {"users", "xu"} and return_action == "admin_users":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("📘 Hướng dẫn Admin", callback_data="menu|admin_handbook"), InlineKeyboardButton("⬅️ User / Xu", callback_data="menu|admin_users")],
+            [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📘 Hướng dẫn Admin", callback_data="menu|admin_handbook"), InlineKeyboardButton("⬅️ Quản trị", callback_data="menu|admin")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
