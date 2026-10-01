@@ -1,6 +1,6 @@
 {
   "version": "p0.video.r19",
-  "default_provider_chain": ["shopaikey_video", "key4u_video", "toanaas_video", "veo", "kling", "generic_http"],
+  "default_provider_chain": ["shopaikey_video", "key4u_video", "fal_video", "toanaas_video", "veo", "kling", "generic_http"],
   "tier_aliases": {
     "200": "low",
     "trial": "low",
@@ -204,6 +204,15 @@
           "request_defaults": {"duration": 10, "resolution": "1080p"}
         }
       ]
+    }
+  },
+  "product_routes": {
+    "video_ai_video_reference": {
+      "product": "video_ai_video_reference",
+      "capability": "video_to_video",
+      "provider": "fal_video",
+      "model": "fal-ai/wan/v2.2-a14b/video-to-video",
+      "max_single_task_seconds": 10
     }
   }
 }
