@@ -50,11 +50,14 @@ AUTO_MULTI_V2_FAILURE_CODES = frozenset({
     "auto_cast_manual_required",
     "voice_pool_capacity_insufficient",
     "scalar_audio_missing",
+    "tts_provider_unavailable",
     "tts_ambiguous_submission",
     "tts_artifact_corruption",
     "tts_contract_mismatch",
     "tts_quote_mismatch",
 })
+
+TTS_PROVIDER_UNAVAILABLE_STATUS = "TTS_PROVIDER_UNAVAILABLE"
 
 
 def _bounded_auto_multi_v2_failure(
@@ -108,6 +111,50 @@ def _multi_v2_manual_required_result(
         **evidence,
         "state": {**dict(state), **evidence, **bounded_failure},
     }
+
+
+def _tts_provider_failure_code(error: Exception) -> str:
+    """Classify only an explicit provider rejection as safe pre-submit failure.
+
+    Transport exceptions stay ambiguous so the checkpoint can continue to block
+    an automatic duplicate submit. ``tts_unavailable:`` is emitted only after
+    the provider adapter returned a concrete non-success result.
+    """
+
+    detail = str(error or "").strip().lower()
+    return "tts_provider_unavailable" if detail.startswith("tts_unavailable:") else ""
+
+
+def _multi_v2_tts_provider_failure_result(
+    state: Mapping[str, object],
+    error: Exception,
+    *,
+    stage: str,
+    code: str,
+) -> dict[str, Any]:
+    evidence = auto_multi_speaker._multi_diarization_debug_fields(state)
+    bounded_failure = _bounded_auto_multi_v2_failure(
+        error,
+        stage=stage,
+        code=code,
+    )
+    result: dict[str, Any] = {
+        "ok": False,
+        "status": TTS_PROVIDER_UNAVAILABLE_STATUS,
+        "reason": str(error),
+        "lane_mode": str(state.get("mode") or state.get("lane_mode") or ""),
+        "public_copy_key": "tts_provider_unavailable",
+        "error_code": code,
+        "admin_debug_summary": str(error),
+        "tts_provider_failure": True,
+        **bounded_failure,
+    }
+    if evidence:
+        result.update(evidence)
+        result["state"] = {**dict(state), **evidence, **bounded_failure}
+    else:
+        result["state"] = {**dict(state), **bounded_failure}
+    return result
 
 
 def _extract_multi_v2_cue_identity(item: object) -> tuple[str, float, float]:
@@ -326,6 +373,13 @@ async def _run_isolated_multi_speaker_v2_blackbox(
     def owned_failure_result(error: Exception) -> dict[str, Any]:
         if failure_slot:
             owned_error, owned_stage, owned_code = failure_slot[0]
+            if owned_code == "tts_provider_unavailable":
+                return _multi_v2_tts_provider_failure_result(
+                    current,
+                    owned_error,
+                    stage=owned_stage,
+                    code=owned_code,
+                )
             return _multi_v2_manual_required_result(
                 current,
                 owned_error,
@@ -547,12 +601,25 @@ async def _run_isolated_multi_speaker_v2_blackbox(
                         synthesize_segments([cue], *args, **scalar_kwargs)
                     )
                 except Exception as net_exc:
-                    checkpoint_mgr.record_cue_ambiguous(cue, cue_voice_id, net_exc)
-                    record_owned_failure(
-                        net_exc,
-                        stage="tts_checkpoint",
-                        code="tts_ambiguous_submission",
-                    )
+                    provider_failure_code = _tts_provider_failure_code(net_exc)
+                    if provider_failure_code:
+                        checkpoint_mgr.record_cue_pre_submit_failure(
+                            cue,
+                            cue_voice_id,
+                            net_exc,
+                        )
+                        record_owned_failure(
+                            net_exc,
+                            stage="tts_scalar",
+                            code=provider_failure_code,
+                        )
+                    else:
+                        checkpoint_mgr.record_cue_ambiguous(cue, cue_voice_id, net_exc)
+                        record_owned_failure(
+                            net_exc,
+                            stage="tts_checkpoint",
+                            code="tts_ambiguous_submission",
+                        )
                     raise
 
                 try:

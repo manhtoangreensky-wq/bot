@@ -91,6 +91,18 @@ _KEY4U_EXCLUSIVE_I2V_ENDPOINT_ENVS = {
         "KEY4U_KLING_IMAGE2VIDEO_SUBMIT_URL",
     ),
 }
+_KEY4U_EXCLUSIVE_I2V_POLL_ENVS = {
+    "kling": (
+        "KEY4U_KLING_I2V_POLL_URL",
+        "KEY4U_KLING_IMAGE2VIDEO_POLL_URL",
+        "KEY4U_KELING_I2V_POLL_URL",
+        "KEY4U_KELING_IMAGE2VIDEO_POLL_URL",
+    ),
+    "keling": (
+        "KEY4U_KELING_I2V_POLL_URL",
+        "KEY4U_KLING_IMAGE2VIDEO_POLL_URL",
+    ),
+}
 _KEY4U_EXCLUSIVE_POLL_ENVS = {
     "kling": ("KEY4U_KLING_VIDEO_POLL_URL", "KEY4U_KLING_POLL_URL", "KEY4U_KELING_VIDEO_POLL_URL"),
     "keling": ("KEY4U_KELING_VIDEO_POLL_URL", "KEY4U_KLING_VIDEO_POLL_URL"),
@@ -216,6 +228,15 @@ def _valid_endpoint_url(value: Any) -> bool:
     return bool(text and text.lower().startswith(_URL_PREFIXES))
 
 
+def _is_auth_key4u_host(host: str) -> bool:
+    h = str(host or "").lower()
+    if not h:
+        return False
+    if h in {"api.key4u.vn", "api.key4u.shop", "key4u.vn", "key4u.shop", "fake.key4u.local"}:
+        return True
+    return h.endswith(".key4u.vn") or h.endswith(".key4u.shop") or h.endswith(".key4u.local")
+
+
 def _first_endpoint(env: dict[str, str] | os._Environ[str], names: tuple[str, ...]) -> tuple[str, str]:
     for name in names:
         value = str(env.get(name) or "").strip()
@@ -247,10 +268,10 @@ def _key4u_official_google_veo_endpoints(
         "https://api.key4u.vn",
     )
     return (
-        f"{base}/v1/video/create",
-        "derived:key4u_unified_video_create",
-        f"{base}/v1/video/query?id={{task_id}}",
-        "derived:key4u_unified_video_query",
+        f"{base}/v1/videos",
+        "derived:key4u_official_veo_videos",
+        f"{base}/v1/videos/{{task_id}}",
+        "derived:key4u_official_veo_poll",
     )
 
 
@@ -258,24 +279,6 @@ def _normalize_key4u_official_google_veo_submit_endpoint(
     submit_url: str,
     submit_source: str,
 ) -> tuple[str, str]:
-    parsed = urllib.parse.urlsplit(str(submit_url or "").strip())
-    if (
-        (parsed.hostname or "").lower() in {"api.key4u.vn", "api.key4u.shop"}
-        and parsed.path.rstrip("/")
-        in {"/v1/videos", "/v1/videos/generations"}
-    ):
-        normalized = urllib.parse.urlunsplit(
-            (
-                parsed.scheme,
-                parsed.netloc,
-                "/v1/video/create",
-                "",
-                "",
-            )
-        )
-        return normalized, (
-            f"normalized_unified:{submit_source or 'key4u_official_videos'}"
-        )
     return submit_url, submit_source
 
 
@@ -350,14 +353,6 @@ def model_interface_contract(
                     data,
                     _KEY4U_EXCLUSIVE_ENDPOINT_ENVS.get(family, _KEY4U_EXCLUSIVE_ENDPOINT_ENVS["kling"]),
                 )
-                def _is_auth_key4u_host(host: str) -> bool:
-                    h = str(host or "").lower()
-                    if not h:
-                        return False
-                    if h in {"api.key4u.vn", "api.key4u.shop", "key4u.vn", "key4u.shop", "fake.key4u.local"}:
-                        return True
-                    return h.endswith(".key4u.vn") or h.endswith(".key4u.shop") or h.endswith(".key4u.local")
-
                 if base_submit_url:
                     parsed = urllib.parse.urlsplit(base_submit_url)
                     host = (parsed.hostname or "").lower()
@@ -394,7 +389,31 @@ def model_interface_contract(
                 data,
                 _KEY4U_EXCLUSIVE_ENDPOINT_ENVS.get(family, _KEY4U_EXCLUSIVE_ENDPOINT_ENVS["kling"]),
             )
-        poll_url, poll_source = _first_endpoint(data, _KEY4U_EXCLUSIVE_POLL_ENVS.get(family, ()))
+        if norm_cap == "image_to_video":
+            poll_url, poll_source = _first_endpoint(
+                data,
+                _KEY4U_EXCLUSIVE_I2V_POLL_ENVS.get(family, ()),
+            )
+            if not poll_url:
+                base_poll_url, base_poll_source = _first_endpoint(
+                    data,
+                    _KEY4U_EXCLUSIVE_POLL_ENVS.get(family, ()),
+                )
+                if base_poll_url:
+                    parsed_poll = urllib.parse.urlsplit(base_poll_url)
+                    if _is_auth_key4u_host(parsed_poll.hostname) and "/text2video" in parsed_poll.path:
+                        poll_url = base_poll_url.replace("/text2video", "/image2video")
+                        poll_source = f"canonical_i2v_poll:{base_poll_source}"
+                    else:
+                        poll_url = base_poll_url
+                        poll_source = base_poll_source
+                elif submit_url:
+                    parsed_sub = urllib.parse.urlsplit(submit_url)
+                    if _is_auth_key4u_host(parsed_sub.hostname):
+                        poll_url = f"{submit_url.rstrip('/')}/{{task_id}}"
+                        poll_source = f"derived_from_i2v_submit:{submit_source}"
+        else:
+            poll_url, poll_source = _first_endpoint(data, _KEY4U_EXCLUSIVE_POLL_ENVS.get(family, ()))
         base.update(
             {
                 "provider_interface": "key4u_kling_exclusive",
