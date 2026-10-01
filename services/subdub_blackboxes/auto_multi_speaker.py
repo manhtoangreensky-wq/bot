@@ -515,6 +515,7 @@ async def run_local_acoustic_diarization_off_event_loop(
     *,
     duration_seconds: float,
     gender_source_original: bool = False,
+    minimum_speakers: int = subdub_multi_speaker_embedding_onnx.MIN_SPEAKERS,
     acoustic_diarize: Callable = (
         subdub_multi_speaker_embedding_onnx.diarize_fixed_vocal_word_timeline
     ),
@@ -580,6 +581,8 @@ async def run_local_acoustic_diarization_off_event_loop(
 
     def run_acoustic() -> dict[str, object]:
         gender_kwargs = {"gender_source_original": True} if gender_source_original else {}
+        if minimum_speakers != subdub_multi_speaker_embedding_onnx.MIN_SPEAKERS:
+            gender_kwargs["minimum_speakers"] = minimum_speakers
         if not queued_default_runner:
             return acoustic_diarize(
                 str(path),

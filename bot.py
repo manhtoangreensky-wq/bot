@@ -234167,6 +234167,10 @@ def set_video_dubbing_pending(user_id, step: str, **fields) -> dict:
         next_target = subdub_translation_cache_language_key(fields.get("target_language") or "")
         translation_target_changed = previous_target != next_target
     acoustic_fields = auto_multi_speaker.bounded_multi_acoustic_evidence(fields)
+    if fields.get("auto_smart_generic_acoustic") is True:
+        acoustic_fields = {}
+        for key in auto_multi_speaker.MULTI_ACOUSTIC_STATE_FIELDS:
+            state.pop(key, None)
     for key, value in fields.items():
         if key in auto_multi_speaker.MULTI_ACOUSTIC_STATE_FIELDS:
             continue
@@ -234207,6 +234211,7 @@ def set_video_dubbing_pending(user_id, step: str, **fields) -> dict:
             "auto_smart_multivoice", "auto_smart_multivoice_opt_in",
             "auto_smart_dispatch", "auto_smart_degraded_single_voice",
             "auto_smart_degraded_reason", "auto_multi_engine",
+            "auto_smart_generic_acoustic",
             "subdub_engine_requested", "subdub_engine_selected",
             "subdub_asr_route_id", "subdub_asr_provider",
             "subdub_asr_require_word_timeline",
@@ -234242,6 +234247,7 @@ def set_video_dubbing_pending(user_id, step: str, **fields) -> dict:
             if key in {
                 "auto_smart_multivoice", "auto_smart_multivoice_opt_in",
                 "auto_smart_degraded_single_voice",
+                "auto_smart_generic_acoustic",
                 "subdub_asr_require_word_timeline",
                 "subdub_asr_require_provider_speaker_labels",
                 "subdub_local_acoustic_diarization_allowed",
@@ -239661,8 +239667,8 @@ def resolve_subdub_execution_asr_kwargs(state: dict | None = None) -> dict:
     kwargs = {}
     if require_word_timeline:
         kwargs["require_auto_multi_word_timeline"] = True
-    if require_provider_speaker_labels:
-        kwargs["require_diarization"] = True
+    if require_provider_speaker_labels or auto_smart_multivoice.is_auto_smart_multivoice_state(st):
+        kwargs["require_diarization"] = require_provider_speaker_labels
     return kwargs
 
 
@@ -249045,7 +249051,7 @@ async def _subdub_auto_bootstrap_cached_media_source(
     progress_callback,
     allow_confirmed_product: bool,
 ) -> dict:
-    """Obtain one confirmed diarized source when a cached subtitle has no sidecar."""
+    """Obtain a confirmed auto source when a cached subtitle has no sidecar."""
 
     if (
         not allow_confirmed_product
@@ -249058,7 +249064,11 @@ async def _subdub_auto_bootstrap_cached_media_source(
         resolve_parameters = inspect.signature(video_dubbing_resolve_source_script).parameters
     except Exception as exc:
         raise subdub_speaker_cast.AutoCastUnavailable() from exc
-    if "require_diarization" not in resolve_parameters:
+    smart_word_asr = auto_smart_multivoice.is_auto_smart_multivoice_state(state)
+    required_parameter = (
+        "require_auto_multi_word_timeline" if smart_word_asr else "require_diarization"
+    )
+    if required_parameter not in resolve_parameters:
         raise subdub_speaker_cast.AutoCastUnavailable()
     resolve_kwargs = {
         "duration_seconds": duration_hint,
@@ -249069,8 +249079,13 @@ async def _subdub_auto_bootstrap_cached_media_source(
         "media_kind": str(state.get("source_media_type") or state.get("media_kind") or ""),
         "source_language": str(state.get("source_language") or "auto"),
         "prefer_visual_subtitles": False,
-        "require_diarization": True,
     }
+    if smart_word_asr:
+        resolve_kwargs["require_auto_multi_word_timeline"] = True
+        if "require_diarization" in resolve_parameters:
+            resolve_kwargs["require_diarization"] = False
+    else:
+        resolve_kwargs["require_diarization"] = True
     if "allow_two_speaker_key4u_fallback" in resolve_parameters:
         resolve_kwargs["allow_two_speaker_key4u_fallback"] = bool(
             auto_speaker.is_auto_speaker_state(state)
@@ -249159,6 +249174,7 @@ async def video_dubbing_prepare_subtitles(
     require_auto_cast: bool = False,
 ) -> dict:
     require_auto_cast = bool(require_auto_cast)
+    smart_acoustic_classifications = {}
     speaker_workspace = str(state.get("_pipeline_workspace") or "")
     mode = normalize_video_translate_mode(
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
@@ -249473,10 +249489,12 @@ async def video_dubbing_prepare_subtitles(
                     word_timeline,
                     duration_seconds=acoustic_duration,
                     gender_source_original=auto_smart_multivoice.is_auto_smart_multivoice_state(state),
+                    **({"minimum_speakers": 1} if auto_smart_multivoice.is_auto_smart_multivoice_state(state) else {}),
                 )
             except (
                 subdub_speaker_cast.AutoCastUnavailable,
                 subdub_speaker_cast.AutoCastManualRequired,
+                ValueError,
             ) as exc:
                 acoustic_failure = subdub_multi_acoustic_failure_evidence(
                     exc,
@@ -249489,11 +249507,13 @@ async def video_dubbing_prepare_subtitles(
                         failure_job_key,
                         **acoustic_failure,
                     )
-                raise
-            except ValueError as exc:
                 if not (
                     auto_smart_multivoice.is_auto_smart_multivoice_state(state)
-                    and str(exc) == "fixed_vocal_speaker_count_unstable"
+                    and acoustic_failure["multi_acoustic_failure_code"] in {
+                        "fixed_vocal_speaker_count_unstable",
+                        "fixed_vocal_window_support_invalid",
+                        "acoustic_unit_count_invalid",
+                    }
                 ):
                     raise
                 fresh_smart_asr_segments = subdub_canonical_single_speaker_segments(
@@ -249511,7 +249531,7 @@ async def video_dubbing_prepare_subtitles(
                         exclude={"subtitle_ref", "source_subtitle_ref"},
                     ),
                     auto_smart_degraded_single_voice=True,
-                    auto_smart_degraded_reason=str(exc),
+                    auto_smart_degraded_reason=acoustic_failure["multi_acoustic_failure_code"],
                 )
             source_segments = (
                 list(fresh_smart_asr_segments)
@@ -249520,6 +249540,25 @@ async def video_dubbing_prepare_subtitles(
             )
             if not source_segments:
                 raise subdub_speaker_cast.AutoCastUnavailable()
+            smart_generic_acoustic = bool(
+                auto_smart_multivoice.is_auto_smart_multivoice_state(state)
+                and acoustic_result.get("smart_acoustic_generic") is True
+            )
+            if smart_generic_acoustic:
+                candidate_classes = acoustic_result.get("smart_acoustic_classifications")
+                detected_count = acoustic_result.get("detected_speaker_count")
+                labels = {segment.get("speaker_id") for segment in source_segments}
+                if (
+                    type(detected_count) is not int or not 1 <= detected_count <= 8
+                    or not isinstance(candidate_classes, dict)
+                    or set(candidate_classes) != labels or len(labels) != detected_count
+                    or acoustic_result.get("word_coverage_count") != len(word_timeline)
+                ):
+                    raise subdub_speaker_cast.AutoCastUnavailable()
+                smart_acoustic_classifications = dict(candidate_classes)
+                smart_multi_acoustic = False
+            if auto_smart_multivoice.is_auto_smart_multivoice_state(state):
+                state = {**state, "auto_smart_generic_acoustic": smart_generic_acoustic}
             source_subtitle = video_dubbing_srt_from_segments(source_segments)
             source_script = video_dubbing_plain_script(source_subtitle)
             acoustic_fields = auto_multi_speaker.bounded_multi_acoustic_evidence({
@@ -249556,7 +249595,7 @@ async def video_dubbing_prepare_subtitles(
                 "multi_acoustic_dropped_non_speech_speaker_labels": acoustic_result.get("dropped_non_speech_speaker_labels"),
                 "multi_acoustic_dropped_non_speech_speaker_count": len(acoustic_result.get("dropped_non_speech_speaker_labels") or []),
             })
-            if not acoustic_fields and not acoustic_degraded_to_single:
+            if not acoustic_fields and not acoustic_degraded_to_single and not smart_generic_acoustic:
                 raise subdub_speaker_cast.AutoCastUnavailable()
             if not acoustic_degraded_to_single:
                 acoustic_subtitle_ref = set_video_dubbing_artifact(
@@ -249734,6 +249773,7 @@ async def video_dubbing_prepare_subtitles(
         state = {**state, **exact_multi_pipeline_context}
     return {
         "state": state,
+        **({"acoustic_classifications": smart_acoustic_classifications} if smart_acoustic_classifications else {}),
         "source_bytes": source_bytes,
         "content_type": content_type,
         "source_subtitle": source_subtitle,
@@ -250066,6 +250106,9 @@ def _subdub_auto_persist_prepared_cache(
         ),
         "dub_text_source": str(policy.get("dub_text_source") or ""),
         "target_language": str(state.get("target_language") or "")[:120],
+        **({"acoustic_classifications": dict(prepared["acoustic_classifications"])}
+           if prepared_state.get("auto_smart_generic_acoustic") is True
+           and isinstance(prepared.get("acoustic_classifications"), dict) else {}),
     }
     metadata_path = write_subtitle_dub_pipeline_artifact(
         workspace,
@@ -250637,6 +250680,9 @@ def _subdub_auto_load_cached_prepared(job: dict, state: dict) -> dict:
     }
     return {
         "state": resumed_state,
+        **({"acoustic_classifications": dict(cache["acoustic_classifications"])}
+           if resumed_state.get("auto_smart_generic_acoustic") is True
+           and isinstance(cache.get("acoustic_classifications"), dict) else {}),
         "source_bytes": source_bytes,
         "content_type": str(state.get("source_mime_type") or "video/mp4"),
         "source_subtitle": source_subtitle,
