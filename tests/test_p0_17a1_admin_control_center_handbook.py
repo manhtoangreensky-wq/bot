@@ -216,7 +216,7 @@ def test_admin_support_page_has_ticket_and_notes():
     assert "CSKH / Góp ý / Ticket" in text
     assert "/admin_gopy" in text
     assert "🎧 Ticket admin" in labels
-    assert "📌 Admin notes" in labels
+    assert "📌 Hướng dẫn hỗ trợ" in labels
 
 
 def test_admin_handbook_menu_exists():
