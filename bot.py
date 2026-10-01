@@ -230758,8 +230758,8 @@ ADMIN_CONTROL_MODULES = {
         "purpose": "Dùng để kiểm tra runtime, deployment, webhook Telegram, provider tổng quan, cleanup file tạm và trạng thái sẵn sàng vận hành.",
         "when": "Dùng sau deploy, khi nghi ngờ bot instance cũ giữ webhook, khi cần cleanup hoặc khi kiểm tra dashboard hệ thống.",
         "buttons": [
-            [("🧬 Runtime", "menu|system_runtime_help"), ("📡 Telegram status", "admin_help|runtime")],
-            [("🔁 Telegram takeover", "admin_help|runtime"), ("🧹 Cleanup temp", "admin_help|runtime")],
+            [("🧬 Runtime", "menu|system_runtime_help"), ("📘 Hướng dẫn kiểm tra Telegram", "admin_help|runtime")],
+            [("📘 Hướng dẫn nhận quyền webhook Telegram", "admin_help|runtime"), ("📘 Hướng dẫn dọn file tạm", "admin_help|runtime")],
             [("📊 Dashboard", "menu|admin_overview")],
         ],
         "commands": [
