@@ -34,12 +34,14 @@ class _Query:
 def _load_ticket_ask_code():
     bot_path = Path(__file__).resolve().parents[1] / "bot.py"
     source = bot_path.read_text(encoding="utf-8")
-    keyboard_marker = 'def support_ticket_admin_keyboard(ticket: dict, source: str = "new") -> InlineKeyboardMarkup:'
+    keyboard_match = re.search(r"(?m)^def support_ticket_admin_keyboard\(", source)
+    if keyboard_match is None:
+        raise AssertionError("support ticket admin keyboard is missing")
     handler_marker = (
         "async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):\n"
         "    query = update.callback_query"
     )
-    keyboard_start = source.index(keyboard_marker)
+    keyboard_start = keyboard_match.start()
     keyboard_end = source.index("\ndef support_admin_list_payload(", keyboard_start)
     handler_start = source.index(handler_marker)
     ask_start = source.index('    if action == "ask" and len(parts) >= 3:', handler_start)
