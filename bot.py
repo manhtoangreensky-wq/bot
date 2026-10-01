@@ -135860,6 +135860,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_existed_before = user_exists(uid)
     clear_memory_guided_pending(uid)
     get_user(uid, update.effective_user.first_name)
+    clear_doc_tool_pending(uid)
     record_usage_event(
         uid,
         username=update.effective_user.username or update.effective_user.first_name or "",
