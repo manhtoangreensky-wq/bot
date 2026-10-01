@@ -35,7 +35,18 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Mapping, Sequence
 from urllib.parse import urlsplit
 
-from services.video_provider_base import VideoGenerationRequest
+from services.video_provider_base import (
+    FORBIDDEN_OUTPUT_URL_SCHEMES,
+    SAFE_HOSTNAME_PATTERN,
+    SAFE_VIDEO_EXTENSIONS,
+    SHOPAIKEY_EXACT_HOST,
+    SHOPAIKEY_PATH_PATTERN,
+    SHOPAIKEY_TASK_ID_PATTERN,
+    VideoGenerationRequest,
+    is_safe_shopaikey_content_url,
+    is_safe_video_output_url,
+    sanitize_output_url_for_logging,
+)
 
 logger = logging.getLogger("web_product_video_worker_consumer")
 
@@ -53,13 +64,6 @@ MIN_DURATION_SECONDS: float = 1.0
 MAX_DURATION_SECONDS: float = 60.0
 MIN_PROMPT_LENGTH: int = 3
 MAX_PROMPT_LENGTH: int = 2000
-
-# Artifact & URL validation constants
-SAFE_VIDEO_EXTENSIONS: frozenset[str] = frozenset({".mp4", ".webm", ".mov"})
-SAFE_HOSTNAME_PATTERN = re.compile(
-    r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
-)
-FORBIDDEN_OUTPUT_URL_SCHEMES = frozenset({"javascript:", "vbscript:", "data:", "file:", "blob:", "about:"})
 ACCEPTED_VIDEO_FORMATS = frozenset({"mp4", "mov", "webm", "mkv"})
 ACCEPTED_VIDEO_CODECS = frozenset({"h264", "hevc", "av1", "vp9", "vp8", "prores"})
 MIN_ARTIFACT_BYTES = 4096
@@ -163,64 +167,7 @@ def is_web_product_video_worker_enabled(environ: Mapping[str, str] | None = None
     return str(source.get("WEB_PRODUCT_VIDEO_WORKER_ENABLED") or "false").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def is_safe_video_output_url(url: Any) -> bool:
-    """Validate that candidate Product Video output URL is safe to deliver."""
-    if not isinstance(url, str):
-        return False
-    trimmed = url.strip()
-    if not trimmed or len(trimmed) > 2048 or trimmed != url:
-        return False
-    if any(ord(c) < 32 or ord(c) == 127 for c in trimmed):
-        return False
-    if "\\" in trimmed:
-        return False
-    lowered = trimmed.lower()
-    if ".." in lowered or "%2e" in lowered:
-        return False
-    if any(lowered.startswith(s) or s in lowered for s in FORBIDDEN_OUTPUT_URL_SCHEMES):
-        return False
-    try:
-        parsed = urlsplit(trimmed)
-    except Exception:
-        return False
-    if parsed.scheme.lower() != "https":
-        return False
-    if not parsed.netloc:
-        return False
-    if parsed.username or parsed.password or "@" in parsed.netloc:
-        return False
 
-    hostname = (parsed.hostname or "").lower()
-    if not hostname:
-        return False
-
-    if hostname == "localhost" or hostname.endswith(".localhost"):
-        return False
-
-    try:
-        ip = ipaddress.ip_address(hostname)
-    except ValueError:
-        ip = None
-
-    if ip is not None:
-        if not ip.is_global:
-            return False
-    else:
-        if not SAFE_HOSTNAME_PATTERN.fullmatch(hostname):
-            return False
-
-    try:
-        port = parsed.port
-    except ValueError:
-        return False
-    if port not in (None, 443):
-        return False
-
-    path = parsed.path.lower()
-    if not any(path.endswith(ext) for ext in SAFE_VIDEO_EXTENSIONS):
-        return False
-
-    return True
 
 
 def validate_video_artifact_metadata(metadata: Any) -> tuple[bool, str, dict[str, Any]]:
@@ -1207,7 +1154,8 @@ def execute_claimed_web_product_video_job(
             output_path = str(gen_result.get("output_path") or gen_result.get("local_path") or "").strip()
 
             if not output_url or not is_safe_video_output_url(output_url):
-                logger.error("unsafe_output_url_rejected job_id=%s url=%s", raw_job_id, output_url[:80])
+                sanitized_url = sanitize_output_url_for_logging(output_url)
+                logger.error("unsafe_output_url_rejected job_id=%s url=%s", raw_job_id, sanitized_url)
                 if client:
                     try:
                         client.fail(
