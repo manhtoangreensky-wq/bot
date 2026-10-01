@@ -9,7 +9,7 @@
           "family": "google_veo",
           "quality": "fast",
           "cost_tier": "low",
-          "capabilities": ["text_to_video", "scene_video", "short_video"],
+          "capabilities": ["text_to_video", "scene_video", "short_video", "image_to_video"],
           "clip_seconds": 8,
           "max_single_task_seconds": 8,
           "supports_concat": true,
@@ -109,6 +109,8 @@
           "clip_seconds": 8,
           "max_single_task_seconds": 8,
           "supports_concat": true,
+          "submit_endpoint": "/v1/videos",
+          "poll_endpoint": "/v1/videos/{task_id}",
           "payload_adapter": "key4u_veo_small_clip"
         },
         "kling-3.0-turbo": {
@@ -245,7 +247,10 @@
     "shopaikey_veo_small_clip": {
       "family": "google_veo",
       "required_fields": ["model", "prompt", "duration", "ratio"],
-      "allowed_fields": ["job_id", "source", "wallet_charge", "product_type", "capability", "model", "prompt", "negative_prompt", "ratio", "aspect_ratio", "aspectRatio", "duration", "duration_seconds", "quality", "style", "seed", "sound", "resolution", "metadata"],
+      "allowed_fields": ["job_id", "source", "wallet_charge", "product_type", "capability", "model", "prompt", "negative_prompt", "ratio", "aspect_ratio", "aspectRatio", "duration", "duration_seconds", "quality", "style", "seed", "sound", "resolution", "metadata", "image", "image_paths"],
+      "allowed_fields_by_capability": {
+        "image_to_video": ["image_paths", "image"]
+      },
       "result_fields": ["data.status", "data.result_url", "data.id", "data.id_base", "status", "result_url"],
       "poll_status_fields": ["data.status", "status"],
       "duration_support": "short_clip",
@@ -281,7 +286,10 @@
     "key4u_veo_small_clip": {
       "family": "google_veo",
       "required_fields": ["model", "prompt", "duration", "ratio"],
-      "allowed_fields": ["job_id", "source", "wallet_charge", "product_type", "capability", "model", "prompt", "negative_prompt", "ratio", "aspect_ratio", "aspectRatio", "duration", "duration_seconds", "quality", "style", "seed", "sound", "resolution", "metadata"],
+      "allowed_fields": ["job_id", "source", "wallet_charge", "product_type", "capability", "model", "prompt", "negative_prompt", "ratio", "aspect_ratio", "aspectRatio", "duration", "duration_seconds", "quality", "style", "seed", "sound", "resolution", "metadata", "image", "image_paths", "storyboard"],
+      "allowed_fields_by_capability": {
+        "image_to_video": ["storyboard", "image_paths", "image"]
+      },
       "result_fields": ["data.status", "data.result_url", "status", "result_url", "task_id"],
       "poll_status_fields": ["data.status", "status"],
       "duration_support": "short_clip",
