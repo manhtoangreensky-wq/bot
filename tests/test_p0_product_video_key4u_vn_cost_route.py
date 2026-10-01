@@ -55,8 +55,8 @@ def test_key4u_active_defaults_and_video_adapter_use_vn(monkeypatch):
     assert config.minimax_base_url == f"{KEY4U_VN}/minimax"
     assert config.minimax_tts_base_url == f"{KEY4U_VN}/minimax"
     assert config.suno_base_url == f"{KEY4U_VN}/suno"
-    assert adapter._submit_url() == f"{KEY4U_VN}/v1/video/create"
-    assert adapter._poll_url() == f"{KEY4U_VN}/v1/video/query?id={{task_id}}"
+    assert adapter._submit_url() == f"{KEY4U_VN}/v1/videos"
+    assert adapter._poll_url() == f"{KEY4U_VN}/v1/videos/{{task_id}}"
 
 
 def test_common_tier_uses_new_live_cost_order():
@@ -125,28 +125,28 @@ def test_saved_price_route_map_matches_current_customer_prices_and_runtime_order
         row["customer_unit_xu"] for row in rows
     )
     assert [row["customer_unit_xu"] for row in rows] == [
-        80,
-        110,
-        160,
-        200,
-        220,
-        220,
-        370,
-        370,
-        1260,
-        2360,
+        221,
+        259,
+        337,
+        371,
+        804,
+        804,
+        1261,
+        2143,
+        2411,
+        3214,
     ]
     assert [row["label"] for row in rows] == [
-        "Nhanh gon",
-        "Chuyen dong on dinh",
-        "Chuyen dong co am thanh",
-        "Can bang ro net",
-        "Tieu chuan co am thanh",
-        "Canh dai co am thanh",
-        "Cao cap linh hoat",
-        "Dien xuat chan that",
-        "Da goc may",
-        "Dien anh nhieu canh",
+        "Video Khởi Đầu Âm Thanh 5s",
+        "Video Chuyển Động Xã Hội 5s",
+        "Video Diễn Xuất Nhân Vật 6s",
+        "Video Veo Cân Bằng Chi Tiết 8s",
+        "Video Chuyển Động Kiểm Soát 5s",
+        "Video Chuyển Động Đồng Bộ Âm Thanh 5s",
+        "Video Tham Chiếu Đa Góc Nhìn 8s",
+        "Video Chuyển Động Chuyên Nghiệp Kling 10s",
+        "Video Điện Ảnh Đa Phân Cảnh Doubao 10s",
+        "Video Toàn Cảnh Chuyển Động Dài Kling 15s",
     ]
 
     quality = {
@@ -230,7 +230,7 @@ def _request_for_resolution(resolution, *, seconds, prompt="Product video scene.
     )
 
 
-def test_key4u_veo_normalizes_legacy_videos_endpoint_to_unified_contract(monkeypatch):
+def test_key4u_veo_uses_canonical_specialized_videos_endpoint(monkeypatch):
     env = _key4u_env(
         KEY4U_VEO_VIDEO_ENDPOINT=f"{KEY4U_VN}/v1/videos",
         KEY4U_VEO_VIDEO_POLL_URL=f"{KEY4U_VN}/v1/videos/{{task_id}}",
@@ -259,19 +259,17 @@ def test_key4u_veo_normalizes_legacy_videos_endpoint_to_unified_contract(monkeyp
     monkeypatch.setattr(
         provider,
         "_open_multipart_form",
-        lambda *_args, **_kwargs: pytest.fail("legacy /v1/videos must normalize to official JSON contract"),
+        lambda *_args, **_kwargs: pytest.fail("specialized /v1/videos must use JSON wire payload"),
     )
     result = provider.submit_video_job(_request_for_resolution(resolution, seconds=8))
 
     assert result.ok is True
-    assert resolution["provider_endpoint_source"] == (
-        "normalized_unified:KEY4U_VEO_VIDEO_ENDPOINT"
-    )
+    assert resolution["provider_endpoint_source"] == "KEY4U_VEO_VIDEO_ENDPOINT"
     assert resolution["provider_submit_url_override"] == (
-        f"{KEY4U_VN}/v1/video/create"
+        f"{KEY4U_VN}/v1/videos"
     )
     assert captured == {
-        "url": f"{KEY4U_VN}/v1/video/create",
+        "url": f"{KEY4U_VN}/v1/videos",
         "payload": {
             "model": "veo_3_1-fast",
             "prompt": "Product video scene.",
@@ -280,7 +278,7 @@ def test_key4u_veo_normalizes_legacy_videos_endpoint_to_unified_contract(monkeyp
         "method": "POST",
     }
     assert result.raw["provider_poll_url_override"] == (
-        f"{KEY4U_VN}/v1/video/query?id={{task_id}}"
+        f"{KEY4U_VN}/v1/videos/{{task_id}}"
     )
 
 
@@ -301,8 +299,8 @@ def test_key4u_veo_keeps_custom_proxy_videos_endpoint_override(monkeypatch):
     provider = _key4u_provider(env)
     captured = {}
 
-    def fake_multipart(url, fields, **_kwargs):
-        captured.update({"url": url, "fields": fields})
+    def fake_json(url, payload=None, **kwargs):
+        captured.update({"url": url, "payload": payload, "method": kwargs.get("method", "POST")})
         return {
             "ok": True,
             "status_code": 200,
@@ -310,7 +308,12 @@ def test_key4u_veo_keeps_custom_proxy_videos_endpoint_override(monkeypatch):
             "response_shape": {"type": "dict"},
         }
 
-    monkeypatch.setattr(provider, "_open_multipart_form", fake_multipart)
+    monkeypatch.setattr(provider, "_open_json", fake_json)
+    monkeypatch.setattr(
+        provider,
+        "_open_multipart_form",
+        lambda *_args, **_kwargs: pytest.fail("Veo must use JSON wire payload"),
+    )
     result = provider.submit_video_job(
         _request_for_resolution(resolution, seconds=8)
     )
@@ -319,10 +322,10 @@ def test_key4u_veo_keeps_custom_proxy_videos_endpoint_override(monkeypatch):
     assert resolution["provider_endpoint_source"] == "KEY4U_VEO_VIDEO_ENDPOINT"
     assert resolution["provider_submit_url_override"] == f"{proxy}/v1/videos"
     assert captured["url"] == f"{proxy}/v1/videos"
-    assert captured["fields"]["model"] == "veo_3_1-fast"
+    assert captured["payload"]["model"] == "veo_3_1-fast"
 
 
-def test_key4u_veo_derives_current_unified_contract_without_new_env():
+def test_key4u_veo_derives_official_endpoint_without_new_env():
     env = _key4u_env(KEY4U_BASE_URL=KEY4U_VN)
 
     resolution = resolve_product_video_model(
@@ -339,13 +342,13 @@ def test_key4u_veo_derives_current_unified_contract_without_new_env():
     assert resolution["selected_model"] == "veo_3_1-fast"
     assert resolution["provider_interface"] == "key4u_google_veo_exclusive"
     assert resolution["provider_endpoint_source"] == (
-        "derived:key4u_unified_video_create"
+        "derived:key4u_official_veo_videos"
     )
     assert resolution["provider_submit_url_override"] == (
-        f"{KEY4U_VN}/v1/video/create"
+        f"{KEY4U_VN}/v1/videos"
     )
     assert resolution["provider_poll_url_override"] == (
-        f"{KEY4U_VN}/v1/video/query?id={{task_id}}"
+        f"{KEY4U_VN}/v1/videos/{{task_id}}"
     )
     assert resolution["contract_validation_status"] == "ok"
     assert resolution["submit_skipped_due_to_contract"] is False
@@ -368,7 +371,7 @@ def test_key4u_veo_does_not_derive_official_endpoint_without_auth():
     )
 
 
-def test_key4u_veo_derived_unified_contract_uses_json_wire_payload(monkeypatch):
+def test_key4u_veo_derived_official_contract_uses_json_wire_payload(monkeypatch):
     env = _key4u_env(KEY4U_BASE_URL=KEY4U_VN)
     resolution = resolve_product_video_model(
         tier=400,
@@ -403,7 +406,7 @@ def test_key4u_veo_derived_unified_contract_uses_json_wire_payload(monkeypatch):
 
     assert result.ok is True
     assert captured == {
-        "url": f"{KEY4U_VN}/v1/video/create",
+        "url": f"{KEY4U_VN}/v1/videos",
         "payload": {
             "model": "veo_3_1-fast",
             "prompt": "Product video scene.",
@@ -412,7 +415,7 @@ def test_key4u_veo_derived_unified_contract_uses_json_wire_payload(monkeypatch):
         "method": "POST",
     }
     assert result.raw["provider_poll_url_override"] == (
-        f"{KEY4U_VN}/v1/video/query?id={{task_id}}"
+        f"{KEY4U_VN}/v1/videos/{{task_id}}"
     )
     assert result.raw["provider_http_request_sent"] is True
     assert result.raw["submit_http_status"] == 200
@@ -559,20 +562,28 @@ def test_key4u_poll_override_is_used_for_family_task(monkeypatch):
     [
         (
             "task_existing_key4u_scene_2",
-            "veo3.1-fast%3Atask_existing_key4u_scene_2",
+            "task_existing_key4u_scene_2",
+        ),
+        (
+            "veo_3_1-fast:task_existing_key4u_scene_2",
+            "task_existing_key4u_scene_2",
         ),
         (
             "veo3.1-fast:task_existing_key4u_scene_2",
-            "veo3.1-fast%3Atask_existing_key4u_scene_2",
+            "task_existing_key4u_scene_2",
+        ),
+        (
+            "unknown_model:task_existing_key4u_scene_2",
+            "unknown_model%3Atask_existing_key4u_scene_2",
         ),
     ],
 )
-def test_key4u_official_openai_poll_uses_model_qualified_task_id_once(
+def test_key4u_official_openai_poll_uses_raw_task_id_and_dequalifies_historical_prefixed_ids(
     monkeypatch,
     task_id,
     expected_suffix,
 ):
-    env = _key4u_env(KEY4U_VIDEO_MODEL="veo3.1-fast")
+    env = _key4u_env(KEY4U_VIDEO_MODEL="veo_3_1-fast")
     provider = _key4u_provider(env)
     captured = {}
 
@@ -588,7 +599,7 @@ def test_key4u_official_openai_poll_uses_model_qualified_task_id_once(
             "ok": True,
             "status_code": 200,
             "body": {
-                "id": "veo3.1-fast:task_existing_key4u_scene_2",
+                "id": expected_suffix,
                 "status": "pending",
                 "video_url": None,
             },
@@ -608,6 +619,35 @@ def test_key4u_official_openai_poll_uses_model_qualified_task_id_once(
         "payload": None,
         "method": "GET",
     }
+
+
+def test_key4u_official_openai_poll_preserves_unknown_prefixed_task_id_negative_guard(monkeypatch):
+    env = _key4u_env(KEY4U_VIDEO_MODEL="veo_3_1-fast")
+    provider = _key4u_provider(env)
+    captured = {}
+
+    def fake_json(url, payload=None, **kwargs):
+        captured["url"] = url
+        return {
+            "ok": True,
+            "status_code": 200,
+            "body": {
+                "id": "unknown_vendor:task_other_model_123",
+                "status": "pending",
+                "video_url": None,
+            },
+            "response_shape": {"type": "dict"},
+        }
+
+    monkeypatch.setattr(provider, "_open_json", fake_json)
+    result = provider.poll_video_job(
+        "unknown_vendor:task_other_model_123",
+        poll_url_override=f"{KEY4U_VN}/v1/videos/{{task_id}}",
+    )
+    assert result.ok is True
+    assert captured["url"] == f"{KEY4U_VN}/v1/videos/unknown_vendor%3Atask_other_model_123"
+    assert "unknown_vendor" in captured["url"]
+
 
 
 @pytest.mark.parametrize(

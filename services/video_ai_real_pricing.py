@@ -1113,9 +1113,40 @@ def calculate_tts_cost_vnd(text_or_char_count: str | int = 0) -> Decimal:
     return usd * SHOPAIKEY_USD_TO_VND
 
 
-def product_video_provider_usd_to_vnd(provider: str = "") -> Decimal:
+FAL_WAN_V2V_METADATA: dict[str, Any] = {
+    "provider": "fal_video",
+    "model": "fal-ai/wan/v2.2-a14b/video-to-video",
+    "capability": "video_to_video",
+    "usd_per_second_720p": Decimal("0.08"),
+    "duration_tiers": {
+        5: {"frames": 81, "usd": Decimal("0.40")},
+        10: {"frames": 161, "usd": Decimal("0.80")},
+    },
+    "fx_authority": "FAL_USD_TO_VND",
+    "default_fx_allowed": False,
+}
+
+
+def fal_provider_usd_to_vnd(environ: dict[str, str] | None = None) -> Decimal:
+    """Canonical runtime-required FX rate for Fal.ai. Rejects default 3500."""
+    env = environ if environ is not None else os.environ
+    raw = env.get("FAL_USD_TO_VND") if hasattr(env, "get") else None
+    if raw is None or not str(raw).strip():
+        raise ValueError("fal_usd_to_vnd_runtime_required")
+    val_str = str(raw).strip()
+    if not val_str.isdigit():
+        raise ValueError(f"fal_usd_to_vnd_must_be_positive_integer: {val_str}")
+    val = int(val_str)
+    if val <= 0:
+        raise ValueError("fal_usd_to_vnd_must_be_positive")
+    return Decimal(str(val))
+
+
+def product_video_provider_usd_to_vnd(provider: str = "", environ: dict[str, str] | None = None) -> Decimal:
     """Canonical exchange rate for Product Video runtime routing (Key4U=3500, ShopAIKey=3250)."""
     prov = str(provider or "").strip().lower()
+    if "fal" in prov:
+        return fal_provider_usd_to_vnd(environ)
     if "key4u" in prov:
         return KEY4U_USD_TO_VND
     if "shopaikey" in prov:
