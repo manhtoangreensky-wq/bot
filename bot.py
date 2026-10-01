@@ -231406,6 +231406,27 @@ def admin_provider_freeze_keyboard(kind: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
+def admin_overview_text() -> str:
+    start_at, end_at, _label = report_period_bounds("today")
+    payload = admin_report_payload(start_at, end_at, "today")
+    users = payload["users"]
+    money = payload["money"]
+    tools = payload["tools"]
+    return "\n".join([
+        "📊 <b>Báo cáo tổng TOAN AAS</b>",
+        f"🗓️ Kỳ báo cáo: <code>{html.escape(str(start_at))}</code> → <code>{html.escape(str(end_at))}</code>",
+        "",
+        "<b>Người dùng</b>",
+        f"• Tổng: <b>{int(users['total'] or 0)}</b> | Mới: <b>{int(users['new'] or 0)}</b> | Active: <b>{int(users['active'] or 0)}</b>",
+        "",
+        "<b>Doanh thu / Xu</b>",
+        f"• Doanh thu hôm nay: <b>{vnd_text(money['total_amount'])}</b> ({int(money['total_count'] or 0)} giao dịch)",
+        f"• Xu bán: <b>{xu_text(money['xu_sold'])}</b> | Bill chờ duyệt: <b>{int(money['pending_deposits'] or 0)}</b>",
+        "",
+        "<b>Công cụ</b>",
+        f"• Lượt gọi: <b>{int(tools['requested'] or 0)}</b> | Thành công: <b>{int(tools['success'] or 0)}</b> | Lỗi: <b>{int(tools['fail'] or 0)}</b>",
+    ])
+
 ADMIN_MENU_PAGE_HANDLERS = {
     "admin_users": lambda: (admin_module_page_text("users"), admin_module_keyboard("users")),
     "admin_billing": lambda: (admin_module_page_text("billing"), admin_module_keyboard("billing")),
