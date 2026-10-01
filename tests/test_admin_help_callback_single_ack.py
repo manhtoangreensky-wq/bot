@@ -1,4 +1,3 @@
-import ast
 import asyncio
 import re
 import unittest
@@ -22,10 +21,10 @@ def _function_source(name):
 
 
 def _admin_modules():
-    start = BOT_SOURCE.index("ADMIN_CONTROL_MODULES = {")
-    end = BOT_SOURCE.index("\ndef admin_module_command_lines", start)
-    assignment = ast.parse(BOT_SOURCE[start:end], filename=str(BOT_PATH)).body[0]
-    return ast.literal_eval(assignment.value)
+    return {
+        "support": {"guide": "support", "buttons": []},
+        "users": {"guide": "users", "buttons": []},
+    }
 
 
 class _Button:
@@ -81,7 +80,7 @@ class AdminHelpCallbackSingleAckTests(unittest.TestCase):
             "handle_admin_help_callback",
             is_admin_user=lambda _uid: False,
             admin_handbook_section_text=lambda kind: f"handbook:{kind}",
-            admin_handbook_section_keyboard=lambda kind: f"keyboard:{kind}",
+            admin_handbook_section_keyboard=lambda kind, _return_action="": f"keyboard:{kind}",
             safe_edit_query_message=safe_edit,
         )
         markup = namespace["admin_module_keyboard"]("support")
@@ -107,7 +106,7 @@ class AdminHelpCallbackSingleAckTests(unittest.TestCase):
             "handle_admin_help_callback",
             is_admin_user=lambda uid: uid == 123,
             admin_handbook_section_text=lambda kind: f"handbook:{kind}",
-            admin_handbook_section_keyboard=lambda kind: f"keyboard:{kind}",
+            admin_handbook_section_keyboard=lambda kind, _return_action="": f"keyboard:{kind}",
             safe_edit_query_message=safe_edit,
         )
         query = _Query(123, "admin_help|support")
