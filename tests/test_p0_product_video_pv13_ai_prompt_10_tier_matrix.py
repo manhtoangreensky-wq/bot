@@ -30,32 +30,32 @@ from services import video_tail9
 from services import video_uifreeze1
 
 
-CANONICAL_10_TIERS = (400, 500, 600, 200, 300, 700, 800, 1000, 1200, 1500)
+CANONICAL_10_TIERS = (300, 200, 1000, 400, 500, 600, 1200, 800, 1500, 700)
 
 EXPECTED_TIER_PRICES = {
-    400: 80,
-    500: 110,
-    600: 160,
-    200: 200,
-    300: 220,
-    700: 220,
-    800: 370,
-    1000: 370,
-    1200: 1260,
-    1500: 2360,
+    300: 221,
+    200: 259,
+    1000: 337,
+    400: 371,
+    500: 804,
+    600: 804,
+    1200: 1261,
+    800: 2143,
+    1500: 2411,
+    700: 3214,
 }
 
 EXPECTED_TIER_SECONDS = {
+    300: 5,
+    200: 5,
+    1000: 6,
     400: 8,
     500: 5,
     600: 5,
-    200: 5,
-    300: 5,
-    700: 15,
-    800: 10,
-    1000: 6,
     1200: 8,
+    800: 10,
     1500: 10,
+    700: 15,
 }
 
 PUBLIC_RATIOS = ("9:16", "16:9", "1:1", "4:5")
@@ -185,19 +185,19 @@ def test_ten_tier_catalog_completeness_and_uniqueness() -> None:
     )
 
 
-def test_tier_400_visible_and_80_xu_protected() -> None:
-    """Tier 400 must remain strictly visible with unit_xu == 80 and 8 seconds."""
+def test_tier_400_visible_and_canonical_pricing_protected() -> None:
+    """Tier 400 must remain strictly visible with canonical unit_xu == 371 and 8 seconds."""
     catalog = video_ai_real_pricing.public_quality_catalog()
     tier_400 = next((row for row in catalog if row["tier_id"] == 400), None)
     assert tier_400 is not None, "Tier 400 must be visible in public catalog"
-    assert tier_400["unit_xu"] == 80, f"Tier 400 unit_xu must be 80, got {tier_400['unit_xu']}"
+    assert tier_400["unit_xu"] == 371, f"Tier 400 unit_xu must be 371, got {tier_400['unit_xu']}"
     assert tier_400["seconds"] == 8, f"Tier 400 seconds must be 8, got {tier_400['seconds']}"
 
-    two_scene_quote = video_ai_real_pricing.video_multiscene_price(80, scene_count=2)
-    assert two_scene_quote["subtotal_xu"] == 160
+    two_scene_quote = video_ai_real_pricing.video_multiscene_price(371, scene_count=2)
+    assert two_scene_quote["subtotal_xu"] == 742
     assert two_scene_quote["discount_percent"] == 10
-    assert two_scene_quote["discount_xu"] == 16
-    assert two_scene_quote["total_xu"] == 144
+    assert two_scene_quote["discount_xu"] == 74
+    assert two_scene_quote["total_xu"] == 668
 
 
 @pytest.mark.parametrize("tier_id", CANONICAL_10_TIERS)
@@ -216,18 +216,18 @@ def test_all_ten_tiers_prices_and_seconds_match_canonical_spec(tier_id: int) -> 
 
 
 def test_ten_tier_pricing_aggregate_truth() -> None:
-    """Canonical one-scene total across 10 tiers is 5350 Xu; 2-scene aggregate is 9630 Xu.
+    """Canonical one-scene total across 10 tiers is 11825 Xu; 2-scene aggregate is 21285 Xu.
 
     The 2-scene aggregate is calculated from source pricing (video_multiscene_price),
     not hardcoded prose.
     """
-    assert sum(EXPECTED_TIER_PRICES.values()) == 5350
+    assert sum(EXPECTED_TIER_PRICES.values()) == 11825
 
     two_scene_aggregate = sum(
         video_ai_real_pricing.video_multiscene_price(EXPECTED_TIER_PRICES[tier_id], scene_count=2)["total_xu"]
         for tier_id in CANONICAL_10_TIERS
     )
-    assert two_scene_aggregate == 9630
+    assert two_scene_aggregate == 21285
 
 
 # ==============================================================================

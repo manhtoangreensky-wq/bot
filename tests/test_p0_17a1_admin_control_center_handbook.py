@@ -29,11 +29,26 @@ class FakeQuery:
 
 def test_admin_main_menu_compact():
     text = bot.menu_text_admin()
-    labels = [label for row in _labels(bot.menu_nav_keyboard("admin", True)) for label in row]
+    rows = _labels(bot.menu_nav_keyboard("admin", True))
+    labels = [label for row in rows for label in row]
 
     assert "📊 <b>Quản trị TOAN AAS</b>" in text
     assert "Đây là bảng điều khiển nội bộ" in text
-    assert len(labels) <= 12
+    assert len(labels) == 12
+    assert "📘 Hướng dẫn Admin" not in labels
+    assert ["📣 Thông báo khách hàng", "🏠 Menu chính"] in rows
+    user_module_callbacks = [
+        button.callback_data
+        for row in bot.admin_module_keyboard("users").inline_keyboard
+        for button in row
+    ]
+    assert "admin_help|users" in user_module_callbacks
+    section_callbacks = [
+        button.callback_data
+        for row in bot.admin_handbook_section_keyboard("users").inline_keyboard
+        for button in row
+    ]
+    assert "menu|admin_handbook" in section_callbacks
     assert "/add" not in text
     assert "/pending" not in text
     assert "/queue_status" not in text
@@ -231,7 +246,7 @@ def test_admin_support_page_has_ticket_and_notes():
     assert "CSKH / Góp ý / Ticket" in text
     assert "/admin_gopy" in text
     assert "🎧 Ticket admin" in labels
-    assert "📌 Admin notes" in labels
+    assert "📌 Hướng dẫn hỗ trợ" in labels
 
 
 def test_admin_handbook_menu_exists():
