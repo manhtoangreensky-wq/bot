@@ -62,6 +62,7 @@ class MemoryPendingResetOnStartTests(unittest.TestCase):
             "memory_search_prompt_text": lambda _lang: "Search memory",
             "memory_main_keyboard": lambda _lang: "memory-keyboard",
             "clear_media_creator_pending_states": lambda _uid: False,
+            "clear_doc_tool_pending": lambda _uid: None,
             "user_ui_lang": lambda _uid: "vi",
             "ui_text": lambda *_args: "Pending input canceled",
             "log_command_received": lambda *_args: None,

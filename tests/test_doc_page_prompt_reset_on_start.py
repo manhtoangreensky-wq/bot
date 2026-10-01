@@ -57,6 +57,7 @@ class DocPagePromptResetOnStartTests(unittest.TestCase):
             "doc_tool_confirm_text": lambda *_args: "document-confirm",
             "doc_tool_confirm_keyboard": lambda *_args: "confirm-keyboard",
             "clear_media_creator_pending_states": lambda _uid: False,
+            "clear_memory_guided_pending": lambda _uid: None,
             "user_ui_lang": lambda _uid: "vi",
             "ui_text": lambda *_args: "Pending input canceled",
             "log_command_received": lambda *_args: None,
