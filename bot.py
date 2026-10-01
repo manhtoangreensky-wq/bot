@@ -44440,6 +44440,7 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
     uid = update.effective_user.id
     try:
         if action in {"back", "menu"}:
+            clear_broadcast_lite_pending(uid)
             return await _broadcast_lite_edit(query, broadcast_lite_admin_menu_text(), broadcast_lite_admin_menu_keyboard())
 
         if action == "compose":
@@ -135857,8 +135858,11 @@ async def cmd_linkweb(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_command_received("start", update)
     uid = update.effective_user.id
+    clear_internal_archive_pending(uid)
     user_existed_before = user_exists(uid)
+    clear_memory_guided_pending(uid)
     get_user(uid, update.effective_user.first_name)
+    clear_doc_tool_pending(uid)
     record_usage_event(
         uid,
         username=update.effective_user.username or update.effective_user.first_name or "",
@@ -135867,6 +135871,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         command="/start",
         status="ok",
     )
+    clear_storage_addon_pending(uid)
     if context.args and (context.args[0].startswith("login_") or context.args[0].startswith("link_") or context.args[0].startswith("web_")):
         deep_arg = context.args[0]
         code = deep_arg.split("_", 1)[1].strip()
@@ -135895,8 +135900,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         elif ref_result.get("reason") == "self_ref":
             await update.message.reply_text("⚠️ Bạn không thể tự giới thiệu chính mình.")
-    pending_notice = clear_pending_start_notice(uid)
     user_is_admin = is_admin_user(uid)
+    if user_is_admin:
+        clear_broadcast_lite_pending(uid)
+    pending_notice = clear_pending_start_notice(uid)
     if not has_user_language(uid):
         if pending_notice:
             await update.message.reply_text(pending_notice.strip())
@@ -140243,12 +140250,22 @@ async def handle_admin_help_callback(update: Update, context: ContextTypes.DEFAU
     await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("⛔ Khu vực này chỉ dành cho Admin.", show_alert=True)
-    kind = (query.data.split("|", 1)[1] if "|" in query.data else "payment").strip()
+    parts = str(query.data or "").split("|")
+    kind = parts[1].strip() if len(parts) > 1 else "payment"
+    return_action = parts[2].strip() if len(parts) > 2 else ""
+    if kind not in {"users", "xu"} or return_action != "admin_users":
+        return_action = ""
     return await safe_edit_query_message(
         query,
         admin_handbook_section_text(kind),
-        reply_markup=admin_handbook_section_keyboard(kind),
+        reply_markup=admin_handbook_section_keyboard(kind, return_action),
     )
+
+async def handle_admin_gopy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    inbox_update = SimpleNamespace(effective_user=query.from_user, message=query.message)
+    return await cmd_admin_gopy(inbox_update, SimpleNamespace(args=[]))
 
 
 # ==============================================================================
@@ -141195,7 +141212,11 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
     action = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else "main"
     uid = query.from_user.id
     lang = get_user_language(uid) or "vi"
+    if action == "main":
+        clear_video_downloader_pending(uid)
     if not FREE_HUB_ENABLED:
+        if action == "main":
+            clear_free_hub_pending(uid)
         return await safe_edit_or_send(
             query,
             "🛠 Công cụ miễn phí đang bảo trì. TOAN AAS chưa gọi API và chưa trừ Xu.",
@@ -230251,7 +230272,7 @@ def system_help_text(kind: str) -> str:
     pages = {
         "runtime": (
             "🧬 <b>Runtime</b>\n\n"
-            "Dùng <code>/runtime</code> để kiểm tra build, commit, Railway runtime và startup warning. "
+            "Dùng <code>/runtime</code> để kiểm tra build, commit, trạng thái runtime và cảnh báo lúc khởi động. "
             "Trang menu này chỉ hướng dẫn, không gọi healthcheck ngoài."
         ),
         "data_status": (
@@ -230586,8 +230607,7 @@ def admin_control_center_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🛡 Bảo mật / DB", callback_data="menu|admin_security_db"), InlineKeyboardButton("🖥 Hệ thống", callback_data="menu|admin_system_ops")],
         [InlineKeyboardButton("🤖 Provider / Worker", callback_data="menu|admin_provider_worker"), InlineKeyboardButton("💰 Tài chính", callback_data="menu|admin_finance")],
         [InlineKeyboardButton("🚀 Marketing / Affiliate", callback_data="admin_growth|main"), InlineKeyboardButton("🎧 CSKH / Góp ý", callback_data="menu|admin_support")],
-        [InlineKeyboardButton("📘 Hướng dẫn Admin", callback_data="menu|admin_handbook"), InlineKeyboardButton("📣 Thông báo khách hàng", callback_data="menu|admin_broadcast_lite")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("📣 Thông báo khách hàng", callback_data="menu|admin_broadcast_lite"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ]
     return InlineKeyboardMarkup(rows)
 
@@ -230598,9 +230618,9 @@ ADMIN_CONTROL_MODULES = {
         "purpose": "Dùng để xem hồ sơ user, số dư Xu, lịch sử giao dịch và hỗ trợ cộng/trừ Xu thủ công khi cần.",
         "when": "Dùng khi CSKH cần tra user, kiểm tra ledger, chỉnh hạng hoặc hỗ trợ cộng/trừ Xu có lý do rõ.",
         "buttons": [
-            [("🔎 Tra user", "admin_help|users"), ("📒 Ledger user", "admin_help|users")],
-            [("➕ Cộng Xu", "admin_help|xu"), ("➖ Trừ Xu", "admin_help|xu")],
-            [("⭐ Set VIP/Tier", "admin_help|users")],
+            [("📘 Cách tra user", "admin_help|users|admin_users"), ("📘 Cách xem ledger", "admin_help|users|admin_users")],
+            [("📘 Cách cộng Xu", "admin_help|xu|admin_users"), ("📘 Cách trừ Xu", "admin_help|xu|admin_users")],
+            [("📘 Cách set VIP/Tier", "admin_help|users|admin_users")],
         ],
         "commands": [
             ("/profile_user <ID>", "xem hồ sơ user"),
@@ -230680,7 +230700,7 @@ ADMIN_CONTROL_MODULES = {
         "purpose": "Dùng để kiểm tra hàng chờ job, đóng/mở công cụ, hoàn Xu/lượt khi job lỗi, và xử lý lock job.",
         "when": "Dùng khi provider lỗi, job kẹt, cần bảo trì, cần hoàn Xu/lượt hoặc cần kiểm tra queue trước khi mở lại public.",
         "buttons": [
-            [("📊 Queue status", "menu|freeze_queue_status"), ("🔎 Job status", "admin_help|refund")],
+            [("📊 Queue status", "menu|freeze_queue_status"), ("Hướng dẫn hoàn Xu khi job lỗi", "admin_help|refund")],
             [("🧊 Freeze tools", "menu|freeze_queue_help"), ("🔓 Unfreeze tools", "menu|admin_confirm_unfreeze_tool")],
             [("🎬 Freeze video", "menu|admin_confirm_freeze_video"), ("💸 Refund job", "menu|admin_confirm_refund_job")],
         ],
@@ -230738,8 +230758,8 @@ ADMIN_CONTROL_MODULES = {
         "purpose": "Dùng để kiểm tra runtime, deployment, webhook Telegram, provider tổng quan, cleanup file tạm và trạng thái sẵn sàng vận hành.",
         "when": "Dùng sau deploy, khi nghi ngờ bot instance cũ giữ webhook, khi cần cleanup hoặc khi kiểm tra dashboard hệ thống.",
         "buttons": [
-            [("🧬 Runtime", "menu|system_runtime_help"), ("📡 Telegram status", "admin_help|runtime")],
-            [("🔁 Telegram takeover", "admin_help|runtime"), ("🧹 Cleanup temp", "admin_help|runtime")],
+            [("🧬 Runtime", "menu|system_runtime_help"), ("📘 Hướng dẫn kiểm tra Telegram", "admin_help|runtime")],
+            [("📘 Hướng dẫn nhận quyền webhook Telegram", "admin_help|runtime"), ("📘 Hướng dẫn dọn file tạm", "admin_help|runtime")],
             [("📊 Dashboard", "menu|admin_overview")],
         ],
         "commands": [
@@ -230851,8 +230871,8 @@ ADMIN_CONTROL_MODULES = {
         "purpose": "Dùng để xem góp ý, ticket, phản hồi user, ghi chú vận hành và theo dõi việc cần xử lý.",
         "when": "Dùng khi có user cần hỗ trợ, cần xem ticket, hoặc cần ghi chú vận hành sau ca trực.",
         "buttons": [
-            [("🎧 Ticket admin", "ticket|admin"), ("📝 Góp ý admin", "admin_help|support")],
-            [("📌 Admin notes", "admin_help|support"), ("📣 Marketing tự động", "marketing|start")],
+            [("🎧 Ticket admin", "ticket|admin"), ("📝 Góp ý admin", "admin_gopy|inbox")],
+            [("📌 Hướng dẫn hỗ trợ", "admin_help|support"), ("📣 Marketing tự động", "marketing|start")],
         ],
         "commands": [
             ("/admin_gopy", "xem/gửi ghi chú góp ý admin"),
@@ -230902,13 +230922,14 @@ def admin_module_page_text(module_key: str) -> str:
 def admin_module_keyboard(module_key: str) -> InlineKeyboardMarkup:
     module = ADMIN_CONTROL_MODULES.get(module_key) or ADMIN_CONTROL_MODULES["users"]
     action = f"admin_{module_key}"
+    help_context = "|admin_users" if module_key == "users" else ""
     rows = [
         [InlineKeyboardButton(label, callback_data=callback) for label, callback in row]
         for row in module.get("buttons") or []
     ]
     rows.append([
         InlineKeyboardButton("🔄 Làm mới", callback_data=f"menu|{action}"),
-        InlineKeyboardButton("📘 Hướng dẫn", callback_data=f"admin_help|{module.get('guide') or module_key}"),
+        InlineKeyboardButton("📘 Hướng dẫn", callback_data=f"admin_help|{module.get('guide') or module_key}{help_context}"),
     ])
     rows.append([
         InlineKeyboardButton("⬅️ Quản trị", callback_data="menu|admin"),
@@ -231054,7 +231075,12 @@ def admin_handbook_section_text(kind: str) -> str:
     body = pages.get(clean) or pages["payment"]
     return f"{title_map.get(clean, title_map['payment'])}\n\n{body}"
 
-def admin_handbook_section_keyboard(kind: str = "") -> InlineKeyboardMarkup:
+def admin_handbook_section_keyboard(kind: str = "", return_action: str = "") -> InlineKeyboardMarkup:
+    if kind in {"users", "xu"} and return_action == "admin_users":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("📘 Hướng dẫn Admin", callback_data="menu|admin_handbook"), InlineKeyboardButton("⬅️ User / Xu", callback_data="menu|admin_users")],
+            [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📘 Hướng dẫn Admin", callback_data="menu|admin_handbook"), InlineKeyboardButton("⬅️ Quản trị", callback_data="menu|admin")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
@@ -231404,6 +231430,27 @@ def admin_provider_freeze_keyboard(kind: str) -> InlineKeyboardMarkup:
         first_row,
         [InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|admin_provider"), InlineKeyboardButton("⚙️ Admin", callback_data="menu|admin")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def admin_overview_text() -> str:
+    start_at, end_at, _label = report_period_bounds("today")
+    payload = admin_report_payload(start_at, end_at, "today")
+    users = payload["users"]
+    money = payload["money"]
+    tools = payload["tools"]
+    return "\n".join([
+        "📊 <b>Báo cáo tổng TOAN AAS</b>",
+        f"🗓️ Kỳ báo cáo: <code>{html.escape(str(start_at))}</code> → <code>{html.escape(str(end_at))}</code>",
+        "",
+        "<b>Người dùng</b>",
+        f"• Tổng: <b>{int(users['total'] or 0)}</b> | Mới: <b>{int(users['new'] or 0)}</b> | Active: <b>{int(users['active'] or 0)}</b>",
+        "",
+        "<b>Doanh thu / Xu</b>",
+        f"• Doanh thu hôm nay: <b>{vnd_text(money['total_amount'])}</b> ({int(money['total_count'] or 0)} giao dịch)",
+        f"• Xu bán: <b>{xu_text(money['xu_sold'])}</b> | Bill chờ duyệt: <b>{int(money['pending_deposits'] or 0)}</b>",
+        "",
+        "<b>Công cụ</b>",
+        f"• Lượt gọi: <b>{int(tools['requested'] or 0)}</b> | Thành công: <b>{int(tools['success'] or 0)}</b> | Lỗi: <b>{int(tools['fail'] or 0)}</b>",
     ])
 
 ADMIN_MENU_PAGE_HANDLERS = {
@@ -232359,7 +232406,7 @@ def internal_archive_upload_prompt_text(department: str, document_type: str) -> 
         "Bạn hãy gửi file muốn lưu. Nên gửi từng file một để tránh lỗi Telegram."
     )
 
-def internal_archive_type_keyboard(department: str) -> InlineKeyboardMarkup:
+def internal_archive_type_keyboard(department: str, back_to_preview: bool = False) -> InlineKeyboardMarkup:
     values = INTERNAL_DOC_TYPES.get(department, ())
     buttons = [
         (document_type_label(value), f"archive|type|{value}")
@@ -232371,7 +232418,10 @@ def internal_archive_type_keyboard(department: str) -> InlineKeyboardMarkup:
         for index in range(0, len(buttons), 2)
     ]
     rows.append([
-        InlineKeyboardButton("⬅️ Phòng ban", callback_data="archive|back_department"),
+        InlineKeyboardButton(
+            "⬅️ Xem lại hồ sơ" if back_to_preview else "⬅️ Phòng ban",
+            callback_data="archive|back_department",
+        ),
         InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
     ])
     return InlineKeyboardMarkup(rows)
@@ -232685,7 +232735,11 @@ async def handle_internal_archive_callback(update: Update, context: ContextTypes
             return await safe_edit_query_message(query, internal_archive_menu_text(), reply_markup=internal_archive_menu_keyboard())
         fields = {key: value for key, value in state.items() if key not in {"pending_action", "step", "created_at_ts"}}
         set_internal_archive_pending(uid, "choosing_type", **fields)
-        return await safe_edit_query_message(query, internal_archive_type_text(department), reply_markup=internal_archive_type_keyboard(department))
+        return await safe_edit_query_message(
+            query,
+            internal_archive_type_text(department),
+            reply_markup=internal_archive_type_keyboard(department, back_to_preview=bool(state.get("file_info"))),
+        )
     if action == "type" and len(parts) > 2:
         department = state.get("department")
         document_type = parts[2]
@@ -272169,6 +272223,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_remote_worker_canary_callback, pattern=r"^remote_worker_canary_(create|status)(\||$)"))
     tg_app.add_handler(CallbackQueryHandler(handle_remote_worker_prod_canary_callback, pattern=r"^remote_worker_prod_canary_(create|status)(\||$)"))
     tg_app.add_handler(CallbackQueryHandler(handle_knowledge_vault_callback, pattern=r"^vault\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_admin_gopy_callback, pattern=r"^admin_gopy\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_admin_help_callback, pattern=r"^admin_help\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_admin_growth_callback, pattern=r"^admin_growth\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_broadcast_lite_callback, pattern=r"^broadcast_lite\|"))
@@ -278965,6 +279020,56 @@ async def api_internal_admin_wallet_compensate(request: Request):
         idempotency_key=idempotency_key,
         reason=reason,
         actor_id=actor_id,
+        db_path=DB_FILE,
+    )
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.post("/internal/v1/web-product-video/settle")
+async def api_internal_web_product_video_settle(request: Request):
+    """Canonical Bot Core settlement endpoint for Web Product Video jobs."""
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+        if not isinstance(payload, dict):
+            raise ValueError("Payload must be an object")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.web_product_video_settlement_service import execute_web_product_video_settlement
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
+    payload_actor = str(payload.get("actor_id") or "").strip()
+    actor_id = header_actor or payload_actor
+
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path="/internal/v1/web-product-video/settle",
+        body_bytes=raw_body,
+        actor_id=actor_id,
+    )
+    if not auth_ok:
+        raise HTTPException(
+            status_code=auth_status,
+            detail={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    ok, result, status_code = execute_web_product_video_settlement(
+        web_job_id=str(payload.get("web_job_id") or "").strip(),
+        web_request_id=str(payload.get("web_request_id") or "").strip(),
+        canonical_user_id=payload.get("canonical_user_id"),
+        product_key=str(payload.get("product_key") or "").strip(),
+        tier_id=payload.get("tier_id"),
+        scene_count=payload.get("scene_count", 1),
+        output_url=str(payload.get("output_url") or "").strip(),
+        validated_output_metadata=payload.get("validated_output_metadata"),
+        caller_amount_xu=payload.get("amount_xu") if "amount_xu" in payload else payload.get("amount"),
+        idempotency_key=str(payload.get("idempotency_key") or "").strip() or None,
         db_path=DB_FILE,
     )
     return JSONResponse(status_code=status_code, content=result)

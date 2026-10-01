@@ -6748,6 +6748,8 @@ def _run_provider_generation_impl(
             "provider_task_id_masked": mask_provider_task_id(submit.provider_task_id),
             "provider_status": "downloaded",
             "result_url_present": True,
+            "result_url": result_url_value,
+            "file_url": result_url_value,
             "download_status": "downloaded",
             "output_path": artifact.local_path,
             "local_path": artifact.local_path,

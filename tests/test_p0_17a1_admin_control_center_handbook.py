@@ -29,11 +29,26 @@ class FakeQuery:
 
 def test_admin_main_menu_compact():
     text = bot.menu_text_admin()
-    labels = [label for row in _labels(bot.menu_nav_keyboard("admin", True)) for label in row]
+    rows = _labels(bot.menu_nav_keyboard("admin", True))
+    labels = [label for row in rows for label in row]
 
     assert "📊 <b>Quản trị TOAN AAS</b>" in text
     assert "Đây là bảng điều khiển nội bộ" in text
-    assert len(labels) <= 12
+    assert len(labels) == 12
+    assert "📘 Hướng dẫn Admin" not in labels
+    assert ["📣 Thông báo khách hàng", "🏠 Menu chính"] in rows
+    user_module_callbacks = [
+        button.callback_data
+        for row in bot.admin_module_keyboard("users").inline_keyboard
+        for button in row
+    ]
+    assert "admin_help|users" in user_module_callbacks
+    section_callbacks = [
+        button.callback_data
+        for row in bot.admin_handbook_section_keyboard("users").inline_keyboard
+        for button in row
+    ]
+    assert "menu|admin_handbook" in section_callbacks
     assert "/add" not in text
     assert "/pending" not in text
     assert "/queue_status" not in text
@@ -92,10 +107,40 @@ def test_admin_user_wallet_page_has_purpose_and_commands():
 
 
 def test_admin_user_wallet_buttons_present():
-    labels = [label for row in _labels(bot.admin_module_keyboard("users")) for label in row]
+    markup = bot.admin_module_keyboard("users")
+    callbacks = {
+        button.text: button.callback_data
+        for row in markup.inline_keyboard
+        for button in row
+    }
 
-    for label in ["🔎 Tra user", "📒 Ledger user", "➕ Cộng Xu", "➖ Trừ Xu", "⭐ Set VIP/Tier", "📘 Hướng dẫn"]:
-        assert label in labels
+    assert callbacks["📘 Cách tra user"] == "admin_help|users|admin_users"
+    assert callbacks["📘 Cách xem ledger"] == "admin_help|users|admin_users"
+    assert callbacks["📘 Cách cộng Xu"] == "admin_help|xu|admin_users"
+    assert callbacks["📘 Cách trừ Xu"] == "admin_help|xu|admin_users"
+    assert callbacks["📘 Cách set VIP/Tier"] == "admin_help|users|admin_users"
+    assert callbacks["📘 Hướng dẫn"] == "admin_help|users|admin_users"
+
+
+def test_admin_user_guide_callback_returns_to_user_module(monkeypatch):
+    monkeypatch.setattr(bot, "is_admin_user", lambda user_id: user_id == 123)
+    query = FakeQuery(123, "admin_help|users|admin_users")
+
+    asyncio.run(bot.handle_admin_help_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+
+    assert "📘 User / Xu" in query.edits[0][0]
+    callbacks = {callback for row in _callbacks(query.edits[0][1]["reply_markup"]) for callback in row}
+    assert {"menu|admin_handbook", "menu|admin_users", "menu|main"} <= callbacks
+
+
+def test_legacy_admin_help_keeps_handbook_and_admin_navigation(monkeypatch):
+    monkeypatch.setattr(bot, "is_admin_user", lambda user_id: user_id == 123)
+    query = FakeQuery(123, "admin_help|support")
+
+    asyncio.run(bot.handle_admin_help_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+
+    callbacks = {callback for row in _callbacks(query.edits[0][1]["reply_markup"]) for callback in row}
+    assert {"menu|admin_handbook", "menu|admin", "menu|main"} <= callbacks
 
 
 def test_admin_billing_page_has_payos_risk_buttons():
@@ -132,6 +177,25 @@ def test_admin_queue_freeze_page_has_refund_and_lock_guidance():
     assert "/refund_job &lt;job_id&gt;" in text
     assert "/clear_job_lock &lt;job_id&gt;" in text
     assert "Freeze là công cụ chống cháy" in text
+
+
+def test_admin_queue_refund_guide_button_label_and_callback():
+    buttons = [
+        button
+        for row in bot.admin_module_keyboard("queue").inline_keyboard
+        for button in row
+    ]
+    refund_buttons = [button for button in buttons if button.callback_data == "admin_help|refund"]
+
+    assert len(refund_buttons) == 1
+    assert refund_buttons[0].text == "Hướng dẫn hoàn Xu khi job lỗi"
+
+    query = FakeQuery(bot.ADMIN_ID, "admin_help|refund")
+    asyncio.run(bot.handle_admin_help_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+
+    assert "Quy trình hoàn Xu" in query.edits[-1][0]
+    assert "/job_status &lt;job_id&gt;" in query.edits[-1][0]
+    assert "/refund_job &lt;job_id&gt;" in query.edits[-1][0]
 
 
 def test_admin_security_db_page_has_c4_buttons():
@@ -201,7 +265,7 @@ def test_admin_support_page_has_ticket_and_notes():
     assert "CSKH / Góp ý / Ticket" in text
     assert "/admin_gopy" in text
     assert "🎧 Ticket admin" in labels
-    assert "📌 Admin notes" in labels
+    assert "📌 Hướng dẫn hỗ trợ" in labels
 
 
 def test_admin_handbook_menu_exists():
