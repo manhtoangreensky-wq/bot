@@ -4407,7 +4407,9 @@ def _confirm_product_video_invoice_atomic(
             conn.rollback()
         except Exception:
             pass
-        return {
+        from services.video_real_render_connector import RealVideoRenderError
+        diagnostics = getattr(exc, "diagnostics", None)
+        out = {
             "ok": False,
             "reason": "dispatch_outbox_transaction_failed",
             "public_message": "Hệ thống chưa thể bắt đầu tạo video lúc này. TOAN AAS chưa trừ Xu. Anh/chị vui lòng thử lại sau.",
@@ -4417,6 +4419,11 @@ def _confirm_product_video_invoice_atomic(
             "charge": 0,
             "charged_xu": 0,
         }
+        if isinstance(exc, RealVideoRenderError):
+            out["blocker"] = str(getattr(exc, "args", [""])[0])
+            if diagnostics:
+                out["diagnostics"] = diagnostics
+        return out
 
 
 def confirm_video_project_invoice(
@@ -4932,6 +4939,9 @@ def _product_video_requested_product_type(
         invoice.get("public_product_type"),
         invoice.get("video_product_type"),
         invoice.get("product_type"),
+        project.get("product_type"),
+        project.get("video_product_type"),
+        project.get("public_product_type"),
         project.get("profile_id"),
     ):
         token = str(value or "").strip()
@@ -5252,6 +5262,19 @@ def build_product_video_confirm_kickoff_payload(
         or str(engine_contract.get("engine_adapter") or "").strip().lower() == "storyboard_scene_image_video_engine"
     )
     if is_storyboard_job:
+        storyboard_provider = str(
+            invoice.get("selected_provider")
+            or asset_pack.get("selected_provider")
+            or (job or {}).get("selected_provider")
+            or model_metadata.get("selected_provider")
+            or (chain[0] if chain else "")
+            or ""
+        ).strip().lower()
+        if storyboard_provider in {"shopai", "shopaikey", "shopaikey_video"}:
+            storyboard_provider = "shopaikey_video"
+        elif storyboard_provider in {"key4u", "k4u", "key4u_video"}:
+            storyboard_provider = "key4u_video"
+
         explicit_storyboard_model = str(
             invoice.get("pinned_wire_model")
             or invoice.get("selected_model")
@@ -5259,33 +5282,42 @@ def build_product_video_confirm_kickoff_payload(
             or asset_pack.get("pinned_wire_model")
             or asset_pack.get("selected_model")
             or asset_pack.get("model")
+            or (job or {}).get("selected_model")
+            or (job or {}).get("model")
             or ""
         ).strip()
-        if explicit_storyboard_model:
-            from services.video_real_render_connector import (
-                STORYBOARD_PROVEN_I2V_MODELS,
-                STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER,
-                RealVideoRenderError,
-            )
-            if explicit_storyboard_model not in STORYBOARD_PROVEN_I2V_MODELS:
-                raise RealVideoRenderError(
-                    STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER,
-                    diagnostics={
-                        "ok": False,
-                        "provider": "key4u_video",
-                        "model": explicit_storyboard_model,
-                        "blocker": STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER,
-                        "allowed_models": sorted(STORYBOARD_PROVEN_I2V_MODELS),
-                        "no_charge": True,
-                    },
-                )
-            model_metadata["selected_model"] = explicit_storyboard_model
-            model_metadata["pinned_wire_model"] = explicit_storyboard_model
-            model_metadata["model"] = explicit_storyboard_model
-            if "provider_model_map" in model_metadata and isinstance(model_metadata["provider_model_map"], dict):
-                model_metadata["provider_model_map"]["key4u_video"] = explicit_storyboard_model
-            else:
-                model_metadata["provider_model_map"] = {"key4u_video": explicit_storyboard_model}
+
+        from services.video_real_render_connector import (
+            STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER,
+            _resolve_storyboard_i2v_model,
+        )
+
+        if explicit_storyboard_model and not storyboard_provider:
+            if explicit_storyboard_model in STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER.get("shopaikey_video", set()):
+                storyboard_provider = "shopaikey_video"
+            elif explicit_storyboard_model in STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER.get("key4u_video", set()):
+                storyboard_provider = "key4u_video"
+
+        if not storyboard_provider:
+            storyboard_provider = "shopaikey_video"
+
+        resolved_model = _resolve_storyboard_i2v_model(
+            job,
+            asset_pack=asset_pack,
+            invoice=invoice,
+            provider=storyboard_provider,
+        )
+        family = "google_veo" if storyboard_provider == "shopaikey_video" else "kling"
+        model_metadata["selected_provider"] = storyboard_provider
+        model_metadata["selected_model"] = resolved_model
+        model_metadata["pinned_wire_model"] = resolved_model
+        model_metadata["model"] = resolved_model
+        model_metadata["selected_family"] = family
+        if "provider_model_map" in model_metadata and isinstance(model_metadata["provider_model_map"], dict):
+            model_metadata["provider_model_map"][storyboard_provider] = resolved_model
+        else:
+            model_metadata["provider_model_map"] = {storyboard_provider: resolved_model}
+        chain = [storyboard_provider]
     if scene_tasks:
         for task in scene_tasks:
             task.update(
@@ -5309,15 +5341,18 @@ def build_product_video_confirm_kickoff_payload(
                 }
             )
     next_poll_at = now_text(current_dt + timedelta(seconds=25))
-    preconfirm_candidate_keys = [
-        str(item or "").strip()
-        for item in (
-            eligibility_snapshot.get("eligible_provider_keys")
-            or asset_pack.get("preconfirm_candidate_keys")
-            or chain
-        )
-        if str(item or "").strip()
-    ]
+    if is_storyboard_job:
+        preconfirm_candidate_keys = [storyboard_provider]
+    else:
+        preconfirm_candidate_keys = [
+            str(item or "").strip()
+            for item in (
+                eligibility_snapshot.get("eligible_provider_keys")
+                or asset_pack.get("preconfirm_candidate_keys")
+                or chain
+            )
+            if str(item or "").strip()
+        ]
     provider_chain_resolved = bool(chain and preconfirm_candidate_keys and model_resolution.get("ok"))
     dispatch_blocker = ""
     if not chain:
@@ -5436,11 +5471,35 @@ def build_product_video_confirm_kickoff_payload(
         "multi_scene_health_gate": dict(multi_scene_health_gate) if isinstance(multi_scene_health_gate, dict) else {},
         "primary_selected_due_to_health": str(asset_pack.get("primary_selected_due_to_health") or invoice.get("primary_selected_due_to_health") or ""),
         "provider_degraded_reason": str(asset_pack.get("provider_degraded_reason") or invoice.get("provider_degraded_reason") or ""),
-        "effective_primary_for_low_basic": str(asset_pack.get("effective_primary_for_low_basic") or invoice.get("effective_primary_for_low_basic") or (chain[0] if chain else "")),
+        "effective_primary_for_low_basic": str(
+            asset_pack.get("effective_primary_for_low_basic")
+            or invoice.get("effective_primary_for_low_basic")
+            or (storyboard_provider if is_storyboard_job else (chain[0] if chain else ""))
+        ),
         **model_metadata,
-        "model": str(model_metadata.get("selected_model") or invoice.get("model") or (model_metadata.get("provider_model_map") or {}).get("key4u_video") or "kling-v3"),
-        "selected_model": str(model_metadata.get("selected_model") or invoice.get("selected_model") or (model_metadata.get("provider_model_map") or {}).get("key4u_video") or "kling-v3"),
-        "pinned_wire_model": str(model_metadata.get("selected_model") or invoice.get("pinned_wire_model") or "kling-v3"),
+        "model": str(
+            model_metadata.get("selected_model")
+            or model_metadata.get("model")
+            or invoice.get("selected_model")
+            or invoice.get("model")
+            or (model_metadata.get("provider_model_map") or {}).get(str(model_metadata.get("selected_provider") or ""))
+            or ""
+        ),
+        "selected_model": str(
+            model_metadata.get("selected_model")
+            or model_metadata.get("model")
+            or invoice.get("selected_model")
+            or invoice.get("model")
+            or (model_metadata.get("provider_model_map") or {}).get(str(model_metadata.get("selected_provider") or ""))
+            or ""
+        ),
+        "pinned_wire_model": str(
+            model_metadata.get("pinned_wire_model")
+            or model_metadata.get("selected_model")
+            or invoice.get("pinned_wire_model")
+            or invoice.get("selected_model")
+            or ""
+        ),
         "public_confirm_kickoff_attempted": True,
         "public_confirm_kickoff_success": provider_chain_resolved,
         "worker_dispatch_attempted": True,
