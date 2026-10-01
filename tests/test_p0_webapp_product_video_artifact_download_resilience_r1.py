@@ -10,7 +10,9 @@ Verifies:
 - Key4U behavior unchanged.
 """
 
+import http.client
 import io
+import os
 import socket
 import urllib.error
 import urllib.request
@@ -382,3 +384,226 @@ def test_key4u_behavior_unchanged(tmp_path, monkeypatch, mock_probe):
     assert artifact.diagnostics["download_final_url_host"] == "local_file"
     assert Path(artifact.local_path).name == "key4u_video_key4u_job.mp4"
     assert Path(artifact.local_path).exists()
+
+
+def test_remote_disconnected_triggers_transient_retry_and_succeeds(tmp_path, monkeypatch, mock_probe):
+    attempts = []
+
+    class MockOpener:
+        def open(self, request, timeout=180):
+            attempts.append(request.full_url)
+            if len(attempts) == 1:
+                raise http.client.RemoteDisconnected("Remote end closed connection without response")
+            return MockResponse(
+                VALID_MP4_BYTES,
+                headers={"Content-Type": "video/mp4", "Content-Length": str(len(VALID_MP4_BYTES))},
+            )
+
+    monkeypatch.setattr(urllib.request, "build_opener", lambda *args: MockOpener())
+
+    out_dir = tmp_path / "out_remote_disconnected"
+    artifact = materialize_video_url(
+        "https://cdn.example.com/videos/remote_disconnected.mp4",
+        job_id="job_remote_disconnected",
+        output_dir=str(out_dir),
+        sleep_func=lambda _s: None,
+    )
+
+    assert artifact.ok is True
+    assert len(attempts) == 2
+    assert artifact.diagnostics["download_attempts"] == 2
+    assert artifact.diagnostics["download_retries"] == 1
+    assert artifact.diagnostics["transient_retry_attempted"] is True
+    assert Path(artifact.local_path).exists()
+    assert len(list(out_dir.glob("*.part"))) == 0
+
+
+def test_incomplete_read_triggers_transient_retry_and_succeeds(tmp_path, monkeypatch, mock_probe):
+    attempts = []
+
+    class MockOpener:
+        def open(self, request, timeout=180):
+            attempts.append(request.full_url)
+            if len(attempts) == 1:
+                raise http.client.IncompleteRead(b"partial_bytes", expected=2048)
+            return MockResponse(
+                VALID_MP4_BYTES,
+                headers={"Content-Type": "video/mp4", "Content-Length": str(len(VALID_MP4_BYTES))},
+            )
+
+    monkeypatch.setattr(urllib.request, "build_opener", lambda *args: MockOpener())
+
+    out_dir = tmp_path / "out_incomplete_read"
+    artifact = materialize_video_url(
+        "https://cdn.example.com/videos/incomplete_read.mp4",
+        job_id="job_incomplete_read",
+        output_dir=str(out_dir),
+        sleep_func=lambda _s: None,
+    )
+
+    assert artifact.ok is True
+    assert len(attempts) == 2
+    assert artifact.diagnostics["download_attempts"] == 2
+    assert artifact.diagnostics["download_retries"] == 1
+    assert artifact.diagnostics["transient_retry_attempted"] is True
+    assert Path(artifact.local_path).exists()
+    assert len(list(out_dir.glob("*.part"))) == 0
+
+
+def test_http_429_triggers_transient_retry_and_succeeds(tmp_path, monkeypatch, mock_probe):
+    attempts = []
+
+    class MockOpener:
+        def open(self, request, timeout=180):
+            attempts.append(request.full_url)
+            if len(attempts) == 1:
+                raise urllib.error.HTTPError(
+                    request.full_url,
+                    429,
+                    "Too Many Requests",
+                    {"Retry-After": "1"},
+                    io.BytesIO(b"rate limited"),
+                )
+            return MockResponse(
+                VALID_MP4_BYTES,
+                headers={"Content-Type": "video/mp4", "Content-Length": str(len(VALID_MP4_BYTES))},
+            )
+
+    monkeypatch.setattr(urllib.request, "build_opener", lambda *args: MockOpener())
+
+    out_dir = tmp_path / "out_429"
+    artifact = materialize_video_url(
+        "https://cdn.example.com/videos/rate_limited.mp4",
+        job_id="job_429",
+        output_dir=str(out_dir),
+        sleep_func=lambda _s: None,
+    )
+
+    assert artifact.ok is True
+    assert len(attempts) == 2
+    assert artifact.diagnostics["download_attempts"] == 2
+    assert artifact.diagnostics["download_retries"] == 1
+    assert artifact.diagnostics["transient_retry_attempted"] is True
+    assert Path(artifact.local_path).exists()
+    assert len(list(out_dir.glob("*.part"))) == 0
+
+
+def test_http_503_triggers_transient_retry_and_succeeds(tmp_path, monkeypatch, mock_probe):
+    attempts = []
+
+    class MockOpener:
+        def open(self, request, timeout=180):
+            attempts.append(request.full_url)
+            if len(attempts) == 1:
+                raise urllib.error.HTTPError(
+                    request.full_url,
+                    503,
+                    "Service Unavailable",
+                    {},
+                    io.BytesIO(b"service unavailable"),
+                )
+            return MockResponse(
+                VALID_MP4_BYTES,
+                headers={"Content-Type": "video/mp4", "Content-Length": str(len(VALID_MP4_BYTES))},
+            )
+
+    monkeypatch.setattr(urllib.request, "build_opener", lambda *args: MockOpener())
+
+    out_dir = tmp_path / "out_503"
+    artifact = materialize_video_url(
+        "https://cdn.example.com/videos/503.mp4",
+        job_id="job_503",
+        output_dir=str(out_dir),
+        sleep_func=lambda _s: None,
+    )
+
+    assert artifact.ok is True
+    assert len(attempts) == 2
+    assert artifact.diagnostics["download_attempts"] == 2
+    assert artifact.diagnostics["download_retries"] == 1
+    assert artifact.diagnostics["transient_retry_attempted"] is True
+    assert Path(artifact.local_path).exists()
+    assert len(list(out_dir.glob("*.part"))) == 0
+
+
+def test_content_length_overlong_mismatch_triggers_retry_and_succeeds(tmp_path, monkeypatch, mock_probe):
+    attempts = []
+
+    class MockOpener:
+        def open(self, request, timeout=180):
+            attempts.append(request.full_url)
+            if len(attempts) == 1:
+                # Overlong mismatch: Content-Length is 500, but body has 2048 bytes
+                return MockResponse(
+                    VALID_MP4_BYTES,
+                    headers={"Content-Type": "video/mp4", "Content-Length": "500"},
+                )
+            return MockResponse(
+                VALID_MP4_BYTES,
+                headers={"Content-Type": "video/mp4", "Content-Length": str(len(VALID_MP4_BYTES))},
+            )
+
+    monkeypatch.setattr(urllib.request, "build_opener", lambda *args: MockOpener())
+
+    out_dir = tmp_path / "out_overlong"
+    artifact = materialize_video_url(
+        "https://cdn.example.com/videos/overlong.mp4",
+        job_id="job_overlong",
+        output_dir=str(out_dir),
+        sleep_func=lambda _s: None,
+    )
+
+    assert artifact.ok is True
+    assert len(attempts) == 2
+    assert artifact.diagnostics["download_attempts"] == 2
+    assert artifact.diagnostics["download_retries"] == 1
+    assert artifact.diagnostics["content_length_verified"] is True
+    assert Path(artifact.local_path).exists()
+    assert len(list(out_dir.glob("*.part"))) == 0
+
+
+def test_atomic_replace_failure_fails_closed_and_cleans_part_and_preserves_preexisting_target(tmp_path, monkeypatch, mock_probe):
+    class MockOpener:
+        def open(self, request, timeout=180):
+            return MockResponse(
+                VALID_MP4_BYTES,
+                headers={"Content-Type": "video/mp4", "Content-Length": str(len(VALID_MP4_BYTES))},
+            )
+
+    monkeypatch.setattr(urllib.request, "build_opener", lambda *args: MockOpener())
+
+    out_dir = tmp_path / "out_replace_fail"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    target_path = out_dir / "provider_video_job_replace_fail.mp4"
+    preexisting_content = b"PREEXISTING_VALID_CONTENT_BEFORE_RUN"
+    target_path.write_bytes(preexisting_content)
+
+    def failing_replace(src, dst):
+        raise OSError("Simulated atomic replace failure (e.g. disk/cross-device error)")
+
+    monkeypatch.setattr(os, "replace", failing_replace)
+
+    artifact = materialize_video_url(
+        "https://cdn.example.com/videos/replace_fail.mp4",
+        job_id="job_replace_fail",
+        output_dir=str(out_dir),
+        sleep_func=lambda _s: None,
+    )
+
+    assert artifact.ok is False
+    assert artifact.error_code == "artifact_finalize_failed"
+    assert artifact.diagnostics["mp4_validator_result"] == "artifact_finalize_failed"
+    # Pre-existing target was preserved unchanged
+    assert target_path.exists()
+    assert target_path.read_bytes() == preexisting_content
+    # Failed .part file was cleaned up
+    assert len(list(out_dir.glob("*.part"))) == 0
+
+
+def test_non_atomic_move_fallback_absent():
+    import inspect
+    from services import video_provider_base
+
+    src = inspect.getsource(video_provider_base.materialize_video_url)
+    assert "shutil.move" not in src
+

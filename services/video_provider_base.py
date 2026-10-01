@@ -381,9 +381,9 @@ def materialize_video_url(
                 transferred = int(part_file.stat().st_size) if part_file.exists() else 0
                 diagnostics["download_bytes"] = transferred
 
-                if content_length > 0 and transferred < content_length:
+                if content_length > 0 and transferred != content_length:
                     raise IncompleteDownloadError(
-                        f"Incomplete download: transferred {transferred} of {content_length} Content-Length"
+                        f"Content-Length mismatch: transferred {transferred} != {content_length} Content-Length"
                     )
                 if content_length > 0:
                     diagnostics["content_length_verified"] = True
@@ -495,8 +495,26 @@ def materialize_video_url(
     if candidate_file != target:
         try:
             os.replace(candidate_file, target)
-        except Exception:
-            shutil.move(str(candidate_file), str(target))
+        except Exception as exc:
+            diagnostics.update({
+                "download_error_class": type(exc).__name__,
+                "download_error_message_masked": type(exc).__name__,
+                "mp4_validator_result": "artifact_finalize_failed",
+            })
+            if candidate_file.exists():
+                try:
+                    candidate_file.unlink()
+                except OSError:
+                    pass
+            return VideoArtifactResult(
+                ok=False,
+                local_path=str(target),
+                bytes=0,
+                error_code="artifact_finalize_failed",
+                error_message=type(exc).__name__,
+                content_type=content_type,
+                diagnostics=diagnostics,
+            )
 
     digest = hashlib.sha256()
     with target.open("rb") as handle:
