@@ -13,6 +13,7 @@ import pytest
 from services import subdub_multi_speaker_embedding_onnx as service
 from services import subdub_speaker_cast as speaker_cast
 from services import subdub_two_speaker_gender_onnx as gender_service
+from services.subdub_blackboxes import auto_smart_multivoice as smart
 
 
 SOURCE_SHA256 = "83de97b744b931e544b569e6e750f8415545f226461bd2e36cfb49225898ad3e"
@@ -350,7 +351,8 @@ def test_exact_fixture_fixed_vocal_authority_is_asr_independent(tmp_path):
         assert forbidden not in result
 
 
-def test_exact_fixture_fixed_vocal_accepts_actual_145_word_timing(tmp_path):
+@pytest.mark.parametrize("smart_mode", [False, True], ids=["legacy", "smart"])
+def test_exact_fixture_fixed_vocal_accepts_actual_145_word_timing(tmp_path, smart_mode):
     source_value = str(os.environ.get("SUBDUB_MULTI_FIXTURE_PATH") or "").strip()
     if not source_value:
         pytest.fail("SUBDUB_MULTI_FIXTURE_PATH is mandatory for this resource gate")
@@ -393,12 +395,38 @@ def test_exact_fixture_fixed_vocal_accepts_actual_145_word_timing(tmp_path):
         duration_seconds=SOURCE_DURATION_SECONDS,
         deadline_monotonic=time.monotonic() + 540.0,
         stop_requested=lambda: False,
+        **({"minimum_speakers": 1, "gender_source_original": True} if smart_mode else {}),
     )
 
     assert result["ok"] is True
     assert result["raw_speaker_count"] == 5
     assert result["detected_speaker_count"] == 5
     assert result["word_count"] == result["word_coverage_count"] == 145
+    if smart_mode and result.get("smart_acoustic_generic") is True:
+        classifications = result["smart_acoustic_classifications"]
+        labels = {cue["speaker_id"] for cue in result["segments"]}
+        assert labels == set(classifications)
+        assert len(labels) == 5
+        assert sum(len(cue["text"].split()) for cue in result["segments"]) == 145
+        for cue in result["segments"]:
+            assert cue["voice_register"] == classifications[cue["speaker_id"]]["voice_register"]
+        decision = smart.decide_smart_multivoice(
+            result["segments"], acoustic_classifications=classifications,
+            validated_pools={
+                "low": [f"low-{i}" for i in range(8)],
+                "high": [f"high-{i}" for i in range(8)],
+            },
+        )
+        assert decision.effective_speaker_count == decision.effective_voice_count == 5
+        assert len(set(decision.speaker_voice_map.values())) == 5
+        assert result["model_sha256"] == service.MODEL_SHA256
+        print(json.dumps({
+            "speaker_count": result["detected_speaker_count"],
+            "word_coverage_count": result["word_coverage_count"],
+            "classifications": classifications,
+            "speaker_voice_map": decision.speaker_voice_map,
+        }, sort_keys=True))
+        return
     assert result["unit_count"] == 37
     assert result["embedding_window_count"] == 120
     assert result["raw_embedding_window_count"] == 178
