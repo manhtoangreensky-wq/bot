@@ -2,7 +2,7 @@
 
 import ast
 import asyncio
-import copy
+import re
 from pathlib import Path
 import tempfile
 import unittest
@@ -13,23 +13,30 @@ import admin_broadcast
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (ROOT / "bot.py").read_text(encoding="utf-8")
-TREE = ast.parse(SOURCE)
-FUNCTIONS = {
-    node.name: node
-    for node in TREE.body
-    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-}
+
+
+def _function_source(name):
+    pattern = re.compile(rf"^(?:async )?def {re.escape(name)}\(", re.MULTILINE)
+    match = pattern.search(SOURCE)
+    if match is None:
+        raise AssertionError(f"missing function: {name}")
+    ends = [
+        SOURCE.find("\ndef ", match.end()),
+        SOURCE.find("\nasync def ", match.end()),
+        SOURCE.find("\n@", match.end()),
+    ]
+    ends = [end for end in ends if end >= 0]
+    return SOURCE[match.start() : min(ends) if ends else len(SOURCE)]
 
 
 def _compile_function(namespace, name):
-    node = copy.deepcopy(FUNCTIONS[name])
+    node = ast.parse(_function_source(name)).body[0]
     node.decorator_list = []
     exec(compile(ast.Module(body=[node], type_ignores=[]), "bot.py:" + name, "exec"), namespace)
 
 
 def _compile_actual_broadcast_dispatch(namespace):
-    handler = FUNCTIONS["handle_message"]
-    handler_source = ast.get_source_segment(SOURCE, handler)
+    handler_source = _function_source("handle_message")
     start = handler_source.index("    if await handle_broadcast_lite_pending_text(update, context):")
     end = handler_source.index("    # A specific SubDub input state owns", start)
     branch = handler_source[start:end]
@@ -81,7 +88,9 @@ class BroadcastLiteStartPendingResetTests(unittest.TestCase):
                 "clear_quick_image_flow", "clear_public_image_prompt_pending", "clear_public_video_prompt_pending",
                 "clear_media_aspect_pending", "clear_public_video_package_context", "clear_creative_motion_pending",
                 "clear_cinematic_ad_pending", "clear_trend_video_flow_pending", "clear_trend_workflow_confirm_pending",
-                "clear_feedback_pending", "clear_image_menu_pending", "clear_frame_video_state",
+                "clear_feedback_pending", "clear_image_menu_pending", "clear_internal_archive_pending",
+                "clear_memory_guided_pending", "clear_doc_tool_pending", "clear_storage_addon_pending",
+                "clear_frame_video_state",
                 "clear_storyboard_state", "clear_developing_video_pending", "clear_product_context",
                 "clear_music_guided_pending", "clear_translation_menu_pending", "clear_video_editor_pending",
                 "clear_video_downloader_pending", "clear_video_dubbing_pending", "clear_video_finalization_state",
