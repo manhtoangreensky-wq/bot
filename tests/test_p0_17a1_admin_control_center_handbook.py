@@ -179,6 +179,25 @@ def test_admin_queue_freeze_page_has_refund_and_lock_guidance():
     assert "Freeze là công cụ chống cháy" in text
 
 
+def test_admin_queue_refund_guide_button_label_and_callback():
+    buttons = [
+        button
+        for row in bot.admin_module_keyboard("queue").inline_keyboard
+        for button in row
+    ]
+    refund_buttons = [button for button in buttons if button.callback_data == "admin_help|refund"]
+
+    assert len(refund_buttons) == 1
+    assert refund_buttons[0].text == "Hướng dẫn hoàn Xu khi job lỗi"
+
+    query = FakeQuery(bot.ADMIN_ID, "admin_help|refund")
+    asyncio.run(bot.handle_admin_help_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+
+    assert "Quy trình hoàn Xu" in query.edits[-1][0]
+    assert "/job_status &lt;job_id&gt;" in query.edits[-1][0]
+    assert "/refund_job &lt;job_id&gt;" in query.edits[-1][0]
+
+
 def test_admin_security_db_page_has_c4_buttons():
     text = bot.admin_module_page_text("security_db")
     labels = [label for row in _labels(bot.admin_module_keyboard("security_db")) for label in row]

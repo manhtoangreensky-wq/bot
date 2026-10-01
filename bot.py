@@ -230700,7 +230700,7 @@ ADMIN_CONTROL_MODULES = {
         "purpose": "Dùng để kiểm tra hàng chờ job, đóng/mở công cụ, hoàn Xu/lượt khi job lỗi, và xử lý lock job.",
         "when": "Dùng khi provider lỗi, job kẹt, cần bảo trì, cần hoàn Xu/lượt hoặc cần kiểm tra queue trước khi mở lại public.",
         "buttons": [
-            [("📊 Queue status", "menu|freeze_queue_status"), ("🔎 Job status", "admin_help|refund")],
+            [("📊 Queue status", "menu|freeze_queue_status"), ("Hướng dẫn hoàn Xu khi job lỗi", "admin_help|refund")],
             [("🧊 Freeze tools", "menu|freeze_queue_help"), ("🔓 Unfreeze tools", "menu|admin_confirm_unfreeze_tool")],
             [("🎬 Freeze video", "menu|admin_confirm_freeze_video"), ("💸 Refund job", "menu|admin_confirm_refund_job")],
         ],
