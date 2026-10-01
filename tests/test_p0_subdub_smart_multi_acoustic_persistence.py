@@ -54,6 +54,7 @@ class SmartMultiAcousticPersistenceTests(unittest.TestCase):
             }
 
         async def diarize(*_args, **_kwargs):
+            captured["gender_source_original"] = _kwargs.get("gender_source_original")
             return {
                 "segments": [
                     {"cue_id": f"cue-{index}", "text": "hello", "speaker": index}
@@ -150,6 +151,7 @@ class SmartMultiAcousticPersistenceTests(unittest.TestCase):
             asyncio.run(prepare(None, state, 123, require_auto_cast=True))
 
         self.assertEqual(captured["workspace"], "C:/tmp/smart-multi-job")
+        self.assertIs(captured["gender_source_original"], True)
         self.assertEqual(
             captured["sidecar"].get("acoustic", {}).get("speaker_registers"),
             ["high", "low", "low"],

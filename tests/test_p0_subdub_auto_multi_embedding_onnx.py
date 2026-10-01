@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import hashlib
 import math
 from pathlib import Path
+import time
 
 import numpy as np
 import pytest
@@ -1825,12 +1826,18 @@ def test_hybrid_word_mapping_uses_speech_support_independent_of_raw_label_positi
     assert result["speaker_unit_counts"] == [2] * effective_speaker_count
 
 
+@pytest.mark.parametrize("gender_source_original", [False, True])
 def test_fixed_vocal_diarization_discovers_speakers_before_word_mapping(
     monkeypatch,
+    tmp_path,
+    gender_source_original,
 ):
     words = thirty_acoustic_words()
     calls = []
     pcm = np.ones(18 * service.PCM_SAMPLE_RATE, dtype=np.int16)
+    source_path = tmp_path / "source-stereo.pcm"
+    np.full(18 * 44_100 * 2, 3000, dtype=np.int16).tofile(source_path)
+    captured = {}
 
     monkeypatch.setattr(
         service,
@@ -1866,18 +1873,19 @@ def test_fixed_vocal_diarization_discovers_speakers_before_word_mapping(
             "view_cosine_mean": 1.0,
         },
     )
-    monkeypatch.setattr(
-        service,
-        "_fixed_vocal_speech_window_views",
-        lambda *_args, **_kwargs: calls.append("speech_windows") or {
+    def speech_window_views(*_args, **kwargs):
+        calls.append("speech_windows")
+        captured["gender_pcm16"] = kwargs.get("gender_pcm16")
+        return {
             "plan": {"regions": [], "windows": []},
             "base_embeddings": np.eye(6, service.EMBEDDING_DIM, dtype=np.float32),
             "shifted_embeddings": np.eye(6, service.EMBEDDING_DIM, dtype=np.float32),
             "source_positions": np.arange(6, dtype=np.float64),
             "speech_seconds": np.ones(6, dtype=np.float64),
             "window_samples": [np.ones(8_000, dtype=np.int16)] * 6,
-        },
-    )
+        }
+
+    monkeypatch.setattr(service, "_fixed_vocal_speech_window_views", speech_window_views)
     monkeypatch.setattr(
         service.multi_gender,
         "classify_vocal_window_gender_probabilities",
@@ -1928,13 +1936,18 @@ def test_fixed_vocal_diarization_discovers_speakers_before_word_mapping(
         },
     )
 
-    result = service.diarize_fixed_vocal_word_timeline(
-        "fixture-stereo.pcm",
+    result = asyncio.run(auto_multi_speaker.run_local_acoustic_diarization_off_event_loop(
+        source_path,
         words,
         duration_seconds=18.0,
-        deadline_monotonic=10**12,
-        stop_requested=lambda: False,
-    )
+        gender_source_original=gender_source_original,
+    ))
+
+    if gender_source_original:
+        assert captured["gender_pcm16"].shape == pcm.shape
+        assert np.all(captured["gender_pcm16"] == 3000)
+    else:
+        assert captured["gender_pcm16"] is None
 
     assert calls == [
         "vocal",
@@ -1988,6 +2001,57 @@ def test_gender_constrained_authority_supports_generic_three_to_eight_speakers(
     )
     assert result["base_shift_agreement"] == 1.0
     assert result["base_aggregate_agreement"] == 1.0
+
+
+def test_gender_authority_does_not_override_strong_gender_with_identity_cluster():
+    identities = [speaker for speaker in range(3) for _ in range(6)]
+    embeddings = np.zeros((len(identities), service.EMBEDDING_DIM), dtype=np.float32)
+    for index, speaker in enumerate(identities):
+        embeddings[index, speaker] = 1.0
+    probabilities = [0.99] * 6 + [0.99] + [0.01] * 11
+
+    result = service.build_gender_constrained_speech_authority(
+        embeddings,
+        embeddings.copy(),
+        np.arange(len(identities), dtype=np.float64),
+        np.full(len(identities), 1.5, dtype=np.float64),
+        probabilities,
+        speaker_count=3,
+    )
+
+    registers = result["speaker_registers"]
+    assert result["speaker_count"] == 3
+    assert len(set(result["labels"])) == 3
+    assert registers.count("high") == 1
+    assert registers.count("low") == 2
+    for label, probability in zip(result["labels"], probabilities, strict=True):
+        assert registers[label] == ("high" if probability >= 0.9 else "low")
+
+
+def test_smart_gender_windows_use_original_audio_without_changing_embeddings(monkeypatch):
+    vocal_pcm = np.full(service.PCM_SAMPLE_RATE, 2000, dtype=np.int16)
+    original_pcm = np.full(service.PCM_SAMPLE_RATE, -3000, dtype=np.int16)
+    embedded_samples = []
+
+    def embed(_session, samples):
+        embedded_samples.append(samples.copy())
+        return np.eye(1, service.EMBEDDING_DIM, dtype=np.float32)[0]
+
+    monkeypatch.setattr(service, "_embedding_session", lambda _factory: object())
+    monkeypatch.setattr(service, "_normalized_session_embedding", embed)
+    views = service._fixed_vocal_speech_window_views(
+        vocal_pcm,
+        [{"index": 0, "word": "source", "start": 0.0, "end": 1.0}],
+        duration_seconds=1.0,
+        deadline_monotonic=time.monotonic() + 30,
+        stop_requested=lambda: False,
+        gender_pcm16=original_pcm,
+    )
+
+    assert embedded_samples
+    assert all(np.all(samples == 2000) for samples in embedded_samples)
+    assert all(np.all(samples == -3000) for samples in views["window_samples"])
+    assert len(views["window_samples"]) == len(views["base_embeddings"])
 
 
 def test_fixed_vocal_loader_reuses_uvr_and_returns_mono_16k(
