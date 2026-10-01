@@ -48,7 +48,7 @@ from services.video_trace_state import (
 )
 
 
-DEFAULT_VIDEO_PROVIDER_CHAIN = "shopaikey_video,key4u_video,toanaas_video,veo,kling,generic_http"
+DEFAULT_VIDEO_PROVIDER_CHAIN = "shopaikey_video,key4u_video,fal_video,toanaas_video,veo,kling,generic_http"
 VIDEO_STUB_PROVIDER_NAME = "stub_video"
 PUBLIC_NO_VIDEO_PROVIDER_COPY = (
     "Hiện hệ thống dựng video AI chưa sẵn sàng. Bot chưa trừ Xu."
@@ -621,7 +621,12 @@ def product_video_freeze_truth(
     blocker_code = public_blocker_code
     blocker_source = public_blocker_source
     if source_kind == OWNER_AUTHORIZED_LIVE_ACCEPTANCE:
-        if provider_spend_freeze:
+        scoped_bypass = (
+            str(env.get("ACCEPTANCE_BYPASS_SCOPE") or "").strip() in {"probation_liveness_only", "owner_acceptance_liveness"}
+            or str(context.get("acceptance_bypass_scope") or "").strip() in {"probation_liveness_only", "owner_acceptance_liveness"}
+        )
+        acceptance_auth_valid = bool(context.get("owner_acceptance_auth_valid")) or _context_bool("owner_acceptance_auth_valid")
+        if provider_spend_freeze and not (acceptance_auth_valid and scoped_bypass):
             blocker_code = "provider_spend_freeze_active"
             blocker_source = "runtime:provider_spend_freeze"
         elif provider_freeze:
@@ -1423,6 +1428,29 @@ def _product_video_paid_fallback_blocked(
     metadata: dict[str, Any] | None,
 ) -> bool:
     clean = str(blocker or "").strip()
+    meta = dict(metadata or {})
+    is_selfshot = bool(
+        meta.get("is_controlled_keyframe_i2v")
+        or str(meta.get("route") or "").strip() == "controlled_keyframe_image_to_video"
+        or str(meta.get("product_type") or "").startswith("self_shot")
+        or str(meta.get("video_flow_type") or "").startswith("selfshot")
+    )
+    if is_selfshot and (
+        meta.get("provider_http_request_sent")
+        or meta.get("provider_submit_called")
+        or meta.get("provider_task_id")
+        or clean in {
+            "provider_submit_outcome_ambiguous_no_charge",
+            "ambiguous_submit_timeout",
+            "provider_submit_timeout",
+            "provider_poll_timeout",
+            "provider_task_id_present_resubmit_forbidden",
+            "provider_task_already_exists",
+            "provider_submit_failed",
+            "provider_failed_server_error",
+        }
+    ):
+        return True
     # Ambiguous submit timeouts, task-already-present, and poll timeouts on in-flight tasks MUST NEVER fallback to another paid provider.
     if clean in {
         "provider_submit_outcome_ambiguous_no_charge",
@@ -2125,23 +2153,41 @@ def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter
     if name == "key4u_video":
         namespace_cfg = video_provider_namespace_config("key4u_video", env)
         base_url = str(env.get("KEY4U_BASE_URL") or env.get("KEY4U_API_BASE") or "https://api.key4u.vn").rstrip("/")
-        submit_url = _endpoint_alias(env, "KEY4U_VIDEO_SUBMIT_URL", "KEY4U_BASE_URL", "KEY4U_VIDEO_ENDPOINT", "VIDEO_KEY4U_SUBMIT_URL")
-        submit_url = submit_url or str(namespace_cfg.get("submit_url") or "")
-        if submit_url and submit_url.rstrip("/").endswith(("/video/generate", "/generate")):
-            submit_url = ""
-        if not submit_url and (env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN") or namespace_cfg.get("auth_header_value")):
-            submit_url = f"{base_url}/v1/video/create"
-
-        poll_url = _endpoint_alias(env, "KEY4U_VIDEO_POLL_URL", "KEY4U_BASE_URL", "KEY4U_VIDEO_POLL_ENDPOINT", "VIDEO_KEY4U_POLL_URL")
-        poll_url = poll_url or str(namespace_cfg.get("poll_url") or "")
-        if poll_url and poll_url.rstrip("/").endswith(("/video/generate", "/generate")):
-            poll_url = ""
-        if not poll_url and submit_url:
-            poll_url = f"{base_url}/v1/video/query?id={{task_id}}"
-
         model_name = str(env.get("KEY4U_VIDEO_MODEL") or namespace_cfg.get("model") or "")
         if not model_name and (env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN") or namespace_cfg.get("auth_header_value")):
             model_name = "kling-video"
+
+        is_veo = model_name in {"veo_3_1-fast", "veo3.1-fast"}
+        if is_veo:
+            submit_url = _endpoint_alias(env, "KEY4U_VEO_VIDEO_ENDPOINT", "KEY4U_BASE_URL", "KEY4U_VEO_VIDEO_SUBMIT_URL", "KEY4U_GOOGLE_VEO_VIDEO_ENDPOINT")
+            submit_url = submit_url or str(namespace_cfg.get("submit_url") or "")
+            if submit_url and submit_url.rstrip("/").endswith(("/v1/video/create", "/video/create", "/video/generate", "/generate")):
+                submit_url = ""
+            if not submit_url and (env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN") or namespace_cfg.get("auth_header_value")):
+                submit_url = f"{base_url}/v1/videos"
+            poll_url = _endpoint_alias(env, "KEY4U_VEO_VIDEO_POLL_URL", "KEY4U_BASE_URL", "KEY4U_GOOGLE_VEO_VIDEO_POLL_URL")
+            poll_url = poll_url or str(namespace_cfg.get("poll_url") or "")
+            if poll_url and (
+                poll_url.rstrip("/").endswith(("/v1/video/query", "/video/query", "/video/generate", "/generate"))
+                or "query?id=" in poll_url
+            ):
+                poll_url = ""
+            if not poll_url and submit_url:
+                poll_url = f"{base_url}/v1/videos/{{task_id}}"
+        else:
+            submit_url = _endpoint_alias(env, "KEY4U_VIDEO_SUBMIT_URL", "KEY4U_BASE_URL", "KEY4U_VIDEO_ENDPOINT", "VIDEO_KEY4U_SUBMIT_URL")
+            submit_url = submit_url or str(namespace_cfg.get("submit_url") or "")
+            if submit_url and submit_url.rstrip("/").endswith(("/video/generate", "/generate")):
+                submit_url = ""
+            if not submit_url and (env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN") or namespace_cfg.get("auth_header_value")):
+                submit_url = f"{base_url}/v1/video/create"
+
+            poll_url = _endpoint_alias(env, "KEY4U_VIDEO_POLL_URL", "KEY4U_BASE_URL", "KEY4U_VIDEO_POLL_ENDPOINT", "VIDEO_KEY4U_POLL_URL")
+            poll_url = poll_url or str(namespace_cfg.get("poll_url") or "")
+            if poll_url and poll_url.rstrip("/").endswith(("/video/generate", "/generate")):
+                poll_url = ""
+            if not poll_url and submit_url:
+                poll_url = f"{base_url}/v1/video/query?id={{task_id}}"
 
         from services.video_provider_catalog import load_video_provider_catalog
         catalog = load_video_provider_catalog()
@@ -2162,7 +2208,7 @@ def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter
         derived["KEY4U_VIDEO_AUTH_HEADER_NAME"] = env.get("KEY4U_VIDEO_AUTH_HEADER_NAME") or namespace_cfg.get("auth_header_name") or "Authorization"
         derived["KEY4U_VIDEO_AUTH_HEADER_VALUE"] = env.get("KEY4U_VIDEO_AUTH_HEADER_VALUE") or namespace_cfg.get("auth_header_value") or _bearer(env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN") or "")
         derived["KEY4U_VIDEO_MODEL"] = model_name if model_valid else ""
-        derived["KEY4U_VIDEO_CAPABILITIES"] = env.get("KEY4U_VIDEO_CAPABILITIES") or namespace_cfg.get("capabilities") or "text_to_video,image_to_video,video_to_video,multi_scene_video,scene_video"
+        derived["KEY4U_VIDEO_CAPABILITIES"] = env.get("KEY4U_VIDEO_CAPABILITIES") or namespace_cfg.get("capabilities") or "text_to_video,image_to_video,multi_scene_video,scene_video"
 
         return GenericHttpVideoProvider(
             provider_name="key4u_video",
@@ -2174,6 +2220,43 @@ def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter
             result_field_env="KEY4U_VIDEO_RESULT_FIELD",
             model_env="KEY4U_VIDEO_MODEL",
             capabilities_env="KEY4U_VIDEO_CAPABILITIES",
+            environ=derived,
+        )
+    if name == "fal_video":
+        namespace_cfg = video_provider_namespace_config("fal_video", env)
+        submit_url = _endpoint_alias(env, "FAL_VIDEO_SUBMIT_URL", "FAL_VIDEO_ENDPOINT", "VIDEO_FAL_SUBMIT_URL")
+        submit_url = submit_url or str(namespace_cfg.get("submit_url") or "https://queue.fal.run/fal-ai/wan/v2.2-a14b/video-to-video")
+
+        poll_url = _endpoint_alias(env, "FAL_VIDEO_POLL_URL", "FAL_VIDEO_POLL_ENDPOINT", "VIDEO_FAL_POLL_URL")
+        poll_url = poll_url or str(namespace_cfg.get("poll_url") or "https://queue.fal.run/fal-ai/wan/v2.2-a14b/video-to-video/requests/{task_id}/status")
+
+        token = env.get("FAL_KEY") or env.get("FAL_VIDEO_API_KEY") or env.get("FAL_API_KEY") or str(namespace_cfg.get("auth_header_value") or "")
+        auth_value = token if token.startswith("Key ") else (f"Key {token}" if token else "")
+
+        model_name = str(env.get("FAL_VIDEO_MODEL") or namespace_cfg.get("model") or "fal-ai/wan/v2.2-a14b/video-to-video")
+        model_valid = bool(model_name == "fal-ai/wan/v2.2-a14b/video-to-video")
+        explicit_enabled = str(env.get("FAL_VIDEO_TO_VIDEO_ENABLED") or env.get("FAL_VIDEO_ENABLED") or namespace_cfg.get("enabled") or "").strip().lower()
+        derived = dict(env)
+        derived.update(_provider_namespace_metadata("fal_video", namespace_cfg))
+        derived["FAL_VIDEO_ENABLED"] = "1" if explicit_enabled in {"1", "true", "yes", "on"} else "0"
+        derived["FAL_VIDEO_SUBMIT_URL"] = submit_url
+        derived["FAL_VIDEO_POLL_URL"] = poll_url
+        derived["FAL_VIDEO_AUTH_HEADER_NAME"] = env.get("FAL_VIDEO_AUTH_HEADER_NAME") or namespace_cfg.get("auth_header_name") or "Authorization"
+        derived["FAL_VIDEO_AUTH_HEADER_VALUE"] = auth_value
+        derived["FAL_VIDEO_RESULT_FIELD"] = env.get("FAL_VIDEO_RESULT_FIELD") or namespace_cfg.get("result_field") or "video.url"
+        derived["FAL_VIDEO_MODEL"] = model_name if model_valid else ""
+        derived["FAL_VIDEO_CAPABILITIES"] = env.get("FAL_VIDEO_CAPABILITIES") or namespace_cfg.get("capabilities") or "video_to_video,short_video"
+
+        return GenericHttpVideoProvider(
+            provider_name="fal_video",
+            enabled_env="FAL_VIDEO_ENABLED",
+            submit_url_env="FAL_VIDEO_SUBMIT_URL",
+            poll_url_env="FAL_VIDEO_POLL_URL",
+            auth_header_name_env="FAL_VIDEO_AUTH_HEADER_NAME",
+            auth_header_value_env="FAL_VIDEO_AUTH_HEADER_VALUE",
+            result_field_env="FAL_VIDEO_RESULT_FIELD",
+            model_env="FAL_VIDEO_MODEL",
+            capabilities_env="FAL_VIDEO_CAPABILITIES",
             environ=derived,
         )
     if name == "veo":
@@ -4452,9 +4535,29 @@ def _run_provider_generation_impl(
     required_capability_original = str(request.required_capability or "").strip()
     normalized_capability_candidates = capability_options(required_capability_original)
     candidate_adapters = provider_candidate_adapters(request.required_capability, env, status)
+    is_storyboard = bool(
+        str(metadata.get("product_type") or request.product_type or "").strip().lower() in {"storyboard_prompt", "storyboard_to_video"}
+        or str(metadata.get("engine_adapter") or "").strip().lower() == "storyboard_scene_image_video_engine"
+        or str(metadata.get("engine_route") or "").strip().lower() == "storyboard_to_video"
+        or bool(metadata.get("is_storyboard"))
+        or bool(metadata.get("storyboard"))
+    )
+    model_req = str(metadata.get("selected_model") or metadata.get("model") or metadata.get("storyboard_model") or "").strip()
+    if model_req in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
+        default_sb_prov = "key4u_video"
+    else:
+        default_sb_prov = "shopaikey_video"
+    storyboard_provider = str(metadata.get("selected_provider") or default_sb_prov).strip().lower()
+    if is_storyboard:
+        candidate_adapters = [item for item in candidate_adapters if item.provider_name == storyboard_provider][:1]
     if acceptance_valid:
         pinned_provider = verified_acceptance.get("pinned_provider") or CANONICAL_ACCEPTANCE_PROVIDER
         candidate_adapters = [item for item in candidate_adapters if item.provider_name == pinned_provider][:1]
+        adapter = candidate_adapters[0] if candidate_adapters else None
+        provider_candidates = [item.provider_name for item in candidate_adapters]
+        initial_primary_provider = adapter.provider_name if adapter else ""
+        initial_fallback_provider = ""
+    elif is_storyboard:
         adapter = candidate_adapters[0] if candidate_adapters else None
         provider_candidates = [item.provider_name for item in candidate_adapters]
         initial_primary_provider = adapter.provider_name if adapter else ""
@@ -4496,6 +4599,14 @@ def _run_provider_generation_impl(
                 or (request.metadata or {}).get("interactive_product")
             )
     is_product_video = bool(metadata.get("product_video") or metadata.get("interactive_product") or (request.metadata or {}).get("product_video"))
+    is_selfshot = bool(
+        metadata.get("is_controlled_keyframe_i2v")
+        or (request.metadata or {}).get("is_controlled_keyframe_i2v")
+        or str(metadata.get("route") or "").strip() == "controlled_keyframe_image_to_video"
+        or str((request.metadata or {}).get("route") or "").strip() == "controlled_keyframe_image_to_video"
+        or str(request.video_flow_type or "").startswith("selfshot")
+        or str(request.product_type or "").startswith("self_shot")
+    )
     submit_switch = product_video_submit_switch_detail(env)
     submit_switch_enabled = bool(submit_switch.get("resolved"))
     submit_enabled = submit_switch_enabled
@@ -4564,6 +4675,8 @@ def _run_provider_generation_impl(
             "provider_configured": bool(candidate_adapters),
             "worker_available": runtime_worker_compatible,
             "worker_compatible": runtime_worker_compatible,
+            "owner_acceptance_auth_valid": acceptance_valid,
+            "acceptance_bypass_scope": str(metadata.get("acceptance_bypass_scope") or env.get("ACCEPTANCE_BYPASS_SCOPE") or ""),
         },
         environ=env,
     )
@@ -4629,6 +4742,8 @@ def _run_provider_generation_impl(
             candidate_adapters = [
                 item for item in candidate_adapters if item.provider_name == (verified_acceptance.get("pinned_provider") or CANONICAL_ACCEPTANCE_PROVIDER)
             ][:1]
+        elif is_storyboard:
+            candidate_adapters = [item for item in candidate_adapters if item.provider_name == storyboard_provider][:1]
         else:
             candidate_adapters = [
                 item for item in candidate_adapters if item.provider_name in runtime_candidates
@@ -4636,7 +4751,7 @@ def _run_provider_generation_impl(
         adapter = candidate_adapters[0] if candidate_adapters else None
         provider_candidates = [item.provider_name for item in candidate_adapters]
         initial_primary_provider = adapter.provider_name if adapter else ""
-        initial_fallback_provider = "" if acceptance_valid else next((name for name in provider_candidates if name and name != initial_primary_provider), "")
+        initial_fallback_provider = "" if (acceptance_valid or is_storyboard) else next((name for name in provider_candidates if name and name != initial_primary_provider), "")
     try:
         current_fallback_count = int(metadata.get("fallback_count") or metadata.get("provider_fallback_count") or 0)
     except Exception:
@@ -4648,6 +4763,14 @@ def _run_provider_generation_impl(
         provider_candidates = [item.provider_name for item in candidate_adapters]
         initial_primary_provider = adapter.provider_name if adapter else ""
         initial_fallback_provider = ""
+    elif is_storyboard:
+        candidate_adapters = [item for item in candidate_adapters if item.provider_name == storyboard_provider][:1]
+        max_provider_attempts = 1
+        candidate_adapters = candidate_adapters[:max_provider_attempts]
+        adapter = candidate_adapters[0] if candidate_adapters else None
+        provider_candidates = [item.provider_name for item in candidate_adapters]
+        initial_primary_provider = adapter.provider_name if adapter else ""
+        initial_fallback_provider = ""
     elif is_product_video and candidate_adapters:
         max_provider_attempts = 1 if current_fallback_count >= 1 else 2
         candidate_adapters = candidate_adapters[:max_provider_attempts]
@@ -4655,7 +4778,7 @@ def _run_provider_generation_impl(
         provider_candidates = [item.provider_name for item in candidate_adapters]
         initial_primary_provider = adapter.provider_name if adapter else ""
         initial_fallback_provider = next((name for name in provider_candidates if name and name != initial_primary_provider), "")
-    if is_product_video and not acceptance_valid and len(candidate_adapters) > 1:
+    if is_product_video and not acceptance_valid and not is_storyboard and len(candidate_adapters) > 1:
         # Candidate adapters have already passed readiness, capability and
         # contract filtering. This lets the persisted job quote authorize one
         # in-budget fallback without asking the customer to confirm twice.
@@ -4784,7 +4907,9 @@ def _run_provider_generation_impl(
         "fallback_used": False,
         "fallback_reason": "",
         "primary_provider": initial_primary_provider,
+        "initial_primary_provider": initial_primary_provider,
         "fallback_provider": initial_fallback_provider,
+        "initial_fallback_provider": initial_fallback_provider,
         "fallback_attempted": False,
         "fallback_count": current_fallback_count,
         "fallback_submit_source": "",
@@ -5556,15 +5681,15 @@ def _run_provider_generation_impl(
                     and persisted_model == "veo_3_1-fast"
                     and (adapter_submit.hostname or "").lower()
                     in {"api.key4u.vn", "api.key4u.shop"}
-                    and adapter_submit.path.rstrip("/") == "/v1/video/create"
                 ):
-                    recovered_poll_url = (
-                        f"{adapter_submit.scheme}://{adapter_submit.netloc}"
-                        "/v1/video/query?id={task_id}"
-                    )
-                    recovered_poll_source = (
-                        "recovered:key4u_unified_video_query_from_persisted_model"
-                    )
+                    if adapter_submit.path.rstrip("/").endswith("/v1/videos"):
+                        recovered_poll_url = (
+                            f"{adapter_submit.scheme}://{adapter_submit.netloc}"
+                            f"{adapter_submit.path.rstrip('/')}/{{task_id}}"
+                        )
+                        recovered_poll_source = (
+                            "recovered:key4u_veo_path_poll_from_persisted_model"
+                        )
                 adapter_model = str(
                     persisted_model
                     or current_adapter.env.get(current_adapter.model_env)
@@ -5614,7 +5739,26 @@ def _run_provider_generation_impl(
                 },
             )
         else:
-            if is_product_video:
+            has_explicit_economics_context = bool(
+                metadata.get("tier_id") is not None
+                or metadata.get("quality_tier") is not None
+                or metadata.get("quality_tier_id") is not None
+                or metadata.get("quality") is not None
+                or metadata.get("customer_quote_xu") is not None
+                or metadata.get("persisted_quoted_price_xu") is not None
+                or metadata.get("user_visible_price_xu") is not None
+                or metadata.get("quote_xu") is not None
+                or (request.metadata or {}).get("tier_id") is not None
+                or (request.metadata or {}).get("quality_tier") is not None
+                or (request.metadata or {}).get("quality_tier_id") is not None
+                or (request.metadata or {}).get("quality") is not None
+                or (request.metadata or {}).get("customer_quote_xu") is not None
+                or (request.metadata or {}).get("persisted_quoted_price_xu") is not None
+                or (request.metadata or {}).get("user_visible_price_xu") is not None
+                or (request.metadata or {}).get("quote_xu") is not None
+                or is_product_video
+            )
+            if is_product_video or (is_storyboard and has_explicit_economics_context):
                 tier_id_val = (
                     metadata.get("tier_id")
                     or metadata.get("quality_tier")
@@ -5624,6 +5768,7 @@ def _run_provider_generation_impl(
                     or (request.metadata or {}).get("quality_tier_id")
                     or (request.metadata or {}).get("quality")
                     or metadata.get("quality")
+                    or (400 if is_storyboard else None)
                 )
                 tier_id_int = 0
                 if tier_id_val is not None:
@@ -5648,7 +5793,9 @@ def _run_provider_generation_impl(
                         or metadata.get("clip_count")
                         or (request.metadata or {}).get("scene_count")
                         or (request.metadata or {}).get("clip_count")
-                        or 1
+                        or (len(request.storyboard) if request.storyboard else None)
+                        or (len(request.scenes) if request.scenes else None)
+                        or (2 if is_storyboard else 1)
                     )
                     quote_xu_val = (
                         metadata.get("customer_quote_xu")
@@ -5665,9 +5812,23 @@ def _run_provider_generation_impl(
                     )
                     model_candidate = (
                         selected_model_for_provider(provider_metadata, current_adapter.provider_name)
+                        or (provider_metadata.get("storyboard_model") if is_storyboard else "")
+                        or (metadata.get("storyboard_model") if is_storyboard else "")
+                        or (provider_metadata.get("selected_model") if is_storyboard else "")
+                        or (metadata.get("selected_model") if is_storyboard else "")
+                        or (provider_metadata.get("model") if is_storyboard else "")
+                        or (metadata.get("model") if is_storyboard else "")
                         or getattr(current_adapter, "model", "")
                         or getattr(current_adapter, "provider_payload_model", "")
                         or ""
+                    )
+                    provider_submit_sec = (
+                        metadata.get("provider_billable_submit_seconds")
+                        or metadata.get("provider_submit_duration_seconds")
+                        or (request.metadata or {}).get("provider_billable_submit_seconds")
+                        or (request.metadata or {}).get("provider_submit_duration_seconds")
+                        or (10 if (is_storyboard and current_adapter.provider_name == "key4u_video" and str(model_candidate).strip() == "kling-3.0-turbo") else None)
+                        or (float(request.duration_seconds) if (request.duration_seconds and float(request.duration_seconds) > 0 and (is_storyboard or str(model_candidate).strip() == "kling-3.0-turbo")) else None)
                     )
                     econ_check = video_ai_real_pricing.check_product_video_economics(
                         tier_id=tier_id_int,
@@ -5676,6 +5837,20 @@ def _run_provider_generation_impl(
                         model=model_candidate,
                         customer_quote_xu=quote_xu_val,
                         is_fallback=(attempt_index > 0),
+                        provider_submit_seconds=provider_submit_sec,
+                    )
+                    _mark_trace(
+                        "economics_check",
+                        tier_id=tier_id_int,
+                        scene_count=scene_count_val,
+                        provider=current_adapter.provider_name,
+                        model=model_candidate,
+                        provider_submit_seconds=provider_submit_sec,
+                        public_output_seconds_total=econ_check.get("public_output_seconds_total"),
+                        provider_billable_seconds_total=econ_check.get("provider_billable_seconds_total"),
+                        expected_provider_cost_usd=econ_check.get("expected_provider_cost_usd"),
+                        computed_provider_cost_usd=econ_check.get("computed_provider_cost_usd"),
+                        economics_safe=econ_check.get("economics_safe"),
                     )
                     if not econ_check.get("economics_safe"):
                         blocker = str(
@@ -5807,7 +5982,7 @@ def _run_provider_generation_impl(
                     return exc_payload
                 if attempt_index + 1 < len(candidate_adapters):
                     _record_failure(blocker, exc_payload, submit_failure=True)
-                    if is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata):
+                    if (is_selfshot and (is_timeout or submit_called_flag)) or (is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata)):
                         return _paid_fallback_requires_confirmation_payload(blocker, exc_payload)
                     continue
                 _record_failure(blocker, exc_payload, submit_failure=True)
@@ -5891,7 +6066,7 @@ def _run_provider_generation_impl(
                 return _merge_contract_debug(payload, submit.raw)
             if attempt_index + 1 < len(candidate_adapters):
                 _record_failure(blocker, submit.raw, submit_failure=True)
-                if is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata):
+                if (is_selfshot and (provider_http_request_sent or submit_called_flag or is_ambiguous_submit)) or (is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata)):
                     return _paid_fallback_requires_confirmation_payload(blocker, submit.raw)
                 continue
             _record_failure(blocker, submit.raw, submit_failure=True)
@@ -5941,7 +6116,7 @@ def _run_provider_generation_impl(
                 blocker = "provider_task_id_missing"
                 if attempt_index + 1 < len(candidate_adapters):
                     _record_failure(blocker, submit.raw, submit_failure=True)
-                    if is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata):
+                    if (is_selfshot and (provider_http_request_sent or submit_called_flag or is_ambiguous_submit)) or (is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata)):
                         return _paid_fallback_requires_confirmation_payload(blocker, submit.raw)
                     continue
                 _record_failure(blocker, submit.raw, submit_failure=True)
@@ -6102,6 +6277,11 @@ def _run_provider_generation_impl(
                     payload["provider_attempts"] = _copy_attempt_traces()
                     return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
                 if poll_result.status in {"failed", "cancelled"}:
+                    try:
+                        from services.provider_reference_transport import cleanup_provider_image_references_for_job
+                        cleanup_provider_image_references_for_job(str(request.job_id or submit.provider_task_id or ""), env=env)
+                    except Exception:
+                        pass
                     terminal_result_url = str(poll_result.result_url or poll_result.file_url or "").strip()
                     result_diagnostic = _failed_result_url_diagnostic(terminal_result_url)
                     blocker = (
@@ -6568,6 +6748,8 @@ def _run_provider_generation_impl(
             "provider_task_id_masked": mask_provider_task_id(submit.provider_task_id),
             "provider_status": "downloaded",
             "result_url_present": True,
+            "result_url": result_url_value,
+            "file_url": result_url_value,
             "download_status": "downloaded",
             "output_path": artifact.local_path,
             "local_path": artifact.local_path,
@@ -6578,6 +6760,11 @@ def _run_provider_generation_impl(
             "artifact_hash": artifact.artifact_hash,
             "provider_readiness": status,
         }
+        try:
+            from services.provider_reference_transport import cleanup_provider_image_references_for_job
+            cleanup_provider_image_references_for_job(str(request.job_id or submit.provider_task_id or ""), env=env)
+        except Exception:
+            pass
         return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
     return {
         "ok": False,
@@ -6613,4 +6800,39 @@ def run_provider_generation(
         owner_auth["consumed"] = True
         res["owner_acceptance_consumed"] = True
     return res
+
+
+def render_video_payload(
+    request: VideoGenerationRequest,
+    *,
+    output_dir: str = "",
+    env: dict[str, str] | None = None,
+    environ: dict[str, str] | None = None,
+    sleep_func=time.sleep,
+    allow_pending_result: bool | None = None,
+    max_poll_seconds: int | None = None,
+    poll_interval_seconds: int | None = None,
+    poll_existing_task: bool = False,
+    existing_task_id: str = "",
+    **kwargs: Any,
+) -> dict[str, Any]:
+    active_env = dict(env if env is not None else (environ or os.environ))
+    if max_poll_seconds is not None:
+        active_env["VIDEO_PROVIDER_MAX_POLL_SECONDS"] = str(max_poll_seconds)
+    if poll_interval_seconds is not None:
+        active_env["VIDEO_PROVIDER_POLL_INTERVAL_SECONDS"] = str(poll_interval_seconds)
+    out = output_dir or tempfile.mkdtemp(prefix="video_render_")
+    if existing_task_id:
+        request_metadata = dict(request.metadata or {})
+        request_metadata["provider_pending_task_id"] = existing_task_id
+        request_metadata["provider_task_id"] = existing_task_id
+        request.metadata = request_metadata
+    return run_provider_generation(
+        request,
+        output_dir=out,
+        environ=active_env,
+        sleep_func=sleep_func,
+        allow_pending_result=allow_pending_result,
+        **kwargs,
+    )
 
