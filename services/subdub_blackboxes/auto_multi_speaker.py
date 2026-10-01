@@ -514,6 +514,7 @@ async def run_local_acoustic_diarization_off_event_loop(
     word_timeline: list[dict],
     *,
     duration_seconds: float,
+    gender_source_original: bool = False,
     acoustic_diarize: Callable = (
         subdub_multi_speaker_embedding_onnx.diarize_fixed_vocal_word_timeline
     ),
@@ -578,6 +579,7 @@ async def run_local_acoustic_diarization_off_event_loop(
     )
 
     def run_acoustic() -> dict[str, object]:
+        gender_kwargs = {"gender_source_original": True} if gender_source_original else {}
         if not queued_default_runner:
             return acoustic_diarize(
                 str(path),
@@ -585,6 +587,7 @@ async def run_local_acoustic_diarization_off_event_loop(
                 duration_seconds=measured_duration_seconds,
                 deadline_monotonic=time.monotonic() + timeout_seconds,
                 stop_requested=stop_event.is_set,
+                **gender_kwargs,
             )
         lock = subdub_multi_speaker_embedding_onnx._FIXED_VOCAL_PIPELINE_LOCK
         subdub_multi_speaker_embedding_onnx._acquire_runtime_lock(
@@ -604,6 +607,7 @@ async def run_local_acoustic_diarization_off_event_loop(
                     duration_seconds=measured_duration_seconds,
                     deadline_monotonic=time.monotonic() + timeout_seconds,
                     stop_requested=stop_event.is_set,
+                    **gender_kwargs,
                 )
             )
         finally:

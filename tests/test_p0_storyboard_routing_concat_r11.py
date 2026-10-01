@@ -211,7 +211,9 @@ def test_storyboard_render_scene_async_enforces_key4u_chain(mock_storyboard_file
             "result_url_present": True,
         }
 
-    with patch("services.video_real_render_connector.run_provider_generation", side_effect=mock_run_provider):
+    with patch("services.video_real_render_connector.run_provider_generation", side_effect=mock_run_provider), \
+         patch("services.video_real_render_connector.normalize_storyboard_provider_clip", return_value=raw_path), \
+         patch("services.video_final_output.probe_video", return_value={"ok": True, "has_video": True, "duration": 8.0, "bytes": 256}):
         res = asyncio.run(_render_scene_async(scene_obj, raw_path, ["shopaikey_video", "key4u_video"]))
         assert res.get("ok") is True
         assert res.get("provider") == "key4u_video"
