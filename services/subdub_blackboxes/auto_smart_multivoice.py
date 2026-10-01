@@ -2088,7 +2088,11 @@ async def run_auto_smart_multivoice(
                 elif item_fit_ratio > MAX_INTELLIGIBLE_FIT_RATIO:
                     overfit_cues.append((str(item.get("cue_id") or ""), round(item_fit_ratio, 3)))
 
-        if overfit_cues and len(synth_artifacts) > 0:
+        smart_fit_render_deferred = bool(
+            callable(render_pipeline)
+            and any(bool(item.get("cue_locked_timing")) for item in synth_artifacts)
+        )
+        if overfit_cues and len(synth_artifacts) > 0 and not smart_fit_render_deferred:
             overfit_ratio = len(overfit_cues) / len(synth_artifacts)
             if overfit_ratio > MAX_OVERFIT_CUE_RATIO:
                 worst = max(overfit_cues, key=lambda x: x[1])
@@ -2112,6 +2116,11 @@ async def run_auto_smart_multivoice(
                 "smart_multi_compression_graceful: %d/%d cues exceed fit_ratio %.2f (ratio=%.1f%%), allowing render",
                 len(overfit_cues), len(synth_artifacts), MAX_INTELLIGIBLE_FIT_RATIO,
                 overfit_ratio * 100,
+            )
+        elif overfit_cues and smart_fit_render_deferred:
+            logger.warning(
+                "smart_multi_compression_deferred_to_render: %d/%d cues exceed fit_ratio %.2f",
+                len(overfit_cues), len(synth_artifacts), MAX_INTELLIGIBLE_FIT_RATIO,
             )
 
     # Checkpoint 3: After synthesis

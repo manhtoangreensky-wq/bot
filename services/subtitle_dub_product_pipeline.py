@@ -396,6 +396,12 @@ async def process_subtitle_dub_job(
                 str(pipeline_state.get("auto_speaker_lane") or "").strip().lower() == "multi"
                 and not pipeline_state.get("cue_locked_timing")
             )
+            smart_fit_render_deferred = bool(
+                not is_legacy_multi
+                and str(pipeline_state.get("auto_speaker_lane") or "").strip().lower()
+                == "auto_smart_multivoice"
+                and callable(build_timeline_audio)
+            )
             # Map authoritative tts_segments by stable cue identity/index
             expected_source_ids: list[str] = []
             auth_by_id: dict[str, dict] = {}
@@ -612,7 +618,7 @@ async def process_subtitle_dub_job(
                     "post_fit_audio_seconds": generated_seconds / fit_ratio,
                     "drift_seconds": 0.0,
                 })
-            if not is_legacy_multi and overfit_cues and len(tts_chunks) > 0:
+            if not is_legacy_multi and not smart_fit_render_deferred and overfit_cues and len(tts_chunks) > 0:
                 overfit_ratio = len(overfit_cues) / len(tts_chunks)
                 if overfit_ratio > MAX_OVERFIT_CUE_RATIO:
                     worst = max(overfit_cues, key=lambda x: x[1])
@@ -814,6 +820,11 @@ async def process_subtitle_dub_job(
         "tts_expected_segments": tts_expected_segments,
         "tts_generated_segments": tts_generated_segments,
         "tts_mixed_segments": tts_mixed_segments,
+        "smart_fit_render_deferred": bool(
+            cue_locked_timing
+            and str(pipeline_state.get("auto_speaker_lane") or "").strip().lower()
+            == "auto_smart_multivoice"
+        ),
         "tts_dropped_segments": tts_dropped_segments,
         "tts_overlap_resolutions": max(0, sum(1 for item in tts_chunks if float(item.get("audio_duration") or 0.0) > max(0.1, float(item.get("end") or 0.0) - float(item.get("start") or 0.0)))),
         "cue_locked_timing": bool(cue_locked_timing),
