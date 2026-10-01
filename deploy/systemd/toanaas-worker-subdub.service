@@ -1,0 +1,16 @@
+[Unit]
+Description=TOAN AAS SubDub Dedicated Worker Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/toanaas/bot
+EnvironmentFile=/etc/toanaas/bot.env
+ExecStart=/opt/toanaas/bot/.venv/bin/python -u services/subdub_worker_daemon.py
+Restart=always
+RestartSec=3
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

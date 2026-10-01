@@ -19,7 +19,9 @@ MIN_MULTI_SPEAKERS = 3
 MAX_MULTI_SPEAKERS = speaker_cast.MAX_AUTO_SPEAKER_LABELS
 MIN_CLASSIFIED_CUES_PER_SPEAKER = 2
 MAX_CUES_PER_SPEAKER = exact_gender.MAX_CUES_PER_SPEAKER
-MIN_VOTE_DOMINANCE = exact_gender.MIN_VOTE_DOMINANCE
+MIN_VOTE_DOMINANCE = 2.0 / 3.0
+MIN_PANN_SCORE_MARGIN = 0.08
+MIN_ACOUSTIC_SCORE_MARGIN = MIN_PANN_SCORE_MARGIN
 MAX_JOB_EVIDENCE_SECONDS = exact_gender.MAX_JOB_EVIDENCE_SECONDS
 CLASSIFIER_WALL_TIMEOUT_SECONDS = exact_gender.CLASSIFIER_WALL_TIMEOUT_SECONDS
 
@@ -504,18 +506,34 @@ def _aggregate_one_gender_result(
         rows.append({"start": start, "end": end})
     winner_votes = max(male_votes, female_votes)
     dominance = winner_votes / len(rows)
-    if dominance < MIN_VOTE_DOMINANCE:
+    if dominance < MIN_VOTE_DOMINANCE - 1e-6:
+        raise _manual_required()
+    sorted_margins = sorted(score_margins)
+    n_margins = len(sorted_margins)
+    if n_margins % 2 == 1:
+        median_margin = float(sorted_margins[n_margins // 2])
+    else:
+        median_margin = float(
+            (sorted_margins[n_margins // 2 - 1] + sorted_margins[n_margins // 2]) / 2.0
+        )
+    if median_margin < MIN_PANN_SCORE_MARGIN:
         raise _manual_required()
     gender = "male" if male_votes > female_votes else "female"
     voiced_seconds = exact_gender._union_seconds(rows)
     if voiced_seconds <= 0.0:
+        raise _manual_required()
+    confidence = round(
+        float(min(1.0, max(0.0, 0.25 + 0.75 * dominance))),
+        6,
+    )
+    if confidence < speaker_cast.MIN_REGISTER_CONFIDENCE:
         raise _manual_required()
     return (
         {
             "speaker_id": speaker_id,
             "voice_gender": gender,
             "voice_register": "low" if gender == "male" else "high",
-            "confidence": round(float(dominance), 6),
+            "confidence": confidence,
             "voiced_seconds": round(float(voiced_seconds), 6),
             "sample_count": int(
                 round(voiced_seconds * exact_gender.PCM_SAMPLE_RATE)
@@ -523,10 +541,7 @@ def _aggregate_one_gender_result(
             "cue_count": len(rows),
             "male_votes": male_votes,
             "female_votes": female_votes,
-            "pann_score_margin": round(
-                float(sorted(score_margins)[len(score_margins) // 2]),
-                6,
-            ),
+            "pann_score_margin": round(median_margin, 6),
             "reason": "classified_panns_multi_after_uvr",
         },
         rows,
