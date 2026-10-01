@@ -59920,7 +59920,7 @@ def set_support_ticket_pending(user_id, step: str, **fields) -> dict:
         if key in {
             "category", "ticket_id", "source", "reply_text", "variant", "lead_type",
             "selected_option", "service_type", "back_to", "needs_admin", "support_flow",
-            "awaiting_support_message", "support_origin", "service_group",
+            "awaiting_support_message", "support_origin", "service_group", "preview_token",
         }:
             state[key] = str(value or "")[:4000]
     USER_PENDING[support_ticket_pending_key(user_id)] = state
@@ -139874,14 +139874,15 @@ async def handle_support_pending_input(update: Update, context: ContextTypes.DEF
             clear_support_ticket_pending(uid)
             await update.message.reply_text("Không tìm thấy ticket.")
             return True
-        set_support_ticket_pending(uid, "admin_reply_preview", ticket_id=ticket_id, reply_text=text, source=state.get("source") or "new")
+        preview_token = uuid.uuid4().hex[:16]
+        set_support_ticket_pending(uid, "admin_reply_preview", ticket_id=ticket_id, reply_text=text, source=state.get("source") or "new", preview_token=preview_token)
         await update.message.reply_text(
             "📨 <b>Xác nhận gửi phản hồi</b>\n\n"
             f"Gửi tới ticket <code>{html.escape(ticket['ticket_code'])}</code>\n\n"
             f"Nội dung:\n{html.escape(text)}\n\nBạn có muốn gửi cho khách không?",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📨 Gửi cho khách", callback_data=f"ticket|send|{ticket_id}"), InlineKeyboardButton("✍️ Sửa lại", callback_data=f"ticket|reply|{ticket_id}")],
+                [InlineKeyboardButton("📨 Gửi cho khách", callback_data=f"ticket|send|{ticket_id}|{preview_token}"), InlineKeyboardButton("✍️ Sửa lại", callback_data=f"ticket|reply|{ticket_id}")],
                 [InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
             ]),
         )
@@ -140185,20 +140186,27 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
         reply_text = support_suggested_reply(ticket.get("category"), variant, ticket.get("message") or "")
         update_support_ticket(ticket_id, suggested_reply=reply_text)
-        set_support_ticket_pending(uid, "admin_reply_preview", ticket_id=ticket_id, reply_text=reply_text, variant=variant, source="new")
+        preview_token = uuid.uuid4().hex[:16]
+        set_support_ticket_pending(uid, "admin_reply_preview", ticket_id=ticket_id, reply_text=reply_text, variant=variant, source="new", preview_token=preview_token)
         return await safe_edit_or_send(
             query,
             "🤖 <b>Gợi ý trả lời</b>\n\n"
             f"{html.escape(reply_text)}\n\nBot chưa gửi nội dung này cho khách.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📨 Gửi cho khách", callback_data=f"ticket|send|{ticket_id}"), InlineKeyboardButton("✍️ Sửa lại", callback_data=f"ticket|reply|{ticket_id}")],
+                [InlineKeyboardButton("📨 Gửi cho khách", callback_data=f"ticket|send|{ticket_id}|{preview_token}"), InlineKeyboardButton("✍️ Sửa lại", callback_data=f"ticket|reply|{ticket_id}")],
                 [InlineKeyboardButton("🔄 Gợi ý khác", callback_data=f"ticket|suggest|{ticket_id}|{variant + 1}"), InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new")],
             ]),
         )
     if action == "send" and len(parts) >= 3:
         ticket_id = int(parts[2])
         state = get_support_ticket_pending(uid) or {}
-        if state.get("step") != "admin_reply_preview" or int(state.get("ticket_id") or 0) != ticket_id:
+        if (
+            state.get("step") != "admin_reply_preview"
+            or int(state.get("ticket_id") or 0) != ticket_id
+            or len(parts) < 4
+            or not state.get("preview_token")
+            or parts[3] != state.get("preview_token")
+        ):
             return await query.answer("Bản xem trước đã hết hạn. Vui lòng soạn hoặc tạo gợi ý lại.", show_alert=True)
         ticket = get_support_ticket(ticket_id)
         reply_text = str(state.get("reply_text") or "").strip()

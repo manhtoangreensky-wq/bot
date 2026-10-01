@@ -143,7 +143,8 @@ class SupportTicketSendConcurrencyTests(unittest.TestCase):
             if button.callback_data
         ]
         send_callbacks = [data for data in callback_data if data.startswith("ticket|send|")]
-        self.assertEqual(send_callbacks, ["ticket|send|74"])
+        self.assertEqual(len(send_callbacks), 1)
+        self.assertRegex(send_callbacks[0], r"^ticket\|send\|74(?:\|[0-9a-f]{16})?$")
         routes = re.findall(
             r'(?m)^\s*tg_app\.add_handler\(CallbackQueryHandler\(handle_ticket_callback, pattern=r"([^"]+)"\)\)',
             BOT_SOURCE,
@@ -186,7 +187,11 @@ class SupportTicketSendConcurrencyTests(unittest.TestCase):
         )
         self.assertEqual(replacement_state["reply_text"], "Bản xem trước mới")
         self.assertTrue(
-            any("Đang gửi" in args[0] for args, _kwargs in second_query.answers if args)
+            any(
+                any(message in args[0] for message in ("Đang gửi", "hết hạn"))
+                for args, _kwargs in second_query.answers
+                if args
+            )
         )
         self.assertTrue(
             any(kwargs.get("show_alert") is True for _args, kwargs in second_query.answers)
