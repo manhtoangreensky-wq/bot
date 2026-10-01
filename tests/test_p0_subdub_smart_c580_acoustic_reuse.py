@@ -8,6 +8,7 @@ import pytest
 from services import subdub_multi_speaker_gender_onnx
 from services import subdub_speaker_cast as speaker_cast
 from services.subdub_blackboxes import auto_smart_multivoice as smart
+from services.subdub_blackboxes import auto_multi_speaker_v2
 
 
 def _prepared_segments() -> list[dict]:
@@ -26,7 +27,7 @@ def _prepared_segments() -> list[dict]:
     return rows
 
 
-def test_smart_blackbox_reuses_prepared_auto_multi_acoustic_registers(
+def test_smart_blackbox_dispatches_strong_prepared_registers_to_v2(
     tmp_path,
     monkeypatch,
 ):
@@ -46,24 +47,24 @@ def test_smart_blackbox_reuses_prepared_auto_multi_acoustic_registers(
             "output_segments": [dict(item) for item in segments],
         }
 
-    async def capture_runner(**kwargs):
+    async def capture_v2(*, state, **kwargs):
         captured.update(kwargs)
+        captured["state"] = dict(state)
         return {
-                "ok": True,
-                "strategy": smart.STRATEGY_GENERIC_MULTI,
-            "detected_speaker_count": 3,
-                "effective_speaker_count": 3,
-                "effective_voice_count": 3,
-                "speaker_voice_map": {"speaker_0": "v1", "speaker_1": "v2", "speaker_2": "v3"},
-            "fallback_level": 1,
-            "fallback_reason": "n3_unknown_register_distinct_voice",
-                "output_mode": smart.OUTPUT_MODE_DUBBED_MULTI,
-                "final_mp4_path": str(source),
-                "blocker": None,
-                "auto_smart_verified": True,
+            "ok": True,
+            "state": {
+                "auto_multi_voice_verified": True,
+                "auto_detected_speaker_count": 3,
+                "auto_distinct_voice_count": 3,
+            },
+            "video_output": b"v2-video-output",
         }
 
-    monkeypatch.setattr(smart, "run_auto_smart_multivoice", capture_runner)
+    monkeypatch.setattr(
+        auto_multi_speaker_v2,
+        "run_auto_multi_speaker_v2_blackbox",
+        capture_v2,
+    )
 
     result = asyncio.run(
         smart.run_auto_smart_multivoice_blackbox(
@@ -81,34 +82,10 @@ def test_smart_blackbox_reuses_prepared_auto_multi_acoustic_registers(
     )
 
     assert result["ok"] is True
-    assert result["state"]["auto_smart_fallback_level"] == 1
-    assert result["state"]["auto_smart_fallback_reason"] == (
-        "n3_unknown_register_distinct_voice"
-    )
-    assert result["state"]["auto_smart_register_degraded"] is True
-    assert captured["acoustic_classifications"] == {
-        "chunk_00:speaker_0": {
-            "speaker_id": "chunk_00:speaker_0",
-            "voice_register": "high",
-            "voice_gender": "female",
-            "confidence": subdub_multi_speaker_gender_onnx.MULTI_GENDER_STRONG_CONFIDENCE,
-            "reason": "classified_multi_acoustic_gender_onnx",
-        },
-        "chunk_00:speaker_1": {
-            "speaker_id": "chunk_00:speaker_1",
-            "voice_register": "low",
-            "voice_gender": "male",
-            "confidence": subdub_multi_speaker_gender_onnx.MULTI_GENDER_STRONG_CONFIDENCE,
-            "reason": "classified_multi_acoustic_gender_onnx",
-        },
-        "chunk_00:speaker_2": {
-            "speaker_id": "chunk_00:speaker_2",
-            "voice_register": "low",
-            "voice_gender": "male",
-            "confidence": subdub_multi_speaker_gender_onnx.MULTI_GENDER_STRONG_CONFIDENCE,
-            "reason": "classified_multi_acoustic_gender_onnx",
-        },
-    }
+    assert result["state"]["subdub_engine_selected"] == "auto_multi_speaker_v2"
+    assert result["state"]["auto_smart_dispatch"] == "n3_plus_proven_v2"
+    assert captured["state"]["auto_speaker_lane"] == "multi"
+    assert captured["state"]["auto_multi_engine"] == "v2"
 
 
 def test_diarized_deepgram_result_preserves_word_timeline(monkeypatch):
@@ -660,3 +637,83 @@ def test_smart_blackbox_recovers_one_weak_prepared_register_without_classifier_r
             stereo_pcm_path=str(pcm),
         ))
     assert captured == {}
+
+
+def test_smart_n3_dispatches_prepared_state_to_proven_v2_once(tmp_path, monkeypatch):
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"source-video")
+    pcm = tmp_path / "source.pcm"
+    pcm.write_bytes(b"\x01\x00\x01\x00" * (44_100 * 4))
+    segments = _prepared_segments()
+    prepared = {
+        "state": {
+            "auto_smart_multivoice_opt_in": True,
+            "_pipeline_workspace": str(tmp_path),
+            "_pipeline_job_id": "smart-n3-v2",
+        },
+        "source_file": str(source),
+        "source_bytes": source.read_bytes(),
+        "source_segments": segments,
+        "output_segments": segments,
+    }
+    observed = {"prepare_calls": 0, "v2_calls": 0}
+
+    async def prepare(_state, *, require_auto_cast=False):
+        assert require_auto_cast is True
+        observed["prepare_calls"] += 1
+        return prepared
+
+    async def extract_pcm(*_args, **_kwargs):
+        return str(pcm)
+
+    async def run_v2(*, state, extract_pcm, **payload):
+        observed["v2_calls"] += 1
+        observed["state"] = dict(state)
+        assert callable(extract_pcm)
+        reused = await payload["prepare_subtitles"](
+            dict(state),
+            require_auto_cast=True,
+        )
+        assert reused is prepared
+        return {
+            "ok": True,
+            "state": {
+                "auto_multi_voice_verified": True,
+                "auto_detected_speaker_count": 3,
+                "auto_distinct_voice_count": 3,
+            },
+            "video_output": b"real-v2-output-boundary",
+        }
+
+    async def forbid_smart_runner(**_kwargs):
+        raise AssertionError("Smart N>=3 must reuse the proven V2 downstream engine")
+
+    monkeypatch.setattr(
+        auto_multi_speaker_v2,
+        "run_auto_multi_speaker_v2_blackbox",
+        run_v2,
+    )
+    monkeypatch.setattr(smart, "run_auto_smart_multivoice", forbid_smart_runner)
+
+    result = asyncio.run(smart.run_auto_smart_multivoice_blackbox(
+        state={
+            "auto_smart_multivoice_opt_in": True,
+            "source": str(source),
+            "_pipeline_workspace": str(tmp_path),
+            "_pipeline_job_id": "smart-n3-v2",
+        },
+        lane_mode="subtitle_plus_dub",
+        prepare_subtitles=prepare,
+        extract_pcm=extract_pcm,
+        run_lane_blackbox=lambda **_kwargs: {},
+        runner=lambda **_kwargs: {},
+    ))
+
+    assert observed["prepare_calls"] == 1
+    assert observed["v2_calls"] == 1
+    assert observed["state"]["auto_speaker_lane"] == "multi"
+    assert observed["state"]["auto_multi_engine"] == "v2"
+    assert observed["state"]["auto_smart_multivoice_opt_in"] is True
+    assert result["ok"] is True
+    assert result["state"]["subdub_engine_selected"] == "auto_multi_speaker_v2"
+    assert result["state"]["auto_smart_dispatch"] == "n3_plus_proven_v2"
