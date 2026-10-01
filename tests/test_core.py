@@ -11577,3 +11577,77 @@ def test_video_prompt_engine_v10_strength_controls_are_prompt_only():
     assert "[Global Vision & Tone]" in plan["prompt"]
     assert "[Shot Breakdown]" in plan["prompt"]
     assert "[Audio / SFX]" in plan["prompt"]
+
+
+def test_profile_command_sends_account_keyboard_for_saved_locale_without_wallet_io(monkeypatch):
+    source = bot_source_text()
+    assert re.search(r'CommandHandler\("profile",\s*cmd_profile\)', source)
+
+    async def no_birthday_wallet_side_effect(update, context):
+        return None
+
+    monkeypatch.setattr(bot, "get_user_language", lambda user_id: "en")
+    monkeypatch.setattr(bot, "public_pricing_locale", lambda language: language)
+    monkeypatch.setattr(
+        bot,
+        "public_account_flow_copy",
+        lambda language: {
+            "profile_title": "Account",
+            "member_tier": "Tier",
+            "eligible_topups": "Eligible top-ups",
+            "service_xu_used": "Xu used",
+            "ref_pending_rewarded": "Referrals",
+            "ref_rewards_received": "Referral rewards",
+            "monthly_plan": "Monthly plan",
+            "plan_progress_note": "Plan note",
+            "service_benefit": "Service benefit",
+            "birthday_benefit": "Birthday benefit",
+            "not_saved_birthday": "No birthday saved",
+            "birthday_gift_short": "Birthday gift",
+            "profile_policy_note": "Account policy",
+            "profile_commands": "Account commands",
+            "plan_not_subscribed": "No plan",
+            "save_service_xu": "Save {discount}%",
+        },
+    )
+    monkeypatch.setattr(bot, "maybe_auto_grant_birthday_gift", no_birthday_wallet_side_effect)
+    monkeypatch.setattr(bot, "get_user", lambda user_id, first_name: (100, 20, False))
+    monkeypatch.setattr(bot, "get_member_profile", lambda user_id: {"total_paid_vnd": 0})
+    monkeypatch.setattr(
+        bot,
+        "referral_stats_for_user",
+        lambda user_id: {"pending": 0, "rewarded": 0, "reward_xu": 0},
+    )
+    monkeypatch.setattr(bot, "admin_display_badge", lambda user_id: "")
+    monkeypatch.setattr(bot, "get_role_badge", lambda user_id: "Member")
+    monkeypatch.setattr(bot, "referral_link_for_user", lambda user_id: "https://example.test/ref")
+    monkeypatch.setattr(bot, "birthday_gift_status", lambda user_id: {"birthday": None})
+    monkeypatch.setattr(bot, "get_user_plan", lambda user_id: {"active": False})
+    monkeypatch.setattr(bot, "get_member_service_discount_rate", lambda user_id: 0)
+
+    sent = {}
+
+    async def capture_reply(text, **kwargs):
+        sent["text"] = text
+        sent.update(kwargs)
+
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=987654321, first_name="Test"),
+        message=SimpleNamespace(reply_text=capture_reply),
+    )
+    asyncio.run(bot.cmd_profile(update, None))
+
+    assert "<code>987654321</code>" in sent["text"]
+    assert sent["parse_mode"] == "HTML"
+    assert "reply_markup" in sent
+    markup = sent["reply_markup"]
+    actual_keyboard = [
+        [(button.text, button.callback_data) for button in row]
+        for row in markup.inline_keyboard
+    ]
+    expected_keyboard = [
+        [(button.text, button.callback_data) for button in row]
+        for row in bot.main_profile_keyboard("en").inline_keyboard
+    ]
+    assert actual_keyboard == expected_keyboard
+    assert len(actual_keyboard) == 6
