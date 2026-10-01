@@ -48,6 +48,7 @@ class FreeHubMaintenancePendingResetTest(unittest.TestCase):
             "InlineKeyboardButton": _Button,
             "InlineKeyboardMarkup": _Markup,
             "USER_PENDING": {},
+            "clear_video_downloader_pending": lambda _uid: None,
             "time": time,
             "FREE_HUB_PENDING_TTL_SECONDS": 600,
             "FREE_HUB_ENABLED": True,
