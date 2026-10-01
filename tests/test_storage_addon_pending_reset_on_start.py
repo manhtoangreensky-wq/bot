@@ -54,6 +54,8 @@ class StorageAddonPendingResetOnStartTests(unittest.TestCase):
             "InlineKeyboardMarkup": lambda rows: rows,
             "InlineKeyboardButton": lambda *args, **kwargs: (args, kwargs),
             "clear_media_creator_pending_states": lambda _uid: False,
+            "clear_memory_guided_pending": lambda _uid: None,
+            "clear_doc_tool_pending": lambda _uid: None,
             "clear_pending_start_notice": None,
             "storage_addon_spec_from_custom": lambda _text: None,
             "memory_storage_addon_keyboard": lambda *_args: "storage-keyboard",
