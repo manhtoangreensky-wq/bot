@@ -3300,15 +3300,17 @@ def validate_owner_acceptance_authorization(
 
     # 3. Product type pinning
     pinned_product = str(auth.get("product_type") or CANONICAL_ACCEPTANCE_PRODUCT_TYPE).strip()
-    if pinned_product != CANONICAL_ACCEPTANCE_PRODUCT_TYPE and not auth.get("allow_other_product"):
+    allowed_acceptance_products = {CANONICAL_ACCEPTANCE_PRODUCT_TYPE, "video_ai_video_reference"}
+    if pinned_product not in allowed_acceptance_products and not auth.get("allow_other_product"):
         return False, "owner_acceptance_product_mismatch", {}
     ctx_product = str(ctx.get("product_type") or "").strip()
     if ctx_product and ctx_product != pinned_product:
         return False, "owner_acceptance_product_mismatch", {}
 
-    # 4. Provider pinning (shopaikey_video only for first lane)
+    # 4. Provider pinning (shopaikey_video or fal_video for owner acceptance)
     pinned_provider = str(auth.get("provider") or CANONICAL_ACCEPTANCE_PROVIDER).strip()
-    if pinned_provider != CANONICAL_ACCEPTANCE_PROVIDER and not auth.get("allow_secondary_provider"):
+    allowed_acceptance_providers = {CANONICAL_ACCEPTANCE_PROVIDER, "fal_video", "fal.ai", "fal-video"}
+    if pinned_provider not in allowed_acceptance_providers and not auth.get("allow_secondary_provider"):
         return False, "owner_acceptance_provider_mismatch", {}
     ctx_provider = str(ctx.get("provider") or ctx.get("selected_provider") or "").strip()
     if ctx_provider and ctx_provider != pinned_provider:
@@ -3350,7 +3352,12 @@ def validate_owner_acceptance_authorization(
     # 8. Spend bound & currency unit contract (SPEC-02C: CROSS_UNIT_COMPARISON=NO)
     max_spend = auth.get("max_provider_spend")
     if max_spend is not None:
-        auth_spend_unit = str(auth.get("max_provider_spend_unit") or "").strip().upper()
+        auth_spend_unit = str(
+            auth.get("max_provider_spend_unit")
+            or auth.get("spend_unit")
+            or auth.get("currency")
+            or ""
+        ).strip().upper()
         if not auth_spend_unit:
             return False, "owner_acceptance_spend_unit_missing", {}
 

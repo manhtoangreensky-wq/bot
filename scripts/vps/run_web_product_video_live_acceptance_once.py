@@ -18,10 +18,12 @@ import argparse
 import json
 import logging
 import os
+import shutil
 import stat
+import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 # Ensure project root is in sys.path
 _ROOT = Path(__file__).resolve().parents[2]
@@ -89,6 +91,34 @@ def load_protected_owner_auth(file_path: str | Path, expected_job_id: str) -> di
     return auth_data
 
 
+def query_systemd_service_state(service_name: str = "toanaas-worker-web-product-video.service") -> tuple[bool, str]:
+    """Query systemctl is-active for service_name.
+
+    Returns:
+        (is_inactive, state_string)
+        is_inactive is True ONLY if state is confirmed 'inactive'.
+    """
+    systemctl = shutil.which("systemctl")
+    if not systemctl:
+        return False, "SYSTEMCTL_UNAVAILABLE"
+    try:
+        proc = subprocess.run(
+            [systemctl, "is-active", service_name],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        state = (proc.stdout or "").strip().lower()
+        if state == "inactive":
+            return True, "inactive"
+        elif state == "active":
+            return False, "active"
+        else:
+            return False, state or f"UNKNOWN_RETURN_CODE_{proc.returncode}"
+    except Exception as exc:
+        return False, f"QUERY_ERROR_{type(exc).__name__}"
+
+
 def run_live_acceptance_once(
     expected_job_id: str,
     owner_auth_file: str | Path,
@@ -97,6 +127,8 @@ def run_live_acceptance_once(
     base_url: str | None = None,
     dry_run: bool = False,
     client: WebProductVideoDispatcherClient | None = None,
+    service_name: str = "toanaas-worker-web-product-video.service",
+    service_checker: Callable[[str], tuple[bool, str]] | None = None,
 ) -> int:
     """Execute exactly one targeted Owner acceptance job and terminate.
 
@@ -113,6 +145,18 @@ def run_live_acceptance_once(
         owner_auth = load_protected_owner_auth(owner_auth_file, clean_expected_id)
     except Exception as exc:
         print(f"STATUS=BLOCKED_OWNER_AUTH_INVALID: {exc}", file=sys.stderr)
+        print("PROVIDER_CALLS=0")
+        return 1
+
+    # Phase A: Generic background worker quiescence verification
+    checker = service_checker or query_systemd_service_state
+    is_quiesced, svc_state = checker(service_name)
+    if not is_quiesced:
+        if str(svc_state).strip().lower() == "active":
+            print("STATUS=BLOCKED_GENERIC_WEB_PRODUCT_VIDEO_WORKER_ACTIVE")
+        else:
+            print(f"STATUS=BLOCKED_UNKNOWN_SERVICE_STATE: {svc_state}")
+        print("TARGET_JOB_CLAIM=0")
         print("PROVIDER_CALLS=0")
         return 1
 
@@ -220,6 +264,11 @@ def main() -> int:
         action="store_true",
         help="Claim and validate target job only without invoking provider runtime",
     )
+    parser.add_argument(
+        "--service-name",
+        default="toanaas-worker-web-product-video.service",
+        help="Generic background worker systemd service name to check for quiescence",
+    )
 
     args = parser.parse_args()
 
@@ -230,6 +279,7 @@ def main() -> int:
         worker_id=args.worker_id,
         base_url=args.base_url,
         dry_run=args.dry_run,
+        service_name=args.service_name,
     )
 
 
