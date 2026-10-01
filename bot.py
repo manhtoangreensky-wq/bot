@@ -141195,6 +141195,8 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
     action = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else "main"
     uid = query.from_user.id
     lang = get_user_language(uid) or "vi"
+    if action == "main":
+        clear_video_downloader_pending(uid)
     if not FREE_HUB_ENABLED:
         return await safe_edit_or_send(
             query,
