@@ -2789,7 +2789,12 @@ async def run_auto_smart_multivoice_blackbox(
     except speaker_cast.AutoCastUnavailable:
         prepared_speaker_labels = []
     dispatch_to_v2 = False
-    if len(prepared_speaker_labels) >= 3 and isinstance(prepared, dict):
+    generic_acoustic = bool(
+        isinstance(prepared, dict)
+        and isinstance(prepared.get("state"), Mapping)
+        and prepared["state"].get("auto_smart_generic_acoustic") is True
+    )
+    if len(prepared_speaker_labels) >= 3 and isinstance(prepared, dict) and not generic_acoustic:
         try:
             strong_registers = auto_multi_speaker.acoustic_register_classifications(
                 prepared,
