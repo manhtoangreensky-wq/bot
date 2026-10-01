@@ -249,8 +249,14 @@ class DisallowedRedirectError(urllib.error.HTTPError):
     """Raised when a redirect target violates safety policy before connection."""
 
     def __init__(self, url: str, reason: str):
-        super().__init__(url, 400, f"Disallowed redirect destination ({reason})", hdrs=None, fp=None)
+        sanitized = sanitize_output_url_for_logging(url)
+        super().__init__(sanitized, 400, f"Disallowed redirect destination ({reason})", hdrs=None, fp=None)
         self.redirect_reason = reason
+        self.sanitized_url = sanitized
+
+
+class UnsafeOutputURLError(ValueError):
+    """Raised when candidate video output URL violates SSRF or security whitelist policy."""
 
 
 def is_safe_shopaikey_content_url(url: Any) -> bool:
@@ -443,7 +449,7 @@ class _HardenedVideoRedirectHandler(urllib.request.HTTPRedirectHandler):
 
 def _is_transient_download_error(exc: BaseException) -> bool:
     """Determine if a download failure is transient and eligible for bounded retry."""
-    if isinstance(exc, DisallowedRedirectError):
+    if isinstance(exc, (DisallowedRedirectError, UnsafeOutputURLError)):
         return False
     if isinstance(exc, (TimeoutError, socket.timeout, ConnectionResetError, http.client.RemoteDisconnected, http.client.IncompleteRead, IncompleteDownloadError)):
         return True
@@ -485,8 +491,8 @@ def materialize_video_url(
         "result_url_ext": source_ext[:20],
         "result_url_query_present": bool(parsed_source.query),
         "trusted_video_url": bool(
-            parsed_source.scheme in {"http", "https"} and parsed_source.hostname
-        ) or os.path.isfile(source),
+            is_safe_video_output_url(source) or os.path.isfile(source)
+        ),
         "download_http_status": 0,
         "download_final_url_host": "",
         "download_redirect_count": 0,
@@ -543,6 +549,21 @@ def materialize_video_url(
                 diagnostics=diagnostics,
             )
     else:
+        if not is_safe_video_output_url(source):
+            diagnostics.update({
+                "trusted_video_url": False,
+                "download_error_class": "UnsafeOutputURLError",
+                "download_error_message_masked": "provider_result_url_unsafe",
+                "mp4_validator_result": "not_run_unsafe_url",
+            })
+            return VideoArtifactResult(
+                ok=False,
+                local_path=str(target),
+                error_code="provider_result_url_unsafe",
+                error_message="provider_result_url_unsafe",
+                diagnostics=diagnostics,
+            )
+
         max_attempts = 2
         last_exc: BaseException | None = None
         transfer_success = False

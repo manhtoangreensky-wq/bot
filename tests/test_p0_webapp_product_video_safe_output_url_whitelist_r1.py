@@ -45,11 +45,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from providers.video_generic_http_provider import GenericHttpVideoProvider
 from services.video_provider_base import (
     DisallowedRedirectError,
     IncompleteDownloadError,
+    UnsafeOutputURLError,
     VideoArtifactResult,
     VideoGenerationRequest,
+    VideoPollResult,
     is_safe_shopaikey_content_url,
     is_safe_video_output_url,
     materialize_video_url,
@@ -562,3 +565,218 @@ def test_22_consumer_accepts_valid_shopaikey_url_end_to_end(tmp_path: Path) -> N
     assert outcome.output_url == VALID_SHOPAIKEY_URL
     assert client.complete.call_count == 1
     assert client.fail.call_count == 0
+
+
+# ==============================================================================
+# 5. Shared Materializer Fail-Closed URL Validation Direct Tests
+# ==============================================================================
+
+def test_initial_http_shopaikey_rejected_before_network(tmp_path: Path) -> None:
+    """TEST_INITIAL_HTTP_SHOPAIKEY_REJECTED_BEFORE_NETWORK=PASS"""
+    with patch("urllib.request.build_opener") as mock_opener_cls, \
+         patch("urllib.request.urlopen") as mock_urlopen:
+        res = materialize_video_url(
+            "http://api.shopaikey.com/v1/videos/task_123/content?exp=1791504000&sig=424074123350da54e35a932e474286d8",
+            job_id="job_unsafe_http",
+            output_dir=str(tmp_path),
+        )
+
+    assert res.ok is False
+    assert res.error_code == "provider_result_url_unsafe"
+    assert res.error_message == "provider_result_url_unsafe"
+    assert res.diagnostics["download_attempts"] == 0
+    assert res.diagnostics["download_retries"] == 0
+    assert res.diagnostics["download_http_status"] == 0
+    assert res.diagnostics["download_bytes"] == 0
+    assert res.diagnostics["download_redirect_count"] == 0
+    assert res.diagnostics["trusted_video_url"] is False
+    assert res.diagnostics["download_error_class"] == "UnsafeOutputURLError"
+    assert mock_opener_cls.call_count == 0
+    assert mock_urlopen.call_count == 0
+
+
+def test_initial_host_suffix_attack_rejected_before_network(tmp_path: Path) -> None:
+    """TEST_INITIAL_HOST_SUFFIX_ATTACK_REJECTED_BEFORE_NETWORK=PASS"""
+    with patch("urllib.request.build_opener") as mock_opener_cls, \
+         patch("urllib.request.urlopen") as mock_urlopen:
+        res = materialize_video_url(
+            "https://api.shopaikey.com.attacker.com/v1/videos/task_123/content?exp=1791504000&sig=424074123350da54e35a932e474286d8",
+            job_id="job_suffix_attack",
+            output_dir=str(tmp_path),
+        )
+
+    assert res.ok is False
+    assert res.error_code == "provider_result_url_unsafe"
+    assert res.diagnostics["download_attempts"] == 0
+    assert mock_opener_cls.call_count == 0
+    assert mock_urlopen.call_count == 0
+
+
+def test_initial_localhost_or_private_ip_mp4_rejected_before_network(tmp_path: Path) -> None:
+    """TEST_INITIAL_LOCALHOST_OR_PRIVATE_IP_MP4_REJECTED_BEFORE_NETWORK=PASS"""
+    unsafe_targets = [
+        "http://localhost/video.mp4",
+        "https://127.0.0.1/video.mp4",
+        "https://10.0.0.1/video.mp4",
+        "https://192.168.1.1/video.mp4",
+        "https://169.254.169.254/video.mp4",
+    ]
+    for url in unsafe_targets:
+        with patch("urllib.request.build_opener") as mock_opener_cls, \
+             patch("urllib.request.urlopen") as mock_urlopen:
+            res = materialize_video_url(url, job_id="job_private_ip", output_dir=str(tmp_path))
+
+        assert res.ok is False
+        assert res.error_code == "provider_result_url_unsafe"
+        assert res.diagnostics["download_attempts"] == 0
+        assert mock_opener_cls.call_count == 0
+        assert mock_urlopen.call_count == 0
+
+
+def test_initial_arbitrary_extensionless_other_host_rejected_before_network(tmp_path: Path) -> None:
+    """TEST_INITIAL_ARBITRARY_EXTENSIONLESS_OTHER_HOST_REJECTED_BEFORE_NETWORK=PASS"""
+    with patch("urllib.request.build_opener") as mock_opener_cls, \
+         patch("urllib.request.urlopen") as mock_urlopen:
+        res = materialize_video_url(
+            "https://api.someotherhost.com/v1/videos/task_123/content?exp=1791504000&sig=424074123350da54e35a932e474286d8",
+            job_id="job_other_host",
+            output_dir=str(tmp_path),
+        )
+
+    assert res.ok is False
+    assert res.error_code == "provider_result_url_unsafe"
+    assert res.diagnostics["download_attempts"] == 0
+    assert mock_opener_cls.call_count == 0
+    assert mock_urlopen.call_count == 0
+
+
+def test_valid_initial_shopaikey_signed_content_reaches_mocked_opener(tmp_path: Path) -> None:
+    """TEST_VALID_INITIAL_SHOPAIKEY_SIGNED_CONTENT_REACHES_MOCKED_OPENER=PASS"""
+    mock_response = MagicMock()
+    mock_response.headers = {"Content-Type": "video/mp4", "Content-Length": "2048"}
+    mock_response.geturl.return_value = VALID_SHOPAIKEY_URL
+    mock_response.status = 200
+    mock_response.getcode.return_value = 200
+    mock_response.read = io.BytesIO(b"\x00" * 2048).read
+
+    with patch("urllib.request.build_opener") as mock_opener_cls, \
+         patch("services.video_final_output.probe_video", return_value={"ok": True, "duration": 5.0, "has_video": True, "has_audio": True}):
+        mock_opener = MagicMock()
+        mock_opener.open.return_value.__enter__.return_value = mock_response
+        mock_opener_cls.return_value = mock_opener
+
+        res = materialize_video_url(
+            VALID_SHOPAIKEY_URL,
+            job_id="job_valid_shop",
+            output_dir=str(tmp_path),
+        )
+
+    assert res.ok is True
+    assert mock_opener.open.call_count == 1
+    assert res.diagnostics["download_attempts"] == 1
+    assert res.diagnostics["download_http_status"] == 200
+    assert res.diagnostics["download_bytes"] == 2048
+
+
+def test_valid_initial_legacy_https_mp4_reaches_mocked_opener(tmp_path: Path) -> None:
+    """TEST_VALID_INITIAL_LEGACY_HTTPS_MP4_REACHES_MOCKED_OPENER=PASS"""
+    mock_response = MagicMock()
+    mock_response.headers = {"Content-Type": "video/mp4", "Content-Length": "2048"}
+    mock_response.geturl.return_value = LEGACY_SAFE_MP4_URL
+    mock_response.status = 200
+    mock_response.getcode.return_value = 200
+    mock_response.read = io.BytesIO(b"\x00" * 2048).read
+
+    with patch("urllib.request.build_opener") as mock_opener_cls, \
+         patch("services.video_final_output.probe_video", return_value={"ok": True, "duration": 5.0, "has_video": True, "has_audio": True}):
+        mock_opener = MagicMock()
+        mock_opener.open.return_value.__enter__.return_value = mock_response
+        mock_opener_cls.return_value = mock_opener
+
+        res = materialize_video_url(
+            LEGACY_SAFE_MP4_URL,
+            job_id="job_valid_legacy",
+            output_dir=str(tmp_path),
+        )
+
+    assert res.ok is True
+    assert mock_opener.open.call_count == 1
+    assert res.diagnostics["download_attempts"] == 1
+    assert res.diagnostics["download_http_status"] == 200
+    assert res.diagnostics["download_bytes"] == 2048
+
+
+def test_generic_http_provider_materialize_unsafe_url_zero_network(tmp_path: Path) -> None:
+    """TEST_GENERIC_HTTP_PROVIDER_MATERIALIZE_UNSAFE_URL_ZERO_NETWORK=PASS"""
+    provider = GenericHttpVideoProvider(
+        provider_name="test_generic_http",
+        environ={"VIDEO_PROVIDER_OUTPUT_DIR": str(tmp_path)},
+    )
+    poll_result = VideoPollResult(
+        ok=True,
+        provider_name="test_generic_http",
+        provider_task_id="task_unsafe_poll_999",
+        result_url="http://insecure-domain.com/video.mp4",
+        status="succeeded",
+    )
+
+    with patch("urllib.request.build_opener") as mock_opener_cls, \
+         patch("urllib.request.urlopen") as mock_urlopen:
+        artifact = provider.materialize_result(poll_result, job_id="job_generic_http_unsafe")
+
+    assert artifact.ok is False
+    assert artifact.error_code == "provider_result_url_unsafe"
+    assert artifact.diagnostics["download_attempts"] == 0
+    assert artifact.diagnostics["download_retries"] == 0
+    assert artifact.diagnostics["download_http_status"] == 0
+    assert artifact.diagnostics["download_bytes"] == 0
+    assert artifact.diagnostics["download_redirect_count"] == 0
+    assert mock_opener_cls.call_count == 0
+    assert mock_urlopen.call_count == 0
+
+
+def test_redirect_disallowed_destination_zero_request() -> None:
+    """TEST_REDIRECT_DISALLOWED_DESTINATION_ZERO_REQUEST=PASS"""
+    disallowed_destinations = [
+        "http://api.shopaikey.com/v1/videos/task_123/content?exp=1791504000&sig=abc",  # HTTP downgrade
+        "https://127.0.0.1/video.mp4",  # private IP
+        "https://attacker.com/exploit.mp4",  # untrusted host
+        "https://api.shopaikey.com.attacker.com/v1/videos/task_123/content?exp=1791504000&sig=abc",  # host suffix
+        "https://api.shopaikey.com/v1/videos/task_123/content",  # missing exp/sig
+    ]
+    for disallowed_url in disallowed_destinations:
+        handler = _HardenedVideoRedirectHandler(VALID_SHOPAIKEY_URL)
+        with pytest.raises(DisallowedRedirectError) as exc_info:
+            handler.redirect_request(
+                req=MagicMock(),
+                fp=None,
+                code=302,
+                msg="Found",
+                headers={},
+                newurl=disallowed_url,
+            )
+        assert exc_info.value.code == 400
+        assert "disallowed" in exc_info.value.redirect_reason
+
+
+def test_signed_query_not_present_in_failure_diagnostics_or_logs(tmp_path: Path) -> None:
+    """TEST_SIGNED_QUERY_NOT_PRESENT_IN_FAILURE_DIAGNOSTICS_OR_LOGS=PASS"""
+    secret_sig = "SECRET_SIG_VALUE_XYZ_99999"
+    secret_exp = "1799999999"
+    test_url = f"http://api.shopaikey.com/v1/videos/task_test_sec/content?exp={secret_exp}&sig={secret_sig}"
+
+    with patch("urllib.request.build_opener") as mock_opener_cls:
+        res = materialize_video_url(
+            test_url,
+            job_id="job_leak_test",
+            output_dir=str(tmp_path),
+        )
+
+    assert res.ok is False
+    assert res.error_code == "provider_result_url_unsafe"
+    diag_str = str(res.diagnostics)
+    assert secret_sig not in diag_str
+    assert secret_exp not in diag_str
+    assert "sig=" not in diag_str
+    assert "exp=" not in diag_str
+
