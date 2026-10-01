@@ -1092,7 +1092,7 @@ def test_storyboard_kling_3_turbo_wire_payload_construction(sample_panels):
         "grok-imagine-video",
         "sora",
         "seedance",
-        "veo_3_1-fast",
+        "veo3.1-fast",
         "MiniMax-Hailuo-02",
         "unsupported-model-x",
     ],
@@ -1131,7 +1131,7 @@ def test_storyboard_unproven_models_fail_closed_at_draft_prepare(sample_panels, 
     assert diag.get("no_charge") is True
     assert diag.get("blocker") == video_real_render_connector.STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER
     assert diag.get("model") == unproven_model
-    assert diag.get("allowed_models") == ["kling-3.0-turbo", "kling-v3"]
+    assert diag.get("allowed_models") == sorted(video_real_render_connector.STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER["key4u_video"])
 
 
 def test_storyboard_unproven_model_fails_closed_at_render_real_video_job(tmp_path, sample_panels):
