@@ -259256,10 +259256,10 @@ async def handle_marketing_pending_text(update: Update, context: ContextTypes.DE
 
 async def handle_marketing_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     uid = query.from_user.id
     if not is_admin_user(uid):
         return await query.answer("Tính năng Marketing tự động đang thử nghiệm nội bộ. Hiện chỉ admin sử dụng.", show_alert=True)
+    await query.answer()
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "start"
     value = parts[2] if len(parts) > 2 else ""
