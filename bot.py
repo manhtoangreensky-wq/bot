@@ -278948,6 +278948,56 @@ async def api_internal_admin_wallet_compensate(request: Request):
     return JSONResponse(status_code=status_code, content=result)
 
 
+@fastapi_app.post("/internal/v1/web-product-video/settle")
+async def api_internal_web_product_video_settle(request: Request):
+    """Canonical Bot Core settlement endpoint for Web Product Video jobs."""
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+        if not isinstance(payload, dict):
+            raise ValueError("Payload must be an object")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.web_product_video_settlement_service import execute_web_product_video_settlement
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
+    payload_actor = str(payload.get("actor_id") or "").strip()
+    actor_id = header_actor or payload_actor
+
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path="/internal/v1/web-product-video/settle",
+        body_bytes=raw_body,
+        actor_id=actor_id,
+    )
+    if not auth_ok:
+        raise HTTPException(
+            status_code=auth_status,
+            detail={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    ok, result, status_code = execute_web_product_video_settlement(
+        web_job_id=str(payload.get("web_job_id") or "").strip(),
+        web_request_id=str(payload.get("web_request_id") or "").strip(),
+        canonical_user_id=payload.get("canonical_user_id"),
+        product_key=str(payload.get("product_key") or "").strip(),
+        tier_id=payload.get("tier_id"),
+        scene_count=payload.get("scene_count", 1),
+        output_url=str(payload.get("output_url") or "").strip(),
+        validated_output_metadata=payload.get("validated_output_metadata"),
+        caller_amount_xu=payload.get("amount_xu") if "amount_xu" in payload else payload.get("amount"),
+        idempotency_key=str(payload.get("idempotency_key") or "").strip() or None,
+        db_path=DB_FILE,
+    )
+    return JSONResponse(status_code=status_code, content=result)
+
+
 # ─── CANONICAL CUSTOMER READ MODEL ENDPOINTS (SPEC-P0.BOT.INTERNAL.CUSTOMER.READ.MODEL.API.V1) ───
 
 @fastapi_app.get("/internal/v1/wallet")
