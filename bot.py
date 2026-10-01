@@ -135858,6 +135858,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_command_received("start", update)
     uid = update.effective_user.id
     user_existed_before = user_exists(uid)
+    clear_memory_guided_pending(uid)
     get_user(uid, update.effective_user.first_name)
     record_usage_event(
         uid,
