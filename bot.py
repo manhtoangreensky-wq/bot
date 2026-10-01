@@ -60512,7 +60512,7 @@ def support_ticket_admin_text(ticket: dict) -> str:
     ]
     return "\n".join(lines)
 
-def support_ticket_admin_keyboard(ticket: dict, source: str = "new") -> InlineKeyboardMarkup:
+def support_ticket_admin_keyboard(ticket: dict, source: str = "new", list_offset: int = 0) -> InlineKeyboardMarkup:
     ticket_id = int(ticket["id"])
     rows = [
         [InlineKeyboardButton("✅ Đã xử lý", callback_data=f"ticket|st|{ticket_id}|resolved"), InlineKeyboardButton("💬 Soạn trả lời", callback_data=f"ticket|reply|{ticket_id}")],
@@ -60524,7 +60524,7 @@ def support_ticket_admin_keyboard(ticket: dict, source: str = "new") -> InlineKe
         rows.append([InlineKeyboardButton("📎 Xem file đính kèm", callback_data=f"ticket|file|{ticket_id}")])
     if ticket.get("category") == "lead_consulting":
         rows.append([InlineKeyboardButton("📞 Cần liên hệ", callback_data=f"ticket|lead|{ticket_id}|contact"), InlineKeyboardButton("⭐ Lead tiềm năng", callback_data=f"ticket|lead|{ticket_id}|potential")])
-    rows.append([InlineKeyboardButton("⬅️ Danh sách", callback_data=f"ticket|al|{source}|0"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    rows.append([InlineKeyboardButton("⬅️ Danh sách", callback_data=f"ticket|al|{source}|{max(0, int(list_offset or 0))}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
 def support_admin_list_payload(list_kind: str, offset: int = 0) -> tuple[str, InlineKeyboardMarkup]:
@@ -60548,7 +60548,7 @@ def support_admin_list_payload(list_kind: str, offset: int = 0) -> tuple[str, In
             lines.append(f"• <code>{ticket['ticket_code']}</code> — {html.escape(support_category_label(ticket['category']))} — user <code>{html.escape(ticket['user_id'])}</code>")
     rows = []
     for index in range(0, len(tickets), 2):
-        rows.append([InlineKeyboardButton(f"🎫 {ticket['ticket_code'][-6:]}", callback_data=f"ticket|av|{ticket['id']}|{list_kind}") for ticket in tickets[index:index + 2]])
+        rows.append([InlineKeyboardButton(f"🎫 {ticket['ticket_code'][-6:]}", callback_data=f"ticket|av|{ticket['id']}|{list_kind}|{offset}") for ticket in tickets[index:index + 2]])
     nav = []
     if offset > 0:
         nav.append(InlineKeyboardButton("⬅️ Trang trước", callback_data=f"ticket|al|{list_kind}|{max(0, offset - 6)}"))
@@ -140135,7 +140135,8 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         if not ticket:
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
         source = parts[3] if len(parts) >= 4 else "new"
-        return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket, source))
+        list_offset = max(0, int(parts[4] or 0)) if len(parts) >= 5 else 0
+        return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket, source, list_offset))
     if action == "asearch" and len(parts) >= 3:
         set_support_ticket_pending(uid, "admin_search", source=parts[2])
         prompt = "Nhập user ID để tìm ticket." if parts[2] == "user" else "Nhập mã ticket, user ID, username hoặc từ khóa."
