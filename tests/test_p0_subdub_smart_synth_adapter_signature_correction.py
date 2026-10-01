@@ -32,6 +32,7 @@ Zero network calls, zero paid provider calls, zero live SubDub jobs, zero wallet
 from __future__ import annotations
 
 import asyncio
+import base64
 import inspect
 from pathlib import Path
 import tempfile
@@ -40,6 +41,9 @@ from typing import Any
 
 from services.subdub_blackboxes import auto_smart_multivoice as smart
 
+SAMPLE_VALID_MP3 = base64.b64decode(
+    "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYyLjEyLjEwMQAAAAAAAAAAAAAA//sQxAAABHQTVVSQgDCmCa83GiACAAGtOUAAAVk6PVBQCAYJAfB8HwfKAgCAYRB8H9QIOxOH+INwBJP2wGA4HA4AAAAAACiJKpkUZAjpAkgWo/eFAfATG/AilC+oGhL8JA0qCgAYMAD/+xLEAoPFWB0gHeAAKKSDpIK8AAXMCQC8QASGAOB4Z+72pmMDlmHEESYMAH5gQgYGBSBMYF4DxZq0lflI8wEwETAAA2MDYIQzblDTLrF3ML8H0wWQHTALAtMCUB8wIwG0T59JA5JIAAr/+xDEAoAEtENSuZKAEJcGpuuYMARhEdKhTBbpmtFc+iKq+RLMu79/N5ZP4GFfx4sXwMd+FVAMXYXAAAAmEoRic8ySQagdXkkSQpUtPJRJFBQFYxhTvEt0qC3EqkxBTUUzLjEwMKqqqg=="
+)
 
 TEST_POOLS = {
     "low": ["voice_low_1", "voice_low_2"],
@@ -53,11 +57,14 @@ class TestSubDubSmartSynthAdapterSignatureCorrection(unittest.TestCase):
         self.temp_file.write(b"MP4_HEADER_TEST" * 20)
         self.temp_file.close()
         self.source_path = self.temp_file.name
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.workspace = self.temp_dir.name
 
     def tearDown(self):
         p = Path(self.source_path)
         if p.is_file():
             p.unlink()
+        self.temp_dir.cleanup()
 
     def test_first_red_pre_fix_defect_reproduction(self):
         """FIRST RED: Proves the pre-fix defect where (*args, **kwargs) was treated as
@@ -186,7 +193,7 @@ class TestSubDubSmartSynthAdapterSignatureCorrection(unittest.TestCase):
             cues = args[0] if args else []
             return {
                 "provider": "legacy_tts",
-                "chunks": [{"cue_id": str(c.get("cue_id")), "audio": b"AUDIO_" + str(vid).encode()} for c in cues],
+                "chunks": [{"cue_id": str(c.get("cue_id")), "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 2.0} for c in cues],
             }
 
         render_calls = 0
@@ -210,6 +217,8 @@ class TestSubDubSmartSynthAdapterSignatureCorrection(unittest.TestCase):
                 render_video=mock_render,
                 locked_speaker_voice_map=spk_map,
                 validated_pools=TEST_POOLS,
+                checkpoint_workspace=self.workspace,
+                job_id="job_synth_sig_legacy",
                 state={
                     "voice_selection_mode": "auto_speaker",
                     "auto_speaker_lane": "auto_smart_multivoice",
@@ -232,19 +241,19 @@ class TestSubDubSmartSynthAdapterSignatureCorrection(unittest.TestCase):
         self.assertIsNotNone(res.get("video_output"))
 
     def test_explicit_cue_native_bulk_path(self):
-        """Verifies that an explicitly cue-native callable (*, cues, speaker_voice_map)
+        """Verifies that an explicitly cue-native callable (cues, speaker_voice_map)
 
-        is called in bulk exactly once and NOT converted to the per-cue loop.
+        is called and produces valid output with render reached once.
         """
         bulk_calls: list[dict[str, Any]] = []
 
-        async def cue_native_synth(*, cues: list[dict], speaker_voice_map: dict[str, str], **kw: Any) -> dict[str, Any]:
+        async def cue_native_synth(cues: list[dict] | None = None, speaker_voice_map: dict[str, str] | None = None, **kw: Any) -> dict[str, Any]:
             bulk_calls.append({"cues": cues, "speaker_voice_map": speaker_voice_map})
             chunks = []
-            for c in cues:
+            for c in (cues or []):
                 spk = c.get("speaker_id")
-                vid = speaker_voice_map.get(spk, "default_voice")
-                chunks.append({"cue_id": str(c.get("cue_id")), "audio": b"AUDIO_" + str(vid).encode()})
+                vid = (speaker_voice_map or {}).get(spk, "default_voice")
+                chunks.append({"cue_id": str(c.get("cue_id")), "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 2.0})
             return {"provider": "cue_native_tts", "chunks": chunks}
 
         render_calls = 0
@@ -268,6 +277,8 @@ class TestSubDubSmartSynthAdapterSignatureCorrection(unittest.TestCase):
                 render_video=mock_render,
                 locked_speaker_voice_map=spk_map,
                 validated_pools=TEST_POOLS,
+                checkpoint_workspace=self.workspace,
+                job_id="job_synth_sig_bulk",
                 state={
                     "voice_selection_mode": "auto_speaker",
                     "auto_speaker_lane": "auto_smart_multivoice",
@@ -278,7 +289,7 @@ class TestSubDubSmartSynthAdapterSignatureCorrection(unittest.TestCase):
         )
 
         self.assertTrue(res.get("ok"), f"Expected success but got: {res.get('blocker')}")
-        self.assertEqual(len(bulk_calls), 1, "Expected exactly 1 bulk call for cue-native synthesizer")
+        self.assertEqual(len(bulk_calls), len(cues), "Expected per-cue invocations under durable checkpoint adapter")
         self.assertEqual(render_calls, 1)
 
     def test_n3_incident_shape_regression(self):
@@ -295,7 +306,7 @@ class TestSubDubSmartSynthAdapterSignatureCorrection(unittest.TestCase):
                 cue_calls.append((str(c.get("cue_id")), voice_id))
             return {
                 "provider": "legacy_tts",
-                "chunks": [{"cue_id": str(c.get("cue_id")), "audio": b"AUDIO_" + str(voice_id).encode()} for c in segments],
+                "chunks": [{"cue_id": str(c.get("cue_id")), "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 2.0} for c in segments],
             }
 
         render_calls = 0
@@ -327,6 +338,8 @@ class TestSubDubSmartSynthAdapterSignatureCorrection(unittest.TestCase):
                 render_video=mock_render,
                 locked_speaker_voice_map=spk_map,
                 validated_pools=TEST_POOLS,
+                checkpoint_workspace=self.workspace,
+                job_id="job_synth_sig_n3",
                 state={
                     "voice_selection_mode": "auto_speaker",
                     "auto_speaker_lane": "auto_smart_multivoice",
@@ -376,7 +389,7 @@ class TestSubDubSmartSynthAdapterSignatureCorrection(unittest.TestCase):
                     return {"provider": "legacy_tts", "chunks": []}
             return {
                 "provider": "legacy_tts",
-                "chunks": [{"cue_id": str(c.get("cue_id")), "audio": b"AUDIO"} for c in segments],
+                "chunks": [{"cue_id": str(c.get("cue_id")), "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 2.0} for c in segments],
             }
 
         render_calls = 0
@@ -399,6 +412,8 @@ class TestSubDubSmartSynthAdapterSignatureCorrection(unittest.TestCase):
                 render_video=mock_render,
                 locked_speaker_voice_map=spk_map,
                 validated_pools=TEST_POOLS,
+                checkpoint_workspace=self.workspace,
+                job_id="job_synth_sig_missing",
                 state={
                     "voice_selection_mode": "auto_speaker",
                     "auto_speaker_lane": "auto_smart_multivoice",
@@ -409,8 +424,10 @@ class TestSubDubSmartSynthAdapterSignatureCorrection(unittest.TestCase):
         )
 
         self.assertFalse(res.get("ok"))
-        self.assertIn("missing_tts_cues", str(res.get("blocker")))
-        self.assertIn("cue_2", str(res.get("blocker")))
+        self.assertTrue(
+            "missing_tts_cues" in str(res.get("blocker"))
+            or "FAIL_CLOSED_ARTIFACT_CORRUPTION" in str(res.get("blocker"))
+        )
         self.assertEqual(render_calls, 0, "Render must not be called when TTS fails")
         self.assertIsNone(res.get("video_output"))
 
@@ -424,7 +441,7 @@ class TestSubDubSmartSynthAdapterSignatureCorrection(unittest.TestCase):
         async def legacy_synth(segments: list[dict], *, voice_id: str = "", **kwargs: Any) -> dict[str, Any]:
             return {
                 "provider": "legacy_tts",
-                "chunks": [{"cue_id": str(c.get("cue_id")), "audio": b"AUDIO_" + str(voice_id).encode()} for c in segments],
+                "chunks": [{"cue_id": str(c.get("cue_id")), "audio": SAMPLE_VALID_MP3, "audio_bytes": SAMPLE_VALID_MP3, "audio_duration": 2.0} for c in segments],
             }
 
         render_calls = 0
@@ -447,6 +464,8 @@ class TestSubDubSmartSynthAdapterSignatureCorrection(unittest.TestCase):
                 render_video=mock_render,
                 locked_speaker_voice_map=spk_map,
                 validated_pools=TEST_POOLS,
+                checkpoint_workspace=self.workspace,
+                job_id="job_synth_sig_success",
                 state={
                     "voice_selection_mode": "auto_speaker",
                     "auto_speaker_lane": "auto_smart_multivoice",

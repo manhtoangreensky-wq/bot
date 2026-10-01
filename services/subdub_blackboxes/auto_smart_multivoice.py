@@ -31,6 +31,7 @@ from dataclasses import dataclass
 import hashlib
 import inspect
 import json
+import logging
 import math
 import os
 from pathlib import Path
@@ -40,11 +41,52 @@ import tempfile
 import time
 from typing import Any, Callable, Mapping, Sequence
 
+from services.subdub_blackboxes import auto_multi_speaker, auto_multi_speaker_v2
 from services import subdub_speaker_cast as speaker_cast
+from services import subdub_tts_checkpoint
 from services import video_local_validation
 
 
+logger = logging.getLogger(__name__)
+
 SMART_DECISION_VERSION = "smart_multivoice_v1"
+
+FAIL_CLOSED_ASYNC_SUBMITTED_PRIOR_SUBMIT = "FAIL_CLOSED_ASYNC_SUBMITTED_PRIOR_SUBMIT"
+FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE = "FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE"
+MAX_INTELLIGIBLE_FIT_RATIO = 1.8
+HARD_CAP_FIT_RATIO = 5.0  # Fail job only if any single cue exceeds this extreme ratio
+MAX_OVERFIT_CUE_RATIO = 0.30  # Fail job if >30% of cues exceed MAX_INTELLIGIBLE_FIT_RATIO
+MAX_CUE_END_OVERSHOOT_SECONDS = 0.100
+AUTO_SMART_N3_PLUS_DISPATCH_STRATEGY = "n3_plus_proven_v2"
+
+
+class SubdubTTSAsyncSubmittedPriorSubmitError(subdub_tts_checkpoint.SubdubTTSCheckpointError):
+    """Raised when a cue was already submitted asynchronously to provider; auto-resubmit forbidden."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        cue_id: str = "",
+        task_id: str = "",
+        provider_request_id: str = "",
+        entry: Mapping[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.cue_id = str(cue_id or "")
+        self.task_id = str(task_id or "")
+        self.provider_request_id = str(provider_request_id or "")
+        self.entry = dict(entry or {})
+
+
+class SubdubTTSUnprovenSynthSignatureError(subdub_tts_checkpoint.SubdubTTSCheckpointError):
+    """Raised when base_synthesize signature cannot be proven safe for per-cue synthesis."""
+
+    def __init__(self, message: str, *, reason: str = "") -> None:
+        super().__init__(message)
+        self.reason = str(reason or "")
+        self.error_code = FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE
+
 
 # Allowed strategies
 STRATEGY_STRICT_TWO = "STRICT_TWO"
@@ -95,6 +137,8 @@ SMART_CONTROL_ONLY_KEYS: tuple[str, ...] = (
     "segments",
     "cues",
     "source_media",
+    "checkpoint_manager",
+    "checkpoint_workspace",
 )
 
 
@@ -115,6 +159,37 @@ class SmartVoiceDecision:
     decision_version: str = SMART_DECISION_VERSION
 
 
+def _n3_auto_cast_failure_reason(
+    classifier_error_reason: str | None,
+    unresolved_speaker_ids: Sequence[str],
+) -> str:
+    classifier_reason = str(classifier_error_reason or "unknown").strip() or "unknown"
+    unresolved = ",".join(str(item).strip() for item in unresolved_speaker_ids if str(item).strip())
+    return (
+        "CLASSIFIER_UNAVAILABLE:N3_AUTO_CAST_UNRESOLVED:"
+        f"classifier={classifier_reason};"
+        f"pitch_unresolved={unresolved or 'all'}"
+    )
+
+
+def _n3_auto_cast_manual_required(
+    *,
+    failure_reason: str,
+    detected_speaker_count: int,
+    classifier_error_reason: str | None,
+    unresolved_speaker_ids: Sequence[str],
+) -> speaker_cast.AutoCastManualRequired:
+    error = speaker_cast.AutoCastManualRequired()
+    error.smart_failure_stage = "auto_cast"
+    error.smart_failure_reason = str(failure_reason)
+    error.detected_speaker_count = int(detected_speaker_count)
+    error.classifier_error_reason = str(classifier_error_reason or "unknown")
+    error.unresolved_speaker_ids = [
+        str(item).strip() for item in unresolved_speaker_ids if str(item).strip()
+    ]
+    return error
+
+
 def _hash_seed_int(seed: str, *parts: str) -> int:
     """Deterministic integer from seed and context parts."""
     key = ":".join([seed, *parts])
@@ -132,11 +207,12 @@ def _is_non_speech_cue(cue: Mapping[str, Any]) -> bool:
         return True
     if sound_type in {"music", "singing", "song", "noise", "background", "non_speech"}:
         return True
-    text = str(cue.get("text") or cue.get("content") or "").strip()
-    if not text:
-        return True
-    if _NON_SPEECH_TEXT_RE.match(text):
-        return True
+    if "text" in cue or "content" in cue:
+        text = str(cue.get("text") or cue.get("content") or "").strip()
+        if not text:
+            return True
+        if _NON_SPEECH_TEXT_RE.match(text):
+            return True
     return False
 
 
@@ -166,6 +242,400 @@ def _normalize_voice_pools(
     return low_pool, high_pool, all_pool
 
 
+def is_valid_cue_local_acoustic_authority(meta: Any) -> bool:
+    """Validate that cue-local acoustic metadata meets canonical authority requirements.
+
+    Contract:
+    - Must be a Mapping.
+    - If confidence is present, it must be a finite float (not bool) >= MIN_REGISTER_CONFIDENCE (0.75).
+      If omitted, defaults to 1.0 (authoritative).
+    - Either:
+      1) voice_register is strictly 'low' or 'high' AND confidence >= MIN_REGISTER_CONFIDENCE.
+      2) pitch_hz (or f0_hz / median_hz / median_f0) is canonically classifiable via
+         speaker_cast.pitch_register into 'low' or 'high' (outside ambiguity band [155.0, 165.0] Hz
+         with sufficient confidence >= 0.75).
+    - Any ambiguous, unknown, non-finite, or low-confidence evidence returns False.
+    """
+    if not isinstance(meta, Mapping):
+        return False
+
+    conf_raw = meta.get("confidence")
+    if conf_raw is None or isinstance(conf_raw, bool):
+        return False
+    try:
+        conf = float(conf_raw)
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+    if not math.isfinite(conf) or conf < speaker_cast.MIN_REGISTER_CONFIDENCE:
+        return False
+
+    reg = str(meta.get("voice_register") or "").strip().lower()
+    if reg in {"low", "high"}:
+        return True
+
+    pitch_val = meta.get("pitch_hz")
+    if pitch_val is None:
+        pitch_val = meta.get("f0_hz")
+    if pitch_val is None:
+        pitch_val = meta.get("median_hz")
+    if pitch_val is None:
+        pitch_val = meta.get("median_f0")
+
+    if pitch_val is not None and not isinstance(pitch_val, bool):
+        classified = speaker_cast.pitch_register(pitch_val, confidence=conf)
+        if classified in {"low", "high"}:
+            return True
+
+    return False
+
+
+def smooth_smart_multivoice_cues(
+    cues: Sequence[Mapping[str, Any]],
+    *,
+    min_duration_sec: float = 0.8,
+    max_gap_sec: float = 0.6,
+    acoustic_classifications: Mapping[str, Mapping[str, Any]] | None = None,
+    cue_acoustic_classifications: Mapping[str | int, Mapping[str, Any]] | None = None,
+    stereo_pcm_path: str | Path | None = None,
+    sample_rate: int = 44100,
+    channels: int = 2,
+) -> list[dict[str, Any]]:
+    """Smooth short diarization flapping/bleeding to maintain speaker continuity.
+
+    Invariants:
+    - Never modifies cues if already consistent or non-speech.
+    - Preserves cue identities, timing, content, and original metadata.
+    - Sandwich check: if cue i (< min_duration_sec) is sandwiched between
+      cues i-1 and i+1 having the SAME speaker, and gaps are <= max_gap_sec,
+      cue i inherits the surrounding speaker.
+    - Acoustic guard: uses cue-local evidence first (distinguishing Case A incident bleed
+      from Case B true interjections), falling back to speaker-level acoustic evidence.
+    """
+    if not cues:
+        return []
+    smoothed = [dict(c) for c in cues]
+    speech_indices: list[int] = []
+    for idx, c in enumerate(smoothed):
+        if not _is_non_speech_cue(c):
+            spk = str(c.get("speaker_id") or c.get("speaker") or "").strip()
+            if spk:
+                speech_indices.append(idx)
+
+    for pos, idx in enumerate(speech_indices):
+        curr = smoothed[idx]
+        start = (
+            float(curr.get("start_ms", 0)) / 1000.0
+            if curr.get("start_ms") is not None
+            else float(curr.get("start", 0.0) or 0.0)
+        )
+        end = (
+            float(curr.get("end_ms", 0)) / 1000.0
+            if curr.get("end_ms") is not None
+            else float(curr.get("end", 0.0) or 0.0)
+        )
+        duration = max(0.0, end - start)
+        if duration >= min_duration_sec:
+            continue
+
+        curr_spk = str(curr.get("speaker_id") or curr.get("speaker") or "").strip()
+
+        # Sandwich check: cue i sandwiched between i-1 and i+1 of the same speaker
+        if 0 < pos < len(speech_indices) - 1:
+            prev_idx = speech_indices[pos - 1]
+            next_idx = speech_indices[pos + 1]
+            prev_cue = smoothed[prev_idx]
+            next_cue = smoothed[next_idx]
+            prev_spk = str(prev_cue.get("speaker_id") or prev_cue.get("speaker") or "").strip()
+            next_spk = str(next_cue.get("speaker_id") or next_cue.get("speaker") or "").strip()
+            prev_end = (
+                float(prev_cue.get("end_ms", 0)) / 1000.0
+                if prev_cue.get("end_ms") is not None
+                else float(prev_cue.get("end", 0.0) or 0.0)
+            )
+            next_start = (
+                float(next_cue.get("start_ms", 0)) / 1000.0
+                if next_cue.get("start_ms") is not None
+                else float(next_cue.get("start", 0.0) or 0.0)
+            )
+            gap_before = max(0.0, start - prev_end)
+            gap_after = max(0.0, next_start - end)
+            if prev_spk and prev_spk == next_spk and prev_spk != curr_spk:
+                if gap_before <= max_gap_sec and gap_after <= max_gap_sec:
+                    cid = str(curr.get("cue_id") or curr.get("id") or "")
+                    cue_meta = None
+                    if isinstance(cue_acoustic_classifications, Mapping):
+                        cue_meta = (
+                            cue_acoustic_classifications.get(cid)
+                            or cue_acoustic_classifications.get(idx)
+                            or cue_acoustic_classifications.get(str(idx))
+                        )
+                    if (cue_meta is None or not is_valid_cue_local_acoustic_authority(cue_meta)) and stereo_pcm_path and Path(stereo_pcm_path).is_file():
+                        try:
+                            cue_ranges = {curr_spk: [(start, end)]}
+                            c_est = estimate_speaker_pitches_from_pcm(
+                                stereo_pcm_path,
+                                cue_ranges,
+                                sample_rate=sample_rate,
+                                channels=channels,
+                            )
+                            pcm_meta = c_est.get(curr_spk)
+                            if is_valid_cue_local_acoustic_authority(pcm_meta):
+                                cue_meta = pcm_meta
+                        except Exception:
+                            pass
+
+                    prev_meta = (acoustic_classifications.get(prev_spk) or {}) if acoustic_classifications else {}
+                    prev_reg = str(prev_meta.get("voice_register") or "").strip().lower()
+                    prev_conf = float(prev_meta.get("confidence") or 0.0)
+
+                    if is_valid_cue_local_acoustic_authority(cue_meta):
+                        cue_reg = str(cue_meta.get("voice_register") or "").strip().lower()
+                        cue_conf = float(cue_meta.get("confidence") or 0.0)
+                        if cue_reg not in {"low", "high"}:
+                            pitch_val = (
+                                cue_meta.get("pitch_hz")
+                                or cue_meta.get("f0_hz")
+                                or cue_meta.get("median_f0")
+                                or cue_meta.get("median_hz")
+                            )
+                            if pitch_val is not None and not isinstance(pitch_val, bool):
+                                cue_reg = speaker_cast.pitch_register(pitch_val, confidence=cue_conf)
+                        if (
+                            cue_conf >= speaker_cast.MIN_REGISTER_CONFIDENCE
+                            and cue_reg in {"low", "high"}
+                            and prev_conf >= speaker_cast.MIN_REGISTER_CONFIDENCE
+                            and prev_reg in {"low", "high"}
+                        ):
+                            if cue_reg != prev_reg:
+                                # Case B: True short interjection contradicting surrounding register -> PRESERVE
+                                continue
+                            else:
+                                # Case A: Incident bleed matching surrounding register -> SMOOTH
+                                pass
+                    elif cue_meta is not None:
+                        # Non-authoritative cue_meta without valid PCM authority cannot authorize smoothing
+                        # Under R10: INVALID_CUE_META_WITHOUT_PCM_CANNOT_AUTHORIZE_SMOOTHING
+                        # Must NOT cause blind smoothing -> PRESERVE original speaker
+                        continue
+                    elif acoustic_classifications:
+                        curr_meta = acoustic_classifications.get(curr_spk) or {}
+                        curr_reg = str(curr_meta.get("voice_register") or "").strip().lower()
+                        curr_conf = float(curr_meta.get("confidence") or 0.0)
+                        if (
+                            curr_reg in {"low", "high"}
+                            and prev_reg in {"low", "high"}
+                            and curr_reg != prev_reg
+                            and curr_conf >= speaker_cast.MIN_REGISTER_CONFIDENCE
+                            and prev_conf >= speaker_cast.MIN_REGISTER_CONFIDENCE
+                        ):
+                            continue
+
+                    if curr.get("speaker_id"):
+                        curr["speaker_id"] = prev_spk
+                    if curr.get("speaker"):
+                        curr["speaker"] = prev_cue.get("speaker", prev_spk)
+                    curr["anti_flapping_smoothed"] = True
+                    continue
+
+    return smoothed
+
+
+
+def _build_derived_ranges(
+    cues: Sequence[Mapping[str, Any]],
+    stereo_pcm_path: str | Path | None = None,
+    speakers: Sequence[str] | None = None,
+    max_duration_seconds: float | None = None,
+    sample_rate: int = 44100,
+    channels: int = 2,
+) -> dict[str, list[tuple[float, float]]]:
+    T_max: float | None = None
+    if stereo_pcm_path:
+        p = Path(stereo_pcm_path)
+        if p.is_file() and p.stat().st_size > 0:
+            bytes_per_sec = sample_rate * channels * 2
+            pcm_dur = p.stat().st_size / bytes_per_sec
+            T_max = min(max_duration_seconds, pcm_dur) if max_duration_seconds is not None else pcm_dur
+        elif max_duration_seconds is not None:
+            T_max = float(max_duration_seconds)
+        else:
+            raise ValueError(f"invalid_or_missing_pcm: {stereo_pcm_path}")
+    elif max_duration_seconds is not None:
+        T_max = float(max_duration_seconds)
+
+    target_speakers = set(speakers) if speakers is not None else None
+    ranges: dict[str, list[tuple[float, float]]] = {}
+    for c in cues:
+        spk = str(c.get("speaker_id") or c.get("speaker") or "").strip()
+        if not spk or (target_speakers is not None and spk not in target_speakers):
+            continue
+        s = float(c.get("start_ms", 0)) / 1000.0 if "start_ms" in c else float(c.get("start", 0.0) or 0.0)
+        e = float(c.get("end_ms", 0)) / 1000.0 if "end_ms" in c else float(c.get("end", 0.0) or 0.0)
+
+        if T_max is not None:
+            if s > T_max + 1e-4:
+                raise ValueError(f"cue_start_beyond_eof: cue start {s:.3f} exceeds T_max {T_max:.3f}")
+            if e > T_max:
+                overshoot = e - T_max
+                if overshoot <= MAX_CUE_END_OVERSHOOT_SECONDS + 1e-9:
+                    e = T_max
+                else:
+                    raise ValueError(f"cue_end_overshoot_exceeds_limit: cue end {e:.3f} exceeds T_max {T_max:.3f} by {overshoot:.3f}s")
+
+        s = max(0.0, s)
+        if e > s and (e - s) >= 0.05:
+            ranges.setdefault(spk, []).append((s, e))
+    return ranges
+
+
+def estimate_speaker_pitches_from_pcm(
+    pcm_path: str | Path,
+    ranges_by_speaker: Mapping[str, Sequence[tuple[float, float]]],
+    *,
+    sample_rate: int | None = None,
+    channels: int | None = None,
+    deadline_monotonic: float | None = None,
+    stop_requested: Callable[[], bool] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Estimate pitch register per speaker directly from PCM audio.
+
+    Supports Stereo 44.1kHz s16le PCM or Mono 16kHz s16le PCM.
+    Returns mapping: speaker_id -> {
+        voice_register: "low" | "high" | "unknown",
+        voice_gender: "male" | "female" | "ambiguous",
+        confidence: float,
+        median_f0: float,
+    }
+    """
+    path = Path(pcm_path)
+    if not path.is_file():
+        return {}
+
+    file_size = path.stat().st_size
+    if file_size == 0:
+        return {}
+
+    # Explicit format authority: default canonical stereo 44.1kHz s16le, or explicitly declared mono 16kHz s16le
+    sr = int(sample_rate) if sample_rate is not None else 44100
+    ch = int(channels) if channels is not None else 2
+
+    if sr not in {44100, 16000} or ch not in {1, 2}:
+        raise ValueError(f"unsupported_pcm_format: sample_rate={sr}, channels={ch}")
+    if ch == 1 and sr != 16000:
+        raise ValueError(f"unsupported_pcm_format: mono requires 16000Hz, got {sr}")
+    if ch == 2 and sr != 44100:
+        raise ValueError(f"unsupported_pcm_format: stereo requires 44100Hz, got {sr}")
+
+    bytes_per_frame = ch * 2
+    if file_size % bytes_per_frame != 0:
+        raise ValueError(f"truncated_pcm_frame: file_size={file_size} not multiple of {bytes_per_frame}")
+
+    deadline = deadline_monotonic or (time.monotonic() + 30.0)
+    stop_fn = stop_requested or (lambda: False)
+
+    try:
+        import numpy as np
+    except ImportError:
+        return {}
+
+    results: dict[str, dict[str, Any]] = {}
+
+
+    try:
+        with path.open("rb") as handle:
+            for spk, ranges in ranges_by_speaker.items():
+                if stop_fn() or time.monotonic() > deadline:
+                    break
+                if not ranges:
+                    continue
+
+                pitches: list[float] = []
+                confs: list[float] = []
+
+                for s, e in list(ranges)[:12]:
+                    if stop_fn() or time.monotonic() > deadline:
+                        break
+                    start_frame = int(round(s * sr))
+                    frame_count = int(round((e - s) * sr))
+                    byte_offset = start_frame * bytes_per_frame
+                    byte_count = frame_count * bytes_per_frame
+                    if byte_count <= 0 or byte_offset + byte_count > file_size:
+                        continue
+                    handle.seek(byte_offset)
+                    raw = handle.read(byte_count)
+                    if len(raw) != byte_count:
+                        continue
+
+                    values = np.frombuffer(raw, dtype="<i2")
+                    if ch == 2:
+                        if values.size % 2 != 0:
+                            continue
+                        mono = values.reshape(-1, 2).mean(axis=1)
+                    else:
+                        mono = values.astype(np.float64)
+
+                    if sr != 16000:
+                        target_len = int(round(len(mono) * 16000 / sr))
+                        if target_len < 2:
+                            continue
+                        src_pos = np.arange(len(mono), dtype=np.float64)
+                        dst_pos = np.arange(target_len, dtype=np.float64) * (sr / 16000)
+                        resampled = np.interp(dst_pos, src_pos, mono)
+                        resampled_int16 = np.clip(resampled, -32768, 32767).astype(np.int16)
+                    else:
+                        resampled_int16 = np.clip(mono, -32768, 32767).astype(np.int16)
+
+                    mono_16k_bytes = resampled_int16.tobytes()
+                    hop_bytes = speaker_cast.PCM_WINDOW_BYTES
+                    if len(mono_16k_bytes) >= hop_bytes:
+                        for i in range(0, len(mono_16k_bytes) - hop_bytes + 1, hop_bytes):
+                            if stop_fn() or time.monotonic() > deadline:
+                                break
+                            win = mono_16k_bytes[i : i + hop_bytes]
+                            est = speaker_cast._estimate_window_pitch(
+                                win,
+                                deadline_monotonic=deadline,
+                                stop_requested=stop_fn,
+                            )
+                            if est:
+                                pitches.append(est[0])
+                                confs.append(est[1])
+                    elif len(mono_16k_bytes) >= 1600:
+                        repeats = int(math.ceil(hop_bytes / len(mono_16k_bytes)))
+                        win = (mono_16k_bytes * repeats)[:hop_bytes]
+                        est = speaker_cast._estimate_window_pitch(
+                            win,
+                            deadline_monotonic=deadline,
+                            stop_requested=stop_fn,
+                        )
+                        if est:
+                            pitches.append(est[0])
+                            confs.append(est[1])
+
+                if pitches:
+                    med_f0 = float(np.median(pitches))
+                    mean_conf = float(np.mean(confs))
+                    reg = speaker_cast.pitch_register(med_f0, confidence=mean_conf)
+                    if reg == "low":
+                        gender = "male"
+                    elif reg == "high":
+                        gender = "female"
+                    else:
+                        gender = "ambiguous"
+                    results[spk] = {
+                        "speaker_id": spk,
+                        "voice_register": reg,
+                        "voice_gender": gender,
+                        "confidence": round(mean_conf, 4),
+                        "median_f0": round(med_f0, 1),
+                    }
+    except (OSError, ValueError, TypeError):
+        pass
+
+    return results
+
+
 def decide_smart_multivoice(
     cues: Sequence[Mapping[str, Any]],
     *,
@@ -178,13 +648,26 @@ def decide_smart_multivoice(
     strict_two_classifier: Callable[..., Any] | None = None,
     multi_speaker_classifier: Callable[..., Any] | None = None,
     acoustic_classifications: Mapping[str, Mapping[str, Any]] | None = None,
+    cue_acoustic_classifications: Mapping[str | int, Mapping[str, Any]] | None = None,
     fallback_level_override: int | None = None,
     default_fallback_voice: str | None = None,
     locked_speaker_voice_map: Mapping[str, str] | None = None,
     raise_manual_required: bool = False,
+    strict: bool | None = None,
 ) -> SmartVoiceDecision:
     """Core pure-functional decision authority for Auto Smart Multi-Voice lane."""
+    if strict is not None:
+        raise_manual_required = bool(strict)
+
     seed = hashlib.sha256(str(assignment_seed).encode("utf-8")).hexdigest()
+
+    # Step 0: Apply dialogue continuity / anti-flapping smoothing with acoustic guard
+    input_cues = smooth_smart_multivoice_cues(
+        cues,
+        acoustic_classifications=acoustic_classifications,
+        cue_acoustic_classifications=cue_acoustic_classifications,
+        stereo_pcm_path=stereo_pcm_path,
+    )
 
     # Step 1: Filter speech vs non-speech cues and validate canonical identities
     # Invariant: No invented speaker IDs. Missing/invalid speaker -> TERMINAL_REJECTED.
@@ -192,7 +675,7 @@ def decide_smart_multivoice(
     non_speech_cues: list[dict[str, Any]] = []
     dispositions: dict[str, str] = {}
 
-    for idx, raw_cue in enumerate(cues):
+    for idx, raw_cue in enumerate(input_cues):
         cue = dict(raw_cue)
         cue_id = cue.get("cue_id") or cue.get("id")
         if cue_id is None or str(cue_id).strip() == "":
@@ -530,12 +1013,7 @@ def decide_smart_multivoice(
             strict_result = acoustic_classifications
         elif callable(strict_fn):
             try:
-                derived_ranges = ranges_by_speaker
-                if derived_ranges is None:
-                    derived_ranges = {
-                        spk1: [(float(c.get("start_ms", 0)) / 1000.0, float(c.get("end_ms", 0)) / 1000.0) for c in speech_cues if c["speaker_id"] == spk1],
-                        spk2: [(float(c.get("start_ms", 0)) / 1000.0, float(c.get("end_ms", 0)) / 1000.0) for c in speech_cues if c["speaker_id"] == spk2],
-                    }
+                derived_ranges = ranges_by_speaker or _build_derived_ranges(speech_cues, stereo_pcm_path, [spk1, spk2])
                 strict_result = strict_fn(
                     str(stereo_pcm_path or ""),
                     derived_ranges,
@@ -572,7 +1050,40 @@ def decide_smart_multivoice(
             except Exception:
                 strict_succeeded = False
 
+        if not strict_succeeded and stereo_pcm_path is not None:
+            try:
+                derived_ranges = ranges_by_speaker or _build_derived_ranges(speech_cues, stereo_pcm_path, [spk1, spk2])
+                pitch_res = estimate_speaker_pitches_from_pcm(
+                    stereo_pcm_path,
+                    derived_ranges,
+                    deadline_monotonic=deadline_monotonic,
+                    stop_requested=stop_requested,
+                )
+                if pitch_res and spk1 in pitch_res and spk2 in pitch_res:
+                    r1 = str(pitch_res[spk1].get("voice_register") or "")
+                    r2 = str(pitch_res[spk2].get("voice_register") or "")
+                    if r1 in {"low", "high"} and r2 in {"low", "high"}:
+                        p1 = low_pool if r1 == "low" else high_pool
+                        p2 = low_pool if r2 == "low" else high_pool
+                        if not p1: p1 = all_pool
+                        if not p2: p2 = all_pool
+                        v1 = p1[_hash_seed_int(seed, spk1, r1) % len(p1)]
+                        avail_p2 = [v for v in p2 if v != v1] or [v for v in all_pool if v != v1]
+                        if avail_p2:
+                            v2 = avail_p2[_hash_seed_int(seed, spk2, r2) % len(avail_p2)]
+                            speaker_voice_map[spk1] = v1
+                            speaker_voice_map[spk2] = v2
+                            strategy = STRATEGY_STRICT_TWO
+                            fallback_level = 0
+                            fallback_reason = None
+                            output_mode = OUTPUT_MODE_DUBBED_MULTI
+                            strict_succeeded = True
+            except Exception:
+                strict_succeeded = False
+
         if not strict_succeeded:
+            if raise_manual_required:
+                raise speaker_cast.AutoCastManualRequired()
             # Caught strict failure or ambiguity: Fallback internally without manual halt!
             if len(all_pool) >= 2:
                 idx1 = _hash_seed_int(seed, spk1, "n2_spk1") % len(all_pool)
@@ -599,6 +1110,7 @@ def decide_smart_multivoice(
         multi_classifications: dict[str, Any] | None = None
         classifier_failed = False
         classifier_error_reason: str | None = None
+        unresolved_speaker_ids: list[str] = []
 
         multi_fn = multi_speaker_classifier
         if multi_fn is None and stereo_pcm_path is not None:
@@ -613,15 +1125,7 @@ def decide_smart_multivoice(
             multi_classifications = dict(acoustic_classifications)
         elif callable(multi_fn):
             try:
-                derived_ranges = ranges_by_speaker
-                if derived_ranges is None:
-                    derived_ranges = {
-                        spk: [
-                            (float(c.get("start_ms", 0)) / 1000.0, float(c.get("end_ms", 0)) / 1000.0)
-                            for c in speech_cues if c["speaker_id"] == spk
-                        ]
-                        for spk in ordered_speakers
-                    }
+                derived_ranges = ranges_by_speaker or _build_derived_ranges(speech_cues, stereo_pcm_path, ordered_speakers)
                 res = multi_fn(
                     str(stereo_pcm_path or ""),
                     derived_ranges,
@@ -640,14 +1144,58 @@ def decide_smart_multivoice(
                 classifier_failed = True
                 classifier_error_reason = str(exc)
 
+        # Fallback to pitch classification when ONNX is unavailable or ambiguous
+        if (classifier_failed or multi_classifications is None) and stereo_pcm_path is not None:
+            try:
+                derived_ranges = ranges_by_speaker or _build_derived_ranges(speech_cues, stereo_pcm_path, ordered_speakers)
+                pitch_res = estimate_speaker_pitches_from_pcm(
+                    stereo_pcm_path,
+                    derived_ranges,
+                    deadline_monotonic=deadline_monotonic,
+                    stop_requested=stop_requested,
+                )
+                if (
+                    pitch_res
+                    and len(pitch_res) == len(ordered_speakers)
+                    and all(pitch_res.get(spk, {}).get("voice_register") in {"low", "high"} for spk in ordered_speakers)
+                ):
+                    multi_classifications = pitch_res
+                    classifier_failed = False
+                    classifier_error_reason = None
+                else:
+                    classifier_failed = True
+                    unresolved_speaker_ids = [
+                        spk
+                        for spk in ordered_speakers
+                        if not isinstance((pitch_res or {}).get(spk), Mapping)
+                        or (pitch_res or {}).get(spk, {}).get("voice_register")
+                        not in {"low", "high"}
+                    ]
+                    if classifier_error_reason is None:
+                        classifier_error_reason = "multi_classifier_unavailable"
+            except Exception as exc:
+                classifier_failed = True
+                unresolved_speaker_ids = list(ordered_speakers)
+                if classifier_error_reason is None:
+                    classifier_error_reason = str(exc) or type(exc).__name__
+
         fail_dispositions = {
             str(c.get("cue_id") or c.get("id")): DISPOSITION_TERMINAL_REJECTED
             for c in cues if (c.get("cue_id") or c.get("id"))
         }
 
         if classifier_failed:
+            failure_reason = _n3_auto_cast_failure_reason(
+                classifier_error_reason,
+                unresolved_speaker_ids,
+            )
             if raise_manual_required:
-                raise speaker_cast.AutoCastManualRequired()
+                raise _n3_auto_cast_manual_required(
+                    failure_reason=failure_reason,
+                    detected_speaker_count=detected_speaker_count,
+                    classifier_error_reason=classifier_error_reason,
+                    unresolved_speaker_ids=unresolved_speaker_ids,
+                )
             return SmartVoiceDecision(
                 strategy=STRATEGY_FAILED,
                 detected_speaker_count=detected_speaker_count,
@@ -655,7 +1203,7 @@ def decide_smart_multivoice(
                 effective_voice_count=0,
                 speaker_voice_map={},
                 fallback_level=-1,
-                fallback_reason=f"CLASSIFIER_UNAVAILABLE:{classifier_error_reason or 'error'}",
+                fallback_reason=failure_reason,
                 output_mode=OUTPUT_MODE_FAILED,
                 cue_dispositions=fail_dispositions,
                 tts_cues=[],
@@ -663,23 +1211,12 @@ def decide_smart_multivoice(
 
         if multi_classifications is not None:
             speaker_registers: dict[str, tuple[str, float]] = {}
+            unresolved_register_speakers: list[str] = []
             for spk in ordered_speakers:
                 meta = multi_classifications.get(spk)
                 if not isinstance(meta, Mapping):
-                    if raise_manual_required:
-                        raise speaker_cast.AutoCastManualRequired()
-                    return SmartVoiceDecision(
-                        strategy=STRATEGY_FAILED,
-                        detected_speaker_count=detected_speaker_count,
-                        effective_speaker_count=0,
-                        effective_voice_count=0,
-                        speaker_voice_map={},
-                        fallback_level=-1,
-                        fallback_reason=f"MISSING_SPEAKER_CLASSIFICATION:{spk}",
-                        output_mode=OUTPUT_MODE_FAILED,
-                        cue_dispositions=fail_dispositions,
-                        tts_cues=[],
-                    )
+                    unresolved_register_speakers.append(spk)
+                    continue
                 gender = str(meta.get("voice_gender") or meta.get("gender") or "").strip().lower()
                 register = str(meta.get("voice_register") or meta.get("register") or "").strip().lower()
                 if not register:
@@ -698,21 +1235,69 @@ def decide_smart_multivoice(
                     or not math.isfinite(conf)
                     or conf < speaker_cast.MIN_REGISTER_CONFIDENCE
                 ):
-                    if raise_manual_required:
-                        raise speaker_cast.AutoCastManualRequired()
-                    return SmartVoiceDecision(
-                        strategy=STRATEGY_FAILED,
-                        detected_speaker_count=detected_speaker_count,
-                        effective_speaker_count=0,
-                        effective_voice_count=0,
-                        speaker_voice_map={},
-                        fallback_level=-1,
-                        fallback_reason="AMBIGUOUS_OR_INVALID_GENDER_CLASSIFICATION",
-                        output_mode=OUTPUT_MODE_FAILED,
-                        cue_dispositions=fail_dispositions,
-                        tts_cues=[],
-                    )
+                    unresolved_register_speakers.append(spk)
+                    continue
                 speaker_registers[spk] = (register, conf)
+
+            if unresolved_register_speakers and stereo_pcm_path is not None:
+                try:
+                    derived_ranges = ranges_by_speaker or _build_derived_ranges(
+                        speech_cues,
+                        stereo_pcm_path,
+                        unresolved_register_speakers,
+                    )
+                    pitch_classifications = estimate_speaker_pitches_from_pcm(
+                        stereo_pcm_path,
+                        derived_ranges,
+                        deadline_monotonic=deadline_monotonic,
+                        stop_requested=stop_requested,
+                    )
+                except Exception:
+                    pitch_classifications = {}
+                for spk in list(unresolved_register_speakers):
+                    meta = pitch_classifications.get(spk)
+                    if not isinstance(meta, Mapping):
+                        continue
+                    register = str(meta.get("voice_register") or "").strip().lower()
+                    try:
+                        confidence = float(meta.get("confidence") or 0.0)
+                    except (TypeError, ValueError, OverflowError):
+                        confidence = 0.0
+                    if (
+                        register in {"low", "high"}
+                        and math.isfinite(confidence)
+                        and confidence >= speaker_cast.MIN_REGISTER_CONFIDENCE
+                    ):
+                        speaker_registers[spk] = (register, confidence)
+                        unresolved_register_speakers.remove(spk)
+
+            if unresolved_register_speakers and (
+                not speaker_registers or len(all_pool) < detected_speaker_count
+            ):
+                failure_reason = (
+                    "N3_REGISTER_EVIDENCE_UNAVAILABLE"
+                    if not speaker_registers
+                    else "N3_DISTINCT_APPROVED_VOICE_POOL_TOO_SMALL"
+                )
+                if raise_manual_required:
+                    raise _n3_auto_cast_manual_required(
+                        failure_reason=failure_reason,
+                        detected_speaker_count=detected_speaker_count,
+                        classifier_error_reason=classifier_error_reason,
+                        unresolved_speaker_ids=unresolved_register_speakers,
+                    )
+                return SmartVoiceDecision(
+                    strategy=STRATEGY_FAILED,
+                    detected_speaker_count=detected_speaker_count,
+                    effective_speaker_count=0,
+                    effective_voice_count=0,
+                    speaker_voice_map={},
+                    fallback_level=-1,
+                    fallback_reason=failure_reason,
+                    output_mode=OUTPUT_MODE_FAILED,
+                    cue_dispositions=fail_dispositions,
+                    tts_cues=[],
+                )
 
             canonical_speaker_map = {}
             reverse_speaker_map = {}
@@ -724,35 +1309,84 @@ def decide_smart_multivoice(
                 canonical_speaker_map[spk] = canon_id
                 reverse_speaker_map[canon_id] = spk
 
-            cast_classifications = {
-                canonical_speaker_map[spk]: {
-                    "speaker_id": canonical_speaker_map[spk],
-                    "voice_register": reg,
-                    "confidence": conf,
+            if speaker_registers:
+                cast_classifications = {
+                    canonical_speaker_map[spk]: {
+                        "speaker_id": canonical_speaker_map[spk],
+                        "voice_register": reg,
+                        "confidence": conf,
+                    }
+                    for spk, (reg, conf) in speaker_registers.items()
                 }
-                for spk, (reg, conf) in speaker_registers.items()
-            }
-            cast_speaker_order = [canonical_speaker_map[spk] for spk in ordered_speakers]
-            pools_dict = {"low": low_pool, "high": high_pool}
+                cast_speaker_order = [
+                    canonical_speaker_map[spk]
+                    for spk in ordered_speakers
+                    if spk in speaker_registers
+                ]
+                pools_dict = {"low": low_pool, "high": high_pool}
 
-            try:
-                assigned = speaker_cast.assign_stable_voices(
-                    cast_classifications,
-                    speaker_order=cast_speaker_order,
-                    validated_pools=pools_dict,
-                    assignment_seed=seed,
-                )
-                for canon_id, assign_data in assigned.items():
-                    orig_spk = reverse_speaker_map[canon_id]
-                    speaker_voice_map[orig_spk] = assign_data["voice_id"]
+                try:
+                    assigned = speaker_cast.assign_stable_voices(
+                        cast_classifications,
+                        speaker_order=cast_speaker_order,
+                        validated_pools=pools_dict,
+                        assignment_seed=seed,
+                    )
+                    for canon_id, assign_data in assigned.items():
+                        orig_spk = reverse_speaker_map[canon_id]
+                        speaker_voice_map[orig_spk] = assign_data["voice_id"]
+                except speaker_cast.AutoCastManualRequired as exc:
+                    if raise_manual_required:
+                        raise
+                    return SmartVoiceDecision(
+                        strategy=STRATEGY_FAILED,
+                        detected_speaker_count=detected_speaker_count,
+                        effective_speaker_count=0,
+                        effective_voice_count=0,
+                        speaker_voice_map={},
+                        fallback_level=-1,
+                        fallback_reason=f"AUTO_CAST_MANUAL_REQUIRED:{exc or 'capacity_exceeded'}",
+                        output_mode=OUTPUT_MODE_FAILED,
+                        cue_dispositions=fail_dispositions,
+                        tts_cues=[],
+                    )
 
-                strategy = STRATEGY_GENERIC_MULTI
-                fallback_level = 0
-                fallback_reason = None
-                output_mode = OUTPUT_MODE_DUBBED_MULTI
-            except speaker_cast.AutoCastManualRequired as exc:
+            used_voice_ids = set(speaker_voice_map.values())
+            for spk in unresolved_register_speakers:
+                available = [voice_id for voice_id in all_pool if voice_id not in used_voice_ids]
+                if not available:
+                    if raise_manual_required:
+                        raise speaker_cast.AutoCastManualRequired()
+                    return SmartVoiceDecision(
+                        strategy=STRATEGY_FAILED,
+                        detected_speaker_count=detected_speaker_count,
+                        effective_speaker_count=0,
+                        effective_voice_count=0,
+                        speaker_voice_map={},
+                        fallback_level=-1,
+                        fallback_reason="N3_DISTINCT_APPROVED_VOICE_POOL_TOO_SMALL",
+                        output_mode=OUTPUT_MODE_FAILED,
+                        cue_dispositions=fail_dispositions,
+                        tts_cues=[],
+                    )
+                index = _hash_seed_int(seed, spk, "n3_unknown_register") % len(available)
+                chosen_voice = available[index]
+                speaker_voice_map[spk] = chosen_voice
+                used_voice_ids.add(chosen_voice)
+
+            strategy = STRATEGY_GENERIC_MULTI
+            fallback_level = 1 if unresolved_register_speakers else 0
+            fallback_reason = (
+                "n3_unknown_register_distinct_voice"
+                if unresolved_register_speakers
+                else None
+            )
+            output_mode = OUTPUT_MODE_DUBBED_MULTI
+        else:
+            # When no acoustic classifications are provided or resolved
+            if raise_manual_required or stereo_pcm_path is not None or multi_speaker_classifier is not None:
                 if raise_manual_required:
-                    raise
+                    raise speaker_cast.AutoCastManualRequired()
                 return SmartVoiceDecision(
                     strategy=STRATEGY_FAILED,
                     detected_speaker_count=detected_speaker_count,
@@ -760,12 +1394,11 @@ def decide_smart_multivoice(
                     effective_voice_count=0,
                     speaker_voice_map={},
                     fallback_level=-1,
-                    fallback_reason=f"AUTO_CAST_MANUAL_REQUIRED:{exc or 'capacity_exceeded'}",
+                    fallback_reason="ACOUSTIC_CLASSIFICATION_UNAVAILABLE_OR_FAILED",
                     output_mode=OUTPUT_MODE_FAILED,
                     cue_dispositions=fail_dispositions,
                     tts_cues=[],
                 )
-        else:
             # Fallback behavior when no acoustic evidence is provided (retains test_07..test_10 compatibility)
             strategy = STRATEGY_GENERIC_MULTI
             if len(all_pool) >= detected_speaker_count:
@@ -887,6 +1520,7 @@ async def run_auto_smart_multivoice(
     strict_two_classifier: Callable[..., Any] | None = None,
     multi_speaker_classifier: Callable[..., Any] | None = None,
     acoustic_classifications: Mapping[str, Mapping[str, Any]] | None = None,
+    cue_acoustic_classifications: Mapping[str | int, Mapping[str, Any]] | None = None,
     synthesize_segments: Callable[..., Any] | None = None,
     render_pipeline: Callable[..., Any] | None = None,
     probe_fn: Callable[[str], Mapping[str, Any]] | None = None,
@@ -984,23 +1618,42 @@ async def run_auto_smart_multivoice(
             strict_two_classifier=strict_two_classifier,
             multi_speaker_classifier=multi_speaker_classifier,
             acoustic_classifications=acoustic_classifications,
+            cue_acoustic_classifications=cue_acoustic_classifications,
             fallback_level_override=fallback_level_override,
             default_fallback_voice=default_fallback_voice,
             locked_speaker_voice_map=locked_speaker_voice_map,
+            raise_manual_required=True,
         )
     except speaker_cast.AutoCastManualRequired as exc:
+        detected_speaker_count = int(
+            getattr(exc, "detected_speaker_count", 0) or 0
+        )
+        fallback_reason = str(
+            getattr(exc, "smart_failure_reason", "")
+            or str(exc)
+            or speaker_cast.AUTO_CAST_MANUAL_REQUIRED
+        )
         return {
             "ok": False,
             "strategy": STRATEGY_FAILED,
-            "detected_speaker_count": 0,
+            "detected_speaker_count": detected_speaker_count,
             "effective_speaker_count": 0,
             "effective_voice_count": 0,
             "speaker_voice_map": {},
             "fallback_level": -1,
-            "fallback_reason": str(exc) or speaker_cast.AUTO_CAST_MANUAL_REQUIRED,
+            "fallback_reason": fallback_reason,
             "output_mode": OUTPUT_MODE_FAILED,
             "final_mp4_path": None,
             "blocker": speaker_cast.AUTO_CAST_MANUAL_REQUIRED,
+            "failure_stage": str(
+                getattr(exc, "smart_failure_stage", "") or "auto_cast"
+            ),
+            "classifier_error_reason": str(
+                getattr(exc, "classifier_error_reason", "")
+            ),
+            "unresolved_speaker_ids": list(
+                getattr(exc, "unresolved_speaker_ids", []) or []
+            ),
             "auto_smart_verified": False,
         }
 
@@ -1064,18 +1717,161 @@ async def run_auto_smart_multivoice(
             }
 
         try:
-            synth_result = await _maybe_await(
-                synthesize_segments(
-                    cues=decision.tts_cues,
-                    speaker_voice_map=decision.speaker_voice_map,
-                )
-            )
+            synth_kw: dict[str, Any] = {
+                "cues": decision.tts_cues,
+                "speaker_voice_map": decision.speaker_voice_map,
+            }
+            try:
+                sig = inspect.signature(synthesize_segments)
+                params = sig.parameters
+                has_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+                if has_varkw or "cue_locked_timing" in params:
+                    synth_kw["cue_locked_timing"] = True
+            except Exception:
+                pass
+            synth_result = await _maybe_await(synthesize_segments(**synth_kw))
             if isinstance(synth_result, list):
                 raw_chunks = synth_result
             elif isinstance(synth_result, Mapping) and "chunks" in synth_result:
                 raw_chunks = list(synth_result.get("chunks") or [])
             else:
                 raw_chunks = [synth_result]
+        except subdub_tts_checkpoint.SubdubTTSArtifactCorruptionError as synth_err:
+            return {
+                "ok": False,
+                "strategy": decision.strategy,
+                "detected_speaker_count": decision.detected_speaker_count,
+                "effective_speaker_count": decision.effective_speaker_count,
+                "effective_voice_count": decision.effective_voice_count,
+                "speaker_voice_map": decision.speaker_voice_map,
+                "fallback_level": decision.fallback_level,
+                "fallback_reason": decision.fallback_reason,
+                "output_mode": OUTPUT_MODE_FAILED,
+                "final_mp4_path": None,
+                "status": "FAIL_CLOSED_ARTIFACT_CORRUPTION",
+                "blocker": "FAIL_CLOSED_ARTIFACT_CORRUPTION",
+                "error_code": "FAIL_CLOSED_ARTIFACT_CORRUPTION",
+                "tts_checkpoint_failure_stage": "tts_checkpoint",
+                "tts_checkpoint_failure_code": "tts_artifact_corruption",
+                "auto_smart_verified": False,
+            }
+        except subdub_tts_checkpoint.SubdubTTSAmbiguousSubmissionError as synth_err:
+            return {
+                "ok": False,
+                "strategy": decision.strategy,
+                "detected_speaker_count": decision.detected_speaker_count,
+                "effective_speaker_count": decision.effective_speaker_count,
+                "effective_voice_count": decision.effective_voice_count,
+                "speaker_voice_map": decision.speaker_voice_map,
+                "fallback_level": decision.fallback_level,
+                "fallback_reason": decision.fallback_reason,
+                "output_mode": OUTPUT_MODE_FAILED,
+                "final_mp4_path": None,
+                "status": "FAIL_CLOSED_AMBIGUOUS_SUBMISSION",
+                "blocker": "FAIL_CLOSED_AMBIGUOUS_SUBMISSION",
+                "error_code": "FAIL_CLOSED_AMBIGUOUS_SUBMISSION",
+                "tts_checkpoint_failure_stage": "tts_checkpoint",
+                "tts_checkpoint_failure_code": "tts_ambiguous_submission",
+                "auto_smart_verified": False,
+            }
+        except SubdubTTSAsyncSubmittedPriorSubmitError as synth_err:
+            return {
+                "ok": False,
+                "strategy": decision.strategy,
+                "detected_speaker_count": decision.detected_speaker_count,
+                "effective_speaker_count": decision.effective_speaker_count,
+                "effective_voice_count": decision.effective_voice_count,
+                "speaker_voice_map": decision.speaker_voice_map,
+                "fallback_level": decision.fallback_level,
+                "fallback_reason": decision.fallback_reason,
+                "output_mode": OUTPUT_MODE_FAILED,
+                "final_mp4_path": None,
+                "status": FAIL_CLOSED_ASYNC_SUBMITTED_PRIOR_SUBMIT,
+                "blocker": FAIL_CLOSED_ASYNC_SUBMITTED_PRIOR_SUBMIT,
+                "error_code": FAIL_CLOSED_ASYNC_SUBMITTED_PRIOR_SUBMIT,
+                "tts_checkpoint_failure_stage": "tts_checkpoint",
+                "tts_checkpoint_failure_code": "tts_async_submitted_prior_submit",
+                "async_task_id": synth_err.task_id,
+                "async_provider_request_id": synth_err.provider_request_id,
+                "cue_id": synth_err.cue_id,
+                "auto_smart_verified": False,
+            }
+        except SubdubTTSUnprovenSynthSignatureError as synth_err:
+            return {
+                "ok": False,
+                "strategy": decision.strategy,
+                "detected_speaker_count": decision.detected_speaker_count,
+                "effective_speaker_count": decision.effective_speaker_count,
+                "effective_voice_count": decision.effective_voice_count,
+                "speaker_voice_map": decision.speaker_voice_map,
+                "fallback_level": decision.fallback_level,
+                "fallback_reason": decision.fallback_reason,
+                "output_mode": OUTPUT_MODE_FAILED,
+                "final_mp4_path": None,
+                "status": FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE,
+                "blocker": FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE,
+                "error_code": FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE,
+                "tts_checkpoint_failure_stage": "tts_checkpoint",
+                "tts_checkpoint_failure_code": "tts_unproven_synth_signature",
+                "auto_smart_verified": False,
+            }
+        except subdub_tts_checkpoint.SubdubTTSContractMismatchError as synth_err:
+            return {
+                "ok": False,
+                "strategy": decision.strategy,
+                "detected_speaker_count": decision.detected_speaker_count,
+                "effective_speaker_count": decision.effective_speaker_count,
+                "effective_voice_count": decision.effective_voice_count,
+                "speaker_voice_map": decision.speaker_voice_map,
+                "fallback_level": decision.fallback_level,
+                "fallback_reason": decision.fallback_reason,
+                "output_mode": OUTPUT_MODE_FAILED,
+                "final_mp4_path": None,
+                "status": "FAIL_CLOSED_CONTRACT_MISMATCH",
+                "blocker": "FAIL_CLOSED_CONTRACT_MISMATCH",
+                "error_code": "FAIL_CLOSED_CONTRACT_MISMATCH",
+                "tts_checkpoint_failure_stage": "tts_checkpoint",
+                "tts_checkpoint_failure_code": "tts_contract_mismatch",
+                "auto_smart_verified": False,
+            }
+        except subdub_tts_checkpoint.SubdubTTSQuoteMismatchError as synth_err:
+            return {
+                "ok": False,
+                "strategy": decision.strategy,
+                "detected_speaker_count": decision.detected_speaker_count,
+                "effective_speaker_count": decision.effective_speaker_count,
+                "effective_voice_count": decision.effective_voice_count,
+                "speaker_voice_map": decision.speaker_voice_map,
+                "fallback_level": decision.fallback_level,
+                "fallback_reason": decision.fallback_reason,
+                "output_mode": OUTPUT_MODE_FAILED,
+                "final_mp4_path": None,
+                "status": "FAIL_CLOSED_QUOTE_MISMATCH",
+                "blocker": "FAIL_CLOSED_QUOTE_MISMATCH",
+                "error_code": "FAIL_CLOSED_QUOTE_MISMATCH",
+                "tts_checkpoint_failure_stage": "tts_checkpoint",
+                "tts_checkpoint_failure_code": "tts_quote_mismatch",
+                "auto_smart_verified": False,
+            }
+        except subdub_tts_checkpoint.SubdubTTSCheckpointError as synth_err:
+            return {
+                "ok": False,
+                "strategy": decision.strategy,
+                "detected_speaker_count": decision.detected_speaker_count,
+                "effective_speaker_count": decision.effective_speaker_count,
+                "effective_voice_count": decision.effective_voice_count,
+                "speaker_voice_map": decision.speaker_voice_map,
+                "fallback_level": decision.fallback_level,
+                "fallback_reason": decision.fallback_reason,
+                "output_mode": OUTPUT_MODE_FAILED,
+                "final_mp4_path": None,
+                "status": "FAIL_CLOSED_CHECKPOINT_ERROR",
+                "blocker": "FAIL_CLOSED_CHECKPOINT_ERROR",
+                "error_code": "FAIL_CLOSED_CHECKPOINT_ERROR",
+                "tts_checkpoint_failure_stage": "tts_checkpoint",
+                "tts_checkpoint_failure_code": "tts_checkpoint_error",
+                "auto_smart_verified": False,
+            }
         except Exception as synth_err:
             return {
                 "ok": False,
@@ -1136,7 +1932,7 @@ async def run_auto_smart_multivoice(
                     "auto_smart_verified": False,
                 }
             # Check zero-length audio if audio payload present
-            if "audio" in chunk and chunk["audio"] == b"":
+            if ("audio" in chunk and chunk["audio"] == b"") or ("audio_bytes" in chunk and chunk["audio_bytes"] == b""):
                 return {
                     "ok": False,
                     "strategy": decision.strategy,
@@ -1145,7 +1941,102 @@ async def run_auto_smart_multivoice(
                     "auto_smart_verified": False,
                 }
             seen_cue_ids.add(cid)
-            synth_artifacts.append(dict(chunk, cue_id=cid))
+            ch_item = dict(chunk, cue_id=cid)
+            ch_item["cue_locked_timing"] = True
+            aud_data = ch_item.get("audio_bytes") if ch_item.get("audio_bytes") is not None else ch_item.get("audio")
+            if aud_data is not None:
+                ch_item["audio"] = aud_data
+                ch_item["audio_bytes"] = aud_data
+
+            # Intelligibility fit-ratio check (Section N) and timeline metadata enrichment
+            # Source cue identity is authoritative: stable cue_id/id mapping first, positional only as guarded fallback
+            c_match = next((c for c in decision.tts_cues if str(c.get("cue_id") or c.get("id")) == cid), None)
+            if not c_match and len(raw_chunks) == len(decision.tts_cues):
+                c_idx = len(seen_cue_ids) - 1
+                if 0 <= c_idx < len(decision.tts_cues):
+                    c_match = decision.tts_cues[c_idx]
+
+            if c_match:
+                # Source owns: cue_id, speaker_id/speaker, source start/end timeline, non_speech_boundary
+                s_sec = float(c_match.get("start_ms", 0)) / 1000.0 if "start_ms" in c_match else float(c_match.get("start", 0.0) or 0.0)
+                e_sec = float(c_match.get("end_ms", 0)) / 1000.0 if "end_ms" in c_match else float(c_match.get("end", 0.0) or 0.0)
+                ch_item["start"] = s_sec
+                ch_item["end"] = e_sec
+                if "start_ms" in c_match:
+                    ch_item["start_ms"] = c_match["start_ms"]
+                if "end_ms" in c_match:
+                    ch_item["end_ms"] = c_match["end_ms"]
+                if "text" in c_match:
+                    ch_item["text"] = c_match["text"]
+
+                # Source speaker authority defeats conflicting/stale chunk speaker metadata
+                spk = c_match.get("speaker_id") or c_match.get("speaker")
+                if spk is not None and str(spk).strip():
+                    ch_item["speaker_id"] = str(spk).strip()
+                    ch_item["speaker"] = str(spk).strip()
+                else:
+                    ch_item["speaker_id"] = ""
+                    ch_item["speaker"] = ""
+                    ch_item["recovery_eligible"] = False
+
+                # Source non_speech_boundary authority: source True cannot be overridden by chunk False
+                if c_match.get("non_speech_boundary") is not None:
+                    ch_item["non_speech_boundary"] = bool(c_match["non_speech_boundary"])
+
+                cue_window = max(0.001, e_sec - s_sec)
+                ch_item["cue_window"] = cue_window
+                ch_item["cue_window_seconds"] = cue_window
+            else:
+                # Chunk cannot be safely matched to one authoritative source cue: RECOVERY_ELIGIBLE=FALSE
+                ch_item["recovery_eligible"] = False
+                cue_window = max(0.001, float(ch_item.get("cue_window") or (float(ch_item.get("end", 0.0)) - float(ch_item.get("start", 0.0)))))
+                ch_item["cue_window"] = cue_window
+                ch_item["cue_window_seconds"] = cue_window
+
+            gen_sec = float(ch_item.get("audio_duration") or ch_item.get("raw_audio_duration") or 0.0)
+            if gen_sec <= 0.0:
+                raw_aud = chunk.get("audio") or chunk.get("audio_bytes")
+                if isinstance(raw_aud, (bytes, bytearray)) and len(raw_aud) >= 16:
+                    try:
+                        from services import subdub_tts_artifact_validator
+                        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tf:
+                            tf.write(raw_aud)
+                            tf_p = tf.name
+                        try:
+                            v_res = subdub_tts_artifact_validator.validate_tts_audio_artifact(tf_p)
+                            if v_res.ok and v_res.duration > 0.0:
+                                gen_sec = float(v_res.duration)
+                        finally:
+                            try:
+                                os.unlink(tf_p)
+                            except OSError:
+                                pass
+                    except Exception:
+                        gen_sec = 0.0
+
+            if gen_sec <= 0.0:
+                return {
+                    "ok": False,
+                    "strategy": decision.strategy,
+                    "status": "TTS_DURATION_AUTHORITY_MISSING",
+                    "error_code": "missing_synth_duration_authority",
+                    "blocker": f"missing_synth_duration_authority:{cid}",
+                    "output_mode": OUTPUT_MODE_FAILED,
+                    "final_mp4_path": None,
+                    "cue_id": cid,
+                    "auto_smart_verified": False,
+                }
+
+            ch_item["audio_duration"] = gen_sec
+            ch_item["raw_audio_duration"] = gen_sec
+            ch_item["original_cue_ids"] = [cid]
+            if cue_window > 0.05 and gen_sec > 0:
+                ch_item["fit_ratio"] = gen_sec / cue_window
+            else:
+                ch_item["fit_ratio"] = 1.0
+
+            ch_item.setdefault("original_cue_ids", [cid])
+            synth_artifacts.append(ch_item)
 
         missing_cues = set(expected_cue_ids) - seen_cue_ids
         if missing_cues:
@@ -1156,6 +2047,72 @@ async def run_auto_smart_multivoice(
                 "blocker": f"missing_tts_cues:{sorted(missing_cues)}",
                 "auto_smart_verified": False,
             }
+
+        # Canonical production ordering: sort synth_artifacts by expected_cue_ids sequence
+        cue_order_map = {cue_id: idx for idx, cue_id in enumerate(expected_cue_ids)}
+        synth_artifacts.sort(key=lambda item: cue_order_map.get(str(item.get("cue_id") or item.get("id")), 999999))
+
+        # Safe shared micro-cue recovery for cue-locked lanes without relaxing MAX_INTELLIGIBLE_FIT_RATIO
+        from services.subdub_microcue_recovery import recover_cue_locked_micro_cues
+        synth_artifacts = recover_cue_locked_micro_cues(synth_artifacts, max_fit_ratio=MAX_INTELLIGIBLE_FIT_RATIO)
+
+        # Final compression check: graceful degradation for cues exceeding MAX_INTELLIGIBLE_FIT_RATIO
+        overfit_cues = []
+        for item in synth_artifacts:
+            i_win = float(item.get("cue_window") or (float(item.get("end", 0.0)) - float(item.get("start", 0.0))))
+            i_dur = float(item.get("audio_duration") or item.get("raw_audio_duration") or 0.0)
+            if i_win > 0.05 and i_dur > 0:
+                item_fit_ratio = i_dur / i_win
+                if item_fit_ratio > HARD_CAP_FIT_RATIO:
+                    # Extreme single-cue ratio: fail immediately
+                    fail_cid = str(
+                        item.get("recovery_trigger_cue_id")
+                        or item.get("original_trigger_cue_id")
+                        or (item.get("original_cue_ids") or [""])[-1]
+                        or item.get("cue_id")
+                        or ""
+                    )
+                    return {
+                        "ok": False,
+                        "strategy": decision.strategy,
+                        "status": "TTS_EXTREME_COMPRESSION_FAILED",
+                        "error_code": "extreme_audio_compression_unintelligible",
+                        "blocker": "extreme_audio_compression_unintelligible",
+                        "output_mode": OUTPUT_MODE_FAILED,
+                        "final_mp4_path": None,
+                        "fit_ratio": round(item_fit_ratio, 3),
+                        "cue_id": fail_cid,
+                        "recovery_trigger_cue_id": str(item.get("recovery_trigger_cue_id") or fail_cid),
+                        "auto_smart_verified": False,
+                    }
+                elif item_fit_ratio > MAX_INTELLIGIBLE_FIT_RATIO:
+                    overfit_cues.append((str(item.get("cue_id") or ""), round(item_fit_ratio, 3)))
+
+        if overfit_cues and len(synth_artifacts) > 0:
+            overfit_ratio = len(overfit_cues) / len(synth_artifacts)
+            if overfit_ratio > MAX_OVERFIT_CUE_RATIO:
+                worst = max(overfit_cues, key=lambda x: x[1])
+                return {
+                    "ok": False,
+                    "strategy": decision.strategy,
+                    "status": "TTS_EXTREME_COMPRESSION_FAILED",
+                    "error_code": "extreme_audio_compression_unintelligible",
+                    "blocker": "extreme_audio_compression_unintelligible",
+                    "output_mode": OUTPUT_MODE_FAILED,
+                    "final_mp4_path": None,
+                    "fit_ratio": worst[1],
+                    "cue_id": worst[0],
+                    "recovery_trigger_cue_id": worst[0],
+                    "overfit_cue_count": len(overfit_cues),
+                    "overfit_cue_ratio": round(overfit_ratio, 3),
+                    "auto_smart_verified": False,
+                }
+            # Graceful degradation: log overfit cues but allow render to continue
+            logger.warning(
+                "smart_multi_compression_graceful: %d/%d cues exceed fit_ratio %.2f (ratio=%.1f%%), allowing render",
+                len(overfit_cues), len(synth_artifacts), MAX_INTELLIGIBLE_FIT_RATIO,
+                overfit_ratio * 100,
+            )
 
     # Checkpoint 3: After synthesis
     if _is_stopped():
@@ -1361,6 +2318,8 @@ def is_auto_smart_multivoice_state(state: Mapping[str, Any] | None) -> bool:
     flag = state.get("auto_smart_multivoice") is True
     engine = str(state.get("auto_multi_engine") or "").strip().lower()
     subdub_mode = str(state.get("subdub_mode") or "").strip().lower()
+    engine_req = str(state.get("subdub_engine_requested") or "").strip().lower()
+    plan_ver = str(state.get("subdub_asr_plan_version") or "").strip().lower()
     return bool(
         lane == AUTO_SMART_MULTIVOICE_LANE
         or mode == AUTO_SMART_MULTIVOICE_LANE
@@ -1368,7 +2327,350 @@ def is_auto_smart_multivoice_state(state: Mapping[str, Any] | None) -> bool:
         or flag
         or engine == "smart"
         or subdub_mode == "smart_multivoice"
+        or engine_req == "auto_smart_multivoice"
+        or plan_ver == "r8_2"
     )
+
+
+def resolve_synth_call_shape(
+    base_synthesize: Callable[..., Any],
+    extra_kwargs: Mapping[str, Any] | None = None,
+) -> tuple[str, inspect.Signature]:
+    """Inspects base_synthesize signature BEFORE provider invocation to select call shape deterministically.
+
+    Supported safe per-cue invocation shapes:
+    1. 'kwargs_voice_id': accepts (cues, *extra_args, **scalar_kwargs) with voice_id.
+    2. 'cues_voice_id_kw': accepts (cues, voice_id=...) keyword argument.
+    3. 'cues_voice_id_pos': accepts (cues, voice_id) positional argument.
+    4. 'cues_speaker_voice_map': accepts (cues, speaker_voice_map={spk: voice_id}).
+
+    Fails closed if the signature cannot accept any safe per-cue shape.
+    """
+    if not callable(base_synthesize):
+        raise SubdubTTSUnprovenSynthSignatureError("base_synthesize is not callable", reason="not_callable")
+    try:
+        sig = inspect.signature(base_synthesize)
+    except (ValueError, TypeError) as exc:
+        raise SubdubTTSUnprovenSynthSignatureError(f"uninspectable signature: {exc}", reason="uninspectable") from exc
+
+    dummy_cues = [{"cue_id": "__probe__", "text": "__probe__", "speaker_id": "__probe__"}]
+    dummy_voice = "__probe_voice__"
+    kw = dict(extra_kwargs or {})
+    kw["voice_id"] = dummy_voice
+
+    params = list(sig.parameters.values())
+    param_names = [p.name for p in params]
+    has_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params)
+
+    # Specific signature contracts
+    if "speaker_voice_map" in param_names:
+        try:
+            sig.bind(dummy_cues, speaker_voice_map={"__probe__": dummy_voice})
+            return "cues_speaker_voice_map", sig
+        except Exception:
+            pass
+
+    if "voice_id" in param_names:
+        try:
+            sig.bind(dummy_cues, voice_id=dummy_voice)
+            return "cues_voice_id_kw", sig
+        except Exception:
+            pass
+        try:
+            sig.bind(dummy_cues, dummy_voice)
+            return "cues_voice_id_pos", sig
+        except Exception:
+            pass
+
+    if has_varkw:
+        try:
+            sig.bind(dummy_cues, **kw)
+            return "kwargs_voice_id", sig
+        except Exception:
+            pass
+
+    try:
+        sig.bind(dummy_cues, voice_id=dummy_voice)
+        return "cues_voice_id_kw", sig
+    except Exception:
+        pass
+
+    try:
+        sig.bind(dummy_cues, speaker_voice_map={"__probe__": dummy_voice})
+        return "cues_speaker_voice_map", sig
+    except Exception:
+        pass
+
+    raise SubdubTTSUnprovenSynthSignatureError(
+        f"unsupported_synth_signature: signature {sig} does not accept any supported per-cue shape",
+        reason="no_supported_signature",
+    )
+
+
+def create_smart_synth_adapter(
+    base_synthesize: Callable[..., Any],
+    *,
+    checkpoint_manager: subdub_tts_checkpoint.SubdubTTSCheckpointManager | None = None,
+    workspace: str | None = None,
+    job_id: str | None = None,
+    target_language: str = "vi",
+    quote_fingerprint: str = "",
+) -> Callable[..., Any]:
+    """Wraps per-cue base_synthesize with SubdubTTSCheckpointManager.
+
+    Invariant: A cue with durable STATE_SUCCEEDED must never invoke the
+    paid provider again for the same immutable cue contract.
+    Before every per-cue synthesis call, prepare_cue_intent is consulted.
+    Success is persisted to disk and atomic manifest before the next cue.
+    """
+    safe_job_id = str(job_id or "").strip()
+    if checkpoint_manager is None and workspace and safe_job_id:
+        checkpoint_manager = subdub_tts_checkpoint.SubdubTTSCheckpointManager(
+            workspace=workspace,
+            job_id=safe_job_id,
+            target_language=target_language or "vi",
+            quote_fingerprint=quote_fingerprint or "",
+        )
+
+    async def _smart_synth_adapter(*args: Any, **kwargs: Any) -> Any:
+        if checkpoint_manager is None:
+            raise subdub_tts_checkpoint.SubdubTTSCheckpointError(
+                "missing_checkpoint_identity: durable workspace and stable job_id required"
+            )
+        cues_arg = kwargs.get("cues")
+        if cues_arg is None and args:
+            cues_arg = args[0]
+        spk_map = kwargs.get("speaker_voice_map") or {}
+        if cues_arg is None:
+            cues_arg = kwargs.get("segments") or []
+
+        # Pre-submit argument normalization:
+        # Do not forward original cues positional argument again.
+        extra_args = args[1:] if len(args) > 1 else ()
+        extra_kwargs = {
+            k: v for k, v in kwargs.items()
+            if k not in ("cues", "segments", "speaker_voice_map", "voice_id")
+        }
+
+        # Deterministic pre-submit signature selection (no trial calls, no runtime exception probing)
+        call_shape, _sig = resolve_synth_call_shape(base_synthesize, extra_kwargs)
+
+        cues_list = list(cues_arg or [])
+        all_chunks: list[dict[str, Any]] = []
+        provider_labels: list[str] = []
+
+        for cue in cues_list:
+            cid = str(cue.get("cue_id") or cue.get("id") or "")
+            spk = str(cue.get("speaker_id") or cue.get("speaker") or "")
+            cue_voice_id = str(cue.get("tts_voice_id") or spk_map.get(spk) or kwargs.get("voice_id") or "")
+
+            is_reused = False
+            entry = None
+            cached_bytes = b""
+            if checkpoint_manager is not None:
+                # 1. Consult checkpoint manager BEFORE provider boundary
+                is_reused, _path, cached_bytes, entry = checkpoint_manager.prepare_cue_intent(
+                    cue, cue_voice_id
+                )
+
+            if entry and entry.get("state") == subdub_tts_checkpoint.STATE_ASYNC_SUBMITTED:
+                task_id = str(entry.get("task_id") or "")
+                provider_request_id = str(entry.get("provider_request_id") or "")
+                raise SubdubTTSAsyncSubmittedPriorSubmitError(
+                    f"async_submitted_prior_submit for cue {cid}: task_id={task_id} provider_request_id={provider_request_id}",
+                    cue_id=cid,
+                    task_id=task_id,
+                    provider_request_id=provider_request_id,
+                    entry=entry,
+                )
+
+            if is_reused and entry is not None:
+                # 2. Reconstruct and reuse persisted chunks with 0 provider calls
+                reconstructed = checkpoint_manager.reconstruct_chunks(cue, entry, cached_bytes)
+                for ch in reconstructed:
+                    if isinstance(ch, dict):
+                        ch_copy = dict(ch)
+                        ch_copy.setdefault("cue_id", cid)
+                        ch_copy["cue_locked_timing"] = True
+                        if "start" not in ch_copy:
+                            if "start_ms" in cue:
+                                ch_copy["start"] = float(cue["start_ms"]) / 1000.0
+                            elif "start" in cue:
+                                ch_copy["start"] = float(cue["start"] or 0.0)
+                        if "end" not in ch_copy:
+                            if "end_ms" in cue:
+                                ch_copy["end"] = float(cue["end_ms"]) / 1000.0
+                            elif "end" in cue:
+                                ch_copy["end"] = float(cue["end"] or 0.0)
+                        if "text" not in ch_copy and "text" in cue:
+                            ch_copy["text"] = cue["text"]
+                        if "speaker_id" not in ch_copy and ("speaker_id" in cue or "speaker" in cue):
+                            ch_copy["speaker_id"] = str(cue.get("speaker_id") or cue.get("speaker") or "")
+                        if "audio" not in ch_copy and "audio_bytes" in ch_copy:
+                            ch_copy["audio"] = ch_copy["audio_bytes"]
+                        elif "audio_bytes" not in ch_copy and "audio" in ch_copy:
+                            ch_copy["audio_bytes"] = ch_copy["audio"]
+                        all_chunks.append(ch_copy)
+                provider_labels.append(str(entry.get("provider_label") or "smart_tts"))
+                continue
+
+            # 3. Provider call for new/uncompleted safe cue
+            # Exactly one provider call per attempt: any exception marks ambiguous and fails closed.
+            try:
+                sig_params = _sig.parameters
+                has_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig_params.values())
+                supports_cue_locked = has_varkw or "cue_locked_timing" in sig_params
+                if call_shape == "kwargs_voice_id":
+                    scalar_kwargs = dict(extra_kwargs)
+                    scalar_kwargs["voice_id"] = cue_voice_id
+                    if supports_cue_locked:
+                        scalar_kwargs["cue_locked_timing"] = True
+                    chunk_res = await _maybe_await(
+                        base_synthesize([cue], *extra_args, **scalar_kwargs)
+                    )
+                elif call_shape == "cues_voice_id_kw":
+                    call_kw = {"voice_id": cue_voice_id}
+                    if supports_cue_locked:
+                        call_kw["cue_locked_timing"] = True
+                    chunk_res = await _maybe_await(
+                        base_synthesize([cue], **call_kw)
+                    )
+                elif call_shape == "cues_voice_id_pos":
+                    chunk_res = await _maybe_await(
+                        base_synthesize([cue], cue_voice_id)
+                    )
+                elif call_shape == "cues_speaker_voice_map":
+                    call_kw = {"speaker_voice_map": {spk: cue_voice_id}}
+                    if supports_cue_locked:
+                        call_kw["cue_locked_timing"] = True
+                    chunk_res = await _maybe_await(
+                        base_synthesize([cue], **call_kw)
+                    )
+                else:
+                    raise SubdubTTSUnprovenSynthSignatureError(
+                        f"unsupported_call_shape: {call_shape}"
+                    )
+            except Exception as net_exc:
+                if checkpoint_manager is not None:
+                    checkpoint_manager.record_cue_ambiguous(cue, cue_voice_id, net_exc)
+                raise
+
+            # 4. Extract audio chunks and metadata
+            if isinstance(chunk_res, dict):
+                raw_chunks = chunk_res.get("chunks") or []
+                prov = chunk_res.get("provider")
+                if prov:
+                    provider_labels.append(str(prov))
+            elif isinstance(chunk_res, list):
+                raw_chunks = chunk_res
+            else:
+                raw_chunks = [chunk_res]
+
+            matched_chunks: list[dict[str, Any]] = []
+            for ch in raw_chunks:
+                if isinstance(ch, dict):
+                    ch_cid = str(ch.get("cue_id") or ch.get("id") or "")
+                    if ch_cid == cid:
+                        matched_chunks.append(dict(ch))
+            if not matched_chunks:
+                for ch in raw_chunks:
+                    if isinstance(ch, dict):
+                        ch_cid = str(ch.get("cue_id") or ch.get("id") or "")
+                        if not ch_cid:
+                            ch_copy = dict(ch)
+                            ch_copy["cue_id"] = cid
+                            matched_chunks.append(ch_copy)
+            if not matched_chunks:
+                for ch in raw_chunks:
+                    if isinstance(ch, dict):
+                        ch_copy = dict(ch)
+                        ch_copy.setdefault("cue_id", cid)
+                        matched_chunks.append(ch_copy)
+
+            primary_audio = b""
+            primary_dur = 0.0
+            if matched_chunks:
+                primary_audio = bytes(matched_chunks[0].get("audio_bytes") or matched_chunks[0].get("audio") or b"")
+                primary_dur = float(
+                    matched_chunks[0].get("audio_duration")
+                    or matched_chunks[0].get("raw_audio_duration")
+                    or 0.0
+                )
+                if primary_dur <= 0.0 and len(primary_audio) >= 16:
+                    try:
+                        from services import subdub_tts_artifact_validator
+                        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tf:
+                            tf.write(primary_audio)
+                            tf_p = tf.name
+                        try:
+                            v_res = subdub_tts_artifact_validator.validate_tts_audio_artifact(tf_p)
+                            if v_res.ok and v_res.duration > 0.0:
+                                primary_dur = float(v_res.duration)
+                                for ch in matched_chunks:
+                                    ch["audio_duration"] = primary_dur
+                        finally:
+                            try:
+                                os.unlink(tf_p)
+                            except OSError:
+                                pass
+                    except Exception:
+                        pass
+                for ch in matched_chunks:
+                    if "start" not in ch:
+                        if "start_ms" in cue:
+                            ch["start"] = float(cue["start_ms"]) / 1000.0
+                        elif "start" in cue:
+                            ch["start"] = float(cue["start"] or 0.0)
+                    if "end" not in ch:
+                        if "end_ms" in cue:
+                            ch["end"] = float(cue["end_ms"]) / 1000.0
+                        elif "end" in cue:
+                            ch["end"] = float(cue["end"] or 0.0)
+                    if "text" not in ch and "text" in cue:
+                        ch["text"] = cue["text"]
+                    if "speaker_id" not in ch and ("speaker_id" in cue or "speaker" in cue):
+                        ch["speaker_id"] = str(cue.get("speaker_id") or cue.get("speaker") or "")
+                    if "audio" not in ch and "audio_bytes" in ch:
+                        ch["audio"] = ch["audio_bytes"]
+                    elif "audio_bytes" not in ch and "audio" in ch:
+                        ch["audio_bytes"] = ch["audio"]
+
+            provider_label = provider_labels[-1] if provider_labels else "smart_tts"
+
+            # 5. Persist success to disk and atomic manifest BEFORE continuing to next cue
+            if checkpoint_manager is not None:
+                clean_chunks_meta = [
+                    {k: v for k, v in ch.items() if k not in ("audio", "audio_bytes") and not isinstance(v, (bytes, bytearray))}
+                    for ch in matched_chunks
+                ]
+                checkpoint_manager.record_cue_success(
+                    cue,
+                    cue_voice_id,
+                    primary_audio,
+                    duration=primary_dur,
+                    provider_label=provider_label,
+                    chunks_meta=clean_chunks_meta,
+                )
+
+            for ch in matched_chunks:
+                ch["cue_locked_timing"] = True
+                all_chunks.append(ch)
+
+        return {
+            "chunks": all_chunks,
+            "provider": provider_labels[0] if provider_labels else "smart_tts",
+        }
+
+    return _smart_synth_adapter
+
+
+async def execute_smart_multivoice_lane(
+    payload: Mapping[str, Any] | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    args = dict(payload or {})
+    args.update(kwargs)
+    return await run_auto_smart_multivoice_blackbox(**args)
 
 
 async def run_auto_smart_multivoice_blackbox(
@@ -1388,6 +2690,8 @@ async def run_auto_smart_multivoice_blackbox(
             "public_copy_key": "voice_auto_manual_required",
         }
 
+    resolved_lane_mode = str(payload.get("lane_mode") or current.get("mode") or "dub")
+
     source_media = (
         payload.get("source_media")
         or current.get("source")
@@ -1402,21 +2706,26 @@ async def run_auto_smart_multivoice_blackbox(
     prepare_subtitles = payload.get("prepare_subtitles")
     prepared = None
     if callable(prepare_subtitles):
+        sub_state = dict(current)
         try:
             prepared = await _maybe_await(
                 prepare_subtitles(
-                    dict(current),
+                    sub_state,
                     require_auto_cast=True,
                 )
             )
         except Exception as prep_err:
             lane_mode = str(payload.get("lane_mode") or current.get("mode") or "dub")
+            detail = str(getattr(prep_err, "detail", "") or str(prep_err) or "")
+            is_auto_cast = isinstance(prep_err, speaker_cast.AutoCastUnavailable) or type(prep_err).__name__ == "AutoCastUnavailable"
+            status = "AUTO_CAST_UNAVAILABLE" if is_auto_cast else ("DIALOGUE_UNAVAILABLE" if lane_mode == "dub" else "SUBTITLE_PREPARE_FAILED")
             return {
                 "ok": False,
-                "status": "DIALOGUE_UNAVAILABLE" if lane_mode == "dub" else "SUBTITLE_PREPARE_FAILED",
-                "error_code": type(prep_err).__name__,
-                "admin_debug_summary": str(prep_err)[:160],
-                "state": dict(current),
+                "status": status,
+                "error_code": "AUTO_CAST_UNAVAILABLE" if is_auto_cast else type(prep_err).__name__,
+                "admin_debug_summary": detail[:160] or type(prep_err).__name__,
+                "detail": detail,
+                "state": dict(sub_state),
             }
 
     if isinstance(prepared, dict):
@@ -1475,6 +2784,240 @@ async def run_auto_smart_multivoice_blackbox(
         or payload.get("cues")
         or []
     )
+    try:
+        prepared_speaker_labels = speaker_cast.ordered_auto_speaker_labels(cues)
+    except speaker_cast.AutoCastUnavailable:
+        prepared_speaker_labels = []
+    dispatch_to_v2 = False
+    generic_acoustic = bool(
+        isinstance(prepared, dict)
+        and isinstance(prepared.get("state"), Mapping)
+        and prepared["state"].get("auto_smart_generic_acoustic") is True
+    )
+    if len(prepared_speaker_labels) >= 3 and isinstance(prepared, dict) and not generic_acoustic:
+        try:
+            strong_registers = auto_multi_speaker.acoustic_register_classifications(
+                prepared,
+                prepared_speaker_labels,
+            )
+            dispatch_to_v2 = len(strong_registers) == len(prepared_speaker_labels)
+        except (
+            speaker_cast.AutoCastUnavailable,
+            speaker_cast.AutoCastManualRequired,
+        ):
+            dispatch_to_v2 = False
+    if dispatch_to_v2 and isinstance(prepared, dict):
+        prepared_state = (
+            dict(prepared.get("state"))
+            if isinstance(prepared.get("state"), Mapping)
+            else {}
+        )
+        v2_state = {
+            **dict(current),
+            **prepared_state,
+            "voice_selection_mode": "auto_speaker",
+            "auto_speaker_lane": auto_multi_speaker.AUTO_MULTI_SPEAKER_LANE,
+            "auto_multi_engine": "v2",
+            "auto_smart_multivoice_opt_in": True,
+            "subdub_engine_selected": "auto_multi_speaker_v2",
+            "auto_smart_dispatch": "n3_plus_proven_v2",
+        }
+
+        async def reuse_prepared(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+            return prepared
+
+        v2_payload = dict(payload)
+        v2_payload["prepare_subtitles"] = reuse_prepared
+        v2_payload.pop("state", None)
+        v2_payload.pop("extract_pcm", None)
+        try:
+            v2_result = await auto_multi_speaker_v2.run_auto_multi_speaker_v2_blackbox(
+                extract_pcm=extract_pcm,
+                state=v2_state,
+                **v2_payload,
+            )
+        finally:
+            if temp_source_path and os.path.exists(temp_source_path):
+                try:
+                    os.unlink(temp_source_path)
+                except OSError:
+                    pass
+        v2_result = dict(v2_result or {})
+        v2_result_state = {
+            **v2_state,
+            **dict(v2_result.get("state") or {}),
+            "auto_smart_multivoice_opt_in": True,
+            "subdub_engine_selected": "auto_multi_speaker_v2",
+            "auto_smart_dispatch": "n3_plus_proven_v2",
+        }
+        return {
+            **v2_result,
+            "state": v2_result_state,
+            "auto_smart_dispatch": "n3_plus_proven_v2",
+        }
+    acoustic_classifications = (
+        payload.get("acoustic_classifications")
+        or current.get("acoustic_classifications")
+        or (prepared.get("acoustic_classifications") if isinstance(prepared, dict) else None)
+    )
+    if not acoustic_classifications and isinstance(prepared, dict) and isinstance(cues, list):
+        try:
+            speaker_labels = speaker_cast.ordered_auto_speaker_labels(cues)
+        except speaker_cast.AutoCastUnavailable:
+            speaker_labels = []
+        if len(speaker_labels) >= 3:
+            try:
+                prepared_classifications = auto_multi_speaker.acoustic_register_classifications(
+                    prepared,
+                    speaker_labels,
+                )
+            except speaker_cast.AutoCastManualRequired:
+                acoustic_state = auto_multi_speaker.bounded_multi_acoustic_evidence(
+                    auto_multi_speaker.auto_speaker._prepared_state(prepared)
+                )
+                registers = acoustic_state.get("multi_acoustic_speaker_registers")
+                confidences = acoustic_state.get("multi_acoustic_speaker_register_confidences")
+                if (
+                    acoustic_state.get("multi_acoustic_speaker_count") != len(speaker_labels)
+                    or not isinstance(registers, list)
+                    or not isinstance(confidences, list)
+                    or len(registers) != len(speaker_labels)
+                    or len(confidences) != len(speaker_labels)
+                    or all(
+                        confidence >= speaker_cast.MIN_REGISTER_CONFIDENCE
+                        for confidence in confidences
+                    )
+                ):
+                    raise
+                prepared_classifications = {}
+                for index, label in enumerate(speaker_labels):
+                    chunk_index, speaker_index, canonical = speaker_cast.validated_speaker_identity(
+                        {"speaker_id": label}
+                    )
+                    if chunk_index != 0 or speaker_index != index or canonical != label:
+                        raise
+                    prepared_classifications[label] = {
+                        "speaker_id": label,
+                        "voice_register": (
+                            registers[index]
+                            if confidences[index] >= speaker_cast.MIN_REGISTER_CONFIDENCE
+                            else "unknown"
+                        ),
+                        "confidence": confidences[index],
+                    }
+            if prepared_classifications:
+                acoustic_classifications = prepared_classifications
+    stereo_pcm_path = (
+        payload.get("stereo_pcm_path")
+        or current.get("stereo_pcm_path")
+        or (prepared.get("stereo_pcm_path") if isinstance(prepared, dict) else None)
+    )
+    extracted_pcm_path: str | None = None
+    pcm_extraction_error: str | None = None
+    if stereo_pcm_path is None and callable(extract_pcm):
+        try:
+            from services import subdub_two_speaker_gender_onnx
+            prep_ctx = dict(prepared or {})
+            if "state" not in prep_ctx and isinstance(current, Mapping):
+                prep_ctx["state"] = dict(current)
+            if "source_file" not in prep_ctx and source_media:
+                prep_ctx["source_file"] = source_media
+            if "source_path" not in prep_ctx and source_media:
+                prep_ctx["source_path"] = source_media
+            extracted = await _maybe_await(
+                extract_pcm(
+                    prep_ctx,
+                    current,
+                    channels=subdub_two_speaker_gender_onnx.PCM_CHANNELS,
+                    sample_rate=subdub_two_speaker_gender_onnx.PCM_SAMPLE_RATE,
+                    sample_format="s16le",
+                )
+            )
+            if isinstance(extracted, Mapping):
+                raw_p = extracted.get("pcm_path") or extracted.get("path")
+            else:
+                raw_p = extracted
+            if raw_p and Path(str(raw_p)).is_file() and Path(str(raw_p)).stat().st_size > 0:
+                stereo_pcm_path = str(raw_p)
+                extracted_pcm_path = stereo_pcm_path
+            else:
+                pcm_extraction_error = f"invalid_pcm_path:{raw_p}"
+        except Exception as pcm_err:
+            stereo_pcm_path = None
+            pcm_extraction_error = f"{type(pcm_err).__name__}:{str(pcm_err)[:120]}"
+
+        if pcm_extraction_error is not None:
+            cue_acoustics = (
+                payload.get("cue_acoustic_classifications")
+                or current.get("cue_acoustic_classifications")
+                or (prepared.get("cue_acoustic_classifications") if isinstance(prepared, dict) else None)
+            )
+            has_full_cue_local_acoustics = False
+            missing_cue_ids: list[str] = []
+            speech_cues = [
+                (idx, c)
+                for idx, c in enumerate(cues)
+                if isinstance(c, Mapping) and not _is_non_speech_cue(c) and str(c.get("speaker_id") or c.get("speaker") or "").strip()
+            ] if cues else []
+
+            target_cues = speech_cues if speech_cues else [(idx, c) for idx, c in enumerate(cues) if isinstance(c, Mapping)]
+            if isinstance(cue_acoustics, Mapping) and target_cues:
+                for idx, c in target_cues:
+                    cid = str(c.get("cue_id") or c.get("id") or "").strip()
+                    meta = None
+                    if cid and cid in cue_acoustics:
+                        meta = cue_acoustics[cid]
+                    elif cid and cid.isdigit() and int(cid) in cue_acoustics:
+                        meta = cue_acoustics[int(cid)]
+                    elif idx in cue_acoustics:
+                        meta = cue_acoustics[idx]
+                    elif str(idx) in cue_acoustics:
+                        meta = cue_acoustics[str(idx)]
+                    if not is_valid_cue_local_acoustic_authority(meta):
+                        missing_cue_ids.append(cid or str(idx))
+                if not missing_cue_ids:
+                    has_full_cue_local_acoustics = True
+            elif isinstance(cue_acoustics, Mapping) and not cues:
+                has_full_cue_local_acoustics = True
+
+            if not has_full_cue_local_acoustics:
+                if temp_source_path and os.path.exists(temp_source_path):
+                    try:
+                        os.unlink(temp_source_path)
+                    except OSError:
+                        pass
+                blocker_msg = f"pcm_extraction_failed:{pcm_extraction_error}"
+                if missing_cue_ids:
+                    blocker_msg = f"{blocker_msg}:partial_cue_coverage_gap:{','.join(missing_cue_ids[:5])}"
+                return {
+                    "ok": False,
+                    "status": "PCM_EXTRACTION_FAILED",
+                    "error_code": "pcm_extraction_failed",
+                    "blocker": blocker_msg,
+                    "admin_debug_summary": blocker_msg,
+                    "strategy": STRATEGY_FAILED,
+                    "detected_speaker_count": 0,
+                    "effective_speaker_count": 0,
+                    "effective_voice_count": 0,
+                    "speaker_voice_map": {},
+                    "fallback_level": -1,
+                    "fallback_reason": None,
+                    "output_mode": OUTPUT_MODE_FAILED,
+                    "final_mp4_path": None,
+                    "auto_smart_verified": False,
+                    "state": dict(current),
+                }
+
+    cues = smooth_smart_multivoice_cues(
+        cues,
+        acoustic_classifications=acoustic_classifications,
+        cue_acoustic_classifications=(
+            payload.get("cue_acoustic_classifications")
+            or current.get("cue_acoustic_classifications")
+            or (prepared.get("cue_acoustic_classifications") if isinstance(prepared, dict) else None)
+        ),
+        stereo_pcm_path=stereo_pcm_path,
+    )
 
     # PR #1138 invariant: preserve filtering of SMART_CONTROL_ONLY_KEYS
     clean_payload = dict(payload)
@@ -1503,81 +3046,110 @@ async def run_auto_smart_multivoice_blackbox(
 
     base_synthesize = payload.get("synthesize_segments")
     smart_synthesizer = None
+    checkpoint_mgr = None
     if callable(base_synthesize):
-        async def _smart_synth_adapter(*args: Any, **kwargs: Any) -> Any:
-            cues_arg = kwargs.get("cues")
-            if cues_arg is None and args:
-                cues_arg = args[0]
-            spk_map = kwargs.get("speaker_voice_map") or {}
-            if cues_arg is None:
-                cues_arg = kwargs.get("segments") or []
+        checkpoint_mgr = payload.get("checkpoint_manager") or current.get("checkpoint_manager")
+        resolved_job_id = str(
+            current.get("_pipeline_job_id")
+            or current.get("job_id")
+            or payload.get("job_id")
+            or ""
+        ).strip()
+        ws = str(
+            payload.get("checkpoint_workspace")
+            or payload.get("workspace")
+            or current.get("_pipeline_workspace")
+            or current.get("workspace")
+            or ""
+        ).strip()
 
-            accepts_cues = False
-            try:
-                sig = inspect.signature(base_synthesize)
-                params = sig.parameters
-                if "speaker_voice_map" in params or "cues" in params:
-                    accepts_cues = True
-            except (ValueError, TypeError):
-                accepts_cues = False
-
-            if accepts_cues:
-                return await _maybe_await(base_synthesize(*args, **kwargs))
-
-            cues_list = list(cues_arg or [])
-            all_chunks = []
-            provider_labels = []
-            for cue in cues_list:
-                cid = str(cue.get("cue_id") or cue.get("id") or "")
-                spk = str(cue.get("speaker_id") or cue.get("speaker") or "")
-                cue_voice_id = cue.get("tts_voice_id") or spk_map.get(spk) or kwargs.get("voice_id")
-                chunk_res = await _maybe_await(
-                    base_synthesize([cue], voice_id=cue_voice_id)
-                )
-                if isinstance(chunk_res, dict):
-                    raw_chunks = chunk_res.get("chunks") or []
-                    prov = chunk_res.get("provider")
-                    if prov:
-                        provider_labels.append(str(prov))
-                elif isinstance(chunk_res, list):
-                    raw_chunks = chunk_res
-                else:
-                    raw_chunks = [chunk_res]
-                matched_chunks = []
-                for ch in raw_chunks:
-                    if isinstance(ch, dict):
-                        ch_cid = str(ch.get("cue_id") or ch.get("id") or "")
-                        if ch_cid == cid:
-                            matched_chunks.append(ch)
-                if not matched_chunks:
-                    for ch in raw_chunks:
-                        if isinstance(ch, dict):
-                            ch_cid = str(ch.get("cue_id") or ch.get("id") or "")
-                            if not ch_cid:
-                                ch_copy = dict(ch)
-                                ch_copy["cue_id"] = cid
-                                matched_chunks.append(ch_copy)
-                if not matched_chunks:
-                    for ch in raw_chunks:
-                        if isinstance(ch, dict):
-                            ch_copy = dict(ch)
-                            ch_copy.setdefault("cue_id", cid)
-                            matched_chunks.append(ch_copy)
-                for ch in matched_chunks:
-                    all_chunks.append(ch)
-
+        if not ws and not checkpoint_mgr:
             return {
-                "chunks": all_chunks,
-                "provider": provider_labels[0] if provider_labels else "smart_tts",
+                "ok": False,
+                "status": "BLOCKED_NO_DURABLE_LIVE_JOB_WORKSPACE",
+                "blocker": "BLOCKED_NO_DURABLE_LIVE_JOB_WORKSPACE",
+                "error_code": "BLOCKED_NO_DURABLE_LIVE_JOB_WORKSPACE",
+                "state": dict(current),
             }
-        smart_synthesizer = _smart_synth_adapter
+
+        if not resolved_job_id and not checkpoint_mgr:
+            return {
+                "ok": False,
+                "status": "FAIL_CLOSED_MISSING_CHECKPOINT_JOB_ID",
+                "blocker": "FAIL_CLOSED_MISSING_CHECKPOINT_JOB_ID",
+                "error_code": "FAIL_CLOSED_MISSING_CHECKPOINT_JOB_ID",
+                "state": dict(current),
+            }
+
+        target_lang = str(
+            payload.get("target_language")
+            or current.get("target_language")
+            or "vi"
+        ).strip()
+        quote_fp = str(
+            payload.get("quote_fingerprint")
+            or current.get("quote_fingerprint")
+            or current.get("confirmed_quote_id")
+            or ""
+        ).strip()
+
+        if checkpoint_mgr is None and ws and resolved_job_id:
+            try:
+                checkpoint_mgr = subdub_tts_checkpoint.SubdubTTSCheckpointManager(
+                    workspace=ws,
+                    job_id=resolved_job_id,
+                    target_language=target_lang,
+                    quote_fingerprint=quote_fp,
+                )
+            except subdub_tts_checkpoint.SubdubTTSQuoteMismatchError as exc:
+                return {
+                    "ok": False,
+                    "status": "FAIL_CLOSED_QUOTE_MISMATCH",
+                    "blocker": "FAIL_CLOSED_QUOTE_MISMATCH",
+                    "error_code": "FAIL_CLOSED_QUOTE_MISMATCH",
+                    "tts_checkpoint_failure_stage": "tts_checkpoint",
+                    "tts_checkpoint_failure_code": "tts_quote_mismatch",
+                    "state": dict(current),
+                }
+            except subdub_tts_checkpoint.SubdubTTSContractMismatchError as exc:
+                return {
+                    "ok": False,
+                    "status": "FAIL_CLOSED_CONTRACT_MISMATCH",
+                    "blocker": "FAIL_CLOSED_CONTRACT_MISMATCH",
+                    "error_code": "FAIL_CLOSED_CONTRACT_MISMATCH",
+                    "tts_checkpoint_failure_stage": "tts_checkpoint",
+                    "tts_checkpoint_failure_code": "tts_contract_mismatch",
+                    "state": dict(current),
+                }
+            except subdub_tts_checkpoint.SubdubTTSCheckpointError as exc:
+                return {
+                    "ok": False,
+                    "status": "FAIL_CLOSED_AMBIGUOUS_SUBMISSION",
+                    "blocker": "FAIL_CLOSED_AMBIGUOUS_SUBMISSION",
+                    "error_code": "FAIL_CLOSED_AMBIGUOUS_SUBMISSION",
+                    "tts_checkpoint_failure_stage": "tts_checkpoint",
+                    "tts_checkpoint_failure_code": "tts_ambiguous_submission",
+                    "state": dict(current),
+                }
+
+        smart_synthesizer = create_smart_synth_adapter(
+            base_synthesize,
+            checkpoint_manager=checkpoint_mgr,
+            workspace=ws,
+            job_id=resolved_job_id,
+            target_language=target_lang,
+            quote_fingerprint=quote_fp,
+        )
     elif callable(payload.get("runner")):
         async def _mock_runner_synth(*args: Any, **kwargs: Any) -> Any:
             cues_list = kwargs.get("cues") or []
             chunks = []
             for c in cues_list:
                 cid = str(c.get("cue_id") or c.get("id"))
-                chunks.append({"cue_id": cid, "audio": b"DUMMY_AUDIO_BYTES"})
+                s = float(c.get("start_ms", 0)) / 1000.0 if "start_ms" in c else float(c.get("start", 0.0) or 0.0)
+                e = float(c.get("end_ms", 0)) / 1000.0 if "end_ms" in c else float(c.get("end", 0.0) or 0.0)
+                dur = max(0.1, e - s) if e > s else 1.0
+                chunks.append({"cue_id": cid, "audio": b"DUMMY_AUDIO_BYTES", "audio_duration": dur})
             return {"chunks": chunks, "provider": "runner_mock"}
         smart_synthesizer = _mock_runner_synth
 
@@ -1585,11 +3157,82 @@ async def run_auto_smart_multivoice_blackbox(
     captured_audio: bytes | None = None
     probe_fn = payload.get("probe_fn") or payload.get("probe_video")
 
+    pipeline_state = (
+        prepared.get("state")
+        if (isinstance(prepared, dict) and isinstance(prepared.get("state"), dict))
+        else None
+    ) or (current if isinstance(current, dict) else {})
+
+    raw_dur_authority = (
+        pipeline_state.get("input_duration_seconds")
+        or pipeline_state.get("input_duration")
+        or pipeline_state.get("video_duration")
+        or pipeline_state.get("source_duration")
+        or 0.0
+    )
+    try:
+        dur_authority = float(raw_dur_authority or 0.0)
+    except (ValueError, TypeError):
+        dur_authority = 0.0
+
+    max_cue_end = 0.0
+    if cues:
+        for c in cues:
+            c_end = float(c.get("end_ms", 0)) / 1000.0 if c.get("end_ms") else float(c.get("end", 0.0) or 0.0)
+            if c_end > max_cue_end:
+                max_cue_end = c_end
+
+    canonical_duration = max(dur_authority, max_cue_end, 1.0)
+
+    raw_output_subtitle = str(
+        (prepared.get("output_subtitle") if isinstance(prepared, dict) else "")
+        or current.get("output_subtitle")
+        or ""
+    )
+    raw_output_text = str(
+        (prepared.get("output_script") if isinstance(prepared, dict) else "")
+        or (prepared.get("output_text") if isinstance(prepared, dict) else "")
+        or current.get("output_script")
+        or current.get("output_text")
+        or ""
+    )
+
+    srt_from_text_fn = (
+        payload.get("srt_from_text")
+        or current.get("srt_from_text")
+        or (prepared.get("srt_from_text") if isinstance(prepared, dict) else None)
+    )
+    if not callable(srt_from_text_fn):
+        try:
+            import bot
+            srt_from_text_fn = getattr(bot, "video_dubbing_srt_from_text", None)
+        except Exception:
+            srt_from_text_fn = None
+
+    canonical_srt_text = ""
+    if "-->" in raw_output_subtitle:
+        canonical_srt_text = raw_output_subtitle
+    elif raw_output_text.strip() and callable(srt_from_text_fn):
+        try:
+            canonical_srt_text = str(srt_from_text_fn(raw_output_text.strip(), int(canonical_duration)) or "")
+        except Exception:
+            canonical_srt_text = ""
+    elif "-->" in raw_output_text:
+        canonical_srt_text = raw_output_text
+
+    canonical_srt_bytes = canonical_srt_text.encode("utf-8") if canonical_srt_text else b""
+
     if not callable(render_pipeline) and callable(payload.get("render_video")):
         render_video_fn = payload["render_video"]
-        build_timeline_audio = payload.get("build_timeline_audio")
-        normalize_audio = payload.get("normalize_audio")
-        validate_audio = payload.get("validate_audio")
+        build_timeline_audio = payload.get("build_timeline_audio") or current.get("build_timeline_audio")
+        if not callable(build_timeline_audio):
+            try:
+                import bot
+                build_timeline_audio = getattr(bot, "build_dub_timeline_audio", None)
+            except Exception:
+                build_timeline_audio = None
+        normalize_audio = payload.get("normalize_audio") or current.get("normalize_audio")
+        validate_audio = payload.get("validate_audio") or current.get("validate_audio")
 
         async def _adapted_render_pipeline(
             *,
@@ -1606,14 +3249,32 @@ async def run_auto_smart_multivoice_blackbox(
             nonlocal captured_audio
             norm_audio = b""
             if callable(build_timeline_audio):
-                raw_audio, _ = await _maybe_await(build_timeline_audio(tts_chunks, 5.0))
-                if callable(normalize_audio):
-                    norm_audio, _ = await _maybe_await(normalize_audio(raw_audio))
+                timeline_res = await _maybe_await(build_timeline_audio(tts_chunks, canonical_duration))
+                err_detail = ""
+                if isinstance(timeline_res, tuple):
+                    raw_audio = timeline_res[0] if len(timeline_res) >= 1 else b""
+                    err_detail = str(timeline_res[1]) if len(timeline_res) >= 2 else ""
                 else:
-                    norm_audio = raw_audio
+                    raw_audio = timeline_res
+
+                if err_detail:
+                    current["timeline_audio_detail"] = err_detail
+
+                if tts_chunks and (not raw_audio or not isinstance(raw_audio, (bytes, bytearray))):
+                    raise RuntimeError(f"TIMELINE_AUDIO_BUILD_FAILED:{err_detail or 'empty_timeline_audio'}")
+
+                if callable(normalize_audio):
+                    norm_res = await _maybe_await(normalize_audio(raw_audio))
+                    if isinstance(norm_res, tuple) and len(norm_res) >= 1:
+                        norm_audio = norm_res[0]
+                    else:
+                        norm_audio = norm_res
+                else:
+                    norm_audio = raw_audio if isinstance(raw_audio, (bytes, bytearray)) else b""
+
                 if callable(validate_audio):
                     await _maybe_await(validate_audio(norm_audio))
-                captured_audio = norm_audio
+                captured_audio = norm_audio if isinstance(norm_audio, (bytes, bytearray)) else b""
 
             src_bytes = b""
             if Path(source_media).is_file():
@@ -1624,13 +3285,39 @@ async def run_auto_smart_multivoice_blackbox(
             if not src_bytes and isinstance(prepared, dict) and prepared.get("source_bytes"):
                 src_bytes = prepared["source_bytes"]
 
-            render_res = await _maybe_await(
-                render_video_fn(
-                    src_bytes,
-                    dubbed_audio=norm_audio,
-                    subtitle_bytes=b"",
-                )
+            render_sub_bytes = b""
+            effective_mode = str(resolved_lane_mode or output_mode or "").lower()
+            wants_subtitle = effective_mode in {"subtitle_plus_dub", "subdub"} or "subtitle" in effective_mode
+            if wants_subtitle:
+                if not canonical_srt_text or "-->" not in canonical_srt_text:
+                    raise RuntimeError("empty_translation: subtitle_plus_dub requires valid canonical SRT with timestamp markers ('-->') for render")
+                render_sub_bytes = canonical_srt_bytes
+
+            dub_policy = (prepared.get("dub_audio_policy") if isinstance(prepared, dict) else None) or {}
+            keep_orig_audio = bool(
+                pipeline_state.get("keep_original_audio")
+                or current.get("keep_original_audio")
+                or dub_policy.get("keep_original_audio")
+                or (prepared.get("keep_original_audio") if isinstance(prepared, dict) else False)
             )
+
+            render_kw: dict[str, Any] = {
+                "dubbed_audio": norm_audio,
+                "subtitle_bytes": render_sub_bytes,
+            }
+            try:
+                sig = inspect.signature(render_video_fn)
+                params = sig.parameters
+                has_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+                if has_varkw or "keep_original_audio" in params:
+                    render_kw["keep_original_audio"] = keep_orig_audio
+                if has_varkw or "target_duration_seconds" in params:
+                    render_kw["target_duration_seconds"] = canonical_duration
+            except Exception:
+                render_kw["keep_original_audio"] = keep_orig_audio
+                render_kw["target_duration_seconds"] = canonical_duration
+
+            render_res = await _maybe_await(render_video_fn(src_bytes, **render_kw))
             video_bytes = None
             if isinstance(render_res, tuple) and len(render_res) >= 1:
                 video_bytes = render_res[0]
@@ -1663,6 +3350,10 @@ async def run_auto_smart_multivoice_blackbox(
         if probe_fn is None:
             probe_fn = lambda p: {"ok": True}
 
+    ranges_by_speaker = payload.get("ranges_by_speaker")
+    if ranges_by_speaker is None and cues:
+        ranges_by_speaker = _build_derived_ranges(cues, stereo_pcm_path)
+
     try:
         smart_result = await run_auto_smart_multivoice(
             source_media=source_media,
@@ -1670,13 +3361,18 @@ async def run_auto_smart_multivoice_blackbox(
             output_path=output_path,
             validated_pools=validated_pools,
             assignment_seed=assignment_seed,
-            stereo_pcm_path=payload.get("stereo_pcm_path"),
-            ranges_by_speaker=payload.get("ranges_by_speaker"),
+            stereo_pcm_path=stereo_pcm_path,
+            ranges_by_speaker=ranges_by_speaker,
             deadline_monotonic=payload.get("deadline_monotonic"),
             stop_requested=payload.get("stop_requested"),
             strict_two_classifier=payload.get("strict_two_classifier"),
             multi_speaker_classifier=payload.get("multi_speaker_classifier"),
-            acoustic_classifications=payload.get("acoustic_classifications"),
+            acoustic_classifications=acoustic_classifications,
+            cue_acoustic_classifications=(
+                payload.get("cue_acoustic_classifications")
+                or current.get("cue_acoustic_classifications")
+                or (prepared.get("cue_acoustic_classifications") if isinstance(prepared, dict) else None)
+            ),
             synthesize_segments=smart_synthesizer,
             render_pipeline=render_pipeline,
             probe_fn=probe_fn,
@@ -1692,6 +3388,11 @@ async def run_auto_smart_multivoice_blackbox(
                 os.unlink(temp_source_path)
             except OSError:
                 pass
+        if extracted_pcm_path and os.path.exists(extracted_pcm_path):
+            try:
+                os.unlink(extracted_pcm_path)
+            except OSError:
+                pass
 
     result_state = dict(current)
     result_state["subdub_engine_selected"] = "auto_smart_multivoice"
@@ -1701,6 +3402,13 @@ async def run_auto_smart_multivoice_blackbox(
     result_state["auto_effective_speaker_count"] = smart_result.get("effective_speaker_count", 0)
     result_state["auto_distinct_voice_count"] = smart_result.get("effective_voice_count", 0)
     result_state["auto_smart_output_mode"] = smart_result.get("output_mode")
+    result_state["auto_smart_fallback_level"] = smart_result.get("fallback_level", -1)
+    result_state["auto_smart_fallback_reason"] = smart_result.get("fallback_reason")
+    result_state["auto_smart_register_degraded"] = (
+        bool(smart_result.get("ok"))
+        and smart_result.get("fallback_reason")
+        == "n3_unknown_register_distinct_voice"
+    )
     result_state["speaker_voice_map"] = smart_result.get("speaker_voice_map") or {}
     if smart_result.get("locked_speaker_voice_map"):
         result_state["locked_speaker_voice_map"] = dict(smart_result["locked_speaker_voice_map"])
@@ -1709,8 +3417,20 @@ async def run_auto_smart_multivoice_blackbox(
     elif locked_speaker_voice_map is not None:
         result_state["locked_speaker_voice_map"] = {k: str(v).strip() for k, v in locked_speaker_voice_map.items()}
 
+    if checkpoint_mgr is not None:
+        result_state["checkpoint_workspace"] = checkpoint_mgr.workspace
+        result_state["checkpoint_job_id"] = checkpoint_mgr.job_id
+
+    if smart_result.get("async_task_id"):
+        result_state["async_task_id"] = smart_result["async_task_id"]
+    if smart_result.get("async_provider_request_id"):
+        result_state["async_provider_request_id"] = smart_result["async_provider_request_id"]
+
     response = dict(smart_result)
     response["state"] = result_state
+    if checkpoint_mgr is not None:
+        response["checkpoint_workspace"] = checkpoint_mgr.workspace
+        response["checkpoint_job_id"] = checkpoint_mgr.job_id
 
     if smart_result.get("ok"):
         video_bytes = b""
@@ -1737,6 +3457,30 @@ async def run_auto_smart_multivoice_blackbox(
             response["audio_bytes"] = captured_audio
         elif "audio_bytes" not in response:
             response["audio_bytes"] = b""
+
+        if prepared is not None:
+            response["prepared"] = prepared
+
+        segments_list = list(cues) if isinstance(cues, list) else []
+        if isinstance(prepared, dict) and prepared.get("output_segments"):
+            segments_list = list(prepared["output_segments"])
+        elif isinstance(current, dict) and current.get("output_segments"):
+            segments_list = list(current["output_segments"])
+
+        response["output_subtitle"] = raw_output_subtitle
+        response["output_text"] = raw_output_text
+        response["output_segments"] = segments_list
+        response["srt_text"] = canonical_srt_text
+        response["srt_bytes"] = canonical_srt_bytes
+
+        result_state["output_subtitle"] = response["output_subtitle"]
+        result_state["output_text"] = response["output_text"]
+        result_state["output_segments"] = segments_list
+        result_state["srt_text"] = response["srt_text"]
+
+        if current.get("timeline_audio_detail"):
+            response["timeline_audio_detail"] = current["timeline_audio_detail"]
+            result_state["timeline_audio_detail"] = current["timeline_audio_detail"]
     else:
         blocker = str(smart_result.get("blocker") or "smart_multivoice_failed")
         response["ok"] = False

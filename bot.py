@@ -875,6 +875,8 @@ KEY4U_VIDEO_MODEL = _env("KEY4U_DEFAULT_VIDEO_MODEL", _env("KEY4U_VIDEO_MODEL", 
 KEY4U_VIDEO_FALLBACK_MODELS = _env("KEY4U_VIDEO_FALLBACK_MODELS", "veo3.1-fast,pixverse-video,viduq3,kling-video,minimax-video,doubao-seedance")
 KEY4U_TTS_MODEL = _env("KEY4U_DEFAULT_TTS_MODEL", _env("KEY4U_TTS_MODEL", "speech-02-hd"))
 KEY4U_TTS_ALT_MODEL = _env("KEY4U_ALT_TTS_MODEL", "speech-2.6-hd")
+KEY4U_TTS_MAX_RETRIES = env_int("KEY4U_TTS_MAX_RETRIES", 2)
+KEY4U_TTS_RETRY_BACKOFF = env_float("KEY4U_TTS_RETRY_BACKOFF", 0.5)
 KEY4U_MINIMAX_CLONE_MODEL = _env("KEY4U_MINIMAX_CLONE_MODEL", "speech-2.8-hd")
 KEY4U_STT_MODEL = _env("KEY4U_STT_MODEL", "whisper-1")
 KEY4U_SUNO_MODEL = _env("KEY4U_DEFAULT_MUSIC_MODEL", _env("KEY4U_SUNO_MODEL", "chirp-v4"))
@@ -17416,9 +17418,9 @@ def payos_risk_report_keyboard() -> InlineKeyboardMarkup:
 
 async def handle_payos_risk_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
+    await query.answer()
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "menu"
     value = parts[2] if len(parts) > 2 else ""
@@ -40705,6 +40707,12 @@ async def deepgram_asr_adapter(
         }
     if not audio_bytes:
         return {"ok": False, "status": "media_download_failed", "detail": "empty_audio_bytes"}
+    get_state_fn = globals().get("get_subdub_active_pipeline_state")
+    active_st = get_state_fn() if callable(get_state_fn) else None
+    if isinstance(active_st, dict):
+        active_st["asr_route_called"] = True
+        active_st["subdub_asr_provider_called"] = "deepgram"
+        active_st["subdub_asr_called_at"] = int(time.time())
     if require_diarization:
         diagnostic = await AgentDeepgram.diagnostic(
             audio_bytes,
@@ -43743,9 +43751,9 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
 async def handle_payos_alert_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global PAYOS_ALERT_MUTED_UNTIL
     query = update.callback_query
-    await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("Lệnh này chỉ dành cho admin.", show_alert=True)
+    await query.answer()
     action = (query.data or "").split("|", 1)[-1]
     if action == "manual":
         set_manual_bill_state(query.from_user.id, order_code="MANUAL")
@@ -44432,6 +44440,7 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
     uid = update.effective_user.id
     try:
         if action in {"back", "menu"}:
+            clear_broadcast_lite_pending(uid)
             return await _broadcast_lite_edit(query, broadcast_lite_admin_menu_text(), broadcast_lite_admin_menu_keyboard())
 
         if action == "compose":
@@ -53129,6 +53138,12 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
     text = "\n".join(lines)
     if len(text) <= VIDEO_DEBUG_REPLY_LIMIT:
         return text
+    has_scene_ledger = bool(
+        result.get("scene_task_map")
+        or result.get("scene_tasks_total")
+        or result.get("aggregate_job_status")
+        or result.get("scene_status_by_index")
+    )
     compact_lines = [
         "🎬 <b>Video Provider Job Debug</b>",
         "Provider job diagnostic partial",
@@ -53138,7 +53153,7 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• job id: <code>{jid}</code>",
         f"• project id: <code>{safe_int((project or {}).get('project_id'), 0) or '-'}</code>",
         f"• provider: <code>{_video_debug_safe_value(provider, 80)}</code>",
-        *_video_scene_ledger_debug_lines(result),
+        *(_video_scene_ledger_debug_lines(result) if has_scene_ledger else []),
         f"• configured provider chain: <code>{_video_debug_safe_value(','.join(str(item) for item in (result.get('configured_provider_chain') or [])) or '-', 180)}</code>",
         f"• selected provider before submit: <code>{_video_debug_safe_value(result.get('selected_provider_before_submit'), 80)}</code>",
         f"• selected provider after fallback: <code>{_video_debug_safe_value(result.get('selected_provider_after_fallback'), 80)}</code>",
@@ -53163,13 +53178,6 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• charge policy: <code>{_video_debug_safe_value(result.get('charge_policy') or 'after_valid_mp4_delivery', 80)}</code>",
         f"• submit accepted: <code>{'yes' if result.get('submit_accepted') else 'no'}</code>",
         f"• submit http: <code>{safe_int(result.get('provider_submit_http_status'), 0)}</code>",
-        f"• ShopAIKey exact status endpoint: <code>{'yes' if result.get('shopaikey_status_endpoint_exact') else 'no'}</code>",
-        f"• ShopAIKey status HTTP: <code>{safe_int(result.get('shopaikey_status_http_code'), 0)}</code>",
-        f"• ShopAIKey data.status: <code>{_video_debug_safe_value(result.get('shopaikey_raw_status'), 80)}</code>",
-        f"• ShopAIKey data.progress: <code>{_video_debug_safe_value(result.get('shopaikey_data_progress_raw'), 60)}</code>",
-        f"• ShopAIKey data.result_url: <code>{'yes' if result.get('shopaikey_result_url_from_data') else 'no'}</code>",
-        f"• HTTP 200 ignored as progress: <code>{'yes' if result.get('http_200_not_used_as_progress') else 'no'}</code>",
-        f"• result URL source path: <code>{_video_debug_safe_value(result.get('result_url_source_path') or result.get('result_field_path'), 80)}</code>",
         f"• submit url host: <code>{_video_debug_safe_value(result.get('provider_submit_url_host'), 120)}</code>",
         f"• auth header: <code>{_video_debug_safe_value(result.get('provider_auth_header_name'), 80)}</code> present=<code>{'yes' if result.get('auth_header_value_present') or result.get('provider_auth_value_present') or result.get('auth_present') or result.get('auth_configured') else 'no'}</code> scheme=<code>{_video_debug_safe_value(result.get('provider_auth_scheme_prefix') or result.get('auth_scheme'), 40)}</code>",
         f"• provider model present: <code>{'yes' if result.get('provider_model_present') or result.get('provider_payload_model') else 'no'}</code>",
@@ -53180,36 +53188,16 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• canonical reason: <code>{_video_debug_safe_value(result.get('canonical_task_selected_reason'), 100)}</code>",
         f"• provider progress percent: <code>{safe_int(result.get('provider_progress_percent'), 0)}%</code>",
         f"• render video progress: <code>{safe_int(result.get('render_video_progress_percent') or result.get('provider_render_progress_percent'), 0)}%</code>",
-        f"• render video progress public: <code>{_video_debug_safe_value(result.get('render_video_progress_percent_public'), 40)}</code>",
-        f"• render progress public mode: <code>{_video_debug_safe_value(result.get('render_progress_public_mode'), 60)}</code>",
-        f"• public zero bar due to untrusted provider: <code>{'yes' if result.get('public_zero_bar_due_to_untrusted_provider') else 'no'}</code>",
-        f"• fake progress prevented: <code>{'yes' if result.get('fake_progress_prevented') else 'no'}</code>",
-        f"• render progress source: <code>{_video_debug_safe_value(result.get('render_progress_source'), 80)}</code>",
         f"• provider elapsed/max: <code>{safe_int(result.get('provider_elapsed_seconds') or result.get('provider_wait_elapsed_seconds'), 0)}/{safe_int(result.get('provider_wait_max_seconds'), 0)}</code>",
-        f"• timeout at: <code>{_video_debug_safe_value(result.get('timeout_at'), 80)}</code>",
-        f"• provider poll count: <code>{safe_int(result.get('provider_poll_count'), 0)}</code>",
-        f"• provider poll count source: <code>{_video_debug_safe_value(result.get('provider_poll_count_source'), 60)}</code>",
-        f"• provider status payload source: <code>{_video_debug_safe_value(result.get('provider_status_payload_source'), 100)}</code>",
-        f"• raw provider status before source fix: <code>{_video_debug_safe_value(result.get('raw_provider_status_before_source_fix'), 80)}</code>",
         f"• raw provider status: <code>{_video_debug_safe_value(result.get('raw_provider_status') or result.get('provider_status_raw'), 80)}</code>",
-        f"• canonical status before NOT_START override: <code>{_video_debug_safe_value(result.get('canonical_status_before_not_start_override'), 80)}</code>",
-        f"• NOT_START override applied: <code>{'yes' if result.get('not_start_override_applied') else 'no'}</code>",
-        f"• scene NOT_START elapsed/threshold: <code>{safe_int(result.get('scene_not_start_elapsed'), 0)}/{safe_int(result.get('not_start_threshold_seconds') or result.get('stall_threshold'), 0)}</code>",
-        f"• NOT_START threshold source: <code>{_video_debug_safe_value(result.get('not_start_threshold_source'), 100)}</code>",
-        f"• provider stalled NOT_START: <code>{'yes' if result.get('provider_stalled_not_start') else 'no'}</code>",
         f"• progress_monotonic_applied: <code>{'yes' if result.get('progress_monotonic_applied') else 'no'}</code>",
-        f"• summary fields from primary alive task: <code>{'yes' if result.get('summary_fields_from_primary_alive_task') else 'no'}</code>",
         f"• provider fallback attempted: <code>{'yes' if result.get('provider_fallback_attempted') else 'no'}</code>",
         f"• provider fallback reason: <code>{_video_debug_safe_value(result.get('provider_fallback_reason') or result.get('fallback_reason'), 120)}</code>",
         f"• fallback allowed: <code>{'yes' if result.get('fallback_allowed') is not False else 'no'}</code>",
         f"• fallback blocked reason: <code>{_video_debug_safe_value(result.get('fallback_blocked_reason') or result.get('fallback_block_reason'), 120)}</code>",
         f"• fallback provider candidate: <code>{_video_debug_safe_value(result.get('fallback_provider_candidate') or result.get('next_provider_or_model_candidate'), 80)}</code>",
-        f"• primary provider continue polling: <code>{'yes' if result.get('primary_provider_continue_polling') else 'no'}</code>",
-        f"• primary provider task alive: <code>{'yes' if result.get('primary_provider_task_alive') else 'no'}</code>",
-        f"• primary provider task id present: <code>{'yes' if result.get('primary_provider_task_id_present') else 'no'}</code>",
         f"• key4u submit suppressed: <code>{'yes' if result.get('key4u_submit_suppressed') else 'no'}</code>",
         f"• key4u submit suppressed reason: <code>{_video_debug_safe_value(result.get('key4u_submit_suppressed_reason'), 120)}</code>",
-        f"• next poll scheduled: <code>{'yes' if result.get('next_poll_scheduled') else 'no'}</code>",
         f"• provider wait: <code>{safe_int(result.get('provider_wait_elapsed_seconds'), 0)}/{safe_int(result.get('provider_wait_max_seconds'), 0)}</code>",
         f"• provider task id saved: <code>{'yes' if result.get('provider_task_id_saved') or task_ids or video_ids else 'no'}</code>",
         f"• provider task id: <code>{_video_debug_safe_value(masked_tasks, 160)}</code>",
@@ -59932,7 +59920,7 @@ def set_support_ticket_pending(user_id, step: str, **fields) -> dict:
         if key in {
             "category", "ticket_id", "source", "reply_text", "variant", "lead_type",
             "selected_option", "service_type", "back_to", "needs_admin", "support_flow",
-            "awaiting_support_message", "support_origin", "service_group",
+            "awaiting_support_message", "support_origin", "service_group", "preview_token",
         }:
             state[key] = str(value or "")[:4000]
     USER_PENDING[support_ticket_pending_key(user_id)] = state
@@ -60525,7 +60513,7 @@ def support_ticket_admin_text(ticket: dict) -> str:
     ]
     return "\n".join(lines)
 
-def support_ticket_admin_keyboard(ticket: dict, source: str = "new") -> InlineKeyboardMarkup:
+def support_ticket_admin_keyboard(ticket: dict, source: str = "new", list_offset: int = 0) -> InlineKeyboardMarkup:
     ticket_id = int(ticket["id"])
     rows = [
         [InlineKeyboardButton("✅ Đã xử lý", callback_data=f"ticket|st|{ticket_id}|resolved"), InlineKeyboardButton("💬 Soạn trả lời", callback_data=f"ticket|reply|{ticket_id}")],
@@ -60537,7 +60525,7 @@ def support_ticket_admin_keyboard(ticket: dict, source: str = "new") -> InlineKe
         rows.append([InlineKeyboardButton("📎 Xem file đính kèm", callback_data=f"ticket|file|{ticket_id}")])
     if ticket.get("category") == "lead_consulting":
         rows.append([InlineKeyboardButton("📞 Cần liên hệ", callback_data=f"ticket|lead|{ticket_id}|contact"), InlineKeyboardButton("⭐ Lead tiềm năng", callback_data=f"ticket|lead|{ticket_id}|potential")])
-    rows.append([InlineKeyboardButton("⬅️ Danh sách", callback_data=f"ticket|al|{source}|0"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    rows.append([InlineKeyboardButton("⬅️ Danh sách", callback_data=f"ticket|al|{source}|{max(0, int(list_offset or 0))}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
 def support_admin_list_payload(list_kind: str, offset: int = 0) -> tuple[str, InlineKeyboardMarkup]:
@@ -60561,7 +60549,7 @@ def support_admin_list_payload(list_kind: str, offset: int = 0) -> tuple[str, In
             lines.append(f"• <code>{ticket['ticket_code']}</code> — {html.escape(support_category_label(ticket['category']))} — user <code>{html.escape(ticket['user_id'])}</code>")
     rows = []
     for index in range(0, len(tickets), 2):
-        rows.append([InlineKeyboardButton(f"🎫 {ticket['ticket_code'][-6:]}", callback_data=f"ticket|av|{ticket['id']}|{list_kind}") for ticket in tickets[index:index + 2]])
+        rows.append([InlineKeyboardButton(f"🎫 {ticket['ticket_code'][-6:]}", callback_data=f"ticket|av|{ticket['id']}|{list_kind}|{offset}") for ticket in tickets[index:index + 2]])
     nav = []
     if offset > 0:
         nav.append(InlineKeyboardButton("⬅️ Trang trước", callback_data=f"ticket|al|{list_kind}|{max(0, offset - 6)}"))
@@ -64891,6 +64879,75 @@ async def minimax_audio_reference_to_bytes(value) -> tuple[bytes, str]:
             return audio_bytes, encoding
     return b"", "empty_demo_audio"
 
+def _is_transient_key4u_tts_error(result: dict, status: str, http_status: int) -> bool:
+    code = int(http_status or 0)
+    # Ambiguous delivery: without confirmed HTTP status code, delivery is unverified.
+    # Automatic retry on ambiguous delivery is disabled to prevent duplicate paid submits.
+    if code <= 0:
+        return False
+
+    stat = str(status or "").upper()
+    if stat in {"FAIL_TIMEOUT", "FAIL_EXCEPTION"}:
+        return False
+
+    res_dict = result if isinstance(result, dict) else {}
+    err_text = " ".join([
+        str(res_dict.get("error_message_safe") or ""),
+        str(res_dict.get("error_class") or ""),
+        str(res_dict.get("detail") or ""),
+        stat,
+    ]).lower()
+
+    # Ambiguous transport / timeout / connection reset errors must never be auto-retried
+    if any(marker in err_text for marker in ("timeout", "connection reset", "connection dropped")):
+        return False
+
+    # HTTP 504 is Gateway Timeout: upstream receipt is ambiguous without idempotency
+    if code == 504:
+        return False
+
+    # Permanent client / auth / bad request errors
+    if code in {400, 401, 403, 404, 405, 422}:
+        return False
+    if stat in {
+        "FAIL_AUTH",
+        "FAIL_BAD_REQUEST",
+        "FAIL_NOT_FOUND",
+        "FAIL_MODEL_NOT_FOUND",
+        "FAIL_PARAM",
+        "FAIL_VOICE_NOT_FOUND",
+        "PASS",
+    }:
+        return False
+
+    # Explicit provider rate limit (HTTP 429)
+    if code == 429:
+        return True
+
+    # Explicit provider unavailable (HTTP 503)
+    if code == 503:
+        return True
+
+    # Explicit server-side transient rejection markers with confirmed HTTP error response.
+    # Structured status alone MUST NOT bypass this gate for HTTP 500/502.
+    if code in {500, 502}:
+        explicit_transient_markers = (
+            "temporarily unavailable",
+            "try again later",
+            "service_unavailable",
+            "quá tải",
+            "overloaded",
+            "rate limit",
+        )
+        msg_text = " ".join([
+            str(res_dict.get("error_message_safe") or ""),
+            str(res_dict.get("detail") or ""),
+        ]).lower()
+        return any(marker in msg_text for marker in explicit_transient_markers)
+
+    return False
+
+
 async def key4u_minimax_tts_bytes(
     text: str,
     voice_id: str = "",
@@ -64905,26 +64962,41 @@ async def key4u_minimax_tts_bytes(
     provider = key4u_provider_instance()
     selected_voice_id = str(voice_id or default_tts_voice_id("male"))
     selected_speed = voice_tts_provider_speed(voice_speed or VOICE_TTS_DEFAULT_SPEED)
-    result = await provider.tts(
-        str(text or "")[:3500],
-        model=KEY4U_TTS_MODEL,
-        voice_id=str(voice_id or default_tts_voice_id("male")),
-        speed=selected_speed,
-        timeout_seconds=float(SHOPAIKEY_TTS_TIMEOUT_SECONDS or 60),
-        language_boost=str(tts_language_boost or "auto"),
-    )
-    status = str(result.get("status") or ("PASS" if result.get("ok") else "FAIL"))
-    http_status = int(result.get("http_status") or 0)
-    audio_bytes = bytes(result.get("output_bytes") or b"")
-    if result.get("ok") and audio_bytes:
-        return "PASS", audio_bytes, f"http={http_status}; bytes={len(audio_bytes)}; route=key4u_minimax", http_status
-    output_url = str(result.get("output_url") or "").strip()
-    if result.get("ok") and output_url:
-        downloaded, detail, download_http = await _download_audio_url_bytes(output_url)
-        if downloaded:
-            return "PASS", downloaded, f"http={http_status}; {detail}; route=key4u_minimax", int(download_http or http_status)
-    detail = sanitize_provider_error(result.get("error_message_safe") or status)[:240]
-    return status or "FAIL", b"", detail, http_status
+    max_retries = max(0, int(KEY4U_TTS_MAX_RETRIES))
+    base_backoff = max(0.0, float(KEY4U_TTS_RETRY_BACKOFF))
+    last_status = "FAIL"
+    last_detail = ""
+    last_http_status = 0
+    for attempt in range(max_retries + 1):
+        result = await provider.tts(
+            str(text or "")[:3500],
+            model=KEY4U_TTS_MODEL,
+            voice_id=selected_voice_id,
+            speed=selected_speed,
+            timeout_seconds=float(SHOPAIKEY_TTS_TIMEOUT_SECONDS or 60),
+            language_boost=str(tts_language_boost or "auto"),
+        )
+        status = str(result.get("status") or ("PASS" if result.get("ok") else "FAIL"))
+        http_status = int(result.get("http_status") or 0)
+        audio_bytes = bytes(result.get("output_bytes") or b"")
+        if result.get("ok") and audio_bytes:
+            return "PASS", audio_bytes, f"http={http_status}; bytes={len(audio_bytes)}; route=key4u_minimax", http_status
+        output_url = str(result.get("output_url") or "").strip()
+        if result.get("ok") and output_url:
+            downloaded, detail, download_http = await _download_audio_url_bytes(output_url)
+            if downloaded:
+                return "PASS", downloaded, f"http={http_status}; {detail}; route=key4u_minimax", int(download_http or http_status)
+        detail = sanitize_provider_error(result.get("error_message_safe") or status)[:240]
+        last_status = status or "FAIL"
+        last_detail = detail
+        last_http_status = http_status
+        if attempt < max_retries and _is_transient_key4u_tts_error(result, status, http_status):
+            delay = base_backoff * (attempt + 1)
+            if delay > 0:
+                await asyncio.sleep(delay)
+            continue
+        break
+    return last_status, b"", last_detail, last_http_status
 
 async def shopaikey_minimax_tts_bytes(
     text: str,
@@ -65717,7 +65789,22 @@ async def asr_transcribe_audio(
             transcript_json = dict(result.get("transcript_json") or {})
             segments = deepgram_segments_from_response(transcript_json)
             word_timeline = []
-            if result.get("ok") and transcript and require_auto_multi_word_timeline:
+            diarized_speaker_count = len(
+                {
+                    item.get("speaker")
+                    for item in segments
+                    if isinstance(item, dict) and item.get("speaker") is not None
+                }
+            )
+            needs_word_timeline = bool(
+                require_auto_multi_word_timeline
+                or (require_diarization and diarized_speaker_count >= 3)
+            )
+            if (
+                result.get("ok")
+                and transcript
+                and needs_word_timeline
+            ):
                 duration_value = media_duration_seconds
                 if type(duration_value) not in {int, float} or not math.isfinite(
                     float(duration_value)
@@ -65732,7 +65819,7 @@ async def asr_transcribe_audio(
                     duration_seconds=duration_value,
                     diagnostics=parse_diagnostics,
                 )
-                if not word_timeline:
+                if not word_timeline and require_auto_multi_word_timeline:
                     rejection_reason = re.sub(
                         r"[^a-z0-9_]+",
                         "_",
@@ -65783,7 +65870,7 @@ async def asr_transcribe_audio(
                     "duration_seconds": float(segments[-1]["end"] if segments else 0),
                     "detail": f"chars={len(transcript)}; segments={len(segments)}",
                 }
-                if require_auto_multi_word_timeline:
+                if needs_word_timeline:
                     success["word_timeline"] = word_timeline
                 return success
             status = str(result.get("status") or "FAIL")
@@ -68848,6 +68935,11 @@ GUIDE_SECTION_ALIASES = {
     "pricing": "credits",
     "topup": "credits",
     "refund": "faq",
+    "link": "telegram_link",
+    "lienket": "telegram_link",
+    "web": "telegram_link",
+    "webapp": "telegram_link",
+    "telegram": "telegram_link",
 }
 
 def normalize_guide_section_key(section_key_or_number: str) -> str:
@@ -105976,6 +106068,31 @@ def video_uiflow3_prepare_project_for_invoice(user_id: int, session: dict) -> di
     current["draft"] = draft
     save_video_session(user_id, current)
     return project
+try:
+    from services.video_real_render_connector import (
+        STORYBOARD_DEFAULT_I2V_MODEL,
+        STORYBOARD_PROVEN_I2V_MODELS,
+        STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER,
+        STORYBOARD_I2V_MODEL_NOT_PROVEN,
+        STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER,
+        STORYBOARD_DEFAULT_I2V_MODEL_BY_PROVIDER,
+        _resolve_storyboard_i2v_model,
+    )
+except ImportError:
+    STORYBOARD_DEFAULT_I2V_MODEL: str = "kling-v3"
+    STORYBOARD_PROVEN_I2V_MODELS: set[str] = {"kling-v3", "kling-3.0-turbo"}
+    STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER: str = "storyboard_i2v_model_not_proven_no_charge"
+    STORYBOARD_I2V_MODEL_NOT_PROVEN: str = STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER
+    STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER = {
+        "key4u_video": {"kling-v3", "kling-3.0-turbo"},
+        "shopaikey_video": {"veo3.1-fast", "veo_3_1-fast"},
+    }
+    STORYBOARD_DEFAULT_I2V_MODEL_BY_PROVIDER = {
+        "key4u_video": "kling-v3",
+        "shopaikey_video": "veo3.1-fast",
+    }
+    def _resolve_storyboard_i2v_model(*args, **kwargs):
+        return "veo3.1-fast"
 
 
 def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
@@ -106088,7 +106205,12 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
             "capability_snapshot": dict(preflight_snapshot.get("engine_route") or {}),
             "route_selection": dict(preflight_snapshot.get("route_selection") or {}),
             "scene_count": scene_count,
-            "duration_seconds": scene_count * video_selfshot2.SCENE_SECONDS,
+            "scene_duration_seconds": video_selfshot2.canonical_scene_seconds(
+                draft.get("quality_tier") or draft.get("quality_tier_id") or invoice.get("routing_quality_tier") or invoice.get("quality_xu")
+            ),
+            "duration_seconds": scene_count * video_selfshot2.canonical_scene_seconds(
+                draft.get("quality_tier") or draft.get("quality_tier_id") or invoice.get("routing_quality_tier") or invoice.get("quality_xu")
+            ),
             "source_bound_per_scene": True,
             "text_only_fallback_allowed": False,
             "continuity_validation_required": True,
@@ -106099,25 +106221,39 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
             ),
             "receipt_once": True,
         })
+        selfshot2_scene_seconds = video_selfshot2.canonical_scene_seconds(
+            draft.get("quality_tier") or draft.get("quality_tier_id") or invoice.get("routing_quality_tier") or invoice.get("quality_xu")
+        )
         invoice.update({
             "job_type": video_selfshot2.JOB_TYPE,
             "source_hash": str(source_analysis.get("source_hash") or ""),
             "scene_count": scene_count,
-            "duration_seconds": scene_count * video_selfshot2.SCENE_SECONDS,
+            "scene_duration_seconds": selfshot2_scene_seconds,
+            "duration_seconds": scene_count * selfshot2_scene_seconds,
             "engine_route": str((preflight_snapshot.get("engine_route") or {}).get("route") or ""),
             "continuity_validation_required": True,
             "text_only_fallback_allowed": False,
         })
     if product_type == video_selfshot3.JOB_TYPE:
-        source_video = dict(draft.get("source_video") or draft.get("source_asset") or {})
-        source_analysis = dict(draft.get("source_analysis") or {})
-        source_segment = dict(draft.get("source_segment") or {})
+        source_video = dict(draft.get("source_video") or draft.get("source_asset") or asset_pack_payload.get("source_video") or {})
+        source_analysis = dict(draft.get("source_analysis") or asset_pack_payload.get("source_analysis") or {})
+        source_segment = dict(draft.get("source_segment") or asset_pack_payload.get("source_segment") or {})
         subject_manifest = dict(draft.get("subject_manifest") or {})
         relationship_locks = list(draft.get("relationship_locks") or [])
         transformation_stages = list(draft.get("transformation_stages") or [])
         prompt_bundle = dict(draft.get("prompt_bundle") or {})
         audio_plan = dict(draft.get("audio_plan") or {})
         preflight_snapshot = dict(draft.get("selfshot3_preflight") or {})
+        selfshot3_duration = (
+            max(1, int((source_segment.get("duration_ms") or 0) / 1000))
+            if (source_segment.get("duration_ms") or 0) > 0
+            else max(1, safe_int(
+                asset_pack_payload.get("duration_seconds")
+                or draft.get("b14_scene_seconds")
+                or draft.get("scene_duration_seconds"),
+                15,
+            ))
+        )
         asset_pack_payload.update({
             "source_video": source_video,
             "source_file_id": str(source_video.get("file_id") or draft.get("source_file_id") or ""),
@@ -106153,7 +106289,7 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
             "route_selection": dict(preflight_snapshot.get("route_selection") or {}),
             "one_take": True,
             "scene_count": 1,
-            "duration_seconds": max(1, int((source_segment.get("duration_ms") or 0) / 1000)),
+            "duration_seconds": selfshot3_duration,
             "continuity_validation_required": True,
             "identity_continuity_required": True,
             "object_continuity_required": bool(relationship_locks or subject_manifest.get("selection_type") in {"object", "person_object"}),
@@ -106164,13 +106300,151 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
             "source_hash": str(source_analysis.get("source_hash") or ""),
             "one_take": True,
             "scene_count": 1,
-            "duration_seconds": max(1, int((source_segment.get("duration_ms") or 0) / 1000)),
+            "duration_seconds": selfshot3_duration,
             "engine_route": str((preflight_snapshot.get("engine_route") or {}).get("route") or ""),
             "continuity_validation_required": True,
         })
+    storyboard_provider = ""
+    storyboard_model = ""
+    selected_family = ""
+    if product_type in {"storyboard_prompt", "storyboard_to_video"}:
+        raw_cards = (
+            draft.get("scene_cards")
+            or draft.get("storyboard_panels")
+            or asset_pack_payload.get("scene_cards")
+            or plan.get("scenes")
+            or []
+        )
+        panels = list(draft.get("storyboard_panels") or [])
+        panel_map = {}
+        for p in panels:
+            if isinstance(p, dict):
+                idx = safe_int(p.get("scene_index") or p.get("panel_index"), 0)
+                if idx:
+                    panel_map[idx] = p.get("local_path") or p.get("image_path") or p.get("file_path") or ""
+
+        materialized_cards = []
+        for i, card in enumerate(raw_cards, 1):
+            if not isinstance(card, dict):
+                continue
+            card_copy = dict(card)
+            idx = safe_int(card_copy.get("scene_index") or card_copy.get("card_index"), i)
+            card_copy["scene_index"] = idx
+            card_copy["card_index"] = idx
+            card_copy["scene_id"] = card_copy.get("scene_id") or f"scene_{idx}"
+            img = card_copy.get("image_path") or card_copy.get("local_path") or card_copy.get("file_path") or panel_map.get(idx) or ""
+            if img:
+                card_copy["image_path"] = img
+                card_copy["local_path"] = img
+                card_copy["file_path"] = img
+            card_copy.setdefault("duration_seconds", float(draft.get("b14_scene_seconds") or 8.0))
+            materialized_cards.append(card_copy)
+
+        declared = safe_int(draft.get("b14_scene_count"), 0)
+        scene_count = max(1, declared or len(materialized_cards) or 1)
+        scene_seconds = safe_int(draft.get("b14_scene_seconds"), 8) or 8
+
+        raw_provider = str(
+            draft.get("selected_provider")
+            or draft.get("provider_order")
+            or (draft.get("asset_pack") or {}).get("selected_provider")
+            or (session or {}).get("selected_provider")
+            or ""
+        ).strip().lower()
+
+        raw_candidate = (
+            draft.get("selected_model")
+            or draft.get("model")
+            or draft.get("pinned_wire_model")
+            or draft.get("b14_selected_model")
+            or draft.get("b14_model")
+            or (draft.get("asset_pack") or {}).get("selected_model")
+            or (draft.get("asset_pack") or {}).get("model")
+            or (draft.get("asset_pack") or {}).get("pinned_wire_model")
+            or asset_pack_payload.get("selected_model")
+            or asset_pack_payload.get("model")
+            or asset_pack_payload.get("pinned_wire_model")
+            or (session or {}).get("selected_model")
+            or (session or {}).get("model")
+            or (session or {}).get("pinned_wire_model")
+            or ""
+        )
+        candidate_model = str(raw_candidate or "").strip()
+
+        if raw_provider in {"shopai", "shopaikey", "shopaikey_video"}:
+            storyboard_provider = "shopaikey_video"
+        elif raw_provider in {"key4u", "k4u", "key4u_video"}:
+            storyboard_provider = "key4u_video"
+        elif candidate_model in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
+            storyboard_provider = "key4u_video"
+        elif candidate_model == "veo_3_1-fast":
+            storyboard_provider = "key4u_video"
+        elif candidate_model == "veo3.1-fast":
+            storyboard_provider = "shopaikey_video"
+        else:
+            storyboard_provider = "shopaikey_video"
+
+        storyboard_model = _resolve_storyboard_i2v_model(
+            {"selected_provider": storyboard_provider, "selected_model": candidate_model, "model": candidate_model},
+            provider=storyboard_provider,
+        )
+        if storyboard_provider == "shopaikey_video" or "veo" in storyboard_model:
+            selected_family = "google_veo"
+        else:
+            selected_family = "kling"
+
+        asset_pack_payload.update({
+            "product_type": "storyboard_prompt",
+            "engine_route": "storyboard_to_video",
+            "engine_adapter": "storyboard_scene_image_video_engine",
+            "required_capability": "image_to_video",
+            "provider_capability": "image_to_video",
+            "orchestration_mode": "per_scene_8s",
+            "provider_orchestration_mode": "per_scene_8s",
+            "selected_provider": storyboard_provider,
+            "provider_order": storyboard_provider,
+            "provider_chain": [storyboard_provider],
+            "model": storyboard_model,
+            "selected_model": storyboard_model,
+            "pinned_wire_model": storyboard_model,
+            "selected_family": selected_family,
+            "routing_quality_tier": "common",
+            "quality_tier": "common",
+            "scene_cards": materialized_cards,
+            "storyboard_panels": panels or [
+                {"scene_index": c["scene_index"], "local_path": c.get("local_path") or c.get("image_path")}
+                for c in materialized_cards
+            ],
+            "scene_count": scene_count,
+            "scene_duration_seconds": scene_seconds,
+            "duration_seconds": scene_count * scene_seconds,
+        })
+        invoice.update({
+            "job_type": "video_render",
+            "product_type": "storyboard_prompt",
+            "engine_route": "storyboard_to_video",
+            "engine_adapter": "storyboard_scene_image_video_engine",
+            "required_capability": "image_to_video",
+            "provider_capability": "image_to_video",
+            "orchestration_mode": "per_scene_8s",
+            "provider_orchestration_mode": "per_scene_8s",
+            "selected_provider": storyboard_provider,
+            "provider_order": storyboard_provider,
+            "provider_chain": [storyboard_provider],
+            "model": storyboard_model,
+            "selected_model": storyboard_model,
+            "pinned_wire_model": storyboard_model,
+            "selected_family": selected_family,
+            "routing_quality_tier": "common",
+            "quality_tier": "common",
+            "scene_count": scene_count,
+            "scene_duration_seconds": scene_seconds,
+            "duration_seconds": scene_count * scene_seconds,
+        })
+    is_storyboard = product_type in {"storyboard_prompt", "storyboard_to_video"}
     invoice.update({
-        "product_type": product_type,
-        "engine_adapter": route.get("adapter") or "",
+        "product_type": "storyboard_prompt" if is_storyboard else product_type,
+        "engine_adapter": "storyboard_scene_image_video_engine" if is_storyboard else (route.get("adapter") or ""),
         "source": "product_video",
         "render_mode": "real",
         "test_pattern": False,
@@ -106180,14 +106454,31 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
         "fake_renderer_allowed": False,
         "real_renderer_required": True,
         "provider_call": True,
-        "provider_order": provider_order_csv,
-        "provider_chain": provider_chain or [item.strip() for item in str(provider_order_csv or "").split(",") if item.strip()],
-        "selected_provider": (provider_chain[0] if provider_chain else ""),
+        "provider_order": storyboard_provider if is_storyboard else provider_order_csv,
+        "provider_chain": [storyboard_provider] if is_storyboard else (provider_chain or [item.strip() for item in str(provider_order_csv or "").split(",") if item.strip()]),
+        "selected_provider": storyboard_provider if is_storyboard else (provider_chain[0] if provider_chain else ""),
         "submit_source": str(draft.get("submit_source") or draft.get("provider_submit_source") or "public_user_final_confirm"),
         "provider_submit_source": str(draft.get("provider_submit_source") or draft.get("submit_source") or "public_user_final_confirm"),
         "public_user_confirmed": bool(draft.get("public_user_confirmed") or draft.get("b14_public_user_confirmed")),
         "charge_policy": "after_valid_mp4_delivery",
     })
+    if is_storyboard:
+        invoice.update({
+            "engine_route": "storyboard_to_video",
+            "orchestration_mode": "per_scene_8s",
+            "provider_orchestration_mode": "per_scene_8s",
+            "required_capability": "image_to_video",
+            "provider_capability": "image_to_video",
+            "selected_provider": storyboard_provider,
+            "provider_order": storyboard_provider,
+            "provider_chain": [storyboard_provider],
+            "model": storyboard_model,
+            "selected_model": storyboard_model,
+            "pinned_wire_model": storyboard_model,
+            "selected_family": selected_family,
+            "routing_quality_tier": "common",
+            "quality_tier": "common",
+        })
     if is_internal:
         asset_pack_payload.update({
             "created_by_admin": True,
@@ -106244,6 +106535,7 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
         addons_disabled_by_package=1 if invoice["addons_disabled_by_package"] else 0,
         invoice_json=invoice,
         total_xu_estimated=invoice["total_xu"],
+        scene_cards_json=asset_pack_payload.get("scene_cards") or [],
     )
     draft["b14_project_id"] = project_id
     draft["b14_invoice"] = invoice
@@ -135350,6 +135642,8 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
         return broadcast_lite_admin_menu_text(), broadcast_lite_admin_menu_keyboard()
     if action == "admin" and is_admin:
         return menu_text_admin(), menu_nav_keyboard("admin", True)
+    if action == "finance" and is_admin:
+        return finance_menu_text(), finance_admin_keyboard()
     if action in ADMIN_MENU_PAGE_HANDLERS:
         return ADMIN_MENU_PAGE_HANDLERS[action]()
     if action == "doc_tools":
@@ -135564,8 +135858,13 @@ async def cmd_linkweb(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_command_received("start", update)
     uid = update.effective_user.id
+    clear_pending_admin_tool_test(uid)
+    clear_support_ticket_pending(uid)
+    clear_internal_archive_pending(uid)
     user_existed_before = user_exists(uid)
+    clear_memory_guided_pending(uid)
     get_user(uid, update.effective_user.first_name)
+    clear_doc_tool_pending(uid)
     record_usage_event(
         uid,
         username=update.effective_user.username or update.effective_user.first_name or "",
@@ -135574,6 +135873,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         command="/start",
         status="ok",
     )
+    clear_storage_addon_pending(uid)
     if context.args and (context.args[0].startswith("login_") or context.args[0].startswith("link_") or context.args[0].startswith("web_")):
         deep_arg = context.args[0]
         code = deep_arg.split("_", 1)[1].strip()
@@ -135602,8 +135902,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         elif ref_result.get("reason") == "self_ref":
             await update.message.reply_text("⚠️ Bạn không thể tự giới thiệu chính mình.")
-    pending_notice = clear_pending_start_notice(uid)
     user_is_admin = is_admin_user(uid)
+    if user_is_admin:
+        clear_broadcast_lite_pending(uid)
+    pending_notice = clear_pending_start_notice(uid)
     if not has_user_language(uid):
         if pending_notice:
             await update.message.reply_text(pending_notice.strip())
@@ -139572,14 +139874,15 @@ async def handle_support_pending_input(update: Update, context: ContextTypes.DEF
             clear_support_ticket_pending(uid)
             await update.message.reply_text("Không tìm thấy ticket.")
             return True
-        set_support_ticket_pending(uid, "admin_reply_preview", ticket_id=ticket_id, reply_text=text, source=state.get("source") or "new")
+        preview_token = uuid.uuid4().hex[:16]
+        set_support_ticket_pending(uid, "admin_reply_preview", ticket_id=ticket_id, reply_text=text, source=state.get("source") or "new", preview_token=preview_token)
         await update.message.reply_text(
             "📨 <b>Xác nhận gửi phản hồi</b>\n\n"
             f"Gửi tới ticket <code>{html.escape(ticket['ticket_code'])}</code>\n\n"
             f"Nội dung:\n{html.escape(text)}\n\nBạn có muốn gửi cho khách không?",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📨 Gửi cho khách", callback_data=f"ticket|send|{ticket_id}"), InlineKeyboardButton("✍️ Sửa lại", callback_data=f"ticket|reply|{ticket_id}")],
+                [InlineKeyboardButton("📨 Gửi cho khách", callback_data=f"ticket|send|{ticket_id}|{preview_token}"), InlineKeyboardButton("✍️ Sửa lại", callback_data=f"ticket|reply|{ticket_id}")],
                 [InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
             ]),
         )
@@ -139713,6 +140016,7 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
             reply_markup=support_consult_keyboard(lang),
         )
     if action == "consult_type" and len(parts) >= 3:
+        clear_support_ticket_pending(uid)
         service_type = parts[2] if parts[2] in SUPPORT_CONSULT_DETAILS else "video"
         return await safe_edit_or_send(
             query,
@@ -139756,10 +140060,11 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
 
 async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     data = str(query.data or "")
     parts = data.split("|")
     action = parts[1] if len(parts) > 1 else "start"
+    if action not in {"send", "file"}:
+        await query.answer()
     uid = query.from_user.id
     lang = normalize_user_language(get_user_language(uid)) or "vi"
     copy = public_hub_copy(lang)
@@ -139780,6 +140085,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         text, keyboard = public_support_ticket_list_keyboard(uid, lang)
         return await safe_edit_or_send(query, text, reply_markup=keyboard)
     if action == "pv" and len(parts) >= 3:
+        clear_support_ticket_pending(uid)
         ticket = get_support_ticket(int(parts[2]), uid)
         if not ticket:
             return await query.answer(copy["support_ticket_not_found"], show_alert=True)
@@ -139838,11 +140144,13 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         text, keyboard = support_admin_list_payload(kind, offset)
         return await safe_edit_or_send(query, text, reply_markup=keyboard)
     if action == "av" and len(parts) >= 3:
+        clear_support_ticket_pending(uid)
         ticket = get_support_ticket(int(parts[2]))
         if not ticket:
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
         source = parts[3] if len(parts) >= 4 else "new"
-        return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket, source))
+        list_offset = max(0, int(parts[4] or 0)) if len(parts) >= 5 else 0
+        return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket, source, list_offset))
     if action == "asearch" and len(parts) >= 3:
         set_support_ticket_pending(uid, "admin_search", source=parts[2])
         prompt = "Nhập user ID để tìm ticket." if parts[2] == "user" else "Nhập mã ticket, user ID, username hoặc từ khóa."
@@ -139854,10 +140162,11 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
     if action == "st" and len(parts) >= 4:
         ticket_id = int(parts[2])
         new_status = parts[3]
+        previous_ticket = get_support_ticket(ticket_id) if new_status == "refund_pending" else None
         ticket = update_support_ticket(ticket_id, status=new_status)
         if not ticket:
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
-        if new_status == "refund_pending":
+        if new_status == "refund_pending" and str((previous_ticket or {}).get("status") or "") != new_status:
             await query.message.reply_text("💰 Ticket đã được đánh dấu cần kiểm tra hoàn Xu/refund. Thao tác này chưa cộng hoặc trừ Xu.")
         return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket))
     if action == "reply" and len(parts) >= 3:
@@ -139868,6 +140177,8 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         return await safe_edit_or_send(query, "💬 Nhập nội dung phản hồi cho khách. Bot chỉ gửi sau khi admin xem preview và bấm xác nhận.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]]))
     if action == "ask" and len(parts) >= 3:
         ticket_id = int(parts[2])
+        if not get_support_ticket(ticket_id):
+            return await query.answer("Không tìm thấy ticket.", show_alert=True)
         set_support_ticket_pending(uid, "admin_reply_input", ticket_id=ticket_id, source="new")
         return await safe_edit_or_send(query, "👤 Nhập câu hỏi hoặc thông tin bạn cần khách bổ sung. Bot sẽ cho xem preview trước khi gửi.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new")]]))
     if action == "suggest" and len(parts) >= 4:
@@ -139878,41 +140189,64 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
         reply_text = support_suggested_reply(ticket.get("category"), variant, ticket.get("message") or "")
         update_support_ticket(ticket_id, suggested_reply=reply_text)
-        set_support_ticket_pending(uid, "admin_reply_preview", ticket_id=ticket_id, reply_text=reply_text, variant=variant, source="new")
+        preview_token = uuid.uuid4().hex[:16]
+        set_support_ticket_pending(uid, "admin_reply_preview", ticket_id=ticket_id, reply_text=reply_text, variant=variant, source="new", preview_token=preview_token)
         return await safe_edit_or_send(
             query,
             "🤖 <b>Gợi ý trả lời</b>\n\n"
             f"{html.escape(reply_text)}\n\nBot chưa gửi nội dung này cho khách.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📨 Gửi cho khách", callback_data=f"ticket|send|{ticket_id}"), InlineKeyboardButton("✍️ Sửa lại", callback_data=f"ticket|reply|{ticket_id}")],
+                [InlineKeyboardButton("📨 Gửi cho khách", callback_data=f"ticket|send|{ticket_id}|{preview_token}"), InlineKeyboardButton("✍️ Sửa lại", callback_data=f"ticket|reply|{ticket_id}")],
                 [InlineKeyboardButton("🔄 Gợi ý khác", callback_data=f"ticket|suggest|{ticket_id}|{variant + 1}"), InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new")],
             ]),
         )
     if action == "send" and len(parts) >= 3:
         ticket_id = int(parts[2])
         state = get_support_ticket_pending(uid) or {}
-        if state.get("step") != "admin_reply_preview" or int(state.get("ticket_id") or 0) != ticket_id:
+        if (
+            state.get("step") != "admin_reply_preview"
+            or int(state.get("ticket_id") or 0) != ticket_id
+            or len(parts) < 4
+            or not state.get("preview_token")
+            or parts[3] != state.get("preview_token")
+        ):
             return await query.answer("Bản xem trước đã hết hạn. Vui lòng soạn hoặc tạo gợi ý lại.", show_alert=True)
         ticket = get_support_ticket(ticket_id)
         reply_text = str(state.get("reply_text") or "").strip()
         if not ticket or not reply_text:
             return await query.answer("Không có nội dung hợp lệ để gửi.", show_alert=True)
+        send_lock_key = f"support_ticket_send_inflight:{uid}:{ticket_id}"
+        if USER_PENDING.get(send_lock_key) is not None:
+            return await query.answer("Đang gửi phản hồi này. Vui lòng chờ.", show_alert=True)
+        send_lock = object()
+        USER_PENDING[send_lock_key] = send_lock
         try:
+            await query.answer("Đang gửi phản hồi...", show_alert=False)
             await context.bot.send_message(
                 chat_id=ticket["user_id"],
                 text=(f"💬 <b>Phản hồi từ TOAN AAS</b>\nTicket: <code>{html.escape(ticket['ticket_code'])}</code>\n\n{html.escape(reply_text)}"),
                 parse_mode="HTML",
             )
+            if get_support_ticket_pending(uid) is state:
+                clear_support_ticket_pending(uid)
         except Exception as exc:
             logger.warning("support ticket reply send failed | ticket_id=%s error=%s", ticket_id, type(exc).__name__)
-            return await query.answer("Không gửi được phản hồi. Ticket chưa được đánh dấu đã gửi.", show_alert=True)
+            if get_support_ticket_pending(uid) is state:
+                error_text = "⚠️ Không gửi được phản hồi. Bản xem trước vẫn còn; vui lòng thử lại."
+            else:
+                error_text = "⚠️ Không gửi được phản hồi. Trạng thái ticket đã thay đổi; vui lòng kiểm tra trước khi gửi lại."
+            return await query.message.reply_text(error_text)
+        finally:
+            if USER_PENDING.get(send_lock_key) is send_lock:
+                USER_PENDING.pop(send_lock_key, None)
         add_support_ticket_message(ticket_id, "admin", uid, reply_text, "sent")
         ticket = update_support_ticket(ticket_id, status="waiting_user", assigned_admin_id=uid)
-        clear_support_ticket_pending(uid)
         await query.message.reply_text("✅ Đã gửi phản hồi cho đúng user của ticket.")
         return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket))
     if action == "note" and len(parts) >= 3:
         ticket_id = int(parts[2])
+        if not get_support_ticket(ticket_id):
+            return await query.answer("Không tìm thấy ticket.", show_alert=True)
         set_support_ticket_pending(uid, "admin_note_input", ticket_id=ticket_id)
         return await safe_edit_or_send(query, "📌 Nhập ghi chú nội bộ. Nội dung này không hiển thị cho khách.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new")]]))
     if action == "assign" and len(parts) >= 3:
@@ -139925,36 +140259,60 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         if not ticket:
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
         marker = "Cần liên hệ" if parts[3] == "contact" else "Lead tiềm năng"
-        note = f"{ticket.get('admin_note') or ''}\n[{now_text()} admin {uid}] {marker}".strip()
+        existing_note = str(ticket.get("admin_note") or "")
+        note_lines = existing_note.rstrip().splitlines()
+        same_last_marker = bool(note_lines) and note_lines[-1].endswith(f"admin {uid}] {marker}")
+        if same_last_marker and str(ticket.get("status") or "") == "reviewing" and str(ticket.get("assigned_admin_id") or "") == str(uid):
+            return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket))
+        note = existing_note if same_last_marker else f"{existing_note}\n[{now_text()} admin {uid}] {marker}".strip()
         ticket = update_support_ticket(ticket["id"], status="reviewing", assigned_admin_id=uid, admin_note=note)
         return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket))
     if action == "file" and len(parts) >= 3:
         ticket = get_support_ticket(int(parts[2]))
         if not ticket or not ticket.get("attachment_file_id"):
             return await query.answer("Ticket chưa có file đính kèm.", show_alert=True)
+        send_lock_key = f"support_ticket_file_inflight:{uid}:{ticket['id']}"
+        if USER_PENDING.get(send_lock_key) is not None:
+            return await query.answer("File đính kèm đang được gửi. Vui lòng chờ.", show_alert=True)
+        send_lock = object()
+        USER_PENDING[send_lock_key] = send_lock
         caption = f"📎 File của ticket <code>{html.escape(ticket['ticket_code'])}</code>"
         try:
+            await query.answer("Đang gửi file đính kèm...", show_alert=False)
             if ticket.get("attachment_type") == "photo":
                 await context.bot.send_photo(chat_id=query.message.chat_id, photo=ticket["attachment_file_id"], caption=caption, parse_mode="HTML")
             else:
                 await context.bot.send_document(chat_id=query.message.chat_id, document=ticket["attachment_file_id"], caption=caption, parse_mode="HTML")
         except Exception as exc:
             logger.warning("support attachment send failed | ticket_id=%s error=%s", ticket.get("id"), type(exc).__name__)
-            return await query.answer("Không gửi lại được file đính kèm.", show_alert=True)
+            return await query.message.reply_text("⚠️ Không gửi lại được file đính kèm.")
+        finally:
+            if USER_PENDING.get(send_lock_key) is send_lock:
+                USER_PENDING.pop(send_lock_key, None)
         return
     return await query.answer(copy["support_ticket_action_unsupported"], show_alert=True)
 
 async def handle_admin_help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("⛔ Khu vực này chỉ dành cho Admin.", show_alert=True)
-    kind = (query.data.split("|", 1)[1] if "|" in query.data else "payment").strip()
+    await query.answer()
+    parts = str(query.data or "").split("|")
+    kind = parts[1].strip() if len(parts) > 1 else "payment"
+    return_action = parts[2].strip() if len(parts) > 2 else ""
+    if kind not in {"users", "xu"} or return_action != "admin_users":
+        return_action = ""
     return await safe_edit_query_message(
         query,
         admin_handbook_section_text(kind),
-        reply_markup=admin_handbook_section_keyboard(kind),
+        reply_markup=admin_handbook_section_keyboard(kind, return_action),
     )
+
+async def handle_admin_gopy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    inbox_update = SimpleNamespace(effective_user=query.from_user, message=query.message)
+    return await cmd_admin_gopy(inbox_update, SimpleNamespace(args=[]))
 
 
 # ==============================================================================
@@ -140291,11 +140649,13 @@ exec(compile(autopost_engine_code, f"{__file__}:autopost_engine", "exec"), globa
 
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     action = (query.data.split("|", 1)[1] if "|" in query.data else "main").strip()
+    user_is_admin = is_admin_user(query.from_user.id)
+    if action == "admin" and not user_is_admin:
+        return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
+    await query.answer()
     if isinstance(getattr(context, "user_data", None), dict):
         context.user_data.pop(VIDEO_TAIL9_TEXT_INPUT_KEY, None)
-    user_is_admin = is_admin_user(query.from_user.id)
     if user_is_admin:
         clear_broadcast_lite_pending(query.from_user.id)
     lang = get_user_language(query.from_user.id) or "vi"
@@ -140328,6 +140688,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if action not in {"hint_note", "hint_search_note"}:
         clear_memory_guided_pending(query.from_user.id)
     clear_music_guided_pending(query.from_user.id)
+    clear_pending_admin_tool_test(query.from_user.id)
     if action == "autopost":
         return await safe_edit_query_message(
             query,
@@ -140901,7 +141262,11 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
     action = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else "main"
     uid = query.from_user.id
     lang = get_user_language(uid) or "vi"
+    if action == "main":
+        clear_video_downloader_pending(uid)
     if not FREE_HUB_ENABLED:
+        if action == "main":
+            clear_free_hub_pending(uid)
         return await safe_edit_or_send(
             query,
             "🛠 Công cụ miễn phí đang bảo trì. TOAN AAS chưa gọi API và chưa trừ Xu.",
@@ -185005,6 +185370,8 @@ async def handle_doc_tool_callback(update: Update, context: ContextTypes.DEFAULT
         USER_PENDING[doc_tool_pending_key(uid)] = state
         return await safe_edit_or_send(query, "🧹 Đã xóa danh sách file tạm. TOAN AAS chưa xử lý và chưa trừ Xu.", reply_markup=doc_tool_start_keyboard(tool, lang, state))
     if action == "back_received":
+        state["awaiting_page_spec"] = "0"
+        USER_PENDING[doc_tool_pending_key(uid)] = state
         return await safe_edit_or_send(query, doc_tool_received_text(state, lang), parse_mode="HTML", reply_markup=doc_tool_after_file_keyboard(state, lang))
     if action == "ask_pages":
         state["awaiting_page_spec"] = "1"
@@ -212737,10 +213104,10 @@ async def cmd_remote_worker_canary_status(update: Update, context: ContextTypes.
 
 async def handle_remote_worker_canary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     uid = query.from_user.id if query.from_user else 0
     if not is_admin_user(uid):
         return await query.answer("⛔ Khu vực này chỉ dành cho Admin.", show_alert=True)
+    await query.answer()
     data = str(query.data or "")
     if data.startswith("remote_worker_canary_create"):
         flags = worker_auth.worker_api_runtime_flags(LOCAL_WORKER_TOKEN)
@@ -212898,10 +213265,10 @@ async def cmd_remote_worker_prod_canary_status(update: Update, context: ContextT
 
 async def handle_remote_worker_prod_canary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     uid = query.from_user.id if query.from_user else 0
     if not is_admin_user(uid):
         return await query.answer("⛔ Khu vực này chỉ dành cho Admin.", show_alert=True)
+    await query.answer()
     data = str(query.data or "")
     if data.startswith("remote_worker_prod_canary_create"):
         flags = worker_auth.worker_api_runtime_flags(LOCAL_WORKER_TOKEN)
@@ -213527,7 +213894,7 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{html.escape(copy['profile_policy_note'])}\n\n"
         f"{html.escape(copy['profile_commands'])}"
     )
-    await update.message.reply_text(msg, parse_mode="HTML")
+    await update.message.reply_text(msg, parse_mode="HTML", reply_markup=main_profile_keyboard(lang))
 
 async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -221398,9 +221765,9 @@ async def cmd_operator_n8n_workflow(update: Update, context: ContextTypes.DEFAUL
 
 async def handle_operator_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("Chỉ Admin được dùng.", show_alert=True)
+    await query.answer()
     action = query.data.split("|", 1)[1]
     if action == "root":
         return await query.edit_message_text(
@@ -222405,9 +222772,9 @@ async def cmd_reference_scan(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def handle_creative_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("Chỉ Admin được dùng.", show_alert=True)
+    await query.answer()
     parts = query.data.split("|")
     if len(parts) != 3 or parts[1] != "select":
         return
@@ -222429,9 +222796,9 @@ async def handle_creative_callback(update: Update, context: ContextTypes.DEFAULT
 
 async def handle_task_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("Chỉ Admin được dùng.", show_alert=True)
+    await query.answer()
     parts = query.data.split("|")
     if len(parts) != 4:
         return
@@ -225816,9 +226183,9 @@ async def cmd_trend_rank(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_trend_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("Chỉ Admin được dùng.", show_alert=True)
+    await query.answer()
     parts = query.data.split("|")
     if len(parts) != 3 or parts[1] != "video":
         return
@@ -225902,9 +226269,9 @@ async def handle_trend_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def handle_pipeline_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("Chỉ Admin được dùng.", show_alert=True)
+    await query.answer()
     parts = query.data.split("|")
     if len(parts) != 4:
         return
@@ -225933,9 +226300,9 @@ async def handle_pipeline_callback(update: Update, context: ContextTypes.DEFAULT
 
 async def handle_video_job_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("Chỉ Admin được dùng.", show_alert=True)
+    await query.answer()
     parts = query.data.split("|")
     if len(parts) != 3:
         return
@@ -229958,7 +230325,7 @@ def system_help_text(kind: str) -> str:
     pages = {
         "runtime": (
             "🧬 <b>Runtime</b>\n\n"
-            "Dùng <code>/runtime</code> để kiểm tra build, commit, Railway runtime và startup warning. "
+            "Dùng <code>/runtime</code> để kiểm tra build, commit, trạng thái runtime và cảnh báo lúc khởi động. "
             "Trang menu này chỉ hướng dẫn, không gọi healthcheck ngoài."
         ),
         "data_status": (
@@ -230293,8 +230660,7 @@ def admin_control_center_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🛡 Bảo mật / DB", callback_data="menu|admin_security_db"), InlineKeyboardButton("🖥 Hệ thống", callback_data="menu|admin_system_ops")],
         [InlineKeyboardButton("🤖 Provider / Worker", callback_data="menu|admin_provider_worker"), InlineKeyboardButton("💰 Tài chính", callback_data="menu|admin_finance")],
         [InlineKeyboardButton("🚀 Marketing / Affiliate", callback_data="admin_growth|main"), InlineKeyboardButton("🎧 CSKH / Góp ý", callback_data="menu|admin_support")],
-        [InlineKeyboardButton("📘 Hướng dẫn Admin", callback_data="menu|admin_handbook"), InlineKeyboardButton("📣 Thông báo khách hàng", callback_data="menu|admin_broadcast_lite")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("📣 Thông báo khách hàng", callback_data="menu|admin_broadcast_lite"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ]
     return InlineKeyboardMarkup(rows)
 
@@ -230305,9 +230671,9 @@ ADMIN_CONTROL_MODULES = {
         "purpose": "Dùng để xem hồ sơ user, số dư Xu, lịch sử giao dịch và hỗ trợ cộng/trừ Xu thủ công khi cần.",
         "when": "Dùng khi CSKH cần tra user, kiểm tra ledger, chỉnh hạng hoặc hỗ trợ cộng/trừ Xu có lý do rõ.",
         "buttons": [
-            [("🔎 Tra user", "admin_help|users"), ("📒 Ledger user", "admin_help|users")],
-            [("➕ Cộng Xu", "admin_help|xu"), ("➖ Trừ Xu", "admin_help|xu")],
-            [("⭐ Set VIP/Tier", "admin_help|users")],
+            [("📘 Cách tra user", "admin_help|users|admin_users"), ("📘 Cách xem ledger", "admin_help|users|admin_users")],
+            [("📘 Cách cộng Xu", "admin_help|xu|admin_users"), ("📘 Cách trừ Xu", "admin_help|xu|admin_users")],
+            [("📘 Cách set VIP/Tier", "admin_help|users|admin_users")],
         ],
         "commands": [
             ("/profile_user <ID>", "xem hồ sơ user"),
@@ -230361,7 +230727,7 @@ ADMIN_CONTROL_MODULES = {
         "when": "Dùng khi cần hỗ trợ gói, combo, monthly plan, storage hoặc rà soát quyền lợi hiện có của user.",
         "buttons": [
             [("📦 Catalog gói", "menu|admin_packages_catalog"), ("🎁 Cấp combo", "menu|admin_packages_grant_combo")],
-            [("📅 Cấp tháng", "menu|admin_packages_grant_monthly"), ("💾 Cấp lưu trữ", "admin_help|packages")],
+            [("📅 Cấp tháng", "menu|admin_packages_grant_monthly"), ("📘 Cách cấp lưu trữ", "admin_help|packages")],
             [("📦 Đơn chờ duyệt", "menu|admin_package_orders"), ("👤 Gói của user", "menu|admin_packages_user")],
         ],
         "commands": [
@@ -230387,7 +230753,7 @@ ADMIN_CONTROL_MODULES = {
         "purpose": "Dùng để kiểm tra hàng chờ job, đóng/mở công cụ, hoàn Xu/lượt khi job lỗi, và xử lý lock job.",
         "when": "Dùng khi provider lỗi, job kẹt, cần bảo trì, cần hoàn Xu/lượt hoặc cần kiểm tra queue trước khi mở lại public.",
         "buttons": [
-            [("📊 Queue status", "menu|freeze_queue_status"), ("🔎 Job status", "admin_help|refund")],
+            [("📊 Queue status", "menu|freeze_queue_status"), ("Hướng dẫn hoàn Xu khi job lỗi", "admin_help|refund")],
             [("🧊 Freeze tools", "menu|freeze_queue_help"), ("🔓 Unfreeze tools", "menu|admin_confirm_unfreeze_tool")],
             [("🎬 Freeze video", "menu|admin_confirm_freeze_video"), ("💸 Refund job", "menu|admin_confirm_refund_job")],
         ],
@@ -230445,8 +230811,8 @@ ADMIN_CONTROL_MODULES = {
         "purpose": "Dùng để kiểm tra runtime, deployment, webhook Telegram, provider tổng quan, cleanup file tạm và trạng thái sẵn sàng vận hành.",
         "when": "Dùng sau deploy, khi nghi ngờ bot instance cũ giữ webhook, khi cần cleanup hoặc khi kiểm tra dashboard hệ thống.",
         "buttons": [
-            [("🧬 Runtime", "menu|system_runtime_help"), ("📡 Telegram status", "admin_help|runtime")],
-            [("🔁 Telegram takeover", "admin_help|runtime"), ("🧹 Cleanup temp", "admin_help|runtime")],
+            [("🧬 Runtime", "menu|system_runtime_help"), ("📘 Hướng dẫn kiểm tra Telegram", "admin_help|runtime")],
+            [("📘 Hướng dẫn nhận quyền webhook Telegram", "admin_help|runtime"), ("📘 Hướng dẫn dọn file tạm", "admin_help|runtime")],
             [("📊 Dashboard", "menu|admin_overview")],
         ],
         "commands": [
@@ -230471,10 +230837,10 @@ ADMIN_CONTROL_MODULES = {
         "when": "Dùng khi provider lỗi, cần smoke test nội bộ, cần kiểm tra video job hoặc worker trước khi mở public.",
         "buttons": [
             [("🤖 Provider status", "menu|admin_provider_status"), ("🧪 Smoke Test", "menu|smoke_test")],
-            [("🎬 Video job", "menu|admin_provider_routes"), ("🔊 TTS/Voice test", "admin_help|provider")],
-            [("📝 ASR/Sub/Dub test", "admin_help|provider")],
-            [("🤖 Remote Worker Status", "admin_help|provider"), ("🧪 Test worker API", "admin_help|provider")],
-            [("🧪 Remote Worker Canary", "admin_help|provider"), ("🔄 Canary status", "admin_help|provider")],
+            [("🎬 Video job", "menu|admin_provider_routes"), ("📘 Hướng dẫn: TTS/Voice test", "admin_help|provider")],
+            [("📘 Hướng dẫn: ASR/Sub/Dub test", "admin_help|provider")],
+            [("📘 Hướng dẫn: Remote Worker Status", "admin_help|provider"), ("📘 Hướng dẫn: Test worker API", "admin_help|provider")],
+            [("📘 Hướng dẫn: Remote Worker Canary", "admin_help|provider"), ("📘 Hướng dẫn: Canary status", "admin_help|provider")],
             [("📘 Hướng dẫn VPS", "admin_help|provider")],
         ],
         "commands": [
@@ -230558,8 +230924,8 @@ ADMIN_CONTROL_MODULES = {
         "purpose": "Dùng để xem góp ý, ticket, phản hồi user, ghi chú vận hành và theo dõi việc cần xử lý.",
         "when": "Dùng khi có user cần hỗ trợ, cần xem ticket, hoặc cần ghi chú vận hành sau ca trực.",
         "buttons": [
-            [("🎧 Ticket admin", "ticket|admin"), ("📝 Góp ý admin", "admin_help|support")],
-            [("📌 Admin notes", "admin_help|support"), ("📣 Marketing tự động", "marketing|start")],
+            [("🎧 Ticket admin", "ticket|admin"), ("📝 Góp ý admin", "admin_gopy|inbox")],
+            [("📌 Hướng dẫn hỗ trợ", "admin_help|support"), ("📣 Marketing tự động", "marketing|start")],
         ],
         "commands": [
             ("/admin_gopy", "xem/gửi ghi chú góp ý admin"),
@@ -230609,13 +230975,14 @@ def admin_module_page_text(module_key: str) -> str:
 def admin_module_keyboard(module_key: str) -> InlineKeyboardMarkup:
     module = ADMIN_CONTROL_MODULES.get(module_key) or ADMIN_CONTROL_MODULES["users"]
     action = f"admin_{module_key}"
+    help_context = "|admin_users" if module_key == "users" else ""
     rows = [
         [InlineKeyboardButton(label, callback_data=callback) for label, callback in row]
         for row in module.get("buttons") or []
     ]
     rows.append([
         InlineKeyboardButton("🔄 Làm mới", callback_data=f"menu|{action}"),
-        InlineKeyboardButton("📘 Hướng dẫn", callback_data=f"admin_help|{module.get('guide') or module_key}"),
+        InlineKeyboardButton("📘 Hướng dẫn", callback_data=f"admin_help|{module.get('guide') or module_key}{help_context}"),
     ])
     rows.append([
         InlineKeyboardButton("⬅️ Quản trị", callback_data="menu|admin"),
@@ -230761,7 +231128,12 @@ def admin_handbook_section_text(kind: str) -> str:
     body = pages.get(clean) or pages["payment"]
     return f"{title_map.get(clean, title_map['payment'])}\n\n{body}"
 
-def admin_handbook_section_keyboard(kind: str = "") -> InlineKeyboardMarkup:
+def admin_handbook_section_keyboard(kind: str = "", return_action: str = "") -> InlineKeyboardMarkup:
+    if kind in {"users", "xu"} and return_action == "admin_users":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("📘 Hướng dẫn Admin", callback_data="menu|admin_handbook"), InlineKeyboardButton("⬅️ User / Xu", callback_data="menu|admin_users")],
+            [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📘 Hướng dẫn Admin", callback_data="menu|admin_handbook"), InlineKeyboardButton("⬅️ Quản trị", callback_data="menu|admin")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
@@ -231111,6 +231483,27 @@ def admin_provider_freeze_keyboard(kind: str) -> InlineKeyboardMarkup:
         first_row,
         [InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|admin_provider"), InlineKeyboardButton("⚙️ Admin", callback_data="menu|admin")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def admin_overview_text() -> str:
+    start_at, end_at, _label = report_period_bounds("today")
+    payload = admin_report_payload(start_at, end_at, "today")
+    users = payload["users"]
+    money = payload["money"]
+    tools = payload["tools"]
+    return "\n".join([
+        "📊 <b>Báo cáo tổng TOAN AAS</b>",
+        f"🗓️ Kỳ báo cáo: <code>{html.escape(str(start_at))}</code> → <code>{html.escape(str(end_at))}</code>",
+        "",
+        "<b>Người dùng</b>",
+        f"• Tổng: <b>{int(users['total'] or 0)}</b> | Mới: <b>{int(users['new'] or 0)}</b> | Active: <b>{int(users['active'] or 0)}</b>",
+        "",
+        "<b>Doanh thu / Xu</b>",
+        f"• Doanh thu hôm nay: <b>{vnd_text(money['total_amount'])}</b> ({int(money['total_count'] or 0)} giao dịch)",
+        f"• Xu bán: <b>{xu_text(money['xu_sold'])}</b> | Bill chờ duyệt: <b>{int(money['pending_deposits'] or 0)}</b>",
+        "",
+        "<b>Công cụ</b>",
+        f"• Lượt gọi: <b>{int(tools['requested'] or 0)}</b> | Thành công: <b>{int(tools['success'] or 0)}</b> | Lỗi: <b>{int(tools['fail'] or 0)}</b>",
     ])
 
 ADMIN_MENU_PAGE_HANDLERS = {
@@ -232066,7 +232459,7 @@ def internal_archive_upload_prompt_text(department: str, document_type: str) -> 
         "Bạn hãy gửi file muốn lưu. Nên gửi từng file một để tránh lỗi Telegram."
     )
 
-def internal_archive_type_keyboard(department: str) -> InlineKeyboardMarkup:
+def internal_archive_type_keyboard(department: str, back_to_preview: bool = False) -> InlineKeyboardMarkup:
     values = INTERNAL_DOC_TYPES.get(department, ())
     buttons = [
         (document_type_label(value), f"archive|type|{value}")
@@ -232078,7 +232471,10 @@ def internal_archive_type_keyboard(department: str) -> InlineKeyboardMarkup:
         for index in range(0, len(buttons), 2)
     ]
     rows.append([
-        InlineKeyboardButton("⬅️ Phòng ban", callback_data="archive|back_department"),
+        InlineKeyboardButton(
+            "⬅️ Xem lại hồ sơ" if back_to_preview else "⬅️ Phòng ban",
+            callback_data="archive|back_department",
+        ),
         InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
     ])
     return InlineKeyboardMarkup(rows)
@@ -232392,7 +232788,11 @@ async def handle_internal_archive_callback(update: Update, context: ContextTypes
             return await safe_edit_query_message(query, internal_archive_menu_text(), reply_markup=internal_archive_menu_keyboard())
         fields = {key: value for key, value in state.items() if key not in {"pending_action", "step", "created_at_ts"}}
         set_internal_archive_pending(uid, "choosing_type", **fields)
-        return await safe_edit_query_message(query, internal_archive_type_text(department), reply_markup=internal_archive_type_keyboard(department))
+        return await safe_edit_query_message(
+            query,
+            internal_archive_type_text(department),
+            reply_markup=internal_archive_type_keyboard(department, back_to_preview=bool(state.get("file_info"))),
+        )
     if action == "type" and len(parts) > 2:
         department = state.get("department")
         document_type = parts[2]
@@ -233874,6 +234274,10 @@ def set_video_dubbing_pending(user_id, step: str, **fields) -> dict:
         next_target = subdub_translation_cache_language_key(fields.get("target_language") or "")
         translation_target_changed = previous_target != next_target
     acoustic_fields = auto_multi_speaker.bounded_multi_acoustic_evidence(fields)
+    if fields.get("auto_smart_generic_acoustic") is True:
+        acoustic_fields = {}
+        for key in auto_multi_speaker.MULTI_ACOUSTIC_STATE_FIELDS:
+            state.pop(key, None)
     for key, value in fields.items():
         if key in auto_multi_speaker.MULTI_ACOUSTIC_STATE_FIELDS:
             continue
@@ -233911,6 +234315,15 @@ def set_video_dubbing_pending(user_id, step: str, **fields) -> dict:
             "source_file_ref", "source_media_type", "source_content_type",
             "active_flow", "output_format", "entry_surface", "media_kind",
             "selected_language", "selected_voice", "speed",
+            "auto_smart_multivoice", "auto_smart_multivoice_opt_in",
+            "auto_smart_dispatch", "auto_smart_degraded_single_voice",
+            "auto_smart_degraded_reason", "auto_multi_engine",
+            "auto_smart_generic_acoustic",
+            "subdub_engine_requested", "subdub_engine_selected",
+            "subdub_asr_route_id", "subdub_asr_provider",
+            "subdub_asr_require_word_timeline",
+            "subdub_asr_require_provider_speaker_labels",
+            "subdub_asr_plan_version", "subdub_local_acoustic_diarization_allowed",
             "preview_seconds", "preview_text", "processing_error", "task2_job_id",
             "dub_source", "segment_count", "subtitle_segment_count",
             "translated_segment_count", "detected_language", "last_ready_step",
@@ -233938,7 +234351,21 @@ def set_video_dubbing_pending(user_id, step: str, **fields) -> dict:
             "dubbed_voice_volume_percent", "audio_mix_mode",
             "volume_config_source", "audio_mix_return_step",
         }:
-            state[key] = _short_pending_text(value)
+            if key in {
+                "auto_smart_multivoice", "auto_smart_multivoice_opt_in",
+                "auto_smart_degraded_single_voice",
+                "auto_smart_generic_acoustic",
+                "subdub_asr_require_word_timeline",
+                "subdub_asr_require_provider_speaker_labels",
+                "subdub_local_acoustic_diarization_allowed",
+            }:
+                state[key] = (
+                    value
+                    if type(value) is bool
+                    else str(value or "").strip().lower() in {"1", "true", "yes"}
+                )
+            else:
+                state[key] = _short_pending_text(value)
     state.update(acoustic_fields)
     if translation_target_changed:
         state["translated_subtitle_ref"] = ""
@@ -234840,6 +235267,8 @@ def subtitle_plus_dub_safe_fail_text(reason: str = "", lang: str = "vi") -> str:
         return "TOAN AAS chưa tạo được phụ đề từ video này. Hệ thống chưa trừ Xu. Anh/chị có thể thử video rõ tiếng hơn hoặc gửi file phụ đề nếu có."
     if "translation" in reason:
         return "TOAN AAS chưa dịch được phụ đề lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử lại hoặc chọn ngôn ngữ khác."
+    if "tts_provider_unavailable" in reason or "provider_unavailable" in reason:
+        return "TOAN AAS chưa kết nối được nhà cung cấp giọng lúc này. Hệ thống chưa trừ Xu. Vui lòng thử lại sau khi nhà cung cấp hoạt động trở lại."
     if "tts" in reason or "voice" in reason:
         return "TOAN AAS chưa tạo được audio lồng tiếng lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử lại hoặc đổi giọng."
     if "mux" in reason:
@@ -237821,6 +238250,12 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
     state = state or {}
     result = result or {}
     receipt_context = {**state, **dict(result.get("state") or {}), **result}
+    smart_multi_selected = (
+        auto_smart_multivoice.is_auto_smart_multivoice_state(receipt_context)
+        or auto_smart_multivoice.is_auto_smart_multivoice_state(
+            receipt_context.get("auto_exact_resume_state")
+        )
+    )
     mode = normalize_video_translate_mode(
         receipt_context.get("requested_mode")
         or receipt_context.get("mode")
@@ -237907,6 +238342,9 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
         )
         multi_detail_lines = ""
         if multi_proof:
+            dubbing_type = "Smart Multi" if smart_multi_selected else (
+                "Tự động nhiều giọng" if is_vi else "Auto-detected multi-speaker"
+            )
             source_name = html.escape(
                 str(multi_proof["source_file_name"])
             )
@@ -237925,7 +238363,7 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
             if is_vi:
                 multi_detail_lines = (
                     f"• Tệp nguồn: <b>{source_name}</b>\n"
-                    "• Loại lồng tiếng: <b>Tự động nhiều giọng</b>\n"
+                    f"• Loại lồng tiếng: <b>{dubbing_type}</b>\n"
                     f"• Số người nói nhận diện: <b>{speaker_count}</b>\n"
                     f"• Số giọng lồng tiếng đã dùng: <b>{voice_count}</b>\n"
                     f"• Giá phụ đề: <b>{subtitle_xu} Xu</b>\n"
@@ -237934,16 +238372,22 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
             else:
                 multi_detail_lines = (
                     f"• Source file: <b>{source_name}</b>\n"
-                    "• Dubbing type: <b>Auto-detected multi-speaker</b>\n"
+                    f"• Dubbing type: <b>{dubbing_type}</b>\n"
                     f"• Detected speakers: <b>{speaker_count}</b>\n"
                     f"• Dubbing voices used: <b>{voice_count}</b>\n"
                     f"• Subtitle price: <b>{subtitle_xu} Xu</b>\n"
                     f"• Dubbing price: <b>{dubbing_xu} Xu</b>\n"
                 )
         elif (
-            auto_speaker.is_auto_speaker_state(receipt_context)
-            and not auto_multi_speaker.is_auto_multi_speaker_state(receipt_context)
+            smart_multi_selected
+            or (
+                auto_speaker.is_auto_speaker_state(receipt_context)
+                and not auto_multi_speaker.is_auto_multi_speaker_state(receipt_context)
+            )
         ):
+            dubbing_type = "Smart Multi" if smart_multi_selected else (
+                "Tự động 2 giọng" if is_vi else "Auto-detected two-speaker"
+            )
             subtitle_xu = max(
                 0,
                 _safe_int(
@@ -237960,7 +238404,7 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
             )
             if is_vi:
                 multi_detail_lines = (
-                    "• Loại lồng tiếng: <b>Tự động 2 giọng</b>\n"
+                    f"• Loại lồng tiếng: <b>{dubbing_type}</b>\n"
                     + (
                         f"• Giá phụ đề: <b>{subtitle_xu} Xu</b>\n"
                         if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
@@ -237970,7 +238414,7 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
                 )
             else:
                 multi_detail_lines = (
-                    "• Dubbing type: <b>Auto-detected two-speaker</b>\n"
+                    f"• Dubbing type: <b>{dubbing_type}</b>\n"
                     + (
                         f"• Subtitle price: <b>{subtitle_xu} Xu</b>\n"
                         if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
@@ -238637,6 +239081,8 @@ def video_tts_provider_configured_for_dub() -> bool:
 def video_dubbing_mode_needs_asr_provider(mode: str, state: dict | None = None) -> bool:
     mode = normalize_video_translate_mode(mode)
     state = dict(state or {})
+    if auto_smart_multivoice.is_auto_smart_multivoice_state(state):
+        return True
     if video_dubbing_state_has_subtitle_or_transcript(state):
         return False
     return video_dubbing_state_requires_asr(mode, state)
@@ -239091,11 +239537,247 @@ def video_dubbing_dialogue_text_keyboard(lang: str = "vi") -> InlineKeyboardMark
         ],
     ])
 
-def video_dubbing_asr_missing_for_state(mode: str, state: dict | None = None, public: bool = True) -> bool:
-    return bool(
-        video_dubbing_mode_needs_asr_provider(mode, state)
-        and not get_asr_adapter_readiness(public=False).get("configured")
+def resolve_subdub_asr_plan(
+    state: dict | None = None,
+    product_selection: str | None = None,
+    confirmation: bool | None = None,
+    runtime_config: dict | None = None,
+    *,
+    mode: str | None = None,
+    public: bool = True,
+) -> dict:
+    state_dict = dict(state or {})
+    resolved_mode = normalize_video_translate_mode(
+        mode
+        or state_dict.get("video_processing_mode")
+        or state_dict.get("mode")
+        or state_dict.get("process_type")
+        or ""
     )
+    is_smart = bool(
+        product_selection == "auto_smart_multivoice"
+        or auto_smart_multivoice.is_auto_smart_multivoice_state(state_dict)
+    )
+    is_multi = bool(
+        not is_smart
+        and (
+            product_selection in {"auto_multi_speaker", "multi"}
+            or auto_multi_speaker.is_auto_multi_speaker_state(state_dict)
+        )
+    )
+    is_two_speaker = bool(
+        not is_smart
+        and not is_multi
+        and (
+            product_selection in {"auto_speaker", "auto"}
+            or auto_speaker.is_auto_speaker_state(state_dict)
+        )
+    )
+
+    if is_smart:
+        engine_requested = "auto_smart_multivoice"
+        provider = "deepgram"
+        route_id = "smart_multivoice_deepgram"
+        require_word_timeline = True
+        require_provider_speaker_labels = False
+        allow_local_acoustic_diarization = True
+        require_final_confirmation = True
+
+        cfg_deepgram = (runtime_config or {}).get("DEEPGRAM_API_KEY") if isinstance(runtime_config, dict) else None
+        deepgram_key = str(DEEPGRAM_API_KEY if cfg_deepgram is None else cfg_deepgram or "").strip()
+        deepgram_ready = bool(deepgram_key)
+
+        is_confirmed = (
+            bool(confirmation)
+            if confirmation is not None
+            else bool(
+                state_dict.get("confirmed_product")
+                or state_dict.get("subdub_final_confirmed")
+                or state_dict.get("admin_interactive_confirm")
+            )
+        )
+
+        ready = True
+        blocker = ""
+        blocker_class = ""
+        detail = "ok"
+
+        if not deepgram_ready:
+            ready = False
+            blocker = AUTO_CAST_UNAVAILABLE
+            blocker_class = "ASR_CONFIG_MISSING"
+            detail = "deepgram_asr_not_configured"
+        elif require_final_confirmation and not is_confirmed:
+            ready = False
+            blocker = AUTO_CAST_UNAVAILABLE
+            blocker_class = "FINAL_CONFIRMATION_MISSING"
+            detail = "subdub_final_confirmation_required"
+
+        return {
+            "route_id": route_id,
+            "engine_requested": engine_requested,
+            "provider": provider,
+            "require_word_timeline": require_word_timeline,
+            "require_provider_speaker_labels": require_provider_speaker_labels,
+            "allow_local_acoustic_diarization": allow_local_acoustic_diarization,
+            "require_final_confirmation": require_final_confirmation,
+            "ready": ready,
+            "blocker": blocker,
+            "blocker_class": blocker_class,
+            "detail": detail,
+        }
+
+    engine_requested = (
+        "auto_multi_speaker"
+        if is_multi
+        else ("auto_speaker" if is_two_speaker else "standard_subdub")
+    )
+    adapter_readiness = get_asr_adapter_readiness(public=False)
+    configured = bool(adapter_readiness.get("configured"))
+    provider = str(ASR_PROVIDER or adapter_readiness.get("provider") or "auto").lower()
+
+    return {
+        "route_id": f"{engine_requested}_{provider}",
+        "engine_requested": engine_requested,
+        "provider": provider,
+        "require_word_timeline": is_multi,
+        "require_provider_speaker_labels": is_multi or is_two_speaker,
+        "allow_local_acoustic_diarization": is_multi,
+        "require_final_confirmation": False,
+        "ready": configured,
+        "blocker": "" if configured else "ASR_ADAPTER_UNAVAILABLE",
+        "blocker_class": "" if configured else "ASR_CONFIG_MISSING",
+        "detail": "ok" if configured else "asr_adapter_unconfigured",
+    }
+
+
+def video_dubbing_asr_missing_for_state(mode: str, state: dict | None = None, public: bool = True) -> bool:
+    if not video_dubbing_mode_needs_asr_provider(mode, state):
+        return False
+    plan = resolve_subdub_asr_plan(state=state, mode=mode, public=public)
+    # Invariant §11: Do NOT call confirmation failure "ASR missing"
+    return plan.get("blocker_class") == "ASR_CONFIG_MISSING"
+
+
+_SUBDUB_ACTIVE_PIPELINE_STATE: ContextVar[dict | None] = ContextVar(
+    "_SUBDUB_ACTIVE_PIPELINE_STATE", default=None
+)
+
+
+def set_subdub_active_pipeline_state(state: dict | None):
+    return _SUBDUB_ACTIVE_PIPELINE_STATE.set(state)
+
+
+def get_subdub_active_pipeline_state() -> dict | None:
+    return _SUBDUB_ACTIVE_PIPELINE_STATE.get()
+
+
+def reset_subdub_active_pipeline_state(token) -> None:
+    if token is not None:
+        try:
+            _SUBDUB_ACTIVE_PIPELINE_STATE.reset(token)
+        except Exception:
+            _SUBDUB_ACTIVE_PIPELINE_STATE.set(None)
+
+
+def subdub_admission_preflight(
+    state: dict | None = None,
+    mode: str | None = None,
+    public: bool = True,
+    *,
+    confirmation: bool | None = None,
+) -> dict:
+    plan = resolve_subdub_asr_plan(state=state, mode=mode, confirmation=confirmation, public=public)
+    ready = bool(plan.get("ready"))
+    detail = str(plan.get("detail") or "ok")
+    blocker_class = str(plan.get("blocker_class") or "")
+    if not ready:
+        return {
+            "admitted": False,
+            "ready": False,
+            "blocker_class": blocker_class,
+            "detail": detail,
+            "job_inserted": False,
+            "asr_plan_snapshot": {},
+        }
+    route_id = (
+        "deepgram_word_timeline"
+        if (state or {}).get("subdub_engine_requested") == "auto_smart_multivoice"
+        or (state or {}).get("subdub_asr_plan_version") == "r8_2"
+        else str(plan.get("route_id") or "smart_multivoice_deepgram")
+    )
+    snapshot = {
+        "subdub_asr_route_id": route_id,
+        "subdub_asr_provider": str(plan.get("provider") or "deepgram"),
+        "subdub_asr_require_word_timeline": bool(plan.get("require_word_timeline")),
+        "subdub_asr_require_provider_speaker_labels": bool(plan.get("require_provider_speaker_labels")),
+        "subdub_local_acoustic_diarization_allowed": bool(plan.get("allow_local_acoustic_diarization")),
+        "subdub_asr_plan_version": "r8_2",
+        "subdub_engine_requested": str(plan.get("engine_requested") or "auto_smart_multivoice"),
+        "auto_smart_multivoice_opt_in": bool((state or {}).get("auto_smart_multivoice_opt_in")),
+        "subdub_final_confirmed": True,
+        "subdub_engine_selected": "",
+        "asr_route_called": False,
+    }
+    return {
+        "admitted": True,
+        "ready": True,
+        "blocker_class": "",
+        "detail": "ok",
+        "job_inserted": True,
+        "asr_plan_snapshot": snapshot,
+    }
+
+
+def resolve_subdub_execution_asr_kwargs(state: dict | None = None) -> dict:
+    st = dict(state or {})
+    plan_version = str(st.get("subdub_asr_plan_version") or "").strip()
+    if plan_version == "r8_2":
+        required_fields = [
+            "subdub_asr_route_id",
+            "subdub_asr_provider",
+            "subdub_asr_require_word_timeline",
+            "subdub_asr_require_provider_speaker_labels",
+            "subdub_local_acoustic_diarization_allowed",
+        ]
+        if not all(field in st for field in required_fields):
+            raise RuntimeError("subdub_asr_plan_snapshot_incomplete")
+        required_provider = str(st.get("subdub_asr_provider") or "")
+        if required_provider == "deepgram" and not DEEPGRAM_API_KEY:
+            raise RuntimeError("subdub_asr_runtime_dependency_unavailable")
+        require_word_timeline = bool(st.get("subdub_asr_require_word_timeline"))
+        require_provider_speaker_labels = bool(st.get("subdub_asr_require_provider_speaker_labels"))
+        kwargs = {}
+        if require_word_timeline:
+            kwargs["require_auto_multi_word_timeline"] = True
+        if require_provider_speaker_labels:
+            kwargs["require_diarization"] = True
+        else:
+            kwargs["require_diarization"] = False
+        return kwargs
+
+    if "subdub_asr_require_word_timeline" in st:
+        require_word_timeline = bool(st.get("subdub_asr_require_word_timeline"))
+        require_provider_speaker_labels = bool(st.get("subdub_asr_require_provider_speaker_labels"))
+        kwargs = {}
+        if require_word_timeline:
+            kwargs["require_auto_multi_word_timeline"] = True
+        if require_provider_speaker_labels:
+            kwargs["require_diarization"] = True
+        else:
+            kwargs["require_diarization"] = False
+        return kwargs
+
+    plan = resolve_subdub_asr_plan(state=st)
+    require_word_timeline = bool(plan.get("require_word_timeline"))
+    require_provider_speaker_labels = bool(plan.get("require_provider_speaker_labels"))
+    kwargs = {}
+    if require_word_timeline:
+        kwargs["require_auto_multi_word_timeline"] = True
+    if require_provider_speaker_labels or auto_smart_multivoice.is_auto_smart_multivoice_state(st):
+        kwargs["require_diarization"] = require_provider_speaker_labels
+    return kwargs
+
 
 def video_dubbing_guard_text(mode: str, state: dict | None = None, lang: str = "vi", admin: bool = False) -> str:
     mode = normalize_video_translate_mode(mode)
@@ -241646,6 +242328,17 @@ def acquire_subtitle_dub_pipeline_job(job_key: str, **fields) -> tuple[bool, dic
         existing["updated_at"] = time.time()
         SUBTITLE_DUB_PIPELINE_JOBS[key] = existing
         return False, existing
+    is_smart = bool(
+        fields.get("auto_smart_multivoice_opt_in")
+        or fields.get("subdub_engine_requested") == "auto_smart_multivoice"
+        or auto_smart_multivoice.is_auto_smart_multivoice_state(fields)
+    )
+    snapshot = {}
+    if is_smart:
+        admit = subdub_admission_preflight(state=fields, mode=str(fields.get("mode") or ""))
+        if not admit.get("admitted"):
+            return False, admit
+        snapshot = dict(admit.get("asr_plan_snapshot") or {})
     now_ts = time.time()
     lifecycle_debug = subdub_lifecycle_debug_fields("received_file")
     job = {
@@ -241692,6 +242385,7 @@ def acquire_subtitle_dub_pipeline_job(job_key: str, **fields) -> tuple[bool, dic
         "updated_at": now_ts,
         "duplicate_count": 0,
         **fields,
+        **snapshot,
     }
     job = subdub_enrich_job_identity(job, job_key=key, mode=str(fields.get("mode") or ""), state=fields)
     SUBTITLE_DUB_PIPELINE_JOBS[key] = job
@@ -242137,6 +242831,7 @@ def subdub_preserve_original_acoustic_source(
 
 def video_dubbing_sync_state_fields(state: dict | None = None, *, exclude: set[str] | None = None) -> dict:
     skipped = {
+        "user_id",
         "step",
         "current_step",
         "previous_step",
@@ -242768,6 +243463,7 @@ def subtitle_dub_debug_job_payload(
         detail=detail,
         pipeline_attempted=pipeline_attempted,
     )
+    asr_plan = resolve_subdub_asr_plan(state=state, mode=mode)
     return {
         "feature": "subtitle_dub",
         "user_id": str(user_id or ""),
@@ -242841,7 +243537,7 @@ def subtitle_dub_debug_job_payload(
         "duration_seconds": int(input_save.get("duration") or _safe_int(state.get("video_duration") or state.get("source_duration"), 0)),
         "extracted_audio_path": str(artifacts.get("audio") or ""),
         "extracted_audio_exists": bool(artifacts.get("audio") and os.path.exists(str(artifacts.get("audio")))),
-        "asr_route_called": bool(attempts.get("asr") or route.get("asr")),
+        "asr_route_called": bool(state.get("asr_route_called") if state.get("asr_route_called") is not None else (attempts.get("asr") or route.get("asr"))),
         "transcript_length": int(attempts.get("transcript_length") or 0),
         "original_srt_path": str((artifacts.get("subtitles") or [""])[0] if isinstance(artifacts.get("subtitles"), list) and artifacts.get("subtitles") else ""),
         "translated_srt_path": str((artifacts.get("translated_subtitles") or [""])[0] if isinstance(artifacts.get("translated_subtitles"), list) and artifacts.get("translated_subtitles") else ""),
@@ -242956,6 +243652,18 @@ def subtitle_dub_debug_job_payload(
         "cost_line_rendered": bool(state.get("cost_line_rendered")),
         "cost_line_reason": str(state.get("cost_line_reason") or ""),
         "last_technical_error": sanitize_log_text(str(detail or ""))[:220],
+        "detail": str(detail or state.get("detail") or ""),
+        "error_detail": str(detail or state.get("error_detail") or state.get("detail") or ""),
+        "subdub_engine_requested": str(state.get("subdub_engine_requested") or asr_plan.get("engine_requested") or ""),
+        "subdub_engine_selected": str(state.get("subdub_engine_selected") or state.get("engine_selected") or ""),
+        "auto_smart_dispatch": str(state.get("auto_smart_dispatch") or ""),
+        "auto_smart_multivoice_opt_in": bool(state.get("auto_smart_multivoice_opt_in")),
+        "subdub_final_confirmed": bool(state.get("subdub_final_confirmed") or state.get("confirmed_product")),
+        "subdub_asr_route_id": str(state.get("subdub_asr_route_id") or asr_plan.get("route_id") or ""),
+        "subdub_asr_provider": str(state.get("subdub_asr_provider") or asr_plan.get("provider") or ""),
+        "subdub_asr_require_word_timeline": bool(state.get("subdub_asr_require_word_timeline") if state.get("subdub_asr_require_word_timeline") is not None else asr_plan.get("require_word_timeline")),
+        "subdub_asr_require_provider_speaker_labels": bool(state.get("subdub_asr_require_provider_speaker_labels") if state.get("subdub_asr_require_provider_speaker_labels") is not None else asr_plan.get("require_provider_speaker_labels")),
+        "subdub_local_acoustic_diarization_allowed": bool(state.get("subdub_local_acoustic_diarization_allowed") if state.get("subdub_local_acoustic_diarization_allowed") is not None else asr_plan.get("allow_local_acoustic_diarization")),
         "public_safe_error": public_safe_error,
         "pipeline_blocker": blocker,
         "provider_route": route,
@@ -246208,9 +246916,11 @@ async def transcribe_media_to_segments(
     allow_two_speaker_key4u_fallback: bool = False,
     allow_multi_speaker_key4u_fallback: bool = False,
     require_auto_multi_word_timeline: bool = False,
+    allow_subdub_public: bool = False,
 ) -> dict:
     require_diarization = bool(require_diarization)
     require_auto_multi_word_timeline = bool(require_auto_multi_word_timeline)
+    allow_subdub_public = bool(allow_subdub_public)
     source_bytes = b""
     content_type = "application/octet-stream"
     file_name = ""
@@ -246444,7 +247154,7 @@ async def transcribe_media_to_segments(
                 chunk_content_type,
                 language=source_language,
                 allow_admin=allow_admin,
-                allow_subdub_public=True,
+                allow_subdub_public=allow_subdub_public,
                 allow_confirmed_product=allow_confirmed_product,
                 updated_by=updated_by,
                 context=context,
@@ -246584,7 +247294,7 @@ async def transcribe_media_to_segments(
                 audio_content_type,
                 language=source_language,
                 allow_admin=allow_admin,
-                allow_subdub_public=True,
+                allow_subdub_public=allow_subdub_public,
                 allow_confirmed_product=allow_confirmed_product,
                 updated_by=updated_by,
                 context=context,
@@ -246711,7 +247421,7 @@ async def transcribe_media_to_segments(
         "subtitle_timing_source": timing_source,
         "global_timing_preserved": global_timing_preserved,
     }
-    if require_auto_multi_word_timeline:
+    if require_auto_multi_word_timeline or "word_timeline" in asr_result:
         success["word_timeline"] = word_timeline
     return success
 
@@ -246735,126 +247445,142 @@ async def video_dubbing_resolve_source_script(
     allow_two_speaker_key4u_fallback: bool = False,
     allow_multi_speaker_key4u_fallback: bool = False,
     require_auto_multi_word_timeline: bool = False,
+    state: dict | None = None,
 ) -> dict:
-    require_auto_multi_word_timeline = bool(require_auto_multi_word_timeline)
-    embedded_subtitle, subtitle_detail = "", ""
-    if not require_auto_multi_word_timeline:
-        embedded_subtitle, subtitle_detail = await video_dubbing_extract_embedded_subtitle(source_bytes, content_type)
-    if embedded_subtitle and not require_auto_multi_word_timeline:
-        return {
-            "source_kind": "embedded_subtitle",
-            "subtitle": embedded_subtitle,
-            "script": video_dubbing_plain_script(embedded_subtitle),
-            "asr_provider": "embedded_subtitle",
-            "detail": subtitle_detail,
-            "detected_language": subdub_detect_language_from_text(embedded_subtitle, "auto"),
-        }
-    if prefer_visual_subtitles and not require_auto_multi_word_timeline:
-        try:
-            visual_result = await asyncio.wait_for(
-                video_dubbing_extract_visual_subtitle(
-                    source_bytes,
-                    content_type,
-                    duration_seconds=duration_seconds,
-                    source_language=source_language,
-                    max_seconds=max_seconds,
-                ),
-                timeout=float(SUBDUB_VISUAL_OCR_TOTAL_TIMEOUT_SECONDS),
-            )
-        except asyncio.TimeoutError:
-            visual_result = {"ok": False, "status": "visual_ocr_timeout", "segments": []}
-        except Exception as exc:
-            visual_result = {
-                "ok": False,
-                "status": "visual_ocr_unavailable",
-                "detail": type(exc).__name__,
-                "segments": [],
-            }
-        if visual_result.get("ok") and visual_result.get("subtitle"):
-            return {
-                "source_kind": "visual_hardsub_ocr",
-                "subtitle": str(visual_result.get("subtitle") or ""),
-                "script": str(visual_result.get("script") or ""),
-                "asr_provider": "visual_hardsub_ocr",
-                "detail": str(visual_result.get("detail") or ""),
-                "segments": list(visual_result.get("segments") or []),
-                "detected_language": subdub_detect_language_from_text(
-                    str(visual_result.get("script") or ""),
-                    source_language,
-                ),
-                "duration_seconds": int(duration_seconds or 0),
-                "chunk_count": 1,
-                "chunk_strategy": "visual_frame_ocr",
-                "global_timing_preserved": True,
-                "subtitle_timing_source": "visual_hardsub_ocr",
-                "visual_ocr_frame_count": int(visual_result.get("frame_count") or 0),
-                "visual_ocr_cue_count": int(visual_result.get("cue_count") or 0),
-            }
-    # Media routing stays here; transcribe_media_to_segments calls video_dubbing_transcribe_bytes only after audio is valid.
-    result = await transcribe_media_to_segments(
-        {
-            "bytes": source_bytes,
-            "content_type": content_type,
-            "file_name": file_name,
-            "source_file_name": file_name,
-            "media_kind": media_kind,
-            "source_media_kind": media_kind,
-            "duration_seconds": duration_seconds,
-            "source_hash": source_hash,
-            "asr_checkpoint_path": asr_checkpoint_path,
-        },
-        context=context,
-        duration_seconds=duration_seconds,
-        max_seconds=max_seconds,
-        source_language=source_language,
-        allow_admin=allow_admin,
-        allow_confirmed_product=allow_confirmed_product,
-        updated_by=updated_by,
-        progress_callback=progress_callback,
-        allow_two_speaker_key4u_fallback=allow_two_speaker_key4u_fallback,
-        allow_multi_speaker_key4u_fallback=allow_multi_speaker_key4u_fallback,
-        **(
-            {"require_diarization": True}
-            if require_diarization
-            else {"require_auto_multi_word_timeline": True}
-            if require_auto_multi_word_timeline
-            else {}
-        ),
-    )
-    if not result.get("output_valid"):
-        failure_status = str(result.get("status") or "asr_failed")
-        if (
+    token = None
+    set_fn = globals().get("set_subdub_active_pipeline_state")
+    get_fn = globals().get("get_subdub_active_pipeline_state")
+    reset_fn = globals().get("reset_subdub_active_pipeline_state")
+    if set_fn and get_fn and isinstance(state, dict):
+        current_active = get_fn()
+        if current_active is not state:
+            token = set_fn(state)
+    try:
+        require_auto_multi_word_timeline = bool(require_auto_multi_word_timeline)
+        require_speaker_evidence = bool(
             require_diarization or require_auto_multi_word_timeline
-        ) and failure_status == AUTO_CAST_UNAVAILABLE:
+        )
+        embedded_subtitle, subtitle_detail = "", ""
+        if not require_speaker_evidence:
+            embedded_subtitle, subtitle_detail = await video_dubbing_extract_embedded_subtitle(source_bytes, content_type)
+        if embedded_subtitle and not require_speaker_evidence:
+            return {
+                "source_kind": "embedded_subtitle",
+                "subtitle": embedded_subtitle,
+                "script": video_dubbing_plain_script(embedded_subtitle),
+                "asr_provider": "embedded_subtitle",
+                "detail": subtitle_detail,
+                "detected_language": subdub_detect_language_from_text(embedded_subtitle, "auto"),
+            }
+        if prefer_visual_subtitles and not require_speaker_evidence:
+            try:
+                visual_result = await asyncio.wait_for(
+                    video_dubbing_extract_visual_subtitle(
+                        source_bytes,
+                        content_type,
+                        duration_seconds=duration_seconds,
+                        source_language=source_language,
+                        max_seconds=max_seconds,
+                    ),
+                    timeout=float(SUBDUB_VISUAL_OCR_TOTAL_TIMEOUT_SECONDS),
+                )
+            except asyncio.TimeoutError:
+                visual_result = {"ok": False, "status": "visual_ocr_timeout", "segments": []}
+            except Exception as exc:
+                visual_result = {
+                    "ok": False,
+                    "status": "visual_ocr_unavailable",
+                    "detail": type(exc).__name__,
+                    "segments": [],
+                }
+            if visual_result.get("ok") and visual_result.get("subtitle"):
+                return {
+                    "source_kind": "visual_hardsub_ocr",
+                    "subtitle": str(visual_result.get("subtitle") or ""),
+                    "script": str(visual_result.get("script") or ""),
+                    "asr_provider": "visual_hardsub_ocr",
+                    "detail": str(visual_result.get("detail") or ""),
+                    "segments": list(visual_result.get("segments") or []),
+                    "detected_language": subdub_detect_language_from_text(
+                        str(visual_result.get("script") or ""),
+                        source_language,
+                    ),
+                    "duration_seconds": int(duration_seconds or 0),
+                    "chunk_count": 1,
+                    "chunk_strategy": "visual_frame_ocr",
+                    "global_timing_preserved": True,
+                    "subtitle_timing_source": "visual_hardsub_ocr",
+                    "visual_ocr_frame_count": int(visual_result.get("frame_count") or 0),
+                    "visual_ocr_cue_count": int(visual_result.get("cue_count") or 0),
+                }
+        # Media routing stays here; transcribe_media_to_segments calls video_dubbing_transcribe_bytes only after audio is valid.
+        result = await transcribe_media_to_segments(
+            {
+                "bytes": source_bytes,
+                "content_type": content_type,
+                "file_name": file_name,
+                "source_file_name": file_name,
+                "media_kind": media_kind,
+                "source_media_kind": media_kind,
+                "duration_seconds": duration_seconds,
+                "source_hash": source_hash,
+                "asr_checkpoint_path": asr_checkpoint_path,
+            },
+            context=context,
+            duration_seconds=duration_seconds,
+            max_seconds=max_seconds,
+            source_language=source_language,
+            allow_admin=allow_admin,
+            allow_confirmed_product=allow_confirmed_product,
+            updated_by=updated_by,
+            progress_callback=progress_callback,
+            allow_two_speaker_key4u_fallback=allow_two_speaker_key4u_fallback,
+            allow_multi_speaker_key4u_fallback=allow_multi_speaker_key4u_fallback,
+            **(
+                {"require_diarization": True}
+                if require_diarization
+                else {"require_auto_multi_word_timeline": True}
+                if require_auto_multi_word_timeline
+                else {}
+            ),
+        )
+        if not result.get("output_valid"):
+            failure_status = str(result.get("status") or "asr_failed")
+            if (
+                require_diarization or require_auto_multi_word_timeline
+            ) and failure_status == AUTO_CAST_UNAVAILABLE:
+                raise subdub_speaker_cast.AutoCastUnavailable()
+            raise RuntimeError(failure_status)
+        word_timeline = list(result.get("word_timeline") or [])
+        if require_auto_multi_word_timeline and not word_timeline:
             raise subdub_speaker_cast.AutoCastUnavailable()
-        raise RuntimeError(failure_status)
-    word_timeline = list(result.get("word_timeline") or [])
-    if require_auto_multi_word_timeline and not word_timeline:
-        raise subdub_speaker_cast.AutoCastUnavailable()
-    transcript = str(result.get("transcript_text") or "").strip()
-    subtitle_text = video_dubbing_srt_from_segments(list(result.get("segments") or []))
-    if not subtitle_text:
-        raise RuntimeError("subtitle_generation_failed")
-    source_result = {
-        "source_kind": "asr",
-        "subtitle": subtitle_text,
-        "script": transcript,
-        "asr_provider": str(result.get("provider") or ""),
-        "detail": str(result.get("detail") or ""),
-        "segments": result.get("segments") or [],
-        "detected_language": result.get("detected_language") or "",
-        "duration_seconds": int(result.get("duration_seconds") or duration_seconds or 0),
-        "chunk_count": int(result.get("chunk_count") or (1 if duration_seconds else 0)),
-        "chunk_strategy": str(result.get("chunk_strategy") or "single_pass"),
-        "global_timing_preserved": bool(result.get("global_timing_preserved", True)),
-        "skipped_chunk_count": int(result.get("skipped_chunk_count") or 0),
-        "skipped_chunk_indices": list(result.get("skipped_chunk_indices") or []),
-        "speech_chunk_count": int(result.get("speech_chunk_count") or 0),
-        "subtitle_timing_source": str(result.get("subtitle_timing_source") or ""),
-    }
-    if require_auto_multi_word_timeline:
-        source_result["word_timeline"] = word_timeline
-    return source_result
+        transcript = str(result.get("transcript_text") or "").strip()
+        subtitle_text = video_dubbing_srt_from_segments(list(result.get("segments") or []))
+        if not subtitle_text:
+            raise RuntimeError("subtitle_generation_failed")
+        source_result = {
+            "source_kind": "asr",
+            "subtitle": subtitle_text,
+            "script": transcript,
+            "asr_provider": str(result.get("provider") or ""),
+            "detail": str(result.get("detail") or ""),
+            "segments": result.get("segments") or [],
+            "detected_language": result.get("detected_language") or "",
+            "duration_seconds": int(result.get("duration_seconds") or duration_seconds or 0),
+            "chunk_count": int(result.get("chunk_count") or (1 if duration_seconds else 0)),
+            "chunk_strategy": str(result.get("chunk_strategy") or "single_pass"),
+            "global_timing_preserved": bool(result.get("global_timing_preserved", True)),
+            "skipped_chunk_count": int(result.get("skipped_chunk_count") or 0),
+            "skipped_chunk_indices": list(result.get("skipped_chunk_indices") or []),
+            "speech_chunk_count": int(result.get("speech_chunk_count") or 0),
+            "subtitle_timing_source": str(result.get("subtitle_timing_source") or ""),
+        }
+        if require_auto_multi_word_timeline or "word_timeline" in result:
+            source_result["word_timeline"] = word_timeline
+        return source_result
+    finally:
+        if reset_fn and token is not None:
+            reset_fn(token)
 
 async def video_dubbing_render_video(
     source_bytes: bytes,
@@ -247188,23 +247914,33 @@ async def execute_video_dubbing_preview(
         return {"ok": False, "guard": True, "text": video_dubbing_custom_voice_guard_text(lang)}
     source_bytes, content_type = await video_dubbing_download_source(context, state)
     preview_seconds = preview_duration_seconds("subtitle_dub_ai")
-    source_info = await video_dubbing_resolve_source_script(
-        source_bytes,
-        content_type,
-        context,
-        duration_seconds=_safe_int(state.get("video_duration") or state.get("source_duration"), 0),
-        max_seconds=preview_seconds,
-        allow_admin=is_admin_user(query.from_user.id),
-        updated_by=query.from_user.id,
-        file_name=str(state.get("source_file_name") or ""),
-        media_kind=str(state.get("source_media_type") or state.get("media_kind") or ""),
-        source_language=str(state.get("source_language") or "auto"),
-        prefer_visual_subtitles=bool(
-            SUBDUB_VISUAL_OCR_PUBLIC_ENABLED
-            and mode in {VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
-            and video_dubbing_has_existing_subtitle_metadata(state) is not False
-        ),
+    token = (
+        set_subdub_active_pipeline_state(state)
+        if isinstance(state, dict)
+        else None
     )
+    try:
+        source_info = await video_dubbing_resolve_source_script(
+            source_bytes,
+            content_type,
+            context,
+            duration_seconds=_safe_int(state.get("video_duration") or state.get("source_duration"), 0),
+            max_seconds=preview_seconds,
+            allow_admin=is_admin_user(query.from_user.id),
+            updated_by=query.from_user.id,
+            file_name=str(state.get("source_file_name") or ""),
+            media_kind=str(state.get("source_media_type") or state.get("media_kind") or ""),
+            source_language=str(state.get("source_language") or "auto"),
+            prefer_visual_subtitles=bool(
+                SUBDUB_VISUAL_OCR_PUBLIC_ENABLED
+                and mode in {VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
+                and video_dubbing_has_existing_subtitle_metadata(state) is not False
+            ),
+            state=state,
+        )
+    finally:
+        if token is not None:
+            reset_subdub_active_pipeline_state(token)
     source_subtitle = str(source_info.get("subtitle") or "").strip()
     source_script = str(source_info.get("script") or "").strip()
     if not source_script:
@@ -247285,6 +248021,49 @@ def key4u_minimax_voice_compatible(voice_id: str = "") -> bool:
     except Exception:
         pass
     return False
+
+
+def key4u_tts_explicit_rejection_allows_direct_fallback(
+    status: str = "",
+    detail: str = "",
+    http_status: int = 0,
+) -> bool:
+    """Allow direct MiniMax only after a concrete Key4U rejection.
+
+    A timeout or an otherwise ambiguous response may mean Key4U accepted the
+    request, so it must remain fail-closed. Authentication/token failures are
+    pre-submit rejections and are safe to hand to the already-configured
+    direct route once.
+    """
+
+    normalized_status = str(status or "").strip().upper()
+    try:
+        normalized_http_status = int(http_status or 0)
+    except (TypeError, ValueError):
+        normalized_http_status = 0
+    if normalized_http_status in {401, 403} or normalized_status in {
+        "FAIL_AUTH",
+        "FAIL_UNAUTHORIZED",
+        "FAIL_FORBIDDEN",
+    }:
+        return True
+    normalized_detail = str(detail or "").strip().lower()
+    return any(
+        marker in normalized_detail
+        for marker in (
+            "token status is unavailable",
+            "token unavailable",
+            "token disabled",
+            "token expired",
+            "invalid api key",
+            "api key invalid",
+            "credential revoked",
+            "account disabled",
+            "quota exhausted",
+            "insufficient quota",
+            "insufficient balance",
+        )
+    )
 
 async def video_dubbing_tts_bytes(
     text: str,
@@ -247441,6 +248220,35 @@ async def video_dubbing_tts_bytes(
             return label, audio_bytes, detail
         safe_detail = sanitize_log_text(str(detail or status))[:120]
         errors.append(f"{label}={status}:{safe_detail}" if safe_detail else f"{label}={status}")
+        if (
+            label == "Key4U MiniMax"
+            and provider == "key4u_minimax"
+            and direct_ready
+            and key4u_tts_explicit_rejection_allows_direct_fallback(
+                status,
+                detail,
+                _http_status,
+            )
+        ):
+            direct_status, direct_audio_bytes, direct_detail, direct_http_status = (
+                await call_direct_minimax_tts_bytes_with_speed(
+                    text[:3500],
+                    voice_id=voice_id,
+                    voice_style=voice_style,
+                    voice_speed=voice_speed,
+                    tts_language_boost=tts_language_boost,
+                )
+            )
+            if direct_status == "PASS" and direct_audio_bytes:
+                return "MiniMax direct fallback", direct_audio_bytes, direct_detail
+            direct_safe_detail = sanitize_log_text(
+                str(direct_detail or direct_status)
+            )[:120]
+            errors.append(
+                f"MiniMax direct fallback={direct_status}:{direct_safe_detail}"
+                if direct_safe_detail
+                else f"MiniMax direct fallback={direct_status}"
+            )
     raise RuntimeError("tts_unavailable:" + ",".join(errors))
 
 def video_dubbing_output_file(data: bytes, filename: str) -> io.BytesIO:
@@ -248312,6 +249120,32 @@ def subdub_canonical_auto_speaker_segments(
     return output
 
 
+def subdub_canonical_single_speaker_segments(
+    segments: list[dict],
+    *,
+    extraction_source: str,
+) -> list[dict]:
+    """Map an explicitly degraded Smart Multi result to one honest speaker."""
+
+    canonical = subdub_canonical_cues.canonicalize_segments(
+        segments or [],
+        extraction_source=str(extraction_source or "asr"),
+        source_language="auto",
+    )
+    if not canonical:
+        raise subdub_speaker_cast.AutoCastUnavailable()
+    return [
+        {
+            **cue,
+            "speaker": 0,
+            "speaker_confidence": 0.0,
+            "speaker_id": "chunk_00:speaker_0",
+            "chunk_index": 0,
+        }
+        for cue in canonical
+    ]
+
+
 async def _subdub_auto_bootstrap_cached_media_source(
     context: ContextTypes.DEFAULT_TYPE,
     state: dict,
@@ -248324,7 +249158,7 @@ async def _subdub_auto_bootstrap_cached_media_source(
     progress_callback,
     allow_confirmed_product: bool,
 ) -> dict:
-    """Obtain one confirmed diarized source when a cached subtitle has no sidecar."""
+    """Obtain a confirmed auto source when a cached subtitle has no sidecar."""
 
     if (
         not allow_confirmed_product
@@ -248337,7 +249171,11 @@ async def _subdub_auto_bootstrap_cached_media_source(
         resolve_parameters = inspect.signature(video_dubbing_resolve_source_script).parameters
     except Exception as exc:
         raise subdub_speaker_cast.AutoCastUnavailable() from exc
-    if "require_diarization" not in resolve_parameters:
+    smart_word_asr = auto_smart_multivoice.is_auto_smart_multivoice_state(state)
+    required_parameter = (
+        "require_auto_multi_word_timeline" if smart_word_asr else "require_diarization"
+    )
+    if required_parameter not in resolve_parameters:
         raise subdub_speaker_cast.AutoCastUnavailable()
     resolve_kwargs = {
         "duration_seconds": duration_hint,
@@ -248348,8 +249186,13 @@ async def _subdub_auto_bootstrap_cached_media_source(
         "media_kind": str(state.get("source_media_type") or state.get("media_kind") or ""),
         "source_language": str(state.get("source_language") or "auto"),
         "prefer_visual_subtitles": False,
-        "require_diarization": True,
     }
+    if smart_word_asr:
+        resolve_kwargs["require_auto_multi_word_timeline"] = True
+        if "require_diarization" in resolve_parameters:
+            resolve_kwargs["require_diarization"] = False
+    else:
+        resolve_kwargs["require_diarization"] = True
     if "allow_two_speaker_key4u_fallback" in resolve_parameters:
         resolve_kwargs["allow_two_speaker_key4u_fallback"] = bool(
             auto_speaker.is_auto_speaker_state(state)
@@ -248374,12 +249217,23 @@ async def _subdub_auto_bootstrap_cached_media_source(
             if workspace
             else ""
         )
-    source_info = await video_dubbing_resolve_source_script(
-        source_bytes,
-        content_type,
-        context,
-        **resolve_kwargs,
+    if "state" in resolve_parameters:
+        resolve_kwargs["state"] = state
+    token = (
+        set_subdub_active_pipeline_state(state)
+        if isinstance(state, dict)
+        else None
     )
+    try:
+        source_info = await video_dubbing_resolve_source_script(
+            source_bytes,
+            content_type,
+            context,
+            **resolve_kwargs,
+        )
+    finally:
+        if token is not None:
+            reset_subdub_active_pipeline_state(token)
     if (
         str(source_info.get("source_kind") or "") != "asr"
         or not str(source_info.get("subtitle") or "").strip()
@@ -248427,6 +249281,7 @@ async def video_dubbing_prepare_subtitles(
     require_auto_cast: bool = False,
 ) -> dict:
     require_auto_cast = bool(require_auto_cast)
+    smart_acoustic_classifications = {}
     speaker_workspace = str(state.get("_pipeline_workspace") or "")
     mode = normalize_video_translate_mode(
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
@@ -248435,10 +249290,17 @@ async def video_dubbing_prepare_subtitles(
     exact_acoustic_multi = bool(
         require_auto_cast and auto_multi_speaker.is_auto_multi_speaker_state(state)
     )
+    preserve_pipeline_context = bool(
+        exact_acoustic_multi
+        or (
+            require_auto_cast
+            and auto_smart_multivoice.is_auto_smart_multivoice_state(state)
+        )
+    )
     exact_multi_pipeline_context = {
         key: value
         for key, value in state.items()
-        if exact_acoustic_multi and str(key).startswith("_pipeline_")
+        if preserve_pipeline_context and str(key).startswith("_pipeline_")
     }
     if isinstance(source_bytes_override, bytearray):
         source_bytes_override = bytes(source_bytes_override)
@@ -248555,7 +249417,7 @@ async def video_dubbing_prepare_subtitles(
             subtitle_ref=subtitle_ref,
             source_subtitle_ref=subtitle_ref,
         )
-        if exact_acoustic_multi:
+        if preserve_pipeline_context:
             state = {**state, **exact_multi_pipeline_context}
     if not source_subtitle:
         if video_dubbing_is_subtitle_text_source(state, content_type):
@@ -248611,11 +249473,17 @@ async def video_dubbing_prepare_subtitles(
                         if workspace
                         else ""
                     )
+                if require_auto_cast:
+                    exec_asr_kwargs = resolve_subdub_execution_asr_kwargs(state)
+                    for k, v in exec_asr_kwargs.items():
+                        if k in resolve_parameters:
+                            resolve_kwargs[k] = v
                 if require_auto_cast and "require_diarization" in resolve_parameters:
-                    if exact_acoustic_multi:
-                        resolve_kwargs.pop("require_diarization", None)
-                    else:
-                        resolve_kwargs["require_diarization"] = True
+                    if "require_diarization" not in resolve_kwargs:
+                        if exact_acoustic_multi:
+                            resolve_kwargs.pop("require_diarization", None)
+                        else:
+                            resolve_kwargs["require_diarization"] = True
                 if exact_acoustic_multi and "require_auto_multi_word_timeline" in resolve_parameters:
                     resolve_kwargs["require_auto_multi_word_timeline"] = True
                     resolve_kwargs.pop("require_diarization", None)
@@ -248637,12 +249505,23 @@ async def video_dubbing_prepare_subtitles(
                     )
             except Exception:
                 pass
-            source_info = await video_dubbing_resolve_source_script(
-                source_bytes,
-                content_type,
-                context,
-                **resolve_kwargs,
+            if "state" in resolve_parameters:
+                resolve_kwargs["state"] = state
+            token = (
+                set_subdub_active_pipeline_state(state)
+                if isinstance(state, dict)
+                else None
             )
+            try:
+                source_info = await video_dubbing_resolve_source_script(
+                    source_bytes,
+                    content_type,
+                    context,
+                    **resolve_kwargs,
+                )
+            finally:
+                if token is not None:
+                    reset_subdub_active_pipeline_state(token)
             source_subtitle = str(source_info.get("subtitle") or "").strip()
         subtitle_ref = set_video_dubbing_artifact(user_id, "source_subtitle", source_subtitle)
         sync_fields = video_dubbing_sync_state_fields(state, exclude={"subtitle_ref", "source_subtitle_ref"})
@@ -248653,7 +249532,7 @@ async def video_dubbing_prepare_subtitles(
             subtitle_ref=subtitle_ref,
             source_subtitle_ref=subtitle_ref,
         )
-        if exact_acoustic_multi:
+        if preserve_pipeline_context:
             state = {**state, **exact_multi_pipeline_context}
     source_script = video_dubbing_plain_script(source_subtitle)
     source_segments = list(source_info.get("segments") or []) or video_dubbing_segments_from_subtitle(source_subtitle)
@@ -248663,10 +249542,35 @@ async def video_dubbing_prepare_subtitles(
         raise RuntimeError("subtitle_segments_empty")
     if require_auto_cast:
         fresh_auto_asr = str(source_info.get("source_kind") or "") == "asr"
-        if fresh_auto_asr and exact_acoustic_multi:
+        fresh_smart_asr_segments: list[dict] | None = None
+        smart_multi_acoustic = False
+        if (
+            fresh_auto_asr
+            and not exact_acoustic_multi
+            and auto_smart_multivoice.is_auto_smart_multivoice_state(state)
+        ):
+            _has_provider_speaker_labels = any(
+                subdub_speaker_cast.valid_speaker_index(seg.get("speaker"))
+                for seg in source_segments
+            )
+            if _has_provider_speaker_labels:
+                fresh_smart_asr_segments = subdub_canonical_auto_speaker_segments(
+                    source_segments,
+                    extraction_source="asr",
+                )
+                smart_multi_acoustic = len(
+                    subdub_speaker_cast.ordered_auto_speaker_labels(
+                        fresh_smart_asr_segments
+                    )
+                ) >= 3
+            else:
+                # Provider labels absent — local acoustic diarization will prove speakers
+                smart_multi_acoustic = True
+        if fresh_auto_asr and (exact_acoustic_multi or smart_multi_acoustic):
             word_timeline = list(source_info.get("word_timeline") or [])
             if not word_timeline:
-                raise subdub_speaker_cast.AutoCastUnavailable()
+                asr_prov = str(source_info.get("asr_provider") or "deepgram")
+                raise subdub_speaker_cast.AutoCastUnavailable(detail=f"{asr_prov}_word_timeline_missing")
             acoustic_prepared = {
                 "state": dict(state),
                 "source_bytes": bytes(source_bytes),
@@ -248685,15 +249589,19 @@ async def video_dubbing_prepare_subtitles(
             acoustic_duration = float(
                 source_info.get("duration_seconds") or duration_hint or 0.0
             )
+            acoustic_degraded_to_single = False
             try:
                 acoustic_result = await auto_multi_speaker.run_local_acoustic_diarization_off_event_loop(
                     Path(pcm_path),
                     word_timeline,
                     duration_seconds=acoustic_duration,
+                    gender_source_original=auto_smart_multivoice.is_auto_smart_multivoice_state(state),
+                    **({"minimum_speakers": 1} if auto_smart_multivoice.is_auto_smart_multivoice_state(state) else {}),
                 )
             except (
                 subdub_speaker_cast.AutoCastUnavailable,
                 subdub_speaker_cast.AutoCastManualRequired,
+                ValueError,
             ) as exc:
                 acoustic_failure = subdub_multi_acoustic_failure_evidence(
                     exc,
@@ -248706,10 +249614,58 @@ async def video_dubbing_prepare_subtitles(
                         failure_job_key,
                         **acoustic_failure,
                     )
-                raise
-            source_segments = list(acoustic_result.get("segments") or [])
+                if not (
+                    auto_smart_multivoice.is_auto_smart_multivoice_state(state)
+                    and acoustic_failure["multi_acoustic_failure_code"] in {
+                        "fixed_vocal_speaker_count_unstable",
+                        "fixed_vocal_window_support_invalid",
+                        "acoustic_unit_count_invalid",
+                    }
+                ):
+                    raise
+                fresh_smart_asr_segments = subdub_canonical_single_speaker_segments(
+                    source_segments,
+                    extraction_source="asr",
+                )
+                smart_multi_acoustic = False
+                acoustic_degraded_to_single = True
+                acoustic_result = {}
+                state = set_video_dubbing_pending(
+                    user_id,
+                    state.get("step") or "processing",
+                    **video_dubbing_sync_state_fields(
+                        state,
+                        exclude={"subtitle_ref", "source_subtitle_ref"},
+                    ),
+                    auto_smart_degraded_single_voice=True,
+                    auto_smart_degraded_reason=acoustic_failure["multi_acoustic_failure_code"],
+                )
+            source_segments = (
+                list(fresh_smart_asr_segments)
+                if acoustic_degraded_to_single
+                else list(acoustic_result.get("segments") or [])
+            )
             if not source_segments:
                 raise subdub_speaker_cast.AutoCastUnavailable()
+            smart_generic_acoustic = bool(
+                auto_smart_multivoice.is_auto_smart_multivoice_state(state)
+                and acoustic_result.get("smart_acoustic_generic") is True
+            )
+            if smart_generic_acoustic:
+                candidate_classes = acoustic_result.get("smart_acoustic_classifications")
+                detected_count = acoustic_result.get("detected_speaker_count")
+                labels = {segment.get("speaker_id") for segment in source_segments}
+                if (
+                    type(detected_count) is not int or not 1 <= detected_count <= 8
+                    or not isinstance(candidate_classes, dict)
+                    or set(candidate_classes) != labels or len(labels) != detected_count
+                    or acoustic_result.get("word_coverage_count") != len(word_timeline)
+                ):
+                    raise subdub_speaker_cast.AutoCastUnavailable()
+                smart_acoustic_classifications = dict(candidate_classes)
+                smart_multi_acoustic = False
+            if auto_smart_multivoice.is_auto_smart_multivoice_state(state):
+                state = {**state, "auto_smart_generic_acoustic": smart_generic_acoustic}
             source_subtitle = video_dubbing_srt_from_segments(source_segments)
             source_script = video_dubbing_plain_script(source_subtitle)
             acoustic_fields = auto_multi_speaker.bounded_multi_acoustic_evidence({
@@ -248746,26 +249702,27 @@ async def video_dubbing_prepare_subtitles(
                 "multi_acoustic_dropped_non_speech_speaker_labels": acoustic_result.get("dropped_non_speech_speaker_labels"),
                 "multi_acoustic_dropped_non_speech_speaker_count": len(acoustic_result.get("dropped_non_speech_speaker_labels") or []),
             })
-            if not acoustic_fields:
+            if not acoustic_fields and not acoustic_degraded_to_single and not smart_generic_acoustic:
                 raise subdub_speaker_cast.AutoCastUnavailable()
-            acoustic_subtitle_ref = set_video_dubbing_artifact(
-                user_id,
-                "source_subtitle",
-                source_subtitle,
-            )
-            state = set_video_dubbing_pending(
-                user_id,
-                state.get("step") or "processing",
-                **video_dubbing_sync_state_fields(
-                    state,
-                    exclude={"subtitle_ref", "source_subtitle_ref"},
-                ),
-                **acoustic_fields,
-                subtitle_ref=acoustic_subtitle_ref,
-                source_subtitle_ref=acoustic_subtitle_ref,
-            )
+            if not acoustic_degraded_to_single:
+                acoustic_subtitle_ref = set_video_dubbing_artifact(
+                    user_id,
+                    "source_subtitle",
+                    source_subtitle,
+                )
+                state = set_video_dubbing_pending(
+                    user_id,
+                    state.get("step") or "processing",
+                    **video_dubbing_sync_state_fields(
+                        state,
+                        exclude={"subtitle_ref", "source_subtitle_ref"},
+                    ),
+                    **acoustic_fields,
+                    subtitle_ref=acoustic_subtitle_ref,
+                    source_subtitle_ref=acoustic_subtitle_ref,
+                )
         elif fresh_auto_asr:
-            source_segments = subdub_canonical_auto_speaker_segments(
+            source_segments = fresh_smart_asr_segments or subdub_canonical_auto_speaker_segments(
                 source_segments,
                 extraction_source="asr",
             )
@@ -248787,7 +249744,7 @@ async def video_dubbing_prepare_subtitles(
                 media_sha256=media_sha256,
                 subtitle_sha256=subtitle_sha256,
             )
-            if exact_acoustic_multi:
+            if exact_acoustic_multi or smart_multi_acoustic:
                 sidecar_acoustic = auto_multi_speaker.acoustic_sidecar_evidence(
                     acoustic_fields
                 )
@@ -248919,10 +249876,11 @@ async def video_dubbing_prepare_subtitles(
     output_script = video_dubbing_plain_script(output_subtitle)
     if not output_script:
         raise RuntimeError("subtitle_script_empty")
-    if exact_acoustic_multi:
+    if preserve_pipeline_context:
         state = {**state, **exact_multi_pipeline_context}
     return {
         "state": state,
+        **({"acoustic_classifications": smart_acoustic_classifications} if smart_acoustic_classifications else {}),
         "source_bytes": source_bytes,
         "content_type": content_type,
         "source_subtitle": source_subtitle,
@@ -249189,8 +250147,11 @@ def _subdub_auto_resume_state(state: dict) -> dict:
         if isinstance(value, (str, int, float, bool)) or value is None:
             safe[str(key)] = value
     if (
-        str(state.get("auto_speaker_lane") or "").strip().lower() == "multi"
-        and auto_multi_speaker.is_auto_multi_speaker_state(state)
+        (
+            str(state.get("auto_speaker_lane") or "").strip().lower() == "multi"
+            and auto_multi_speaker.is_auto_multi_speaker_state(state)
+        )
+        or auto_smart_multivoice.is_auto_smart_multivoice_state(state)
     ):
         safe.update(auto_multi_speaker.bounded_multi_acoustic_evidence(state))
     return safe
@@ -249252,6 +250213,9 @@ def _subdub_auto_persist_prepared_cache(
         ),
         "dub_text_source": str(policy.get("dub_text_source") or ""),
         "target_language": str(state.get("target_language") or "")[:120],
+        **({"acoustic_classifications": dict(prepared["acoustic_classifications"])}
+           if prepared_state.get("auto_smart_generic_acoustic") is True
+           and isinstance(prepared.get("acoustic_classifications"), dict) else {}),
     }
     metadata_path = write_subtitle_dub_pipeline_artifact(
         workspace,
@@ -249823,6 +250787,9 @@ def _subdub_auto_load_cached_prepared(job: dict, state: dict) -> dict:
     }
     return {
         "state": resumed_state,
+        **({"acoustic_classifications": dict(cache["acoustic_classifications"])}
+           if resumed_state.get("auto_smart_generic_acoustic") is True
+           and isinstance(cache.get("acoustic_classifications"), dict) else {}),
         "source_bytes": source_bytes,
         "content_type": str(state.get("source_mime_type") or "video/mp4"),
         "source_subtitle": source_subtitle,
@@ -251306,6 +252273,8 @@ async def _extract_subdub_auto_pcm(
     exact_acoustic_multi = bool(
         auto_multi_speaker.is_auto_multi_speaker_state(prepared_state)
         or auto_multi_speaker.is_auto_multi_speaker_state(state or {})
+        or auto_smart_multivoice.is_auto_smart_multivoice_state(prepared_state)
+        or auto_smart_multivoice.is_auto_smart_multivoice_state(state or {})
     )
     original_acoustic_source = str(
         prepared_state.get("_pipeline_source_path_override")
@@ -251318,6 +252287,10 @@ async def _extract_subdub_auto_pcm(
         saved_source = str(
             prepared_state.get("_pipeline_saved_source_path")
             or (state or {}).get("_pipeline_saved_source_path")
+            or (prepared or {}).get("source_path")
+            or (prepared or {}).get("source_file")
+            or ((state or {}).get("input_save") or {}).get("normalized_path")
+            or ((state or {}).get("input_save") or {}).get("path")
             or ""
         ).strip()
     source_path = ""
@@ -251723,7 +252696,10 @@ async def _execute_video_dubbing_pipeline_core(
             **state,
             **(
                 {"_pipeline_source_path_override": str(input_save.get("original_source_path") or input_save.get("path") or "")}
-                if auto_multi_speaker.is_auto_multi_speaker_state(state)
+                if (
+                    auto_multi_speaker.is_auto_multi_speaker_state(state)
+                    or auto_smart_multivoice.is_auto_smart_multivoice_state(state)
+                )
                 and str(input_save.get("original_source_path") or input_save.get("path") or "")
                 else {}
             ),
@@ -252411,6 +253387,13 @@ async def _execute_video_dubbing_pipeline_core(
                 + (f" Anh/chị hãy chọn ngôn ngữ khác thay cho {target_language}." if target_language else "")
             )
             return _failed_product_result("UNSUPPORTED_LANGUAGE_FOR_TTS", unsupported_text, detail or "unsupported_language_for_tts", stage="voice")
+        if status == auto_multi_speaker_v2.TTS_PROVIDER_UNAVAILABLE_STATUS:
+            return _failed_product_result(
+                status,
+                subtitle_plus_dub_safe_fail_text("tts_provider_unavailable", lang),
+                detail or str(product_result.get("reason") or "tts_provider_unavailable"),
+                stage="audio",
+            )
         if status == "VIDEO_RENDER_FAILED":
             return _failed_product_result("VIDEO_RENDER_FAILED", subdub_mode_fail_text(mode, lang), detail, stage="video")
         fail_text = (
@@ -258278,10 +259261,10 @@ async def handle_marketing_pending_text(update: Update, context: ContextTypes.DE
 
 async def handle_marketing_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     uid = query.from_user.id
     if not is_admin_user(uid):
         return await query.answer("Tính năng Marketing tự động đang thử nghiệm nội bộ. Hiện chỉ admin sử dụng.", show_alert=True)
+    await query.answer()
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "start"
     value = parts[2] if len(parts) > 2 else ""
@@ -271293,7 +272276,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_remote_worker_canary_callback, pattern=r"^remote_worker_canary_(create|status)(\||$)"))
     tg_app.add_handler(CallbackQueryHandler(handle_remote_worker_prod_canary_callback, pattern=r"^remote_worker_prod_canary_(create|status)(\||$)"))
     tg_app.add_handler(CallbackQueryHandler(handle_knowledge_vault_callback, pattern=r"^vault\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_admin_gopy_callback, pattern=r"^admin_gopy\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_admin_help_callback, pattern=r"^admin_help\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_admin_growth_callback, pattern=r"^admin_growth\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_broadcast_lite_callback, pattern=r"^broadcast_lite\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern=r"^menu\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_provider_choice, pattern=r"^prov\|"))
@@ -274063,6 +275048,27 @@ async def status_page():
         "health": "/health",
         "landing": "/",
     }
+
+
+# ─── FIRST-PARTY PROVIDER EPHEMERAL REFERENCE TRANSPORT ───────────────────────
+@fastapi_app.get("/provider-media/v1/{token}")
+@fastapi_app.head("/provider-media/v1/{token}")
+async def serve_provider_media(token: str):
+    from services.provider_reference_transport import resolve_provider_reference
+    resolved = resolve_provider_reference(token)
+    if not resolved.get("ok"):
+        raise HTTPException(status_code=404, detail="Resource not found")
+    file_path = str(resolved["path"])
+    mime_type = str(resolved.get("mime_type") or "application/octet-stream")
+    file_size = resolved.get("file_size") or os.path.getsize(file_path)
+    return FileResponse(
+        path=file_path,
+        media_type=mime_type,
+        headers={
+            "Content-Length": str(file_size),
+            "Cache-Control": "private, no-store",
+        },
+    )
 
 def customer_guide_file_path(filename: str) -> str:
     if filename == GUIDE_DOCX_FILE:
@@ -277886,6 +278892,59 @@ async def api_internal_admin_wallet_credit(request: Request):
         execute_admin_wallet_credit,
     )
 
+    raw_auth = str(request.headers.get("authorization") or "").strip()
+    bridge_token = (
+        os.environ.get("CORE_BRIDGE_TOKEN", "").strip()
+        or os.environ.get("WEBAPP_LINK_CALLBACK_TOKEN", "").strip()
+        or os.environ.get("INTERNAL_API_SECRET", "").strip()
+        or os.environ.get("BOT_INTERNAL_SECRET", "").strip()
+    )
+    if not bridge_token:
+        raise HTTPException(
+            status_code=503,
+            detail={"ok": False, "error_code": "BRIDGE_NOT_CONFIGURED", "message": "Bridge token not configured"},
+        )
+    if not raw_auth:
+        raise HTTPException(
+            status_code=401,
+            detail={"ok": False, "error_code": "AUTH_MISSING", "message": "Authentication failed: AUTH_MISSING"},
+        )
+    bearer = (
+        raw_auth.replace("Bearer ", "", 1).strip()
+        if raw_auth.lower().startswith("bearer ")
+        else raw_auth
+    )
+    if not bearer or not hmac.compare_digest(bearer, bridge_token):
+        raise HTTPException(
+            status_code=401,
+            detail={"ok": False, "error_code": "AUTH_INVALID", "message": "Authentication failed: AUTH_INVALID"},
+        )
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
+    raw_payload_actor = payload.get("actor_id")
+    payload_actor = str(raw_payload_actor or "").strip()
+
+    if not header_actor and not payload_actor:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "ok": False,
+                "error_code": "MISSING_ACTOR_ID",
+                "message": "actor_id is required and cannot be blank",
+            },
+        )
+
+    if header_actor != payload_actor:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "ok": False,
+                "error_code": "ACTOR_ID_MISMATCH",
+                "message": "Header actor_id does not match payload actor_id",
+            },
+        )
+    actor_id = header_actor
+
     auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
         authorization=request.headers.get("authorization", ""),
         signature=request.headers.get("x-toan-aas-signature", ""),
@@ -277894,6 +278953,7 @@ async def api_internal_admin_wallet_credit(request: Request):
         method="POST",
         path="/internal/v1/admin/wallet/credit",
         body_bytes=raw_body,
+        actor_id=actor_id,
     )
     if not auth_ok:
         raise HTTPException(
@@ -277911,7 +278971,6 @@ async def api_internal_admin_wallet_credit(request: Request):
     idempotency_key = str(payload.get("idempotency_key") or "").strip()
     reason = str(payload.get("reason") or payload.get("reference") or "").strip()
     reference = str(payload.get("reference") or payload.get("reason") or "").strip()
-    actor_id = str(request.headers.get("x-toan-aas-actor-id") or payload.get("actor_id") or "").strip()
 
     ok, result, status_code = execute_admin_wallet_credit(
         user_id=user_id,
@@ -277944,6 +279003,7 @@ async def api_internal_admin_wallet_compensate(request: Request):
         execute_admin_wallet_compensation,
     )
 
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
     auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
         authorization=request.headers.get("authorization", ""),
         signature=request.headers.get("x-toan-aas-signature", ""),
@@ -277952,6 +279012,7 @@ async def api_internal_admin_wallet_compensate(request: Request):
         method="POST",
         path="/internal/v1/admin/wallet/compensate",
         body_bytes=raw_body,
+        actor_id=header_actor,
     )
     if not auth_ok:
         raise HTTPException(
@@ -277997,7 +279058,7 @@ async def api_internal_admin_wallet_compensate(request: Request):
     actor_id = str(raw_actor_id).strip()
 
     header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
-    if header_actor and header_actor != actor_id:
+    if header_actor != actor_id:
         return JSONResponse(
             status_code=400,
             content={
@@ -278012,6 +279073,56 @@ async def api_internal_admin_wallet_compensate(request: Request):
         idempotency_key=idempotency_key,
         reason=reason,
         actor_id=actor_id,
+        db_path=DB_FILE,
+    )
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.post("/internal/v1/web-product-video/settle")
+async def api_internal_web_product_video_settle(request: Request):
+    """Canonical Bot Core settlement endpoint for Web Product Video jobs."""
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+        if not isinstance(payload, dict):
+            raise ValueError("Payload must be an object")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.web_product_video_settlement_service import execute_web_product_video_settlement
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
+    payload_actor = str(payload.get("actor_id") or "").strip()
+    actor_id = header_actor or payload_actor
+
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path="/internal/v1/web-product-video/settle",
+        body_bytes=raw_body,
+        actor_id=actor_id,
+    )
+    if not auth_ok:
+        raise HTTPException(
+            status_code=auth_status,
+            detail={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    ok, result, status_code = execute_web_product_video_settlement(
+        web_job_id=str(payload.get("web_job_id") or "").strip(),
+        web_request_id=str(payload.get("web_request_id") or "").strip(),
+        canonical_user_id=payload.get("canonical_user_id"),
+        product_key=str(payload.get("product_key") or "").strip(),
+        tier_id=payload.get("tier_id"),
+        scene_count=payload.get("scene_count", 1),
+        output_url=str(payload.get("output_url") or "").strip(),
+        validated_output_metadata=payload.get("validated_output_metadata"),
+        caller_amount_xu=payload.get("amount_xu") if "amount_xu" in payload else payload.get("amount"),
+        idempotency_key=str(payload.get("idempotency_key") or "").strip() or None,
         db_path=DB_FILE,
     )
     return JSONResponse(status_code=status_code, content=result)
@@ -278671,6 +279782,625 @@ async def api_internal_admin_packages_update(package_key: str, request: Request)
         db_path=DB_FILE,
     )
     return JSONResponse(status_code=status_code, content=result)
+
+
+# ─── CANONICAL SUBDUB WEB UPLOAD STAGING ENDPOINTS (BOT-SUBDUB-D1) ───
+
+@fastapi_app.post("/internal/v1/uploads")
+async def api_internal_subdub_upload_create(request: Request):
+    """Canonical Bot Core upload staging CREATE endpoint for Web SubDub media intake (BOT-SUBDUB-D1)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.subdub_upload_staging import create_staged_upload
+
+    raw_body = await request.body()
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path="/internal/v1/uploads",
+        body_bytes=raw_body,
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    content_type_header = str(request.headers.get("content-type") or "").lower()
+    file_bytes = b""
+    file_name = "media.bin"
+    detected_mime = "application/octet-stream"
+    idempotency_key = str(request.headers.get("idempotency-key") or "").strip()
+    client_meta = {}
+
+    if "application/json" in content_type_header:
+        try:
+            data = json.loads(raw_body.decode("utf-8") or "{}")
+        except Exception:
+            return JSONResponse(
+                status_code=400,
+                content={"ok": False, "error_code": "INVALID_JSON", "message": "Invalid JSON payload"},
+            )
+        if not isinstance(data, dict):
+            return JSONResponse(
+                status_code=400,
+                content={"ok": False, "error_code": "INVALID_PAYLOAD", "message": "Expected JSON object"},
+            )
+
+        client_uid = str(data.get("user_id") or data.get("owner_id") or "").strip()
+        if client_uid:
+            clean_client_uid = normalize_target_user_id(client_uid)
+            if clean_client_uid and clean_client_uid != clean_actor:
+                return JSONResponse(
+                    status_code=403,
+                    content={"ok": False, "error_code": "ACTOR_ID_MISMATCH", "message": "Supplied user_id does not match authenticated actor"},
+                )
+
+        file_name = str(data.get("file_name") or data.get("name") or "media.bin").strip()
+        detected_mime = str(data.get("content_type") or data.get("mime_type") or "application/octet-stream").strip()
+        idempotency_key = str(data.get("idempotency_key") or idempotency_key).strip()
+
+        b64_content = data.get("content_base64")
+        if b64_content is not None:
+            if not isinstance(b64_content, str) or not b64_content.strip():
+                file_bytes = b""
+            else:
+                try:
+                    file_bytes = base64.b64decode(b64_content, validate=True)
+                except Exception:
+                    return JSONResponse(
+                        status_code=400,
+                        content={"ok": False, "error_code": "INVALID_BASE64", "message": "Failed to decode content_base64"},
+                    )
+        else:
+            file_bytes = b""
+
+        client_meta = data
+    else:
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error_code": "UNSUPPORTED_CONTENT_TYPE", "message": "Expected application/json payload"},
+        )
+
+    ok, reason, status_code, result = create_staged_upload(
+        file_bytes=file_bytes,
+        file_name=file_name,
+        content_type=detected_mime,
+        actor_id=clean_actor,
+        idempotency_key=idempotency_key,
+        client_metadata=client_meta,
+    )
+    if not ok:
+        return JSONResponse(
+            status_code=status_code,
+            content={"ok": False, "error_code": reason, "message": f"Upload staging failed: {reason}"},
+        )
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.get("/internal/v1/uploads/{upload_id}")
+async def api_internal_subdub_upload_consume(upload_id: str, request: Request):
+    """Canonical Bot Core upload staging owner-bound LOOKUP/CONSUME endpoint (BOT-SUBDUB-D1)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.subdub_upload_staging import get_staged_upload, to_public_metadata
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = f"/internal/v1/uploads/{upload_id}"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path=path,
+        body_bytes=b"",
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    ok, reason, status_code, record = get_staged_upload(upload_id, actor_id=clean_actor)
+    if not ok:
+        return JSONResponse(
+            status_code=status_code,
+            content={"ok": False, "error_code": reason, "message": f"Lookup failed: {reason}"},
+        )
+
+    public_meta = to_public_metadata(record)
+    return JSONResponse(status_code=status_code, content=public_meta)
+
+
+# ─── CANONICAL SUBDUB WEB MEDIA PREFLIGHT ENDPOINT (BOT-SUBDUB-D2) ───────────
+
+@fastapi_app.post("/internal/v1/uploads/{upload_id}/preflight")
+async def api_internal_subdub_media_preflight(upload_id: str, request: Request):
+    """Canonical Bot Core media preflight authority for Web SubDub (BOT-SUBDUB-D2).
+
+    Server-probed duration is THE authority. Client-sent duration_seconds is IGNORED.
+    Probe failure fails closed with deterministic error_code.
+    """
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.subdub_upload_staging import get_staged_upload
+
+    # --- Actor ID ---
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    # --- Auth ---
+    raw_body = await request.body()
+    path = f"/internal/v1/uploads/{upload_id}/preflight"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    # --- Upload ID validation ---
+    import re as _re_d2
+    _UPLOAD_ID_SAFE = _re_d2.compile(r"^[A-Za-z0-9_-]{1,80}$")
+    if not _UPLOAD_ID_SAFE.match(upload_id):
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error_code": "INVALID_UPLOAD_ID", "message": "Invalid upload_id format"},
+        )
+
+    # --- D1 Owner-bound lookup ---
+    ok, reason, status_code, record = get_staged_upload(upload_id, actor_id=clean_actor)
+    if not ok:
+        return JSONResponse(
+            status_code=status_code,
+            content={"ok": False, "error_code": reason, "message": f"Upload lookup failed: {reason}"},
+        )
+
+    # --- Read physical bytes ---
+    local_path = record.get("local_path", "")
+    file_bytes = b""
+    if local_path:
+        try:
+            with open(local_path, "rb") as f:
+                file_bytes = f.read()
+        except Exception:
+            return JSONResponse(
+                status_code=404,
+                content={"ok": False, "error_code": "STAGED_FILE_MISSING", "message": "Staged file not accessible"},
+            )
+    if not file_bytes:
+        return JSONResponse(
+            status_code=422,
+            content={"ok": False, "error_code": "EMPTY_MEDIA", "message": "Staged file is empty or missing"},
+        )
+
+    # --- Canonical server-side FFprobe ---
+    probe = await subdub_probe_video_bytes(file_bytes)
+    if not probe.get("ok"):
+        detail = probe.get("detail", "unknown_probe_error")
+        error_code = "PROBE_TIMEOUT" if detail == "ffprobe_timeout" else "PROBE_FAILED"
+        return JSONResponse(
+            status_code=422,
+            content={"ok": False, "error_code": error_code, "detail": detail, "message": f"Media probe failed: {detail}"},
+        )
+
+    # --- Duration gate (server-probed duration is authority) ---
+    probed_duration = probe.get("duration", 0.0)
+    gate = subdub_duration_gate_payload(ffprobe_duration=probed_duration)
+
+    preflight_passed = gate.get("duration_gate_result", "") not in ("fail_over_limit",)
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "ok": True,
+            "upload_id": upload_id,
+            "preflight_passed": preflight_passed,
+            "duration_seconds": gate.get("duration_seconds", 0),
+            "detected_duration_source": gate.get("detected_duration_source", ""),
+            "duration_gate_result": gate.get("duration_gate_result", ""),
+            "duration_limit_seconds": gate.get("duration_limit_seconds", 0),
+            "has_video": bool(probe.get("has_video")),
+            "has_audio": bool(probe.get("has_audio")),
+            "content_type": record.get("content_type", ""),
+            "size_bytes": int(probe.get("size", 0)),
+            "is_long_media": gate.get("is_long_media", False),
+            "chunking_enabled": gate.get("chunking_enabled", False),
+        },
+    )
+
+
+# ─── CANONICAL SUBDUB VOICE RESOLUTION ENDPOINTS (BOT-SUBDUB-D3) ────────────
+
+@fastapi_app.get("/internal/v1/voice/profiles")
+async def api_internal_subdub_voice_profiles(request: Request):
+    """Canonical Bot Core owner-bound Voice Vault listing endpoint (BOT-SUBDUB-D3).
+
+    Returns sanitized voice profiles for the authenticated user without raw provider IDs.
+    """
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.subdub_voice_resolution import get_owner_voice_profiles_safe
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    query_actor = str(request.query_params.get("user_id") or "").strip()
+    actor_candidate = header_actor or query_actor
+    clean_actor = normalize_target_user_id(actor_candidate) if actor_candidate else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = "/internal/v1/voice/profiles"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path=path,
+        body_bytes=b"",
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    items = get_owner_voice_profiles_safe(clean_actor)
+    return JSONResponse(
+        status_code=200,
+        content={
+            "ok": True,
+            "data": {"items": items, "total": len(items)},
+            "items": items,
+            "total": len(items),
+        },
+    )
+
+
+@fastapi_app.post("/internal/v1/voice/resolve")
+async def api_internal_subdub_voice_resolve(request: Request):
+    """Canonical Bot Core SubDub voice resolution authority endpoint (BOT-SUBDUB-D3).
+
+    Enforces server-side voice resolution authority and safe projection.
+    Client-sent provider_voice_id or voice_id are strictly rejected as authority.
+    """
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.subdub_voice_resolution import resolve_subdub_voice_authority, to_safe_voice_resolution_projection
+
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:
+        payload = {}
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    body_actor = str(payload.get("target_user_id") or payload.get("user_id") or "").strip()
+    actor_candidate = header_actor or body_actor
+    clean_actor = normalize_target_user_id(actor_candidate) if actor_candidate else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = "/internal/v1/voice/resolve"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    ok, reason, status_code, result = resolve_subdub_voice_authority(clean_actor, payload)
+    safe_data = to_safe_voice_resolution_projection(result)
+
+    if not ok:
+        return JSONResponse(
+            status_code=status_code,
+            content={
+                "ok": False,
+                "error_code": reason,
+                "message": f"Voice resolution failed: {reason}",
+                "detail": safe_data.get("detail", ""),
+            },
+        )
+
+    return JSONResponse(status_code=status_code, content=safe_data)
+
+
+# ─── CANONICAL SUBDUB DURABLE WORKER CLAIM ENDPOINTS (BOT-SUBDUB-D4) ─────────
+
+@fastapi_app.post("/internal/v1/subdub/jobs")
+async def api_internal_subdub_jobs_enqueue(request: Request):
+    """Enqueue a new SubDub job into durable worker queue (BOT-SUBDUB-D4)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.subdub_worker_claim import enqueue_subdub_job
+
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:
+        payload = {}
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    body_actor = str(payload.get("target_user_id") or payload.get("user_id") or "").strip()
+    actor_candidate = header_actor or body_actor
+    clean_actor = normalize_target_user_id(actor_candidate) if actor_candidate else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = "/internal/v1/subdub/jobs"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    mode = str(payload.get("mode") or "dub")
+    job_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
+    max_attempts = int(payload.get("max_attempts") or 3)
+
+    job = enqueue_subdub_job(clean_actor, mode=mode, payload=job_payload, max_attempts=max_attempts)
+    return JSONResponse(status_code=200, content={"ok": True, "job": job})
+
+
+@fastapi_app.post("/internal/v1/subdub/jobs/claim")
+async def api_internal_subdub_jobs_claim(request: Request):
+    """Atomically claim the next queued SubDub job for worker execution (BOT-SUBDUB-D4)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.subdub_worker_claim import claim_next_subdub_job
+
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:
+        payload = {}
+
+    worker_id = str(payload.get("worker_id") or request.headers.get("x-toan-aas-actor-id") or "worker").strip()
+    path = "/internal/v1/subdub/jobs/claim"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=worker_id,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    lease_seconds = int(payload.get("lease_seconds") or 600)
+    job = claim_next_subdub_job(worker_id=worker_id, lease_seconds=lease_seconds)
+    return JSONResponse(status_code=200, content={"ok": True, "job": job})
+
+
+@fastapi_app.post("/internal/v1/subdub/jobs/{job_id}/heartbeat")
+async def api_internal_subdub_jobs_heartbeat(job_id: str, request: Request):
+    """Extend lease on a currently processing SubDub job (BOT-SUBDUB-D4)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.subdub_worker_claim import heartbeat_subdub_job
+
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:
+        payload = {}
+
+    worker_id = str(payload.get("worker_id") or request.headers.get("x-toan-aas-actor-id") or "").strip()
+    path = f"/internal/v1/subdub/jobs/{job_id}/heartbeat"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=worker_id,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    claim_token = str(payload.get("claim_token") or "").strip()
+    lease_seconds = int(payload.get("lease_seconds") or 600)
+
+    ok, reason, data = heartbeat_subdub_job(job_id, worker_id, claim_token, lease_seconds=lease_seconds)
+    if not ok:
+        status_code = 404 if reason == "JOB_NOT_FOUND" else (403 if reason == "FENCING_TOKEN_MISMATCH" else 422)
+        return JSONResponse(status_code=status_code, content={"ok": False, "error_code": reason, "message": f"Heartbeat failed: {reason}"})
+
+    return JSONResponse(status_code=200, content={"ok": True, **data})
+
+
+@fastapi_app.post("/internal/v1/subdub/jobs/{job_id}/complete")
+async def api_internal_subdub_jobs_complete(job_id: str, request: Request):
+    """Mark SubDub job as completed (BOT-SUBDUB-D4)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.subdub_worker_claim import complete_subdub_job
+
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:
+        payload = {}
+
+    worker_id = str(payload.get("worker_id") or request.headers.get("x-toan-aas-actor-id") or "").strip()
+    path = f"/internal/v1/subdub/jobs/{job_id}/complete"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=worker_id,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    claim_token = str(payload.get("claim_token") or "").strip()
+    result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+
+    ok, reason, data = complete_subdub_job(job_id, worker_id, claim_token, result=result)
+    if not ok:
+        status_code = 404 if reason == "JOB_NOT_FOUND" else (403 if reason == "FENCING_TOKEN_MISMATCH" else 422)
+        return JSONResponse(status_code=status_code, content={"ok": False, "error_code": reason, "message": f"Complete failed: {reason}"})
+
+    return JSONResponse(status_code=200, content={"ok": True, **data})
+
+
+@fastapi_app.post("/internal/v1/subdub/jobs/{job_id}/fail")
+async def api_internal_subdub_jobs_fail(job_id: str, request: Request):
+    """Mark SubDub job as failed (BOT-SUBDUB-D4)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.subdub_worker_claim import fail_subdub_job
+
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:
+        payload = {}
+
+    worker_id = str(payload.get("worker_id") or request.headers.get("x-toan-aas-actor-id") or "").strip()
+    path = f"/internal/v1/subdub/jobs/{job_id}/fail"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=worker_id,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    claim_token = str(payload.get("claim_token") or "").strip()
+    error_code = str(payload.get("error_code") or "worker_failed")
+    message = str(payload.get("message") or "")
+
+    ok, reason, data = fail_subdub_job(job_id, worker_id, claim_token, error_code=error_code, message=message)
+    if not ok:
+        status_code = 404 if reason == "JOB_NOT_FOUND" else (403 if reason == "FENCING_TOKEN_MISMATCH" else 422)
+        return JSONResponse(status_code=status_code, content={"ok": False, "error_code": reason, "message": f"Fail failed: {reason}"})
+
+    return JSONResponse(status_code=200, content={"ok": True, **data})
+
+
+@fastapi_app.get("/internal/v1/subdub/jobs/{job_id}")
+async def api_internal_subdub_jobs_get(job_id: str, request: Request):
+    """Retrieve SubDub job status (BOT-SUBDUB-D4)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.subdub_worker_claim import get_subdub_worker_job
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
+
+    path = f"/internal/v1/subdub/jobs/{job_id}"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path=path,
+        body_bytes=b"",
+        actor_id=clean_actor or "system",
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    job = get_subdub_worker_job(job_id, actor_id=clean_actor if clean_actor else None)
+    if not job:
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error_code": "JOB_NOT_FOUND", "message": f"Job #{job_id} not found"},
+        )
+
+    return JSONResponse(status_code=200, content={"ok": True, "job": job})
 
 
 # ─── ENTRY POINT ──────────────────────────────────────────────────────────────

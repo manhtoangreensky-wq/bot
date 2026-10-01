@@ -200,11 +200,12 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
     },
     "self_shot_scene_change": {
         "flow_owner": "selfshot2",
-        "engine_route": "self_shot_scene_change",
+        "engine_route": "controlled_keyframe_image_to_video",
         "executor_product_type": "self_shot_scene_change",
         "source_audio_available": True,
         "return_to": "vproduct|ss2|show|review",
-        "required_capability": "video_to_video",
+        "required_capability": "image_to_video",
+        "fallback_capabilities": ("controlled_keyframe_image_to_video", "image_to_video"),
         "input_type": "source_video",
         "worker_owner": "selfshot2",
         "pricing_mode": "canonical",
@@ -213,11 +214,12 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
     },
     "self_shot_cinematic_transform": {
         "flow_owner": "selfshot3",
-        "engine_route": "self_shot_cinematic_transform",
+        "engine_route": "controlled_keyframe_image_to_video",
         "executor_product_type": "self_shot_cinematic_transform",
         "source_audio_available": True,
         "return_to": "vproduct|ss3|show|review",
-        "required_capability": "video_to_video",
+        "required_capability": "image_to_video",
+        "fallback_capabilities": ("controlled_keyframe_image_to_video", "image_to_video"),
         "input_type": "source_video",
         "worker_owner": "selfshot3",
         "pricing_mode": "canonical",
@@ -381,7 +383,7 @@ def execution_product_for_mode(product_type: str, entry_mode: str = "") -> str:
     return product
 
 
-def commercial_contract(product_type: str) -> dict[str, Any]:
+def commercial_contract(product_type: str, quality_tier_id: int = 0) -> dict[str, Any]:
     """Return the product contract used by catalog, invoice and confirmation.
 
     The contract contains no provider or worker health. Runtime readiness is a
@@ -389,6 +391,18 @@ def commercial_contract(product_type: str) -> dict[str, Any]:
     """
 
     adapter = adapter_for(product_type)
+    scene_duration_seconds = max(1, int(adapter["scene_duration_seconds"]))
+    tier_id = int(quality_tier_id or 0)
+    if tier_id > 0:
+        try:
+            from services import video_ai_real_pricing
+            tier_seconds = int(
+                video_ai_real_pricing.product_video_route_by_tier(tier_id).get("seconds_per_scene") or 0
+            )
+            if tier_seconds > 0:
+                scene_duration_seconds = tier_seconds
+        except Exception:
+            pass
     return {
         "product_type": str(adapter["canonical_product_type"]),
         "flow_owner": str(adapter["flow_owner"]),
@@ -396,6 +410,7 @@ def commercial_contract(product_type: str) -> dict[str, Any]:
         "executor_product_type": str(adapter["executor_product_type"]),
         "pricing_mode": str(adapter["pricing_mode"]),
         "required_capability": str(adapter["required_capability"]),
+        "fallback_capabilities": tuple(adapter.get("fallback_capabilities") or ()),
         "input_type": str(adapter["input_type"]),
         "output_type": str(adapter["output_type"]),
         "worker_owner": str(adapter["worker_owner"]),
@@ -404,7 +419,7 @@ def commercial_contract(product_type: str) -> dict[str, Any]:
         "supports_single_scene": bool(adapter["supports_single_scene"]),
         "supported_quality_tiers": tuple(int(item) for item in adapter["supported_quality_tiers"]),
         "supported_package_tiers": tuple(int(item) for item in adapter["supported_quality_tiers"]),
-        "scene_duration_seconds": max(1, int(adapter["scene_duration_seconds"])),
+        "scene_duration_seconds": scene_duration_seconds,
         "public_planning_enabled": bool(adapter["public_planning_enabled"]),
         "execution_enabled": bool(adapter["execution_enabled"]),
         "execution_blocker": str(adapter["execution_blocker"]),
@@ -420,9 +435,9 @@ def package_compatibility(
     asset_ready: bool = True,
     input_valid: bool = True,
 ) -> dict[str, Any]:
-    contract = commercial_contract(product_type)
     count = max(1, int(scene_count or 1))
     tier_id = int(quality_tier_id or 0)
+    contract = commercial_contract(product_type, quality_tier_id=tier_id)
     blockers: list[str] = []
     if not contract["product_type"]:
         blockers.append("product_owner_missing")

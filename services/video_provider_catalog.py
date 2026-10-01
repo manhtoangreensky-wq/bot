@@ -19,6 +19,9 @@ DEFAULT_CATALOG_PATH = ROOT_DIR / "config" / "video_provider_catalog.json"
 DEFAULT_ROUTING_PATH = ROOT_DIR / "config" / "product_video_model_routing.json"
 DEFAULT_PROVIDER_CHAIN = ["shopaikey_video", "key4u_video", "toanaas_video", "veo", "kling", "generic_http"]
 PROVIDER_ENV_PREFIX = {
+    "fal_video": "FAL_VIDEO",
+    "fal.ai": "FAL_VIDEO",
+    "fal": "FAL_VIDEO",
     "shopaikey_video": "SHOPAIKEY_VIDEO",
     "key4u_video": "KEY4U_VIDEO",
     "toanaas_video": "VIDEO_TOANAAS",
@@ -34,7 +37,7 @@ KEY4U_COST_ROUTING_OVERRIDE_WARNING = "COST_ROUTING_OVERRIDE_KEY4U_PRIMARY"
 PUBLIC_LOW_TIER_KEY4U_WARNING = "PUBLIC_LOW_TIER_PRIMARY_PROVIDER_NOT_COST_OPTIMAL"
 
 _URL_PREFIXES = ("http://", "https://")
-_MEDIA_INPUT_FIELDS = ("storyboard", "image_paths", "source_video_path")
+_MEDIA_INPUT_FIELDS = ("storyboard", "image_paths", "source_video_path", "image")
 _TIER_COST_ORDER = {
     "low": 1,
     "basic": 2,
@@ -88,6 +91,18 @@ _KEY4U_EXCLUSIVE_I2V_ENDPOINT_ENVS = {
         "KEY4U_KLING_IMAGE2VIDEO_SUBMIT_URL",
     ),
 }
+_KEY4U_EXCLUSIVE_I2V_POLL_ENVS = {
+    "kling": (
+        "KEY4U_KLING_I2V_POLL_URL",
+        "KEY4U_KLING_IMAGE2VIDEO_POLL_URL",
+        "KEY4U_KELING_I2V_POLL_URL",
+        "KEY4U_KELING_IMAGE2VIDEO_POLL_URL",
+    ),
+    "keling": (
+        "KEY4U_KELING_I2V_POLL_URL",
+        "KEY4U_KLING_IMAGE2VIDEO_POLL_URL",
+    ),
+}
 _KEY4U_EXCLUSIVE_POLL_ENVS = {
     "kling": ("KEY4U_KLING_VIDEO_POLL_URL", "KEY4U_KLING_POLL_URL", "KEY4U_KELING_VIDEO_POLL_URL"),
     "keling": ("KEY4U_KELING_VIDEO_POLL_URL", "KEY4U_KLING_VIDEO_POLL_URL"),
@@ -123,6 +138,9 @@ def load_product_video_model_routing(path: str | os.PathLike[str] | None = None)
 
 def split_provider_chain(value: Any) -> list[str]:
     aliases = {
+        "fal": "fal_video",
+        "fal.ai": "fal_video",
+        "fal_video": "fal_video",
         "shopaikey": "shopaikey_video",
         "shopai": "shopaikey_video",
         "key4u": "key4u_video",
@@ -210,6 +228,15 @@ def _valid_endpoint_url(value: Any) -> bool:
     return bool(text and text.lower().startswith(_URL_PREFIXES))
 
 
+def _is_auth_key4u_host(host: str) -> bool:
+    h = str(host or "").lower()
+    if not h:
+        return False
+    if h in {"api.key4u.vn", "api.key4u.shop", "key4u.vn", "key4u.shop", "fake.key4u.local"}:
+        return True
+    return h.endswith(".key4u.vn") or h.endswith(".key4u.shop") or h.endswith(".key4u.local")
+
+
 def _first_endpoint(env: dict[str, str] | os._Environ[str], names: tuple[str, ...]) -> tuple[str, str]:
     for name in names:
         value = str(env.get(name) or "").strip()
@@ -241,10 +268,10 @@ def _key4u_official_google_veo_endpoints(
         "https://api.key4u.vn",
     )
     return (
-        f"{base}/v1/video/create",
-        "derived:key4u_unified_video_create",
-        f"{base}/v1/video/query?id={{task_id}}",
-        "derived:key4u_unified_video_query",
+        f"{base}/v1/videos",
+        "derived:key4u_official_veo_videos",
+        f"{base}/v1/videos/{{task_id}}",
+        "derived:key4u_official_veo_poll",
     )
 
 
@@ -252,29 +279,30 @@ def _normalize_key4u_official_google_veo_submit_endpoint(
     submit_url: str,
     submit_source: str,
 ) -> tuple[str, str]:
-    parsed = urllib.parse.urlsplit(str(submit_url or "").strip())
-    if (
-        (parsed.hostname or "").lower() in {"api.key4u.vn", "api.key4u.shop"}
-        and parsed.path.rstrip("/")
-        in {"/v1/videos", "/v1/videos/generations"}
-    ):
-        normalized = urllib.parse.urlunsplit(
-            (
-                parsed.scheme,
-                parsed.netloc,
-                "/v1/video/create",
-                "",
-                "",
-            )
-        )
-        return normalized, (
-            f"normalized_unified:{submit_source or 'key4u_official_videos'}"
-        )
     return submit_url, submit_source
 
 
-def _cost_tier_allowed(product_tier: str, model_cfg: dict[str, Any]) -> bool:
+def _cost_tier_allowed(
+    product_tier: str,
+    model_cfg: dict[str, Any],
+    *,
+    required_capability: str = "",
+    provider: str = "",
+    model: str = "",
+) -> bool:
+    cfg_provider = str(provider or model_cfg.get("provider") or "").strip().lower()
+    cfg_model = str(model or model_cfg.get("model") or "").strip().lower()
+    cfg_family = str(model_cfg.get("family") or "").strip().lower()
     model_cost = str(model_cfg.get("cost_tier") or model_cfg.get("tier") or "").strip().lower()
+
+    if (
+        required_capability == "image_to_video"
+        and (cfg_provider in {"key4u_video", ""} or not cfg_provider)
+        and (cfg_family == "kling" or "kling" in cfg_model)
+        and model_cost in {"", "common"}
+    ):
+        return True
+
     if not model_cost:
         return True
     product_score = _TIER_COST_ORDER.get(normalize_tier(product_tier), 2)
@@ -325,14 +353,6 @@ def model_interface_contract(
                     data,
                     _KEY4U_EXCLUSIVE_ENDPOINT_ENVS.get(family, _KEY4U_EXCLUSIVE_ENDPOINT_ENVS["kling"]),
                 )
-                def _is_auth_key4u_host(host: str) -> bool:
-                    h = str(host or "").lower()
-                    if not h:
-                        return False
-                    if h in {"api.key4u.vn", "api.key4u.shop", "key4u.vn", "key4u.shop", "fake.key4u.local"}:
-                        return True
-                    return h.endswith(".key4u.vn") or h.endswith(".key4u.shop") or h.endswith(".key4u.local")
-
                 if base_submit_url:
                     parsed = urllib.parse.urlsplit(base_submit_url)
                     host = (parsed.hostname or "").lower()
@@ -369,7 +389,31 @@ def model_interface_contract(
                 data,
                 _KEY4U_EXCLUSIVE_ENDPOINT_ENVS.get(family, _KEY4U_EXCLUSIVE_ENDPOINT_ENVS["kling"]),
             )
-        poll_url, poll_source = _first_endpoint(data, _KEY4U_EXCLUSIVE_POLL_ENVS.get(family, ()))
+        if norm_cap == "image_to_video":
+            poll_url, poll_source = _first_endpoint(
+                data,
+                _KEY4U_EXCLUSIVE_I2V_POLL_ENVS.get(family, ()),
+            )
+            if not poll_url:
+                base_poll_url, base_poll_source = _first_endpoint(
+                    data,
+                    _KEY4U_EXCLUSIVE_POLL_ENVS.get(family, ()),
+                )
+                if base_poll_url:
+                    parsed_poll = urllib.parse.urlsplit(base_poll_url)
+                    if _is_auth_key4u_host(parsed_poll.hostname) and "/text2video" in parsed_poll.path:
+                        poll_url = base_poll_url.replace("/text2video", "/image2video")
+                        poll_source = f"canonical_i2v_poll:{base_poll_source}"
+                    else:
+                        poll_url = base_poll_url
+                        poll_source = base_poll_source
+                elif submit_url:
+                    parsed_sub = urllib.parse.urlsplit(submit_url)
+                    if _is_auth_key4u_host(parsed_sub.hostname):
+                        poll_url = f"{submit_url.rstrip('/')}/{{task_id}}"
+                        poll_source = f"derived_from_i2v_submit:{submit_source}"
+        else:
+            poll_url, poll_source = _first_endpoint(data, _KEY4U_EXCLUSIVE_POLL_ENVS.get(family, ()))
         base.update(
             {
                 "provider_interface": "key4u_kling_exclusive",
@@ -391,6 +435,78 @@ def model_interface_contract(
                 }
             )
         return base
+    if family == "xai_grok":
+        norm_cap = str(capability or "").strip().lower().replace("-", "_")
+        if norm_cap == "image_to_video":
+            submit_url, submit_source = _first_endpoint(
+                data,
+                (
+                    "KEY4U_GROK_I2V_SUBMIT_URL",
+                    "KEY4U_GROK_I2V_ENDPOINT",
+                    "KEY4U_OPENAI_VIDEO_SUBMIT_URL",
+                    "KEY4U_OPENAI_VIDEO_ENDPOINT",
+                ),
+            )
+            if not submit_url:
+                candidate_url, candidate_source = _first_endpoint(data, _KEY4U_GENERIC_ENDPOINT_ENVS)
+                if candidate_url:
+                    parsed = urllib.parse.urlsplit(candidate_url)
+                    path = (parsed.path or "").rstrip("/")
+                    if path.endswith("/v1/videos"):
+                        submit_url = candidate_url
+                        submit_source = candidate_source
+                    elif parsed.hostname and ("key4u" in parsed.hostname or parsed.hostname.endswith(".local")):
+                        submit_url = f"{parsed.scheme}://{parsed.netloc}/v1/videos"
+                        submit_source = f"canonical_contract:{candidate_source}"
+            if not submit_url:
+                base_url = next(
+                    (
+                        str(data.get(name) or "").strip().rstrip("/")
+                        for name in ("KEY4U_BASE_URL", "KEY4U_API_BASE")
+                        if _valid_endpoint_url(data.get(name))
+                    ),
+                    "https://api.key4u.vn",
+                )
+                submit_url = f"{base_url}/v1/videos"
+                submit_source = "canonical_contract:key4u_base_url"
+
+            poll_url, poll_source = _first_endpoint(
+                data,
+                (
+                    "KEY4U_GROK_VIDEO_POLL_URL",
+                    "KEY4U_OPENAI_VIDEO_POLL_URL",
+                    "KEY4U_VIDEO_POLL_ENDPOINT",
+                    "KEY4U_VIDEO_POLL_URL",
+                ),
+            )
+            if not poll_url:
+                base_url = next(
+                    (
+                        str(data.get(name) or "").strip().rstrip("/")
+                        for name in ("KEY4U_BASE_URL", "KEY4U_API_BASE")
+                        if _valid_endpoint_url(data.get(name))
+                    ),
+                    "https://api.key4u.vn",
+                )
+                poll_url = f"{base_url}/v1/video/query?id={{task_id}}"
+                poll_source = "canonical_contract:key4u_query"
+
+            base.update(
+                {
+                    "provider_interface": "key4u_openai_video_multipart_i2v",
+                    "provider_endpoint_source": submit_source,
+                    "provider_submit_url_override": submit_url,
+                    "submit_url": submit_url,
+                    "provider_poll_url_override": poll_url,
+                    "poll_url": poll_url,
+                    "provider_poll_endpoint_source": poll_source,
+                    "model_requires_exclusive_interface": True,
+                    "contract_validation_status": "ok",
+                    "contract_block_reason": "",
+                    "submit_skipped_due_to_contract": False,
+                }
+            )
+            return base
     if family in {"minimax_hailuo", "google_veo"}:
         submit_url, submit_source = _first_endpoint(data, _KEY4U_EXCLUSIVE_ENDPOINT_ENVS.get(family, ()))
         poll_url, poll_source = _first_endpoint(data, _KEY4U_EXCLUSIVE_POLL_ENVS.get(family, ()))
@@ -551,6 +667,8 @@ def _routing_candidates(
     catalog: dict[str, Any],
     routing: dict[str, Any],
     env: dict[str, str] | os._Environ[str],
+    *,
+    required_capability: str = "",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool]:
     candidates: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
@@ -601,6 +719,18 @@ def _routing_candidates(
                 candidates.append(candidate)
                 break
 
+    if required_capability == "image_to_video" and "key4u_video" in provider_chain:
+        has_kling = any(
+            str(c.get("provider") or "") == "key4u_video" and str(c.get("model") or "") == "kling-v3"
+            for c in candidates
+        )
+        if not has_kling:
+            kling_cand = _candidate_from_entry("key4u_video", "kling-v3", f"config:i2v:{tier}", catalog)
+            kling_cand["role"] = "primary"
+            kling_cand["cost_tier"] = "common"
+            kling_cand["request_defaults"] = {"model_name": "kling-v3", "duration": 8}
+            candidates.insert(0, kling_cand)
+
     deduped: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str]] = set()
     for item in candidates:
@@ -627,7 +757,7 @@ def resolve_product_video_model(
     route = routing or load_product_video_model_routing()
     tier_key = normalize_tier(tier, route)
     chain = split_provider_chain(provider_chain) if provider_chain not in (None, "", []) else effective_provider_chain(data, route)
-    candidates, rejected, env_override_detected = _routing_candidates(tier_key, chain, cat, route, data)
+    candidates, rejected, env_override_detected = _routing_candidates(tier_key, chain, cat, route, data, required_capability=required_capability)
     default_chain = split_provider_chain(route.get("default_provider_chain") or DEFAULT_PROVIDER_CHAIN)
     key4u_primary_override = bool(tier_key in {"low", "basic"} and chain and chain[0] == "key4u_video")
     candidate_list_compact: list[dict[str, Any]] = []
@@ -635,7 +765,7 @@ def resolve_product_video_model(
         provider = str(candidate.get("provider") or "")
         model = str(candidate.get("model") or "")
         cfg = dict(candidate.get("config") or {})
-        candidate_interface = model_interface_contract(provider, model, env=data, catalog=cat)
+        candidate_interface = model_interface_contract(provider, model, capability=required_capability, env=data, catalog=cat)
         candidate_list_compact.append(
             {
                 "provider": provider,
@@ -654,11 +784,11 @@ def resolve_product_video_model(
         provider = str(item.get("provider") or "")
         model = str(item.get("model") or "")
         cfg = dict(item.get("config") or {})
-        candidate_interface = model_interface_contract(provider, model, env=data, catalog=cat)
+        candidate_interface = model_interface_contract(provider, model, capability=required_capability, env=data, catalog=cat)
         if not cfg:
             rejected.append({"provider": provider, "model": model, "reason": MODEL_UNKNOWN, "source": item.get("source")})
             continue
-        if not _cost_tier_allowed(tier_key, cfg):
+        if not _cost_tier_allowed(tier_key, cfg, required_capability=required_capability, provider=provider, model=model):
             rejected.append({"provider": provider, "model": model, "reason": "model_cost_tier_exceeds_product_tier", "source": item.get("source")})
             continue
         if requires_concat and not cfg.get("supports_concat"):
@@ -721,12 +851,13 @@ def resolve_product_video_model(
             fallback_interface = model_interface_contract(
                 fallback_provider,
                 fallback_model,
+                capability=required_capability,
                 env=data,
                 catalog=cat,
             )
             if (
                 not fallback_cfg
-                or not _cost_tier_allowed(tier_key, fallback_cfg)
+                or not _cost_tier_allowed(tier_key, fallback_cfg, required_capability=required_capability, provider=fallback_provider, model=fallback_model)
                 or (requires_concat and not fallback_cfg.get("supports_concat"))
                 or not _model_supports(
                     fallback_cfg,

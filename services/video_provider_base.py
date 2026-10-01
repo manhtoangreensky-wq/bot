@@ -8,8 +8,12 @@ network work unless an adapter method is called explicitly.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import os
 import shutil
+import socket
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -218,6 +222,31 @@ def _reject_non_video_payload(path: Path, content_type: str = "") -> str:
     return ""
 
 
+class IncompleteDownloadError(Exception):
+    """Raised when downloaded byte count does not match Content-Length header."""
+    pass
+
+
+TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
+NON_RETRYABLE_HTTP_STATUS_CODES = {400, 401, 403, 404}
+
+
+def _is_transient_download_error(exc: BaseException) -> bool:
+    """Determine if a download failure is transient and eligible for bounded retry."""
+    if isinstance(exc, (TimeoutError, socket.timeout, ConnectionResetError, http.client.RemoteDisconnected, http.client.IncompleteRead, IncompleteDownloadError)):
+        return True
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in TRANSIENT_HTTP_STATUS_CODES
+    if isinstance(exc, urllib.error.URLError):
+        reason = getattr(exc, "reason", None)
+        if isinstance(reason, (TimeoutError, socket.timeout, ConnectionResetError, ConnectionRefusedError, socket.gaierror, http.client.RemoteDisconnected, http.client.IncompleteRead)):
+            return True
+        reason_str = str(reason or "").lower()
+        if any(term in reason_str for term in ("timed out", "timeout", "connection reset", "connection refused", "temporary", "nameresolution", "getaddrinfo failed")):
+            return True
+    return False
+
+
 def materialize_video_url(
     url: str,
     *,
@@ -225,6 +254,7 @@ def materialize_video_url(
     output_dir: str = "",
     timeout_seconds: int = 180,
     filename_prefix: str = "provider_video",
+    sleep_func: Any = None,
 ) -> VideoArtifactResult:
     source = str(url or "").strip()
     if not source:
@@ -255,6 +285,11 @@ def materialize_video_url(
         "download_error_message_masked": "",
         "mp4_validator_result": "not_run",
         "first_bytes_hex_safe": "",
+        "download_attempts": 0,
+        "download_retries": 0,
+        "part_file_used": True,
+        "content_length_verified": False,
+        "transient_retry_attempted": False,
     }
     out_dir = Path(output_dir or os.environ.get("VIDEO_PROVIDER_OUTPUT_DIR") or os.environ.get("VIDEO_PROVIDER_WORK_DIR") or "video_outputs")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -271,60 +306,148 @@ def materialize_video_url(
             self.redirect_count += 1
             return super().redirect_request(req, fp, code, msg, headers, newurl)
 
-    try:
-        if os.path.isfile(source):
-            shutil.copyfile(source, target)
-            content_type = "video/mp4"
-            diagnostics["download_http_status"] = 200
-            diagnostics["download_final_url_host"] = "local_file"
-        else:
-            request = urllib.request.Request(source, headers={"User-Agent": "TOAN-AAS-video-provider/1.0"})
-            redirect_handler = _CountingRedirectHandler()
-            opener = urllib.request.build_opener(redirect_handler)
-            with opener.open(request, timeout=max(1, int(timeout_seconds or 180))) as response:
-                content_type = str(response.headers.get("Content-Type") or "")
-                final_url = str(response.geturl() or "")
-                final_parts = urllib.parse.urlsplit(final_url)
-                try:
-                    content_length = int(response.headers.get("Content-Length") or 0)
-                except Exception:
-                    content_length = 0
-                diagnostics.update(
-                    {
-                        "download_http_status": int(getattr(response, "status", 0) or response.getcode() or 0),
-                        "download_final_url_host": str(final_parts.hostname or "")[:160],
-                        "download_redirect_count": int(redirect_handler.redirect_count),
-                        "download_content_length": content_length,
-                    }
-                )
-                with target.open("wb") as handle:
-                    shutil.copyfileobj(response, handle)
-    except Exception as exc:
-        diagnostics.update(
-            {
+    if os.path.isfile(source):
+        part_file = out_dir / f"{filename_prefix}_{safe_job}.attempt_1.part"
+        diagnostics["download_attempts"] = 1
+        diagnostics["download_retries"] = 0
+        diagnostics["download_http_status"] = 200
+        diagnostics["download_final_url_host"] = "local_file"
+        content_type = "video/mp4"
+        try:
+            if Path(source).resolve() != target.resolve():
+                shutil.copyfile(source, part_file)
+                candidate_file = part_file
+                cleanup_on_fail = True
+            else:
+                candidate_file = target
+                cleanup_on_fail = False
+        except Exception as exc:
+            diagnostics.update({
                 "download_error_class": type(exc).__name__,
                 "download_error_message_masked": type(exc).__name__,
                 "mp4_validator_result": "not_run_download_failed",
-            }
-        )
-        return VideoArtifactResult(
-            ok=False,
-            local_path=str(target),
-            error_code="provider_download_failed",
-            error_message=type(exc).__name__,
-            diagnostics=diagnostics,
-        )
+            })
+            if part_file.exists():
+                try:
+                    part_file.unlink()
+                except OSError:
+                    pass
+            return VideoArtifactResult(
+                ok=False,
+                local_path=str(target),
+                error_code="provider_download_failed",
+                error_message=type(exc).__name__,
+                diagnostics=diagnostics,
+            )
+    else:
+        max_attempts = 2
+        last_exc: BaseException | None = None
+        transfer_success = False
+        candidate_file: Path | None = None
+        cleanup_on_fail = True
+
+        for attempt in range(1, max_attempts + 1):
+            diagnostics["download_attempts"] = attempt
+            part_file = out_dir / f"{filename_prefix}_{safe_job}.attempt_{attempt}.part"
+            candidate_file = part_file
+            if part_file.exists():
+                try:
+                    part_file.unlink()
+                except OSError:
+                    pass
+
+            try:
+                request = urllib.request.Request(source, headers={"User-Agent": "TOAN-AAS-video-provider/1.0"})
+                redirect_handler = _CountingRedirectHandler()
+                opener = urllib.request.build_opener(redirect_handler)
+                with opener.open(request, timeout=max(1, int(timeout_seconds or 180))) as response:
+                    content_type = str(response.headers.get("Content-Type") or "")
+                    final_url = str(response.geturl() or "")
+                    final_parts = urllib.parse.urlsplit(final_url)
+                    try:
+                        content_length = int(response.headers.get("Content-Length") or 0)
+                    except Exception:
+                        content_length = 0
+                    status_code = int(getattr(response, "status", 0) or response.getcode() or 0)
+                    diagnostics.update({
+                        "download_http_status": status_code,
+                        "download_final_url_host": str(final_parts.hostname or "")[:160],
+                        "download_redirect_count": int(redirect_handler.redirect_count),
+                        "download_content_length": content_length,
+                    })
+                    with part_file.open("wb") as handle:
+                        shutil.copyfileobj(response, handle)
+
+                transferred = int(part_file.stat().st_size) if part_file.exists() else 0
+                diagnostics["download_bytes"] = transferred
+
+                if content_length > 0 and transferred != content_length:
+                    raise IncompleteDownloadError(
+                        f"Content-Length mismatch: transferred {transferred} != {content_length} Content-Length"
+                    )
+                if content_length > 0:
+                    diagnostics["content_length_verified"] = True
+
+                transfer_success = True
+                break
+
+            except Exception as exc:
+                last_exc = exc
+                diagnostics.update({
+                    "download_error_class": type(exc).__name__,
+                    "download_error_message_masked": type(exc).__name__,
+                    "mp4_validator_result": "not_run_download_failed",
+                })
+                if isinstance(exc, urllib.error.HTTPError):
+                    diagnostics["download_http_status"] = exc.code
+
+                if part_file.exists():
+                    try:
+                        part_file.unlink()
+                    except OSError:
+                        pass
+
+                if attempt < max_attempts and _is_transient_download_error(exc):
+                    diagnostics["transient_retry_attempted"] = True
+                    diagnostics["download_retries"] = diagnostics.get("download_retries", 0) + 1
+                    backoff = float(os.environ.get("VIDEO_PROVIDER_DOWNLOAD_RETRY_BACKOFF_SECONDS") or 1.0)
+                    sleeper = sleep_func or time.sleep
+                    sleeper(backoff)
+                    continue
+                else:
+                    break
+
+        if not transfer_success:
+            if candidate_file and candidate_file.exists():
+                try:
+                    candidate_file.unlink()
+                except OSError:
+                    pass
+            return VideoArtifactResult(
+                ok=False,
+                local_path=str(target),
+                error_code="provider_download_failed",
+                error_message=type(last_exc).__name__ if last_exc else "download_failed",
+                diagnostics=diagnostics,
+            )
+
     diagnostics["download_content_type"] = content_type[:160]
-    size = int(target.stat().st_size) if target.exists() else 0
+    size = int(candidate_file.stat().st_size) if candidate_file and candidate_file.exists() else 0
     diagnostics["download_bytes"] = size
     try:
-        diagnostics["first_bytes_hex_safe"] = target.read_bytes()[:16].hex()
+        diagnostics["first_bytes_hex_safe"] = candidate_file.read_bytes()[:16].hex() if candidate_file else ""
     except Exception:
         diagnostics["first_bytes_hex_safe"] = ""
+
     minimum_bytes = max(1, int(os.environ.get("VIDEO_PROVIDER_MIN_VIDEO_BYTES") or 1024))
-    rejected = _reject_non_video_payload(target, content_type)
+    rejected = _reject_non_video_payload(candidate_file, content_type)
     if rejected:
         diagnostics["mp4_validator_result"] = rejected
+        if cleanup_on_fail and candidate_file and candidate_file.exists():
+            try:
+                candidate_file.unlink()
+            except OSError:
+                pass
         return VideoArtifactResult(
             ok=False,
             local_path=str(target),
@@ -333,8 +456,14 @@ def materialize_video_url(
             content_type=content_type,
             diagnostics=diagnostics,
         )
+
     if size < minimum_bytes:
         diagnostics["mp4_validator_result"] = "output_below_minimum_bytes"
+        if cleanup_on_fail and candidate_file and candidate_file.exists():
+            try:
+                candidate_file.unlink()
+            except OSError:
+                pass
         return VideoArtifactResult(
             ok=False,
             local_path=str(target),
@@ -343,9 +472,15 @@ def materialize_video_url(
             content_type=content_type,
             diagnostics=diagnostics,
         )
-    probe = video_final_output.probe_video(str(target))
+
+    probe = video_final_output.probe_video(str(candidate_file))
     if not probe.get("ok"):
         diagnostics["mp4_validator_result"] = str(probe.get("reason") or "output_unreadable")
+        if cleanup_on_fail and candidate_file and candidate_file.exists():
+            try:
+                candidate_file.unlink()
+            except OSError:
+                pass
         return VideoArtifactResult(
             ok=False,
             local_path=str(target),
@@ -354,11 +489,38 @@ def materialize_video_url(
             content_type=content_type,
             diagnostics=diagnostics,
         )
+
     diagnostics["mp4_validator_result"] = "valid_mp4"
+
+    if candidate_file != target:
+        try:
+            os.replace(candidate_file, target)
+        except Exception as exc:
+            diagnostics.update({
+                "download_error_class": type(exc).__name__,
+                "download_error_message_masked": type(exc).__name__,
+                "mp4_validator_result": "artifact_finalize_failed",
+            })
+            if candidate_file.exists():
+                try:
+                    candidate_file.unlink()
+                except OSError:
+                    pass
+            return VideoArtifactResult(
+                ok=False,
+                local_path=str(target),
+                bytes=0,
+                error_code="artifact_finalize_failed",
+                error_message=type(exc).__name__,
+                content_type=content_type,
+                diagnostics=diagnostics,
+            )
+
     digest = hashlib.sha256()
     with target.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
+
     return VideoArtifactResult(
         ok=True,
         local_path=str(target),

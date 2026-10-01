@@ -4407,7 +4407,9 @@ def _confirm_product_video_invoice_atomic(
             conn.rollback()
         except Exception:
             pass
-        return {
+        from services.video_real_render_connector import RealVideoRenderError
+        diagnostics = getattr(exc, "diagnostics", None)
+        out = {
             "ok": False,
             "reason": "dispatch_outbox_transaction_failed",
             "public_message": "Hệ thống chưa thể bắt đầu tạo video lúc này. TOAN AAS chưa trừ Xu. Anh/chị vui lòng thử lại sau.",
@@ -4417,6 +4419,11 @@ def _confirm_product_video_invoice_atomic(
             "charge": 0,
             "charged_xu": 0,
         }
+        if isinstance(exc, RealVideoRenderError):
+            out["blocker"] = str(getattr(exc, "args", [""])[0])
+            if diagnostics:
+                out["diagnostics"] = diagnostics
+        return out
 
 
 def confirm_video_project_invoice(
@@ -4932,6 +4939,9 @@ def _product_video_requested_product_type(
         invoice.get("public_product_type"),
         invoice.get("video_product_type"),
         invoice.get("product_type"),
+        project.get("product_type"),
+        project.get("video_product_type"),
+        project.get("public_product_type"),
         project.get("profile_id"),
     ):
         token = str(value or "").strip()
@@ -5140,32 +5150,56 @@ def build_product_video_confirm_kickoff_payload(
         or project.get("quality_key")
         or ""
     ).strip()
-    is_tier_700 = _as_int(tier, 0) == 700 or quality_key == "kling_long_audio_15"
+    tier_int = _as_int(tier, 0)
+    canonical_tier_seconds = 0
+    if tier_int > 0:
+        try:
+            from services import video_ai_real_pricing
+            canonical_tier_seconds = int(
+                video_ai_real_pricing.product_video_route_by_tier(tier_int).get("seconds_per_scene") or 0
+            )
+        except Exception:
+            pass
+    is_tier_700 = tier_int == 700 or quality_key == "kling_long_audio_15"
+    if is_tier_700:
+        default_scene_seconds = 15
+    elif canonical_tier_seconds > 0:
+        default_scene_seconds = canonical_tier_seconds
+    else:
+        default_scene_seconds = PRODUCT_VIDEO_SCENE_SECONDS
+
     scene_duration_limit = (
         PRODUCT_VIDEO_MAX_UIFLOW3_SCENE_SECONDS
         if (
             is_tier_700
+            or default_scene_seconds > PRODUCT_VIDEO_SCENE_SECONDS
             or str(asset_pack.get("uiflow3_handoff_sha256") or "").strip()
         )
-        else PRODUCT_VIDEO_SCENE_SECONDS
-    )
-    default_scene_seconds = 15 if is_tier_700 else PRODUCT_VIDEO_SCENE_SECONDS
-    scene_duration = max(
-        1,
-        min(
-            scene_duration_limit,
-            _as_int(
-                invoice.get("scene_duration_seconds")
-                or invoice.get("scene_seconds")
-                or asset_pack.get("scene_duration_seconds")
-                or asset_pack.get("scene_seconds"),
-                default_scene_seconds,
-            ),
-        ),
+        else max(PRODUCT_VIDEO_SCENE_SECONDS, default_scene_seconds)
     )
     requested_product_type = _product_video_requested_product_type(project, asset_pack, invoice)
     engine_contract = product_video_engine_contract(requested_product_type)
     execution_product_type = str(engine_contract.get("product_type") or requested_product_type)
+    is_selfshot = (
+        requested_product_type in {"self_shot_scene_change", "self_shot_cinematic_transform"}
+        or execution_product_type in {"self_shot_scene_change", "self_shot_cinematic_transform"}
+    )
+    if is_selfshot and canonical_tier_seconds > 0:
+        scene_duration = canonical_tier_seconds
+    else:
+        scene_duration = max(
+            1,
+            min(
+                scene_duration_limit,
+                _as_int(
+                    invoice.get("scene_duration_seconds")
+                    or invoice.get("scene_seconds")
+                    or asset_pack.get("scene_duration_seconds")
+                    or asset_pack.get("scene_seconds"),
+                    default_scene_seconds,
+                ),
+            ),
+        )
     required_capability = str(engine_contract.get("required_capability") or "text_to_video")
     eligibility_snapshot = (
         asset_pack.get("provider_eligibility_snapshot")
@@ -5221,6 +5255,69 @@ def build_product_video_confirm_kickoff_payload(
         requires_concat=per_scene_orchestration,
     )
     model_metadata = model_metadata_from_resolution(model_resolution)
+    is_storyboard_job = bool(
+        execution_product_type in {"storyboard_prompt", "storyboard_to_video"}
+        or requested_product_type in {"storyboard_prompt", "storyboard_to_video"}
+        or str(engine_contract.get("engine_route") or "").strip().lower() == "storyboard_to_video"
+        or str(engine_contract.get("engine_adapter") or "").strip().lower() == "storyboard_scene_image_video_engine"
+    )
+    if is_storyboard_job:
+        storyboard_provider = str(
+            invoice.get("selected_provider")
+            or asset_pack.get("selected_provider")
+            or (job or {}).get("selected_provider")
+            or model_metadata.get("selected_provider")
+            or (chain[0] if chain else "")
+            or ""
+        ).strip().lower()
+        if storyboard_provider in {"shopai", "shopaikey", "shopaikey_video"}:
+            storyboard_provider = "shopaikey_video"
+        elif storyboard_provider in {"key4u", "k4u", "key4u_video"}:
+            storyboard_provider = "key4u_video"
+
+        explicit_storyboard_model = str(
+            invoice.get("pinned_wire_model")
+            or invoice.get("selected_model")
+            or invoice.get("model")
+            or asset_pack.get("pinned_wire_model")
+            or asset_pack.get("selected_model")
+            or asset_pack.get("model")
+            or (job or {}).get("selected_model")
+            or (job or {}).get("model")
+            or ""
+        ).strip()
+
+        from services.video_real_render_connector import (
+            STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER,
+            _resolve_storyboard_i2v_model,
+        )
+
+        if explicit_storyboard_model and not storyboard_provider:
+            if explicit_storyboard_model in STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER.get("shopaikey_video", set()):
+                storyboard_provider = "shopaikey_video"
+            elif explicit_storyboard_model in STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER.get("key4u_video", set()):
+                storyboard_provider = "key4u_video"
+
+        if not storyboard_provider:
+            storyboard_provider = "shopaikey_video"
+
+        resolved_model = _resolve_storyboard_i2v_model(
+            job,
+            asset_pack=asset_pack,
+            invoice=invoice,
+            provider=storyboard_provider,
+        )
+        family = "google_veo" if storyboard_provider == "shopaikey_video" else "kling"
+        model_metadata["selected_provider"] = storyboard_provider
+        model_metadata["selected_model"] = resolved_model
+        model_metadata["pinned_wire_model"] = resolved_model
+        model_metadata["model"] = resolved_model
+        model_metadata["selected_family"] = family
+        if "provider_model_map" in model_metadata and isinstance(model_metadata["provider_model_map"], dict):
+            model_metadata["provider_model_map"][storyboard_provider] = resolved_model
+        else:
+            model_metadata["provider_model_map"] = {storyboard_provider: resolved_model}
+        chain = [storyboard_provider]
     if scene_tasks:
         for task in scene_tasks:
             task.update(
@@ -5244,15 +5341,18 @@ def build_product_video_confirm_kickoff_payload(
                 }
             )
     next_poll_at = now_text(current_dt + timedelta(seconds=25))
-    preconfirm_candidate_keys = [
-        str(item or "").strip()
-        for item in (
-            eligibility_snapshot.get("eligible_provider_keys")
-            or asset_pack.get("preconfirm_candidate_keys")
-            or chain
-        )
-        if str(item or "").strip()
-    ]
+    if is_storyboard_job:
+        preconfirm_candidate_keys = [storyboard_provider]
+    else:
+        preconfirm_candidate_keys = [
+            str(item or "").strip()
+            for item in (
+                eligibility_snapshot.get("eligible_provider_keys")
+                or asset_pack.get("preconfirm_candidate_keys")
+                or chain
+            )
+            if str(item or "").strip()
+        ]
     provider_chain_resolved = bool(chain and preconfirm_candidate_keys and model_resolution.get("ok"))
     dispatch_blocker = ""
     if not chain:
@@ -5333,6 +5433,7 @@ def build_product_video_confirm_kickoff_payload(
         "duration_seconds": scene_count * scene_duration,
         "scene_tasks": scene_tasks,
         "provider_scene_tasks": scene_tasks,
+        "scene_cards": [dict(item) for item in (project_scene_cards or asset_pack.get("scene_cards") or invoice.get("scene_cards") or []) if isinstance(item, dict)],
         "scene_tasks_total": scene_count if per_scene_orchestration else 0,
         "scene_tasks_created_count": scene_count if per_scene_orchestration else 0,
         "scene_tasks_submitted": 0,
@@ -5370,8 +5471,35 @@ def build_product_video_confirm_kickoff_payload(
         "multi_scene_health_gate": dict(multi_scene_health_gate) if isinstance(multi_scene_health_gate, dict) else {},
         "primary_selected_due_to_health": str(asset_pack.get("primary_selected_due_to_health") or invoice.get("primary_selected_due_to_health") or ""),
         "provider_degraded_reason": str(asset_pack.get("provider_degraded_reason") or invoice.get("provider_degraded_reason") or ""),
-        "effective_primary_for_low_basic": str(asset_pack.get("effective_primary_for_low_basic") or invoice.get("effective_primary_for_low_basic") or (chain[0] if chain else "")),
+        "effective_primary_for_low_basic": str(
+            asset_pack.get("effective_primary_for_low_basic")
+            or invoice.get("effective_primary_for_low_basic")
+            or (storyboard_provider if is_storyboard_job else (chain[0] if chain else ""))
+        ),
         **model_metadata,
+        "model": str(
+            model_metadata.get("selected_model")
+            or model_metadata.get("model")
+            or invoice.get("selected_model")
+            or invoice.get("model")
+            or (model_metadata.get("provider_model_map") or {}).get(str(model_metadata.get("selected_provider") or ""))
+            or ""
+        ),
+        "selected_model": str(
+            model_metadata.get("selected_model")
+            or model_metadata.get("model")
+            or invoice.get("selected_model")
+            or invoice.get("model")
+            or (model_metadata.get("provider_model_map") or {}).get(str(model_metadata.get("selected_provider") or ""))
+            or ""
+        ),
+        "pinned_wire_model": str(
+            model_metadata.get("pinned_wire_model")
+            or model_metadata.get("selected_model")
+            or invoice.get("pinned_wire_model")
+            or invoice.get("selected_model")
+            or ""
+        ),
         "public_confirm_kickoff_attempted": True,
         "public_confirm_kickoff_success": provider_chain_resolved,
         "worker_dispatch_attempted": True,
@@ -10747,6 +10875,40 @@ def hydrate_video_job_payload(conn: sqlite3.Connection, job: dict[str, Any]) -> 
         for key in product_video_public_seam.WORKER_ROUTE_PAYLOAD_KEYS
         if key in persisted_payload
     }
+    worker_hydration_keys = (
+        "product_type",
+        "public_product_type",
+        "video_product_type",
+        "engine_route",
+        "engine_adapter",
+        "orchestration_mode",
+        "provider_orchestration_mode",
+        "required_capability",
+        "provider_capability",
+        "selected_provider",
+        "selected_model",
+        "model",
+        "pinned_wire_model",
+        "selected_family",
+        "scene_count",
+        "scene_cards",
+        "scene_tasks",
+        "duration_seconds",
+        "scene_duration_seconds",
+        "scene_seconds",
+        "charge_policy",
+        "source",
+        "render_mode",
+        "real_renderer_required",
+        "provider_call",
+        "provider_chain",
+        "provider_order",
+        "provider_interface",
+        "provider_submit_url_override",
+    )
+    for key in worker_hydration_keys:
+        if key in persisted_payload and key not in route_payload:
+            route_payload[key] = persisted_payload[key]
     return {
         **job,
         **route_payload,

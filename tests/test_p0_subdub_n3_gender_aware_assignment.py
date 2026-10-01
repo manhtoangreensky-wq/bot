@@ -217,8 +217,8 @@ class TestN3GenderAwareVoiceAssignmentR1(unittest.TestCase):
         d2 = smart.decide_smart_multivoice(cues, validated_pools=TEST_POOLS, acoustic_classifications=classifications, assignment_seed="determinism_seed_777")
         self.assertEqual(d1.speaker_voice_map, d2.speaker_voice_map)
 
-    def test_case_09_ambiguous_classification_fails_closed(self):
-        """Case 9: ambiguous classification (e.g. low confidence < 0.75 or ambiguous label) -> fail closed."""
+    def test_case_09_one_ambiguous_register_uses_distinct_approved_voice(self):
+        """Case 9: one unresolved register degrades without collapsing speaker identity."""
         cues = [
             {"cue_id": "c1", "speaker_id": "spk_1", "text": "A", "start_ms": 0, "end_ms": 1000},
             {"cue_id": "c2", "speaker_id": "spk_2", "text": "B", "start_ms": 1000, "end_ms": 2000},
@@ -234,9 +234,21 @@ class TestN3GenderAwareVoiceAssignmentR1(unittest.TestCase):
             validated_pools=TEST_POOLS,
             acoustic_classifications=ambiguous_classifications,
         )
-        self.assertEqual(decision.output_mode, smart.OUTPUT_MODE_FAILED)
-        self.assertEqual(decision.strategy, smart.STRATEGY_FAILED)
-        self.assertEqual(decision.tts_cues, [])
+        self.assertEqual(decision.output_mode, smart.OUTPUT_MODE_DUBBED_MULTI)
+        self.assertEqual(decision.strategy, smart.STRATEGY_GENERIC_MULTI)
+        self.assertEqual(decision.effective_speaker_count, 3)
+        self.assertEqual(decision.effective_voice_count, 3)
+        self.assertEqual(set(decision.speaker_voice_map), {"spk_1", "spk_2", "spk_3"})
+        self.assertEqual(len(set(decision.speaker_voice_map.values())), 3)
+        self.assertLessEqual(
+            set(decision.speaker_voice_map.values()),
+            set(TEST_POOLS["low"] + TEST_POOLS["high"]),
+        )
+        self.assertEqual(decision.fallback_level, 1)
+        self.assertEqual(
+            decision.fallback_reason,
+            "n3_unknown_register_distinct_voice",
+        )
 
     def test_case_10_classifier_unavailable_or_error_fails_closed_no_render(self):
         """Case 10: classifier unavailable or error -> structured failure, no render."""
@@ -321,6 +333,50 @@ class TestN3GenderAwareVoiceAssignmentR1(unittest.TestCase):
             self.assertEqual(mock_shopaikey.call_count, 0)
             self.assertIn("tts_unavailable", str(ctx.exception))
 
+    def test_case_13_smart_multivoice_pipeline_source_override(self):
+        """Case 13: _pipeline_source_path_override propagated for auto_smart_multivoice in pipeline state."""
+        state = {
+            "auto_smart_multivoice": True,
+            "input_save": {
+                "original_source_path": "/fake/workspace/original.mp4",
+                "path": "/fake/workspace/normalized.mp4",
+            },
+        }
+        self.assertTrue(smart.is_auto_smart_multivoice_state(state))
+        override = (
+            {"_pipeline_source_path_override": str(state["input_save"].get("original_source_path") or state["input_save"].get("path") or "")}
+            if smart.is_auto_smart_multivoice_state(state)
+            and str(state["input_save"].get("original_source_path") or state["input_save"].get("path") or "")
+            else {}
+        )
+        self.assertEqual(override["_pipeline_source_path_override"], "/fake/workspace/original.mp4")
+
+    def test_case_14_multi_speaker_gender_onnx_dominance_and_confidence(self):
+        """Case 14: multi speaker gender onnx accepts 2/3 dominance and calculates confidence."""
+        from services import subdub_multi_speaker_gender_onnx as multi_onnx
+        self.assertAlmostEqual(multi_onnx.MIN_VOTE_DOMINANCE, 2.0 / 3.0, places=4)
+        cues_male_dominant = [
+            {"start": 0.0, "end": 1.0, "male_score": 0.8, "female_score": 0.2},
+            {"start": 1.5, "end": 2.5, "male_score": 0.9, "female_score": 0.1},
+            {"start": 3.0, "end": 4.0, "male_score": 0.3, "female_score": 0.7},
+        ]
+        res, rows = multi_onnx._aggregate_one_gender_result("spk_test", cues_male_dominant)
+        self.assertEqual(res["voice_gender"], "male")
+        self.assertEqual(res["voice_register"], "low")
+        self.assertGreaterEqual(res["confidence"], 0.75)
+
+    def test_case_15_weak_acoustic_margin_fails_closed(self):
+        """Case 15: vote dominance with weak acoustic margins (< 0.08) fails closed."""
+        from services import subdub_multi_speaker_gender_onnx as multi_onnx
+        weak_cues = [
+            {"start": 0.0, "end": 1.0, "male_score": 0.53, "female_score": 0.47},
+            {"start": 1.0, "end": 2.0, "male_score": 0.53, "female_score": 0.47},
+            {"start": 2.0, "end": 3.0, "male_score": 0.47, "female_score": 0.53},
+        ]
+        with self.assertRaises(speaker_cast.AutoCastManualRequired):
+            multi_onnx._aggregate_one_gender_result("spk_weak", weak_cues)
+
 
 if __name__ == "__main__":
     unittest.main()
+
