@@ -221760,9 +221760,9 @@ async def cmd_operator_n8n_workflow(update: Update, context: ContextTypes.DEFAUL
 
 async def handle_operator_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("Chỉ Admin được dùng.", show_alert=True)
+    await query.answer()
     action = query.data.split("|", 1)[1]
     if action == "root":
         return await query.edit_message_text(
