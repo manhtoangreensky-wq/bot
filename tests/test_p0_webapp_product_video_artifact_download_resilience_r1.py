@@ -294,7 +294,7 @@ def test_html_error_payload_no_retry(tmp_path, monkeypatch, mock_probe):
 
     out_dir = tmp_path / "out_html"
     artifact = materialize_video_url(
-        "https://cdn.example.com/videos/error.html",
+        "https://cdn.example.com/videos/error_payload.mp4",
         job_id="job_html",
         output_dir=str(out_dir),
         sleep_func=lambda _s: None,

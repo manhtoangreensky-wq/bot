@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import hashlib
 import http.client
+import ipaddress
 import os
+import re
 import shutil
 import socket
 import time
@@ -231,8 +233,224 @@ TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
 NON_RETRYABLE_HTTP_STATUS_CODES = {400, 401, 403, 404}
 
 
+SHOPAIKEY_EXACT_HOST: str = "api.shopaikey.com"
+SHOPAIKEY_TASK_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-]{1,128}$")
+SHOPAIKEY_PATH_PATTERN = re.compile(r"^/v1/videos/([a-zA-Z0-9_\-]+)/content$")
+SHOPAIKEY_CONTENT_ENDPOINT_REDIRECT_MAX: int = 1
+
+SAFE_VIDEO_EXTENSIONS: frozenset[str] = frozenset({".mp4", ".webm", ".mov"})
+SAFE_HOSTNAME_PATTERN = re.compile(
+    r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+)
+FORBIDDEN_OUTPUT_URL_SCHEMES = frozenset({"javascript:", "vbscript:", "data:", "file:", "blob:", "about:"})
+
+
+class DisallowedRedirectError(urllib.error.HTTPError):
+    """Raised when a redirect target violates safety policy before connection."""
+
+    def __init__(self, url: str, reason: str):
+        sanitized = sanitize_output_url_for_logging(url)
+        super().__init__(sanitized, 400, f"Disallowed redirect destination ({reason})", hdrs=None, fp=None)
+        self.redirect_reason = reason
+        self.sanitized_url = sanitized
+
+
+class UnsafeOutputURLError(ValueError):
+    """Raised when candidate video output URL violates SSRF or security whitelist policy."""
+
+
+def is_safe_shopaikey_content_url(url: Any) -> bool:
+    """Validate that candidate URL matches the exact ShopAIKey signed content endpoint policy.
+
+    Required Policy:
+    - https scheme only (HTTP_ALLOWED=NO)
+    - exact host == "api.shopaikey.com" (HOST_WILDCARD_ALLOWED=NO, SUBDOMAIN_MATCH_ALLOWED=NO, HOST_SUFFIX_MATCH_ALLOWED=NO)
+    - port 443 or default None (NON_443_PORT_ALLOWED=NO)
+    - no userinfo / no '@' in netloc (USERINFO_ALLOWED=NO)
+    - no fragment (FRAGMENT_ALLOWED=NO)
+    - exact path shape: /v1/videos/<safe-task-id>/content
+    - signed query: both 'exp' and 'sig' parameters must be present and non-empty
+    - no directory traversal (.. or %2e) or backslashes
+    """
+    if not isinstance(url, str):
+        return False
+    trimmed = url.strip()
+    if not trimmed or len(trimmed) > 2048 or trimmed != url:
+        return False
+    if any(ord(c) < 32 or ord(c) == 127 for c in trimmed):
+        return False
+    if "\\" in trimmed:
+        return False
+    lowered = trimmed.lower()
+    if ".." in lowered or "%2e" in lowered:
+        return False
+    if any(lowered.startswith(s) or s in lowered for s in FORBIDDEN_OUTPUT_URL_SCHEMES):
+        return False
+
+    try:
+        parsed = urllib.parse.urlsplit(trimmed)
+    except Exception:
+        return False
+
+    if parsed.scheme.lower() != "https":
+        return False
+    if not parsed.netloc:
+        return False
+    if parsed.username or parsed.password or "@" in parsed.netloc:
+        return False
+    if parsed.fragment:
+        return False
+
+    hostname = (parsed.hostname or "").lower()
+    if hostname != SHOPAIKEY_EXACT_HOST:
+        return False
+
+    try:
+        port = parsed.port
+    except ValueError:
+        return False
+    if port not in (None, 443):
+        return False
+
+    match = SHOPAIKEY_PATH_PATTERN.match(parsed.path)
+    if not match:
+        return False
+    task_id = match.group(1)
+    if not SHOPAIKEY_TASK_ID_PATTERN.match(task_id):
+        return False
+
+    query_params = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+    exp_vals = query_params.get("exp")
+    sig_vals = query_params.get("sig")
+    if not exp_vals or not exp_vals[0].strip():
+        return False
+    if not sig_vals or not sig_vals[0].strip():
+        return False
+
+    return True
+
+
+def is_safe_video_output_url(url: Any) -> bool:
+    """Validate that candidate Product Video output URL is safe to deliver.
+
+    Accepts:
+    1. Exact ShopAIKey signed content endpoint
+    2. Legacy safe HTTPS video URL (.mp4, .webm, .mov)
+    """
+    if not isinstance(url, str):
+        return False
+
+    if is_safe_shopaikey_content_url(url):
+        return True
+
+    trimmed = url.strip()
+    if not trimmed or len(trimmed) > 2048 or trimmed != url:
+        return False
+    if any(ord(c) < 32 or ord(c) == 127 for c in trimmed):
+        return False
+    if "\\" in trimmed:
+        return False
+    lowered = trimmed.lower()
+    if ".." in lowered or "%2e" in lowered:
+        return False
+    if any(lowered.startswith(s) or s in lowered for s in FORBIDDEN_OUTPUT_URL_SCHEMES):
+        return False
+
+    try:
+        parsed = urllib.parse.urlsplit(trimmed)
+    except Exception:
+        return False
+
+    if parsed.scheme.lower() != "https":
+        return False
+    if not parsed.netloc:
+        return False
+    if parsed.username or parsed.password or "@" in parsed.netloc:
+        return False
+    if parsed.fragment:
+        return False
+
+    hostname = (parsed.hostname or "").lower()
+    if not hostname:
+        return False
+
+    if hostname == "localhost" or hostname.endswith(".localhost"):
+        return False
+
+    try:
+        ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        ip = None
+
+    if ip is not None:
+        if not ip.is_global:
+            return False
+    else:
+        if not SAFE_HOSTNAME_PATTERN.fullmatch(hostname):
+            return False
+
+    try:
+        port = parsed.port
+    except ValueError:
+        return False
+    if port not in (None, 443):
+        return False
+
+    path = parsed.path.lower()
+    if not any(path.endswith(ext) for ext in SAFE_VIDEO_EXTENSIONS):
+        return False
+
+    return True
+
+
+def sanitize_output_url_for_logging(url: Any) -> str:
+    """Format URL for safe logging: scheme/host/path/query_present only.
+
+    Never logs signed query values, tokens, sig, or exp.
+    """
+    if not isinstance(url, str) or not url.strip():
+        return "<empty>"
+    try:
+        p = urllib.parse.urlsplit(url.strip())
+        scheme = p.scheme.lower() if p.scheme else "none"
+        host = (p.hostname or "").lower() or "none"
+        path = p.path or ""
+        q_present = bool(p.query)
+        return f"{scheme}://{host}{path}?query_present={q_present}"
+    except Exception:
+        return "<unparseable>"
+
+
+class _HardenedVideoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Hardened redirect handler enforcing exact destination safety before connection."""
+
+    def __init__(self, initial_source: str):
+        super().__init__()
+        self.initial_source = initial_source
+        self.is_shopaikey = is_safe_shopaikey_content_url(initial_source)
+        self.max_redirects = SHOPAIKEY_CONTENT_ENDPOINT_REDIRECT_MAX if self.is_shopaikey else 2
+        self.redirect_count = 0
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        self.redirect_count += 1
+        if self.redirect_count > self.max_redirects:
+            raise DisallowedRedirectError(newurl, f"redirect_limit_exceeded_max_{self.max_redirects}")
+
+        # Validate destination BEFORE contacting
+        if self.is_shopaikey:
+            if not is_safe_shopaikey_content_url(newurl):
+                raise DisallowedRedirectError(newurl, "shopaikey_redirect_destination_disallowed")
+        else:
+            if not is_safe_video_output_url(newurl):
+                raise DisallowedRedirectError(newurl, "redirect_destination_disallowed")
+
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def _is_transient_download_error(exc: BaseException) -> bool:
     """Determine if a download failure is transient and eligible for bounded retry."""
+    if isinstance(exc, (DisallowedRedirectError, UnsafeOutputURLError)):
+        return False
     if isinstance(exc, (TimeoutError, socket.timeout, ConnectionResetError, http.client.RemoteDisconnected, http.client.IncompleteRead, IncompleteDownloadError)):
         return True
     if isinstance(exc, urllib.error.HTTPError):
@@ -273,8 +491,8 @@ def materialize_video_url(
         "result_url_ext": source_ext[:20],
         "result_url_query_present": bool(parsed_source.query),
         "trusted_video_url": bool(
-            parsed_source.scheme in {"http", "https"} and parsed_source.hostname
-        ) or os.path.isfile(source),
+            is_safe_video_output_url(source) or os.path.isfile(source)
+        ),
         "download_http_status": 0,
         "download_final_url_host": "",
         "download_redirect_count": 0,
@@ -296,15 +514,6 @@ def materialize_video_url(
     safe_job = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in str(job_id or "job"))[:80]
     target = out_dir / f"{filename_prefix}_{safe_job}.mp4"
     content_type = ""
-
-    class _CountingRedirectHandler(urllib.request.HTTPRedirectHandler):
-        def __init__(self):
-            super().__init__()
-            self.redirect_count = 0
-
-        def redirect_request(self, req, fp, code, msg, headers, newurl):
-            self.redirect_count += 1
-            return super().redirect_request(req, fp, code, msg, headers, newurl)
 
     if os.path.isfile(source):
         part_file = out_dir / f"{filename_prefix}_{safe_job}.attempt_1.part"
@@ -340,6 +549,21 @@ def materialize_video_url(
                 diagnostics=diagnostics,
             )
     else:
+        if not is_safe_video_output_url(source):
+            diagnostics.update({
+                "trusted_video_url": False,
+                "download_error_class": "UnsafeOutputURLError",
+                "download_error_message_masked": "provider_result_url_unsafe",
+                "mp4_validator_result": "not_run_unsafe_url",
+            })
+            return VideoArtifactResult(
+                ok=False,
+                local_path=str(target),
+                error_code="provider_result_url_unsafe",
+                error_message="provider_result_url_unsafe",
+                diagnostics=diagnostics,
+            )
+
         max_attempts = 2
         last_exc: BaseException | None = None
         transfer_success = False
@@ -356,9 +580,10 @@ def materialize_video_url(
                 except OSError:
                     pass
 
+            redirect_handler: _HardenedVideoRedirectHandler | None = None
             try:
                 request = urllib.request.Request(source, headers={"User-Agent": "TOAN-AAS-video-provider/1.0"})
-                redirect_handler = _CountingRedirectHandler()
+                redirect_handler = _HardenedVideoRedirectHandler(source)
                 opener = urllib.request.build_opener(redirect_handler)
                 with opener.open(request, timeout=max(1, int(timeout_seconds or 180))) as response:
                     content_type = str(response.headers.get("Content-Type") or "")
@@ -397,6 +622,7 @@ def materialize_video_url(
                     "download_error_class": type(exc).__name__,
                     "download_error_message_masked": type(exc).__name__,
                     "mp4_validator_result": "not_run_download_failed",
+                    "download_redirect_count": int(getattr(redirect_handler, "redirect_count", 0)),
                 })
                 if isinstance(exc, urllib.error.HTTPError):
                     diagnostics["download_http_status"] = exc.code
