@@ -461,6 +461,56 @@ async def test_auto_multi_v2_spec04_ambiguous_submission_fail_closed(monkeypatch
 
 
 @_sync
+async def test_auto_multi_v2_provider_rejection_is_not_manual_voice_failure(monkeypatch, tmp_path: Path):
+    ws, state, cues, pools, assigned_voices = _setup_multi_v2_fixture(
+        monkeypatch,
+        tmp_path,
+        "job_provider_rejection",
+    )
+    provider_called = 0
+    provider_error = (
+        "tts_unavailable:Key4U MiniMax=FAIL:"
+        "This token status is unavailable"
+    )
+
+    async def mock_synthesize_segments(segments, *args, **kwargs):
+        nonlocal provider_called
+        provider_called += 1
+        raise RuntimeError(provider_error)
+
+    async def mock_run_lane(lane_mode, runner, **payload):
+        synth = payload["synthesize_segments"]
+        annotated = await payload["prepare_subtitles"](payload["state"])
+        compat_voice = payload["resolve_voice_id"](1, payload["state"])
+        return await synth(annotated["output_segments"], voice_id=compat_voice)
+
+    result = await auto_multi_speaker_v2._run_isolated_multi_speaker_v2_blackbox(
+        lane_mode="subtitle_plus_dub",
+        run_lane_blackbox=mock_run_lane,
+        runner=lambda *a, **kw: None,
+        prepare_subtitles=lambda *a, **kw: None,
+        resolve_voice_id=lambda *a, **kw: None,
+        synthesize_segments=mock_synthesize_segments,
+        post_prepare_gate=lambda p, s: {"ok": True, "status": auto_speaker.AUTO_SPEAKER_PREFLIGHT_READY},
+        extract_pcm=lambda *a, **kw: {"pcm_path": "audio.pcm"},
+        validated_pools=pools,
+        classify_speakers=lambda *a, **kw: {},
+        state=state,
+    )
+
+    assert provider_called == 1
+    assert result["ok"] is False
+    assert result["status"] == auto_multi_speaker_v2.TTS_PROVIDER_UNAVAILABLE_STATUS
+    assert result["auto_multi_failure_stage"] == "tts_scalar"
+    assert result["auto_multi_failure_code"] == "tts_provider_unavailable"
+    assert provider_error in result["reason"]
+
+    manifest = json.loads(Path(ws, "subdub_tts_manifest.json").read_text(encoding="utf-8"))
+    entry = next(iter(manifest["entries"].values()))
+    assert entry["state"] == subdub_tts_checkpoint.STATE_FAILED_PRE_SUBMIT
+
+
+@_sync
 async def test_auto_multi_v2_spec04_corrupted_artifact_fail_closed(monkeypatch, tmp_path: Path):
     ws, state, cues, pools, assigned_voices = _setup_multi_v2_fixture(monkeypatch, tmp_path, "job_corrupt_artifact")
 

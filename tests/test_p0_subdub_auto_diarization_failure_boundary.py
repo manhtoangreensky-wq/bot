@@ -25,7 +25,106 @@ def _load_resolver_from_production_source():
     return namespace["video_dubbing_resolve_source_script"], namespace
 
 
+def _load_video_dubbing_prepare_subtitles_from_production_source():
+    source = Path("bot.py").read_text(encoding="utf-8")
+    namespace = {
+        "ContextTypes": SimpleNamespace(DEFAULT_TYPE=object),
+        "hashlib": __import__("hashlib"),
+        "inspect": __import__("inspect"),
+        "os": __import__("os"),
+    }
+    sync_start = source.index("def video_dubbing_sync_state_fields(")
+    sync_end = source.index("\ndef subdub_telegram_file_too_big", sync_start)
+    prepare_start = source.index("async def video_dubbing_prepare_subtitles(")
+    prepare_end = source.index("\ndef subdub_auto_validated_voice_pools", prepare_start)
+    exec(compile(source[sync_start:sync_end], "bot.py", "exec"), namespace)
+    exec(compile(source[prepare_start:prepare_end], "bot.py", "exec"), namespace)
+    return namespace["video_dubbing_prepare_subtitles"], namespace
+
+
 class AutoDiarizationFailureBoundaryTests(unittest.TestCase):
+    def test_smart_multi_preserves_pipeline_workspace_across_subtitle_pending_sync(self):
+        prepare, namespace = _load_video_dubbing_prepare_subtitles_from_production_source()
+        captured = {}
+
+        class ExtractionReached(Exception):
+            pass
+
+        async def resolve_source(*_args, **_kwargs):
+            return {
+                "source_kind": "asr",
+                "subtitle": "1\n00:00:00,000 --> 00:00:01,000\nhello\n",
+                "segments": [
+                    {"start": 0.0, "end": 1.0, "text": "hello", "speaker": None}
+                ],
+                "word_timeline": [{"word": "hello", "start": 0.0, "end": 1.0}],
+                "duration_seconds": 1.0,
+            }
+
+        async def extract_pcm(prepared, state, **_kwargs):
+            captured["prepared_workspace"] = prepared["state"].get("_pipeline_workspace")
+            captured["state_workspace"] = state.get("_pipeline_workspace")
+            raise ExtractionReached
+
+        pending = {}
+
+        def set_pending(_user_id, step, **fields):
+            pending.update(fields)
+            pending.update(
+                {"pending_action": "video_dubbing", "step": step, "current_step": step}
+            )
+            return dict(pending)
+
+        namespace.update(
+            {
+                "VIDEO_SUBTITLE_MODE_TRANSLATE": "translate",
+                "VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB": "subtitle_plus_dub",
+                "SUBDUB_VISUAL_OCR_PUBLIC_ENABLED": False,
+                "normalize_video_translate_mode": lambda value: str(value or "dub"),
+                "_safe_int": lambda value, default=0: int(value or default),
+                "resolve_subdub_execution_asr_kwargs": lambda _state: {},
+                "set_subdub_active_pipeline_state": lambda _state: None,
+                "reset_subdub_active_pipeline_state": lambda _token: None,
+                "auto_multi_speaker": SimpleNamespace(
+                    is_auto_multi_speaker_state=lambda state: state.get("auto_speaker_lane")
+                    == "auto_multi_speaker"
+                ),
+                "auto_smart_multivoice": SimpleNamespace(
+                    is_auto_smart_multivoice_state=lambda state: bool(
+                        state.get("auto_smart_multivoice_opt_in")
+                    )
+                ),
+                "video_dubbing_sync_state_fields": namespace[
+                    "video_dubbing_sync_state_fields"
+                ],
+                "video_dubbing_resolve_source_script": resolve_source,
+                "video_dubbing_is_subtitle_text_source": lambda *_args: False,
+                "get_video_dubbing_artifact": lambda *_args: "",
+                "set_video_dubbing_artifact": lambda *_args: "source-subtitle-ref",
+                "set_video_dubbing_pending": set_pending,
+                "video_dubbing_plain_script": lambda _subtitle: "hello",
+                "video_dubbing_segments_from_subtitle": lambda _subtitle: [],
+                "_extract_subdub_auto_pcm": extract_pcm,
+                "subdub_speaker_cast": subdub_speaker_cast,
+            }
+        )
+        state = {
+            "_pipeline_workspace": "C:/tmp/subdub-smart-job",
+            "_pipeline_source_bytes_override": b"source-video",
+            "_pipeline_source_content_type_override": "video/mp4",
+            "auto_smart_multivoice_opt_in": True,
+            "mode": "dub",
+            "video_processing_mode": "dub",
+            "source_media_type": "video",
+            "source_mime_type": "video/mp4",
+        }
+
+        with self.assertRaises(ExtractionReached):
+            asyncio.run(prepare(None, state, 123, require_auto_cast=True))
+
+        self.assertEqual(captured["prepared_workspace"], state["_pipeline_workspace"])
+        self.assertEqual(captured["state_workspace"], state["_pipeline_workspace"])
+
     def test_auto_resolver_preserves_diarization_unavailable_exception(self):
         resolver, namespace = _load_resolver_from_production_source()
 

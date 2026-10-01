@@ -18,6 +18,7 @@ SCRIPT_PATH = ROOT / "scripts" / "vps" / "sync_product_video_worker_release.sh"
 ALLOWED_CHANGED_FILES = {
     ".github/workflows/deploy-vps.yml",
     "scripts/vps/sync_product_video_worker_release.sh",
+    "tests/test_deploy_vps_workflow_hygiene.py",
     "tests/test_p0_product_video_worker_deploy_lock.py",
 }
 TARGET_REF = "refs/deployments/bot-release"

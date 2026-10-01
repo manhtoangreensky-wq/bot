@@ -101,7 +101,9 @@ def test_normalize_scene_duration_trims_and_extends(monkeypatch, tmp_path):
     long_clip = _make_clip(tmp_path / "long.mp4", duration=8)
     short_clip = _make_clip(tmp_path / "short.mp4", duration=2)
     trimmed = mvp.normalize_scene_duration(long_clip, str(tmp_path / "trimmed.mp4"), 6)
-    extended = mvp.normalize_scene_duration(short_clip, str(tmp_path / "extended.mp4"), 6)
+    with pytest.raises(ValueError, match="scene_duration_short_no_charge"):
+        mvp.normalize_scene_duration(short_clip, str(tmp_path / "extended_default.mp4"), 6)
+    extended = mvp.normalize_scene_duration(short_clip, str(tmp_path / "extended.mp4"), 6, allow_frame_padding=True)
     assert 5.7 <= mvp.probe_duration(trimmed) <= 6.4
     assert 5.7 <= mvp.probe_duration(extended) <= 6.4
 

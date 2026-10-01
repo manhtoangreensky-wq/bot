@@ -183,6 +183,7 @@ def test_internal_wallet_credit_rejects_unknown_account(test_db: str):
         user_id="nonexistent_999999",
         amount_xu=1000,
         idempotency_key="key_unknown_user",
+        actor_id="test-admin",
         db_path=test_db,
     )
     assert not ok
@@ -204,6 +205,7 @@ def test_internal_wallet_credit_rejects_zero_amount(test_db: str):
         user_id="1001",
         amount_xu=0,
         idempotency_key="key_zero_amount",
+        actor_id="test-admin",
         db_path=test_db,
     )
     assert not ok
@@ -222,6 +224,7 @@ def test_internal_wallet_credit_rejects_negative_amount(test_db: str):
         user_id="1001",
         amount_xu=-500,
         idempotency_key="key_negative_amount",
+        actor_id="test-admin",
         db_path=test_db,
     )
     assert not ok
@@ -240,6 +243,7 @@ def test_internal_wallet_credit_requires_idempotency_key(test_db: str):
         user_id="1001",
         amount_xu=1000,
         idempotency_key="",
+        actor_id="test-admin",
         db_path=test_db,
     )
     assert not ok
@@ -264,6 +268,7 @@ def test_internal_wallet_credit_success_credits_once(test_db: str):
         idempotency_key="key_success_once",
         reason="Manual topup MANUAL-101",
         reference="MANUAL-101",
+        actor_id="test-admin",
         db_path=test_db,
     )
     assert ok
@@ -292,6 +297,7 @@ def test_internal_wallet_credit_creates_durable_ledger_receipt(test_db: str):
         amount_xu=300,
         idempotency_key="key_receipt_check",
         reason="Topup receipt test",
+        actor_id="test-admin",
         db_path=test_db,
     )
     assert ok
@@ -313,6 +319,7 @@ def test_internal_wallet_credit_never_returns_local_credit_receipt(test_db: str)
         user_id="1001",
         amount_xu=250,
         idempotency_key="key_no_local_credit",
+        actor_id="test-admin",
         db_path=test_db,
     )
     assert ok
@@ -331,6 +338,7 @@ def test_internal_wallet_credit_same_key_same_payload_replays_same_receipt(test_
         idempotency_key=key,
         reason="Topup 500",
         reference="REF-500",
+        actor_id="test-admin",
         db_path=test_db,
     )
     assert ok1
@@ -342,6 +350,7 @@ def test_internal_wallet_credit_same_key_same_payload_replays_same_receipt(test_
         idempotency_key=key,
         reason="Topup 500",
         reference="REF-500",
+        actor_id="test-admin",
         db_path=test_db,
     )
     assert ok2
@@ -364,6 +373,7 @@ def test_internal_wallet_credit_same_key_replay_does_not_credit_twice(test_db: s
             amount_xu=700,
             idempotency_key=key,
             reason="Topup 700",
+            actor_id="test-admin",
             db_path=test_db,
         )
         assert ok
@@ -391,6 +401,7 @@ def test_internal_wallet_credit_same_key_different_amount_conflicts(test_db: str
         user_id="1001",
         amount_xu=1000,
         idempotency_key=key,
+        actor_id="test-admin",
         db_path=test_db,
     )
     assert ok1
@@ -404,6 +415,7 @@ def test_internal_wallet_credit_same_key_different_amount_conflicts(test_db: str
         user_id="1001",
         amount_xu=2000,
         idempotency_key=key,
+        actor_id="test-admin",
         db_path=test_db,
     )
     assert not ok2
@@ -428,6 +440,7 @@ def test_internal_wallet_credit_same_key_different_account_conflicts(test_db: st
         user_id="1001",
         amount_xu=500,
         idempotency_key=key,
+        actor_id="test-admin",
         db_path=test_db,
     )
     assert ok1
@@ -437,6 +450,7 @@ def test_internal_wallet_credit_same_key_different_account_conflicts(test_db: st
         user_id="1002",
         amount_xu=500,
         idempotency_key=key,
+        actor_id="test-admin",
         db_path=test_db,
     )
     assert not ok2
@@ -457,6 +471,7 @@ def test_internal_wallet_credit_same_key_different_reference_conflicts(test_db: 
         amount_xu=500,
         idempotency_key=key,
         reference="MANUAL-REF-A",
+        actor_id="test-admin",
         db_path=test_db,
     )
     assert ok1
@@ -466,6 +481,7 @@ def test_internal_wallet_credit_same_key_different_reference_conflicts(test_db: 
         amount_xu=500,
         idempotency_key=key,
         reference="MANUAL-REF-B",
+        actor_id="test-admin",
         db_path=test_db,
     )
     assert not ok2
@@ -490,6 +506,7 @@ def test_internal_wallet_credit_survives_service_reinitialization(tmp_path: Path
         user_id="2001",
         amount_xu=400,
         idempotency_key=key,
+        actor_id="test-admin",
         db_path=str(db_file),
     )
     assert ok1
@@ -500,6 +517,7 @@ def test_internal_wallet_credit_survives_service_reinitialization(tmp_path: Path
         user_id="2001",
         amount_xu=400,
         idempotency_key=key,
+        actor_id="test-admin",
         db_path=str(db_file),
     )
     assert ok2
@@ -533,6 +551,7 @@ def test_internal_wallet_credit_concurrent_duplicate_credits_once(tmp_path: Path
             amount_xu=500,
             idempotency_key=key,
             reason="Concurrent topup test",
+            actor_id="test-admin",
             db_path=str(db_file),
         )
 
@@ -603,6 +622,7 @@ def test_internal_wallet_credit_ledger_failure_rolls_back(tmp_path: Path):
         user_id="5001",
         amount_xu=500,
         idempotency_key="key_ledger_fail",
+        actor_id="test-admin",
         db_path=str(db_file),
     )
     assert not ok
@@ -686,12 +706,19 @@ def test_fastapi_admin_wallet_credit_end_to_end(tmp_path: Path, monkeypatch):
     client = TestClient(bot.fastapi_app)
 
     # 1. First credit
-    payload = {"user_id": "777", "amount_xu": 200, "idempotency_key": "k_fastapi_1", "reason": "Test credit"}
+    actor = "fastapi-admin"
+    payload = {
+        "user_id": "777",
+        "amount_xu": 200,
+        "idempotency_key": "k_fastapi_1",
+        "reason": "Test credit",
+        "actor_id": actor,
+    }
     body_bytes = json.dumps(payload).encode("utf-8")
     now_ts = str(int(time.time()))
     req_id = "req-fa-001"
     digest = hashlib.sha256(body_bytes).hexdigest()
-    msg = f"{now_ts}.{req_id}.POST./internal/v1/admin/wallet/credit.{digest}".encode("utf-8")
+    msg = f"{now_ts}.{req_id}.POST./internal/v1/admin/wallet/credit.{digest}.{actor}".encode("utf-8")
     sig = hmac.new(secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()
 
     headers = {
@@ -699,6 +726,7 @@ def test_fastapi_admin_wallet_credit_end_to_end(tmp_path: Path, monkeypatch):
         "X-TOAN-AAS-Signature": sig,
         "X-TOAN-AAS-Timestamp": now_ts,
         "X-TOAN-AAS-Request-ID": req_id,
+        "X-TOAN-AAS-Actor-ID": actor,
         "Content-Type": "application/json",
     }
     resp1 = client.post("/internal/v1/admin/wallet/credit", content=body_bytes, headers=headers)
@@ -711,13 +739,14 @@ def test_fastapi_admin_wallet_credit_end_to_end(tmp_path: Path, monkeypatch):
 
     # 2. Replay same key & payload
     req_id2 = "req-fa-002"
-    msg2 = f"{now_ts}.{req_id2}.POST./internal/v1/admin/wallet/credit.{digest}".encode("utf-8")
+    msg2 = f"{now_ts}.{req_id2}.POST./internal/v1/admin/wallet/credit.{digest}.{actor}".encode("utf-8")
     sig2 = hmac.new(secret.encode("utf-8"), msg2, hashlib.sha256).hexdigest()
     headers2 = {
         "Authorization": f"Bearer {token}",
         "X-TOAN-AAS-Signature": sig2,
         "X-TOAN-AAS-Timestamp": now_ts,
         "X-TOAN-AAS-Request-ID": req_id2,
+        "X-TOAN-AAS-Actor-ID": actor,
         "Content-Type": "application/json",
     }
     resp2 = client.post("/internal/v1/admin/wallet/credit", content=body_bytes, headers=headers2)
@@ -729,16 +758,23 @@ def test_fastapi_admin_wallet_credit_end_to_end(tmp_path: Path, monkeypatch):
     assert data2["balance_after"] == 250
 
     # 3. Conflict on same key different amount
-    payload3 = {"user_id": "777", "amount_xu": 999, "idempotency_key": "k_fastapi_1", "reason": "Test credit"}
+    payload3 = {
+        "user_id": "777",
+        "amount_xu": 999,
+        "idempotency_key": "k_fastapi_1",
+        "reason": "Test credit",
+        "actor_id": actor,
+    }
     body_bytes3 = json.dumps(payload3).encode("utf-8")
     digest3 = hashlib.sha256(body_bytes3).hexdigest()
-    msg3 = f"{now_ts}.{req_id2}.POST./internal/v1/admin/wallet/credit.{digest3}".encode("utf-8")
+    msg3 = f"{now_ts}.{req_id2}.POST./internal/v1/admin/wallet/credit.{digest3}.{actor}".encode("utf-8")
     sig3 = hmac.new(secret.encode("utf-8"), msg3, hashlib.sha256).hexdigest()
     headers3 = {
         "Authorization": f"Bearer {token}",
         "X-TOAN-AAS-Signature": sig3,
         "X-TOAN-AAS-Timestamp": now_ts,
         "X-TOAN-AAS-Request-ID": req_id2,
+        "X-TOAN-AAS-Actor-ID": actor,
         "Content-Type": "application/json",
     }
     resp3 = client.post("/internal/v1/admin/wallet/credit", content=body_bytes3, headers=headers3)
@@ -756,6 +792,7 @@ def test_internal_wallet_credit_canonical_user_id_prefix_normalized(test_db: str
         idempotency_key=key,
         reason="Test telegram prefix",
         reference="REF-TG-001",
+        actor_id="test-admin",
         db_path=test_db,
     )
     assert ok is True
@@ -772,6 +809,7 @@ def test_internal_wallet_credit_canonical_user_id_prefix_normalized(test_db: str
         idempotency_key=key,
         reason="Test telegram prefix",
         reference="REF-TG-001",
+        actor_id="test-admin",
         db_path=test_db,
     )
     assert ok2 is True
@@ -779,4 +817,321 @@ def test_internal_wallet_credit_canonical_user_id_prefix_normalized(test_db: str
     assert res2["data"]["replayed"] is True
     assert res2["data"]["ledger_event_id"] == res["data"]["ledger_event_id"]
     assert res2["data"]["balance_after"] == 800
+
+
+def test_fastapi_admin_wallet_credit_eight_actor_boundaries(tmp_path: Path, monkeypatch):
+    """Explicitly prove all 8 actor boundaries for /internal/v1/admin/wallet/credit:
+    Boundary 1: header actor == payload actor + actor-bound signature => PASS (200)
+    Boundary 2: header actor == payload actor + legacy non-actor signature => 401 SIGNATURE_INVALID
+    Boundary 3: header actor != payload actor (different names) => 400 ACTOR_ID_MISMATCH
+    Boundary 4: header actor present, payload actor present, tampered signature => 401 SIGNATURE_INVALID
+    Boundary 5: header actor missing, payload actor missing => 400 MISSING_ACTOR_ID
+    Boundary 6: header actor present, payload actor missing => 400 ACTOR_ID_MISMATCH
+    Boundary 7: header actor missing, payload actor present => 400 ACTOR_ID_MISMATCH
+    Boundary 8: whitespace actor => 400 MISSING_ACTOR_ID
+    """
+    from fastapi.testclient import TestClient
+    import bot
+
+    db_file = tmp_path / "credit_boundaries.db"
+    conn = create_test_db(db_file)
+    conn.execute("INSERT INTO users (user_id, username, credits) VALUES ('888', 'boundary_user', 100)")
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(bot, "DB_FILE", str(db_file))
+    token = "test-credit-token"
+    secret = "test-credit-secret"
+    monkeypatch.setenv("CORE_BRIDGE_TOKEN", token)
+    monkeypatch.setenv("CORE_BRIDGE_HMAC_SECRET", secret)
+
+    client = TestClient(bot.fastapi_app)
+
+    # 1. Boundary 1: header actor == payload actor + actor-bound signature => PASS (200)
+    payload1 = {
+        "user_id": "888",
+        "amount_xu": 50,
+        "idempotency_key": "k_b1_pass",
+        "reason": "Boundary 1 test",
+        "actor_id": "auditor-01",
+    }
+    body1 = json.dumps(payload1).encode("utf-8")
+    now_ts = str(int(time.time()))
+    req_id1 = "req-b1"
+    digest1 = hashlib.sha256(body1).hexdigest()
+    msg1 = f"{now_ts}.{req_id1}.POST./internal/v1/admin/wallet/credit.{digest1}.auditor-01".encode("utf-8")
+    sig1 = hmac.new(secret.encode("utf-8"), msg1, hashlib.sha256).hexdigest()
+    headers1 = {
+        "Authorization": f"Bearer {token}",
+        "X-TOAN-AAS-Signature": sig1,
+        "X-TOAN-AAS-Timestamp": now_ts,
+        "X-TOAN-AAS-Request-ID": req_id1,
+        "X-TOAN-AAS-Actor-ID": "auditor-01",
+        "Content-Type": "application/json",
+    }
+    resp1 = client.post("/internal/v1/admin/wallet/credit", content=body1, headers=headers1)
+    assert resp1.status_code == 200
+    data1 = resp1.json()
+    assert data1["ok"] is True
+    assert data1["balance_after"] == 150
+
+    # 2. Boundary 2: header actor == payload actor + legacy non-actor signature => 401 SIGNATURE_INVALID
+    payload2 = {
+        "user_id": "888",
+        "amount_xu": 50,
+        "idempotency_key": "k_b2_legacy_fail",
+        "reason": "Boundary 2 test",
+        "actor_id": "auditor-01",
+    }
+    body2 = json.dumps(payload2).encode("utf-8")
+    req_id2 = "req-b2"
+    digest2 = hashlib.sha256(body2).hexdigest()
+    msg2 = f"{now_ts}.{req_id2}.POST./internal/v1/admin/wallet/credit.{digest2}".encode("utf-8")
+    sig2 = hmac.new(secret.encode("utf-8"), msg2, hashlib.sha256).hexdigest()
+    headers2 = {
+        "Authorization": f"Bearer {token}",
+        "X-TOAN-AAS-Signature": sig2,
+        "X-TOAN-AAS-Timestamp": now_ts,
+        "X-TOAN-AAS-Request-ID": req_id2,
+        "X-TOAN-AAS-Actor-ID": "auditor-01",
+        "Content-Type": "application/json",
+    }
+    resp2 = client.post("/internal/v1/admin/wallet/credit", content=body2, headers=headers2)
+    assert resp2.status_code == 401
+    assert resp2.json()["detail"]["error_code"] == "SIGNATURE_INVALID"
+
+    # 3. Boundary 3: header actor != payload actor (different names) => 400 ACTOR_ID_MISMATCH
+    payload3 = {
+        "user_id": "888",
+        "amount_xu": 50,
+        "idempotency_key": "k_b3_mismatch",
+        "reason": "Boundary 3 test",
+        "actor_id": "auditor-01",
+    }
+    body3 = json.dumps(payload3).encode("utf-8")
+    req_id3 = "req-b3"
+    digest3 = hashlib.sha256(body3).hexdigest()
+    msg3 = f"{now_ts}.{req_id3}.POST./internal/v1/admin/wallet/credit.{digest3}.different-actor".encode("utf-8")
+    sig3 = hmac.new(secret.encode("utf-8"), msg3, hashlib.sha256).hexdigest()
+    headers3 = {
+        "Authorization": f"Bearer {token}",
+        "X-TOAN-AAS-Signature": sig3,
+        "X-TOAN-AAS-Timestamp": now_ts,
+        "X-TOAN-AAS-Request-ID": req_id3,
+        "X-TOAN-AAS-Actor-ID": "different-actor",
+        "Content-Type": "application/json",
+    }
+    resp3 = client.post("/internal/v1/admin/wallet/credit", content=body3, headers=headers3)
+    assert resp3.status_code == 400
+    assert resp3.json()["error_code"] == "ACTOR_ID_MISMATCH"
+
+    # 4. Boundary 4: header actor present, payload actor present, tampered signature => 401 SIGNATURE_INVALID
+    payload4 = {
+        "user_id": "888",
+        "amount_xu": 50,
+        "idempotency_key": "k_b4_tamper",
+        "reason": "Boundary 4 test",
+        "actor_id": "auditor-01",
+    }
+    body4 = json.dumps(payload4).encode("utf-8")
+    req_id4 = "req-b4"
+    tampered_sig = "bad" + sig1[3:]
+    headers4 = {
+        "Authorization": f"Bearer {token}",
+        "X-TOAN-AAS-Signature": tampered_sig,
+        "X-TOAN-AAS-Timestamp": now_ts,
+        "X-TOAN-AAS-Request-ID": req_id4,
+        "X-TOAN-AAS-Actor-ID": "auditor-01",
+        "Content-Type": "application/json",
+    }
+    resp4 = client.post("/internal/v1/admin/wallet/credit", content=body4, headers=headers4)
+    assert resp4.status_code == 401
+    assert resp4.json()["detail"]["error_code"] == "SIGNATURE_INVALID"
+
+    # 5. Boundary 5: header actor missing, payload actor missing => 400 MISSING_ACTOR_ID
+    payload5 = {
+        "user_id": "888",
+        "amount_xu": 50,
+        "idempotency_key": "k_b5_missing",
+        "reason": "Boundary 5 test",
+    }
+    body5 = json.dumps(payload5).encode("utf-8")
+    req_id5 = "req-b5"
+    digest5 = hashlib.sha256(body5).hexdigest()
+    msg5 = f"{now_ts}.{req_id5}.POST./internal/v1/admin/wallet/credit.{digest5}".encode("utf-8")
+    sig5 = hmac.new(secret.encode("utf-8"), msg5, hashlib.sha256).hexdigest()
+    headers5 = {
+        "Authorization": f"Bearer {token}",
+        "X-TOAN-AAS-Signature": sig5,
+        "X-TOAN-AAS-Timestamp": now_ts,
+        "X-TOAN-AAS-Request-ID": req_id5,
+        "Content-Type": "application/json",
+    }
+    resp5 = client.post("/internal/v1/admin/wallet/credit", content=body5, headers=headers5)
+    assert resp5.status_code == 400
+    assert resp5.json()["error_code"] == "MISSING_ACTOR_ID"
+
+    # 6. Boundary 6: header actor present, payload actor missing => 400 ACTOR_ID_MISMATCH
+    payload6 = {
+        "user_id": "888",
+        "amount_xu": 50,
+        "idempotency_key": "k_b6_hdr_only",
+        "reason": "Boundary 6 test",
+    }
+    body6 = json.dumps(payload6).encode("utf-8")
+    req_id6 = "req-b6"
+    digest6 = hashlib.sha256(body6).hexdigest()
+    msg6 = f"{now_ts}.{req_id6}.POST./internal/v1/admin/wallet/credit.{digest6}.auditor-01".encode("utf-8")
+    sig6 = hmac.new(secret.encode("utf-8"), msg6, hashlib.sha256).hexdigest()
+    headers6 = {
+        "Authorization": f"Bearer {token}",
+        "X-TOAN-AAS-Signature": sig6,
+        "X-TOAN-AAS-Timestamp": now_ts,
+        "X-TOAN-AAS-Request-ID": req_id6,
+        "X-TOAN-AAS-Actor-ID": "auditor-01",
+        "Content-Type": "application/json",
+    }
+    resp6 = client.post("/internal/v1/admin/wallet/credit", content=body6, headers=headers6)
+    assert resp6.status_code == 400
+    assert resp6.json()["error_code"] == "ACTOR_ID_MISMATCH"
+
+    # 7. Boundary 7: header actor missing, payload actor present => 400 ACTOR_ID_MISMATCH
+    payload7 = {
+        "user_id": "888",
+        "amount_xu": 50,
+        "idempotency_key": "k_b7_payload_only",
+        "reason": "Boundary 7 test",
+        "actor_id": "auditor-01",
+    }
+    body7 = json.dumps(payload7).encode("utf-8")
+    req_id7 = "req-b7"
+    digest7 = hashlib.sha256(body7).hexdigest()
+    msg7 = f"{now_ts}.{req_id7}.POST./internal/v1/admin/wallet/credit.{digest7}.auditor-01".encode("utf-8")
+    sig7 = hmac.new(secret.encode("utf-8"), msg7, hashlib.sha256).hexdigest()
+    headers7 = {
+        "Authorization": f"Bearer {token}",
+        "X-TOAN-AAS-Signature": sig7,
+        "X-TOAN-AAS-Timestamp": now_ts,
+        "X-TOAN-AAS-Request-ID": req_id7,
+        "Content-Type": "application/json",
+    }
+    resp7 = client.post("/internal/v1/admin/wallet/credit", content=body7, headers=headers7)
+    assert resp7.status_code == 400
+    assert resp7.json()["error_code"] == "ACTOR_ID_MISMATCH"
+
+    # 8. Boundary 8: whitespace actor => 400 MISSING_ACTOR_ID
+    payload8 = {
+        "user_id": "888",
+        "amount_xu": 50,
+        "idempotency_key": "k_b8_whitespace",
+        "reason": "Boundary 8 test",
+        "actor_id": "   ",
+    }
+    body8 = json.dumps(payload8).encode("utf-8")
+    req_id8 = "req-b8"
+    digest8 = hashlib.sha256(body8).hexdigest()
+    msg8 = f"{now_ts}.{req_id8}.POST./internal/v1/admin/wallet/credit.{digest8}".encode("utf-8")
+    sig8 = hmac.new(secret.encode("utf-8"), msg8, hashlib.sha256).hexdigest()
+    headers8 = {
+        "Authorization": f"Bearer {token}",
+        "X-TOAN-AAS-Signature": sig8,
+        "X-TOAN-AAS-Timestamp": now_ts,
+        "X-TOAN-AAS-Request-ID": req_id8,
+        "X-TOAN-AAS-Actor-ID": "   ",
+        "Content-Type": "application/json",
+    }
+    resp8 = client.post("/internal/v1/admin/wallet/credit", content=body8, headers=headers8)
+    assert resp8.status_code == 400
+    assert resp8.json()["error_code"] == "MISSING_ACTOR_ID"
+
+
+def test_internal_wallet_credit_service_requires_actor_id(test_db: str):
+    """Service layer strictly rejects missing or blank actor_id."""
+    # 1. Blank string actor
+    ok, res, status = execute_admin_wallet_credit(
+        user_id="1001",
+        amount_xu=100,
+        idempotency_key="k_svc_blank_actor",
+        actor_id="",
+        db_path=test_db,
+    )
+    assert not ok
+    assert status == 400
+    assert res["error_code"] == "MISSING_ACTOR_ID"
+
+    # 2. Whitespace actor
+    ok, res, status = execute_admin_wallet_credit(
+        user_id="1001",
+        amount_xu=100,
+        idempotency_key="k_svc_whitespace_actor",
+        actor_id="   ",
+        db_path=test_db,
+    )
+    assert not ok
+    assert status == 400
+    assert res["error_code"] == "MISSING_ACTOR_ID"
+
+    # 3. None actor
+    ok, res, status = execute_admin_wallet_credit(
+        user_id="1001",
+        amount_xu=100,
+        idempotency_key="k_svc_none_actor",
+        actor_id=None,
+        db_path=test_db,
+    )
+    assert not ok
+    assert status == 400
+    assert res["error_code"] == "MISSING_ACTOR_ID"
+
+    # Verify zero mutations across tables
+    conn = sqlite3.connect(test_db)
+    bal = conn.execute("SELECT credits FROM users WHERE user_id='1001'").fetchone()[0]
+    idem_count = conn.execute("SELECT count(*) FROM admin_wallet_idempotency").fetchone()[0]
+    ev_count = conn.execute("SELECT count(*) FROM credit_events").fetchone()[0]
+    audit_count = conn.execute("SELECT count(*) FROM audit_logs").fetchone()[0]
+    conn.close()
+
+    assert bal == 500  # unmutated
+    assert idem_count == 0
+    assert ev_count == 0
+    assert audit_count == 0
+
+    # 4. apply_canonical_wallet_credit_conn direct call rejects blank actor
+    conn = sqlite3.connect(test_db)
+    with pytest.raises(ValueError, match="actor_id is required"):
+        apply_canonical_wallet_credit_conn(
+            conn,
+            user_id="1001",
+            amount_xu=100,
+            actor_id="",
+        )
+    conn.close()
+
+
+def test_internal_wallet_credit_service_does_not_infer_fallback_actor(test_db: str, monkeypatch):
+    """Service layer MUST NOT fallback to ADMIN_ID or DEFAULT_ADMIN_ID."""
+    monkeypatch.setenv("ADMIN_ID", "inferred_env_admin_999")
+    monkeypatch.setenv("DEFAULT_ADMIN_ID", "inferred_default_admin_999")
+
+    ok, res, status = execute_admin_wallet_credit(
+        user_id="1001",
+        amount_xu=100,
+        idempotency_key="k_svc_no_fallback",
+        actor_id="",
+        db_path=test_db,
+    )
+    assert not ok
+    assert status == 400
+    assert res["error_code"] == "MISSING_ACTOR_ID"
+
+    conn = sqlite3.connect(test_db)
+    bal = conn.execute("SELECT credits FROM users WHERE user_id='1001'").fetchone()[0]
+    audit_inferred = conn.execute(
+        "SELECT count(*) FROM audit_logs WHERE actor_id IN ('inferred_env_admin_999', 'inferred_default_admin_999')"
+    ).fetchone()[0]
+    conn.close()
+
+    assert bal == 500  # unmutated
+    assert audit_inferred == 0
+
 
