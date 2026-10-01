@@ -24,6 +24,8 @@ import logging
 import os
 from pathlib import Path
 import re
+import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -264,8 +266,150 @@ def validate_video_artifact_metadata(metadata: Any) -> tuple[bool, str, dict[str
         "codec": codec,
         "fps": float(metadata.get("fps") or 30.0),
         "bitrate_kbps": int(metadata.get("bitrate_kbps") or 0),
+        "has_audio": bool(metadata.get("has_audio")),
     }
     return True, "", sanitized
+
+
+def validate_aspect_ratio_match(actual_width: int, actual_height: int, requested_ratio: str) -> tuple[bool, str]:
+    """Validate that actual probed dimensions match the requested aspect ratio contract."""
+    if actual_width <= 0 or actual_height <= 0:
+        return False, "INVALID_DIMENSIONS_ZERO_OR_NEGATIVE"
+
+    ratio_str = str(requested_ratio or "9:16").strip()
+    ratio_map = {
+        "9:16": (9, 16),
+        "9/16": (9, 16),
+        "16:9": (16, 9),
+        "16/9": (16, 9),
+        "1:1": (1, 1),
+        "1/1": (1, 1),
+        "4:5": (4, 5),
+        "4/5": (4, 5),
+        "3:4": (3, 4),
+        "3/4": (3, 4),
+        "4:3": (4, 3),
+        "4/3": (4, 3),
+    }
+    expected_w, expected_h = ratio_map.get(ratio_str, (9, 16))
+    expected_ratio = expected_w / expected_h
+    actual_ratio = actual_width / actual_height
+
+    # Orientation mismatch check
+    if expected_w < expected_h and actual_width >= actual_height:
+        return False, f"ACTUAL_ASPECT_RATIO_MISMATCH: requested {ratio_str} (vertical), got {actual_width}x{actual_height} (horizontal/square)"
+    if expected_w > expected_h and actual_width <= actual_height:
+        return False, f"ACTUAL_ASPECT_RATIO_MISMATCH: requested {ratio_str} (horizontal), got {actual_width}x{actual_height} (vertical/square)"
+    if expected_w == expected_h and abs(actual_width - actual_height) / max(actual_width, actual_height) > 0.05:
+        return False, f"ACTUAL_ASPECT_RATIO_MISMATCH: requested {ratio_str} (square), got {actual_width}x{actual_height}"
+
+    # Ratio numeric tolerance check (8% tolerance on aspect ratio)
+    if abs(actual_ratio - expected_ratio) / expected_ratio > 0.08:
+        return False, f"ACTUAL_ASPECT_RATIO_MISMATCH: requested {ratio_str} ({expected_ratio:.3f}), got {actual_width}x{actual_height} ({actual_ratio:.3f})"
+
+    return True, ""
+
+
+def validate_duration_contract(actual_duration: float, expected_duration: float, *, tolerance_seconds: float | None = None) -> tuple[bool, str]:
+    """Validate that actual probed duration matches the canonical Product Video contract."""
+    try:
+        actual = float(actual_duration or 0.0)
+        expected = float(expected_duration or 0.0)
+    except (TypeError, ValueError):
+        return False, "INVALID_DURATION_VALUE"
+
+    if actual <= 0.0:
+        return False, "DURATION_MUST_BE_POSITIVE"
+    if expected <= 0.0:
+        return False, "EXPECTED_DURATION_MUST_BE_POSITIVE"
+
+    # Canonical Product Video duration tolerance: max(0.75, expected * 0.20)
+    tolerance = float(tolerance_seconds) if tolerance_seconds is not None else max(0.75, expected * 0.20)
+    if abs(actual - expected) > tolerance:
+        return False, f"DURATION_OUT_OF_TOLERANCE: expected {expected:.1f}s +/- {tolerance:.2f}s, got {actual:.2f}s"
+
+    return True, ""
+
+
+def probe_artifact_file(path: str) -> dict[str, Any]:
+    """Probe actual downloaded MP4 artifact using ffprobe truth."""
+    clean_path = str(path or "").strip()
+    if not clean_path or not os.path.exists(clean_path):
+        return {"ok": False, "reason": "OUTPUT_MISSING", "error": "Artifact file missing on disk"}
+
+    size = os.path.getsize(clean_path)
+    if size <= 0:
+        return {"ok": False, "reason": "ZERO_BYTE_ARTIFACT", "error": "Artifact file is zero bytes"}
+
+    ffprobe = shutil.which("ffprobe") or os.environ.get("FFPROBE_PATH") or ""
+    if not ffprobe:
+        try:
+            from services.video_final_output import ffprobe_path
+            ffprobe = ffprobe_path()
+        except Exception:
+            pass
+
+    if not ffprobe:
+        return {"ok": False, "reason": "PROBE_FAILURE", "error": "ffprobe binary not found"}
+
+    command = [
+        ffprobe,
+        "-v", "error",
+        "-show_entries", "format=format_name,duration,size:stream=codec_type,codec_name,width,height",
+        "-of", "json",
+        clean_path,
+    ]
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=45)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"ok": False, "reason": "PROBE_FAILURE", "error": f"ffprobe execution failed: {type(exc).__name__}"}
+
+    if completed.returncode != 0:
+        return {"ok": False, "reason": "PROBE_FAILURE", "error": f"ffprobe returned non-zero code {completed.returncode}"}
+
+    try:
+        payload = json.loads(completed.stdout or "{}")
+    except json.JSONDecodeError:
+        return {"ok": False, "reason": "PROBE_FAILURE", "error": "ffprobe output invalid JSON"}
+
+    streams = [s for s in payload.get("streams") or [] if isinstance(s, dict)]
+    video_stream = next((s for s in streams if s.get("codec_type") == "video"), None)
+    if not video_stream:
+        return {"ok": False, "reason": "MISSING_VIDEO_STREAM", "error": "Artifact contains no video stream"}
+
+    try:
+        width = int(video_stream.get("width") or 0)
+        height = int(video_stream.get("height") or 0)
+    except (TypeError, ValueError):
+        width, height = 0, 0
+
+    if width <= 0 or height <= 0:
+        return {"ok": False, "reason": "MISSING_VIDEO_STREAM", "error": "Invalid video stream dimensions"}
+
+    try:
+        duration = float((payload.get("format") or {}).get("duration") or 0.0)
+    except (TypeError, ValueError):
+        duration = 0.0
+
+    if duration <= 0.0:
+        return {"ok": False, "reason": "INVALID_DURATION", "error": "Artifact duration is zero or negative"}
+
+    codec = str(video_stream.get("codec_name") or "h264").strip().lower()
+    has_audio = any(s.get("codec_type") == "audio" for s in streams)
+    format_name = str((payload.get("format") or {}).get("format_name") or "mp4").strip().lower()
+
+    return {
+        "ok": True,
+        "duration": duration,
+        "duration_seconds": duration,
+        "width": width,
+        "height": height,
+        "codec": codec,
+        "has_audio": has_audio,
+        "file_size_bytes": size,
+        "bytes": size,
+        "format": "mp4" if "mp4" in format_name else format_name.split(",")[0],
+    }
 
 
 class WebProductVideoDispatcherClient:
@@ -999,18 +1143,127 @@ def execute_claimed_web_product_video_job(
                     video_renders=1,
                 )
 
-            # Artifact metadata validation
-            duration = float(gen_result.get("duration") or gen_result.get("duration_seconds") or (job.get("payload") or {}).get("duration") or 5.0)
-            file_size = int(gen_result.get("bytes") or (os.path.getsize(output_path) if output_path and os.path.exists(output_path) else 0))
-            ratio = str((job.get("payload") or {}).get("aspect_ratio") or "9:16").strip()
-            dims = (720, 1280) if ratio == "9:16" else ((1280, 720) if ratio == "16:9" else (1024, 1024))
+            # Artifact metadata validation using actual ffprobe truth
+            requested_ratio = str((job.get("payload") or {}).get("aspect_ratio") or "9:16").strip()
+            expected_duration = float((job.get("payload") or {}).get("duration") or 5.0)
+
+            # If local artifact path is present on disk, probe truth directly from the file
+            if output_path and os.path.exists(output_path):
+                probe = probe_artifact_file(output_path)
+                if not probe.get("ok"):
+                    err_code = str(probe.get("reason") or "PROBE_FAILURE")
+                    err_msg = str(probe.get("error") or err_code)
+                    logger.error("artifact_probe_failed job_id=%s reason=%s error=%s", raw_job_id, err_code, err_msg)
+                    if client:
+                        try:
+                            client.fail(
+                                job_id=raw_job_id,
+                                error_code=err_code,
+                                error_message=err_msg,
+                                fatal=True,
+                            )
+                        except Exception as exc:
+                            logger.error("fail_reporting_error job_id=%s err=%s", raw_job_id, type(exc).__name__)
+                    return ConsumerExecutionOutcome(
+                        ok=False,
+                        job_id=raw_job_id,
+                        request_id=request_id,
+                        product_key=product_key,
+                        status=err_code,
+                        blocker_reason=err_msg,
+                        output_url=output_url,
+                        provider_submit_called=True,
+                        provider_calls=1,
+                        paid_provider_calls=1,
+                        video_renders=1,
+                    )
+                duration = float(probe.get("duration") or 0.0)
+                width = int(probe.get("width") or 0)
+                height = int(probe.get("height") or 0)
+                file_size = int(probe.get("file_size_bytes") or os.path.getsize(output_path))
+                fmt = str(probe.get("format") or "mp4").strip().lower()
+                codec = str(probe.get("codec") or "h264").strip().lower()
+                has_audio = bool(probe.get("has_audio"))
+            else:
+                # No local artifact file on disk (e.g. mock executor in unit tests):
+                # Use explicit gen_result attributes if provided, or default dims for ratio
+                dims = (720, 1280) if requested_ratio == "9:16" else (1280, 720)
+                try:
+                    width = int(gen_result.get("width") or dims[0])
+                    height = int(gen_result.get("height") or dims[1])
+                except (TypeError, ValueError):
+                    width, height = dims
+                duration = float(gen_result.get("duration") or gen_result.get("duration_seconds") or 0.0)
+                file_size = int(gen_result.get("bytes") or gen_result.get("file_size_bytes") or 0)
+                fmt = str(gen_result.get("format") or "mp4").strip().lower()
+                codec = str(gen_result.get("codec") or "h264").strip().lower()
+                has_audio = bool(gen_result.get("has_audio"))
+
+            # Aspect Ratio Contract Validation
+            is_ratio_match, ratio_err = validate_aspect_ratio_match(width, height, requested_ratio)
+            if not is_ratio_match:
+                logger.error("artifact_aspect_ratio_mismatch job_id=%s err=%s", raw_job_id, ratio_err)
+                if client:
+                    try:
+                        client.fail(
+                            job_id=raw_job_id,
+                            error_code="ARTIFACT_CONTRACT_MISMATCH",
+                            error_message=ratio_err,
+                            fatal=True,
+                        )
+                    except Exception as exc:
+                        logger.error("fail_reporting_error job_id=%s err=%s", raw_job_id, type(exc).__name__)
+                return ConsumerExecutionOutcome(
+                    ok=False,
+                    job_id=raw_job_id,
+                    request_id=request_id,
+                    product_key=product_key,
+                    status="ARTIFACT_CONTRACT_MISMATCH",
+                    blocker_reason=ratio_err,
+                    output_url=output_url,
+                    provider_submit_called=True,
+                    provider_calls=1,
+                    paid_provider_calls=1,
+                    video_renders=1,
+                )
+
+            # Duration Contract Validation
+            is_duration_match, duration_err = validate_duration_contract(duration, expected_duration)
+            if not is_duration_match:
+                logger.error("artifact_duration_mismatch job_id=%s err=%s", raw_job_id, duration_err)
+                if client:
+                    try:
+                        client.fail(
+                            job_id=raw_job_id,
+                            error_code="ARTIFACT_CONTRACT_MISMATCH",
+                            error_message=duration_err,
+                            fatal=True,
+                        )
+                    except Exception as exc:
+                        logger.error("fail_reporting_error job_id=%s err=%s", raw_job_id, type(exc).__name__)
+                return ConsumerExecutionOutcome(
+                    ok=False,
+                    job_id=raw_job_id,
+                    request_id=request_id,
+                    product_key=product_key,
+                    status="ARTIFACT_CONTRACT_MISMATCH",
+                    blocker_reason=duration_err,
+                    output_url=output_url,
+                    provider_submit_called=True,
+                    provider_calls=1,
+                    paid_provider_calls=1,
+                    video_renders=1,
+                )
+
+            # Basic metadata schema validation
             raw_meta = {
                 "duration_seconds": duration,
-                "width": int(gen_result.get("width") or dims[0]),
-                "height": int(gen_result.get("height") or dims[1]),
+                "width": width,
+                "height": height,
                 "file_size_bytes": file_size,
-                "format": str(gen_result.get("format") or "mp4").strip().lower(),
-                "codec": str(gen_result.get("codec") or "h264").strip().lower(),
+                "format": fmt,
+                "codec": codec,
+                "has_audio": has_audio,
             }
             is_valid_meta, meta_err, sanitized_meta = validate_video_artifact_metadata(raw_meta)
             if not is_valid_meta:
