@@ -17418,9 +17418,9 @@ def payos_risk_report_keyboard() -> InlineKeyboardMarkup:
 
 async def handle_payos_risk_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     if not is_admin_user(query.from_user.id):
         return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
+    await query.answer()
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "menu"
     value = parts[2] if len(parts) > 2 else ""
