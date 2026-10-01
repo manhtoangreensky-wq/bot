@@ -140647,11 +140647,13 @@ exec(compile(autopost_engine_code, f"{__file__}:autopost_engine", "exec"), globa
 
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     action = (query.data.split("|", 1)[1] if "|" in query.data else "main").strip()
+    user_is_admin = is_admin_user(query.from_user.id)
+    if action == "admin" and not user_is_admin:
+        return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
+    await query.answer()
     if isinstance(getattr(context, "user_data", None), dict):
         context.user_data.pop(VIDEO_TAIL9_TEXT_INPUT_KEY, None)
-    user_is_admin = is_admin_user(query.from_user.id)
     if user_is_admin:
         clear_broadcast_lite_pending(query.from_user.id)
     lang = get_user_language(query.from_user.id) or "vi"
