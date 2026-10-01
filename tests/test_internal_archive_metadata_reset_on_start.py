@@ -68,6 +68,7 @@ class InternalArchiveMetadataResetOnStartTests(unittest.TestCase):
             "InlineKeyboardMarkup": lambda rows: rows,
             "InlineKeyboardButton": lambda *args, **kwargs: (args, kwargs),
             "clear_doc_tool_pending": lambda _uid: False,
+            "clear_memory_guided_pending": lambda _uid: None,
             "clear_media_creator_pending_states": lambda _uid: False,
             "internal_archive_preview_text": lambda _state: "archive-preview",
             "internal_archive_preview_keyboard": lambda: "archive-preview-keyboard",
