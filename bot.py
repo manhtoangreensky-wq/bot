@@ -140099,7 +140099,15 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         ticket_preview = get_support_ticket(int(parts[2]), uid)
         if not ticket_preview:
             return await query.answer(copy["support_ticket_not_found"], show_alert=True)
-    if action not in {"send", "file", "pv"}:
+    admin_ticket_detail = None
+    if action == "av":
+        if len(parts) < 3 or not parts[2].isdigit():
+            return await query.answer("Không tìm thấy ticket.", show_alert=True)
+        clear_support_ticket_pending(uid)
+        admin_ticket_detail = get_support_ticket(int(parts[2]))
+        if not admin_ticket_detail:
+            return await query.answer("Không tìm thấy ticket.", show_alert=True)
+    if action not in {"send", "file", "pv", "av"}:
         await query.answer()
     if action == "start":
         clear_support_ticket_pending(uid)
@@ -140173,10 +140181,8 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         text, keyboard = support_admin_list_payload(kind, offset)
         return await safe_edit_or_send(query, text, reply_markup=keyboard)
     if action == "av" and len(parts) >= 3:
-        clear_support_ticket_pending(uid)
-        ticket = get_support_ticket(int(parts[2]))
-        if not ticket:
-            return await query.answer("Không tìm thấy ticket.", show_alert=True)
+        await query.answer()
+        ticket = admin_ticket_detail
         source = parts[3] if len(parts) >= 4 else "new"
         list_offset = max(0, int(parts[4] or 0)) if len(parts) >= 5 else 0
         return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket, source, list_offset))
