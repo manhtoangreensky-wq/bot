@@ -1608,6 +1608,19 @@ async def run_auto_smart_multivoice(
         }
 
     # Step 1: Run Smart Voice Decision Authority
+    allow_two_uncertainty = False
+    if is_auto_smart_multivoice_state(state) and locked_speaker_voice_map is None:
+        speech_cues = [cue for cue in segments if isinstance(cue, Mapping) and not _is_non_speech_cue(cue)]
+        cue_ids = [str(cue.get("cue_id") or cue.get("id") or "").strip() for cue in speech_cues]
+        try:
+            speaker_labels = speaker_cast.ordered_auto_speaker_labels(speech_cues)
+        except speaker_cast.AutoCastUnavailable:
+            speaker_labels = []
+        _low, _high, approved_voices = _normalize_voice_pools(validated_pools)
+        allow_two_uncertainty = bool(
+            len(speaker_labels) == 2 and approved_voices
+            and all(cue_ids) and len(cue_ids) == len(set(cue_ids))
+        )
     try:
         decision = decide_smart_multivoice(
             cues=segments,
@@ -1624,7 +1637,7 @@ async def run_auto_smart_multivoice(
             fallback_level_override=fallback_level_override,
             default_fallback_voice=default_fallback_voice,
             locked_speaker_voice_map=locked_speaker_voice_map,
-            raise_manual_required=True,
+            raise_manual_required=not allow_two_uncertainty,
         )
     except speaker_cast.AutoCastManualRequired as exc:
         detected_speaker_count = int(
