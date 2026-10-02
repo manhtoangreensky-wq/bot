@@ -140698,8 +140698,30 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     action = (query.data.split("|", 1)[1] if "|" in query.data else "main").strip()
     user_is_admin = is_admin_user(query.from_user.id)
-    if action == "admin" and not user_is_admin:
+    admin_only = {"affiliate", "operator", "admin", "system", "finance", "billing", "admin_packages", "admin_provider", "internal_archive"}
+    admin_only_prefixes = (
+        "finance_",
+        "tax_",
+        "freeze_",
+        "admin_",
+        "system_",
+        "smoke_",
+        "provider_custom",
+        "clear_stale",
+        "unfreeze_",
+    )
+    admin_only_pages = {"admin_overview", "freeze_queue", "freeze_status", "smoke_test", "payos_risk"}
+    public_hints = {
+        "hint_naptien", "hint_profile", "hint_terms", "hint_film", "hint_ai_prompt",
+        "hint_note", "hint_search_note", "hint_remind", "hint_doc_tools", "hint_pricing",
+        "hint_doc_image_to_pdf", "hint_doc_pdf_to_word", "hint_doc_compress_pdf",
+        "hint_doc_split_pdf", "hint_doc_merge_pdf", "hint_doc_save_document",
+        "hint_image_tools", "hint_image_to_video_pack", "hint_media_factory", "hint_video_status",
+    }
+    if (action in admin_only or action in admin_only_pages or action.startswith(admin_only_prefixes)) and not user_is_admin:
         return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
+    if action.startswith("hint_") and not user_is_admin and action not in public_hints:
+        return await query.answer("Lệnh nội bộ chỉ dành cho Admin.", show_alert=True)
     await query.answer()
     if isinstance(getattr(context, "user_data", None), dict):
         context.user_data.pop(VIDEO_TAIL9_TEXT_INPUT_KEY, None)
@@ -140754,30 +140776,6 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         set_user_chat_mode(query.from_user.id, next_mode, username=query.from_user.username or query.from_user.first_name or "", note="Public Chat Pro toggled from menu")
         return await safe_edit_query_message(query, public_chat_menu_text(query.from_user.id, lang), reply_markup=public_chat_menu_keyboard(query.from_user.id, lang))
 
-    admin_only = {"affiliate", "operator", "admin", "system", "finance", "billing", "admin_packages", "admin_provider", "internal_archive"}
-    admin_only_prefixes = (
-        "finance_",
-        "tax_",
-        "freeze_",
-        "admin_",
-        "system_",
-        "smoke_",
-        "provider_custom",
-        "clear_stale",
-        "unfreeze_",
-    )
-    admin_only_pages = {"admin_overview", "freeze_queue", "freeze_status", "smoke_test", "payos_risk"}
-    public_hints = {
-        "hint_naptien", "hint_profile", "hint_terms", "hint_film", "hint_ai_prompt",
-        "hint_note", "hint_search_note", "hint_remind", "hint_doc_tools", "hint_pricing",
-        "hint_doc_image_to_pdf", "hint_doc_pdf_to_word", "hint_doc_compress_pdf",
-        "hint_doc_split_pdf", "hint_doc_merge_pdf", "hint_doc_save_document",
-        "hint_image_tools", "hint_image_to_video_pack", "hint_media_factory", "hint_video_status",
-    }
-    if (action in admin_only or action in admin_only_pages or action.startswith(admin_only_prefixes)) and not user_is_admin:
-        return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
-    if action.startswith("hint_") and not user_is_admin and action not in public_hints:
-        return await query.answer("Lệnh nội bộ chỉ dành cho Admin.", show_alert=True)
     if action == "admin_db_status":
         record_security_event(
             "db_status_viewed",
