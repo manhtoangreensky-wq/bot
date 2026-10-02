@@ -1430,11 +1430,98 @@ def build_shopaikey_video_payload(request: VideoGenerationRequest, env: dict[str
     return data
 
 
+def build_fal_video_payload(request: VideoGenerationRequest, env: dict[str, str] | os._Environ[str] | None = None) -> dict[str, Any]:
+    data = _base_video_payload(request, env)
+    capability = str(request.required_capability or data.get("capability") or "").strip().lower().replace("-", "_")
+    model = str(
+        selected_model_for_provider(request.metadata, "fal_video")
+        or (env or os.environ).get("FAL_VIDEO_MODEL")
+        or "fal-ai/wan/v2.2-a14b/video-to-video"
+    ).strip()
+    data["model"] = model
+    if capability in {"video_to_video", "v2v"}:
+        source_path = str(request.source_video_path or (request.metadata or {}).get("source_video_path") or "").strip()
+        data["source_video_path"] = source_path
+    return data
+
+
+def _fal_wire_payload(
+    payload: dict[str, Any],
+    *,
+    submit_url: str = "",
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    active_env = env or os.environ
+    data = dict(payload or {})
+    metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+    capability = str(data.get("capability") or metadata.get("required_capability") or "").strip().lower().replace("-", "_")
+
+    if capability in {"video_to_video", "v2v"}:
+        source_path = str(
+            data.get("source_video_path")
+            or metadata.get("source_video_path")
+            or ""
+        ).strip()
+        if not source_path:
+            raise VideoProviderContractError(
+                "fal_v2v_source_video_path_missing",
+                stage="wire_payload_build",
+                debug={"provider": "fal_video", "blocker": "fal_v2v_source_video_path_missing", "no_charge": True},
+            )
+
+        if source_path.startswith(("http://", "https://")):
+            remote_source_url = source_path
+        else:
+            from services.video_ai_edit_provider import (
+                AiEditProviderError,
+                provider_config_from_env,
+                upload_fal_media_file,
+            )
+            config = provider_config_from_env("fal_video", env=active_env)
+            try:
+                upload_res = upload_fal_media_file(config, source_path)
+            except AiEditProviderError as exc:
+                raise VideoProviderContractError(
+                    exc.reason,
+                    stage="wire_payload_build",
+                    debug={"provider": "fal_video", "blocker": exc.reason, "no_charge": True},
+                ) from exc
+            remote_source_url = str(upload_res.get("file_url") or "").strip()
+            if not remote_source_url or not remote_source_url.startswith("https://"):
+                raise VideoProviderContractError(
+                    "fal_scene_upload_result_url_invalid",
+                    stage="wire_payload_build",
+                    debug={"provider": "fal_video", "blocker": "fal_scene_upload_result_url_invalid", "no_charge": True},
+                )
+
+        from services.video_ai_edit_provider import calculate_fal_wan_v2v_num_frames
+        duration_sec = float(data.get("duration_seconds") or data.get("duration") or 5.0)
+        num_frames = calculate_fal_wan_v2v_num_frames(duration_sec)
+        prompt_text = str(data.get("prompt") or "").strip()
+        aspect_ratio = str(data.get("aspect_ratio") or data.get("ratio") or "9:16").strip()
+        neg_prompt = str(data.get("negative_prompt") or "").strip()
+
+        wire = {
+            "prompt": prompt_text,
+            "video_url": remote_source_url,
+            "num_frames": num_frames,
+            "frames_per_second": 16,
+            "aspect_ratio": aspect_ratio,
+        }
+        if neg_prompt:
+            wire["negative_prompt"] = neg_prompt
+        return wire
+
+    return data
+
+
 def _build_provider_payload(provider_name: str, request: VideoGenerationRequest, env: dict[str, str] | os._Environ[str]) -> dict[str, Any]:
     if provider_name == "key4u_video":
         return build_key4u_video_payload(request, env)
     if provider_name == "shopaikey_video":
         return build_shopaikey_video_payload(request, env)
+    if provider_name == "fal_video":
+        return build_fal_video_payload(request, env)
     data = _base_video_payload(request, env)
     model = str(env.get("VIDEO_GENERIC_HTTP_MODEL") or env.get("VIDEO_PROVIDER_MODEL") or "").strip()
     if model:
@@ -1887,6 +1974,8 @@ class GenericHttpVideoProvider:
                 wire_payload = _key4u_wire_payload(payload, submit_url=submit_url, env=self.env)
             elif self.provider_name == "shopaikey_video":
                 wire_payload = _shopaikey_wire_payload(payload, submit_url=submit_url, env=self.env)
+            elif self.provider_name == "fal_video":
+                wire_payload = _fal_wire_payload(payload, submit_url=submit_url, env=self.env)
             else:
                 wire_payload = payload
         except VideoProviderContractError as exc:
