@@ -185353,11 +185353,22 @@ async def run_doc_tool_state(message, context: ContextTypes.DEFAULT_TYPE, uid, s
 
 async def handle_doc_tool_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     uid = query.from_user.id
     lang = get_user_language(uid) or "vi"
     action = str(query.data or "").split("|", 1)[1] if "|" in str(query.data or "") else "start"
+    if action != "confirm":
+        await query.answer()
     state = get_doc_tool_pending(uid)
+    tool = str(state.get("doc_tool_current") or "save_document") if state else "save_document"
+    config = None
+    files = []
+    if action == "confirm" and state:
+        config = doc_tool_config(tool)
+        files = list(state.get("doc_tool_files") or [])
+        if len(files) < int(config.get("min_files") or 1):
+            return await query.answer("Chưa đủ file để xử lý.", show_alert=True)
+    if action == "confirm":
+        await query.answer()
     if action == "main":
         clear_doc_tool_pending(uid)
         return await safe_edit_or_send(query, localized_start_menu_text(uid, lang), parse_mode="HTML", reply_markup=localized_main_menu_keyboard(is_admin_user(uid), lang))
@@ -185369,7 +185380,6 @@ async def handle_doc_tool_callback(update: Update, context: ContextTypes.DEFAULT
         return await safe_edit_or_send(query, menu_text_main_docs_i18n(lang), parse_mode="HTML", reply_markup=main_docs_keyboard(lang))
     if not state:
         return await safe_edit_or_send(query, "⏰ Yêu cầu tài liệu đã hết hạn. TOAN AAS chưa xử lý file và chưa trừ Xu.", reply_markup=doc_tools_keyboard(lang))
-    tool = str(state.get("doc_tool_current") or "save_document")
     if action == "send_more":
         return await safe_edit_or_send(query, doc_tool_start_text(tool, lang), parse_mode="HTML", reply_markup=doc_tool_start_keyboard(tool, lang, state))
     if action == "reset_files":
@@ -185414,10 +185424,6 @@ async def handle_doc_tool_callback(update: Update, context: ContextTypes.DEFAULT
         USER_PENDING[doc_tool_pending_key(uid)] = state
         return await safe_edit_or_send(query, doc_tool_confirm_text(state, lang), parse_mode="HTML", reply_markup=doc_tool_confirm_keyboard(lang, state))
     if action == "confirm":
-        config = doc_tool_config(tool)
-        files = list(state.get("doc_tool_files") or [])
-        if len(files) < int(config.get("min_files") or 1):
-            return await query.answer("Chưa đủ file để xử lý.", show_alert=True)
         if tool == "split_pdf" and not (state.get("doc_tool_options") or {}).get("page_spec"):
             state["awaiting_page_spec"] = "1"
             USER_PENDING[doc_tool_pending_key(uid)] = state
