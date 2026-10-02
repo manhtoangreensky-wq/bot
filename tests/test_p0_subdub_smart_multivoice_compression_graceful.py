@@ -208,8 +208,8 @@ def test_bb7bf97d7c_shape_reaches_production_render(tmp_path):
     assert len(render_calls[0]["tts_chunks"]) == 71
 
 
-def test_realistic_smart_overfit_shape_defers_to_render_fit(tmp_path):
-    """Smart sends bounded overfit cues to the cue-locked FFmpeg fit stage."""
+def test_arbitrary_renderer_cannot_bypass_smart_compression_gate(tmp_path):
+    """A callable alone does not prove bounded scheduling or valid MP4 output."""
     cues = []
     durations = {}
     for index in range(25):
@@ -259,6 +259,7 @@ def test_realistic_smart_overfit_shape_defers_to_render_fit(tmp_path):
         )
     )
 
-    assert result["ok"] is True, result
-    assert len(render_calls) == 1
-    assert result["auto_smart_verified"] is True
+    assert result["ok"] is False, result
+    assert result["error_code"] == "extreme_audio_compression_unintelligible"
+    assert not render_calls
+    assert not output_mp4.exists()
