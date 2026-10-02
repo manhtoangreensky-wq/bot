@@ -43,6 +43,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from services.subdub_blackboxes import auto_multi_speaker, auto_multi_speaker_v2
 from services import subdub_speaker_cast as speaker_cast
+from services.subdub_smart_timing import extend_smart_tail_windows, retime_smart_subtitle_tails
 from services import subdub_tts_checkpoint
 from services import video_local_validation
 
@@ -1696,6 +1697,7 @@ async def run_auto_smart_multivoice(
 
     # Step 2: Synthesis Coverage Verification for Dubbed modes
     synth_artifacts: list[dict[str, Any]] = []
+    render_segments = [dict(cue) for cue in segments]
     if decision.output_mode in {
         OUTPUT_MODE_DUBBED_MULTI,
         OUTPUT_MODE_DUBBED_SINGLE,
@@ -2055,6 +2057,22 @@ async def run_auto_smart_multivoice(
         cue_order_map = {cue_id: idx for idx, cue_id in enumerate(expected_cue_ids)}
         synth_artifacts.sort(key=lambda item: cue_order_map.get(str(item.get("cue_id") or item.get("id")), 999999))
 
+        source_duration = max(
+            float(
+                (state or {}).get("input_duration_seconds")
+                or (state or {}).get("input_duration")
+                or (state or {}).get("video_duration")
+                or (state or {}).get("source_duration")
+                or 0.0
+            ),
+            max((float(item.get("end") or 0.0) for item in synth_artifacts), default=0.0),
+        )
+        extend_smart_tail_windows(
+            synth_artifacts,
+            companion_segments=render_segments,
+            source_duration=source_duration,
+        )
+
         # Safe shared micro-cue recovery for cue-locked lanes without relaxing MAX_INTELLIGIBLE_FIT_RATIO
         from services.subdub_microcue_recovery import recover_cue_locked_micro_cues
         synth_artifacts = recover_cue_locked_micro_cues(synth_artifacts, max_fit_ratio=MAX_INTELLIGIBLE_FIT_RATIO)
@@ -2212,11 +2230,11 @@ async def run_auto_smart_multivoice(
 
     # Step 4: Render MP4 with explicit audio preservation contracts
     preserved_cues = [
-        dict(c) for c in segments
+        dict(c) for c in render_segments
         if decision.cue_dispositions.get(str(c.get("cue_id") or c.get("id"))) == DISPOSITION_PRESERVED
     ]
     dubbed_cues = [
-        dict(c) for c in segments
+        dict(c) for c in render_segments
         if decision.cue_dispositions.get(str(c.get("cue_id") or c.get("id"))) == DISPOSITION_DUBBED
     ]
 
@@ -2228,7 +2246,7 @@ async def run_auto_smart_multivoice(
                     output_path=str(out_target),
                     output_mode=decision.output_mode,
                     tts_chunks=synth_artifacts,
-                    cues=segments,
+                    cues=render_segments,
                     dispositions=decision.cue_dispositions,
                     preserved_cues=preserved_cues,
                     dubbed_cues=dubbed_cues,
@@ -2332,6 +2350,7 @@ async def run_auto_smart_multivoice(
         "auto_smart_verified": True,
         "cue_dispositions": decision.cue_dispositions,
         "tts_cues": decision.tts_cues,
+        "output_segments": render_segments,
         "decision_version": decision.decision_version,
         "locked_speaker_voice_map": dict(decision.speaker_voice_map) if locked_speaker_voice_map else None,
     }
@@ -3296,7 +3315,7 @@ async def run_auto_smart_multivoice_blackbox(
             dubbed_cues: list[dict],
             **kw: Any,
         ) -> str:
-            nonlocal captured_audio
+            nonlocal captured_audio, canonical_srt_text, canonical_srt_bytes
             norm_audio = b""
             if callable(build_timeline_audio):
                 timeline_res = await _maybe_await(build_timeline_audio(tts_chunks, canonical_duration))
@@ -3341,6 +3360,9 @@ async def run_auto_smart_multivoice_blackbox(
             effective_mode = str(resolved_lane_mode or output_mode or "").lower()
             wants_subtitle = effective_mode in {"subtitle_plus_dub", "subdub"} or "subtitle" in effective_mode
             if wants_subtitle:
+                if any(float(cue.get("tail_extension_seconds") or 0.0) > 0.001 for cue in cues):
+                    canonical_srt_text = retime_smart_subtitle_tails(canonical_srt_text, cues)
+                    canonical_srt_bytes = canonical_srt_text.encode("utf-8")
                 if not canonical_srt_text or "-->" not in canonical_srt_text:
                     raise RuntimeError("empty_translation: subtitle_plus_dub requires valid canonical SRT with timestamp markers ('-->') for render")
                 render_sub_bytes = canonical_srt_bytes
@@ -3518,8 +3540,15 @@ async def run_auto_smart_multivoice_blackbox(
             segments_list = list(prepared["output_segments"])
         elif isinstance(current, dict) and current.get("output_segments"):
             segments_list = list(current["output_segments"])
+        rendered_segments = list(smart_result.get("output_segments") or [])
+        if any(float(cue.get("tail_extension_seconds") or 0.0) > 0.001 for cue in rendered_segments):
+            segments_list = rendered_segments
 
-        response["output_subtitle"] = raw_output_subtitle
+        response["output_subtitle"] = (
+            canonical_srt_text
+            if any(float(cue.get("tail_extension_seconds") or 0.0) > 0.001 for cue in segments_list)
+            else raw_output_subtitle
+        )
         response["output_text"] = raw_output_text
         response["output_segments"] = segments_list
         response["srt_text"] = canonical_srt_text
