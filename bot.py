@@ -42812,9 +42812,9 @@ async def edit_insufficient_credits(query, current_credits: int, required_credit
 
 async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     parts = query.data.split("|")
     if len(parts) != 4:
+        await query.answer()
         return
     _, service, mode, uid_str = parts
     uid = int(uid_str)
@@ -42822,6 +42822,8 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
     if query.from_user.id != uid:
         await query.answer("⚠️ Không phải yêu cầu của bạn!", show_alert=True)
         return
+
+    await query.answer()
 
     pending = USER_PENDING.pop(uid, None)
     if not pending:
