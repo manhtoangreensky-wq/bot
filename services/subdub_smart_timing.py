@@ -131,8 +131,8 @@ def retime_smart_subtitle_tails(srt_text: str, segments: Iterable[dict]) -> str:
         end_ms = int(round(_cue_seconds(segment, "end") * 1000))
         original_end_ms = int(round(float(segment["smart_source_end"]) * 1000))
         if (
-            parsed[position]["start_ms"] != start_ms
-            or parsed[position]["end_ms"] not in {original_end_ms, end_ms}
+            abs(parsed[position]["start_ms"] - start_ms) > 1
+            or min(abs(parsed[position]["end_ms"] - value) for value in (original_end_ms, end_ms)) > 1
         ):
             raise ValueError("smart_tail_subtitle_cue_mismatch")
         hours, remainder = divmod(end_ms, 3_600_000)

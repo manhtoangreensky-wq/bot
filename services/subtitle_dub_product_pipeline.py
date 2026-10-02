@@ -244,6 +244,14 @@ async def process_subtitle_dub_job(
         }
     prepared = dict(prepared or {})
     pipeline_state = dict(prepared.get("state") or state)
+    smart_timing = (
+        str(pipeline_state.get("auto_speaker_lane") or "").strip().lower()
+        == "auto_smart_multivoice"
+        or (
+            pipeline_state.get("auto_smart_multivoice_opt_in") is True
+            and pipeline_state.get("auto_smart_dispatch") == "n3_plus_proven_v2"
+        )
+    )
     if tts_language_route:
         language_fields = subdub_tts_language_state_fields(tts_language_route)
         pipeline_state.update(language_fields)
@@ -307,6 +315,7 @@ async def process_subtitle_dub_job(
     selected_tts_voice_id = ""
     dub_audio_policy: dict[str, Any] = {}
     cue_locked_timing = False
+    smart_fit_warnings: list[dict[str, Any]] = []
     if _mode_needs_dub(mode):
         dub_audio_policy = resolve_subdub_dub_audio_policy(pipeline_state, prepared)
         tts_segments = list(dub_audio_policy.pop("tts_segments", []) or [])
@@ -366,10 +375,7 @@ async def process_subtitle_dub_job(
                 base_speed=speed,
                 max_speed=1.8 if cue_locked_timing else min(1.0, max(0.7, speed)),
                 cue_locked_timing=cue_locked_timing,
-                duration_aware_timing=(
-                    str(pipeline_state.get("auto_speaker_lane") or "").strip().lower()
-                    == "auto_smart_multivoice"
-                ),
+                duration_aware_timing=smart_timing,
                 tts_language_code=pipeline_state.get("resolved_tts_language_code") or "auto",
                 tts_language_boost=pipeline_state.get("tts_language_boost") or "auto",
                 edge_voice_id=pipeline_state.get("resolved_edge_voice_id") or "",
@@ -567,8 +573,7 @@ async def process_subtitle_dub_job(
                     item["audio_bytes"] = item["audio"]
 
             if (
-                str(pipeline_state.get("auto_speaker_lane") or "").strip().lower()
-                == "auto_smart_multivoice"
+                smart_timing
                 and any(bool(item.get("duration_aware_timing")) for item in tts_chunks)
             ):
                 source_duration = max(
@@ -613,7 +618,10 @@ async def process_subtitle_dub_job(
                 generated_seconds = max(0.0, float(item.get("audio_duration") or 0.0))
                 fit_seconds = max(0.0, float(item.get("fit_audio_duration") or generated_seconds))
                 raw_fit_ratio = fit_seconds / cue_window if cue_window > 0.05 and fit_seconds > 0 else 1.0
-                if not is_legacy_multi and raw_fit_ratio > HARD_CAP_FIT_RATIO:
+                smart_warning = smart_timing and bool(item.get("duration_aware_timing"))
+                if smart_warning and raw_fit_ratio > MAX_INTELLIGIBLE_FIT_RATIO:
+                    smart_fit_warnings.append({"cue_id": str(item.get("cue_id") or ""), "fit_ratio": round(raw_fit_ratio, 3)})
+                if not is_legacy_multi and not smart_warning and raw_fit_ratio > HARD_CAP_FIT_RATIO:
                     fail_cid = str(
                         item.get("recovery_trigger_cue_id")
                         or item.get("original_trigger_cue_id")
@@ -638,6 +646,7 @@ async def process_subtitle_dub_job(
                     }
                 if (
                     not is_legacy_multi
+                    and not smart_warning
                     and bool(item.get("duration_aware_timing"))
                     and raw_fit_ratio > SMART_DURATION_AWARE_HARD_CAP_FIT_RATIO
                 ):
@@ -663,7 +672,7 @@ async def process_subtitle_dub_job(
                         "cue_id": fail_cid,
                         "recovery_trigger_cue_id": str(item.get("recovery_trigger_cue_id") or fail_cid),
                     }
-                elif not is_legacy_multi and raw_fit_ratio > MAX_INTELLIGIBLE_FIT_RATIO:
+                elif not is_legacy_multi and not smart_warning and raw_fit_ratio > MAX_INTELLIGIBLE_FIT_RATIO:
                     overfit_cues.append((str(item.get("cue_id") or ""), round(raw_fit_ratio, 3)))
                 fit_ratio = max(1.0, raw_fit_ratio)
                 item.update({
@@ -873,6 +882,8 @@ async def process_subtitle_dub_job(
         "srt_bytes": srt_bytes,
         "subtitle_items": subtitle_items,
         "tts_chunks": tts_chunks,
+        "smart_audio_fit_degraded": bool(smart_fit_warnings),
+        "smart_audio_fit_warnings": smart_fit_warnings,
         "tts_expected_segments": tts_expected_segments,
         "tts_generated_segments": tts_generated_segments,
         "tts_mixed_segments": tts_mixed_segments,
