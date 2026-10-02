@@ -2028,7 +2028,7 @@ async def run_auto_smart_multivoice(
                 }
 
             ch_item["audio_duration"] = gen_sec
-            ch_item["raw_audio_duration"] = gen_sec
+            ch_item.setdefault("raw_audio_duration", gen_sec)
             ch_item["original_cue_ids"] = [cid]
             if cue_window > 0.05 and gen_sec > 0:
                 ch_item["fit_ratio"] = gen_sec / cue_window
@@ -2855,6 +2855,24 @@ async def run_auto_smart_multivoice_blackbox(
             "state": v2_result_state,
             "auto_smart_dispatch": "n3_plus_proven_v2",
         }
+    if isinstance(prepared, dict) and prepared.get("source_segments"):
+        # Smart's generic route bypasses the shared pipeline's source-text binding.
+        # Retain original speech for rate measurement, never change cue/voice timing.
+        source_by_id = {}
+        duplicate_source_ids = set()
+        for source_cue in prepared["source_segments"]:
+            source_id = str(source_cue.get("cue_id") or source_cue.get("id") or "")
+            if source_id in source_by_id:
+                duplicate_source_ids.add(source_id)
+            source_by_id[source_id] = source_cue
+        cues = [dict(cue) for cue in cues]
+        for cue in cues:
+            cue_id = str(cue.get("cue_id") or cue.get("id") or "")
+            original = source_by_id.get(cue_id)
+            if cue_id and cue_id not in duplicate_source_ids and original:
+                original_text = str(original.get("source_text") or original.get("text") or "").strip()
+                if original_text:
+                    cue["source_text"] = original_text
     acoustic_classifications = (
         payload.get("acoustic_classifications")
         or current.get("acoustic_classifications")
@@ -3273,7 +3291,9 @@ async def run_auto_smart_multivoice_blackbox(
                     norm_audio = raw_audio if isinstance(raw_audio, (bytes, bytearray)) else b""
 
                 if callable(validate_audio):
-                    await _maybe_await(validate_audio(norm_audio))
+                    audio_qc = await _maybe_await(validate_audio(norm_audio))
+                    if isinstance(audio_qc, Mapping) and audio_qc.get("ok") is False:
+                        raise RuntimeError(f"TIMELINE_AUDIO_QC_FAILED:{audio_qc.get('detail') or 'audio_qc_failed'}")
                 captured_audio = norm_audio if isinstance(norm_audio, (bytes, bytearray)) else b""
 
             src_bytes = b""

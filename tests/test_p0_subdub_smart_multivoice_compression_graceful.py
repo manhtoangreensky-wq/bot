@@ -206,3 +206,60 @@ def test_bb7bf97d7c_shape_reaches_production_render(tmp_path):
     assert result["blocker"] is None
     assert len(render_calls) == 1
     assert len(render_calls[0]["tts_chunks"]) == 71
+
+
+def test_arbitrary_renderer_cannot_bypass_smart_compression_gate(tmp_path):
+    """A callable alone does not prove bounded scheduling or valid MP4 output."""
+    cues = []
+    durations = {}
+    for index in range(25):
+        start = float(index * 3)
+        cue_id = f"cue-{index:04d}"
+        cues.append({
+            "cue_id": cue_id,
+            "speaker_id": f"speaker_{index % 5}",
+            "text": f"cue {index}",
+            "start_ms": int(start * 1000),
+            "end_ms": int((start + 1.0) * 1000),
+        })
+        durations[cue_id] = 2.5 if index < 16 else 1.0
+
+    source_media = tmp_path / "smart-fit-source.mp4"
+    source_media.write_bytes(b"source")
+    output_mp4 = tmp_path / "smart-fit-output.mp4"
+    render_calls = []
+
+    async def synthesize(cues, speaker_voice_map, **kwargs):
+        del speaker_voice_map, kwargs
+        return [
+            {"cue_id": cue["cue_id"], "audio": b"audio", "audio_duration": durations[cue["cue_id"]]}
+            for cue in cues
+        ]
+
+    async def render(**kwargs):
+        render_calls.append(kwargs)
+        Path(kwargs["output_path"]).write_bytes(
+            b"0" * (smart.video_local_validation.MIN_OUTPUT_BYTES + 1)
+        )
+        return kwargs["output_path"]
+
+    result = asyncio.run(
+        smart.run_auto_smart_multivoice(
+            source_media=source_media,
+            segments=cues,
+            output_path=output_mp4,
+            validated_pools={"low": [f"low_{i}" for i in range(8)], "high": [f"high_{i}" for i in range(8)]},
+            acoustic_classifications={
+                f"speaker_{i}": {"voice_register": "high" if i == 0 else "low", "confidence": 0.99}
+                for i in range(5)
+            },
+            synthesize_segments=synthesize,
+            render_pipeline=render,
+            probe_fn=lambda path: {"ok": Path(path).is_file()},
+        )
+    )
+
+    assert result["ok"] is False, result
+    assert result["error_code"] == "extreme_audio_compression_unintelligible"
+    assert not render_calls
+    assert not output_mp4.exists()
