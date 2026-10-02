@@ -232785,11 +232785,15 @@ async def handle_internal_archive_callback(update: Update, context: ContextTypes
         )
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "root"
-    if action != "save":
+    if action not in {"save", "preview"}:
         await query.answer()
     clear_doc_tool_pending(uid)
     clear_media_creator_pending_states(uid)
     state = get_internal_archive_pending(uid) or {}
+    if action == "preview" and not state.get("file_info"):
+        return await query.answer("Chưa có hồ sơ chờ lưu.", show_alert=True)
+    if action == "preview":
+        await query.answer()
     if action == "root":
         clear_internal_archive_pending(uid)
         return await safe_edit_query_message(query, internal_archive_menu_text(), reply_markup=internal_archive_menu_keyboard())
@@ -232920,8 +232924,6 @@ async def handle_internal_archive_callback(update: Update, context: ContextTypes
         set_internal_archive_pending(uid, "awaiting_tags", **{key: value for key, value in state.items() if key not in {"pending_action", "step", "created_at_ts"}})
         return await safe_edit_query_message(query, "🏷 Hãy nhập tag, ngăn cách bằng dấu phẩy.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Xem lại hồ sơ", callback_data="archive|preview"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]]))
     if action == "preview":
-        if not state.get("file_info"):
-            return await query.answer("Chưa có hồ sơ chờ lưu.", show_alert=True)
         state = set_internal_archive_pending(uid, "preview", **{key: value for key, value in state.items() if key not in {"pending_action", "step", "created_at_ts"}})
         return await safe_edit_query_message(query, internal_archive_preview_text(state), reply_markup=internal_archive_preview_keyboard())
     if action == "change_dept":
