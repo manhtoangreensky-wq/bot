@@ -55,6 +55,7 @@ FAIL_CLOSED_ASYNC_SUBMITTED_PRIOR_SUBMIT = "FAIL_CLOSED_ASYNC_SUBMITTED_PRIOR_SU
 FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE = "FAIL_CLOSED_UNPROVEN_SYNTH_SIGNATURE"
 MAX_INTELLIGIBLE_FIT_RATIO = 1.8
 HARD_CAP_FIT_RATIO = 5.0  # Fail job only if any single cue exceeds this extreme ratio
+SMART_DURATION_AWARE_HARD_CAP_FIT_RATIO = 2.5
 MAX_OVERFIT_CUE_RATIO = 0.30  # Fail job if >30% of cues exceed MAX_INTELLIGIBLE_FIT_RATIO
 MAX_CUE_END_OVERSHOOT_SECONDS = 0.100
 AUTO_SMART_N3_PLUS_DISPATCH_STRATEGY = "n3_plus_proven_v2"
@@ -1727,6 +1728,8 @@ async def run_auto_smart_multivoice(
                 has_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
                 if has_varkw or "cue_locked_timing" in params:
                     synth_kw["cue_locked_timing"] = True
+                if has_varkw or "duration_aware_timing" in params:
+                    synth_kw["duration_aware_timing"] = True
             except Exception:
                 pass
             synth_result = await _maybe_await(synthesize_segments(**synth_kw))
@@ -2060,7 +2063,12 @@ async def run_auto_smart_multivoice(
         overfit_cues = []
         for item in synth_artifacts:
             i_win = float(item.get("cue_window") or (float(item.get("end", 0.0)) - float(item.get("start", 0.0))))
-            i_dur = float(item.get("audio_duration") or item.get("raw_audio_duration") or 0.0)
+            i_dur = float(
+                item.get("fit_audio_duration")
+                or item.get("audio_duration")
+                or item.get("raw_audio_duration")
+                or 0.0
+            )
             if i_win > 0.05 and i_dur > 0:
                 item_fit_ratio = i_dur / i_win
                 if item_fit_ratio > HARD_CAP_FIT_RATIO:
@@ -2078,6 +2086,30 @@ async def run_auto_smart_multivoice(
                         "status": "TTS_EXTREME_COMPRESSION_FAILED",
                         "error_code": "extreme_audio_compression_unintelligible",
                         "blocker": "extreme_audio_compression_unintelligible",
+                        "output_mode": OUTPUT_MODE_FAILED,
+                        "final_mp4_path": None,
+                        "fit_ratio": round(item_fit_ratio, 3),
+                        "cue_id": fail_cid,
+                        "recovery_trigger_cue_id": str(item.get("recovery_trigger_cue_id") or fail_cid),
+                        "auto_smart_verified": False,
+                    }
+                if (
+                    bool(item.get("duration_aware_timing"))
+                    and item_fit_ratio > SMART_DURATION_AWARE_HARD_CAP_FIT_RATIO
+                ):
+                    fail_cid = str(
+                        item.get("recovery_trigger_cue_id")
+                        or item.get("original_trigger_cue_id")
+                        or (item.get("original_cue_ids") or [""])[-1]
+                        or item.get("cue_id")
+                        or ""
+                    )
+                    return {
+                        "ok": False,
+                        "strategy": decision.strategy,
+                        "status": "TTS_DURATION_AWARE_FIT_FAILED",
+                        "error_code": "duration_aware_fit_exceeds_hard_cap",
+                        "blocker": "duration_aware_fit_exceeds_hard_cap",
                         "output_mode": OUTPUT_MODE_FAILED,
                         "final_mp4_path": None,
                         "fit_ratio": round(item_fit_ratio, 3),

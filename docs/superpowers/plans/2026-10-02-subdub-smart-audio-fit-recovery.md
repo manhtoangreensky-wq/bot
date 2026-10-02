@@ -53,8 +53,9 @@ the actual duration of a future TTS.
   diff check clean; bot/shared timeline/strict V2 unchanged by this task.
 - [x] After incorporating main `70da4947`: 211 passed, one known baseline test
   deselected; full compile exit 0. This is not an all-suite PASS claim.
-- [ ] Update PR #1285 with narrow patch and truthful report.
-- [ ] Merge/deploy source-locked patch only after verification/review.
+- [x] Follow-up duration-aware post-65 patch added separately; PR #1285 is
+  preserved as the prior source-text fix.
+- [ ] Open/merge/deploy the follow-up patch only after verification/review.
 - [ ] One new bounded paid job only with fresh Owner authorization.
 - [ ] Verify real MP4, source timing, five voices, 10-20 second speech/receipt.
 
@@ -72,13 +73,30 @@ uses an `extract_pcm` fake rejecting required `workspace` keyword. It fails
 before changed source-rate/render code. Do not modify unrelated PCM/ASR code
 to hide this baseline test defect.
 
-## Remaining Limit
+## Follow-Up Patch: Duration-Aware Post-65 Recovery
 
-Old audio cannot prove fresh TTS duration/intelligibility. Cue 13 has 6.425
-seconds of detected speech in a 1.760-second window: even deleting all silence
-would require 3.65x compression. Fresh source-aware TTS and, if still too long,
-duration-aware translation/TTS adaptation need real evidence. Do not declare
-all valid videos supported or claim LIVE PASS from this source patch.
+The next failure `#3B6B6DF47E` had 68/68 TTS success and 30 raw overfit cues.
+The narrow follow-up keeps all pre-65 stages unchanged and adds only Smart
+post-TTS metadata/fit handling:
+
+- Smart requests the existing provider ceiling for short translated cues using
+  target-text units divided by the locked source cue window.
+- `non_silent_seconds` becomes the fit-duration authority for Smart; original
+  raw duration remains preserved for artifact provenance.
+- The cue-locked FFmpeg path removes internal silence before tempo fitting,
+  then keeps original cue starts/ends and rejects any Smart duration-aware cue
+  above the new hard cap `2.5`.
+- The normal `1.8` fit threshold and `5.0` generic hard cap remain unchanged;
+  the duration-aware allowance is isolated to Smart and is still bounded.
+
+Offline replay using all 68 existing TTS artifacts (provider calls `0`) produced
+an actual H264/AAC MP4: 181.000 seconds, 52,874,089 bytes, 68 cues, 3 speaker
+IDs, source overlap `0`, shifted cues `0`, and full FFmpeg decode PASS. The
+replay's maximum duration-aware fit was `2.228975`, below the `2.5` cap.
+
+This is artifact evidence from cached audio with simulated provider speed, not
+LIVE PASS. A fresh authorized job is still required to confirm the actual
+provider response at the new Smart speed request.
 
 The previous one-job live grants were consumed before this task. A fresh
 bounded grant was requested; no paid request or new job has been made here.
