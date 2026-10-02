@@ -238745,29 +238745,32 @@ async def open_subdub_postdelivery_video_edit(
     token: str,
     target: str,
     lang: str = "vi",
+    callback_acknowledged: bool = False,
 ):
+    async def _postdelivery_error(text: str):
+        if callback_acknowledged:
+            return await safe_edit_or_send(query, text)
+        return await query.answer(text, show_alert=True)
+
     artifact = subdub_resolve_postdelivery_video_edit_artifact(
         token,
         user_id=user_id,
     )
     if not artifact:
-        await query.answer(
+        await _postdelivery_error(
             "Không còn mở được đúng video vừa hoàn tất. Video hiện tại không bị thay đổi.",
-            show_alert=True,
         )
         return True
     try:
         existing = video_editor_state_snapshot(get_video_editor_pending(user_id))
     except VideoEditorStateUnavailableError:
-        await query.answer(
+        await _postdelivery_error(
             "Chưa mở được Chỉnh sửa video lúc này. Vui lòng thử lại sau.",
-            show_alert=True,
         )
         return True
     if str(existing.get("step") or "") == "job_status" and safe_int(existing.get("job_id"), 0) > 0:
-        await query.answer(
+        await _postdelivery_error(
             "Một tác vụ Chỉnh sửa video đang được xử lý. Hãy dùng bảng trạng thái hiện có.",
-            show_alert=True,
         )
         return True
     session_id = f"subdub-delivery-{artifact['token']}"
@@ -238794,9 +238797,8 @@ async def open_subdub_postdelivery_video_edit(
     else:
         candidate = subdub_postdelivery_video_edit_state(artifact, target=target)
     if not candidate:
-        await query.answer(
+        await _postdelivery_error(
             "Chưa mở được video vừa hoàn tất. Vui lòng thử lại sau.",
-            show_alert=True,
         )
         return True
     fields = video_editor_state_snapshot(candidate)
@@ -238805,9 +238807,8 @@ async def open_subdub_postdelivery_video_edit(
     try:
         stored = set_video_editor_pending(user_id, step, **fields)
     except (VideoEditorStateCommitError, VideoEditorStateUnavailableError):
-        await query.answer(
+        await _postdelivery_error(
             "Phiên chỉnh sửa vừa thay đổi. Hãy bấm lại từ báo cáo hoàn tất.",
-            show_alert=True,
         )
         return True
     clear_video_editor_competing_video_states(user_id, context)
@@ -238818,7 +238819,8 @@ async def open_subdub_postdelivery_video_edit(
         "tool_home",
         product_id="video_local_edit",
     )
-    await query.answer()
+    if not callback_acknowledged:
+        await query.answer()
     if str(stored.get("current_screen") or "") == "branding":
         return await safe_edit_or_send(
             query,
@@ -257044,6 +257046,14 @@ async def handle_video_dubbing_callback(
     action = parts[1] if len(parts) > 1 else "start"
     value = parts[2] if len(parts) > 2 else ""
     if action in {"edit", "branding"} and not _subdub_background:
+        try:
+            await query.answer()
+        except Exception as error:
+            logger.warning(
+                "SubDub post-delivery callback answer failed; continuing | action=%s | error=%s",
+                action,
+                type(error).__name__,
+            )
         return await open_subdub_postdelivery_video_edit(
             query,
             context,
@@ -257051,6 +257061,7 @@ async def handle_video_dubbing_callback(
             token=value,
             target=action,
             lang=lang,
+            callback_acknowledged=True,
         )
     if not _subdub_background:
         try:
