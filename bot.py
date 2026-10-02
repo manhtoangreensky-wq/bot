@@ -140326,6 +140326,8 @@ async def handle_admin_help_callback(update: Update, context: ContextTypes.DEFAU
 
 async def handle_admin_gopy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    if not is_admin_user(query.from_user.id):
+        return await query.answer("⛔ Khu vực này chỉ dành cho Admin.", show_alert=True)
     await query.answer()
     inbox_update = SimpleNamespace(effective_user=query.from_user, message=query.message)
     return await cmd_admin_gopy(inbox_update, SimpleNamespace(args=[]))
