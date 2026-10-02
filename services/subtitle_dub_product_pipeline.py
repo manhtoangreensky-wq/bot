@@ -7,6 +7,7 @@ from services.subdub_tts_language_routing import (
     resolve_subdub_tts_language_route,
     subdub_tts_language_state_fields,
 )
+from services.subdub_smart_timing import extend_smart_tail_windows, retime_smart_subtitle_tails
 
 
 VIDEO_SUBTITLE_MODE_CREATE = "subtitle_create"
@@ -564,6 +565,33 @@ async def process_subtitle_dub_job(
                     item["audio"] = item["audio_bytes"]
                 elif item.get("audio_bytes") is None and item.get("audio") is not None:
                     item["audio_bytes"] = item["audio"]
+
+            if (
+                str(pipeline_state.get("auto_speaker_lane") or "").strip().lower()
+                == "auto_smart_multivoice"
+                and any(bool(item.get("duration_aware_timing")) for item in tts_chunks)
+            ):
+                source_duration = max(
+                    float(
+                        pipeline_state.get("input_duration_seconds")
+                        or pipeline_state.get("input_duration")
+                        or pipeline_state.get("video_duration")
+                        or pipeline_state.get("source_duration")
+                        or 0.0
+                    ),
+                    max((float(item.get("end") or 0.0) for item in tts_chunks), default=0.0),
+                )
+                output_segments = [dict(item) for item in output_segments]
+                extended_cues = extend_smart_tail_windows(
+                    tts_chunks,
+                    companion_segments=output_segments,
+                    source_duration=source_duration,
+                )
+                if extended_cues and srt_bytes:
+                    srt_text = retime_smart_subtitle_tails(srt_text, output_segments)
+                    srt_bytes = str(srt_text or "").encode("utf-8")
+                    subtitle_items = subtitle_output_items(srt_text, output_type, mode)
+                    output_subtitle = srt_text
 
             from services.subdub_microcue_recovery import (
                 recover_cue_locked_micro_cues,
