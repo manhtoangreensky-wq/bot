@@ -1697,6 +1697,10 @@ async def run_auto_smart_multivoice(
 
     # Step 2: Synthesis Coverage Verification for Dubbed modes
     synth_artifacts: list[dict[str, Any]] = []
+    tts_provider = ""
+    tts_generated_segments = 0
+    smart_fit_warnings: list[dict[str, Any]] = []
+    smart_best_effort = is_auto_smart_multivoice_state(state)
     render_segments = [dict(cue) for cue in segments]
     if decision.output_mode in {
         OUTPUT_MODE_DUBBED_MULTI,
@@ -1735,6 +1739,8 @@ async def run_auto_smart_multivoice(
             except Exception:
                 pass
             synth_result = await _maybe_await(synthesize_segments(**synth_kw))
+            if isinstance(synth_result, Mapping):
+                tts_provider = str(synth_result.get("provider") or "")
             if isinstance(synth_result, list):
                 raw_chunks = synth_result
             elif isinstance(synth_result, Mapping) and "chunks" in synth_result:
@@ -2056,6 +2062,7 @@ async def run_auto_smart_multivoice(
         # Canonical production ordering: sort synth_artifacts by expected_cue_ids sequence
         cue_order_map = {cue_id: idx for idx, cue_id in enumerate(expected_cue_ids)}
         synth_artifacts.sort(key=lambda item: cue_order_map.get(str(item.get("cue_id") or item.get("id")), 999999))
+        tts_generated_segments = len(synth_artifacts)
 
         source_duration = max(
             float(
@@ -2089,6 +2096,9 @@ async def run_auto_smart_multivoice(
             )
             if i_win > 0.05 and i_dur > 0:
                 item_fit_ratio = i_dur / i_win
+                if smart_best_effort and item.get("duration_aware_timing") and item_fit_ratio > MAX_INTELLIGIBLE_FIT_RATIO:
+                    smart_fit_warnings.append({"cue_id": str(item.get("cue_id") or ""), "fit_ratio": round(item_fit_ratio, 3)})
+                    continue
                 if item_fit_ratio > HARD_CAP_FIT_RATIO:
                     # Extreme single-cue ratio: fail immediately
                     fail_cid = str(
@@ -2350,6 +2360,13 @@ async def run_auto_smart_multivoice(
         "auto_smart_verified": True,
         "cue_dispositions": decision.cue_dispositions,
         "tts_cues": decision.tts_cues,
+        "tts_provider": tts_provider,
+        "tts_expected_segments": len(decision.tts_cues),
+        "tts_generated_segments": tts_generated_segments,
+        "tts_mixed_segments": tts_generated_segments,
+        "tts_dropped_segments": 0,
+        "smart_audio_fit_degraded": bool(smart_fit_warnings),
+        "smart_audio_fit_warnings": smart_fit_warnings,
         "output_segments": render_segments,
         "decision_version": decision.decision_version,
         "locked_speaker_voice_map": dict(decision.speaker_voice_map) if locked_speaker_voice_map else None,
@@ -3224,6 +3241,7 @@ async def run_auto_smart_multivoice_blackbox(
 
     render_pipeline = payload.get("render_pipeline")
     captured_audio: bytes | None = None
+    captured_audio_qc: dict[str, Any] = {}
     probe_fn = payload.get("probe_fn") or payload.get("probe_video")
 
     pipeline_state = (
@@ -3315,7 +3333,7 @@ async def run_auto_smart_multivoice_blackbox(
             dubbed_cues: list[dict],
             **kw: Any,
         ) -> str:
-            nonlocal captured_audio, canonical_srt_text, canonical_srt_bytes
+            nonlocal captured_audio, captured_audio_qc, canonical_srt_text, canonical_srt_bytes
             norm_audio = b""
             if callable(build_timeline_audio):
                 timeline_res = await _maybe_await(build_timeline_audio(tts_chunks, canonical_duration))
@@ -3345,6 +3363,8 @@ async def run_auto_smart_multivoice_blackbox(
                     audio_qc = await _maybe_await(validate_audio(norm_audio))
                     if isinstance(audio_qc, Mapping) and audio_qc.get("ok") is False:
                         raise RuntimeError(f"TIMELINE_AUDIO_QC_FAILED:{audio_qc.get('detail') or 'audio_qc_failed'}")
+                    if isinstance(audio_qc, Mapping):
+                        captured_audio_qc = dict(audio_qc)
                 captured_audio = norm_audio if isinstance(norm_audio, (bytes, bytearray)) else b""
 
             src_bytes = b""
@@ -3531,6 +3551,11 @@ async def run_auto_smart_multivoice_blackbox(
             response["audio_bytes"] = captured_audio
         elif "audio_bytes" not in response:
             response["audio_bytes"] = b""
+        if captured_audio:
+            response["output_audio_source"] = "generated_tts"
+            response["tts_audio_bytes"] = len(captured_audio)
+            if captured_audio_qc:
+                response["tts_audio_qc"] = captured_audio_qc
 
         if prepared is not None:
             response["prepared"] = prepared
