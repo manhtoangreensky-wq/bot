@@ -140091,7 +140091,15 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
     admin_actions = {"admin", "al", "av", "asearch", "stats", "templates", "st", "reply", "suggest", "send", "ask", "note", "assign", "lead", "file"}
     if action in admin_actions and not is_admin_user(uid):
         return await query.answer(copy["support_ticket_admin_only"], show_alert=True)
-    if action not in {"send", "file"}:
+    ticket_preview = None
+    if action == "pv":
+        if len(parts) < 3 or not parts[2].isdigit():
+            return await query.answer(copy["support_ticket_action_unsupported"], show_alert=True)
+        clear_support_ticket_pending(uid)
+        ticket_preview = get_support_ticket(int(parts[2]), uid)
+        if not ticket_preview:
+            return await query.answer(copy["support_ticket_not_found"], show_alert=True)
+    if action not in {"send", "file", "pv"}:
         await query.answer()
     if action == "start":
         clear_support_ticket_pending(uid)
@@ -140107,10 +140115,8 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         text, keyboard = public_support_ticket_list_keyboard(uid, lang)
         return await safe_edit_or_send(query, text, reply_markup=keyboard)
     if action == "pv" and len(parts) >= 3:
-        clear_support_ticket_pending(uid)
-        ticket = get_support_ticket(int(parts[2]), uid)
-        if not ticket:
-            return await query.answer(copy["support_ticket_not_found"], show_alert=True)
+        await query.answer()
+        ticket = ticket_preview
         return await safe_edit_or_send(
             query,
             public_support_ticket_text(ticket, lang),
