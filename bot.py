@@ -141913,10 +141913,12 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
 
 async def handle_feedback_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     data = (query.data or "").strip()
     uid = query.from_user.id
     lang = user_ui_lang(uid)
+    if data not in {"feedback|start", "feedback|cancel"} and not data.startswith("feedback|cat|"):
+        return await query.answer("Feedback action not supported.", show_alert=True)
+    await query.answer()
     if data == "feedback|start":
         clear_feedback_pending(uid)
         clear_support_ticket_pending(uid)
