@@ -122,7 +122,7 @@ def test_smart_retains_original_text_for_provider_rate_without_timeline_shift(tm
     ))
     assert result["ok"], result
     plan = observed["plan"]
-    assert requested_speeds == [1.8, 1.8]
+    assert requested_speeds == [0.95, 0.95]
     if source_case in {"matching", "reordered"}:
         assert received_source_text == ["go now", "stay here"]
     else:
@@ -173,8 +173,8 @@ def test_recovery_cannot_turn_audio_qc_failure_into_mp4_success(tmp_path, monkey
     assert not (tmp_path / "result.mp4").exists()
 
 
-def test_smart_duration_aware_tts_requests_fit_speed_without_touching_other_lanes(timeline_bot, monkeypatch):
-    """Smart must use target text/window, while the ordinary helper stays unchanged."""
+def test_smart_duration_aware_tts_keeps_base_speed_before_measuring_audio(timeline_bot, monkeypatch):
+    """Do not guess 1.8x from text length before any audio has been measured."""
     requested = []
 
     async def provider(_text, _style, _voice, speed, **_kwargs):
@@ -196,14 +196,18 @@ def test_smart_duration_aware_tts_requests_fit_speed_without_touching_other_lane
         cue_locked_timing=True, duration_aware_timing=True,
     ))
     assert result["chunks"][0]["duration_aware_timing"] is True
-    assert result["chunks"][0]["fit_audio_duration"] == pytest.approx(0.8)
-    assert requested == [1.8]
+    assert result["chunks"][0]["fit_audio_duration"] == pytest.approx(1.0)
+    assert requested == [0.95]
+
+    asyncio.run(timeline_bot.synthesize_dub_segment_chunks(
+        cue, voice_id="voice", base_speed=0.95, max_speed=1.8,
+        cue_locked_timing=True, duration_aware_timing=False,
+    ))
+    assert requested[-1] == pytest.approx(0.95)
 
 
-def test_timeline_plan_uses_speech_duration_for_smart_fit_without_shifting_cue():
-    import bot
-
-    plan = bot.subdub_plan_dub_timeline([
+def test_timeline_plan_keeps_internal_pause_duration_for_smart_fit(timeline_bot):
+    plan = timeline_bot.subdub_plan_dub_timeline([
         {
             "cue_id": "smart-cue", "start": 4.0, "end": 5.0,
             "audio_duration": 2.4, "fit_audio_duration": 1.5,
@@ -212,8 +216,59 @@ def test_timeline_plan_uses_speech_duration_for_smart_fit_without_shifting_cue()
     ], 10.0)
     assert plan["ok"] is True
     assert plan["scheduled"][0]["scheduled_start"] == pytest.approx(4.0)
-    assert plan["scheduled"][0]["tempo_ratio"] == pytest.approx(1.5)
+    assert plan["scheduled"][0]["tempo_ratio"] == pytest.approx(2.4)
     assert plan["scheduled"][0]["generated_audio_seconds"] == pytest.approx(2.4)
+
+
+def test_smart_audio_finishes_at_subtitle_end_instead_of_rushing_then_padding(timeline_bot):
+    plan = timeline_bot.subdub_plan_dub_timeline([
+        {"cue_id": "c1", "start": 2.0, "end": 6.0,
+         "audio_duration": 2.0, "fit_audio_duration": 1.6,
+         "duration_aware_timing": True, "cue_locked_timing": True},
+    ], 8.0)
+    cue = plan["scheduled"][0]
+    assert cue["tempo_ratio"] == pytest.approx(0.5)
+    assert cue["post_fit_audio_seconds"] == pytest.approx(4.0)
+    assert cue["scheduled_start"] == pytest.approx(2.0)
+    assert cue["scheduled_end"] == pytest.approx(6.0)
+    assert plan["shifted_cue_count"] == 0
+
+
+def test_smart_ffmpeg_retains_pause_and_speech_through_cue_end(timeline_bot, tmp_path):
+    import array
+    import math
+
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg unavailable")
+    audio_path = tmp_path / "paced.mp3"
+    subprocess.run([
+        shutil.which("ffmpeg"), "-y", "-f", "lavfi", "-i",
+        "sine=frequency=440:sample_rate=32000:duration=2.0",
+        "-af", "volume='if(between(t,0.8,1.2),0,1)':eval=frame",
+        "-c:a", "libmp3lame", str(audio_path),
+    ], capture_output=True, check=True)
+    audio, _ = asyncio.run(timeline_bot.build_dub_timeline_audio([
+        {"cue_id": "c1", "start": 2.0, "end": 6.0,
+         "audio_duration": 2.0, "fit_audio_duration": 1.6,
+         "audio_bytes": audio_path.read_bytes(),
+         "duration_aware_timing": True, "cue_locked_timing": True},
+    ], 8.0))
+    output = tmp_path / "paced-output.mp3"
+    output.write_bytes(audio)
+    assert float(_probe(output)["format"]["duration"]) == pytest.approx(8.0, abs=0.15)
+    pcm = subprocess.run([
+        shutil.which("ffmpeg"), "-v", "error", "-i", str(output),
+        "-ar", "16000", "-ac", "1", "-f", "s16le", "-",
+    ], capture_output=True, check=True).stdout
+    samples = array.array("h", pcm)
+
+    def rms(start, end):
+        window = samples[int(start * 16000):int(end * 16000)]
+        return math.sqrt(sum(x * x for x in window) / len(window))
+
+    assert rms(5.4, 5.7) > 500
+    assert rms(3.95, 4.15) < 200
+    assert rms(6.3, 6.6) < 200
 
 
 def test_duration_aware_timeline_compacts_silence_and_decodes(timeline_bot, tmp_path):

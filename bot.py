@@ -234022,7 +234022,10 @@ def subdub_auto_multi_terminal_proof_fields(
     current = dict(state or {})
     acoustic_evidence = auto_multi_speaker.bounded_multi_acoustic_evidence(current)
     if (
-        not auto_multi_speaker.is_auto_multi_speaker_state(current)
+        not (
+            auto_multi_speaker.is_auto_multi_speaker_state(current)
+            or auto_smart_multivoice.is_auto_smart_multivoice_state(current)
+        )
         or current.get("auto_multi_voice_verified") is not True
         or current.get("auto_multi_attribution_verified") is not True
         or current.get("auto_multi_geometry_verified") is not True
@@ -234082,7 +234085,11 @@ def subdub_auto_multi_terminal_proof_fields(
         return {}
     return {
         **acoustic_evidence,
-        "auto_speaker_lane": auto_multi_speaker.AUTO_MULTI_SPEAKER_LANE,
+        "auto_speaker_lane": (
+            auto_smart_multivoice.AUTO_SMART_MULTIVOICE_LANE
+            if auto_smart_multivoice.is_auto_smart_multivoice_state(current)
+            else auto_multi_speaker.AUTO_MULTI_SPEAKER_LANE
+        ),
         "source_file_name": source_file_name,
         "auto_detected_speaker_count": speaker_count,
         "auto_distinct_voice_count": distinct_voice_count,
@@ -248606,11 +248613,7 @@ async def synthesize_dub_segment_chunks(
         source_speech_rate = source_text_units / slot_seconds
         required_target_speech_rate = translated_text_units / slot_seconds
         if duration_aware_timing:
-            estimated_target_seconds = translated_text_units * 0.8
-            required_provider_speed = safe_base_speed * max(
-                1.0,
-                estimated_target_seconds / max(0.001, slot_seconds),
-            )
+            required_provider_speed = safe_base_speed
         else:
             required_provider_speed = safe_base_speed * max(
                 1.0,
@@ -248685,11 +248688,7 @@ async def synthesize_dub_segment_chunks(
             "detail": sanitize_log_text(str(detail or ""))[:180],
             "audio_qc": dict(audio_qc),
             "duration_aware_timing": bool(duration_aware_timing),
-            "fit_audio_duration": (
-                max(0.0, float(audio_qc.get("non_silent_seconds") or 0.0))
-                if duration_aware_timing and float(audio_qc.get("non_silent_seconds") or 0.0) > 0
-                else duration
-            ),
+            "fit_audio_duration": duration,
         })
     if not chunks:
         raise RuntimeError("tts_segments_empty")
@@ -248733,7 +248732,8 @@ def subdub_plan_dub_timeline(
         audio_duration = max(0.0, float(item.get("audio_duration") or 0.0))
         fit_audio_duration = max(
             0.0,
-            float(item.get("fit_audio_duration") or audio_duration),
+            audio_duration if item.get("duration_aware_timing")
+            else float(item.get("fit_audio_duration") or audio_duration),
         )
         if end <= start:
             return {"ok": False, "blocker": f"tts_cue_window_invalid:{cue_id}", "scheduled": []}
@@ -248755,7 +248755,11 @@ def subdub_plan_dub_timeline(
         previous_end = 0.0
         for item in normalized:
             cue_window = float(item["end"]) - float(item["start"])
-            fit_ratio = max(1.0, float(item["fit_audio_duration"]) / cue_window)
+            measured_ratio = float(item["fit_audio_duration"]) / cue_window
+            fit_ratio = (
+                measured_ratio if item.get("duration_aware_timing")
+                else max(1.0, measured_ratio)
+            )
             post_fit_audio = float(item["fit_audio_duration"]) / fit_ratio
             if float(item["start"]) < previous_end - 0.001:
                 source_overlap_count += 1
@@ -248903,7 +248907,10 @@ async def build_dub_timeline_audio(chunks: list[dict], total_duration: float = 0
                     0.06,
                     min(cue_window, float(item.get("post_fit_audio_seconds") or cue_window)),
                 )
-                tempo_ratio = max(1.0, float(item.get("tempo_ratio") or 1.0))
+                smart_timing = bool(item.get("duration_aware_timing"))
+                tempo_ratio = float(item.get("tempo_ratio") or 1.0)
+                if not smart_timing:
+                    tempo_ratio = max(1.0, tempo_ratio)
                 fade_duration = min(0.008, post_fit_audio / 4.0)
                 fade_out_start = max(0.0, post_fit_audio - fade_duration)
                 chain = []
@@ -248916,20 +248923,25 @@ async def build_dub_timeline_audio(chunks: list[dict], total_duration: float = 0
                         f"atrim=start={trim_start:.6f}:end={trim_end:.6f}",
                         "asetpts=PTS-STARTPTS",
                     ])
-                if bool(item.get("duration_aware_timing")):
-                    chain.append(
-                        "silenceremove=stop_periods=-1:"
-                        "stop_duration=0.08:stop_threshold=-40dB"
-                    )
+                tempo_filters = []
+                if smart_timing and tempo_ratio < 1.0:
+                    # Preserve pauses while fitting the whole utterance to its cue.
+                    while tempo_ratio < 0.5:
+                        tempo_filters.append("atempo=0.5")
+                        tempo_ratio /= 0.5
+                    tempo_filters.append(f"atempo={tempo_ratio:.9f}")
+                else:
+                    tempo_filters = subdub_atempo_filters(tempo_ratio)
                 chain.extend([
                     "aformat=sample_fmts=fltp:sample_rates=32000:channel_layouts=mono",
-                    *subdub_atempo_filters(tempo_ratio),
+                    *tempo_filters,
+                    *(["asetpts=N/SR/TB"] if smart_timing else []),
                     f"afade=t=in:st=0:d={fade_duration:.6f}",
                     f"afade=t=out:st={fade_out_start:.6f}:d={fade_duration:.6f}",
                     f"apad=whole_dur={cue_window:.6f}",
                     f"atrim=duration={cue_window:.6f}",
                     f"adelay={int(round(scheduled_start * 1000))}|{int(round(scheduled_start * 1000))}",
-                    "asetpts=PTS-STARTPTS",
+                    "asetpts=N/SR/TB" if smart_timing else "asetpts=PTS-STARTPTS",
                 ])
                 cue_label = f"cue_{index}"
                 filters.append(f"[{index}:a]{','.join(chain)}[{cue_label}]")
@@ -249695,6 +249707,7 @@ async def video_dubbing_prepare_subtitles(
                     auto_smart_multivoice.is_auto_smart_multivoice_state(state)
                     and acoustic_failure["multi_acoustic_failure_code"] in {
                         "fixed_vocal_speaker_count_unstable",
+                        "fixed_vocal_view_unstable",
                         "fixed_vocal_window_support_invalid",
                         "acoustic_unit_count_invalid",
                     }
