@@ -141941,9 +141941,12 @@ async def handle_feedback_callback(update: Update, context: ContextTypes.DEFAULT
 
 async def handle_language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     data = (query.data or "").strip()
     uid = query.from_user.id
+    lang = normalize_user_language(data.split("|", 1)[1]) if data.startswith("lang|") else None
+    if data.startswith("lang|") and not lang:
+        return await query.answer("Language is not supported.", show_alert=True)
+    await query.answer()
     if data == "lang_more":
         current_lang = normalize_user_language(get_user_language(uid)) or "vi"
         return await safe_edit_query_message(
@@ -141966,9 +141969,6 @@ async def handle_language_callback(update: Update, context: ContextTypes.DEFAULT
             reply_markup=localized_main_menu_keyboard(is_admin_user(uid), previous_lang),
         )
     if data.startswith("lang|"):
-        lang = normalize_user_language(data.split("|", 1)[1])
-        if not lang:
-            return await query.answer("Language is not supported.", show_alert=True)
         selected = set_user_language(uid, lang)
         if not is_admin_user(uid) and user_selected_vietnamese_initially(uid):
             asyncio.create_task(enqueue_broadcast_first_start_safe(uid))
