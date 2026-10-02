@@ -140078,14 +140078,14 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
     data = str(query.data or "")
     parts = data.split("|")
     action = parts[1] if len(parts) > 1 else "start"
-    if action not in {"send", "file"}:
-        await query.answer()
     uid = query.from_user.id
     lang = normalize_user_language(get_user_language(uid)) or "vi"
     copy = public_hub_copy(lang)
     admin_actions = {"admin", "al", "av", "asearch", "stats", "templates", "st", "reply", "suggest", "send", "ask", "note", "assign", "lead", "file"}
     if action in admin_actions and not is_admin_user(uid):
         return await query.answer(copy["support_ticket_admin_only"], show_alert=True)
+    if action not in {"send", "file"}:
+        await query.answer()
     if action == "start":
         clear_support_ticket_pending(uid)
         return await safe_edit_or_send(query, support_ticket_menu_text(lang), reply_markup=support_ticket_menu_keyboard(lang))
