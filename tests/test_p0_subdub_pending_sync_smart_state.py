@@ -370,22 +370,32 @@ def test_smart_multi_pending_sync_excludes_user_id_and_keeps_route_contract():
 
 
 @pytest.mark.parametrize("wrapped_failure", [False, True])
-def test_smart_multi_unstable_fixed_count_degrades_to_one_voice_without_acoustic_claim(wrapped_failure):
+@pytest.mark.parametrize("failure_code", [
+    "fixed_vocal_speaker_count_unstable", "fixed_vocal_view_unstable",
+])
+def test_smart_multi_unstable_fixed_count_degrades_to_one_voice_without_acoustic_claim(wrapped_failure, failure_code):
     tmp_root = BOT_PATH.parent / ".pytest_tmp"
     tmp_root.mkdir(parents=True, exist_ok=True)
     tmp_path = Path(tempfile.mkdtemp(prefix="smart_multi_", dir=tmp_root))
     namespace = _namespace()
     captured = {}
+    words = [f"word{index:02d}" for index in range(31)]
+    source_segments = [
+        {"start": float(index * 10), "end": float(index * 10 + 6),
+         "text": " ".join(words[index * 8:(index + 1) * 8]), "speaker": None}
+        for index in range(4)
+    ]
 
     async def resolve_source(*_args, **_kwargs):
         return {
             "source_kind": "asr",
             "subtitle": "1\n00:00:00,000 --> 00:00:01,000\nhello\n",
-            "segments": [
-                {"start": 0.0, "end": 1.0, "text": "hello", "speaker": None}
+            "segments": source_segments,
+            "word_timeline": [
+                {"word": word, "start": float(index), "end": float(index + 0.5)}
+                for index, word in enumerate(words)
             ],
-            "word_timeline": [{"word": "hello", "start": 0.0, "end": 1.0}],
-            "duration_seconds": 1.0,
+            "duration_seconds": 60.0,
         }
 
     async def pcm_extract(*_args, **_kwargs):
@@ -393,8 +403,8 @@ def test_smart_multi_unstable_fixed_count_degrades_to_one_voice_without_acoustic
 
     async def unstable_diarization(*_args, **_kwargs):
         if wrapped_failure:
-            raise namespace["subdub_speaker_cast"].AutoCastManualRequired() from ValueError("fixed_vocal_speaker_count_unstable")
-        raise ValueError("fixed_vocal_speaker_count_unstable")
+            raise namespace["subdub_speaker_cast"].AutoCastManualRequired() from ValueError(failure_code)
+        raise ValueError(failure_code)
 
     def persist_sidecar(sidecar, *, workspace):
         captured["sidecar"] = dict(sidecar)
@@ -439,10 +449,13 @@ def test_smart_multi_unstable_fixed_count_degrades_to_one_voice_without_acoustic
         assert {segment["speaker_id"] for segment in prepared["source_segments"]} == {
             "chunk_00:speaker_0"
         }
+        assert [segment["text"] for segment in prepared["source_segments"]] == [
+            segment["text"] for segment in source_segments
+        ]
         assert {segment["speaker"] for segment in captured["sidecar"]["cues"]} == {0}
         assert "acoustic" not in captured["sidecar"]
         assert pending["auto_smart_degraded_single_voice"] is True
-        assert pending["auto_smart_degraded_reason"] == "fixed_vocal_speaker_count_unstable"
+        assert pending["auto_smart_degraded_reason"] == failure_code
 
         async def unrelated_failure(*_args, **_kwargs):
             raise ValueError("unrelated_acoustic_failure")
