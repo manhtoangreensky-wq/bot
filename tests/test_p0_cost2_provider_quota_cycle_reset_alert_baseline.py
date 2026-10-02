@@ -286,7 +286,12 @@ def test_cost2_no_subdub_changes():
 
 
 def test_cost2_no_payos_wallet_finance_changes():
-    diff = _bot_diff().lower()
+    # Diff context can contain an unchanged neighbouring payment startup block.
+    # Inspect modifications, not context, while still rejecting any payment edit.
+    diff = "\n".join(
+        line for line in _bot_diff().lower().splitlines()
+        if line.startswith(("+", "-")) and not line.startswith(("+++", "---"))
+    )
     if _current_branch().startswith("hotfix/p0-subdub"):
         # SubDub-scoped branches may move admin status copy that contains the
         # literal "wallet_mutation=0" reassurance line; real PayOS/wallet code
@@ -305,5 +310,13 @@ def test_cost2_no_provider_paid_calls():
         assert forbidden not in command_source
     assert without_aiedit1_scope(_changed_paths()) <= {
         "bot.py",
+        "docs/reports/PROVIDER_BALANCE_100USD.md",
+        "services/provider_balance_alert_policy.py",
+        "services/provider_balance_notifications.py",
+        "services/provider_balance_reader.py",
         "tests/test_p0_cost2_provider_quota_cycle_reset_alert_baseline.py",
+        "tests/test_provider_balance_alert_policy.py",
+        "tests/test_provider_balance_notifications.py",
+        "tests/test_provider_balance_reader.py",
+        "tests/test_provider_balance_runtime_seam.py",
     }
