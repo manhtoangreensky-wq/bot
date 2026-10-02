@@ -1469,15 +1469,25 @@ def _fal_wire_payload(
                 debug={"provider": "fal_video", "blocker": "fal_v2v_source_video_path_missing", "no_charge": True},
             )
 
-        if source_path.startswith(("http://", "https://")):
+        if source_path.startswith("http://"):
+            raise VideoProviderContractError(
+                "fal_v2v_insecure_http_source_unsupported",
+                stage="wire_payload_build",
+                debug={"provider": "fal_video", "blocker": "fal_v2v_insecure_http_source_unsupported", "no_charge": True},
+            )
+
+        from services.video_ai_edit_provider import (
+            AiEditProviderError,
+            build_fal_wan_v2v_payload,
+            provider_config_from_env,
+            upload_fal_media_file,
+        )
+
+        config = provider_config_from_env("fal_video", env=active_env)
+
+        if source_path.startswith("https://"):
             remote_source_url = source_path
         else:
-            from services.video_ai_edit_provider import (
-                AiEditProviderError,
-                provider_config_from_env,
-                upload_fal_media_file,
-            )
-            config = provider_config_from_env("fal_video", env=active_env)
             try:
                 upload_res = upload_fal_media_file(config, source_path)
             except AiEditProviderError as exc:
@@ -1494,23 +1504,26 @@ def _fal_wire_payload(
                     debug={"provider": "fal_video", "blocker": "fal_scene_upload_result_url_invalid", "no_charge": True},
                 )
 
-        from services.video_ai_edit_provider import calculate_fal_wan_v2v_num_frames
         duration_sec = float(data.get("duration_seconds") or data.get("duration") or 5.0)
-        num_frames = calculate_fal_wan_v2v_num_frames(duration_sec)
         prompt_text = str(data.get("prompt") or "").strip()
         aspect_ratio = str(data.get("aspect_ratio") or data.get("ratio") or "9:16").strip()
         neg_prompt = str(data.get("negative_prompt") or "").strip()
 
-        wire = {
-            "prompt": prompt_text,
-            "video_url": remote_source_url,
-            "num_frames": num_frames,
-            "frames_per_second": 16,
-            "aspect_ratio": aspect_ratio,
-        }
-        if neg_prompt:
-            wire["negative_prompt"] = neg_prompt
-        return wire
+        try:
+            return build_fal_wan_v2v_payload(
+                config,
+                prompt=prompt_text,
+                source_video_path=remote_source_url,
+                duration_seconds=duration_sec,
+                aspect_ratio=aspect_ratio,
+                negative_prompt=neg_prompt,
+            )
+        except AiEditProviderError as exc:
+            raise VideoProviderContractError(
+                exc.reason,
+                stage="wire_payload_build",
+                debug={"provider": "fal_video", "blocker": exc.reason, "no_charge": True},
+            ) from exc
 
     return data
 
