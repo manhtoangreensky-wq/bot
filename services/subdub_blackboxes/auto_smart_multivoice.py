@@ -41,7 +41,7 @@ import tempfile
 import time
 from typing import Any, Callable, Mapping, Sequence
 
-from services.subdub_blackboxes import auto_multi_speaker, auto_multi_speaker_v2
+from services.subdub_blackboxes import auto_multi_speaker, auto_multi_speaker_v2, auto_speaker
 from services import subdub_speaker_cast as speaker_cast
 from services.subdub_smart_timing import extend_smart_tail_windows, retime_smart_subtitle_tails
 from services import subdub_tts_checkpoint
@@ -2923,6 +2923,63 @@ async def run_auto_smart_multivoice_blackbox(
             "state": v2_result_state,
             "auto_smart_dispatch": "n3_plus_proven_v2",
         }
+
+    current = dict(current)
+    post_prepare_gate = payload.get("post_prepare_gate")
+    production_auto = bool(current.get("_pipeline_job_key")) and auto_speaker.is_auto_speaker_state(current)
+
+    def stop_at_exact_gate(result: Mapping[str, Any]) -> dict[str, Any]:
+        if temp_source_path and os.path.exists(temp_source_path):
+            try:
+                os.unlink(temp_source_path)
+            except OSError:
+                pass
+        return {**dict(result), "ok": False, "state": dict(current)}
+
+    if callable(post_prepare_gate):
+        entry_state = dict(current)
+        try:
+            gate_result = await _maybe_await(post_prepare_gate(prepared, current))
+        except asyncio.CancelledError:
+            stop_at_exact_gate({})
+            raise
+        except Exception as gate_error:
+            return stop_at_exact_gate({
+                "status": "AUTO_EXACT_GATE_FAILED",
+                "error_code": "auto_exact_gate_failed",
+                "failure_stage": "pricing",
+                "admin_debug_summary": type(gate_error).__name__,
+            })
+        prepared_state = prepared.get("state") if isinstance(prepared, Mapping) else None
+        if isinstance(prepared_state, Mapping):
+            # Either gate output may carry updates; stale prepared fields cannot undo state updates.
+            for key, value in prepared_state.items():
+                if str(key).startswith("_pipeline_") and key in current:
+                    continue
+                if key not in current or current[key] == entry_state.get(key):
+                    current[key] = value
+        if not auto_speaker._gate_continues(gate_result):
+            return stop_at_exact_gate(
+                gate_result if isinstance(gate_result, Mapping)
+                else {"status": "AUTO_EXACT_GATE_INVALID", "error_code": "auto_exact_gate_invalid"}
+            )
+    elif production_auto:
+        return stop_at_exact_gate({
+            "status": "AUTO_EXACT_GATE_UNAVAILABLE", "error_code": "auto_exact_gate_unavailable",
+            "failure_stage": "pricing",
+        })
+    if production_auto:
+        try:
+            exact_price = int(current.get("auto_exact_actual_total_xu") or 0)
+        except (TypeError, ValueError, OverflowError):
+            exact_price = 0
+        if not current.get("auto_exact_receipt_confirmed") or exact_price <= 0:
+            return stop_at_exact_gate({
+                "status": "AUTO_EXACT_PRICE_MISSING", "error_code": "auto_exact_price_missing",
+                "failure_stage": "pricing",
+            })
+    if isinstance(prepared, Mapping):
+        cues = prepared.get("output_segments") or prepared.get("source_segments") or prepared.get("segments") or cues
     if isinstance(prepared, dict) and prepared.get("source_segments"):
         # Smart's generic route bypasses the shared pipeline's source-text binding.
         # Retain original speech for rate measurement, never change cue/voice timing.
