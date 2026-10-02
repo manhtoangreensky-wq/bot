@@ -140107,7 +140107,14 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         admin_ticket_detail = get_support_ticket(int(parts[2]))
         if not admin_ticket_detail:
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
-    if action not in {"send", "file", "pv", "av"}:
+    admin_ticket_status = None
+    if action == "st":
+        if len(parts) < 4 or not parts[2].isdigit():
+            return await query.answer(copy["support_ticket_action_unsupported"], show_alert=True)
+        admin_ticket_status = get_support_ticket(int(parts[2]))
+        if not admin_ticket_status:
+            return await query.answer("Không tìm thấy ticket.", show_alert=True)
+    if action not in {"send", "file", "pv", "av", "st"}:
         await query.answer()
     if action == "start":
         clear_support_ticket_pending(uid)
@@ -140199,10 +140206,11 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
     if action == "st" and len(parts) >= 4:
         ticket_id = int(parts[2])
         new_status = parts[3]
-        previous_ticket = get_support_ticket(ticket_id) if new_status == "refund_pending" else None
+        previous_ticket = admin_ticket_status if new_status == "refund_pending" else None
+        await query.answer()
         ticket = update_support_ticket(ticket_id, status=new_status)
         if not ticket:
-            return await query.answer("Không tìm thấy ticket.", show_alert=True)
+            return await safe_edit_or_send(query, "Không tìm thấy ticket.", reply_markup=support_admin_menu_keyboard())
         if new_status == "refund_pending" and str((previous_ticket or {}).get("status") or "") != new_status:
             await query.message.reply_text("💰 Ticket đã được đánh dấu cần kiểm tra hoàn Xu/refund. Thao tác này chưa cộng hoặc trừ Xu.")
         return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket))
