@@ -365,6 +365,10 @@ async def process_subtitle_dub_job(
                 base_speed=speed,
                 max_speed=1.8 if cue_locked_timing else min(1.0, max(0.7, speed)),
                 cue_locked_timing=cue_locked_timing,
+                duration_aware_timing=(
+                    str(pipeline_state.get("auto_speaker_lane") or "").strip().lower()
+                    == "auto_smart_multivoice"
+                ),
                 tts_language_code=pipeline_state.get("resolved_tts_language_code") or "auto",
                 tts_language_boost=pipeline_state.get("tts_language_boost") or "auto",
                 edge_voice_id=pipeline_state.get("resolved_edge_voice_id") or "",
@@ -570,6 +574,7 @@ async def process_subtitle_dub_job(
                 tts_chunks = recover_cue_locked_micro_cues(tts_chunks)
 
             HARD_CAP_FIT_RATIO = 5.0
+            SMART_DURATION_AWARE_HARD_CAP_FIT_RATIO = 2.5
             MAX_OVERFIT_CUE_RATIO = 0.30
             overfit_cues = []
             for item in tts_chunks:
@@ -578,7 +583,8 @@ async def process_subtitle_dub_job(
                     float(item.get("end") or 0.0) - float(item.get("start") or 0.0),
                 )
                 generated_seconds = max(0.0, float(item.get("audio_duration") or 0.0))
-                raw_fit_ratio = generated_seconds / cue_window if cue_window > 0.05 and generated_seconds > 0 else 1.0
+                fit_seconds = max(0.0, float(item.get("fit_audio_duration") or generated_seconds))
+                raw_fit_ratio = fit_seconds / cue_window if cue_window > 0.05 and fit_seconds > 0 else 1.0
                 if not is_legacy_multi and raw_fit_ratio > HARD_CAP_FIT_RATIO:
                     fail_cid = str(
                         item.get("recovery_trigger_cue_id")
@@ -602,12 +608,40 @@ async def process_subtitle_dub_job(
                         "cue_id": fail_cid,
                         "recovery_trigger_cue_id": str(item.get("recovery_trigger_cue_id") or fail_cid),
                     }
+                if (
+                    not is_legacy_multi
+                    and bool(item.get("duration_aware_timing"))
+                    and raw_fit_ratio > SMART_DURATION_AWARE_HARD_CAP_FIT_RATIO
+                ):
+                    fail_cid = str(
+                        item.get("recovery_trigger_cue_id")
+                        or item.get("original_trigger_cue_id")
+                        or (item.get("original_cue_ids") or [""])[-1]
+                        or item.get("cue_id")
+                        or ""
+                    )
+                    return {
+                        "ok": False,
+                        "status": "TTS_DURATION_AWARE_FIT_FAILED",
+                        "error_code": "duration_aware_fit_exceeds_hard_cap",
+                        "blocker": "duration_aware_fit_exceeds_hard_cap",
+                        "provider_called": True,
+                        "charged": False,
+                        "created_files": [],
+                        "state": pipeline_state,
+                        "prepared": prepared,
+                        "route_attempts": route_attempts,
+                        "fit_ratio": round(raw_fit_ratio, 3),
+                        "cue_id": fail_cid,
+                        "recovery_trigger_cue_id": str(item.get("recovery_trigger_cue_id") or fail_cid),
+                    }
                 elif not is_legacy_multi and raw_fit_ratio > MAX_INTELLIGIBLE_FIT_RATIO:
                     overfit_cues.append((str(item.get("cue_id") or ""), round(raw_fit_ratio, 3)))
                 fit_ratio = max(1.0, raw_fit_ratio)
                 item.update({
                     "cue_window_seconds": cue_window,
                     "generated_audio_seconds": generated_seconds,
+                    "fit_audio_duration": fit_seconds,
                     "fit_ratio": fit_ratio,
                     "post_fit_audio_seconds": generated_seconds / fit_ratio,
                     "drift_seconds": 0.0,
