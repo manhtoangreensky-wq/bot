@@ -236654,7 +236654,7 @@ def video_dubbing_custom_voice_guard_keyboard(lang: str = "vi") -> InlineKeyboar
             ("👨 Giọng nam mặc định" if is_vi else "👨 Default male", "videodub|voice|default_male"),
         ],
         lang,
-        back=("⬅️ Quay lại giọng" if is_vi else "⬅️ Back to voices", "videodub|back_voice"),
+        back=("⬅️ Quay lại giọng" if is_vi else "⬅️ Back to voices", "videodub|voice_menu"),
     )
 
 def video_dubbing_uses_custom_voice(state: dict | None = None) -> bool:
@@ -236688,7 +236688,7 @@ def video_dubbing_saved_voice_keyboard(user_id, lang: str = "vi", page: int = 0)
     return video_v6_keyboard(
         buttons,
         lang,
-        back=("⬅️ Quay lại giọng" if is_vi else "⬅️ Back to voices", "videodub|back_voice"),
+        back=("⬅️ Quay lại giọng" if is_vi else "⬅️ Back to voices", "videodub|voice_menu"),
     )
 
 def video_dubbing_voice_payload(choice: str, profile: dict | None = None, lang: str = "vi") -> dict:
@@ -257294,6 +257294,19 @@ async def handle_video_dubbing_callback(
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
     )
     active_flow = str(state.get("active_flow") or "")
+    if action == "voice_menu":
+        if mode not in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
+            return await safe_edit_or_send(
+                query, video_dubbing_missing_upload_recovery_text(lang),
+                reply_markup=video_dubbing_menu_keyboard(lang, origin),
+            )
+        state = _clear_subdub_voice_for_navigation(uid, state)
+        step = "choosing_voice" if active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB else "voice"
+        state = set_video_dubbing_pending(uid, step, processing="0")
+        return await safe_edit_or_send(
+            query, video_dubbing_voice_text(state, lang), parse_mode="HTML",
+            reply_markup=video_dubbing_voice_keyboard(lang, state),
+        )
     if action in {"subtitle_position", "subtitle_position_set", "subtitle_position_back"}:
         return await handle_video_dubbing_subtitle_position_callback(
             query, uid, state, mode, action, value, lang
@@ -258423,7 +258436,7 @@ async def handle_video_dubbing_callback(
         return await safe_edit_or_send(
             query,
             "✍️ Hãy nhập mô tả giọng lồng tiếng bạn muốn." if normalize_user_language(lang) == "vi" else "✍️ Describe the dubbing voice.",
-            reply_markup=video_v6_keyboard([], lang, back=("⬅️ Quay lại giọng" if normalize_user_language(lang) == "vi" else "⬅️ Back", "videodub|back_voice")),
+            reply_markup=video_v6_keyboard([], lang, back=("⬅️ Quay lại giọng" if normalize_user_language(lang) == "vi" else "⬅️ Back", "videodub|voice_menu")),
         )
     if action == "voice_saved":
         if mode not in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
@@ -258460,7 +258473,7 @@ async def handle_video_dubbing_callback(
         return await safe_edit_or_send(
             query,
             "✍️ Hãy nhập mô tả giọng lồng tiếng bạn muốn." if normalize_user_language(lang) == "vi" else "✍️ Describe the dubbing voice.",
-            reply_markup=video_v6_keyboard([], lang, back=("⬅️ Quay lại giọng" if normalize_user_language(lang) == "vi" else "⬅️ Back", "videodub|back_voice")),
+            reply_markup=video_v6_keyboard([], lang, back=("⬅️ Quay lại giọng" if normalize_user_language(lang) == "vi" else "⬅️ Back", "videodub|voice_menu")),
         )
     if action == "voice_profile_page":
         state = reset_subdub_voice_selection(state, selecting_auto=False)
