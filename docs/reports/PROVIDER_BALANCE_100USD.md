@@ -1,6 +1,6 @@
 # Provider balance notifications — N4.35 handoff
 
-`BASE_SHA=70da49476010c750ea1c8af7be29495657c1cbad`
+`BASE_SHA=51e8c172f9a73e24ecb0e32418bdc48d25887f39`
 
 ## Contract
 
@@ -11,11 +11,13 @@
 - Persist `PENDING` before Telegram send and `SENT` only after a valid message receipt. Ambiguous outcomes remain pending for manual reconciliation; do not blindly retry. Recovery above threshold rearms the next alert. Reminder cadence is six hours.
 - Notification only: no automatic provider freeze, billing, wallet, or customer-message changes. Key4U polling honors the existing alert switch and credentials. ShopAIKey preserves its existing usage monitor/safety read and performs one separate fixed-balance notification read per monitor tick.
 
-## Verification on the refreshed branch
+## Verification on the latest-main integration
 
-- Focused policy, notification, reader, and actual monitor/startup seam tests: `52 passed in 3.14s`; HTTP was mocked with `httpx.MockTransport`, Telegram sends were `AsyncMock` only.
+- Current main advanced by SubDub PR #1285 while this branch was being verified. It was merged as an upstream parent only; the PR diff against latest main still contains no SubDub/Product Video/Voice/Music paths.
+- Focused policy, notification, reader, actual monitor/startup seam, and protected quota regression command: `75 passed, 294 warnings in 11.10s` on the latest-main integration. HTTP was mocked with `httpx.MockTransport`, Telegram sends were `AsyncMock` only.
+- Focused `py_compile` for the three service modules and five related test modules: exit `0` (8 files). Full `bot.py` compile is delegated to the required source-compile CI because the local 15 MB compile exceeded the bounded CPU window.
 - `git diff --check HEAD`: exit `0`.
-- Local `py_compile bot.py` was interrupted after a 120-second CPU-bound run on the 15 MB source file; this is **not** recorded as PASS. Updated-PR source-compile and quality CI are required before merge.
+- Updated-PR source-compile and quality CI are required before merge.
 - `PROVIDER_CALLS=0; TELEGRAM_SENDS=0; WALLET_MUTATIONS=0; PROD_DB_WRITES=0; DEPLOY=NO; RESTART=NO; RUNTIME_SHA=NOT_VERIFIED; LIVE_PASS=NOT_TESTED`.
 
 ## Remaining gates
