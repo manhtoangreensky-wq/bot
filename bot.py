@@ -232775,11 +232775,12 @@ async def handle_internal_archive_callback(update: Update, context: ContextTypes
             "Hồ sơ nội bộ chỉ dành cho admin/owner. Vui lòng dùng mục Hỗ trợ nếu cần gửi tài liệu.",
             show_alert=True,
         )
-    await query.answer()
-    clear_doc_tool_pending(uid)
-    clear_media_creator_pending_states(uid)
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "root"
+    if action != "save":
+        await query.answer()
+    clear_doc_tool_pending(uid)
+    clear_media_creator_pending_states(uid)
     state = get_internal_archive_pending(uid) or {}
     if action == "root":
         clear_internal_archive_pending(uid)
@@ -232883,6 +232884,7 @@ async def handle_internal_archive_callback(update: Update, context: ContextTypes
         info = state.get("file_info") or {}
         if state.get("step") != "preview" or not info:
             return await query.answer("Chưa có hồ sơ chờ lưu.", show_alert=True)
+        await query.answer()
         quota_error = internal_archive_quota_error(uid, int(info.get("size_bytes") or 0))
         if quota_error:
             return await safe_edit_query_message(query, quota_error, reply_markup=internal_archive_preview_keyboard())
