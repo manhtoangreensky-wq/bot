@@ -1545,7 +1545,7 @@ async def set_telegram_webhook_takeover(bot, drop_pending_updates: bool = True) 
     }
 
 async def telegram_webhook_watchdog():
-    """Keep Telegram updates pinned to this Railway deployment if another process reclaims the token."""
+    """Keep Telegram updates pinned to the expected TOAN AAS webhook if another process reclaims the token."""
     global ACTIVE_TELEGRAM_WEBHOOK_WATCHDOG, ACTIVE_TELEGRAM_WEBHOOK_URL
     if not tg_app or not PUBLIC_BASE_URL or TELEGRAM_TAKEOVER_INTERVAL_SECONDS <= 0:
         return
@@ -1575,7 +1575,7 @@ async def telegram_webhook_watchdog():
                         chat_id=ADMIN_ID,
                         text=(
                             "🛡 <b>TOAN AAS WEBHOOK WATCHDOG</b>\n\n"
-                            "Bot vừa tự kéo Telegram update về đúng Railway TOAN AAS.\n"
+                            "Bot vừa tự kéo Telegram update về đúng webhook TOAN AAS.\n"
                             f"• Webhook cũ: <code>{html.escape(info_payload.get('url') or '-')}</code>\n"
                             f"• Webhook đúng: <code>{html.escape(expected_url or '-')}</code>\n"
                             f"• Kết quả: <code>{html.escape(str(takeover.get('ok')))}</code>\n"
