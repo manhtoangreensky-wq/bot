@@ -51,6 +51,8 @@ the actual duration of a future TTS.
   no new failures in the comparable six-file suite.
 - [x] Python 3.11 compile (bot, Smart, shared pipeline, new tests): exit 0;
   diff check clean; bot/shared timeline/strict V2 unchanged by this task.
+- [x] After incorporating main `70da4947`: 211 passed, one known baseline test
+  deselected; full compile exit 0. This is not an all-suite PASS claim.
 - [ ] Update PR #1285 with narrow patch and truthful report.
 - [ ] Merge/deploy source-locked patch only after verification/review.
 - [ ] One new bounded paid job only with fresh Owner authorization.
@@ -80,3 +82,4 @@ all valid videos supported or claim LIVE PASS from this source patch.
 
 The previous one-job live grants were consumed before this task. A fresh
 bounded grant was requested; no paid request or new job has been made here.
+Hold this PR as draft until source-locked real-output acceptance is resolved.
