@@ -617,3 +617,77 @@ def test_d02_credentials_absent_from_wire_payload_and_debug(mock_fal_env: dict[s
     # Check debug keys
     raw_str = json.dumps(result.raw)
     assert secret not in raw_str
+
+
+def test_d03_key4u_video_payload_building_contract_unchanged(mock_fal_env: dict[str, str]):
+    """Key4U video payload building contract remains completely unchanged."""
+    req = VideoGenerationRequest(
+        job_id="test_job_key4u",
+        product_type="video_ai_video_reference",
+        prompt="neon city lights",
+        required_capability="text_to_video",
+        duration_seconds=5.0,
+    )
+    env_with_key4u = dict(mock_fal_env)
+    env_with_key4u["KEY4U_KLING_VIDEO_ENDPOINT"] = "https://api.key4u.example/v1/kling"
+    env_with_key4u["KEY4U_VIDEO_MODEL"] = "kling-3.0-turbo"
+    payload_key4u = _build_provider_payload("key4u_video", req, env_with_key4u)
+    assert payload_key4u.get("model") == "kling-3.0-turbo"
+    assert payload_key4u.get("prompt") == "neon city lights"
+
+
+def test_d04_wallet_isolation_fail_if_called_guard(mock_fal_env: dict[str, str]):
+    """Wallet/settlement mutations must never be called during provider submission."""
+    provider = _generic_adapter_for("fal_video", mock_fal_env)
+    req = VideoGenerationRequest(
+        job_id="test_job_wallet_guard",
+        product_type="video_ai_video_reference",
+        prompt="test prompt",
+        required_capability="video_to_video",
+        source_video_path="https://fal.media/files/scene_wallet.mp4",
+        duration_seconds=5.0,
+    )
+
+    fake_resp = {
+        "ok": True,
+        "status_code": 200,
+        "body": {"request_id": "fal-req-wallet-1", "status": "IN_QUEUE"},
+    }
+
+    with patch("services.web_product_video_settlement_service.execute_web_product_video_settlement") as mock_settle, \
+         patch("services.admin_wallet_service.execute_admin_wallet_credit") as mock_credit:
+        mock_settle.side_effect = AssertionError("Wallet mutation attempted in submit_video_job!")
+        mock_credit.side_effect = AssertionError("Admin wallet credit attempted in submit_video_job!")
+        with patch.object(provider, "_open_json", return_value=fake_resp):
+            result = provider.submit_video_job(req)
+
+        assert result.ok is True
+        assert mock_settle.call_count == 0
+        assert mock_credit.call_count == 0
+
+
+def test_d05_real_network_prohibition_fail_if_called_guard(mock_fal_env: dict[str, str]):
+    """Ensure socket.connect is forbidden to prove provider-free isolation."""
+    provider = _generic_adapter_for("fal_video", mock_fal_env)
+    req = VideoGenerationRequest(
+        job_id="test_job_network_guard",
+        product_type="video_ai_video_reference",
+        prompt="test prompt",
+        required_capability="video_to_video",
+        source_video_path="https://fal.media/files/scene_network.mp4",
+        duration_seconds=5.0,
+    )
+
+    fake_resp = {
+        "ok": True,
+        "status_code": 200,
+        "body": {"request_id": "fal-req-net-1", "status": "IN_QUEUE"},
+    }
+
+    with patch.object(socket.socket, "connect", side_effect=AssertionError("Real network connection forbidden!")) as mock_connect:
+        with patch.object(provider, "_open_json", return_value=fake_resp):
+            result = provider.submit_video_job(req)
+
+        assert result.ok is True
+        assert mock_connect.call_count == 0
+
