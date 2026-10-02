@@ -139928,9 +139928,16 @@ async def handle_support_ticket_pending_text(update: Update, context: ContextTyp
 
 async def handle_human_support_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "start"
+    supported_actions = {
+        "start", "admin_contact", "cskh_auto", "ticket", "premium", "premium_type",
+        "bot", "bot_type", "bot_input", "consult", "consult_type", "consult_need", "consult_input",
+    }
+    actions_requiring_value = {"premium_type", "bot_type", "bot_input", "consult_type", "consult_need", "consult_input"}
+    if action not in supported_actions or (action in actions_requiring_value and len(parts) < 3):
+        return await query.answer("Thao tác hỗ trợ chưa được hỗ trợ.", show_alert=True)
+    await query.answer()
     uid = query.from_user.id
     lang = normalize_user_language(get_user_language(uid)) or "vi"
     if action == "start":
@@ -140071,7 +140078,7 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
                 lang=lang,
             ),
         )
-    return await query.answer("Thao tác hỗ trợ chưa được hỗ trợ.", show_alert=True)
+    return
 
 async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
