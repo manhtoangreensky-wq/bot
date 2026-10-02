@@ -1235,6 +1235,26 @@ def _shopaikey_wire_payload(
     ).strip().lower().replace("-", "_")
 
     metadata = dict(data.get("metadata") or {})
+    if ratio:
+        metadata["ratio"] = ratio
+        metadata["aspect_ratio"] = ratio
+        metadata["aspectRatio"] = ratio
+
+    dur_val = (
+        data.get("duration")
+        or data.get("duration_seconds")
+        or metadata.get("duration")
+        or metadata.get("duration_seconds")
+    )
+    if dur_val not in (None, ""):
+        try:
+            metadata["duration"] = int(dur_val)
+        except (ValueError, TypeError):
+            pass
+
+    res_val = str(data.get("resolution") or metadata.get("resolution") or "").strip()
+    if res_val:
+        metadata["resolution"] = res_val
     exact_model = str(
         data.get("model")
         or metadata.get("selected_model")
@@ -1361,6 +1381,7 @@ def _shopaikey_wire_payload(
                 )
             data["image"] = serialized
 
+    data["metadata"] = metadata
     data.pop("image_paths", None)
     data.pop("storyboard", None)
     data.pop("source_video_path", None)
@@ -1385,6 +1406,22 @@ def build_shopaikey_video_payload(request: VideoGenerationRequest, env: dict[str
         data["model"] = model
         data["metadata"] = enrich_metadata_with_model_contract(data.get("metadata"), "shopaikey_video", model, env=env)
         data = _apply_selected_request_defaults(data, request, "shopaikey_video")
+        meta = dict(data.get("metadata") or {})
+        ratio_val = str(data.get("ratio") or data.get("aspect_ratio") or request.ratio or "").strip()
+        if ratio_val:
+            meta["ratio"] = ratio_val
+            meta["aspect_ratio"] = ratio_val
+            meta["aspectRatio"] = ratio_val
+        dur_val = data.get("duration") or data.get("duration_seconds") or request.duration_seconds
+        if dur_val not in (None, ""):
+            try:
+                meta["duration"] = int(dur_val)
+            except (ValueError, TypeError):
+                pass
+        res_val = str(data.get("resolution") or meta.get("resolution") or "").strip()
+        if res_val:
+            meta["resolution"] = res_val
+        data["metadata"] = meta
 
     req_cap = str(
         request.required_capability
