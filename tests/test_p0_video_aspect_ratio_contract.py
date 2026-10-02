@@ -1,7 +1,11 @@
 import sqlite3
 import json
-import pytest
-from providers.video_generic_http_provider import _shopaikey_wire_payload, _key4u_wire_payload
+from providers.video_generic_http_provider import (
+    _shopaikey_wire_payload,
+    _key4u_wire_payload,
+    build_shopaikey_video_payload,
+    VideoGenerationRequest,
+)
 import services.video_final_output as vfo
 from services.video_project_queue import (
     ensure_video_project_queue_schema,
@@ -35,6 +39,46 @@ def test_shopaikey_wire_payload_preserves_canonical_ratio():
     wire_16_9 = _shopaikey_wire_payload(payload_16_9)
     assert wire_16_9["ratio"] == "16:9"
     assert wire_16_9["aspect_ratio"] == "16:9"
+
+
+def test_shopaikey_wire_payload_grok_metadata_ratio_and_duration_contract():
+    payload = {
+        "model": "grok-video-3",
+        "prompt": "a vertical product video",
+        "ratio": "9:16",
+        "duration": 5,
+        "resolution": "720p",
+    }
+    wire = _shopaikey_wire_payload(payload)
+    assert wire["ratio"] == "9:16"
+    assert wire["aspect_ratio"] == "9:16"
+    assert wire["aspectRatio"] == "9:16"
+    assert wire["metadata"]["ratio"] == "9:16"
+    assert wire["metadata"]["aspect_ratio"] == "9:16"
+    assert wire["metadata"]["aspectRatio"] == "9:16"
+    assert wire["metadata"]["duration"] == 5
+    assert wire["metadata"]["resolution"] == "720p"
+
+
+def test_shopaikey_build_payload_propagates_metadata_ratio_and_duration():
+    req = VideoGenerationRequest(
+        job_id="job_test_ratio_1",
+        product_type="video_ai_prompt",
+        prompt="Test vertical video",
+        ratio="9:16",
+        duration_seconds=5,
+        quality="basic",
+        metadata={
+            "selected_provider": "shopaikey_video",
+            "selected_model": "grok-video-3",
+        },
+    )
+    payload = build_shopaikey_video_payload(req)
+    assert payload["ratio"] == "9:16"
+    assert payload["aspect_ratio"] == "9:16"
+    assert payload["metadata"]["ratio"] == "9:16"
+    assert payload["metadata"]["aspect_ratio"] == "9:16"
+    assert payload["metadata"]["duration"] == 5
 
 
 def test_key4u_9_16_ratio_mapping_regression():
