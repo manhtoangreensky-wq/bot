@@ -209,9 +209,15 @@
   "product_routes": {
     "video_ai_video_reference": {
       "product": "video_ai_video_reference",
-      "capability": "video_to_video",
-      "provider": "fal_video",
-      "model": "fal-ai/wan/v2.2-a14b/video-to-video",
+      "execution_mode": "video_reference_guided_i2v",
+      "source_input": "video",
+      "capability": "image_to_video",
+      "primary_provider": "shopaikey_video",
+      "primary_model": "veo3.1-fast",
+      "secondary_provider": "key4u_video",
+      "secondary_model": "veo3.1-components",
+      "provider": "shopaikey_video",
+      "model": "veo3.1-fast",
       "max_single_task_seconds": 10
     }
   }

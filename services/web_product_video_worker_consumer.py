@@ -554,21 +554,23 @@ def validate_claimed_job(
             if auth_product != product_key:
                 return False, f"OWNER_ACCEPTANCE_PRODUCT_MISMATCH:{auth_product}!={product_key}"
             auth_provider = str(owner_acceptance_auth.get("provider") or "").strip().lower()
-            if auth_provider not in ("fal_video", "fal.ai", "fal-video"):
+            allowed_auth_providers = ("shopaikey_video", "shopaikey", "key4u_video", "fal_video", "fal.ai", "fal-video")
+            if auth_provider not in allowed_auth_providers:
                 return False, f"OWNER_ACCEPTANCE_PROVIDER_MISMATCH:{auth_provider}"
             auth_model = str(
                 owner_acceptance_auth.get("model")
                 or owner_acceptance_auth.get("selected_model")
                 or ""
             ).strip()
-            if auth_model and auth_model != "fal-ai/wan/v2.2-a14b/video-to-video":
+            allowed_auth_models = ("veo3.1-fast", "fal-ai/wan/v2.2-a14b/video-to-video", "veo3.1-components")
+            if auth_model and auth_model not in allowed_auth_models:
                 return False, f"OWNER_ACCEPTANCE_MODEL_MISMATCH:{auth_model}"
             auth_cap = str(
                 owner_acceptance_auth.get("capability")
                 or owner_acceptance_auth.get("required_capability")
                 or ""
             ).strip()
-            if auth_cap and auth_cap != "video_to_video":
+            if auth_cap and auth_cap not in ("image_to_video", "video_to_video"):
                 return False, f"OWNER_ACCEPTANCE_CAPABILITY_MISMATCH:{auth_cap}"
         else:
             return False, f"UNSUPPORTED_PRODUCT:{product_key}"
@@ -716,18 +718,46 @@ def map_web_job_to_bot_runtime(
         ).strip()
         if not source_video_path:
             raise InvalidJobEnvelopeError("SOURCE_VIDEO_PATH_REQUIRED: Missing source_video_path for video_ai_video_reference")
-        image_paths: list[str] = []
+        from services.video_reference_package import (
+            create_video_reference_package,
+            VideoReferencePackageError,
+        )
+        try:
+            ref_pkg = create_video_reference_package(
+                source_video_path=source_video_path,
+                user_prompt=prompt,
+                duration=duration_seconds,
+            )
+            image_paths = list(ref_pkg.get("frame_paths") or [])
+            metadata["reference_package"] = ref_pkg
+            metadata["prompt_sha256"] = ref_pkg.get("prompt_sha256")
+            metadata["source_video_sha256"] = ref_pkg.get("source_video_sha256")
+        except VideoReferencePackageError as exc:
+            if payload.get("image_paths"):
+                image_paths = list(payload.get("image_paths"))
+            else:
+                raise InvalidJobEnvelopeError(f"VIDEO_REFERENCE_PACKAGING_FAILED: {exc}") from exc
+        except Exception as exc:
+            if payload.get("image_paths"):
+                image_paths = list(payload.get("image_paths"))
+            else:
+                raise InvalidJobEnvelopeError(f"VIDEO_REFERENCE_PACKAGING_ERROR: {exc}") from exc
+
+        metadata["execution_mode"] = "video_reference_guided_i2v"
+        metadata["source_input_kind"] = "video"
+        metadata["native_v2v"] = False
+        metadata["native_v2v_enabled"] = False
         req_product_type = "video_ai_video_reference"
         req_video_flow_type = "video_ai_video_reference"
-        req_capability = "video_to_video"
+        req_capability = "image_to_video"
         derived_route = {
-            "tier_id": 500,
-            "quality_key": "advanced",
+            "tier_id": 400,
+            "quality_key": "motion_standard_5",
             "seconds": int(duration_seconds) or 5,
-            "provider": "fal_video",
-            "model": "fal-ai/wan/v2.2-a14b/video-to-video",
-            "required_capability": "video_to_video",
-            "estimated_provider_cost": 0.40,
+            "provider": "shopaikey_video",
+            "model": "veo3.1-fast",
+            "required_capability": "image_to_video",
+            "estimated_provider_cost": 0.70,
             "estimated_provider_cost_unit": "USD",
             "fallback_allowed": False,
         }
@@ -782,7 +812,11 @@ def map_web_job_to_bot_runtime(
             quality,
         }
         if is_v2v:
-            valid_tiers.update({"500", "advanced", "fal-ai/wan/v2.2-a14b/video-to-video"})
+            valid_tiers.update({
+                "400", "veo31_fast_8", "motion_standard_5", "veo3.1-fast",
+                "500", "advanced", "fal-ai/wan/v2.2-a14b/video-to-video",
+                "veo3.1-components",
+            })
         if auth_tier and auth_tier.lower() in valid_tiers:
             derived_ctx["tier"] = auth_tier
 

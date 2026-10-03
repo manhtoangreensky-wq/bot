@@ -1000,70 +1000,82 @@ def _key4u_wire_payload(
                 )
             if isinstance(image_src, (list, tuple)):
                 items = [x for x in image_src if x]
-                if not items:
-                    raise VideoProviderContractError(
-                        "provider_image_input_missing_no_charge",
-                        stage="wire_payload_build",
-                        debug={"provider": "key4u_video", "blocker": "provider_image_input_missing_no_charge", "no_charge": True},
-                    )
-                image_src = items[0]
-            if isinstance(image_src, dict):
-                image_src = image_src.get("url") or image_src.get("image_url") or image_src.get("path") or image_src.get("image") or ""
-            image_val = str(image_src or "").strip()
-            if not image_val:
+            else:
+                items = [image_src] if image_src else []
+            if not items:
                 raise VideoProviderContractError(
                     "provider_image_input_missing_no_charge",
                     stage="wire_payload_build",
                     debug={"provider": "key4u_video", "blocker": "provider_image_input_missing_no_charge", "no_charge": True},
                 )
-            if "://" in image_val:
-                from services.provider_reference_transport import validate_external_reference_url
-                valid_url, url_err = validate_external_reference_url(image_val)
-                if not valid_url:
-                    raise VideoProviderContractError(
-                        url_err,
-                        stage="wire_payload_build",
-                        debug={
-                            "provider": "key4u_video",
-                            "blocker": url_err,
-                            "no_charge": True,
-                        },
-                    )
-                reference_url = image_val
-            else:
-                from services.provider_reference_transport import prepare_provider_image_reference
-                try:
-                    ref_info = prepare_provider_image_reference(
-                        image_val,
-                        provider="key4u_video",
-                        purpose="image_to_video",
-                        job_id=str(data.get("job_id") or metadata.get("job_id") or ""),
-                        env=env if isinstance(env, dict) else (metadata.get("env") if isinstance(metadata.get("env"), dict) else None),
-                    )
-                    reference_url = ref_info["public_url"]
-                except VideoProviderContractError:
-                    raise
-                except Exception as exc:
-                    raise VideoProviderContractError(
-                        "key4u_veo_i2v_public_reference_unavailable_no_charge",
-                        stage="wire_payload_build",
-                        debug={
-                            "provider": "key4u_video",
-                            "blocker": "key4u_veo_i2v_public_reference_unavailable_no_charge",
-                            "error": type(exc).__name__,
-                            "no_charge": True,
-                        },
-                    ) from exc
+            reference_urls: list[str] = []
+            for item in items:
+                if isinstance(item, dict):
+                    item = item.get("url") or item.get("image_url") or item.get("path") or item.get("image") or ""
+                image_val = str(item or "").strip()
+                if not image_val:
+                    continue
+                if "://" in image_val:
+                    from services.provider_reference_transport import validate_external_reference_url
+                    valid_url, url_err = validate_external_reference_url(image_val)
+                    if not valid_url:
+                        raise VideoProviderContractError(
+                            url_err,
+                            stage="wire_payload_build",
+                            debug={
+                                "provider": "key4u_video",
+                                "blocker": url_err,
+                                "no_charge": True,
+                            },
+                        )
+                    reference_urls.append(image_val)
+                else:
+                    from services.provider_reference_transport import prepare_provider_image_reference
+                    try:
+                        ref_info = prepare_provider_image_reference(
+                            image_val,
+                            provider="key4u_video",
+                            purpose="image_to_video",
+                            job_id=str(data.get("job_id") or metadata.get("job_id") or ""),
+                            env=env if isinstance(env, dict) else (metadata.get("env") if isinstance(metadata.get("env"), dict) else None),
+                        )
+                        reference_urls.append(ref_info["public_url"])
+                    except VideoProviderContractError:
+                        raise
+                    except Exception as exc:
+                        raise VideoProviderContractError(
+                            "key4u_veo_i2v_public_reference_unavailable_no_charge",
+                            stage="wire_payload_build",
+                            debug={
+                                "provider": "key4u_video",
+                                "blocker": "key4u_veo_i2v_public_reference_unavailable_no_charge",
+                                "error": type(exc).__name__,
+                                "no_charge": True,
+                            },
+                        ) from exc
+
+            if not reference_urls:
+                raise VideoProviderContractError(
+                    "provider_image_input_missing_no_charge",
+                    stage="wire_payload_build",
+                    debug={"provider": "key4u_video", "blocker": "provider_image_input_missing_no_charge", "no_charge": True},
+                )
 
             out_meta = dict(metadata) if isinstance(metadata, dict) else {}
             out_meta.pop("provider_submit_url_override", None)
             out_meta.pop("provider_poll_url_override", None)
-            out_meta["images"] = [reference_url]
+            out_meta.pop("source_video_path", None)
+            out_meta.pop("video_path", None)
+            out_meta.pop("image_paths", None)
+            out_meta["images"] = reference_urls
             out_meta["provider_reference_present"] = True
-            out_meta["provider_reference_count"] = 1
-            out_meta["provider_reference_host"] = urllib.parse.urlsplit(reference_url).netloc
-            wire["images"] = [reference_url]
+            out_meta["provider_reference_count"] = len(reference_urls)
+            out_meta["provider_reference_host"] = urllib.parse.urlsplit(reference_urls[0]).netloc
+            wire["images"] = reference_urls
             wire["metadata"] = out_meta
+            wire.pop("source_video_path", None)
+            wire.pop("video_path", None)
+            wire.pop("image_paths", None)
         return wire
     if (
         family == "google_veo"
@@ -1310,67 +1322,79 @@ def _shopaikey_wire_payload(
             # Local filesystem paths must NEVER leak on the wire.
             if isinstance(image_src, (list, tuple)):
                 items = [x for x in image_src if x]
-                if not items:
-                    raise VideoProviderContractError(
-                        "provider_image_input_missing_no_charge",
-                        stage="wire_payload_build",
-                        debug={"provider": "shopaikey_video", "blocker": "provider_image_input_missing_no_charge", "no_charge": True},
-                    )
-                image_src = items[0]
-            if isinstance(image_src, dict):
-                image_src = image_src.get("url") or image_src.get("image_url") or image_src.get("path") or image_src.get("image") or ""
-            image_val = str(image_src or "").strip()
-            if not image_val:
+            else:
+                items = [image_src] if image_src else []
+            if not items:
                 raise VideoProviderContractError(
                     "provider_image_input_missing_no_charge",
                     stage="wire_payload_build",
                     debug={"provider": "shopaikey_video", "blocker": "provider_image_input_missing_no_charge", "no_charge": True},
                 )
-            if "://" in image_val:
-                from services.provider_reference_transport import validate_external_reference_url
-                valid_url, url_err = validate_external_reference_url(image_val)
-                if not valid_url:
-                    raise VideoProviderContractError(
-                        url_err,
-                        stage="wire_payload_build",
-                        debug={
-                            "provider": "shopaikey_video",
-                            "blocker": url_err,
-                            "no_charge": True,
-                        },
-                    )
-                reference_url = image_val
-            else:
-                from services.provider_reference_transport import prepare_provider_image_reference
-                try:
-                    ref_info = prepare_provider_image_reference(
-                        image_val,
-                        provider="shopaikey_video",
-                        purpose="image_to_video",
-                        job_id=str(data.get("job_id") or metadata.get("job_id") or ""),
-                        env=env,
-                    )
-                    reference_url = ref_info["public_url"]
-                except VideoProviderContractError:
-                    raise
-                except Exception as exc:
-                    raise VideoProviderContractError(
-                        "shopaikey_veo_i2v_public_reference_unavailable_no_charge",
-                        stage="wire_payload_build",
-                        debug={
-                            "provider": "shopaikey_video",
-                            "blocker": "shopaikey_veo_i2v_public_reference_unavailable_no_charge",
-                            "error": type(exc).__name__,
-                            "no_charge": True,
-                        },
-                    ) from exc
+            reference_urls: list[str] = []
+            for item in items:
+                if isinstance(item, dict):
+                    item = item.get("url") or item.get("image_url") or item.get("path") or item.get("image") or ""
+                image_val = str(item or "").strip()
+                if not image_val:
+                    continue
+                if "://" in image_val:
+                    from services.provider_reference_transport import validate_external_reference_url
+                    valid_url, url_err = validate_external_reference_url(image_val)
+                    if not valid_url:
+                        raise VideoProviderContractError(
+                            url_err,
+                            stage="wire_payload_build",
+                            debug={
+                                "provider": "shopaikey_video",
+                                "blocker": url_err,
+                                "no_charge": True,
+                            },
+                        )
+                    reference_urls.append(image_val)
+                else:
+                    from services.provider_reference_transport import prepare_provider_image_reference
+                    try:
+                        ref_info = prepare_provider_image_reference(
+                            image_val,
+                            provider="shopaikey_video",
+                            purpose="image_to_video",
+                            job_id=str(data.get("job_id") or metadata.get("job_id") or ""),
+                            env=env,
+                        )
+                        reference_urls.append(ref_info["public_url"])
+                    except VideoProviderContractError:
+                        raise
+                    except Exception as exc:
+                        raise VideoProviderContractError(
+                            "shopaikey_veo_i2v_public_reference_unavailable_no_charge",
+                            stage="wire_payload_build",
+                            debug={
+                                "provider": "shopaikey_video",
+                                "blocker": "shopaikey_veo_i2v_public_reference_unavailable_no_charge",
+                                "error": type(exc).__name__,
+                                "no_charge": True,
+                            },
+                        ) from exc
 
-            metadata["images"] = [reference_url]
+            if not reference_urls:
+                raise VideoProviderContractError(
+                    "provider_image_input_missing_no_charge",
+                    stage="wire_payload_build",
+                    debug={"provider": "shopaikey_video", "blocker": "provider_image_input_missing_no_charge", "no_charge": True},
+                )
+
+            metadata["images"] = reference_urls
             metadata["provider_reference_present"] = True
-            metadata["provider_reference_count"] = 1
-            metadata["provider_reference_host"] = urllib.parse.urlsplit(reference_url).netloc
+            metadata["provider_reference_count"] = len(reference_urls)
+            metadata["provider_reference_host"] = urllib.parse.urlsplit(reference_urls[0]).netloc
+            metadata.pop("source_video_path", None)
+            metadata.pop("video_path", None)
+            metadata.pop("image_paths", None)
             data["metadata"] = metadata
             data.pop("image", None)
+            data.pop("source_video_path", None)
+            data.pop("video_path", None)
+            data.pop("image_paths", None)
         else:
             serialized = serialize_local_image_for_provider_wire(image_src)
             if is_i2v and not serialized:
@@ -1385,6 +1409,9 @@ def _shopaikey_wire_payload(
     data.pop("image_paths", None)
     data.pop("storyboard", None)
     data.pop("source_video_path", None)
+    data.pop("video_path", None)
+    metadata.pop("source_video_path", None)
+    metadata.pop("video_path", None)
     return data
 
 

@@ -62,17 +62,23 @@ def test_2_fal_provider_router_candidate_and_capabilities():
     assert "fal_video" in video_provider_router.DEFAULT_VIDEO_PROVIDER_CHAIN
 
 
-def test_3_video_ai_video_reference_routes_to_fal_v2v_in_routing_config():
-    """config/product_video_model_routing.json must register video_ai_video_reference -> fal_video."""
+def test_3_video_ai_video_reference_routes_to_reference_guided_i2v_hybrid_in_routing_config():
+    """config/product_video_model_routing.json registers video_ai_video_reference -> shopaikey_video hybrid."""
     routing = video_provider_catalog.load_product_video_model_routing()
     assert "fal_video" in routing["default_provider_chain"]
     assert "product_routes" in routing
     prod_route = routing["product_routes"].get("video_ai_video_reference")
     assert prod_route is not None
     assert prod_route["product"] == "video_ai_video_reference"
-    assert prod_route["capability"] == "video_to_video"
-    assert prod_route["provider"] == "fal_video"
-    assert prod_route["model"] == "fal-ai/wan/v2.2-a14b/video-to-video"
+    assert prod_route["execution_mode"] == "video_reference_guided_i2v"
+    assert prod_route["source_input"] == "video"
+    assert prod_route["capability"] == "image_to_video"
+    assert prod_route["primary_provider"] == "shopaikey_video"
+    assert prod_route["primary_model"] == "veo3.1-fast"
+    assert prod_route["secondary_provider"] == "key4u_video"
+    assert prod_route["secondary_model"] == "veo3.1-components"
+    assert prod_route["provider"] == "shopaikey_video"
+    assert prod_route["model"] == "veo3.1-fast"
     assert prod_route["max_single_task_seconds"] == 10
 
 
