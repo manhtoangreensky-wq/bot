@@ -42,6 +42,8 @@ This module is for the current Telegram revenue bot. It adds admin reporting, us
 - Tool usage, success, failure and top commands.
 - Provider debug/error summary.
 
+Provider error counts and rows come from `api_debug_events`. A readable table with no matching rows is reported as `0`; if either provider-log query is unavailable, the report and offline insight show `không khả dụng` instead. These are debug-log event counts, not canonical product-job, artifact, delivery-receipt, or revenue reconciliation; do not interpret an unavailable source as zero errors or as proof that all products completed successfully.
+
 ## Persistent User Mode Commands
 
 - `/mode` - view current mode.
