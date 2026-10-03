@@ -182643,12 +182643,26 @@ def admin_report_payload(start_at: str, end_at: str, label: str) -> dict:
             "SELECT COUNT(*) FROM birthday_review_requests WHERE status='pending'",
             default=0,
         ) or 0)
-        provider_errors = int(sql_scalar(
-            conn,
-            "SELECT COUNT(*) FROM api_debug_events WHERE UPPER(status) NOT IN ('PASS','OK','SUCCESS') AND created_at BETWEEN ? AND ?",
-            (start_at, end_at),
-            0,
-        ) or 0)
+        try:
+            provider_error_row = conn.execute(
+                "SELECT COUNT(*) FROM api_debug_events WHERE UPPER(status) NOT IN ('PASS','OK','SUCCESS') AND created_at BETWEEN ? AND ?",
+                (start_at, end_at),
+            ).fetchone()
+            provider_rows = conn.execute(
+                """SELECT COALESCE(provider,''), COALESCE(status,''), COUNT(*)
+                FROM api_debug_events
+                WHERE created_at BETWEEN ? AND ?
+                GROUP BY COALESCE(provider,''), COALESCE(status,'')
+                ORDER BY COUNT(*) DESC
+                LIMIT 8""",
+                (start_at, end_at),
+            ).fetchall()
+            providers_available = True
+            provider_errors = int((provider_error_row[0] if provider_error_row else 0) or 0)
+        except Exception:
+            providers_available = False
+            provider_errors = None
+            provider_rows = []
         top_tools = sql_rows(
             conn,
             """SELECT COALESCE(tool_name,''), COUNT(*)
@@ -182665,16 +182679,6 @@ def admin_report_payload(start_at: str, end_at: str, label: str) -> dict:
             FROM usage_events
             WHERE command<>'' AND created_at BETWEEN ? AND ?
             GROUP BY COALESCE(command,'')
-            ORDER BY COUNT(*) DESC
-            LIMIT 8""",
-            (start_at, end_at),
-        )
-        provider_rows = sql_rows(
-            conn,
-            """SELECT COALESCE(provider,''), COALESCE(status,''), COUNT(*)
-            FROM api_debug_events
-            WHERE created_at BETWEEN ? AND ?
-            GROUP BY COALESCE(provider,''), COALESCE(status,'')
             ORDER BY COUNT(*) DESC
             LIMIT 8""",
             (start_at, end_at),
@@ -182720,6 +182724,7 @@ def admin_report_payload(start_at: str, end_at: str, label: str) -> dict:
                 "top_commands": top_commands,
             },
             "providers": {
+                "available": providers_available,
                 "errors": provider_errors,
                 "rows": provider_rows,
             },
@@ -182749,6 +182754,7 @@ def format_admin_report(payload: dict) -> str:
     tools = payload["tools"]
     providers = payload["providers"]
     growth = payload["growth"]
+    providers_available = providers.get("available", True)
     success_rate = 0
     if int(tools["success"] or 0) + int(tools["fail"] or 0) > 0:
         success_rate = round((int(tools["success"] or 0) / (int(tools["success"] or 0) + int(tools["fail"] or 0))) * 100, 1)
@@ -182757,7 +182763,12 @@ def format_admin_report(payload: dict) -> str:
     provider_lines = [
         f"• {html.escape(str(provider or 'unknown'))}/{html.escape(str(status or '-'))}: <b>{int(count or 0)}</b>"
         for provider, status, count in providers["rows"]
-    ]
+    ] if providers_available else []
+    provider_summary = (
+        f"• Provider error/debug fail: <b>{int(providers.get('errors') or 0)}</b>"
+        if providers_available
+        else "• Provider error/debug fail: <b>không khả dụng</b> (không đọc được nguồn dữ liệu)"
+    )
     lines = [
         f"📊 <b>TOAN AAS — BÁO CÁO {html.escape(payload['label']).upper()}</b>",
         f"<code>{html.escape(payload['start_at'])}</code> → <code>{html.escape(payload['end_at'])}</code>",
@@ -182807,7 +182818,7 @@ def format_admin_report(payload: dict) -> str:
         f"• Birthday Xu gifted: <b>{xu_text(growth.get('birthday_xu', 0))}</b>",
         "",
         "<b>Provider</b>",
-        f"• Provider error/debug fail: <b>{providers['errors']}</b>",
+        provider_summary,
     ]
     if provider_lines:
         lines.extend(provider_lines[:5])
@@ -182830,10 +182841,11 @@ def offline_admin_insight(payload: dict, ai_error: str = "") -> str:
     tools = payload.get("tools") or {}
     providers = payload.get("providers") or {}
     growth = payload.get("growth") or {}
+    providers_available = providers.get("available", True)
     requested = int(tools.get("requested") or 0)
     success = int(tools.get("success") or 0)
     fail = int(tools.get("fail") or 0)
-    provider_errors = int(providers.get("errors") or 0)
+    provider_errors = int(providers.get("errors") or 0) if providers_available else 0
     revenue = int(money.get("total_amount") or 0)
     active = int(users.get("active") or 0)
     new_users = int(users.get("new") or 0)
@@ -182852,7 +182864,9 @@ def offline_admin_insight(payload: dict, ai_error: str = "") -> str:
     if not good_points:
         good_points.append("Chưa có tín hiệu mạnh; cần test thực tế và kéo user dùng lại.")
     risks = []
-    if provider_errors > 0 or fail > 0:
+    if not providers_available:
+        risks.append("Không xác minh được lỗi provider vì nguồn dữ liệu báo cáo không đọc được.")
+    elif provider_errors > 0 or fail > 0:
         risks.append("Có lỗi provider/tool, cần ưu tiên kiểm tra tool lỗi nhiều nhất.")
     if revenue <= 0:
         risks.append("Doanh thu bằng 0, cần thúc đẩy nạp Xu/manual QR hoặc ưu đãi hợp lệ.")
@@ -182879,7 +182893,7 @@ def offline_admin_insight(payload: dict, ai_error: str = "") -> str:
         f"• User mới: <b>{new_users}</b>",
         f"• Doanh thu: <b>{vnd_text(revenue)}</b>",
         f"• Tool calls: <b>{requested}</b> | success <b>{success}</b> | fail <b>{fail}</b>",
-        f"• Provider errors: <b>{provider_errors}</b>",
+        f"• Provider errors: <b>{provider_errors if providers_available else 'không khả dụng'}</b>",
         "",
         "<b>2. Điểm tốt</b>",
         *[f"• {item}" for item in good_points],
