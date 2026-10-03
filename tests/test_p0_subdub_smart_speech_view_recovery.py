@@ -61,8 +61,8 @@ def test_evenly_split_register_evidence_does_not_invent_a_voice():
 
 def test_bad_view_is_not_fixed_by_lowering_threshold():
     views,p=_views(2)
-    views['shifted_embeddings'][0]=0
-    views['shifted_embeddings'][0,10]=1.
+    views['shifted_embeddings'][:3]=0
+    views['shifted_embeddings'][:3,10]=1.
     with pytest.raises(speaker_cast.AutoCastManualRequired):
         _module().build_speech_identity_authority(views,p)
     assert engine.MIN_FIXED_VOCAL_VIEW_COSINE==.98
