@@ -40318,6 +40318,7 @@ class AgentDeepgram:
         *,
         require_diarization: bool = False,
         timeout_seconds: float = 60.0,
+        language: str = "auto",
     ) -> dict:
         if not DEEPGRAM_API_KEY:
             return {"status": "MISSING", "http_status": 0, "error": "DEEPGRAM_API_KEY missing"}
@@ -40327,6 +40328,7 @@ class AgentDeepgram:
                     "https://api.deepgram.com/v1/listen",
                     params=subdub_deepgram_request_params(
                         require_diarization=require_diarization,
+                        **({"language": language} if str(language or "auto").lower() != "auto" else {}),
                     ),
                     headers={
                         "Authorization": f"Token {DEEPGRAM_API_KEY}",
@@ -40413,8 +40415,12 @@ class AgentDeepgram:
             return f"❌ Lỗi: {str(e)}"
 
 
-def subdub_deepgram_request_params(*, require_diarization: bool = False) -> dict[str, str]:
+def subdub_deepgram_request_params(*, require_diarization: bool = False, language: str = "auto") -> dict[str, str]:
     params = {str(key): str(value) for key, value in AgentDeepgram.REQUEST_PARAMS.items()}
+    language_hint = str(language or "auto").strip()
+    if language_hint and language_hint.lower() != "auto":
+        params["language"] = language_hint
+        params.pop("detect_language", None)
     if require_diarization:
         params["model"] = "nova-3-general"
         params.pop("diarize", None)
@@ -40698,6 +40704,7 @@ async def deepgram_asr_adapter(
     *,
     require_diarization: bool = False,
     timeout_seconds: float = 60.0,
+    language: str = "auto",
 ) -> dict:
     if not DEEPGRAM_API_KEY:
         return {
@@ -40719,12 +40726,14 @@ async def deepgram_asr_adapter(
             content_type,
             require_diarization=True,
             timeout_seconds=timeout_seconds,
+            **({"language": language} if str(language or "auto").lower() != "auto" else {}),
         )
     else:
         diagnostic = await AgentDeepgram.diagnostic(
             audio_bytes,
             content_type,
             timeout_seconds=timeout_seconds,
+            **({"language": language} if str(language or "auto").lower() != "auto" else {}),
         )
     http_status = int(diagnostic.get("http_status") or 0)
     if (
@@ -65782,12 +65791,18 @@ async def asr_transcribe_audio(
                 }
             errors.append(f"ShopAIKey={status}")
         elif route == "deepgram" and DEEPGRAM_API_KEY:
+            language_kwargs = (
+                {"language": language}
+                if str(language or "auto").strip().lower() != "auto"
+                else {}
+            )
             if require_diarization:
                 result = await deepgram_asr_adapter(
                     audio_bytes,
                     content_type,
                     require_diarization=True,
                     timeout_seconds=timeout_seconds,
+                    **language_kwargs,
                 )
             elif require_auto_multi_word_timeline:
                 result = await deepgram_asr_adapter(
@@ -65795,9 +65810,10 @@ async def asr_transcribe_audio(
                     content_type,
                     require_diarization=False,
                     timeout_seconds=timeout_seconds,
+                    **language_kwargs,
                 )
             else:
-                result = await deepgram_asr_adapter(audio_bytes, content_type)
+                result = await deepgram_asr_adapter(audio_bytes, content_type, **language_kwargs)
             transcript = str(result.get("transcript") or "").strip()
             transcript_json = dict(result.get("transcript_json") or {})
             segments = deepgram_segments_from_response(transcript_json)
