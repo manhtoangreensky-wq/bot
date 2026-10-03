@@ -281,6 +281,12 @@ jobs:
 
               printf '%s' \"\$HEALTH_JSON\" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get(\"status\") == \"ok\"; print(\"HEALTH_PAYLOAD_VALIDATED:\", data.get(\"status\"))'
 
+              echo '=== Reconciling SubDub Worker State (toanaas-worker-subdub.service) ==='
+              export BOT_DIR=\"\$WEBAPP_DIR\"
+              export TARGET_SHA=\"\$TARGET_SHA\"
+              source \"\$WEBAPP_DIR/scripts/vps/sync_product_video_worker_release.sh\"
+              reconcile_subdub_worker_already_deployed
+
               echo '=== Cleaning up Remote Staging Directory (If Present) ==='
               CLEANUP_TARGET=\"/tmp/deploy-bot-\$TARGET_SHA\"
               if [[ -d \"\$CLEANUP_TARGET\" ]]; then
