@@ -169703,7 +169703,7 @@ def voice_vault_keyboard(user_id, lang: str = "vi", product_context: str = PRODU
     for index_on_page, profile in enumerate(profiles):
         display_code = voice_profile_display_code(page, index_on_page, page_size)
         marker = f"{display_code}"
-        buttons.append((marker, cb(f"voice_profile_select_code:{display_code}")))
+        buttons.append((marker, cb(f"voice_profile_select:{int(profile.get('id') or 0)}")))
     nav_buttons = []
     if page > 0:
         nav_buttons.append((f"⬅️ {_audio_copy(lang, 'previous')}", cb(f"voice_profiles_page:{page - 1}")))
