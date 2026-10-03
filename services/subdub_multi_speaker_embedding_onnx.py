@@ -3181,6 +3181,14 @@ def _diarize_fixed_vocal_word_timeline_owned(
         )
     except (ValueError, speaker_cast.AutoCastManualRequired) as error:
         cause = error.__cause__ or error
+        if minimum_speakers == 1 and gender_source_original and str(cause) == "fixed_vocal_view_unstable":
+            from services.subdub_smart_speech_identity import recover_speech_identity
+            return recover_speech_identity(
+                vocal_pcm, stereo_pcm_path, validated_words,
+                duration_seconds=duration_seconds,
+                deadline_monotonic=deadline_monotonic,
+                stop_requested=stop_requested, session_factory=session_factory,
+            )
         if minimum_speakers != 1 or str(cause) not in {
             "fixed_vocal_speaker_count_unstable", "fixed_vocal_window_support_invalid",
             "acoustic_cluster_unsupported",
