@@ -329,3 +329,64 @@ def test_08_settlement_insufficient_funds_fails_closed(test_db):
 
     u = test_db.execute("SELECT credits FROM users WHERE user_id = 3333").fetchone()
     assert u["credits"] == 5
+
+
+def test_09_settlement_exact_canonical_wire_schema_and_failures(test_db):
+    """Prove exact canonical wire schema is accepted and each missing field fails closed."""
+    test_db.execute("INSERT INTO users (user_id, credits, total_spent) VALUES (4444, 500, 0)")
+    test_db.commit()
+
+    base_payload = {
+        "web_job_id": "sdj_wire_01",
+        "web_request_id": "SDB-20261003-ABCD",
+        "canonical_user_id": "4444",
+        "subdub_mode": "dub",
+        "output_url": "https://tg.toanaas.vn/artifacts/subdub/sdj_wire_01.mp4",
+        "validated_output_metadata": {"character_count": 500, "duration": 30.0},
+        "idempotency_key": "subdub_settle:sdj_wire_01:dub",
+    }
+
+    # 1. Missing web_job_id
+    p = dict(base_payload)
+    p["web_job_id"] = ""
+    ok, res, code = execute_web_subdub_settlement(**p, conn=test_db)
+    assert ok is False and code == 400 and res["error_code"] == "WEB_JOB_ID_REQUIRED"
+
+    # 2. Missing web_request_id
+    p = dict(base_payload)
+    p["web_request_id"] = ""
+    ok, res, code = execute_web_subdub_settlement(**p, conn=test_db)
+    assert ok is False and code == 400 and res["error_code"] == "WEB_REQUEST_ID_REQUIRED"
+
+    # 3. Missing canonical_user_id
+    p = dict(base_payload)
+    p["canonical_user_id"] = ""
+    ok, res, code = execute_web_subdub_settlement(**p, conn=test_db)
+    assert ok is False and code == 400 and res["error_code"] == "CANONICAL_USER_ID_REQUIRED"
+
+    # 4. Invalid mode
+    p = dict(base_payload)
+    p["subdub_mode"] = "invalid_mode_xyz"
+    ok, res, code = execute_web_subdub_settlement(**p, conn=test_db)
+    assert ok is False and code == 400 and res["error_code"] == "INVALID_SUBDUB_MODE"
+
+    # 5. Missing output_url
+    p = dict(base_payload)
+    p["output_url"] = ""
+    ok, res, code = execute_web_subdub_settlement(**p, conn=test_db)
+    assert ok is False and code == 400 and res["error_code"] == "OUTPUT_URL_REQUIRED"
+
+    # 6. Missing validated_output_metadata
+    p = dict(base_payload)
+    p["validated_output_metadata"] = None
+    ok, res, code = execute_web_subdub_settlement(**p, conn=test_db)
+    assert ok is False and code == 400 and res["error_code"] == "VALIDATED_OUTPUT_METADATA_REQUIRED"
+
+    # 7. Valid full payload succeeds
+    ok, res, code = execute_web_subdub_settlement(**base_payload, conn=test_db)
+    assert ok is True and code == 200 and res["status"] == "settled"
+    assert res["idempotency_key"] == "subdub_settle:sdj_wire_01:dub"
+
+    # 8. Duplicate idempotency returns duplicate=True and does not debit again
+    ok2, res2, code2 = execute_web_subdub_settlement(**base_payload, conn=test_db)
+    assert ok2 is True and code2 == 200 and res2["duplicate"] is True

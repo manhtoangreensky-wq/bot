@@ -140,7 +140,7 @@ def derive_canonical_subdub_charge(
     meta = dict(metadata or {})
     # Extract billable chars or derive from cues/duration
     chars = 0
-    for k in ("char_count", "chars", "billing_chars", "billable_chars"):
+    for k in ("char_count", "character_count", "chars", "billing_chars", "billable_chars"):
         if meta.get(k) is not None:
             try:
                 val = int(meta[k])
@@ -152,7 +152,7 @@ def derive_canonical_subdub_charge(
 
     if chars <= 0:
         # Fallback estimation from duration or cue count if explicit chars absent
-        duration = float(meta.get("duration_seconds") or 0.0)
+        duration = float(meta.get("duration_seconds") or meta.get("duration") or 0.0)
         cues = int(meta.get("cues_count") or 0)
         if duration > 0:
             chars = max(10, int(duration * 15))  # avg ~15 chars/sec

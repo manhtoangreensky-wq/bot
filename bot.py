@@ -279600,7 +279600,7 @@ async def api_internal_web_subdub_settle(request: Request):
 
     header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
     payload_actor = str(payload.get("actor_id") or "").strip()
-    actor_id = header_actor or payload_actor
+    actor_id = header_actor or payload_actor or str(payload.get("canonical_user_id") or "").strip()
 
     auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
         authorization=request.headers.get("authorization", ""),
@@ -279621,7 +279621,7 @@ async def api_internal_web_subdub_settle(request: Request):
     ok, result, status_code = execute_web_subdub_settlement(
         web_job_id=str(payload.get("web_job_id") or "").strip(),
         web_request_id=str(payload.get("web_request_id") or "").strip(),
-        canonical_user_id=payload.get("canonical_user_id"),
+        canonical_user_id=payload.get("canonical_user_id") or actor_id,
         subdub_mode=str(payload.get("subdub_mode") or "").strip(),
         output_url=str(payload.get("output_url") or "").strip(),
         validated_output_metadata=payload.get("validated_output_metadata"),
