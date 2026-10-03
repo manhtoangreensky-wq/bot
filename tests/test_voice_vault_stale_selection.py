@@ -339,3 +339,132 @@ def test_owned_rename_callback_still_starts_rename_for_selected_profile(voice_va
     text = query.message.replies[-1][0]
     assert "hãy nhập tên mới" in text.lower()
     assert ns["USER_PENDING"] != before_pending
+
+
+@pytest.mark.parametrize("profile_case", ("foreign", "missing"))
+def test_foreign_or_stale_voice_profile_save_stops_before_charge(
+    voice_vault_runtime, profile_case
+):
+    from copy import deepcopy
+
+    ns, route, conn = voice_vault_runtime
+    profile_id = 104 if profile_case == "foreign" else 999
+    if profile_case == "foreign":
+        conn.execute(
+            "INSERT INTO voice_profiles VALUES (?, ?, 'active', ?, ?, NULL, 0, '')",
+            (profile_id, "902", "foreign-provider-id", "Foreign voice 104"),
+        )
+        conn.commit()
+
+    expected_markup = object()
+    ns["voice_hub_keyboard"] = lambda *_args: expected_markup
+    charge_calls = []
+    ns["spend_fixed_credit_info"] = lambda *args, **kwargs: charge_calls.append((args, kwargs))
+    before_pending = deepcopy(ns["USER_PENDING"])
+    before_rows = conn.execute("SELECT * FROM voice_profiles ORDER BY id").fetchall()
+    before_writes = conn.total_changes
+
+    query = CALLBACK_FIXTURE["_click"](
+        route, f"music_quick|showroom|voice_profile_save:{profile_id}"
+    )
+
+    text, markup = query.message.replies[-1]
+    assert "chưa có bản giọng hợp lệ để lưu" in text.lower()
+    assert "Foreign voice 104" not in text
+    assert markup is expected_markup
+    assert charge_calls == []
+    assert ns["USER_PENDING"] == before_pending
+    after_rows = conn.execute("SELECT * FROM voice_profiles ORDER BY id").fetchall()
+    assert [tuple(row) for row in after_rows] == [tuple(row) for row in before_rows]
+    assert conn.total_changes == before_writes
+
+
+@pytest.mark.parametrize("profile_case", ("foreign", "missing"))
+def test_foreign_or_stale_voice_profile_use_stops_before_mutation(
+    voice_vault_runtime, profile_case
+):
+    from copy import deepcopy
+
+    ns, route, conn = voice_vault_runtime
+    profile_id = 104 if profile_case == "foreign" else 999
+    if profile_case == "foreign":
+        conn.execute(
+            "INSERT INTO voice_profiles VALUES (?, ?, 'active', ?, ?, NULL, 0, '')",
+            (profile_id, "902", "foreign-provider-id", "Foreign voice 104"),
+        )
+        conn.commit()
+
+    pending = deepcopy(ns["USER_PENDING"])
+    music_result = {"voice_text": "existing safe fixture"}
+    ns["get_music_guided_result"] = lambda *_args: music_result
+    result_before = deepcopy(music_result)
+    video_steps = []
+    ns["start_video_voice_script_step"] = lambda *args, **kwargs: video_steps.append((args, kwargs))
+    updates = []
+    original_update = ns["update_user_voice_profile"]
+
+    def observe_update(user_id, selected_id, **fields):
+        updates.append((user_id, selected_id, fields))
+        return original_update(user_id, selected_id, **fields)
+
+    ns["update_user_voice_profile"] = observe_update
+    before_rows = conn.execute("SELECT * FROM voice_profiles ORDER BY id").fetchall()
+    before_writes = conn.total_changes
+
+    query = CALLBACK_FIXTURE["_click"](
+        route, f"music_quick|showroom|voice_profile_use:{profile_id}"
+    )
+
+    text, markup = query.message.replies[-1]
+    assert "chưa sẵn sàng để sử dụng" in text.lower()
+    assert "Foreign voice 104" not in text
+    expected_callbacks = [
+        button.callback_data
+        for row in ns["voice_vault_keyboard"](901, "vi", "showroom").inline_keyboard
+        for button in row
+    ]
+    actual_callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+    assert actual_callbacks == expected_callbacks
+    assert not any(str(data).endswith(f":{profile_id}") for data in actual_callbacks)
+    assert ns["USER_PENDING"] == pending
+    assert music_result == result_before
+    assert updates == []
+    assert video_steps == []
+    after_rows = conn.execute("SELECT * FROM voice_profiles ORDER BY id").fetchall()
+    assert [tuple(row) for row in after_rows] == [tuple(row) for row in before_rows]
+    assert conn.total_changes == before_writes
+
+
+@pytest.mark.parametrize("product_context", ("showroom", "video_addon"))
+def test_stale_emitted_voice_profile_read_keeps_parent_vault_context(
+    voice_vault_runtime, product_context
+):
+    ns, route, conn = voice_vault_runtime
+    profile = ns["get_user_voice_profile"](901, 101)
+    assert profile
+    markup = ns["voice_profile_actions_keyboard"](101, "vi", product_context, profile)
+    callback_data = CALLBACK_FIXTURE["_callback"](markup, "voice_profile_read:101")
+    assert callback_data == f"music_quick|{product_context}|voice_profile_read:101"
+
+    conn.execute("DELETE FROM voice_profiles WHERE id=101 AND user_id='901'")
+    conn.commit()
+    before_writes = conn.total_changes
+
+    query = CALLBACK_FIXTURE["_click"](route, callback_data)
+
+    text, actual_markup = query.message.replies[-1]
+    expected_callbacks = [
+        button.callback_data
+        for row in ns["voice_vault_keyboard"](901, "vi", product_context).inline_keyboard
+        for button in row
+    ]
+    actual_callbacks = [
+        button.callback_data
+        for row in actual_markup.inline_keyboard
+        for button in row
+    ]
+    assert "không tìm thấy giọng này" in text.lower()
+    assert actual_callbacks == expected_callbacks
+    expected_parent = "vfinal|voice" if product_context == "video_addon" else "music_quick|showroom|voice_hub"
+    assert expected_parent in actual_callbacks
+    assert conn.total_changes == before_writes
