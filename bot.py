@@ -175117,6 +175117,12 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
         text = _short_pending_text(update.message.text, text_limit)
     if not text or text.startswith("/"):
         return False
+    if action == "voice_clone_upload":
+        await update.message.reply_text(
+            voice_clone_upload_text(lang), parse_mode="HTML",
+            reply_markup=voice_clone_step_back_keyboard("voice_clone", lang, ctx),
+        )
+        return True
     clear_music_guided_pending(uid)
     if action in {"music_product_background_idea", "music_product_song_idea"}:
         result = get_music_guided_result(uid) or {}
