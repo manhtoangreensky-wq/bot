@@ -250433,6 +250433,15 @@ def _subdub_auto_resume_state(state: dict) -> dict:
         or auto_smart_multivoice.is_auto_smart_multivoice_state(state)
     ):
         safe.update(auto_multi_speaker.bounded_multi_acoustic_evidence(state))
+    if auto_smart_multivoice.is_auto_smart_multivoice_state(state):
+        safe.pop("smart_translation_missing_cue_ids", None)
+        missing_ids = state.get("smart_translation_missing_cue_ids")
+        if (
+            type(missing_ids) is list and 0 < len(missing_ids) <= 2048
+            and all(type(cid) is str and 0 < len(cid) <= 160 and cid.strip() == cid for cid in missing_ids)
+            and len(set(missing_ids)) == len(missing_ids)
+        ):
+            safe["smart_translation_missing_cue_ids"] = list(missing_ids)
     return safe
 
 
