@@ -25,6 +25,8 @@ def voice_vault_runtime():
             "voice_profile_display_code",
             "user_voice_profile_by_display_code",
             "voice_vault_keyboard",
+            "update_user_voice_profile",
+            "soft_delete_voice_profile",
         ):
             exec(
                 compile(
@@ -34,7 +36,7 @@ def voice_vault_runtime():
                 ),
                 ns,
             )
-        ns.update(html=html, ui_text=lambda *_args: "Home")
+        ns.update(html=html, ui_text=lambda *_args: "Home", now_text=lambda: "fixture-now")
         for profile_id in (101, 102, 103):
             conn.execute(
                 "INSERT INTO voice_profiles VALUES (?, ?, 'active', ?, ?, NULL, 0, '')",
@@ -105,4 +107,33 @@ def test_stable_profile_id_callback_cannot_open_another_users_voice(voice_vault_
     assert "Foreign voice 104" not in text
     actual_callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
     assert not any(str(data).endswith("voice_profile_select:104") for data in actual_callbacks)
+    assert conn.total_changes == before_click_writes
+
+
+def test_delete_callback_cannot_soft_delete_another_users_voice(voice_vault_runtime):
+    ns, route, conn = voice_vault_runtime
+    conn.execute("ALTER TABLE voice_profiles ADD COLUMN updated_at TEXT")
+    conn.execute(
+        "INSERT INTO voice_profiles VALUES (?, ?, 'active', ?, ?, NULL, 0, '', NULL)",
+        (104, "902", "foreign-provider-id", "Foreign voice 104"),
+    )
+    conn.commit()
+    before = conn.execute(
+        "SELECT user_id, status, deleted_at, is_default, updated_at FROM voice_profiles WHERE id=104"
+    ).fetchone()
+    before_click_writes = conn.total_changes
+
+    query = CALLBACK_FIXTURE["_click"](
+        route, "music_quick|showroom|voice_profile_delete:104"
+    )
+
+    text, markup = query.message.replies[-1]
+    assert "không xóa được giọng này" in text.lower()
+    assert "Foreign voice 104" not in text
+    actual_callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+    assert not any(str(data).endswith(("voice_profile_select:104", "voice_profile_delete:104")) for data in actual_callbacks)
+    after = conn.execute(
+        "SELECT user_id, status, deleted_at, is_default, updated_at FROM voice_profiles WHERE id=104"
+    ).fetchone()
+    assert tuple(after) == before
     assert conn.total_changes == before_click_writes
