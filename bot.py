@@ -184734,6 +184734,8 @@ def doc_tool_after_file_keyboard(state: dict, lang: str = "vi") -> InlineKeyboar
     tool = str(state.get("doc_tool_current") or "")
     config = doc_tool_config(tool)
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    back_callback = "docflow|back"
+    back_label = doc_tool_parent_label(state, tool, lang)
     if tool == "compress_pdf":
         buttons = [
             (f"🟢 {copy['docs_compress_light']}", "docflow|compress|light"), (f"🔵 {copy['docs_compress_medium']}", "docflow|compress|medium"),
@@ -184741,6 +184743,9 @@ def doc_tool_after_file_keyboard(state: dict, lang: str = "vi") -> InlineKeyboar
         ]
     elif tool == "split_pdf":
         buttons = [(f"✍️ {copy['docs_page_range']}", "docflow|ask_pages"), (f"📎 {copy['docs_send_file']}", "docflow|reset_files")]
+        if str(state.get("awaiting_page_spec") or "0") == "1":
+            back_callback = "docflow|back_received"
+            back_label = f"⬅️ {copy['docs_received']}"
     elif tool == "save_document":
         return InlineKeyboardMarkup([
             [
@@ -184776,7 +184781,7 @@ def doc_tool_after_file_keyboard(state: dict, lang: str = "vi") -> InlineKeyboar
     for idx in range(0, len(buttons), 2):
         rows.append([InlineKeyboardButton(text, callback_data=callback) for text, callback in buttons[idx:idx + 2]])
     rows.append([
-        InlineKeyboardButton(doc_tool_parent_label(state, tool, lang), callback_data="docflow|back"),
+        InlineKeyboardButton(back_label, callback_data=back_callback),
         InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
     ])
     return InlineKeyboardMarkup(rows)
