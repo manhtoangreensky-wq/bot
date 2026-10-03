@@ -11,9 +11,10 @@ def test_scene_plan_auto_acknowledges_callback_before_gemini_enhancement() -> No
     branch_start = source.index('        elif action == "scene_plan_auto":')
     branch_end = source.index('        elif action == "plan_scene"', branch_start)
     branch_source = source[branch_start:branch_end]
-    assert branch_source.index("await query.answer()") < branch_source.index(
-        "video_uiflow3_ai_enhance_scenes"
-    )
+    ack_index = branch_source.index("await query.answer(")
+    answered_index = branch_source.index("callback_answered = True")
+    enhancement_index = branch_source.index("await video_uiflow3_ai_enhance_scenes_bounded(")
+    assert ack_index < answered_index < enhancement_index
 
     handler_start = source.index("async def handle_video_uiflow3_callback")
     handler_end = source.index("async def handle_video_uiflow3_pending_text", handler_start)
