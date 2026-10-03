@@ -85155,6 +85155,15 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
         else:
             raise ValueError("video_uiflow3_stale_action")
     except ValueError as exc:
+        if callback_answered:
+            current = video_uiflow3_canonical_screen_state(state)
+            current = save_video_uiflow3_state(context, current)
+            text, keyboard = video_uiflow3_screen_payload(current)
+            return await safe_edit_or_send_long_html(
+                query,
+                f"⚠️ {html.escape(video_uiflow3_input_error(exc))}\n\n{text}",
+                reply_markup=keyboard,
+            )
         await query.answer(video_uiflow3_input_error(exc), show_alert=True)
         return await video_uiflow3_render(query, context, state)
 
