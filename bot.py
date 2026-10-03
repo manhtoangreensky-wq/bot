@@ -172405,6 +172405,11 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         await query.answer()
         profile_id = _safe_int(action.split(":", 1)[1], 0)
         profile = get_user_voice_profile(user_id, profile_id)
+        if not voice_profile_can_generate_tts(profile):
+            return await query.message.reply_text(
+                "⚠️ Giọng này không còn sẵn sàng. Hãy chọn lại giọng trong Kho voice.",
+                reply_markup=voice_vault_keyboard(user_id, lang, ctx),
+            )
         return await query.message.reply_text(
             "🎬 Giọng này đã sẵn sàng. Để gắn vào video, hãy mở Kho voice từ flow tạo video hiện tại rồi chọn giọng này.",
             reply_markup=voice_profile_actions_keyboard(profile_id, lang, PRODUCT_CONTEXT_SHOWROOM, profile),
