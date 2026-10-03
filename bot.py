@@ -171782,6 +171782,12 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         result = get_music_guided_result(user_id) or {}
         mode = music_product_mode_from_result(result)
         if result.get("music_suggestions"):
+            pending = get_music_guided_pending(user_id) or {}
+            if (
+                str(pending.get("pending_action") or "").startswith("music_product_")
+                and normalize_product_context(pending.get("product_context"), ctx) == ctx
+            ):
+                clear_music_guided_pending(user_id)
             return await query.message.reply_text(
                 music_product_suggestions_text(result, lang),
                 parse_mode="HTML",
@@ -249906,6 +249912,15 @@ async def video_dubbing_prepare_subtitles(
                     and acoustic_failure["multi_acoustic_failure_code"] in {
                         "fixed_vocal_speaker_count_unstable",
                         "fixed_vocal_view_unstable",
+                        "fixed_vocal_smart_speech_view_unstable",
+                        "fixed_vocal_smart_speech_count_unstable",
+                        "fixed_vocal_smart_speech_partition_unstable",
+                        "fixed_vocal_gender_view_unstable",
+                        "fixed_vocal_gender_allocation_unstable",
+                        "fixed_vocal_gender_allocation_invalid",
+                        "fixed_vocal_gender_partition_unstable",
+                        "fixed_vocal_gender_evidence_invalid",
+                        "fixed_vocal_gender_ambiguity_invalid",
                         "fixed_vocal_window_support_invalid",
                         "acoustic_unit_count_invalid",
                     }
