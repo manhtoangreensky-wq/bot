@@ -20,7 +20,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Mapping, Protocol
 
 from services import video_final_output
 
@@ -421,6 +421,164 @@ def sanitize_output_url_for_logging(url: Any) -> str:
         return "<unparseable>"
 
 
+SAFE_ARTIFACT_DIAGNOSTIC_KEYS = (
+    "download_error_class",
+    "download_http_status",
+    "download_redirect_count",
+    "download_final_url_host",
+    "download_attempts",
+    "download_retries",
+    "transient_retry_attempted",
+    "download_content_type",
+    "download_content_length",
+    "download_bytes",
+    "mp4_validator_result",
+    "content_length_verified",
+)
+
+
+def sanitize_artifact_download_diagnostics(raw: Any) -> dict[str, Any]:
+    """Sanitize and bounded-validate artifact download diagnostics for safe propagation and logging.
+
+    Enforces strict secret safety:
+    - Explicit key allowlist ONLY (unknown keys discarded).
+    - Numeric values: bounded integers only.
+    - Boolean values: strictly bool.
+    - Host values: hostname only, lowercase, no userinfo/port/path/query/fragments.
+    - Token/class values: alphanumeric + allowed symbols (_.-) only, bounded length.
+    - No secret leakage: full URLs, query strings, sig, exp, token, auth headers are never included.
+    - Invalid values are omitted (not passed raw).
+    """
+    if not isinstance(raw, Mapping):
+        return {}
+
+    sanitized: dict[str, Any] = {}
+
+    # 1. download_error_class: safe token
+    err_cls = raw.get("download_error_class")
+    if isinstance(err_cls, str) and err_cls.strip():
+        token = err_cls.strip().split(".")[-1].split(":")[0].strip()
+        if re.fullmatch(r"^[A-Za-z0-9_.-]{1,80}$", token):
+            sanitized["download_error_class"] = token
+
+    # 2. download_http_status: bounded int 0-599
+    http_st = raw.get("download_http_status")
+    if http_st is not None and not isinstance(http_st, bool):
+        try:
+            val = int(http_st)
+            if 0 <= val <= 599:
+                sanitized["download_http_status"] = val
+        except (ValueError, TypeError):
+            pass
+
+    # 3. download_redirect_count: bounded int 0-50
+    rc = raw.get("download_redirect_count")
+    if rc is not None and not isinstance(rc, bool):
+        try:
+            val = int(rc)
+            if 0 <= val <= 50:
+                sanitized["download_redirect_count"] = val
+        except (ValueError, TypeError):
+            pass
+
+    # 4. download_final_url_host: hostname only, lowercase, no userinfo, port, path, or query
+    final_host = raw.get("download_final_url_host")
+    if isinstance(final_host, str) and final_host.strip():
+        cleaned_host = final_host.strip().lower()
+        if "://" in cleaned_host:
+            try:
+                cleaned_host = (urllib.parse.urlsplit(cleaned_host).hostname or "").lower()
+            except Exception:
+                cleaned_host = ""
+        if "/" in cleaned_host:
+            cleaned_host = cleaned_host.split("/", 1)[0]
+        if "?" in cleaned_host:
+            cleaned_host = cleaned_host.split("?", 1)[0]
+        if ":" in cleaned_host:
+            cleaned_host = cleaned_host.split(":", 1)[0]
+        if "@" in cleaned_host:
+            cleaned_host = cleaned_host.split("@", 1)[-1]
+        cleaned_host = cleaned_host.strip()
+        if cleaned_host and re.fullmatch(r"^[a-z0-9][a-z0-9.-]{0,120}[a-z0-9]$|^[a-z0-9]$", cleaned_host):
+            sanitized["download_final_url_host"] = cleaned_host
+
+    # 5. download_attempts: bounded int 0-50
+    attempts = raw.get("download_attempts")
+    if attempts is not None and not isinstance(attempts, bool):
+        try:
+            val = int(attempts)
+            if 0 <= val <= 50:
+                sanitized["download_attempts"] = val
+        except (ValueError, TypeError):
+            pass
+
+    # 6. download_retries: bounded int 0-50
+    retries = raw.get("download_retries")
+    if retries is not None and not isinstance(retries, bool):
+        try:
+            val = int(retries)
+            if 0 <= val <= 50:
+                sanitized["download_retries"] = val
+        except (ValueError, TypeError):
+            pass
+
+    # 7. transient_retry_attempted: bool
+    tra = raw.get("transient_retry_attempted")
+    if tra is not None:
+        if isinstance(tra, bool):
+            sanitized["transient_retry_attempted"] = tra
+        elif str(tra).strip().lower() in ("true", "1"):
+            sanitized["transient_retry_attempted"] = True
+        elif str(tra).strip().lower() in ("false", "0"):
+            sanitized["transient_retry_attempted"] = False
+
+    # 8. download_content_type: bounded safe mime token
+    ct = raw.get("download_content_type")
+    if isinstance(ct, str) and ct.strip():
+        token = ct.strip().split(";")[0].strip().lower()[:80]
+        if re.fullmatch(r"^[a-z0-9_+.-]+/[a-z0-9_+.-]+$", token):
+            sanitized["download_content_type"] = token
+
+    # 9. download_content_length: bounded int >= 0
+    cl = raw.get("download_content_length")
+    if cl is not None and not isinstance(cl, bool):
+        try:
+            val = int(cl)
+            if 0 <= val <= 10_000_000_000:
+                sanitized["download_content_length"] = val
+        except (ValueError, TypeError):
+            pass
+
+    # 10. download_bytes: bounded int >= 0
+    db = raw.get("download_bytes")
+    if db is not None and not isinstance(db, bool):
+        try:
+            val = int(db)
+            if 0 <= val <= 10_000_000_000:
+                sanitized["download_bytes"] = val
+        except (ValueError, TypeError):
+            pass
+
+    # 11. mp4_validator_result: safe token
+    vr = raw.get("mp4_validator_result")
+    if isinstance(vr, str) and vr.strip():
+        token = vr.strip().lower()[:80]
+        if re.fullmatch(r"^[a-z0-9_.-]{1,80}$", token):
+            sanitized["mp4_validator_result"] = token
+
+    # 12. content_length_verified: bool
+    clv = raw.get("content_length_verified")
+    if clv is not None:
+        if isinstance(clv, bool):
+            sanitized["content_length_verified"] = clv
+        elif str(clv).strip().lower() in ("true", "1"):
+            sanitized["content_length_verified"] = True
+        elif str(clv).strip().lower() in ("false", "0"):
+            sanitized["content_length_verified"] = False
+
+    return sanitized
+
+
 class _HardenedVideoRedirectHandler(urllib.request.HTTPRedirectHandler):
     """Hardened redirect handler enforcing exact destination safety before connection."""
 
@@ -626,6 +784,16 @@ def materialize_video_url(
                 })
                 if isinstance(exc, urllib.error.HTTPError):
                     diagnostics["download_http_status"] = exc.code
+                if isinstance(exc, DisallowedRedirectError):
+                    try:
+                        target_url = getattr(exc, "sanitized_url", "") or getattr(exc, "filename", "") or ""
+                        err_host = (urllib.parse.urlsplit(target_url).hostname or "").lower()
+                    except Exception:
+                        err_host = ""
+                    if err_host:
+                        diagnostics["download_final_url_host"] = err_host[:160]
+                elif not diagnostics.get("download_final_url_host") and parsed_source.hostname:
+                    diagnostics["download_final_url_host"] = str(parsed_source.hostname or "").lower()[:160]
 
                 if part_file.exists():
                     try:

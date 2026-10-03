@@ -25,6 +25,7 @@ from services.video_provider_base import (
     VideoSubmitResult,
     mask_provider_task_id,
     normalize_provider_status,
+    sanitize_artifact_download_diagnostics,
     split_provider_chain,
 )
 from services.video_provider_catalog import (
@@ -6753,17 +6754,22 @@ def _run_provider_generation_impl(
                 )
                 in {"succeeded", "completed"}
             )
+            sanitized_download_diag = sanitize_artifact_download_diagnostics(getattr(artifact, "diagnostics", None))
+            failure_event_data = {
+                **(getattr(poll_result, "raw", {}) or {}),
+                "provider_result_blocker": blocker,
+                "result_url_present": True,
+                "download_content_type": artifact.content_type,
+                "downloaded_file_size": artifact.bytes,
+                "provider_error_message_safe": artifact.error_message or blocker,
+            }
+            if sanitized_download_diag:
+                failure_event_data["artifact_download_diagnostics"] = sanitized_download_diag
+
             if artifact_retryable:
                 _record_failure(
                     blocker,
-                    {
-                        **(getattr(poll_result, "raw", {}) or {}),
-                        "provider_result_blocker": blocker,
-                        "result_url_present": True,
-                        "download_content_type": artifact.content_type,
-                        "downloaded_file_size": artifact.bytes,
-                        "provider_error_message_safe": artifact.error_message or blocker,
-                    },
+                    failure_event_data,
                     submit_failure=False,
                 )
                 pending = _provider_pending_payload(
@@ -6776,42 +6782,26 @@ def _run_provider_generation_impl(
                 pending["artifact_download_retry_count"] = prior_download_retries + 1
                 pending["artifact_download_retry_limit"] = artifact_retry_limit
                 pending["artifact_download_retry_scene_index"] = current_retry_scene_index
+                if sanitized_download_diag:
+                    pending["artifact_download_diagnostics"] = sanitized_download_diag
                 return pending
             if attempt_index + 1 < len(candidate_adapters):
                 _record_failure(
                     blocker,
-                    {
-                        **(getattr(poll_result, "raw", {}) or {}),
-                        "provider_result_blocker": blocker,
-                        "result_url_present": True,
-                        "download_content_type": artifact.content_type,
-                        "downloaded_file_size": artifact.bytes,
-                        "provider_error_message_safe": artifact.error_message or blocker,
-                    },
+                    failure_event_data,
                 )
                 if is_product_video:
-                    return _paid_fallback_requires_confirmation_payload(
+                    fallback_payload = _paid_fallback_requires_confirmation_payload(
                         blocker,
-                        {
-                            **(getattr(poll_result, "raw", {}) or {}),
-                            "provider_result_blocker": blocker,
-                            "result_url_present": True,
-                            "download_content_type": artifact.content_type,
-                            "downloaded_file_size": artifact.bytes,
-                            "provider_error_message_safe": artifact.error_message or blocker,
-                        },
+                        failure_event_data,
                     )
+                    if sanitized_download_diag:
+                        fallback_payload["artifact_download_diagnostics"] = sanitized_download_diag
+                    return fallback_payload
                 continue
             _record_failure(
                 blocker,
-                {
-                    **(getattr(poll_result, "raw", {}) or {}),
-                    "provider_result_blocker": blocker,
-                    "result_url_present": True,
-                    "download_content_type": artifact.content_type,
-                    "downloaded_file_size": artifact.bytes,
-                    "provider_error_message_safe": artifact.error_message or blocker,
-                },
+                failure_event_data,
             )
             payload = {
                 "ok": False,
@@ -6836,6 +6826,8 @@ def _run_provider_generation_impl(
                 "download_status": artifact.error_code or "failed",
                 "provider_readiness": status,
             }
+            if sanitized_download_diag:
+                payload["artifact_download_diagnostics"] = sanitized_download_diag
             if is_product_video:
                 payload.update({
                     "status": "failed_no_charge",

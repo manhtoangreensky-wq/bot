@@ -56,6 +56,7 @@ from services.video_provider_base import (
     is_safe_shopaikey_content_url,
     is_safe_video_output_url,
     materialize_video_url,
+    sanitize_artifact_download_diagnostics,
     sanitize_output_url_for_logging,
     _HardenedVideoRedirectHandler,
 )
@@ -779,4 +780,84 @@ def test_signed_query_not_present_in_failure_diagnostics_or_logs(tmp_path: Path)
     assert secret_exp not in diag_str
     assert "sig=" not in diag_str
     assert "exp=" not in diag_str
+
+
+def test_sanitize_artifact_download_diagnostics_allowlist_and_safety() -> None:
+    """Validate that sanitize_artifact_download_diagnostics strictly enforces allowlist, bounds, and strips secrets."""
+    raw_dirty = {
+        "download_error_class": "urllib.error.HTTPError: 400 Bad Request",
+        "download_http_status": "400",
+        "download_redirect_count": 1,
+        "download_final_url_host": "HTTPS://CDN.EXAMPLE.COM:8080/path?sig=SECRET_SIG&exp=123",
+        "download_attempts": "2",
+        "download_retries": 1,
+        "transient_retry_attempted": "true",
+        "download_content_type": "Video/MP4; charset=binary",
+        "download_content_length": 1048576,
+        "download_bytes": 524288,
+        "mp4_validator_result": "VALID_MP4",
+        "content_length_verified": False,
+        # Untrusted / secret fields that MUST be dropped:
+        "full_url": "https://cdn.example.com/video.mp4?sig=SECRET&exp=123",
+        "query": "sig=SECRET&exp=123",
+        "token": "BEARER_SECRET_TOKEN",
+        "headers": {"Authorization": "Bearer secret"},
+        "cookie": "session=secret",
+    }
+    sanitized = sanitize_artifact_download_diagnostics(raw_dirty)
+
+    # Allowlist keys present and properly bounded/sanitized
+    assert sanitized["download_error_class"] == "HTTPError"
+    assert sanitized["download_http_status"] == 400
+    assert sanitized["download_redirect_count"] == 1
+    assert sanitized["download_final_url_host"] == "cdn.example.com"
+    assert sanitized["download_attempts"] == 2
+    assert sanitized["download_retries"] == 1
+    assert sanitized["transient_retry_attempted"] is True
+    assert sanitized["download_content_type"] == "video/mp4"
+    assert sanitized["download_content_length"] == 1048576
+    assert sanitized["download_bytes"] == 524288
+    assert sanitized["mp4_validator_result"] == "valid_mp4"
+    assert sanitized["content_length_verified"] is False
+
+    # Secrets and unknown keys strictly dropped
+    assert "full_url" not in sanitized
+    assert "query" not in sanitized
+    assert "token" not in sanitized
+    assert "headers" not in sanitized
+    assert "cookie" not in sanitized
+
+    dumped = json.dumps(sanitized)
+    assert "SECRET" not in dumped
+    assert "Bearer" not in dumped
+    assert "session" not in dumped
+    assert "8080" not in dumped
+
+
+def test_materialize_video_url_disallowed_redirect_captures_host_and_status(tmp_path: Path) -> None:
+    """When a redirect target is disallowed, materialize_video_url captures destination host and status 400."""
+    initial_valid_url = VALID_SHOPAIKEY_URL
+    disallowed_dest = "https://untrusted-cdn.evil.com/video.mp4"
+
+    def fake_open(req, *args, **kwargs):
+        raise DisallowedRedirectError(disallowed_dest, "redirect_destination_disallowed")
+
+    mock_opener = MagicMock()
+    mock_opener.open.side_effect = fake_open
+
+    with patch("urllib.request.build_opener", return_value=mock_opener):
+        res = materialize_video_url(
+            initial_valid_url,
+            job_id="test_redirect_diag",
+            output_dir=str(tmp_path),
+        )
+
+    assert res.ok is False
+    assert res.error_code == "provider_download_failed"
+    assert res.diagnostics["download_error_class"] == "DisallowedRedirectError"
+    assert res.diagnostics["download_http_status"] == 400
+    assert res.diagnostics["download_final_url_host"] == "untrusted-cdn.evil.com"
+    assert res.diagnostics["download_attempts"] == 1
+    assert res.diagnostics["mp4_validator_result"] == "not_run_download_failed"
+
 

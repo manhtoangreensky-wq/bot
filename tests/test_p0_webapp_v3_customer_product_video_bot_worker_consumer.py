@@ -10,6 +10,7 @@ import json
 import logging
 import urllib.request
 from typing import Any
+from unittest.mock import MagicMock
 import pytest
 
 from services.web_product_video_worker_consumer import (
@@ -25,6 +26,7 @@ from services.web_product_video_worker_consumer import (
     WebProductVideoDispatcherClient,
     WorkerAuthError,
     WorkerClientError,
+    execute_claimed_web_product_video_job,
     get_web_base_url,
     get_worker_secret,
     map_web_job_to_bot_runtime,
@@ -462,3 +464,118 @@ def test_15_provider_boundary_guarded_against_submission(monkeypatch: pytest.Mon
     assert outcome.paid_provider_calls == 0
     assert outcome.video_renders == 0
     assert outcome.wallet_mutations == 0
+
+
+def test_16_consumer_logs_and_appends_sanitized_download_diagnostics_on_artifact_failure(caplog: pytest.LogCaptureFixture) -> None:
+    """Consumer logs safe structured line and appends compact sanitized diagnostics to client.fail."""
+    client = MagicMock(spec=WebProductVideoDispatcherClient)
+
+    def failing_executor(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "blocker": "provider_download_failed",
+            "public_message": "Tạo video thất bại.",
+            "artifact_download_diagnostics": {
+                "download_error_class": "DisallowedRedirectError",
+                "download_http_status": 400,
+                "download_final_url_host": "cdn.example.invalid",
+                "download_redirect_count": 1,
+                "download_attempts": 1,
+                "download_retries": 0,
+                "transient_retry_attempted": False,
+                "download_content_length": 0,
+                "download_bytes": 0,
+                "mp4_validator_result": "not_run_download_failed",
+                "content_length_verified": False,
+                # Malicious / secret fields that MUST be filtered out
+                "secret_sig": "SECRET123",
+                "url": "https://cdn.example.invalid/secret.mp4?sig=SECRET123",
+            },
+            "provider_submit_called": True,
+        }
+
+    with caplog.at_level(logging.WARNING, logger="web_product_video_worker_consumer"):
+        outcome = execute_claimed_web_product_video_job(
+            SAMPLE_VALID_WEB_JOB,
+            client=client,
+            environ={"WEB_PRODUCT_VIDEO_WORKER_ENABLED": "true"},
+            executor_fn=failing_executor,
+        )
+
+    assert outcome.ok is False
+    assert outcome.status == "PROVIDER_FAILED"
+    assert outcome.blocker_reason == "provider_download_failed"
+
+    # Verify client.fail was called with error_code and sanitized summary
+    client.fail.assert_called_once()
+    fail_kwargs = client.fail.call_args.kwargs
+    assert fail_kwargs["error_code"] == "provider_download_failed"
+    err_msg = fail_kwargs["error_message"]
+    assert "Tạo video thất bại." in err_msg
+    assert "download_error_class=DisallowedRedirectError" in err_msg
+    assert "download_http_status=400" in err_msg
+    assert "download_final_url_host=cdn.example.invalid" in err_msg
+    assert "SECRET123" not in err_msg
+    assert "secret.mp4" not in err_msg
+
+    # Verify structured journal warning logged
+    log_text = "\n".join(rec.message for rec in caplog.records)
+    assert "artifact_download_diagnostics" in log_text
+    assert "download_final_url_host=cdn.example.invalid" in log_text
+    assert "SECRET123" not in log_text
+
+
+def test_17_consumer_backward_compatibility_when_download_diagnostics_missing() -> None:
+    """Consumer handles missing or empty diagnostics gracefully without appending empty brackets."""
+    client = MagicMock(spec=WebProductVideoDispatcherClient)
+
+    def failing_executor_no_diag(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "blocker": "provider_download_failed",
+            "public_message": "Tạo video thất bại.",
+            "provider_submit_called": True,
+        }
+
+    outcome = execute_claimed_web_product_video_job(
+        SAMPLE_VALID_WEB_JOB,
+        client=client,
+        environ={"WEB_PRODUCT_VIDEO_WORKER_ENABLED": "true"},
+        executor_fn=failing_executor_no_diag,
+    )
+
+    assert outcome.ok is False
+    client.fail.assert_called_once()
+    fail_kwargs = client.fail.call_args.kwargs
+    assert fail_kwargs["error_message"] == "Tạo video thất bại."
+
+
+def test_18_consumer_error_message_bounded_to_1000_chars() -> None:
+    """Error message passed to client.fail is strictly bounded to 1000 characters."""
+    client = MagicMock(spec=WebProductVideoDispatcherClient)
+    huge_msg = "X" * 1500
+
+    def failing_executor_huge(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "blocker": "provider_download_failed",
+            "public_message": huge_msg,
+            "artifact_download_diagnostics": {
+                "download_error_class": "DisallowedRedirectError",
+                "download_http_status": 400,
+            },
+            "provider_submit_called": True,
+        }
+
+    outcome = execute_claimed_web_product_video_job(
+        SAMPLE_VALID_WEB_JOB,
+        client=client,
+        environ={"WEB_PRODUCT_VIDEO_WORKER_ENABLED": "true"},
+        executor_fn=failing_executor_huge,
+    )
+
+    assert outcome.ok is False
+    client.fail.assert_called_once()
+    fail_kwargs = client.fail.call_args.kwargs
+    assert len(fail_kwargs["error_message"]) <= 1000
+
