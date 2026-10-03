@@ -172480,7 +172480,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         profile = get_user_voice_profile(user_id, profile_id)
         preview_ref = str((profile or {}).get("preview_audio_ref") or "")
         if not preview_ref:
-            return await query.message.reply_text("⚠️ Giọng này chưa có file demo để tải. Quý khách có thể tạo/nghe thử lại trước.", reply_markup=voice_profile_actions_keyboard(profile_id, lang, PRODUCT_CONTEXT_SHOWROOM, profile))
+            return await query.message.reply_text("⚠️ Giọng này chưa có file demo để tải. Quý khách có thể tạo/nghe thử lại trước.", reply_markup=voice_profile_actions_keyboard(profile_id, lang, ctx, profile))
         await context.bot.send_audio(chat_id=query.message.chat_id, audio=preview_ref, caption=f"⬇️ Demo voice: {profile.get('display_name') or 'TOAN AAS voice'}")
         return None
     if action.startswith("voice_profile_default:"):
