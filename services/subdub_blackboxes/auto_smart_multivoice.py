@@ -1714,6 +1714,7 @@ async def run_auto_smart_multivoice(
     tts_provider = ""
     tts_generated_segments = 0
     smart_fit_warnings: list[dict[str, Any]] = []
+    source_audio_evidence: dict[str, Any] = {}
     smart_best_effort = is_auto_smart_multivoice_state(state)
     render_segments = [dict(cue) for cue in segments]
     if decision.output_mode in {
@@ -2093,6 +2094,19 @@ async def run_auto_smart_multivoice(
             companion_segments=render_segments,
             source_duration=source_duration,
         )
+        if smart_best_effort:
+            from services.subdub_smart_source_audio import replace_unfit_smart_cues
+            for item in synth_artifacts:
+                item["tts_voice_id"] = decision.speaker_voice_map.get(str(item.get("speaker_id") or ""), "")
+            try:
+                source_audio_evidence = replace_unfit_smart_cues(
+                    synth_artifacts, source_file=str(media_path),
+                    missing_translation_cue_ids=list((state or {}).get("smart_translation_missing_cue_ids") or []),
+                )
+            except RuntimeError as exc:
+                return {"ok": False, "status": "SMART_SOURCE_AUDIO_FAILED", "error_code": str(exc),
+                        "blocker": str(exc), "output_mode": OUTPUT_MODE_FAILED,
+                        "tts_expected_segments": len(expected_cue_ids), "tts_generated_segments": tts_generated_segments}
 
         # Safe shared micro-cue recovery for cue-locked lanes without relaxing MAX_INTELLIGIBLE_FIT_RATIO
         from services.subdub_microcue_recovery import recover_cue_locked_micro_cues
@@ -2381,6 +2395,7 @@ async def run_auto_smart_multivoice(
         "tts_dropped_segments": 0,
         "smart_audio_fit_degraded": bool(smart_fit_warnings),
         "smart_audio_fit_warnings": smart_fit_warnings,
+        **source_audio_evidence,
         "output_segments": render_segments,
         "decision_version": decision.decision_version,
         "locked_speaker_voice_map": dict(decision.speaker_voice_map) if locked_speaker_voice_map else None,
@@ -2976,6 +2991,9 @@ async def run_auto_smart_multivoice_blackbox(
             "subdub_engine_selected": "auto_multi_speaker_v2",
             "auto_smart_dispatch": "n3_plus_proven_v2",
         }
+        for key in ("smart_source_audio_cue_ids", "smart_source_audio_reasons", "smart_source_audio_cue_count", "smart_dubbed_voice_count"):
+            if key in v2_result:
+                v2_result_state[key] = v2_result[key]
         translation_evidence = _smart_translation_evidence(prepared, v2_result_state)
         v2_result_state.update(translation_evidence)
         return {
@@ -3622,6 +3640,9 @@ async def run_auto_smart_multivoice_blackbox(
         == "n3_unknown_register_distinct_voice"
     )
     result_state["speaker_voice_map"] = smart_result.get("speaker_voice_map") or {}
+    for key in ("smart_source_audio_cue_ids", "smart_source_audio_reasons", "smart_source_audio_cue_count", "smart_dubbed_voice_count"):
+        if key in smart_result:
+            result_state[key] = smart_result[key]
     if smart_result.get("locked_speaker_voice_map"):
         result_state["locked_speaker_voice_map"] = dict(smart_result["locked_speaker_voice_map"])
     elif locked_speaker_voice_map is not None and smart_result.get("speaker_voice_map"):
@@ -3673,7 +3694,7 @@ async def run_auto_smart_multivoice_blackbox(
         elif "audio_bytes" not in response:
             response["audio_bytes"] = b""
         if captured_audio:
-            response["output_audio_source"] = "generated_tts"
+            response["output_audio_source"] = "mixed" if smart_result.get("smart_source_audio_cue_count") else "generated_tts"
             response["tts_audio_bytes"] = len(captured_audio)
             if captured_audio_qc:
                 response["tts_audio_qc"] = captured_audio_qc

@@ -265,5 +265,6 @@ def test_bbdd_cached_audio_renders_real_mp4_with_matching_subtitle_tail(tmp_path
     assert [cue["text"] for cue in result["output_segments"]] == original_texts
     assert result["output_segments"][-1]["end"] == 43.94
     assert b"00:00:39,920 --> 00:00:43,940" in result["srt_bytes"]
-    assert observed["plan"]["scheduled"][-1]["tempo_ratio"] == pytest.approx(1.279338, abs=0.00001)
+    assert observed["plan"]["scheduled"][-1]["tempo_ratio"] == pytest.approx(1.0)
+    assert result["smart_source_audio_cue_count"] == 1
     assert float(_probe(output)["format"]["duration"]) == pytest.approx(duration, abs=0.15)

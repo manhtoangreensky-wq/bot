@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import textwrap
+import tempfile
 
 import pytest
 
@@ -69,7 +70,8 @@ def test_806_cached_mp4_passes_real_outer_audio_guard(tmp_path, monkeypatch, med
     )
     assert _outer_audio_guard(result) is None
     assert result["tts_provider"] == "cached_offline"
-    assert result["output_audio_source"] == "generated_tts"
+    assert result["output_audio_source"] == "mixed"
+    assert result["smart_source_audio_cue_count"] == 1
     assert result["tts_audio_qc"]["ok"] is True
     assert result["tts_expected_segments"] == result["tts_generated_segments"] == 5
 
@@ -82,9 +84,17 @@ def _shared_contract(lane, *, smart_dispatch=False, duration=2.6, video_end=2.0)
     if smart_dispatch:
         state.update(auto_smart_multivoice_opt_in=True, auto_smart_dispatch="n3_plus_proven_v2")
     observed = {}
+    source_bytes = b"source"
+    if smart_dispatch:
+        with tempfile.TemporaryDirectory() as folder:
+            source_path = Path(folder) / "source.mp4"
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=black:s=320x180:r=25",
+                            "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100", "-t", str(video_end),
+                            "-c:v", "libx264", "-c:a", "aac", str(source_path)], check=True)
+            source_bytes = source_path.read_bytes()
 
     async def prepare(_state):
-        return {"source_bytes": b"source", "content_type": "video/mp4",
+        return {"source_bytes": source_bytes, "content_type": "video/mp4",
                 "source_segments": cues, "output_segments": cues,
                 "output_subtitle": "1\n00:00:01,000 --> 00:00:02,000\nfull speech\n"}
 
@@ -118,11 +128,12 @@ def test_smart_v2_borrows_gap_while_plain_multi_does_not():
 
 
 @pytest.mark.parametrize("duration", [2.6, 6.0])
-def test_owner_smart_quality_warning_does_not_abort_valid_render(duration):
+def test_owner_smart_source_fallback_does_not_abort_valid_render(duration):
     result, observed = _shared_contract("multi", smart_dispatch=True, duration=duration)
     assert result["ok"], result
-    assert result["smart_audio_fit_degraded"] is True
-    assert result["smart_audio_fit_warnings"][0]["fit_ratio"] == duration
+    assert result["smart_source_audio_cue_ids"] == ["c1"]
+    assert result["smart_audio_fit_degraded"] is False
+    assert observed["chunks"][0]["fit_ratio"] == 1.0
     assert observed["chunks"][0]["start"] == 1.0
     assert observed["chunks"][0]["end"] == 2.0
     assert observed["duration"] == 2.0
@@ -204,11 +215,11 @@ def test_53b6_all_23_cues_and_five_voices_render_through_shared_posttts_path(tmp
     assert len(chunks) == 23 and len(voices) == len(set(voices.values())) == 5
     result, observed = _run_shared_cached_mp4(root, chunks, voices, registers, tmp_path / "five_voice.mp4", media_bot)
     assert result["tts_expected_segments"] == result["tts_generated_segments"] == 23
-    assert result["smart_audio_fit_degraded"] is True
-    warning_ids = {c["cue_id"] for c in result["smart_audio_fit_warnings"]}
-    assert chunks[13]["cue_id"] in warning_ids
+    assert result["smart_audio_fit_degraded"] is False
+    assert chunks[13]["cue_id"] in result["smart_source_audio_cue_ids"]
     assert result["output_segments"][13]["end"] == 37.3
-    assert observed["plan"]["scheduled"][13]["tempo_ratio"] == pytest.approx(2.59712386)
+    assert observed["plan"]["scheduled"][13]["tempo_ratio"] == pytest.approx(1.0)
+    assert max(c["tempo_ratio"] for c in observed["plan"]["scheduled"]) <= 1.001
     assert result["output_segments"][21]["end"] > chunks[21]["end"]
     assert result["output_segments"][22]["end"] > chunks[22]["end"]
 
@@ -221,7 +232,9 @@ def test_53b6_actual_generic_route_renders_all_cues_with_quality_warning(tmp_pat
         tmp_path, monkeypatch, media_bot, source, chunks, duration, voices,
     )
     assert _outer_audio_guard(result) is None
-    assert result["smart_audio_fit_degraded"] is True
+    assert result["smart_audio_fit_degraded"] is False
+    assert chunks[13]["cue_id"] in result["smart_source_audio_cue_ids"]
+    assert max(c["tempo_ratio"] for c in observed["plan"]["scheduled"]) <= 1.001
     assert result["tts_expected_segments"] == result["tts_generated_segments"] == 23
     assert result["speaker_voice_map"] == voices
     assert observed["plan"]["shifted_cue_count"] == 0
