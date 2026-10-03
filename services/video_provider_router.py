@@ -4578,20 +4578,22 @@ def _run_provider_generation_impl(
     acceptance_blocker = ""
     verified_acceptance: dict[str, Any] = {}
     if owner_acceptance_auth is not None:
+        acceptance_context = dict(metadata)
+        acceptance_context.update({
+            "user_id": getattr(request, "user_id", None) or metadata.get("user_id"),
+            "job_id": request.job_id or metadata.get("job_id"),
+            "project_id": metadata.get("project_id"),
+            "product_type": request.product_type or metadata.get("product_type"),
+            "provider": metadata.get("provider") or metadata.get("selected_provider"),
+            "required_capability": request.required_capability,
+            "tier": metadata.get("tier") or metadata.get("selected_model") or metadata.get("model") or getattr(request, "tier", ""),
+            "runtime_sha": metadata.get("runtime_sha"),
+            "estimated_provider_cost": metadata.get("estimated_provider_cost") or metadata.get("spend_amount") or 0.70,
+            "estimated_provider_cost_unit": metadata.get("estimated_provider_cost_unit") or metadata.get("provider_cost_unit") or "USD",
+        })
         acceptance_valid, acceptance_blocker, verified_acceptance = validate_owner_acceptance_authorization(
             owner_acceptance_auth,
-            context={
-                "user_id": getattr(request, "user_id", None) or metadata.get("user_id"),
-                "job_id": request.job_id or metadata.get("job_id"),
-                "project_id": metadata.get("project_id"),
-                "product_type": request.product_type or metadata.get("product_type"),
-                "provider": metadata.get("provider") or metadata.get("selected_provider"),
-                "required_capability": request.required_capability,
-                "tier": metadata.get("tier") or metadata.get("selected_model") or metadata.get("model") or getattr(request, "tier", ""),
-                "runtime_sha": metadata.get("runtime_sha"),
-                "estimated_provider_cost": metadata.get("estimated_provider_cost") or metadata.get("spend_amount") or 0.70,
-                "estimated_provider_cost_unit": metadata.get("estimated_provider_cost_unit") or metadata.get("provider_cost_unit") or "USD",
-            },
+            context=acceptance_context,
             environ=env,
         )
         if not acceptance_valid:
