@@ -171482,6 +171482,18 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         return await query.message.reply_text(voice_tts_volume_input_text(lang), reply_markup=voice_tts_settings_keyboard(lang, ctx))
     if action == "voice_tts_settings_back":
         await query.answer()
+        pending = get_music_guided_pending(user_id) or {}
+        if (
+            str(pending.get("pending_action") or "") in {"voice_tts_speed_input", "voice_tts_volume_input"}
+            and normalize_product_context(pending.get("product_context"), ctx) == ctx
+        ):
+            clear_music_guided_pending(user_id)
+            result = get_music_guided_result(user_id) or {}
+            return await show_voice_tts_settings_screen(
+                query.message, user_id,
+                str(result.get("voice_tts_settings_source") or "standalone"),
+                product_context=ctx, lang=lang,
+            )
         return await voice_tts_return_previous_screen(query.message, user_id, lang, ctx)
     if action == "voice_tts_create":
         await query.answer()
