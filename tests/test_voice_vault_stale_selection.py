@@ -85,3 +85,24 @@ def test_legacy_slot_callback_expires_instead_of_selecting_different_profile(voi
     assert "music_quick|showroom|voice_profile_select:102" in actual_callbacks
     assert "Fixture voice 101" not in text and "Fixture voice 102" not in text
     assert conn.total_changes == before_click_writes
+
+
+def test_stable_profile_id_callback_cannot_open_another_users_voice(voice_vault_runtime):
+    ns, route, conn = voice_vault_runtime
+    conn.execute(
+        "INSERT INTO voice_profiles VALUES (?, ?, 'active', ?, ?, NULL, 0, '')",
+        (104, "902", "foreign-provider-id", "Foreign voice 104"),
+    )
+    conn.commit()
+    before_click_writes = conn.total_changes
+
+    query = CALLBACK_FIXTURE["_click"](
+        route, "music_quick|showroom|voice_profile_select:104"
+    )
+
+    text, markup = query.message.replies[-1]
+    assert "không tìm thấy giọng này trong tài khoản" in text.lower()
+    assert "Foreign voice 104" not in text
+    actual_callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+    assert not any(str(data).endswith("voice_profile_select:104") for data in actual_callbacks)
+    assert conn.total_changes == before_click_writes
