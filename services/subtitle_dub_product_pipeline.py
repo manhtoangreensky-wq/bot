@@ -252,6 +252,7 @@ async def process_subtitle_dub_job(
             and pipeline_state.get("auto_smart_dispatch") == "n3_plus_proven_v2"
         )
     )
+    source_audio_evidence = {}
     if tts_language_route:
         language_fields = subdub_tts_language_state_fields(tts_language_route)
         pipeline_state.update(language_fields)
@@ -597,6 +598,20 @@ async def process_subtitle_dub_job(
                     srt_bytes = str(srt_text or "").encode("utf-8")
                     subtitle_items = subtitle_output_items(srt_text, output_type, mode)
                     output_subtitle = srt_text
+                from services.subdub_smart_source_audio import replace_unfit_smart_cues
+                for item, auth_seg, _cid in chunk_bindings:
+                    item.setdefault("tts_voice_id", str(auth_seg.get("tts_voice_id") or selected_tts_voice_id or ""))
+                try:
+                    source_audio_evidence = replace_unfit_smart_cues(
+                        tts_chunks, source_bytes=source_bytes,
+                        source_file=str(prepared.get("source_file") or ""),
+                        missing_translation_cue_ids=list(pipeline_state.get("smart_translation_missing_cue_ids") or []),
+                    )
+                except RuntimeError as exc:
+                    return {"ok": False, "status": "SMART_SOURCE_AUDIO_FAILED", "error_code": str(exc),
+                            "state": pipeline_state, "prepared": prepared,
+                            "tts_expected_segments": tts_expected_segments, "tts_generated_segments": tts_generated_segments}
+                pipeline_state.update(source_audio_evidence)
 
             from services.subdub_microcue_recovery import (
                 recover_cue_locked_micro_cues,
@@ -884,6 +899,7 @@ async def process_subtitle_dub_job(
         "tts_chunks": tts_chunks,
         "smart_audio_fit_degraded": bool(smart_fit_warnings),
         "smart_audio_fit_warnings": smart_fit_warnings,
+        **source_audio_evidence,
         "tts_expected_segments": tts_expected_segments,
         "tts_generated_segments": tts_generated_segments,
         "tts_mixed_segments": tts_mixed_segments,
@@ -931,6 +947,7 @@ async def process_subtitle_dub_job(
         "tts_cue_qc": [dict(item.get("audio_qc") or {}) for item in tts_chunks],
         "raw_audio_bytes": raw_audio_bytes,
         "audio_bytes": audio_bytes,
+        **({"output_audio_source": "mixed"} if source_audio_evidence.get("smart_source_audio_cue_count") else {}),
         "video_output": video_output,
         "normalization_detail": normalization_detail,
         "selected_tts_voice_id": selected_tts_voice_id,
