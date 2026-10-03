@@ -20,17 +20,15 @@ reason per cue and the number of TTS voices actually played. Receipt discloses
 original-audio cues and actual played voices, not only the assigned cast map.
 Price/confirmation/wallet/settlement formulas and provider-call policy are unchanged.
 
-Smart speaker uncertainty follows the same render-only source policy. After
-acoustic recovery, unproven attribution is not evidence of one real speaker;
-unproven register cues must not play an arbitrarily selected male/female voice.
-Preparation records the affected cue IDs, preserves them through bounded JSON
-resume, and only Smart render paths mark those chunks for exact source extraction.
-Known identities/cues continue dubbing unchanged. If every attribution is uncertain,
-all affected cues retain source audio and the receipt explicitly reports that the
-speaker count is not reliably determined, with zero dubbing voices actually played.
-This is degraded translated-subtitle output, not a claim that all speech was dubbed.
-Checkpoint generation counts and artifacts remain untouched. Per-cue provenance
-uses `speaker_attribution_uncertain`, distinct from translation/duration failures.
+Speaker uncertainty is disclosed metadata, not a reason to discard fitting TTS.
+Preparation/resume retains the uncertainty cue IDs and the existing fallback cast
+map; source speaker count remains unproven, not a fabricated single-speaker proof.
+After cast selection, translated TTS that fits keeps its original render payload.
+Only missing translation or measured duration failure triggers source extraction.
+Known identities/cues, timestamps, pacing and checkpoint artifacts are unchanged.
+The actual played-voice counter distinguishes source from dubbed cues. This is
+best-effort voice attribution, not a guarantee that uncertain gender is correct.
+Historical `speaker_attribution_uncertain` source provenance remains readable.
 
 Measured source case: a0.88s source window with2.285469s generated audio and no
 next gap used to need2.597x. The new policy preserves original audio at1x for that
