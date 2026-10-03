@@ -553,23 +553,80 @@ def validate_claimed_job(
             ).strip()
             if auth_product != product_key:
                 return False, f"OWNER_ACCEPTANCE_PRODUCT_MISMATCH:{auth_product}!={product_key}"
-            auth_provider = str(owner_acceptance_auth.get("provider") or "").strip().lower()
-            if auth_provider not in ("fal_video", "fal.ai", "fal-video"):
-                return False, f"OWNER_ACCEPTANCE_PROVIDER_MISMATCH:{auth_provider}"
-            auth_model = str(
-                owner_acceptance_auth.get("model")
-                or owner_acceptance_auth.get("selected_model")
-                or ""
-            ).strip()
-            if auth_model and auth_model != "fal-ai/wan/v2.2-a14b/video-to-video":
-                return False, f"OWNER_ACCEPTANCE_MODEL_MISMATCH:{auth_model}"
-            auth_cap = str(
-                owner_acceptance_auth.get("capability")
-                or owner_acceptance_auth.get("required_capability")
-                or ""
-            ).strip()
-            if auth_cap and auth_cap != "video_to_video":
-                return False, f"OWNER_ACCEPTANCE_CAPABILITY_MISMATCH:{auth_cap}"
+
+            if product_key == "video_ai_video_reference":
+                auth_provider = str(owner_acceptance_auth.get("provider") or "").strip().lower()
+                if "fal" in auth_provider:
+                    return False, "OWNER_ACCEPTANCE_FAL_PROHIBITED_FOR_VIDEO_REFERENCE"
+                if auth_provider in ("key4u_video", "key4u"):
+                    return False, "KEY4U_SECONDARY_COMMERCIAL_DISABLED"
+                if auth_provider not in ("shopaikey_video", "shopaikey"):
+                    return False, f"OWNER_ACCEPTANCE_PROVIDER_MISMATCH:{auth_provider}"
+
+                auth_model = str(
+                    owner_acceptance_auth.get("model")
+                    or owner_acceptance_auth.get("selected_model")
+                    or ""
+                ).strip()
+                if auth_model:
+                    if "fal" in auth_model.lower():
+                        return False, "OWNER_ACCEPTANCE_FAL_MODEL_PROHIBITED"
+                    if auth_model != "veo3.1-fast":
+                        return False, f"CROSS_PROVIDER_MODEL_PAIR_REJECTED:{auth_provider}+{auth_model}"
+
+                auth_cap = str(
+                    owner_acceptance_auth.get("capability")
+                    or owner_acceptance_auth.get("required_capability")
+                    or ""
+                ).strip()
+                if auth_cap:
+                    if auth_cap == "video_to_video":
+                        return False, "NATIVE_V2V_NOT_PERMITTED:capability_must_be_image_to_video"
+                    if auth_cap != "image_to_video":
+                        return False, f"OWNER_ACCEPTANCE_CAPABILITY_MISMATCH:{auth_cap}"
+
+                auth_exec_mode = str(owner_acceptance_auth.get("execution_mode") or "").strip()
+                if auth_exec_mode and auth_exec_mode != "video_reference_guided_i2v":
+                    return False, f"EXECUTION_MODE_MISMATCH:{auth_exec_mode}"
+
+                payload_dict = job.get("payload") if isinstance(job.get("payload"), Mapping) else {}
+                job_quality = str(payload_dict.get("quality_tier") or payload_dict.get("tier") or "500").strip().lower()
+                auth_tier = str(owner_acceptance_auth.get("tier") or owner_acceptance_auth.get("quality_tier") or "").strip().lower()
+                if job_quality in {"400", "veo31_fast_8", "balanced"}:
+                    return False, "TIER_400_VIDEO_REFERENCE_REJECTED"
+                if auth_tier in {"400", "veo31_fast_8", "balanced"}:
+                    return False, "TIER_400_VIDEO_REFERENCE_REJECTED"
+                if auth_tier:
+                    tier_alias_map = {
+                        "500": "500", "motion_standard_5": "500", "standard": "500",
+                        "600": "600", "motion_audio_5": "600",
+                        "700": "700", "kling_long_audio_15": "700", "long": "700",
+                        "800": "800", "motion_pro_audio_10": "800", "high": "800",
+                    }
+                    can_auth = tier_alias_map.get(auth_tier, auth_tier)
+                    can_job = tier_alias_map.get(job_quality, job_quality)
+                    if can_auth != can_job:
+                        return False, f"QUALITY_TIER_MISMATCH:{can_auth}!={can_job}"
+            else:
+                auth_provider = str(owner_acceptance_auth.get("provider") or "").strip().lower()
+                allowed_auth_providers = ("shopaikey_video", "shopaikey", "key4u_video", "fal_video", "fal.ai", "fal-video")
+                if auth_provider not in allowed_auth_providers:
+                    return False, f"OWNER_ACCEPTANCE_PROVIDER_MISMATCH:{auth_provider}"
+                auth_model = str(
+                    owner_acceptance_auth.get("model")
+                    or owner_acceptance_auth.get("selected_model")
+                    or ""
+                ).strip()
+                allowed_auth_models = ("veo3.1-fast", "fal-ai/wan/v2.2-a14b/video-to-video", "veo3.1-components")
+                if auth_model and auth_model not in allowed_auth_models:
+                    return False, f"OWNER_ACCEPTANCE_MODEL_MISMATCH:{auth_model}"
+                auth_cap = str(
+                    owner_acceptance_auth.get("capability")
+                    or owner_acceptance_auth.get("required_capability")
+                    or ""
+                ).strip()
+                if auth_cap and auth_cap not in ("image_to_video", "video_to_video"):
+                    return False, f"OWNER_ACCEPTANCE_CAPABILITY_MISMATCH:{auth_cap}"
         else:
             return False, f"UNSUPPORTED_PRODUCT:{product_key}"
 
@@ -615,6 +672,23 @@ def validate_claimed_job(
     quality_tier = str(payload.get("quality_tier") or "standard").strip().lower()
     if quality_tier and not re.fullmatch(r"[a-z0-9_\-]+", quality_tier):
         return False, f"INVALID_QUALITY_TIER:{quality_tier}"
+
+    if product_key == "video_ai_video_reference":
+        supported_public_tiers = {
+            "500", "motion_standard_5", "standard",
+            "600", "motion_audio_5",
+            "700", "kling_long_audio_15", "long",
+            "800", "motion_pro_audio_10", "high",
+        }
+        raw_q = str(payload.get("tier") or payload.get("quality_tier") or "500").strip().lower()
+        if raw_q in {"400", "veo31_fast_8", "balanced"}:
+            return False, "TIER_400_VIDEO_REFERENCE_REJECTED"
+        if raw_q not in supported_public_tiers:
+            return False, f"INCOMPATIBLE_HYBRID_QUALITY_TIER:{raw_q}"
+        if raw_q in {"700", "kling_long_audio_15", "long"}:
+            return False, "COMMERCIAL_UNAVAILABLE_TIER_700_HYBRID_INCOMPATIBLE"
+        if raw_q in {"800", "motion_pro_audio_10", "high"}:
+            return False, "COMMERCIAL_UNAVAILABLE_TIER_800_HYBRID_INCOMPATIBLE"
 
     return True, ""
 
@@ -716,19 +790,75 @@ def map_web_job_to_bot_runtime(
         ).strip()
         if not source_video_path:
             raise InvalidJobEnvelopeError("SOURCE_VIDEO_PATH_REQUIRED: Missing source_video_path for video_ai_video_reference")
-        image_paths: list[str] = []
+
+        raw_quality = str(payload.get("tier") or payload.get("quality_tier") or "500").strip().lower()
+        if raw_quality in {"400", "veo31_fast_8", "balanced"}:
+            raise InvalidJobEnvelopeError("TIER_400_VIDEO_REFERENCE_REJECTED")
+        if raw_quality in {"700", "kling_long_audio_15", "long"}:
+            raise InvalidJobEnvelopeError("COMMERCIAL_UNAVAILABLE_TIER_700_HYBRID_INCOMPATIBLE")
+        if raw_quality in {"800", "motion_pro_audio_10", "high"}:
+            raise InvalidJobEnvelopeError("COMMERCIAL_UNAVAILABLE_TIER_800_HYBRID_INCOMPATIBLE")
+        from services.video_ai_real_pricing import build_canonical_hybrid_pricing_snapshot
+        try:
+            pricing_snap = build_canonical_hybrid_pricing_snapshot(tier=raw_quality)
+        except ValueError as exc:
+            raise InvalidJobEnvelopeError(f"INCOMPATIBLE_HYBRID_QUALITY_TIER: {exc}") from exc
+
+        tier_id = pricing_snap["tier_id"]
+        quality_key = pricing_snap["quality_tier"]
+        effective_duration = float(pricing_snap["seconds"])
+        estimated_cost = float(pricing_snap["usd_cost"])
+        pricing_snap_hash = str(pricing_snap["pricing_snapshot_id_or_hash"])
+
+        from services.video_reference_package import (
+            create_video_reference_package,
+            VideoReferencePackageError,
+        )
+        try:
+            ref_pkg = create_video_reference_package(
+                source_video_path=source_video_path,
+                user_prompt=prompt,
+                duration=effective_duration,
+            )
+        except VideoReferencePackageError as exc:
+            raise InvalidJobEnvelopeError(f"VIDEO_REFERENCE_PACKAGING_FAILED: {exc}") from exc
+        except Exception as exc:
+            raise InvalidJobEnvelopeError(f"VIDEO_REFERENCE_PACKAGING_ERROR: {exc}") from exc
+
+        image_paths = list(ref_pkg.get("frame_paths") or [])
+        if len(image_paths) != 2:
+            raise InvalidJobEnvelopeError(f"INVALID_REFERENCE_FRAME_COUNT: expected 2, got {len(image_paths)}")
+
+        metadata["reference_package"] = ref_pkg
+        metadata["execution_mode"] = "video_reference_guided_i2v"
+        metadata["source_input_kind"] = "video"
+        metadata["native_v2v"] = False
+        metadata["native_v2v_enabled"] = False
+        metadata["source_video_sha256"] = ref_pkg.get("source_video_sha256")
+        metadata["frame_1_sha256"] = ref_pkg.get("frame_1_sha256")
+        metadata["frame_2_sha256"] = ref_pkg.get("frame_2_sha256")
+        metadata["prompt_sha256"] = ref_pkg.get("prompt_sha256")
+        metadata["pricing_snapshot"] = pricing_snap
+        metadata["pricing_snapshot_id_or_hash"] = pricing_snap_hash
+        metadata["duration_seconds"] = effective_duration
+        metadata["aspect_ratio"] = aspect_ratio
+        metadata["quality_tier"] = quality_key
+        metadata["tier"] = str(tier_id)
+
         req_product_type = "video_ai_video_reference"
         req_video_flow_type = "video_ai_video_reference"
-        req_capability = "video_to_video"
+        req_capability = "image_to_video"
+        duration_seconds = effective_duration
         derived_route = {
-            "tier_id": 500,
-            "quality_key": "advanced",
-            "seconds": int(duration_seconds) or 5,
-            "provider": "fal_video",
-            "model": "fal-ai/wan/v2.2-a14b/video-to-video",
-            "required_capability": "video_to_video",
-            "estimated_provider_cost": 0.40,
+            "tier_id": tier_id,
+            "quality_key": quality_key,
+            "seconds": int(effective_duration),
+            "provider": "shopaikey_video",
+            "model": "veo3.1-fast",
+            "required_capability": "image_to_video",
+            "estimated_provider_cost": estimated_cost,
             "estimated_provider_cost_unit": "USD",
+            "pricing_snapshot_id_or_hash": pricing_snap_hash,
             "fallback_allowed": False,
         }
     else:
@@ -751,11 +881,21 @@ def map_web_job_to_bot_runtime(
             "project_id": str(job.get("project_id") or "").strip(),
             "product_type": req_product_type,
             "provider": derived_route["provider"],
+            "model": derived_route["model"],
             "required_capability": derived_route["required_capability"],
             "tier": str(derived_route["tier_id"]),
+            "quality_tier": derived_route["quality_key"],
             "estimated_provider_cost": derived_route["estimated_provider_cost"],
             "estimated_provider_cost_unit": derived_route["estimated_provider_cost_unit"],
             "expected_duration_seconds": derived_route.get("seconds", 5),
+            "duration_seconds": derived_route.get("seconds", 5),
+            "aspect_ratio": aspect_ratio,
+            "execution_mode": "video_reference_guided_i2v" if is_v2v else "",
+            "source_video_sha256": metadata.get("source_video_sha256", ""),
+            "frame_1_sha256": metadata.get("frame_1_sha256", ""),
+            "frame_2_sha256": metadata.get("frame_2_sha256", ""),
+            "prompt_sha256": metadata.get("prompt_sha256", ""),
+            "pricing_snapshot_id_or_hash": metadata.get("pricing_snapshot_id_or_hash", ""),
             "max_provider_submits": 1,
         }
         if acceptance_context and isinstance(acceptance_context, Mapping):
@@ -775,16 +915,27 @@ def map_web_job_to_bot_runtime(
 
         # Support tier binding against numeric tier or quality key or model
         auth_tier = str(owner_acceptance_auth.get("tier") or "").strip()
-        valid_tiers = {
-            str(derived_route["tier_id"]).strip().lower(),
-            derived_route["quality_key"].strip().lower(),
-            derived_route["model"].strip().lower(),
-            quality,
-        }
         if is_v2v:
-            valid_tiers.update({"500", "advanced", "fal-ai/wan/v2.2-a14b/video-to-video"})
-        if auth_tier and auth_tier.lower() in valid_tiers:
-            derived_ctx["tier"] = auth_tier
+            valid_tiers = {
+                str(derived_route["tier_id"]).strip().lower(),
+                derived_route["quality_key"].strip().lower(),
+                derived_route["model"].strip().lower(),
+            }
+            if derived_route["tier_id"] == 500:
+                valid_tiers.add("standard")
+            if auth_tier and auth_tier.lower() in valid_tiers:
+                derived_ctx["tier"] = auth_tier
+            elif auth_tier:
+                derived_ctx["tier"] = auth_tier
+        else:
+            valid_tiers = {
+                str(derived_route["tier_id"]).strip().lower(),
+                derived_route["quality_key"].strip().lower(),
+                derived_route["model"].strip().lower(),
+                quality,
+            }
+            if auth_tier and auth_tier.lower() in valid_tiers:
+                derived_ctx["tier"] = auth_tier
 
         # Resolve runtime SHA
         try:
