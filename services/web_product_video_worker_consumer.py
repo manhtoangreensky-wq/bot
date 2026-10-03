@@ -590,13 +590,18 @@ def validate_claimed_job(
                     return False, f"EXECUTION_MODE_MISMATCH:{auth_exec_mode}"
 
                 payload_dict = job.get("payload") if isinstance(job.get("payload"), Mapping) else {}
-                job_quality = str(payload_dict.get("quality_tier") or payload_dict.get("tier") or "400").strip().lower()
+                job_quality = str(payload_dict.get("quality_tier") or payload_dict.get("tier") or "500").strip().lower()
                 auth_tier = str(owner_acceptance_auth.get("tier") or owner_acceptance_auth.get("quality_tier") or "").strip().lower()
+                if job_quality in {"400", "veo31_fast_8", "balanced"}:
+                    return False, "TIER_400_VIDEO_REFERENCE_REJECTED"
+                if auth_tier in {"400", "veo31_fast_8", "balanced"}:
+                    return False, "TIER_400_VIDEO_REFERENCE_REJECTED"
                 if auth_tier:
                     tier_alias_map = {
-                        "400": "400", "veo31_fast_8": "400", "balanced": "400", "veo3.1-fast": "400",
                         "500": "500", "motion_standard_5": "500", "standard": "500",
                         "600": "600", "motion_audio_5": "600",
+                        "700": "700", "kling_long_audio_15": "700", "long": "700",
+                        "800": "800", "motion_pro_audio_10": "800", "high": "800",
                     }
                     can_auth = tier_alias_map.get(auth_tier, auth_tier)
                     can_job = tier_alias_map.get(job_quality, job_quality)
@@ -669,14 +674,21 @@ def validate_claimed_job(
         return False, f"INVALID_QUALITY_TIER:{quality_tier}"
 
     if product_key == "video_ai_video_reference":
-        supported_hybrid_tiers = {
-            "400", "veo31_fast_8", "balanced",
+        supported_public_tiers = {
             "500", "motion_standard_5", "standard",
             "600", "motion_audio_5",
+            "700", "kling_long_audio_15", "long",
+            "800", "motion_pro_audio_10", "high",
         }
-        raw_q = str(payload.get("tier") or payload.get("quality_tier") or "400").strip().lower()
-        if raw_q not in supported_hybrid_tiers:
+        raw_q = str(payload.get("tier") or payload.get("quality_tier") or "500").strip().lower()
+        if raw_q in {"400", "veo31_fast_8", "balanced"}:
+            return False, "TIER_400_VIDEO_REFERENCE_REJECTED"
+        if raw_q not in supported_public_tiers:
             return False, f"INCOMPATIBLE_HYBRID_QUALITY_TIER:{raw_q}"
+        if raw_q in {"700", "kling_long_audio_15", "long"}:
+            return False, "COMMERCIAL_UNAVAILABLE_TIER_700_HYBRID_INCOMPATIBLE"
+        if raw_q in {"800", "motion_pro_audio_10", "high"}:
+            return False, "COMMERCIAL_UNAVAILABLE_TIER_800_HYBRID_INCOMPATIBLE"
 
     return True, ""
 
@@ -779,7 +791,13 @@ def map_web_job_to_bot_runtime(
         if not source_video_path:
             raise InvalidJobEnvelopeError("SOURCE_VIDEO_PATH_REQUIRED: Missing source_video_path for video_ai_video_reference")
 
-        raw_quality = str(payload.get("tier") or payload.get("quality_tier") or "400").strip().lower()
+        raw_quality = str(payload.get("tier") or payload.get("quality_tier") or "500").strip().lower()
+        if raw_quality in {"400", "veo31_fast_8", "balanced"}:
+            raise InvalidJobEnvelopeError("TIER_400_VIDEO_REFERENCE_REJECTED")
+        if raw_quality in {"700", "kling_long_audio_15", "long"}:
+            raise InvalidJobEnvelopeError("COMMERCIAL_UNAVAILABLE_TIER_700_HYBRID_INCOMPATIBLE")
+        if raw_quality in {"800", "motion_pro_audio_10", "high"}:
+            raise InvalidJobEnvelopeError("COMMERCIAL_UNAVAILABLE_TIER_800_HYBRID_INCOMPATIBLE")
         from services.video_ai_real_pricing import build_canonical_hybrid_pricing_snapshot
         try:
             pricing_snap = build_canonical_hybrid_pricing_snapshot(tier=raw_quality)
@@ -905,8 +923,6 @@ def map_web_job_to_bot_runtime(
             }
             if derived_route["tier_id"] == 500:
                 valid_tiers.add("standard")
-            elif derived_route["tier_id"] == 400:
-                valid_tiers.add("balanced")
             if auth_tier and auth_tier.lower() in valid_tiers:
                 derived_ctx["tier"] = auth_tier
             elif auth_tier:

@@ -25,9 +25,15 @@ import tempfile
 from typing import Any, Mapping
 
 try:
-    from PIL import Image
+    from PIL import Image, ImageStat
 except ImportError:
     Image = None
+    ImageStat = None
+
+# Frame information and non-flat validity thresholds (deterministic Pillow ImageStat)
+MIN_FRAME_STDDEV = 3.0  # Channels with max stddev < 3.0 are flat solid/gray/low-information
+MIN_FRAME_MEAN_LUMINANCE = 8.0  # Mean luminance < 8.0 is effectively pure/near black
+MAX_FRAME_MEAN_LUMINANCE = 248.0  # Mean luminance > 248.0 is effectively pure/near white
 
 logger = logging.getLogger(__name__)
 
@@ -183,11 +189,20 @@ def probe_video_duration(source_video_path: str | Path) -> float:
 
 
 def is_valid_decoded_image(frame_path: Path) -> tuple[bool, int, int]:
-    """Validates that extracted image file decodes cleanly and is not blank/empty."""
+    """Validates that extracted image file decodes cleanly and is not blank/flat/low-information.
+
+    Rejects:
+    - decode failures or zero-dimension images
+    - pure or near-black frames (mean luminance < 8.0)
+    - pure or near-white frames (mean luminance > 248.0)
+    - flat gray frames (max stddev < 3.0)
+    - flat solid-color frames (max stddev < 3.0)
+    - low-information frames (max stddev < 3.0)
+    """
     if not frame_path.exists() or frame_path.stat().st_size <= 0:
         return False, 0, 0
 
-    if Image is not None:
+    if Image is not None and ImageStat is not None:
         try:
             with Image.open(frame_path) as img:
                 img.verify()
@@ -195,12 +210,19 @@ def is_valid_decoded_image(frame_path: Path) -> tuple[bool, int, int]:
                 w, h = img.size
                 if w <= 0 or h <= 0:
                     return False, 0, 0
-                extrema = img.getextrema()
-                if isinstance(extrema[0], tuple):
-                    max_val = max(band[1] for band in extrema)
-                else:
-                    max_val = extrema[1]
-                if max_val < 8:  # Effectively pure black / corrupt
+                rgb_img = img.convert("RGB")
+                stat = ImageStat.Stat(rgb_img)
+                # Compute standard ITU-R luminance: 0.299 R + 0.587 G + 0.114 B
+                mean_lum = 0.299 * stat.mean[0] + 0.587 * stat.mean[1] + 0.114 * stat.mean[2]
+                if mean_lum < MIN_FRAME_MEAN_LUMINANCE:
+                    logger.debug("Frame rejected: near-black mean_lum=%.2f < %.2f (%s)", mean_lum, MIN_FRAME_MEAN_LUMINANCE, frame_path)
+                    return False, w, h
+                if mean_lum > MAX_FRAME_MEAN_LUMINANCE:
+                    logger.debug("Frame rejected: near-white mean_lum=%.2f > %.2f (%s)", mean_lum, MAX_FRAME_MEAN_LUMINANCE, frame_path)
+                    return False, w, h
+                max_std = max(stat.stddev)
+                if max_std < MIN_FRAME_STDDEV:
+                    logger.debug("Frame rejected: flat/low-information max_std=%.2f < %.2f (%s)", max_std, MIN_FRAME_STDDEV, frame_path)
                     return False, w, h
                 return True, w, h
         except Exception as exc:

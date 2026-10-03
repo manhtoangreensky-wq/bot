@@ -418,12 +418,14 @@ def test_map_web_job_to_bot_runtime_video_ai_video_reference(sample_source_video
             "source_video_path": str(sample_source_video),
             "prompt": "Stunning transition of scenic mountain landscape",
             "aspect_ratio": "9:16",
-            "duration": 8,
-            "quality_tier": "veo31_fast_8",
+            "duration": 5,
+            "quality_tier": "motion_standard_5",
         },
     }
 
     runtime_sha = "c8b0835b04afa617a7a5fd829bce17efebec15ea"
+    pkg = create_video_reference_package(sample_source_video, user_prompt="Stunning transition of scenic mountain landscape", duration=5.0)
+    snap = video_ai_real_pricing.build_canonical_hybrid_pricing_snapshot(500)
     auth = {
         "job_id": "pvj_ref_hybrid_001",
         "owner_authorized": True,
@@ -433,8 +435,17 @@ def test_map_web_job_to_bot_runtime_video_ai_video_reference(sample_source_video
         "capability": "image_to_video",
         "acceptance_type": "owner_authorized_live_acceptance_lane",
         "user_id": "acc_test_owner",
-        "tier": "400",
+        "tier": "500",
+        "quality_tier": "motion_standard_5",
         "runtime_sha": runtime_sha,
+        "execution_mode": "video_reference_guided_i2v",
+        "source_video_sha256": pkg["source_video_sha256"],
+        "frame_1_sha256": pkg["frame_1_sha256"],
+        "frame_2_sha256": pkg["frame_2_sha256"],
+        "prompt_sha256": pkg["prompt_sha256"],
+        "pricing_snapshot_id_or_hash": snap["pricing_snapshot_id_or_hash"],
+        "duration_seconds": 5.0,
+        "aspect_ratio": "9:16",
         "max_provider_spend": 1.00,
         "max_provider_spend_unit": "USD",
         "nonce": "nonce_test_ref_001",
@@ -459,7 +470,7 @@ def test_map_web_job_to_bot_runtime_video_ai_video_reference(sample_source_video
     assert req.product_type == "video_ai_video_reference"
     assert req.video_flow_type == "video_ai_video_reference"
     assert req.required_capability == "image_to_video"
-    assert req.duration_seconds == 8.0
+    assert req.duration_seconds == 5.0
     assert len(req.image_paths) == 2
     assert req.metadata["execution_mode"] == "video_reference_guided_i2v"
     assert req.metadata["source_input_kind"] == "video"
@@ -470,8 +481,8 @@ def test_map_web_job_to_bot_runtime_video_ai_video_reference(sample_source_video
     assert "frame_1_sha256" in req.metadata
     assert "frame_2_sha256" in req.metadata
     assert "pricing_snapshot_id_or_hash" in req.metadata
-    assert req.metadata["quality_tier"] == "veo31_fast_8"
-    assert req.metadata["tier"] == "400"
+    assert req.metadata["quality_tier"] == "motion_standard_5"
+    assert req.metadata["tier"] == "500"
     assert req.metadata["estimated_provider_cost"] == 0.70
 
 
@@ -522,8 +533,8 @@ def test_remove_payload_image_paths_bypass_fails_closed(tmp_path: Path):
 
 def test_exact_auth_tuple_full_binding_success(sample_source_video: Path, mock_storage_root: Path):
     """Full exact tuple in auth matches package and succeeds."""
-    pkg = create_video_reference_package(sample_source_video, user_prompt="A majestic sunrise over snowy peaks", duration=8.0)
-    snap = video_ai_real_pricing.build_canonical_hybrid_pricing_snapshot(400)
+    pkg = create_video_reference_package(sample_source_video, user_prompt="A majestic sunrise over snowy peaks", duration=5.0)
+    snap = video_ai_real_pricing.build_canonical_hybrid_pricing_snapshot(500)
 
     job = {
         "job_id": "pvj_ref_tuple_ok",
@@ -535,8 +546,8 @@ def test_exact_auth_tuple_full_binding_success(sample_source_video: Path, mock_s
             "source_video_path": str(sample_source_video),
             "prompt": "A majestic sunrise over snowy peaks",
             "aspect_ratio": "9:16",
-            "duration": 8,
-            "quality_tier": "veo31_fast_8",
+            "duration": 5,
+            "quality_tier": "motion_standard_5",
         },
     }
     runtime_sha = "c8b0835b04afa617a7a5fd829bce17efebec15ea"
@@ -549,8 +560,8 @@ def test_exact_auth_tuple_full_binding_success(sample_source_video: Path, mock_s
         "capability": "image_to_video",
         "acceptance_type": "owner_authorized_live_acceptance_lane",
         "user_id": "acc_test_owner",
-        "tier": "400",
-        "quality_tier": "veo31_fast_8",
+        "tier": "500",
+        "quality_tier": "motion_standard_5",
         "runtime_sha": runtime_sha,
         "execution_mode": "video_reference_guided_i2v",
         "source_video_sha256": pkg["source_video_sha256"],
@@ -558,7 +569,7 @@ def test_exact_auth_tuple_full_binding_success(sample_source_video: Path, mock_s
         "frame_2_sha256": pkg["frame_2_sha256"],
         "prompt_sha256": pkg["prompt_sha256"],
         "pricing_snapshot_id_or_hash": snap["pricing_snapshot_id_or_hash"],
-        "duration_seconds": 8.0,
+        "duration_seconds": 5.0,
         "aspect_ratio": "9:16",
         "max_provider_spend": 1.00,
         "max_provider_spend_unit": "USD",
@@ -594,8 +605,8 @@ def test_exact_auth_tuple_full_binding_success(sample_source_video: Path, mock_s
 ])
 def test_exact_auth_tuple_mismatches_fail_closed(sample_source_video: Path, mock_storage_root: Path, mismatch_key: str, mismatch_val: Any, expected_err: str):
     """Any mismatch in exact authority tuple fails closed before HTTP."""
-    pkg = create_video_reference_package(sample_source_video, user_prompt="Consistent prompt", duration=8.0)
-    snap = video_ai_real_pricing.build_canonical_hybrid_pricing_snapshot(400)
+    pkg = create_video_reference_package(sample_source_video, user_prompt="Consistent prompt", duration=5.0)
+    snap = video_ai_real_pricing.build_canonical_hybrid_pricing_snapshot(500)
 
     job = {
         "job_id": f"pvj_ref_mismatch_{mismatch_key}",
@@ -607,8 +618,8 @@ def test_exact_auth_tuple_mismatches_fail_closed(sample_source_video: Path, mock
             "source_video_path": str(sample_source_video),
             "prompt": "Consistent prompt",
             "aspect_ratio": "9:16",
-            "duration": 8,
-            "quality_tier": "veo31_fast_8",
+            "duration": 5,
+            "quality_tier": "motion_standard_5",
         },
     }
     runtime_sha = "c8b0835b04afa617a7a5fd829bce17efebec15ea"
@@ -621,8 +632,8 @@ def test_exact_auth_tuple_mismatches_fail_closed(sample_source_video: Path, mock
         "capability": "image_to_video",
         "acceptance_type": "owner_authorized_live_acceptance_lane",
         "user_id": "acc_test_owner",
-        "tier": "400",
-        "quality_tier": "veo31_fast_8",
+        "tier": "500",
+        "quality_tier": "motion_standard_5",
         "runtime_sha": runtime_sha,
         "execution_mode": "video_reference_guided_i2v",
         "source_video_sha256": pkg["source_video_sha256"],
@@ -630,7 +641,7 @@ def test_exact_auth_tuple_mismatches_fail_closed(sample_source_video: Path, mock
         "frame_2_sha256": pkg["frame_2_sha256"],
         "prompt_sha256": pkg["prompt_sha256"],
         "pricing_snapshot_id_or_hash": snap["pricing_snapshot_id_or_hash"],
-        "duration_seconds": 8.0,
+        "duration_seconds": 5.0,
         "aspect_ratio": "9:16",
         "max_provider_spend": 1.00,
         "max_provider_spend_unit": "USD",
@@ -720,7 +731,7 @@ def test_cross_provider_model_pair_rejections(sample_source_video: Path):
 
 
 def test_quality_tier_mismatch_between_job_and_auth_rejected(sample_source_video: Path):
-    """Job requested tier 500 (motion_standard_5) but auth specified tier 400 -> rejected."""
+    """Job requested tier 500 (motion_standard_5) but auth specified tier 600 -> rejected."""
     job = {
         "job_id": "pvj_ref_tier_mismatch",
         "request_id": "VID-20261003-TIERMISMATCH",
@@ -740,7 +751,7 @@ def test_quality_tier_mismatch_between_job_and_auth_rejected(sample_source_video
         "provider": "shopaikey_video",
         "model": "veo3.1-fast",
         "capability": "image_to_video",
-        "tier": "400",
+        "tier": "600",
     }
     ok, reason = web_product_video_worker_consumer.validate_claimed_job(job, owner_acceptance_auth=auth)
     assert ok is False
@@ -775,26 +786,24 @@ def test_incompatible_hybrid_quality_tier_rejected(sample_source_video: Path):
 
 
 def test_canonical_hybrid_pricing_snapshot_contract():
-    """Verify build_canonical_hybrid_pricing_snapshot conforms to Section 7 contract."""
-    # Tier 400: veo31_fast_8, 8s, $0.700 USD
-    snap400 = video_ai_real_pricing.build_canonical_hybrid_pricing_snapshot(400)
-    assert snap400["provider"] == "shopaikey_video"
-    assert snap400["model"] == "veo3.1-fast"
-    assert snap400["tier_id"] == 400
-    assert snap400["quality_tier"] == "veo31_fast_8"
-    assert snap400["seconds"] == 8
-    assert snap400["usd_cost"] == 0.700
-    assert snap400["pricing_basis"] == "mỗi lần tạo"
-    assert "ShopAIKey" in snap400["source_reference"]
-    assert "3,250" in snap400["fx_authority"]
-    assert len(snap400["pricing_snapshot_id_or_hash"]) == 64
+    """Verify build_canonical_hybrid_pricing_snapshot conforms to R16.09AB3 contract."""
+    # Tier 400 is strictly rejected per authoritative public contract
+    with pytest.raises(ValueError) as exc_400:
+        video_ai_real_pricing.build_canonical_hybrid_pricing_snapshot(400)
+    assert "hybrid_pricing_tier_400_rejected" in str(exc_400.value)
 
     # Tier 500: motion_standard_5, 5s, $0.700 USD
     snap500 = video_ai_real_pricing.build_canonical_hybrid_pricing_snapshot("motion_standard_5")
+    assert snap500["provider"] == "shopaikey_video"
+    assert snap500["model"] == "veo3.1-fast"
     assert snap500["tier_id"] == 500
     assert snap500["quality_tier"] == "motion_standard_5"
     assert snap500["seconds"] == 5
     assert snap500["usd_cost"] == 0.700
+    assert snap500["pricing_basis"] == "mỗi lần tạo"
+    assert "ShopAIKey" in snap500["source_reference"]
+    assert "3250" in snap500["fx_authority"]
+    assert len(snap500["pricing_snapshot_id_or_hash"]) == 64
 
     # Tier 600: motion_audio_5, 5s, $0.700 USD
     snap600 = video_ai_real_pricing.build_canonical_hybrid_pricing_snapshot("600")
@@ -803,13 +812,22 @@ def test_canonical_hybrid_pricing_snapshot_contract():
     assert snap600["seconds"] == 5
     assert snap600["usd_cost"] == 0.700
 
+    # Tiers 700 & 800 fail closed as commercially disabled in hybrid I2V
+    with pytest.raises(ValueError) as exc_700:
+        video_ai_real_pricing.build_canonical_hybrid_pricing_snapshot(700)
+    assert "hybrid_pricing_tier_700_commercially_disabled" in str(exc_700.value)
+
+    with pytest.raises(ValueError) as exc_800:
+        video_ai_real_pricing.build_canonical_hybrid_pricing_snapshot(800)
+    assert "hybrid_pricing_tier_800_commercially_disabled" in str(exc_800.value)
+
     # Incompatible tier fails closed
     with pytest.raises(ValueError):
         video_ai_real_pricing.build_canonical_hybrid_pricing_snapshot(200)
 
     # Key4U secondary remains unpriced / fails closed
     with pytest.raises(ValueError):
-        video_ai_real_pricing.build_canonical_hybrid_pricing_snapshot(400, provider="key4u_video")
+        video_ai_real_pricing.build_canonical_hybrid_pricing_snapshot(500, provider="key4u_video")
 
 
 def test_routing_config_authoritative_contract():
@@ -830,3 +848,262 @@ def test_routing_config_authoritative_contract():
     assert prod_route["provider"] == "shopaikey_video"
     assert prod_route["model"] == "veo3.1-fast"
     assert prod_route["max_single_task_seconds"] == 10
+
+
+def test_tier_400_rejected_for_video_reference(sample_source_video: Path):
+    """Tier 400 is strictly rejected across validation, mapping, pricing, and router auth."""
+    # 1. validate_claimed_job with tier 400 in payload
+    auth = {
+        "job_id": "pvj_ref_tier_400",
+        "owner_authorized": True,
+        "product_type": "video_ai_video_reference",
+        "provider": "shopaikey_video",
+        "model": "veo3.1-fast",
+        "capability": "image_to_video",
+        "tier": "500",
+    }
+    job = {
+        "job_id": "pvj_ref_tier_400",
+        "request_id": "VID-20261003-400",
+        "account_id": "acc_test_owner",
+        "product_key": "video_ai_video_reference",
+        "status": "processing",
+        "payload": {
+            "source_video_path": str(sample_source_video),
+            "prompt": "Test tier 400 rejection",
+            "quality_tier": "400",
+        },
+    }
+    ok, reason = web_product_video_worker_consumer.validate_claimed_job(job, owner_acceptance_auth=auth)
+    assert ok is False
+    assert "TIER_400_VIDEO_REFERENCE_REJECTED" in reason
+
+    # 2. validate_claimed_job with tier 400 in auth
+    auth_bad = dict(auth)
+    auth_bad["tier"] = "400"
+    job["payload"]["quality_tier"] = "500"
+    ok, reason = web_product_video_worker_consumer.validate_claimed_job(job, owner_acceptance_auth=auth_bad)
+    assert ok is False
+    assert "TIER_400_VIDEO_REFERENCE_REJECTED" in reason
+
+    # 3. map_web_job_to_bot_runtime raises InvalidJobEnvelopeError
+    job["payload"]["quality_tier"] = "400"
+    with pytest.raises(web_product_video_worker_consumer.InvalidJobEnvelopeError) as exc_map:
+        web_product_video_worker_consumer.map_web_job_to_bot_runtime(job, owner_acceptance_auth=auth)
+    assert "TIER_400_VIDEO_REFERENCE_REJECTED" in str(exc_map.value)
+
+    # 4. router validate_owner_acceptance_authorization rejects tier 400
+    from services.video_provider_router import validate_owner_acceptance_authorization
+    router_auth = {
+        "acceptance_type": "owner_authorized_live_acceptance",
+        "owner_authorized": True,
+        "user_id": "usr_test_owner",
+        "job_id": "pvj_ref_tier_400",
+        "product_type": "video_ai_video_reference",
+        "provider": "shopaikey_video",
+        "model": "veo3.1-fast",
+        "capability": "image_to_video",
+        "execution_mode": "video_reference_guided_i2v",
+        "source_video_sha256": "a" * 64,
+        "frame_1_sha256": "b" * 64,
+        "frame_2_sha256": "c" * 64,
+        "prompt_sha256": "d" * 64,
+        "pricing_snapshot_id_or_hash": "e" * 64,
+        "duration_seconds": 5.0,
+        "aspect_ratio": "9:16",
+        "quality_tier": "400",
+        "runtime_sha": "f" * 40,
+    }
+    router_ctx = dict(router_auth)
+    ok_router, blocker, _ = validate_owner_acceptance_authorization(router_auth, router_ctx)
+    assert ok_router is False
+    assert blocker == "owner_acceptance_tier_400_rejected"
+
+
+def test_public_quality_tiers_contracts_500_600_700_800(sample_source_video: Path):
+    """Audit exact runtime execution contract for authoritative public tiers (500, 600, 700, 800)."""
+    # Canonical public tier list parity
+    from services import video_tail9, video_uifreeze1
+    assert video_tail9.VIDEO_TO_VIDEO_QUALITY_TIERS == (500, 600, 700, 800)
+    assert video_uifreeze1._V2V_SUPPORTED_TIERS == frozenset({500, 600, 700, 800})
+
+    # Tiers 500 & 600 execute via ShopAIKey veo3.1-fast (5s, $0.700, commercial enabled)
+    snap500 = video_ai_real_pricing.build_canonical_hybrid_pricing_snapshot(500)
+    assert snap500["tier_id"] == 500
+    assert snap500["quality_tier"] == "motion_standard_5"
+    assert snap500["seconds"] == 5
+    assert snap500["provider"] == "shopaikey_video"
+    assert snap500["model"] == "veo3.1-fast"
+
+    snap600 = video_ai_real_pricing.build_canonical_hybrid_pricing_snapshot(600)
+    assert snap600["tier_id"] == 600
+    assert snap600["quality_tier"] == "motion_audio_5"
+    assert snap600["seconds"] == 5
+    assert snap600["provider"] == "shopaikey_video"
+    assert snap600["model"] == "veo3.1-fast"
+
+    # Tiers 700 & 800 are recognized public tiers but commercially disabled in hybrid I2V
+    auth700 = {
+        "job_id": "pvj_ref_tier_700",
+        "owner_authorized": True,
+        "product_type": "video_ai_video_reference",
+        "provider": "shopaikey_video",
+        "model": "veo3.1-fast",
+        "capability": "image_to_video",
+        "tier": "700",
+    }
+    job700 = {
+        "job_id": "pvj_ref_tier_700",
+        "request_id": "VID-20261003-700",
+        "account_id": "acc_test_owner",
+        "product_key": "video_ai_video_reference",
+        "status": "processing",
+        "payload": {
+            "source_video_path": str(sample_source_video),
+            "prompt": "Test tier 700 fail closed",
+            "quality_tier": "700",
+        },
+    }
+    ok700, reason700 = web_product_video_worker_consumer.validate_claimed_job(job700, owner_acceptance_auth=auth700)
+    assert ok700 is False
+    assert "COMMERCIAL_UNAVAILABLE_TIER_700_HYBRID_INCOMPATIBLE" in reason700
+
+    auth800 = {
+        "job_id": "pvj_ref_tier_800",
+        "owner_authorized": True,
+        "product_type": "video_ai_video_reference",
+        "provider": "shopaikey_video",
+        "model": "veo3.1-fast",
+        "capability": "image_to_video",
+        "tier": "800",
+    }
+    job800 = {
+        "job_id": "pvj_ref_tier_800",
+        "request_id": "VID-20261003-800",
+        "account_id": "acc_test_owner",
+        "product_key": "video_ai_video_reference",
+        "status": "processing",
+        "payload": {
+            "source_video_path": str(sample_source_video),
+            "prompt": "Test tier 800 fail closed",
+            "quality_tier": "800",
+        },
+    }
+    ok800, reason800 = web_product_video_worker_consumer.validate_claimed_job(job800, owner_acceptance_auth=auth800)
+    assert ok800 is False
+    assert "COMMERCIAL_UNAVAILABLE_TIER_800_HYBRID_INCOMPATIBLE" in reason800
+
+
+def test_mandatory_auth_fields_missing_fail_closed():
+    """All 15 authorization and context fields are strictly mandatory for video_ai_video_reference."""
+    from services.video_provider_router import validate_owner_acceptance_authorization
+
+    base_auth = {
+        "acceptance_type": "owner_authorized_live_acceptance",
+        "owner_authorized": True,
+        "user_id": "usr_test_owner",
+        "job_id": "pvj_ref_mandatory_auth",
+        "product_type": "video_ai_video_reference",
+        "provider": "shopaikey_video",
+        "model": "veo3.1-fast",
+        "capability": "image_to_video",
+        "execution_mode": "video_reference_guided_i2v",
+        "source_video_sha256": "1" * 64,
+        "frame_1_sha256": "2" * 64,
+        "frame_2_sha256": "3" * 64,
+        "prompt_sha256": "4" * 64,
+        "pricing_snapshot_id_or_hash": "5" * 64,
+        "duration_seconds": 5.0,
+        "aspect_ratio": "9:16",
+        "quality_tier": "500",
+        "runtime_sha": "6" * 40,
+    }
+
+    # Verify base succeeds
+    ok_base, reason_base, _ = validate_owner_acceptance_authorization(base_auth, dict(base_auth))
+    assert ok_base is True, f"Base auth should succeed, got {reason_base}"
+
+    # Verify each of the 15 fields missing from auth fails closed
+    fields_to_test = [
+        "execution_mode",
+        "provider",
+        "model",
+        "capability",
+        "source_video_sha256",
+        "frame_1_sha256",
+        "frame_2_sha256",
+        "prompt_sha256",
+        "pricing_snapshot_id_or_hash",
+        "duration_seconds",
+        "aspect_ratio",
+        "quality_tier",
+        "runtime_sha",
+        "job_id",
+        "user_id",
+    ]
+    for field in fields_to_test:
+        bad_auth = dict(base_auth)
+        bad_auth.pop(field)
+        ok, reason, _ = validate_owner_acceptance_authorization(bad_auth, dict(base_auth))
+        assert ok is False, f"Missing {field} from auth should fail closed"
+
+        # Missing from context also fails closed
+        bad_ctx = dict(base_auth)
+        bad_ctx.pop(field)
+        ok_ctx, reason_ctx, _ = validate_owner_acceptance_authorization(base_auth, bad_ctx)
+        assert ok_ctx is False, f"Missing {field} from context should fail closed"
+
+
+def test_frame_information_checks_reject_flat_and_low_information_frames(tmp_path: Path):
+    """Pillow ImageStat rejects black, white, flat-gray, flat-color frames, and accepts normal frames."""
+    from PIL import Image, ImageDraw
+    import services.video_reference_package as vrp
+
+    # 1. Pure black frame
+    black_path = tmp_path / "black.jpg"
+    Image.new("RGB", (640, 360), color=(0, 0, 0)).save(black_path)
+    ok_black, _, _ = vrp.is_valid_decoded_image(black_path)
+    assert ok_black is False, "Pure black frame must be rejected"
+
+    # 2. Near-black frame (mean luminance < 8.0)
+    near_black_path = tmp_path / "near_black.jpg"
+    Image.new("RGB", (640, 360), color=(5, 5, 5)).save(near_black_path)
+    ok_near_black, _, _ = vrp.is_valid_decoded_image(near_black_path)
+    assert ok_near_black is False, "Near-black frame must be rejected"
+
+    # 3. Pure white frame
+    white_path = tmp_path / "white.jpg"
+    Image.new("RGB", (640, 360), color=(255, 255, 255)).save(white_path)
+    ok_white, _, _ = vrp.is_valid_decoded_image(white_path)
+    assert ok_white is False, "Pure white frame must be rejected"
+
+    # 4. Near-white frame (mean luminance > 248.0)
+    near_white_path = tmp_path / "near_white.jpg"
+    Image.new("RGB", (640, 360), color=(250, 250, 250)).save(near_white_path)
+    ok_near_white, _, _ = vrp.is_valid_decoded_image(near_white_path)
+    assert ok_near_white is False, "Near-white frame must be rejected"
+
+    # 5. Flat gray frame
+    gray_path = tmp_path / "flat_gray.jpg"
+    Image.new("RGB", (640, 360), color=(128, 128, 128)).save(gray_path)
+    ok_gray, _, _ = vrp.is_valid_decoded_image(gray_path)
+    assert ok_gray is False, "Flat gray frame must be rejected"
+
+    # 6. Flat solid color frame (e.g. green screen)
+    flat_color_path = tmp_path / "flat_color.jpg"
+    Image.new("RGB", (640, 360), color=(0, 180, 0)).save(flat_color_path)
+    ok_flat_color, _, _ = vrp.is_valid_decoded_image(flat_color_path)
+    assert ok_flat_color is False, "Flat solid color frame must be rejected"
+
+    # 7. Normal frame with natural image details / gradient
+    normal_path = tmp_path / "normal.jpg"
+    normal_img = Image.new("RGB", (640, 360), color=(50, 100, 150))
+    draw = ImageDraw.Draw(normal_img)
+    for x in range(0, 640, 20):
+        draw.line([(x, 0), (x, 360)], fill=(x % 256, (x * 2) % 256, (x * 3) % 256), width=5)
+    normal_img.save(normal_path)
+    ok_normal, w, h = vrp.is_valid_decoded_image(normal_path)
+    assert ok_normal is True, "Normal detailed frame must be accepted"
+    assert w == 640
+    assert h == 360
+

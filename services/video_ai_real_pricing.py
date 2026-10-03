@@ -571,15 +571,19 @@ def _runtime_route_fields(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_canonical_hybrid_pricing_snapshot(
-    tier: int | str = 400,
+    tier: int | str = 500,
     provider: str = "shopaikey_video",
     model: str = "veo3.1-fast",
 ) -> dict[str, Any]:
     """Build authoritative pricing snapshot for reference-guided I2V hybrid route.
 
-    Supports canonical tiers: 400 (veo31_fast_8), 500 (motion_standard_5), 600 (motion_audio_5).
-    Primary: shopaikey_video / veo3.1-fast ($0.700 USD).
-    Fails closed on unpriced providers/models or incompatible tiers.
+    Supports canonical public tiers for video_ai_video_reference:
+      500 (motion_standard_5, 5s), 600 (motion_audio_5, 5s).
+    Tier 400 is strictly rejected per authoritative public contract.
+    Tiers 700 and 800 are commercially disabled in hybrid I2V due to duration/model incompatibility.
+
+    Fails closed on any missing canonical fields, unpriced providers/models, or incompatible tiers.
+    Zero magic fallbacks.
     """
     prov_norm = str(provider or "").strip().lower()
     if prov_norm == "shopaikey":
@@ -591,11 +595,9 @@ def build_canonical_hybrid_pricing_snapshot(
     if model_norm != "veo3.1-fast":
         raise ValueError(f"hybrid_pricing_unsupported_or_unpriced_model:{model}")
 
-    tier_raw = str(tier or "400").strip().lower()
+    tier_raw = str(tier or "500").strip().lower()
     if tier_raw in {"400", "veo31_fast_8", "balanced"}:
-        tier_id = 400
-        quality_key = "veo31_fast_8"
-        seconds = 8
+        raise ValueError("hybrid_pricing_tier_400_rejected:video_ai_video_reference_does_not_support_tier_400")
     elif tier_raw in {"500", "motion_standard_5", "standard"}:
         tier_id = 500
         quality_key = "motion_standard_5"
@@ -604,6 +606,10 @@ def build_canonical_hybrid_pricing_snapshot(
         tier_id = 600
         quality_key = "motion_audio_5"
         seconds = 5
+    elif tier_raw in {"700", "kling_long_audio_15", "long"}:
+        raise ValueError("hybrid_pricing_tier_700_commercially_disabled:requires_15s_model_incompatible_with_veo31_fast_hybrid")
+    elif tier_raw in {"800", "motion_pro_audio_10", "high"}:
+        raise ValueError("hybrid_pricing_tier_800_commercially_disabled:requires_10s_model_incompatible_with_veo31_fast_hybrid")
     else:
         raise ValueError(f"hybrid_pricing_incompatible_tier:{tier}")
 
@@ -611,11 +617,41 @@ def build_canonical_hybrid_pricing_snapshot(
     if not catalog_row:
         raise ValueError(f"hybrid_catalog_row_missing:{quality_key}")
 
-    prov_cfg = (catalog_row.get("providers") or {}).get("shopaikey") or {}
-    usd_cost = float(prov_cfg.get("usd_per_scene") or "0.700")
-    pricing_basis = str(prov_cfg.get("pricing_basis") or "mỗi lần tạo")
-    source_reference = str(prov_cfg.get("source_reference") or "ShopAIKey model catalog: veo3.1-fast")
-    fx_authority = "ShopAIKey model catalog: 1 USD = 3,250 VND"
+    providers_dict = catalog_row.get("providers") or {}
+    if not isinstance(providers_dict, dict) or "shopaikey" not in providers_dict:
+        raise ValueError(f"hybrid_pricing_provider_entry_missing:shopaikey:{quality_key}")
+
+    prov_cfg = providers_dict["shopaikey"]
+    if not isinstance(prov_cfg, dict):
+        raise ValueError(f"hybrid_pricing_provider_entry_invalid:shopaikey:{quality_key}")
+
+    entry_model = str(prov_cfg.get("model") or "").strip()
+    if entry_model != model_norm:
+        raise ValueError(f"hybrid_pricing_model_mismatch:{entry_model}!={model_norm}")
+
+    usd_val = prov_cfg.get("usd_per_scene")
+    if usd_val is None or str(usd_val).strip() == "":
+        raise ValueError(f"hybrid_pricing_missing_usd_per_scene:{quality_key}")
+    try:
+        usd_cost = float(usd_val)
+        if usd_cost <= 0:
+            raise ValueError(f"hybrid_pricing_non_positive_usd_cost:{usd_cost}")
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"hybrid_pricing_invalid_usd_cost:{usd_val}") from exc
+
+    pricing_basis = str(prov_cfg.get("pricing_basis") or "").strip()
+    if not pricing_basis:
+        raise ValueError(f"hybrid_pricing_missing_pricing_basis:{quality_key}")
+
+    source_reference = str(prov_cfg.get("source_reference") or "").strip()
+    if not source_reference:
+        raise ValueError(f"hybrid_pricing_missing_source_reference:{quality_key}")
+
+    # Canonical exchange-rate authority
+    fx_rate = product_video_provider_usd_to_vnd(prov_norm)
+    if not fx_rate or fx_rate <= Decimal("0"):
+        raise ValueError(f"hybrid_pricing_invalid_fx_rate:{prov_norm}")
+    fx_authority = f"product_video_provider_usd_to_vnd({prov_norm})={int(fx_rate)}"
 
     canonical_data = {
         "provider": "shopaikey_video",
@@ -626,6 +662,7 @@ def build_canonical_hybrid_pricing_snapshot(
         "pricing_basis": pricing_basis,
         "source_reference": source_reference,
         "fx_authority": fx_authority,
+        "fx_rate_vnd": str(fx_rate),
     }
     raw_json = json.dumps(canonical_data, sort_keys=True)
     snap_hash = hashlib.sha256(raw_json.encode("utf-8")).hexdigest()
@@ -640,6 +677,7 @@ def build_canonical_hybrid_pricing_snapshot(
         "pricing_basis": pricing_basis,
         "source_reference": source_reference,
         "fx_authority": fx_authority,
+        "fx_rate_vnd": str(fx_rate),
         "pricing_snapshot_id_or_hash": snap_hash,
     }
 
