@@ -233,3 +233,109 @@ def test_foreign_voice_actions_return_callers_vault_without_state_changes(voice_
     assert "Foreign voice 104" not in text
     assert ns["USER_PENDING"] == before_pending
     assert conn.total_changes == before_click_writes
+
+
+@pytest.mark.parametrize("action", ("voice_profile_default", "voice_profile_rename"))
+@pytest.mark.parametrize("profile_case", ("foreign", "missing"))
+def test_foreign_or_stale_default_and_rename_return_callers_vault_without_changes(
+    voice_vault_runtime, action, profile_case
+):
+    from copy import deepcopy
+
+    ns, route, conn = voice_vault_runtime
+    conn.execute("ALTER TABLE voice_profiles ADD COLUMN updated_at TEXT")
+    profile_id = 104 if profile_case == "foreign" else 999
+    if profile_case == "foreign":
+        conn.execute(
+            "INSERT INTO voice_profiles (id, user_id, status, provider_voice_id, display_name, deleted_at, is_default, preview_audio_ref, updated_at) "
+            "VALUES (?, ?, 'active', ?, ?, NULL, 1, '', NULL)",
+            (profile_id, "902", "foreign-provider-id", "Foreign voice 104"),
+        )
+        conn.commit()
+    if action == "voice_profile_default":
+        exec(
+            compile(
+                "from __future__ import annotations\n" + CALLBACK_FIXTURE["_source"]("set_default_voice_profile"),
+                "bot.py:set_default_voice_profile",
+                "exec",
+            ),
+            ns,
+        )
+
+    before_rows = conn.execute(
+        "SELECT id, user_id, is_default, updated_at FROM voice_profiles ORDER BY id"
+    ).fetchall()
+    before_writes = conn.total_changes
+    before_pending = deepcopy(ns["USER_PENDING"])
+
+    query = CALLBACK_FIXTURE["_click"](
+        route, f"music_quick|showroom|{action}:{profile_id}"
+    )
+
+    text, markup = query.message.replies[-1]
+    if action == "voice_profile_default":
+        assert "chỉ giọng đã lưu thành công" in text.lower()
+    else:
+        assert "không tìm thấy giọng này" in text.lower()
+    expected_callbacks = [
+        button.callback_data
+        for row in ns["voice_vault_keyboard"](901, "vi", "showroom").inline_keyboard
+        for button in row
+    ]
+    actual_callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+    assert actual_callbacks == expected_callbacks
+    assert not any(str(data).endswith(f":{profile_id}") for data in actual_callbacks)
+    assert "Foreign voice 104" not in text
+    assert ns["USER_PENDING"] == before_pending
+    after_rows = conn.execute(
+        "SELECT id, user_id, is_default, updated_at FROM voice_profiles ORDER BY id"
+    ).fetchall()
+    assert [tuple(row) for row in after_rows] == [tuple(row) for row in before_rows]
+    assert conn.total_changes == before_writes
+
+
+def test_owned_default_callback_keeps_default_change_scoped_to_owner(voice_vault_runtime):
+    ns, route, conn = voice_vault_runtime
+    conn.execute("ALTER TABLE voice_profiles ADD COLUMN updated_at TEXT")
+    conn.execute(
+        "INSERT INTO voice_profiles (id, user_id, status, provider_voice_id, display_name, deleted_at, is_default, preview_audio_ref, updated_at) "
+        "VALUES (104, '902', 'active', 'foreign-provider-id', 'Foreign voice 104', NULL, 1, '', NULL)"
+    )
+    conn.commit()
+    exec(
+        compile(
+            "from __future__ import annotations\n" + CALLBACK_FIXTURE["_source"]("set_default_voice_profile"),
+            "bot.py:set_default_voice_profile",
+            "exec",
+        ),
+        ns,
+    )
+
+    query = CALLBACK_FIXTURE["_click"](
+        route, "music_quick|showroom|voice_profile_default:101"
+    )
+
+    text = query.message.replies[-1][0]
+    assert "đã đặt làm giọng mặc định" in text.lower()
+    defaults = conn.execute(
+        "SELECT user_id, id, is_default FROM voice_profiles ORDER BY user_id, id"
+    ).fetchall()
+    assert [tuple(row) for row in defaults if row[0] == "901"] == [
+        ("901", 101, 1), ("901", 102, 0), ("901", 103, 0)
+    ]
+    assert [tuple(row) for row in defaults if row[0] == "902"] == [("902", 104, 1)]
+
+
+def test_owned_rename_callback_still_starts_rename_for_selected_profile(voice_vault_runtime):
+    from copy import deepcopy
+
+    ns, route, conn = voice_vault_runtime
+    before_pending = deepcopy(ns["USER_PENDING"])
+
+    query = CALLBACK_FIXTURE["_click"](
+        route, "music_quick|showroom|voice_profile_rename:101"
+    )
+
+    text = query.message.replies[-1][0]
+    assert "hãy nhập tên mới" in text.lower()
+    assert ns["USER_PENDING"] != before_pending
