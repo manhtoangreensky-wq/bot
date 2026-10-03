@@ -13,16 +13,18 @@ from test_p0_subdub_smart_bounded_audio_recovery import media_bot, timeline_bot,
 from test_p0_subdub_smart_standard_pipeline_orchestrator import SAMPLE_VALID_MP3
 
 
-def test_uncertain_identity_retains_source_even_when_generated_audio_fits(tmp_path):
+def test_uncertain_identity_keeps_fitting_tts_and_uncertainty_metadata(tmp_path):
     source = _source(tmp_path)
     chunks = [{'cue_id': 'c1', 'start': 0., 'end': 1., 'audio_duration': .8,
-               'audio_bytes': b'wrong-voice', 'tts_voice_id': 'female',
+               'audio_bytes': b'estimated-voice', 'tts_voice_id': 'female',
                'duration_aware_timing': True, 'smart_attribution_uncertain': True}]
     evidence = replace_unfit_smart_cues(chunks, source_file=str(source))
-    assert evidence['smart_source_audio_reasons'] == {'c1': 'speaker_attribution_uncertain'}
-    assert evidence['smart_dubbed_voice_count'] == 0
-    assert chunks[0]['audio_duration'] == 1.
-    assert chunks[0]['smart_audio_source'] == 'source'
+    assert evidence['smart_source_audio_reasons'] == {}
+    assert evidence['smart_dubbed_voice_count'] == 1
+    assert chunks[0]['audio_duration'] == .8
+    assert chunks[0]['audio_bytes'] == b'estimated-voice'
+    assert chunks[0]['smart_attribution_uncertain'] is True
+    assert chunks[0].get('smart_audio_source') != 'source'
 
 
 def test_uncertain_ids_survive_resume_without_mutating_quote():
@@ -82,9 +84,10 @@ def test_generic_smart_uncertain_cue_renders_real_mp4_without_changing_known_cue
         locked_speaker_voice_map={'s0': 'male', 's1': 'female'},
         output_path=str(output), job_id='offline-uncertain', checkpoint_workspace=str(tmp_path/'checkpoint')))
     assert result['ok'], result
-    assert result['smart_source_audio_reasons'] == {'c0': 'speaker_attribution_uncertain'}
-    assert result['state']['smart_dubbed_voice_count'] == 1
-    assert observed['chunks'][0]['smart_audio_source'] == 'source'
+    assert result['smart_source_audio_reasons'] == {}
+    assert result['state']['smart_dubbed_voice_count'] == 2
+    assert observed['chunks'][0].get('smart_audio_source') != 'source'
+    assert observed['chunks'][0]['smart_attribution_uncertain'] is True
     assert observed['chunks'][1].get('smart_audio_source') != 'source'
     assert observed['plan']['shifted_cue_count'] == 0
     assert all(c['tempo_ratio'] <= 1.001 for c in observed['plan']['scheduled'])

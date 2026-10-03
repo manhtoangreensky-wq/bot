@@ -129,11 +129,12 @@ def test_smart_v2_borrows_gap_while_plain_multi_does_not():
     assert plain_observed["chunks"][0]["end"] == 2.0
 
 
-def test_smart_v2_uses_source_for_uncertain_identity_but_plain_multi_unchanged():
+def test_smart_v2_keeps_uncertain_fit_tts_and_plain_multi_unchanged():
     result, observed = _shared_contract('multi', smart_dispatch=True, duration=.7, uncertain=True)
     assert result['ok'], result
-    assert result['smart_source_audio_reasons'] == {'c1': 'speaker_attribution_uncertain'}
-    assert observed['chunks'][0]['smart_audio_source'] == 'source'
+    assert result['smart_source_audio_reasons'] == {}
+    assert observed['chunks'][0].get('smart_audio_source') != 'source'
+    assert observed['chunks'][0]['smart_attribution_uncertain'] is True
     plain, plain_observed = _shared_contract('multi', duration=.7, uncertain=True)
     assert plain['ok'] and plain_observed['chunks'][0].get('smart_audio_source') != 'source'
 
