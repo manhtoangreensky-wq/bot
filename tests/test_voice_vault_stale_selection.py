@@ -19,12 +19,15 @@ def voice_vault_runtime():
         for name in (
             "build_2col_keyboard",
             "get_user_voice_profile",
+            "voice_profile_can_generate_tts",
+            "voice_profile_can_preview",
             "user_voice_profile_rows",
             "user_voice_profile_count",
             "voice_vault_page_size",
             "voice_profile_display_code",
             "user_voice_profile_by_display_code",
             "voice_vault_keyboard",
+            "voice_profile_actions_keyboard",
             "update_user_voice_profile",
             "soft_delete_voice_profile",
         ):
@@ -36,7 +39,14 @@ def voice_vault_runtime():
                 ),
                 ns,
             )
-        ns.update(html=html, ui_text=lambda *_args: "Home", now_text=lambda: "fixture-now")
+        ns.update(
+            html=html,
+            ui_text=lambda *_args: "Home",
+            now_text=lambda: "fixture-now",
+            minimax_voice_adapter=PROFILE_FIXTURE["minimax_voice_adapter"],
+            VOICE_PROFILE_FINAL_READY_STATUSES={"active", "ready", "saved"},
+            VOICE_PROFILE_PREVIEW_STATUSES={"active", "ready", "saved", "preview_ready"},
+        )
         for profile_id in (101, 102, 103):
             conn.execute(
                 "INSERT INTO voice_profiles VALUES (?, ?, 'active', ?, ?, NULL, 0, '')",
@@ -136,4 +146,52 @@ def test_delete_callback_cannot_soft_delete_another_users_voice(voice_vault_runt
         "SELECT user_id, status, deleted_at, is_default, updated_at FROM voice_profiles WHERE id=104"
     ).fetchone()
     assert tuple(after) == before
+    assert conn.total_changes == before_click_writes
+
+
+def test_foreign_profile_preview_callback_returns_callers_vault_only(voice_vault_runtime):
+    ns, route, conn = voice_vault_runtime
+    conn.execute(
+        "INSERT INTO voice_profiles VALUES (?, ?, 'active', ?, ?, NULL, 0, '')",
+        (104, "902", "foreign-provider-id", "Foreign voice 104"),
+    )
+    conn.commit()
+    before_click_writes = conn.total_changes
+
+    query = CALLBACK_FIXTURE["_click"](
+        route, "music_quick|showroom|voice_profile_listen:104"
+    )
+
+    text, markup = query.message.replies[-1]
+    assert "không tìm thấy giọng này trong tài khoản" in text.lower()
+    expected_callbacks = [
+        button.callback_data
+        for row in ns["voice_vault_keyboard"](901, "vi", "showroom").inline_keyboard
+        for button in row
+    ]
+    actual_callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+    assert actual_callbacks == expected_callbacks
+    assert not any(str(data).endswith(":104") for data in actual_callbacks)
+    assert "Foreign voice 104" not in text
+    assert conn.total_changes == before_click_writes
+
+
+def test_owned_profile_without_preview_keeps_existing_preview_guidance(voice_vault_runtime):
+    ns, route, conn = voice_vault_runtime
+    conn.execute(
+        "INSERT INTO voice_profiles VALUES (?, ?, 'active', ?, ?, NULL, 0, '')",
+        (105, "901", "test-voice-105", "Owned voice 105"),
+    )
+    conn.commit()
+    before_click_writes = conn.total_changes
+
+    query = CALLBACK_FIXTURE["_click"](
+        route, "music_quick|showroom|voice_profile_listen:105"
+    )
+
+    text, markup = query.message.replies[-1]
+    callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+    assert "chưa có bản nghe thử" in text.lower()
+    assert "music_quick|showroom|voice_profile_delete:105" in callbacks
+    assert "Foreign voice 104" not in text
     assert conn.total_changes == before_click_writes

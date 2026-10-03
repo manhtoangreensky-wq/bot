@@ -172386,6 +172386,11 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         await query.answer()
         profile_id = _safe_int(action.split(":", 1)[1], 0)
         profile = get_user_voice_profile(user_id, profile_id)
+        if not profile:
+            return await query.message.reply_text(
+                "⚠️ Không tìm thấy giọng này trong tài khoản của quý khách.",
+                reply_markup=voice_vault_keyboard(user_id, lang, ctx),
+            )
         preview_ref = str(profile.get("preview_audio_ref") or "") if profile else ""
         if not preview_ref:
             return await query.message.reply_text("⚠️ Giọng này chưa có bản nghe thử. Quý khách có thể tạo lại preview.", reply_markup=voice_profile_actions_keyboard(profile_id, lang, ctx, profile))
