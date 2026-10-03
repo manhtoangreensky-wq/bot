@@ -9,6 +9,53 @@ from services import subdub_speaker_cast as cast
 from services import subdub_two_speaker_gender_onnx as stereo
 
 
+def _mixed_two_count_authority(base, shifted, aggregate, positions, speech, probs, reliable, partitions) -> dict:
+    counts = [int(partition[0]) for partition in partitions]
+    if sorted(counts) != [1, 2, 2]:
+        raise ValueError("fixed_vocal_smart_speech_count_unstable")
+    two_views = [partition[1] for partition in partitions if partition[0] == 2]
+    for labels in two_views:
+        engine._validate_cluster_support(labels, speech[reliable], 2)
+    aligned = engine._align_cluster_labels_to_reference(
+        two_views[0].tolist(), two_views[1].tolist(), speaker_count=2, minimum_speakers=1)
+    if np.mean(two_views[0] == aligned) < engine.SPEECH_PARTITION_MIN_AGREEMENT:
+        raise ValueError("fixed_vocal_smart_speech_partition_unstable")
+    threshold = gender.MULTI_GENDER_STRONG_CONFIDENCE
+    if any(np.count_nonzero(votes) < stereo.MIN_CLASSIFIED_CUES_PER_SPEAKER for votes in (
+        probs[reliable] >= threshold, probs[reliable] <= 1 - threshold,
+    )):
+        raise ValueError("fixed_vocal_gender_evidence_invalid")
+    authority = engine.build_gender_constrained_speech_authority(
+        base[reliable], shifted[reliable], positions[reliable], speech[reliable], probs[reliable],
+        speaker_count=2, minimum_speakers=1,
+    )
+    if (set(authority["speaker_registers"]) != {"low", "high"}
+            or min(authority[k] for k in ("base_shift_agreement", "base_aggregate_agreement", "shift_aggregate_agreement"))
+            < engine.SPEECH_PARTITION_MIN_AGREEMENT):
+        raise ValueError("fixed_vocal_smart_speech_partition_unstable")
+    trusted = np.asarray(authority["labels"])
+    centroids = np.stack([aggregate[reliable][trusted == label].mean(axis=0) for label in range(2)])
+    norms = np.linalg.norm(centroids, axis=1)
+    if not np.isfinite(norms).all() or np.any(norms <= 0):
+        raise ValueError("fixed_vocal_smart_speech_partition_unstable")
+    centroids /= norms[:, None]
+    projected_base = np.argmax(base[~reliable] @ centroids.T, axis=1)
+    projected_shifted = np.argmax(shifted[~reliable] @ centroids.T, axis=1)
+    if np.any(projected_base != projected_shifted):
+        raise ValueError("fixed_vocal_smart_speech_partition_unstable")
+    labels = np.empty(len(base), dtype=np.int64)
+    # Keep validated acoustic/register labels; centroid projection is only for missing views.
+    labels[reliable] = trusted
+    labels[~reliable] = projected_base
+    engine._validate_cluster_support(labels, speech, 2)
+    authority.update(labels=labels.tolist(), unit_confidences=engine._cluster_unit_confidences(aggregate, labels, 2),
+                     speaker_count_views=counts, supported_window_recovery=True, mixed_two_count_recovery=True,
+                     unreliable_view_window_count=int((~reliable).sum()),
+                     register_ambiguous_window_count=int(np.count_nonzero(
+                         reliable & (probs < threshold) & (probs > 1 - threshold))))
+    return authority
+
+
 def _supported_speech_authority(views: dict, probabilities: list) -> dict:
     base = np.array(views["base_embeddings"], dtype=np.float64, copy=True)
     shifted = np.array(views["shifted_embeddings"], dtype=np.float64, copy=True)
@@ -40,7 +87,7 @@ def _supported_speech_authority(views: dict, probabilities: list) -> dict:
                   for matrix in (base, shifted, aggregate)]
     counts = [int(partition[0]) for partition in partitions]
     if len(set(counts)) != 1:
-        raise ValueError("fixed_vocal_smart_speech_count_unstable")
+        return _mixed_two_count_authority(base, shifted, aggregate, positions, speech, probs, reliable, partitions)
     count = counts[0]
     for _count, labels, _eigenvalues in partitions:
         engine._validate_cluster_support(labels, speech[reliable], count)
@@ -152,8 +199,9 @@ def build_speech_identity_authority(views: dict, probabilities: list) -> dict:
         cause = error
         while cause.__cause__ is not None:
             cause = cause.__cause__
-        if str(cause) in {"fixed_vocal_smart_speech_view_unstable", "fixed_vocal_gender_ambiguity_invalid",
-                          "fixed_vocal_gender_evidence_invalid"}:
+        if (str(cause) in {"fixed_vocal_smart_speech_view_unstable", "fixed_vocal_gender_ambiguity_invalid",
+                           "fixed_vocal_gender_evidence_invalid"}
+                or (str(cause) == "fixed_vocal_smart_speech_count_unstable" and sorted(counts) == [1, 2, 2])):
             try:
                 return _supported_speech_authority(views, probabilities)
             except Exception as recovery_error:
