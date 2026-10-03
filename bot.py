@@ -234242,6 +234242,11 @@ def subdub_auto_multi_terminal_proof_fields(
     }
 
 
+def subdub_smart_terminal_evidence_fields(state: dict | None = None) -> dict:
+    from services.subdub_smart_terminal import bounded_smart_terminal_evidence
+    return bounded_smart_terminal_evidence(state)
+
+
 def subdub_auto_routing_decision(
     state: dict | None = None,
 ) -> tuple[str, str]:
@@ -254545,6 +254550,7 @@ async def _execute_video_dubbing_pipeline_core(
             "provider_task_id": "",
             **auto_settlement_fields,
             **subdub_auto_multi_terminal_proof_fields(state),
+            **subdub_smart_terminal_evidence_fields(state),
             "status": "partial" if (partial_result or delivery_partial_result) else "completed",
             "terminal_state": result_terminal_state,
             "lifecycle_state": "delivered" if result_terminal_state == "delivered" else result_terminal_state,
@@ -255224,6 +255230,7 @@ async def execute_video_dubbing_pipeline(
             **input_save_fields,
             **multi_diarization,
             **subdub_auto_multi_terminal_proof_fields(result_state),
+            **subdub_smart_terminal_evidence_fields(result_state),
             "job_id": job.get("job_id"),
             "workspace": workspace,
             "manifest": os.path.join(workspace, "manifest.json"),
