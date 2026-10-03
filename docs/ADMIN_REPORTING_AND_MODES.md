@@ -39,10 +39,12 @@ This module is for the current Telegram revenue bot. It adds admin reporting, us
 - PayOS paid orders and manual QR approvals.
 - Revenue amount, sold Xu, added Xu, spent Xu and circulating Xu.
 - Trial grants and promo/gift/launch credit events.
-- Tool usage, success, failure and top commands.
+- `usage_events` tool-use/success/failure event counts and top tools/commands.
 - Provider debug/error summary.
 
 Provider error counts and rows come from `api_debug_events`. A readable table with no matching rows is reported as `0`; if either provider-log query is unavailable, the report and offline insight show `không khả dụng` instead. These are debug-log event counts, not canonical product-job, artifact, delivery-receipt, or revenue reconciliation; do not interpret an unavailable source as zero errors or as proof that all products completed successfully.
+
+The Công cụ section counts `usage_events` rows (`tool_use`, `tool_success`, and `tool_fail`/`provider_error`). Its success percentage is `tool_success / (tool_success + tool_fail/provider_error)` by event row; it is not a unique-request rate, canonical job count, or proof that a video, audio file, or subtitle was delivered. `usage_events` has no normalized product job/delivery key. Consult each product's own job/artifact/delivery source for output outcomes; where no exact receipt key exists, report the delivery metric as unavailable rather than zero.
 
 ## Persistent User Mode Commands
 
