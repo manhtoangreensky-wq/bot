@@ -12,6 +12,7 @@ from __future__ import annotations
 from copy import deepcopy
 from decimal import Decimal, ROUND_FLOOR, ROUND_HALF_UP
 from functools import lru_cache
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -566,6 +567,80 @@ def _runtime_route_fields(row: dict[str, Any]) -> dict[str, Any]:
             _load_product_video_price_route_map().get("captured_at") or ""
         ),
         "current_customer_unit_xu": int(saved.get("customer_unit_xu") or 0),
+    }
+
+
+def build_canonical_hybrid_pricing_snapshot(
+    tier: int | str = 400,
+    provider: str = "shopaikey_video",
+    model: str = "veo3.1-fast",
+) -> dict[str, Any]:
+    """Build authoritative pricing snapshot for reference-guided I2V hybrid route.
+
+    Supports canonical tiers: 400 (veo31_fast_8), 500 (motion_standard_5), 600 (motion_audio_5).
+    Primary: shopaikey_video / veo3.1-fast ($0.700 USD).
+    Fails closed on unpriced providers/models or incompatible tiers.
+    """
+    prov_norm = str(provider or "").strip().lower()
+    if prov_norm == "shopaikey":
+        prov_norm = "shopaikey_video"
+    if prov_norm != "shopaikey_video":
+        raise ValueError(f"hybrid_pricing_unsupported_or_unpriced_provider:{provider}")
+
+    model_norm = str(model or "").strip()
+    if model_norm != "veo3.1-fast":
+        raise ValueError(f"hybrid_pricing_unsupported_or_unpriced_model:{model}")
+
+    tier_raw = str(tier or "400").strip().lower()
+    if tier_raw in {"400", "veo31_fast_8", "balanced"}:
+        tier_id = 400
+        quality_key = "veo31_fast_8"
+        seconds = 8
+    elif tier_raw in {"500", "motion_standard_5", "standard"}:
+        tier_id = 500
+        quality_key = "motion_standard_5"
+        seconds = 5
+    elif tier_raw in {"600", "motion_audio_5"}:
+        tier_id = 600
+        quality_key = "motion_audio_5"
+        seconds = 5
+    else:
+        raise ValueError(f"hybrid_pricing_incompatible_tier:{tier}")
+
+    catalog_row = next((r for r in _MODEL_ROWS if r.get("key") == quality_key), None)
+    if not catalog_row:
+        raise ValueError(f"hybrid_catalog_row_missing:{quality_key}")
+
+    prov_cfg = (catalog_row.get("providers") or {}).get("shopaikey") or {}
+    usd_cost = float(prov_cfg.get("usd_per_scene") or "0.700")
+    pricing_basis = str(prov_cfg.get("pricing_basis") or "mỗi lần tạo")
+    source_reference = str(prov_cfg.get("source_reference") or "ShopAIKey model catalog: veo3.1-fast")
+    fx_authority = "ShopAIKey model catalog: 1 USD = 3,250 VND"
+
+    canonical_data = {
+        "provider": "shopaikey_video",
+        "model": "veo3.1-fast",
+        "tier_id": tier_id,
+        "quality_tier": quality_key,
+        "usd_cost": f"{usd_cost:.4f}",
+        "pricing_basis": pricing_basis,
+        "source_reference": source_reference,
+        "fx_authority": fx_authority,
+    }
+    raw_json = json.dumps(canonical_data, sort_keys=True)
+    snap_hash = hashlib.sha256(raw_json.encode("utf-8")).hexdigest()
+
+    return {
+        "provider": "shopaikey_video",
+        "model": "veo3.1-fast",
+        "tier_id": tier_id,
+        "quality_tier": quality_key,
+        "seconds": seconds,
+        "usd_cost": usd_cost,
+        "pricing_basis": pricing_basis,
+        "source_reference": source_reference,
+        "fx_authority": fx_authority,
+        "pricing_snapshot_id_or_hash": snap_hash,
     }
 
 

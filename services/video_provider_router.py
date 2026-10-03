@@ -3309,7 +3309,16 @@ def validate_owner_acceptance_authorization(
 
     # 4. Provider pinning (shopaikey_video or fal_video for owner acceptance)
     pinned_provider = str(auth.get("provider") or CANONICAL_ACCEPTANCE_PROVIDER).strip()
-    allowed_acceptance_providers = {CANONICAL_ACCEPTANCE_PROVIDER, "fal_video", "fal.ai", "fal-video", "key4u_video"}
+    if pinned_product == "video_ai_video_reference":
+        if "fal" in pinned_provider.lower():
+            return False, "owner_acceptance_fal_prohibited_for_video_reference", {}
+        if pinned_provider in {"key4u_video", "key4u"}:
+            return False, "owner_acceptance_secondary_key4u_commercial_disabled", {}
+        if pinned_provider not in {"shopaikey_video", "shopaikey"}:
+            return False, "owner_acceptance_provider_mismatch", {}
+        allowed_acceptance_providers = {"shopaikey_video", "shopaikey"}
+    else:
+        allowed_acceptance_providers = {CANONICAL_ACCEPTANCE_PROVIDER, "fal_video", "fal.ai", "fal-video", "key4u_video"}
     if pinned_provider not in allowed_acceptance_providers and not auth.get("allow_secondary_provider"):
         return False, "owner_acceptance_provider_mismatch", {}
     ctx_provider = str(ctx.get("provider") or ctx.get("selected_provider") or "").strip()
@@ -3319,8 +3328,71 @@ def validate_owner_acceptance_authorization(
     # 5. Capability pinning
     pinned_capability = str(auth.get("capability") or auth.get("required_capability") or "").strip()
     ctx_capability = str(ctx.get("required_capability") or ctx.get("capability") or "").strip()
-    if pinned_capability and ctx_capability and ctx_capability != pinned_capability:
-        return False, "owner_acceptance_capability_mismatch", {}
+    if pinned_product == "video_ai_video_reference":
+        if pinned_capability and pinned_capability != "image_to_video":
+            return False, "owner_acceptance_capability_mismatch", {}
+        if ctx_capability and ctx_capability != "image_to_video":
+            return False, "owner_acceptance_capability_mismatch", {}
+    else:
+        if pinned_capability and ctx_capability and ctx_capability != pinned_capability:
+            return False, "owner_acceptance_capability_mismatch", {}
+
+    # 5b. Model & Execution Mode checks for video_ai_video_reference
+    auth_model = str(auth.get("model") or auth.get("selected_model") or "").strip()
+    ctx_model = str(ctx.get("model") or ctx.get("selected_model") or "").strip()
+    if pinned_product == "video_ai_video_reference":
+        if "fal" in auth_model.lower():
+            return False, "owner_acceptance_fal_model_prohibited", {}
+        if auth_model and auth_model != "veo3.1-fast":
+            return False, "owner_acceptance_provider_model_cross_pair_invalid", {}
+        if ctx_model and ctx_model != "veo3.1-fast":
+            return False, "owner_acceptance_provider_model_cross_pair_invalid", {}
+        if auth_model and ctx_model and auth_model != ctx_model:
+            return False, "owner_acceptance_model_mismatch", {}
+
+        auth_mode = str(auth.get("execution_mode") or "").strip()
+        ctx_mode = str(ctx.get("execution_mode") or "").strip()
+        if auth_mode and auth_mode != "video_reference_guided_i2v":
+            return False, "owner_acceptance_execution_mode_mismatch", {}
+        if ctx_mode and ctx_mode != "video_reference_guided_i2v":
+            return False, "owner_acceptance_execution_mode_mismatch", {}
+
+        # Exact tuple binding: Source SHA, Frame SHAs, Prompt SHA, Pricing Snapshot, Aspect Ratio
+        tuple_checks = [
+            ("source_video_sha256", "owner_acceptance_source_sha_mismatch"),
+            ("frame_1_sha256", "owner_acceptance_frame_1_sha_mismatch"),
+            ("frame_2_sha256", "owner_acceptance_frame_2_sha_mismatch"),
+            ("prompt_sha256", "owner_acceptance_prompt_sha_mismatch"),
+            ("pricing_snapshot_id_or_hash", "owner_acceptance_pricing_snapshot_mismatch"),
+            ("aspect_ratio", "owner_acceptance_aspect_ratio_mismatch"),
+        ]
+        for field_name, blocker_key in tuple_checks:
+            auth_val = str(auth.get(field_name) or "").strip()
+            ctx_val = str(ctx.get(field_name) or "").strip()
+            if auth_val and ctx_val and auth_val != ctx_val:
+                return False, blocker_key, {"expected": auth_val, "actual": ctx_val}
+
+        # Duration check
+        auth_dur = auth.get("duration_seconds") or auth.get("duration")
+        ctx_dur = ctx.get("duration_seconds") or ctx.get("duration") or ctx.get("expected_duration_seconds")
+        if auth_dur is not None and ctx_dur is not None:
+            try:
+                if abs(float(auth_dur) - float(ctx_dur)) > 0.05:
+                    return False, "owner_acceptance_duration_mismatch", {"expected": auth_dur, "actual": ctx_dur}
+            except (ValueError, TypeError):
+                return False, "owner_acceptance_duration_invalid", {}
+
+        # Quality tier check
+        auth_q = str(auth.get("quality_tier") or auth.get("tier") or "").strip().lower()
+        ctx_q = str(ctx.get("quality_tier") or ctx.get("tier") or "").strip().lower()
+        if auth_q and ctx_q:
+            t_map = {
+                "400": "400", "veo31_fast_8": "400", "balanced": "400", "veo3.1-fast": "400",
+                "500": "500", "motion_standard_5": "500", "standard": "500",
+                "600": "600", "motion_audio_5": "600",
+            }
+            if t_map.get(auth_q, auth_q) != t_map.get(ctx_q, ctx_q):
+                return False, "owner_acceptance_quality_tier_mismatch", {"expected": auth_q, "actual": ctx_q}
 
     # 6. Tier binding (SPEC-02C: CROSS_TIER_REUSE=NO)
     auth_tier = str(auth.get("tier") or auth.get("selected_model") or auth.get("model") or "").strip()
