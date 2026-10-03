@@ -433,3 +433,38 @@ def test_foreign_or_stale_voice_profile_use_stops_before_mutation(
     after_rows = conn.execute("SELECT * FROM voice_profiles ORDER BY id").fetchall()
     assert [tuple(row) for row in after_rows] == [tuple(row) for row in before_rows]
     assert conn.total_changes == before_writes
+
+
+@pytest.mark.parametrize("product_context", ("showroom", "video_addon"))
+def test_stale_emitted_voice_profile_read_keeps_parent_vault_context(
+    voice_vault_runtime, product_context
+):
+    ns, route, conn = voice_vault_runtime
+    profile = ns["get_user_voice_profile"](901, 101)
+    assert profile
+    markup = ns["voice_profile_actions_keyboard"](101, "vi", product_context, profile)
+    callback_data = CALLBACK_FIXTURE["_callback"](markup, "voice_profile_read:101")
+    assert callback_data == f"music_quick|{product_context}|voice_profile_read:101"
+
+    conn.execute("DELETE FROM voice_profiles WHERE id=101 AND user_id='901'")
+    conn.commit()
+    before_writes = conn.total_changes
+
+    query = CALLBACK_FIXTURE["_click"](route, callback_data)
+
+    text, actual_markup = query.message.replies[-1]
+    expected_callbacks = [
+        button.callback_data
+        for row in ns["voice_vault_keyboard"](901, "vi", product_context).inline_keyboard
+        for button in row
+    ]
+    actual_callbacks = [
+        button.callback_data
+        for row in actual_markup.inline_keyboard
+        for button in row
+    ]
+    assert "không tìm thấy giọng này" in text.lower()
+    assert actual_callbacks == expected_callbacks
+    expected_parent = "vfinal|voice" if product_context == "video_addon" else "music_quick|showroom|voice_hub"
+    assert expected_parent in actual_callbacks
+    assert conn.total_changes == before_writes
