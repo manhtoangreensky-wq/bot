@@ -157157,6 +157157,16 @@ async def translate_with_deepl(text: str, target_lang: str = "vi") -> str:
     endpoint = (DEEPL_API_URL or "https://api-free.deepl.com/v2/translate").strip()
     target = normalize_translate_target(target_lang)
     target_code = TRANSLATE_LANGUAGE_OPTIONS.get(target, TRANSLATE_LANGUAGE_OPTIONS["vi"])["deepl"]
+    request_body = {"text": [text], "target_lang": target_code}
+    get_state_fn = globals().get("get_subdub_active_pipeline_state")
+    active_state = get_state_fn() if callable(get_state_fn) else None
+    if isinstance(active_state, dict) and auto_smart_multivoice.is_auto_smart_multivoice_state(active_state):
+        cue_context = dict(active_state.get("_smart_translation_cue") or {})
+        if cue_context.get("context"):
+            request_body["context"] = str(cue_context["context"])[:3000]
+        source_hint = str(cue_context.get("source_language") or "auto").split("-", 1)[0].upper()
+        if source_hint in {"AR", "BG", "CS", "DA", "DE", "EL", "EN", "ES", "ET", "FI", "FR", "HU", "ID", "IT", "JA", "KO", "LT", "LV", "NB", "NL", "PL", "PT", "RO", "RU", "SK", "SL", "SV", "TR", "UK", "VI", "ZH"}:
+            request_body["source_lang"] = source_hint
     async with httpx.AsyncClient(timeout=30.0) as client:
         res = await client.post(
             endpoint,
@@ -157164,10 +157174,7 @@ async def translate_with_deepl(text: str, target_lang: str = "vi") -> str:
                 "Authorization": f"DeepL-Auth-Key {DEEPL_API_KEY}",
                 "Content-Type": "application/json",
             },
-            json={
-                "text": [text],
-                "target_lang": target_code,
-            },
+            json=request_body,
         )
     if res.status_code != 200:
         raise RuntimeError(f"DeepL HTTP {res.status_code}: {sanitize_log_text(res.text)[:300]}")
@@ -247027,10 +247034,21 @@ async def translate_subtitle_segments(
     translated_segments = []
     providers = []
     missing_count = 0
+    get_state_fn = globals().get("get_subdub_active_pipeline_state")
+    active_state = get_state_fn() if callable(get_state_fn) else None
+    smart_context = isinstance(active_state, dict) and auto_smart_multivoice.is_auto_smart_multivoice_state(active_state)
     for index, item in enumerate(segments or [], start=1):
         text = str((item or {}).get("text") or "").strip()
         if not text:
             continue
+        previous_context = active_state.get("_smart_translation_cue") if smart_context else None
+        had_context = smart_context and "_smart_translation_cue" in active_state
+        if smart_context:
+            nearby = segments[max(0, index - 3):min(len(segments), index + 2)]
+            active_state["_smart_translation_cue"] = {
+                "context": "\n".join(str(c.get("text") or "").strip() for c in nearby)[:3000],
+                "source_language": active_state.get("detected_language") or active_state.get("source_language") or "auto",
+            }
         try:
             translated = await translate_subtitle_text(
                 text,
@@ -247041,6 +247059,12 @@ async def translate_subtitle_segments(
             )
         except Exception:
             translated = {}
+        finally:
+            if smart_context:
+                if had_context:
+                    active_state["_smart_translation_cue"] = previous_context
+                else:
+                    active_state.pop("_smart_translation_cue", None)
         translated_text = str(translated.get("text") or "").strip()
         translate_missing = not bool(translated_text)
         if not translated_text:
@@ -250032,13 +250056,22 @@ async def video_dubbing_prepare_subtitles(
         if not output_subtitle:
             # translate_subtitle_segments calls translate_subtitle_text per segment so timestamps stay intact.
             await subdub_emit_progress_callback(progress_callback, "translating_subtitle")
-            translated = await translate_subtitle_segments(
-                source_segments,
-                target_language,
-                allow_admin=allow_admin,
-                updated_by=user_id,
-                allow_confirmed_product=allow_confirmed_product,
+            translation_token = (
+                set_subdub_active_pipeline_state({**state, "detected_language": source_info.get("detected_language") or state.get("detected_language") or state.get("source_language") or "auto"})
+                if auto_smart_multivoice.is_auto_smart_multivoice_state(state)
+                else None
             )
+            try:
+                translated = await translate_subtitle_segments(
+                    source_segments,
+                    target_language,
+                    allow_admin=allow_admin,
+                    updated_by=user_id,
+                    allow_confirmed_product=allow_confirmed_product,
+                )
+            finally:
+                if translation_token is not None:
+                    reset_subdub_active_pipeline_state(translation_token)
             output_segments = list(translated.get("segments") or [])
             translation_provider = str(translated.get("provider") or "")
             translation_missing_count = int(translated.get("translation_missing_count") or 0)
