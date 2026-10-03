@@ -2096,8 +2096,10 @@ async def run_auto_smart_multivoice(
         )
         if smart_best_effort:
             from services.subdub_smart_source_audio import replace_unfit_smart_cues
+            uncertain_ids = set((state or {}).get("smart_attribution_uncertain_cue_ids") or [])
             for item in synth_artifacts:
                 item["tts_voice_id"] = decision.speaker_voice_map.get(str(item.get("speaker_id") or ""), "")
+                item["smart_attribution_uncertain"] = str(item.get("cue_id") or "") in uncertain_ids
             try:
                 source_audio_evidence = replace_unfit_smart_cues(
                     synth_artifacts, source_file=str(media_path),
