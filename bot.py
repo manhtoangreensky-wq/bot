@@ -253440,6 +253440,56 @@ async def _execute_video_dubbing_pipeline_core(
             public_safe_error=text,
             route_attempts=debug_route_attempts,
         )
+        smart_failure = auto_smart_multivoice.is_auto_smart_multivoice_state(state)
+        if smart_failure:
+            product_state = {**state, **dict(product_result.get("state") or {})}
+            evidence_keys = (
+                "auto_smart_multivoice_verified", "auto_detected_speaker_count",
+                "auto_effective_speaker_count", "auto_distinct_voice_count",
+                "speaker_voice_map", "auto_smart_strategy", "auto_smart_fallback_reason",
+                "translation_source_cue_count", "translation_output_cue_count",
+                "translation_missing_cue_ids", "translation_unchanged_cue_ids",
+                "translation_needs_review", "translation_quality_reason",
+            )
+            evidence = {key: product_state[key] for key in evidence_keys if key in product_state}
+            job_id = str(state.get("_pipeline_job_id") or "")
+            latest = {}
+            try:
+                latest = dict(get_engine_async_job(job_id) or {}) if job_id else {}
+            except Exception:
+                latest = {}
+            latest_stage = str(latest.get("progress_stage") or latest.get("current_stage") or "")
+            if (
+                str(latest.get("internal_job_id") or latest.get("job_id") or "") == job_id
+                and str(latest.get("user_id") or "") == str(uid)
+                and latest_stage in SUBDUB_PROGRESS_STAGES
+                and latest_stage != "delivered"
+                and str(latest.get("terminal_state") or latest.get("status") or "") != "delivered"
+            ):
+                evidence.update(
+                    progress_percent=subdub_progress_percent_for_lifecycle(latest_stage),
+                    progress_stage=latest_stage,
+                    current_stage=latest_stage,
+                    lifecycle_state=latest_stage,
+                    last_completed_step=str(latest.get("last_completed_step") or ""),
+                )
+            final_path = str(workspace_artifacts.get("final_mp4") or "")
+            output_proven = bool(
+                dict(state.get("_subdub_output_validation") or {}).get("ok") is True
+                and final_path and os.path.isfile(final_path) and os.path.getsize(final_path) > 0
+            )
+            if output_proven:
+                output_stage = "delivering" if int(evidence.get("progress_percent") or 0) >= subdub_progress_percent_for_lifecycle("delivering") else "validating_output"
+                evidence.update(
+                    progress_percent=max(int(evidence.get("progress_percent") or 0), subdub_progress_percent_for_lifecycle("validating_output")),
+                    progress_stage=output_stage,
+                    current_stage=output_stage,
+                    lifecycle_state=output_stage,
+                    last_completed_step="validating_output",
+                    final_mp4_validated=True,
+                )
+            debug_state.update(evidence)
+            debug_job.update(evidence)
         return {
             "ok": False,
             "status": status,
@@ -253451,7 +253501,7 @@ async def _execute_video_dubbing_pipeline_core(
             "debug_job": debug_job,
             "pipeline_attempted": True,
             "provider_route": provider_route,
-            "state": dict(state),
+            "state": dict(debug_state) if smart_failure else dict(state),
             "tts_expected_segments": int(state.get("tts_expected_segments") or 0),
             "tts_generated_segments": int(state.get("tts_generated_segments") or 0),
             "tts_mixed_segments": int(state.get("tts_mixed_segments") or 0),
@@ -253493,7 +253543,11 @@ async def _execute_video_dubbing_pipeline_core(
     if str(product_result.get("status") or "") == "AUTO_EXACT_CONFIRMATION_REQUIRED":
         return {
             **dict(product_result or {}),
-            "state": dict(state),
+            "state": (
+                {**state, **dict(product_result.get("state") or {})}
+                if auto_smart_multivoice.is_auto_smart_multivoice_state(state)
+                else dict(state)
+            ),
             "workspace_artifacts": workspace_artifacts,
             "input_save": {
                 key: value
