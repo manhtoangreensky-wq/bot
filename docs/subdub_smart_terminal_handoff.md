@@ -22,3 +22,14 @@ Controls include early/no-artifact failures, foreign job/user, delivered snapsho
 unchanged legacy failure/pause and the actual public progress renderer. The original
 boundary produced 3 failed and 6 passed cases before the patch. An added stage
 coherence test caught one further failure before publication.
+
+Completed Smart snapshots now preserve bounded generic cast/count metadata in
+both the core final-job save and outer pipeline update. This fixes metadata loss
+for Smart results without strict multi attribution/geometry proof. The strict
+proof helper and its requirements remain unchanged; generic metadata never adds
+strict verified flags. Unproven whole-source attribution is explicitly marked
+and cannot persist a fabricated one-speaker count. Source cue IDs/reasons and
+actual dubbing voice count remain available after workspace cleanup. Fields are
+allowlisted and bounded; financial, provider, credential and output-validation
+fields are not copied. Tests execute the actual metadata unpacks in both final
+consumers and include invalid/unverified casts and legacy controls.

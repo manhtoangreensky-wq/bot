@@ -599,8 +599,10 @@ async def process_subtitle_dub_job(
                     subtitle_items = subtitle_output_items(srt_text, output_type, mode)
                     output_subtitle = srt_text
                 from services.subdub_smart_source_audio import replace_unfit_smart_cues
+                uncertain_ids = set(pipeline_state.get("smart_attribution_uncertain_cue_ids") or [])
                 for item, auth_seg, _cid in chunk_bindings:
                     item.setdefault("tts_voice_id", str(auth_seg.get("tts_voice_id") or selected_tts_voice_id or ""))
+                    item["smart_attribution_uncertain"] = str(item.get("cue_id") or "") in uncertain_ids
                 try:
                     source_audio_evidence = replace_unfit_smart_cues(
                         tts_chunks, source_bytes=source_bytes,

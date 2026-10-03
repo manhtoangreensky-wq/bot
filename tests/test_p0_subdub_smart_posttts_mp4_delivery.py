@@ -76,13 +76,15 @@ def test_806_cached_mp4_passes_real_outer_audio_guard(tmp_path, monkeypatch, med
     assert result["tts_expected_segments"] == result["tts_generated_segments"] == 5
 
 
-def _shared_contract(lane, *, smart_dispatch=False, duration=2.6, video_end=2.0):
+def _shared_contract(lane, *, smart_dispatch=False, duration=2.6, video_end=2.0, uncertain=False):
     cues = [{"cue_id": "c1", "speaker_id": "s1", "start": 1.0, "end": 2.0,
              "text": "full speech", "tts_voice_id": "voice"}]
     state = {"auto_speaker_lane": lane, "cue_locked_timing": True,
              "input_duration": video_end, "target_language": "vi"}
     if smart_dispatch:
         state.update(auto_smart_multivoice_opt_in=True, auto_smart_dispatch="n3_plus_proven_v2")
+    if uncertain:
+        state['smart_attribution_uncertain_cue_ids'] = ['c1']
     observed = {}
     source_bytes = b"source"
     if smart_dispatch:
@@ -125,6 +127,15 @@ def test_smart_v2_borrows_gap_while_plain_multi_does_not():
     assert smart_result["ok"] and plain_result["ok"]
     assert smart_observed["chunks"][0]["end"] == 2.5
     assert plain_observed["chunks"][0]["end"] == 2.0
+
+
+def test_smart_v2_uses_source_for_uncertain_identity_but_plain_multi_unchanged():
+    result, observed = _shared_contract('multi', smart_dispatch=True, duration=.7, uncertain=True)
+    assert result['ok'], result
+    assert result['smart_source_audio_reasons'] == {'c1': 'speaker_attribution_uncertain'}
+    assert observed['chunks'][0]['smart_audio_source'] == 'source'
+    plain, plain_observed = _shared_contract('multi', duration=.7, uncertain=True)
+    assert plain['ok'] and plain_observed['chunks'][0].get('smart_audio_source') != 'source'
 
 
 @pytest.mark.parametrize("duration", [2.6, 6.0])

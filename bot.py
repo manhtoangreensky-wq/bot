@@ -172480,7 +172480,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         profile = get_user_voice_profile(user_id, profile_id)
         preview_ref = str((profile or {}).get("preview_audio_ref") or "")
         if not preview_ref:
-            return await query.message.reply_text("⚠️ Giọng này chưa có file demo để tải. Quý khách có thể tạo/nghe thử lại trước.", reply_markup=voice_profile_actions_keyboard(profile_id, lang, PRODUCT_CONTEXT_SHOWROOM, profile))
+            return await query.message.reply_text("⚠️ Giọng này chưa có file demo để tải. Quý khách có thể tạo/nghe thử lại trước.", reply_markup=voice_profile_actions_keyboard(profile_id, lang, ctx, profile))
         await context.bot.send_audio(chat_id=query.message.chat_id, audio=preview_ref, caption=f"⬇️ Demo voice: {profile.get('display_name') or 'TOAN AAS voice'}")
         return None
     if action.startswith("voice_profile_default:"):
@@ -234242,6 +234242,11 @@ def subdub_auto_multi_terminal_proof_fields(
     }
 
 
+def subdub_smart_terminal_evidence_fields(state: dict | None = None) -> dict:
+    from services.subdub_smart_terminal import bounded_smart_terminal_evidence
+    return bounded_smart_terminal_evidence(state)
+
+
 def subdub_auto_routing_decision(
     state: dict | None = None,
 ) -> tuple[str, str]:
@@ -238623,6 +238628,7 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
             voices = receipt_context.get("auto_distinct_voice_count")
             if (
                 not multi_proof and receipt_context.get("auto_smart_multivoice_verified") is True
+                and receipt_context.get("auto_smart_degraded_single_voice") is not True
                 and isinstance(voice_map, dict) and voice_map
                 and all(isinstance(value, str) and value.strip() for value in voice_map.values())
                 and type(detected) is int and 1 <= detected <= 8
@@ -238641,10 +238647,21 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
                     if is_vi else "• Voice assignment: <b>fallback used</b>\n"
                 )
             source_audio_count = receipt_context.get("smart_source_audio_cue_count")
+            if receipt_context.get("auto_smart_degraded_single_voice") is True:
+                multi_detail_lines += (
+                    "• Số người nói nguồn: <b>chưa xác định chắc chắn</b>\n"
+                    if is_vi else "• Source speaker count: <b>not reliably determined</b>\n"
+                )
+                played_voices = receipt_context.get("smart_dubbed_voice_count")
+                if type(played_voices) is int and played_voices >= 0:
+                    multi_detail_lines += (
+                        f"• Số giọng lồng tiếng đã dùng: <b>{played_voices}</b>\n"
+                        if is_vi else f"• Dubbing voices used: <b>{played_voices}</b>\n"
+                    )
             if type(source_audio_count) is int and source_audio_count > 0:
                 multi_detail_lines += (
-                    f"• Giữ âm thanh nguồn: <b>{source_audio_count}</b> câu không fit/chưa dịch; phụ đề giữ theo kết quả từng câu.\n"
-                    if is_vi else f"• Original audio retained: <b>{source_audio_count}</b> unfit/untranslated cues; subtitles follow each cue result.\n"
+                    f"• Giữ âm thanh nguồn: <b>{source_audio_count}</b> câu không fit/chưa dịch/chưa chắc người nói; phụ đề giữ theo kết quả từng câu.\n"
+                    if is_vi else f"• Original audio retained: <b>{source_audio_count}</b> unfit/untranslated/uncertain-speaker cues; subtitles follow each cue result.\n"
                 )
             source_count = receipt_context.get("translation_source_cue_count")
             output_count = receipt_context.get("translation_output_cue_count")
@@ -249968,7 +249985,8 @@ async def video_dubbing_prepare_subtitles(
                 smart_acoustic_classifications = dict(candidate_classes)
                 smart_multi_acoustic = False
             if auto_smart_multivoice.is_auto_smart_multivoice_state(state):
-                state = {**state, "auto_smart_generic_acoustic": smart_generic_acoustic}
+                state = {**state, "auto_smart_generic_acoustic": smart_generic_acoustic,
+                         "auto_smart_degraded_single_voice": acoustic_degraded_to_single}
             source_subtitle = video_dubbing_srt_from_segments(source_segments)
             source_script = video_dubbing_plain_script(source_subtitle)
             acoustic_fields = auto_multi_speaker.bounded_multi_acoustic_evidence({
@@ -250195,6 +250213,15 @@ async def video_dubbing_prepare_subtitles(
         state = {**state, **exact_multi_pipeline_context}
     if smart_missing_translation_cue_ids:
         state["smart_translation_missing_cue_ids"] = smart_missing_translation_cue_ids
+    if auto_smart_multivoice.is_auto_smart_multivoice_state(state):
+        uncertain_ids = set(state.get("smart_attribution_uncertain_cue_ids") or [])
+        if state.get("auto_smart_degraded_single_voice") is True:
+            uncertain_ids = {str(cue.get("cue_id") or "") for cue in output_segments}
+        elif smart_acoustic_classifications:
+            uncertain_ids = {str(cue.get("cue_id") or "") for cue in output_segments
+                             if smart_acoustic_classifications.get(cue.get("speaker_id"), {}).get("voice_register") not in {"low", "high"}}
+        state["smart_attribution_uncertain_cue_ids"] = [str(cue.get("cue_id") or "")
+            for cue in output_segments if str(cue.get("cue_id") or "") in uncertain_ids]
     return {
         "state": state,
         **({"acoustic_classifications": smart_acoustic_classifications} if smart_acoustic_classifications else {}),
@@ -250472,14 +250499,15 @@ def _subdub_auto_resume_state(state: dict) -> dict:
     ):
         safe.update(auto_multi_speaker.bounded_multi_acoustic_evidence(state))
     if auto_smart_multivoice.is_auto_smart_multivoice_state(state):
-        safe.pop("smart_translation_missing_cue_ids", None)
-        missing_ids = state.get("smart_translation_missing_cue_ids")
-        if (
-            type(missing_ids) is list and 0 < len(missing_ids) <= 2048
-            and all(type(cid) is str and 0 < len(cid) <= 160 and cid.strip() == cid for cid in missing_ids)
-            and len(set(missing_ids)) == len(missing_ids)
-        ):
-            safe["smart_translation_missing_cue_ids"] = list(missing_ids)
+        for cue_key in ("smart_translation_missing_cue_ids", "smart_attribution_uncertain_cue_ids"):
+            safe.pop(cue_key, None)
+            cue_ids = state.get(cue_key)
+            if (
+                type(cue_ids) is list and 0 < len(cue_ids) <= 2048
+                and all(type(cid) is str and 0 < len(cid) <= 160 and cid.strip() == cid for cid in cue_ids)
+                and len(set(cue_ids)) == len(cue_ids)
+            ):
+                safe[cue_key] = list(cue_ids)
     return safe
 
 
@@ -254522,6 +254550,7 @@ async def _execute_video_dubbing_pipeline_core(
             "provider_task_id": "",
             **auto_settlement_fields,
             **subdub_auto_multi_terminal_proof_fields(state),
+            **subdub_smart_terminal_evidence_fields(state),
             "status": "partial" if (partial_result or delivery_partial_result) else "completed",
             "terminal_state": result_terminal_state,
             "lifecycle_state": "delivered" if result_terminal_state == "delivered" else result_terminal_state,
@@ -255201,6 +255230,7 @@ async def execute_video_dubbing_pipeline(
             **input_save_fields,
             **multi_diarization,
             **subdub_auto_multi_terminal_proof_fields(result_state),
+            **subdub_smart_terminal_evidence_fields(result_state),
             "job_id": job.get("job_id"),
             "workspace": workspace,
             "manifest": os.path.join(workspace, "manifest.json"),
