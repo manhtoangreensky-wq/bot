@@ -170,6 +170,11 @@ class SubDubWorkerDaemon:
         artifact_dir: Path | str | None = None,
         db_conn: sqlite3.Connection | None = None,
         transcriber_fn: Callable[..., Any] | None = None,
+        translator_fn: Callable[..., Any] | None = None,
+        voice_resolver_fn: Callable[..., Any] | None = None,
+        tts_fn: Callable[..., Any] | None = None,
+        muxer_fn: Callable[..., Any] | None = None,
+        probe_fn: Callable[..., Any] | None = None,
     ):
         self.worker_id = str(worker_id or DEFAULT_WORKER_ID).strip()[:80]
         self.poll_interval = max(0.1, float(poll_interval))
@@ -180,8 +185,14 @@ class SubDubWorkerDaemon:
         self.artifact_dir.mkdir(parents=True, exist_ok=True)
         self.db_conn = db_conn
         self.transcriber_fn = transcriber_fn
+        self.translator_fn = translator_fn
+        self.voice_resolver_fn = voice_resolver_fn
+        self.tts_fn = tts_fn
+        self.muxer_fn = muxer_fn
+        self.probe_fn = probe_fn
         self._running = False
         self._stop_event = threading.Event()
+
 
     def stop(self) -> None:
         """Signal daemon to stop gracefully."""
@@ -351,15 +362,46 @@ class SubDubWorkerDaemon:
                     payload=payload,
                     heartbeat_abort=heartbeat_abort,
                 )
+            elif mode == "subtitle_translate":
+                self._execute_subtitle_translate(
+                    job_id=job_id,
+                    worker_id=worker_id,
+                    claim_token=claim_token,
+                    owner_id=owner_id,
+                    media_path=media_path,
+                    payload=payload,
+                    heartbeat_abort=heartbeat_abort,
+                )
+            elif mode == "dub":
+                self._execute_dub(
+                    job_id=job_id,
+                    worker_id=worker_id,
+                    claim_token=claim_token,
+                    owner_id=owner_id,
+                    media_path=media_path,
+                    payload=payload,
+                    heartbeat_abort=heartbeat_abort,
+                )
+            elif mode == "subtitle_plus_dub":
+                self._execute_subtitle_plus_dub(
+                    job_id=job_id,
+                    worker_id=worker_id,
+                    claim_token=claim_token,
+                    owner_id=owner_id,
+                    media_path=media_path,
+                    payload=payload,
+                    heartbeat_abort=heartbeat_abort,
+                )
             else:
                 fail_subdub_job(
                     job_id,
                     worker_id,
                     claim_token,
-                    error_code="MODE_NOT_IMPLEMENTED_YET",
-                    message=f"Mode {mode} pipeline adapter not yet active in R1",
+                    error_code="UNSUPPORTED_MODE",
+                    message=f"SubDub mode '{mode}' is not supported by worker",
                     conn=self.db_conn,
                 )
+
         except Exception as exc:
             logger.error(f"Execution error on job {job_id}: {exc}")
             # Ensure failure is registered fail-closed
@@ -566,6 +608,675 @@ class SubDubWorkerDaemon:
         )
         if not ok:
             logger.error(f"Failed to complete job {job_id}: {reason}")
+
+    def _execute_subtitle_translate(
+        self,
+        *,
+        job_id: str,
+        worker_id: str,
+        claim_token: str,
+        owner_id: str,
+        media_path: str,
+        payload: dict[str, Any],
+        heartbeat_abort: threading.Event,
+    ) -> None:
+        """Execute mode=subtitle_translate and produce truthful translated subtitle artifact."""
+        if heartbeat_abort.is_set():
+            logger.warning(f"Aborting execution for {job_id} due to fencing token mismatch")
+            return
+
+        target_lang = str(payload.get("target_language") or "").strip().lower()
+        if not target_lang:
+            fail_subdub_job(
+                job_id,
+                worker_id,
+                claim_token,
+                error_code="MISSING_TARGET_LANGUAGE",
+                message="target_language is required for subtitle_translate",
+                conn=self.db_conn,
+            )
+            return
+
+        # 1. Transcribe source media
+        source_segments = []
+        duration_seconds = 0.0
+        if self.transcriber_fn is not None:
+            try:
+                res = self.transcriber_fn(media_path, payload)
+                if isinstance(res, list):
+                    source_segments = res
+                    duration_seconds = max((float((c or {}).get("end") or 0.0) for c in res if isinstance(c, dict)), default=0.0)
+                elif isinstance(res, dict):
+                    source_segments = res.get("segments") or res.get("cues") or []
+                    duration_seconds = float(res.get("duration") or res.get("duration_seconds") or 0.0)
+                elif isinstance(res, str):
+                    source_segments = [{"text": res, "start": 0.0, "end": 2.0}]
+                    duration_seconds = 2.0
+            except Exception as exc:
+                fail_subdub_job(job_id, worker_id, claim_token, "TRANSCRIBER_FAILED", f"Transcriber error: {type(exc).__name__}", conn=self.db_conn)
+                return
+        else:
+            if not is_provider_calls_enabled():
+                fail_subdub_job(job_id, worker_id, claim_token, "PROVIDER_CALLS_DISABLED", "Provider calls are disabled by environment gate (PROVIDER_CALLS=0)", conn=self.db_conn)
+                return
+            try:
+                import bot
+                import asyncio
+                media_bytes = Path(media_path).read_bytes()
+                content_type = str(payload.get("source_mime_type") or "audio/mpeg")
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    res = loop.run_until_complete(
+                        bot.transcribe_media_to_segments(
+                            {"bytes": media_bytes, "content_type": content_type, "duration_seconds": 0},
+                            allow_subdub_public=True,
+                        )
+                    )
+                finally:
+                    loop.close()
+                source_segments = res.get("segments") or []
+                duration_seconds = float(res.get("duration_seconds") or 0.0)
+            except Exception as exc:
+                fail_subdub_job(job_id, worker_id, claim_token, "CANONICAL_ASR_FAILED", f"ASR execution error: {type(exc).__name__}", conn=self.db_conn)
+                return
+
+        if not source_segments:
+            fail_subdub_job(job_id, worker_id, claim_token, "EMPTY_SOURCE_TRANSCRIPT", "Source media yielded zero subtitle segments", conn=self.db_conn)
+            return
+
+        # 2. Translate segments to target language
+        translated_segments = []
+        if self.translator_fn is not None:
+            try:
+                t_res = self.translator_fn(source_segments, target_lang, payload)
+                if isinstance(t_res, list):
+                    translated_segments = t_res
+                elif isinstance(t_res, dict):
+                    translated_segments = t_res.get("segments") or []
+            except Exception as exc:
+                fail_subdub_job(job_id, worker_id, claim_token, "TRANSLATION_FAILED", f"Translator error: {type(exc).__name__}", conn=self.db_conn)
+                return
+        else:
+            if not is_provider_calls_enabled():
+                fail_subdub_job(job_id, worker_id, claim_token, "PROVIDER_CALLS_DISABLED", "Provider calls are disabled by environment gate (PROVIDER_CALLS=0)", conn=self.db_conn)
+                return
+            try:
+                import bot
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    t_out = loop.run_until_complete(
+                        bot.translate_subtitle_segments(
+                            source_segments,
+                            target_lang,
+                            allow_confirmed_product=True,
+                        )
+                    )
+                finally:
+                    loop.close()
+                translated_segments = t_out.get("segments") or t_out if isinstance(t_out, list) else []
+            except Exception as exc:
+                fail_subdub_job(job_id, worker_id, claim_token, "CANONICAL_TRANSLATION_FAILED", f"Translation error: {type(exc).__name__}", conn=self.db_conn)
+                return
+
+        if not translated_segments:
+            fail_subdub_job(job_id, worker_id, claim_token, "EMPTY_TRANSLATION_OUTPUT", "Translation yielded zero segments", conn=self.db_conn)
+            return
+
+        vtt_content = format_vtt_text(translated_segments)
+        cues_count = len([c for c in translated_segments if isinstance(c, dict) and (c.get("text") or "").strip()])
+        char_count = sum(len(str((c or {}).get("text") or "")) for c in translated_segments if isinstance(c, dict))
+
+        if cues_count <= 0 or not vtt_content.startswith("WEBVTT"):
+            fail_subdub_job(job_id, worker_id, claim_token, "INVALID_VTT_HEADER", "Produced translated subtitle lacks valid WEBVTT header or content", conn=self.db_conn)
+            return
+
+        vtt_bytes = vtt_content.encode("utf-8")
+        if len(vtt_bytes) == 0:
+            fail_subdub_job(job_id, worker_id, claim_token, "ZERO_BYTE_OUTPUT", "Produced subtitle artifact is 0 bytes", conn=self.db_conn)
+            return
+
+        artifact_filename = f"{job_id}.vtt"
+        artifact_file = self.artifact_dir / artifact_filename
+        artifact_file.write_bytes(vtt_bytes)
+        file_size = artifact_file.stat().st_size
+        file_sha256 = hashlib.sha256(vtt_bytes).hexdigest()
+
+        delivery_url = f"{self.public_base_url}/{artifact_filename}"
+        if not is_safe_subdub_output_url(delivery_url):
+            fail_subdub_job(job_id, worker_id, claim_token, "UNSAFE_DELIVERY_URL", "Constructed delivery URL violates safety invariants", conn=self.db_conn)
+            return
+
+        result_payload = {
+            "output_url": delivery_url,
+            "download_url": delivery_url,
+            "url": delivery_url,
+            "format": "vtt",
+            "output_format": "vtt",
+            "content_type": "text/vtt",
+            "size_bytes": file_size,
+            "sha256": file_sha256,
+            "duration_seconds": round(duration_seconds, 2),
+            "cues_count": cues_count,
+            "char_count": char_count,
+            "target_language": target_lang,
+            "mode": "subtitle_translate",
+            "artifact_path": str(artifact_file),
+        }
+        complete_subdub_job(job_id, worker_id, claim_token, result=result_payload, conn=self.db_conn)
+
+    def _execute_dub(
+        self,
+        *,
+        job_id: str,
+        worker_id: str,
+        claim_token: str,
+        owner_id: str,
+        media_path: str,
+        payload: dict[str, Any],
+        heartbeat_abort: threading.Event,
+    ) -> None:
+        """Execute mode=dub and produce truthful dubbed media artifact."""
+        if heartbeat_abort.is_set():
+            logger.warning(f"Aborting execution for {job_id} due to fencing token mismatch")
+            return
+
+        target_lang = str(payload.get("target_language") or "").strip().lower()
+        if not target_lang:
+            fail_subdub_job(
+                job_id,
+                worker_id,
+                claim_token,
+                error_code="MISSING_TARGET_LANGUAGE",
+                message="target_language is required for dub",
+                conn=self.db_conn,
+            )
+            return
+
+        # 1. Voice profile resolution (server authority)
+        if self.voice_resolver_fn is not None:
+            try:
+                vr_ok, vr_reason, vr_code, vr_data = self.voice_resolver_fn(owner_id, payload)
+            except Exception as exc:
+                fail_subdub_job(job_id, worker_id, claim_token, "VOICE_RESOLUTION_FAILED", f"Voice resolver error: {type(exc).__name__}", conn=self.db_conn)
+                return
+        else:
+            from services.subdub_voice_resolution import resolve_subdub_voice_authority
+            vr_ok, vr_reason, vr_code, vr_data = resolve_subdub_voice_authority(owner_id, payload)
+
+        if not vr_ok:
+            fail_subdub_job(job_id, worker_id, claim_token, vr_reason or "VOICE_RESOLUTION_FAILED", f"Voice resolution failed: {vr_reason}", conn=self.db_conn)
+            return
+
+        # 2. ASR Transcribe
+        source_segments = []
+        duration_seconds = 0.0
+        if self.transcriber_fn is not None:
+            try:
+                res = self.transcriber_fn(media_path, payload)
+                if isinstance(res, list):
+                    source_segments = res
+                    duration_seconds = max((float((c or {}).get("end") or 0.0) for c in res if isinstance(c, dict)), default=0.0)
+                elif isinstance(res, dict):
+                    source_segments = res.get("segments") or res.get("cues") or []
+                    duration_seconds = float(res.get("duration") or res.get("duration_seconds") or 0.0)
+                elif isinstance(res, str):
+                    source_segments = [{"text": res, "start": 0.0, "end": 2.0}]
+                    duration_seconds = 2.0
+            except Exception as exc:
+                fail_subdub_job(job_id, worker_id, claim_token, "TRANSCRIBER_FAILED", f"Transcriber error: {type(exc).__name__}", conn=self.db_conn)
+                return
+        else:
+            if not is_provider_calls_enabled():
+                fail_subdub_job(job_id, worker_id, claim_token, "PROVIDER_CALLS_DISABLED", "Provider calls are disabled by environment gate (PROVIDER_CALLS=0)", conn=self.db_conn)
+                return
+            try:
+                import bot
+                import asyncio
+                media_bytes = Path(media_path).read_bytes()
+                content_type = str(payload.get("source_mime_type") or "audio/mpeg")
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    res = loop.run_until_complete(
+                        bot.transcribe_media_to_segments(
+                            {"bytes": media_bytes, "content_type": content_type, "duration_seconds": 0},
+                            allow_subdub_public=True,
+                        )
+                    )
+                finally:
+                    loop.close()
+                source_segments = res.get("segments") or []
+                duration_seconds = float(res.get("duration_seconds") or 0.0)
+            except Exception as exc:
+                fail_subdub_job(job_id, worker_id, claim_token, "CANONICAL_ASR_FAILED", f"ASR execution error: {type(exc).__name__}", conn=self.db_conn)
+                return
+
+        if not source_segments:
+            fail_subdub_job(job_id, worker_id, claim_token, "EMPTY_SOURCE_TRANSCRIPT", "Source media yielded zero subtitle segments", conn=self.db_conn)
+            return
+
+        # 3. Translation (if needed)
+        source_lang = str(payload.get("source_language") or "auto").strip().lower()
+        if source_lang == target_lang and self.translator_fn is None:
+            translated_segments = source_segments
+        elif self.translator_fn is not None:
+            try:
+                t_res = self.translator_fn(source_segments, target_lang, payload)
+                translated_segments = t_res if isinstance(t_res, list) else t_res.get("segments", [])
+            except Exception as exc:
+                fail_subdub_job(job_id, worker_id, claim_token, "TRANSLATION_FAILED", f"Translator error: {type(exc).__name__}", conn=self.db_conn)
+                return
+        else:
+            if not is_provider_calls_enabled():
+                fail_subdub_job(job_id, worker_id, claim_token, "PROVIDER_CALLS_DISABLED", "Provider calls are disabled by environment gate (PROVIDER_CALLS=0)", conn=self.db_conn)
+                return
+            try:
+                import bot
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    t_out = loop.run_until_complete(
+                        bot.translate_subtitle_segments(source_segments, target_lang, allow_confirmed_product=True)
+                    )
+                finally:
+                    loop.close()
+                translated_segments = t_out.get("segments") or t_out if isinstance(t_out, list) else []
+            except Exception as exc:
+                fail_subdub_job(job_id, worker_id, claim_token, "CANONICAL_TRANSLATION_FAILED", f"Translation error: {type(exc).__name__}", conn=self.db_conn)
+                return
+
+        char_count = sum(len(str((c or {}).get("text") or "")) for c in translated_segments if isinstance(c, dict))
+
+        # 4. TTS Synthesis
+        dub_audio_bytes = b""
+        if self.tts_fn is not None:
+            try:
+                dub_audio_bytes = self.tts_fn(translated_segments, vr_data, payload)
+            except Exception as exc:
+                fail_subdub_job(job_id, worker_id, claim_token, "TTS_FAILED", f"TTS error: {type(exc).__name__}", conn=self.db_conn)
+                return
+        else:
+            if not is_provider_calls_enabled():
+                fail_subdub_job(job_id, worker_id, claim_token, "PROVIDER_CALLS_DISABLED", "Provider calls are disabled by environment gate (PROVIDER_CALLS=0)", conn=self.db_conn)
+                return
+            try:
+                import bot
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    synth_res = loop.run_until_complete(
+                        bot.synthesize_dub_segment_chunks(
+                            translated_segments,
+                            voice_style=vr_data.get("_internal_provider_voice_id"),
+                            voice_speed=vr_data.get("voice_speed", 1.0),
+                            target_language=target_lang,
+                        )
+                    )
+                finally:
+                    loop.close()
+                dub_audio_bytes = synth_res.get("audio_bytes") if isinstance(synth_res, dict) else (synth_res or b"")
+            except Exception as exc:
+                fail_subdub_job(job_id, worker_id, claim_token, "CANONICAL_TTS_FAILED", f"TTS error: {type(exc).__name__}", conn=self.db_conn)
+                return
+
+        if not dub_audio_bytes or len(dub_audio_bytes) == 0:
+            fail_subdub_job(job_id, worker_id, claim_token, "TTS_SYNTHESIS_FAILED", "TTS synthesis produced zero bytes", conn=self.db_conn)
+            return
+
+        # 5. Mux / Render
+        is_video = str(payload.get("source_media_type") or "").lower() == "video" or bool(payload.get("is_video_source")) or Path(media_path).suffix.lower() in (".mp4", ".mov", ".webm", ".mkv")
+        output_format = "video" if is_video else "audio"
+        ext = "mp4" if is_video else "mp3"
+        content_type = "video/mp4" if is_video else "audio/mpeg"
+
+        final_media_bytes = b""
+        if self.muxer_fn is not None:
+            try:
+                final_media_bytes, ext = self.muxer_fn(media_path, dub_audio_bytes, None, payload)
+                content_type = "video/mp4" if ext == "mp4" else "audio/mpeg"
+                output_format = "video" if ext == "mp4" else "audio"
+            except Exception as exc:
+                fail_subdub_job(job_id, worker_id, claim_token, "MUX_FAILED", f"Muxer error: {type(exc).__name__}", conn=self.db_conn)
+                return
+        elif not is_video:
+            final_media_bytes = dub_audio_bytes
+        else:
+            if not is_provider_calls_enabled():
+                fail_subdub_job(job_id, worker_id, claim_token, "PROVIDER_CALLS_DISABLED", "Provider calls are disabled by environment gate (PROVIDER_CALLS=0)", conn=self.db_conn)
+                return
+            try:
+                import bot
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    render_res = loop.run_until_complete(
+                        bot.video_dubbing_render_video(
+                            video_path=media_path,
+                            audio_bytes=dub_audio_bytes,
+                            mode="dub",
+                        )
+                    )
+                finally:
+                    loop.close()
+                final_media_bytes = render_res.get("video_bytes") if isinstance(render_res, dict) else (render_res or b"")
+            except Exception as exc:
+                fail_subdub_job(job_id, worker_id, claim_token, "CANONICAL_MUX_FAILED", f"Mux error: {type(exc).__name__}", conn=self.db_conn)
+                return
+
+        if not final_media_bytes or len(final_media_bytes) == 0:
+            fail_subdub_job(job_id, worker_id, claim_token, "EMPTY_MUX_OUTPUT", "Mux/render produced zero bytes", conn=self.db_conn)
+            return
+
+        artifact_filename = f"{job_id}.{ext}"
+        artifact_file = self.artifact_dir / artifact_filename
+        artifact_file.write_bytes(final_media_bytes)
+        file_size = artifact_file.stat().st_size
+        file_sha256 = hashlib.sha256(final_media_bytes).hexdigest()
+
+        # 6. Final Media Probe
+        if self.probe_fn is not None:
+            try:
+                probe_ok, probe_info = self.probe_fn(str(artifact_file))
+                if not probe_ok:
+                    fail_subdub_job(job_id, worker_id, claim_token, "ARTIFACT_PROBE_FAILED", f"Probe error: {probe_info.get('reason', 'invalid media')}", conn=self.db_conn)
+                    return
+            except Exception as exc:
+                fail_subdub_job(job_id, worker_id, claim_token, "ARTIFACT_PROBE_FAILED", f"Probe exception: {type(exc).__name__}", conn=self.db_conn)
+                return
+        else:
+            if file_size <= 0:
+                fail_subdub_job(job_id, worker_id, claim_token, "ARTIFACT_PROBE_FAILED", "Generated artifact has zero size", conn=self.db_conn)
+                return
+
+        delivery_url = f"{self.public_base_url}/{artifact_filename}"
+        if not is_safe_subdub_output_url(delivery_url):
+            fail_subdub_job(job_id, worker_id, claim_token, "UNSAFE_DELIVERY_URL", "Constructed delivery URL violates safety invariants", conn=self.db_conn)
+            return
+
+        result_payload = {
+            "output_url": delivery_url,
+            "download_url": delivery_url,
+            "url": delivery_url,
+            "format": ext,
+            "output_format": output_format,
+            "content_type": content_type,
+            "size_bytes": file_size,
+            "sha256": file_sha256,
+            "duration_seconds": round(duration_seconds, 2),
+            "char_count": char_count,
+            "target_language": target_lang,
+            "voice_profile_id": payload.get("voice_profile_id"),
+            "mode": "dub",
+            "artifact_path": str(artifact_file),
+        }
+        complete_subdub_job(job_id, worker_id, claim_token, result=result_payload, conn=self.db_conn)
+
+    def _execute_subtitle_plus_dub(
+        self,
+        *,
+        job_id: str,
+        worker_id: str,
+        claim_token: str,
+        owner_id: str,
+        media_path: str,
+        payload: dict[str, Any],
+        heartbeat_abort: threading.Event,
+    ) -> None:
+        """Execute mode=subtitle_plus_dub and produce truthful combo media artifact."""
+        if heartbeat_abort.is_set():
+            logger.warning(f"Aborting execution for {job_id} due to fencing token mismatch")
+            return
+
+        target_lang = str(payload.get("target_language") or "").strip().lower()
+        if not target_lang:
+            fail_subdub_job(
+                job_id,
+                worker_id,
+                claim_token,
+                error_code="MISSING_TARGET_LANGUAGE",
+                message="target_language is required for subtitle_plus_dub",
+                conn=self.db_conn,
+            )
+            return
+
+        # 1. Voice profile resolution
+        if self.voice_resolver_fn is not None:
+            try:
+                vr_ok, vr_reason, vr_code, vr_data = self.voice_resolver_fn(owner_id, payload)
+            except Exception as exc:
+                fail_subdub_job(job_id, worker_id, claim_token, "VOICE_RESOLUTION_FAILED", f"Voice resolver error: {type(exc).__name__}", conn=self.db_conn)
+                return
+        else:
+            from services.subdub_voice_resolution import resolve_subdub_voice_authority
+            vr_ok, vr_reason, vr_code, vr_data = resolve_subdub_voice_authority(owner_id, payload)
+
+        if not vr_ok:
+            fail_subdub_job(job_id, worker_id, claim_token, vr_reason or "VOICE_RESOLUTION_FAILED", f"Voice resolution failed: {vr_reason}", conn=self.db_conn)
+            return
+
+        # 2. ASR Transcribe
+        source_segments = []
+        duration_seconds = 0.0
+        if self.transcriber_fn is not None:
+            try:
+                res = self.transcriber_fn(media_path, payload)
+                if isinstance(res, list):
+                    source_segments = res
+                    duration_seconds = max((float((c or {}).get("end") or 0.0) for c in res if isinstance(c, dict)), default=0.0)
+                elif isinstance(res, dict):
+                    source_segments = res.get("segments") or res.get("cues") or []
+                    duration_seconds = float(res.get("duration") or res.get("duration_seconds") or 0.0)
+                elif isinstance(res, str):
+                    source_segments = [{"text": res, "start": 0.0, "end": 2.0}]
+                    duration_seconds = 2.0
+            except Exception as exc:
+                fail_subdub_job(job_id, worker_id, claim_token, "TRANSCRIBER_FAILED", f"Transcriber error: {type(exc).__name__}", conn=self.db_conn)
+                return
+        else:
+            if not is_provider_calls_enabled():
+                fail_subdub_job(job_id, worker_id, claim_token, "PROVIDER_CALLS_DISABLED", "Provider calls are disabled by environment gate (PROVIDER_CALLS=0)", conn=self.db_conn)
+                return
+            try:
+                import bot
+                import asyncio
+                media_bytes = Path(media_path).read_bytes()
+                content_type = str(payload.get("source_mime_type") or "audio/mpeg")
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    res = loop.run_until_complete(
+                        bot.transcribe_media_to_segments(
+                            {"bytes": media_bytes, "content_type": content_type, "duration_seconds": 0},
+                            allow_subdub_public=True,
+                        )
+                    )
+                finally:
+                    loop.close()
+                source_segments = res.get("segments") or []
+                duration_seconds = float(res.get("duration_seconds") or 0.0)
+            except Exception as exc:
+                fail_subdub_job(job_id, worker_id, claim_token, "CANONICAL_ASR_FAILED", f"ASR execution error: {type(exc).__name__}", conn=self.db_conn)
+                return
+
+        if not source_segments:
+            fail_subdub_job(job_id, worker_id, claim_token, "EMPTY_SOURCE_TRANSCRIPT", "Source media yielded zero subtitle segments", conn=self.db_conn)
+            return
+
+        # 3. Translate segments
+        if self.translator_fn is not None:
+            try:
+                t_res = self.translator_fn(source_segments, target_lang, payload)
+                translated_segments = t_res if isinstance(t_res, list) else t_res.get("segments", [])
+            except Exception as exc:
+                fail_subdub_job(job_id, worker_id, claim_token, "TRANSLATION_FAILED", f"Translator error: {type(exc).__name__}", conn=self.db_conn)
+                return
+        else:
+            if not is_provider_calls_enabled():
+                fail_subdub_job(job_id, worker_id, claim_token, "PROVIDER_CALLS_DISABLED", "Provider calls are disabled by environment gate (PROVIDER_CALLS=0)", conn=self.db_conn)
+                return
+            try:
+                import bot
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    t_out = loop.run_until_complete(
+                        bot.translate_subtitle_segments(source_segments, target_lang, allow_confirmed_product=True)
+                    )
+                finally:
+                    loop.close()
+                translated_segments = t_out.get("segments") or t_out if isinstance(t_out, list) else []
+            except Exception as exc:
+                fail_subdub_job(job_id, worker_id, claim_token, "CANONICAL_TRANSLATION_FAILED", f"Translation error: {type(exc).__name__}", conn=self.db_conn)
+                return
+
+        char_count = sum(len(str((c or {}).get("text") or "")) for c in translated_segments if isinstance(c, dict))
+
+        # Write subtitle artifact
+        vtt_content = format_vtt_text(translated_segments)
+        vtt_bytes = vtt_content.encode("utf-8")
+        if not vtt_bytes or not vtt_content.startswith("WEBVTT"):
+            fail_subdub_job(job_id, worker_id, claim_token, "INVALID_VTT_HEADER", "Combo subtitle generation failed", conn=self.db_conn)
+            return
+        subtitle_file = self.artifact_dir / f"{job_id}.vtt"
+        subtitle_file.write_bytes(vtt_bytes)
+
+        # 4. TTS Synthesis
+        dub_audio_bytes = b""
+        if self.tts_fn is not None:
+            try:
+                dub_audio_bytes = self.tts_fn(translated_segments, vr_data, payload)
+            except Exception as exc:
+                fail_subdub_job(job_id, worker_id, claim_token, "TTS_FAILED", f"TTS error: {type(exc).__name__}", conn=self.db_conn)
+                return
+        else:
+            if not is_provider_calls_enabled():
+                fail_subdub_job(job_id, worker_id, claim_token, "PROVIDER_CALLS_DISABLED", "Provider calls are disabled by environment gate (PROVIDER_CALLS=0)", conn=self.db_conn)
+                return
+            try:
+                import bot
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    synth_res = loop.run_until_complete(
+                        bot.synthesize_dub_segment_chunks(
+                            translated_segments,
+                            voice_style=vr_data.get("_internal_provider_voice_id"),
+                            voice_speed=vr_data.get("voice_speed", 1.0),
+                            target_language=target_lang,
+                        )
+                    )
+                finally:
+                    loop.close()
+                dub_audio_bytes = synth_res.get("audio_bytes") if isinstance(synth_res, dict) else (synth_res or b"")
+            except Exception as exc:
+                fail_subdub_job(job_id, worker_id, claim_token, "CANONICAL_TTS_FAILED", f"TTS error: {type(exc).__name__}", conn=self.db_conn)
+                return
+
+        if not dub_audio_bytes or len(dub_audio_bytes) == 0:
+            fail_subdub_job(job_id, worker_id, claim_token, "TTS_SYNTHESIS_FAILED", "TTS synthesis produced zero bytes", conn=self.db_conn)
+            return
+
+        # 5. Mux / Render combo (both video subtitle + audio)
+        is_video = str(payload.get("source_media_type") or "").lower() == "video" or bool(payload.get("is_video_source")) or Path(media_path).suffix.lower() in (".mp4", ".mov", ".webm", ".mkv")
+        output_format = "video_subtitle" if is_video else "audio"
+        ext = "mp4" if is_video else "mp3"
+        content_type = "video/mp4" if is_video else "audio/mpeg"
+
+        final_media_bytes = b""
+        if self.muxer_fn is not None:
+            try:
+                final_media_bytes, ext = self.muxer_fn(media_path, dub_audio_bytes, str(subtitle_file), payload)
+                content_type = "video/mp4" if ext == "mp4" else "audio/mpeg"
+                output_format = "video_subtitle" if ext == "mp4" else "audio"
+            except Exception as exc:
+                fail_subdub_job(job_id, worker_id, claim_token, "MUX_FAILED", f"Muxer error: {type(exc).__name__}", conn=self.db_conn)
+                return
+        elif not is_video:
+            final_media_bytes = dub_audio_bytes
+        else:
+            if not is_provider_calls_enabled():
+                fail_subdub_job(job_id, worker_id, claim_token, "PROVIDER_CALLS_DISABLED", "Provider calls are disabled by environment gate (PROVIDER_CALLS=0)", conn=self.db_conn)
+                return
+            try:
+                import bot
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    render_res = loop.run_until_complete(
+                        bot.video_dubbing_render_video(
+                            video_path=media_path,
+                            audio_bytes=dub_audio_bytes,
+                            mode="subtitle_plus_dub",
+                            subtitle_file=str(subtitle_file),
+                        )
+                    )
+                finally:
+                    loop.close()
+                final_media_bytes = render_res.get("video_bytes") if isinstance(render_res, dict) else (render_res or b"")
+            except Exception as exc:
+                fail_subdub_job(job_id, worker_id, claim_token, "CANONICAL_MUX_FAILED", f"Mux error: {type(exc).__name__}", conn=self.db_conn)
+                return
+
+        if not final_media_bytes or len(final_media_bytes) == 0:
+            fail_subdub_job(job_id, worker_id, claim_token, "EMPTY_MUX_OUTPUT", "Combo render produced zero bytes", conn=self.db_conn)
+            return
+
+        artifact_filename = f"{job_id}.{ext}"
+        artifact_file = self.artifact_dir / artifact_filename
+        artifact_file.write_bytes(final_media_bytes)
+        file_size = artifact_file.stat().st_size
+        file_sha256 = hashlib.sha256(final_media_bytes).hexdigest()
+
+        # 6. Final Media Probe
+        if self.probe_fn is not None:
+            try:
+                probe_ok, probe_info = self.probe_fn(str(artifact_file))
+                if not probe_ok:
+                    fail_subdub_job(job_id, worker_id, claim_token, "ARTIFACT_PROBE_FAILED", f"Probe error: {probe_info.get('reason', 'invalid media')}", conn=self.db_conn)
+                    return
+            except Exception as exc:
+                fail_subdub_job(job_id, worker_id, claim_token, "ARTIFACT_PROBE_FAILED", f"Probe exception: {type(exc).__name__}", conn=self.db_conn)
+                return
+        else:
+            if file_size <= 0:
+                fail_subdub_job(job_id, worker_id, claim_token, "ARTIFACT_PROBE_FAILED", "Generated combo artifact has zero size", conn=self.db_conn)
+                return
+
+        delivery_url = f"{self.public_base_url}/{artifact_filename}"
+        sub_delivery_url = f"{self.public_base_url}/{job_id}.vtt"
+        if not is_safe_subdub_output_url(delivery_url) or not is_safe_subdub_output_url(sub_delivery_url):
+            fail_subdub_job(job_id, worker_id, claim_token, "UNSAFE_DELIVERY_URL", "Constructed delivery URL violates safety invariants", conn=self.db_conn)
+            return
+
+        result_payload = {
+            "output_url": delivery_url,
+            "download_url": delivery_url,
+            "url": delivery_url,
+            "subtitle_url": sub_delivery_url,
+            "format": ext,
+            "output_format": output_format,
+            "content_type": content_type,
+            "size_bytes": file_size,
+            "sha256": file_sha256,
+            "duration_seconds": round(duration_seconds, 2),
+            "char_count": char_count,
+            "target_language": target_lang,
+            "voice_profile_id": payload.get("voice_profile_id"),
+            "mode": "subtitle_plus_dub",
+            "artifact_path": str(artifact_file),
+            "subtitle_path": str(subtitle_file),
+        }
+        complete_subdub_job(job_id, worker_id, claim_token, result=result_payload, conn=self.db_conn)
+
 
     def run(self, *, run_once: bool = False, max_jobs: int | None = None) -> int:
         """Main worker loop. Returns total number of jobs processed."""
