@@ -65692,6 +65692,31 @@ async def asr_transcribe_audio(
             "segments": [],
             "detail": "deepgram_diarization_unavailable",
         }
+    local_language_hint = ""
+    get_state_fn = globals().get("get_subdub_active_pipeline_state")
+    active_state = get_state_fn() if callable(get_state_fn) else None
+    if (
+        require_auto_multi_word_timeline
+        and allow_confirmed_product
+        and str(language or "auto").strip().lower() == "auto"
+        and isinstance(active_state, dict)
+        and auto_smart_multivoice.is_auto_smart_multivoice_state(active_state)
+    ):
+        try:
+            from services import subdub_smart_language
+            language_probe = await subdub_smart_language.detect_smart_language(
+                audio_bytes,
+                duration_seconds=media_duration_seconds,
+                ffmpeg_path=frame_video_ffmpeg_path(),
+            )
+            active_state["subdub_smart_language_probe"] = language_probe
+            if language_probe.get("status") == "confident":
+                local_language_hint = str(language_probe.get("language") or "")
+                language = local_language_hint or language
+        except Exception:
+            active_state["subdub_smart_language_probe"] = {
+                "language": "auto", "status": "auto_fallback", "reason": "probe_failed",
+            }
     provider = str(ASR_PROVIDER or "auto").lower()
     errors = []
     provider_order = (
@@ -65895,7 +65920,7 @@ async def asr_transcribe_audio(
                     "provider": "deepgram",
                     "text": transcript,
                     "segments": segments,
-                    "language": "",
+                    "language": local_language_hint,
                     "duration_seconds": float(segments[-1]["end"] if segments else 0),
                     "detail": f"chars={len(transcript)}; segments={len(segments)}",
                 }
