@@ -66,3 +66,22 @@ def test_emitted_voice_vault_selection_keeps_profile_identity_after_list_changes
     text, _response_markup = query.message.replies[-1]
     assert "Fixture voice 102" in text
     assert conn.total_changes == before_click_writes
+
+
+def test_legacy_slot_callback_expires_instead_of_selecting_different_profile(voice_vault_runtime):
+    ns, route, conn = voice_vault_runtime
+    # This callback can remain in an already-sent Telegram message from before
+    # stable profile IDs were emitted. It has no identity beyond display slot 2.
+    legacy_callback = "music_quick|showroom|voice_profile_select_code:2"
+    conn.execute("DELETE FROM voice_profiles WHERE id=103")
+    conn.commit()
+    before_click_writes = conn.total_changes
+
+    query = CALLBACK_FIXTURE["_click"](route, legacy_callback)
+
+    text, markup = query.message.replies[-1]
+    assert "màn kho voice cũ đã hết hạn" in text.lower()
+    actual_callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+    assert "music_quick|showroom|voice_profile_select:102" in actual_callbacks
+    assert "Fixture voice 101" not in text and "Fixture voice 102" not in text
+    assert conn.total_changes == before_click_writes
