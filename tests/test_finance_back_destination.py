@@ -94,6 +94,7 @@ def _run_finance_back_callback():
         "clear_storage_addon_pending",
         "clear_memory_guided_pending",
         "clear_music_guided_pending",
+        "clear_pending_admin_tool_test",
     ):
         namespace[helper] = lambda *_args, **_kwargs: None
 
@@ -104,7 +105,7 @@ def _run_finance_back_callback():
         "localized_menu_content",
         "handle_menu_callback",
     ):
-        exec(compile(_function_source(helper), str(BOT_PATH), "exec"), namespace)
+        exec(compile(_function_source(helper), f"{BOT_PATH}:{helper}", "exec"), namespace)
 
     source_keyboard = namespace["finance_child_keyboard"]()
     back_callback = next(

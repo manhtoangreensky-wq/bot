@@ -74,6 +74,13 @@ class StorageAddonPendingResetOnStartTests(unittest.TestCase):
             "maybe_auto_grant_birthday_gift": noop_async,
             "asyncio": asyncio,
         }
+        for helper in (
+            "clear_pending_admin_tool_test", "clear_support_ticket_pending",
+            "clear_internal_archive_pending", "clear_storage_addon_pending",
+            "clear_translation_menu_pending", "clear_translation_session",
+            "clear_broadcast_lite_pending",
+        ):
+            scope.setdefault(helper, lambda *_args, **_kwargs: None)
         for name in (
             "storage_addon_pending_key",
             "set_storage_addon_pending",

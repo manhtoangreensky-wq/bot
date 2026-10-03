@@ -39,7 +39,7 @@ def _actual_function_source(source, name):
 
 
 def _load_actual_function(source, name, namespace):
-    exec(compile(_actual_function_source(source, name), "bot.py", "exec"), namespace)
+    exec(compile(_actual_function_source(source, name), f"bot.py:{name}", "exec"), namespace)
     return namespace[name]
 
 
@@ -98,6 +98,7 @@ class AdminTicketBackPaginationTest(unittest.TestCase):
             "support_category_label": lambda category: category,
             "list_support_tickets": fake_list_support_tickets,
             "get_support_ticket": lambda *_args, **_kwargs: ticket,
+            "clear_support_ticket_pending": lambda _uid: None,
             "support_ticket_admin_text": lambda _ticket: "ticket detail",
             "safe_edit_or_send": capture_edit,
         }
