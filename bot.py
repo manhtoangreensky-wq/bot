@@ -257096,7 +257096,7 @@ async def handle_video_dubbing_callback(
             lang=lang,
             callback_acknowledged=True,
         )
-    if not _subdub_background:
+    if not _subdub_background and action != "job_download":
         try:
             await query.answer()
         except Exception as error:
@@ -257581,7 +257581,11 @@ async def handle_video_dubbing_callback(
         job_id = _safe_int(value, _safe_int(state.get("task2_job_id"), 0))
         job = get_local_worker_job(job_id) if job_id else {}
         if not job or (str(job.get("user_id") or "") != str(uid) and not is_admin_user(uid)):
-            return await query.answer("Không tìm thấy job xử lý.", show_alert=True)
+            return await safe_edit_or_send(
+                query,
+                "Không tìm thấy job xử lý.",
+                reply_markup=video_dubbing_menu_keyboard(lang, origin),
+            )
         status = str(job.get("status") or "").lower()
         if status == "succeeded":
             return await safe_edit_or_send(query, video_dubbing_job_status_text(job, lang), reply_markup=video_dubbing_job_result_keyboard(lang))
