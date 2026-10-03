@@ -17,16 +17,18 @@ def replace_unfit_smart_cues(
     missing = set(missing_translation_cue_ids)
     replacements = []
     for item in chunks:
-        if not item.get("duration_aware_timing"):
+        uncertain = item.get("smart_attribution_uncertain") is True
+        if not item.get("duration_aware_timing") and not uncertain:
             continue
         cid = str(item.get("cue_id") or "")
         start, end = float(item.get("start") or 0), float(item.get("end") or 0)
         duration = float(item.get("fit_audio_duration") or item.get("audio_duration") or item.get("raw_audio_duration") or 0)
-        if cid not in missing and duration <= end - start + .001:
+        if cid not in missing and not uncertain and duration <= end - start + .001:
             continue
         if not cid or not all(math.isfinite(v) for v in (start, end, duration)) or start < 0 or end <= start:
             raise RuntimeError("smart_source_audio_invalid_window")
-        replacements.append((item, cid, start, end, "translation_missing" if cid in missing else "natural_audio_exceeds_window"))
+        reason = "speaker_attribution_uncertain" if uncertain else "translation_missing" if cid in missing else "natural_audio_exceeds_window"
+        replacements.append((item, cid, start, end, reason))
     evidence = {"smart_source_audio_cue_ids": [], "smart_source_audio_reasons": {},
                 "smart_source_audio_cue_count": 0, "smart_dubbed_voice_count": len({
                     str(c.get("tts_voice_id") or c.get("voice_id") or "") for c in chunks

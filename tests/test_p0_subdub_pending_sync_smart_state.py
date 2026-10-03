@@ -327,6 +327,7 @@ def test_smart_generic_acoustic_keeps_detected_speakers_without_strict_multi_evi
     assert len(prepared["acoustic_classifications"]) == count
     assert len({segment["speaker_id"] for segment in prepared["source_segments"]}) == count
     assert prepared["state"]["auto_smart_generic_acoustic"] is True
+    assert prepared["state"]["smart_attribution_uncertain_cue_ids"] == [f"cue-{i}" for i in range(1, count)]
     assert "multi_acoustic_speaker_count" not in prepared["state"]
     assert "acoustic" not in captured["sidecar"]
 
