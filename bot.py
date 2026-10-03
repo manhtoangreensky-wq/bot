@@ -249895,6 +249895,15 @@ async def video_dubbing_prepare_subtitles(
                     and acoustic_failure["multi_acoustic_failure_code"] in {
                         "fixed_vocal_speaker_count_unstable",
                         "fixed_vocal_view_unstable",
+                        "fixed_vocal_smart_speech_view_unstable",
+                        "fixed_vocal_smart_speech_count_unstable",
+                        "fixed_vocal_smart_speech_partition_unstable",
+                        "fixed_vocal_gender_view_unstable",
+                        "fixed_vocal_gender_allocation_unstable",
+                        "fixed_vocal_gender_allocation_invalid",
+                        "fixed_vocal_gender_partition_unstable",
+                        "fixed_vocal_gender_evidence_invalid",
+                        "fixed_vocal_gender_ambiguity_invalid",
                         "fixed_vocal_window_support_invalid",
                         "acoustic_unit_count_invalid",
                     }
