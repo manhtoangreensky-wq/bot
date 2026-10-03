@@ -1,12 +1,175 @@
 """Smart-only recovery on speech windows after an unstable whole-vocal view."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 
 from services import subdub_multi_speaker_embedding_onnx as engine
 from services import subdub_multi_speaker_gender_onnx as gender
 from services import subdub_speaker_cast as cast
 from services import subdub_two_speaker_gender_onnx as stereo
+
+
+def _source_gender_consensus(evidence: dict) -> dict | None:
+    try:
+        full, windows = evidence["full"], evidence["windows"]
+        if not windows or len(windows) + 1 > gender.MAX_CUES_PER_SPEAKER:
+            return None
+        rows = [full, *windows]
+        for row in rows:
+            scores = np.asarray([row["male_score"], row["female_score"]], dtype=np.float64)
+            if (not np.isfinite(scores).all() or np.any(scores < 0)
+                    or scores.sum() <= 0 or scores[0] == scores[1]):
+                return None
+        male, female = float(full["male_score"]), float(full["female_score"])
+        if abs(male - female) / (male + female) < gender.MIN_PANN_SCORE_MARGIN:
+            return None
+        classification, _rows = gender._aggregate_one_gender_result("source_run", rows)
+        register = "low" if male > female else "high"
+        dominance = max(classification["male_votes"], classification["female_votes"]) / len(rows)
+        if classification["voice_register"] != register or dominance < stereo.MIN_VOTE_DOMINANCE:
+            return None
+        # Preserve a strongly supported opposite voice rather than smoothing a real turn.
+        for row in windows:
+            male, female = float(row["male_score"]), float(row["female_score"])
+            opposite = female if register == "low" else male
+            if opposite / (male + female) >= gender.MULTI_GENDER_STRONG_CONFIDENCE:
+                return None
+        return classification
+    except (KeyError, TypeError, ValueError, cast.AutoCastManualRequired):
+        return None
+
+
+def _apply_source_gender_evidence(authority: dict, views: dict, evidence: dict) -> dict:
+    labels = np.asarray(authority["labels"], dtype=np.int64).copy()
+    registers = list(authority["speaker_registers"])
+    count = int(authority["speaker_count"])
+    windows = views["plan"]["windows"]
+    verified = {run: classification for run, item in evidence.items()
+                if (classification := _source_gender_consensus(item)) is not None}
+    result = dict(authority)
+    register_confidences = list(authority["speaker_register_confidences"])
+    # A consistently evidenced person changes register, not identity or speaker count.
+    for label in range(count):
+        members = [window for window in windows if labels[window["window_index"]] == label]
+        votes = [verified[window["run_index"]] for window in members if window["run_index"] in verified]
+        if (len(votes) < stereo.MIN_CLASSIFIED_CUES_PER_SPEAKER
+                or len(votes) / len(members) < engine.SPEECH_PARTITION_MIN_AGREEMENT):
+            continue
+        values = [vote["voice_register"] for vote in votes]
+        register = max(set(values), key=values.count)
+        if values.count(register) / len(values) >= engine.SPEECH_PARTITION_MIN_AGREEMENT:
+            if registers[label] != register:
+                registers[label] = register
+                register_confidences[label] = min(vote["confidence"] for vote in votes if vote["voice_register"] == register)
+    if count > 1:
+        base = np.asarray(views["base_embeddings"], dtype=np.float64)
+        shifted = np.asarray(views["shifted_embeddings"], dtype=np.float64)
+        aggregate = base + shifted
+        centroids = np.stack([aggregate[labels == label].mean(axis=0) for label in range(count)])
+        norms = np.linalg.norm(centroids, axis=1)
+        if not np.isfinite(norms).all() or np.any(norms <= 0):
+            return result
+        centroids /= norms[:, None]
+        for window in windows:
+            index = int(window["window_index"])
+            classification = verified.get(window["run_index"])
+            if not classification or registers[labels[index]] == classification["voice_register"]:
+                continue
+            eligible = [label for label, register in enumerate(registers)
+                        if register == classification["voice_register"]]
+            if not eligible:
+                continue
+            base_label = eligible[int(np.argmax(base[index] @ centroids[eligible].T))]
+            shift_label = eligible[int(np.argmax(shifted[index] @ centroids[eligible].T))]
+            if base_label == shift_label:
+                labels[index] = base_label
+        try:
+            engine._validate_cluster_support(labels, np.asarray(views["speech_seconds"]), count)
+        except (ValueError, cast.AutoCastManualRequired):
+            return result
+    result.update(labels=labels.tolist(), speaker_registers=registers, speaker_register_confidences=register_confidences,
+                  source_gender_verified_run_count=len(verified),
+                  source_gender_corrected_window_count=int(np.count_nonzero(labels != np.asarray(authority["labels"]))),
+                  source_gender_register_corrected=registers != list(authority["speaker_registers"]))
+    return result
+
+
+def _pann_source_run_evidence(vocal: np.ndarray, plan: dict, *, stereo_pcm_path: str,
+                              deadline_monotonic, stop_requested) -> dict:
+    if not stereo._CLASSIFIER_LOCK.acquire(blocking=False):
+        return {}
+    evidence = {}
+    try:
+        import onnxruntime as ort
+        stereo._ensure_active(deadline_monotonic, stop_requested)
+        model_paths = stereo._validated_model_paths()
+        regions, bounds = {}, {}
+        source_regions = {}
+        for region in plan["regions"]:
+            start, end = (int(round(float(region[key]) * engine.PCM_SAMPLE_RATE)) for key in ("start", "end"))
+            if not 0 <= start < end <= len(vocal):
+                return {}
+            regions[region["index"]] = vocal[start:end]
+            bounds[region["index"]] = (start, end)
+            source_regions[region["index"]] = region
+        source_scores, batch, batch_seconds = {}, {}, 0.0
+        for run in plan["runs"]:
+            run_windows = [w for w in plan["windows"] if w["run_index"] == run["run_index"]]
+            if len(run_windows) + 1 > gender.MAX_CUES_PER_SPEAKER:
+                continue
+            items = [source_regions[index] for index in run["region_indexes"]]
+            start, end = min(item["start"] for item in items), max(item["end"] for item in items)
+            if end - start > stereo.MAX_JOB_EVIDENCE_SECONDS:
+                continue
+            if batch and batch_seconds + end - start > stereo.MAX_JOB_EVIDENCE_SECONDS:
+                source_scores.update(stereo._infer_selected_cues(
+                    Path(stereo_pcm_path), batch, model_paths,
+                    deadline_monotonic=deadline_monotonic, stop_requested=stop_requested,
+                ))
+                batch, batch_seconds = {}, 0.0
+            batch[str(run["run_index"])] = [{"start": start, "end": end}]
+            batch_seconds += end - start
+        if batch:
+            source_scores.update(stereo._infer_selected_cues(
+                Path(stereo_pcm_path), batch, model_paths,
+                deadline_monotonic=deadline_monotonic, stop_requested=stop_requested,
+            ))
+        session = stereo._session(ort, model_paths[1])
+
+        def score(samples, start):
+            stereo._ensure_active(deadline_monotonic, stop_requested)
+            values = samples.astype(np.float32) / 32768.0
+            target = int(round(len(values) * stereo.PANN_SAMPLE_RATE / engine.PCM_SAMPLE_RATE))
+            if len(values) < 2 or target < 2:
+                raise ValueError("panns_signal_too_short")
+            signal = np.interp(np.arange(target) * engine.PCM_SAMPLE_RATE / stereo.PANN_SAMPLE_RATE,
+                               np.arange(len(values)), values).astype(np.float32)
+            scores = session.run(["clipwise_output"], {"input_values": signal.reshape(1, -1)})[0][0]
+            return {"start": float(start), "end": float(start) + len(values) / engine.PCM_SAMPLE_RATE,
+                    "male_score": float(max(scores[stereo._MALE_SPEECH_INDEX], scores[stereo._MALE_SINGING_INDEX])),
+                    "female_score": float(max(scores[stereo._FEMALE_SPEECH_INDEX], scores[stereo._FEMALE_SINGING_INDEX]))}
+
+        for run in plan["runs"]:
+            stereo._ensure_active(deadline_monotonic, stop_requested)
+            samples = engine._compact_run_samples(run, region_samples=regions, region_bounds=bounds)
+            run_windows = [w for w in plan["windows"] if w["run_index"] == run["run_index"]]
+            # Long continuous/overlapping speech is not a single-person gender authority.
+            if len(run_windows) + 1 > gender.MAX_CUES_PER_SPEAKER or str(run["run_index"]) not in source_scores:
+                continue
+            full = source_scores[str(run["run_index"])][0]
+            rows = []
+            for window in run_windows:
+                start, end = (int(round(float(window[key]) * engine.PCM_SAMPLE_RATE))
+                              for key in ("speech_start_seconds", "speech_end_seconds"))
+                rows.append(score(samples[start:end], window["source_position"]))
+            evidence[run["run_index"]] = {"full": full, "windows": rows}
+    except (ImportError, MemoryError, OSError, OverflowError, IndexError, KeyError, TypeError, ValueError, RuntimeError, cast.AutoCastManualRequired):
+        pass
+    finally:
+        stereo._CLASSIFIER_LOCK.release()
+    return evidence
 
 
 def _mixed_two_count_authority(base, shifted, aggregate, positions, speech, probs, reliable, partitions) -> dict:
@@ -237,6 +400,12 @@ def recover_speech_identity(
         views["window_samples"], deadline_monotonic=deadline_monotonic, stop_requested=stop_requested,
     )
     authority = build_speech_identity_authority(views, probabilities)
+    source_gender_evidence = _pann_source_run_evidence(
+        vocal_pcm, views["plan"], stereo_pcm_path=stereo_pcm_path,
+        deadline_monotonic=deadline_monotonic, stop_requested=stop_requested,
+    )
+    if source_gender_evidence:
+        authority = _apply_source_gender_evidence(authority, views, source_gender_evidence)
     count = int(authority["speaker_count"])
     mapped = engine.map_subsegment_clusters_to_regions(views["plan"], authority, minimum_speakers=1)
     units = [{"unit_index": index, "word_indexes": [index], "start": float(word["start"]),
@@ -259,6 +428,9 @@ def recover_speech_identity(
             "algorithm_version": engine.FIXED_VOCAL_ALGORITHM_VERSION,
             "smart_acoustic_generic": True, "smart_acoustic_classifications": classes,
             "smart_speech_identity_recovered": True,
+            "source_gender_verified_run_count": authority.get("source_gender_verified_run_count", 0),
+            "source_gender_corrected_window_count": authority.get("source_gender_corrected_window_count", 0),
+            "source_gender_register_corrected": authority.get("source_gender_register_corrected", False),
             "speaker_count_views": authority["speaker_count_views"],
             "speech_view_cosine_min": authority["view_cosine_min"],
             "speech_view_agreement": min(authority[k] for k in (
