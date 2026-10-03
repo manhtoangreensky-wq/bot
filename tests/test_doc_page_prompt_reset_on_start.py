@@ -71,6 +71,13 @@ class DocPagePromptResetOnStartTests(unittest.TestCase):
             "localized_main_menu_keyboard": lambda *_args: "main-keyboard",
             "maybe_auto_grant_birthday_gift": noop_async,
         }
+        for helper in (
+            "clear_pending_admin_tool_test", "clear_support_ticket_pending",
+            "clear_internal_archive_pending", "clear_storage_addon_pending",
+            "clear_translation_menu_pending", "clear_translation_session",
+            "clear_broadcast_lite_pending",
+        ):
+            scope.setdefault(helper, lambda *_args, **_kwargs: None)
         for name in (
             "doc_tool_pending_key",
             "get_doc_tool_pending",

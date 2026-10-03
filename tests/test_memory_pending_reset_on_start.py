@@ -81,6 +81,13 @@ class MemoryPendingResetOnStartTests(unittest.TestCase):
             "memory_notes_list_text": lambda *_args: "empty results",
             "memory_notes_list_keyboard": lambda *_args: "empty-results-keyboard",
         }
+        for helper in (
+            "clear_pending_admin_tool_test", "clear_support_ticket_pending",
+            "clear_internal_archive_pending", "clear_storage_addon_pending",
+            "clear_translation_menu_pending", "clear_translation_session",
+            "clear_broadcast_lite_pending",
+        ):
+            scope.setdefault(helper, lambda *_args, **_kwargs: None)
         for name in (
             "memory_guided_pending_key",
             "set_memory_guided_pending",

@@ -90,6 +90,7 @@ class BroadcastLiteStartPendingResetTests(unittest.TestCase):
                 "clear_cinematic_ad_pending", "clear_trend_video_flow_pending", "clear_trend_workflow_confirm_pending",
                 "clear_feedback_pending", "clear_image_menu_pending", "clear_internal_archive_pending",
                 "clear_memory_guided_pending", "clear_doc_tool_pending", "clear_storage_addon_pending",
+                "clear_pending_admin_tool_test", "clear_translation_session",
                 "clear_frame_video_state",
                 "clear_storyboard_state", "clear_developing_video_pending", "clear_product_context",
                 "clear_music_guided_pending", "clear_translation_menu_pending", "clear_video_editor_pending",
