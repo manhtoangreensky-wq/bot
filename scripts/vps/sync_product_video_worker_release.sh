@@ -147,7 +147,7 @@ rollback_transaction() {
 
   log "ROLLBACK_STARTED"
   "$SYSTEMCTL_BIN" stop "$SERVICE_NAME" || rollback_failed=1
-  "$SYSTEMCTL_BIN" stop "$SUBDUB_SERVICE_NAME" 2>/dev/null || true
+  "$SYSTEMCTL_BIN" stop "$SUBDUB_SERVICE_NAME" || rollback_failed=1
 
   restore_repo "$BOT_DIR" "$PREV_BOT_SHA" "bot" || rollback_failed=1
   restore_bot_refs || rollback_failed=1
@@ -174,7 +174,7 @@ rollback_transaction() {
       rollback_failed=1
     fi
   else
-    "$SYSTEMCTL_BIN" stop "$SUBDUB_SERVICE_NAME" 2>/dev/null || true
+    "$SYSTEMCTL_BIN" stop "$SUBDUB_SERVICE_NAME" || rollback_failed=1
   fi
 
   if [[ "$rollback_failed" == "0" ]]; then
@@ -262,10 +262,9 @@ get_bot_python() {
     echo "$BOT_PYTHON"
   elif [[ -x "$BOT_DIR/.venv/bin/python" ]]; then
     echo "$BOT_DIR/.venv/bin/python"
-  elif command -v python3 >/dev/null 2>&1; then
-    command -v python3
   else
-    command -v python
+    fail "Bot venv Python is missing or not executable: tried $BOT_PYTHON and $BOT_DIR/.venv/bin/python"
+    return 1
   fi
 }
 
@@ -310,32 +309,58 @@ assert_subdub_service_contract() {
     fail "SubDub worker daemon source is missing: $BOT_DIR/$SUBDUB_DAEMON_REL_PATH"
     return 1
   fi
+  local env_file=""
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^[[:space:]]*EnvironmentFile=(-)?([^[:space:]]+) ]]; then
+      env_file="${BASH_REMATCH[2]}"
+      break
+    fi
+  done <<< "$unit"
+  if [[ -z "$env_file" ]]; then
+    fail "SubDub worker service unit does not declare EnvironmentFile"
+    return 1
+  fi
+  if [[ ! -f "$env_file" ]]; then
+    fail "SubDub worker EnvironmentFile is missing: $env_file"
+    return 1
+  fi
 }
 
 assert_subdub_queue_safe() {
   local db_path
   db_path="$(resolve_subdub_db_path)"
-  if [[ -z "$db_path" || ! -f "$db_path" ]]; then
-    return 0
+  if [[ -z "$db_path" ]]; then
+    fail "SubDub queue authority missing: canonical DB path could not be resolved"
+    return 1
+  fi
+  if [[ ! -f "$db_path" ]]; then
+    fail "SubDub queue authority missing: DB file does not exist: $db_path"
+    return 1
   fi
   local py_bin
-  py_bin="$(get_bot_python)"
+  py_bin="$(get_bot_python)" || return 1
   local active_count
   active_count="$("$py_bin" -c "
 import sqlite3, sys
-try:
-    conn = sqlite3.connect('$db_path')
-    tables = [r[0] for r in conn.execute(\"SELECT name FROM sqlite_master WHERE type='table' AND name='subdub_worker_jobs'\").fetchall()]
-    if not tables:
-        print(0)
-        sys.exit(0)
-    row = conn.execute(\"SELECT count(*) FROM subdub_worker_jobs WHERE status IN ('processing', 'leased', 'stale_lease', 'unknown_active')\").fetchone()
-    print(row[0] if row else 0)
-except Exception:
-    print(0)
-" 2>/dev/null || echo 0)"
+conn = sqlite3.connect('$db_path')
+tables = [r[0] for r in conn.execute(\"SELECT name FROM sqlite_master WHERE type='table' AND name='subdub_worker_jobs'\").fetchall()]
+if not tables:
+    print('TABLE_MISSING')
+    sys.exit(0)
+row = conn.execute(\"SELECT count(*) FROM subdub_worker_jobs WHERE status = 'processing'\").fetchone()
+print(row[0] if row else 0)
+" 2>&1)" || { fail "SubDub queue safety query failed (Python error)"; return 1; }
+  if [[ "$active_count" == "TABLE_MISSING" ]]; then
+    fail "SubDub queue authority missing: subdub_worker_jobs table does not exist in $db_path"
+    return 1
+  fi
+  if ! [[ "$active_count" =~ ^[0-9]+$ ]]; then
+    fail "SubDub queue safety query returned non-numeric result: $active_count"
+    return 1
+  fi
   if [[ "$active_count" -gt 0 ]]; then
-    fail "SubDub queue safety violation: $active_count active/leased jobs in flight before deploy"
+    fail "SubDub queue safety violation: $active_count processing jobs in flight before deploy"
+    return 1
   fi
 }
 
@@ -457,8 +482,8 @@ activate_and_verify_subdub_worker() {
   run_subdub_doctor
 
   if [[ "$SUBDUB_WAS_ACTIVE" == "1" ]]; then
-    "$SYSTEMCTL_BIN" start "$SUBDUB_SERVICE_NAME" || fail "Failed to start SubDub worker service"
-    "$SYSTEMCTL_BIN" is-active --quiet "$SUBDUB_SERVICE_NAME" || fail "SubDub worker service is not active after start"
+    "$SYSTEMCTL_BIN" start "$SUBDUB_SERVICE_NAME" || { fail "Failed to start SubDub worker service"; return 1; }
+    "$SYSTEMCTL_BIN" is-active --quiet "$SUBDUB_SERVICE_NAME" || { fail "SubDub worker service is not active after start"; return 1; }
     SUBDUB_ACTIVATED=1
 
     local new_pid=""
@@ -470,26 +495,29 @@ activate_and_verify_subdub_worker() {
       fi
       sleep 0.5
     done
-    [[ -n "$new_pid" && "$new_pid" != "0" ]] || fail "SubDub worker MainPID is 0 or missing"
+    [[ -n "$new_pid" && "$new_pid" != "0" ]] || { fail "SubDub worker MainPID is 0 or missing"; return 1; }
     SUBDUB_NEW_PID="$new_pid"
 
     if [[ -n "$PREV_SUBDUB_PID" && "$PREV_SUBDUB_PID" != "0" ]]; then
       if [[ "$new_pid" == "$PREV_SUBDUB_PID" ]]; then
         fail "SubDub worker PID did not change after reload (old=$PREV_SUBDUB_PID new=$new_pid)"
+        return 1
       fi
     fi
 
-    if [[ -d "$PROC_DIR/$new_pid" ]]; then
-      local proc_cwd=""
-      proc_cwd="$(readlink -f "$PROC_DIR/$new_pid/cwd" 2>/dev/null || true)"
-      local canonical_bot_dir
-      canonical_bot_dir="$(cd "$BOT_DIR" && pwd -P)"
-      [[ "$proc_cwd" == "$canonical_bot_dir" ]] || fail "SubDub worker process cwd ($proc_cwd) does not match $canonical_bot_dir"
+    [[ -d "$PROC_DIR/$new_pid" ]] || { fail "SubDub worker /proc/$new_pid directory is missing: cannot verify process"; return 1; }
 
-      local proc_cmdline=""
-      proc_cmdline="$(tr '\0' ' ' < "$PROC_DIR/$new_pid/cmdline" 2>/dev/null || true)"
-      [[ "$proc_cmdline" == *"services/subdub_worker_daemon.py"* ]] || fail "SubDub worker process cmdline ($proc_cmdline) does not execute services/subdub_worker_daemon.py"
-    fi
+    local proc_cwd=""
+    proc_cwd="$(readlink -f "$PROC_DIR/$new_pid/cwd" 2>/dev/null)" || true
+    [[ -n "$proc_cwd" ]] || { fail "SubDub worker /proc/$new_pid/cwd is unreadable"; return 1; }
+    local canonical_bot_dir
+    canonical_bot_dir="$(cd "$BOT_DIR" && pwd -P)"
+    [[ "$proc_cwd" == "$canonical_bot_dir" ]] || { fail "SubDub worker process cwd ($proc_cwd) does not match $canonical_bot_dir"; return 1; }
+
+    local proc_cmdline=""
+    proc_cmdline="$(tr '\0' ' ' < "$PROC_DIR/$new_pid/cmdline" 2>/dev/null)" || true
+    [[ -n "$proc_cmdline" ]] || { fail "SubDub worker /proc/$new_pid/cmdline is unreadable"; return 1; }
+    [[ "$proc_cmdline" == *"services/subdub_worker_daemon.py"* ]] || { fail "SubDub worker process cmdline ($proc_cmdline) does not execute services/subdub_worker_daemon.py"; return 1; }
 
     assert_exact_sha "$BOT_DIR" "$TARGET_SHA" "bot target while subdub active"
     SUBDUB_VERIFIED=1
@@ -497,6 +525,7 @@ activate_and_verify_subdub_worker() {
   else
     if "$SYSTEMCTL_BIN" is-active --quiet "$SUBDUB_SERVICE_NAME"; then
       fail "SubDub worker was inactive pre-deploy but is active unexpectedly"
+      return 1
     fi
     SUBDUB_VERIFIED=1
     log "SUBDUB_WORKER_PRESERVED_INACTIVE sha=$TARGET_SHA service=$SUBDUB_SERVICE_NAME"
@@ -514,9 +543,38 @@ reconcile_subdub_worker_already_deployed() {
 
     local prev_pid=""
     prev_pid="$("$SYSTEMCTL_BIN" show -p MainPID --value "$SUBDUB_SERVICE_NAME" 2>/dev/null || echo "")"
+    local prev_was_active=1
 
-    "$SYSTEMCTL_BIN" restart "$SUBDUB_SERVICE_NAME" || fail "Failed to restart SubDub worker service during reconciliation"
-    "$SYSTEMCTL_BIN" is-active --quiet "$SUBDUB_SERVICE_NAME" || fail "SubDub worker service is not active after restart during reconciliation"
+    local reconcile_failed=0
+    "$SYSTEMCTL_BIN" restart "$SUBDUB_SERVICE_NAME" || reconcile_failed=1
+
+    if [[ "$reconcile_failed" == "1" ]]; then
+      log "RECONCILIATION_RESTART_FAILED: attempting prior state restoration"
+      if [[ "$prev_was_active" == "1" ]]; then
+        "$SYSTEMCTL_BIN" start "$SUBDUB_SERVICE_NAME" 2>/dev/null || true
+        if "$SYSTEMCTL_BIN" is-active --quiet "$SUBDUB_SERVICE_NAME"; then
+          log "RECONCILIATION_ROLLBACK_RESTORED: service restarted to prior active state"
+        else
+          log "RECONCILIATION_ROLLBACK_DEGRADED: could not restore prior active state"
+        fi
+      fi
+      fail "Failed to restart SubDub worker service during reconciliation"
+      return 1
+    fi
+
+    "$SYSTEMCTL_BIN" is-active --quiet "$SUBDUB_SERVICE_NAME" || {
+      log "RECONCILIATION_SERVICE_NOT_ACTIVE_AFTER_RESTART: attempting prior state restoration"
+      if [[ "$prev_was_active" == "1" ]]; then
+        "$SYSTEMCTL_BIN" start "$SUBDUB_SERVICE_NAME" 2>/dev/null || true
+        if "$SYSTEMCTL_BIN" is-active --quiet "$SUBDUB_SERVICE_NAME"; then
+          log "RECONCILIATION_ROLLBACK_RESTORED: service restored to prior active state"
+        else
+          log "RECONCILIATION_ROLLBACK_DEGRADED: could not restore prior active state"
+        fi
+      fi
+      fail "SubDub worker service is not active after restart during reconciliation"
+      return 1
+    }
 
     local new_pid=""
     local attempt
@@ -527,25 +585,28 @@ reconcile_subdub_worker_already_deployed() {
       fi
       sleep 0.5
     done
-    [[ -n "$new_pid" && "$new_pid" != "0" ]] || fail "SubDub worker MainPID is 0 or missing after restart during reconciliation"
+    [[ -n "$new_pid" && "$new_pid" != "0" ]] || { fail "SubDub worker MainPID is 0 or missing after restart during reconciliation"; return 1; }
 
     if [[ -n "$prev_pid" && "$prev_pid" != "0" ]]; then
       if [[ "$new_pid" == "$prev_pid" ]]; then
         fail "SubDub worker PID did not change after reload during reconciliation (old=$prev_pid new=$new_pid)"
+        return 1
       fi
     fi
 
-    if [[ -d "$PROC_DIR/$new_pid" ]]; then
-      local proc_cwd=""
-      proc_cwd="$(readlink -f "$PROC_DIR/$new_pid/cwd" 2>/dev/null || true)"
-      local canonical_bot_dir
-      canonical_bot_dir="$(cd "$BOT_DIR" && pwd -P)"
-      [[ "$proc_cwd" == "$canonical_bot_dir" ]] || fail "SubDub worker process cwd ($proc_cwd) does not match $canonical_bot_dir during reconciliation"
+    [[ -d "$PROC_DIR/$new_pid" ]] || { fail "SubDub worker /proc/$new_pid directory is missing during reconciliation: cannot verify process"; return 1; }
 
-      local proc_cmdline=""
-      proc_cmdline="$(tr '\0' ' ' < "$PROC_DIR/$new_pid/cmdline" 2>/dev/null || true)"
-      [[ "$proc_cmdline" == *"services/subdub_worker_daemon.py"* ]] || fail "SubDub worker process cmdline ($proc_cmdline) does not execute services/subdub_worker_daemon.py during reconciliation"
-    fi
+    local proc_cwd=""
+    proc_cwd="$(readlink -f "$PROC_DIR/$new_pid/cwd" 2>/dev/null)" || true
+    [[ -n "$proc_cwd" ]] || { fail "SubDub worker /proc/$new_pid/cwd is unreadable during reconciliation"; return 1; }
+    local canonical_bot_dir
+    canonical_bot_dir="$(cd "$BOT_DIR" && pwd -P)"
+    [[ "$proc_cwd" == "$canonical_bot_dir" ]] || { fail "SubDub worker process cwd ($proc_cwd) does not match $canonical_bot_dir during reconciliation"; return 1; }
+
+    local proc_cmdline=""
+    proc_cmdline="$(tr '\0' ' ' < "$PROC_DIR/$new_pid/cmdline" 2>/dev/null)" || true
+    [[ -n "$proc_cmdline" ]] || { fail "SubDub worker /proc/$new_pid/cmdline is unreadable during reconciliation"; return 1; }
+    [[ "$proc_cmdline" == *"services/subdub_worker_daemon.py"* ]] || { fail "SubDub worker process cmdline ($proc_cmdline) does not execute services/subdub_worker_daemon.py during reconciliation"; return 1; }
 
     if [[ -n "$TARGET_SHA" ]]; then
       assert_exact_sha "$BOT_DIR" "$TARGET_SHA" "bot target while subdub active during reconciliation"

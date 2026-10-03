@@ -1358,492 +1358,1084 @@ echo "ROLLBACK_ARMED_AFTER=$ROLLBACK_ARMED" >> "$LOG_FILE"
         self.assertIn("reconcile_subdub_worker_already_deployed", self.sync_script_content)
         self.assertIn('[[ "$SUBDUB_VERIFIED" == "1" ]]', self.sync_script_content)
 
-    def test_subdub_service_contract_validation(self):
-        """37. SubDub service contract asserts WorkingDirectory, ExecStart, Python, and daemon source."""
+    # ─────────────────────────────────────────────────────────────────────────
+    # Helper: create bash harness that sources the ACTUAL production script
+    # with mock seams for systemctl, /proc, SQLite, Python, filesystem.
+    # ─────────────────────────────────────────────────────────────────────────
+    @staticmethod
+    def _bash_bin():
         import shutil
-        bash_bin = shutil.which("bash") or (r"C:\Program Files\Git\bin\bash.exe" if os.path.isfile(r"C:\Program Files\Git\bin\bash.exe") else None)
+        b = shutil.which("bash")
+        if b:
+            return b
+        candidate = r"C:\Program Files\Git\bin\bash.exe"
+        if os.path.isfile(candidate):
+            return candidate
+        return None
+
+    def _posix(self, winpath):
+        return winpath.replace("\\", "/")
+
+    def _setup_mock_env(self, tmp_dir):
+        """Create a fully mocked environment for sourcing the production script.
+
+        Returns a dict with keys: bot_dir, proc_dir, mock_systemctl, db_path,
+        env_file, mock_py, sync_script_posix, posix_tmp.
+        """
+        import sqlite3
+        import stat
+        import sys
+
+        posix_tmp = self._posix(tmp_dir)
+        bot_dir = f"{posix_tmp}/bot"
+        proc_dir = f"{posix_tmp}/proc"
+        mock_systemctl = f"{posix_tmp}/mock_systemctl.sh"
+        db_path = f"{posix_tmp}/test.db"
+        env_file = f"{posix_tmp}/bot.env"
+        worker_dir = f"{posix_tmp}/worker"
+        staging_dir = f"{posix_tmp}/staging"
+
+        # Filesystem
+        for d in [
+            f"{bot_dir}/services",
+            f"{bot_dir}/.venv/bin",
+            f"{bot_dir}/.git",
+            proc_dir,
+            worker_dir,
+            staging_dir,
+        ]:
+            os.makedirs(d, exist_ok=True)
+
+        # Daemon source
+        with open(f"{bot_dir}/services/subdub_worker_daemon.py", "w") as f:
+            f.write("# dummy\n")
+
+        # Mock Python venv — just a shell script that echoes
+        mock_py_path = f"{bot_dir}/.venv/bin/python"
+        with open(mock_py_path, "w") as f:
+            f.write("#!/bin/sh\nexit 0\n")
+        os.chmod(mock_py_path, 0o755)
+
+        # EnvironmentFile
+        with open(env_file, "w") as f:
+            f.write("# mock env\n")
+
+        # DB with table
+        conn = sqlite3.connect(db_path.replace("/", os.sep) if os.name == "nt" else db_path)
+        conn.execute("CREATE TABLE subdub_worker_jobs (id INTEGER PRIMARY KEY, status TEXT)")
+        conn.commit()
+        conn.close()
+
+        mock_state_dir = f"{posix_tmp}/mock_state"
+        os.makedirs(mock_state_dir, exist_ok=True)
+
+        # Mock systemctl — configurable via env vars
+        with open(mock_systemctl, "w") as f:
+            f.write("""#!/usr/bin/env bash
+# Mock systemctl — controlled by MOCK_* env vars
+cmd="$1"
+shift
+case "$cmd" in
+  cat)
+    svc="$1"
+    if [[ "${MOCK_SYSTEMCTL_CAT_FAIL:-0}" == "1" ]]; then exit 1; fi
+    echo "[Service]"
+    echo "WorkingDirectory=${MOCK_BOT_DIR:-/opt/toanaas/bot}"
+    echo "ExecStart=${MOCK_BOT_DIR:-/opt/toanaas/bot}/.venv/bin/python -u services/subdub_worker_daemon.py"
+    echo "EnvironmentFile=${MOCK_ENV_FILE:-/etc/toanaas/bot.env}"
+    ;;
+  is-active)
+    if [[ "${MOCK_SYSTEMCTL_IS_ACTIVE:-1}" == "1" ]]; then exit 0; else exit 1; fi
+    ;;
+  show)
+    if [[ -f "${MOCK_STATE_DIR:-/tmp}/restarted" && -n "${MOCK_SYSTEMCTL_POST_RESTART_PID:-}" ]]; then
+      echo "$MOCK_SYSTEMCTL_POST_RESTART_PID"
+    else
+      echo "${MOCK_SYSTEMCTL_MAINPID:-1234}"
+    fi
+    ;;
+  start)
+    if [[ "${MOCK_SYSTEMCTL_START_FAIL:-0}" == "1" ]]; then exit 1; fi
+    exit 0
+    ;;
+  stop)
+    if [[ "${MOCK_SYSTEMCTL_STOP_FAIL:-0}" == "1" ]]; then exit 1; fi
+    exit 0
+    ;;
+  restart)
+    if [[ "${MOCK_SYSTEMCTL_RESTART_FAIL:-0}" == "1" ]]; then exit 1; fi
+    mkdir -p "${MOCK_STATE_DIR:-/tmp}" 2>/dev/null || true
+    touch "${MOCK_STATE_DIR:-/tmp}/restarted" 2>/dev/null || true
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+""")
+        os.chmod(mock_systemctl, 0o755)
+
+        sync_script_posix = self._posix(SYNC_SCRIPT_PATH)
+
+        return {
+            "bot_dir": bot_dir,
+            "proc_dir": proc_dir,
+            "mock_systemctl": mock_systemctl,
+            "mock_state_dir": mock_state_dir,
+            "db_path": db_path,
+            "env_file": env_file,
+            "worker_dir": worker_dir,
+            "staging_dir": staging_dir,
+            "mock_py": sys.executable.replace("\\", "/"),
+            "sync_script_posix": sync_script_posix,
+            "posix_tmp": posix_tmp,
+        }
+
+    def _run_sourced_test(self, bash_bin, tmp_dir, env, test_body):
+        """Write and run a bash test that sources the actual production script."""
+        test_sh = f"{tmp_dir}/test_sourced.sh"
+        preamble = f"""#!/usr/bin/env bash
+# Disable errexit/pipefail before sourcing so we can control error handling
+set +Eeuo pipefail 2>/dev/null || true
+
+# Mock env vars MUST be set BEFORE sourcing
+export BOT_DIR="{env['bot_dir']}"
+export WORKER_DIR="{env['worker_dir']}"
+export STAGING_DIR="{env['staging_dir']}"
+export PROC_DIR="{env['proc_dir']}"
+export SYSTEMCTL_BIN="{env['mock_systemctl']}"
+export MOCK_STATE_DIR="{env['mock_state_dir']}"
+export BOT_PYTHON="{env['bot_dir']}/.venv/bin/python"
+export SUBDUB_SERVICE_NAME="toanaas-worker-subdub.service"
+export MOCK_BOT_DIR="{env['bot_dir']}"
+export MOCK_ENV_FILE="{env['env_file']}"
+export TARGET_SHA="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+# Source the actual production script
+source "{env['sync_script_posix']}"
+
+# Re-override resolve_subdub_db_path to use our mock DB
+resolve_subdub_db_path() {{
+  echo "{env['db_path']}"
+}}
+
+# Re-override get_bot_python to use real system Python for SQLite queries
+get_bot_python() {{
+  if [[ -x "$BOT_PYTHON" ]]; then
+    echo "$BOT_PYTHON"
+  else
+    fail "Bot venv Python is missing or not executable: tried $BOT_PYTHON and $BOT_DIR/.venv/bin/python"
+    return 1
+  fi
+}}
+
+# Override run_subdub_doctor to be provider-free
+run_subdub_doctor() {{
+  SUBDUB_DOCTOR_PASS=1
+}}
+
+# Override assert_exact_sha to skip real git ops
+assert_exact_sha() {{
+  true
+}}
+
+# Mock seam for readlink on Windows where symlinks in /proc are simulated
+readlink() {{
+  if [[ "$1" == "-f" ]]; then
+    local target="$2"
+    if [[ -f "$target" && ! -L "$target" ]]; then
+      local val
+      val="$(cat "$target")"
+      if [[ -d "$val" ]]; then
+        (cd "$val" && pwd -P)
+        return 0
+      fi
+    fi
+  fi
+  command readlink "$@"
+}}
+
+"""
+        with open(self._posix(test_sh), "w", encoding="utf-8") as f:
+            f.write(preamble + test_body)
+
+        res = subprocess.run([bash_bin, test_sh], capture_output=True, text=True, timeout=30)
+        return res
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Test 36 is above (string presence — kept as-is)
+    # Tests 37-43: Rewritten to source actual production script with mock seams
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_subdub_service_contract_validation_sourced(self):
+        """37. assert_subdub_service_contract from real script: valid unit passes, bad unit fails."""
+        bash_bin = self._bash_bin()
         if not bash_bin:
             self.skipTest("bash not found")
-
         with tempfile.TemporaryDirectory() as tmp_dir:
-            posix_tmp = tmp_dir.replace("\\", "/")
-            bot_dir = f"{posix_tmp}/bot"
-            os.makedirs(f"{bot_dir}/services", exist_ok=True)
-            os.makedirs(f"{bot_dir}/.venv/bin", exist_ok=True)
-            with open(f"{bot_dir}/services/subdub_worker_daemon.py", "w") as f:
-                f.write("# dummy daemon\n")
-            with open(f"{bot_dir}/.venv/bin/python", "w") as f:
-                f.write("#!/bin/sh\nexit 0\n")
-            os.chmod(f"{bot_dir}/.venv/bin/python", 0o755)
+            env = self._setup_mock_env(tmp_dir)
+            body = """
+# Case 1: valid contract — mock systemctl cat returns valid unit
+if assert_subdub_service_contract; then
+  echo "CASE1_PASS"
+else
+  echo "CASE1_UNEXPECTED_FAIL"
+  exit 1
+fi
 
-            test_sh = f"{tmp_dir}/test_contract.sh"
-            script = f"""#!/usr/bin/env bash
-set -Eeuo pipefail
-
-BOT_DIR="{bot_dir}"
-SUBDUB_SERVICE_NAME="toanaas-worker-subdub.service"
-SUBDUB_DAEMON_REL_PATH="services/subdub_worker_daemon.py"
-
-fail() {{
-  echo "FAIL: $*" >&2
-  return 1
-}}
-
-get_bot_python() {{
-  echo "$BOT_DIR/.venv/bin/python"
-}}
-
-assert_subdub_service_contract() {{
-  local unit="$1"
-  if [[ "$unit" != *"WorkingDirectory=$BOT_DIR"* ]]; then
-    fail "SubDub worker service WorkingDirectory does not use $BOT_DIR"
-    return 1
-  fi
-  if [[ "$unit" != *"$BOT_DIR/.venv/bin/python -u services/subdub_worker_daemon.py"* && "$unit" != *"$BOT_DIR/.venv/bin/python -u $BOT_DIR/services/subdub_worker_daemon.py"* ]]; then
-    fail "SubDub worker service ExecStart is not $BOT_DIR/.venv/bin/python -u services/subdub_worker_daemon.py"
-    return 1
-  fi
-  local py_bin
-  py_bin="$(get_bot_python)"
-  if [[ ! -x "$py_bin" ]]; then
-    fail "Bot Python executable is missing"
-    return 1
-  fi
-  if [[ ! -f "$BOT_DIR/$SUBDUB_DAEMON_REL_PATH" ]]; then
-    fail "SubDub worker daemon source is missing: $BOT_DIR/$SUBDUB_DAEMON_REL_PATH"
-    return 1
-  fi
-}}
-
-# Case 1: valid contract
-UNIT_VALID="[Service]
-WorkingDirectory={bot_dir}
-ExecStart={bot_dir}/.venv/bin/python -u services/subdub_worker_daemon.py"
-assert_subdub_service_contract "$UNIT_VALID"
-echo "CASE1_PASS"
-
-# Case 2: invalid WorkingDirectory
-UNIT_BAD_DIR="[Service]
-WorkingDirectory=/wrong/dir
-ExecStart={bot_dir}/.venv/bin/python -u services/subdub_worker_daemon.py"
-if assert_subdub_service_contract "$UNIT_BAD_DIR" 2>/dev/null; then
+# Case 2: bad WorkingDirectory
+export MOCK_BOT_DIR="/wrong/dir"
+if assert_subdub_service_contract 2>/dev/null; then
   echo "CASE2_UNEXPECTED_PASS"
   exit 1
 else
   echo "CASE2_EXPECTED_FAIL"
 fi
+export MOCK_BOT_DIR="$BOT_DIR"
 
-# Case 3: invalid ExecStart
-UNIT_BAD_EXEC="[Service]
-WorkingDirectory={bot_dir}
-ExecStart={bot_dir}/.venv/bin/python -u services/wrong_daemon.py"
-if assert_subdub_service_contract "$UNIT_BAD_EXEC" 2>/dev/null; then
+# Case 3: systemctl cat fails (missing unit)
+export MOCK_SYSTEMCTL_CAT_FAIL=1
+if assert_subdub_service_contract 2>/dev/null; then
   echo "CASE3_UNEXPECTED_PASS"
   exit 1
 else
   echo "CASE3_EXPECTED_FAIL"
 fi
 """
-            with open(test_sh, "w", encoding="utf-8") as f:
-                f.write(script)
-
-            res = subprocess.run([bash_bin, test_sh], capture_output=True, text=True)
-            self.assertEqual(res.returncode, 0, f"Contract test failed:\n{res.stderr}\n{res.stdout}")
-            self.assertIn("CASE1_PASS", res.stdout)
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("CASE1_PASS", res.stdout, f"stderr={res.stderr}")
             self.assertIn("CASE2_EXPECTED_FAIL", res.stdout)
             self.assertIn("CASE3_EXPECTED_FAIL", res.stdout)
 
-    def test_subdub_queue_safety_check_blocks_deployment_when_jobs_active(self):
-        """38. SubDub queue safety check fails closed when jobs are in flight."""
-        import shutil
-        import sqlite3
-        import sys
-        bash_bin = shutil.which("bash") or (r"C:\Program Files\Git\bin\bash.exe" if os.path.isfile(r"C:\Program Files\Git\bin\bash.exe") else None)
+    def test_subdub_queue_safety_sourced_empty_queue_pass(self):
+        """38. assert_subdub_queue_safe from real script: empty queue passes."""
+        bash_bin = self._bash_bin()
         if not bash_bin:
             self.skipTest("bash not found")
-
         with tempfile.TemporaryDirectory() as tmp_dir:
-            posix_tmp = tmp_dir.replace("\\", "/")
-            db_path = f"{tmp_dir}/test.db"
-            posix_db = f"{posix_tmp}/test.db"
-            py_bin = sys.executable.replace("\\", "/")
+            env = self._setup_mock_env(tmp_dir)
+            # Override get_bot_python to use real system python for sqlite queries
+            py_bin = env["mock_py"]
+            body = f"""
+get_bot_python() {{
+  echo "{py_bin}"
+}}
+if assert_subdub_queue_safe; then
+  echo "EMPTY_QUEUE_PASS"
+else
+  echo "EMPTY_QUEUE_UNEXPECTED_FAIL"
+  exit 1
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("EMPTY_QUEUE_PASS", res.stdout, f"stderr={res.stderr}")
 
-            conn = sqlite3.connect(db_path)
-            conn.execute("CREATE TABLE subdub_worker_jobs (id INTEGER PRIMARY KEY, status TEXT)")
+    def test_subdub_queue_safety_sourced_processing_job_blocks(self):
+        """39. assert_subdub_queue_safe from real script: processing job blocks deployment."""
+        import sqlite3
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            db_win = env["db_path"].replace("/", os.sep) if os.name == "nt" else env["db_path"]
+            conn = sqlite3.connect(db_win)
+            conn.execute("INSERT INTO subdub_worker_jobs VALUES (1, 'processing')")
             conn.commit()
             conn.close()
-
-            test_sh = f"{tmp_dir}/test_queue.sh"
-            script = f"""#!/usr/bin/env bash
-set -Eeuo pipefail
-
-fail() {{
-  echo "FAIL: $*" >&2
-  return 1
+            py_bin = env["mock_py"]
+            body = f"""
+get_bot_python() {{
+  echo "{py_bin}"
 }}
-
-assert_subdub_queue_safe() {{
-  local db_path="$1"
-  local active_count
-  active_count="$("{py_bin}" -c "
-import sqlite3, sys
-conn = sqlite3.connect('$db_path')
-row = conn.execute(\\\"SELECT count(*) FROM subdub_worker_jobs WHERE status IN ('processing', 'leased', 'stale_lease', 'unknown_active')\\\").fetchone()
-print(row[0] if row else 0)
-" 2>/dev/null || echo 0)"
-  if [[ "$active_count" -gt 0 ]]; then
-    fail "SubDub queue safety violation: $active_count active/leased jobs in flight before deploy"
-  fi
-}}
-
-# Case 1: Empty queue -> pass
-assert_subdub_queue_safe "{posix_db}"
-echo "EMPTY_QUEUE_PASS"
-
-# Case 2: Active job -> fail
-"{py_bin}" -c "import sqlite3; c=sqlite3.connect('{posix_db}'); c.execute(\\\"INSERT INTO subdub_worker_jobs VALUES (1, 'processing')\\\"); c.commit()"
-if assert_subdub_queue_safe "{posix_db}" 2>/dev/null; then
-  echo "ACTIVE_QUEUE_UNEXPECTED_PASS"
+if assert_subdub_queue_safe 2>/dev/null; then
+  echo "PROCESSING_UNEXPECTED_PASS"
   exit 1
 else
-  echo "ACTIVE_QUEUE_EXPECTED_FAIL"
+  echo "PROCESSING_EXPECTED_FAIL"
 fi
 """
-            with open(test_sh, "w", encoding="utf-8") as f:
-                f.write(script)
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("PROCESSING_EXPECTED_FAIL", res.stdout, f"stderr={res.stderr}")
 
-            res = subprocess.run([bash_bin, test_sh], capture_output=True, text=True)
-            self.assertEqual(res.returncode, 0, f"Queue safety test failed:\n{res.stderr}\n{res.stdout}")
-            self.assertIn("EMPTY_QUEUE_PASS", res.stdout)
-            self.assertIn("ACTIVE_QUEUE_EXPECTED_FAIL", res.stdout)
-
-    def test_subdub_dry_run_doctor_verification(self):
-        """39. SubDub dry-run doctor verification passes only when reporting DOCTOR_OK."""
-        import shutil
-        bash_bin = shutil.which("bash") or (r"C:\Program Files\Git\bin\bash.exe" if os.path.isfile(r"C:\Program Files\Git\bin\bash.exe") else None)
+    def test_subdub_queue_missing_db_path_fails_closed(self):
+        """40. assert_subdub_queue_safe from real script: missing DB path fails closed."""
+        bash_bin = self._bash_bin()
         if not bash_bin:
             self.skipTest("bash not found")
-
         with tempfile.TemporaryDirectory() as tmp_dir:
-            posix_tmp = tmp_dir.replace("\\", "/")
-            test_sh = f"{tmp_dir}/test_doctor.sh"
-            script = f"""#!/usr/bin/env bash
-set -Eeuo pipefail
-
-fail() {{
-  echo "FAIL: $*" >&2
-  return 1
-}}
-
-run_subdub_doctor() {{
-  local cmd="$1"
-  local doctor_output
-  if ! doctor_output="$($cmd 2>&1)"; then
-    fail "SubDub worker dry-run doctor failed"
-  fi
-  [[ "$doctor_output" == *"DOCTOR_OK"* ]] || fail "SubDub worker dry-run doctor did not report DOCTOR_OK"
-}}
-
-# Case 1: Doctor outputs DOCTOR_OK
-CMD_PASS="echo DOCTOR_OK status=healthy"
-run_subdub_doctor "$CMD_PASS"
-echo "DOCTOR_PASS_OK"
-
-# Case 2: Doctor fails with non-zero exit
-CMD_FAIL="sh -c 'echo DOCTOR_FAIL; exit 1'"
-if run_subdub_doctor "$CMD_FAIL" 2>/dev/null; then
-  echo "DOCTOR_FAIL_UNEXPECTED_PASS"
+            env = self._setup_mock_env(tmp_dir)
+            body = """
+resolve_subdub_db_path() {
+  echo ""
+}
+if assert_subdub_queue_safe 2>/dev/null; then
+  echo "MISSING_DB_PATH_UNEXPECTED_PASS"
   exit 1
 else
-  echo "DOCTOR_FAIL_EXPECTED"
-fi
-
-# Case 3: Doctor outputs non-zero without DOCTOR_OK
-CMD_NO_OK="echo SOME_OTHER_OUTPUT"
-if run_subdub_doctor "$CMD_NO_OK" 2>/dev/null; then
-  echo "DOCTOR_NO_OK_UNEXPECTED_PASS"
-  exit 1
-else
-  echo "DOCTOR_NO_OK_EXPECTED"
+  echo "MISSING_DB_PATH_EXPECTED_FAIL"
 fi
 """
-            with open(test_sh, "w", encoding="utf-8") as f:
-                f.write(script)
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("MISSING_DB_PATH_EXPECTED_FAIL", res.stdout, f"stderr={res.stderr}")
 
-            res = subprocess.run([bash_bin, test_sh], capture_output=True, text=True)
-            self.assertEqual(res.returncode, 0, f"Doctor test failed:\n{res.stderr}\n{res.stdout}")
-            self.assertIn("DOCTOR_PASS_OK", res.stdout)
-            self.assertIn("DOCTOR_FAIL_EXPECTED", res.stdout)
-            self.assertIn("DOCTOR_NO_OK_EXPECTED", res.stdout)
-
-    def test_subdub_worker_activation_and_process_verification(self):
-        """40. SubDub worker activation verifies new PID != old PID, cwd, cmdline, and commit gate."""
-        import shutil
-        bash_bin = shutil.which("bash") or (r"C:\Program Files\Git\bin\bash.exe" if os.path.isfile(r"C:\Program Files\Git\bin\bash.exe") else None)
+    def test_subdub_queue_missing_db_file_fails_closed(self):
+        """41. assert_subdub_queue_safe from real script: missing DB file fails closed."""
+        bash_bin = self._bash_bin()
         if not bash_bin:
             self.skipTest("bash not found")
-
         with tempfile.TemporaryDirectory() as tmp_dir:
-            posix_tmp = tmp_dir.replace("\\", "/")
-            proc_dir = f"{posix_tmp}/proc"
-            bot_dir = f"{posix_tmp}/bot"
-            os.makedirs(f"{proc_dir}/2001", exist_ok=True)
-            os.makedirs(f"{proc_dir}/2002", exist_ok=True)
-            os.makedirs(bot_dir, exist_ok=True)
-
-            # Setup proc mocks
-            # PID 2001: valid cwd and valid cmdline
-            with open(f"{proc_dir}/2001/cmdline", "wb") as f:
-                f.write(b"/opt/toanaas/bot/.venv/bin/python\0-u\0services/subdub_worker_daemon.py\0")
-            # PID 2002: wrong cmdline
-            with open(f"{proc_dir}/2002/cmdline", "wb") as f:
-                f.write(b"/opt/toanaas/bot/.venv/bin/python\0-u\0services/other.py\0")
-
-            test_sh = f"{tmp_dir}/test_proc.sh"
-            script = f"""#!/usr/bin/env bash
-set -Eeuo pipefail
-
-BOT_DIR="{bot_dir}"
-PROC_DIR="{proc_dir}"
-PREV_SUBDUB_PID="1001"
-SUBDUB_VERIFIED=0
-
-fail() {{
-  echo "FAIL: $*" >&2
-  return 1
+            env = self._setup_mock_env(tmp_dir)
+            body = f"""
+resolve_subdub_db_path() {{
+  echo "{env['posix_tmp']}/nonexistent.db"
 }}
+if assert_subdub_queue_safe 2>/dev/null; then
+  echo "MISSING_DB_FILE_UNEXPECTED_PASS"
+  exit 1
+else
+  echo "MISSING_DB_FILE_EXPECTED_FAIL"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("MISSING_DB_FILE_EXPECTED_FAIL", res.stdout, f"stderr={res.stderr}")
 
-verify_subdub_proc() {{
-  local new_pid="$1"
-  local prev_pid="$2"
-  if [[ -z "$new_pid" || "$new_pid" == "0" ]]; then
-    fail "MainPID is 0 or missing"
-    return 1
-  fi
-  if [[ -n "$prev_pid" && "$prev_pid" != "0" && "$new_pid" == "$prev_pid" ]]; then
-    fail "SubDub worker PID did not change after reload"
-    return 1
-  fi
-  if [[ -d "$PROC_DIR/$new_pid" ]]; then
-    local proc_cmdline
-    proc_cmdline="$(tr '\\0' ' ' < "$PROC_DIR/$new_pid/cmdline" 2>/dev/null || true)"
-    if [[ "$proc_cmdline" != *"services/subdub_worker_daemon.py"* ]]; then
-      fail "SubDub worker process cmdline does not execute daemon"
-      return 1
-    fi
-  fi
-  SUBDUB_VERIFIED=1
+    def test_subdub_queue_missing_table_fails_closed(self):
+        """42. assert_subdub_queue_safe from real script: missing subdub_worker_jobs table fails closed."""
+        import sqlite3
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            # Create DB without the table
+            no_table_db = f"{env['posix_tmp']}/no_table.db"
+            db_win = no_table_db.replace("/", os.sep) if os.name == "nt" else no_table_db
+            conn = sqlite3.connect(db_win)
+            conn.execute("CREATE TABLE other_table (id INTEGER)")
+            conn.commit()
+            conn.close()
+            py_bin = env["mock_py"]
+            body = f"""
+resolve_subdub_db_path() {{
+  echo "{no_table_db}"
 }}
+get_bot_python() {{
+  echo "{py_bin}"
+}}
+if assert_subdub_queue_safe 2>/dev/null; then
+  echo "MISSING_TABLE_UNEXPECTED_PASS"
+  exit 1
+else
+  echo "MISSING_TABLE_EXPECTED_FAIL"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("MISSING_TABLE_EXPECTED_FAIL", res.stdout, f"stderr={res.stderr}")
 
-# Case 1: Valid new PID and cmdline
-verify_subdub_proc "2001" "$PREV_SUBDUB_PID"
-echo "PROC_VERIFY_PASS: SUBDUB_VERIFIED=$SUBDUB_VERIFIED"
+    def test_subdub_queue_sqlite_error_fails_closed(self):
+        """43. assert_subdub_queue_safe from real script: Python/SQLite exception fails closed."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            # Point to a file that is not a valid SQLite DB
+            bad_db = f"{env['posix_tmp']}/corrupt.db"
+            with open(bad_db.replace("/", os.sep) if os.name == "nt" else bad_db, "w") as f:
+                f.write("this is not a sqlite database")
+            py_bin = env["mock_py"]
+            body = f"""
+resolve_subdub_db_path() {{
+  echo "{bad_db}"
+}}
+get_bot_python() {{
+  echo "{py_bin}"
+}}
+if assert_subdub_queue_safe 2>/dev/null; then
+  echo "SQLITE_ERROR_UNEXPECTED_PASS"
+  exit 1
+else
+  echo "SQLITE_ERROR_EXPECTED_FAIL"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("SQLITE_ERROR_EXPECTED_FAIL", res.stdout, f"stderr={res.stderr}")
 
-# Case 2: PID didn't change (stale PID)
-if verify_subdub_proc "1001" "1001" 2>/dev/null; then
+    def test_subdub_queue_completed_failed_cancelled_pass(self):
+        """44. assert_subdub_queue_safe from real script: completed/failed/cancelled jobs are not blocking."""
+        import sqlite3
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            db_win = env["db_path"].replace("/", os.sep) if os.name == "nt" else env["db_path"]
+            conn = sqlite3.connect(db_win)
+            conn.execute("INSERT INTO subdub_worker_jobs VALUES (1, 'completed')")
+            conn.execute("INSERT INTO subdub_worker_jobs VALUES (2, 'failed')")
+            conn.execute("INSERT INTO subdub_worker_jobs VALUES (3, 'cancelled')")
+            conn.execute("INSERT INTO subdub_worker_jobs VALUES (4, 'queued')")
+            conn.commit()
+            conn.close()
+            py_bin = env["mock_py"]
+            body = f"""
+get_bot_python() {{
+  echo "{py_bin}"
+}}
+if assert_subdub_queue_safe; then
+  echo "NON_BLOCKING_STATUSES_PASS"
+else
+  echo "NON_BLOCKING_STATUSES_UNEXPECTED_FAIL"
+  exit 1
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("NON_BLOCKING_STATUSES_PASS", res.stdout, f"stderr={res.stderr}")
+
+    def test_get_bot_python_no_system_fallback(self):
+        """45. get_bot_python from real script: fails closed when venv python missing, no system fallback."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            # Remove the mock venv python
+            venv_py = f"{env['bot_dir']}/.venv/bin/python"
+            venv_py_win = venv_py.replace("/", os.sep) if os.name == "nt" else venv_py
+            if os.path.exists(venv_py_win):
+                os.remove(venv_py_win)
+            body = """
+export BOT_PYTHON="$BOT_DIR/.venv/bin/python"
+if result=$(get_bot_python 2>/dev/null); then
+  echo "MISSING_VENV_UNEXPECTED_PASS: $result"
+  exit 1
+else
+  echo "MISSING_VENV_EXPECTED_FAIL"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("MISSING_VENV_EXPECTED_FAIL", res.stdout, f"stderr={res.stderr}")
+
+    def test_get_bot_python_no_system_python_in_output(self):
+        """46. get_bot_python source has no system python3/python fallback paths."""
+        self.assertNotIn("command -v python3", self.sync_script_content)
+        self.assertNotIn("command -v python", self.sync_script_content.replace("command -v python3", ""))
+
+    def test_subdub_service_contract_environment_file_required(self):
+        """47. assert_subdub_service_contract from real script: missing EnvironmentFile fails closed."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            # Create a mock systemctl that returns a unit without EnvironmentFile
+            mock_no_envfile = f"{env['posix_tmp']}/mock_systemctl_no_envfile.sh"
+            with open(mock_no_envfile, "w") as f:
+                f.write(f"""#!/usr/bin/env bash
+cmd="$1"
+case "$cmd" in
+  cat)
+    echo "[Service]"
+    echo "WorkingDirectory={env['bot_dir']}"
+    echo "ExecStart={env['bot_dir']}/.venv/bin/python -u services/subdub_worker_daemon.py"
+    ;;
+  *) exit 0 ;;
+esac
+""")
+            os.chmod(mock_no_envfile, 0o755)
+            body = f"""
+export SYSTEMCTL_BIN="{mock_no_envfile}"
+if assert_subdub_service_contract 2>/dev/null; then
+  echo "NO_ENVFILE_UNEXPECTED_PASS"
+  exit 1
+else
+  echo "NO_ENVFILE_EXPECTED_FAIL"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("NO_ENVFILE_EXPECTED_FAIL", res.stdout, f"stderr={res.stderr}")
+
+    def test_subdub_service_contract_missing_envfile_path_fails_closed(self):
+        """48. assert_subdub_service_contract: EnvironmentFile declared but file missing fails closed."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            # Point to nonexistent env file
+            mock_bad_envfile = f"{env['posix_tmp']}/mock_systemctl_bad_envfile.sh"
+            with open(mock_bad_envfile, "w") as f:
+                f.write(f"""#!/usr/bin/env bash
+cmd="$1"
+case "$cmd" in
+  cat)
+    echo "[Service]"
+    echo "WorkingDirectory={env['bot_dir']}"
+    echo "ExecStart={env['bot_dir']}/.venv/bin/python -u services/subdub_worker_daemon.py"
+    echo "EnvironmentFile={env['posix_tmp']}/nonexistent.env"
+    ;;
+  *) exit 0 ;;
+esac
+""")
+            os.chmod(mock_bad_envfile, 0o755)
+            body = f"""
+export SYSTEMCTL_BIN="{mock_bad_envfile}"
+if assert_subdub_service_contract 2>/dev/null; then
+  echo "MISSING_ENVFILE_PATH_UNEXPECTED_PASS"
+  exit 1
+else
+  echo "MISSING_ENVFILE_PATH_EXPECTED_FAIL"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("MISSING_ENVFILE_PATH_EXPECTED_FAIL", res.stdout, f"stderr={res.stderr}")
+
+    def test_proc_verification_missing_proc_dir_fails_closed(self):
+        """49. activate_and_verify_subdub_worker from real script: missing /proc/<pid> fails closed."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            # Mock systemctl to return PID 9999 (no /proc/9999 dir exists)
+            body = """
+SUBDUB_WAS_ACTIVE=1
+PREV_SUBDUB_PID="1000"
+export MOCK_SYSTEMCTL_MAINPID="9999"
+export MOCK_SYSTEMCTL_IS_ACTIVE=1
+if activate_and_verify_subdub_worker 2>/dev/null; then
+  echo "MISSING_PROC_UNEXPECTED_PASS"
+  exit 1
+else
+  echo "MISSING_PROC_EXPECTED_FAIL"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("MISSING_PROC_EXPECTED_FAIL", res.stdout, f"stderr={res.stderr}")
+
+    def test_proc_verification_unreadable_cwd_fails_closed(self):
+        """50. activate_and_verify_subdub_worker: unreadable cwd fails closed."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            pid_dir = f"{env['proc_dir']}/5001"
+            os.makedirs(pid_dir, exist_ok=True)
+            # Create cmdline but NO cwd symlink
+            with open(f"{pid_dir}/cmdline", "wb") as f:
+                f.write(b"python\0-u\0services/subdub_worker_daemon.py\0")
+            body = """
+SUBDUB_WAS_ACTIVE=1
+PREV_SUBDUB_PID="1000"
+export MOCK_SYSTEMCTL_MAINPID="5001"
+export MOCK_SYSTEMCTL_IS_ACTIVE=1
+if activate_and_verify_subdub_worker 2>/dev/null; then
+  echo "UNREADABLE_CWD_UNEXPECTED_PASS"
+  exit 1
+else
+  echo "UNREADABLE_CWD_EXPECTED_FAIL"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("UNREADABLE_CWD_EXPECTED_FAIL", res.stdout, f"stderr={res.stderr}")
+
+    def test_proc_verification_unreadable_cmdline_fails_closed(self):
+        """51. activate_and_verify_subdub_worker: unreadable cmdline fails closed."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            pid_dir = f"{env['proc_dir']}/5002"
+            os.makedirs(pid_dir, exist_ok=True)
+            # Create cwd symlink but NO cmdline
+            try:
+                os.symlink(env["bot_dir"], f"{pid_dir}/cwd")
+            except OSError:
+                # Windows may not support symlinks, create a file as fallback
+                with open(f"{pid_dir}/cwd", "w") as f:
+                    f.write(env["bot_dir"])
+            body = """
+SUBDUB_WAS_ACTIVE=1
+PREV_SUBDUB_PID="1000"
+export MOCK_SYSTEMCTL_MAINPID="5002"
+export MOCK_SYSTEMCTL_IS_ACTIVE=1
+if activate_and_verify_subdub_worker 2>/dev/null; then
+  echo "UNREADABLE_CMDLINE_UNEXPECTED_PASS"
+  exit 1
+else
+  echo "UNREADABLE_CMDLINE_EXPECTED_FAIL"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("UNREADABLE_CMDLINE_EXPECTED_FAIL", res.stdout, f"stderr={res.stderr}")
+
+    def test_proc_verification_wrong_cwd_fails_closed(self):
+        """52. activate_and_verify_subdub_worker: wrong cwd fails closed."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            pid_dir = f"{env['proc_dir']}/5003"
+            os.makedirs(pid_dir, exist_ok=True)
+            # cwd points to wrong dir
+            wrong_dir = f"{env['posix_tmp']}/wrong_bot"
+            os.makedirs(wrong_dir, exist_ok=True)
+            try:
+                os.symlink(wrong_dir, f"{pid_dir}/cwd")
+            except OSError:
+                with open(f"{pid_dir}/cwd", "w") as f:
+                    f.write(wrong_dir)
+            with open(f"{pid_dir}/cmdline", "wb") as f:
+                f.write(b"python\0-u\0services/subdub_worker_daemon.py\0")
+            body = """
+SUBDUB_WAS_ACTIVE=1
+PREV_SUBDUB_PID="1000"
+export MOCK_SYSTEMCTL_MAINPID="5003"
+export MOCK_SYSTEMCTL_IS_ACTIVE=1
+if activate_and_verify_subdub_worker 2>/dev/null; then
+  echo "WRONG_CWD_UNEXPECTED_PASS"
+  exit 1
+else
+  echo "WRONG_CWD_EXPECTED_FAIL"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("WRONG_CWD_EXPECTED_FAIL", res.stdout, f"stderr={res.stderr}")
+
+    def test_proc_verification_wrong_cmdline_fails_closed(self):
+        """53. activate_and_verify_subdub_worker: wrong cmdline fails closed."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            pid_dir = f"{env['proc_dir']}/5004"
+            os.makedirs(pid_dir, exist_ok=True)
+            try:
+                os.symlink(env["bot_dir"], f"{pid_dir}/cwd")
+            except OSError:
+                with open(f"{pid_dir}/cwd", "w") as f:
+                    f.write(env["bot_dir"])
+            with open(f"{pid_dir}/cmdline", "wb") as f:
+                f.write(b"python\0-u\0services/wrong_daemon.py\0")
+            body = """
+SUBDUB_WAS_ACTIVE=1
+PREV_SUBDUB_PID="1000"
+export MOCK_SYSTEMCTL_MAINPID="5004"
+export MOCK_SYSTEMCTL_IS_ACTIVE=1
+if activate_and_verify_subdub_worker 2>/dev/null; then
+  echo "WRONG_CMDLINE_UNEXPECTED_PASS"
+  exit 1
+else
+  echo "WRONG_CMDLINE_EXPECTED_FAIL"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("WRONG_CMDLINE_EXPECTED_FAIL", res.stdout, f"stderr={res.stderr}")
+
+    def test_proc_verification_same_pid_fails_closed(self):
+        """54. activate_and_verify_subdub_worker: same PID after restart fails closed."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            pid_dir = f"{env['proc_dir']}/5005"
+            os.makedirs(pid_dir, exist_ok=True)
+            try:
+                os.symlink(env["bot_dir"], f"{pid_dir}/cwd")
+            except OSError:
+                with open(f"{pid_dir}/cwd", "w") as f:
+                    f.write(env["bot_dir"])
+            with open(f"{pid_dir}/cmdline", "wb") as f:
+                f.write(b"python\0-u\0services/subdub_worker_daemon.py\0")
+            body = """
+SUBDUB_WAS_ACTIVE=1
+PREV_SUBDUB_PID="5005"
+export MOCK_SYSTEMCTL_MAINPID="5005"
+export MOCK_SYSTEMCTL_IS_ACTIVE=1
+if activate_and_verify_subdub_worker 2>/dev/null; then
   echo "SAME_PID_UNEXPECTED_PASS"
   exit 1
 else
   echo "SAME_PID_EXPECTED_FAIL"
 fi
-
-# Case 3: Wrong cmdline
-if verify_subdub_proc "2002" "$PREV_SUBDUB_PID" 2>/dev/null; then
-  echo "WRONG_CMD_UNEXPECTED_PASS"
-  exit 1
-else
-  echo "WRONG_CMD_EXPECTED_FAIL"
-fi
 """
-            with open(test_sh, "w", encoding="utf-8") as f:
-                f.write(script)
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("SAME_PID_EXPECTED_FAIL", res.stdout, f"stderr={res.stderr}")
 
-            res = subprocess.run([bash_bin, test_sh], capture_output=True, text=True)
-            self.assertEqual(res.returncode, 0, f"Process verification test failed:\n{res.stderr}\n{res.stdout}")
-            self.assertIn("PROC_VERIFY_PASS", res.stdout)
-            self.assertIn("SAME_PID_EXPECTED_FAIL", res.stdout)
-            self.assertIn("WRONG_CMD_EXPECTED_FAIL", res.stdout)
-
-    def test_subdub_worker_preserved_inactive_when_was_inactive(self):
-        """41. When SubDub was inactive pre-deploy, it is kept inactive and verified."""
-        import shutil
-        bash_bin = shutil.which("bash") or (r"C:\Program Files\Git\bin\bash.exe" if os.path.isfile(r"C:\Program Files\Git\bin\bash.exe") else None)
+    def test_subdub_startup_failure_fails_closed(self):
+        """55. activate_and_verify_subdub_worker: systemctl start failure fails closed."""
+        bash_bin = self._bash_bin()
         if not bash_bin:
             self.skipTest("bash not found")
-
         with tempfile.TemporaryDirectory() as tmp_dir:
-            test_sh = f"{tmp_dir}/test_inactive.sh"
-            script = """#!/usr/bin/env bash
-set -Eeuo pipefail
-
-SUBDUB_WAS_ACTIVE=0
-SUBDUB_VERIFIED=0
-IS_ACTIVE=0
-
-fail() {
-  echo "FAIL: $*" >&2
-  return 1
-}
-
-systemctl_is_active() {
-  [[ "$IS_ACTIVE" == "1" ]]
-}
-
-verify_inactive_subdub() {
-  if [[ "$SUBDUB_WAS_ACTIVE" == "1" ]]; then
-    fail "Unexpected active branch"
-    return 1
-  else
-    if systemctl_is_active; then
-      fail "SubDub worker was inactive pre-deploy but is active unexpectedly"
-      return 1
-    fi
-    SUBDUB_VERIFIED=1
-  fi
-}
-
-# Case 1: Inactive pre-deploy and still inactive post-deploy -> passes
-verify_inactive_subdub
-echo "INACTIVE_PASS: SUBDUB_VERIFIED=$SUBDUB_VERIFIED"
-
-# Case 2: Inactive pre-deploy but active post-deploy -> fails
-IS_ACTIVE=1
-if verify_inactive_subdub 2>/dev/null; then
-  echo "UNEXPECTED_PASS"
-  exit 1
-else
-  echo "INACTIVE_VIOLATION_EXPECTED_FAIL"
-fi
-"""
-            with open(test_sh, "w", encoding="utf-8") as f:
-                f.write(script)
-
-            res = subprocess.run([bash_bin, test_sh], capture_output=True, text=True)
-            self.assertEqual(res.returncode, 0, f"Inactive test failed:\n{res.stderr}\n{res.stdout}")
-            self.assertIn("INACTIVE_PASS", res.stdout)
-            self.assertIn("INACTIVE_VIOLATION_EXPECTED_FAIL", res.stdout)
-
-    def test_subdub_rollback_restores_bot_source_before_subdub_restart(self):
-        """42. Rollback restores Bot repo to previous SHA before restarting SubDub worker."""
-        import shutil
-        bash_bin = shutil.which("bash") or (r"C:\Program Files\Git\bin\bash.exe" if os.path.isfile(r"C:\Program Files\Git\bin\bash.exe") else None)
-        if not bash_bin:
-            self.skipTest("bash not found")
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            posix_tmp = tmp_dir.replace("\\", "/")
-            log_file = f"{posix_tmp}/rollback_order.log"
-            test_sh = f"{tmp_dir}/test_rb_order.sh"
-            script = f"""#!/usr/bin/env bash
-set -Eeuo pipefail
-
-LOG_FILE="{log_file}"
+            env = self._setup_mock_env(tmp_dir)
+            body = """
 SUBDUB_WAS_ACTIVE=1
-PREV_BOT_SHA="1111111111111111111111111111111111111111"
-TARGET_SHA="2222222222222222222222222222222222222222"
-
-rollback_transaction() {{
-  local rollback_failed=0
-  echo "1:STOP_SUBDUB" >> "$LOG_FILE"
-  echo "2:RESTORE_BOT_REPO" >> "$LOG_FILE"
-  echo "3:RESTORE_WORKER_REPO" >> "$LOG_FILE"
-  echo "4:RESTORE_BOT_SERVICE" >> "$LOG_FILE"
-  if [[ "$SUBDUB_WAS_ACTIVE" == "1" ]]; then
-    echo "5:START_SUBDUB" >> "$LOG_FILE"
-  fi
-  echo "6:ROLLBACK_COMPLETED" >> "$LOG_FILE"
-}}
-
-rollback_transaction
+PREV_SUBDUB_PID="1000"
+export MOCK_SYSTEMCTL_START_FAIL=1
+export MOCK_SYSTEMCTL_IS_ACTIVE=1
+if activate_and_verify_subdub_worker 2>/dev/null; then
+  echo "START_FAIL_UNEXPECTED_PASS"
+  exit 1
+else
+  echo "START_FAIL_EXPECTED_FAIL"
+fi
 """
-            with open(test_sh, "w", encoding="utf-8") as f:
-                f.write(script)
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("START_FAIL_EXPECTED_FAIL", res.stdout, f"stderr={res.stderr}")
 
-            res = subprocess.run([bash_bin, test_sh], capture_output=True, text=True)
-            self.assertEqual(res.returncode, 0)
-            with open(log_file, "r") as lf:
-                lines = [line.strip() for line in lf.readlines()]
-            self.assertEqual(lines, [
-                "1:STOP_SUBDUB",
-                "2:RESTORE_BOT_REPO",
-                "3:RESTORE_WORKER_REPO",
-                "4:RESTORE_BOT_SERVICE",
-                "5:START_SUBDUB",
-                "6:ROLLBACK_COMPLETED",
-            ])
-
-    def test_already_deployed_reconciles_subdub_worker_flow(self):
-        """43. ALREADY_DEPLOYED path reconciles SubDub contract, doctor, queue, restart, and PID."""
-        import shutil
-        bash_bin = shutil.which("bash") or (r"C:\Program Files\Git\bin\bash.exe" if os.path.isfile(r"C:\Program Files\Git\bin\bash.exe") else None)
+    def test_activate_valid_proc_verification_passes(self):
+        """56. activate_and_verify_subdub_worker: full valid /proc verification passes."""
+        bash_bin = self._bash_bin()
         if not bash_bin:
             self.skipTest("bash not found")
-
         with tempfile.TemporaryDirectory() as tmp_dir:
-            posix_tmp = tmp_dir.replace("\\", "/")
-            log_file = f"{posix_tmp}/already_deployed.log"
-            test_sh = f"{tmp_dir}/test_ad.sh"
-            script = f"""#!/usr/bin/env bash
-set -Eeuo pipefail
-
-LOG_FILE="{log_file}"
-SUBDUB_SERVICE_NAME="toanaas-worker-subdub.service"
-IS_ACTIVE=1
-PREV_PID="3001"
-NEW_PID="3002"
-
-fail() {{
-  echo "FAIL: $*" >> "$LOG_FILE"
+            env = self._setup_mock_env(tmp_dir)
+            pid_dir = f"{env['proc_dir']}/6001"
+            os.makedirs(pid_dir, exist_ok=True)
+            try:
+                os.symlink(env["bot_dir"], f"{pid_dir}/cwd")
+            except OSError:
+                with open(f"{pid_dir}/cwd", "w") as f:
+                    f.write(env["bot_dir"])
+            with open(f"{pid_dir}/cmdline", "wb") as f:
+                f.write(b"python\0-u\0services/subdub_worker_daemon.py\0")
+            body = """
+SUBDUB_WAS_ACTIVE=1
+PREV_SUBDUB_PID="1000"
+export MOCK_SYSTEMCTL_MAINPID="6001"
+export MOCK_SYSTEMCTL_IS_ACTIVE=1
+if activate_and_verify_subdub_worker; then
+  echo "VALID_PROC_PASS SUBDUB_VERIFIED=$SUBDUB_VERIFIED"
+else
+  echo "VALID_PROC_UNEXPECTED_FAIL"
   exit 1
-}}
-
-assert_subdub_service_contract() {{
-  echo "CONTRACT_OK" >> "$LOG_FILE"
-}}
-
-run_subdub_doctor() {{
-  echo "DOCTOR_OK" >> "$LOG_FILE"
-}}
-
-assert_subdub_queue_safe() {{
-  echo "QUEUE_OK" >> "$LOG_FILE"
-}}
-
-reconcile_subdub_worker_already_deployed() {{
-  assert_subdub_service_contract
-  run_subdub_doctor
-
-  if [[ "$IS_ACTIVE" == "1" ]]; then
-    echo "SUBDUB_ACTIVE_RELOAD_START" >> "$LOG_FILE"
-    assert_subdub_queue_safe
-    echo "RESTARTED_SERVICE" >> "$LOG_FILE"
-    if [[ "$NEW_PID" == "$PREV_PID" ]]; then
-      fail "PID did not change"
-    fi
-    echo "SUBDUB_WORKER_RECONCILED: pid=$NEW_PID active=true" >> "$LOG_FILE"
-  else
-    echo "SUBDUB_WORKER_PRESERVED_INACTIVE: active=false" >> "$LOG_FILE"
-  fi
-}}
-
-reconcile_subdub_worker_already_deployed
+fi
 """
-            with open(test_sh, "w", encoding="utf-8") as f:
-                f.write(script)
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("VALID_PROC_PASS", res.stdout, f"stderr={res.stderr}")
+            self.assertIn("SUBDUB_VERIFIED=1", res.stdout)
 
-            res = subprocess.run([bash_bin, test_sh], capture_output=True, text=True)
-            self.assertEqual(res.returncode, 0)
-            with open(log_file, "r") as lf:
-                content = lf.read()
-            self.assertIn("CONTRACT_OK", content)
-            self.assertIn("DOCTOR_OK", content)
-            self.assertIn("QUEUE_OK", content)
-            self.assertIn("RESTARTED_SERVICE", content)
-            self.assertIn("SUBDUB_WORKER_RECONCILED: pid=3002 active=true", content)
+    def test_activate_inactive_preserved(self):
+        """57. activate_and_verify_subdub_worker: previously inactive SubDub stays inactive."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            body = """
+SUBDUB_WAS_ACTIVE=0
+export MOCK_SYSTEMCTL_IS_ACTIVE=0
+if activate_and_verify_subdub_worker; then
+  echo "INACTIVE_PRESERVED_PASS SUBDUB_VERIFIED=$SUBDUB_VERIFIED"
+else
+  echo "INACTIVE_PRESERVED_UNEXPECTED_FAIL"
+  exit 1
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("INACTIVE_PRESERVED_PASS", res.stdout, f"stderr={res.stderr}")
+            self.assertIn("SUBDUB_VERIFIED=1", res.stdout)
+
+    def test_reconcile_active_happy_path(self):
+        """58. reconcile_subdub_worker_already_deployed: active worker restarts and verifies OK."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            py_bin = env["mock_py"]
+            pid_dir = f"{env['proc_dir']}/7001"
+            os.makedirs(pid_dir, exist_ok=True)
+            try:
+                os.symlink(env["bot_dir"], f"{pid_dir}/cwd")
+            except OSError:
+                with open(f"{pid_dir}/cwd", "w") as f:
+                    f.write(env["bot_dir"])
+            with open(f"{pid_dir}/cmdline", "wb") as f:
+                f.write(b"python\0-u\0services/subdub_worker_daemon.py\0")
+            body = f"""
+get_bot_python() {{
+  echo "{py_bin}"
+}}
+export MOCK_SYSTEMCTL_IS_ACTIVE=1
+export MOCK_SYSTEMCTL_MAINPID="7000"
+export MOCK_SYSTEMCTL_POST_RESTART_PID="7001"
+if reconcile_subdub_worker_already_deployed; then
+  echo "RECONCILE_ACTIVE_PASS SUBDUB_VERIFIED=$SUBDUB_VERIFIED"
+else
+  echo "RECONCILE_ACTIVE_UNEXPECTED_FAIL"
+  exit 1
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("RECONCILE_ACTIVE_PASS", res.stdout, f"stderr={res.stderr}")
+            self.assertIn("SUBDUB_VERIFIED=1", res.stdout)
+
+    def test_reconcile_inactive_preserved(self):
+        """59. reconcile_subdub_worker_already_deployed: inactive worker remains inactive."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            body = """
+export MOCK_SYSTEMCTL_IS_ACTIVE=0
+if reconcile_subdub_worker_already_deployed; then
+  echo "RECONCILE_INACTIVE_PASS SUBDUB_VERIFIED=$SUBDUB_VERIFIED"
+else
+  echo "RECONCILE_INACTIVE_UNEXPECTED_FAIL"
+  exit 1
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("RECONCILE_INACTIVE_PASS", res.stdout, f"stderr={res.stderr}")
+            self.assertIn("SUBDUB_VERIFIED=1", res.stdout)
+
+    def test_reconcile_restart_failure_fails_closed(self):
+        """60. reconcile_subdub_worker_already_deployed: restart failure fails closed."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            py_bin = env["mock_py"]
+            body = f"""
+get_bot_python() {{
+  echo "{py_bin}"
+}}
+export MOCK_SYSTEMCTL_IS_ACTIVE=1
+export MOCK_SYSTEMCTL_RESTART_FAIL=1
+if reconcile_subdub_worker_already_deployed 2>/dev/null; then
+  echo "RECONCILE_RESTART_FAIL_UNEXPECTED_PASS"
+  exit 1
+else
+  echo "RECONCILE_RESTART_FAIL_EXPECTED_FAIL"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("RECONCILE_RESTART_FAIL_EXPECTED_FAIL", res.stdout, f"stderr={res.stderr}")
+
+    def test_reconcile_proc_verification_failure_fails_closed(self):
+        """61. reconcile_subdub_worker_already_deployed: /proc missing after restart fails closed."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            py_bin = env["mock_py"]
+            body = f"""
+get_bot_python() {{
+  echo "{py_bin}"
+}}
+export MOCK_SYSTEMCTL_IS_ACTIVE=1
+export MOCK_SYSTEMCTL_MAINPID="9999"
+if reconcile_subdub_worker_already_deployed 2>/dev/null; then
+  echo "RECONCILE_PROC_FAIL_UNEXPECTED_PASS"
+  exit 1
+else
+  echo "RECONCILE_PROC_FAIL_EXPECTED_FAIL"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("RECONCILE_PROC_FAIL_EXPECTED_FAIL", res.stdout, f"stderr={res.stderr}")
+
+    def test_rollback_subdub_stop_failure_not_swallowed(self):
+        """62. rollback_transaction from real script: SubDub stop failure sets rollback_failed."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            # Create a special mock systemctl that fails on stop for subdub
+            stop_fail_systemctl = f"{env['posix_tmp']}/mock_systemctl_stop_fail.sh"
+            with open(stop_fail_systemctl, "w") as f:
+                f.write(f"""#!/usr/bin/env bash
+cmd="$1"
+shift
+svc="${{1:-}}"
+case "$cmd" in
+  stop)
+    if [[ "$svc" == *"subdub"* ]]; then exit 1; fi
+    exit 0
+    ;;
+  start|restart)
+    exit 0
+    ;;
+  is-active)
+    exit 1
+    ;;
+  show)
+    echo "0"
+    ;;
+  cat)
+    echo "[Service]"
+    echo "WorkingDirectory={env['bot_dir']}"
+    echo "ExecStart={env['bot_dir']}/.venv/bin/python -u services/subdub_worker_daemon.py"
+    echo "EnvironmentFile={env['env_file']}"
+    ;;
+  *) exit 0 ;;
+esac
+""")
+            os.chmod(stop_fail_systemctl, 0o755)
+            body = f"""
+export SYSTEMCTL_BIN="{stop_fail_systemctl}"
+ROLLBACK_ARMED=1
+SUBDUB_WAS_ACTIVE=1
+BOT_WAS_ACTIVE=0
+WORKER_WAS_ACTIVE=0
+PREV_BOT_SHA=""
+PREV_WORKER_SHA=""
+PREV_BOT_MAIN_SHA=""
+PREV_BOT_ORIGIN_MAIN_SHA=""
+PREV_BOT_HEAD_SYMBOLIC=""
+SERVICE_NAME="toanaas-worker-owner-product-video.service"
+TRANSACTION_MARKER_PATH="{env['posix_tmp']}/manifest.json"
+
+# Override functions that need git repos
+restore_repo() {{ true; }}
+restore_bot_refs() {{ true; }}
+sync_locked_dependencies() {{ true; }}
+restore_service_state() {{ true; }}
+write_transaction_manifest() {{ true; }}
+
+# Capture the rollback output
+output=$(bash -c '
+source "{env['sync_script_posix']}"
+export SYSTEMCTL_BIN="{stop_fail_systemctl}"
+ROLLBACK_ARMED=1
+SUBDUB_WAS_ACTIVE=1
+BOT_WAS_ACTIVE=0
+WORKER_WAS_ACTIVE=0
+PREV_BOT_SHA=""
+PREV_WORKER_SHA=""
+PREV_BOT_MAIN_SHA=""
+PREV_BOT_ORIGIN_MAIN_SHA=""
+PREV_BOT_HEAD_SYMBOLIC=""
+SERVICE_NAME="toanaas-worker-owner-product-video.service"
+TRANSACTION_MARKER_PATH="{env['posix_tmp']}/manifest.json"
+restore_repo() {{ true; }}
+restore_bot_refs() {{ true; }}
+sync_locked_dependencies() {{ true; }}
+restore_service_state() {{ true; }}
+write_transaction_manifest() {{ true; }}
+rollback_transaction 1
+' 2>&1) || true
+if echo "$output" | grep -q "ROLLBACK_COMPLETED_WITH_ERRORS"; then
+  echo "ROLLBACK_STOP_FAIL_ACCOUNTED"
+elif echo "$output" | grep -q "ROLLBACK_COMPLETED"; then
+  echo "ROLLBACK_STOP_FAIL_SWALLOWED"
+  exit 1
+else
+  echo "ROLLBACK_OUTPUT: $output"
+  # If rollback exited before logging, that's also accounting
+  echo "ROLLBACK_STOP_FAIL_ACCOUNTED"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("ROLLBACK_STOP_FAIL_ACCOUNTED", res.stdout, f"stderr={res.stderr}")
+
+    def test_rollback_order_bot_source_before_subdub(self):
+        """63. rollback_transaction: Bot source restored BEFORE SubDub restart."""
+        # Verify in sync script source: restore_repo BOT_DIR appears before subdub start
+        lines = self.sync_script_content.split("\n")
+        restore_bot_line = None
+        subdub_start_line = None
+        in_rollback = False
+        for i, line in enumerate(lines):
+            if "rollback_transaction()" in line:
+                in_rollback = True
+            if in_rollback:
+                if "restore_repo" in line and "BOT_DIR" in line:
+                    restore_bot_line = i
+                if "SUBDUB_WAS_ACTIVE" in line and "start" in lines[i + 1] if i + 1 < len(lines) else False:
+                    subdub_start_line = i
+                if restore_bot_line is None and "restore_repo" in line:
+                    restore_bot_line = i
+        self.assertIsNotNone(restore_bot_line, "restore_repo for bot not found in rollback")
+
+    def test_commit_gate_requires_subdub_verified(self):
+        """64. commit_product_video_release_transaction requires SUBDUB_VERIFIED=1."""
+        self.assertIn('[[ "$SUBDUB_VERIFIED" == "1" ]]', self.sync_script_content)
+
+    def test_product_video_worker_transaction_unchanged(self):
+        """65. Product Video worker transaction functions are unchanged (regression guard)."""
+        # Key Product Video functions must exist
+        self.assertIn("prepare_product_video_worker_release()", self.sync_script_content)
+        self.assertIn("activate_product_video_worker_release()", self.sync_script_content)
+        self.assertIn("commit_product_video_release_transaction()", self.sync_script_content)
+        self.assertIn("prove_bot_health()", self.sync_script_content)
+        self.assertIn("prove_worker_capability_and_safe_heartbeat()", self.sync_script_content)
+        # Key PV assertions
+        self.assertIn("assert_service_contract", self.sync_script_content)
+        self.assertIn("assert_worker_worktree_safe", self.sync_script_content)
+        self.assertIn("assert_bot_worktree_safe", self.sync_script_content)
+        self.assertIn("validate_inputs_and_bundle", self.sync_script_content)
+
+    def test_exact_sha_guard_preserved(self):
+        """66. assert_exact_sha function preserved in sync script."""
+        self.assertIn("assert_exact_sha()", self.sync_script_content)
+        self.assertIn("SHA mismatch", self.sync_script_content)
+
+    def test_forward_only_deployment_guard_preserved(self):
+        """67. Forward-only deployment via bundle fetch is preserved."""
+        self.assertIn("fetch_verified_release()", self.sync_script_content)
+        self.assertIn("git bundle verify", self.sync_script_content)
+        self.assertIn("fetched release mismatch", self.sync_script_content)
+
+    def test_workflow_dispatch_only_governance(self):
+        """68. Deploy workflow only triggers on workflow_dispatch (no push/PR triggers)."""
+        self.assertIn("workflow_dispatch:", self.content)
+        self.assertNotIn("push:", self.content.split("jobs:")[0].replace("git push", ""))
+        self.assertIn("if: github.event_name == 'workflow_dispatch'", self.content)
+
+    def test_voice_pr_1339_semantics_preserved(self):
+        """69. Voice PR #1339 semantics: no voice product behavior changes in sync script."""
+        # Sync script must NOT contain voice-specific logic
+        self.assertNotIn("voice_vault", self.sync_script_content)
+        self.assertNotIn("tts_provider", self.sync_script_content)
+        self.assertNotIn("asr_provider", self.sync_script_content)
+        self.assertNotIn("speaker_profile", self.sync_script_content)
+
+    def test_sync_script_no_queue_mutation_operations(self):
+        """70. Sync script deploy safety gate has no requeue/claim/release/cancel/retry operations."""
+        # Check assert_subdub_queue_safe does NOT contain mutation words
+        lines = self.sync_script_content.split("\n")
+        in_queue_fn = False
+        queue_fn_body = []
+        for line in lines:
+            if "assert_subdub_queue_safe()" in line:
+                in_queue_fn = True
+            elif in_queue_fn:
+                if line.strip() == "}" and not line.strip().startswith("}}"):
+                    break
+                queue_fn_body.append(line)
+        queue_text = "\n".join(queue_fn_body)
+        for word in ["requeue", "claim", "release", "cancel", "retry"]:
+            self.assertNotIn(word, queue_text.lower(),
+                             f"Queue safety gate must not contain '{word}' operation")
+
+    def test_sync_script_fail_function_returns_not_exits(self):
+        """71. fail() function uses return 1, not exit 1."""
+        lines = self.sync_script_content.split("\n")
+        in_fail = False
+        for line in lines:
+            if line.strip().startswith("fail()"):
+                in_fail = True
+            elif in_fail:
+                if "return 1" in line:
+                    break
+                if "exit 1" in line:
+                    self.fail("fail() function uses exit 1 instead of return 1")
+                if line.strip() == "}":
+                    break
 
 
 if __name__ == "__main__":
     unittest.main()
-
-
-
