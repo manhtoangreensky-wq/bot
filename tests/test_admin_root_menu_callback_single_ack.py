@@ -49,7 +49,7 @@ def _load_functions(*names, **dependencies):
     source = "from __future__ import annotations\n\n" + "\n\n".join(
         _function_source(name) for name in names
     )
-    exec(compile(source, str(BOT_PATH), "exec"), namespace)
+    exec(compile(source, f"{BOT_PATH}:extracted_callbacks", "exec"), namespace)
     return namespace
 
 
@@ -94,6 +94,7 @@ def _main_menu_dependencies(is_admin, effects):
         "clear_storage_addon_pending": record("storage_addon"),
         "clear_memory_guided_pending": record("memory_guided"),
         "clear_music_guided_pending": record("music_guided"),
+        "clear_pending_admin_tool_test": record("admin_tool_test"),
         "safe_edit_query_message": safe_edit,
         "localized_menu_content": lambda action, _admin, _lang, _uid: (
             f"existing screen:{action}", f"existing keyboard:{action}"
