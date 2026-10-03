@@ -171782,6 +171782,12 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         result = get_music_guided_result(user_id) or {}
         mode = music_product_mode_from_result(result)
         if result.get("music_suggestions"):
+            pending = get_music_guided_pending(user_id) or {}
+            if (
+                str(pending.get("pending_action") or "").startswith("music_product_")
+                and normalize_product_context(pending.get("product_context"), ctx) == ctx
+            ):
+                clear_music_guided_pending(user_id)
             return await query.message.reply_text(
                 music_product_suggestions_text(result, lang),
                 parse_mode="HTML",
