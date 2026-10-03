@@ -172386,6 +172386,11 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         await query.answer()
         profile_id = _safe_int(action.split(":", 1)[1], 0)
         profile = get_user_voice_profile(user_id, profile_id)
+        if not profile:
+            return await query.message.reply_text(
+                "⚠️ Không tìm thấy giọng này trong tài khoản của quý khách.",
+                reply_markup=voice_vault_keyboard(user_id, lang, ctx),
+            )
         preview_ref = str(profile.get("preview_audio_ref") or "") if profile else ""
         if not preview_ref:
             return await query.message.reply_text("⚠️ Giọng này chưa có bản nghe thử. Quý khách có thể tạo lại preview.", reply_markup=voice_profile_actions_keyboard(profile_id, lang, ctx, profile))
@@ -172458,6 +172463,11 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         await query.answer()
         profile_id = _safe_int(action.split(":", 1)[1], 0)
         profile = get_user_voice_profile(user_id, profile_id)
+        if not profile:
+            return await query.message.reply_text(
+                "⚠️ Không tìm thấy giọng này trong tài khoản của quý khách.",
+                reply_markup=voice_vault_keyboard(user_id, lang, PRODUCT_CONTEXT_SHOWROOM),
+            )
         if not voice_profile_can_generate_tts(profile):
             return await query.message.reply_text(voice_profile_not_ready_text(profile, lang), parse_mode="HTML", reply_markup=voice_profile_actions_keyboard(profile_id, lang, PRODUCT_CONTEXT_SHOWROOM, profile))
         set_music_guided_pending(
@@ -172476,6 +172486,11 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         await query.answer()
         profile_id = _safe_int(action.split(":", 1)[1], 0)
         profile = get_user_voice_profile(user_id, profile_id)
+        if not profile:
+            return await query.message.reply_text(
+                "⚠️ Không tìm thấy giọng này trong tài khoản của quý khách.",
+                reply_markup=voice_vault_keyboard(user_id, lang, PRODUCT_CONTEXT_SHOWROOM),
+            )
         result = get_music_guided_result(user_id) or {}
         text_value = str(result.get("voice_text") or "").strip()
         if not voice_profile_can_generate_tts(profile):
@@ -172491,6 +172506,11 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         await query.answer()
         profile_id = _safe_int(action.split(":", 1)[1], 0)
         profile = get_user_voice_profile(user_id, profile_id)
+        if not profile:
+            return await query.message.reply_text(
+                "⚠️ Không tìm thấy giọng này trong tài khoản của quý khách.",
+                reply_markup=voice_vault_keyboard(user_id, lang, ctx),
+            )
         preview_ref = str((profile or {}).get("preview_audio_ref") or "")
         if not preview_ref:
             return await query.message.reply_text("⚠️ Giọng này chưa có file demo để tải. Quý khách có thể tạo/nghe thử lại trước.", reply_markup=voice_profile_actions_keyboard(profile_id, lang, ctx, profile))
