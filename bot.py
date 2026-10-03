@@ -172443,7 +172443,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         profile_id = _safe_int(action.split(":", 1)[1], 0)
         profile = get_user_voice_profile(user_id, profile_id)
         if not profile:
-            return await query.message.reply_text("⚠️ Không tìm thấy giọng này.", reply_markup=voice_vault_keyboard(user_id, lang, PRODUCT_CONTEXT_SHOWROOM))
+            return await query.message.reply_text("⚠️ Không tìm thấy giọng này.", reply_markup=voice_vault_keyboard(user_id, lang, ctx))
         if not voice_profile_can_generate_tts(profile):
             return await query.message.reply_text(voice_profile_not_ready_text(profile, lang), parse_mode="HTML", reply_markup=voice_profile_actions_keyboard(profile_id, lang, PRODUCT_CONTEXT_SHOWROOM, profile))
         set_music_guided_pending(
