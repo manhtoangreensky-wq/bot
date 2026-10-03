@@ -1445,10 +1445,15 @@ case "$cmd" in
     echo "EnvironmentFile=${MOCK_ENV_FILE:-/etc/toanaas/bot.env}"
     ;;
   is-active)
+    if [[ -f "${MOCK_STATE_DIR:-/tmp}/restarted" && "${MOCK_SYSTEMCTL_POST_RESTART_IS_ACTIVE:-}" != "" ]]; then
+      if [[ "$MOCK_SYSTEMCTL_POST_RESTART_IS_ACTIVE" == "1" ]]; then exit 0; else exit 1; fi
+    fi
     if [[ "${MOCK_SYSTEMCTL_IS_ACTIVE:-1}" == "1" ]]; then exit 0; else exit 1; fi
     ;;
   show)
-    if [[ -f "${MOCK_STATE_DIR:-/tmp}/restarted" && -n "${MOCK_SYSTEMCTL_POST_RESTART_PID:-}" ]]; then
+    if [[ -f "${MOCK_STATE_DIR:-/tmp}/recovery_restarted" && -n "${MOCK_SYSTEMCTL_RECOVERY_PID:-}" ]]; then
+      echo "$MOCK_SYSTEMCTL_RECOVERY_PID"
+    elif [[ -f "${MOCK_STATE_DIR:-/tmp}/restarted" && -n "${MOCK_SYSTEMCTL_POST_RESTART_PID:-}" ]]; then
       echo "$MOCK_SYSTEMCTL_POST_RESTART_PID"
     else
       echo "${MOCK_SYSTEMCTL_MAINPID:-1234}"
@@ -1465,7 +1470,12 @@ case "$cmd" in
   restart)
     if [[ "${MOCK_SYSTEMCTL_RESTART_FAIL:-0}" == "1" ]]; then exit 1; fi
     mkdir -p "${MOCK_STATE_DIR:-/tmp}" 2>/dev/null || true
-    touch "${MOCK_STATE_DIR:-/tmp}/restarted" 2>/dev/null || true
+    if [[ -f "${MOCK_STATE_DIR:-/tmp}/restarted" ]]; then
+      touch "${MOCK_STATE_DIR:-/tmp}/recovery_restarted" 2>/dev/null || true
+      if [[ "${MOCK_SYSTEMCTL_RECOVERY_RESTART_FAIL:-0}" == "1" ]]; then exit 1; fi
+    else
+      touch "${MOCK_STATE_DIR:-/tmp}/restarted" 2>/dev/null || true
+    fi
     exit 0
     ;;
   *)
@@ -1491,9 +1501,29 @@ esac
             "posix_tmp": posix_tmp,
         }
 
-    def _run_sourced_test(self, bash_bin, tmp_dir, env, test_body):
+    def _run_sourced_test(self, bash_bin, tmp_dir, env, test_body, raw_db=False, raw_py=False, raw_sha=False):
         """Write and run a bash test that sources the actual production script."""
         test_sh = f"{tmp_dir}/test_sourced.sh"
+        db_override = "" if raw_db else f"""
+resolve_subdub_db_path() {{
+  echo "{env['db_path']}"
+}}
+"""
+        py_override = "" if raw_py else f"""
+get_bot_python() {{
+  if [[ -x "$BOT_PYTHON" ]]; then
+    echo "$BOT_PYTHON"
+  else
+    fail "Bot venv Python is missing or not executable: tried $BOT_PYTHON and $BOT_DIR/.venv/bin/python"
+    return 1
+  fi
+}}
+"""
+        sha_override = "" if raw_sha else """
+assert_exact_sha() {
+  true
+}
+"""
         preamble = f"""#!/usr/bin/env bash
 # Disable errexit/pipefail before sourcing so we can control error handling
 set +Eeuo pipefail 2>/dev/null || true
@@ -1514,35 +1544,23 @@ export TARGET_SHA="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 # Source the actual production script
 source "{env['sync_script_posix']}"
 
-# Re-override resolve_subdub_db_path to use our mock DB
-resolve_subdub_db_path() {{
-  echo "{env['db_path']}"
-}}
-
-# Re-override get_bot_python to use real system Python for SQLite queries
-get_bot_python() {{
-  if [[ -x "$BOT_PYTHON" ]]; then
-    echo "$BOT_PYTHON"
-  else
-    fail "Bot venv Python is missing or not executable: tried $BOT_PYTHON and $BOT_DIR/.venv/bin/python"
-    return 1
-  fi
-}}
+{db_override}
+{py_override}
 
 # Override run_subdub_doctor to be provider-free
 run_subdub_doctor() {{
   SUBDUB_DOCTOR_PASS=1
 }}
 
-# Override assert_exact_sha to skip real git ops
-assert_exact_sha() {{
-  true
-}}
+{sha_override}
 
 # Mock seam for readlink on Windows where symlinks in /proc are simulated
 readlink() {{
   if [[ "$1" == "-f" ]]; then
     local target="$2"
+    if [[ ! -e "$target" && ! -L "$target" ]]; then
+      return 1
+    fi
     if [[ -f "$target" && ! -L "$target" ]]; then
       local val
       val="$(cat "$target")"
@@ -2436,6 +2454,591 @@ fi
                 if line.strip() == "}":
                     break
 
+    # =========================================================================
+    # Group 1: SubDub Queue DB Authority Tests (Section 5)
+    # =========================================================================
+
+    def test_queue_db_authority_db_file_only(self):
+        """72. Queue DB Authority: EnvironmentFile contains DB_FILE only -> resolves correctly."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            target_db = f"{env['posix_tmp']}/custom_db_file.db"
+            body = f"""
+cat << 'EOF' > "$MOCK_ENV_FILE"
+DB_FILE={target_db}
+EOF
+res=$(resolve_subdub_db_path "$MOCK_ENV_FILE")
+echo "RESOLVED:$res"
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body, raw_db=True)
+            self.assertIn(f"RESOLVED:{target_db}", res.stdout, f"stderr={res.stderr}")
+
+    def test_queue_db_authority_sqlite_db_path_only(self):
+        """73. Queue DB Authority: EnvironmentFile contains SQLITE_DB_PATH only -> resolves correctly."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            target_db = f"{env['posix_tmp']}/custom_sqlite.db"
+            body = f"""
+cat << 'EOF' > "$MOCK_ENV_FILE"
+SQLITE_DB_PATH={target_db}
+EOF
+res=$(resolve_subdub_db_path "$MOCK_ENV_FILE")
+echo "RESOLVED:$res"
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body, raw_db=True)
+            self.assertIn(f"RESOLVED:{target_db}", res.stdout, f"stderr={res.stderr}")
+
+    def test_queue_db_authority_db_path_only(self):
+        """74. Queue DB Authority: EnvironmentFile contains DB_PATH only -> resolves correctly."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            target_db = f"{env['posix_tmp']}/custom_db_path.db"
+            body = f"""
+cat << 'EOF' > "$MOCK_ENV_FILE"
+DB_PATH={target_db}
+EOF
+res=$(resolve_subdub_db_path "$MOCK_ENV_FILE")
+echo "RESOLVED:$res"
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body, raw_db=True)
+            self.assertIn(f"RESOLVED:{target_db}", res.stdout, f"stderr={res.stderr}")
+
+    def test_queue_db_authority_database_path_only(self):
+        """75. Queue DB Authority: EnvironmentFile contains DATABASE_PATH only -> resolves correctly."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            target_db = f"{env['posix_tmp']}/custom_database_path.db"
+            body = f"""
+cat << 'EOF' > "$MOCK_ENV_FILE"
+DATABASE_PATH={target_db}
+EOF
+res=$(resolve_subdub_db_path "$MOCK_ENV_FILE")
+echo "RESOLVED:$res"
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body, raw_db=True)
+            self.assertIn(f"RESOLVED:{target_db}", res.stdout, f"stderr={res.stderr}")
+
+    def test_queue_db_authority_no_canonical_variable_fails_closed(self):
+        """76. Queue DB Authority: EnvironmentFile contains no canonical DB variable -> fails closed."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            body = """
+cat << 'EOF' > "$MOCK_ENV_FILE"
+UNRELATED_VAR=foo
+ANOTHER_VAR=bar
+EOF
+if res=$(resolve_subdub_db_path "$MOCK_ENV_FILE" 2>/dev/null); then
+  echo "UNEXPECTED_PASS:$res"
+  exit 1
+else
+  echo "EXPECTED_FAIL_NO_CANONICAL"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body, raw_db=True)
+            self.assertIn("EXPECTED_FAIL_NO_CANONICAL", res.stdout, f"stderr={res.stderr}")
+
+    def test_queue_db_authority_conflicting_variables_precedence(self):
+        """77. Queue DB Authority: conflicting DB variables -> DB_PATH wins per documented precedence."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            p1 = f"{env['posix_tmp']}/db_path_winner.db"
+            p2 = f"{env['posix_tmp']}/db_file_secondary.db"
+            p3 = f"{env['posix_tmp']}/database_path_tertiary.db"
+            p4 = f"{env['posix_tmp']}/sqlite_db_path_quaternary.db"
+            body = f"""
+cat << 'EOF' > "$MOCK_ENV_FILE"
+DATABASE_PATH={p3}
+SQLITE_DB_PATH={p4}
+DB_PATH={p1}
+DB_FILE={p2}
+EOF
+res=$(resolve_subdub_db_path "$MOCK_ENV_FILE")
+echo "RESOLVED:$res"
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body, raw_db=True)
+            self.assertIn(f"RESOLVED:{p1}", res.stdout, f"stderr={res.stderr}")
+
+    def test_queue_db_authority_decoy_exists_canonical_wins(self):
+        """78. Queue DB Authority: filesystem decoy exists but canonical env points elsewhere -> canonical wins."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            canonical_db = f"{env['posix_tmp']}/canonical_target.db"
+            decoy_db = f"{env['bot_dir']}/toandaas_system.db"
+            with open(decoy_db.replace("/", os.sep) if os.name == "nt" else decoy_db, "w") as f:
+                f.write("decoy")
+            body = f"""
+cat << 'EOF' > "$MOCK_ENV_FILE"
+DB_PATH={canonical_db}
+EOF
+res=$(resolve_subdub_db_path "$MOCK_ENV_FILE")
+echo "RESOLVED:$res"
+if [[ "$res" == "{decoy_db}" ]]; then
+  echo "DECOY_FAIL"
+  exit 1
+fi
+echo "CANONICAL_WON"
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body, raw_db=True)
+            self.assertIn("CANONICAL_WON", res.stdout, f"stderr={res.stderr}")
+            self.assertIn(f"RESOLVED:{canonical_db}", res.stdout)
+
+    # =========================================================================
+    # Group 2: Python Authority Tests (Section 6)
+    # =========================================================================
+
+    def test_python_authority_ambient_bot_python_rejected(self):
+        """79. Python Authority: ambient BOT_PYTHON pointing elsewhere is rejected / fails closed."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            body = """
+export BOT_PYTHON="/arbitrary/different/python"
+if res=$(get_bot_python 2>&1); then
+  echo "UNEXPECTED_PASS:$res"
+  exit 1
+else
+  echo "EXPECTED_REJECTED:$res"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body, raw_py=True)
+            self.assertIn("EXPECTED_REJECTED", res.stdout, f"stderr={res.stderr}")
+            self.assertIn("Arbitrary BOT_PYTHON override is forbidden", res.stdout)
+
+    def test_python_authority_exact_venv_python_missing_fails_closed(self):
+        """80. Python Authority: exact Bot venv Python missing fails closed."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            venv_py = f"{env['bot_dir']}/.venv/bin/python"
+            venv_py_win = venv_py.replace("/", os.sep) if os.name == "nt" else venv_py
+            if os.path.exists(venv_py_win):
+                os.remove(venv_py_win)
+            body = """
+unset BOT_PYTHON
+if res=$(get_bot_python 2>&1); then
+  echo "UNEXPECTED_PASS:$res"
+  exit 1
+else
+  echo "EXPECTED_MISSING:$res"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body, raw_py=True)
+            self.assertIn("EXPECTED_MISSING", res.stdout, f"stderr={res.stderr}")
+            self.assertIn("Exact Bot venv Python is missing", res.stdout)
+
+    def test_python_authority_exact_venv_python_not_executable_fails_closed(self):
+        """81. Python Authority: exact Bot venv Python not executable fails closed."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            body = """
+unset BOT_PYTHON
+# Overwrite with non-shebang text and remove execute permission
+echo "corrupted binary without shebang" > "$BOT_DIR/.venv/bin/python"
+chmod -x "$BOT_DIR/.venv/bin/python" 2>/dev/null || chmod 0644 "$BOT_DIR/.venv/bin/python" 2>/dev/null
+if res=$(get_bot_python 2>&1); then
+  echo "UNEXPECTED_PASS:$res"
+  exit 1
+else
+  echo "EXPECTED_NOT_EXECUTABLE:$res"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body, raw_py=True)
+            self.assertIn("EXPECTED_NOT_EXECUTABLE", res.stdout, f"stderr={res.stderr}")
+            self.assertIn("not executable", res.stdout)
+
+    def test_python_authority_doctor_and_queue_use_exact_venv(self):
+        """82. Python Authority: doctor and queue query use exact venv Python."""
+        self.assertIn('py_bin="$(get_bot_python)"', self.sync_script_content)
+        self.assertIn('PRODUCTION_BOT_PYTHON_EXACT_PATH="$BOT_DIR/.venv/bin/python"', self.sync_script_content)
+        self.assertIn('local exact_python="$BOT_DIR/.venv/bin/python"', self.sync_script_content)
+
+    # =========================================================================
+    # Group 3: ALREADY_DEPLOYED Failure Rollback Tests (Section 7)
+    # =========================================================================
+
+    def test_reconcile_failure_new_pid_missing(self):
+        """83. reconcile failure: new PID missing/0 -> fails closed with degraded accounting."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            py_bin = env["mock_py"]
+            body = f"""
+get_bot_python() {{ echo "{py_bin}"; }}
+export SUBDUB_PID_POLL_ATTEMPTS=2
+export SUBDUB_PID_POLL_SLEEP=0.01
+export MOCK_SYSTEMCTL_IS_ACTIVE=1
+export MOCK_SYSTEMCTL_MAINPID="7000"
+export MOCK_SYSTEMCTL_POST_RESTART_PID="0"
+if reconcile_subdub_worker_already_deployed; then
+  echo "UNEXPECTED_PASS"
+  exit 1
+else
+  echo "EXPECTED_FAIL_NONZERO"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("EXPECTED_FAIL_NONZERO", res.stdout, f"stderr={res.stderr}")
+            self.assertIn("stage=new_pid_missing", res.stdout)
+            self.assertTrue("RECONCILIATION_ROLLBACK_DEGRADED" in res.stdout or "RECONCILIATION_ROLLBACK_RESTORED" in res.stdout)
+            self.assertNotIn("SUBDUB_WORKER_RECONCILED", res.stdout)
+
+    def test_reconcile_failure_same_pid(self):
+        """84. reconcile failure: new PID == previous PID -> fails closed with rollback accounting."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            py_bin = env["mock_py"]
+            body = f"""
+get_bot_python() {{ echo "{py_bin}"; }}
+export MOCK_SYSTEMCTL_IS_ACTIVE=1
+export MOCK_SYSTEMCTL_MAINPID="7000"
+export MOCK_SYSTEMCTL_POST_RESTART_PID="7000"
+if reconcile_subdub_worker_already_deployed; then
+  echo "UNEXPECTED_PASS"
+  exit 1
+else
+  echo "EXPECTED_FAIL_NONZERO"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("EXPECTED_FAIL_NONZERO", res.stdout, f"stderr={res.stderr}")
+            self.assertIn("stage=same_pid", res.stdout)
+            self.assertTrue("RECONCILIATION_ROLLBACK_DEGRADED" in res.stdout or "RECONCILIATION_ROLLBACK_RESTORED" in res.stdout)
+            self.assertNotIn("SUBDUB_WORKER_RECONCILED", res.stdout)
+
+    def test_reconcile_failure_proc_missing(self):
+        """85. reconcile failure: /proc/<pid> missing -> fails closed with rollback accounting."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            py_bin = env["mock_py"]
+            body = f"""
+get_bot_python() {{ echo "{py_bin}"; }}
+export MOCK_SYSTEMCTL_IS_ACTIVE=1
+export MOCK_SYSTEMCTL_MAINPID="7000"
+export MOCK_SYSTEMCTL_POST_RESTART_PID="7099"
+if reconcile_subdub_worker_already_deployed; then
+  echo "UNEXPECTED_PASS"
+  exit 1
+else
+  echo "EXPECTED_FAIL_NONZERO"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("EXPECTED_FAIL_NONZERO", res.stdout, f"stderr={res.stderr}")
+            self.assertIn("stage=proc_pid_missing", res.stdout)
+            self.assertTrue("RECONCILIATION_ROLLBACK_DEGRADED" in res.stdout or "RECONCILIATION_ROLLBACK_RESTORED" in res.stdout)
+            self.assertNotIn("SUBDUB_WORKER_RECONCILED", res.stdout)
+
+    def test_reconcile_failure_proc_cwd_unreadable(self):
+        """86. reconcile failure: /proc/<pid>/cwd unreadable -> fails closed."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            py_bin = env["mock_py"]
+            pid_dir = f"{env['proc_dir']}/7101"
+            os.makedirs(pid_dir, exist_ok=True)
+            with open(f"{pid_dir}/cmdline", "wb") as f:
+                f.write(b"python\0-u\0services/subdub_worker_daemon.py\0")
+            body = f"""
+get_bot_python() {{ echo "{py_bin}"; }}
+export MOCK_SYSTEMCTL_IS_ACTIVE=1
+export MOCK_SYSTEMCTL_MAINPID="7000"
+export MOCK_SYSTEMCTL_POST_RESTART_PID="7101"
+if reconcile_subdub_worker_already_deployed; then
+  echo "UNEXPECTED_PASS"
+  exit 1
+else
+  echo "EXPECTED_FAIL_NONZERO"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("EXPECTED_FAIL_NONZERO", res.stdout, f"stderr={res.stderr}")
+            self.assertIn("stage=proc_cwd_unreadable", res.stdout)
+            self.assertTrue("RECONCILIATION_ROLLBACK_DEGRADED" in res.stdout or "RECONCILIATION_ROLLBACK_RESTORED" in res.stdout)
+            self.assertNotIn("SUBDUB_WORKER_RECONCILED", res.stdout)
+
+    def test_reconcile_failure_proc_cwd_mismatch(self):
+        """87. reconcile failure: /proc/<pid>/cwd mismatch -> fails closed."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            py_bin = env["mock_py"]
+            pid_dir = f"{env['proc_dir']}/7102"
+            os.makedirs(pid_dir, exist_ok=True)
+            with open(f"{pid_dir}/cwd", "w") as f:
+                f.write(env["staging_dir"])
+            with open(f"{pid_dir}/cmdline", "wb") as f:
+                f.write(b"python\0-u\0services/subdub_worker_daemon.py\0")
+            body = f"""
+get_bot_python() {{ echo "{py_bin}"; }}
+export MOCK_SYSTEMCTL_IS_ACTIVE=1
+export MOCK_SYSTEMCTL_MAINPID="7000"
+export MOCK_SYSTEMCTL_POST_RESTART_PID="7102"
+if reconcile_subdub_worker_already_deployed; then
+  echo "UNEXPECTED_PASS"
+  exit 1
+else
+  echo "EXPECTED_FAIL_NONZERO"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("EXPECTED_FAIL_NONZERO", res.stdout, f"stderr={res.stderr}")
+            self.assertIn("stage=proc_cwd_mismatch", res.stdout)
+            self.assertTrue("RECONCILIATION_ROLLBACK_DEGRADED" in res.stdout or "RECONCILIATION_ROLLBACK_RESTORED" in res.stdout)
+            self.assertNotIn("SUBDUB_WORKER_RECONCILED", res.stdout)
+
+    def test_reconcile_failure_proc_cmdline_unreadable(self):
+        """88. reconcile failure: /proc/<pid>/cmdline unreadable -> fails closed."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            py_bin = env["mock_py"]
+            pid_dir = f"{env['proc_dir']}/7103"
+            os.makedirs(pid_dir, exist_ok=True)
+            with open(f"{pid_dir}/cwd", "w") as f:
+                f.write(env["bot_dir"])
+            with open(f"{pid_dir}/cmdline", "wb") as f:
+                f.write(b"")
+            body = f"""
+get_bot_python() {{ echo "{py_bin}"; }}
+export MOCK_SYSTEMCTL_IS_ACTIVE=1
+export MOCK_SYSTEMCTL_MAINPID="7000"
+export MOCK_SYSTEMCTL_POST_RESTART_PID="7103"
+if reconcile_subdub_worker_already_deployed; then
+  echo "UNEXPECTED_PASS"
+  exit 1
+else
+  echo "EXPECTED_FAIL_NONZERO"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("EXPECTED_FAIL_NONZERO", res.stdout, f"stderr={res.stderr}")
+            self.assertIn("stage=proc_cmdline_unreadable", res.stdout)
+            self.assertTrue("RECONCILIATION_ROLLBACK_DEGRADED" in res.stdout or "RECONCILIATION_ROLLBACK_RESTORED" in res.stdout)
+            self.assertNotIn("SUBDUB_WORKER_RECONCILED", res.stdout)
+
+    def test_reconcile_failure_proc_cmdline_mismatch(self):
+        """89. reconcile failure: /proc/<pid>/cmdline mismatch -> fails closed."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            py_bin = env["mock_py"]
+            pid_dir = f"{env['proc_dir']}/7104"
+            os.makedirs(pid_dir, exist_ok=True)
+            with open(f"{pid_dir}/cwd", "w") as f:
+                f.write(env["bot_dir"])
+            with open(f"{pid_dir}/cmdline", "wb") as f:
+                f.write(b"python\0-u\0services/unrelated_daemon.py\0")
+            body = f"""
+get_bot_python() {{ echo "{py_bin}"; }}
+export MOCK_SYSTEMCTL_IS_ACTIVE=1
+export MOCK_SYSTEMCTL_MAINPID="7000"
+export MOCK_SYSTEMCTL_POST_RESTART_PID="7104"
+if reconcile_subdub_worker_already_deployed; then
+  echo "UNEXPECTED_PASS"
+  exit 1
+else
+  echo "EXPECTED_FAIL_NONZERO"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("EXPECTED_FAIL_NONZERO", res.stdout, f"stderr={res.stderr}")
+            self.assertIn("stage=proc_cmdline_mismatch", res.stdout)
+            self.assertTrue("RECONCILIATION_ROLLBACK_DEGRADED" in res.stdout or "RECONCILIATION_ROLLBACK_RESTORED" in res.stdout)
+            self.assertNotIn("SUBDUB_WORKER_RECONCILED", res.stdout)
+
+    def test_reconcile_failure_target_sha_mismatch(self):
+        """90. reconcile failure: target SHA mismatch -> fails closed."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            py_bin = env["mock_py"]
+            pid_dir = f"{env['proc_dir']}/7105"
+            os.makedirs(pid_dir, exist_ok=True)
+            with open(f"{pid_dir}/cwd", "w") as f:
+                f.write(env["bot_dir"])
+            with open(f"{pid_dir}/cmdline", "wb") as f:
+                f.write(b"python\0-u\0services/subdub_worker_daemon.py\0")
+            body = f"""
+get_bot_python() {{ echo "{py_bin}"; }}
+export MOCK_SYSTEMCTL_IS_ACTIVE=1
+export MOCK_SYSTEMCTL_MAINPID="7000"
+export MOCK_SYSTEMCTL_POST_RESTART_PID="7105"
+export TARGET_SHA="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+assert_exact_sha() {{
+  return 1
+}}
+if reconcile_subdub_worker_already_deployed; then
+  echo "UNEXPECTED_PASS"
+  exit 1
+else
+  echo "EXPECTED_FAIL_NONZERO"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("EXPECTED_FAIL_NONZERO", res.stdout, f"stderr={res.stderr}")
+            self.assertIn("stage=target_sha_mismatch", res.stdout)
+            self.assertTrue("RECONCILIATION_ROLLBACK_DEGRADED" in res.stdout or "RECONCILIATION_ROLLBACK_RESTORED" in res.stdout)
+            self.assertNotIn("SUBDUB_WORKER_RECONCILED", res.stdout)
+
+    def test_reconcile_failure_restart_failed(self):
+        """91. reconcile failure: restart command fails -> fails closed with rollback accounting."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            py_bin = env["mock_py"]
+            body = f"""
+get_bot_python() {{ echo "{py_bin}"; }}
+export MOCK_SYSTEMCTL_IS_ACTIVE=1
+export MOCK_SYSTEMCTL_RESTART_FAIL=1
+if reconcile_subdub_worker_already_deployed; then
+  echo "UNEXPECTED_PASS"
+  exit 1
+else
+  echo "EXPECTED_FAIL_NONZERO"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("EXPECTED_FAIL_NONZERO", res.stdout, f"stderr={res.stderr}")
+            self.assertIn("stage=restart_failed", res.stdout)
+            self.assertTrue("RECONCILIATION_ROLLBACK_DEGRADED" in res.stdout or "RECONCILIATION_ROLLBACK_RESTORED" in res.stdout)
+            self.assertNotIn("SUBDUB_WORKER_RECONCILED", res.stdout)
+
+    def test_reconcile_failure_not_active_after_restart(self):
+        """92. reconcile failure: not active after restart -> fails closed with rollback accounting."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            py_bin = env["mock_py"]
+            body = f"""
+get_bot_python() {{ echo "{py_bin}"; }}
+export MOCK_SYSTEMCTL_IS_ACTIVE=1
+export MOCK_SYSTEMCTL_POST_RESTART_IS_ACTIVE=0
+if reconcile_subdub_worker_already_deployed; then
+  echo "UNEXPECTED_PASS"
+  exit 1
+else
+  echo "EXPECTED_FAIL_NONZERO"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("EXPECTED_FAIL_NONZERO", res.stdout, f"stderr={res.stderr}")
+            self.assertIn("stage=not_active_after_restart", res.stdout)
+            self.assertTrue("RECONCILIATION_ROLLBACK_DEGRADED" in res.stdout or "RECONCILIATION_ROLLBACK_RESTORED" in res.stdout)
+            self.assertNotIn("SUBDUB_WORKER_RECONCILED", res.stdout)
+
+    def test_reconcile_recovery_best_provable_succeeds(self):
+        """93. reconcile recovery: best-provable recovery succeeds -> logs RECONCILIATION_ROLLBACK_RESTORED."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            py_bin = env["mock_py"]
+            # Setup recovery PID 7200 with valid proc
+            pid_dir = f"{env['proc_dir']}/7200"
+            os.makedirs(pid_dir, exist_ok=True)
+            with open(f"{pid_dir}/cwd", "w") as f:
+                f.write(env["bot_dir"])
+            with open(f"{pid_dir}/cmdline", "wb") as f:
+                f.write(b"python\0-u\0services/subdub_worker_daemon.py\0")
+            body = f"""
+get_bot_python() {{ echo "{py_bin}"; }}
+export MOCK_SYSTEMCTL_IS_ACTIVE=1
+export MOCK_SYSTEMCTL_MAINPID="7000"
+# Initial restart PID has missing proc (causes verification failure)
+export MOCK_SYSTEMCTL_POST_RESTART_PID="7199"
+# Recovery restart PID returns 7200 which is valid
+export MOCK_SYSTEMCTL_RECOVERY_PID="7200"
+if reconcile_subdub_worker_already_deployed; then
+  echo "UNEXPECTED_PASS"
+  exit 1
+else
+  echo "EXPECTED_FAIL_NONZERO"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("EXPECTED_FAIL_NONZERO", res.stdout, f"stderr={res.stderr}")
+            self.assertIn("RECONCILIATION_ROLLBACK_RESTORED: service recovered to verified active process", res.stdout)
+            self.assertNotIn("SUBDUB_WORKER_RECONCILED", res.stdout)
+
+    def test_reconcile_recovery_best_provable_fails_degraded(self):
+        """94. reconcile recovery: recovery fails -> logs RECONCILIATION_ROLLBACK_DEGRADED."""
+        bash_bin = self._bash_bin()
+        if not bash_bin:
+            self.skipTest("bash not found")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = self._setup_mock_env(tmp_dir)
+            py_bin = env["mock_py"]
+            body = f"""
+get_bot_python() {{ echo "{py_bin}"; }}
+export MOCK_SYSTEMCTL_IS_ACTIVE=1
+export MOCK_SYSTEMCTL_MAINPID="7000"
+export MOCK_SYSTEMCTL_POST_RESTART_PID="7199"
+# Recovery restart fails
+export MOCK_SYSTEMCTL_RECOVERY_RESTART_FAIL=1
+if reconcile_subdub_worker_already_deployed; then
+  echo "UNEXPECTED_PASS"
+  exit 1
+else
+  echo "EXPECTED_FAIL_NONZERO"
+fi
+"""
+            res = self._run_sourced_test(bash_bin, tmp_dir, env, body)
+            self.assertIn("EXPECTED_FAIL_NONZERO", res.stdout, f"stderr={res.stderr}")
+            self.assertIn("RECONCILIATION_ROLLBACK_DEGRADED", res.stdout)
+            self.assertNotIn("SUBDUB_WORKER_RECONCILED", res.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
+

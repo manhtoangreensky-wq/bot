@@ -15,7 +15,7 @@ HEALTH_SLEEP_SECONDS="${HEALTH_SLEEP_SECONDS:-2}"
 SYSTEMCTL_BIN="${SYSTEMCTL_BIN:-systemctl}"
 CURL_BIN="${CURL_BIN:-curl}"
 PROC_DIR="${PROC_DIR:-/proc}"
-BOT_PYTHON="${BOT_PYTHON:-$BOT_DIR/.venv/bin/python}"
+PRODUCTION_BOT_PYTHON_EXACT_PATH="$BOT_DIR/.venv/bin/python"
 RELEASE_REF="refs/deployments/bot-release"
 BOT_RELEASE_REF="refs/deployments/product-video-bot-release"
 WORKER_RELEASE_REF="refs/deployments/product-video-worker-release"
@@ -258,55 +258,26 @@ assert_service_contract() {
 }
 
 get_bot_python() {
-  if [[ -x "$BOT_PYTHON" ]]; then
-    echo "$BOT_PYTHON"
-  elif [[ -x "$BOT_DIR/.venv/bin/python" ]]; then
-    echo "$BOT_DIR/.venv/bin/python"
-  else
-    fail "Bot venv Python is missing or not executable: tried $BOT_PYTHON and $BOT_DIR/.venv/bin/python"
+  local exact_python="$BOT_DIR/.venv/bin/python"
+  if [[ -n "${BOT_PYTHON:-}" && "$BOT_PYTHON" != "$exact_python" ]]; then
+    fail "Arbitrary BOT_PYTHON override is forbidden: ambient BOT_PYTHON='$BOT_PYTHON' does not match exact production path '$exact_python'"
     return 1
   fi
+  if [[ ! -f "$exact_python" ]]; then
+    fail "Exact Bot venv Python is missing: $exact_python"
+    return 1
+  fi
+  if [[ ! -x "$exact_python" ]]; then
+    fail "Exact Bot venv Python is not executable: $exact_python"
+    return 1
+  fi
+  echo "$exact_python"
 }
 
-resolve_subdub_db_path() {
-  local db_path=""
-  if [[ -f "/etc/toanaas/bot.env" ]]; then
-    db_path="$(grep -E '^(CANONICAL_DB_PATH|DB_PATH|DATABASE_PATH)=' /etc/toanaas/bot.env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '"' | tr -d "'")"
-  fi
-  if [[ -z "$db_path" || ! -f "$db_path" ]]; then
-    if [[ -f "/data/toandaas_system.db" ]]; then
-      db_path="/data/toandaas_system.db"
-    elif [[ -f "$BOT_DIR/toandaas_system.db" ]]; then
-      db_path="$BOT_DIR/toandaas_system.db"
-    elif [[ -f "$BOT_DIR/bot.db" ]]; then
-      db_path="$BOT_DIR/bot.db"
-    fi
-  fi
-  echo "$db_path"
-}
-
-assert_subdub_service_contract() {
+get_subdub_service_env_file() {
   local unit
   if ! unit="$("$SYSTEMCTL_BIN" cat "$SUBDUB_SERVICE_NAME" 2>/dev/null)"; then
     fail "SubDub worker service unit ($SUBDUB_SERVICE_NAME) is missing"
-    return 1
-  fi
-  if [[ "$unit" != *"WorkingDirectory=$BOT_DIR"* ]]; then
-    fail "SubDub worker service WorkingDirectory does not use $BOT_DIR"
-    return 1
-  fi
-  if [[ "$unit" != *"$BOT_DIR/.venv/bin/python -u services/subdub_worker_daemon.py"* && "$unit" != *"$BOT_DIR/.venv/bin/python -u $BOT_DIR/services/subdub_worker_daemon.py"* ]]; then
-    fail "SubDub worker service ExecStart is not $BOT_DIR/.venv/bin/python -u services/subdub_worker_daemon.py"
-    return 1
-  fi
-  local py_bin
-  py_bin="$(get_bot_python)"
-  if [[ ! -x "$py_bin" ]]; then
-    fail "Bot Python executable is missing"
-    return 1
-  fi
-  if [[ ! -f "$BOT_DIR/$SUBDUB_DAEMON_REL_PATH" ]]; then
-    fail "SubDub worker daemon source is missing: $BOT_DIR/$SUBDUB_DAEMON_REL_PATH"
     return 1
   fi
   local env_file=""
@@ -324,40 +295,174 @@ assert_subdub_service_contract() {
     fail "SubDub worker EnvironmentFile is missing: $env_file"
     return 1
   fi
+  echo "$env_file"
 }
 
-assert_subdub_queue_safe() {
-  local db_path
-  db_path="$(resolve_subdub_db_path)"
-  if [[ -z "$db_path" ]]; then
-    fail "SubDub queue authority missing: canonical DB path could not be resolved"
+# Documented Canonical Precedence for SubDub Queue DB:
+# 1. DB_PATH (bot.py primary)
+# 2. DB_FILE (bot.py fallback / services/video_edit_state_store)
+# 3. DATABASE_PATH (services/video_trace_state)
+# 4. SQLITE_DB_PATH (services/video_provider_router)
+#
+# Derived strictly from the SubDub worker service unit's EnvironmentFile.
+# Filesystem guessing fallback is strictly forbidden (FILESYSTEM_GUESS_FALLBACK_ALLOWED=NO).
+resolve_subdub_db_path() {
+  local env_file="${1:-}"
+  if [[ -z "$env_file" ]]; then
+    env_file="$(get_subdub_service_env_file)" || return 1
+  fi
+  if [[ ! -f "$env_file" ]]; then
+    fail "Cannot resolve SubDub DB path: environment file does not exist: $env_file"
     return 1
   fi
-  if [[ ! -f "$db_path" ]]; then
-    fail "SubDub queue authority missing: DB file does not exist: $db_path"
+
+  extract_db_var() {
+    local var_name="$1"
+    local file="$2"
+    grep -E "^[[:space:]]*${var_name}=" "$file" 2>/dev/null | tail -n 1 | cut -d= -f2- | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^["'\'']//' -e 's/["'\'']$//'
+  }
+
+  check_db_var_ambiguity() {
+    local var_name="$1"
+    local file="$2"
+    local distinct_count
+    distinct_count="$(grep -E "^[[:space:]]*${var_name}=" "$file" 2>/dev/null | cut -d= -f2- | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^["'\'']//' -e 's/["'\'']$//' | sort -u | grep -v '^$' | wc -l)"
+    if [[ "$distinct_count" -gt 1 ]]; then
+      return 1
+    fi
+    return 0
+  }
+
+  for check_var in DB_PATH DB_FILE DATABASE_PATH SQLITE_DB_PATH; do
+    if ! check_db_var_ambiguity "$check_var" "$env_file"; then
+      fail "SubDub queue authority ambiguity: variable '$check_var' has conflicting values in $env_file"
+      return 1
+    fi
+  done
+
+  local val_db_path
+  local val_db_file
+  local val_database_path
+  local val_sqlite_db_path
+
+  val_db_path="$(extract_db_var "DB_PATH" "$env_file")"
+  val_db_file="$(extract_db_var "DB_FILE" "$env_file")"
+  val_database_path="$(extract_db_var "DATABASE_PATH" "$env_file")"
+  val_sqlite_db_path="$(extract_db_var "SQLITE_DB_PATH" "$env_file")"
+
+  local chosen_path=""
+  local chosen_source=""
+
+  # Documented Canonical Precedence: DB_PATH > DB_FILE > DATABASE_PATH > SQLITE_DB_PATH
+  if [[ -n "$val_db_path" ]]; then
+    chosen_path="$val_db_path"
+    chosen_source="DB_PATH"
+  elif [[ -n "$val_db_file" ]]; then
+    chosen_path="$val_db_file"
+    chosen_source="DB_FILE"
+  elif [[ -n "$val_database_path" ]]; then
+    chosen_path="$val_database_path"
+    chosen_source="DATABASE_PATH"
+  elif [[ -n "$val_sqlite_db_path" ]]; then
+    chosen_path="$val_sqlite_db_path"
+    chosen_source="SQLITE_DB_PATH"
+  fi
+
+  if [[ -z "$chosen_path" ]]; then
+    fail "SubDub queue authority missing: no canonical DB variable (DB_PATH, DB_FILE, DATABASE_PATH, SQLITE_DB_PATH) found in $env_file"
+    return 1
+  fi
+
+  # Filesystem guessing fallback is strictly forbidden
+  echo "$chosen_path"
+}
+
+assert_subdub_service_contract() {
+  local unit
+  if ! unit="$("$SYSTEMCTL_BIN" cat "$SUBDUB_SERVICE_NAME" 2>/dev/null)"; then
+    fail "SubDub worker service unit ($SUBDUB_SERVICE_NAME) is missing"
+    return 1
+  fi
+  if [[ "$unit" != *"WorkingDirectory=$BOT_DIR"* ]]; then
+    fail "SubDub worker service WorkingDirectory does not use $BOT_DIR"
+    return 1
+  fi
+  if [[ "$unit" != *"$BOT_DIR/.venv/bin/python -u services/subdub_worker_daemon.py"* && "$unit" != *"$BOT_DIR/.venv/bin/python -u $BOT_DIR/services/subdub_worker_daemon.py"* ]]; then
+    fail "SubDub worker service ExecStart is not $BOT_DIR/.venv/bin/python -u services/subdub_worker_daemon.py"
     return 1
   fi
   local py_bin
   py_bin="$(get_bot_python)" || return 1
-  local active_count
-  active_count="$("$py_bin" -c "
+  if [[ ! -f "$BOT_DIR/$SUBDUB_DAEMON_REL_PATH" ]]; then
+    fail "SubDub worker daemon source is missing: $BOT_DIR/$SUBDUB_DAEMON_REL_PATH"
+    return 1
+  fi
+  get_subdub_service_env_file >/dev/null || return 1
+}
+
+assert_subdub_queue_safe() {
+  local env_file
+  env_file="$(get_subdub_service_env_file)" || return 1
+
+  local db_path=""
+  db_path="$(resolve_subdub_db_path "$env_file")" || {
+    fail "SubDub queue authority missing: canonical DB path could not be resolved from $env_file"
+    return 1
+  }
+
+  log "QUEUE_DB_SOURCE=SUBDUB_SYSTEMD_ENVIRONMENT_FILE"
+  log "SUBDUB_QUEUE_DB_DERIVED_FROM_SERVICE_ENVIRONMENT_FILE=YES env_file=$env_file db_path=$db_path"
+
+  if [[ -z "$db_path" ]]; then
+    fail "SubDub queue authority missing: resolved DB path is empty"
+    return 1
+  fi
+  log "QUEUE_DB_PATH_NONEMPTY=YES"
+
+  if [[ ! -f "$db_path" ]]; then
+    fail "SubDub queue authority missing: DB file does not exist: $db_path"
+    return 1
+  fi
+  log "QUEUE_DB_FILE_EXISTS=YES"
+
+  local py_bin
+  py_bin="$(get_bot_python)" || return 1
+
+  local query_result
+  query_result="$("$py_bin" -c "
 import sqlite3, sys
-conn = sqlite3.connect('$db_path')
-tables = [r[0] for r in conn.execute(\"SELECT name FROM sqlite_master WHERE type='table' AND name='subdub_worker_jobs'\").fetchall()]
-if not tables:
-    print('TABLE_MISSING')
-    sys.exit(0)
-row = conn.execute(\"SELECT count(*) FROM subdub_worker_jobs WHERE status = 'processing'\").fetchone()
-print(row[0] if row else 0)
-" 2>&1)" || { fail "SubDub queue safety query failed (Python error)"; return 1; }
-  if [[ "$active_count" == "TABLE_MISSING" ]]; then
+try:
+    conn = sqlite3.connect('$db_path')
+    tables = [r[0] for r in conn.execute(\"SELECT name FROM sqlite_master WHERE type='table' AND name='subdub_worker_jobs'\").fetchall()]
+    if not tables:
+        print('TABLE_MISSING')
+        sys.exit(0)
+    row = conn.execute(\"SELECT count(*) FROM subdub_worker_jobs WHERE status = 'processing'\").fetchone()
+    print(f'COUNT:{row[0] if row else 0}')
+except Exception as e:
+    print(f'ERROR:{e}')
+    sys.exit(1)
+" 2>&1)" || { fail "SubDub queue safety query failed (Python error): $query_result"; return 1; }
+
+  if [[ "$query_result" == "TABLE_MISSING" ]]; then
     fail "SubDub queue authority missing: subdub_worker_jobs table does not exist in $db_path"
     return 1
   fi
-  if ! [[ "$active_count" =~ ^[0-9]+$ ]]; then
-    fail "SubDub queue safety query returned non-numeric result: $active_count"
+
+  if [[ "$query_result" == ERROR:* ]]; then
+    fail "SubDub queue safety query error: $query_result"
     return 1
   fi
+
+  log "QUEUE_TABLE_EXISTS=YES"
+  log "QUEUE_QUERY_SUCCESS=YES"
+
+  local active_count="${query_result#COUNT:}"
+  if ! [[ "$active_count" =~ ^[0-9]+$ ]]; then
+    fail "SubDub queue safety query returned non-numeric result: $query_result"
+    return 1
+  fi
+
   if [[ "$active_count" -gt 0 ]]; then
     fail "SubDub queue safety violation: $active_count processing jobs in flight before deploy"
     return 1
@@ -533,84 +638,153 @@ activate_and_verify_subdub_worker() {
   write_transaction_manifest
 }
 
+handle_subdub_reconciliation_failure() {
+  local stage="$1"
+  local reason="$2"
+  local prev_was_active="${3:-0}"
+  local prev_pid="${4:-}"
+  local mutation_started="${5:-0}"
+
+  local curr_active=0
+  if "$SYSTEMCTL_BIN" is-active --quiet "$SUBDUB_SERVICE_NAME" 2>/dev/null; then
+    curr_active=1
+  fi
+  local curr_pid=""
+  curr_pid="$("$SYSTEMCTL_BIN" show -p MainPID --value "$SUBDUB_SERVICE_NAME" 2>/dev/null || echo "")"
+
+  log "RECONCILIATION_FAILURE_CAPTURED stage=$stage reason=\"$reason\" prev_active=$prev_was_active prev_pid=${prev_pid:-none} mutation_started=$mutation_started curr_active=$curr_active curr_pid=${curr_pid:-none}"
+
+  if [[ "$mutation_started" == "1" ]]; then
+    log "RECONCILIATION_POST_RESTART_RECOVERY_STARTED stage=$stage"
+    if [[ "$prev_was_active" == "1" ]]; then
+      local recovery_proven=0
+      local rec_pid=""
+      # Best-provable recovery: attempt restart and full verification of running process
+      if "$SYSTEMCTL_BIN" restart "$SUBDUB_SERVICE_NAME" 2>/dev/null && "$SYSTEMCTL_BIN" is-active --quiet "$SUBDUB_SERVICE_NAME" 2>/dev/null; then
+        rec_pid="$("$SYSTEMCTL_BIN" show -p MainPID --value "$SUBDUB_SERVICE_NAME" 2>/dev/null || echo "")"
+        if [[ -n "$rec_pid" && "$rec_pid" != "0" && -d "$PROC_DIR/$rec_pid" ]]; then
+          local rec_cwd=""
+          rec_cwd="$(readlink -f "$PROC_DIR/$rec_pid/cwd" 2>/dev/null)" || true
+          local canonical_bot_dir
+          canonical_bot_dir="$(cd "$BOT_DIR" && pwd -P)"
+          local rec_cmdline=""
+          rec_cmdline="$(tr '\0' ' ' < "$PROC_DIR/$rec_pid/cmdline" 2>/dev/null)" || true
+          if [[ "$rec_cwd" == "$canonical_bot_dir" && "$rec_cmdline" == *"services/subdub_worker_daemon.py"* ]]; then
+            recovery_proven=1
+          fi
+        fi
+      fi
+
+      if [[ "$recovery_proven" == "1" ]]; then
+        log "RECONCILIATION_ROLLBACK_RESTORED: service recovered to verified active process (stage=$stage rec_pid=$rec_pid)"
+      else
+        log "RECONCILIATION_ROLLBACK_DEGRADED: could not prove active service restoration after post-restart verification failure (stage=$stage)"
+      fi
+    else
+      # Service was originally inactive, restore inactive state
+      "$SYSTEMCTL_BIN" stop "$SUBDUB_SERVICE_NAME" 2>/dev/null || true
+      if ! "$SYSTEMCTL_BIN" is-active --quiet "$SUBDUB_SERVICE_NAME" 2>/dev/null; then
+        log "RECONCILIATION_ROLLBACK_RESTORED: service restored to prior inactive state"
+      else
+        log "RECONCILIATION_ROLLBACK_DEGRADED: could not restore prior inactive state"
+      fi
+    fi
+  else
+    log "RECONCILIATION_PRE_MUTATION_FAILURE: no service mutation occurred (stage=$stage)"
+  fi
+
+  fail "SubDub worker reconciliation failed at stage '$stage': $reason"
+  return 1
+}
+
 reconcile_subdub_worker_already_deployed() {
-  assert_subdub_service_contract
-  run_subdub_doctor
+  assert_subdub_service_contract || return 1
+  run_subdub_doctor || return 1
 
   if "$SYSTEMCTL_BIN" is-active --quiet "$SUBDUB_SERVICE_NAME"; then
     log "SubDub worker is active: performing queue check and governed reload"
-    assert_subdub_queue_safe
+    assert_subdub_queue_safe || return 1
 
     local prev_pid=""
     prev_pid="$("$SYSTEMCTL_BIN" show -p MainPID --value "$SUBDUB_SERVICE_NAME" 2>/dev/null || echo "")"
     local prev_was_active=1
+    local mutation_started=0
 
-    local reconcile_failed=0
-    "$SYSTEMCTL_BIN" restart "$SUBDUB_SERVICE_NAME" || reconcile_failed=1
-
-    if [[ "$reconcile_failed" == "1" ]]; then
-      log "RECONCILIATION_RESTART_FAILED: attempting prior state restoration"
-      if [[ "$prev_was_active" == "1" ]]; then
-        "$SYSTEMCTL_BIN" start "$SUBDUB_SERVICE_NAME" 2>/dev/null || true
-        if "$SYSTEMCTL_BIN" is-active --quiet "$SUBDUB_SERVICE_NAME"; then
-          log "RECONCILIATION_ROLLBACK_RESTORED: service restarted to prior active state"
-        else
-          log "RECONCILIATION_ROLLBACK_DEGRADED: could not restore prior active state"
-        fi
-      fi
-      fail "Failed to restart SubDub worker service during reconciliation"
+    # Service mutation begins
+    mutation_started=1
+    if ! "$SYSTEMCTL_BIN" restart "$SUBDUB_SERVICE_NAME"; then
+      handle_subdub_reconciliation_failure "restart_failed" "systemctl restart returned non-zero" "$prev_was_active" "$prev_pid" "$mutation_started"
       return 1
     fi
 
-    "$SYSTEMCTL_BIN" is-active --quiet "$SUBDUB_SERVICE_NAME" || {
-      log "RECONCILIATION_SERVICE_NOT_ACTIVE_AFTER_RESTART: attempting prior state restoration"
-      if [[ "$prev_was_active" == "1" ]]; then
-        "$SYSTEMCTL_BIN" start "$SUBDUB_SERVICE_NAME" 2>/dev/null || true
-        if "$SYSTEMCTL_BIN" is-active --quiet "$SUBDUB_SERVICE_NAME"; then
-          log "RECONCILIATION_ROLLBACK_RESTORED: service restored to prior active state"
-        else
-          log "RECONCILIATION_ROLLBACK_DEGRADED: could not restore prior active state"
-        fi
-      fi
-      fail "SubDub worker service is not active after restart during reconciliation"
+    if ! "$SYSTEMCTL_BIN" is-active --quiet "$SUBDUB_SERVICE_NAME"; then
+      handle_subdub_reconciliation_failure "not_active_after_restart" "service is not active after restart" "$prev_was_active" "$prev_pid" "$mutation_started"
       return 1
-    }
+    fi
 
     local new_pid=""
     local attempt
-    for ((attempt = 1; attempt <= 30; attempt++)); do
+    local max_attempts="${SUBDUB_PID_POLL_ATTEMPTS:-30}"
+    local sleep_seconds="${SUBDUB_PID_POLL_SLEEP:-0.5}"
+    for ((attempt = 1; attempt <= max_attempts; attempt++)); do
       new_pid="$("$SYSTEMCTL_BIN" show -p MainPID --value "$SUBDUB_SERVICE_NAME" 2>/dev/null || echo "")"
       if [[ -n "$new_pid" && "$new_pid" != "0" ]]; then
         break
       fi
-      sleep 0.5
+      sleep "$sleep_seconds"
     done
-    [[ -n "$new_pid" && "$new_pid" != "0" ]] || { fail "SubDub worker MainPID is 0 or missing after restart during reconciliation"; return 1; }
+    if [[ -z "$new_pid" || "$new_pid" == "0" ]]; then
+      handle_subdub_reconciliation_failure "new_pid_missing" "SubDub worker MainPID is 0 or missing after restart" "$prev_was_active" "$prev_pid" "$mutation_started"
+      return 1
+    fi
 
     if [[ -n "$prev_pid" && "$prev_pid" != "0" ]]; then
       if [[ "$new_pid" == "$prev_pid" ]]; then
-        fail "SubDub worker PID did not change after reload during reconciliation (old=$prev_pid new=$new_pid)"
+        handle_subdub_reconciliation_failure "same_pid" "SubDub worker PID did not change after reload (old=$prev_pid new=$new_pid)" "$prev_was_active" "$prev_pid" "$mutation_started"
         return 1
       fi
     fi
 
-    [[ -d "$PROC_DIR/$new_pid" ]] || { fail "SubDub worker /proc/$new_pid directory is missing during reconciliation: cannot verify process"; return 1; }
+    if [[ ! -d "$PROC_DIR/$new_pid" ]]; then
+      handle_subdub_reconciliation_failure "proc_pid_missing" "SubDub worker /proc/$new_pid directory is missing: cannot verify process" "$prev_was_active" "$prev_pid" "$mutation_started"
+      return 1
+    fi
 
     local proc_cwd=""
-    proc_cwd="$(readlink -f "$PROC_DIR/$new_pid/cwd" 2>/dev/null)" || true
-    [[ -n "$proc_cwd" ]] || { fail "SubDub worker /proc/$new_pid/cwd is unreadable during reconciliation"; return 1; }
+    if [[ -e "$PROC_DIR/$new_pid/cwd" || -L "$PROC_DIR/$new_pid/cwd" ]]; then
+      proc_cwd="$(readlink -f "$PROC_DIR/$new_pid/cwd" 2>/dev/null)" || true
+    fi
+    if [[ -z "$proc_cwd" ]]; then
+      handle_subdub_reconciliation_failure "proc_cwd_unreadable" "SubDub worker /proc/$new_pid/cwd is unreadable" "$prev_was_active" "$prev_pid" "$mutation_started"
+      return 1
+    fi
+
     local canonical_bot_dir
     canonical_bot_dir="$(cd "$BOT_DIR" && pwd -P)"
-    [[ "$proc_cwd" == "$canonical_bot_dir" ]] || { fail "SubDub worker process cwd ($proc_cwd) does not match $canonical_bot_dir during reconciliation"; return 1; }
+    if [[ "$proc_cwd" != "$canonical_bot_dir" ]]; then
+      handle_subdub_reconciliation_failure "proc_cwd_mismatch" "SubDub worker process cwd ($proc_cwd) does not match $canonical_bot_dir" "$prev_was_active" "$prev_pid" "$mutation_started"
+      return 1
+    fi
 
     local proc_cmdline=""
     proc_cmdline="$(tr '\0' ' ' < "$PROC_DIR/$new_pid/cmdline" 2>/dev/null)" || true
-    [[ -n "$proc_cmdline" ]] || { fail "SubDub worker /proc/$new_pid/cmdline is unreadable during reconciliation"; return 1; }
-    [[ "$proc_cmdline" == *"services/subdub_worker_daemon.py"* ]] || { fail "SubDub worker process cmdline ($proc_cmdline) does not execute services/subdub_worker_daemon.py during reconciliation"; return 1; }
-
-    if [[ -n "$TARGET_SHA" ]]; then
-      assert_exact_sha "$BOT_DIR" "$TARGET_SHA" "bot target while subdub active during reconciliation"
+    if [[ -z "$proc_cmdline" ]]; then
+      handle_subdub_reconciliation_failure "proc_cmdline_unreadable" "SubDub worker /proc/$new_pid/cmdline is unreadable" "$prev_was_active" "$prev_pid" "$mutation_started"
+      return 1
     fi
+
+    if [[ "$proc_cmdline" != *"services/subdub_worker_daemon.py"* ]]; then
+      handle_subdub_reconciliation_failure "proc_cmdline_mismatch" "SubDub worker process cmdline ($proc_cmdline) does not execute services/subdub_worker_daemon.py" "$prev_was_active" "$prev_pid" "$mutation_started"
+      return 1
+    fi
+
+    if [[ -n "${TARGET_SHA:-}" ]]; then
+      if ! assert_exact_sha "$BOT_DIR" "$TARGET_SHA" "bot target while subdub active during reconciliation"; then
+        handle_subdub_reconciliation_failure "target_sha_mismatch" "bot target SHA mismatch: expected=$TARGET_SHA" "$prev_was_active" "$prev_pid" "$mutation_started"
+        return 1
+      fi
+    fi
+
     SUBDUB_VERIFIED=1
     log "SUBDUB_WORKER_RECONCILED sha=${TARGET_SHA:-current} pid=$new_pid service=$SUBDUB_SERVICE_NAME active=true"
   else
