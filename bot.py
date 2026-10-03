@@ -182789,14 +182789,15 @@ def format_admin_report(payload: dict) -> str:
         f"• Xu trừ trong kỳ: <b>{xu_text(credits['spent'])}</b>",
         f"• Xu đang lưu hành: <b>{xu_text(credits['circulating'])}</b>",
         "",
-        "<b>Công cụ</b>",
-        f"• Lượt gọi tool: <b>{tools['requested']}</b>",
-        f"• Thành công: <b>{tools['success']}</b>",
-        f"• Lỗi: <b>{tools['fail']}</b>",
-        f"• Tỷ lệ thành công: <b>{success_rate}%</b>",
-        f"• AI chat lượt: <b>{tools.get('ai_chat_total', 0)}</b>",
-        f"• AI chat success: <b>{tools.get('ai_chat_success', 0)}</b>",
-        f"• AI chat fail: <b>{tools.get('ai_chat_fail', 0)}</b>",
+        "<b>Công cụ — event usage_events</b>",
+        f"• Lượt tool_use: <b>{tools['requested']}</b>",
+        f"• Event tool_success: <b>{tools['success']}</b>",
+        f"• Event lỗi (tool_fail/provider_error): <b>{tools['fail']}</b>",
+        f"• Tỷ lệ event thành công (success/(success+lỗi)): <b>{success_rate}%</b>",
+        "• Lưu ý: Đây là số event, không phải số job đã giao video, audio hoặc phụ đề.",
+        f"• AI chat events: <b>{tools.get('ai_chat_total', 0)}</b>",
+        f"• AI chat success events: <b>{tools.get('ai_chat_success', 0)}</b>",
+        f"• AI chat fail events: <b>{tools.get('ai_chat_fail', 0)}</b>",
         f"• Xu chat đã trừ: <b>{xu_text(tools.get('ai_chat_xu_spent', 0))}</b>",
         "",
         "<b>Trial / Promo</b>",
@@ -182823,9 +182824,9 @@ def format_admin_report(payload: dict) -> str:
     if provider_lines:
         lines.extend(provider_lines[:5])
     if top_tool_lines:
-        lines.extend(["", "<b>Top tools</b>", *top_tool_lines[:6]])
+        lines.extend(["", "<b>Top tools (usage events)</b>", *top_tool_lines[:6]])
     if top_command_lines:
-        lines.extend(["", "<b>Top commands</b>", *top_command_lines[:6]])
+        lines.extend(["", "<b>Top commands (usage events)</b>", *top_command_lines[:6]])
     lines.append("")
     lines.append("Lệnh AI insight: <code>/report_ai_today</code> | chart: <code>/report_chart_week</code>")
     return "\n".join(lines[:120])
@@ -182856,7 +182857,7 @@ def offline_admin_insight(payload: dict, ai_error: str = "") -> str:
     if active > 0:
         good_points.append("Bot có hoạt động thực tế trong kỳ.")
     if success_rate >= 80:
-        good_points.append(f"Tỷ lệ tool thành công đang khá ổn ({success_rate}%).")
+        good_points.append(f"Tỷ lệ event tool thành công trong usage_events đang khá ổn ({success_rate}%).")
     if revenue > 0:
         good_points.append(f"Đã có doanh thu: {vnd_text(revenue)}.")
     if int(growth.get("trial_grants") or 0) > 0 or new_users > 0:
@@ -182892,7 +182893,8 @@ def offline_admin_insight(payload: dict, ai_error: str = "") -> str:
         f"• Active users: <b>{active}</b>",
         f"• User mới: <b>{new_users}</b>",
         f"• Doanh thu: <b>{vnd_text(revenue)}</b>",
-        f"• Tool calls: <b>{requested}</b> | success <b>{success}</b> | fail <b>{fail}</b>",
+        f"• Usage events: tool_use <b>{requested}</b> | tool_success <b>{success}</b> | lỗi <b>{fail}</b>",
+        "• Lưu ý: Đây là số event usage_events, không xác nhận job đã hoàn tất/giao video, audio hoặc phụ đề.",
         f"• Provider errors: <b>{provider_errors if providers_available else 'không khả dụng'}</b>",
         "",
         "<b>2. Điểm tốt</b>",
