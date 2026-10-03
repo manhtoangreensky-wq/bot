@@ -140155,7 +140155,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         admin_ticket_status = get_support_ticket(int(parts[2]))
         if not admin_ticket_status:
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
-    if action not in {"send", "file", "pv", "av", "st"}:
+    if action not in {"send", "file", "pv", "av", "st", "reply", "ask", "suggest", "note", "assign", "lead"}:
         await query.answer()
     if action == "start":
         clear_support_ticket_pending(uid)
@@ -140259,12 +140259,14 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         ticket_id = int(parts[2])
         if not get_support_ticket(ticket_id):
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
+        await query.answer()
         set_support_ticket_pending(uid, "admin_reply_input", ticket_id=ticket_id, source="new")
         return await safe_edit_or_send(query, "💬 Nhập nội dung phản hồi cho khách. Bot chỉ gửi sau khi admin xem preview và bấm xác nhận.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]]))
     if action == "ask" and len(parts) >= 3:
         ticket_id = int(parts[2])
         if not get_support_ticket(ticket_id):
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
+        await query.answer()
         set_support_ticket_pending(uid, "admin_reply_input", ticket_id=ticket_id, source="new")
         return await safe_edit_or_send(query, "👤 Nhập câu hỏi hoặc thông tin bạn cần khách bổ sung. Bot sẽ cho xem preview trước khi gửi.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new")]]))
     if action == "suggest" and len(parts) >= 4:
@@ -140273,6 +140275,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         ticket = get_support_ticket(ticket_id)
         if not ticket:
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
+        await query.answer()
         reply_text = support_suggested_reply(ticket.get("category"), variant, ticket.get("message") or "")
         update_support_ticket(ticket_id, suggested_reply=reply_text)
         preview_token = uuid.uuid4().hex[:16]
@@ -140333,17 +140336,23 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         ticket_id = int(parts[2])
         if not get_support_ticket(ticket_id):
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
+        await query.answer()
         set_support_ticket_pending(uid, "admin_note_input", ticket_id=ticket_id)
         return await safe_edit_or_send(query, "📌 Nhập ghi chú nội bộ. Nội dung này không hiển thị cho khách.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new")]]))
     if action == "assign" and len(parts) >= 3:
-        ticket = update_support_ticket(int(parts[2]), status="reviewing", assigned_admin_id=uid)
-        if not ticket:
+        ticket_id = int(parts[2])
+        if not get_support_ticket(ticket_id):
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
+        await query.answer()
+        ticket = update_support_ticket(ticket_id, status="reviewing", assigned_admin_id=uid)
+        if not ticket:
+            return await safe_edit_or_send(query, "Không tìm thấy ticket.", reply_markup=support_admin_menu_keyboard())
         return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket))
     if action == "lead" and len(parts) >= 4:
         ticket = get_support_ticket(int(parts[2]))
         if not ticket:
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
+        await query.answer()
         marker = "Cần liên hệ" if parts[3] == "contact" else "Lead tiềm năng"
         existing_note = str(ticket.get("admin_note") or "")
         note_lines = existing_note.rstrip().splitlines()
