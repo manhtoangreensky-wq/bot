@@ -12309,11 +12309,22 @@ async def handle_product_progress_callback(update: Update, context: ContextTypes
     canonical = product_progress_status.normalize_product_type(product_type)
     job = get_engine_async_job(job_id) if job_id and job_id != "latest" else {}
     canonical = resolve_progress_product_type(job_id, canonical, job)
+    actor_id = query.from_user.id if getattr(query, "from_user", None) else 0
+    job_owner = str(job.get("user_id") or "").strip()
+    if not job_owner and isinstance(job.get("debug_job"), dict):
+        job_owner = str(job["debug_job"].get("user_id") or "").strip()
+    if job_owner and job_owner != str(actor_id) and not is_admin_user(actor_id):
+        return await safe_edit_or_send(
+            query,
+            product_progress_status_from_job_text(canonical, {}, "", lang),
+            parse_mode="HTML",
+            reply_markup=product_progress_status_keyboard(canonical, "latest", lang),
+        )
     if canonical == "subdub":
         job = subdub_progress_job_for_user(
             job_id,
             query.from_user.id if getattr(query, "from_user", None) else 0,
-        ) or job
+        )
     if canonical == "subdub" and job:
         registry_present = subdub_persisted_job_registry_present(job)
         recovery_key, job = subdub_rehydrate_terminal_job(job)
