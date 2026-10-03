@@ -195,3 +195,41 @@ def test_owned_profile_without_preview_keeps_existing_preview_guidance(voice_vau
     assert "music_quick|showroom|voice_profile_delete:105" in callbacks
     assert "Foreign voice 104" not in text
     assert conn.total_changes == before_click_writes
+
+
+@pytest.mark.parametrize(
+    "action",
+    ("voice_profile_download", "voice_profile_edit_text", "voice_profile_generate"),
+)
+def test_foreign_voice_actions_return_callers_vault_without_state_changes(voice_vault_runtime, action):
+    from copy import deepcopy
+
+    ns, route, conn = voice_vault_runtime
+    conn.execute(
+        "INSERT INTO voice_profiles VALUES (?, ?, 'active', ?, ?, NULL, 0, '')",
+        (104, "902", "foreign-provider-id", "Foreign voice 104"),
+    )
+    conn.commit()
+    before_click_writes = conn.total_changes
+    before_pending = deepcopy(ns["USER_PENDING"])
+    # This copy function is only needed by the existing not-ready failure branch;
+    # the test asserts the branch routes to owner-scoped recovery before reaching it.
+    ns["voice_profile_not_ready_text"] = lambda *_args: "⚠️ Giọng chưa sẵn sàng."
+
+    query = CALLBACK_FIXTURE["_click"](
+        route, f"music_quick|showroom|{action}:104"
+    )
+
+    text, markup = query.message.replies[-1]
+    assert "không tìm thấy giọng này trong tài khoản" in text.lower()
+    expected_callbacks = [
+        button.callback_data
+        for row in ns["voice_vault_keyboard"](901, "vi", "showroom").inline_keyboard
+        for button in row
+    ]
+    actual_callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+    assert actual_callbacks == expected_callbacks
+    assert not any(str(data).endswith(":104") for data in actual_callbacks)
+    assert "Foreign voice 104" not in text
+    assert ns["USER_PENDING"] == before_pending
+    assert conn.total_changes == before_click_writes
