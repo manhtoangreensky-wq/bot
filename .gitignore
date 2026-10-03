@@ -25,3 +25,7 @@ backups/
 v_*.mp3
 no_bg.png
 toan-daas-updated-files/
+assets/models/subdub_smart_language/*.bin
+assets/models/subdub_smart_language/*.json
+assets/models/subdub_smart_language/*.part
+assets/models/subdub_smart_language/vocabulary.txt
