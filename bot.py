@@ -172364,8 +172364,10 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         await query.answer()
         value = _safe_int(action.split(":", 1)[1], 0)
         if action.startswith("voice_profile_select_code:"):
-            profile = user_voice_profile_by_display_code(user_id, value)
-            profile_id = int((profile or {}).get("id") or 0)
+            return await query.message.reply_text(
+                "⚠️ Màn Kho voice cũ đã hết hạn. Hãy mở lại Kho voice và chọn lại giọng.",
+                reply_markup=voice_vault_keyboard(user_id, lang, ctx),
+            )
         else:
             profile_id = value
             profile = get_user_voice_profile(user_id, profile_id)
