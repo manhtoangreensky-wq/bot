@@ -377,3 +377,59 @@ def test_foreign_or_stale_voice_profile_save_stops_before_charge(
     after_rows = conn.execute("SELECT * FROM voice_profiles ORDER BY id").fetchall()
     assert [tuple(row) for row in after_rows] == [tuple(row) for row in before_rows]
     assert conn.total_changes == before_writes
+
+
+@pytest.mark.parametrize("profile_case", ("foreign", "missing"))
+def test_foreign_or_stale_voice_profile_use_stops_before_mutation(
+    voice_vault_runtime, profile_case
+):
+    from copy import deepcopy
+
+    ns, route, conn = voice_vault_runtime
+    profile_id = 104 if profile_case == "foreign" else 999
+    if profile_case == "foreign":
+        conn.execute(
+            "INSERT INTO voice_profiles VALUES (?, ?, 'active', ?, ?, NULL, 0, '')",
+            (profile_id, "902", "foreign-provider-id", "Foreign voice 104"),
+        )
+        conn.commit()
+
+    pending = deepcopy(ns["USER_PENDING"])
+    music_result = {"voice_text": "existing safe fixture"}
+    ns["get_music_guided_result"] = lambda *_args: music_result
+    result_before = deepcopy(music_result)
+    video_steps = []
+    ns["start_video_voice_script_step"] = lambda *args, **kwargs: video_steps.append((args, kwargs))
+    updates = []
+    original_update = ns["update_user_voice_profile"]
+
+    def observe_update(user_id, selected_id, **fields):
+        updates.append((user_id, selected_id, fields))
+        return original_update(user_id, selected_id, **fields)
+
+    ns["update_user_voice_profile"] = observe_update
+    before_rows = conn.execute("SELECT * FROM voice_profiles ORDER BY id").fetchall()
+    before_writes = conn.total_changes
+
+    query = CALLBACK_FIXTURE["_click"](
+        route, f"music_quick|showroom|voice_profile_use:{profile_id}"
+    )
+
+    text, markup = query.message.replies[-1]
+    assert "chưa sẵn sàng để sử dụng" in text.lower()
+    assert "Foreign voice 104" not in text
+    expected_callbacks = [
+        button.callback_data
+        for row in ns["voice_vault_keyboard"](901, "vi", "showroom").inline_keyboard
+        for button in row
+    ]
+    actual_callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+    assert actual_callbacks == expected_callbacks
+    assert not any(str(data).endswith(f":{profile_id}") for data in actual_callbacks)
+    assert ns["USER_PENDING"] == pending
+    assert music_result == result_before
+    assert updates == []
+    assert video_steps == []
+    after_rows = conn.execute("SELECT * FROM voice_profiles ORDER BY id").fetchall()
+    assert [tuple(row) for row in after_rows] == [tuple(row) for row in before_rows]
+    assert conn.total_changes == before_writes
