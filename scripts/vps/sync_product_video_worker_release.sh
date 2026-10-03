@@ -14,9 +14,21 @@ HEALTH_ATTEMPTS="${HEALTH_ATTEMPTS:-120}"
 HEALTH_SLEEP_SECONDS="${HEALTH_SLEEP_SECONDS:-2}"
 SYSTEMCTL_BIN="${SYSTEMCTL_BIN:-systemctl}"
 CURL_BIN="${CURL_BIN:-curl}"
+PROC_DIR="${PROC_DIR:-/proc}"
+BOT_PYTHON="${BOT_PYTHON:-$BOT_DIR/.venv/bin/python}"
 RELEASE_REF="refs/deployments/bot-release"
 BOT_RELEASE_REF="refs/deployments/product-video-bot-release"
 WORKER_RELEASE_REF="refs/deployments/product-video-worker-release"
+
+SUBDUB_SERVICE_NAME="${SUBDUB_SERVICE_NAME:-toanaas-worker-subdub.service}"
+SUBDUB_DAEMON_REL_PATH="services/subdub_worker_daemon.py"
+SUBDUB_WAS_ACTIVE=0
+PREV_SUBDUB_PID=""
+SUBDUB_STOPPED=0
+SUBDUB_DOCTOR_PASS=0
+SUBDUB_ACTIVATED=0
+SUBDUB_NEW_PID=""
+SUBDUB_VERIFIED=0
 
 TRANSACTION_MARKER_PATH="${TRANSACTION_MARKER_PATH:-$STAGING_DIR/transaction_manifest.json}"
 WORKER_PREPARED=0
@@ -54,6 +66,14 @@ write_transaction_manifest() {
   "bot_healthy": $( [[ "$BOT_HEALTHY" == "1" ]] && echo "true" || echo "false" ),
   "worker_activated": $( [[ "$WORKER_ACTIVATED" == "1" ]] && echo "true" || echo "false" ),
   "worker_verified": $( [[ "$WORKER_VERIFIED" == "1" ]] && echo "true" || echo "false" ),
+  "subdub_service_name": "${SUBDUB_SERVICE_NAME}",
+  "subdub_was_active": $( [[ "$SUBDUB_WAS_ACTIVE" == "1" ]] && echo "true" || echo "false" ),
+  "previous_subdub_pid": "${PREV_SUBDUB_PID}",
+  "subdub_stopped": $( [[ "$SUBDUB_STOPPED" == "1" ]] && echo "true" || echo "false" ),
+  "subdub_doctor_pass": $( [[ "$SUBDUB_DOCTOR_PASS" == "1" ]] && echo "true" || echo "false" ),
+  "subdub_activated": $( [[ "$SUBDUB_ACTIVATED" == "1" ]] && echo "true" || echo "false" ),
+  "subdub_new_pid": "${SUBDUB_NEW_PID}",
+  "subdub_verified": $( [[ "$SUBDUB_VERIFIED" == "1" ]] && echo "true" || echo "false" ),
   "committed": $( [[ "$TRANSACTION_COMMITTED" == "1" ]] && echo "true" || echo "false" ),
   "timestamp_utc": "${ts}"
 }
@@ -127,6 +147,7 @@ rollback_transaction() {
 
   log "ROLLBACK_STARTED"
   "$SYSTEMCTL_BIN" stop "$SERVICE_NAME" || rollback_failed=1
+  "$SYSTEMCTL_BIN" stop "$SUBDUB_SERVICE_NAME" 2>/dev/null || true
 
   restore_repo "$BOT_DIR" "$PREV_BOT_SHA" "bot" || rollback_failed=1
   restore_bot_refs || rollback_failed=1
@@ -140,6 +161,21 @@ rollback_transaction() {
     "$SYSTEMCTL_BIN" stop "$BOT_SERVICE_NAME" || rollback_failed=1
   fi
   restore_service_state "$SERVICE_NAME" "$WORKER_WAS_ACTIVE" || rollback_failed=1
+
+  if [[ "$SUBDUB_WAS_ACTIVE" == "1" ]]; then
+    "$SYSTEMCTL_BIN" start "$SUBDUB_SERVICE_NAME" || rollback_failed=1
+    if "$SYSTEMCTL_BIN" is-active --quiet "$SUBDUB_SERVICE_NAME"; then
+      local rb_pid
+      rb_pid="$("$SYSTEMCTL_BIN" show -p MainPID --value "$SUBDUB_SERVICE_NAME" 2>/dev/null || echo "")"
+      if [[ -z "$rb_pid" || "$rb_pid" == "0" ]]; then
+        rollback_failed=1
+      fi
+    else
+      rollback_failed=1
+    fi
+  else
+    "$SYSTEMCTL_BIN" stop "$SUBDUB_SERVICE_NAME" 2>/dev/null || true
+  fi
 
   if [[ "$rollback_failed" == "0" ]]; then
     log "ROLLBACK_COMPLETED"
@@ -221,6 +257,101 @@ assert_service_contract() {
   [[ -f "$WORKER_ENV_FILE" ]] || fail "worker environment file is missing"
 }
 
+get_bot_python() {
+  if [[ -x "$BOT_PYTHON" ]]; then
+    echo "$BOT_PYTHON"
+  elif [[ -x "$BOT_DIR/.venv/bin/python" ]]; then
+    echo "$BOT_DIR/.venv/bin/python"
+  elif command -v python3 >/dev/null 2>&1; then
+    command -v python3
+  else
+    command -v python
+  fi
+}
+
+resolve_subdub_db_path() {
+  local db_path=""
+  if [[ -f "/etc/toanaas/bot.env" ]]; then
+    db_path="$(grep -E '^(CANONICAL_DB_PATH|DB_PATH|DATABASE_PATH)=' /etc/toanaas/bot.env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '"' | tr -d "'")"
+  fi
+  if [[ -z "$db_path" || ! -f "$db_path" ]]; then
+    if [[ -f "/data/toandaas_system.db" ]]; then
+      db_path="/data/toandaas_system.db"
+    elif [[ -f "$BOT_DIR/toandaas_system.db" ]]; then
+      db_path="$BOT_DIR/toandaas_system.db"
+    elif [[ -f "$BOT_DIR/bot.db" ]]; then
+      db_path="$BOT_DIR/bot.db"
+    fi
+  fi
+  echo "$db_path"
+}
+
+assert_subdub_service_contract() {
+  local unit
+  if ! unit="$("$SYSTEMCTL_BIN" cat "$SUBDUB_SERVICE_NAME" 2>/dev/null)"; then
+    fail "SubDub worker service unit ($SUBDUB_SERVICE_NAME) is missing"
+    return 1
+  fi
+  if [[ "$unit" != *"WorkingDirectory=$BOT_DIR"* ]]; then
+    fail "SubDub worker service WorkingDirectory does not use $BOT_DIR"
+    return 1
+  fi
+  if [[ "$unit" != *"$BOT_DIR/.venv/bin/python -u services/subdub_worker_daemon.py"* && "$unit" != *"$BOT_DIR/.venv/bin/python -u $BOT_DIR/services/subdub_worker_daemon.py"* ]]; then
+    fail "SubDub worker service ExecStart is not $BOT_DIR/.venv/bin/python -u services/subdub_worker_daemon.py"
+    return 1
+  fi
+  local py_bin
+  py_bin="$(get_bot_python)"
+  if [[ ! -x "$py_bin" ]]; then
+    fail "Bot Python executable is missing"
+    return 1
+  fi
+  if [[ ! -f "$BOT_DIR/$SUBDUB_DAEMON_REL_PATH" ]]; then
+    fail "SubDub worker daemon source is missing: $BOT_DIR/$SUBDUB_DAEMON_REL_PATH"
+    return 1
+  fi
+}
+
+assert_subdub_queue_safe() {
+  local db_path
+  db_path="$(resolve_subdub_db_path)"
+  if [[ -z "$db_path" || ! -f "$db_path" ]]; then
+    return 0
+  fi
+  local py_bin
+  py_bin="$(get_bot_python)"
+  local active_count
+  active_count="$("$py_bin" -c "
+import sqlite3, sys
+try:
+    conn = sqlite3.connect('$db_path')
+    tables = [r[0] for r in conn.execute(\"SELECT name FROM sqlite_master WHERE type='table' AND name='subdub_worker_jobs'\").fetchall()]
+    if not tables:
+        print(0)
+        sys.exit(0)
+    row = conn.execute(\"SELECT count(*) FROM subdub_worker_jobs WHERE status IN ('processing', 'leased', 'stale_lease', 'unknown_active')\").fetchone()
+    print(row[0] if row else 0)
+except Exception:
+    print(0)
+" 2>/dev/null || echo 0)"
+  if [[ "$active_count" -gt 0 ]]; then
+    fail "SubDub queue safety violation: $active_count active/leased jobs in flight before deploy"
+  fi
+}
+
+run_subdub_doctor() {
+  local py_bin
+  py_bin="$(get_bot_python)"
+  local doctor_output
+  if ! doctor_output="$("$py_bin" -u "$BOT_DIR/$SUBDUB_DAEMON_REL_PATH" --dry-run 2>&1)"; then
+    printf '%s\n' "$doctor_output" >&2
+    fail "SubDub worker dry-run doctor failed"
+  fi
+  printf '%s\n' "$doctor_output"
+  [[ "$doctor_output" == *"DOCTOR_OK"* ]] || fail "SubDub worker dry-run doctor did not report DOCTOR_OK"
+  SUBDUB_DOCTOR_PASS=1
+}
+
 create_backup_refs() {
   local timestamp="$1"
   git -C "$BOT_DIR" update-ref "refs/backups/product-video-deploy/bot-$TARGET_SHA-$timestamp" "$PREV_BOT_SHA"
@@ -246,7 +377,9 @@ prove_bot_health() {
     sleep "$HEALTH_SLEEP_SECONDS"
   done
   [[ -n "$health_json" ]] || fail "bot health endpoint failed"
-  printf '%s' "$health_json" | "$BOT_DIR/.venv/bin/python" -c 'import json,sys; payload=json.load(sys.stdin); assert payload.get("status") == "ok"'
+  local py_bin
+  py_bin="$(get_bot_python)"
+  printf '%s' "$health_json" | "$py_bin" -c 'import json,sys; payload=json.load(sys.stdin); assert payload.get("status") == "ok"'
   assert_exact_sha "$BOT_DIR" "$TARGET_SHA" "bot target"
   BOT_HEALTHY=1
   write_transaction_manifest
@@ -278,6 +411,8 @@ prepare_product_video_worker_release() {
   assert_worker_worktree_safe
   assert_bot_worktree_safe
   assert_service_contract
+  assert_subdub_service_contract
+  assert_subdub_queue_safe
 
   PREV_BOT_SHA="$(git -C "$BOT_DIR" rev-parse HEAD)"
   PREV_WORKER_SHA="$(git -C "$WORKER_DIR" rev-parse HEAD)"
@@ -286,6 +421,13 @@ prepare_product_video_worker_release() {
   PREV_BOT_HEAD_SYMBOLIC="$(git -C "$BOT_DIR" symbolic-ref -q HEAD 2>/dev/null || true)"
   if "$SYSTEMCTL_BIN" is-active --quiet "$BOT_SERVICE_NAME"; then BOT_WAS_ACTIVE=1; fi
   if "$SYSTEMCTL_BIN" is-active --quiet "$SERVICE_NAME"; then WORKER_WAS_ACTIVE=1; fi
+  if "$SYSTEMCTL_BIN" is-active --quiet "$SUBDUB_SERVICE_NAME"; then
+    SUBDUB_WAS_ACTIVE=1
+    PREV_SUBDUB_PID="$("$SYSTEMCTL_BIN" show -p MainPID --value "$SUBDUB_SERVICE_NAME" 2>/dev/null || echo "")"
+  else
+    SUBDUB_WAS_ACTIVE=0
+    PREV_SUBDUB_PID=""
+  fi
 
   fetch_verified_release "$BOT_DIR" "$BOT_RELEASE_REF"
   fetch_verified_release "$WORKER_DIR" "$WORKER_RELEASE_REF"
@@ -300,11 +442,120 @@ prepare_product_video_worker_release() {
   trap 'rollback_transaction 143' TERM
 
   "$SYSTEMCTL_BIN" stop "$SERVICE_NAME"
+  if [[ "$SUBDUB_WAS_ACTIVE" == "1" ]]; then
+    "$SYSTEMCTL_BIN" stop "$SUBDUB_SERVICE_NAME" || fail "Failed to stop SubDub worker service"
+    SUBDUB_STOPPED=1
+  fi
   switch_to_target "$WORKER_DIR" "worker"
   assert_exact_sha "$WORKER_DIR" "$TARGET_SHA" "worker target"
   sync_locked_dependencies "$WORKER_DIR"
   WORKER_PREPARED=1
   write_transaction_manifest
+}
+
+activate_and_verify_subdub_worker() {
+  run_subdub_doctor
+
+  if [[ "$SUBDUB_WAS_ACTIVE" == "1" ]]; then
+    "$SYSTEMCTL_BIN" start "$SUBDUB_SERVICE_NAME" || fail "Failed to start SubDub worker service"
+    "$SYSTEMCTL_BIN" is-active --quiet "$SUBDUB_SERVICE_NAME" || fail "SubDub worker service is not active after start"
+    SUBDUB_ACTIVATED=1
+
+    local new_pid=""
+    local attempt
+    for ((attempt = 1; attempt <= 30; attempt++)); do
+      new_pid="$("$SYSTEMCTL_BIN" show -p MainPID --value "$SUBDUB_SERVICE_NAME" 2>/dev/null || echo "")"
+      if [[ -n "$new_pid" && "$new_pid" != "0" ]]; then
+        break
+      fi
+      sleep 0.5
+    done
+    [[ -n "$new_pid" && "$new_pid" != "0" ]] || fail "SubDub worker MainPID is 0 or missing"
+    SUBDUB_NEW_PID="$new_pid"
+
+    if [[ -n "$PREV_SUBDUB_PID" && "$PREV_SUBDUB_PID" != "0" ]]; then
+      if [[ "$new_pid" == "$PREV_SUBDUB_PID" ]]; then
+        fail "SubDub worker PID did not change after reload (old=$PREV_SUBDUB_PID new=$new_pid)"
+      fi
+    fi
+
+    if [[ -d "$PROC_DIR/$new_pid" ]]; then
+      local proc_cwd=""
+      proc_cwd="$(readlink -f "$PROC_DIR/$new_pid/cwd" 2>/dev/null || true)"
+      local canonical_bot_dir
+      canonical_bot_dir="$(cd "$BOT_DIR" && pwd -P)"
+      [[ "$proc_cwd" == "$canonical_bot_dir" ]] || fail "SubDub worker process cwd ($proc_cwd) does not match $canonical_bot_dir"
+
+      local proc_cmdline=""
+      proc_cmdline="$(tr '\0' ' ' < "$PROC_DIR/$new_pid/cmdline" 2>/dev/null || true)"
+      [[ "$proc_cmdline" == *"services/subdub_worker_daemon.py"* ]] || fail "SubDub worker process cmdline ($proc_cmdline) does not execute services/subdub_worker_daemon.py"
+    fi
+
+    assert_exact_sha "$BOT_DIR" "$TARGET_SHA" "bot target while subdub active"
+    SUBDUB_VERIFIED=1
+    log "SUBDUB_WORKER_TARGET_HEALTH_PROVEN sha=$TARGET_SHA pid=$new_pid service=$SUBDUB_SERVICE_NAME"
+  else
+    if "$SYSTEMCTL_BIN" is-active --quiet "$SUBDUB_SERVICE_NAME"; then
+      fail "SubDub worker was inactive pre-deploy but is active unexpectedly"
+    fi
+    SUBDUB_VERIFIED=1
+    log "SUBDUB_WORKER_PRESERVED_INACTIVE sha=$TARGET_SHA service=$SUBDUB_SERVICE_NAME"
+  fi
+  write_transaction_manifest
+}
+
+reconcile_subdub_worker_already_deployed() {
+  assert_subdub_service_contract
+  run_subdub_doctor
+
+  if "$SYSTEMCTL_BIN" is-active --quiet "$SUBDUB_SERVICE_NAME"; then
+    log "SubDub worker is active: performing queue check and governed reload"
+    assert_subdub_queue_safe
+
+    local prev_pid=""
+    prev_pid="$("$SYSTEMCTL_BIN" show -p MainPID --value "$SUBDUB_SERVICE_NAME" 2>/dev/null || echo "")"
+
+    "$SYSTEMCTL_BIN" restart "$SUBDUB_SERVICE_NAME" || fail "Failed to restart SubDub worker service during reconciliation"
+    "$SYSTEMCTL_BIN" is-active --quiet "$SUBDUB_SERVICE_NAME" || fail "SubDub worker service is not active after restart during reconciliation"
+
+    local new_pid=""
+    local attempt
+    for ((attempt = 1; attempt <= 30; attempt++)); do
+      new_pid="$("$SYSTEMCTL_BIN" show -p MainPID --value "$SUBDUB_SERVICE_NAME" 2>/dev/null || echo "")"
+      if [[ -n "$new_pid" && "$new_pid" != "0" ]]; then
+        break
+      fi
+      sleep 0.5
+    done
+    [[ -n "$new_pid" && "$new_pid" != "0" ]] || fail "SubDub worker MainPID is 0 or missing after restart during reconciliation"
+
+    if [[ -n "$prev_pid" && "$prev_pid" != "0" ]]; then
+      if [[ "$new_pid" == "$prev_pid" ]]; then
+        fail "SubDub worker PID did not change after reload during reconciliation (old=$prev_pid new=$new_pid)"
+      fi
+    fi
+
+    if [[ -d "$PROC_DIR/$new_pid" ]]; then
+      local proc_cwd=""
+      proc_cwd="$(readlink -f "$PROC_DIR/$new_pid/cwd" 2>/dev/null || true)"
+      local canonical_bot_dir
+      canonical_bot_dir="$(cd "$BOT_DIR" && pwd -P)"
+      [[ "$proc_cwd" == "$canonical_bot_dir" ]] || fail "SubDub worker process cwd ($proc_cwd) does not match $canonical_bot_dir during reconciliation"
+
+      local proc_cmdline=""
+      proc_cmdline="$(tr '\0' ' ' < "$PROC_DIR/$new_pid/cmdline" 2>/dev/null || true)"
+      [[ "$proc_cmdline" == *"services/subdub_worker_daemon.py"* ]] || fail "SubDub worker process cmdline ($proc_cmdline) does not execute services/subdub_worker_daemon.py during reconciliation"
+    fi
+
+    if [[ -n "$TARGET_SHA" ]]; then
+      assert_exact_sha "$BOT_DIR" "$TARGET_SHA" "bot target while subdub active during reconciliation"
+    fi
+    SUBDUB_VERIFIED=1
+    log "SUBDUB_WORKER_RECONCILED sha=${TARGET_SHA:-current} pid=$new_pid service=$SUBDUB_SERVICE_NAME active=true"
+  else
+    SUBDUB_VERIFIED=1
+    log "SUBDUB_WORKER_PRESERVED_INACTIVE sha=${TARGET_SHA:-current} service=$SUBDUB_SERVICE_NAME active=false"
+  fi
 }
 
 activate_product_video_worker_release() {
@@ -319,14 +570,17 @@ activate_product_video_worker_release() {
   WORKER_VERIFIED=1
   write_transaction_manifest
   log "WORKER_TARGET_HEALTH_PROVEN sha=$TARGET_SHA capabilities=owner_product_video,canonical_multiscene_b13_r18c_v1"
+
+  activate_and_verify_subdub_worker
 }
 
 commit_product_video_release_transaction() {
+  [[ "$SUBDUB_VERIFIED" == "1" ]] || fail "Cannot commit transaction: SubDub worker not verified"
   TRANSACTION_COMMITTED=1
   write_transaction_manifest
   ROLLBACK_ARMED=0
   trap - ERR INT TERM
-  log "PRODUCT_VIDEO_DEPLOY_TRANSACTION_COMMITTED bot_sha=$TARGET_SHA worker_sha=$TARGET_SHA"
+  log "PRODUCT_VIDEO_DEPLOY_TRANSACTION_COMMITTED bot_sha=$TARGET_SHA worker_sha=$TARGET_SHA subdub_verified=1"
 }
 
 main() {
