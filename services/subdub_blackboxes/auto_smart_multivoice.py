@@ -46,6 +46,7 @@ from services import subdub_speaker_cast as speaker_cast
 from services.subdub_smart_timing import extend_smart_tail_windows, retime_smart_subtitle_tails
 from services import subdub_tts_checkpoint
 from services import video_local_validation
+from services.subdub_canonical_cues import normalize_cue_text
 
 
 logger = logging.getLogger(__name__)
@@ -2745,6 +2746,50 @@ def create_smart_synth_adapter(
     return _smart_synth_adapter
 
 
+def _smart_translation_evidence(prepared: Mapping[str, Any] | None, state: Mapping[str, Any]) -> dict[str, Any]:
+    prepared = prepared if isinstance(prepared, Mapping) else {}
+    source = list(prepared.get("source_segments") or [])
+    output = list(prepared.get("output_segments") or [])
+    target = str(state.get("target_language") or prepared.get("target_language") or "").strip().lower()
+    language = str(state.get("source_language") or prepared.get("detected_language") or "auto").strip().lower()
+    requested = bool(target and target not in {"auto", "source", "original", "same", "detect"})
+    requested = requested and str(state.get("dub_text_source") or "").lower() not in {"source", "original"}
+    requested = requested and target.replace("_", "-").split("-")[0] != language.replace("_", "-").split("-")[0]
+    source_by_id: dict[str, list[Mapping[str, Any]]] = {}
+    output_by_id: dict[str, list[Mapping[str, Any]]] = {}
+    invalid = 0
+    for items, indexed in ((source, source_by_id), (output, output_by_id)):
+        for item in items:
+            cue_id = str(item.get("cue_id") or item.get("id") or "").strip() if isinstance(item, Mapping) else ""
+            if not cue_id:
+                invalid += 1
+                continue
+            indexed.setdefault(cue_id, []).append(item)
+        invalid += sum(len(values) - 1 for values in indexed.values())
+    missing, unchanged = [], []
+    for cue_id, originals in source_by_id.items():
+        translated = output_by_id.get(cue_id, [])
+        if len(originals) != 1 or len(translated) != 1 or not normalize_cue_text(translated[0].get("text")) or translated[0].get("translate_missing"):
+            missing.append(cue_id)
+        elif normalize_cue_text(originals[0].get("text")).casefold() == normalize_cue_text(translated[0].get("text")).casefold():
+            unchanged.append(cue_id)
+    invalid += len(set(output_by_id) - set(source_by_id))
+    review = requested and bool(missing or unchanged or invalid)
+    return {
+        "translation_source_cue_count": len(source),
+        "translation_output_cue_count": len(output),
+        "translation_missing_cue_ids": missing,
+        "translation_unchanged_cue_ids": unchanged,
+        "translation_invalid_identity_count": invalid,
+        "translation_needs_review": review,
+        "translation_quality_reason": (
+            "not_requested" if not requested else
+            "translation_coverage_uncertain" if missing or invalid else
+            "unchanged_source_text_uncertain" if unchanged else "coverage_complete_semantics_unverified"
+        ),
+    }
+
+
 async def execute_smart_multivoice_lane(
     payload: Mapping[str, Any] | None = None,
     **kwargs: Any,
@@ -2931,8 +2976,11 @@ async def run_auto_smart_multivoice_blackbox(
             "subdub_engine_selected": "auto_multi_speaker_v2",
             "auto_smart_dispatch": "n3_plus_proven_v2",
         }
+        translation_evidence = _smart_translation_evidence(prepared, v2_result_state)
+        v2_result_state.update(translation_evidence)
         return {
             **v2_result,
+            **translation_evidence,
             "state": v2_result_state,
             "auto_smart_dispatch": "n3_plus_proven_v2",
         }
@@ -3591,6 +3639,9 @@ async def run_auto_smart_multivoice_blackbox(
         result_state["async_provider_request_id"] = smart_result["async_provider_request_id"]
 
     response = dict(smart_result)
+    translation_evidence = _smart_translation_evidence(prepared, current)
+    response.update(translation_evidence)
+    result_state.update(translation_evidence)
     response["state"] = result_state
     if checkpoint_mgr is not None:
         response["checkpoint_workspace"] = checkpoint_mgr.workspace

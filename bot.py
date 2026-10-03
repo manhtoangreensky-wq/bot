@@ -238486,6 +238486,41 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
                     )
                     + f"• Dubbing price: <b>{dubbing_xu} Xu</b>\n"
                 )
+        if smart_multi_selected:
+            voice_map = receipt_context.get("speaker_voice_map")
+            detected = receipt_context.get("auto_detected_speaker_count")
+            effective = receipt_context.get("auto_effective_speaker_count")
+            voices = receipt_context.get("auto_distinct_voice_count")
+            if (
+                not multi_proof and receipt_context.get("auto_smart_multivoice_verified") is True
+                and isinstance(voice_map, dict) and voice_map
+                and all(isinstance(value, str) and value.strip() for value in voice_map.values())
+                and type(detected) is int and 1 <= detected <= 8
+                and type(effective) is int and effective == len(voice_map)
+                and type(voices) is int and voices == len(set(voice_map.values()))
+            ):
+                multi_detail_lines += (
+                    f"• Số nhãn người nói nguồn: <b>{detected}</b>\n• Số giọng lồng tiếng đã dùng: <b>{voices}</b>\n"
+                    if is_vi else f"• Source speaker labels: <b>{detected}</b>\n• Dubbing voices used: <b>{voices}</b>\n"
+                )
+            if receipt_context.get("auto_smart_fallback_reason"):
+                multi_detail_lines += (
+                    "• Ghép giọng: <b>Đã dùng phương án dự phòng</b>\n"
+                    if is_vi else "• Voice assignment: <b>fallback used</b>\n"
+                )
+            source_count = receipt_context.get("translation_source_cue_count")
+            output_count = receipt_context.get("translation_output_cue_count")
+            if type(source_count) is int and source_count > 0 and type(output_count) is int and output_count >= 0:
+                multi_detail_lines += (
+                    f"• Số câu đầu ra/nguồn: <b>{output_count}/{source_count}</b>\n"
+                    if is_vi else f"• Output/source cues: <b>{output_count}/{source_count}</b>\n"
+                )
+            if receipt_context.get("translation_needs_review") is True:
+                review_ids = set(receipt_context.get("translation_missing_cue_ids") or []) | set(receipt_context.get("translation_unchanged_cue_ids") or [])
+                multi_detail_lines += (
+                    f"• Bản dịch cần kiểm tra: <b>{len(review_ids)}</b> câu; có câu thiếu hoặc giữ nguyên văn bản nguồn.\n"
+                    if is_vi else f"• Translation needs review: <b>{len(review_ids)}</b> cues; missing or unchanged source text.\n"
+                )
         if normalize_user_language(lang) != "vi":
             return (
                 "✅ <b>Completed</b>\n\n"
