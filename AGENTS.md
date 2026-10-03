@@ -64,3 +64,32 @@ Tuyệt đối KHÔNG tự ý thực hiện khi chưa có lệnh rõ ràng từ 
 - `HTTP 200 != FINAL OUTPUT SUCCESS`.
 - `BUILD != PASS` (Chỉ công nhận PASS khi có output thực tế từ terminal).
 - Toàn bộ hệ thống production vận hành trên Ubuntu VPS (`tg.toanaas.vn`), không sử dụng Railway cho runtime hiện tại.
+
+---
+
+## 5. OWNER LOCK: MULTI / SMART MULTI (2026-10-04)
+
+- Owner has closed and locked further engineering on Auto Multi Speaker,
+  Multi V2 and Smart Multi Voice. Keep these lanes operational; this is a
+  code/work-scope lock, not a feature-disable or service-stop instruction.
+- Accepted runtime checkpoint: PR #1353, commit
+  `ba198228c93af7306528eb589ba6f5e0e27458e4`, tag
+  `checkpoint/subdub-smart-pr1353-20261004`. Preserve the PR #1351 gender
+  checkpoint and earlier rollback tags.
+- Known limitation retained at Owner acceptance: initial male speech can still
+  be dubbed with a female voice. Owner considers the current result roughly
+  90% satisfactory and sufficient to close. This is qualitative Owner feedback,
+  not a measured accuracy metric or a claim of complete correctness.
+- Do not continue fixes, refactors, model/threshold/voice/timing changes,
+  experiments, copied replacement engines, automated replay/live jobs,
+  provider calls, resubmissions or Multi-specific deployments on these lanes.
+  Do not change their behavior indirectly through shared SubDub modules.
+- Reopening requires a new explicit Owner instruction that reopens the locked
+  lane and defines the requested narrow scope. A new chat, continuation,
+  residual issue or automatic workflow is not authorization to reopen.
+- Other Owner-authorized features may continue, but must preserve the locked
+  Multi behavior and unrelated working code.
+- The closure update is documentation-only. Do not deploy/restart production
+  merely to publish this lock; the generic auto-deploy rule above does not
+  override this newer, scope-specific Owner stop.
+- Closure and evidence: `docs/reports/SUBDUB_MULTI_OWNER_LOCK_20261004.md`.
