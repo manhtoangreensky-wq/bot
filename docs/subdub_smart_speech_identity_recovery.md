@@ -29,7 +29,37 @@ Acceptance checklist for offline review:
 - Strict lanes never invoke this retry; one vocal extraction is reused.
 
 Unstable recovery errors are recognized by Smart's existing degrade boundary;
-invalid/corrupt model/data and other lanes remain fail closed. A separate follow-up
-replaces invented default dubbing with source audio when attribution remains
-unproven. MP4, speed, tail, pricing, ASR/TTS providers, models and dependencies
+invalid/corrupt model/data and other lanes remain fail closed. Source selection
+is governed by the fitting-TTS policy: attribution uncertainty alone cannot
+discard TTS. MP4, speed, tail, pricing, ASR/TTS providers, models and dependencies
 are not changed by this recovery patch. No paid request is used by tests.
+
+## Supported Identity Retry
+
+Only failed Smart speech recovery enters the supported-window retry for view,
+register ambiguity or register-evidence failures. Primary stable/strict lanes
+and a successful prior speech result bypass it. All runtime edits remain in this
+helper. The reliable subset still must pass the unchanged0.98cosine gate and
+cover at least the existing0.95agreement fraction, with unchanged speech support.
+The three views select and agree on the count before register samples are
+selected. The register subset cannot recount two people as one. Supported
+register windows use the existing constrained partition for that same count.
+Their centroid projection must agree at0.95; labels are then mapped back to all
+windows and every original word, without timestamp shifts or text removal.
+Too many unstable views, unsupported identities, ties, invalid inputs or unstable
+projection still cannot fabricate multiple speakers. Approximate recovery is not
+strict attribution/geometry proof or a guarantee that every boundary is correct.
+
+Offline acceptance includes1/2/3/5/8 stable identities,2/3/5/8 partial-view cases,
+same-register identities, partial register ambiguity, corrupt inputs, missing
+speaker support, actual normalized source word coverage and distinct cast routes.
+No video filename, job ID, forced count, dependency or model change is used.
+
+Measured verification for this retry:62 focused tests passed, including local
+real ONNX word mapping; wider regressions261 passed/1 unsupplied archival fixture
+skip. Workflow hygiene39 passed, Python3.11 compile/diff checks passed. Cached
+same-source original and normalized Ubuntu candidate probes retained70/70 words
+and distinct low/high cast routes. Fresh live ASR word timing was not retained
+after workspace cleanup, so cached response evidence is not represented as a
+reproduction of every fresh word boundary or paid LIVE acceptance. Diagnostic
+timing variants with unstable centroid projection remain rejected, not forced.

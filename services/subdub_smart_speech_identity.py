@@ -9,6 +9,76 @@ from services import subdub_speaker_cast as cast
 from services import subdub_two_speaker_gender_onnx as stereo
 
 
+def _supported_speech_authority(views: dict, probabilities: list) -> dict:
+    base = np.array(views["base_embeddings"], dtype=np.float64, copy=True)
+    shifted = np.array(views["shifted_embeddings"], dtype=np.float64, copy=True)
+    positions = np.asarray(views["source_positions"], dtype=np.float64)
+    speech = np.asarray(views["speech_seconds"], dtype=np.float64)
+    probs = np.asarray(probabilities, dtype=np.float64)
+    if (base.ndim != 2 or shifted.shape != base.shape or base.shape[1] != engine.EMBEDDING_DIM
+            or not engine.MIN_UNITS <= len(base) <= engine.MAX_CLUSTER_UNITS
+            or any(a.shape != (len(base),) for a in (positions, speech, probs))
+            or not all(np.isfinite(a).all() for a in (base, shifted, positions, speech, probs))
+            or np.any(speech <= 0) or np.any((probs < 0) | (probs > 1))):
+        raise ValueError("fixed_vocal_smart_speech_view_invalid")
+    norms, shifted_norms = np.linalg.norm(base, axis=1), np.linalg.norm(shifted, axis=1)
+    if np.any(norms <= 0) or np.any(shifted_norms <= 0):
+        raise ValueError("fixed_vocal_smart_speech_view_invalid")
+    base /= norms[:, None]
+    shifted /= shifted_norms[:, None]
+    cosines = np.sum(base * shifted, axis=1)
+    reliable = cosines >= engine.MIN_FIXED_VOCAL_VIEW_COSINE
+    if reliable.mean() < engine.SPEECH_PARTITION_MIN_AGREEMENT or reliable.sum() < engine.MIN_UNITS:
+        raise ValueError("fixed_vocal_smart_speech_view_unstable")
+    aggregate = base + shifted
+    aggregate_norms = np.linalg.norm(aggregate, axis=1)
+    if np.any(aggregate_norms <= 0):
+        raise ValueError("fixed_vocal_smart_speech_view_invalid")
+    aggregate /= aggregate_norms[:, None]
+    # Count all reliable identities before selecting register evidence, never recount a subset.
+    partitions = [engine._stable_cluster_view(matrix[reliable], positions[reliable], minimum_speakers=1)
+                  for matrix in (base, shifted, aggregate)]
+    counts = [int(partition[0]) for partition in partitions]
+    if len(set(counts)) != 1:
+        raise ValueError("fixed_vocal_smart_speech_count_unstable")
+    count = counts[0]
+    for _count, labels, _eigenvalues in partitions:
+        engine._validate_cluster_support(labels, speech[reliable], count)
+        aligned = engine._align_cluster_labels_to_reference(
+            partitions[0][1].tolist(), labels.tolist(), speaker_count=count, minimum_speakers=1)
+        if np.mean(partitions[0][1] == aligned) < engine.SPEECH_PARTITION_MIN_AGREEMENT:
+            raise ValueError("fixed_vocal_smart_speech_partition_unstable")
+    threshold = gender.MULTI_GENDER_STRONG_CONFIDENCE
+    for label in range(count):
+        votes = probs[reliable][partitions[0][1] == label]
+        high, low = np.count_nonzero(votes >= threshold), np.count_nonzero(votes <= 1 - threshold)
+        if high + low < engine.MIN_CLUSTER_UNITS:
+            raise ValueError("fixed_vocal_gender_evidence_invalid")
+    supported = reliable & ((probs >= threshold) | (probs <= 1 - threshold))
+    authority = engine.build_gender_constrained_speech_authority(
+        base[supported], shifted[supported], positions[supported], speech[supported], probs[supported],
+        speaker_count=count, minimum_speakers=1,
+    )
+    if min(authority[k] for k in ("base_shift_agreement", "base_aggregate_agreement", "shift_aggregate_agreement")) < engine.SPEECH_PARTITION_MIN_AGREEMENT:
+        raise ValueError("fixed_vocal_smart_speech_partition_unstable")
+    centroids = np.stack([aggregate[supported][np.asarray(authority["labels"]) == label].mean(axis=0)
+                          for label in range(count)])
+    centroids /= np.linalg.norm(centroids, axis=1)[:, None]
+    if np.mean(np.argmax(aggregate[supported] @ centroids.T, axis=1) == authority["labels"]) < engine.SPEECH_PARTITION_MIN_AGREEMENT:
+        raise ValueError("fixed_vocal_smart_speech_partition_unstable")
+    labels = np.argmax(aggregate @ centroids.T, axis=1)
+    base_labels, shifted_labels = (np.argmax(matrix @ centroids.T, axis=1) for matrix in (base, shifted))
+    if np.mean(base_labels[reliable] == shifted_labels[reliable]) < engine.SPEECH_PARTITION_MIN_AGREEMENT:
+        raise ValueError("fixed_vocal_smart_speech_partition_unstable")
+    labels[supported] = authority["labels"]
+    engine._validate_cluster_support(labels, speech, count)
+    authority.update(labels=labels.tolist(), unit_confidences=engine._cluster_unit_confidences(aggregate, labels, count),
+                     speaker_count_views=counts, supported_window_recovery=True,
+                     unreliable_view_window_count=int((~reliable).sum()),
+                     register_ambiguous_window_count=int((reliable & ~supported).sum()))
+    return authority
+
+
 def build_speech_identity_authority(views: dict, probabilities: list) -> dict:
     try:
         base = np.array(views["base_embeddings"], dtype=np.float64, copy=True)
@@ -78,9 +148,24 @@ def build_speech_identity_authority(views: dict, probabilities: list) -> dict:
                 raise ValueError("fixed_vocal_smart_speech_partition_unstable")
         authority["speaker_count_views"] = counts
         return authority
-    except cast.AutoCastManualRequired:
-        raise
     except Exception as error:
+        cause = error
+        while cause.__cause__ is not None:
+            cause = cause.__cause__
+        if str(cause) in {"fixed_vocal_smart_speech_view_unstable", "fixed_vocal_gender_ambiguity_invalid",
+                          "fixed_vocal_gender_evidence_invalid"}:
+            try:
+                return _supported_speech_authority(views, probabilities)
+            except Exception as recovery_error:
+                recovery_cause = recovery_error
+                while recovery_cause.__cause__ is not None:
+                    recovery_cause = recovery_cause.__cause__
+                if str(recovery_cause) in {"acoustic_cluster_unsupported", "acoustic_cluster_count_out_of_range",
+                                          "fixed_vocal_gender_cluster_unsupported"}:
+                    raise cast.AutoCastManualRequired() from ValueError("fixed_vocal_smart_speech_partition_unstable")
+                raise cast.AutoCastManualRequired() from recovery_error
+        if isinstance(error, cast.AutoCastManualRequired):
+            raise
         raise cast.AutoCastManualRequired() from error
 
 
