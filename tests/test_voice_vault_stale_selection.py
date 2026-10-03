@@ -339,3 +339,41 @@ def test_owned_rename_callback_still_starts_rename_for_selected_profile(voice_va
     text = query.message.replies[-1][0]
     assert "hãy nhập tên mới" in text.lower()
     assert ns["USER_PENDING"] != before_pending
+
+
+@pytest.mark.parametrize("profile_case", ("foreign", "missing"))
+def test_foreign_or_stale_voice_profile_save_stops_before_charge(
+    voice_vault_runtime, profile_case
+):
+    from copy import deepcopy
+
+    ns, route, conn = voice_vault_runtime
+    profile_id = 104 if profile_case == "foreign" else 999
+    if profile_case == "foreign":
+        conn.execute(
+            "INSERT INTO voice_profiles VALUES (?, ?, 'active', ?, ?, NULL, 0, '')",
+            (profile_id, "902", "foreign-provider-id", "Foreign voice 104"),
+        )
+        conn.commit()
+
+    expected_markup = object()
+    ns["voice_hub_keyboard"] = lambda *_args: expected_markup
+    charge_calls = []
+    ns["spend_fixed_credit_info"] = lambda *args, **kwargs: charge_calls.append((args, kwargs))
+    before_pending = deepcopy(ns["USER_PENDING"])
+    before_rows = conn.execute("SELECT * FROM voice_profiles ORDER BY id").fetchall()
+    before_writes = conn.total_changes
+
+    query = CALLBACK_FIXTURE["_click"](
+        route, f"music_quick|showroom|voice_profile_save:{profile_id}"
+    )
+
+    text, markup = query.message.replies[-1]
+    assert "chưa có bản giọng hợp lệ để lưu" in text.lower()
+    assert "Foreign voice 104" not in text
+    assert markup is expected_markup
+    assert charge_calls == []
+    assert ns["USER_PENDING"] == before_pending
+    after_rows = conn.execute("SELECT * FROM voice_profiles ORDER BY id").fetchall()
+    assert [tuple(row) for row in after_rows] == [tuple(row) for row in before_rows]
+    assert conn.total_changes == before_writes
