@@ -53,6 +53,7 @@ from services.video_provider_base import (
     VideoArtifactResult,
     VideoGenerationRequest,
     VideoPollResult,
+    VideoSubmitResult,
     is_safe_shopaikey_content_url,
     is_safe_video_output_url,
     materialize_video_url,
@@ -859,5 +860,132 @@ def test_materialize_video_url_disallowed_redirect_captures_host_and_status(tmp_
     assert res.diagnostics["download_final_url_host"] == "untrusted-cdn.evil.com"
     assert res.diagnostics["download_attempts"] == 1
     assert res.diagnostics["mp4_validator_result"] == "not_run_download_failed"
+
+
+def test_direct_router_terminal_failure_artifact_download_diagnostics_regression(tmp_path: Path) -> None:
+    """Phase 4: Direct router regression for artifact download failure carrying sanitized diagnostics."""
+    from services.video_provider_router import run_provider_generation
+
+    synth_result_url = VALID_SHOPAIKEY_URL
+    mock_adapter = MagicMock()
+    mock_adapter.provider_name = "shopaikey_video"
+    mock_adapter.submit_video_job.return_value = VideoSubmitResult(
+        ok=True,
+        provider_name="shopaikey_video",
+        provider_task_id="task_synth_123",
+        provider_status="submitted",
+    )
+    mock_adapter.poll_video_job.return_value = VideoPollResult(
+        ok=True,
+        provider_name="shopaikey_video",
+        provider_task_id="task_synth_123",
+        status="succeeded",
+        result_url=synth_result_url,
+        file_url=synth_result_url,
+    )
+    mock_adapter.materialize_result.return_value = VideoArtifactResult(
+        ok=False,
+        error_code="provider_download_failed",
+        diagnostics={
+            "download_error_class": "DisallowedRedirectError",
+            "download_http_status": 400,
+            "download_redirect_count": 1,
+            "download_final_url_host": "https://cdn.example.invalid/video.mp4?sig=SECRET&exp=123",
+            "unknown_key": "SECRET",
+            "token": "SECRET_TOKEN",
+        },
+    )
+
+    req = VideoGenerationRequest(
+        job_id="pvj_router_diag_test",
+        product_type="video_ai_prompt",
+        prompt="Direct router regression test prompt",
+        ratio="9:16",
+        duration_seconds=5.0,
+        metadata={"product_video": True, "job_id": "pvj_router_diag_test"},
+    )
+
+    with patch("services.video_provider_router.provider_candidate_adapters", return_value=[mock_adapter]), \
+         patch("services.video_provider_router._failed_result_url_diagnostic", return_value={"result_url_valid": True}):
+        res = run_provider_generation(
+            req,
+            output_dir=str(tmp_path),
+            environ={"SHOPAIKEY_VIDEO_ENABLED": "true"},
+            sleep_func=lambda *a, **kw: None,
+        )
+
+    # Required Router Assertions
+    assert res["ok"] is False
+    assert res["blocker"] == "provider_download_failed"
+    assert "artifact_download_diagnostics" in res
+    diag = res["artifact_download_diagnostics"]
+    assert diag["download_error_class"] == "DisallowedRedirectError"
+    assert diag["download_http_status"] == 400
+    assert diag["download_redirect_count"] == 1
+    assert diag["download_final_url_host"] == "cdn.example.invalid"
+
+    # Secret and leakage assertions
+    assert "unknown_key" not in diag
+    assert "token" not in diag
+    assert "sig" not in diag
+    assert "exp" not in diag
+    assert "https://" not in diag.get("download_final_url_host", "")
+    dumped = json.dumps(res)
+    assert "SECRET" not in dumped
+    assert "SECRET_TOKEN" not in dumped
+
+
+def test_direct_router_terminal_failure_missing_diagnostics_backward_compatibility(tmp_path: Path) -> None:
+    """Phase 5: Direct router terminal failure with empty/missing diagnostics preserves backward compatibility."""
+    from services.video_provider_router import run_provider_generation
+
+    for empty_diag in ({}, None):
+        mock_adapter = MagicMock()
+        mock_adapter.provider_name = "shopaikey_video"
+        mock_adapter.submit_video_job.return_value = VideoSubmitResult(
+            ok=True,
+            provider_name="shopaikey_video",
+            provider_task_id="task_synth_compat",
+            provider_status="submitted",
+        )
+        mock_adapter.poll_video_job.return_value = VideoPollResult(
+            ok=True,
+            provider_name="shopaikey_video",
+            provider_task_id="task_synth_compat",
+            status="succeeded",
+            result_url=VALID_SHOPAIKEY_URL,
+            file_url=VALID_SHOPAIKEY_URL,
+        )
+        mock_adapter.materialize_result.return_value = VideoArtifactResult(
+            ok=False,
+            error_code="provider_download_failed",
+            diagnostics=empty_diag,
+        )
+
+        req = VideoGenerationRequest(
+            job_id="pvj_compat_test",
+            product_type="video_ai_prompt",
+            prompt="Backward compatibility prompt",
+            ratio="9:16",
+            duration_seconds=5.0,
+            metadata={"product_video": True, "job_id": "pvj_compat_test"},
+        )
+
+        with patch("services.video_provider_router.provider_candidate_adapters", return_value=[mock_adapter]), \
+             patch("services.video_provider_router._failed_result_url_diagnostic", return_value={"result_url_valid": True}):
+            res = run_provider_generation(
+                req,
+                output_dir=str(tmp_path),
+                environ={"SHOPAIKEY_VIDEO_ENABLED": "true"},
+                sleep_func=lambda *a, **kw: None,
+            )
+
+        assert res["ok"] is False
+        assert res["blocker"] == "provider_download_failed"
+        assert res.get("status") == "failed_no_charge"
+        assert res.get("no_charge") is True
+        # Missing diagnostics does not create malformed empty object in payload
+        assert "artifact_download_diagnostics" not in res
+
 
 
