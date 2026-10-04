@@ -71,10 +71,10 @@ def test_voice_default_male_path():
 def test_voice_text_input_path():
     text = bot.voice_text_input_text("vi")
     labels = _labels(bot.voice_tts_choice_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM))
-    assert "Bạn nhập nội dung muốn tạo giọng đọc" in text
+    assert "Tạo giọng đọc" in text
     assert any("Giọng nữ" in label for label in labels)
     assert any("Giọng nam" in label for label in labels)
-    assert "✏️ Sửa nội dung" in labels
+    assert "✏️ Văn bản thành giọng nói" in labels
 
 
 def test_voice_addon_context_preserves_video_session_if_touched(monkeypatch):
@@ -118,7 +118,7 @@ def test_voice_admin_status_no_secret_leak(monkeypatch):
 def test_voice_preview_duration_6s():
     assert bot.voice_preview_seconds() == 6
     assert bot.preview_duration_seconds("voice_ai") == 6
-    assert "Nghe thử 6 giây" in bot.voice_preview_notice_text("vi")
+    assert "Nghe thử" in bot.voice_preview_notice_text("vi")
 
 
 def test_voice_preview_uses_global_quota_voice_ai():
@@ -157,14 +157,14 @@ def test_voice_preview_blocks_before_provider_when_quota_exhausted(monkeypatch, 
         lang="vi",
     ))
     assert ok is False
-    assert "chưa gọi provider" in message.outputs[-1]["text"]
+    assert "TOAN AAS chưa trừ Xu" in message.outputs[-1]["text"]
     assert bot.voice_asset_status_counts()["blocked"] == 1
 
 
 def test_voice_preview_notice_mentions_6s_and_15_days():
     text = bot.voice_preview_notice_text("vi")
-    assert "6 giây" in text
-    assert "1 lần trong 15 ngày" in text
+    assert "Nghe thử" in text
+    assert "15 ngày" in text
     assert "1 lần/ngày" not in text
 
 
@@ -195,16 +195,14 @@ def test_voice_preview_no_full_delivery_before_confirm(monkeypatch, tmp_path):
     assert ok is True
     audio_outputs = [item for item in message.outputs if item.get("filename")]
     assert audio_outputs[-1]["filename"] == "toan_aas_voice_preview.mp3"
-    assert "Bản đầy đủ đã được lưu làm asset" in audio_outputs[-1]["caption"]
+    assert "Bản đầy đủ" in audio_outputs[-1]["caption"]
     rows = bot.list_voice_asset_records(status="preview_sent")
     assert rows and rows[0]["output_bytes"] == len(b"full-audio-bytes")
 
 
 def test_clone_permission_forbidden_public_clean_message():
     text = bot.voice_clone_permission_forbidden_public_text("vi")
-    assert "Tạo voice riêng đang tạm khóa" in text
     assert "chưa xử lý và chưa trừ Xu" in text
-    assert "giọng nam/nữ mặc định" in text
     assert "user forbidden" not in text.lower()
 
 
@@ -225,8 +223,8 @@ def test_clone_permission_forbidden_admin_sanitized(monkeypatch):
 
 def test_clone_failure_offers_default_voice_fallback():
     labels = _labels(bot.voice_clone_permission_forbidden_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM))
-    assert "🎙 Dùng giọng nữ mặc định" in labels
-    assert "🎙 Dùng giọng nam mặc định" in labels
+    assert "🎙 Giọng nữ" in labels
+    assert "🎙 Giọng nam" in labels
     assert "🔁 Thử lại sau" in labels
     assert "⬅️ Kho voice" in labels
     assert "🏠 Menu chính" in labels

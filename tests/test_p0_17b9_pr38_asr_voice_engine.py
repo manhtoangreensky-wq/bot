@@ -60,12 +60,10 @@ def test_voice_engine_readiness_uses_tts_contract():
 
 def test_tts_public_guard_and_failure_copy():
     assert bot.tts_provider_guard_text("vi") == (
-        "Giọng đọc AI đang được chuẩn bị. TOAN AAS chưa xử lý và chưa trừ Xu. "
-        "Anh/chị có thể thử lại sau hoặc dùng công cụ khác trước."
+        "⚠️ Tính năng đang chờ tài nguyên xử lý. TOAN AAS chưa xử lý và chưa trừ Xu."
     )
     assert bot.tts_failure_text("vi") == (
-        "TOAN AAS chưa tạo được giọng đọc lúc này. Hệ thống chưa trừ Xu. "
-        "Anh/chị có thể thử lại hoặc đổi giọng khác."
+        "⚠️ Tính năng đang chờ tài nguyên xử lý. TOAN AAS chưa xử lý và chưa trừ Xu."
     )
 
 
@@ -73,7 +71,7 @@ def test_tts_failure_keyboard_has_required_actions():
     labels = _labels(bot.tts_failure_keyboard("vi"))
     callbacks = _callbacks(bot.tts_failure_keyboard("vi"))
 
-    assert labels == ["🔁 Thử lại", "🎙 Đổi giọng", "✏️ Sửa nội dung", "⬅️ Quay lại", "🏠 Menu chính"]
+    assert labels == ["🔁 Thử lại", "🎙 Đổi giọng", "✏️ Tự nhập mô tả", "⬅️ Quay lại", "🏠 Menu chính"]
     assert any(callback.endswith("|voice_tts_guard") for callback in callbacks)
     assert any(callback.endswith("|voice_hub") for callback in callbacks)
     assert any(callback.endswith("|voice_tts_text") for callback in callbacks)
@@ -113,7 +111,7 @@ def test_manual_dialogue_text_routes_translate_without_asr(monkeypatch):
     assert state["source_subtitle_ref"] == state["subtitle_ref"]
     assert int(state["subtitle_segment_count"]) > 0
     assert "-->" in bot.get_video_dubbing_artifact(uid, state["subtitle_ref"])
-    assert "Dịch phụ đề sang ngôn ngữ nào" in message.outputs[-1]["text"]
+    assert "Chọn ngôn ngữ" in message.outputs[-1]["text"]
 
 
 def test_manual_dialogue_text_routes_subtitle_plus_dub_to_original_ready(monkeypatch):

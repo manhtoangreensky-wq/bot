@@ -141,7 +141,7 @@ def test_song_package_confirm_label_does_not_use_seconds():
 
 
 def test_global_clear_removes_voice_music_subtitle_video_pending():
-    uid = "engine-remap-v2"
+    uid = 99887766
     bot.USER_PENDING[bot.product_context_key(uid)] = {"type": "product_context"}
     bot.USER_PENDING[bot.music_guided_pending_key(uid)] = {"type": "music_guided"}
     bot.USER_PENDING[bot.video_dubbing_pending_key(uid)] = {"type": "video_dubbing"}
