@@ -8474,7 +8474,10 @@ def product_video_scene_ledger_state(
             except Exception:
                 clip_valid = False
         else:
-            clip_valid = False
+            clip_valid = bool(
+                merged.get("clip_valid")
+                and normalized_status_raw in {"clip_downloaded", "downloaded", "validated", "clip_validated", "scene_clip_validated", "succeeded"}
+            )
 
         durable_clip_without_task_identity = bool(
             (
@@ -8970,12 +8973,33 @@ def product_video_scene_ledger_state(
             except Exception:
                 probe_ok = False
 
+        explicit_independent_validation = result.get("independent_final_output_validation")
+        if explicit_independent_validation is not None:
+            has_independent_validation = bool(explicit_independent_validation)
+        else:
+            has_independent_validation = bool(
+                result.get("independent_final_validation")
+                or (
+                    (result.get("final_mp4_valid") or result.get("final_output_validated"))
+                    and (scene_count == 1 or result.get("concat_output_valid"))
+                )
+            )
+
         if not scene_clip_path or not probe_ok:
-            record["clip_valid"] = False
-            record["scene_validation_verified"] = False
-            if _status_class(record.get("status")) == "succeeded" or record.get("status") == "scene_clip_validated":
-                record["status"] = "result_pending_validation"
-                record["result_processing_action"] = "download_and_validate"
+            if (
+                result.get("recovery_existing_tasks_only")
+                and record.get("status") == "scene_clip_validated"
+                and record.get("clip_valid")
+                and has_independent_validation
+            ):
+                record["clip_valid"] = True
+                record["scene_validation_verified"] = True
+            else:
+                record["clip_valid"] = False
+                record["scene_validation_verified"] = False
+                if _status_class(record.get("status")) == "succeeded" or record.get("status") == "scene_clip_validated":
+                    record["status"] = "result_pending_validation"
+                    record["result_processing_action"] = "download_and_validate"
         else:
             record["clip_valid"] = True
             record["scene_validation_verified"] = True

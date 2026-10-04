@@ -97,6 +97,19 @@ def test_dispatcher_client_claim_includes_target_job_id():
 
 # --- 2. Protected Owner Auth Transport & File Validation ---
 
+def _write_auth_file(path: Path, content: str | dict[str, Any]) -> Path:
+    if isinstance(content, dict):
+        text = json.dumps(content)
+    else:
+        text = str(content)
+    path.write_text(text, encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+    return path
+
+
 def test_load_protected_owner_auth_file_not_found():
     with pytest.raises(FileNotFoundError, match="OWNER_AUTH_FILE_NOT_FOUND"):
         load_protected_owner_auth("non_existent_auth_file_xyz.json", "pvj_expected_1")
@@ -128,7 +141,7 @@ def test_load_protected_owner_auth_secure_permissions_posix(tmp_path):
 
 def test_load_protected_owner_auth_job_id_mismatch(tmp_path):
     auth_file = tmp_path / "mismatch_auth.json"
-    auth_file.write_text(json.dumps({"job_id": "pvj_job_wrong"}), encoding="utf-8")
+    _write_auth_file(auth_file, {"job_id": "pvj_job_wrong"})
 
     with pytest.raises(ValueError, match="OWNER_AUTH_EXPECTED_JOB_MISMATCH"):
         load_protected_owner_auth(auth_file, "pvj_job_expected")
@@ -136,7 +149,7 @@ def test_load_protected_owner_auth_job_id_mismatch(tmp_path):
 
 def test_load_protected_owner_auth_malformed_json(tmp_path):
     auth_file = tmp_path / "malformed.json"
-    auth_file.write_text("not-a-json-object", encoding="utf-8")
+    _write_auth_file(auth_file, "not-a-json-object")
 
     with pytest.raises(ValueError, match="OWNER_AUTH_PARSE_FAILED"):
         load_protected_owner_auth(auth_file, "pvj_job_1")
@@ -146,7 +159,7 @@ def test_load_protected_owner_auth_malformed_json(tmp_path):
 
 def test_runner_fails_closed_when_expected_job_missing(tmp_path, capsys):
     auth_file = tmp_path / "auth.json"
-    auth_file.write_text(json.dumps({"job_id": "pvj_1"}), encoding="utf-8")
+    _write_auth_file(auth_file, {"job_id": "pvj_1"})
 
     code = run_live_acceptance_once(
         expected_job_id="",
@@ -160,7 +173,7 @@ def test_runner_fails_closed_when_expected_job_missing(tmp_path, capsys):
 
 def test_runner_fails_closed_when_auth_invalid(tmp_path, capsys):
     auth_file = tmp_path / "auth_mismatch.json"
-    auth_file.write_text(json.dumps({"job_id": "pvj_different"}), encoding="utf-8")
+    _write_auth_file(auth_file, {"job_id": "pvj_different"})
 
     code = run_live_acceptance_once(
         expected_job_id="pvj_target_1",
@@ -174,7 +187,7 @@ def test_runner_fails_closed_when_auth_invalid(tmp_path, capsys):
 
 def test_runner_fails_closed_when_target_job_not_claimable(tmp_path, capsys):
     auth_file = tmp_path / "auth.json"
-    auth_file.write_text(json.dumps({"job_id": "pvj_target_1"}), encoding="utf-8")
+    _write_auth_file(auth_file, {"job_id": "pvj_target_1"})
 
     # Mock dispatcher client returning idle (not claimable)
     mock_client = MagicMock(spec=WebProductVideoDispatcherClient)
@@ -200,7 +213,7 @@ def test_runner_fails_closed_when_target_job_not_claimable(tmp_path, capsys):
 
 def test_runner_fails_closed_when_claimed_job_differs_from_expected(tmp_path, capsys):
     auth_file = tmp_path / "auth.json"
-    auth_file.write_text(json.dumps({"job_id": "pvj_target_1"}), encoding="utf-8")
+    _write_auth_file(auth_file, {"job_id": "pvj_target_1"})
 
     # Mock dispatcher returning a DIFFERENT job
     mock_client = MagicMock(spec=WebProductVideoDispatcherClient)
@@ -227,7 +240,7 @@ def test_runner_fails_closed_when_claimed_job_differs_from_expected(tmp_path, ca
 
 def test_runner_dry_run_success(tmp_path, capsys):
     auth_file = tmp_path / "auth.json"
-    auth_file.write_text(json.dumps({"job_id": "pvj_target_1"}), encoding="utf-8")
+    _write_auth_file(auth_file, {"job_id": "pvj_target_1"})
 
     mock_client = MagicMock(spec=WebProductVideoDispatcherClient)
     mock_client.claim.return_value = WebClaimResponse(
@@ -255,7 +268,7 @@ def test_runner_dry_run_success(tmp_path, capsys):
 def test_runner_single_use_auth_memory_retirement(tmp_path):
     """Verify that owner_auth dictionary is cleared from memory after execution."""
     auth_file = tmp_path / "auth.json"
-    auth_file.write_text(json.dumps({"job_id": "pvj_target_1", "tier": "200"}), encoding="utf-8")
+    _write_auth_file(auth_file, {"job_id": "pvj_target_1", "tier": "200"})
 
     mock_client = MagicMock(spec=WebProductVideoDispatcherClient)
     mock_client.claim.return_value = WebClaimResponse(

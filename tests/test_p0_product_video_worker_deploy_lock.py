@@ -101,12 +101,15 @@ def release_fixture() -> dict[str, object]:
     (source / "requirements.lock").write_text("old-lock\n", encoding="utf-8")
     (source / "bot.py").write_text("BUILD = 'old'\n", encoding="utf-8")
     (source / "remote_worker.py").write_text("CAP = 'old'\n", encoding="utf-8")
+    (source / "services").mkdir(parents=True, exist_ok=True)
+    (source / "services" / "subdub_worker_daemon.py").write_text("print('DOCTOR_OK')\n", encoding="utf-8")
     (source / ".gitignore").write_text(".venv/\n", encoding="utf-8")
     old_sha = _commit(source, "old")
 
     (source / "requirements.lock").write_text("target-lock\n", encoding="utf-8")
     (source / "bot.py").write_text("BUILD = 'target'\n", encoding="utf-8")
     (source / "remote_worker.py").write_text("CAP = 'target'\n", encoding="utf-8")
+    (source / "services" / "subdub_worker_daemon.py").write_text("print('DOCTOR_OK')\n", encoding="utf-8")
     target_sha = _commit(source, "target")
     _git(source, "update-ref", TARGET_REF, target_sha)
 
@@ -143,6 +146,12 @@ case "$*" in
     fi
     printf '%s\\n' 'ping: OK' 'claim skipped because dry-run: yes'
     ;;
+  *"services/subdub_worker_daemon.py --dry-run"*)
+    printf '%s\\n' 'DOCTOR_OK'
+    ;;
+  *"-c "*subdub_worker_jobs*)
+    printf '%s\\n' 'COUNT:0'
+    ;;
 esac
 exit 0
 """.replace("__REPO__", _posix(repo)).replace("__KIND__", name).replace(
@@ -160,11 +169,19 @@ set -euo pipefail
 printf '%s\\n' "$*" >> "$SYSTEMCTL_LOG"
 case "${1:-}" in
   cat)
-    printf '[Service]\\nWorkingDirectory=%s\\nExecStart=%s/.venv/bin/python %s/remote_worker.py --owner-product-video\\n' "$WORKER_DIR" "$WORKER_DIR" "$WORKER_DIR"
+    target_service="${2:-}"
+    if [ "$target_service" = "$SUBDUB_SERVICE_NAME" ]; then
+      printf '[Service]\\nWorkingDirectory=%s\\nExecStart=%s/.venv/bin/python -u services/subdub_worker_daemon.py\\nEnvironmentFile=%s\\n' "$BOT_DIR" "$BOT_DIR" "$SUBDUB_ENV_FILE"
+    else
+      printf '[Service]\\nWorkingDirectory=%s\\nExecStart=%s/.venv/bin/python %s/remote_worker.py --owner-product-video\\n' "$WORKER_DIR" "$WORKER_DIR" "$WORKER_DIR"
+    fi
     ;;
   is-active)
     service="${3:-${2:-}}"
     if [ "$service" = "$SERVICE_NAME" ] && [ "${FAKE_WORKER_ACTIVE_FAIL:-0}" = "1" ]; then
+      exit 3
+    fi
+    if [ "$service" = "$SUBDUB_SERVICE_NAME" ]; then
       exit 3
     fi
     ;;
@@ -188,6 +205,13 @@ printf '%s\\n' '{"status":"ok"}'
         "LOCAL_WORKER_TOKEN=fixture-token\nLOCAL_WORKER_API_URL=http://fixture.invalid\n",
         encoding="utf-8",
     )
+    subdub_db = tmp_path / "subdub.db"
+    subdub_db.touch()
+    subdub_env = tmp_path / "subdub.env"
+    subdub_env.write_text(
+        f"DB_PATH={_posix(subdub_db)}\n",
+        encoding="utf-8",
+    )
     systemctl_log = tmp_path / "systemctl.log"
     python_log = tmp_path / "python.log"
     systemctl_log.write_text("", encoding="utf-8")
@@ -201,6 +225,8 @@ printf '%s\\n' '{"status":"ok"}'
             "BOT_DIR": _posix(repos["bot"]),
             "WORKER_DIR": _posix(repos["worker"]),
             "WORKER_ENV_FILE": _posix(worker_env),
+            "SUBDUB_SERVICE_NAME": "toanaas-worker-subdub.service",
+            "SUBDUB_ENV_FILE": _posix(subdub_env),
             "SERVICE_NAME": "toanaas-worker-owner-product-video.service",
             "BOT_SERVICE_NAME": "toanaas-bot.service",
             "HEALTH_ATTEMPTS": "1",
@@ -447,7 +473,7 @@ def test_activation_failure_rolls_back_both_shas_and_dependency_locks(
         if failure_env.get("FAKE_WORKER_ACTIVE_FAIL") == "1"
         else "start toanaas-worker-owner-product-video.service"
     )
-    assert service_log[-1] == expected_worker_restore
+    assert expected_worker_restore in service_log
 
 
 def test_bundle_target_mismatch_aborts_before_service_stop(

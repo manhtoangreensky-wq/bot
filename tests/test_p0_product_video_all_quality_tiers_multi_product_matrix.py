@@ -540,9 +540,8 @@ def test_multi_scene_film_supports_all_ten_tiers(tier_id: int) -> None:
     )
     assert invoiced["status_stage"] == "invoice"
     assert video_tail9.invoice_allowed(invoiced) == (True, "ok")
-    confirmed, created = video_tail9.confirm_once(invoiced, f"confirm-film-{tier_id}")
-    assert created is True
-    assert confirmed["final_confirmed"] is True
+    with pytest.raises(ValueError, match="multi_scene_film_under_upgrade"):
+        video_tail9.confirm_once(invoiced, f"confirm-film-{tier_id}")
 
 
 # ==============================================================================
