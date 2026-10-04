@@ -142,3 +142,65 @@ def test_recovery_completion_keeps_durable_scene_ledger_when_worker_sends_empty_
     assert stored["provider_submit_allowed"] is False
     assert stored["charged_xu"] == 0
     conn.close()
+
+
+def test_recovery_persisted_boolean_without_independent_validation_fails_closed():
+    project = {"project_id": 101, "scene_count": 1}
+    job = {"id": 202, "status": "processing"}
+    result = {
+        "recovery_existing_tasks_only": True,
+        "provider_submit_allowed": False,
+        "independent_final_output_validation": False,
+        "charged_xu": 0,
+        "scene_tasks": [
+            {
+                "scene_index": 1,
+                "status": "scene_clip_validated",
+                "clip_valid": True,
+                "clip_path": "",
+            }
+        ],
+    }
+
+    ledger = queue.product_video_scene_ledger_state(project, job, result)
+
+    scene_record = ledger["scene_ledger"][0]
+    assert scene_record["scene_validation_verified"] is False
+    assert scene_record["clip_valid"] is False
+    assert scene_record["status"] == "result_pending_validation"
+    assert scene_record["result_processing_action"] == "download_and_validate"
+    assert ledger["scene_clip_valid_by_index"]["1"] is False
+    assert ledger["scene_status_by_index"]["1"] == "result_pending_validation"
+    assert result.get("provider_submit_allowed") is False
+    assert result.get("charged_xu") == 0
+
+
+def test_recovery_with_independent_final_output_validation_preserves_validated_state():
+    project = {"project_id": 102, "scene_count": 1}
+    job = {"id": 203, "status": "processing"}
+    result = {
+        "recovery_existing_tasks_only": True,
+        "provider_submit_allowed": False,
+        "independent_final_output_validation": True,
+        "charged_xu": 0,
+        "scene_tasks": [
+            {
+                "scene_index": 1,
+                "status": "scene_clip_validated",
+                "clip_valid": True,
+                "clip_path": "",
+            }
+        ],
+    }
+
+    ledger = queue.product_video_scene_ledger_state(project, job, result)
+
+    scene_record = ledger["scene_ledger"][0]
+    assert scene_record["scene_validation_verified"] is True
+    assert scene_record["clip_valid"] is True
+    assert scene_record["status"] == "scene_clip_validated"
+    assert ledger["scene_clip_valid_by_index"]["1"] is True
+    assert ledger["scene_status_by_index"]["1"] == "scene_clip_validated"
+    assert result.get("provider_submit_allowed") is False
+    assert result.get("charged_xu") == 0
+

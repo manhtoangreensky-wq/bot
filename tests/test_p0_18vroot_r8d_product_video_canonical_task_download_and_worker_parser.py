@@ -245,11 +245,19 @@ def test_materialize_video_url_records_safe_download_diagnostics(tmp_path, monke
 
 
 def test_worker_trace_exposes_parser_version_and_git_sha(monkeypatch):
-    monkeypatch.setenv("GIT_COMMIT_SHA", "abc123456789")
+    from types import SimpleNamespace
+
+    valid_sha = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+    monkeypatch.setattr(
+        remote_worker.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=128, stdout="", stderr="not a repo"),
+    )
+    monkeypatch.setenv("GIT_COMMIT_SHA", valid_sha)
     remote = remote_worker.worker_process_trace({}, service_mode="owner_product_video", claim_status="claimed")
 
     assert remote["worker_parser_version"] == "r8d_product_video_canonical_parser"
-    assert remote["worker_git_sha"].startswith("abc123")
+    assert remote["worker_git_sha"] == valid_sha
     assert remote["worker_started_at"]
 
 

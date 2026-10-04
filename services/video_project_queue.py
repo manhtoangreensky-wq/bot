@@ -8973,11 +8973,24 @@ def product_video_scene_ledger_state(
             except Exception:
                 probe_ok = False
 
+        explicit_independent_validation = result.get("independent_final_output_validation")
+        if explicit_independent_validation is not None:
+            has_independent_validation = bool(explicit_independent_validation)
+        else:
+            has_independent_validation = bool(
+                result.get("independent_final_validation")
+                or (
+                    (result.get("final_mp4_valid") or result.get("final_output_validated"))
+                    and (scene_count == 1 or result.get("concat_output_valid"))
+                )
+            )
+
         if not scene_clip_path or not probe_ok:
             if (
                 result.get("recovery_existing_tasks_only")
                 and record.get("status") == "scene_clip_validated"
                 and record.get("clip_valid")
+                and has_independent_validation
             ):
                 record["clip_valid"] = True
                 record["scene_validation_verified"] = True

@@ -142,19 +142,12 @@ FFMPEG_MAX_CONCURRENT = max(1, env_int("FFMPEG_MAX_CONCURRENT", 1))
 
 def worker_git_head_info(cwd: str | None = None) -> dict[str, str]:
     process_cwd = os.path.abspath(str(cwd or os.getcwd()))
-    env_sha = str(os.environ.get("GIT_COMMIT_SHA") or os.environ.get("WORKER_GIT_SHA") or "").strip()[:40]
-    if env_sha and re.fullmatch(r"[0-9A-Fa-f]{7,40}", env_sha):
-        return {
-            "worker_sha": env_sha,
-            "worker_git_sha": env_sha,
-            "worker_git_head_sha": env_sha,
-            "worker_sha_source": "env_git_commit_sha",
-            "worker_cwd": process_cwd,
-        }
     candidates = [process_cwd]
     script_cwd = os.path.abspath(SCRIPT_DIR)
     if script_cwd not in candidates:
         candidates.append(script_cwd)
+
+    # 1. Primary Authority: Git rev-parse HEAD (actual checkout HEAD must win)
     for candidate in candidates:
         try:
             result = subprocess.run(
@@ -167,8 +160,9 @@ def worker_git_head_info(cwd: str | None = None) -> dict[str, str]:
             )
         except Exception:
             continue
-        git_sha = str(result.stdout or "").strip()[:40]
-        if result.returncode == 0 and re.fullmatch(r"[0-9A-Fa-f]{7,40}", git_sha):
+        git_sha = str(result.stdout or "").strip()
+        if result.returncode == 0 and re.fullmatch(r"[0-9A-Fa-f]{40}", git_sha):
+            git_sha = git_sha.lower()
             return {
                 "worker_sha": git_sha,
                 "worker_git_sha": git_sha,
@@ -176,11 +170,56 @@ def worker_git_head_info(cwd: str | None = None) -> dict[str, str]:
                 "worker_sha_source": "git_rev_parse_head",
                 "worker_cwd": process_cwd,
             }
+
+    # 2. Environment fallback (ONLY when Git HEAD does not resolve in any candidate)
+    raw_commit_sha = os.environ.get("GIT_COMMIT_SHA")
+    raw_worker_sha = os.environ.get("WORKER_GIT_SHA")
+
+    has_commit = bool(raw_commit_sha is not None and str(raw_commit_sha).strip())
+    has_worker = bool(raw_worker_sha is not None and str(raw_worker_sha).strip())
+
+    if not has_commit and not has_worker:
+        return {
+            "worker_sha": "",
+            "worker_git_sha": "",
+            "worker_git_head_sha": "",
+            "worker_sha_source": "unknown",
+            "worker_cwd": process_cwd,
+        }
+
+    # If both GIT_COMMIT_SHA and WORKER_GIT_SHA exist and differ => FAIL CLOSED
+    if has_commit and has_worker:
+        commit_val = str(raw_commit_sha).strip()
+        worker_val = str(raw_worker_sha).strip()
+        if commit_val.lower() != worker_val.lower():
+            return {
+                "worker_sha": "",
+                "worker_git_sha": "",
+                "worker_git_head_sha": "",
+                "worker_sha_source": "unknown",
+                "worker_cwd": process_cwd,
+            }
+
+    # Exact 40-character hex only; no 7-character short SHA; malformed => fail closed; no dirty input truncation
+    for raw_val in (raw_commit_sha, raw_worker_sha):
+        if raw_val is not None and str(raw_val).strip():
+            stripped = str(raw_val).strip()
+            if not re.fullmatch(r"[0-9a-fA-F]{40}", stripped):
+                return {
+                    "worker_sha": "",
+                    "worker_git_sha": "",
+                    "worker_git_head_sha": "",
+                    "worker_sha_source": "unknown",
+                    "worker_cwd": process_cwd,
+                }
+
+    env_candidate = str(raw_commit_sha if has_commit else raw_worker_sha).strip()
+    env_sha = env_candidate.lower()
     return {
-        "worker_sha": "",
-        "worker_git_sha": "",
-        "worker_git_head_sha": "",
-        "worker_sha_source": "unknown",
+        "worker_sha": env_sha,
+        "worker_git_sha": env_sha,
+        "worker_git_head_sha": env_sha,
+        "worker_sha_source": "env_fallback",
         "worker_cwd": process_cwd,
     }
 
@@ -471,6 +510,7 @@ def ping_server(
     payload = {
         **worker_identity_payload(service_mode, capabilities),
         "worker_id": WORKER_ID,
+        "worker_git_sha": worker_git_sha(),
         "capabilities": capabilities,
         "worker_parser_version": WORKER_PARSER_VERSION,
         "worker_capability_version": PRODUCT_VIDEO_CANONICAL_CAPABILITY if (product_video or owner_product_video) else "",
@@ -493,6 +533,7 @@ def send_heartbeat(job_id: str, progress_percent: int = 0, message: str = "") ->
     payload = {
         **worker_identity_payload(ACTIVE_WORKER_SERVICE_MODE, ACTIVE_WORKER_CAPABILITIES),
         "worker_id": WORKER_ID,
+        "worker_git_sha": worker_git_sha(),
         "job_id": str(job_id),
         "progress_percent": int(progress_percent or 0),
         "message": str(message or "")[:500],
