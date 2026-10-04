@@ -1,0 +1,64 @@
+task_id: PRODUCT_VIDEO_RESUME_PLAN_20261005
+phase: REPORT
+execution_state: WAIT_OWNER_PLAN_APPROVAL
+date: '2026-10-05'
+base_sha: 7bd5b2a86254e16631a9edb74bd40422635b227b
+branch: audit/product-video-resume-plan-20261005
+tracker: https://github.com/manhtoangreensky-wq/bot/issues/1155
+goal_complete: false
+standalone_video_idea_product_scope: OWNER_CLOSED_AS_SHARED_LIBRARY
+idea_integration_acceptance: NOT_EXECUTED
+planning_only: true
+allowed_files:
+  - docs/product-video/PROGRESS.md
+  - docs/product-video/MAP.md
+  - docs/superpowers/specs/2026-10-05-product-video-provider-free-closure-spec.md
+  - docs/superpowers/plans/2026-10-05-product-video-provider-free-closure-plan.md
+  - .agents/state/product-video-resume-plan-20261005.yaml
+preserved_preexisting_untracked:
+  - docs/superpowers/plans/2026-10-03-smart-measured-failures-plan.md
+  - docs/superpowers/specs/2026-10-03-smart-measured-failures-spec.md
+protected:
+  - ALL_RUNTIME_SOURCE
+  - ALL_TEST_SOURCE
+  - SUBDUB_MULTI_SMART
+  - VIDEO_LOCAL_EDIT
+  - LONG_VIDEO_AI_EDIT_EXECUTION
+  - VOICE_TTS
+  - WALLET_PAYMENTS_PAYOS
+  - ENV_SECRETS_SCHEMA_PRODUCTION_DB
+  - DEPLOY_SYSTEMD_WORKFLOWS
+evidence:
+  current_github_bot_main: 7bd5b2a86254e16631a9edb74bd40422635b227b
+  runtime_vps_rechecked_today: false
+  historical_reference_final_review: '5982823837'
+  later_reference_master_dispatch: '5983095178'
+  newest_reference_master_start: '5983137534'
+  newest_reference_master_status_in_latest_read: IN_PROGRESS
+  pytest_this_planning_task: NOT_RUN
+  runtime_new_failures: UNKNOWN_NOT_RUN
+spec_execution:
+  S00: NOT_RUN
+  S01: NOT_RUN
+  S02: NOT_RUN
+  S03: NOT_RUN
+  S04: NOT_RUN
+  S05: NOT_RUN
+  S06: NOT_RUN
+  S07: NOT_RUN
+  S08: NOT_RUN
+  S09: NOT_RUN
+  S10: NOT_RUN
+  S11: NOT_RUN
+safety_counters:
+  provider_calls: 0
+  production_job_creation: 0
+  production_db_mutation: 0
+  wallet_mutations: 0
+  env_mutations: 0
+  service_restarts: 0
+  deploy: 0
+  pr_merge: 0
+lesson_candidate: NONE
+next_action: WAIT_OWNER_APPROVAL_NO_RUNTIME_EXECUTION
+stop: true
