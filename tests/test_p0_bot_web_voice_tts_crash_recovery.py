@@ -12,6 +12,7 @@ Invariants verified:
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import hmac
 import json
@@ -578,4 +579,451 @@ def test_settlement_failure_non_insufficient_funds_fails_job_409(monkeypatch, tm
     assert job_row[0] == "failed"
     assert job_row[1] == "CONCURRENT_UPDATE_CONFLICT"
     conn.close()
+
+
+# -----------------------------------------------------------------------------
+# Phase E: Mandatory Actual-Helper Tests Covering 10 Vectors
+# -----------------------------------------------------------------------------
+
+
+def test_vector_1_exact_durable_replay():
+    """Vector 1: Exact durable replay must succeed with idempotent_replay=True and zero balance mutation."""
+    uid = 10001
+    bot.get_user(uid)
+    bot.add_credit(uid, 100, event_type="setup")
+
+    ref_id = f"voice_tts_settle:{uid}:job_v1_replay"
+    r1 = bot.spend_fixed_credit_idempotent_info(uid, 20, "web_voice_tts", ref_id=ref_id)
+    assert r1["ok"] is True
+    assert r1["idempotent_replay"] is False
+    assert r1["balance_after"] == 80
+    assert r1["final_cost"] == 20
+
+    # Second debit with exact same ref
+    r2 = bot.spend_fixed_credit_idempotent_info(uid, 20, "web_voice_tts", ref_id=ref_id)
+    assert r2["ok"] is True
+    assert r2["idempotent_replay"] is True
+    assert r2["balance_after"] == 80
+    assert r2["final_cost"] == 20
+
+    conn = bot.db_connect()
+    c = conn.cursor()
+    c.execute("SELECT credits FROM users WHERE user_id = ?", (str(uid),))
+    assert c.fetchone()[0] == 80
+    c.execute("SELECT COUNT(*) FROM credit_events WHERE user_id = ? AND ref_id = ?", (str(uid), ref_id))
+    assert c.fetchone()[0] == 1
+    c.execute("SELECT COUNT(*) FROM wallet_idempotent_debits WHERE ref_id = ?", (ref_id,))
+    assert c.fetchone()[0] == 1
+    conn.close()
+
+
+def test_vector_2_same_ref_different_requested_base():
+    """Vector 2: Same ref + different requested base must reject with IDEMPOTENCY_AMOUNT_MISMATCH, AMOUNT_MISMATCH_SECOND_DEBIT_COUNT=0."""
+    uid = 10002
+    bot.get_user(uid)
+    bot.add_credit(uid, 100, event_type="setup")
+
+    ref_id = f"voice_tts_settle:{uid}:job_v2_amount"
+    r1 = bot.spend_fixed_credit_idempotent_info(uid, 20, "web_voice_tts", ref_id=ref_id)
+    assert r1["ok"] is True
+    assert r1["balance_after"] == 80
+
+    r2 = bot.spend_fixed_credit_idempotent_info(uid, 30, "web_voice_tts", ref_id=ref_id)
+    assert r2["ok"] is False
+    assert r2["error_code"] == "IDEMPOTENCY_AMOUNT_MISMATCH"
+    assert r2["idempotent_replay"] is False
+
+    conn = bot.db_connect()
+    c = conn.cursor()
+    c.execute("SELECT credits FROM users WHERE user_id = ?", (str(uid),))
+    assert c.fetchone()[0] == 80  # AMOUNT_MISMATCH_SECOND_DEBIT_COUNT = 0
+    c.execute("SELECT COUNT(*) FROM credit_events WHERE user_id = ? AND ref_id = ?", (str(uid), ref_id))
+    assert c.fetchone()[0] == 1
+    conn.close()
+
+
+def test_vector_3_same_ref_different_owner():
+    """Vector 3: Same ref + different owner must reject with IDEMPOTENCY_OWNER_MISMATCH, OWNER_MISMATCH_SECOND_DEBIT_COUNT=0."""
+    uid_a = 10003
+    uid_b = 10004
+    bot.get_user(uid_a)
+    bot.get_user(uid_b)
+    bot.add_credit(uid_a, 100, event_type="setup")
+    bot.add_credit(uid_b, 100, event_type="setup")
+
+    ref_id = "voice_tts_settle:shared_ref_v3"
+    r1 = bot.spend_fixed_credit_idempotent_info(uid_a, 20, "web_voice_tts", ref_id=ref_id)
+    assert r1["ok"] is True
+    assert r1["balance_after"] == 80
+
+    r2 = bot.spend_fixed_credit_idempotent_info(uid_b, 20, "web_voice_tts", ref_id=ref_id)
+    assert r2["ok"] is False
+    assert r2["error_code"] == "IDEMPOTENCY_OWNER_MISMATCH"
+    assert r2["idempotent_replay"] is False
+
+    conn = bot.db_connect()
+    c = conn.cursor()
+    c.execute("SELECT credits FROM users WHERE user_id = ?", (str(uid_b),))
+    assert c.fetchone()[0] == 100  # OWNER_MISMATCH_SECOND_DEBIT_COUNT = 0
+    c.execute("SELECT COUNT(*) FROM credit_events WHERE user_id = ? AND delta < 0", (str(uid_b),))
+    assert c.fetchone()[0] == 0
+    conn.close()
+
+
+def test_vector_4_same_ref_different_event_type():
+    """Vector 4: Same ref + different event type must reject with IDEMPOTENCY_EVENT_TYPE_MISMATCH, EVENT_MISMATCH_SECOND_DEBIT_COUNT=0."""
+    uid = 10005
+    bot.get_user(uid)
+    bot.add_credit(uid, 100, event_type="setup")
+
+    ref_id = f"voice_tts_settle:{uid}:job_v4_event"
+    r1 = bot.spend_fixed_credit_idempotent_info(uid, 20, "web_voice_tts", ref_id=ref_id)
+    assert r1["ok"] is True
+    assert r1["balance_after"] == 80
+
+    r2 = bot.spend_fixed_credit_idempotent_info(uid, 20, "product_video", ref_id=ref_id)
+    assert r2["ok"] is False
+    assert r2["error_code"] == "IDEMPOTENCY_EVENT_TYPE_MISMATCH"
+    assert r2["idempotent_replay"] is False
+
+    conn = bot.db_connect()
+    c = conn.cursor()
+    c.execute("SELECT credits FROM users WHERE user_id = ?", (str(uid),))
+    assert c.fetchone()[0] == 80  # EVENT_MISMATCH_SECOND_DEBIT_COUNT = 0
+    c.execute("SELECT COUNT(*) FROM credit_events WHERE user_id = ? AND ref_id = ?", (str(uid), ref_id))
+    assert c.fetchone()[0] == 1
+    conn.close()
+
+
+def test_vector_5_legacy_credit_events_no_durable_authority():
+    """Vector 5: Legacy credit_events row with no durable authority must fail closed with IDEMPOTENCY_LEGACY_AUTHORITY_UNPROVEN, 0 second debit, 0 backfill."""
+    uid = 10006
+    bot.get_user(uid)
+    bot.add_credit(uid, 100, event_type="setup")
+
+    ref_id = "legacy_ref_v5_unproven"
+    conn = bot.db_connect()
+    conn.execute(
+        """
+        INSERT INTO credit_events (user_id, delta, balance_after, event_type, note, ref_id, created_at)
+        VALUES (?, -20, 80, 'web_voice_tts', 'historical debit without authority', ?, datetime('now'))
+        """,
+        (str(uid), ref_id),
+    )
+    conn.commit()
+    conn.close()
+
+    r = bot.spend_fixed_credit_idempotent_info(uid, 20, "web_voice_tts", ref_id=ref_id)
+    assert r["ok"] is False
+    assert r["idempotent_replay"] is False
+    assert r["error_code"] == "IDEMPOTENCY_LEGACY_AUTHORITY_UNPROVEN"
+
+    conn = bot.db_connect()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM credit_events WHERE ref_id = ?", (ref_id,))
+    assert c.fetchone()[0] == 1  # LEGACY_UNPROVEN_REF_SECOND_DEBIT_COUNT = 0
+    c.execute("SELECT COUNT(*) FROM wallet_idempotent_debits WHERE ref_id = ?", (ref_id,))
+    assert c.fetchone()[0] == 0  # LEGACY_UNPROVEN_REF_AUTHORITY_BACKFILL_COUNT = 0
+    conn.close()
+
+
+def test_vector_6_legacy_discounted_ambiguity_fail_closed():
+    """Vector 6: Legacy discounted ambiguity (base 10 -> final 8; retry base 8) must fail closed with IDEMPOTENCY_LEGACY_AUTHORITY_UNPROVEN."""
+    uid = 10007
+    bot.get_user(uid)
+    bot.add_credit(uid, 100, event_type="setup")
+
+    ref_id = "legacy_ref_v6_discounted"
+    conn = bot.db_connect()
+    conn.execute(
+        """
+        INSERT INTO credit_events (user_id, delta, balance_after, event_type, note, ref_id, created_at)
+        VALUES (?, -8, 92, 'web_voice_tts', 'historical discounted debit', ?, datetime('now'))
+        """,
+        (str(uid), ref_id),
+    )
+    conn.commit()
+    conn.close()
+
+    # Retry with base 8
+    r_retry8 = bot.spend_fixed_credit_idempotent_info(uid, 8, "web_voice_tts", ref_id=ref_id)
+    assert r_retry8["ok"] is False
+    assert r_retry8["error_code"] == "IDEMPOTENCY_LEGACY_AUTHORITY_UNPROVEN"
+
+    # Retry with base 10
+    r_retry10 = bot.spend_fixed_credit_idempotent_info(uid, 10, "web_voice_tts", ref_id=ref_id)
+    assert r_retry10["ok"] is False
+    assert r_retry10["error_code"] == "IDEMPOTENCY_LEGACY_AUTHORITY_UNPROVEN"
+
+    # Invariants
+    conn = bot.db_connect()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM credit_events WHERE ref_id = ?", (ref_id,))
+    assert c.fetchone()[0] == 1
+    c.execute("SELECT COUNT(*) FROM wallet_idempotent_debits WHERE ref_id = ?", (ref_id,))
+    assert c.fetchone()[0] == 0
+    conn.close()
+
+
+def test_vector_7_stored_settlement_key_mismatch(monkeypatch):
+    """Vector 7: Stored settlement-key mismatch must reject with 409 SETTLEMENT_KEY_CONFLICT, 0 provider calls, 0 debits."""
+    client = TestClient(bot.fastapi_app)
+    uid = 10008
+    bot.get_user(uid)
+    bot.add_credit(uid, 100, event_type="setup")
+
+    job_id = f"job_v7_conflict_{uuid.uuid4().hex[:6]}"
+    stored_wrong_key = "voice_tts_settle:99999:foreign_job"
+
+    conn = bot.db_connect()
+    conn.execute(
+        """
+        INSERT INTO web_voice_tts_bot_jobs (
+            job_id, idempotency_key, web_request_id, user_id,
+            voice_source, script, default_voice_gender, speed, volume_percent,
+            language, status, quote_xu, charged_xu, payload_hash, settlement_status,
+            settlement_idempotency_key, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'default', 'Test kịch bản v7', 'female', '1.0', 100, 'vi', 'prepared', 10, 0, 'dummy', 'unsettled', ?, datetime('now'), datetime('now'))
+        """,
+        (job_id, f"{uid}:{job_id}", f"req_{job_id}", uid, stored_wrong_key),
+    )
+    conn.commit()
+    conn.close()
+
+    provider_calls = 0
+
+    async def mock_execute_engine(*args, **kwargs):
+        nonlocal provider_calls
+        provider_calls += 1
+        return {"ok": True, "output_bytes": b"SHOULD_NOT_EXECUTE"}
+
+    monkeypatch.setattr(bot, "execute_engine", mock_execute_engine)
+
+    confirm_path = f"/internal/v1/web-voice-tts/jobs/{job_id}/confirm"
+    headers = _sign("POST", confirm_path, actor_id=str(uid))
+    resp = client.post(confirm_path, headers=headers)
+
+    assert resp.status_code == 409
+    body = resp.json()
+    assert body["ok"] is False
+    assert body["error_code"] == "SETTLEMENT_KEY_CONFLICT"
+
+    # Invariants
+    assert provider_calls == 0  # SETTLEMENT_KEY_MISMATCH_PROVIDER_EXECUTION_COUNT = 0
+    conn = bot.db_connect()
+    c = conn.cursor()
+    c.execute("SELECT credits FROM users WHERE user_id = ?", (str(uid),))
+    assert c.fetchone()[0] == 100  # SETTLEMENT_KEY_MISMATCH_WALLET_DEBIT_COUNT = 0
+    c.execute("SELECT status, status_reason FROM web_voice_tts_bot_jobs WHERE job_id = ?", (job_id,))
+    job_row = c.fetchone()
+    assert job_row[0] == "failed"
+    assert job_row[1] == "SETTLEMENT_KEY_CONFLICT"
+    conn.close()
+
+
+def test_vector_8_crash_after_debit_before_settled(monkeypatch, tmp_path):
+    """Vector 8: Crash after debit before settled -> recovery achieves CRASH_RECOVERY_TOTAL_PROVIDER_EXECUTIONS=1, CRASH_RECOVERY_TOTAL_WALLET_DEBITS=1."""
+    client = TestClient(bot.fastapi_app)
+    uid = 10009
+    bot.get_user(uid)
+    bot.add_credit(uid, 50, event_type="setup")
+
+    fake_profile = {
+        "id": 93,
+        "user_id": uid,
+        "name": "Giọng nhân vật 93",
+        "provider": "minimax",
+        "provider_voice_id": "minimax_v1_custom_93",
+    }
+    monkeypatch.setattr(bot, "get_user_voice_profile", lambda u, p: fake_profile if u == uid and p == 93 else None)
+    monkeypatch.setattr(bot, "is_admin_user", lambda u: False)
+
+    job_id = f"job_v8_crash_{uuid.uuid4().hex[:6]}"
+    settle_key = f"voice_tts_settle:{uid}:{job_id}"
+
+    # Setup artifact file
+    artifact_file = tmp_path / "voice_assets" / f"web_voice_tts_{uid}_{job_id}.mp3"
+    artifact_file.parent.mkdir(parents=True, exist_ok=True)
+    audio_content = b"CRASH_RECOVERY_AUDIO_SAMPLE_V8"
+    artifact_file.write_bytes(audio_content)
+    art_len = len(audio_content)
+
+    # Initial run before crash: debited wallet
+    r_debit = bot.spend_fixed_credit_idempotent_info(uid, 10, "web_voice_tts", ref_id=settle_key)
+    assert r_debit["ok"] is True
+    assert r_debit["balance_after"] == 40
+
+    conn = bot.db_connect()
+    conn.execute(
+        """
+        INSERT INTO web_voice_tts_bot_jobs (
+            job_id, idempotency_key, web_request_id, user_id,
+            voice_source, script, voice_profile_id, speed, volume_percent,
+            language, status, status_reason, quote_xu, charged_xu, payload_hash,
+            artifact_path, artifact_bytes, settlement_status, settlement_idempotency_key,
+            created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'saved', 'Kịch bản v8 crash', 93, '1.0', 100, 'vi',
+                  'processing', 'SETTLEMENT_IN_PROGRESS', 10, 0, 'dummy',
+                  ?, ?, 'settling', ?, datetime('now'), datetime('now'))
+        """,
+        (job_id, f"{uid}:{job_id}", f"req_{job_id}", uid, str(artifact_file), art_len, settle_key),
+    )
+    conn.commit()
+    conn.close()
+
+    provider_calls = 0
+
+    async def mock_process_voice_tts(**kwargs):
+        nonlocal provider_calls
+        provider_calls += 1
+        return None
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_voice_tts", mock_process_voice_tts)
+
+    confirm_path = f"/internal/v1/web-voice-tts/jobs/{job_id}/confirm"
+    headers = _sign("POST", confirm_path, actor_id=str(uid))
+    resp = client.post(confirm_path, headers=headers)
+
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert resp.json()["job"]["status"] == "completed"
+    assert resp.json()["job"]["settlement_status"] == "settled"
+
+    # Verification: CRASH_RECOVERY_TOTAL_PROVIDER_EXECUTIONS = 1 (1 prior + 0 during recovery)
+    assert provider_calls == 0
+    # Verification: CRASH_RECOVERY_TOTAL_WALLET_DEBITS = 1 (1 prior + 0 during recovery)
+    conn = bot.db_connect()
+    c = conn.cursor()
+    c.execute("SELECT credits FROM users WHERE user_id = ?", (str(uid),))
+    assert c.fetchone()[0] == 40
+    c.execute("SELECT COUNT(*) FROM credit_events WHERE user_id = ? AND ref_id = ?", (str(uid), settle_key))
+    assert c.fetchone()[0] == 1
+    conn.close()
+
+
+def test_vector_9_concurrent_same_ref_debit():
+    """Vector 9: Concurrent same-ref debit must ensure CONCURRENT_MAX_SUCCESSFUL_DEBITS=1."""
+    uid = 10010
+    bot.get_user(uid)
+    bot.add_credit(uid, 100, event_type="setup")
+
+    ref_id = f"voice_tts_settle:{uid}:job_v9_concurrent"
+
+    def _do_debit():
+        return bot.spend_fixed_credit_idempotent_info(uid, 20, "web_voice_tts", ref_id=ref_id)
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(_do_debit) for _ in range(5)]
+        results = [f.result() for f in futures]
+
+    # Exactly 1 result can have idempotent_replay=False
+    initial_debits = [r for r in results if r.get("ok") and not r.get("idempotent_replay")]
+    replays = [r for r in results if r.get("ok") and r.get("idempotent_replay")]
+
+    assert len(initial_debits) == 1, f"Expected exactly 1 initial debit, got {len(initial_debits)}"
+    assert len(initial_debits) + len(replays) == 5
+
+    # Check database state: exactly 1 debit event and balance deducted exactly once
+    conn = bot.db_connect()
+    c = conn.cursor()
+    c.execute("SELECT credits FROM users WHERE user_id = ?", (str(uid),))
+    assert c.fetchone()[0] == 80  # 100 - 20 = 80
+    c.execute("SELECT COUNT(*) FROM credit_events WHERE user_id = ? AND ref_id = ?", (str(uid), ref_id))
+    assert c.fetchone()[0] == 1  # CONCURRENT_MAX_SUCCESSFUL_DEBITS = 1
+    conn.close()
+
+
+def test_vector_10_insufficient_funds_top_up_retry(monkeypatch, tmp_path):
+    """Vector 10: Insufficient funds -> top-up -> retry achieves INSUFFICIENT_FUNDS_TOTAL_PROVIDER_EXECUTIONS=1, INSUFFICIENT_FUNDS_TOTAL_SUCCESSFUL_DEBITS=1."""
+    client = TestClient(bot.fastapi_app)
+    uid = 10011
+    bot.get_user(uid)
+    # User balance starts at 0
+
+    fake_profile = {
+        "id": 94,
+        "user_id": uid,
+        "name": "Giọng nhân vật 94",
+        "provider": "minimax",
+        "provider_voice_id": "minimax_v1_custom_94",
+    }
+    monkeypatch.setattr(bot, "get_user_voice_profile", lambda u, p: fake_profile if u == uid and p == 94 else None)
+    monkeypatch.setattr(bot, "is_admin_user", lambda u: False)
+
+    job_id = f"job_v10_insufficient_{uuid.uuid4().hex[:6]}"
+    settle_key = f"voice_tts_settle:{uid}:{job_id}"
+
+    # Prepare job
+    conn = bot.db_connect()
+    conn.execute(
+        """
+        INSERT INTO web_voice_tts_bot_jobs (
+            job_id, idempotency_key, web_request_id, user_id,
+            voice_source, script, voice_profile_id, speed, volume_percent,
+            language, status, quote_xu, charged_xu, payload_hash, settlement_status,
+            created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'saved', 'Kịch bản v10 insufficient', 94, '1.0', 100, 'vi',
+                  'awaiting_confirmation', 15, 0, 'dummy', 'unsettled', datetime('now'), datetime('now'))
+        """,
+        (job_id, f"{uid}:{job_id}", f"req_{job_id}", uid),
+    )
+    conn.commit()
+    conn.close()
+
+    provider_calls = 0
+
+    class FakeTTSResult:
+        ok = True
+        output_bytes = b"AUDIO_SAMPLE_V10_CONTENT"
+
+    async def mock_process_voice_tts(**kwargs):
+        nonlocal provider_calls
+        provider_calls += 1
+        out_p = kwargs.get("output_path")
+        if out_p:
+            Path(out_p).write_bytes(b"AUDIO_SAMPLE_V10_CONTENT")
+        return FakeTTSResult()
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_voice_tts", mock_process_voice_tts)
+
+    # 1. First confirm: insufficient funds
+    confirm_path = f"/internal/v1/web-voice-tts/jobs/{job_id}/confirm"
+    headers = _sign("POST", confirm_path, actor_id=str(uid))
+    resp1 = client.post(confirm_path, headers=headers)
+
+    assert resp1.status_code == 402
+    assert resp1.json()["error_code"] == "INSUFFICIENT_FUNDS"
+    assert provider_calls == 1
+
+    # Check job is in payment_required
+    conn = bot.db_connect()
+    c = conn.cursor()
+    c.execute("SELECT status, status_reason, artifact_path, settlement_status FROM web_voice_tts_bot_jobs WHERE job_id = ?", (job_id,))
+    j_row = c.fetchone()
+    assert j_row[0] == "payment_required"
+    assert j_row[1] == "INSUFFICIENT_FUNDS"
+    assert j_row[3] == "unsettled"
+    conn.close()
+
+    # 2. Top-up user balance
+    bot.add_credit(uid, 50, event_type="deposit")
+
+    # 3. Second confirm: retry
+    resp2 = client.post(confirm_path, headers=headers)
+    assert resp2.status_code == 200
+    assert resp2.json()["ok"] is True
+    assert resp2.json()["job"]["status"] == "completed"
+    assert resp2.json()["job"]["settlement_status"] == "settled"
+
+    # INSUFFICIENT_FUNDS_TOTAL_PROVIDER_EXECUTIONS = 1 (audio was reused from disk)
+    assert provider_calls == 1
+    # INSUFFICIENT_FUNDS_TOTAL_SUCCESSFUL_DEBITS = 1
+    conn = bot.db_connect()
+    c = conn.cursor()
+    c.execute("SELECT credits FROM users WHERE user_id = ?", (str(uid),))
+    assert c.fetchone()[0] == 35  # 50 - 15 = 35
+    c.execute("SELECT COUNT(*) FROM credit_events WHERE user_id = ? AND ref_id = ?", (str(uid), settle_key))
+    assert c.fetchone()[0] == 1
+    conn.close()
+
 
