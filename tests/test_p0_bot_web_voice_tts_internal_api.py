@@ -394,10 +394,32 @@ def test_confirm_job_saved_voice_insufficient_funds_fails_closed(monkeypatch):
     assert r_confirm.status_code == 402
     assert r_confirm.json()["error_code"] == "INSUFFICIENT_FUNDS"
 
-    # Verify job is failed, not completed
+    # Verify job is in payment_required (Blocker 4: fail closed, unsettled paid artifact not delivered)
     get_path = f"/internal/v1/web-voice-tts/jobs/{job_id}"
     get_headers = make_auth_headers("GET", get_path, actor_id="12345")
     r_get = client.get(get_path, headers=get_headers)
     assert r_get.status_code == 200
-    assert r_get.json()["job"]["status"] == "failed"
+    assert r_get.json()["job"]["status"] == "payment_required"
     assert r_get.json()["job"]["status_reason"] == "INSUFFICIENT_FUNDS"
+
+    # Verify unsettled paid artifact is not delivered publicly
+    art_path = f"/internal/v1/web-voice-tts/jobs/{job_id}/artifact"
+    art_headers = make_auth_headers("GET", art_path, actor_id="12345")
+    r_art = client.get(art_path, headers=art_headers)
+    assert r_art.status_code == 404
+
+    # Second confirm after topping up: verify zero second synthesis
+    synthesis_call_count = 0
+
+    async def mock_second_synthesis(**kwargs):
+        nonlocal synthesis_call_count
+        synthesis_call_count += 1
+        return FakeTTSResult()
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_voice_tts", mock_second_synthesis)
+    monkeypatch.setattr(bot, "spend_fixed_credit_info", lambda uid, amt, cat, desc: {"ok": True, "final_cost": amt})
+
+    r_confirm2 = client.post(confirm_path, headers=confirm_headers)
+    assert r_confirm2.status_code == 200
+    assert r_confirm2.json()["job"]["status"] == "completed"
+    assert synthesis_call_count == 0, "Second confirm must reuse generated audio without repeating provider synthesis"
