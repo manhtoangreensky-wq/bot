@@ -173,3 +173,144 @@ def test_video_status_exposes_worker_source_truth_without_provider_changes():
     assert "heartbeat SHA source bug" in bot_source
     assert '"worker_sha_source": "git_rev_parse_head"' in remote_source
     assert "provider_submit" not in remote_source[remote_source.index("def worker_git_head_info"):remote_source.index("FFMPEG_PATH =")]
+
+
+def test_git_head_current_and_stale_git_commit_sha_git_head_wins(monkeypatch, tmp_path):
+    worker_cwd = str(tmp_path.resolve())
+    monkeypatch.setattr(remote_worker.os, "getcwd", lambda: worker_cwd)
+    monkeypatch.setattr(
+        remote_worker.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout=SHA_NEW + "\n", stderr=""),
+    )
+    monkeypatch.setenv("GIT_COMMIT_SHA", SHA_OLD)
+
+    info = remote_worker.worker_git_head_info()
+
+    assert info["worker_sha"] == SHA_NEW
+    assert info["worker_git_head_sha"] == SHA_NEW
+    assert info["worker_sha_source"] == "git_rev_parse_head"
+
+
+def test_git_head_current_and_stale_worker_git_sha_git_head_wins(monkeypatch, tmp_path):
+    worker_cwd = str(tmp_path.resolve())
+    monkeypatch.setattr(remote_worker.os, "getcwd", lambda: worker_cwd)
+    monkeypatch.setattr(
+        remote_worker.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout=SHA_NEW + "\n", stderr=""),
+    )
+    monkeypatch.setenv("WORKER_GIT_SHA", SHA_OLD)
+
+    info = remote_worker.worker_git_head_info()
+
+    assert info["worker_sha"] == SHA_NEW
+    assert info["worker_git_head_sha"] == SHA_NEW
+    assert info["worker_sha_source"] == "git_rev_parse_head"
+
+
+def test_git_head_and_matching_env_git_head_is_authority(monkeypatch, tmp_path):
+    worker_cwd = str(tmp_path.resolve())
+    monkeypatch.setattr(remote_worker.os, "getcwd", lambda: worker_cwd)
+    monkeypatch.setattr(
+        remote_worker.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout=SHA_NEW + "\n", stderr=""),
+    )
+    monkeypatch.setenv("GIT_COMMIT_SHA", SHA_NEW)
+    monkeypatch.setenv("WORKER_GIT_SHA", SHA_NEW)
+
+    info = remote_worker.worker_git_head_info()
+
+    assert info["worker_sha"] == SHA_NEW
+    assert info["worker_git_head_sha"] == SHA_NEW
+    assert info["worker_sha_source"] == "git_rev_parse_head"
+
+
+def test_git_unavailable_and_valid_40_char_env_explicit_fallback(monkeypatch):
+    monkeypatch.delenv("WORKER_GIT_SHA", raising=False)
+    monkeypatch.setenv("GIT_COMMIT_SHA", SHA_NEW)
+    monkeypatch.setattr(
+        remote_worker.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=128, stdout="", stderr="fatal: not a git repository"),
+    )
+
+    info = remote_worker.worker_git_head_info("/not/a/repo")
+
+    assert info["worker_sha"] == SHA_NEW
+    assert info["worker_git_head_sha"] == SHA_NEW
+    assert info["worker_sha_source"] == "env_fallback"
+
+
+def test_git_unavailable_and_conflicting_env_shas_fails_closed(monkeypatch):
+    monkeypatch.setenv("GIT_COMMIT_SHA", SHA_NEW)
+    monkeypatch.setenv("WORKER_GIT_SHA", SHA_OLD)
+    monkeypatch.setattr(
+        remote_worker.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=128, stdout="", stderr="fatal: not a git repository"),
+    )
+
+    info = remote_worker.worker_git_head_info("/not/a/repo")
+
+    assert info["worker_sha"] == ""
+    assert info["worker_git_head_sha"] == ""
+    assert info["worker_sha_source"] == "unknown"
+
+
+def test_git_unavailable_and_short_sha_fails_closed(monkeypatch):
+    monkeypatch.delenv("WORKER_GIT_SHA", raising=False)
+    monkeypatch.setenv("GIT_COMMIT_SHA", "73b7d9b")
+    monkeypatch.setattr(
+        remote_worker.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=128, stdout="", stderr="fatal: not a git repository"),
+    )
+
+    info = remote_worker.worker_git_head_info("/not/a/repo")
+
+    assert info["worker_sha"] == ""
+    assert info["worker_git_head_sha"] == ""
+    assert info["worker_sha_source"] == "unknown"
+
+
+def test_git_unavailable_and_malformed_env_sha_fails_closed(monkeypatch):
+    monkeypatch.delenv("WORKER_GIT_SHA", raising=False)
+    monkeypatch.setenv("GIT_COMMIT_SHA", SHA_NEW + " extra dirty")
+    monkeypatch.setattr(
+        remote_worker.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=128, stdout="", stderr="fatal: not a git repository"),
+    )
+
+    info = remote_worker.worker_git_head_info("/not/a/repo")
+
+    assert info["worker_sha"] == ""
+    assert info["worker_git_head_sha"] == ""
+    assert info["worker_sha_source"] == "unknown"
+
+
+def test_unknown_worker_sha_source_not_authoritative_downstream_even_with_valid_sha():
+    now = datetime(2026, 7, 13, 12, 0, 0)
+    status = remote_worker_api.product_video_worker_compatibility(
+        [
+            _record(
+                now,
+                worker_sha=SHA_NEW,
+                worker_git_sha=SHA_NEW,
+                worker_git_head_sha="",
+                git_sha="",
+                worker_sha_source="unknown",
+            )
+        ],
+        runtime_sha=SHA_NEW,
+        now=now,
+    )
+
+    assert status["worker_sha"] == ""
+    assert status["worker_git_head_sha"] == ""
+    assert status["worker_sha_source"] == "unknown"
+    assert status["worker_sha_matches_runtime"] is False
+    assert status["stale_worker_sha_ignored"] is True
+

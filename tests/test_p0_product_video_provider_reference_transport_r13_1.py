@@ -205,12 +205,20 @@ def test_base_url_validation_insecure_or_localhost_rejected():
 # 4. STORAGE ROOT UNWRITABLE / NO /tmp FAILOVER
 # ==============================================================================
 
-def test_storage_root_unwritable_fails_closed(valid_jpeg):
+def test_storage_root_unwritable_fails_closed(valid_jpeg, monkeypatch):
     """Unwritable storage root fails closed without falling back to /tmp."""
     unwritable_env = {
         "PROVIDER_REFERENCE_STORAGE_DIR": "/sys/kernel/security/unwritable_provider_refs",
         "PROVIDER_REFERENCE_BASE_URL": "https://toanaas.vn/provider-media/v1",
     }
+    orig_mkdir = Path.mkdir
+
+    def mock_mkdir(self, *args, **kwargs):
+        if "unwritable_provider_refs" in str(self):
+            raise PermissionError("Permission denied: unwritable storage root")
+        return orig_mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", mock_mkdir)
     with pytest.raises(VideoProviderContractError) as exc_info:
         transport.prepare_provider_image_reference(valid_jpeg, env=unwritable_env)
     assert exc_info.value.blocker == "shopaikey_veo_i2v_public_reference_unavailable_no_charge"

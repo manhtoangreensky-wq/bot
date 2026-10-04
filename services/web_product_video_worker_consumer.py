@@ -45,6 +45,7 @@ from services.video_provider_base import (
     VideoGenerationRequest,
     is_safe_shopaikey_content_url,
     is_safe_video_output_url,
+    sanitize_artifact_download_diagnostics,
     sanitize_output_url_for_logging,
 )
 
@@ -1537,6 +1538,12 @@ def execute_claimed_web_product_video_job(
         # Provider execution failed
         blocker = str(gen_result.get("blocker") or gen_result.get("provider_error") or "PROVIDER_FAILED")
         err_msg = str(gen_result.get("public_message") or gen_result.get("exception_message_safe") or blocker)
+        raw_download_diag = gen_result.get("artifact_download_diagnostics") if isinstance(gen_result, Mapping) else None
+        sanitized_diag = sanitize_artifact_download_diagnostics(raw_download_diag)
+        if sanitized_diag:
+            diag_str = " ".join(f"{k}={sanitized_diag[k]}" for k in sorted(sanitized_diag.keys()))
+            logger.warning("artifact_download_diagnostics job_id=%s %s", raw_job_id, diag_str)
+            err_msg = f"{err_msg} [{diag_str}]"[:1000]
         logger.warning("provider_execution_failed job_id=%s blocker=%s", raw_job_id, blocker)
         if client:
             try:

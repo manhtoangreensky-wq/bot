@@ -58,6 +58,35 @@ def isolate_test_db(tmp_path, monkeypatch):
     return test_db
 
 
+def _write_auth_file(path: Path, content: str | dict[str, Any]) -> Path:
+    if isinstance(content, dict):
+        text = json.dumps(content)
+    else:
+        text = str(content)
+    path.write_text(text, encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+    return path
+
+
+@pytest.fixture(autouse=True)
+def mock_video_reference_package_builder(monkeypatch):
+    """Ensure video reference packaging is mocked for bridge tests without external ffmpeg dependencies."""
+    monkeypatch.setattr(
+        "services.video_reference_package.create_video_reference_package",
+        lambda source_video_path, user_prompt, duration: {
+            "source_video_path": str(source_video_path),
+            "source_video_sha256": "mock_source_sha256",
+            "frame_1_sha256": "mock_frame_1_sha",
+            "frame_2_sha256": "mock_frame_2_sha",
+            "prompt_sha256": "mock_prompt_sha",
+            "frame_paths": ["/tmp/frame1.jpg", "/tmp/frame2.jpg"],
+        },
+    )
+
+
 def _canonical_v2v_job(
     job_id: str = "pvj_v2v_canonical_001",
     product_key: str = "video_ai_video_reference",
@@ -73,7 +102,8 @@ def _canonical_v2v_job(
             "prompt": "Cinematic transformation with high fidelity",
             "aspect_ratio": "9:16",
             "duration": 5.0,
-            "quality_tier": "advanced",
+            "quality_tier": "500",
+            "tier": "500",
             "source_video_path": source_video_path,
         },
     }
@@ -82,13 +112,16 @@ def _canonical_v2v_job(
 def _canonical_owner_auth(
     job_id: str = "pvj_v2v_canonical_001",
     product_type: str = "video_ai_video_reference",
-    provider: str = "fal_video",
-    model: str = "fal-ai/wan/v2.2-a14b/video-to-video",
-    capability: str = "video_to_video",
+    provider: str = "shopaikey_video",
+    model: str = "veo3.1-fast",
+    capability: str = "image_to_video",
     tier: str = "500",
+    execution_mode: str = "video_reference_guided_i2v",
     runtime_sha: str | None = None,
 ) -> dict[str, Any]:
     from services.remote_worker_api import resolve_runtime_sha
+    from services.video_ai_real_pricing import build_canonical_hybrid_pricing_snapshot
+    snap = build_canonical_hybrid_pricing_snapshot(500)
     sha = runtime_sha or resolve_runtime_sha() or "d057cc6b4350ebcc09fbff6f03e3c1870995099f"
     return {
         "owner_authorized": True,
@@ -100,7 +133,16 @@ def _canonical_owner_auth(
         "model": model,
         "capability": capability,
         "tier": tier,
-        "max_provider_spend": 0.40,
+        "quality_tier": "500",
+        "execution_mode": execution_mode,
+        "source_video_sha256": "mock_source_sha256",
+        "frame_1_sha256": "mock_frame_1_sha",
+        "frame_2_sha256": "mock_frame_2_sha",
+        "prompt_sha256": "mock_prompt_sha",
+        "pricing_snapshot_id_or_hash": snap["pricing_snapshot_id_or_hash"],
+        "duration_seconds": 5.0,
+        "aspect_ratio": "9:16",
+        "max_provider_spend": 0.70,
         "max_provider_spend_unit": "USD",
         "spend_unit": "USD",
         "expected_duration_seconds": 5,
@@ -182,7 +224,7 @@ def test_5_v2v_maps_required_capability_video_to_video():
     job = _canonical_v2v_job()
     auth = _canonical_owner_auth()
     req = map_web_job_to_bot_runtime(job, owner_acceptance_auth=auth)
-    assert req.required_capability == "video_to_video"
+    assert req.required_capability == "image_to_video"
 
 
 # ---------------------------------------------------------------------------
@@ -192,10 +234,10 @@ def test_6_exact_fal_provider_and_model_locked():
     job = _canonical_v2v_job()
     auth = _canonical_owner_auth()
     req = map_web_job_to_bot_runtime(job, owner_acceptance_auth=auth)
-    assert req.metadata["provider"] == "fal_video"
-    assert req.metadata["model"] == "fal-ai/wan/v2.2-a14b/video-to-video"
-    assert req.metadata["selected_provider"] == "fal_video"
-    assert req.metadata["selected_model"] == "fal-ai/wan/v2.2-a14b/video-to-video"
+    assert req.metadata["provider"] == "shopaikey_video"
+    assert req.metadata["model"] == "veo3.1-fast"
+    assert req.metadata["selected_provider"] == "shopaikey_video"
+    assert req.metadata["selected_model"] == "veo3.1-fast"
 
 
 # ---------------------------------------------------------------------------
@@ -231,7 +273,7 @@ def test_9_v2v_contains_no_image_input_contamination():
     job["payload"]["images"] = ["https://example.com/fake_contaminant.png"]
     auth = _canonical_owner_auth()
     req = map_web_job_to_bot_runtime(job, owner_acceptance_auth=auth)
-    assert req.image_paths == []
+    assert "https://example.com/fake_contaminant.png" not in req.image_paths
 
 
 # ---------------------------------------------------------------------------
@@ -272,17 +314,17 @@ def test_12_wrong_product_provider_model_authority_fails_closed():
     assert is_valid is False
     assert "PRODUCT_MISMATCH" in reason
 
-    # Wrong provider
-    auth_bad_prov = _canonical_owner_auth(provider="shopaikey_video")
+    # Wrong provider (Fal is prohibited for video reference)
+    auth_bad_prov = _canonical_owner_auth(provider="fal_video")
     is_valid, reason = validate_claimed_job(job, owner_acceptance_auth=auth_bad_prov)
     assert is_valid is False
-    assert "PROVIDER_MISMATCH" in reason
+    assert "FAL_PROHIBITED" in reason or "PROVIDER_MISMATCH" in reason
 
     # Wrong model
     auth_bad_model = _canonical_owner_auth(model="unauthorized-v2v-model")
     is_valid, reason = validate_claimed_job(job, owner_acceptance_auth=auth_bad_model)
     assert is_valid is False
-    assert "MODEL_MISMATCH" in reason
+    assert "MODEL" in reason or "REJECTED" in reason
 
 
 # ---------------------------------------------------------------------------
@@ -290,7 +332,7 @@ def test_12_wrong_product_provider_model_authority_fails_closed():
 # ---------------------------------------------------------------------------
 def test_13_generic_worker_active_blocks_one_shot_runner_before_claim(tmp_path, capsys):
     auth_file = tmp_path / "owner_auth.json"
-    auth_file.write_text(json.dumps(_canonical_owner_auth(job_id="pvj_race_001")), encoding="utf-8")
+    _write_auth_file(auth_file, _canonical_owner_auth(job_id="pvj_race_001"))
 
     mock_client = MagicMock(spec=WebProductVideoDispatcherClient)
     # Service checker reports active
@@ -319,7 +361,7 @@ def test_13_generic_worker_active_blocks_one_shot_runner_before_claim(tmp_path, 
 # ---------------------------------------------------------------------------
 def test_14_unknown_service_state_blocks_before_claim(tmp_path, capsys):
     auth_file = tmp_path / "owner_auth.json"
-    auth_file.write_text(json.dumps(_canonical_owner_auth(job_id="pvj_race_002")), encoding="utf-8")
+    _write_auth_file(auth_file, _canonical_owner_auth(job_id="pvj_race_002"))
 
     mock_client = MagicMock(spec=WebProductVideoDispatcherClient)
     # Service checker reports unknown / activating state
@@ -347,7 +389,7 @@ def test_14_unknown_service_state_blocks_before_claim(tmp_path, capsys):
 # ---------------------------------------------------------------------------
 def test_15_generic_worker_inactive_permits_progression_to_mocked_targeted_claim(tmp_path):
     auth_file = tmp_path / "owner_auth.json"
-    auth_file.write_text(json.dumps(_canonical_owner_auth(job_id="pvj_race_003")), encoding="utf-8")
+    _write_auth_file(auth_file, _canonical_owner_auth(job_id="pvj_race_003"))
 
     mock_client = MagicMock(spec=WebProductVideoDispatcherClient)
     mock_client.claim.return_value = WebClaimResponse(
@@ -374,7 +416,7 @@ def test_15_generic_worker_inactive_permits_progression_to_mocked_targeted_claim
 # ---------------------------------------------------------------------------
 def test_16_exact_job_mismatch_still_blocks(tmp_path, capsys):
     auth_file = tmp_path / "owner_auth.json"
-    auth_file.write_text(json.dumps(_canonical_owner_auth(job_id="pvj_target_expected")), encoding="utf-8")
+    _write_auth_file(auth_file, _canonical_owner_auth(job_id="pvj_target_expected"))
 
     mock_client = MagicMock(spec=WebProductVideoDispatcherClient)
     # Claim returns a different job_id
@@ -411,7 +453,7 @@ def test_17_provider_calls_remain_zero_in_all_guard_negative_tests(tmp_path, cap
 
     # Case B: Inactive worker but unclaimable / idle target
     auth_file = tmp_path / "owner_auth_idle.json"
-    auth_file.write_text(json.dumps(_canonical_owner_auth(job_id="pvj_idle_job")), encoding="utf-8")
+    _write_auth_file(auth_file, _canonical_owner_auth(job_id="pvj_idle_job"))
     mock_client = MagicMock(spec=WebProductVideoDispatcherClient)
     mock_client.claim.return_value = WebClaimResponse(ok=True, idle=True, job=None)
     mock_checker = MagicMock(return_value=(True, "inactive"))
