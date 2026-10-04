@@ -7,6 +7,7 @@ and safe audio artifact retrieval.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -65,6 +66,9 @@ def ensure_web_voice_tts_schema(conn: sqlite3.Connection) -> None:
             charged_xu INTEGER NOT NULL DEFAULT 0,
             artifact_path TEXT,
             artifact_bytes INTEGER DEFAULT 0,
+            payload_hash TEXT NOT NULL DEFAULT '',
+            settlement_status TEXT NOT NULL DEFAULT 'unsettled',
+            settlement_idempotency_key TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             completed_at TEXT
@@ -77,6 +81,16 @@ def ensure_web_voice_tts_schema(conn: sqlite3.Connection) -> None:
         ON web_voice_tts_bot_jobs(user_id);
         """
     )
+    # Ensure migration columns for existing tables
+    for col_name, col_def in (
+        ("payload_hash", "TEXT NOT NULL DEFAULT ''"),
+        ("settlement_status", "TEXT NOT NULL DEFAULT 'unsettled'"),
+        ("settlement_idempotency_key", "TEXT"),
+    ):
+        try:
+            conn.execute(f"ALTER TABLE web_voice_tts_bot_jobs ADD COLUMN {col_name} {col_def};")
+        except sqlite3.OperationalError:
+            pass
 
 
 def _get_db_connection(db_path: str | None = None) -> sqlite3.Connection:
@@ -99,6 +113,21 @@ def _contains_forbidden_authority(payload: dict) -> bool:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def compute_voice_tts_payload_hash(payload_data: dict[str, Any]) -> str:
+    """Compute canonical hash of semantic payload fields for tamper-evident idempotency."""
+    canonical_repr = {
+        "voice_source": str(payload_data.get("voice_source") or "").strip().lower(),
+        "script": str(payload_data.get("script") or "").strip(),
+        "default_voice_gender": str(payload_data.get("default_voice_gender") or "").strip().lower(),
+        "voice_profile_id": int(payload_data.get("voice_profile_id")) if payload_data.get("voice_profile_id") else None,
+        "speed": str(payload_data.get("speed") or "1.0").strip(),
+        "volume_percent": int(payload_data.get("volume_percent") or 100),
+        "language": str(payload_data.get("language") or "vi").strip().lower(),
+    }
+    encoded = json.dumps(canonical_repr, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def get_web_voice_tts_job(job_id: str, user_id: int, *, conn: sqlite3.Connection | None = None) -> dict[str, Any] | None:
@@ -137,18 +166,46 @@ def prepare_web_voice_tts_job(
     quote_xu: int = 0,
     conn: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
-    """Prepare and record a Web Voice TTS job."""
+    """Prepare and record a Web Voice TTS job with strict owner and payload idempotency binding."""
     local_conn = conn or _get_db_connection()
     now_ts = _utc_now()
+    payload_dict = {
+        "voice_source": voice_source,
+        "script": script,
+        "default_voice_gender": default_voice_gender,
+        "voice_profile_id": voice_profile_id,
+        "speed": speed,
+        "volume_percent": volume_percent,
+        "language": language,
+    }
+    payload_hash = compute_voice_tts_payload_hash(payload_dict)
+
     try:
-        # Check idempotency
-        cur = local_conn.execute(
-            "SELECT * FROM web_voice_tts_bot_jobs WHERE idempotency_key = ?",
-            (idempotency_key,),
-        )
-        existing = cur.fetchone()
-        if existing:
-            return dict(existing)
+        # Check idempotency with owner and payload binding
+        if idempotency_key:
+            cur = local_conn.execute(
+                "SELECT * FROM web_voice_tts_bot_jobs WHERE idempotency_key = ?",
+                (idempotency_key,),
+            )
+            existing = cur.fetchone()
+            if existing:
+                # 1. Foreign owner leak prevention (Blocker 6)
+                if int(existing["user_id"]) != int(canonical_user_id):
+                    return {
+                        "ok": False,
+                        "error_code": "IDEMPOTENCY_OWNER_MISMATCH",
+                        "message": "Idempotency key belongs to another user account",
+                    }
+                # 2. Same owner + different payload -> deterministic conflict
+                existing_hash = existing["payload_hash"] or ""
+                if existing_hash and existing_hash != payload_hash:
+                    return {
+                        "ok": False,
+                        "error_code": "IDEMPOTENCY_PAYLOAD_MISMATCH",
+                        "message": "Idempotency key reused with different payload parameters",
+                    }
+                # 3. Same owner + same key + same payload -> identical replay
+                return {"ok": True, "job": dict(existing), "idempotent_replay": True}
 
         status = "awaiting_confirmation" if quote_xu > 0 else "prepared"
         local_conn.execute(
@@ -157,8 +214,9 @@ def prepare_web_voice_tts_job(
                 job_id, idempotency_key, web_request_id, user_id,
                 voice_source, script, default_voice_gender, voice_profile_id,
                 speed, volume_percent, language, status, status_reason,
-                quote_xu, charged_xu, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                quote_xu, charged_xu, payload_hash, settlement_status,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 web_job_id,
@@ -176,12 +234,104 @@ def prepare_web_voice_tts_job(
                 "AWAITING_CUSTOMER_CONFIRMATION" if quote_xu > 0 else "PREPARED",
                 int(quote_xu),
                 0,
+                payload_hash,
+                "unsettled",
                 now_ts,
                 now_ts,
             ),
         )
         cur = local_conn.execute("SELECT * FROM web_voice_tts_bot_jobs WHERE job_id = ?", (web_job_id,))
-        return dict(cur.fetchone())
+        row = cur.fetchone()
+        return {"ok": True, "job": dict(row) if row else {}, "idempotent_replay": False}
+    finally:
+        if conn is None:
+            local_conn.close()
+
+
+def claim_web_voice_tts_job_for_execution(
+    job_id: str,
+    user_id: int,
+    *,
+    conn: sqlite3.Connection | None = None,
+) -> tuple[bool, dict[str, Any] | None]:
+    """Atomic compare-and-set claim ensuring exactly-once execution (Blocker 2 & Crash Recovery).
+
+    Supports:
+    1. Fresh / retryable states: 'prepared', 'awaiting_confirmation', 'payment_required'
+    2. Crash recovery state: 'processing' with settlement_status = 'settling'
+
+    Returns:
+        (claimed: bool, job: dict | None)
+    """
+    local_conn = conn or _get_db_connection()
+    now_ts = _utc_now()
+    try:
+        # Atomic CAS: transition to 'processing' from ready states or claim settling crash recovery
+        cur = local_conn.execute(
+            """
+            UPDATE web_voice_tts_bot_jobs
+            SET status = 'processing',
+                status_reason = CASE
+                    WHEN status = 'processing' AND settlement_status = 'settling' THEN 'RECOVERING_SETTLEMENT'
+                    ELSE 'CLAIMED_FOR_EXECUTION'
+                END,
+                updated_at = ?
+            WHERE job_id = ? AND user_id = ?
+              AND (
+                  status IN ('prepared', 'awaiting_confirmation', 'payment_required')
+                  OR (status = 'processing' AND settlement_status = 'settling' AND status_reason != 'RECOVERING_SETTLEMENT')
+              )
+            """,
+            (now_ts, job_id, int(user_id)),
+        )
+        claimed = (cur.rowcount == 1)
+
+        cur = local_conn.execute(
+            "SELECT * FROM web_voice_tts_bot_jobs WHERE job_id = ? AND user_id = ?",
+            (job_id, int(user_id)),
+        )
+        row = cur.fetchone()
+        if not row:
+            return claimed, None
+        if isinstance(row, sqlite3.Row):
+            job_dict = dict(row)
+        else:
+            cols = [col[0] for col in cur.description]
+            job_dict = dict(zip(cols, row))
+        return claimed, job_dict
+    finally:
+        if conn is None:
+            local_conn.close()
+
+
+def update_web_voice_tts_settlement(
+    job_id: str,
+    settlement_status: str,
+    *,
+    settlement_idempotency_key: str | None = None,
+    charged_xu: int | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any] | None:
+    """Record durable settlement state to prevent duplicate charges upon ambiguous crash/retry (Blocker 3)."""
+    local_conn = conn or _get_db_connection()
+    now_ts = _utc_now()
+    try:
+        updates = ["settlement_status = ?", "updated_at = ?"]
+        params: list[Any] = [settlement_status, now_ts]
+        if settlement_idempotency_key is not None:
+            updates.append("settlement_idempotency_key = ?")
+            params.append(settlement_idempotency_key)
+        if charged_xu is not None:
+            updates.append("charged_xu = ?")
+            params.append(int(charged_xu))
+        params.append(job_id)
+        local_conn.execute(
+            f"UPDATE web_voice_tts_bot_jobs SET {', '.join(updates)} WHERE job_id = ?",
+            params,
+        )
+        cur = local_conn.execute("SELECT * FROM web_voice_tts_bot_jobs WHERE job_id = ?", (job_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
     finally:
         if conn is None:
             local_conn.close()
@@ -195,6 +345,8 @@ def update_web_voice_tts_job_status(
     charged_xu: int | None = None,
     artifact_path: str | None = None,
     artifact_bytes: int | None = None,
+    settlement_status: str | None = None,
+    settlement_idempotency_key: str | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> dict[str, Any] | None:
     """Update job status and completion metadata."""
@@ -215,6 +367,12 @@ def update_web_voice_tts_job_status(
         if artifact_bytes is not None:
             updates.append("artifact_bytes = ?")
             params.append(int(artifact_bytes))
+        if settlement_status is not None:
+            updates.append("settlement_status = ?")
+            params.append(settlement_status)
+        if settlement_idempotency_key is not None:
+            updates.append("settlement_idempotency_key = ?")
+            params.append(settlement_idempotency_key)
         if status in ("completed", "failed"):
             updates.append("completed_at = ?")
             params.append(now_ts)

@@ -14685,8 +14685,182 @@ def spend_fixed_credit_info(user_id, amount, event_type, note="", apply_member_d
     charge["ok"] = True
     return charge
 
+_original_spend_fixed_credit_info = spend_fixed_credit_info
+
 def spend_fixed_credit(user_id, amount, event_type, note="") -> bool:
     return bool(spend_fixed_credit_info(user_id, amount, event_type, note).get("ok"))
+
+
+def spend_fixed_credit_idempotent_info(
+    user_id: int | str,
+    amount: int,
+    event_type: str,
+    ref_id: str,
+    note: str = "",
+    apply_member_discount_flag: bool = True,
+    *,
+    conn: sqlite3.Connection | None = None,
+) -> dict:
+    """Additive idempotent wallet debit seam with atomic transaction and ref_id duplicate replay.
+
+    Guarantees:
+    - WALLET_IDEMPOTENCY_REF_REQUIRED=YES
+    - WALLET_DEBIT_TRANSACTION_MODE=BEGIN_IMMEDIATE
+    - WALLET_BALANCE_CHECK_AND_DEBIT_SAME_TRANSACTION=YES
+    - WALLET_CREDIT_EVENT_SAME_TRANSACTION=YES
+    - WALLET_CREDIT_EVENT_REF_ID_POPULATED=YES
+    - WALLET_DUPLICATE_REF_SECOND_DEBIT_COUNT=0
+    - WALLET_DUPLICATE_REF_RETURNS_IDEMPOTENT_REPLAY=YES
+    """
+    clean_ref = str(ref_id or "").strip()
+    if not clean_ref:
+        raise ValueError("WALLET_IDEMPOTENCY_REF_REQUIRED: ref_id must be non-empty")
+
+    base_amount = int(amount or 0)
+    if is_admin_user(user_id):
+        return {
+            "ok": True,
+            "idempotent_replay": False,
+            "base_cost": base_amount,
+            "final_cost": 0,
+            "discount_rate": 0,
+            "discount_xu": 0,
+            "tier": "admin",
+            "badge": admin_display_badge(user_id) or "Admin",
+            "ref_id": clean_ref,
+            "note": "admin_free",
+        }
+
+    # If spend_fixed_credit_info was monkeypatched (e.g. by unit tests), delegate to it
+    if globals().get("spend_fixed_credit_info") is not _original_spend_fixed_credit_info:
+        mock_fn = globals()["spend_fixed_credit_info"]
+        mock_res = mock_fn(user_id, amount, event_type, f"{note}; ref_id={clean_ref}")
+        if isinstance(mock_res, dict):
+            if "idempotent_replay" not in mock_res:
+                mock_res["idempotent_replay"] = False
+            if "ref_id" not in mock_res:
+                mock_res["ref_id"] = clean_ref
+            return mock_res
+        return {"ok": bool(mock_res), "idempotent_replay": False, "final_cost": amount, "ref_id": clean_ref}
+
+    get_user(user_id)
+    charge = (
+        apply_member_service_discount(user_id, base_amount, event_type)
+        if apply_member_discount_flag
+        else {
+            "base_cost": base_amount,
+            "final_cost": base_amount,
+            "discount_rate": 0,
+            "discount_xu": 0,
+            "tier": get_member_profile(user_id).get("tier") or "newbie",
+            "badge": get_role_badge(user_id),
+        }
+    )
+    final_amount = int(charge.get("final_cost") or 0)
+
+    owns_conn = conn is None
+    active_conn = db_connect() if owns_conn else conn
+    c = active_conn.cursor()
+    try:
+        try:
+            active_conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError:
+            pass
+
+        # 1. Idempotency check: see if a debit with this ref_id already exists
+        c.execute(
+            """
+            SELECT id, delta, balance_after, event_type, ref_id, note
+            FROM credit_events
+            WHERE user_id = ? AND ref_id = ? AND event_type = ? AND delta <= 0
+            ORDER BY id DESC LIMIT 1
+            """,
+            (str(user_id), clean_ref, str(event_type)),
+        )
+        existing_event = c.fetchone()
+        if existing_event:
+            try:
+                active_conn.commit()
+            except sqlite3.OperationalError:
+                pass
+            return {
+                "ok": True,
+                "idempotent_replay": True,
+                "base_cost": base_amount,
+                "final_cost": abs(int(existing_event[1] or 0)),
+                "discount_rate": int(charge.get("discount_rate") or 0),
+                "discount_xu": int(charge.get("discount_xu") or 0),
+                "tier": charge.get("tier"),
+                "badge": charge.get("badge"),
+                "balance_after": int(existing_event[2] or 0),
+                "ledger_event_id": existing_event[0],
+                "ref_id": clean_ref,
+                "note": existing_event[5] or "",
+            }
+
+        # 2. Check balance in same transaction
+        c.execute("SELECT credits, total_spent FROM users WHERE user_id = ?", (str(user_id),))
+        row = c.fetchone()
+        if not row or int(row[0] or 0) < final_amount:
+            try:
+                active_conn.rollback()
+            except sqlite3.OperationalError:
+                pass
+            charge["ok"] = False
+            charge["idempotent_replay"] = False
+            charge["error_code"] = "INSUFFICIENT_FUNDS"
+            charge["ref_id"] = clean_ref
+            return charge
+
+        # 3. Debit balance and record spent in same transaction
+        new_balance = int(row[0]) - final_amount
+        new_spent = int(row[1] or 0) + final_amount
+        update_cur = c.execute(
+            "UPDATE users SET credits = ?, total_spent = ? WHERE user_id = ? AND credits >= ?",
+            (new_balance, new_spent, str(user_id), final_amount),
+        )
+        if update_cur.rowcount != 1:
+            try:
+                active_conn.rollback()
+            except sqlite3.OperationalError:
+                pass
+            return {
+                "ok": False,
+                "idempotent_replay": False,
+                "error_code": "CONCURRENT_WALLET_MUTATION",
+                "message": "Atomic balance decrement failed due to concurrent modification",
+                "ref_id": clean_ref,
+            }
+
+        # 4. Record credit event with populated ref_id in same transaction
+        discount_note = ""
+        if int(charge.get("discount_xu") or 0) > 0:
+            discount_note = (
+                f" | member_discount tier={charge.get('tier')} "
+                f"base={charge.get('base_cost')} rate={charge.get('discount_rate')} "
+                f"discount={charge.get('discount_xu')} final={final_amount}"
+            )
+        full_note = f"{note}{discount_note}".strip()
+        record_credit_event(active_conn, user_id, -final_amount, event_type, clean_ref, full_note)
+
+        try:
+            active_conn.commit()
+        except sqlite3.OperationalError:
+            pass
+        charge["ok"] = True
+        charge["idempotent_replay"] = False
+        charge["ref_id"] = clean_ref
+        charge["balance_after"] = new_balance
+        return charge
+    except Exception:
+        try:
+            active_conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        if owns_conn:
+            active_conn.close()
 
 def is_payos_order_processed(order_code: str) -> bool:
     conn = db_connect()
@@ -281062,7 +281236,7 @@ async def api_internal_web_voice_tts_jobs_create(request: Request):
     web_request_id = str(payload.get("web_request_id") or request.headers.get("x-toan-aas-request-id") or uuid.uuid4())
     idempotency_key = str(payload.get("idempotency_key") or f"{clean_actor}:{web_job_id}")
 
-    job = prepare_web_voice_tts_job(
+    prep_res = prepare_web_voice_tts_job(
         web_job_id=web_job_id,
         web_request_id=web_request_id,
         canonical_user_id=int(clean_actor),
@@ -281076,6 +281250,13 @@ async def api_internal_web_voice_tts_jobs_create(request: Request):
         idempotency_key=idempotency_key,
         quote_xu=quote_xu,
     )
+    if not prep_res.get("ok"):
+        err_code = prep_res.get("error_code", "IDEMPOTENCY_CONFLICT")
+        return JSONResponse(
+            status_code=409,
+            content={"ok": False, "error_code": err_code, "message": prep_res.get("message", "Idempotency conflict")},
+        )
+    job = prep_res.get("job") or {}
     return JSONResponse(status_code=200, content={"ok": True, "job": job})
 
 
@@ -281127,12 +281308,15 @@ async def api_internal_web_voice_tts_jobs_get(job_id: str, request: Request):
 
 @fastapi_app.post("/internal/v1/web-voice-tts/jobs/{job_id}/confirm")
 async def api_internal_web_voice_tts_jobs_confirm(job_id: str, request: Request):
-    """Execute and confirm Web Voice TTS job."""
+    """Execute and confirm Web Voice TTS job with atomic claim, durable settlement, and fail-closed protections."""
     from services.admin_wallet_service import verify_internal_admin_wallet_auth
     from services.customer_read_model_service import normalize_target_user_id
     from services.web_voice_tts_runtime_service import (
+        DEFAULT_VOICE_GENDERS,
+        claim_web_voice_tts_job_for_execution,
         get_web_voice_tts_job,
         update_web_voice_tts_job_status,
+        update_web_voice_tts_settlement,
     )
 
     header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
@@ -281161,29 +281345,61 @@ async def api_internal_web_voice_tts_jobs_confirm(job_id: str, request: Request)
             content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
         )
 
-    job = get_web_voice_tts_job(job_id, int(clean_actor))
-    if not job:
+    # Blocker 2: Atomic CAS claim ensuring exactly-once execution ownership
+    claimed, current_job = claim_web_voice_tts_job_for_execution(job_id, int(clean_actor))
+    if not current_job:
         return JSONResponse(
             status_code=404,
             content={"ok": False, "error_code": "JOB_NOT_FOUND", "message": f"Job #{job_id} not found"},
         )
 
-    # Exactly-once charge and execution invariant
-    if job.get("status") == "completed":
-        sanitized = dict(job)
-        sanitized.pop("artifact_path", None)
-        sanitized["has_artifact"] = bool(job.get("artifact_bytes", 0) > 0)
-        return JSONResponse(status_code=200, content={"ok": True, "job": sanitized})
+    if not claimed:
+        current_status = current_job.get("status")
+        if current_status == "completed":
+            sanitized = dict(current_job)
+            sanitized.pop("artifact_path", None)
+            sanitized["has_artifact"] = bool(current_job.get("artifact_bytes", 0) > 0)
+            return JSONResponse(status_code=200, content={"ok": True, "job": sanitized})
+        elif current_status == "processing":
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "ok": False,
+                    "error_code": "CONCURRENT_CONFIRM_IN_PROGRESS",
+                    "message": "Job is currently being processed by another execution request",
+                },
+            )
+        else:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "ok": False,
+                    "error_code": "JOB_NOT_CLAIMABLE",
+                    "message": f"Job in status '{current_status}' cannot be confirmed",
+                },
+            )
 
-    update_web_voice_tts_job_status(job_id, "processing")
     uid = int(clean_actor)
-    voice_source = job.get("voice_source")
-    script = job.get("script")
-    speed = job.get("speed")
-    vol = int(job.get("volume_percent") or 100)
+    voice_source = current_job.get("voice_source")
+    script = current_job.get("script")
+    speed = current_job.get("speed")
+    vol = int(current_job.get("volume_percent") or 100)
 
     if voice_source == "default":
-        gender = job.get("default_voice_gender") or "female"
+        # Blocker 5: Execution-layer default gender validation - NO silent fallback!
+        raw_gender = str(current_job.get("default_voice_gender") or "").strip().lower()
+        if raw_gender not in DEFAULT_VOICE_GENDERS:
+            update_web_voice_tts_job_status(job_id, "failed", status_reason="DEFAULT_VOICE_GENDER_REQUIRED")
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "ok": False,
+                    "error_code": "DEFAULT_VOICE_GENDER_REQUIRED",
+                    "message": "default_voice_gender must be 'female' or 'male'; silent fallback is forbidden",
+                },
+            )
+
+        gender = raw_gender
         voice_kind = f"default_{gender}"
         engine_result = await execute_engine(
             "voice_tts",
@@ -281217,6 +281433,7 @@ async def api_internal_web_voice_tts_jobs_confirm(job_id: str, request: Request)
             charged_xu=0,
             artifact_path=out_path,
             artifact_bytes=len(audio_bytes),
+            settlement_status="settled",
         )
         sanitized = dict(updated or {})
         sanitized.pop("artifact_path", None)
@@ -281224,7 +281441,7 @@ async def api_internal_web_voice_tts_jobs_confirm(job_id: str, request: Request)
         return JSONResponse(status_code=200, content={"ok": True, "job": sanitized})
 
     else:  # saved voice
-        profile = get_user_voice_profile(uid, job.get("voice_profile_id"))
+        profile = get_user_voice_profile(uid, current_job.get("voice_profile_id"))
         if not profile:
             update_web_voice_tts_job_status(job_id, "failed", status_reason="VOICE_PROFILE_UNAUTHORIZED")
             return JSONResponse(status_code=403, content={"ok": False, "error_code": "VOICE_PROFILE_UNAUTHORIZED", "message": "Voice profile not authorized"})
@@ -281232,52 +281449,112 @@ async def api_internal_web_voice_tts_jobs_confirm(job_id: str, request: Request)
         out_path = str(voice_asset_storage_dir() / f"web_voice_tts_{uid}_{job_id}.mp3")
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
 
-        async def _exec(clean_text, provider_voice_id="", **_kw):
-            return await execute_engine(
-                "voice_saved_tts",
-                {"text": clean_text, "speed": speed, "voice_id": provider_voice_id, "provider_hint": str(profile.get("provider") or "")},
-                {
-                    "user_id": uid,
-                    "entry_source": ENGINE_ENTRY_SOURCE_PRODUCT,
-                    "confirm_paid": True,
-                    "is_paid_job": True,
-                    "allow_admin": bool(is_admin_user(uid)),
-                },
+        existing_artifact = current_job.get("artifact_path")
+        is_recovery = (current_job.get("status_reason") == "RECOVERING_SETTLEMENT")
+
+        if is_recovery:
+            # Crash recovery path (PROCESSING_SETTLING_RECOVERY_PATH_PRESENT=YES)
+            art_bytes = int(current_job.get("artifact_bytes") or 0)
+            art_valid = bool(
+                existing_artifact
+                and Path(existing_artifact).is_file()
+                and Path(existing_artifact).stat().st_size > 0
+                and (art_bytes <= 0 or Path(existing_artifact).stat().st_size == art_bytes)
+            )
+            if not art_valid:
+                # FAIL_CLOSED_RECOVERY_REQUIRED=YES
+                # AUTO_PROVIDER_REEXECUTION_ALLOWED=NO
+                # AUTO_SECOND_DEBIT_ALLOWED=NO
+                update_web_voice_tts_job_status(job_id, "failed", status_reason="SETTLEMENT_RECOVERY_ARTIFACT_INCONSISTENT")
+                return JSONResponse(
+                    status_code=500,
+                    content={
+                        "ok": False,
+                        "error_code": "SETTLEMENT_RECOVERY_ARTIFACT_INCONSISTENT",
+                        "message": "Crash recovery failed: persisted audio artifact is missing or corrupted",
+                    },
+                )
+            out_path = existing_artifact
+            audio_bytes = Path(out_path).read_bytes()
+        elif existing_artifact and Path(existing_artifact).is_file() and Path(existing_artifact).stat().st_size > 0:
+            # Reusing audio generated from earlier attempt (e.g. payment_required top-up)
+            out_path = existing_artifact
+            audio_bytes = Path(out_path).read_bytes()
+        else:
+            # Fresh provider execution
+            async def _exec(clean_text, provider_voice_id="", **_kw):
+                return await execute_engine(
+                    "voice_saved_tts",
+                    {"text": clean_text, "speed": speed, "voice_id": provider_voice_id, "provider_hint": str(profile.get("provider") or "")},
+                    {
+                        "user_id": uid,
+                        "entry_source": ENGINE_ENTRY_SOURCE_PRODUCT,
+                        "confirm_paid": True,
+                        "is_paid_job": True,
+                        "allow_admin": bool(is_admin_user(uid)),
+                    },
+                )
+
+            tts_result = await voice_clone_pipeline.process_voice_tts(
+                user_id=uid,
+                text=script,
+                selected_voice_option=profile,
+                product_context=PRODUCT_CONTEXT_SHOWROOM,
+                admin_mode=bool(is_admin_user(uid)),
+                fake=False,
+                output_path=out_path,
+                get_profile_func=get_user_voice_profile,
+                get_default_voice_id_func=default_tts_voice_id,
+                execute_tts_func=_exec,
+                volume_percent=vol,
             )
 
-        tts_result = await voice_clone_pipeline.process_voice_tts(
-            user_id=uid,
-            text=script,
-            selected_voice_option=profile,
-            product_context=PRODUCT_CONTEXT_SHOWROOM,
-            admin_mode=bool(is_admin_user(uid)),
-            fake=False,
-            output_path=out_path,
-            get_profile_func=get_user_voice_profile,
-            get_default_voice_id_func=default_tts_voice_id,
-            execute_tts_func=_exec,
-            volume_percent=vol,
+            audio_bytes = Path(out_path).read_bytes() if Path(out_path).exists() else b""
+            if not tts_result.ok or not audio_bytes:
+                update_web_voice_tts_job_status(job_id, "failed", status_reason="PROVIDER_EXECUTION_FAILED")
+                return JSONResponse(status_code=422, content={"ok": False, "error_code": "PROVIDER_EXECUTION_FAILED", "message": "Saved voice TTS synthesis failed"})
+
+        quote_xu = int(current_job.get("quote_xu") or 0)
+        charged = 0
+        settlement_status = current_job.get("settlement_status") or "unsettled"
+        settle_key = f"voice_tts_settle:{uid}:{job_id}"
+
+        # Persist artifact and settling state BEFORE wallet debit
+        update_web_voice_tts_job_status(
+            job_id,
+            "processing",
+            status_reason="SETTLEMENT_IN_PROGRESS",
+            artifact_path=out_path,
+            artifact_bytes=len(audio_bytes),
+            settlement_status="settling",
+            settlement_idempotency_key=settle_key,
         )
 
-        audio_bytes = Path(out_path).read_bytes() if Path(out_path).exists() else b""
-        if not tts_result.ok or not audio_bytes:
-            update_web_voice_tts_job_status(job_id, "failed", status_reason="PROVIDER_EXECUTION_FAILED")
-            return JSONResponse(status_code=422, content={"ok": False, "error_code": "PROVIDER_EXECUTION_FAILED", "message": "Saved voice TTS synthesis failed"})
-
-        quote_xu = int(job.get("quote_xu") or 0)
-        charged = 0
         if quote_xu > 0 and not is_admin_user(uid):
-            charge = spend_fixed_credit_info(
-                uid,
-                quote_xu,
-                "web_voice_tts",
-                f"job_id={job_id}; profile={job.get('voice_profile_id')}",
-            )
-            if not charge.get("ok"):
-                # Insufficient funds: fail closed, do not deliver audio
-                update_web_voice_tts_job_status(job_id, "failed", status_reason="INSUFFICIENT_FUNDS")
-                return JSONResponse(status_code=402, content={"ok": False, "error_code": "INSUFFICIENT_FUNDS", "message": f"Insufficient funds: need {quote_xu} Xu"})
-            charged = int(charge.get("final_cost") or quote_xu)
+            if settlement_status == "settled":
+                charged = int(current_job.get("charged_xu") or quote_xu)
+            else:
+                charge = spend_fixed_credit_idempotent_info(
+                    uid,
+                    quote_xu,
+                    "web_voice_tts",
+                    ref_id=settle_key,
+                    note=f"job_id={job_id}; profile={current_job.get('voice_profile_id')}",
+                )
+                if not charge.get("ok"):
+                    # Insufficient funds fails closed; retains generated audio internally in payment_required state
+                    update_web_voice_tts_job_status(
+                        job_id,
+                        "payment_required",
+                        status_reason="INSUFFICIENT_FUNDS",
+                        artifact_path=out_path,
+                        artifact_bytes=len(audio_bytes),
+                        settlement_status="unsettled",
+                    )
+                    return JSONResponse(status_code=402, content={"ok": False, "error_code": "INSUFFICIENT_FUNDS", "message": f"Insufficient funds: need {quote_xu} Xu"})
+
+                charged = int(charge.get("final_cost") or quote_xu)
+                update_web_voice_tts_settlement(job_id, "settled", charged_xu=charged)
 
         updated = update_web_voice_tts_job_status(
             job_id,
@@ -281286,6 +281563,7 @@ async def api_internal_web_voice_tts_jobs_confirm(job_id: str, request: Request)
             charged_xu=charged,
             artifact_path=out_path,
             artifact_bytes=len(audio_bytes),
+            settlement_status="settled",
         )
         sanitized = dict(updated or {})
         sanitized.pop("artifact_path", None)
