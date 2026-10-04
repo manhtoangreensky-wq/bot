@@ -139,9 +139,9 @@ def test_each_video_ai_real_tier_survives_invoice_and_idempotent_confirm(
 @pytest.mark.parametrize(
     ("product_type", "tier_id"),
     (
-        ("script_image_video", 200),
-        ("storyboard_prompt", 200),
-        ("multi_scene_film", 700),
+        ("script_image_video", 250),
+        ("storyboard_prompt", 250),
+        ("multi_scene_film", 250),
         ("video_ai_real", 250),
     ),
 )

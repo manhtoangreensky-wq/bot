@@ -135,22 +135,22 @@ def test_video_reference_routes_video_to_video():
     assert route.get("provider_capability") == "video_to_video"
 
 
-def test_self_shot_scene_change_routes_video_to_video():
-    """self_shot_scene_change requires video_to_video capability."""
+def test_self_shot_scene_change_routes_image_to_video():
+    """self_shot_scene_change requires image_to_video capability after R13 migration."""
     contract = video_tail9.commercial_contract("self_shot_scene_change")
-    assert contract.get("required_capability") == "video_to_video"
+    assert contract.get("required_capability") == "image_to_video"
 
     route = video_final_output.route_for_product_type("self_shot_scene_change")
-    assert route.get("provider_capability") == "video_to_video"
+    assert route.get("provider_capability") == "image_to_video"
 
 
-def test_self_shot_cinematic_routes_video_to_video():
-    """self_shot_cinematic_transform requires video_to_video capability."""
+def test_self_shot_cinematic_routes_image_to_video():
+    """self_shot_cinematic_transform requires image_to_video capability after R13 migration."""
     contract = video_tail9.commercial_contract("self_shot_cinematic_transform")
-    assert contract.get("required_capability") == "video_to_video"
+    assert contract.get("required_capability") == "image_to_video"
 
     route = video_final_output.route_for_product_type("self_shot_cinematic_transform")
-    assert route.get("provider_capability") == "video_to_video"
+    assert route.get("provider_capability") == "image_to_video"
 
 
 # ---------------------------------------------------------------------------

@@ -5016,6 +5016,15 @@ def complete_remote_worker_job(
         ):
             if not payload.get(key) and persisted_payload.get(key):
                 payload[key] = persisted_payload[key]
+        for key in (
+            "scene_count",
+            "scenes_total",
+            "scenes_done",
+            "scene_tasks_total",
+            "scene_tasks_completed",
+        ):
+            if not payload.get(key) and persisted_payload.get(key):
+                payload[key] = persisted_payload[key]
         payload.update(
             {
                 "recovery_existing_tasks_only": True,

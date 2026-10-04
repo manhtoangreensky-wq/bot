@@ -99,6 +99,11 @@ def test_recovery_completion_keeps_durable_scene_ledger_when_worker_sends_empty_
             "actual_duration_seconds": 16.0,
         },
     )
+    monkeypatch.setattr(
+        queue.video_local_validation,
+        "probe_video_file",
+        lambda _p: {"ok": True, "duration": 16.0, "has_video": True},
+    )
     final_path = tmp_path / "final_output.mp4"
     final_path.write_bytes(b"real-two-scene-product-video")
 

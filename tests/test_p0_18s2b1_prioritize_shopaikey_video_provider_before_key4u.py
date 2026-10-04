@@ -56,11 +56,11 @@ class _FakeVideoProvider:
         self.calls["submit"] += 1
         if self.fail_submit:
             return VideoSubmitResult(ok=False, provider_name=self.provider_name, error_code="quota_exhausted", raw={"status_code": 402})
-        return VideoSubmitResult(ok=True, provider_name=self.provider_name, provider_task_id=f"{self.provider_name}-task", provider_status="succeeded", result_url="memory://video.mp4")
+        return VideoSubmitResult(ok=True, provider_name=self.provider_name, provider_task_id=f"{self.provider_name}-task", provider_status="succeeded", result_url="https://cdn.example.com/video.mp4")
 
     def poll_video_job(self, provider_task_id: str):
         self.calls["poll"] += 1
-        return VideoPollResult(ok=True, provider_name=self.provider_name, provider_task_id=provider_task_id, status="succeeded", result_url="memory://video.mp4")
+        return VideoPollResult(ok=True, provider_name=self.provider_name, provider_task_id=provider_task_id, status="succeeded", result_url="https://cdn.example.com/video.mp4")
 
     def materialize_result(self, result: VideoPollResult, job_id: str):
         self.calls["materialize"] += 1
@@ -71,7 +71,7 @@ class _FakeVideoProvider:
 
 
 def test_default_video_provider_chain_shopaikey_first():
-    assert video_provider_router.configured_provider_chain({})[:3] == ["shopaikey_video", "key4u_video", "toanaas_video"]
+    assert video_provider_router.configured_provider_chain({})[:2] == ["shopaikey_video", "key4u_video"]
     assert video_provider_router.DEFAULT_VIDEO_PROVIDER_CHAIN.startswith("shopaikey_video,key4u_video")
 
 

@@ -60,6 +60,7 @@ from services import (
     video_real_render_connector,
     video_tail9,
     video_uifreeze1,
+    video_ai_edit_provider,
 )
 from services import video_project_queue as queue
 from services.video_provider_base import VideoGenerationRequest
@@ -643,6 +644,7 @@ def deterministic_pv10_environment(request: pytest.FixtureRequest, monkeypatch: 
     monkeypatch.setenv("KEY4U_VIDEO_SUBMIT_URL", "https://fake.key4u.local/v1/video/create")
     monkeypatch.setenv("KEY4U_VIDEO_POLL_URL", "https://fake.key4u.local/v1/video/query?id={task_id}")
     monkeypatch.setenv("KEY4U_VIDEO_MODEL", "kling-video")
+    monkeypatch.setenv("KEY4U_VIDEO_CAPABILITIES", "text_to_video,image_to_video,video_to_video,multi_scene_video,scene_video")
     monkeypatch.setenv("KEY4U_VIDEO_ENDPOINT", "https://fake.key4u.local/v1/video")
     monkeypatch.setenv("KEY4U_VIDEO_POLL_ENDPOINT", "https://fake.key4u.local/v1/video/poll")
     monkeypatch.setenv("KEY4U_KLING_VIDEO_ENDPOINT", "https://fake.key4u.local/v1/kling")
@@ -658,6 +660,32 @@ def deterministic_pv10_environment(request: pytest.FixtureRequest, monkeypatch: 
     monkeypatch.setenv("KEY4U_VIDEO_TO_VIDEO_MODEL", "kling-video")
     monkeypatch.setenv("KEY4U_VIDEO_TO_VIDEO_INTERFACE", "video_to_video_multipart")
     monkeypatch.setenv("KEY4U_VIDEO_TO_VIDEO_CAPABILITIES", "video_to_video")
+
+    monkeypatch.setenv("FAL_KEY", "fake_fal_key")
+    monkeypatch.setenv("FAL_VIDEO_TO_VIDEO_ENABLED", "1")
+    monkeypatch.setenv("FAL_USD_TO_VND", "25500")
+    monkeypatch.setenv("VIDEO_AI_EDIT_PRICE_5S_XU", "250")
+    monkeypatch.setenv("VIDEO_AI_EDIT_PRICE_10S_XU", "400")
+
+    monkeypatch.setattr(
+        video_ai_edit_provider,
+        "upload_fal_media_file",
+        lambda *args, **kwargs: {"ok": True, "file_url": "https://fal.media/files/uploaded.mp4"},
+    )
+    monkeypatch.setattr(
+        video_ai_edit_provider,
+        "submit_video_edit",
+        lambda *args, **kwargs: {"accepted": True, "provider_task_id": "task_fal_pv10_123"},
+    )
+    monkeypatch.setattr(
+        video_ai_edit_provider,
+        "wait_for_result",
+        lambda *args, **kwargs: {"status": "completed", "result_url": "https://cdn.fake.local/pv10_fal.mp4"},
+    )
+    def _fake_fal_download(url, dest, *args, **kwargs):
+        Path(dest).write_bytes(MINI_MP4_BYTES)
+        return {"ok": True, "path": str(dest)}
+    monkeypatch.setattr(video_ai_edit_provider, "download_result", _fake_fal_download)
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_dispatcher)
     monkeypatch.setattr(urllib.request.OpenerDirector, "open", lambda self, req, *args, **kwargs: fake_dispatcher(req))

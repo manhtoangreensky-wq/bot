@@ -142,6 +142,15 @@ FFMPEG_MAX_CONCURRENT = max(1, env_int("FFMPEG_MAX_CONCURRENT", 1))
 
 def worker_git_head_info(cwd: str | None = None) -> dict[str, str]:
     process_cwd = os.path.abspath(str(cwd or os.getcwd()))
+    env_sha = str(os.environ.get("GIT_COMMIT_SHA") or os.environ.get("WORKER_GIT_SHA") or "").strip()[:40]
+    if env_sha and re.fullmatch(r"[0-9A-Fa-f]{7,40}", env_sha):
+        return {
+            "worker_sha": env_sha,
+            "worker_git_sha": env_sha,
+            "worker_git_head_sha": env_sha,
+            "worker_sha_source": "env_git_commit_sha",
+            "worker_cwd": process_cwd,
+        }
     candidates = [process_cwd]
     script_cwd = os.path.abspath(SCRIPT_DIR)
     if script_cwd not in candidates:
