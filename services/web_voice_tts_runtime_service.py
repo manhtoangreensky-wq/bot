@@ -254,7 +254,11 @@ def claim_web_voice_tts_job_for_execution(
     *,
     conn: sqlite3.Connection | None = None,
 ) -> tuple[bool, dict[str, Any] | None]:
-    """Atomic compare-and-set claim ensuring exactly-once execution (Blocker 2).
+    """Atomic compare-and-set claim ensuring exactly-once execution (Blocker 2 & Crash Recovery).
+
+    Supports:
+    1. Fresh / retryable states: 'prepared', 'awaiting_confirmation', 'payment_required'
+    2. Crash recovery state: 'processing' with settlement_status = 'settling'
 
     Returns:
         (claimed: bool, job: dict | None)
@@ -262,12 +266,21 @@ def claim_web_voice_tts_job_for_execution(
     local_conn = conn or _get_db_connection()
     now_ts = _utc_now()
     try:
-        # Atomic CAS: transition to 'processing' only from claimable states
+        # Atomic CAS: transition to 'processing' from ready states or claim settling crash recovery
         cur = local_conn.execute(
             """
             UPDATE web_voice_tts_bot_jobs
-            SET status = 'processing', status_reason = 'CLAIMED_FOR_EXECUTION', updated_at = ?
-            WHERE job_id = ? AND user_id = ? AND status IN ('prepared', 'awaiting_confirmation', 'payment_required')
+            SET status = 'processing',
+                status_reason = CASE
+                    WHEN status = 'processing' AND settlement_status = 'settling' THEN 'RECOVERING_SETTLEMENT'
+                    ELSE 'CLAIMED_FOR_EXECUTION'
+                END,
+                updated_at = ?
+            WHERE job_id = ? AND user_id = ?
+              AND (
+                  status IN ('prepared', 'awaiting_confirmation', 'payment_required')
+                  OR (status = 'processing' AND settlement_status = 'settling' AND status_reason != 'RECOVERING_SETTLEMENT')
+              )
             """,
             (now_ts, job_id, int(user_id)),
         )
@@ -278,7 +291,14 @@ def claim_web_voice_tts_job_for_execution(
             (job_id, int(user_id)),
         )
         row = cur.fetchone()
-        return claimed, dict(row) if row else None
+        if not row:
+            return claimed, None
+        if isinstance(row, sqlite3.Row):
+            job_dict = dict(row)
+        else:
+            cols = [col[0] for col in cur.description]
+            job_dict = dict(zip(cols, row))
+        return claimed, job_dict
     finally:
         if conn is None:
             local_conn.close()
@@ -326,6 +346,7 @@ def update_web_voice_tts_job_status(
     artifact_path: str | None = None,
     artifact_bytes: int | None = None,
     settlement_status: str | None = None,
+    settlement_idempotency_key: str | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> dict[str, Any] | None:
     """Update job status and completion metadata."""
@@ -349,6 +370,9 @@ def update_web_voice_tts_job_status(
         if settlement_status is not None:
             updates.append("settlement_status = ?")
             params.append(settlement_status)
+        if settlement_idempotency_key is not None:
+            updates.append("settlement_idempotency_key = ?")
+            params.append(settlement_idempotency_key)
         if status in ("completed", "failed"):
             updates.append("completed_at = ?")
             params.append(now_ts)
