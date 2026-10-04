@@ -3337,7 +3337,7 @@ def validate_owner_acceptance_authorization(
             return False, "owner_acceptance_provider_mismatch", {}
         allowed_acceptance_providers = {"shopaikey_video", "shopaikey"}
     else:
-        allowed_acceptance_providers = {CANONICAL_ACCEPTANCE_PROVIDER, "fal_video", "fal.ai", "fal-video", "key4u_video"}
+        allowed_acceptance_providers = {CANONICAL_ACCEPTANCE_PROVIDER, "fal_video", "fal.ai", "fal-video"}
     if pinned_provider not in allowed_acceptance_providers and not auth.get("allow_secondary_provider"):
         return False, "owner_acceptance_provider_mismatch", {}
     ctx_provider = str(ctx.get("provider") or ctx.get("selected_provider") or "").strip()

@@ -13,9 +13,6 @@ import tempfile
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-if "bot" not in sys.modules:
-    sys.modules["bot"] = MagicMock()
-
 import pytest
 
 from services.video_provider_base import VideoGenerationRequest
