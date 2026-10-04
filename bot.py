@@ -63858,9 +63858,11 @@ def direct_minimax_tts_url() -> str:
     return url
 
 VOICE_TTS_DEFAULT_SPEED = "1.0"
+BOT_VOICE_TTS_DEFAULT_SPEED = VOICE_TTS_DEFAULT_SPEED
 VOICE_TTS_MIN_SPEED = 0.1
 VOICE_TTS_MAX_SPEED = 2.0
 VOICE_TTS_DEFAULT_VOLUME_PERCENT = 100
+BOT_VOICE_TTS_DEFAULT_VOLUME_PERCENT = VOICE_TTS_DEFAULT_VOLUME_PERCENT
 VOICE_TTS_MIN_VOLUME_PERCENT = 0
 VOICE_TTS_MAX_VOLUME_PERCENT = 200
 VOICE_TTS_PRODUCT_MIN_WORDS = 20
@@ -280938,6 +280940,407 @@ async def api_internal_subdub_jobs_get(job_id: str, request: Request):
         )
 
     return JSONResponse(status_code=200, content={"ok": True, "job": job})
+
+
+# ─── CANONICAL WEB VOICE TTS RUNTIME ENDPOINTS (BOT-WEB-VOICE-TTS-R1) ──────────
+
+@fastapi_app.post("/internal/v1/web-voice-tts/jobs")
+async def api_internal_web_voice_tts_jobs_create(request: Request):
+    """Canonical Bot Core Web Voice TTS job preparation & quote endpoint."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.web_voice_tts_runtime_service import (
+        FORBIDDEN_AUTHORITY_FIELDS_NORMALIZED,
+        DEFAULT_VOICE_GENDERS,
+        prepare_web_voice_tts_job,
+    )
+
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:
+        payload = {}
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    body_actor = str(payload.get("canonical_user_id") or payload.get("user_id") or "").strip()
+    actor_candidate = header_actor or body_actor
+    clean_actor = normalize_target_user_id(actor_candidate) if actor_candidate else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = "/internal/v1/web-voice-tts/jobs"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    # Strictly reject forbidden authority fields
+    for key in payload.keys():
+        norm = "".join(ch for ch in str(key).lower() if ch.isalnum())
+        if norm in FORBIDDEN_AUTHORITY_FIELDS_NORMALIZED:
+            return JSONResponse(
+                status_code=400,
+                content={"ok": False, "error_code": "FORBIDDEN_AUTHORITY_FIELD_REJECTED", "message": f"Forbidden field: {key}"},
+            )
+
+    voice_source = str(payload.get("voice_source") or "").strip().lower()
+    if voice_source not in ("default", "saved"):
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error_code": "INVALID_VOICE_SOURCE", "message": "voice_source must be 'default' or 'saved'"},
+        )
+
+    script = str(payload.get("script") or "").strip()
+    if not script:
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error_code": "SCRIPT_REQUIRED", "message": "script text is required and cannot be empty"},
+        )
+
+    default_gender = ""
+    voice_profile_id = None
+    quote_xu = 0
+
+    if voice_source == "default":
+        default_gender = str(payload.get("default_voice_gender") or "").strip().lower()
+        if default_gender not in DEFAULT_VOICE_GENDERS:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "ok": False,
+                    "error_code": "DEFAULT_VOICE_GENDER_REQUIRED",
+                    "message": "default_voice_gender must be 'female' or 'male'; silent fallback is not allowed",
+                },
+            )
+        quote_xu = 0
+    else:  # saved voice
+        raw_pid = payload.get("voice_profile_id")
+        try:
+            voice_profile_id = int(raw_pid) if raw_pid is not None else None
+        except (ValueError, TypeError):
+            voice_profile_id = None
+
+        if not voice_profile_id or voice_profile_id <= 0:
+            return JSONResponse(
+                status_code=400,
+                content={"ok": False, "error_code": "VOICE_PROFILE_ID_REQUIRED", "message": "Valid voice_profile_id is required for saved voice"},
+            )
+
+        profile = get_user_voice_profile(int(clean_actor), voice_profile_id)
+        if not profile:
+            return JSONResponse(
+                status_code=403,
+                content={"ok": False, "error_code": "VOICE_PROFILE_UNAUTHORIZED", "message": "Voice profile not found or does not belong to user"},
+            )
+        quote = voice_tts_product_quote(script)
+        quote_xu = int(quote.get("total_xu") or 0)
+
+    try:
+        speed_val = parse_voice_tts_speed_input(payload.get("speed", VOICE_TTS_DEFAULT_SPEED))
+    except Exception as exc:
+        return JSONResponse(status_code=400, content={"ok": False, "error_code": "INVALID_SPEED", "message": f"Invalid speed: {exc}"})
+
+    try:
+        vol_val = parse_voice_tts_volume_input(payload.get("volume_percent", VOICE_TTS_DEFAULT_VOLUME_PERCENT))
+    except Exception as exc:
+        return JSONResponse(status_code=400, content={"ok": False, "error_code": "INVALID_VOLUME", "message": f"Invalid volume: {exc}"})
+    web_job_id = str(payload.get("web_job_id") or uuid.uuid4())
+    web_request_id = str(payload.get("web_request_id") or request.headers.get("x-toan-aas-request-id") or uuid.uuid4())
+    idempotency_key = str(payload.get("idempotency_key") or f"{clean_actor}:{web_job_id}")
+
+    job = prepare_web_voice_tts_job(
+        web_job_id=web_job_id,
+        web_request_id=web_request_id,
+        canonical_user_id=int(clean_actor),
+        voice_source=voice_source,
+        script=script,
+        default_voice_gender=default_gender,
+        voice_profile_id=voice_profile_id,
+        speed=speed_val,
+        volume_percent=vol_val,
+        language="vi",
+        idempotency_key=idempotency_key,
+        quote_xu=quote_xu,
+    )
+    return JSONResponse(status_code=200, content={"ok": True, "job": job})
+
+
+@fastapi_app.get("/internal/v1/web-voice-tts/jobs/{job_id}")
+async def api_internal_web_voice_tts_jobs_get(job_id: str, request: Request):
+    """Retrieve Web Voice TTS job status (strictly read-only)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.web_voice_tts_runtime_service import get_web_voice_tts_job
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = f"/internal/v1/web-voice-tts/jobs/{job_id}"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path=path,
+        body_bytes=b"",
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    job = get_web_voice_tts_job(job_id, int(clean_actor))
+    if not job:
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error_code": "JOB_NOT_FOUND", "message": f"Job #{job_id} not found"},
+        )
+
+    # Sanitize: strip server-internal filesystem paths
+    sanitized = dict(job)
+    sanitized.pop("artifact_path", None)
+    sanitized["has_artifact"] = bool(job.get("artifact_bytes", 0) > 0)
+    return JSONResponse(status_code=200, content={"ok": True, "job": sanitized})
+
+
+@fastapi_app.post("/internal/v1/web-voice-tts/jobs/{job_id}/confirm")
+async def api_internal_web_voice_tts_jobs_confirm(job_id: str, request: Request):
+    """Execute and confirm Web Voice TTS job."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.web_voice_tts_runtime_service import (
+        get_web_voice_tts_job,
+        update_web_voice_tts_job_status,
+    )
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = f"/internal/v1/web-voice-tts/jobs/{job_id}/confirm"
+    raw_body = await request.body()
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    job = get_web_voice_tts_job(job_id, int(clean_actor))
+    if not job:
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error_code": "JOB_NOT_FOUND", "message": f"Job #{job_id} not found"},
+        )
+
+    # Exactly-once charge and execution invariant
+    if job.get("status") == "completed":
+        sanitized = dict(job)
+        sanitized.pop("artifact_path", None)
+        sanitized["has_artifact"] = bool(job.get("artifact_bytes", 0) > 0)
+        return JSONResponse(status_code=200, content={"ok": True, "job": sanitized})
+
+    update_web_voice_tts_job_status(job_id, "processing")
+    uid = int(clean_actor)
+    voice_source = job.get("voice_source")
+    script = job.get("script")
+    speed = job.get("speed")
+    vol = int(job.get("volume_percent") or 100)
+
+    if voice_source == "default":
+        gender = job.get("default_voice_gender") or "female"
+        voice_kind = f"default_{gender}"
+        engine_result = await execute_engine(
+            "voice_tts",
+            {
+                "text": script,
+                "voice_id": voice_kind,
+                "voice_style": default_voice_label(gender, "vi"),
+                "speed": speed,
+                "provider_hint": "default_free",
+            },
+            {
+                "user_id": uid,
+                "entry_source": ENGINE_ENTRY_SOURCE_PRODUCT,
+                "confirm_paid": True,
+                "is_paid_job": False,
+                "allow_admin": True,
+            },
+        )
+        audio_bytes = bytes(engine_result.get("output_bytes") or b"")
+        if not engine_result.get("ok") or not audio_bytes:
+            update_web_voice_tts_job_status(job_id, "failed", status_reason="PROVIDER_EXECUTION_FAILED")
+            return JSONResponse(status_code=422, content={"ok": False, "error_code": "PROVIDER_EXECUTION_FAILED", "message": "TTS synthesis failed"})
+
+        out_path = str(voice_asset_storage_dir() / f"web_voice_tts_{uid}_{job_id}.mp3")
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(out_path).write_bytes(audio_bytes)
+        updated = update_web_voice_tts_job_status(
+            job_id,
+            "completed",
+            status_reason="COMPLETED",
+            charged_xu=0,
+            artifact_path=out_path,
+            artifact_bytes=len(audio_bytes),
+        )
+        sanitized = dict(updated or {})
+        sanitized.pop("artifact_path", None)
+        sanitized["has_artifact"] = True
+        return JSONResponse(status_code=200, content={"ok": True, "job": sanitized})
+
+    else:  # saved voice
+        profile = get_user_voice_profile(uid, job.get("voice_profile_id"))
+        if not profile:
+            update_web_voice_tts_job_status(job_id, "failed", status_reason="VOICE_PROFILE_UNAUTHORIZED")
+            return JSONResponse(status_code=403, content={"ok": False, "error_code": "VOICE_PROFILE_UNAUTHORIZED", "message": "Voice profile not authorized"})
+
+        out_path = str(voice_asset_storage_dir() / f"web_voice_tts_{uid}_{job_id}.mp3")
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+
+        async def _exec(clean_text, provider_voice_id="", **_kw):
+            return await execute_engine(
+                "voice_saved_tts",
+                {"text": clean_text, "speed": speed, "voice_id": provider_voice_id, "provider_hint": str(profile.get("provider") or "")},
+                {
+                    "user_id": uid,
+                    "entry_source": ENGINE_ENTRY_SOURCE_PRODUCT,
+                    "confirm_paid": True,
+                    "is_paid_job": True,
+                    "allow_admin": bool(is_admin_user(uid)),
+                },
+            )
+
+        tts_result = await voice_clone_pipeline.process_voice_tts(
+            user_id=uid,
+            text=script,
+            selected_voice_option=profile,
+            product_context=PRODUCT_CONTEXT_SHOWROOM,
+            admin_mode=bool(is_admin_user(uid)),
+            fake=False,
+            output_path=out_path,
+            get_profile_func=get_user_voice_profile,
+            get_default_voice_id_func=default_tts_voice_id,
+            execute_tts_func=_exec,
+            volume_percent=vol,
+        )
+
+        audio_bytes = Path(out_path).read_bytes() if Path(out_path).exists() else b""
+        if not tts_result.ok or not audio_bytes:
+            update_web_voice_tts_job_status(job_id, "failed", status_reason="PROVIDER_EXECUTION_FAILED")
+            return JSONResponse(status_code=422, content={"ok": False, "error_code": "PROVIDER_EXECUTION_FAILED", "message": "Saved voice TTS synthesis failed"})
+
+        quote_xu = int(job.get("quote_xu") or 0)
+        charged = 0
+        if quote_xu > 0 and not is_admin_user(uid):
+            charge = spend_fixed_credit_info(
+                uid,
+                quote_xu,
+                "web_voice_tts",
+                f"job_id={job_id}; profile={job.get('voice_profile_id')}",
+            )
+            if not charge.get("ok"):
+                # Insufficient funds: fail closed, do not deliver audio
+                update_web_voice_tts_job_status(job_id, "failed", status_reason="INSUFFICIENT_FUNDS")
+                return JSONResponse(status_code=402, content={"ok": False, "error_code": "INSUFFICIENT_FUNDS", "message": f"Insufficient funds: need {quote_xu} Xu"})
+            charged = int(charge.get("final_cost") or quote_xu)
+
+        updated = update_web_voice_tts_job_status(
+            job_id,
+            "completed",
+            status_reason="COMPLETED",
+            charged_xu=charged,
+            artifact_path=out_path,
+            artifact_bytes=len(audio_bytes),
+        )
+        sanitized = dict(updated or {})
+        sanitized.pop("artifact_path", None)
+        sanitized["has_artifact"] = True
+        return JSONResponse(status_code=200, content={"ok": True, "job": sanitized})
+
+
+@fastapi_app.get("/internal/v1/web-voice-tts/jobs/{job_id}/artifact")
+async def api_internal_web_voice_tts_jobs_artifact(job_id: str, request: Request):
+    """Serve authenticated audio artifact for completed Web Voice TTS job."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.web_voice_tts_runtime_service import get_web_voice_tts_job
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = f"/internal/v1/web-voice-tts/jobs/{job_id}/artifact"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path=path,
+        body_bytes=b"",
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    job = get_web_voice_tts_job(job_id, int(clean_actor))
+    if not job or job.get("status") != "completed":
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error_code": "ARTIFACT_NOT_FOUND", "message": "Job not found or not yet completed"},
+        )
+
+    artifact_path = job.get("artifact_path")
+    if not artifact_path or not Path(artifact_path).exists():
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error_code": "ARTIFACT_FILE_MISSING", "message": "Audio artifact missing"},
+        )
+
+    audio_bytes = Path(artifact_path).read_bytes()
+    return Response(content=audio_bytes, media_type="audio/mpeg")
 
 
 # ─── ENTRY POINT ──────────────────────────────────────────────────────────────

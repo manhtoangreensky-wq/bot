@@ -72,14 +72,14 @@ def _saved_state(user_id: int, text: str | None = None, *, speed: str = "1.0", v
 
 def test_saved_voice_button_renames_doc_thu_to_tao_audio():
     labels = _labels(bot.voice_profile_actions_keyboard(77, "vi", bot.PRODUCT_CONTEXT_SHOWROOM, _profile()))
-    assert "▶️ Nghe demo" in labels
+    assert "▶️ Nghe thử" in labels
     assert "🎧 Tạo audio" in labels
     assert "✍️ Đọc thử" not in labels
 
 
 def test_nghe_demo_remains_demo_no_charge():
     markup = bot.voice_profile_actions_keyboard(77, "vi", bot.PRODUCT_CONTEXT_SHOWROOM, _profile())
-    assert "▶️ Nghe demo" in _labels(markup)
+    assert "▶️ Nghe thử" in _labels(markup)
     assert any("voice_profile_listen:77" in cb for cb in _callbacks(markup))
     listen_block = Path(bot.__file__).read_text(encoding="utf-8").split('if action.startswith("voice_profile_listen:"):', 1)[1].split('if action.startswith("voice_profile_use:"):', 1)[0]
     assert "spend_fixed_credit_info" not in listen_block
@@ -92,7 +92,7 @@ def test_tao_audio_requires_text(monkeypatch):
     monkeypatch.setattr(bot, "send_paid_saved_voice_tts_result", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not create without text")))
     message = CaptureMessage()
     asyncio.run(bot.voice_tts_create_from_settings(message, user_id, "vi", bot.PRODUCT_CONTEXT_SHOWROOM))
-    assert "Giọng đọc" in message.outputs[-1]["text"]
+    assert "Tạo giọng đọc" in message.outputs[-1]["text"]
 
 
 def test_tao_audio_rejects_under_20_words(monkeypatch):
@@ -142,8 +142,8 @@ def test_tao_audio_shows_price_summary_before_provider_call(monkeypatch):
     asyncio.run(bot.voice_tts_create_from_settings(message, user_id, "vi", bot.PRODUCT_CONTEXT_SHOWROOM))
     text = message.outputs[-1]["text"]
     assert "Xác nhận tạo audio" in text
-    assert "• Nội dung: <b>30 từ</b>" in text
-    assert "• Đơn giá: <b>0.1 Xu / từ</b>" in text
+    assert "• Nội dung: <b>30</b>" in text
+    assert "• Tạm tính: <b>3 Xu</b>" in text
     assert "• Tổng thanh toán: <b>3 Xu</b>" in text
 
 
@@ -170,7 +170,7 @@ def test_tao_audio_no_charge_before_confirm(monkeypatch):
     monkeypatch.setattr(bot, "spend_fixed_credit_info", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("no charge before confirm")))
     message = CaptureMessage()
     asyncio.run(bot.voice_tts_create_from_settings(message, user_id, "vi", bot.PRODUCT_CONTEXT_SHOWROOM))
-    assert "TOAN AAS chỉ tạo audio và trừ Xu sau khi anh/chị xác nhận." in message.outputs[-1]["text"]
+    assert "TOAN AAS chỉ tạo audio và trừ Xu sau khi bạn xác nhận." in message.outputs[-1]["text"]
 
 
 def test_tao_audio_confirm_then_generates_audio(monkeypatch):
