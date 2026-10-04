@@ -14923,42 +14923,14 @@ def spend_fixed_credit_idempotent_info(
                     "message": f"Idempotency ref '{clean_ref}' has event_type '{leg_event_type}', requested '{event_type_str}'",
                     "ref_id": clean_ref,
                 }
-            if base_amount != leg_final_cost and base_amount != final_amount:
-                if owns_transaction:
-                    active_conn.rollback()
-                return {
-                    "ok": False,
-                    "idempotent_replay": False,
-                    "error_code": "IDEMPOTENCY_AMOUNT_MISMATCH",
-                    "message": f"Idempotency ref '{clean_ref}' recorded legacy cost {leg_final_cost}, requested {base_amount}",
-                    "ref_id": clean_ref,
-                }
-
-            # Backfill into wallet_idempotent_debits
-            c.execute(
-                """
-                INSERT OR IGNORE INTO wallet_idempotent_debits (
-                    ref_id, user_id, event_type, requested_base_amount_xu,
-                    canonical_final_amount_xu, ledger_event_id, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (clean_ref, user_id_str, event_type_str, base_amount, leg_final_cost, leg_id, now_text()),
-            )
             if owns_transaction:
-                active_conn.commit()
+                active_conn.rollback()
             return {
-                "ok": True,
-                "idempotent_replay": True,
-                "base_cost": base_amount,
-                "final_cost": leg_final_cost,
-                "discount_rate": int(charge.get("discount_rate") or 0),
-                "discount_xu": int(charge.get("discount_xu") or 0),
-                "tier": charge.get("tier"),
-                "badge": charge.get("badge"),
-                "balance_after": int(leg_balance_after or 0),
-                "ledger_event_id": leg_id,
+                "ok": False,
+                "idempotent_replay": False,
+                "error_code": "IDEMPOTENCY_LEGACY_AUTHORITY_UNPROVEN",
+                "message": f"Idempotency ref '{clean_ref}' exists in legacy ledger without durable authority; automatic replay or backfill is forbidden",
                 "ref_id": clean_ref,
-                "note": leg_note or "",
             }
 
         # 2. Check balance in same transaction
