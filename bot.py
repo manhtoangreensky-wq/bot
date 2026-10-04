@@ -4154,6 +4154,17 @@ def init_db():
         note TEXT,
         created_at DATETIME
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS wallet_idempotent_debits (
+        ref_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        requested_base_amount_xu INTEGER NOT NULL,
+        canonical_final_amount_xu INTEGER NOT NULL,
+        ledger_event_id INTEGER,
+        created_at TEXT NOT NULL
+    )""")
+    c.execute("""CREATE INDEX IF NOT EXISTS idx_wallet_idempotent_debits_user
+        ON wallet_idempotent_debits(user_id)""")
     c.execute("""CREATE TABLE IF NOT EXISTS api_debug_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         provider TEXT,
@@ -14691,6 +14702,21 @@ def spend_fixed_credit(user_id, amount, event_type, note="") -> bool:
     return bool(spend_fixed_credit_info(user_id, amount, event_type, note).get("ok"))
 
 
+def ensure_wallet_idempotent_debits_schema(conn: sqlite3.Connection):
+    c = conn.cursor()
+    c.execute("""CREATE TABLE IF NOT EXISTS wallet_idempotent_debits (
+        ref_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        requested_base_amount_xu INTEGER NOT NULL,
+        canonical_final_amount_xu INTEGER NOT NULL,
+        ledger_event_id INTEGER,
+        created_at TEXT NOT NULL
+    )""")
+    c.execute("""CREATE INDEX IF NOT EXISTS idx_wallet_idempotent_debits_user
+        ON wallet_idempotent_debits(user_id)""")
+
+
 def spend_fixed_credit_idempotent_info(
     user_id: int | str,
     amount: int,
@@ -14701,14 +14727,21 @@ def spend_fixed_credit_idempotent_info(
     *,
     conn: sqlite3.Connection | None = None,
 ) -> dict:
-    """Additive idempotent wallet debit seam with atomic transaction and ref_id duplicate replay.
+    """Additive idempotent wallet debit seam with atomic transaction, durable authority binding, and ref_id duplicate replay.
 
     Guarantees:
     - WALLET_IDEMPOTENCY_REF_REQUIRED=YES
     - WALLET_DEBIT_TRANSACTION_MODE=BEGIN_IMMEDIATE
+    - BEGIN_IMMEDIATE_LOCK_FAILURE_SWALLOWED=NO
     - WALLET_BALANCE_CHECK_AND_DEBIT_SAME_TRANSACTION=YES
     - WALLET_CREDIT_EVENT_SAME_TRANSACTION=YES
-    - WALLET_CREDIT_EVENT_REF_ID_POPULATED=YES
+    - IDEMPOTENCY_AUTHORITY_WRITE_SAME_TRANSACTION=YES
+    - IDEMPOTENT_DEBIT_OWNER_BOUND=YES
+    - IDEMPOTENT_DEBIT_EVENT_TYPE_BOUND=YES
+    - IDEMPOTENT_DEBIT_BASE_AMOUNT_BOUND=YES
+    - IDEMPOTENT_DEBIT_FINAL_AMOUNT_DURABLY_RECORDED=YES
+    - IDEMPOTENT_DEBIT_LEDGER_EVENT_BOUND=YES
+    - INCOMPATIBLE_REF_REPLAY_FAILS_CLOSED=YES
     - WALLET_DUPLICATE_REF_SECOND_DEBIT_COUNT=0
     - WALLET_DUPLICATE_REF_RETURNS_IDEMPOTENT_REPLAY=YES
     """
@@ -14717,6 +14750,9 @@ def spend_fixed_credit_idempotent_info(
         raise ValueError("WALLET_IDEMPOTENCY_REF_REQUIRED: ref_id must be non-empty")
 
     base_amount = int(amount or 0)
+    user_id_str = str(user_id).strip()
+    event_type_str = str(event_type or "").strip()
+
     if is_admin_user(user_id):
         return {
             "ok": True,
@@ -14740,8 +14776,15 @@ def spend_fixed_credit_idempotent_info(
                 mock_res["idempotent_replay"] = False
             if "ref_id" not in mock_res:
                 mock_res["ref_id"] = clean_ref
+            if not mock_res.get("ok") and not mock_res.get("error_code"):
+                err_val = str(mock_res.get("error") or "INSUFFICIENT_FUNDS").strip().upper()
+                mock_res["error_code"] = err_val
             return mock_res
-        return {"ok": bool(mock_res), "idempotent_replay": False, "final_cost": amount, "ref_id": clean_ref}
+        mock_ok = bool(mock_res)
+        res = {"ok": mock_ok, "idempotent_replay": False, "final_cost": amount, "ref_id": clean_ref}
+        if not mock_ok:
+            res["error_code"] = "INSUFFICIENT_FUNDS"
+        return res
 
     get_user(user_id)
     charge = (
@@ -14760,52 +14803,170 @@ def spend_fixed_credit_idempotent_info(
 
     owns_conn = conn is None
     active_conn = db_connect() if owns_conn else conn
-    c = active_conn.cursor()
-    try:
-        try:
-            active_conn.execute("BEGIN IMMEDIATE")
-        except sqlite3.OperationalError:
-            pass
+    owns_transaction = False
+    ensure_wallet_idempotent_debits_schema(active_conn)
 
-        # 1. Idempotency check: see if a debit with this ref_id already exists
+    try:
+        if not active_conn.in_transaction:
+            try:
+                active_conn.execute("BEGIN IMMEDIATE")
+                owns_transaction = True
+            except sqlite3.OperationalError as lock_err:
+                # BEGIN_IMMEDIATE_LOCK_FAILURE_SWALLOWED=NO
+                return {
+                    "ok": False,
+                    "idempotent_replay": False,
+                    "error_code": "WALLET_LOCK_FAILED",
+                    "message": f"Failed to acquire BEGIN IMMEDIATE lock: {lock_err}",
+                    "ref_id": clean_ref,
+                }
+
+        c = active_conn.cursor()
+
+        # 1. Check durable authority table wallet_idempotent_debits first
         c.execute(
             """
-            SELECT id, delta, balance_after, event_type, ref_id, note
-            FROM credit_events
-            WHERE user_id = ? AND ref_id = ? AND event_type = ? AND delta <= 0
-            ORDER BY id DESC LIMIT 1
+            SELECT ref_id, user_id, event_type, requested_base_amount_xu,
+                   canonical_final_amount_xu, ledger_event_id, created_at
+            FROM wallet_idempotent_debits
+            WHERE ref_id = ?
             """,
-            (str(user_id), clean_ref, str(event_type)),
+            (clean_ref,),
         )
-        existing_event = c.fetchone()
-        if existing_event:
-            try:
+        existing_authority = c.fetchone()
+
+        if existing_authority:
+            rec_ref, rec_uid, rec_event_type, rec_base, rec_final, rec_ledger_id, rec_created = existing_authority
+            if str(rec_uid) != user_id_str:
+                if owns_transaction:
+                    active_conn.rollback()
+                return {
+                    "ok": False,
+                    "idempotent_replay": False,
+                    "error_code": "IDEMPOTENCY_OWNER_MISMATCH",
+                    "message": f"Idempotency ref '{clean_ref}' is owned by user '{rec_uid}', not '{user_id_str}'",
+                    "ref_id": clean_ref,
+                }
+            if str(rec_event_type) != event_type_str:
+                if owns_transaction:
+                    active_conn.rollback()
+                return {
+                    "ok": False,
+                    "idempotent_replay": False,
+                    "error_code": "IDEMPOTENCY_EVENT_TYPE_MISMATCH",
+                    "message": f"Idempotency ref '{clean_ref}' has event_type '{rec_event_type}', requested '{event_type_str}'",
+                    "ref_id": clean_ref,
+                }
+            if int(rec_base) != base_amount:
+                if owns_transaction:
+                    active_conn.rollback()
+                return {
+                    "ok": False,
+                    "idempotent_replay": False,
+                    "error_code": "IDEMPOTENCY_AMOUNT_MISMATCH",
+                    "message": f"Idempotency ref '{clean_ref}' recorded base amount {rec_base}, requested {base_amount}",
+                    "ref_id": clean_ref,
+                }
+
+            # Exact match -> replay
+            c.execute("SELECT credits FROM users WHERE user_id = ?", (user_id_str,))
+            u_row = c.fetchone()
+            curr_bal = int(u_row[0] or 0) if u_row else 0
+            if owns_transaction:
                 active_conn.commit()
-            except sqlite3.OperationalError:
-                pass
             return {
                 "ok": True,
                 "idempotent_replay": True,
                 "base_cost": base_amount,
-                "final_cost": abs(int(existing_event[1] or 0)),
+                "final_cost": int(rec_final),
                 "discount_rate": int(charge.get("discount_rate") or 0),
                 "discount_xu": int(charge.get("discount_xu") or 0),
                 "tier": charge.get("tier"),
                 "badge": charge.get("badge"),
-                "balance_after": int(existing_event[2] or 0),
-                "ledger_event_id": existing_event[0],
+                "balance_after": curr_bal,
+                "ledger_event_id": rec_ledger_id,
                 "ref_id": clean_ref,
-                "note": existing_event[5] or "",
+                "note": note,
+            }
+
+        # Check legacy credit_events for backward compatibility
+        c.execute(
+            """
+            SELECT id, user_id, event_type, delta, balance_after, note
+            FROM credit_events
+            WHERE ref_id = ? AND delta <= 0
+            ORDER BY id DESC LIMIT 1
+            """,
+            (clean_ref,),
+        )
+        legacy_event = c.fetchone()
+        if legacy_event:
+            leg_id, leg_uid, leg_event_type, leg_delta, leg_balance_after, leg_note = legacy_event
+            leg_final_cost = abs(int(leg_delta or 0))
+            if str(leg_uid) != user_id_str:
+                if owns_transaction:
+                    active_conn.rollback()
+                return {
+                    "ok": False,
+                    "idempotent_replay": False,
+                    "error_code": "IDEMPOTENCY_OWNER_MISMATCH",
+                    "message": f"Idempotency ref '{clean_ref}' is owned by user '{leg_uid}', not '{user_id_str}'",
+                    "ref_id": clean_ref,
+                }
+            if str(leg_event_type) != event_type_str:
+                if owns_transaction:
+                    active_conn.rollback()
+                return {
+                    "ok": False,
+                    "idempotent_replay": False,
+                    "error_code": "IDEMPOTENCY_EVENT_TYPE_MISMATCH",
+                    "message": f"Idempotency ref '{clean_ref}' has event_type '{leg_event_type}', requested '{event_type_str}'",
+                    "ref_id": clean_ref,
+                }
+            if base_amount != leg_final_cost and base_amount != final_amount:
+                if owns_transaction:
+                    active_conn.rollback()
+                return {
+                    "ok": False,
+                    "idempotent_replay": False,
+                    "error_code": "IDEMPOTENCY_AMOUNT_MISMATCH",
+                    "message": f"Idempotency ref '{clean_ref}' recorded legacy cost {leg_final_cost}, requested {base_amount}",
+                    "ref_id": clean_ref,
+                }
+
+            # Backfill into wallet_idempotent_debits
+            c.execute(
+                """
+                INSERT OR IGNORE INTO wallet_idempotent_debits (
+                    ref_id, user_id, event_type, requested_base_amount_xu,
+                    canonical_final_amount_xu, ledger_event_id, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (clean_ref, user_id_str, event_type_str, base_amount, leg_final_cost, leg_id, now_text()),
+            )
+            if owns_transaction:
+                active_conn.commit()
+            return {
+                "ok": True,
+                "idempotent_replay": True,
+                "base_cost": base_amount,
+                "final_cost": leg_final_cost,
+                "discount_rate": int(charge.get("discount_rate") or 0),
+                "discount_xu": int(charge.get("discount_xu") or 0),
+                "tier": charge.get("tier"),
+                "badge": charge.get("badge"),
+                "balance_after": int(leg_balance_after or 0),
+                "ledger_event_id": leg_id,
+                "ref_id": clean_ref,
+                "note": leg_note or "",
             }
 
         # 2. Check balance in same transaction
-        c.execute("SELECT credits, total_spent FROM users WHERE user_id = ?", (str(user_id),))
+        c.execute("SELECT credits, total_spent FROM users WHERE user_id = ?", (user_id_str,))
         row = c.fetchone()
         if not row or int(row[0] or 0) < final_amount:
-            try:
+            if owns_transaction:
                 active_conn.rollback()
-            except sqlite3.OperationalError:
-                pass
             charge["ok"] = False
             charge["idempotent_replay"] = False
             charge["error_code"] = "INSUFFICIENT_FUNDS"
@@ -14817,13 +14978,11 @@ def spend_fixed_credit_idempotent_info(
         new_spent = int(row[1] or 0) + final_amount
         update_cur = c.execute(
             "UPDATE users SET credits = ?, total_spent = ? WHERE user_id = ? AND credits >= ?",
-            (new_balance, new_spent, str(user_id), final_amount),
+            (new_balance, new_spent, user_id_str, final_amount),
         )
         if update_cur.rowcount != 1:
-            try:
+            if owns_transaction:
                 active_conn.rollback()
-            except sqlite3.OperationalError:
-                pass
             return {
                 "ok": False,
                 "idempotent_replay": False,
@@ -14841,26 +15000,118 @@ def spend_fixed_credit_idempotent_info(
                 f"discount={charge.get('discount_xu')} final={final_amount}"
             )
         full_note = f"{note}{discount_note}".strip()
-        record_credit_event(active_conn, user_id, -final_amount, event_type, clean_ref, full_note)
+        record_credit_event(active_conn, user_id_str, -final_amount, event_type_str, clean_ref, full_note)
 
+        # Retrieve the ledger_event_id created in the same transaction
+        c.execute(
+            "SELECT id FROM credit_events WHERE user_id = ? AND ref_id = ? AND event_type = ? ORDER BY id DESC LIMIT 1",
+            (user_id_str, clean_ref, event_type_str),
+        )
+        ev_row = c.fetchone()
+        ledger_event_id = ev_row[0] if ev_row else None
+
+        # 5. Record into wallet_idempotent_debits in same transaction
+        now_ts = now_text()
         try:
+            c.execute(
+                """
+                INSERT INTO wallet_idempotent_debits (
+                    ref_id, user_id, event_type, requested_base_amount_xu,
+                    canonical_final_amount_xu, ledger_event_id, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    clean_ref,
+                    user_id_str,
+                    event_type_str,
+                    base_amount,
+                    final_amount,
+                    ledger_event_id,
+                    now_ts,
+                ),
+            )
+        except sqlite3.IntegrityError:
+            # Handle concurrent race where another transaction inserted this ref_id
+            if owns_transaction:
+                active_conn.rollback()
+            # Recheck winner record
+            c.execute(
+                """
+                SELECT ref_id, user_id, event_type, requested_base_amount_xu,
+                       canonical_final_amount_xu, ledger_event_id, created_at
+                FROM wallet_idempotent_debits
+                WHERE ref_id = ?
+                """,
+                (clean_ref,),
+            )
+            winner_debit = c.fetchone()
+            if winner_debit:
+                w_ref, w_uid, w_event_type, w_base, w_final, w_ledger_id, w_created = winner_debit
+                if str(w_uid) != user_id_str:
+                    return {
+                        "ok": False,
+                        "idempotent_replay": False,
+                        "error_code": "IDEMPOTENCY_OWNER_MISMATCH",
+                        "message": f"Idempotency ref '{clean_ref}' is owned by user '{w_uid}', not '{user_id_str}'",
+                        "ref_id": clean_ref,
+                    }
+                if str(w_event_type) != event_type_str:
+                    return {
+                        "ok": False,
+                        "idempotent_replay": False,
+                        "error_code": "IDEMPOTENCY_EVENT_TYPE_MISMATCH",
+                        "message": f"Idempotency ref '{clean_ref}' has event_type '{w_event_type}', requested '{event_type_str}'",
+                        "ref_id": clean_ref,
+                    }
+                if int(w_base) != base_amount:
+                    return {
+                        "ok": False,
+                        "idempotent_replay": False,
+                        "error_code": "IDEMPOTENCY_AMOUNT_MISMATCH",
+                        "message": f"Idempotency ref '{clean_ref}' recorded base amount {w_base}, requested {base_amount}",
+                        "ref_id": clean_ref,
+                    }
+                c.execute("SELECT credits FROM users WHERE user_id = ?", (user_id_str,))
+                u_row = c.fetchone()
+                curr_bal = int(u_row[0] or 0) if u_row else 0
+                return {
+                    "ok": True,
+                    "idempotent_replay": True,
+                    "base_cost": base_amount,
+                    "final_cost": int(w_final),
+                    "discount_rate": int(charge.get("discount_rate") or 0),
+                    "discount_xu": int(charge.get("discount_xu") or 0),
+                    "tier": charge.get("tier"),
+                    "badge": charge.get("badge"),
+                    "balance_after": curr_bal,
+                    "ledger_event_id": w_ledger_id,
+                    "ref_id": clean_ref,
+                    "note": note,
+                }
+            raise
+
+        if owns_transaction:
             active_conn.commit()
-        except sqlite3.OperationalError:
-            pass
+
         charge["ok"] = True
         charge["idempotent_replay"] = False
         charge["ref_id"] = clean_ref
         charge["balance_after"] = new_balance
+        charge["ledger_event_id"] = ledger_event_id
         return charge
     except Exception:
-        try:
-            active_conn.rollback()
-        except Exception:
-            pass
+        if owns_transaction:
+            try:
+                active_conn.rollback()
+            except Exception:
+                pass
         raise
     finally:
         if owns_conn:
-            active_conn.close()
+            try:
+                active_conn.close()
+            except Exception:
+                pass
 
 def is_payos_order_processed(order_code: str) -> bool:
     conn = db_connect()
@@ -281380,6 +281631,19 @@ async def api_internal_web_voice_tts_jobs_confirm(job_id: str, request: Request)
             )
 
     uid = int(clean_actor)
+    expected_settle_key = f"voice_tts_settle:{uid}:{job_id}"
+    stored_settle_key = str(current_job.get("settlement_idempotency_key") or "").strip()
+    if stored_settle_key and stored_settle_key != expected_settle_key:
+        update_web_voice_tts_job_status(job_id, "failed", status_reason="SETTLEMENT_KEY_CONFLICT")
+        return JSONResponse(
+            status_code=409,
+            content={
+                "ok": False,
+                "error_code": "SETTLEMENT_KEY_CONFLICT",
+                "message": f"Stored settlement key '{stored_settle_key}' conflicts with expected key '{expected_settle_key}'",
+            },
+        )
+
     voice_source = current_job.get("voice_source")
     script = current_job.get("script")
     speed = current_job.get("speed")
@@ -281542,16 +281806,31 @@ async def api_internal_web_voice_tts_jobs_confirm(job_id: str, request: Request)
                     note=f"job_id={job_id}; profile={current_job.get('voice_profile_id')}",
                 )
                 if not charge.get("ok"):
-                    # Insufficient funds fails closed; retains generated audio internally in payment_required state
+                    raw_err = str(charge.get("error_code") or charge.get("error") or "WALLET_DEBIT_FAILED").strip().upper()
+                    err_code = raw_err if raw_err else "WALLET_DEBIT_FAILED"
+                    err_msg = str(charge.get("message") or f"Wallet debit failed: {err_code}")
+                    if err_code == "INSUFFICIENT_FUNDS":
+                        # Insufficient funds fails closed; retains generated audio internally in payment_required state
+                        update_web_voice_tts_job_status(
+                            job_id,
+                            "payment_required",
+                            status_reason="INSUFFICIENT_FUNDS",
+                            artifact_path=out_path,
+                            artifact_bytes=len(audio_bytes),
+                            settlement_status="unsettled",
+                        )
+                        return JSONResponse(status_code=402, content={"ok": False, "error_code": "INSUFFICIENT_FUNDS", "message": f"Insufficient funds: need {quote_xu} Xu"})
+
+                    # Non-insufficient funds errors (concurrency, idempotency owner/amount mismatch) fail the job
                     update_web_voice_tts_job_status(
                         job_id,
-                        "payment_required",
-                        status_reason="INSUFFICIENT_FUNDS",
+                        "failed",
+                        status_reason=err_code,
                         artifact_path=out_path,
                         artifact_bytes=len(audio_bytes),
                         settlement_status="unsettled",
                     )
-                    return JSONResponse(status_code=402, content={"ok": False, "error_code": "INSUFFICIENT_FUNDS", "message": f"Insufficient funds: need {quote_xu} Xu"})
+                    return JSONResponse(status_code=409, content={"ok": False, "error_code": err_code, "message": err_msg})
 
                 charged = int(charge.get("final_cost") or quote_xu)
                 update_web_voice_tts_settlement(job_id, "settled", charged_xu=charged)
