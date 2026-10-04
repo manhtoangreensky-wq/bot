@@ -500,3 +500,82 @@ def test_crash_recovery_fail_closed_on_corrupted_artifact_size_mismatch(monkeypa
     assert job_row[0] == "failed"
     assert job_row[1] == "SETTLEMENT_RECOVERY_ARTIFACT_INCONSISTENT"
     conn.close()
+
+
+def test_settlement_failure_non_insufficient_funds_fails_job_409(monkeypatch, tmp_path):
+    """If wallet debit fails with a non-INSUFFICIENT_FUNDS error (e.g. CONCURRENT_UPDATE_CONFLICT),
+    the endpoint must return 409 and mark job as failed (not payment_required).
+    """
+    client = TestClient(bot.fastapi_app)
+    uid = 7005
+    bot.get_user(uid)
+    bot.add_credit(uid, 50, event_type="initial_deposit")
+
+    fake_profile = {
+        "id": 92,
+        "user_id": uid,
+        "name": "Giọng nhân vật 92",
+        "provider": "minimax",
+        "provider_voice_id": "minimax_v1_custom_92",
+    }
+    monkeypatch.setattr(bot, "get_user_voice_profile", lambda u, p: fake_profile if u == uid and p == 92 else None)
+    monkeypatch.setattr(bot, "is_admin_user", lambda u: False)
+
+    job_id = f"job_settle_err_{uuid.uuid4().hex[:6]}"
+    settle_key = f"voice_tts_settle:{uid}:{job_id}"
+
+    # Setup prepared job
+    conn = bot.db_connect()
+    conn.execute(
+        """
+        INSERT INTO web_voice_tts_bot_jobs (
+            job_id, idempotency_key, web_request_id, user_id,
+            voice_source, script, voice_profile_id, speed, volume_percent,
+            language, status, quote_xu, charged_xu, payload_hash, settlement_status,
+            created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'saved', 'Kịch bản test settle conflict', 92, '1.0', 100, 'vi', 'prepared', 10, 0, 'dummy', 'unsettled', datetime('now'), datetime('now'))
+        """,
+        (job_id, f"{uid}:{job_id}", f"req_{job_id}", uid),
+    )
+    conn.commit()
+    conn.close()
+
+    class FakeTTSResult:
+        ok = True
+        output_bytes = b"AUDIO_SAMPLE_92"
+
+    async def mock_process_voice_tts(**kwargs):
+        out_p = kwargs.get("output_path")
+        if out_p:
+            Path(out_p).write_bytes(b"AUDIO_SAMPLE_92")
+        return FakeTTSResult()
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_voice_tts", mock_process_voice_tts)
+
+    def mock_debit_fail(*args, **kwargs):
+        return {
+            "ok": False,
+            "idempotent_replay": False,
+            "error_code": "CONCURRENT_UPDATE_CONFLICT",
+            "message": "Optimistic lock error during debit",
+        }
+
+    monkeypatch.setattr(bot, "spend_fixed_credit_idempotent_info", mock_debit_fail)
+
+    confirm_path = f"/internal/v1/web-voice-tts/jobs/{job_id}/confirm"
+    headers = _sign("POST", confirm_path, actor_id=str(uid))
+    resp = client.post(confirm_path, headers=headers)
+
+    assert resp.status_code == 409
+    body = resp.json()
+    assert body["ok"] is False
+    assert body["error_code"] == "CONCURRENT_UPDATE_CONFLICT"
+
+    conn = bot.db_connect()
+    c = conn.cursor()
+    c.execute("SELECT status, status_reason FROM web_voice_tts_bot_jobs WHERE job_id = ?", (job_id,))
+    job_row = c.fetchone()
+    assert job_row[0] == "failed"
+    assert job_row[1] == "CONCURRENT_UPDATE_CONFLICT"
+    conn.close()
+
