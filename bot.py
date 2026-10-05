@@ -111298,14 +111298,17 @@ async def video_selfshot2_finish_creative_details(
 
 def video_selfshot2_preflight(draft: dict) -> dict:
     scene_count = max(1, safe_int(draft.get("scene_count"), 1))
-    requested_quality = safe_int(draft.get("b14_quality_xu"), 0)
+    requested_quality = safe_int(draft.get("b14_quality_xu") or draft.get("quality_tier"), 0)
     quality_candidates = [requested_quality] if requested_quality else list(VIDEO_TIER_ID_TO_NAME)
+    engine_contract = video_project_queue.product_video_engine_contract(video_selfshot2.PRODUCT_ID)
+    required_capability = str(engine_contract.get("required_capability") or "image_to_video")
+    expected_engine_route = str(engine_contract.get("engine_route") or "controlled_keyframe_image_to_video")
     resolutions = []
     for quality in quality_candidates:
         resolution = dict(video_provider_catalog.resolve_product_video_model(
             tier=max(200, quality),
             scene_count=scene_count,
-            required_capability="video_to_video",
+            required_capability=required_capability,
             requires_concat=scene_count > 1,
         ))
         resolution["requested_quality_xu"] = int(quality)
@@ -111315,20 +111318,29 @@ def video_selfshot2_preflight(draft: dict) -> dict:
     for item in resolutions:
         if item.get("ok"):
             capabilities.update(str(value) for value in (item.get("selected_capabilities") or []))
-    dedicated_providers = []
-    for config in video_ai_edit_provider.configured_provider_chain(os.environ):
-        validation = video_ai_edit_provider.validate_provider_config(config)
-        if not validation.get("ok"):
-            continue
-        dedicated_providers.append(config)
-        capabilities.update(str(value) for value in config.capabilities)
-        capabilities.update(str(value) for value in (validation.get("contract") or {}).get("capabilities") or [])
+    capabilities.add(required_capability)
+
     worker = product_video_worker_admission_status()
     public_preflight = product_video_public_preflight_evaluation(scene_count, explicit_public_final_confirm=True)
+    worker_ready = bool(video_flow6_worker_is_ready(worker) and public_preflight.get("ready"))
+
+    draft_for_preflight = dict(draft or {})
+    if bool(
+        draft_for_preflight.get("reference_keyframes_ready")
+        or draft_for_preflight.get("keyframes_ready")
+        or draft_for_preflight.get("reference_keyframes")
+        or (draft_for_preflight.get("source_video") and (draft_for_preflight.get("source_analysis") or draft_for_preflight.get("source_segment")))
+    ):
+        draft_for_preflight["reference_keyframes_ready"] = True
+
+    i2v_provider_ready = bool(resolution.get("ok"))
+    selected_provider = str(resolution.get("selected_provider") or "")
+    selected_model = str(resolution.get("selected_model") or "")
+
     report = video_selfshot2.preflight(
-        draft,
+        draft_for_preflight,
         capabilities=capabilities,
-        owner_ready=bool(dedicated_providers and video_flow6_worker_is_ready(worker) and public_preflight.get("ready")),
+        owner_ready=bool(i2v_provider_ready and worker_ready),
         package_available=bool(resolution.get("ok")),
         storage_ready=True,
         delivery_ready=True,
@@ -111339,19 +111351,79 @@ def video_selfshot2_preflight(draft: dict) -> dict:
         for item in resolutions
         if item.get("ok") and int(item.get("requested_quality_xu") or 0) > 0
     ]
-    report["dedicated_video_to_video_provider_ready"] = bool(dedicated_providers)
-    report["dedicated_video_to_video_providers"] = [item.provider_name for item in dedicated_providers]
     report["worker"] = dict(worker)
     report["public_preflight"] = dict(public_preflight)
+    report["engine_contract"] = dict(engine_contract)
+    report["required_capability"] = required_capability
+    report["expected_engine_route"] = expected_engine_route
+    report["selected_provider"] = selected_provider
+    report["selected_model"] = selected_model
+    report["i2v_provider_ready"] = i2v_provider_ready
+
     selected_engine_route = str((report.get("engine_route") or {}).get("route") or "")
-    direct_v2v_ready = bool(dedicated_providers and selected_engine_route == "direct_video_to_video")
-    report["direct_video_to_video_executor_ready"] = direct_v2v_ready
-    if not dedicated_providers:
-        blocker = "selfshot2_video_to_video_provider_unavailable"
-    elif selected_engine_route != "direct_video_to_video":
-        blocker = "selfshot2_direct_video_to_video_executor_unavailable"
+    report["controlled_keyframe_i2v_ready"] = bool(
+        i2v_provider_ready and selected_engine_route == expected_engine_route
+    )
+
+    # Economics fail-closed validation
+    economics_safe = True
+    economics_block_reason = ""
+    quote_xu = safe_int(
+        draft.get("b14_final_quote_xu")
+        or draft.get("final_quote_xu")
+        or draft.get("quoted_price_xu"),
+        0,
+    )
+    effective_tier = requested_quality or safe_int(resolution.get("requested_quality_xu"), 700)
+    if quote_xu <= 0 and effective_tier > 0:
+        try:
+            route_pricing = video_ai_real_pricing.product_video_route_by_tier(effective_tier)
+            unit_xu = safe_int(route_pricing.get("customer_unit_xu"), 0)
+            if unit_xu > 0:
+                quote_xu = safe_int(
+                    video_ai_real_pricing.video_multiscene_price(unit_xu, scene_count).get("total_xu"),
+                    0,
+                )
+        except Exception:
+            pass
+    if effective_tier > 0 and selected_provider and selected_model:
+        try:
+            econ_check = video_ai_real_pricing.check_product_video_economics(
+                tier_id=effective_tier,
+                scene_count=scene_count,
+                provider=selected_provider,
+                model=selected_model,
+                customer_quote_xu=quote_xu,
+            )
+            economics_safe = bool(econ_check.get("economics_safe", True))
+            if not economics_safe:
+                economics_block_reason = str(econ_check.get("block_reason") or "economics_loss_guard_blocked")
+        except Exception as exc:
+            economics_safe = False
+            economics_block_reason = f"economics_check_error:{type(exc).__name__}"
+
+    report["economics_safe"] = economics_safe
+    report["economics_block_reason"] = economics_block_reason
+
+    # Canonical fail-closed blocker evaluation
+    blocker = ""
+    if not i2v_provider_ready:
+        blocker = str(
+            resolution.get("blocker")
+            or resolution.get("contract_block_reason")
+            or "selfshot2_image_to_video_provider_unavailable"
+        )
+    elif selected_provider != "key4u_video":
+        blocker = "selfshot2_unsupported_provider"
+    elif selected_model != "kling-v3":
+        blocker = "selfshot2_unsupported_model"
+    elif selected_engine_route != expected_engine_route:
+        blocker = "selfshot2_engine_route_mismatch"
+    elif not economics_safe:
+        blocker = economics_block_reason or "economics_loss_guard_blocked"
     else:
         blocker = ""
+
     if blocker:
         report["blocker"] = blocker
         report["blockers"] = list(dict.fromkeys([

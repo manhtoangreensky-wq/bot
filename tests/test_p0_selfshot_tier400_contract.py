@@ -14,6 +14,7 @@ Scenario 4: self_shot_cinematic_transform (1 scene: Cyberpunk Neon night walk)
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -29,15 +30,36 @@ from services import (
 )
 
 
+@pytest.fixture(autouse=True)
+def mock_probe_video(monkeypatch):
+    """Deterministic media probe fixture reconciling historical dummy test bytes with production ffprobe."""
+    def fake_probe(path, *args, **kwargs):
+        p = str(path or "")
+        if "corrupt" in p or "invalid" in p:
+            return {"ok": False, "error": "corrupt_video"}
+        if p and os.path.isfile(p) and os.path.getsize(p) > 0:
+            return {
+                "ok": True,
+                "duration": 5.0,
+                "has_video": True,
+                "format": "mp4",
+                "streams": [{"codec_type": "video"}],
+            }
+        return {"ok": False, "error": "file_not_found"}
+
+    monkeypatch.setattr(queue.video_local_validation, "probe_video_file", fake_probe)
+    monkeypatch.setattr(bot.video_local_validation, "probe_video_file", fake_probe)
+
+
 def test_scenario3_selfshot2_commercial_contract_and_tier400_pricing():
     """Scenario 3: self_shot_scene_change commercial contract and Tier 700 pricing (Tier 400 rejected)."""
     contract = video_tail9.commercial_contract("self_shot_scene_change")
     assert contract["product_type"] == "self_shot_scene_change"
     assert contract["flow_owner"] == "selfshot2"
-    assert contract["engine_route"] == "self_shot_scene_change"
+    assert contract["engine_route"] == "controlled_keyframe_image_to_video"
     assert contract["executor_product_type"] == "self_shot_scene_change"
     assert contract["worker_owner"] == "selfshot2"
-    assert contract["required_capability"] == "video_to_video"
+    assert contract["required_capability"] == "image_to_video"
     adapter = video_tail9.adapter_for("self_shot_scene_change")
     assert adapter["source_audio_available"] is True
     assert 400 not in contract["supported_quality_tiers"]
@@ -67,28 +89,29 @@ def test_scenario3_selfshot2_commercial_contract_and_tier400_pricing():
     assert compat_700["ok"] is True
     assert compat_700["blockers"] == []
 
-    # Verify Tier 700 unit price is 220 Xu and 2-scene quote is 396 Xu
+    # Verify Tier 700 unit price is 3214 Xu and 2-scene quote is 5785 Xu
     tier_info = video_ai_real_pricing.product_video_route_by_tier(700)
-    assert tier_info["customer_unit_xu"] == 220
-    quote = video_ai_real_pricing.video_multiscene_price(220, 2)
-    assert quote["total_xu"] == 396
+    assert tier_info["customer_unit_xu"] == 3214
+    quote = video_ai_real_pricing.video_multiscene_price(3214, 2)
+    assert quote["total_xu"] == 5785
 
 
 def test_scenario4_selfshot3_commercial_contract_and_tier400_pricing():
-    """Scenario 4: self_shot_cinematic_transform commercial contract and Tier 400 pricing."""
+    """Scenario 4: self_shot_cinematic_transform commercial contract and Tier 700 pricing (Tier 400 rejected)."""
     contract = video_tail9.commercial_contract("self_shot_cinematic_transform")
     assert contract["product_type"] == "self_shot_cinematic_transform"
     assert contract["flow_owner"] == "selfshot3"
-    assert contract["engine_route"] == "self_shot_cinematic_transform"
+    assert contract["engine_route"] == "controlled_keyframe_image_to_video"
     assert contract["executor_product_type"] == "self_shot_cinematic_transform"
     assert contract["worker_owner"] == "selfshot3"
-    assert contract["required_capability"] == "video_to_video"
+    assert contract["required_capability"] == "image_to_video"
     adapter = video_tail9.adapter_for("self_shot_cinematic_transform")
     assert adapter["source_audio_available"] is True
     assert contract["supports_single_scene"] is True
-    assert 400 in contract["supported_quality_tiers"]
+    assert 400 not in contract["supported_quality_tiers"]
+    assert 700 in contract["supported_quality_tiers"]
 
-    # Package compatibility for 1 scene, Tier 400, 9:16
+    # Package compatibility for 1 scene, Tier 400 rejected
     compat = video_tail9.package_compatibility(
         "self_shot_cinematic_transform",
         scene_count=1,
@@ -97,12 +120,24 @@ def test_scenario4_selfshot3_commercial_contract_and_tier400_pricing():
         asset_ready=True,
         input_valid=True,
     )
-    assert compat["ok"] is True
-    assert compat["blockers"] == []
+    assert compat["ok"] is False
+    assert "quality_tier_not_supported" in compat["blockers"]
 
-    # Verify Tier 400 unit price is 80 Xu
-    tier_info = video_ai_real_pricing.product_video_route_by_tier(400)
-    assert tier_info["customer_unit_xu"] == 80
+    # Package compatibility for 1 scene, Tier 700 passes
+    compat_700 = video_tail9.package_compatibility(
+        "self_shot_cinematic_transform",
+        scene_count=1,
+        ratio="9:16",
+        quality_tier_id=700,
+        asset_ready=True,
+        input_valid=True,
+    )
+    assert compat_700["ok"] is True
+    assert compat_700["blockers"] == []
+
+    # Verify Tier 700 unit price is 3214 Xu
+    tier_info = video_ai_real_pricing.product_video_route_by_tier(700)
+    assert tier_info["customer_unit_xu"] == 3214
 
 
 def test_selfshot_audio_authority_source_audio_preserved_by_default():
@@ -162,7 +197,7 @@ def test_selfshot_delivery_receipt_and_exactly_once_billing(tmp_path):
     with open(valid_mp4_ss2, "wb") as f:
         f.write(b"\x00\x00\x00 ftypisom" + b"\x00" * 1024)
 
-    # Scenario 3: 2 scenes -> 396 Xu (Tier 700 with standard 10% 2-scene discount: 2 * 220 * 0.9 = 396)
+    # Scenario 3: 2 scenes -> 5785 Xu (Tier 700 with standard 10% 2-scene discount: 2 * 3214 * 0.9 = 5785)
     project_ss2 = {
         "id": 703,
         "user_id": 8888,
@@ -170,7 +205,7 @@ def test_selfshot_delivery_receipt_and_exactly_once_billing(tmp_path):
         "final_video_path": valid_mp4_ss2,
         "video_delivered_at": "2026-09-15T12:00:00Z",
         "video_delivery_message_id": "11111",
-        "quoted_price_xu": 396,
+        "quoted_price_xu": 5785,
     }
     job_ss2 = {"id": 803, "project_id": 703, "user_id": 8888}
     result_ss2 = {
@@ -181,9 +216,9 @@ def test_selfshot_delivery_receipt_and_exactly_once_billing(tmp_path):
 
     decision_ss2 = queue.product_video_delivery_charge_decision(project_ss2, job_ss2, result_ss2)
     assert decision_ss2["ok"] is True
-    assert decision_ss2["amount_xu"] == 396
+    assert decision_ss2["amount_xu"] == 5785
     assert decision_ss2["already_charged"] is False
-    assert decision_ss2["charge_idempotency_key"] == "product_video_final_delivery:803:396"
+    assert decision_ss2["charge_idempotency_key"] == "product_video_final_delivery:803:5785"
 
     # Scenario 4: 1 scene -> 80 Xu
     valid_mp4_ss3 = str(tmp_path / "ss3_final.mp4")
