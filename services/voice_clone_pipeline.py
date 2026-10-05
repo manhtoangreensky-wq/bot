@@ -63,9 +63,7 @@ class CustomVoiceCreateResult:
 
     def __post_init__(self) -> None:
         if not self.outcome_certainty or self.outcome_certainty in ("UNATTEMPTED", "UNKNOWN"):
-            if self.ok and self.clone_dispatched and self.clone_submit_count > 0:
-                self.outcome_certainty = "SUCCESS"
-            elif self.clone_dispatched or self.clone_submit_count > 0:
+            if self.clone_dispatched or self.clone_submit_count > 0:
                 self.outcome_certainty = "AMBIGUOUS"
             elif not self.ok:
                 self.outcome_certainty = "DETERMINISTIC_FAILURE"

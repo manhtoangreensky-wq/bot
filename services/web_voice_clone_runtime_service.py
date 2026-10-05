@@ -696,6 +696,8 @@ def transition_voice_clone_first_free_state(
     allowed_from: tuple[str, ...] | None = None
     if str(to_state) == "settled":
         allowed_from = ("provider_succeeded",)
+    elif str(to_state) == "provider_succeeded":
+        allowed_from = ("provider_started",)
     elif from_states is not None:
         allowed_from = (from_states,) if isinstance(from_states, str) else tuple(from_states)
 
@@ -729,12 +731,14 @@ def job_has_durable_provider_success_authority(job: dict[str, Any], user_id: int
     """Verify that a job possesses durable authoritative proof of provider creation.
 
     Prevents premature reconciliation/settlement on draft profiles before provider success.
-    Invariants (Phase C):
+    Invariants (Phase C & R1.4C):
     - user_id matches job owner
     - canonical_profile_id is present (> 0)
     - provider_outcome_state == 'provider_success'
     - provider_execution_count == 1
+    - provider_clone_submit_count == 1
     - provider_voice_id is present and non-empty
+    - provider_route is present and non-empty
     - settlement_idempotency_key matches expected format
     """
     if not job or not isinstance(job, dict):
@@ -749,8 +753,13 @@ def job_has_durable_provider_success_authority(job: dict[str, Any], user_id: int
         return False
     if int(job.get("provider_execution_count") or 0) != 1:
         return False
+    if int(job.get("provider_clone_submit_count") or 0) != 1:
+        return False
     provider_voice_id = str(job.get("provider_voice_id") or "").strip()
     if not provider_voice_id:
+        return False
+    provider_route = str(job.get("provider_route") or "").strip()
+    if not provider_route:
         return False
     job_id = str(job.get("job_id") or "").strip()
     expected_settle_key = f"voice_clone_settle:{uid}:{job_id}"

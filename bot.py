@@ -282436,7 +282436,9 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
             )
             
             dispatched = bool(clone_dispatched or actual_submits > 0)
-            if outcome_certainty == "AMBIGUOUS":
+            if bool(result.ok) and dispatched:
+                is_ambiguous = True
+            elif outcome_certainty == "AMBIGUOUS":
                 is_ambiguous = True
             elif outcome_certainty == "DETERMINISTIC_FAILURE":
                 is_ambiguous = False
@@ -282474,7 +282476,37 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
 
         # Provider success: persist provider result before wallet settlement
         if prepared_quote == 0 and not is_admin_user(uid):
-            transition_voice_clone_first_free_state(uid, job_id, "provider_succeeded", reason="PROVIDER_SUCCESS")
+            success_transition_ok = transition_voice_clone_first_free_state(
+                uid,
+                job_id,
+                "provider_succeeded",
+                from_states=("provider_started",),
+                reason="PROVIDER_SUCCESS",
+            )
+            if not success_transition_ok:
+                fail_status = "FIRST_FREE_STATE_CONFLICT"
+                mark_voice_profile_activation_failed(
+                    uid,
+                    profile_id,
+                    get_user_voice_profile(uid, profile_id),
+                    "failed_first_free_state_conflict",
+                    "First-free state conflict: provider_succeeded transition denied",
+                )
+                update_web_voice_clone_job(
+                    job_id,
+                    status="failed",
+                    status_reason=fail_status,
+                    provider_outcome_state="provider_ambiguous",
+                    provider_ambiguity_state="FIRST_FREE_STATE_CONFLICT",
+                    provider_execution_count=actual_submits,
+                    provider_clone_submit_count=actual_submits,
+                    provider_voice_id=provider_voice_id,
+                    provider_route=provider_name,
+                )
+                return JSONResponse(
+                    status_code=409,
+                    content={"ok": False, "error_code": fail_status, "message": "First-free entitlement state conflict"},
+                )
 
         update_user_voice_profile(
             uid,
@@ -282506,7 +282538,17 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
 
     if quote_xu == 0 or is_admin_user(uid):
         if not is_admin_user(uid):
-            transition_voice_clone_first_free_state(uid, job_id, "settled", reason="SETTLED")
+            settled_ok = transition_voice_clone_first_free_state(uid, job_id, "settled", reason="SETTLED")
+            if not settled_ok:
+                update_web_voice_clone_job(
+                    job_id,
+                    status="failed",
+                    status_reason="SETTLEMENT_FAILED",
+                )
+                return JSONResponse(
+                    status_code=409,
+                    content={"ok": False, "error_code": "FIRST_FREE_SETTLEMENT_FAILED", "message": "Failed to settle first-free entitlement"},
+                )
         update_user_voice_profile(uid, profile_id, status="ready")
         final_job = update_web_voice_clone_job(
             job_id,

@@ -76,6 +76,7 @@ from services.web_voice_clone_runtime_service import (
     ensure_web_voice_clone_schema,
     get_voice_clone_first_free_entitlement,
     get_web_voice_clone_job,
+    job_has_durable_provider_success_authority,
     prepare_web_voice_clone_job,
     release_voice_clone_first_free_reservation,
     to_safe_voice_clone_job_projection,
@@ -1341,10 +1342,10 @@ def test_34_crash_after_profile_persistence():
                 job_id, idempotency_key, web_request_id, user_id,
                 payload_hash, upload_id, consent_snapshot, display_name,
                 quote_xu, pricing_state, status, status_reason,
-                provider_execution_count, provider_outcome_state,
+                provider_execution_count, provider_clone_submit_count, provider_route, provider_outcome_state,
                 settlement_status, settlement_idempotency_key, canonical_profile_id,
                 provider_voice_id, preview_audio_bytes, charged_xu, created_at, updated_at
-            ) VALUES (?, 'idem_34', 'req_34', ?, 'hash', 'upl_34', 1, 'Test 34', 50, 'paid_50_xu', 'payment_required', 'INSUFFICIENT_FUNDS', 1, 'provider_success', 'unsettled', ?, ?, 'vox_34', 1000, 0, datetime('now'), datetime('now'))
+            ) VALUES (?, 'idem_34', 'req_34', ?, 'hash', 'upl_34', 1, 'Test 34', 50, 'paid_50_xu', 'payment_required', 'INSUFFICIENT_FUNDS', 1, 1, 'minimax', 'provider_success', 'unsettled', ?, ?, 'vox_34', 1000, 0, datetime('now'), datetime('now'))
             """,
             (job_id, uid, settle_key, pid),
         )
@@ -1384,10 +1385,10 @@ def test_35_crash_after_debit_before_completed_state():
                 job_id, idempotency_key, web_request_id, user_id,
                 payload_hash, upload_id, consent_snapshot, display_name,
                 quote_xu, pricing_state, status, status_reason,
-                provider_execution_count, provider_outcome_state,
+                provider_execution_count, provider_clone_submit_count, provider_route, provider_outcome_state,
                 settlement_status, settlement_idempotency_key, canonical_profile_id,
                 provider_voice_id, preview_audio_bytes, charged_xu, created_at, updated_at
-            ) VALUES (?, 'idem_35', 'req_35', ?, 'hash', 'upl_35', 1, 'Test 35', 50, 'paid_50_xu', 'processing', 'CLAIMED_FOR_EXECUTION', 1, 'provider_success', 'settling', ?, ?, 'vox_35', 1000, 0, datetime('now'), datetime('now'))
+            ) VALUES (?, 'idem_35', 'req_35', ?, 'hash', 'upl_35', 1, 'Test 35', 50, 'paid_50_xu', 'processing', 'CLAIMED_FOR_EXECUTION', 1, 1, 'minimax', 'provider_success', 'settling', ?, ?, 'vox_35', 1000, 0, datetime('now'), datetime('now'))
             """,
             (job_id, uid, settle_key, pid),
         )
@@ -1935,8 +1936,9 @@ def test_46_reconcile_first_free_job_transitions_to_settled(monkeypatch):
     )
     job_id = res_prep.json()["job_id"]
 
-    # Acquire reservation and advance to provider_succeeded
+    # Acquire reservation and advance to provider_succeeded via provider_started
     acquire_voice_clone_first_free_reservation(uid, job_id)
+    transition_voice_clone_first_free_state(uid, job_id, "provider_started", reason="DISPATCHING_PROVIDER")
     transition_voice_clone_first_free_state(uid, job_id, "provider_succeeded", reason="PROVIDER_SUCCESS")
 
     # Put job in processing with canonical profile AND durable provider success authority
@@ -1949,6 +1951,8 @@ def test_46_reconcile_first_free_job_transitions_to_settled(monkeypatch):
         quote_xu=0,
         provider_outcome_state="provider_success",
         provider_execution_count=1,
+        provider_clone_submit_count=1,
+        provider_route="minimax",
         provider_voice_id="vox_46",
         settlement_idempotency_key=settle_key,
     )
@@ -2245,6 +2249,8 @@ def test_53_paid_durable_provider_success_unsettled_reconcile_settles_once(monke
         quote_xu=50,
         provider_outcome_state="provider_success",
         provider_execution_count=1,
+        provider_clone_submit_count=1,
+        provider_route="minimax",
         provider_voice_id="vox_53",
         settlement_idempotency_key=settle_key,
         settlement_status="unsettled",
@@ -2289,6 +2295,8 @@ def test_54_paid_duplicate_reconcile_second_debit_zero(monkeypatch):
         quote_xu=50,
         provider_outcome_state="provider_success",
         provider_execution_count=1,
+        provider_clone_submit_count=1,
+        provider_route="minimax",
         provider_voice_id="vox_54",
         settlement_idempotency_key=settle_key,
         settlement_status="unsettled",
@@ -4695,6 +4703,512 @@ def test_120_r1_4b_r1_4a_string_http_route_name_certainty_remains_pass():
         clone_submit_count=1,
     )
     assert res2.outcome_certainty == "AMBIGUOUS"
+
+
+# ---------------------------------------------------------------------------
+# 121-138: MANDATORY R1.4C DURABLE SUCCESS FSM AUTHORITY TEST MATRIX (PHASE E)
+# ---------------------------------------------------------------------------
+
+
+def test_121_r1_4c_ok_true_deterministic_failure_dispatched_quarantines_ambiguous(monkeypatch):
+    """121 (Phase E-01): ok=True + certainty=DETERMINISTIC_FAILURE + dispatched=True + submit=1 -> AMBIGUOUS, first-free not released."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50121
+    setup_user_wallet(uid, balance=0)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 0)
+
+    async def fake_create(**kwargs):
+        return CustomVoiceCreateResult(
+            ok=True,
+            status="FAIL_CONTRADICTORY",
+            outcome_certainty="DETERMINISTIC_FAILURE",
+            clone_dispatched=True,
+            clone_submit_count=1,
+            provider_voice_id="vox_121",
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+    res_prep = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id, "consent": True, "display_name": "Job 121"},
+        actor_id=str(uid),
+    )
+    job_id = res_prep.json()["job_id"]
+
+    res_confirm = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm", None, actor_id=str(uid))
+    assert res_confirm.status_code == 504
+    assert res_confirm.json()["error_code"] == "INCOHERENT_CERTAINTY_DETERMINISTIC_FAILURE"
+
+    ent = get_voice_clone_first_free_entitlement(uid)
+    assert ent is not None
+    assert ent["state"] == "provider_ambiguous"
+    assert ent["released_at"] is None  # Must NOT be released!
+
+
+def test_122_r1_4c_ok_true_deterministic_failure_dispatched_paid_zero_debit_no_ready(monkeypatch):
+    """122 (Phase E-02): contradictory tuple on paid job -> wallet delta 0, profile not ready."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50122
+    setup_user_wallet(uid, balance=100)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 50)
+
+    async def fake_create(**kwargs):
+        return CustomVoiceCreateResult(
+            ok=True,
+            status="FAIL_CONTRADICTORY",
+            outcome_certainty="DETERMINISTIC_FAILURE",
+            clone_dispatched=True,
+            clone_submit_count=1,
+            provider_voice_id="vox_122",
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+    res_prep = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id, "consent": True, "display_name": "Job 122"},
+        actor_id=str(uid),
+    )
+    job_id = res_prep.json()["job_id"]
+
+    res_confirm = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm", None, actor_id=str(uid))
+    assert res_confirm.status_code == 504
+
+    with bot.db_connect() as conn:
+        bal = conn.execute("SELECT credits FROM users WHERE user_id = ?", (str(uid),)).fetchone()[0]
+        assert bal == 100  # Zero wallet debit!
+        job_row = conn.execute("SELECT status, provider_outcome_state, canonical_profile_id FROM web_voice_clone_jobs WHERE job_id = ?", (job_id,)).fetchone()
+        assert job_row[0] == "failed"
+        assert job_row[1] == "provider_ambiguous"
+        prof_id = job_row[2]
+        prof_row = conn.execute("SELECT status FROM voice_profiles WHERE id = ?", (prof_id,)).fetchone()
+        assert prof_row[0] != "ready"
+
+
+def test_123_r1_4c_ok_true_unattempted_dispatched_quarantines_ambiguous(monkeypatch):
+    """123 (Phase E-03): ok=True + certainty=UNATTEMPTED + dispatched=True + submit=1 -> AMBIGUOUS."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50123
+    setup_user_wallet(uid, balance=0)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 0)
+
+    async def fake_create(**kwargs):
+        return CustomVoiceCreateResult(
+            ok=True,
+            status="UNATTEMPTED_DISPATCHED",
+            outcome_certainty="UNATTEMPTED",
+            clone_dispatched=True,
+            clone_submit_count=1,
+            provider_voice_id="vox_123",
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+    res_prep = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id, "consent": True, "display_name": "Job 123"},
+        actor_id=str(uid),
+    )
+    job_id = res_prep.json()["job_id"]
+
+    res_confirm = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm", None, actor_id=str(uid))
+    assert res_confirm.status_code == 504
+    assert res_confirm.json()["error_code"] in ("INCOHERENT_CERTAINTY_UNATTEMPTED", "INCOHERENT_CERTAINTY_AMBIGUOUS")
+
+    ent = get_voice_clone_first_free_entitlement(uid)
+    assert ent is not None
+    assert ent["state"] == "provider_ambiguous"
+    assert ent["released_at"] is None
+
+
+def test_124_r1_4c_ok_false_explicit_deterministic_no_create_releases_normally(monkeypatch):
+    """124 (Phase E-04): normal ok=False + explicit deterministic no-create + dispatched=True -> deterministic policy still works."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50124
+    setup_user_wallet(uid, balance=0)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 0)
+
+    async def fake_create(**kwargs):
+        return CustomVoiceCreateResult(
+            ok=False,
+            status="INVALID_AUDIO_FORMAT",
+            error_code="AUDIO_FORMAT_INVALID",
+            outcome_certainty="DETERMINISTIC_FAILURE",
+            clone_dispatched=True,
+            clone_submit_count=1,
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+    res_prep = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id, "consent": True, "display_name": "Job 124"},
+        actor_id=str(uid),
+    )
+    job_id = res_prep.json()["job_id"]
+
+    res_confirm = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm", None, actor_id=str(uid))
+    assert res_confirm.status_code == 422
+    assert res_confirm.json()["error_code"] == "AUDIO_FORMAT_INVALID"
+
+    ent = get_voice_clone_first_free_entitlement(uid)
+    assert ent is not None
+    assert ent["state"] == "released"
+
+
+def test_125_r1_4c_durable_success_authority_requires_clone_submit_count_one():
+    """125 (Phase E-05): durable success: execution_count=1, clone_submit_count=0 -> false."""
+    job = {
+        "job_id": "job_125",
+        "user_id": 50125,
+        "canonical_profile_id": 125,
+        "provider_outcome_state": "provider_success",
+        "provider_execution_count": 1,
+        "provider_clone_submit_count": 0,
+        "provider_voice_id": "vox_125",
+        "provider_route": "minimax",
+        "settlement_idempotency_key": "voice_clone_settle:50125:job_125",
+    }
+    assert job_has_durable_provider_success_authority(job, 50125) is False
+
+
+def test_126_r1_4c_durable_success_authority_rejects_clone_submit_count_two():
+    """126 (Phase E-06): durable success: execution_count=1, clone_submit_count=2 -> false."""
+    job = {
+        "job_id": "job_126",
+        "user_id": 50126,
+        "canonical_profile_id": 126,
+        "provider_outcome_state": "provider_success",
+        "provider_execution_count": 1,
+        "provider_clone_submit_count": 2,
+        "provider_voice_id": "vox_126",
+        "provider_route": "minimax",
+        "settlement_idempotency_key": "voice_clone_settle:50126:job_126",
+    }
+    assert job_has_durable_provider_success_authority(job, 50126) is False
+
+
+def test_127_r1_4c_durable_success_authority_requires_non_empty_provider_route():
+    """127 (Phase E-07): durable success: clone_submit_count=1, provider_route empty -> false."""
+    job = {
+        "job_id": "job_127",
+        "user_id": 50127,
+        "canonical_profile_id": 127,
+        "provider_outcome_state": "provider_success",
+        "provider_execution_count": 1,
+        "provider_clone_submit_count": 1,
+        "provider_voice_id": "vox_127",
+        "provider_route": "",
+        "settlement_idempotency_key": "voice_clone_settle:50127:job_127",
+    }
+    assert job_has_durable_provider_success_authority(job, 50127) is False
+
+
+def test_128_r1_4c_durable_success_authority_coherent_evidence_returns_true():
+    """128 (Phase E-08): coherent durable success evidence -> true."""
+    job = {
+        "job_id": "job_128",
+        "user_id": 50128,
+        "canonical_profile_id": 128,
+        "provider_outcome_state": "provider_success",
+        "provider_execution_count": 1,
+        "provider_clone_submit_count": 1,
+        "provider_voice_id": "vox_128",
+        "provider_route": "minimax",
+        "settlement_idempotency_key": "voice_clone_settle:50128:job_128",
+    }
+    assert job_has_durable_provider_success_authority(job, 50128) is True
+
+
+def test_129_r1_4c_first_free_fsm_provider_started_to_provider_succeeded_exactly_once():
+    """129 (Phase E-09): provider_started -> provider_succeeded allowed exactly once."""
+    uid = 50129
+    jid = "job_129"
+    acquire_voice_clone_first_free_reservation(uid, jid)
+    transition_voice_clone_first_free_state(uid, jid, "provider_started", reason="START")
+
+    ok1 = transition_voice_clone_first_free_state(uid, jid, "provider_succeeded", reason="SUCCESS_1")
+    assert ok1 is True
+
+    ok2 = transition_voice_clone_first_free_state(uid, jid, "provider_succeeded", reason="SUCCESS_2")
+    assert ok2 is False  # Cannot transition again from provider_succeeded
+
+
+def test_130_r1_4c_first_free_fsm_provider_ambiguous_to_provider_succeeded_denied():
+    """130 (Phase E-10): provider_ambiguous -> provider_succeeded denied."""
+    uid = 50130
+    jid = "job_130"
+    acquire_voice_clone_first_free_reservation(uid, jid)
+    with bot.db_connect() as conn:
+        conn.execute("UPDATE web_voice_clone_first_free_entitlements SET state = ? WHERE user_id = ?", ("provider_ambiguous", uid))
+
+    ok = transition_voice_clone_first_free_state(uid, jid, "provider_succeeded", reason="DENIED")
+    assert ok is False
+
+
+def test_131_r1_4c_first_free_fsm_provider_failed_to_provider_succeeded_denied():
+    """131 (Phase E-11): provider_failed -> provider_succeeded denied."""
+    uid = 50131
+    jid = "job_131"
+    acquire_voice_clone_first_free_reservation(uid, jid)
+    with bot.db_connect() as conn:
+        conn.execute("UPDATE web_voice_clone_first_free_entitlements SET state = ? WHERE user_id = ?", ("provider_failed", uid))
+
+    ok = transition_voice_clone_first_free_state(uid, jid, "provider_succeeded", reason="DENIED")
+    assert ok is False
+
+
+def test_132_r1_4c_first_free_fsm_released_to_provider_succeeded_denied():
+    """132 (Phase E-12): released -> provider_succeeded denied."""
+    uid = 50132
+    jid = "job_132"
+    acquire_voice_clone_first_free_reservation(uid, jid)
+    with bot.db_connect() as conn:
+        conn.execute("UPDATE web_voice_clone_first_free_entitlements SET state = ? WHERE user_id = ?", ("released", uid))
+
+    ok = transition_voice_clone_first_free_state(uid, jid, "provider_succeeded", reason="DENIED")
+    assert ok is False
+
+
+def test_133_r1_4c_first_free_fsm_settled_to_provider_succeeded_denied():
+    """133 (Phase E-13): settled -> provider_succeeded denied."""
+    uid = 50133
+    jid = "job_133"
+    acquire_voice_clone_first_free_reservation(uid, jid)
+    with bot.db_connect() as conn:
+        conn.execute("UPDATE web_voice_clone_first_free_entitlements SET state = ? WHERE user_id = ?", ("settled", uid))
+
+    ok = transition_voice_clone_first_free_state(uid, jid, "provider_succeeded", reason="DENIED")
+    assert ok is False
+
+
+def test_134_r1_4c_first_free_provider_succeeded_cas_failure_fails_closed(monkeypatch):
+    """134 (Phase E-14): first-free success but provider_succeeded CAS fails -> no settle, profile not ready, job not completed, provider replay 0."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50134
+    setup_user_wallet(uid, balance=0)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 0)
+
+    calls = 0
+
+    async def fake_create(**kwargs):
+        nonlocal calls
+        calls += 1
+        return CustomVoiceCreateResult(
+            ok=True,
+            status="SUCCESS",
+            provider="minimax",
+            provider_voice_id="vox_134",
+            preview_audio_path=str(kwargs.get("sample_path")),
+            preview_audio_bytes=1000,
+            outcome_certainty="SUCCESS",
+            clone_dispatched=True,
+            clone_submit_count=1,
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+    res_prep = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id, "consent": True, "display_name": "Job 134"},
+        actor_id=str(uid),
+    )
+    job_id = res_prep.json()["job_id"]
+
+    orig_transition = transition_voice_clone_first_free_state
+
+    def sabotaged_transition(user_id, jid, to_state, **kwargs):
+        if to_state == "provider_succeeded":
+            return False  # Simulate CAS failure
+        return orig_transition(user_id, jid, to_state, **kwargs)
+
+    monkeypatch.setattr("services.web_voice_clone_runtime_service.transition_voice_clone_first_free_state", sabotaged_transition)
+
+    res_confirm = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm", None, actor_id=str(uid))
+    assert res_confirm.status_code == 409
+    assert res_confirm.json()["error_code"] == "FIRST_FREE_STATE_CONFLICT"
+    assert calls == 1  # Provider replay 0!
+
+    with bot.db_connect() as conn:
+        job_row = conn.execute("SELECT status, canonical_profile_id FROM web_voice_clone_jobs WHERE job_id = ?", (job_id,)).fetchone()
+        assert job_row[0] == "failed"  # Job not completed!
+        prof_id = job_row[1]
+        prof_row = conn.execute("SELECT status FROM voice_profiles WHERE id = ?", (prof_id,)).fetchone()
+        assert prof_row[0] != "ready"  # Profile not ready!
+
+
+def test_135_r1_4c_reconcile_provider_success_clone_submit_count_zero_fails_closed(monkeypatch):
+    """135 (Phase E-15): reconcile provider_success + clone_submit_count=0 -> no settlement."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50135
+    setup_user_wallet(uid, balance=100)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 50)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+    res_prep = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id, "consent": True, "display_name": "Job 135"},
+        actor_id=str(uid),
+    )
+    job_id = res_prep.json()["job_id"]
+
+    prof_id = bot.save_user_voice_profile(uid, "upl_135", display_name="prof_135")
+    settle_key = f"voice_clone_settle:{uid}:{job_id}"
+    update_web_voice_clone_job(
+        job_id,
+        status="processing",
+        canonical_profile_id=prof_id,
+        quote_xu=50,
+        provider_outcome_state="provider_success",
+        provider_execution_count=1,
+        provider_clone_submit_count=0,  # Invalid: 0 submits!
+        provider_route="minimax",
+        provider_voice_id="vox_135",
+        settlement_idempotency_key=settle_key,
+        settlement_status="unsettled",
+    )
+
+    reconcile_path = f"/internal/v1/web-voice-clone/jobs/{job_id}/reconcile"
+    res_rec = post_json_auth(client, reconcile_path, None, actor_id=str(uid))
+    assert res_rec.status_code == 200
+    assert res_rec.json()["status"] == "processing"  # Must NOT settle!
+
+    with bot.db_connect() as conn:
+        bal = conn.execute("SELECT credits FROM users WHERE user_id = ?", (str(uid),)).fetchone()[0]
+        assert bal == 100  # Zero wallet debit!
+        prof_row = conn.execute("SELECT status FROM voice_profiles WHERE id = ?", (prof_id,)).fetchone()
+        assert prof_row[0] != "ready"
+
+
+def test_136_r1_4c_reconcile_coherent_provider_success_settles_idempotently(monkeypatch):
+    """136 (Phase E-16): reconcile coherent provider_success + clone_submit_count=1 -> may settle idempotently."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50136
+    setup_user_wallet(uid, balance=100)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 50)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+    res_prep = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id, "consent": True, "display_name": "Job 136"},
+        actor_id=str(uid),
+    )
+    job_id = res_prep.json()["job_id"]
+
+    prof_id = bot.save_user_voice_profile(uid, "upl_136", display_name="prof_136")
+    settle_key = f"voice_clone_settle:{uid}:{job_id}"
+    update_web_voice_clone_job(
+        job_id,
+        status="processing",
+        canonical_profile_id=prof_id,
+        quote_xu=50,
+        provider_outcome_state="provider_success",
+        provider_execution_count=1,
+        provider_clone_submit_count=1,
+        provider_route="minimax",
+        provider_voice_id="vox_136",
+        settlement_idempotency_key=settle_key,
+        settlement_status="unsettled",
+    )
+
+    reconcile_path = f"/internal/v1/web-voice-clone/jobs/{job_id}/reconcile"
+    # Reconcile 1
+    res1 = post_json_auth(client, reconcile_path, None, actor_id=str(uid))
+    assert res1.status_code == 200
+    assert res1.json()["status"] == "completed"
+    assert res1.json()["charged_xu"] == 50
+
+    with bot.db_connect() as conn:
+        bal = conn.execute("SELECT credits FROM users WHERE user_id = ?", (str(uid),)).fetchone()[0]
+        assert bal == 50
+        prof_row = conn.execute("SELECT status FROM voice_profiles WHERE id = ?", (prof_id,)).fetchone()
+        assert prof_row[0] == "ready"
+
+    # Reconcile 2 (idempotent duplicate)
+    res2 = post_json_auth(client, reconcile_path, None, actor_id=str(uid))
+    assert res2.status_code == 200
+    assert res2.json()["status"] == "completed"
+
+    with bot.db_connect() as conn:
+        bal = conn.execute("SELECT credits FROM users WHERE user_id = ?", (str(uid),)).fetchone()[0]
+        assert bal == 50  # Second debit remains 0!
+
+
+def test_137_r1_4c_real_concurrent_first_free_regression_remains_pass():
+    """137 (Phase E-17): Real concurrent first-free reservation race allows exactly 1 reservation winner."""
+    import threading
+    uid = 50137
+    job_ids = [f"job_137_{i}" for i in range(8)]
+    results = []
+
+    def _acquire(jid):
+        ok, reason, rec = acquire_voice_clone_first_free_reservation(
+            user_id=uid,
+            job_id=jid,
+            claim_token=f"claim_{jid}",
+        )
+        results.append((jid, ok, reason))
+
+    threads = [threading.Thread(target=_acquire, args=(jid,)) for jid in job_ids]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    winners = [r for r in results if r[1] is True]
+    assert len(winners) == 1
+
+
+def test_138_r1_4c_r1_4a_r1_4b_certainty_dispatch_matrix_remains_pass():
+    """138 (Phase E-18): R1.4A/R1.4B certainty and dispatch matrix preservation."""
+    # Preflight contract
+    res_preflight = CustomVoiceCreateResult(
+        ok=True,
+        status="PREFLIGHT_PASS",
+        clone_dispatched=False,
+        clone_submit_count=0,
+    )
+    assert res_preflight.clone_dispatched is False
+    assert res_preflight.clone_submit_count == 0
+    assert res_preflight.outcome_certainty == "UNATTEMPTED"
+
+    # No infer dispatch from ok
+    res_raw = CustomVoiceCreateResult(ok=True, status="SUCCESS")
+    assert res_raw.clone_dispatched is False
+    assert res_raw.clone_submit_count == 0
+    assert res_raw.outcome_certainty == "UNATTEMPTED"
+
+    # Dispatched ambiguous contract
+    res_ambig = CustomVoiceCreateResult(
+        ok=False,
+        status="UPSTREAM_504",
+        outcome_certainty="AMBIGUOUS",
+        clone_dispatched=True,
+        clone_submit_count=1,
+    )
+    assert res_ambig.clone_dispatched is True
+    assert res_ambig.clone_submit_count == 1
+    assert res_ambig.outcome_certainty == "AMBIGUOUS"
 
 
 
