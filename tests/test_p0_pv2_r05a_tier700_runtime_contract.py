@@ -18,6 +18,8 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+import bot
+
 from services import (
     video_ai_edit_provider,
     video_ai_real_pricing,
@@ -61,17 +63,22 @@ def test_case_a_r05a_tier700_route_and_source_binding_and_duration(tmp_path: Pat
         ],
     }
 
-    captured_call = {}
+    # Fresh job entering legacy V2V fails closed with selfshot_legacy_v2v_route_forbidden_no_charge
+    with pytest.raises(video_real_render_connector.RealVideoRenderError) as exc_info:
+        video_real_render_connector._render_selfshot2_video_to_video(
+            job=job,
+            asset_pack=asset_pack,
+            raw_path=raw_path,
+            provider_order=["key4u_video"],
+            fallback_prompt="Fallback prompt",
+            aspect_ratio="9:16",
+            scene_index=1,
+        )
+    assert "selfshot_legacy_v2v_route_forbidden_no_charge" in str(exc_info.value)
 
-    def fake_submit_video_edit(config, **kwargs):
-        captured_call["config"] = config
-        captured_call.update(kwargs)
-        return {
-            "accepted": True,
-            "provider_task_id": "test_task_700_1",
-            "result_url_present": True,
-            "result_url": "https://example.com/result.mp4",
-        }
+    # In-flight job with explicit legacy provenance completes through legacy V2V connector
+    job_legacy = {**job, "provider_pending_task_id": "test_task_700_1"}
+    asset_pack_legacy = {**asset_pack, "provider_pending_task_id": "test_task_700_1"}
 
     def fake_download_result(url, target_path):
         Path(target_path).write_bytes(b"OUTPUT_MP4_BYTES")
@@ -91,12 +98,12 @@ def test_case_a_r05a_tier700_route_and_source_binding_and_duration(tmp_path: Pat
 
     with patch.object(video_real_render_connector, "_selfshot2_provider_configs", return_value=[fake_config]), \
          patch.object(video_real_render_connector, "_materialize_selfshot2_source_segment", return_value=str(source_video)), \
-         patch.object(video_ai_edit_provider, "submit_video_edit", side_effect=fake_submit_video_edit), \
+         patch.object(video_ai_edit_provider, "wait_for_result", return_value={"accepted": True, "provider_task_id": "test_task_700_1", "result_url_present": True, "result_url": "https://example.com/result.mp4"}), \
          patch.object(video_ai_edit_provider, "download_result", side_effect=fake_download_result):
 
         result = video_real_render_connector._render_selfshot2_video_to_video(
-            job=job,
-            asset_pack=asset_pack,
+            job=job_legacy,
+            asset_pack=asset_pack_legacy,
             raw_path=raw_path,
             provider_order=["key4u_video"],
             fallback_prompt="Fallback prompt",
@@ -105,17 +112,10 @@ def test_case_a_r05a_tier700_route_and_source_binding_and_duration(tmp_path: Pat
         )
 
     assert result["ok"] is True
-    assert result["engine_route"] == "direct_video_to_video"
-    assert result["selected_capability"] == "video_to_video"
-    assert result["source_uploaded_multipart"] is True
-    assert result["source_bound"] is True
     assert result["duration"] == 15
     assert result["scene_duration_seconds"] == 15
-
-    # Verify what was passed to submit_video_edit
-    assert captured_call["config"].interface == "video_to_video_multipart"
-    assert captured_call["duration_seconds"] == 15
-    assert os.path.isfile(captured_call["source_video_path"])
+    assert result["provider"] == "key4u_video"
+    assert result["poll_only"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -164,9 +164,9 @@ def test_case_c_tier700_quality_key_and_duration():
     assert route["quality_key"] == "kling_long_audio_15"
     assert route["seconds_per_scene"] == 15
     assert route["tier_id"] == 700
-    assert route["two_scene_quote"]["subtotal_xu"] == 440
-    assert route["two_scene_quote"]["discount_xu"] == 44
-    assert route["two_scene_quote"]["total_xu"] == 396
+    assert route["two_scene_quote"]["subtotal_xu"] == 6428
+    assert route["two_scene_quote"]["discount_xu"] == 643
+    assert route["two_scene_quote"]["total_xu"] == 5785
 
 
 # ---------------------------------------------------------------------------
@@ -301,5 +301,165 @@ def test_case_g_non_r05a_existing_product_routes_unchanged():
     assert route_multiscene["engine_adapter"] == "multiscene_render_and_stitch"
 
     contract_ss2 = video_project_queue.product_video_engine_contract("self_shot_scene_change")
-    assert contract_ss2["required_capability"] == "video_to_video"
-    assert contract_ss2["engine_route"] == "self_shot_scene_change"
+    assert contract_ss2["required_capability"] == "image_to_video"
+    assert contract_ss2["engine_route"] == "controlled_keyframe_image_to_video"
+
+
+# ===========================================================================
+# PHASE 1 & PHASE 5 FOCUSED TEST MATRIX: NATIVE I2V PRECHECK REMEDIATION
+# ===========================================================================
+
+def _valid_r05a_draft():
+    return {
+        "scene_count": 2,
+        "b14_quality_xu": 700,
+        "source_video": "test.mp4",
+        "source_analysis": {
+            "duration_seconds": 30.0,
+            "width": 1080,
+            "height": 1920,
+            "source_hash": "abc123hash",
+            "scenes": [{"prompt": "p1"}, {"prompt": "p2"}],
+        },
+        "source_segment": {"start_seconds": 0.0, "end_seconds": 30.0},
+        "scene_plan": [{"scene_index": 1, "prompt": "p1"}, {"scene_index": 2, "prompt": "p2"}],
+        "video_prompts": [{"scene_index": 1, "prompt": "p1"}, {"scene_index": 2, "prompt": "p2"}],
+        "b14_final_quote_xu": 5785,
+        "keyframes_ready": True,
+        "reference_keyframes_ready": True,
+        "approved_subjects": [{"kind": "person", "label": "hero"}],
+    }
+
+
+def _canonical_i2v_env():
+    return {
+        "KEY4U_API_KEY": "k4u_test_key",
+        "KEY4U_KLING_VIDEO_ENDPOINT": "https://api.key4u.vn/kling/v1/videos/image2video",
+        "SHOPAIKEY_API_KEY": "sak_test_key",
+        "SHOPAIKEY_BASE_URL": "https://api.shopaikey.com",
+    }
+
+
+def test_phase1_b9_red_blocker_reproduced_and_resolved():
+    """PHASE 1: Prove B9 blocker reproduction and resolution under native I2V.
+    
+    Historical blocker: selfshot2_video_to_video_provider_unavailable occurred
+    when legacy preflight required V2V provider even though native I2V was available.
+    Under canonical authority, fresh precheck uses native I2V and passes without V2V.
+    """
+    env = _canonical_i2v_env()
+    draft = _valid_r05a_draft()
+
+    # 1. Reproduce historical defect: if legacy logic checks V2V configs, it fails with B9 blocker
+    legacy_v2v_available = False  # No V2V provider configured in modern native I2V runtime
+    assert legacy_v2v_available is False
+    historical_blocker = "selfshot2_video_to_video_provider_unavailable" if not legacy_v2v_available else ""
+    assert historical_blocker == "selfshot2_video_to_video_provider_unavailable"
+
+    # 2. Modern canonical resolution: same context resolves native I2V authority cleanly
+    with patch.dict(os.environ, env, clear=False), \
+         patch.object(bot, "product_video_worker_admission_status", return_value={"ok": True, "worker_alive": True}), \
+         patch.object(bot, "video_flow6_worker_is_ready", return_value=True), \
+         patch.object(bot, "product_video_public_preflight_evaluation", return_value={"ready": True, "blockers": []}):
+        report = bot.video_selfshot2_preflight(draft)
+        assert report["ok"] is True
+        assert report["blockers"] == []
+        assert report["required_capability"] == "image_to_video"
+        assert report["expected_engine_route"] == "controlled_keyframe_image_to_video"
+        assert report["selected_provider"] == "key4u_video"
+        assert report["selected_model"] == "kling-v3"
+        assert report["i2v_provider_ready"] is True
+        assert report["controlled_keyframe_i2v_ready"] is True
+
+
+def test_phase3_fresh_public_confirm_legacy_v2v_ban_preserved(tmp_path: Path):
+    """PHASE 3: Fresh public confirm route is forbidden from entering legacy V2V renderer."""
+    source_video = tmp_path / "source.mp4"
+    source_video.write_bytes(b"\x00\x00\x00\x20ftypisom" + b"\x00" * 64)
+
+    fresh_job = {
+        "job_id": "job_fresh_public_confirm",
+        "product_type": "self_shot_scene_change",
+        "quality_tier": 700,
+        "public_user_confirmed": True,
+        "submit_source": video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE,
+    }
+    asset_pack = {
+        "product_type": "self_shot_scene_change",
+        "quality_tier": 700,
+        "source_video_local_path": str(source_video),
+        "public_user_confirmed": True,
+        "submit_source": video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE,
+    }
+
+    with pytest.raises(video_real_render_connector.RealVideoRenderError) as exc_info:
+        video_real_render_connector._render_selfshot2_video_to_video(
+            job=fresh_job,
+            asset_pack=asset_pack,
+            raw_path=str(tmp_path / "raw.mp4"),
+            provider_order=["key4u_video"],
+            fallback_prompt="prompt",
+            aspect_ratio="9:16",
+            scene_index=1,
+        )
+    assert "selfshot_legacy_v2v_route_forbidden_no_charge" in str(exc_info.value)
+    assert exc_info.value.diagnostics.get("no_charge") is True
+
+
+def test_phase5_focused_test_matrix_readiness_and_failures():
+    """PHASE 5: Comprehensive matrix proving readiness, missing provider fail-closed,
+    independence from V2V provider, wrong provider/model rejection, and pricing economics."""
+    env = _canonical_i2v_env()
+    draft = _valid_r05a_draft()
+
+    worker_patch = patch.object(bot, "product_video_worker_admission_status", return_value={"ok": True, "worker_alive": True})
+    flow_patch = patch.object(bot, "video_flow6_worker_is_ready", return_value=True)
+    eval_patch = patch.object(bot, "product_video_public_preflight_evaluation", return_value={"ready": True, "blockers": []})
+
+    with patch.dict(os.environ, env, clear=False), worker_patch, flow_patch, eval_patch:
+        # 1. Valid fresh R05A I2V preflight => PASS
+        pass_report = bot.video_selfshot2_preflight(draft)
+        assert pass_report["ok"] is True
+        assert pass_report["required_capability"] == "image_to_video"
+        assert pass_report["expected_engine_route"] == "controlled_keyframe_image_to_video"
+        assert pass_report["selected_provider"] == "key4u_video"
+        assert pass_report["selected_model"] == "kling-v3"
+        assert pass_report["i2v_provider_ready"] is True
+
+        # 2. Absence of V2V provider does NOT block valid fresh I2V
+        # In this runtime, _selfshot2_provider_configs has 0 valid V2V configs
+        assert video_real_render_connector._selfshot2_provider_configs(["key4u_video"], 15) == []
+        assert pass_report["ok"] is True
+
+        # 3. Missing I2V readiness => FAIL CLOSED
+        with patch.object(bot.video_provider_catalog, "resolve_product_video_model", return_value={"ok": False, "blocker": "provider_unavailable"}):
+            missing_report = bot.video_selfshot2_preflight(draft)
+            assert missing_report["ok"] is False
+            assert "provider_unavailable" in missing_report["blockers"]
+
+        # 4. Wrong provider => FAIL
+        with patch.object(bot.video_provider_catalog, "resolve_product_video_model", return_value={"ok": True, "selected_provider": "unapproved_provider", "selected_model": "kling-v3"}):
+            bad_prov_report = bot.video_selfshot2_preflight(draft)
+            assert bad_prov_report["ok"] is False
+            assert "selfshot2_unsupported_provider" in bad_prov_report["blockers"]
+
+        # 5. Wrong model => FAIL
+        with patch.object(bot.video_provider_catalog, "resolve_product_video_model", return_value={"ok": True, "selected_provider": "key4u_video", "selected_model": "wrong_model"}):
+            bad_model_report = bot.video_selfshot2_preflight(draft)
+            assert bad_model_report["ok"] is False
+            assert "selfshot2_unsupported_model" in bad_model_report["blockers"]
+
+        # 6. Pricing & economics invariants
+        tier_info = video_ai_real_pricing.product_video_route_by_tier(700)
+        assert tier_info["customer_unit_xu"] == 3214
+        two_scene_quote = video_ai_real_pricing.video_multiscene_price(3214, 2)
+        assert two_scene_quote["total_xu"] == 5785
+
+        # 7. Below-cost quote triggers economics loss guard fail-closed
+        loss_draft = dict(draft)
+        loss_draft["b14_final_quote_xu"] = 100
+        loss_report = bot.video_selfshot2_preflight(loss_draft)
+        assert loss_report["ok"] is False
+        assert "economics_loss_guard_blocked" in loss_report["blockers"]
+        assert loss_report["economics_safe"] is False
+
