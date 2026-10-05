@@ -1152,6 +1152,8 @@ def test_29o_worker_credential_transport_rejects_redirects() -> None:
 
     class TargetHandler(http.server.BaseHTTPRequestHandler):
         def _capture(self) -> None:
+            if "Content-Length" in self.headers:
+                self.rfile.read(int(self.headers["Content-Length"]))
             target_requests.append(self.path)
             self.send_response(200)
             self.end_headers()
@@ -1167,6 +1169,8 @@ def test_29o_worker_credential_transport_rejects_redirects() -> None:
 
     class RedirectHandler(http.server.BaseHTTPRequestHandler):
         def do_POST(self) -> None:
+            if "Content-Length" in self.headers:
+                self.rfile.read(int(self.headers["Content-Length"]))
             self.send_response(302)
             self.send_header(
                 "Location",
