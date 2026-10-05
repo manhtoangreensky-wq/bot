@@ -912,6 +912,12 @@ class NoCloseProxy:
     def close(self) -> None:
         pass
 
+    def __enter__(self) -> sqlite3.Connection:
+        return self._target.__enter__()
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> Any:
+        return self._target.__exit__(exc_type, exc_val, exc_tb)
+
     def __getattr__(self, item: str) -> Any:
         return getattr(self._target, item)
 
@@ -1164,7 +1170,6 @@ def _seed_and_confirm_project(
     }
 
     # 3. Draft-to-project seam: bot.video_b14_prepare_project_for_invoice
-    bot.db_connect = lambda: NoCloseProxy(conn)
     session = {
         "product_id": product_type,
         "topic": f"PV10 Test {product_type}",
@@ -1214,7 +1219,12 @@ def _seed_and_confirm_project(
             },
         },
     }
-    proj_update = bot.video_b14_prepare_project_for_invoice(user_id, session)
+    orig_db_connect = bot.db_connect
+    bot.db_connect = lambda: NoCloseProxy(conn)
+    try:
+        proj_update = bot.video_b14_prepare_project_for_invoice(user_id, session)
+    finally:
+        bot.db_connect = orig_db_connect
     pid = int(proj_update["project_id"])
 
     # 4. Production provider admission & router (zero manual keys or candidate chains)

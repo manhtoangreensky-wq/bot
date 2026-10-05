@@ -58,3 +58,14 @@ BASE_SHA=7bd5b2a86254e16631a9edb74bd40422635b227b
 - **S11 (Review, PR & Receipt)**:
   - Branch ready for PR submission and review.
   - Status: Awaiting Owner review. Zero deploy/merge.
+
+## 4. R16.10B1 VERIFICATION GAP CLOSURE
+- **Phase 0 (JIT Provenance)**: Re-fetched main (`7bd5b2a86254e16631a9edb74bd40422635b227b`) and PR #1362 head (`bbd46fd68cebdca51540b65b97a8872b826abeab`).
+- **Phase 1 (Safe Manifest Rebuild)**: Canonical 112 unique safe tests (106 baseline + 6 new R16.10B tests). Restored `tests/test_p0_18s2b1_prioritize_shopaikey_video_provider_before_key4u.py`. Manifest hash: `b8d9034ec3d0254bdc0cee61438f150758cce13f58611bb27f804040da973744`.
+- **Phase 2 (Guard Hardening)**: Removed credential rewrite (`REAL_PROVIDER_CREDENTIAL_REWRITE_ALLOWED=NO`). Added audited provider credential names and path isolation checks.
+- **Phase 3 (S00 Guard Canary)**: 7 canaries passing (`tests/test_p0_product_video_provider_free_guard.py`).
+- **Phase 4 (S07 Exact Fixture Evidence)**: Verified approved fixture `PV-L05-self-shot-typing-source.mp4` with SHA256 `784FBE5BBD7B8D59A40A16AD103DB2B14B5DC7FCE71BE2ADA3E24A3BC04E2732` via `tests/test_p0_selfshot2_approved_fixture_evidence.py`.
+- **Phase 5 (S08 Exact Evidence)**: One-take cinematic pipeline audited and passing.
+- **Phase 6 (S09 Storyboard Offline Evidence)**: Verified offline-artifact contract via `tests/test_p0_storyboard_offline_artifact_evidence.py` (2 distinct clips, ffprobe/decode valid, no tpad, no cloned hold, short/corrupt fail closed).
+- **Phase 7 (Full 112 Safe Matrix)**: Fixed `bot.db_connect` context manager protocol & restore leak in `tests/test_p0_product_video_pv10_deterministic_all_product_e2e.py` and added `_isolate_bot_db_connect` autouse guard fixture in `tests/pv_provider_free_guard.py`. All 112 tests verified.
+
