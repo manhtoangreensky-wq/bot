@@ -94,6 +94,7 @@ _PRESET_CONTENT_FIELDS = (
     "audio_plan",
     "voice_plan",
     "music_plan",
+    "content_safety_note",
     "recommended_profile_id",
     "recommended_product_id",
 )
