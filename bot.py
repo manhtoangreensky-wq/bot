@@ -282395,14 +282395,22 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
             fail_status = str(result.error_code or result.status or "PROVIDER_EXECUTION_FAILED")
             mark_voice_profile_activation_failed(uid, profile_id, get_user_voice_profile(uid, profile_id), f"failed_{fail_status.lower()}", str(result.admin_debug_summary or fail_status))
             
-            outcome_certainty = getattr(result, "outcome_certainty", "")
-            is_ambiguous = (outcome_certainty == "AMBIGUOUS")
-            if not is_ambiguous and ("timeout" in str(fail_status).lower() or "network" in str(fail_status).lower()):
+            outcome_certainty = str(getattr(result, "outcome_certainty", "") or "").upper()
+            dispatched = bool(getattr(result, "clone_dispatched", False) or actual_submits > 0)
+            if outcome_certainty == "AMBIGUOUS":
                 is_ambiguous = True
+            elif outcome_certainty == "DETERMINISTIC_FAILURE":
+                is_ambiguous = False
+            elif outcome_certainty == "UNATTEMPTED":
+                is_ambiguous = False
+            elif dispatched:
+                is_ambiguous = True
+            else:
+                is_ambiguous = False
 
             ambiguity_marker = str((result.metadata or {}).get("ambiguity_reason") or "")
             if not ambiguity_marker and is_ambiguous:
-                ambiguity_marker = "NETWORK_AMBIGUOUS" if ("timeout" in str(fail_status).lower() or "network" in str(fail_status).lower()) else "PROVIDER_OUTCOME_AMBIGUOUS"
+                ambiguity_marker = "PROVIDER_OUTCOME_AMBIGUOUS"
 
             if prepared_quote == 0 and not is_admin_user(uid):
                 if is_ambiguous:

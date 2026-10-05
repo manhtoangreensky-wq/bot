@@ -62,25 +62,18 @@ class CustomVoiceCreateResult:
     provider_http_status: int | None = None
 
     def __post_init__(self) -> None:
-        if not self.outcome_certainty or self.outcome_certainty == "UNATTEMPTED":
+        if not self.outcome_certainty or self.outcome_certainty in ("UNATTEMPTED", "UNKNOWN"):
             if self.ok:
                 self.outcome_certainty = "SUCCESS"
-            elif self.clone_dispatched:
+            elif self.clone_dispatched or self.clone_submit_count > 0:
                 self.outcome_certainty = "AMBIGUOUS"
             else:
-                raw_marker = f"{self.error_code or ''} {self.status or ''} {self.safe_public_message or ''}".lower()
-                if "timeout" in raw_marker or "network" in raw_marker:
-                    self.outcome_certainty = "AMBIGUOUS"
-                    self.clone_dispatched = True
-                    if self.clone_submit_count == 0:
-                        self.clone_submit_count = 1
-                else:
-                    self.outcome_certainty = "DETERMINISTIC_FAILURE"
+                self.outcome_certainty = "DETERMINISTIC_FAILURE"
         if self.ok and self.clone_submit_count == 0 and str(self.provider or "") != "minimax_fake":
             self.clone_submit_count = 1
             self.clone_dispatched = True
         if not self.failure_stage:
-            if not self.clone_dispatched:
+            if not self.clone_dispatched and self.clone_submit_count == 0:
                 self.failure_stage = "PRE_DISPATCH"
             elif not self.ok:
                 self.failure_stage = "POST_DISPATCH"
@@ -210,7 +203,7 @@ def _extract_provider_voice_id(payload: Any) -> str:
         if isinstance(value, dict):
             for key, child in value.items():
                 lowered = str(key or "").strip().lower()
-                if lowered in {"provider_voice_id", "voice_id", "voiceid", "custom_voice_id"} and str(child or "").strip():
+                if lowered in {"provider_voice_id", "voice_id", "voiceid", "custom_voice_id", "provider_result_identity"} and str(child or "").strip():
                     candidates.append(str(child).strip())
                 elif isinstance(child, (dict, list, tuple)):
                     visit(child)
@@ -513,12 +506,15 @@ async def process_custom_voice_create(
                     await _maybe_await(record_attempt_func(status=status, provider=route_name, route=f"{route_name}/clone", upload_status="PASS", clone_status=status, error=detail, updated_by=user_id))
 
                 raw_code = parsed_code or 0
+                detail_dict = detail if isinstance(detail, dict) else {}
+                payload_dict = clone_payload if isinstance(clone_payload, dict) else {}
+
                 is_deterministic = False
-                if 400 <= raw_code < 500:
+                if str(status).upper() in ("DETERMINISTIC_FAILURE", "DETERMINISTIC_NO_CREATE", "CLONE_PERMISSION_FORBIDDEN"):
                     is_deterministic = True
-                elif str(status).upper() in ("DETERMINISTIC_FAILURE", "CLONE_PERMISSION_FORBIDDEN"):
+                elif detail_dict.get("no_create_authoritative") is True or detail_dict.get("deterministic_no_create") is True or detail_dict.get("deterministic") is True:
                     is_deterministic = True
-                elif isinstance(detail, dict) and detail.get("deterministic") is True:
+                elif payload_dict.get("no_create_authoritative") is True or payload_dict.get("deterministic_no_create") is True or payload_dict.get("deterministic") is True:
                     is_deterministic = True
 
                 if is_deterministic:
@@ -531,8 +527,27 @@ async def process_custom_voice_create(
                 break
 
             candidate_voice_id = _extract_provider_voice_id(clone_payload)
-            if not candidate_voice_id and str(route_name) == "shopaikey_minimax":
-                candidate_voice_id = provider_voice_id_seed
+            if not candidate_voice_id:
+                # Accept requested ID only if adapter explicitly provides structured authoritative evidence
+                payload_dict = clone_payload if isinstance(clone_payload, dict) else {}
+                detail_dict = detail if isinstance(detail, dict) else {}
+                is_authoritative = bool(
+                    payload_dict.get("provider_result_identity_authoritative") is True
+                    or payload_dict.get("authoritative_identity") is True
+                    or detail_dict.get("provider_result_identity_authoritative") is True
+                    or detail_dict.get("authoritative_identity") is True
+                )
+                if is_authoritative:
+                    auth_id = (
+                        payload_dict.get("provider_result_identity")
+                        or payload_dict.get("voice_id")
+                        or payload_dict.get("requested_voice_id")
+                        or detail_dict.get("provider_result_identity")
+                        or detail_dict.get("voice_id")
+                        or provider_voice_id_seed
+                    )
+                    candidate_voice_id = minimax_voice_adapter.normalize_voice_id(auth_id)
+
             candidate_voice_id = minimax_voice_adapter.normalize_voice_id(candidate_voice_id)
             if not candidate_voice_id or str(candidate_voice_id).strip() == str(pid):
                 outcome_certainty = "AMBIGUOUS"
