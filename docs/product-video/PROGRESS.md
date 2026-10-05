@@ -3,9 +3,16 @@
 Đang đọc và áp dụng skill owner-governed-codex cho task này.
 
 TASK_ID=PRODUCT_VIDEO_RESUME_PLAN_20261005
-STATE=WAIT_OWNER_PLAN_APPROVAL
-MODE=DOCUMENTATION_ONLY
+STATE=OWNER_APPROVED_PROVIDER_FREE_EXECUTION
+MODE=APPROVED_PROVIDER_FREE_CONTROL_PLANE
 BASE_SHA=7bd5b2a86254e16631a9edb74bd40422635b227b
+
+## 0. Controller correction / Owner approval
+
+- Owner đã duyệt tiếp tục provider-free execution theo S00-S11. PR #1360 vẫn là control-plane documentation; runtime/test remediation phải ở branch hẹp và chỉ sau RED chứng minh defect.
+- Master AN4 final receipt `5983313383` đã tồn tại và `PASS` tại exact Bot/Worker SHA `7bd5b2a86254e16631a9edb74bd40422635b227b`: 106 SAFE_RUN files, 2007/2007 PASS, 17 system matrices PASS, unresolved defects=0, live/provider=0.
+- Vì current `bot/main` vẫn đúng SHA trên, S01 Reference được coi là `EVIDENCE_RECONCILED_PASS_NO_RERUN_UNLESS_MATERIAL_DRIFT`. Không chạy chồng 2007 Reference tests.
+- Execution thực tế còn lại: S00, S02-S11. Live/provider/deploy/merge vẫn cần authority riêng.
 
 ## 1. Quyết định Owner mới nhất
 
@@ -73,9 +80,9 @@ Các ô `[x]` dưới đây chỉ là phần lập kế hoạch đã làm. Ô `[
 - [x] P01: đóng yêu cầu standalone Idea theo Owner; giữ integration closure tách riêng.
 - [x] P02: đọc source thật, khoanh các boundary cần kiểm chứng; không tuyên bố runtime defect chưa được tái hiện.
 - [x] P03: lập spec và plan có file, acceptance, lệnh kiểm chứng và rollback.
-- [ ] P04: Owner duyệt phạm vi thực thi provider-free.
+- [x] P04: Owner đã duyệt phạm vi thực thi provider-free; live/deploy/merge vẫn khóa riêng.
 - [ ] S00: JIT authority, phân loại test, fixture isolation và chứng minh guard chặn outbound.
-- [ ] S01: reconcile kết quả master Reference đang `IN_PROGRESS`; tiếp nhận final receipt hoặc báo overlap, không audit chồng.
+- [x] S01: final master receipt `5983313383` đã reconcile PASS; chỉ mở lại nếu S00 phát hiện material drift.
 - [ ] S02: sửa ledger product/library; kiểm chứng kho không submit/quote/charge độc lập.
 - [ ] S03: fixture đầy đủ các trường kho; giữ detail, version và snapshot qua normalizers.
 - [ ] S04: selected/custom prompt, scene arc và nội dung bắt buộc đúng đến compiler; không fallback generic làm mất ý.
@@ -129,8 +136,8 @@ WALLET_MUTATIONS=0
 DEPLOY=NO
 RUNTIME_SHA=NOT_RECHECKED_IN_THIS_PLANNING_TASK
 LIVE_PASS=NOT_TESTED
-BLOCKERS=OWNER_PLAN_APPROVAL; REFERENCE_MASTER_FINAL_RECEIPT_NOT_FOUND_IN_LATEST_READ
+BLOCKERS=NONE_FOR_PROVIDER_FREE_EXECUTION; LIVE_DEPLOY_MERGE_SEPARATELY_LOCKED
 LESSON_CANDIDATE=NONE
-NEXT_STATE=WAIT_OWNER_PLAN_APPROVAL
+NEXT_STATE=OWNER_APPROVED_PROVIDER_FREE_EXECUTION
 STOP=YES
 ```
