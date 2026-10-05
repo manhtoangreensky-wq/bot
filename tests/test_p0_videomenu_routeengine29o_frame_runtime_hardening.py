@@ -1182,8 +1182,11 @@ def test_29o_worker_credential_transport_rejects_redirects() -> None:
         threading.Thread(target=server.serve_forever, daemon=True)
         for server in (target, redirect)
     ]
+    import time
+
     for thread in threads:
         thread.start()
+    time.sleep(0.05)
     try:
         request = urllib.request.Request(
             (
@@ -1194,10 +1197,17 @@ def test_29o_worker_credential_transport_rejects_redirects() -> None:
             headers={"X-Toanaas-Proxy-Secret": "proxy-secret"},
             method="POST",
         )
-        with pytest.raises(urllib.error.HTTPError) as exc_info:
-            open_no_redirect(request, timeout=2)
-        assert exc_info.value.code == 302
-        assert target_requests == []
+        for attempt in range(3):
+            try:
+                with pytest.raises(urllib.error.HTTPError) as exc_info:
+                    open_no_redirect(request, timeout=2)
+                assert exc_info.value.code == 302
+                assert target_requests == []
+                break
+            except (ConnectionAbortedError, ConnectionResetError):
+                if attempt == 2:
+                    raise
+                time.sleep(0.1)
     finally:
         for server in (redirect, target):
             server.shutdown()
