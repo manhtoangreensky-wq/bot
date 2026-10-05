@@ -715,6 +715,9 @@ def test_20_duplicate_confirm(monkeypatch):
             provider_file_id="pfile_20",
             preview_audio_path=str(kwargs.get("sample_path")),
             preview_audio_bytes=1000,
+            outcome_certainty="SUCCESS",
+            clone_dispatched=True,
+            clone_submit_count=1,
         )
 
     monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
@@ -920,6 +923,9 @@ def test_25_first_free_provider_success_zero_debit_one_valid_profile(monkeypatch
             provider_file_id="pfile_25",
             preview_audio_path=str(kwargs.get("sample_path")),
             preview_audio_bytes=1200,
+            outcome_certainty="SUCCESS",
+            clone_dispatched=True,
+            clone_submit_count=1,
         )
 
     monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
@@ -970,6 +976,9 @@ def test_26_paid_provider_success_exactly_one_debit(monkeypatch):
             provider_file_id="pfile_26",
             preview_audio_path=str(kwargs.get("sample_path")),
             preview_audio_bytes=1500,
+            outcome_certainty="SUCCESS",
+            clone_dispatched=True,
+            clone_submit_count=1,
         )
 
     monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
@@ -1018,6 +1027,9 @@ def test_27_insufficient_funds_after_provider_success_no_active_profile_no_secon
             provider_file_id="pfile_27",
             preview_audio_path=str(kwargs.get("sample_path")),
             preview_audio_bytes=1000,
+            outcome_certainty="SUCCESS",
+            clone_dispatched=True,
+            clone_submit_count=1,
         )
 
     monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
@@ -1070,6 +1082,9 @@ def test_28_settlement_retry_at_most_one_charge(monkeypatch):
             provider_file_id="pfile_28",
             preview_audio_path=str(kwargs.get("sample_path")),
             preview_audio_bytes=1000,
+            outcome_certainty="SUCCESS",
+            clone_dispatched=True,
+            clone_submit_count=1,
         )
 
     monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
@@ -1125,6 +1140,9 @@ def test_29_completed_duplicate_confirm_zero_provider_debit_delta(monkeypatch):
             provider_file_id="pfile_29",
             preview_audio_path=str(kwargs.get("sample_path")),
             preview_audio_bytes=1000,
+            outcome_certainty="SUCCESS",
+            clone_dispatched=True,
+            clone_submit_count=1,
         )
 
     monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
@@ -1499,6 +1517,9 @@ def test_40_safe_response_contains_no_secrets_provider_file_local_path_leakage(m
             provider_file_id=secret_pfile,
             preview_audio_path=secret_path,
             preview_audio_bytes=1000,
+            outcome_certainty="SUCCESS",
+            clone_dispatched=True,
+            clone_submit_count=1,
         )
 
     monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
@@ -1592,6 +1613,9 @@ def test_41_concurrent_first_free_race_guard_second_job_rejected(monkeypatch):
             provider_voice_id="vox_concurrent_41",
             preview_audio_path=str(kwargs.get("sample_path")),
             preview_audio_bytes=1000,
+            outcome_certainty="SUCCESS",
+            clone_dispatched=True,
+            clone_submit_count=1,
         )
 
     monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
@@ -1667,6 +1691,9 @@ def test_42_first_free_consumed_second_job_requires_quote_refresh_paid_50_xu(mon
             provider_voice_id="vox_42",
             preview_audio_path="/tmp/vox_42.mp3",
             preview_audio_bytes=500,
+            outcome_certainty="SUCCESS",
+            clone_dispatched=True,
+            clone_submit_count=1,
         )
 
     monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
@@ -1744,6 +1771,9 @@ def test_43_pre_provider_failure_releases_first_free_reservation_for_retry(monke
             provider_voice_id="vox_43",
             preview_audio_path="/tmp/vox_43.mp3",
             preview_audio_bytes=500,
+            outcome_certainty="SUCCESS",
+            clone_dispatched=True,
+            clone_submit_count=1,
         )
 
     monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
@@ -1816,6 +1846,9 @@ def test_44_deterministic_provider_failure_releases_first_free_reservation_for_r
             provider_voice_id="vox_44",
             preview_audio_path="/tmp/vox_44.mp3",
             preview_audio_bytes=500,
+            outcome_certainty="SUCCESS",
+            clone_dispatched=True,
+            clone_submit_count=1,
         )
 
     monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_success)
@@ -4137,5 +4170,531 @@ def test_104_r1_4a_real_concurrent_first_free_regression_remains_pass():
     losers = [r for r in results if r[1] is False]
     assert len(winners) == 1
     assert len(losers) == 9
+
+
+# ============================================================================
+# R1.4B FOCUSED TESTS (105 - 120) - SUCCESS DISPATCH TRUTH & STRICT COHERENCE
+# ============================================================================
+
+def test_105_r1_4b_result_object_ok_submit_count_0_remains_0():
+    """105: CustomVoiceCreateResult with ok=True and clone_submit_count=0 does not infer dispatch."""
+    res = CustomVoiceCreateResult(
+        ok=True,
+        status="PASS",
+        provider=None,
+        clone_submit_count=0,
+    )
+    assert res.clone_submit_count == 0
+    assert res.clone_dispatched is False
+    assert res.provider_clone_submit_count == 0
+    assert res.provider_clone_request_dispatched is False
+
+
+def test_106_r1_4b_preflight_pass_clone_dispatched_false_submit_count_0():
+    """106: preflight_custom_voice_create PASS results in clone_dispatched=False and clone_submit_count=0."""
+    async def _run():
+        res = await voice_clone_pipeline.preflight_custom_voice_create(
+            user_id=50106,
+            profile_id=106,
+            admin_mode=False,
+            readiness={"ready": True},
+            route_attempts_func=lambda r, **kw: [("minimax", None, None, None)],
+            access_allowed_func=lambda u, r, a, **kw: True,
+            ready_for_processing_func=lambda r, a, **kw: True,
+        )
+        assert res.ok is True
+        assert res.status == "PREFLIGHT_PASS"
+        assert res.clone_dispatched is False
+        assert res.clone_submit_count == 0
+        assert res.provider_clone_request_dispatched is False
+        assert res.provider_clone_submit_count == 0
+        assert res.failure_stage == ""
+
+    asyncio.run(_run())
+
+
+def test_107_r1_4b_fake_local_clone_submit_count_remains_0(tmp_path):
+    """107: Fake/local voice clone execution keeps real provider submit count at 0."""
+    wav_file = tmp_path / "test107.wav"
+    wav_file.write_bytes(_make_wav_bytes(12.0))
+
+    async def _run():
+        res = await voice_clone_pipeline.process_custom_voice_create(
+            user_id=50107,
+            sample_path=str(wav_file),
+            display_name="Fake Test",
+            product_context="showroom",
+            profile_id=107,
+            fake=True,
+            finalize_profile_func=lambda **kw: {"ok": True, "charged_xu": 0},
+        )
+        assert res.ok is True
+        assert res.provider == "minimax_fake"
+        assert res.clone_dispatched is False
+        assert res.clone_submit_count == 0
+        assert res.provider_clone_request_dispatched is False
+        assert res.provider_clone_submit_count == 0
+
+    asyncio.run(_run())
+
+
+def test_108_r1_4b_real_pipeline_clone_success_explicit_success_tuple(tmp_path):
+    """108: Real pipeline clone success explicitly populates certainty=SUCCESS, dispatched=True, submit_count=1."""
+    wav_file = tmp_path / "test108.wav"
+    wav_file.write_bytes(_make_wav_bytes(12.0))
+
+    async def _run():
+        async def mock_upload(audio_bytes):
+            return "PASS", "mock_file_108", "", 200
+
+        async def mock_clone(file_id, voice_id):
+            return "PASS", {"voice_id": "vox_real_108"}, "", 200
+
+        async def mock_tts(text, voice_id):
+            return "PASS", b"RIFF" + b"\x00" * 100, "", 200
+
+        async def mock_audio_ref(ref):
+            return b"RIFF" + b"\x00" * 100, ""
+
+        async def mock_cap(audio, secs):
+            return audio, ""
+
+        res = await voice_clone_pipeline.process_custom_voice_create(
+            user_id=50108,
+            sample_path=str(wav_file),
+            display_name="Real Success 108",
+            product_context="showroom",
+            profile_id=108,
+            readiness={"ready": True},
+            route_attempts_func=lambda r, **kw: [("minimax", mock_upload, mock_clone, mock_tts)],
+            access_allowed_func=lambda u, r, a, **kw: True,
+            ready_for_processing_func=lambda r, a, **kw: True,
+            make_provider_voice_id_func=lambda u, **kw: "vox_real_108",
+            audio_reference_to_bytes_func=mock_audio_ref,
+            cap_preview_audio_func=mock_cap,
+            finalize_profile_func=lambda **kw: {"ok": True, "charged_xu": 0},
+        )
+        assert res.ok is True
+        assert res.outcome_certainty == "SUCCESS"
+        assert res.clone_dispatched is True
+        assert res.clone_submit_count == 1
+        assert res.provider_clone_request_dispatched is True
+        assert res.provider_clone_submit_count == 1
+
+    asyncio.run(_run())
+
+
+def test_109_r1_4b_web_confirm_ok_true_certainty_ambiguous_quarantine_fail_closed(monkeypatch):
+    """109: Web confirm with ok=True but certainty=AMBIGUOUS cannot settle and quarantines."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50109
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 0)
+
+    async def fake_create(**kwargs):
+        return CustomVoiceCreateResult(
+            ok=True,
+            status="PASS",
+            profile_id=kwargs.get("profile_id"),
+            provider="minimax",
+            provider_voice_id="vox_109",
+            outcome_certainty="AMBIGUOUS",
+            clone_dispatched=True,
+            clone_submit_count=1,
+            metadata={"ambiguity_reason": "PARTIAL_ENGINE_AMBIGUITY"},
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+    res_prep = post_json_auth(client, "/internal/v1/web-voice-clone/jobs", {"upload_id": upload_id, "consent": True, "display_name": "Job 109"}, actor_id=str(uid))
+    job_id = res_prep.json()["job_id"]
+
+    res_confirm = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm", None, actor_id=str(uid))
+    assert res_confirm.status_code == 504
+
+    job = get_web_voice_clone_job(job_id, uid)
+    assert job["status"] == "failed"
+    assert job["provider_outcome_state"] == "provider_ambiguous"
+
+    ent = get_voice_clone_first_free_entitlement(uid)
+    assert ent["state"] == "provider_ambiguous"
+
+
+def test_110_r1_4b_web_confirm_ok_true_certainty_success_dispatched_false_no_synthesis(monkeypatch):
+    """110: Web confirm with ok=True, certainty=SUCCESS, dispatched=False, submit=0 fails closed with zero submit synthesis."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50110
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 0)
+
+    async def fake_create(**kwargs):
+        return CustomVoiceCreateResult(
+            ok=True,
+            status="PASS",
+            profile_id=kwargs.get("profile_id"),
+            provider="minimax",
+            provider_voice_id="vox_110",
+            outcome_certainty="SUCCESS",
+            clone_dispatched=False,
+            clone_submit_count=0,
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+    res_prep = post_json_auth(client, "/internal/v1/web-voice-clone/jobs", {"upload_id": upload_id, "consent": True, "display_name": "Job 110"}, actor_id=str(uid))
+    job_id = res_prep.json()["job_id"]
+
+    res_confirm = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm", None, actor_id=str(uid))
+    assert res_confirm.status_code == 422
+
+    job = get_web_voice_clone_job(job_id, uid)
+    assert job["status"] == "failed"
+    assert job["provider_execution_count"] == 0
+    assert job["provider_clone_submit_count"] == 0
+    assert job["provider_outcome_state"] == "provider_failed"
+
+    ent = get_voice_clone_first_free_entitlement(uid)
+    assert ent["state"] == "released"
+
+
+def test_111_r1_4b_web_confirm_ok_true_certainty_success_dispatched_true_submit_0_fail_closed(monkeypatch):
+    """111: Web confirm with ok=True, certainty=SUCCESS, dispatched=True, submit=0 fails closed."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50111
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 0)
+
+    async def fake_create(**kwargs):
+        return CustomVoiceCreateResult(
+            ok=True,
+            status="PASS",
+            profile_id=kwargs.get("profile_id"),
+            provider="minimax",
+            provider_voice_id="vox_111",
+            outcome_certainty="SUCCESS",
+            clone_dispatched=True,
+            clone_submit_count=0,
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+    res_prep = post_json_auth(client, "/internal/v1/web-voice-clone/jobs", {"upload_id": upload_id, "consent": True, "display_name": "Job 111"}, actor_id=str(uid))
+    job_id = res_prep.json()["job_id"]
+
+    res_confirm = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm", None, actor_id=str(uid))
+    assert res_confirm.status_code == 504
+
+    job = get_web_voice_clone_job(job_id, uid)
+    assert job["status"] == "failed"
+    assert job["provider_outcome_state"] == "provider_ambiguous"
+
+
+def test_112_r1_4b_web_confirm_ok_true_certainty_success_dispatched_false_submit_1_fail_closed(monkeypatch):
+    """112: Web confirm with ok=True, certainty=SUCCESS, dispatched=False, submit=1 fails closed."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50112
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 0)
+
+    async def fake_create(**kwargs):
+        return CustomVoiceCreateResult(
+            ok=True,
+            status="PASS",
+            profile_id=kwargs.get("profile_id"),
+            provider="minimax",
+            provider_voice_id="vox_112",
+            outcome_certainty="SUCCESS",
+            clone_dispatched=False,
+            clone_submit_count=1,
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+    res_prep = post_json_auth(client, "/internal/v1/web-voice-clone/jobs", {"upload_id": upload_id, "consent": True, "display_name": "Job 112"}, actor_id=str(uid))
+    job_id = res_prep.json()["job_id"]
+
+    res_confirm = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm", None, actor_id=str(uid))
+    assert res_confirm.status_code == 504
+
+    job = get_web_voice_clone_job(job_id, uid)
+    assert job["status"] == "failed"
+    assert job["provider_outcome_state"] == "provider_ambiguous"
+
+
+def test_113_r1_4b_web_confirm_ok_true_certainty_success_dispatched_true_submit_2_fail_closed(monkeypatch):
+    """113: Web confirm with ok=True, certainty=SUCCESS, dispatched=True, submit=2 fails closed."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50113
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 0)
+
+    async def fake_create(**kwargs):
+        return CustomVoiceCreateResult(
+            ok=True,
+            status="PASS",
+            profile_id=kwargs.get("profile_id"),
+            provider="minimax",
+            provider_voice_id="vox_113",
+            outcome_certainty="SUCCESS",
+            clone_dispatched=True,
+            clone_submit_count=2,
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+    res_prep = post_json_auth(client, "/internal/v1/web-voice-clone/jobs", {"upload_id": upload_id, "consent": True, "display_name": "Job 113"}, actor_id=str(uid))
+    job_id = res_prep.json()["job_id"]
+
+    res_confirm = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm", None, actor_id=str(uid))
+    assert res_confirm.status_code == 504
+
+    job = get_web_voice_clone_job(job_id, uid)
+    assert job["status"] == "failed"
+    assert job["provider_outcome_state"] == "provider_ambiguous"
+
+
+def test_114_r1_4b_valid_success_tuple_settlement_succeeds(monkeypatch):
+    """114: Valid success tuple (ok=True, certainty=SUCCESS, dispatched=True, submit=1, valid ID) settles completely."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50114
+    setup_user_wallet(uid, balance=100)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 50)
+
+    async def fake_create(**kwargs):
+        return CustomVoiceCreateResult(
+            ok=True,
+            status="SUCCESS",
+            profile_id=kwargs.get("profile_id"),
+            provider="minimax",
+            provider_voice_id="vox_valid_114",
+            preview_audio_path="/tmp/vox_114.mp3",
+            preview_audio_bytes=1000,
+            outcome_certainty="SUCCESS",
+            clone_dispatched=True,
+            clone_submit_count=1,
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+    res_prep = post_json_auth(client, "/internal/v1/web-voice-clone/jobs", {"upload_id": upload_id, "consent": True, "display_name": "Job 114"}, actor_id=str(uid))
+    job_id = res_prep.json()["job_id"]
+
+    res_confirm = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm", None, actor_id=str(uid))
+    assert res_confirm.status_code == 200
+    data = res_confirm.json()
+    assert data["status"] == "completed"
+
+    job = get_web_voice_clone_job(job_id, uid)
+    assert job["provider_outcome_state"] == "provider_success"
+    assert job["provider_execution_count"] == 1
+    assert job["provider_clone_submit_count"] == 1
+
+
+def test_115_r1_4b_missing_invalid_provider_voice_id_fail_closed_zero_debit(monkeypatch):
+    """115: Missing or invalid durable provider voice ID fails closed with 0 debit."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50115
+    setup_user_wallet(uid, balance=100)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 50)
+
+    async def fake_create(**kwargs):
+        return CustomVoiceCreateResult(
+            ok=True,
+            status="SUCCESS",
+            profile_id=kwargs.get("profile_id"),
+            provider="minimax",
+            provider_voice_id="",  # Missing ID!
+            preview_audio_path="/tmp/vox_115.mp3",
+            preview_audio_bytes=1000,
+            outcome_certainty="SUCCESS",
+            clone_dispatched=True,
+            clone_submit_count=1,
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+    res_prep = post_json_auth(client, "/internal/v1/web-voice-clone/jobs", {"upload_id": upload_id, "consent": True, "display_name": "Job 115"}, actor_id=str(uid))
+    job_id = res_prep.json()["job_id"]
+
+    res_confirm = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm", None, actor_id=str(uid))
+    assert res_confirm.status_code == 504
+
+    with bot.db_connect() as conn:
+        bal = conn.execute("SELECT credits FROM users WHERE user_id = ?", (str(uid),)).fetchone()[0]
+        assert bal == 100  # Zero wallet debit!
+
+
+def test_116_r1_4b_first_free_incoherent_ok_result_entitlement_not_settled(monkeypatch):
+    """116: Incoherent ok result under first free never settles entitlement."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50116
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 0)
+
+    async def fake_create(**kwargs):
+        return CustomVoiceCreateResult(
+            ok=True,
+            status="SUCCESS",
+            profile_id=kwargs.get("profile_id"),
+            provider="minimax",
+            provider_voice_id="vox_116",
+            outcome_certainty="AMBIGUOUS",
+            clone_dispatched=True,
+            clone_submit_count=1,
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+    res_prep = post_json_auth(client, "/internal/v1/web-voice-clone/jobs", {"upload_id": upload_id, "consent": True, "display_name": "Job 116"}, actor_id=str(uid))
+    job_id = res_prep.json()["job_id"]
+
+    res_confirm = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm", None, actor_id=str(uid))
+    assert res_confirm.status_code == 504
+
+    ent = get_voice_clone_first_free_entitlement(uid)
+    assert ent["state"] != "settled"
+
+
+def test_117_r1_4b_paid_incoherent_ok_result_zero_debit_profile_not_ready(monkeypatch):
+    """117: Incoherent ok result for paid job results in zero debit and profile not activated."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50117
+    setup_user_wallet(uid, balance=100)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 50)
+
+    async def fake_create(**kwargs):
+        return CustomVoiceCreateResult(
+            ok=True,
+            status="SUCCESS",
+            profile_id=kwargs.get("profile_id"),
+            provider="minimax",
+            provider_voice_id="vox_117",
+            outcome_certainty="SUCCESS",
+            clone_dispatched=False,
+            clone_submit_count=0,
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+    res_prep = post_json_auth(client, "/internal/v1/web-voice-clone/jobs", {"upload_id": upload_id, "consent": True, "display_name": "Job 117"}, actor_id=str(uid))
+    job_id = res_prep.json()["job_id"]
+
+    res_confirm = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm", None, actor_id=str(uid))
+    assert res_confirm.status_code == 422
+
+    with bot.db_connect() as conn:
+        bal = conn.execute("SELECT credits FROM users WHERE user_id = ?", (str(uid),)).fetchone()[0]
+        assert bal == 100
+
+    job = get_web_voice_clone_job(job_id, uid)
+    pid = job["canonical_profile_id"]
+    prof = bot.get_user_voice_profile(uid, pid)
+    assert (prof or {}).get("status") != "ready"
+
+
+def test_118_r1_4b_duplicate_reconcile_remains_idempotent_provider_free(monkeypatch):
+    """118: Reconcile on settled job remains idempotent and provider-free."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50118
+    setup_user_wallet(uid, balance=100)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 50)
+
+    calls = 0
+
+    async def fake_create(**kwargs):
+        nonlocal calls
+        calls += 1
+        return CustomVoiceCreateResult(
+            ok=True,
+            status="SUCCESS",
+            profile_id=kwargs.get("profile_id"),
+            provider="minimax",
+            provider_voice_id="vox_118",
+            preview_audio_path="/tmp/vox_118.mp3",
+            preview_audio_bytes=1000,
+            outcome_certainty="SUCCESS",
+            clone_dispatched=True,
+            clone_submit_count=1,
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+    res_prep = post_json_auth(client, "/internal/v1/web-voice-clone/jobs", {"upload_id": upload_id, "consent": True, "display_name": "Job 118"}, actor_id=str(uid))
+    job_id = res_prep.json()["job_id"]
+
+    res_confirm1 = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm", None, actor_id=str(uid))
+    assert res_confirm1.status_code == 200
+    assert calls == 1
+
+    res_confirm2 = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm", None, actor_id=str(uid))
+    assert res_confirm2.status_code == 200
+    assert calls == 1  # No second provider execution!
+
+    with bot.db_connect() as conn:
+        bal = conn.execute("SELECT credits FROM users WHERE user_id = ?", (str(uid),)).fetchone()[0]
+        assert bal == 50  # Exactly 1 charge of 50 Xu!
+
+
+def test_119_r1_4b_real_concurrent_first_free_regression_remains_pass():
+    """119: Real concurrent first-free reservation race allows exactly 1 reservation winner."""
+    import threading
+    uid = 50119
+    job_ids = [f"job_119_{i}" for i in range(8)]
+    results = []
+
+    def _acquire(jid):
+        ok, reason, rec = acquire_voice_clone_first_free_reservation(
+            user_id=uid,
+            job_id=jid,
+            claim_token=f"claim_{jid}",
+        )
+        results.append((jid, ok, reason))
+
+    threads = [threading.Thread(target=_acquire, args=(jid,)) for jid in job_ids]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    winners = [r for r in results if r[1] is True]
+    assert len(winners) == 1
+
+
+def test_120_r1_4b_r1_4a_string_http_route_name_certainty_remains_pass():
+    """120: R1.4A invariants remain intact: string heuristic has no authority, 4xx is not deterministic without evidence."""
+    res1 = CustomVoiceCreateResult(
+        ok=False,
+        status="TIMEOUT",
+        safe_public_message="Operation timed out",
+        clone_dispatched=False,
+        clone_submit_count=0,
+    )
+    assert res1.clone_submit_count == 0
+    assert res1.clone_dispatched is False
+    assert res1.outcome_certainty == "DETERMINISTIC_FAILURE"
+
+    res2 = CustomVoiceCreateResult(
+        ok=False,
+        status="HTTP_400",
+        provider_http_status=400,
+        clone_dispatched=True,
+        clone_submit_count=1,
+    )
+    assert res2.outcome_certainty == "AMBIGUOUS"
+
 
 

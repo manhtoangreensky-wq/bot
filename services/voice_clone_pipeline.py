@@ -63,18 +63,17 @@ class CustomVoiceCreateResult:
 
     def __post_init__(self) -> None:
         if not self.outcome_certainty or self.outcome_certainty in ("UNATTEMPTED", "UNKNOWN"):
-            if self.ok:
+            if self.ok and self.clone_dispatched and self.clone_submit_count > 0:
                 self.outcome_certainty = "SUCCESS"
             elif self.clone_dispatched or self.clone_submit_count > 0:
                 self.outcome_certainty = "AMBIGUOUS"
-            else:
+            elif not self.ok:
                 self.outcome_certainty = "DETERMINISTIC_FAILURE"
-        if self.ok and self.clone_submit_count == 0 and str(self.provider or "") != "minimax_fake":
-            self.clone_submit_count = 1
-            self.clone_dispatched = True
+            else:
+                self.outcome_certainty = "UNATTEMPTED"
         if not self.failure_stage:
             if not self.clone_dispatched and self.clone_submit_count == 0:
-                self.failure_stage = "PRE_DISPATCH"
+                self.failure_stage = "PRE_DISPATCH" if not self.ok else ""
             elif not self.ok:
                 self.failure_stage = "POST_DISPATCH"
         if self.metadata is not None and isinstance(self.metadata, dict):

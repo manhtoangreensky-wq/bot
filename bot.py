@@ -282391,12 +282391,51 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
         )
 
         actual_submits = int(getattr(result, "clone_submit_count", 0))
-        if not result.ok:
-            fail_status = str(result.error_code or result.status or "PROVIDER_EXECUTION_FAILED")
-            mark_voice_profile_activation_failed(uid, profile_id, get_user_voice_profile(uid, profile_id), f"failed_{fail_status.lower()}", str(result.admin_debug_summary or fail_status))
+        clone_dispatched = bool(getattr(result, "clone_dispatched", False))
+        outcome_certainty = str(getattr(result, "outcome_certainty", "") or "").upper()
+        provider_name = str(result.provider or "")
+        provider_voice_id = str(result.provider_voice_id or "").strip()
+        provider_file_id = str(result.provider_file_id or "")
+        preview_audio_path = str(result.preview_audio_path or "")
+        preview_audio_bytes = int(result.preview_audio_bytes or 0)
+
+        valid_provider_voice_id = bool(
+            provider_voice_id
+            and minimax_voice_adapter.validate_provider_voice_id(provider_voice_id)
+            and str(provider_voice_id) != str(profile_id)
+        )
+
+        is_success_coherent = (
+            bool(result.ok)
+            and outcome_certainty == "SUCCESS"
+            and clone_dispatched is True
+            and actual_submits == 1
+            and valid_provider_voice_id
+        )
+
+        if not is_success_coherent:
+            if not result.ok:
+                fail_status = str(result.error_code or result.status or "PROVIDER_EXECUTION_FAILED")
+            elif outcome_certainty != "SUCCESS":
+                fail_status = f"INCOHERENT_CERTAINTY_{outcome_certainty}"
+            elif not clone_dispatched and actual_submits == 0:
+                fail_status = "PRE_DISPATCH_SUCCESS_INCOHERENT"
+            elif not valid_provider_voice_id:
+                fail_status = "MISSING_DURABLE_PROVIDER_VOICE_ID"
+            elif actual_submits != 1:
+                fail_status = f"INVALID_CLONE_SUBMIT_COUNT_{actual_submits}"
+            else:
+                fail_status = "INCOHERENT_SUCCESS_TUPLE"
+
+            mark_voice_profile_activation_failed(
+                uid,
+                profile_id,
+                get_user_voice_profile(uid, profile_id),
+                f"failed_{fail_status.lower()}",
+                str(result.admin_debug_summary or fail_status),
+            )
             
-            outcome_certainty = str(getattr(result, "outcome_certainty", "") or "").upper()
-            dispatched = bool(getattr(result, "clone_dispatched", False) or actual_submits > 0)
+            dispatched = bool(clone_dispatched or actual_submits > 0)
             if outcome_certainty == "AMBIGUOUS":
                 is_ambiguous = True
             elif outcome_certainty == "DETERMINISTIC_FAILURE":
@@ -282434,12 +282473,6 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
             )
 
         # Provider success: persist provider result before wallet settlement
-        provider_name = str(result.provider or "")
-        provider_voice_id = str(result.provider_voice_id or "")
-        provider_file_id = str(result.provider_file_id or "")
-        preview_audio_path = str(result.preview_audio_path or "")
-        preview_audio_bytes = int(result.preview_audio_bytes or 0)
-
         if prepared_quote == 0 and not is_admin_user(uid):
             transition_voice_clone_first_free_state(uid, job_id, "provider_succeeded", reason="PROVIDER_SUCCESS")
 
@@ -282455,8 +282488,8 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
         current_job = update_web_voice_clone_job(
             job_id,
             provider_outcome_state="provider_success",
-            provider_execution_count=actual_submits or 1,
-            provider_clone_submit_count=actual_submits or 1,
+            provider_execution_count=actual_submits,
+            provider_clone_submit_count=actual_submits,
             provider_voice_id=provider_voice_id,
             provider_file_id=provider_file_id,
             provider_route=provider_name,
