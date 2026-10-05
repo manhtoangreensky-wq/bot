@@ -1,6 +1,6 @@
 # Product Video và kho ý tưởng: Implementation Plan
 
-> Execution sau Owner duyệt: single agent dùng `superpowers:executing-plans`, từng task nhỏ với review checkpoint. Không spawn subagent; không bắt đầu runtime work trong task lập plan này.
+> Owner đã duyệt provider-free execution. Single agent thực thi theo review checkpoint; PR #1360 vẫn chỉ là control-plane docs. Runtime/test mutation chỉ trên branch hẹp sau RED; không spawn subagent.
 
 **Goal:** Kho cung cấp đúng prompt/detail tới sản phẩm đích; đóng provider-free các Product Video còn thiếu bằng chứng mà không phá baseline ổn định.
 
@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- `STATUS=PROPOSED_WAIT_OWNER_APPROVAL`; mọi S00-S11 dưới đây **NOT_RUN**.
+- `STATUS=OWNER_APPROVED_PROVIDER_FREE_EXECUTION`; S01 evidence reconcile đã PASS từ final receipt `5983313383`; S00 và S02-S11 chưa chạy.
 - `REAL_PROVIDER_CALLS=0`; `PRODUCTION_JOB_CREATION=0`; `PRODUCTION_DB_MUTATION=0`; `WALLET_MUTATIONS=0`; `DEPLOY=0`; `PR_MERGE=0`.
 - `video_idea=SHARED_LIBRARY`, standalone product acceptance closed; integration acceptance vẫn pending.
 - Multi/Smart SubDub và Local Edit locked; Long Video/AI Edit deferred, không tự mở khi các spec khác PASS.
@@ -56,24 +56,24 @@ Plugin là **test harness đề xuất**, hiện chưa tạo. Không chạy các
 
 **Read:** `AGENTS.md`, `docs/product-video/PROGRESS.md`, `docs/product-video/MAP.md`, spec, latest #1155, `tests/conftest.py` và `docs/reports/VIDEO_AI_VIDEO_REFERENCE_PROVIDER_FREE_TEST_MANIFEST_R16_09AN1E.md`.
 
-**Create sau duyệt:** `tests/pv_provider_free_guard.py`, `tests/test_p0_product_video_provider_free_guard.py`, `docs/product-video/SAFE_TEST_MANIFEST.md`.
+**Create khi execution bắt đầu:** `tests/pv_provider_free_guard.py`, `tests/test_p0_product_video_provider_free_guard.py`, `docs/product-video/SAFE_TEST_MANIFEST.md`.
 
-- [ ] JIT main/PR/latest receipt; xác định Reference master có final receipt chưa, tránh task chồng.
+- [ ] JIT main/PR/latest receipt; bind final Reference master receipt `5983313383`; nếu current main vẫn exact `7bd5b2a8...` và không có material overlap thì giữ S01 closed, không audit chồng.
 - [ ] Phân loại exact candidate tests theo source; fixture files SHA256; không dùng totals 707/106/2007 làm con số mới.
 - [ ] Plugin chặn external DNS/socket/HTTP trước collection; credential real và production DB paths không được nạp; FFmpeg chỉ local paths.
 - [ ] Canary test thử `socket.getaddrinfo('example.invalid',443)` và `socket.create_connection(('192.0.2.1',443))`: cả hai phải bị guard exception chặn trước transport. Có counter, không nuốt attempt.
 - [ ] Tạo DB/cache/artifacts trong temp sandbox; assert không có path tới `/data` hoặc production checkout. Không sửa shared conftest.
 - [ ] Verify: `python -m pytest -p tests.pv_provider_free_guard -q tests/test_p0_product_video_provider_free_guard.py`. Mong đợi zero failures; real network=0; guard intercept chứng minh được. Nếu guard chưa chạy được thì **STOP**, không chạy business suite.
 
-## Task S01: reconcile Reference, không audit chồng
+## Task S01: Reference final receipt reconciled — không audit chồng
 
-**Read:** tracker receipts `5982470946`, `5982823837`, `5983095178`, `5983137534`; `docs/reports/VIDEO_AI_VIDEO_REFERENCE_PROVIDER_FREE_TEST_MANIFEST_R16_09AN1E.md`; connector/consumer files ở spec.
+**Read:** tracker receipts `5982470946`, `5982823837`, `5983095178`, `5983137534`, final master receipt `5983313383`; `docs/reports/VIDEO_AI_VIDEO_REFERENCE_PROVIDER_FREE_TEST_MANIFEST_R16_09AN1E.md`; connector/consumer files ở spec.
 
-- [ ] Thu final receipt mới nếu có và bind source/manifest/17 matrix proofs; nếu vẫn in-progress thì ghi ownership blocker, không takeover execution.
-- [ ] Audit drift hiện có so với receipt, không tự redeploy target đã deploy.
-- [ ] Chỉ chạy bổ sung những proof thiếu hoặc bị drift tại exact target, dưới safe manifest; không gọi ShopAIKey.
-- [ ] Verify gap-sensitive cluster sau S00: `pvtest -q tests/test_web_product_video_acceptance.py tests/test_p0_web_product_video_settlement_service.py tests/test_p0_product_video_admin_free_admission.py tests/test_p0_product_video_pv10_deterministic_all_product_e2e.py`. Mong đợi zero new failures so với baseline; counts đo mới. Đây không thay full Reference manifest nếu closure đó chưa có.
-- [ ] Cập nhật Reference status: historical technical PASS / newest audit result / LIVE_DEFERRED tách riêng.
+- [x] Final receipt `5983313383` đã bind: exact Bot/Worker SHA `7bd5b2a8...`, SAFE_RUN 106 files / 2007 PASS, 17 matrices PASS, defects=0, live/provider=0.
+- [ ] S00 chỉ audit drift từ receipt tới current main; không tự redeploy target đã deploy.
+- [ ] Chỉ khi S00 chứng minh material drift mới chạy affected proof dưới safe guard; không gọi ShopAIKey.
+- [ ] Nếu có material drift vào Reference/shared runtime, chạy gap-sensitive cluster sau S00; nếu không có drift thì không rerun 2007 Reference tests.
+- [x] Reference status: `PROVIDER_FREE_MASTER_CLOSURE=PASS`; `LIVE=DEFERRED_BY_OWNER`; lifecycle formal close vẫn NO.
 
 ## Task S02: Idea là kho, không product độc lập
 
