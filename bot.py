@@ -282518,9 +282518,10 @@ async def api_internal_web_voice_clone_jobs_reconcile(job_id: str, request: Requ
     from services.customer_read_model_service import normalize_target_user_id
     from services.web_voice_clone_runtime_service import (
         get_web_voice_clone_job,
-        update_web_voice_clone_job,
+        job_has_durable_provider_success_authority,
         to_safe_voice_clone_job_projection,
         transition_voice_clone_first_free_state,
+        update_web_voice_clone_job,
     )
 
     header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
@@ -282567,10 +282568,24 @@ async def api_internal_web_voice_clone_jobs_reconcile(job_id: str, request: Requ
         return JSONResponse(status_code=200, content=to_safe_voice_clone_job_projection(job))
 
     if current_status in ("processing", "payment_required") and profile_id > 0:
+        # Fail-closed guard: Reconcile settlement strictly requires proven durable provider success.
+        # Draft profile ID or processing status alone does NOT constitute success authority.
+        if not job_has_durable_provider_success_authority(job, uid):
+            return JSONResponse(status_code=200, content=to_safe_voice_clone_job_projection(job))
+
         # Reconcile settlement without secondary provider call
         if quote_xu == 0 or is_admin_user(uid):
             if not is_admin_user(uid):
-                transition_voice_clone_first_free_state(uid, job_id, "settled", reason="RECONCILED_COMPLETED")
+                settled_ok = transition_voice_clone_first_free_state(
+                    uid,
+                    job_id,
+                    "settled",
+                    reason="RECONCILED_COMPLETED",
+                )
+                if not settled_ok:
+                    # Entitlement was not in provider_succeeded state (e.g. reserved, started, ambiguous, failed)
+                    return JSONResponse(status_code=200, content=to_safe_voice_clone_job_projection(job))
+
             update_user_voice_profile(uid, profile_id, status="ready")
             final_job = update_web_voice_clone_job(
                 job_id,

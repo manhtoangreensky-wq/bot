@@ -660,27 +660,89 @@ def transition_voice_clone_first_free_state(
     job_id: str,
     to_state: str,
     *,
+    from_states: tuple[str, ...] | str | None = None,
     reason: str = "",
     details: dict[str, Any] | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> bool:
-    """Transition first-free entitlement state for the owning job."""
+    """Transition first-free entitlement state for the owning job.
+
+    State Transition Guards (Phase F):
+    - Transition to 'settled' strictly requires 'provider_succeeded'.
+      (reserved -> settled = DENIED, provider_started -> settled = DENIED,
+       provider_ambiguous -> settled = DENIED, provider_failed -> settled = DENIED,
+       released -> settled = DENIED, provider_succeeded -> settled = ALLOWED)
+    """
     local_conn = conn or _get_db_connection()
     now_ts = _utc_now()
     details_str = json.dumps(details) if details else "{}"
+
+    # Hardened transition invariant
+    allowed_from: tuple[str, ...] | None = None
+    if str(to_state) == "settled":
+        allowed_from = ("provider_succeeded",)
+    elif from_states is not None:
+        allowed_from = (from_states,) if isinstance(from_states, str) else tuple(from_states)
+
     try:
-        cur = local_conn.execute(
-            """
-            UPDATE web_voice_clone_first_free_entitlements
-            SET state = ?, reason = ?, updated_at = ?, details = ?
-            WHERE user_id = ? AND job_id = ?
-            """,
-            (str(to_state), str(reason), now_ts, details_str, int(user_id), str(job_id)),
-        )
+        if allowed_from is not None:
+            placeholders = ",".join("?" for _ in allowed_from)
+            cur = local_conn.execute(
+                f"""
+                UPDATE web_voice_clone_first_free_entitlements
+                SET state = ?, reason = ?, updated_at = ?, details = ?
+                WHERE user_id = ? AND job_id = ? AND state IN ({placeholders})
+                """,
+                (str(to_state), str(reason), now_ts, details_str, int(user_id), str(job_id), *allowed_from),
+            )
+        else:
+            cur = local_conn.execute(
+                """
+                UPDATE web_voice_clone_first_free_entitlements
+                SET state = ?, reason = ?, updated_at = ?, details = ?
+                WHERE user_id = ? AND job_id = ?
+                """,
+                (str(to_state), str(reason), now_ts, details_str, int(user_id), str(job_id)),
+            )
         return cur.rowcount == 1
     finally:
         if conn is None:
             local_conn.close()
+
+
+def job_has_durable_provider_success_authority(job: dict[str, Any], user_id: int | str) -> bool:
+    """Verify that a job possesses durable authoritative proof of provider creation.
+
+    Prevents premature reconciliation/settlement on draft profiles before provider success.
+    Invariants (Phase C):
+    - user_id matches job owner
+    - canonical_profile_id is present (> 0)
+    - provider_outcome_state == 'provider_success'
+    - provider_execution_count == 1
+    - provider_voice_id is present and non-empty
+    - settlement_idempotency_key matches expected format
+    """
+    if not job or not isinstance(job, dict):
+        return False
+    uid = int(user_id)
+    if int(job.get("user_id") or 0) != uid:
+        return False
+    profile_id = int(job.get("canonical_profile_id") or 0)
+    if profile_id <= 0:
+        return False
+    if str(job.get("provider_outcome_state") or "") != "provider_success":
+        return False
+    if int(job.get("provider_execution_count") or 0) != 1:
+        return False
+    provider_voice_id = str(job.get("provider_voice_id") or "").strip()
+    if not provider_voice_id:
+        return False
+    job_id = str(job.get("job_id") or "").strip()
+    expected_settle_key = f"voice_clone_settle:{uid}:{job_id}"
+    settle_key = str(job.get("settlement_idempotency_key") or "").strip()
+    if settle_key != expected_settle_key:
+        return False
+    return True
 
 
 def release_voice_clone_first_free_reservation(
