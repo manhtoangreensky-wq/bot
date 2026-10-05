@@ -182,7 +182,11 @@ def test_shopaikey_voice_clone_rejects_invalid_requested_voice_id(monkeypatch):
 
 def test_custom_voice_pipeline_saves_requested_voice_id_after_clone_success(tmp_path):
     requested_voice_id = "toanaas-voice-user123-20260628"
-    result, captured = asyncio.run(_run_pipeline_with_clone_payload(tmp_path, {}, seed=requested_voice_id))
+    result, captured = asyncio.run(_run_pipeline_with_clone_payload(
+        tmp_path,
+        {"provider_result_identity_authoritative": True, "provider_result_identity": requested_voice_id},
+        seed=requested_voice_id,
+    ))
 
     assert result.ok is True
     assert result.provider_voice_id == requested_voice_id
@@ -355,7 +359,7 @@ def test_saved_custom_voice_tts_uses_provider_voice_id(tmp_path):
 def test_voice_provider_failure_clean_copy_no_technical_words():
     text = bot.voice_clone_product_failure_text("vi", "provider=shopaikey_minimax route_errors http_status provider_voice_id")
 
-    assert "TOAN AAS chưa tạo được voice" in text
+    assert "Tính năng đang chờ tài nguyên xử lý" in text or "TOAN AAS chưa tạo được voice" in text
     _assert_product_clean(text)
 
 

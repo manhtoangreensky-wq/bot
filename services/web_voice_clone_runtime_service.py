@@ -74,6 +74,11 @@ FORBIDDEN_AUTHORITY_FIELDS_NORMALIZED = frozenset({
     "providerurl",
     "profileid",
     "canonicalprofileid",
+    "canonicaluserid",
+    "userid",
+    "actorid",
+    "canonicaluser",
+    "targetuserid",
 })
 
 
@@ -96,6 +101,7 @@ def ensure_web_voice_clone_schema(conn: sqlite3.Connection) -> None:
             status_reason TEXT NOT NULL DEFAULT '',
             execution_claim TEXT,
             provider_execution_count INTEGER NOT NULL DEFAULT 0,
+            provider_clone_submit_count INTEGER NOT NULL DEFAULT 0,
             provider_outcome_state TEXT DEFAULT 'unattempted',
             provider_ambiguity_state TEXT DEFAULT '',
             settlement_status TEXT NOT NULL DEFAULT 'unsettled',
@@ -114,6 +120,10 @@ def ensure_web_voice_clone_schema(conn: sqlite3.Connection) -> None:
         );
         """
     )
+    try:
+        conn.execute("ALTER TABLE web_voice_clone_jobs ADD COLUMN provider_clone_submit_count INTEGER NOT NULL DEFAULT 0")
+    except Exception:
+        pass
     conn.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_web_voice_clone_user_id
@@ -299,9 +309,9 @@ def prepare_web_voice_clone_job(
                 job_id, idempotency_key, web_request_id, user_id,
                 payload_hash, upload_id, consent_snapshot, display_name,
                 quote_xu, pricing_state, status, status_reason,
-                provider_execution_count, provider_outcome_state,
+                provider_execution_count, provider_clone_submit_count, provider_outcome_state,
                 settlement_status, charged_xu, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'unattempted', 'unsettled', 0, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'unattempted', 'unsettled', 0, ?, ?)
             """,
             (
                 web_job_id,
@@ -388,6 +398,7 @@ def update_web_voice_clone_job(
     status_reason: str | None = None,
     execution_claim: str | None = None,
     provider_execution_count: int | None = None,
+    provider_clone_submit_count: int | None = None,
     provider_outcome_state: str | None = None,
     provider_ambiguity_state: str | None = None,
     settlement_status: str | None = None,
@@ -425,6 +436,9 @@ def update_web_voice_clone_job(
     if provider_execution_count is not None:
         updates.append("provider_execution_count = ?")
         params.append(int(provider_execution_count))
+    if provider_clone_submit_count is not None:
+        updates.append("provider_clone_submit_count = ?")
+        params.append(int(provider_clone_submit_count))
     if provider_outcome_state is not None:
         updates.append("provider_outcome_state = ?")
         params.append(str(provider_outcome_state))
@@ -505,6 +519,7 @@ def to_safe_voice_clone_job_projection(job: dict[str, Any]) -> dict[str, Any]:
         "has_preview_audio": bool(int(job.get("preview_audio_bytes") or 0) > 0),
         "preview_audio_bytes": int(job.get("preview_audio_bytes") or 0),
         "provider_execution_count": int(job.get("provider_execution_count") or 0),
+        "provider_clone_submit_count": int(job.get("provider_clone_submit_count") or 0),
         "created_at": str(job.get("created_at") or ""),
         "updated_at": str(job.get("updated_at") or ""),
         "completed_at": str(job.get("completed_at") or "") if job.get("completed_at") else None,
@@ -660,27 +675,106 @@ def transition_voice_clone_first_free_state(
     job_id: str,
     to_state: str,
     *,
+    from_states: tuple[str, ...] | str | None = None,
     reason: str = "",
     details: dict[str, Any] | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> bool:
-    """Transition first-free entitlement state for the owning job."""
+    """Transition first-free entitlement state for the owning job.
+
+    State Transition Guards (Phase F):
+    - Transition to 'settled' strictly requires 'provider_succeeded'.
+      (reserved -> settled = DENIED, provider_started -> settled = DENIED,
+       provider_ambiguous -> settled = DENIED, provider_failed -> settled = DENIED,
+       released -> settled = DENIED, provider_succeeded -> settled = ALLOWED)
+    """
     local_conn = conn or _get_db_connection()
     now_ts = _utc_now()
     details_str = json.dumps(details) if details else "{}"
+
+    # Hardened transition invariant (R1.4D FSM Authority)
+    allowed_from: tuple[str, ...] | None = None
+    if str(to_state) == "settled":
+        allowed_from = ("provider_succeeded",)
+    elif str(to_state) == "provider_succeeded":
+        allowed_from = ("provider_started",)
+    elif str(to_state) == "provider_started":
+        allowed_from = ("reserved",)
+    elif str(to_state) == "provider_failed":
+        allowed_from = ("provider_started",)
+    elif str(to_state) == "provider_ambiguous":
+        allowed_from = ("provider_started",)
+    elif str(to_state) == "released":
+        allowed_from = ("reserved", "provider_failed")
+    elif from_states is not None:
+        allowed_from = (from_states,) if isinstance(from_states, str) else tuple(from_states)
+
     try:
-        cur = local_conn.execute(
-            """
-            UPDATE web_voice_clone_first_free_entitlements
-            SET state = ?, reason = ?, updated_at = ?, details = ?
-            WHERE user_id = ? AND job_id = ?
-            """,
-            (str(to_state), str(reason), now_ts, details_str, int(user_id), str(job_id)),
-        )
+        if allowed_from is not None:
+            placeholders = ",".join("?" for _ in allowed_from)
+            cur = local_conn.execute(
+                f"""
+                UPDATE web_voice_clone_first_free_entitlements
+                SET state = ?, reason = ?, updated_at = ?, details = ?
+                WHERE user_id = ? AND job_id = ? AND state IN ({placeholders})
+                """,
+                (str(to_state), str(reason), now_ts, details_str, int(user_id), str(job_id), *allowed_from),
+            )
+        else:
+            cur = local_conn.execute(
+                """
+                UPDATE web_voice_clone_first_free_entitlements
+                SET state = ?, reason = ?, updated_at = ?, details = ?
+                WHERE user_id = ? AND job_id = ?
+                """,
+                (str(to_state), str(reason), now_ts, details_str, int(user_id), str(job_id)),
+            )
         return cur.rowcount == 1
     finally:
         if conn is None:
             local_conn.close()
+
+
+def job_has_durable_provider_success_authority(job: dict[str, Any], user_id: int | str) -> bool:
+    """Verify that a job possesses durable authoritative proof of provider creation.
+
+    Prevents premature reconciliation/settlement on draft profiles before provider success.
+    Invariants (Phase C & R1.4C):
+    - user_id matches job owner
+    - canonical_profile_id is present (> 0)
+    - provider_outcome_state == 'provider_success'
+    - provider_execution_count == 1
+    - provider_clone_submit_count == 1
+    - provider_voice_id is present and non-empty
+    - provider_route is present and non-empty
+    - settlement_idempotency_key matches expected format
+    """
+    if not job or not isinstance(job, dict):
+        return False
+    uid = int(user_id)
+    if int(job.get("user_id") or 0) != uid:
+        return False
+    profile_id = int(job.get("canonical_profile_id") or 0)
+    if profile_id <= 0:
+        return False
+    if str(job.get("provider_outcome_state") or "") != "provider_success":
+        return False
+    if int(job.get("provider_execution_count") or 0) != 1:
+        return False
+    if int(job.get("provider_clone_submit_count") or 0) != 1:
+        return False
+    provider_voice_id = str(job.get("provider_voice_id") or "").strip()
+    if not provider_voice_id:
+        return False
+    provider_route = str(job.get("provider_route") or "").strip()
+    if not provider_route:
+        return False
+    job_id = str(job.get("job_id") or "").strip()
+    expected_settle_key = f"voice_clone_settle:{uid}:{job_id}"
+    settle_key = str(job.get("settlement_idempotency_key") or "").strip()
+    if settle_key != expected_settle_key:
+        return False
+    return True
 
 
 def release_voice_clone_first_free_reservation(
@@ -711,4 +805,59 @@ def release_voice_clone_first_free_reservation(
     finally:
         if conn is None:
             local_conn.close()
+
+
+def quarantine_voice_clone_first_free_after_success_conflict(
+    user_id: int,
+    job_id: str = "",
+    *,
+    reason: str = "SUCCESS_CAS_CONFLICT_QUARANTINE",
+    details: dict[str, Any] | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> bool:
+    """Quarantine user entitlement if coherent provider success occurred but success CAS failed.
+
+    Transitions user entitlement to 'provider_ambiguous' if currently in:
+    ('reserved', 'provider_started', 'provider_failed', 'released').
+    Preserves ('provider_ambiguous', 'provider_succeeded', 'settled').
+    Prevents re-acquisition of a second free clone.
+    """
+    local_conn = conn or _get_db_connection()
+    now_ts = _utc_now()
+    details_str = json.dumps(details or {"quarantined_by_job": str(job_id), "reason": str(reason)})
+    try:
+        cur = local_conn.execute(
+            """
+            UPDATE web_voice_clone_first_free_entitlements
+            SET state = 'provider_ambiguous', reason = ?, updated_at = ?, details = ?
+            WHERE user_id = ? AND state IN ('reserved', 'provider_started', 'provider_failed', 'released')
+            """,
+            (str(reason), now_ts, details_str, int(user_id)),
+        )
+        if cur.rowcount >= 1:
+            return True
+        # If user had no record at all, insert quarantine directly
+        cur_check = local_conn.execute(
+            "SELECT state FROM web_voice_clone_first_free_entitlements WHERE user_id = ?",
+            (int(user_id),),
+        )
+        existing = cur_check.fetchone()
+        if not existing:
+            try:
+                local_conn.execute(
+                    """
+                    INSERT INTO web_voice_clone_first_free_entitlements (
+                        user_id, job_id, state, claim_token, reason, created_at, updated_at, details
+                    ) VALUES (?, ?, 'provider_ambiguous', ?, ?, ?, ?, ?)
+                    """,
+                    (int(user_id), str(job_id), f"quarantine_{secrets.token_hex(8)}", str(reason), now_ts, now_ts, details_str),
+                )
+                return True
+            except Exception:
+                pass
+        return False
+    finally:
+        if conn is None:
+            local_conn.close()
+
 

@@ -55,6 +55,48 @@ class CustomVoiceCreateResult:
     safe_public_message: str | None = None
     admin_debug_summary: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    outcome_certainty: str = "UNATTEMPTED"
+    clone_submit_count: int = 0
+    clone_dispatched: bool = False
+    failure_stage: str = ""
+    provider_http_status: int | None = None
+
+    def __post_init__(self) -> None:
+        if not self.outcome_certainty or self.outcome_certainty in ("UNATTEMPTED", "UNKNOWN"):
+            if self.clone_dispatched or self.clone_submit_count > 0:
+                self.outcome_certainty = "AMBIGUOUS"
+            elif not self.ok:
+                self.outcome_certainty = "DETERMINISTIC_FAILURE"
+            else:
+                self.outcome_certainty = "UNATTEMPTED"
+        if not self.failure_stage:
+            if not self.clone_dispatched and self.clone_submit_count == 0:
+                self.failure_stage = "PRE_DISPATCH" if not self.ok else ""
+            elif not self.ok:
+                self.failure_stage = "POST_DISPATCH"
+        if self.metadata is not None and isinstance(self.metadata, dict):
+            self.metadata.setdefault("provider_outcome_certainty", self.outcome_certainty)
+            self.metadata.setdefault("provider_clone_submit_count", self.clone_submit_count)
+            self.metadata.setdefault("provider_clone_request_dispatched", self.clone_dispatched)
+            self.metadata.setdefault("provider_failure_stage", self.failure_stage)
+            if self.provider_http_status is not None:
+                self.metadata.setdefault("provider_http_status", self.provider_http_status)
+
+    @property
+    def provider_outcome_certainty(self) -> str:
+        return self.outcome_certainty
+
+    @property
+    def provider_clone_submit_count(self) -> int:
+        return self.clone_submit_count
+
+    @property
+    def provider_clone_request_dispatched(self) -> bool:
+        return self.clone_dispatched
+
+    @property
+    def provider_failure_stage(self) -> str:
+        return self.failure_stage
 
 
 @dataclass
@@ -158,7 +200,7 @@ def _extract_provider_voice_id(payload: Any) -> str:
         if isinstance(value, dict):
             for key, child in value.items():
                 lowered = str(key or "").strip().lower()
-                if lowered in {"provider_voice_id", "voice_id", "voiceid", "custom_voice_id"} and str(child or "").strip():
+                if lowered in {"provider_voice_id", "voice_id", "voiceid", "custom_voice_id", "provider_result_identity"} and str(child or "").strip():
                     candidates.append(str(child).strip())
                 elif isinstance(child, (dict, list, tuple)):
                     visit(child)
@@ -415,34 +457,109 @@ async def process_custom_voice_create(
     preview_audio_path = ""
     preview_audio_bytes = 0
     provider_called = False
+    clone_dispatched = False
+    clone_submit_count = 0
+    failure_stage = "PRE_DISPATCH"
+    provider_http_status: int | None = None
+    outcome_certainty = "UNATTEMPTED"
+    ambiguity_reason = ""
     created_files: list[str] = []
     try:
         for route_name, upload_call, clone_call, tts_call in route_attempts:
+            if clone_submit_count >= 1:
+                break
             status, candidate_file_id, detail, http_status = await upload_call(audio_bytes)
             provider_called = True
+            parsed_code = int(http_status) if str(http_status or "").isdigit() else (http_status if isinstance(http_status, int) else None)
+            provider_http_status = parsed_code
             if not _is_pass(status) or not candidate_file_id:
                 route_errors.append(_route_error(route_name, "upload", f"{route_name}/upload", status, detail, http_status=http_status, payload_fields=["file", "purpose"]))
                 if callable(record_attempt_func):
                     await _maybe_await(record_attempt_func(status=status, provider=route_name, route=f"{route_name}/upload", upload_status=status, error=detail, updated_by=user_id))
                 continue
-            status, clone_payload, detail, http_status = await clone_call(candidate_file_id, provider_voice_id_seed)
+
+            # Clone request dispatched
+            clone_dispatched = True
+            clone_submit_count += 1
+            failure_stage = "CLONE_DISPATCH"
+
+            try:
+                status, clone_payload, detail, http_status = await clone_call(candidate_file_id, provider_voice_id_seed)
+            except Exception as clone_exc:
+                failure_stage = "POST_DISPATCH"
+                outcome_certainty = "AMBIGUOUS"
+                ambiguity_reason = f"POST_DISPATCH_EXCEPTION:{type(clone_exc).__name__}:{_safe_text(clone_exc, 120)}"
+                route_errors.append(_route_error(route_name, "clone", f"{route_name}/clone", "FAIL", str(clone_exc), payload_fields=["file_id", "voice_id"]))
+                if callable(record_attempt_func):
+                    await _maybe_await(record_attempt_func(status="FAIL", provider=route_name, route=f"{route_name}/clone", upload_status="PASS", clone_status="FAIL", error=str(clone_exc), updated_by=user_id))
+                break
+
+            parsed_code = int(http_status) if str(http_status or "").isdigit() else (http_status if isinstance(http_status, int) else None)
+            provider_http_status = parsed_code
+
             if not _is_pass(status):
                 route_errors.append(_route_error(route_name, "clone", f"{route_name}/clone", status, detail, http_status=http_status, payload_fields=["file_id", "voice_id", "model", "text"]))
                 if callable(record_attempt_func):
                     await _maybe_await(record_attempt_func(status=status, provider=route_name, route=f"{route_name}/clone", upload_status="PASS", clone_status=status, error=detail, updated_by=user_id))
-                continue
+
+                raw_code = parsed_code or 0
+                detail_dict = detail if isinstance(detail, dict) else {}
+                payload_dict = clone_payload if isinstance(clone_payload, dict) else {}
+
+                is_deterministic = False
+                if str(status).upper() in ("DETERMINISTIC_FAILURE", "DETERMINISTIC_NO_CREATE", "CLONE_PERMISSION_FORBIDDEN"):
+                    is_deterministic = True
+                elif detail_dict.get("no_create_authoritative") is True or detail_dict.get("deterministic_no_create") is True or detail_dict.get("deterministic") is True:
+                    is_deterministic = True
+                elif payload_dict.get("no_create_authoritative") is True or payload_dict.get("deterministic_no_create") is True or payload_dict.get("deterministic") is True:
+                    is_deterministic = True
+
+                if is_deterministic:
+                    outcome_certainty = "DETERMINISTIC_FAILURE"
+                    failure_stage = "CLONE_REJECTED"
+                else:
+                    outcome_certainty = "AMBIGUOUS"
+                    failure_stage = "POST_DISPATCH"
+                    ambiguity_reason = f"HTTP_{raw_code}" if raw_code else f"CLONE_FAILED_{status}"
+                break
+
             candidate_voice_id = _extract_provider_voice_id(clone_payload)
-            if not candidate_voice_id and str(route_name) == "shopaikey_minimax":
-                candidate_voice_id = provider_voice_id_seed
+            if not candidate_voice_id:
+                # Accept requested ID only if adapter explicitly provides structured authoritative evidence
+                payload_dict = clone_payload if isinstance(clone_payload, dict) else {}
+                detail_dict = detail if isinstance(detail, dict) else {}
+                is_authoritative = bool(
+                    payload_dict.get("provider_result_identity_authoritative") is True
+                    or payload_dict.get("authoritative_identity") is True
+                    or detail_dict.get("provider_result_identity_authoritative") is True
+                    or detail_dict.get("authoritative_identity") is True
+                )
+                if is_authoritative:
+                    auth_id = (
+                        payload_dict.get("provider_result_identity")
+                        or payload_dict.get("voice_id")
+                        or payload_dict.get("requested_voice_id")
+                        or detail_dict.get("provider_result_identity")
+                        or detail_dict.get("voice_id")
+                        or provider_voice_id_seed
+                    )
+                    candidate_voice_id = minimax_voice_adapter.normalize_voice_id(auth_id)
+
             candidate_voice_id = minimax_voice_adapter.normalize_voice_id(candidate_voice_id)
             if not candidate_voice_id or str(candidate_voice_id).strip() == str(pid):
+                outcome_certainty = "AMBIGUOUS"
+                failure_stage = "POST_DISPATCH"
+                ambiguity_reason = "MISSING_DURABLE_VOICE_ID"
                 route_errors.append(_route_error(route_name, "clone", f"{route_name}/clone", "FAIL", "missing_provider_voice_id", http_status=http_status, payload_fields=["voice_id"]))
                 if callable(record_attempt_func):
                     await _maybe_await(record_attempt_func(status="FAIL", provider=route_name, route=f"{route_name}/clone", upload_status="PASS", clone_status="PASS", error="missing_provider_voice_id", updated_by=user_id))
-                continue
+                break
+
             provider_name = str(route_name)
             provider_file_id = str(candidate_file_id)
             provider_voice_id = candidate_voice_id
+            outcome_certainty = "SUCCESS"
+            failure_stage = ""
             clone_payload_dict = clone_payload if isinstance(clone_payload, dict) else {}
             demo_audio_ref = str((clone_payload_dict or {}).get("demo_audio") or "")
             preview_bytes = b""
@@ -473,13 +590,46 @@ async def process_custom_voice_create(
             break
         if not provider_name or not minimax_voice_adapter.validate_provider_voice_id(provider_voice_id):
             status = _not_ready_status(route_errors, "voice_routes_failed")
-            return CustomVoiceCreateResult(False, status, profile_id=pid, provider=provider_name or None, provider_called=provider_called, error_code=status, safe_public_message=PUBLIC_CUSTOM_VOICE_NOT_READY if status == "CLONE_PERMISSION_FORBIDDEN" else PUBLIC_CUSTOM_VOICE_FAILED, admin_debug_summary=" | ".join(_route_error_summary(item, 160) for item in route_errors[:4]), metadata={**metadata, "route_errors": route_errors})
+            if not clone_dispatched:
+                outcome_certainty = "DETERMINISTIC_FAILURE"
+                failure_stage = "PRE_DISPATCH"
+            elif outcome_certainty not in ("AMBIGUOUS", "DETERMINISTIC_FAILURE"):
+                outcome_certainty = "AMBIGUOUS"
+            metadata.update({
+                "provider_outcome_certainty": outcome_certainty,
+                "provider_clone_submit_count": clone_submit_count,
+                "provider_clone_request_dispatched": clone_dispatched,
+                "provider_failure_stage": failure_stage,
+                "provider_http_status": provider_http_status,
+                "ambiguity_reason": ambiguity_reason,
+            })
+            return CustomVoiceCreateResult(
+                False,
+                status,
+                profile_id=pid,
+                provider=provider_name or None,
+                provider_called=provider_called,
+                error_code=status,
+                safe_public_message=PUBLIC_CUSTOM_VOICE_NOT_READY if status == "CLONE_PERMISSION_FORBIDDEN" else PUBLIC_CUSTOM_VOICE_FAILED,
+                admin_debug_summary=" | ".join(_route_error_summary(item, 160) for item in route_errors[:4]),
+                metadata={**metadata, "route_errors": route_errors},
+                outcome_certainty=outcome_certainty,
+                clone_submit_count=clone_submit_count,
+                clone_dispatched=clone_dispatched,
+                failure_stage=failure_stage,
+                provider_http_status=provider_http_status,
+            )
         metadata.update({
             "provider_file_id": provider_file_id,
             "provider_route": provider_name,
             "provider_voice_id": provider_voice_id,
             "requested_provider_voice_id": provider_voice_id_seed,
             "preview_output_bytes": preview_audio_bytes,
+            "provider_outcome_certainty": "SUCCESS",
+            "provider_clone_submit_count": clone_submit_count,
+            "provider_clone_request_dispatched": True,
+            "provider_failure_stage": "",
+            "provider_http_status": provider_http_status,
         })
         finalize = {}
         if callable(finalize_profile_func):
@@ -493,11 +643,83 @@ async def process_custom_voice_create(
                 )
             )
             if finalize and not finalize.get("ok"):
-                return CustomVoiceCreateResult(False, "FAIL", profile_id=pid, provider=provider_name, provider_voice_id=provider_voice_id, provider_file_id=provider_file_id, preview_audio_path=preview_audio_path or None, preview_audio_bytes=preview_audio_bytes, provider_called=provider_called, created_files=created_files, error_code=str(finalize.get("reason") or "finalize_failed"), safe_public_message=str(finalize.get("public_message") or PUBLIC_CUSTOM_VOICE_FAILED), admin_debug_summary=_safe_text(finalize.get("reason") or "", 220), metadata=metadata)
-        return CustomVoiceCreateResult(True, "PASS", profile_id=pid, provider=provider_name, provider_voice_id=provider_voice_id, provider_file_id=provider_file_id, preview_audio_path=preview_audio_path or None, preview_audio_bytes=preview_audio_bytes, charged_xu=int((finalize or {}).get("charged_xu") or 0), provider_called=provider_called, created_files=created_files, metadata=metadata)
+                return CustomVoiceCreateResult(
+                    False,
+                    "FAIL",
+                    profile_id=pid,
+                    provider=provider_name,
+                    provider_voice_id=provider_voice_id,
+                    provider_file_id=provider_file_id,
+                    preview_audio_path=preview_audio_path or None,
+                    preview_audio_bytes=preview_audio_bytes,
+                    provider_called=provider_called,
+                    created_files=created_files,
+                    error_code=str(finalize.get("reason") or "finalize_failed"),
+                    safe_public_message=str(finalize.get("public_message") or PUBLIC_CUSTOM_VOICE_FAILED),
+                    admin_debug_summary=_safe_text(finalize.get("reason") or "", 220),
+                    metadata=metadata,
+                    outcome_certainty="AMBIGUOUS",
+                    clone_submit_count=clone_submit_count,
+                    clone_dispatched=True,
+                    failure_stage="FINALIZE",
+                    provider_http_status=provider_http_status,
+                )
+        return CustomVoiceCreateResult(
+            True,
+            "PASS",
+            profile_id=pid,
+            provider=provider_name,
+            provider_voice_id=provider_voice_id,
+            provider_file_id=provider_file_id,
+            preview_audio_path=preview_audio_path or None,
+            preview_audio_bytes=preview_audio_bytes,
+            charged_xu=int((finalize or {}).get("charged_xu") or 0),
+            provider_called=provider_called,
+            created_files=created_files,
+            metadata=metadata,
+            outcome_certainty="SUCCESS",
+            clone_submit_count=clone_submit_count,
+            clone_dispatched=True,
+            failure_stage="",
+            provider_http_status=provider_http_status,
+        )
     except Exception as exc:
         status = _not_ready_status(route_errors, exc)
-        return CustomVoiceCreateResult(False, status, profile_id=pid, provider=provider_name or None, provider_voice_id=provider_voice_id or None, provider_file_id=provider_file_id or None, provider_called=provider_called, created_files=created_files, error_code=status, safe_public_message=PUBLIC_CUSTOM_VOICE_NOT_READY if _permission_error(exc) else PUBLIC_CUSTOM_VOICE_FAILED, admin_debug_summary=_safe_text(f"{type(exc).__name__}: {exc}", 260), metadata={**metadata, "route_errors": route_errors})
+        if clone_dispatched:
+            outcome_certainty = "AMBIGUOUS"
+            failure_stage = "POST_DISPATCH"
+            ambiguity_reason = f"POST_DISPATCH_EXCEPTION:{type(exc).__name__}"
+        else:
+            outcome_certainty = "DETERMINISTIC_FAILURE"
+            failure_stage = "PRE_DISPATCH"
+            ambiguity_reason = ""
+        metadata.update({
+            "provider_outcome_certainty": outcome_certainty,
+            "provider_clone_submit_count": clone_submit_count,
+            "provider_clone_request_dispatched": clone_dispatched,
+            "provider_failure_stage": failure_stage,
+            "provider_http_status": provider_http_status,
+            "ambiguity_reason": ambiguity_reason,
+        })
+        return CustomVoiceCreateResult(
+            False,
+            status,
+            profile_id=pid,
+            provider=provider_name or None,
+            provider_voice_id=provider_voice_id or None,
+            provider_file_id=provider_file_id or None,
+            provider_called=provider_called,
+            created_files=created_files,
+            error_code=status,
+            safe_public_message=PUBLIC_CUSTOM_VOICE_NOT_READY if _permission_error(exc) else PUBLIC_CUSTOM_VOICE_FAILED,
+            admin_debug_summary=_safe_text(f"{type(exc).__name__}: {exc}", 260),
+            metadata={**metadata, "route_errors": route_errors},
+            outcome_certainty=outcome_certainty,
+            clone_submit_count=clone_submit_count,
+            clone_dispatched=clone_dispatched,
+            failure_stage=failure_stage,
+            provider_http_status=provider_http_status,
+        )
 
 
 def resolve_user_voice_for_tts(

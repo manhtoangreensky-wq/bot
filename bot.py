@@ -281967,9 +281967,7 @@ async def api_internal_web_voice_clone_jobs_create(request: Request):
         payload = {}
 
     header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
-    body_actor = str(payload.get("canonical_user_id") or payload.get("user_id") or "").strip()
-    actor_candidate = header_actor or body_actor
-    clean_actor = normalize_target_user_id(actor_candidate) if actor_candidate else ""
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
     if not clean_actor:
         return JSONResponse(
             status_code=401,
@@ -282155,6 +282153,7 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
         claim_web_voice_clone_job_for_execution,
         get_voice_clone_first_free_entitlement,
         get_web_voice_clone_job,
+        quarantine_voice_clone_first_free_after_success_conflict,
         release_voice_clone_first_free_reservation,
         to_safe_voice_clone_job_projection,
         transition_voice_clone_first_free_state,
@@ -282356,16 +282355,40 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
                 content={"ok": False, "error_code": "PROFILE_CREATION_FAILED", "message": "Failed to initialize voice profile"},
             )
 
-        # Provider invocation with execution counter increment
+        # Provider invocation gating & execution counter increment
+        if prepared_quote == 0 and not is_admin_user(uid):
+            started_ok = transition_voice_clone_first_free_state(
+                uid, job_id, "provider_started", reason="DISPATCHING_PROVIDER"
+            )
+            if not started_ok:
+                fail_status = "FIRST_FREE_START_CONFLICT"
+                mark_voice_profile_activation_failed(
+                    uid,
+                    profile_id,
+                    get_user_voice_profile(uid, profile_id),
+                    "failed_first_free_start_conflict",
+                    "First-free start conflict: provider_started transition denied",
+                )
+                update_web_voice_clone_job(
+                    job_id,
+                    status="failed",
+                    status_reason=fail_status,
+                    provider_outcome_state="unattempted",
+                    provider_execution_count=0,
+                    provider_clone_submit_count=0,
+                )
+                return JSONResponse(
+                    status_code=409,
+                    content={"ok": False, "error_code": fail_status, "message": "First-free dispatch state conflict"},
+                )
+
         new_exec_count = int(current_job.get("provider_execution_count") or 0) + 1
         update_web_voice_clone_job(
             job_id,
             provider_execution_count=new_exec_count,
+            provider_clone_submit_count=0,
             canonical_profile_id=profile_id,
         )
-
-        if prepared_quote == 0 and not is_admin_user(uid):
-            transition_voice_clone_first_free_state(uid, job_id, "provider_started", reason="DISPATCHING_PROVIDER")
 
         preview_text = capped_voice_preview_text(VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT)
         result = await voice_clone_pipeline.process_custom_voice_create(
@@ -282391,38 +282414,131 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
             max_preview_seconds=VOICE_PREVIEW_MAX_SECONDS,
         )
 
-        if not result.ok:
-            fail_status = str(result.error_code or result.status or "PROVIDER_EXECUTION_FAILED")
-            mark_voice_profile_activation_failed(uid, profile_id, get_user_voice_profile(uid, profile_id), f"failed_{fail_status.lower()}", str(result.admin_debug_summary or fail_status))
-            ambiguity = "NETWORK_AMBIGUOUS" if "timeout" in str(fail_status).lower() or "network" in str(fail_status).lower() else ""
+        actual_submits = int(getattr(result, "clone_submit_count", 0))
+        clone_dispatched = bool(getattr(result, "clone_dispatched", False))
+        outcome_certainty = str(getattr(result, "outcome_certainty", "") or "").upper()
+        provider_name = str(result.provider or "")
+        provider_voice_id = str(result.provider_voice_id or "").strip()
+        provider_file_id = str(result.provider_file_id or "")
+        preview_audio_path = str(result.preview_audio_path or "")
+        preview_audio_bytes = int(result.preview_audio_bytes or 0)
+
+        valid_provider_voice_id = bool(
+            provider_voice_id
+            and minimax_voice_adapter.validate_provider_voice_id(provider_voice_id)
+            and str(provider_voice_id) != str(profile_id)
+        )
+
+        is_success_coherent = (
+            bool(result.ok)
+            and outcome_certainty == "SUCCESS"
+            and clone_dispatched is True
+            and actual_submits == 1
+            and valid_provider_voice_id
+        )
+
+        if not is_success_coherent:
+            if not result.ok:
+                fail_status = str(result.error_code or result.status or "PROVIDER_EXECUTION_FAILED")
+            elif outcome_certainty != "SUCCESS":
+                fail_status = f"INCOHERENT_CERTAINTY_{outcome_certainty}"
+            elif not clone_dispatched and actual_submits == 0:
+                fail_status = "PRE_DISPATCH_SUCCESS_INCOHERENT"
+            elif not valid_provider_voice_id:
+                fail_status = "MISSING_DURABLE_PROVIDER_VOICE_ID"
+            elif actual_submits != 1:
+                fail_status = f"INVALID_CLONE_SUBMIT_COUNT_{actual_submits}"
+            else:
+                fail_status = "INCOHERENT_SUCCESS_TUPLE"
+
+            mark_voice_profile_activation_failed(
+                uid,
+                profile_id,
+                get_user_voice_profile(uid, profile_id),
+                f"failed_{fail_status.lower()}",
+                str(result.admin_debug_summary or fail_status),
+            )
+            
+            dispatched = bool(clone_dispatched or actual_submits > 0)
+            if bool(result.ok) and dispatched:
+                is_ambiguous = True
+            elif outcome_certainty == "AMBIGUOUS":
+                is_ambiguous = True
+            elif outcome_certainty == "DETERMINISTIC_FAILURE":
+                is_ambiguous = False
+            elif outcome_certainty == "UNATTEMPTED":
+                is_ambiguous = False
+            elif dispatched:
+                is_ambiguous = True
+            else:
+                is_ambiguous = False
+
+            ambiguity_marker = str((result.metadata or {}).get("ambiguity_reason") or "")
+            if not ambiguity_marker and is_ambiguous:
+                ambiguity_marker = "PROVIDER_OUTCOME_AMBIGUOUS"
+
             if prepared_quote == 0 and not is_admin_user(uid):
-                if ambiguity:
+                if is_ambiguous:
                     transition_voice_clone_first_free_state(uid, job_id, "provider_ambiguous", reason=fail_status)
                 else:
-                    transition_voice_clone_first_free_state(uid, job_id, "provider_failed", reason=fail_status)
-                    release_voice_clone_first_free_reservation(uid, job_id, reason=f"DETERMINISTIC_PROVIDER_FAILURE:{fail_status}")
+                    failed_transition_ok = transition_voice_clone_first_free_state(
+                        uid, job_id, "provider_failed", reason=fail_status
+                    )
+                    if failed_transition_ok:
+                        release_voice_clone_first_free_reservation(
+                            uid, job_id, reason=f"DETERMINISTIC_PROVIDER_FAILURE:{fail_status}"
+                        )
             update_web_voice_clone_job(
                 job_id,
                 status="failed",
                 status_reason=fail_status,
-                provider_outcome_state="provider_failed",
-                provider_ambiguity_state=ambiguity,
+                provider_outcome_state="provider_ambiguous" if is_ambiguous else "provider_failed",
+                provider_ambiguity_state=ambiguity_marker,
+                provider_execution_count=actual_submits,
+                provider_clone_submit_count=actual_submits,
             )
-            http_code = 504 if ambiguity else 422
+            http_code = 504 if is_ambiguous else 422
             return JSONResponse(
                 status_code=http_code,
                 content={"ok": False, "error_code": fail_status, "message": str(result.safe_public_message or "Voice clone synthesis failed")},
             )
 
         # Provider success: persist provider result before wallet settlement
-        provider_name = str(result.provider or "")
-        provider_voice_id = str(result.provider_voice_id or "")
-        provider_file_id = str(result.provider_file_id or "")
-        preview_audio_path = str(result.preview_audio_path or "")
-        preview_audio_bytes = int(result.preview_audio_bytes or 0)
-
         if prepared_quote == 0 and not is_admin_user(uid):
-            transition_voice_clone_first_free_state(uid, job_id, "provider_succeeded", reason="PROVIDER_SUCCESS")
+            success_transition_ok = transition_voice_clone_first_free_state(
+                uid,
+                job_id,
+                "provider_succeeded",
+                from_states=("provider_started",),
+                reason="PROVIDER_SUCCESS",
+            )
+            if not success_transition_ok:
+                fail_status = "FIRST_FREE_STATE_CONFLICT"
+                quarantine_voice_clone_first_free_after_success_conflict(
+                    uid, job_id, reason="SUCCESS_CAS_CONFLICT_QUARANTINE"
+                )
+                mark_voice_profile_activation_failed(
+                    uid,
+                    profile_id,
+                    get_user_voice_profile(uid, profile_id),
+                    "failed_first_free_state_conflict",
+                    "First-free state conflict: provider_succeeded transition denied",
+                )
+                update_web_voice_clone_job(
+                    job_id,
+                    status="failed",
+                    status_reason=fail_status,
+                    provider_outcome_state="provider_ambiguous",
+                    provider_ambiguity_state="FIRST_FREE_STATE_CONFLICT",
+                    provider_execution_count=actual_submits,
+                    provider_clone_submit_count=actual_submits,
+                    provider_voice_id=provider_voice_id,
+                    provider_route=provider_name,
+                )
+                return JSONResponse(
+                    status_code=409,
+                    content={"ok": False, "error_code": fail_status, "message": "First-free entitlement state conflict"},
+                )
 
         update_user_voice_profile(
             uid,
@@ -282436,6 +282552,8 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
         current_job = update_web_voice_clone_job(
             job_id,
             provider_outcome_state="provider_success",
+            provider_execution_count=actual_submits,
+            provider_clone_submit_count=actual_submits,
             provider_voice_id=provider_voice_id,
             provider_file_id=provider_file_id,
             provider_route=provider_name,
@@ -282452,7 +282570,17 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
 
     if quote_xu == 0 or is_admin_user(uid):
         if not is_admin_user(uid):
-            transition_voice_clone_first_free_state(uid, job_id, "settled", reason="SETTLED")
+            settled_ok = transition_voice_clone_first_free_state(uid, job_id, "settled", reason="SETTLED")
+            if not settled_ok:
+                update_web_voice_clone_job(
+                    job_id,
+                    status="failed",
+                    status_reason="SETTLEMENT_FAILED",
+                )
+                return JSONResponse(
+                    status_code=409,
+                    content={"ok": False, "error_code": "FIRST_FREE_SETTLEMENT_FAILED", "message": "Failed to settle first-free entitlement"},
+                )
         update_user_voice_profile(uid, profile_id, status="ready")
         final_job = update_web_voice_clone_job(
             job_id,
@@ -282518,9 +282646,10 @@ async def api_internal_web_voice_clone_jobs_reconcile(job_id: str, request: Requ
     from services.customer_read_model_service import normalize_target_user_id
     from services.web_voice_clone_runtime_service import (
         get_web_voice_clone_job,
-        update_web_voice_clone_job,
+        job_has_durable_provider_success_authority,
         to_safe_voice_clone_job_projection,
         transition_voice_clone_first_free_state,
+        update_web_voice_clone_job,
     )
 
     header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
@@ -282567,10 +282696,24 @@ async def api_internal_web_voice_clone_jobs_reconcile(job_id: str, request: Requ
         return JSONResponse(status_code=200, content=to_safe_voice_clone_job_projection(job))
 
     if current_status in ("processing", "payment_required") and profile_id > 0:
+        # Fail-closed guard: Reconcile settlement strictly requires proven durable provider success.
+        # Draft profile ID or processing status alone does NOT constitute success authority.
+        if not job_has_durable_provider_success_authority(job, uid):
+            return JSONResponse(status_code=200, content=to_safe_voice_clone_job_projection(job))
+
         # Reconcile settlement without secondary provider call
         if quote_xu == 0 or is_admin_user(uid):
             if not is_admin_user(uid):
-                transition_voice_clone_first_free_state(uid, job_id, "settled", reason="RECONCILED_COMPLETED")
+                settled_ok = transition_voice_clone_first_free_state(
+                    uid,
+                    job_id,
+                    "settled",
+                    reason="RECONCILED_COMPLETED",
+                )
+                if not settled_ok:
+                    # Entitlement was not in provider_succeeded state (e.g. reserved, started, ambiguous, failed)
+                    return JSONResponse(status_code=200, content=to_safe_voice_clone_job_projection(job))
+
             update_user_voice_profile(uid, profile_id, status="ready")
             final_job = update_web_voice_clone_job(
                 job_id,
