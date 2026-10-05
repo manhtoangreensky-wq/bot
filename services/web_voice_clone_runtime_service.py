@@ -692,12 +692,20 @@ def transition_voice_clone_first_free_state(
     now_ts = _utc_now()
     details_str = json.dumps(details) if details else "{}"
 
-    # Hardened transition invariant
+    # Hardened transition invariant (R1.4D FSM Authority)
     allowed_from: tuple[str, ...] | None = None
     if str(to_state) == "settled":
         allowed_from = ("provider_succeeded",)
     elif str(to_state) == "provider_succeeded":
         allowed_from = ("provider_started",)
+    elif str(to_state) == "provider_started":
+        allowed_from = ("reserved",)
+    elif str(to_state) == "provider_failed":
+        allowed_from = ("provider_started",)
+    elif str(to_state) == "provider_ambiguous":
+        allowed_from = ("provider_started",)
+    elif str(to_state) == "released":
+        allowed_from = ("reserved", "provider_failed")
     elif from_states is not None:
         allowed_from = (from_states,) if isinstance(from_states, str) else tuple(from_states)
 
@@ -797,4 +805,59 @@ def release_voice_clone_first_free_reservation(
     finally:
         if conn is None:
             local_conn.close()
+
+
+def quarantine_voice_clone_first_free_after_success_conflict(
+    user_id: int,
+    job_id: str = "",
+    *,
+    reason: str = "SUCCESS_CAS_CONFLICT_QUARANTINE",
+    details: dict[str, Any] | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> bool:
+    """Quarantine user entitlement if coherent provider success occurred but success CAS failed.
+
+    Transitions user entitlement to 'provider_ambiguous' if currently in:
+    ('reserved', 'provider_started', 'provider_failed', 'released').
+    Preserves ('provider_ambiguous', 'provider_succeeded', 'settled').
+    Prevents re-acquisition of a second free clone.
+    """
+    local_conn = conn or _get_db_connection()
+    now_ts = _utc_now()
+    details_str = json.dumps(details or {"quarantined_by_job": str(job_id), "reason": str(reason)})
+    try:
+        cur = local_conn.execute(
+            """
+            UPDATE web_voice_clone_first_free_entitlements
+            SET state = 'provider_ambiguous', reason = ?, updated_at = ?, details = ?
+            WHERE user_id = ? AND state IN ('reserved', 'provider_started', 'provider_failed', 'released')
+            """,
+            (str(reason), now_ts, details_str, int(user_id)),
+        )
+        if cur.rowcount >= 1:
+            return True
+        # If user had no record at all, insert quarantine directly
+        cur_check = local_conn.execute(
+            "SELECT state FROM web_voice_clone_first_free_entitlements WHERE user_id = ?",
+            (int(user_id),),
+        )
+        existing = cur_check.fetchone()
+        if not existing:
+            try:
+                local_conn.execute(
+                    """
+                    INSERT INTO web_voice_clone_first_free_entitlements (
+                        user_id, job_id, state, claim_token, reason, created_at, updated_at, details
+                    ) VALUES (?, ?, 'provider_ambiguous', ?, ?, ?, ?, ?)
+                    """,
+                    (int(user_id), str(job_id), f"quarantine_{secrets.token_hex(8)}", str(reason), now_ts, now_ts, details_str),
+                )
+                return True
+            except Exception:
+                pass
+        return False
+    finally:
+        if conn is None:
+            local_conn.close()
+
 

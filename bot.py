@@ -282153,6 +282153,7 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
         claim_web_voice_clone_job_for_execution,
         get_voice_clone_first_free_entitlement,
         get_web_voice_clone_job,
+        quarantine_voice_clone_first_free_after_success_conflict,
         release_voice_clone_first_free_reservation,
         to_safe_voice_clone_job_projection,
         transition_voice_clone_first_free_state,
@@ -282354,7 +282355,33 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
                 content={"ok": False, "error_code": "PROFILE_CREATION_FAILED", "message": "Failed to initialize voice profile"},
             )
 
-        # Provider invocation with execution counter increment
+        # Provider invocation gating & execution counter increment
+        if prepared_quote == 0 and not is_admin_user(uid):
+            started_ok = transition_voice_clone_first_free_state(
+                uid, job_id, "provider_started", reason="DISPATCHING_PROVIDER"
+            )
+            if not started_ok:
+                fail_status = "FIRST_FREE_START_CONFLICT"
+                mark_voice_profile_activation_failed(
+                    uid,
+                    profile_id,
+                    get_user_voice_profile(uid, profile_id),
+                    "failed_first_free_start_conflict",
+                    "First-free start conflict: provider_started transition denied",
+                )
+                update_web_voice_clone_job(
+                    job_id,
+                    status="failed",
+                    status_reason=fail_status,
+                    provider_outcome_state="unattempted",
+                    provider_execution_count=0,
+                    provider_clone_submit_count=0,
+                )
+                return JSONResponse(
+                    status_code=409,
+                    content={"ok": False, "error_code": fail_status, "message": "First-free dispatch state conflict"},
+                )
+
         new_exec_count = int(current_job.get("provider_execution_count") or 0) + 1
         update_web_voice_clone_job(
             job_id,
@@ -282362,9 +282389,6 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
             provider_clone_submit_count=0,
             canonical_profile_id=profile_id,
         )
-
-        if prepared_quote == 0 and not is_admin_user(uid):
-            transition_voice_clone_first_free_state(uid, job_id, "provider_started", reason="DISPATCHING_PROVIDER")
 
         preview_text = capped_voice_preview_text(VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT)
         result = await voice_clone_pipeline.process_custom_voice_create(
@@ -282457,8 +282481,13 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
                 if is_ambiguous:
                     transition_voice_clone_first_free_state(uid, job_id, "provider_ambiguous", reason=fail_status)
                 else:
-                    transition_voice_clone_first_free_state(uid, job_id, "provider_failed", reason=fail_status)
-                    release_voice_clone_first_free_reservation(uid, job_id, reason=f"DETERMINISTIC_PROVIDER_FAILURE:{fail_status}")
+                    failed_transition_ok = transition_voice_clone_first_free_state(
+                        uid, job_id, "provider_failed", reason=fail_status
+                    )
+                    if failed_transition_ok:
+                        release_voice_clone_first_free_reservation(
+                            uid, job_id, reason=f"DETERMINISTIC_PROVIDER_FAILURE:{fail_status}"
+                        )
             update_web_voice_clone_job(
                 job_id,
                 status="failed",
@@ -282485,6 +282514,9 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
             )
             if not success_transition_ok:
                 fail_status = "FIRST_FREE_STATE_CONFLICT"
+                quarantine_voice_clone_first_free_after_success_conflict(
+                    uid, job_id, reason="SUCCESS_CAS_CONFLICT_QUARANTINE"
+                )
                 mark_voice_profile_activation_failed(
                     uid,
                     profile_id,

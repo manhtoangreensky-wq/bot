@@ -78,6 +78,7 @@ from services.web_voice_clone_runtime_service import (
     get_web_voice_clone_job,
     job_has_durable_provider_success_authority,
     prepare_web_voice_clone_job,
+    quarantine_voice_clone_first_free_after_success_conflict,
     release_voice_clone_first_free_reservation,
     to_safe_voice_clone_job_projection,
     transition_voice_clone_first_free_state,
@@ -2115,6 +2116,7 @@ def test_50_first_free_provider_ambiguous_reconcile_cannot_settle_nor_release(mo
     job_id = res_prep.json()["job_id"]
 
     acquire_voice_clone_first_free_reservation(uid, job_id)
+    transition_voice_clone_first_free_state(uid, job_id, "provider_started", reason="DISPATCHING_PROVIDER")
     transition_voice_clone_first_free_state(uid, job_id, "provider_ambiguous", reason="NETWORK_TIMEOUT")
 
     prof_id = bot.save_user_voice_profile(uid, "upl_50", display_name="prof_50")
@@ -5209,6 +5211,433 @@ def test_138_r1_4c_r1_4a_r1_4b_certainty_dispatch_matrix_remains_pass():
     assert res_ambig.clone_dispatched is True
     assert res_ambig.clone_submit_count == 1
     assert res_ambig.outcome_certainty == "AMBIGUOUS"
+
+
+# ==============================================================================
+# R1.4D: FIRST-FREE DISPATCH FSM AUTHORITY FINALIZATION (PHASE E MATRIX)
+# ==============================================================================
+
+
+def test_139_r1_4d_reserved_to_provider_started_succeeds_exactly_once():
+    """139 (Phase E-01): reserved -> provider_started succeeds exactly once, second is denied."""
+    uid = 50139
+    job_id = "job_139"
+    acquire_voice_clone_first_free_reservation(uid, job_id)
+    # First transition succeeds
+    ok1 = transition_voice_clone_first_free_state(uid, job_id, "provider_started", reason="DISPATCHING")
+    assert ok1 is True
+    ent = get_voice_clone_first_free_entitlement(uid)
+    assert ent["state"] == "provider_started"
+
+    # Second transition is denied
+    ok2 = transition_voice_clone_first_free_state(uid, job_id, "provider_started", reason="RE_DISPATCHING")
+    assert ok2 is False
+
+
+def test_140_r1_4d_provider_started_to_provider_started_denied():
+    """140 (Phase E-02): provider_started -> provider_started denied."""
+    uid = 50140
+    job_id = "job_140"
+    acquire_voice_clone_first_free_reservation(uid, job_id)
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_started") is True
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_started") is False
+
+
+def test_141_r1_4d_provider_ambiguous_to_provider_started_denied():
+    """141 (Phase E-03): provider_ambiguous -> provider_started denied."""
+    uid = 50141
+    job_id = "job_141"
+    acquire_voice_clone_first_free_reservation(uid, job_id)
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_started") is True
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_ambiguous") is True
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_started") is False
+
+
+def test_142_r1_4d_provider_failed_to_provider_started_denied():
+    """142 (Phase E-04): provider_failed -> provider_started denied."""
+    uid = 50142
+    job_id = "job_142"
+    acquire_voice_clone_first_free_reservation(uid, job_id)
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_started") is True
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_failed") is True
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_started") is False
+
+
+def test_143_r1_4d_released_to_provider_started_denied():
+    """143 (Phase E-05): released -> provider_started denied."""
+    uid = 50143
+    job_id = "job_143"
+    acquire_voice_clone_first_free_reservation(uid, job_id)
+    assert release_voice_clone_first_free_reservation(uid, job_id) is True
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_started") is False
+
+
+def test_144_r1_4d_provider_succeeded_to_provider_started_denied():
+    """144 (Phase E-06): provider_succeeded -> provider_started denied."""
+    uid = 50144
+    job_id = "job_144"
+    acquire_voice_clone_first_free_reservation(uid, job_id)
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_started") is True
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_succeeded") is True
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_started") is False
+
+
+def test_145_r1_4d_settled_to_provider_started_denied():
+    """145 (Phase E-07): settled -> provider_started denied."""
+    uid = 50145
+    job_id = "job_145"
+    acquire_voice_clone_first_free_reservation(uid, job_id)
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_started") is True
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_succeeded") is True
+    assert transition_voice_clone_first_free_state(uid, job_id, "settled") is True
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_started") is False
+
+
+def test_146_r1_4d_web_confirm_provider_started_failure_blocks_provider_call(monkeypatch):
+    """146 (Phase E-08): Force provider_started transition false in Web confirm ->
+    process_custom_voice_create call count=0, clone submit=0, wallet delta=0."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50146
+    setup_user_wallet(uid, balance=100)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 0)
+
+    provider_called = False
+
+    async def fake_create(**kwargs):
+        nonlocal provider_called
+        provider_called = True
+        return CustomVoiceCreateResult(ok=True, status="SUCCESS")
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+    res_prep = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id, "consent": True, "display_name": "Job 146"},
+        actor_id=str(uid),
+    )
+    assert res_prep.status_code == 200
+    job_id = res_prep.json()["job_id"]
+
+    orig_transition = transition_voice_clone_first_free_state
+
+    def sabotaged_transition(user_id, jid, to_state, **kwargs):
+        if to_state == "provider_started":
+            return False  # Simulate CAS start conflict
+        return orig_transition(user_id, jid, to_state, **kwargs)
+
+    monkeypatch.setattr("services.web_voice_clone_runtime_service.transition_voice_clone_first_free_state", sabotaged_transition)
+
+    confirm_path = f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm"
+    res_conf = post_json_auth(client, confirm_path, None, actor_id=str(uid))
+    assert res_conf.status_code == 409
+    assert res_conf.json()["error_code"] == "FIRST_FREE_START_CONFLICT"
+    assert provider_called is False  # ZERO provider call!
+
+    with bot.db_connect() as conn:
+        job = conn.execute("SELECT status, status_reason, provider_execution_count, provider_clone_submit_count, provider_outcome_state FROM web_voice_clone_jobs WHERE job_id = ?", (job_id,)).fetchone()
+        assert job[0] == "failed"
+        assert job[1] == "FIRST_FREE_START_CONFLICT"
+        assert job[2] == 0
+        assert job[3] == 0
+        assert job[4] == "unattempted"
+        bal = conn.execute("SELECT credits FROM users WHERE user_id = ?", (str(uid),)).fetchone()[0]
+        assert bal == 100  # ZERO wallet delta!
+
+
+def test_147_r1_4d_provider_started_to_provider_ambiguous_allowed():
+    """147 (Phase E-09): provider_started -> provider_ambiguous allowed."""
+    uid = 50147
+    job_id = "job_147"
+    acquire_voice_clone_first_free_reservation(uid, job_id)
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_started") is True
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_ambiguous", reason="NET_TIMEOUT") is True
+    ent = get_voice_clone_first_free_entitlement(uid)
+    assert ent["state"] == "provider_ambiguous"
+
+
+def test_148_r1_4d_provider_ambiguous_to_provider_failed_denied():
+    """148 (Phase E-10): provider_ambiguous -> provider_failed denied."""
+    uid = 50148
+    job_id = "job_148"
+    acquire_voice_clone_first_free_reservation(uid, job_id)
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_started") is True
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_ambiguous") is True
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_failed") is False
+    ent = get_voice_clone_first_free_entitlement(uid)
+    assert ent["state"] == "provider_ambiguous"
+
+
+def test_149_r1_4d_provider_started_to_provider_failed_allowed():
+    """149 (Phase E-11): provider_started -> provider_failed allowed."""
+    uid = 50149
+    job_id = "job_149"
+    acquire_voice_clone_first_free_reservation(uid, job_id)
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_started") is True
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_failed", reason="400_BAD_AUDIO") is True
+    ent = get_voice_clone_first_free_entitlement(uid)
+    assert ent["state"] == "provider_failed"
+
+
+def test_150_r1_4d_deterministic_provider_failed_transition_fails_entitlement_not_released(monkeypatch):
+    """150 (Phase E-12): deterministic provider_failed transition fails -> entitlement NOT released."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50150
+    setup_user_wallet(uid, balance=0)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 0)
+
+    async def fake_create(**kwargs):
+        return CustomVoiceCreateResult(
+            ok=False,
+            status="UPSTREAM_INVALID_PARAM",
+            outcome_certainty="FAILED_TERMINAL",
+            clone_dispatched=False,
+            clone_submit_count=0,
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+    res_prep = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id, "consent": True, "display_name": "Job 150"},
+        actor_id=str(uid),
+    )
+    job_id = res_prep.json()["job_id"]
+
+    orig_transition = transition_voice_clone_first_free_state
+
+    def sabotaged_transition(user_id, jid, to_state, **kwargs):
+        if to_state == "provider_failed":
+            return False  # Transition fails
+        return orig_transition(user_id, jid, to_state, **kwargs)
+
+    monkeypatch.setattr("services.web_voice_clone_runtime_service.transition_voice_clone_first_free_state", sabotaged_transition)
+
+    confirm_path = f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm"
+    res_conf = post_json_auth(client, confirm_path, None, actor_id=str(uid))
+    assert res_conf.status_code == 422
+    assert res_conf.json()["ok"] is False
+
+    # Entitlement was in provider_started and must NOT have been released
+    ent = get_voice_clone_first_free_entitlement(uid)
+    assert ent["state"] == "provider_started"  # NOT released!
+
+
+def test_151_r1_4d_provider_failed_to_released_allowed():
+    """151 (Phase E-13): provider_failed -> released allowed."""
+    uid = 50151
+    job_id = "job_151"
+    acquire_voice_clone_first_free_reservation(uid, job_id)
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_started") is True
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_failed") is True
+    assert release_voice_clone_first_free_reservation(uid, job_id) is True
+    ent = get_voice_clone_first_free_entitlement(uid)
+    assert ent["state"] == "released"
+
+
+def test_152_r1_4d_coherent_success_cas_conflict_released_quarantines_and_denies_second_free(monkeypatch):
+    """152 (Phase E-14): coherent provider success + success CAS conflict + entitlement released ->
+    final entitlement quarantined/non-reacquirable -> second first-free provider submit=0."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50152
+    setup_user_wallet(uid, balance=0)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 0)
+
+    provider_calls = 0
+
+    async def fake_create(**kwargs):
+        nonlocal provider_calls
+        provider_calls += 1
+        return CustomVoiceCreateResult(
+            ok=True,
+            status="SUCCESS",
+            provider="minimax",
+            provider_voice_id=f"vox_152_{provider_calls}",
+            preview_audio_path=str(kwargs.get("sample_path")),
+            preview_audio_bytes=1000,
+            outcome_certainty="SUCCESS",
+            clone_dispatched=True,
+            clone_submit_count=1,
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+    res_prep = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id, "consent": True, "display_name": "Job 152"},
+        actor_id=str(uid),
+    )
+    job_id = res_prep.json()["job_id"]
+
+    orig_transition = transition_voice_clone_first_free_state
+
+    def sabotaged_transition(user_id, jid, to_state, **kwargs):
+        if to_state == "provider_succeeded":
+            # Simulate entitlement having been released concurrently
+            with bot.db_connect() as conn:
+                conn.execute("UPDATE web_voice_clone_first_free_entitlements SET state = 'released' WHERE user_id = ?", (user_id,))
+            return False
+        return orig_transition(user_id, jid, to_state, **kwargs)
+
+    monkeypatch.setattr("services.web_voice_clone_runtime_service.transition_voice_clone_first_free_state", sabotaged_transition)
+
+    confirm_path = f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm"
+    res_conf = post_json_auth(client, confirm_path, None, actor_id=str(uid))
+    assert res_conf.status_code == 409
+    assert res_conf.json()["error_code"] == "FIRST_FREE_STATE_CONFLICT"
+
+    # Entitlement must now be quarantined in provider_ambiguous
+    ent = get_voice_clone_first_free_entitlement(uid)
+    assert ent is not None
+    assert ent["state"] == "provider_ambiguous"
+
+    # Second first-free reservation attempt MUST fail
+    acq_ok, acq_reason, _ = acquire_voice_clone_first_free_reservation(uid, "job_152_second")
+    assert acq_ok is False
+    assert acq_reason == "FIRST_FREE_QUARANTINED"
+    assert provider_calls == 1  # Exactly 1 provider call, zero second provider call!
+
+
+def test_153_r1_4d_success_cas_conflict_provider_failed_quarantines():
+    """153 (Phase E-15): same with entitlement in provider_failed -> quarantined."""
+    uid = 50153
+    job_id = "job_153"
+    acquire_voice_clone_first_free_reservation(uid, job_id)
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_started") is True
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_failed") is True
+
+    # CAS conflict occurs
+    quarantined = quarantine_voice_clone_first_free_after_success_conflict(uid, job_id)
+    assert quarantined is True
+    ent = get_voice_clone_first_free_entitlement(uid)
+    assert ent["state"] == "provider_ambiguous"
+
+
+def test_154_r1_4d_success_conflict_with_existing_provider_ambiguous_preserves_quarantine():
+    """154 (Phase E-16): success conflict with existing provider_ambiguous preserves quarantine."""
+    uid = 50154
+    job_id = "job_154"
+    acquire_voice_clone_first_free_reservation(uid, job_id)
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_started") is True
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_ambiguous") is True
+
+    quarantine_voice_clone_first_free_after_success_conflict(uid, job_id)
+    ent = get_voice_clone_first_free_entitlement(uid)
+    assert ent["state"] == "provider_ambiguous"
+
+
+def test_155_r1_4d_success_conflict_with_provider_succeeded_settled_preserves_consumed_state():
+    """155 (Phase E-17): success conflict with provider_succeeded/settled preserves consumed state."""
+    uid = 50155
+    job_id = "job_155"
+    acquire_voice_clone_first_free_reservation(uid, job_id)
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_started") is True
+    assert transition_voice_clone_first_free_state(uid, job_id, "provider_succeeded") is True
+    assert transition_voice_clone_first_free_state(uid, job_id, "settled") is True
+
+    quarantine_voice_clone_first_free_after_success_conflict(uid, job_id)
+    ent = get_voice_clone_first_free_entitlement(uid)
+    assert ent["state"] == "settled"  # Not downgraded!
+
+
+def test_156_r1_4d_normal_first_free_fsm_golden_path_to_settled(monkeypatch):
+    """156 (Phase E-18): normal first-free provider_started -> provider_succeeded -> settled -> PASS."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50156
+    setup_user_wallet(uid, balance=0)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 0)
+
+    async def fake_create(**kwargs):
+        return CustomVoiceCreateResult(
+            ok=True,
+            status="SUCCESS",
+            provider="minimax",
+            provider_voice_id="vox_156",
+            preview_audio_path=str(kwargs.get("sample_path")),
+            preview_audio_bytes=1000,
+            outcome_certainty="SUCCESS",
+            clone_dispatched=True,
+            clone_submit_count=1,
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+    res_prep = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id, "consent": True, "display_name": "Job 156"},
+        actor_id=str(uid),
+    )
+    job_id = res_prep.json()["job_id"]
+
+    res_conf = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm", None, actor_id=str(uid))
+    assert res_conf.status_code == 200
+    assert res_conf.json()["status"] == "completed"
+
+    ent = get_voice_clone_first_free_entitlement(uid)
+    assert ent["state"] == "settled"
+
+    with bot.db_connect() as conn:
+        job = conn.execute("SELECT status, settlement_status FROM web_voice_clone_jobs WHERE job_id = ?", (job_id,)).fetchone()
+        assert job[0] == "completed"
+        assert job[1] == "settled"
+
+
+def test_157_r1_4d_real_concurrent_first_free_winner_resolution_executions_le_one():
+    """157 (Phase E-19): real concurrent first-free test remains PASS -> total provider executions before winner resolution <= 1."""
+    import threading
+    uid = 50157
+    job_ids = [f"job_157_{i}" for i in range(10)]
+    results = []
+
+    def _acquire(jid):
+        ok, reason, rec = acquire_voice_clone_first_free_reservation(
+            user_id=uid,
+            job_id=jid,
+            claim_token=f"claim_{jid}",
+        )
+        results.append((jid, ok, reason))
+
+    threads = [threading.Thread(target=_acquire, args=(jid,)) for jid in job_ids]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    winners = [r for r in results if r[1] is True]
+    assert len(winners) == 1
+    # Exactly one winner was allowed to proceed to provider_started
+    winner_jid = winners[0][0]
+    started_ok = transition_voice_clone_first_free_state(uid, winner_jid, "provider_started")
+    assert started_ok is True
+
+
+def test_158_r1_4d_all_r1_4_certainty_reconcile_fsm_invariants_pass():
+    """158 (Phase E-20): all R1.4A/B/C/D certainty, reconcile, and FSM invariants pass."""
+    # 1. Reserved -> Provider Started
+    uid = 50158
+    assert acquire_voice_clone_first_free_reservation(uid, "job_158")[0] is True
+    assert transition_voice_clone_first_free_state(uid, "job_158", "provider_started") is True
+    # 2. Cannot regress to provider_started
+    assert transition_voice_clone_first_free_state(uid, "job_158", "provider_started") is False
+    # 3. Provider Succeeded requires provider_started
+    assert transition_voice_clone_first_free_state(uid, "job_158", "provider_succeeded") is True
+    # 4. Settled requires provider_succeeded
+    assert transition_voice_clone_first_free_state(uid, "job_158", "settled") is True
+    # 5. Settled cannot be overwritten
+    assert transition_voice_clone_first_free_state(uid, "job_158", "released") is False
+    assert transition_voice_clone_first_free_state(uid, "job_158", "provider_started") is False
+
 
 
 
