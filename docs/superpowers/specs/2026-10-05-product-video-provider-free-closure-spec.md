@@ -8,7 +8,7 @@ BASE_SHA=7bd5b2a86254e16631a9edb74bd40422635b227b
 
 Mục tiêu là giữ đúng nội dung khách chọn và hoàn thiện các product chưa đóng, bằng kiểm chứng hệ thống trước khi có live mới. Kho ý tưởng chỉ cung cấp nội dung; executor, quality, quote và job thuộc **sản phẩm đích**.
 
-Quyền hiện tại: đọc source/GitHub và viết bộ tài liệu này, publish PR/comment, rồi dừng. Các spec S00-S11 là đề xuất, chưa được thực thi. Approval plan không tự cấp paid calls, production mutation, deploy hoặc live.
+Quyền hiện tại: Owner đã duyệt thực thi provider-free S00-S11 với source/test remediation hẹp khi có RED. Approval này không cấp paid/provider calls, production mutation, deploy, merge hoặc live; PR #1360 vẫn là docs/state control plane.
 
 Không hứa mọi input đều tạo được video đúng tuyệt đối. Input không hợp lệ, provider lỗi, thiếu asset bắt buộc hoặc output giả phải báo đúng lý do/no-charge; không báo `delivered` khi chưa có artifact giao thật. Trong provider-free test chỉ chứng minh contract và artifact local, không chứng minh provider sẽ làm đúng prompt.
 
@@ -86,13 +86,13 @@ File test plugin đề xuất sau duyệt: `tests/pv_provider_free_guard.py`; pl
 
 Acceptance: full classification, unknown=0; guard canary PASS; no production paths/credential use; no conflict task. Số test được đo khi chạy, không cố ép thành số lịch sử.
 
-### S01: Reference và master audit đang dở
+### S01: Reference master audit đã có final receipt
 
-Đọc final receipt mới của đợt master AN4, rebind exact SHA, đối chiếu 17 matrices của dispatch hiện hữu; không làm lại 2.007 test nếu cùng SHA + evidence đủ và task kia vừa hoàn tất. Nếu receipt thiếu hoặc main drift: ghi gap, không claim closure; xác định ai sở hữu task trước execution.
+Final master receipt `5983313383` đã PASS tại Bot/Worker SHA `7bd5b2a8...`: 106 SAFE_RUN files / 2007 tests PASS, 17 matrices PASS, defects=0. S00 chỉ rebind current main và audit drift; nếu exact authority không material đổi thì không làm lại 2.007 tests và không chạy chồng Reference.
 
 Contract không đổi: `shopaikey_video / veo3.1-fast / image_to_video / video_reference_guided_i2v`, không Fal/Key4U commercial fallback, không ambiguous resubmit. Artifact download/security/worker SHA/recovery/no-charge được kiểm chứng offline tại cần thiết, không submit thật.
 
-Acceptance: ledger thống nhất historical PASS, current master status và live hold; gap nào còn phải có owner/task rõ. Source remediation chỉ khi defect thuộc Reference được chứng minh; không chiếm task đang chạy.
+Acceptance: ledger ghi `REFERENCE_PROVIDER_FREE_MASTER_CLOSURE=PASS`, `LIVE=DEFERRED_BY_OWNER`; chỉ mở source remediation Reference nếu S00 chứng minh material drift hoặc test RED mới thuộc Reference.
 
 ### S02: Đóng standalone product Idea, giữ kho
 
@@ -168,9 +168,9 @@ Acceptance: Owner đọc được cùng nội dung ở GitHub và chat; checklis
 
 ## 7. Definition of done và stop
 
-**Task hiện tại DONE**: docs/spec/checklist nhất quán, publish GitHub và chat, chỉ docs/state changed, dừng `WAIT_OWNER_PLAN_APPROVAL`.
+**Planning/control-plane DONE**: docs/spec/checklist nhất quán, Owner đã duyệt provider-free execution; PR #1360 vẫn chỉ docs/state.
 
-**Provider-free phase DONE sau duyệt**: đủ traceability và matrices của scope approved, zero new regressions, actual local artifact evidence. Không đánh dấu toàn Goal hoàn tất.
+**Provider-free phase DONE**: S00 + S02-S11 đủ traceability/matrices, zero unresolved measured defects, actual local artifact evidence; S01 Reference giữ closed trừ material drift. Không đánh dấu live Goal hoàn tất.
 
 **Product live DONE tương lai**: Owner mở live riêng, exact runtime binding, job/provider/artifact/delivery/no-charge evidence và content/continuity inspection thật. Hiện live bị hoãn.
 
