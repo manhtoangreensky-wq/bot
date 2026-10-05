@@ -281967,9 +281967,7 @@ async def api_internal_web_voice_clone_jobs_create(request: Request):
         payload = {}
 
     header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
-    body_actor = str(payload.get("canonical_user_id") or payload.get("user_id") or "").strip()
-    actor_candidate = header_actor or body_actor
-    clean_actor = normalize_target_user_id(actor_candidate) if actor_candidate else ""
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
     if not clean_actor:
         return JSONResponse(
             status_code=401,

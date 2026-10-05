@@ -74,6 +74,11 @@ FORBIDDEN_AUTHORITY_FIELDS_NORMALIZED = frozenset({
     "providerurl",
     "profileid",
     "canonicalprofileid",
+    "canonicaluserid",
+    "userid",
+    "actorid",
+    "canonicaluser",
+    "targetuserid",
 })
 
 

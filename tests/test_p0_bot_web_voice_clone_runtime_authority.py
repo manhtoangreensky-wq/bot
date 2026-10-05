@@ -2427,3 +2427,337 @@ def test_58_fsm_transition_guard_matrix():
         assert ok is should_succeed, f"Transition from {initial_state} to settled expected {should_succeed}, got {ok}"
 
 
+# ---------------------------------------------------------------------------
+# 59-70: BODY ACTOR AUTHORITY FALLBACK CORRECTION MATRIX (PHASE E / R1.3)
+# ---------------------------------------------------------------------------
+
+
+def test_59_no_actor_header_no_body_identity_rejected_401():
+    """59 (Phase E-01): no actor header + no body identity -> 401 ACTOR_ID_REQUIRED."""
+    client = TestClient(bot.fastapi_app)
+    path = "/internal/v1/web-voice-clone/jobs"
+    payload = {"upload_id": "upl_59", "consent": True, "display_name": "Test 59"}
+    headers = make_auth_headers("POST", path, body=json.dumps(payload).encode("utf-8"), actor_id="50059")
+    headers.pop("X-TOAN-AAS-Actor-ID", None)
+    headers.pop("X-Actor-User-ID", None)
+
+    res = client.post(path, json=payload, headers=headers)
+    assert res.status_code == 401
+    assert res.json()["error_code"] == "ACTOR_ID_REQUIRED"
+
+
+def test_60_no_actor_header_body_canonical_user_id_rejected_zero_job():
+    """60 (Phase E-02): no actor header + body canonical_user_id + otherwise correctly signed internal request -> rejected -> zero job creation."""
+    client = TestClient(bot.fastapi_app)
+    uid_a = 50060
+    setup_user_wallet(uid_a, balance=100)
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid_a))
+
+    path = "/internal/v1/web-voice-clone/jobs"
+    payload = {
+        "upload_id": upload_id,
+        "consent": True,
+        "display_name": "Test 60",
+        "canonical_user_id": uid_a,
+    }
+    raw_body = json.dumps(payload).encode("utf-8")
+    headers = make_auth_headers("POST", path, body=raw_body, actor_id=str(uid_a))
+    headers.pop("X-TOAN-AAS-Actor-ID", None)
+    headers.pop("X-Actor-User-ID", None)
+
+    res = client.post(path, content=raw_body, headers=headers)
+    assert res.status_code == 401
+    assert res.json()["error_code"] == "ACTOR_ID_REQUIRED"
+
+    with bot.db_connect() as conn:
+        job_count = conn.execute("SELECT COUNT(*) FROM web_voice_clone_jobs WHERE user_id = ?", (uid_a,)).fetchone()[0]
+        assert job_count == 0
+
+
+def test_61_no_actor_header_body_user_id_rejected_zero_job():
+    """61 (Phase E-03): no actor header + body user_id + otherwise correctly signed internal request -> rejected -> zero job creation."""
+    client = TestClient(bot.fastapi_app)
+    uid_a = 50061
+    setup_user_wallet(uid_a, balance=100)
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid_a))
+
+    path = "/internal/v1/web-voice-clone/jobs"
+    payload = {
+        "upload_id": upload_id,
+        "consent": True,
+        "display_name": "Test 61",
+        "user_id": uid_a,
+    }
+    raw_body = json.dumps(payload).encode("utf-8")
+    headers = make_auth_headers("POST", path, body=raw_body, actor_id=str(uid_a))
+    headers.pop("X-TOAN-AAS-Actor-ID", None)
+    headers.pop("X-Actor-User-ID", None)
+
+    res = client.post(path, content=raw_body, headers=headers)
+    assert res.status_code == 401
+    assert res.json()["error_code"] == "ACTOR_ID_REQUIRED"
+
+    with bot.db_connect() as conn:
+        job_count = conn.execute("SELECT COUNT(*) FROM web_voice_clone_jobs WHERE user_id = ?", (uid_a,)).fetchone()[0]
+        assert job_count == 0
+
+
+def test_62_valid_actor_header_body_canonical_user_id_same_user_rejected_400():
+    """62 (Phase E-04): valid actor header A + body canonical_user_id=A -> body identity field rejected as forbidden authority."""
+    client = TestClient(bot.fastapi_app)
+    uid_a = 50062
+    setup_user_wallet(uid_a, balance=100)
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid_a))
+
+    path = "/internal/v1/web-voice-clone/jobs"
+    payload = {
+        "upload_id": upload_id,
+        "consent": True,
+        "display_name": "Test 62",
+        "canonical_user_id": uid_a,
+    }
+    res = post_json_auth(client, path, payload, actor_id=str(uid_a))
+    assert res.status_code == 400
+    assert res.json()["error_code"] == "FORBIDDEN_AUTHORITY_FIELD_REJECTED"
+
+    with bot.db_connect() as conn:
+        job_count = conn.execute("SELECT COUNT(*) FROM web_voice_clone_jobs WHERE user_id = ?", (uid_a,)).fetchone()[0]
+        assert job_count == 0
+
+
+def test_63_valid_actor_header_body_user_id_same_user_rejected_400():
+    """63 (Phase E-05): valid actor header A + body user_id=A -> rejected."""
+    client = TestClient(bot.fastapi_app)
+    uid_a = 50063
+    setup_user_wallet(uid_a, balance=100)
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid_a))
+
+    path = "/internal/v1/web-voice-clone/jobs"
+    payload = {
+        "upload_id": upload_id,
+        "consent": True,
+        "display_name": "Test 63",
+        "user_id": uid_a,
+    }
+    res = post_json_auth(client, path, payload, actor_id=str(uid_a))
+    assert res.status_code == 400
+    assert res.json()["error_code"] == "FORBIDDEN_AUTHORITY_FIELD_REJECTED"
+
+    with bot.db_connect() as conn:
+        job_count = conn.execute("SELECT COUNT(*) FROM web_voice_clone_jobs WHERE user_id = ?", (uid_a,)).fetchone()[0]
+        assert job_count == 0
+
+
+def test_64_valid_actor_header_body_canonical_user_id_different_user_rejected():
+    """64 (Phase E-06): valid actor header A + body canonical_user_id=B -> rejected, no B ownership effect, no leak."""
+    client = TestClient(bot.fastapi_app)
+    uid_a = 50064
+    uid_b = 60064
+    setup_user_wallet(uid_a, balance=100)
+    setup_user_wallet(uid_b, balance=100)
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid_a))
+
+    path = "/internal/v1/web-voice-clone/jobs"
+    payload = {
+        "upload_id": upload_id,
+        "consent": True,
+        "display_name": "Test 64",
+        "canonical_user_id": uid_b,
+    }
+    res = post_json_auth(client, path, payload, actor_id=str(uid_a))
+    assert res.status_code == 400
+    assert res.json()["error_code"] == "FORBIDDEN_AUTHORITY_FIELD_REJECTED"
+
+    with bot.db_connect() as conn:
+        job_count_b = conn.execute("SELECT COUNT(*) FROM web_voice_clone_jobs WHERE user_id = ?", (uid_b,)).fetchone()[0]
+        assert job_count_b == 0
+        job_count_a = conn.execute("SELECT COUNT(*) FROM web_voice_clone_jobs WHERE user_id = ?", (uid_a,)).fetchone()[0]
+        assert job_count_a == 0
+
+
+def test_65_valid_actor_header_body_user_id_different_user_rejected():
+    """65 (Phase E-07): valid actor header A + body user_id=B -> rejected, no B ownership effect."""
+    client = TestClient(bot.fastapi_app)
+    uid_a = 50065
+    uid_b = 60065
+    setup_user_wallet(uid_a, balance=100)
+    setup_user_wallet(uid_b, balance=100)
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid_a))
+
+    path = "/internal/v1/web-voice-clone/jobs"
+    payload = {
+        "upload_id": upload_id,
+        "consent": True,
+        "display_name": "Test 65",
+        "user_id": uid_b,
+    }
+    res = post_json_auth(client, path, payload, actor_id=str(uid_a))
+    assert res.status_code == 400
+    assert res.json()["error_code"] == "FORBIDDEN_AUTHORITY_FIELD_REJECTED"
+
+    with bot.db_connect() as conn:
+        job_count_b = conn.execute("SELECT COUNT(*) FROM web_voice_clone_jobs WHERE user_id = ?", (uid_b,)).fetchone()[0]
+        assert job_count_b == 0
+        job_count_a = conn.execute("SELECT COUNT(*) FROM web_voice_clone_jobs WHERE user_id = ?", (uid_a,)).fetchone()[0]
+        assert job_count_a == 0
+
+
+def test_66_valid_actor_header_no_body_identity_succeeds_normally(monkeypatch):
+    """66 (Phase E-08): valid actor header A + no body identity fields -> prepare succeeds normally."""
+    client = TestClient(bot.fastapi_app)
+    uid_a = 50066
+    setup_user_wallet(uid_a, balance=100)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 50)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid_a))
+
+    path = "/internal/v1/web-voice-clone/jobs"
+    payload = {
+        "upload_id": upload_id,
+        "consent": True,
+        "display_name": "Clean Header Actor Job",
+    }
+    res = post_json_auth(client, path, payload, actor_id=str(uid_a))
+    assert res.status_code == 200
+    data = res.json()
+    assert data["ok"] is True
+    assert data["status"] in ("prepared", "awaiting_confirmation")
+    assert data["user_id"] == uid_a
+
+    job = get_web_voice_clone_job(data["job_id"], uid_a)
+    assert job is not None
+    assert job["user_id"] == uid_a
+
+
+def test_67_valid_actor_header_foreign_owner_upload_rejected():
+    """67 (Phase E-09): valid actor header A + foreign-owner upload -> existing cross-account upload denial remains intact."""
+    client = TestClient(bot.fastapi_app)
+    uid_a = 50067
+    uid_b = 60067
+    setup_user_wallet(uid_a, balance=100)
+    setup_user_wallet(uid_b, balance=100)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id_b = stage_test_upload(client, wav_bytes, actor_id=str(uid_b))
+
+    path = "/internal/v1/web-voice-clone/jobs"
+    payload = {
+        "upload_id": upload_id_b,
+        "consent": True,
+        "display_name": "Foreign Upload Test",
+    }
+    res = post_json_auth(client, path, payload, actor_id=str(uid_a))
+    assert res.status_code == 403
+    assert res.json()["error_code"] == "FORBIDDEN_CROSS_OWNER"
+
+
+def test_68_missing_invalid_hmac_with_valid_actor_header_rejected():
+    """68 (Phase E-10): missing/invalid HMAC + valid actor header -> existing auth rejection remains intact."""
+    client = TestClient(bot.fastapi_app)
+    uid = "50068"
+    path = "/internal/v1/web-voice-clone/jobs"
+    payload = {"upload_id": "upl_68", "consent": True, "display_name": "Bad HMAC"}
+
+    headers = make_auth_headers("POST", path, actor_id=uid)
+    headers["X-TOAN-AAS-Signature"] = "bad" * 16
+    res = client.post(path, json=payload, headers=headers)
+    assert res.status_code == 401
+    assert res.json()["error_code"] == "SIGNATURE_INVALID"
+
+
+def test_69_detail_confirm_reconcile_preview_require_header_actor():
+    """69 (Phase E-11): detail / confirm / reconcile / preview continue requiring actor header; no regression."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50069
+    setup_user_wallet(uid, balance=100)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+
+    prep = prepare_web_voice_clone_job(
+        web_job_id=f"vcjob_69_{uuid.uuid4().hex[:8]}",
+        web_request_id="req_69",
+        canonical_user_id=uid,
+        upload_id=upload_id,
+        consent=True,
+        display_name="Job 69",
+        quote_xu=50,
+        pricing_state="paid_50_xu",
+    )
+    job_id = prep["job"]["job_id"]
+
+    routes = [
+        ("GET", f"/internal/v1/web-voice-clone/jobs/{job_id}"),
+        ("POST", f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm"),
+        ("POST", f"/internal/v1/web-voice-clone/jobs/{job_id}/reconcile"),
+        ("GET", f"/internal/v1/web-voice-clone/jobs/{job_id}/preview"),
+    ]
+
+    for method, path in routes:
+        headers = make_auth_headers(method, path, actor_id=str(uid))
+        headers.pop("X-TOAN-AAS-Actor-ID", None)
+        headers.pop("X-Actor-User-ID", None)
+
+        if method == "GET":
+            res = client.get(path, headers=headers)
+        else:
+            res = client.post(path, headers=headers)
+
+        assert res.status_code == 401, f"{method} {path} expected 401 without actor header, got {res.status_code}"
+        assert res.json()["error_code"] == "ACTOR_ID_REQUIRED"
+
+
+def test_70_idempotent_prepare_replay_remains_owner_bound(monkeypatch):
+    """70 (Phase E-12): idempotent prepare replay remains strictly owner-bound."""
+    client = TestClient(bot.fastapi_app)
+    uid_a = 50070
+    uid_b = 60070
+    setup_user_wallet(uid_a, balance=100)
+    setup_user_wallet(uid_b, balance=100)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 50)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid_a))
+
+    path = "/internal/v1/web-voice-clone/jobs"
+    idem_key = f"idem_70_{uuid.uuid4().hex[:8]}"
+    payload = {
+        "upload_id": upload_id,
+        "consent": True,
+        "display_name": "Idempotent Owner Job",
+        "idempotency_key": idem_key,
+    }
+
+    # Owner A creates job
+    res1 = post_json_auth(client, path, payload, actor_id=str(uid_a))
+    assert res1.status_code == 200
+    job_id = res1.json()["job_id"]
+
+    # Replay by Owner A returns same job
+    res_replay_a = post_json_auth(client, path, payload, actor_id=str(uid_a))
+    assert res_replay_a.status_code == 200
+    assert res_replay_a.json()["idempotent_replay"] is True
+    assert res_replay_a.json()["job_id"] == job_id
+
+    # Foreign actor B attempting same idempotency key fails closed (403 IDEMPOTENCY_OWNER_MISMATCH)
+    upload_id_b = stage_test_upload(client, wav_bytes, actor_id=str(uid_b))
+    payload_b = {
+        "upload_id": upload_id_b,
+        "consent": True,
+        "display_name": "Idempotent Foreign Attempt",
+        "idempotency_key": idem_key,
+    }
+    res_foreign = post_json_auth(client, path, payload_b, actor_id=str(uid_b))
+    assert res_foreign.status_code == 403
+    assert res_foreign.json()["error_code"] == "IDEMPOTENCY_OWNER_MISMATCH"
+
+
+
+
