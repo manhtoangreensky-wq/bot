@@ -281872,6 +281872,723 @@ async def api_internal_web_voice_tts_jobs_artifact(job_id: str, request: Request
     return Response(content=audio_bytes, media_type="audio/mpeg")
 
 
+# ─── CANONICAL WEB VOICE CLONE RUNTIME ENDPOINTS (BOT-WEB-VOICE-CLONE-R1) ──────────
+
+@fastapi_app.post("/internal/v1/web-voice-clone/jobs")
+async def api_internal_web_voice_clone_jobs_create(request: Request):
+    """Canonical Bot Core Web Voice Clone job preparation & quote endpoint."""
+    import secrets
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.subdub_upload_staging import get_staged_upload
+    from services.web_voice_clone_runtime_service import (
+        contains_forbidden_authority_fields,
+        validate_voice_clone_sample,
+        prepare_web_voice_clone_job,
+        to_safe_voice_clone_job_projection,
+    )
+
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:
+        payload = {}
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    body_actor = str(payload.get("canonical_user_id") or payload.get("user_id") or "").strip()
+    actor_candidate = header_actor or body_actor
+    clean_actor = normalize_target_user_id(actor_candidate) if actor_candidate else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = "/internal/v1/web-voice-clone/jobs"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    # Strictly reject forbidden authority fields
+    is_forbidden, forbidden_field = contains_forbidden_authority_fields(payload)
+    if is_forbidden:
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error_code": "FORBIDDEN_AUTHORITY_FIELD_REJECTED", "message": f"Forbidden field: {forbidden_field}"},
+        )
+
+    # Validate upload_id: exactly one required
+    raw_uploads = payload.get("upload_ids")
+    if raw_uploads is None:
+        raw_uploads = payload.get("upload_id")
+    if not raw_uploads:
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error_code": "UPLOAD_REQUIRED", "message": "Exactly one sample upload_id is required"},
+        )
+    if isinstance(raw_uploads, list):
+        if len(raw_uploads) != 1 or not str(raw_uploads[0]).strip():
+            return JSONResponse(
+                status_code=400,
+                content={"ok": False, "error_code": "SINGLE_UPLOAD_REQUIRED", "message": "Exactly one sample upload_id is allowed"},
+            )
+        clean_upload_id = str(raw_uploads[0]).strip()
+    else:
+        clean_upload_id = str(raw_uploads).strip()
+        if not clean_upload_id:
+            return JSONResponse(
+                status_code=400,
+                content={"ok": False, "error_code": "UPLOAD_REQUIRED", "message": "Sample upload_id cannot be empty"},
+            )
+
+    # Validate consent: mandatory affirmative boolean
+    consent_val = payload.get("consent")
+    is_consented = False
+    if isinstance(consent_val, bool) and consent_val is True:
+        is_consented = True
+    elif isinstance(consent_val, str) and consent_val.strip().lower() in ("true", "1", "yes"):
+        is_consented = True
+    elif isinstance(consent_val, (int, float)) and int(consent_val) == 1:
+        is_consented = True
+
+    if not is_consented:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "ok": False,
+                "error_code": "VOICE_CLONE_CONSENT_REQUIRED",
+                "message": "Voice Clone requires affirmative consent confirming right to use voice sample",
+            },
+        )
+
+    # Validate and sanitize display_name
+    raw_display_name = str(payload.get("display_name") or "").strip()
+    clean_display_name = re.sub(r"\s+", " ", raw_display_name)[:120]
+    if not clean_display_name:
+        clean_display_name = "Giọng clone mới"
+
+    # Enforce owner-bound upload lookup
+    ok, reason, status_code, staged_record = get_staged_upload(clean_upload_id, actor_id=clean_actor)
+    if not ok:
+        err_code = "FORBIDDEN_CROSS_OWNER" if status_code == 403 else reason
+        return JSONResponse(
+            status_code=status_code,
+            content={"ok": False, "error_code": err_code, "message": f"Upload validation failed: {reason}"},
+        )
+
+    # Validate sample file on disk
+    sample_path = Path(str(staged_record.get("local_path") or ""))
+    sample_ok, sample_err, sample_msg = validate_voice_clone_sample(sample_path)
+    if not sample_ok:
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error_code": sample_err, "message": sample_msg},
+        )
+
+    # Canonical price authority derived strictly from Bot Core
+    quote_xu = int(voice_profile_storage_price_xu(clean_actor) or 0)
+    pricing_state = "first_free" if quote_xu == 0 else "paid_50_xu"
+
+    web_job_id = f"vcjob_{secrets.token_hex(16)}"
+    web_request_id = str(request.headers.get("x-toan-aas-request-id") or f"req_{secrets.token_hex(8)}")
+    idempotency_key = str(payload.get("idempotency_key") or request.headers.get("idempotency-key") or f"key_{web_job_id}").strip()
+
+    prep_result = prepare_web_voice_clone_job(
+        web_job_id=web_job_id,
+        web_request_id=web_request_id,
+        canonical_user_id=int(clean_actor),
+        upload_id=clean_upload_id,
+        consent=True,
+        display_name=clean_display_name,
+        idempotency_key=idempotency_key,
+        quote_xu=quote_xu,
+        pricing_state=pricing_state,
+    )
+    if not prep_result.get("ok"):
+        return JSONResponse(
+            status_code=prep_result.get("http_status", 400),
+            content=prep_result,
+        )
+
+    safe_projection = to_safe_voice_clone_job_projection(prep_result["job"])
+    safe_projection["idempotent_replay"] = prep_result.get("idempotent_replay", False)
+    return JSONResponse(status_code=200, content=safe_projection)
+
+
+@fastapi_app.get("/internal/v1/web-voice-clone/jobs/{job_id}")
+async def api_internal_web_voice_clone_jobs_detail(job_id: str, request: Request):
+    """Retrieve owner-bound Web Voice Clone job detail."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.web_voice_clone_runtime_service import (
+        get_web_voice_clone_job,
+        to_safe_voice_clone_job_projection,
+    )
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = f"/internal/v1/web-voice-clone/jobs/{job_id}"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path=path,
+        body_bytes=b"",
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    job = get_web_voice_clone_job(job_id, int(clean_actor))
+    if not job:
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error_code": "JOB_NOT_FOUND", "message": f"Job #{job_id} not found"},
+        )
+
+    return JSONResponse(status_code=200, content=to_safe_voice_clone_job_projection(job))
+
+
+@fastapi_app.post("/internal/v1/web-voice-clone/jobs/{job_id}/confirm")
+async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Request):
+    """Execute and confirm Web Voice Clone job with atomic claim, durable settlement, and fail-closed protections."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.subdub_upload_staging import get_staged_upload
+    from services.web_voice_clone_runtime_service import (
+        acquire_voice_clone_first_free_reservation,
+        claim_web_voice_clone_job_for_execution,
+        get_voice_clone_first_free_entitlement,
+        get_web_voice_clone_job,
+        release_voice_clone_first_free_reservation,
+        to_safe_voice_clone_job_projection,
+        transition_voice_clone_first_free_state,
+        update_web_voice_clone_job,
+        validate_voice_clone_sample,
+    )
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm"
+    raw_body = await request.body()
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    uid = int(clean_actor)
+    # Atomic CAS claim ensuring exactly-once execution ownership
+    claimed, current_job = claim_web_voice_clone_job_for_execution(job_id, uid)
+    if not current_job:
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error_code": "JOB_NOT_FOUND", "message": f"Job #{job_id} not found"},
+        )
+
+    if not claimed:
+        current_status = current_job.get("status")
+        if current_status == "completed":
+            return JSONResponse(status_code=200, content=to_safe_voice_clone_job_projection(current_job))
+        elif current_status == "processing":
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "ok": False,
+                    "error_code": "CONCURRENT_CONFIRM_IN_PROGRESS",
+                    "message": "Job is currently being processed by another execution request",
+                },
+            )
+        else:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "ok": False,
+                    "error_code": "JOB_NOT_CLAIMABLE",
+                    "message": f"Job in status '{current_status}' cannot be confirmed",
+                },
+            )
+
+    expected_settle_key = f"voice_clone_settle:{uid}:{job_id}"
+    stored_settle_key = str(current_job.get("settlement_idempotency_key") or "").strip()
+    if stored_settle_key and stored_settle_key != expected_settle_key:
+        update_web_voice_clone_job(job_id, status="failed", status_reason="SETTLEMENT_KEY_CONFLICT")
+        return JSONResponse(
+            status_code=409,
+            content={
+                "ok": False,
+                "error_code": "SETTLEMENT_KEY_CONFLICT",
+                "message": f"Stored settlement key '{stored_settle_key}' conflicts with expected key '{expected_settle_key}'",
+            },
+        )
+
+    # Check whether provider clone has already succeeded in a prior attempt (e.g. recovering from payment_required)
+    existing_profile_id = current_job.get("canonical_profile_id")
+    existing_provider_voice = str(current_job.get("provider_voice_id") or "").strip()
+    is_provider_already_executed = bool(existing_profile_id and existing_provider_voice)
+
+    if not is_provider_already_executed:
+        # Phase G: First-Free Pricing Race Guard - revalidate commercial authority immediately before provider call
+        current_price = int(voice_profile_storage_price_xu(uid) or 0)
+        prepared_quote = int(current_job.get("quote_xu") or 0)
+        if current_price != prepared_quote:
+            new_pricing_state = "first_free" if current_price == 0 else "paid_50_xu"
+            update_web_voice_clone_job(
+                job_id,
+                status="failed",
+                status_reason="QUOTE_REFRESH_REQUIRED",
+                quote_xu=current_price,
+                pricing_state=new_pricing_state,
+                execution_claim="",
+            )
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "ok": False,
+                    "error_code": "QUOTE_REFRESH_REQUIRED",
+                    "message": "Commercial pricing state changed since preparation. Please refresh quote.",
+                    "quote_xu": current_price,
+                    "pricing_state": new_pricing_state,
+                },
+            )
+
+        # User-scoped atomic First-Free Entitlement Reservation
+        claim_token = str(current_job.get("execution_claim") or f"claim_{secrets.token_hex(8)}")
+        if prepared_quote == 0 and not is_admin_user(uid):
+            ff_ok, ff_reason, ff_rec = acquire_voice_clone_first_free_reservation(
+                user_id=uid,
+                job_id=job_id,
+                claim_token=claim_token,
+            )
+            if not ff_ok:
+                if ff_reason == "FIRST_FREE_CONSUMED":
+                    update_web_voice_clone_job(
+                        job_id,
+                        status="failed",
+                        status_reason="QUOTE_REFRESH_REQUIRED",
+                        quote_xu=50,
+                        pricing_state="paid_50_xu",
+                        execution_claim="",
+                    )
+                    return JSONResponse(
+                        status_code=409,
+                        content={
+                            "ok": False,
+                            "error_code": "QUOTE_REFRESH_REQUIRED",
+                            "message": "First-free clone has already been consumed by another job. Please refresh quote.",
+                            "quote_xu": 50,
+                            "pricing_state": "paid_50_xu",
+                        },
+                    )
+                else:
+                    update_web_voice_clone_job(
+                        job_id,
+                        status="failed",
+                        status_reason=ff_reason,
+                        execution_claim="",
+                    )
+                    return JSONResponse(
+                        status_code=409,
+                        content={
+                            "ok": False,
+                            "error_code": ff_reason,
+                            "message": f"First-free entitlement unavailable: {ff_reason}",
+                        },
+                    )
+
+        # Revalidate staged upload
+        upload_id = str(current_job.get("upload_id") or "")
+        ok, reason, code, staged_record = get_staged_upload(upload_id, actor_id=clean_actor)
+        if not ok:
+            if prepared_quote == 0 and not is_admin_user(uid):
+                release_voice_clone_first_free_reservation(uid, job_id, reason="UPLOAD_INVALID_BEFORE_PROVIDER")
+            update_web_voice_clone_job(job_id, status="failed", status_reason="UPLOAD_INVALID_OR_REVOKED")
+            return JSONResponse(
+                status_code=400,
+                content={"ok": False, "error_code": "UPLOAD_INVALID_OR_REVOKED", "message": f"Staged upload invalid: {reason}"},
+            )
+
+        sample_path = Path(str(staged_record.get("local_path") or ""))
+        sample_ok, sample_err, sample_msg = validate_voice_clone_sample(sample_path)
+        if not sample_ok:
+            if prepared_quote == 0 and not is_admin_user(uid):
+                release_voice_clone_first_free_reservation(uid, job_id, reason=f"SAMPLE_INVALID_BEFORE_PROVIDER:{sample_err}")
+            update_web_voice_clone_job(job_id, status="failed", status_reason=sample_err)
+            return JSONResponse(
+                status_code=400,
+                content={"ok": False, "error_code": sample_err, "message": sample_msg},
+            )
+
+        # Revalidate readiness & route availability
+        readiness = get_minimax_voice_clone_readiness()
+        if not voice_clone_ready_for_processing(readiness, admin_access=bool(is_admin_user(uid))):
+            if prepared_quote == 0 and not is_admin_user(uid):
+                release_voice_clone_first_free_reservation(uid, job_id, reason="PROVIDER_NOT_READY_BEFORE_PROVIDER")
+            update_web_voice_clone_job(job_id, status="failed", status_reason="PROVIDER_NOT_READY")
+            return JSONResponse(
+                status_code=503,
+                content={"ok": False, "error_code": "PROVIDER_NOT_READY", "message": "Voice Clone provider engine is not ready"},
+            )
+
+        # Create draft profile record in Bot DB
+        profile_id = save_user_voice_profile(
+            uid,
+            upload_id,
+            display_name=str(current_job.get("display_name") or ""),
+        )
+        if not profile_id:
+            if prepared_quote == 0 and not is_admin_user(uid):
+                release_voice_clone_first_free_reservation(uid, job_id, reason="PROFILE_CREATION_FAILED_BEFORE_PROVIDER")
+            update_web_voice_clone_job(job_id, status="failed", status_reason="PROFILE_CREATION_FAILED")
+            return JSONResponse(
+                status_code=500,
+                content={"ok": False, "error_code": "PROFILE_CREATION_FAILED", "message": "Failed to initialize voice profile"},
+            )
+
+        # Provider invocation with execution counter increment
+        new_exec_count = int(current_job.get("provider_execution_count") or 0) + 1
+        update_web_voice_clone_job(
+            job_id,
+            provider_execution_count=new_exec_count,
+            canonical_profile_id=profile_id,
+        )
+
+        if prepared_quote == 0 and not is_admin_user(uid):
+            transition_voice_clone_first_free_state(uid, job_id, "provider_started", reason="DISPATCHING_PROVIDER")
+
+        preview_text = capped_voice_preview_text(VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT)
+        result = await voice_clone_pipeline.process_custom_voice_create(
+            user_id=uid,
+            sample_path=sample_path,
+            display_name=str(current_job.get("display_name") or ""),
+            product_context=PRODUCT_CONTEXT_SHOWROOM,
+            profile_id=profile_id,
+            admin_mode=bool(is_admin_user(uid)),
+            no_charge=True,  # Settlement handled deterministically by web_voice_clone_runtime_service
+            fake=False,
+            preview_text=preview_text,
+            readiness=readiness,
+            output_dir=str(voice_asset_storage_dir()),
+            route_attempts_func=voice_clone_provider_route_attempts,
+            access_allowed_func=voice_clone_access_allowed,
+            ready_for_processing_func=voice_clone_ready_for_processing,
+            make_provider_voice_id_func=make_minimax_voice_id,
+            execute_engine_func=execute_engine,
+            audio_reference_to_bytes_func=minimax_audio_reference_to_bytes,
+            cap_preview_audio_func=cap_voice_preview_audio_bytes,
+            record_attempt_func=record_voice_clone_attempt,
+            max_preview_seconds=VOICE_PREVIEW_MAX_SECONDS,
+        )
+
+        if not result.ok:
+            fail_status = str(result.error_code or result.status or "PROVIDER_EXECUTION_FAILED")
+            mark_voice_profile_activation_failed(uid, profile_id, get_user_voice_profile(uid, profile_id), f"failed_{fail_status.lower()}", str(result.admin_debug_summary or fail_status))
+            ambiguity = "NETWORK_AMBIGUOUS" if "timeout" in str(fail_status).lower() or "network" in str(fail_status).lower() else ""
+            if prepared_quote == 0 and not is_admin_user(uid):
+                if ambiguity:
+                    transition_voice_clone_first_free_state(uid, job_id, "provider_ambiguous", reason=fail_status)
+                else:
+                    transition_voice_clone_first_free_state(uid, job_id, "provider_failed", reason=fail_status)
+                    release_voice_clone_first_free_reservation(uid, job_id, reason=f"DETERMINISTIC_PROVIDER_FAILURE:{fail_status}")
+            update_web_voice_clone_job(
+                job_id,
+                status="failed",
+                status_reason=fail_status,
+                provider_outcome_state="provider_failed",
+                provider_ambiguity_state=ambiguity,
+            )
+            http_code = 504 if ambiguity else 422
+            return JSONResponse(
+                status_code=http_code,
+                content={"ok": False, "error_code": fail_status, "message": str(result.safe_public_message or "Voice clone synthesis failed")},
+            )
+
+        # Provider success: persist provider result before wallet settlement
+        provider_name = str(result.provider or "")
+        provider_voice_id = str(result.provider_voice_id or "")
+        provider_file_id = str(result.provider_file_id or "")
+        preview_audio_path = str(result.preview_audio_path or "")
+        preview_audio_bytes = int(result.preview_audio_bytes or 0)
+
+        if prepared_quote == 0 and not is_admin_user(uid):
+            transition_voice_clone_first_free_state(uid, job_id, "provider_succeeded", reason="PROVIDER_SUCCESS")
+
+        update_user_voice_profile(
+            uid,
+            profile_id,
+            provider=provider_name,
+            provider_voice_id=provider_voice_id,
+            preview_audio_ref=preview_audio_path,
+            status="pending_charge" if prepared_quote > 0 and not is_admin_user(uid) else "ready",
+        )
+
+        current_job = update_web_voice_clone_job(
+            job_id,
+            provider_outcome_state="provider_success",
+            provider_voice_id=provider_voice_id,
+            provider_file_id=provider_file_id,
+            provider_route=provider_name,
+            preview_audio_path=preview_audio_path,
+            preview_audio_bytes=preview_audio_bytes,
+            canonical_profile_id=profile_id,
+            settlement_status="settling",
+            settlement_idempotency_key=expected_settle_key,
+        )
+
+    # Settlement Phase (Post-Provider Result Durably Preserved)
+    quote_xu = int(current_job.get("quote_xu") or 0)
+    profile_id = int(current_job.get("canonical_profile_id") or 0)
+
+    if quote_xu == 0 or is_admin_user(uid):
+        if not is_admin_user(uid):
+            transition_voice_clone_first_free_state(uid, job_id, "settled", reason="SETTLED")
+        update_user_voice_profile(uid, profile_id, status="ready")
+        final_job = update_web_voice_clone_job(
+            job_id,
+            status="completed",
+            status_reason="COMPLETED",
+            settlement_status="settled",
+            charged_xu=0,
+        )
+        return JSONResponse(status_code=200, content=to_safe_voice_clone_job_projection(final_job))
+
+    # Paid settlement
+    charge = spend_fixed_credit_idempotent_info(
+        uid,
+        quote_xu,
+        "web_voice_clone",
+        ref_id=expected_settle_key,
+        note=f"job_id={job_id}; profile={profile_id}",
+    )
+    if not charge.get("ok"):
+        raw_err = str(charge.get("error_code") or charge.get("error") or "WALLET_DEBIT_FAILED").strip().upper()
+        err_code = raw_err if raw_err else "WALLET_DEBIT_FAILED"
+        err_msg = str(charge.get("message") or f"Wallet debit failed: {err_code}")
+
+        if err_code == "INSUFFICIENT_FUNDS":
+            # Insufficient funds preserves provider result in payment_required without secondary provider execution
+            update_user_voice_profile(uid, profile_id, status="pending_charge")
+            final_job = update_web_voice_clone_job(
+                job_id,
+                status="payment_required",
+                status_reason="INSUFFICIENT_FUNDS",
+                settlement_status="unsettled",
+            )
+            return JSONResponse(
+                status_code=402,
+                content={"ok": False, "error_code": "INSUFFICIENT_FUNDS", "message": f"Insufficient funds: need {quote_xu} Xu"},
+            )
+
+        update_user_voice_profile(uid, profile_id, status="pending_charge")
+        update_web_voice_clone_job(
+            job_id,
+            status="failed",
+            status_reason=err_code,
+            settlement_status="unsettled",
+        )
+        return JSONResponse(status_code=409, content={"ok": False, "error_code": err_code, "message": err_msg})
+
+    charged = int(charge.get("final_cost") or quote_xu)
+    update_user_voice_profile(uid, profile_id, status="ready")
+    final_job = update_web_voice_clone_job(
+        job_id,
+        status="completed",
+        status_reason="COMPLETED",
+        settlement_status="settled",
+        charged_xu=charged,
+    )
+    return JSONResponse(status_code=200, content=to_safe_voice_clone_job_projection(final_job))
+
+
+@fastapi_app.post("/internal/v1/web-voice-clone/jobs/{job_id}/reconcile")
+async def api_internal_web_voice_clone_jobs_reconcile(job_id: str, request: Request):
+    """Reconcile and heal Web Voice Clone job status without blind provider re-execution."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.web_voice_clone_runtime_service import (
+        get_web_voice_clone_job,
+        update_web_voice_clone_job,
+        to_safe_voice_clone_job_projection,
+        transition_voice_clone_first_free_state,
+    )
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = f"/internal/v1/web-voice-clone/jobs/{job_id}/reconcile"
+    raw_body = await request.body()
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    uid = int(clean_actor)
+    job = get_web_voice_clone_job(job_id, uid)
+    if not job:
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error_code": "JOB_NOT_FOUND", "message": f"Job #{job_id} not found"},
+        )
+
+    current_status = job.get("status")
+    quote_xu = int(job.get("quote_xu") or 0)
+    profile_id = int(job.get("canonical_profile_id") or 0)
+    expected_settle_key = f"voice_clone_settle:{uid}:{job_id}"
+
+    # If completed, return safe projection directly
+    if current_status == "completed":
+        return JSONResponse(status_code=200, content=to_safe_voice_clone_job_projection(job))
+
+    if current_status in ("processing", "payment_required") and profile_id > 0:
+        # Reconcile settlement without secondary provider call
+        if quote_xu == 0 or is_admin_user(uid):
+            if not is_admin_user(uid):
+                transition_voice_clone_first_free_state(uid, job_id, "settled", reason="RECONCILED_COMPLETED")
+            update_user_voice_profile(uid, profile_id, status="ready")
+            final_job = update_web_voice_clone_job(
+                job_id,
+                status="completed",
+                status_reason="COMPLETED",
+                settlement_status="settled",
+                charged_xu=0,
+            )
+            return JSONResponse(status_code=200, content=to_safe_voice_clone_job_projection(final_job))
+
+        charge = spend_fixed_credit_idempotent_info(
+            uid,
+            quote_xu,
+            "web_voice_clone",
+            ref_id=expected_settle_key,
+            note=f"job_id={job_id}; profile={profile_id}",
+        )
+        if charge.get("ok"):
+            charged = int(charge.get("final_cost") or quote_xu)
+            update_user_voice_profile(uid, profile_id, status="ready")
+            final_job = update_web_voice_clone_job(
+                job_id,
+                status="completed",
+                status_reason="COMPLETED",
+                settlement_status="settled",
+                charged_xu=charged,
+            )
+            return JSONResponse(status_code=200, content=to_safe_voice_clone_job_projection(final_job))
+        elif str(charge.get("error_code") or "").upper() == "INSUFFICIENT_FUNDS":
+            final_job = update_web_voice_clone_job(
+                job_id,
+                status="payment_required",
+                status_reason="INSUFFICIENT_FUNDS",
+                settlement_status="unsettled",
+            )
+            return JSONResponse(status_code=200, content=to_safe_voice_clone_job_projection(final_job))
+
+    return JSONResponse(status_code=200, content=to_safe_voice_clone_job_projection(job))
+
+
+@fastapi_app.get("/internal/v1/web-voice-clone/jobs/{job_id}/preview")
+async def api_internal_web_voice_clone_jobs_preview(job_id: str, request: Request):
+    """Serve authenticated preview audio artifact for completed Web Voice Clone job."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.web_voice_clone_runtime_service import get_web_voice_clone_job
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = f"/internal/v1/web-voice-clone/jobs/{job_id}/preview"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path=path,
+        body_bytes=b"",
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    job = get_web_voice_clone_job(job_id, int(clean_actor))
+    if not job or job.get("status") != "completed":
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error_code": "PREVIEW_NOT_FOUND", "message": "Job not found or not yet completed"},
+        )
+
+    preview_path = job.get("preview_audio_path")
+    if not preview_path or not Path(preview_path).exists():
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error_code": "PREVIEW_FILE_MISSING", "message": "Preview audio missing"},
+        )
+
+    audio_bytes = Path(preview_path).read_bytes()
+    return Response(content=audio_bytes, media_type="audio/mpeg")
+
+
 # ─── ENTRY POINT ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     uvicorn.run(
