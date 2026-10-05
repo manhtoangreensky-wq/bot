@@ -68,12 +68,16 @@ from services.voice_clone_pipeline import (
     CUSTOM_VOICE_MAX_SAMPLE_BYTES,
 )
 from services.web_voice_clone_runtime_service import (
+    acquire_voice_clone_first_free_reservation,
     claim_web_voice_clone_job_for_execution,
     contains_forbidden_authority_fields,
     ensure_web_voice_clone_schema,
+    get_voice_clone_first_free_entitlement,
     get_web_voice_clone_job,
     prepare_web_voice_clone_job,
+    release_voice_clone_first_free_reservation,
     to_safe_voice_clone_job_projection,
+    transition_voice_clone_first_free_state,
     update_web_voice_clone_job,
     validate_voice_clone_sample,
 )
@@ -1521,3 +1525,355 @@ def test_40_safe_response_contains_no_secrets_provider_file_local_path_leakage(m
     forbidden_keys = {"local_path", "preview_audio_path", "provider_file_id", "execution_claim", "recovery_markers", "payload_hash"}
     intersection = forbidden_keys.intersection(data.keys())
     assert len(intersection) == 0, f"Response contains forbidden internal keys: {intersection}"
+
+
+# ---------------------------------------------------------------------------
+# 41-46: FIRST-FREE PRICING RACE GUARD & RESERVATION STATE MACHINE TESTS
+# ---------------------------------------------------------------------------
+
+
+def test_41_concurrent_first_free_race_guard_second_job_rejected(monkeypatch):
+    """41: Two 0-Xu jobs prepared for same user; first acquires reservation, second receives 409 FIRST_FREE_RESERVED while first is in-flight."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50041
+    setup_user_wallet(uid, balance=0)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 0)
+
+    # Job 1 prepared
+    wav_bytes1 = _make_wav_bytes(12.0)
+    upload_id1 = stage_test_upload(client, wav_bytes1, actor_id=str(uid))
+    res_prep1 = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id1, "consent": True, "display_name": "Job 1"},
+        actor_id=str(uid),
+    )
+    assert res_prep1.status_code == 200
+    job_id1 = res_prep1.json()["job_id"]
+    assert res_prep1.json()["quote_xu"] == 0
+
+    # Job 2 prepared
+    wav_bytes2 = _make_wav_bytes(12.0)
+    upload_id2 = stage_test_upload(client, wav_bytes2, actor_id=str(uid))
+    res_prep2 = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id2, "consent": True, "display_name": "Job 2"},
+        actor_id=str(uid),
+    )
+    assert res_prep2.status_code == 200
+    job_id2 = res_prep2.json()["job_id"]
+    assert res_prep2.json()["quote_xu"] == 0
+
+    # Manually simulate Job 1 claiming and acquiring reservation
+    claim_web_voice_clone_job_for_execution(job_id1, uid)
+    acquire_voice_clone_first_free_reservation(uid, job_id1)
+
+    # Now Job 2 attempts confirm
+    confirm_path2 = f"/internal/v1/web-voice-clone/jobs/{job_id2}/confirm"
+    res_confirm2 = post_json_auth(client, confirm_path2, None, actor_id=str(uid))
+    assert res_confirm2.status_code == 409
+    data2 = res_confirm2.json()
+    assert data2["error_code"] == "FIRST_FREE_RESERVED"
+
+    # Confirm reservation table still has Job 1 in reserved
+    ent = get_voice_clone_first_free_entitlement(uid)
+    assert ent is not None
+    assert ent["job_id"] == job_id1
+    assert ent["state"] == "reserved"
+
+
+def test_42_first_free_consumed_second_job_requires_quote_refresh_paid_50_xu(monkeypatch):
+    """42: When first job settles under first-free, second prepared 0-Xu job gets 409 QUOTE_REFRESH_REQUIRED with quote_xu=50."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50042
+    setup_user_wallet(uid, balance=0)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 0)
+
+    # Job 1 prepared
+    wav_bytes1 = _make_wav_bytes(12.0)
+    upload_id1 = stage_test_upload(client, wav_bytes1, actor_id=str(uid))
+    res_prep1 = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id1, "consent": True, "display_name": "Job 1"},
+        actor_id=str(uid),
+    )
+    job_id1 = res_prep1.json()["job_id"]
+
+    # Job 2 prepared
+    wav_bytes2 = _make_wav_bytes(12.0)
+    upload_id2 = stage_test_upload(client, wav_bytes2, actor_id=str(uid))
+    res_prep2 = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id2, "consent": True, "display_name": "Job 2"},
+        actor_id=str(uid),
+    )
+    job_id2 = res_prep2.json()["job_id"]
+
+    # Mock provider success for Job 1
+    async def fake_create(**kwargs):
+        return CustomVoiceCreateResult(
+            ok=True,
+            status="SUCCESS",
+            profile_id=kwargs.get("profile_id"),
+            provider="minimax",
+            provider_voice_id="vox_42",
+            preview_audio_path="/tmp/vox_42.mp3",
+            preview_audio_bytes=500,
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    # Job 1 confirms and settles
+    res_confirm1 = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id1}/confirm", None, actor_id=str(uid))
+    assert res_confirm1.status_code == 200
+    assert res_confirm1.json()["status"] == "completed"
+
+    ent = get_voice_clone_first_free_entitlement(uid)
+    assert ent is not None
+    assert ent["state"] == "settled"
+
+    # Now Job 2 confirms: should be rejected because first-free is consumed
+    res_confirm2 = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id2}/confirm", None, actor_id=str(uid))
+    assert res_confirm2.status_code == 409
+    data2 = res_confirm2.json()
+    assert data2["error_code"] == "QUOTE_REFRESH_REQUIRED"
+    assert data2["quote_xu"] == 50
+    assert data2["pricing_state"] == "paid_50_xu"
+
+
+def test_43_pre_provider_failure_releases_first_free_reservation_for_retry(monkeypatch):
+    """43: Pre-provider failure releases reservation so user can retry first-free clone legitimately."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50043
+    setup_user_wallet(uid, balance=0)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 0)
+
+    # Prepare job with valid upload
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+    res_prep = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id, "consent": True, "display_name": "Job 43"},
+        actor_id=str(uid),
+    )
+    job_id = res_prep.json()["job_id"]
+
+    # Invalidate sample file before confirm to trigger pre-provider validation failure
+    from services.subdub_upload_staging import get_staged_upload
+    ok, reason, code, staged = get_staged_upload(upload_id, actor_id=str(uid))
+    assert ok is True
+    Path(staged["local_path"]).write_bytes(b"")
+
+    # Confirm fails on pre-provider sample check
+    res_confirm = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm", None, actor_id=str(uid))
+    assert res_confirm.status_code == 400
+    assert res_confirm.json()["error_code"] == "sample_missing_or_empty"
+
+    # Reservation state must be released
+    ent = get_voice_clone_first_free_entitlement(uid)
+    assert ent is not None
+    assert ent["state"] == "released"
+
+    # Now user prepares a second job with a good sample
+    wav_bytes2 = _make_wav_bytes(12.0)
+    upload_id2 = stage_test_upload(client, wav_bytes2, actor_id=str(uid))
+    res_prep2 = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id2, "consent": True, "display_name": "Job 43 Retry"},
+        actor_id=str(uid),
+    )
+    job_id2 = res_prep2.json()["job_id"]
+    assert res_prep2.json()["quote_xu"] == 0
+
+    async def fake_create(**kwargs):
+        return CustomVoiceCreateResult(
+            ok=True,
+            status="SUCCESS",
+            profile_id=kwargs.get("profile_id"),
+            provider="minimax",
+            provider_voice_id="vox_43",
+            preview_audio_path="/tmp/vox_43.mp3",
+            preview_audio_bytes=500,
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    # Retry succeeds and re-acquires reservation
+    res_confirm2 = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id2}/confirm", None, actor_id=str(uid))
+    assert res_confirm2.status_code == 200
+    assert res_confirm2.json()["status"] == "completed"
+
+    ent2 = get_voice_clone_first_free_entitlement(uid)
+    assert ent2["job_id"] == job_id2
+    assert ent2["state"] == "settled"
+
+
+def test_44_deterministic_provider_failure_releases_first_free_reservation_for_retry(monkeypatch):
+    """44: Deterministic provider failure releases reservation so user can re-use first-free entitlement."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50044
+    setup_user_wallet(uid, balance=0)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 0)
+
+    # Job 1 prepared
+    wav_bytes1 = _make_wav_bytes(12.0)
+    upload_id1 = stage_test_upload(client, wav_bytes1, actor_id=str(uid))
+    res_prep1 = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id1, "consent": True, "display_name": "Job 44 Fail"},
+        actor_id=str(uid),
+    )
+    job_id1 = res_prep1.json()["job_id"]
+
+    async def fake_fail(**kwargs):
+        return CustomVoiceCreateResult(
+            ok=False,
+            status="FAIL",
+            error_code="AUDIO_QUALITY_TOO_LOW",
+            safe_public_message="Background noise too high",
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_fail)
+
+    res_confirm1 = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id1}/confirm", None, actor_id=str(uid))
+    assert res_confirm1.status_code == 422
+    assert res_confirm1.json()["error_code"] == "AUDIO_QUALITY_TOO_LOW"
+
+    # Verify reservation is released
+    ent = get_voice_clone_first_free_entitlement(uid)
+    assert ent is not None
+    assert ent["state"] == "released"
+
+    # User retries with new job
+    wav_bytes2 = _make_wav_bytes(12.0)
+    upload_id2 = stage_test_upload(client, wav_bytes2, actor_id=str(uid))
+    res_prep2 = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id2, "consent": True, "display_name": "Job 44 Retry"},
+        actor_id=str(uid),
+    )
+    job_id2 = res_prep2.json()["job_id"]
+    assert res_prep2.json()["quote_xu"] == 0
+
+    async def fake_success(**kwargs):
+        return CustomVoiceCreateResult(
+            ok=True,
+            status="SUCCESS",
+            profile_id=kwargs.get("profile_id"),
+            provider="minimax",
+            provider_voice_id="vox_44",
+            preview_audio_path="/tmp/vox_44.mp3",
+            preview_audio_bytes=500,
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_success)
+
+    res_confirm2 = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id2}/confirm", None, actor_id=str(uid))
+    assert res_confirm2.status_code == 200
+    assert res_confirm2.json()["status"] == "completed"
+
+    ent2 = get_voice_clone_first_free_entitlement(uid)
+    assert ent2["job_id"] == job_id2
+    assert ent2["state"] == "settled"
+
+
+def test_45_ambiguous_provider_timeout_quarantines_first_free_reservation(monkeypatch):
+    """45: Ambiguous provider timeout marks reservation provider_ambiguous (quarantined); subsequent attempts locked."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50045
+    setup_user_wallet(uid, balance=0)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 0)
+
+    wav_bytes1 = _make_wav_bytes(12.0)
+    upload_id1 = stage_test_upload(client, wav_bytes1, actor_id=str(uid))
+    res_prep1 = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id1, "consent": True, "display_name": "Job 45 Timeout"},
+        actor_id=str(uid),
+    )
+    job_id1 = res_prep1.json()["job_id"]
+
+    async def fake_timeout(**kwargs):
+        return CustomVoiceCreateResult(
+            ok=False,
+            status="TIMEOUT",
+            error_code="NETWORK_GATEWAY_TIMEOUT",
+            safe_public_message="Gateway timeout",
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_timeout)
+
+    res_confirm1 = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id1}/confirm", None, actor_id=str(uid))
+    assert res_confirm1.status_code == 504
+
+    # Entitlement must be quarantined in provider_ambiguous
+    ent = get_voice_clone_first_free_entitlement(uid)
+    assert ent is not None
+    assert ent["state"] == "provider_ambiguous"
+
+    # Second job prepare and confirm must NOT acquire first-free reservation
+    wav_bytes2 = _make_wav_bytes(12.0)
+    upload_id2 = stage_test_upload(client, wav_bytes2, actor_id=str(uid))
+    res_prep2 = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id2, "consent": True, "display_name": "Job 45 Other"},
+        actor_id=str(uid),
+    )
+    job_id2 = res_prep2.json()["job_id"]
+
+    res_confirm2 = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id2}/confirm", None, actor_id=str(uid))
+    assert res_confirm2.status_code == 409
+    assert res_confirm2.json()["error_code"] == "FIRST_FREE_QUARANTINED"
+
+
+def test_46_reconcile_first_free_job_transitions_to_settled(monkeypatch):
+    """46: Reconciling a first-free completed job durably marks entitlement as settled."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50046
+    setup_user_wallet(uid, balance=0)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 0)
+
+    # Create job in processing state with quote 0, profile_id already created
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+    res_prep = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id, "consent": True, "display_name": "Job 46"},
+        actor_id=str(uid),
+    )
+    job_id = res_prep.json()["job_id"]
+
+    # Acquire reservation and advance to provider_succeeded
+    acquire_voice_clone_first_free_reservation(uid, job_id)
+    transition_voice_clone_first_free_state(uid, job_id, "provider_succeeded", reason="PROVIDER_SUCCESS")
+
+    # Put job in processing with canonical profile
+    prof_id = bot.save_user_voice_profile(uid, "upl_46", display_name="test_46_profile")
+    update_web_voice_clone_job(
+        job_id,
+        status="processing",
+        canonical_profile_id=prof_id,
+        quote_xu=0,
+    )
+
+    # Reconcile endpoint called
+    reconcile_path = f"/internal/v1/web-voice-clone/jobs/{job_id}/reconcile"
+    res_rec = post_json_auth(client, reconcile_path, None, actor_id=str(uid))
+    assert res_rec.status_code == 200
+    assert res_rec.json()["status"] == "completed"
+
+    # Entitlement must be settled
+    ent = get_voice_clone_first_free_entitlement(uid)
+    assert ent is not None
+    assert ent["state"] == "settled"
+

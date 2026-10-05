@@ -282079,11 +282079,15 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
     from services.customer_read_model_service import normalize_target_user_id
     from services.subdub_upload_staging import get_staged_upload
     from services.web_voice_clone_runtime_service import (
+        acquire_voice_clone_first_free_reservation,
         claim_web_voice_clone_job_for_execution,
+        get_voice_clone_first_free_entitlement,
         get_web_voice_clone_job,
+        release_voice_clone_first_free_reservation,
+        to_safe_voice_clone_job_projection,
+        transition_voice_clone_first_free_state,
         update_web_voice_clone_job,
         validate_voice_clone_sample,
-        to_safe_voice_clone_job_projection,
     )
 
     header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
@@ -282174,6 +282178,7 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
                 status_reason="QUOTE_REFRESH_REQUIRED",
                 quote_xu=current_price,
                 pricing_state=new_pricing_state,
+                execution_claim="",
             )
             return JSONResponse(
                 status_code=409,
@@ -282186,10 +282191,56 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
                 },
             )
 
+        # User-scoped atomic First-Free Entitlement Reservation
+        claim_token = str(current_job.get("execution_claim") or f"claim_{secrets.token_hex(8)}")
+        if prepared_quote == 0 and not is_admin_user(uid):
+            ff_ok, ff_reason, ff_rec = acquire_voice_clone_first_free_reservation(
+                user_id=uid,
+                job_id=job_id,
+                claim_token=claim_token,
+            )
+            if not ff_ok:
+                if ff_reason == "FIRST_FREE_CONSUMED":
+                    update_web_voice_clone_job(
+                        job_id,
+                        status="failed",
+                        status_reason="QUOTE_REFRESH_REQUIRED",
+                        quote_xu=50,
+                        pricing_state="paid_50_xu",
+                        execution_claim="",
+                    )
+                    return JSONResponse(
+                        status_code=409,
+                        content={
+                            "ok": False,
+                            "error_code": "QUOTE_REFRESH_REQUIRED",
+                            "message": "First-free clone has already been consumed by another job. Please refresh quote.",
+                            "quote_xu": 50,
+                            "pricing_state": "paid_50_xu",
+                        },
+                    )
+                else:
+                    update_web_voice_clone_job(
+                        job_id,
+                        status="failed",
+                        status_reason=ff_reason,
+                        execution_claim="",
+                    )
+                    return JSONResponse(
+                        status_code=409,
+                        content={
+                            "ok": False,
+                            "error_code": ff_reason,
+                            "message": f"First-free entitlement unavailable: {ff_reason}",
+                        },
+                    )
+
         # Revalidate staged upload
         upload_id = str(current_job.get("upload_id") or "")
         ok, reason, code, staged_record = get_staged_upload(upload_id, actor_id=clean_actor)
         if not ok:
+            if prepared_quote == 0 and not is_admin_user(uid):
+                release_voice_clone_first_free_reservation(uid, job_id, reason="UPLOAD_INVALID_BEFORE_PROVIDER")
             update_web_voice_clone_job(job_id, status="failed", status_reason="UPLOAD_INVALID_OR_REVOKED")
             return JSONResponse(
                 status_code=400,
@@ -282199,6 +282250,8 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
         sample_path = Path(str(staged_record.get("local_path") or ""))
         sample_ok, sample_err, sample_msg = validate_voice_clone_sample(sample_path)
         if not sample_ok:
+            if prepared_quote == 0 and not is_admin_user(uid):
+                release_voice_clone_first_free_reservation(uid, job_id, reason=f"SAMPLE_INVALID_BEFORE_PROVIDER:{sample_err}")
             update_web_voice_clone_job(job_id, status="failed", status_reason=sample_err)
             return JSONResponse(
                 status_code=400,
@@ -282208,6 +282261,8 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
         # Revalidate readiness & route availability
         readiness = get_minimax_voice_clone_readiness()
         if not voice_clone_ready_for_processing(readiness, admin_access=bool(is_admin_user(uid))):
+            if prepared_quote == 0 and not is_admin_user(uid):
+                release_voice_clone_first_free_reservation(uid, job_id, reason="PROVIDER_NOT_READY_BEFORE_PROVIDER")
             update_web_voice_clone_job(job_id, status="failed", status_reason="PROVIDER_NOT_READY")
             return JSONResponse(
                 status_code=503,
@@ -282221,6 +282276,8 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
             display_name=str(current_job.get("display_name") or ""),
         )
         if not profile_id:
+            if prepared_quote == 0 and not is_admin_user(uid):
+                release_voice_clone_first_free_reservation(uid, job_id, reason="PROFILE_CREATION_FAILED_BEFORE_PROVIDER")
             update_web_voice_clone_job(job_id, status="failed", status_reason="PROFILE_CREATION_FAILED")
             return JSONResponse(
                 status_code=500,
@@ -282234,6 +282291,9 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
             provider_execution_count=new_exec_count,
             canonical_profile_id=profile_id,
         )
+
+        if prepared_quote == 0 and not is_admin_user(uid):
+            transition_voice_clone_first_free_state(uid, job_id, "provider_started", reason="DISPATCHING_PROVIDER")
 
         preview_text = capped_voice_preview_text(VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT)
         result = await voice_clone_pipeline.process_custom_voice_create(
@@ -282263,6 +282323,12 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
             fail_status = str(result.error_code or result.status or "PROVIDER_EXECUTION_FAILED")
             mark_voice_profile_activation_failed(uid, profile_id, get_user_voice_profile(uid, profile_id), f"failed_{fail_status.lower()}", str(result.admin_debug_summary or fail_status))
             ambiguity = "NETWORK_AMBIGUOUS" if "timeout" in str(fail_status).lower() or "network" in str(fail_status).lower() else ""
+            if prepared_quote == 0 and not is_admin_user(uid):
+                if ambiguity:
+                    transition_voice_clone_first_free_state(uid, job_id, "provider_ambiguous", reason=fail_status)
+                else:
+                    transition_voice_clone_first_free_state(uid, job_id, "provider_failed", reason=fail_status)
+                    release_voice_clone_first_free_reservation(uid, job_id, reason=f"DETERMINISTIC_PROVIDER_FAILURE:{fail_status}")
             update_web_voice_clone_job(
                 job_id,
                 status="failed",
@@ -282282,6 +282348,9 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
         provider_file_id = str(result.provider_file_id or "")
         preview_audio_path = str(result.preview_audio_path or "")
         preview_audio_bytes = int(result.preview_audio_bytes or 0)
+
+        if prepared_quote == 0 and not is_admin_user(uid):
+            transition_voice_clone_first_free_state(uid, job_id, "provider_succeeded", reason="PROVIDER_SUCCESS")
 
         update_user_voice_profile(
             uid,
@@ -282310,6 +282379,8 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
     profile_id = int(current_job.get("canonical_profile_id") or 0)
 
     if quote_xu == 0 or is_admin_user(uid):
+        if not is_admin_user(uid):
+            transition_voice_clone_first_free_state(uid, job_id, "settled", reason="SETTLED")
         update_user_voice_profile(uid, profile_id, status="ready")
         final_job = update_web_voice_clone_job(
             job_id,
@@ -282377,6 +282448,7 @@ async def api_internal_web_voice_clone_jobs_reconcile(job_id: str, request: Requ
         get_web_voice_clone_job,
         update_web_voice_clone_job,
         to_safe_voice_clone_job_projection,
+        transition_voice_clone_first_free_state,
     )
 
     header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
@@ -282425,6 +282497,8 @@ async def api_internal_web_voice_clone_jobs_reconcile(job_id: str, request: Requ
     if current_status in ("processing", "payment_required") and profile_id > 0:
         # Reconcile settlement without secondary provider call
         if quote_xu == 0 or is_admin_user(uid):
+            if not is_admin_user(uid):
+                transition_voice_clone_first_free_state(uid, job_id, "settled", reason="RECONCILED_COMPLETED")
             update_user_voice_profile(uid, profile_id, status="ready")
             final_job = update_web_voice_clone_job(
                 job_id,

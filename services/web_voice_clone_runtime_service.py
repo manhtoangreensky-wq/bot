@@ -126,6 +126,33 @@ def ensure_web_voice_clone_schema(conn: sqlite3.Connection) -> None:
         ON web_voice_clone_jobs(status);
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS web_voice_clone_first_free_entitlements (
+            user_id INTEGER PRIMARY KEY,
+            job_id TEXT NOT NULL,
+            state TEXT NOT NULL,
+            claim_token TEXT NOT NULL,
+            reason TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            released_at TEXT,
+            details TEXT DEFAULT '{}'
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_web_voice_clone_ffe_job_id
+        ON web_voice_clone_first_free_entitlements(job_id);
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_web_voice_clone_ffe_state
+        ON web_voice_clone_first_free_entitlements(state);
+        """
+    )
 
 
 def _get_db_connection(db_path: str | None = None) -> sqlite3.Connection:
@@ -333,6 +360,7 @@ def claim_web_voice_clone_job_for_execution(
             WHERE job_id = ? AND user_id = ?
               AND (
                   status IN ('prepared', 'awaiting_confirmation', 'payment_required')
+                  OR (status = 'failed' AND status_reason IN ('FIRST_FREE_RESERVED', 'QUOTE_REFRESH_REQUIRED'))
                   OR (status = 'processing' AND settlement_status = 'settling' AND status_reason != 'RECOVERING_SETTLEMENT')
               )
             """,
@@ -481,3 +509,206 @@ def to_safe_voice_clone_job_projection(job: dict[str, Any]) -> dict[str, Any]:
         "updated_at": str(job.get("updated_at") or ""),
         "completed_at": str(job.get("completed_at") or "") if job.get("completed_at") else None,
     }
+
+
+def get_voice_clone_first_free_entitlement(
+    user_id: int,
+    *,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any] | None:
+    """Retrieve current first-free entitlement record for user."""
+    local_conn = conn or _get_db_connection()
+    try:
+        cur = local_conn.execute(
+            "SELECT * FROM web_voice_clone_first_free_entitlements WHERE user_id = ?",
+            (int(user_id),),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        if conn is None:
+            local_conn.close()
+
+
+def acquire_voice_clone_first_free_reservation(
+    user_id: int,
+    job_id: str,
+    claim_token: str = "",
+    *,
+    conn: sqlite3.Connection | None = None,
+) -> tuple[bool, str, dict[str, Any] | None]:
+    """Atomic compare-and-swap reservation of user-scoped first-free entitlement.
+
+    Enforces that across multiple jobs belonging to the same user, at most ONE job
+    can hold or execute under the first-free eligibility slot.
+
+    States:
+    - reserved: actively claimed by a job, pre-provider
+    - provider_started: provider call dispatched
+    - provider_failed: provider deterministically failed (safe to release)
+    - provider_ambiguous: provider outcome uncertain (quarantined, cannot auto-release)
+    - provider_succeeded: provider succeeded, awaiting settlement
+    - settled: first-free permanently consumed
+    - released: safely released, open for re-reservation
+
+    Returns:
+        (acquired: bool, reason: str, entitlement_record: dict | None)
+    """
+    local_conn = conn or _get_db_connection()
+    now_ts = _utc_now()
+    token = claim_token or f"ffclaim_{secrets.token_hex(8)}"
+    uid = int(user_id)
+    jid = str(job_id)
+
+    try:
+        cur = local_conn.execute(
+            "SELECT * FROM web_voice_clone_first_free_entitlements WHERE user_id = ?",
+            (uid,),
+        )
+        existing = cur.fetchone()
+
+        if not existing:
+            try:
+                local_conn.execute(
+                    """
+                    INSERT INTO web_voice_clone_first_free_entitlements (
+                        user_id, job_id, state, claim_token, reason, created_at, updated_at
+                    ) VALUES (?, ?, 'reserved', ?, 'RESERVED', ?, ?)
+                    """,
+                    (uid, jid, token, now_ts, now_ts),
+                )
+                cur = local_conn.execute(
+                    "SELECT * FROM web_voice_clone_first_free_entitlements WHERE user_id = ?",
+                    (uid,),
+                )
+                row = cur.fetchone()
+                return True, "ACQUIRED", dict(row) if row else None
+            except sqlite3.IntegrityError:
+                # Concurrent race insert: re-fetch existing
+                cur = local_conn.execute(
+                    "SELECT * FROM web_voice_clone_first_free_entitlements WHERE user_id = ?",
+                    (uid,),
+                )
+                existing = cur.fetchone()
+
+        if existing:
+            existing_dict = dict(existing)
+            existing_job = str(existing_dict.get("job_id") or "")
+            existing_state = str(existing_dict.get("state") or "")
+
+            if existing_job == jid:
+                # Same job retry / re-entry
+                if existing_state in ("reserved", "provider_started", "provider_succeeded"):
+                    return True, "ALREADY_HELD", existing_dict
+                elif existing_state == "settled":
+                    return True, "ALREADY_SETTLED", existing_dict
+                elif existing_state == "provider_ambiguous":
+                    return False, "PROVIDER_AMBIGUOUS_RESERVATION_LOCKED", existing_dict
+                elif existing_state in ("released", "provider_failed"):
+                    cur = local_conn.execute(
+                        """
+                        UPDATE web_voice_clone_first_free_entitlements
+                        SET state = 'reserved', claim_token = ?, reason = 'RE_RESERVED', updated_at = ?
+                        WHERE user_id = ? AND job_id = ? AND state IN ('released', 'provider_failed')
+                        """,
+                        (token, now_ts, uid, jid),
+                    )
+                    if cur.rowcount == 1:
+                        cur = local_conn.execute(
+                            "SELECT * FROM web_voice_clone_first_free_entitlements WHERE user_id = ?",
+                            (uid,),
+                        )
+                        return True, "ACQUIRED", dict(cur.fetchone())
+                    return False, "FIRST_FREE_RESERVED", existing_dict
+            else:
+                # Distinct job for the same user
+                if existing_state in ("reserved", "provider_started"):
+                    return False, "FIRST_FREE_RESERVED", existing_dict
+                elif existing_state in ("provider_succeeded", "settled"):
+                    return False, "FIRST_FREE_CONSUMED", existing_dict
+                elif existing_state == "provider_ambiguous":
+                    return False, "FIRST_FREE_QUARANTINED", existing_dict
+                elif existing_state in ("released", "provider_failed"):
+                    cur = local_conn.execute(
+                        """
+                        UPDATE web_voice_clone_first_free_entitlements
+                        SET job_id = ?, state = 'reserved', claim_token = ?, reason = 'RESERVED_AFTER_RELEASE', updated_at = ?
+                        WHERE user_id = ? AND state IN ('released', 'provider_failed')
+                        """,
+                        (jid, token, now_ts, uid),
+                    )
+                    if cur.rowcount == 1:
+                        cur = local_conn.execute(
+                            "SELECT * FROM web_voice_clone_first_free_entitlements WHERE user_id = ?",
+                            (uid,),
+                        )
+                        return True, "ACQUIRED", dict(cur.fetchone())
+                    cur = local_conn.execute(
+                        "SELECT * FROM web_voice_clone_first_free_entitlements WHERE user_id = ?",
+                        (uid,),
+                    )
+                    return False, "FIRST_FREE_RESERVED", dict(cur.fetchone())
+
+        return False, "FIRST_FREE_UNAVAILABLE", None
+    finally:
+        if conn is None:
+            local_conn.close()
+
+
+def transition_voice_clone_first_free_state(
+    user_id: int,
+    job_id: str,
+    to_state: str,
+    *,
+    reason: str = "",
+    details: dict[str, Any] | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> bool:
+    """Transition first-free entitlement state for the owning job."""
+    local_conn = conn or _get_db_connection()
+    now_ts = _utc_now()
+    details_str = json.dumps(details) if details else "{}"
+    try:
+        cur = local_conn.execute(
+            """
+            UPDATE web_voice_clone_first_free_entitlements
+            SET state = ?, reason = ?, updated_at = ?, details = ?
+            WHERE user_id = ? AND job_id = ?
+            """,
+            (str(to_state), str(reason), now_ts, details_str, int(user_id), str(job_id)),
+        )
+        return cur.rowcount == 1
+    finally:
+        if conn is None:
+            local_conn.close()
+
+
+def release_voice_clone_first_free_reservation(
+    user_id: int,
+    job_id: str,
+    *,
+    reason: str = "DETERMINISTIC_PROVIDER_FAILURE",
+    conn: sqlite3.Connection | None = None,
+) -> bool:
+    """Safely release first-free reservation after authoritative proof provider did not execute/succeed.
+
+    Guards:
+    - Never auto-releases 'provider_ambiguous' (quarantine invariant)
+    - Never auto-releases 'settled' or 'provider_succeeded' (double-free guard)
+    """
+    local_conn = conn or _get_db_connection()
+    now_ts = _utc_now()
+    try:
+        cur = local_conn.execute(
+            """
+            UPDATE web_voice_clone_first_free_entitlements
+            SET state = 'released', reason = ?, updated_at = ?, released_at = ?
+            WHERE user_id = ? AND job_id = ? AND state IN ('reserved', 'provider_failed')
+            """,
+            (str(reason), now_ts, now_ts, int(user_id), str(job_id)),
+        )
+        return cur.rowcount == 1
+    finally:
+        if conn is None:
+            local_conn.close()
+
