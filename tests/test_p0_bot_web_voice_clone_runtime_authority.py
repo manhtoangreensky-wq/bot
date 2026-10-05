@@ -46,6 +46,7 @@ Covering Phase N 40 required test cases:
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
@@ -63,6 +64,7 @@ from fastapi.testclient import TestClient
 
 import bot
 from services.admin_wallet_service import compute_internal_admin_wallet_signature
+from services import voice_clone_pipeline
 from services.voice_clone_pipeline import (
     CustomVoiceCreateResult,
     CUSTOM_VOICE_MAX_SAMPLE_BYTES,
@@ -2757,6 +2759,777 @@ def test_70_idempotent_prepare_replay_remains_owner_bound(monkeypatch):
     res_foreign = post_json_auth(client, path, payload_b, actor_id=str(uid_b))
     assert res_foreign.status_code == 403
     assert res_foreign.json()["error_code"] == "IDEMPOTENCY_OWNER_MISMATCH"
+
+
+# ==============================================================================
+# PHASE H: R1.4 STRUCTURED PROVIDER OUTCOME CERTAINTY & REPLAY GUARD TESTS (71-86)
+# ==============================================================================
+
+
+def test_71_clone_submit_success_single_submit_and_success_certainty(tmp_path):
+    """71: Clone submit success yields outcome_certainty='SUCCESS' and clone_submit_count=1."""
+    async def _run():
+        wav_path = tmp_path / "sample_71.wav"
+        wav_path.write_bytes(_make_wav_bytes(12.0))
+
+        async def mock_upload(b):
+            return "PASS", "file_71", "ok", 200
+
+        async def mock_clone(fid, seed):
+            return "PASS", {"voice_id": "v_succ_71"}, "ok", 200
+
+        async def mock_tts(t, voice_id=""):
+            return "PASS", b"audio_preview", "ok", 200
+
+        routes = [("minimax_primary", mock_upload, mock_clone, mock_tts)]
+
+        res = await voice_clone_pipeline.process_custom_voice_create(
+            user_id=70071,
+            sample_path=str(wav_path),
+            display_name="Voice 71",
+            product_context="showroom",
+            profile_id=71001,
+            route_attempts_func=lambda r, admin_access=False: routes,
+            access_allowed_func=lambda *a, **k: True,
+            ready_for_processing_func=lambda *a, **k: True,
+            readiness={"ready": True},
+            output_dir=str(tmp_path),
+            make_provider_voice_id_func=lambda u, profile_id=0: "v_succ_71",
+        )
+        assert res.ok is True
+        assert res.outcome_certainty == "SUCCESS"
+        assert res.clone_submit_count == 1
+        assert res.clone_dispatched is True
+        assert res.provider_voice_id == "v_succ_71"
+
+    asyncio.run(_run())
+
+
+def test_72_clone_submit_504_gateway_timeout_ambiguous_no_second_route(tmp_path):
+    """72: First clone submit returning HTTP 504 is classified as AMBIGUOUS and halts cross-route replay."""
+    async def _run():
+        wav_path = tmp_path / "sample_72.wav"
+        wav_path.write_bytes(_make_wav_bytes(12.0))
+
+        r2_clone_called = 0
+
+        async def mock_up_1(b):
+            return "PASS", "file_72_1", "ok", 200
+
+        async def mock_clone_1(fid, seed):
+            return "FAIL", {}, "504 Gateway Time-out", 504
+
+        async def mock_up_2(b):
+            return "PASS", "file_72_2", "ok", 200
+
+        async def mock_clone_2(fid, seed):
+            nonlocal r2_clone_called
+            r2_clone_called += 1
+            return "PASS", {"voice_id": "v_72_2"}, "ok", 200
+
+        routes = [
+            ("route_1", mock_up_1, mock_clone_1, None),
+            ("route_2", mock_up_2, mock_clone_2, None),
+        ]
+
+        res = await voice_clone_pipeline.process_custom_voice_create(
+            user_id=70072,
+            sample_path=str(wav_path),
+            display_name="Voice 72",
+            product_context="showroom",
+            profile_id=72001,
+            route_attempts_func=lambda r, admin_access=False: routes,
+            access_allowed_func=lambda *a, **k: True,
+            ready_for_processing_func=lambda *a, **k: True,
+            readiness={"ready": True},
+            output_dir=str(tmp_path),
+            make_provider_voice_id_func=lambda u, profile_id=0: "v_72_seed",
+        )
+        assert res.ok is False
+        assert res.outcome_certainty == "AMBIGUOUS"
+        assert res.clone_submit_count == 1
+        assert res.clone_dispatched is True
+        assert r2_clone_called == 0
+
+    asyncio.run(_run())
+
+
+def test_73_clone_submit_502_503_bad_gateway_ambiguous_no_second_route(tmp_path):
+    """73: First clone submit returning HTTP 502/503 is classified as AMBIGUOUS with zero route 2 submits."""
+    async def _run():
+        wav_path = tmp_path / "sample_73.wav"
+        wav_path.write_bytes(_make_wav_bytes(12.0))
+
+        r2_clone_called = 0
+
+        async def mock_up_1(b):
+            return "PASS", "file_73_1", "ok", 200
+
+        async def mock_clone_1(fid, seed):
+            return "FAIL", {}, "502 Bad Gateway", 502
+
+        async def mock_up_2(b):
+            return "PASS", "file_73_2", "ok", 200
+
+        async def mock_clone_2(fid, seed):
+            nonlocal r2_clone_called
+            r2_clone_called += 1
+            return "PASS", {"voice_id": "v_73_2"}, "ok", 200
+
+        routes = [
+            ("route_1", mock_up_1, mock_clone_1, None),
+            ("route_2", mock_up_2, mock_clone_2, None),
+        ]
+
+        res = await voice_clone_pipeline.process_custom_voice_create(
+            user_id=70073,
+            sample_path=str(wav_path),
+            display_name="Voice 73",
+            product_context="showroom",
+            profile_id=73001,
+            route_attempts_func=lambda r, admin_access=False: routes,
+            access_allowed_func=lambda *a, **k: True,
+            ready_for_processing_func=lambda *a, **k: True,
+            readiness={"ready": True},
+            output_dir=str(tmp_path),
+            make_provider_voice_id_func=lambda u, profile_id=0: "v_73_seed",
+        )
+        assert res.ok is False
+        assert res.outcome_certainty == "AMBIGUOUS"
+        assert res.clone_submit_count == 1
+        assert r2_clone_called == 0
+
+    asyncio.run(_run())
+
+
+def test_74_clone_submit_connection_reset_ambiguous_no_second_route(tmp_path):
+    """74: First clone submit raising ConnectionResetError is classified as AMBIGUOUS with zero route 2 submits."""
+    async def _run():
+        wav_path = tmp_path / "sample_74.wav"
+        wav_path.write_bytes(_make_wav_bytes(12.0))
+
+        r2_clone_called = 0
+
+        async def mock_up_1(b):
+            return "PASS", "file_74_1", "ok", 200
+
+        async def mock_clone_1(fid, seed):
+            raise ConnectionResetError("Connection forcibly closed by remote host")
+
+        async def mock_up_2(b):
+            return "PASS", "file_74_2", "ok", 200
+
+        async def mock_clone_2(fid, seed):
+            nonlocal r2_clone_called
+            r2_clone_called += 1
+            return "PASS", {"voice_id": "v_74_2"}, "ok", 200
+
+        routes = [
+            ("route_1", mock_up_1, mock_clone_1, None),
+            ("route_2", mock_up_2, mock_clone_2, None),
+        ]
+
+        res = await voice_clone_pipeline.process_custom_voice_create(
+            user_id=70074,
+            sample_path=str(wav_path),
+            display_name="Voice 74",
+            product_context="showroom",
+            profile_id=74001,
+            route_attempts_func=lambda r, admin_access=False: routes,
+            access_allowed_func=lambda *a, **k: True,
+            ready_for_processing_func=lambda *a, **k: True,
+            readiness={"ready": True},
+            output_dir=str(tmp_path),
+            make_provider_voice_id_func=lambda u, profile_id=0: "v_74_seed",
+        )
+        assert res.ok is False
+        assert res.outcome_certainty == "AMBIGUOUS"
+        assert res.clone_submit_count == 1
+        assert r2_clone_called == 0
+
+    asyncio.run(_run())
+
+
+def test_75_clone_submit_runtime_error_upstream_closed_ambiguous_no_string_heuristic(tmp_path):
+    """75: Generic transport exception without 'timeout' or 'network' is classified as AMBIGUOUS."""
+    async def _run():
+        wav_path = tmp_path / "sample_75.wav"
+        wav_path.write_bytes(_make_wav_bytes(12.0))
+
+        r2_clone_called = 0
+
+        async def mock_up_1(b):
+            return "PASS", "file_75_1", "ok", 200
+
+        async def mock_clone_1(fid, seed):
+            raise RuntimeError("upstream closed")
+
+        async def mock_up_2(b):
+            return "PASS", "file_75_2", "ok", 200
+
+        async def mock_clone_2(fid, seed):
+            nonlocal r2_clone_called
+            r2_clone_called += 1
+            return "PASS", {"voice_id": "v_75_2"}, "ok", 200
+
+        routes = [
+            ("route_1", mock_up_1, mock_clone_1, None),
+            ("route_2", mock_up_2, mock_clone_2, None),
+        ]
+
+        res = await voice_clone_pipeline.process_custom_voice_create(
+            user_id=70075,
+            sample_path=str(wav_path),
+            display_name="Voice 75",
+            product_context="showroom",
+            profile_id=75001,
+            route_attempts_func=lambda r, admin_access=False: routes,
+            access_allowed_func=lambda *a, **k: True,
+            ready_for_processing_func=lambda *a, **k: True,
+            readiness={"ready": True},
+            output_dir=str(tmp_path),
+            make_provider_voice_id_func=lambda u, profile_id=0: "v_75_seed",
+        )
+        assert res.ok is False
+        assert res.outcome_certainty == "AMBIGUOUS"
+        assert res.clone_submit_count == 1
+        assert r2_clone_called == 0
+
+    asyncio.run(_run())
+
+
+def test_76_clone_submit_200_missing_provider_voice_id_ambiguous_no_fallback(tmp_path):
+    """76: HTTP 200 without valid provider_voice_id defaults to AMBIGUOUS with no cross-route fallback."""
+    async def _run():
+        wav_path = tmp_path / "sample_76.wav"
+        wav_path.write_bytes(_make_wav_bytes(12.0))
+
+        r2_clone_called = 0
+
+        async def mock_up_1(b):
+            return "PASS", "file_76_1", "ok", 200
+
+        async def mock_clone_1(fid, seed):
+            return "PASS", {"detail": "voice created but id omitted"}, "ok", 200
+
+        async def mock_up_2(b):
+            return "PASS", "file_76_2", "ok", 200
+
+        async def mock_clone_2(fid, seed):
+            nonlocal r2_clone_called
+            r2_clone_called += 1
+            return "PASS", {"voice_id": "v_76_2"}, "ok", 200
+
+        routes = [
+            ("route_generic", mock_up_1, mock_clone_1, None),
+            ("route_2", mock_up_2, mock_clone_2, None),
+        ]
+
+        res = await voice_clone_pipeline.process_custom_voice_create(
+            user_id=70076,
+            sample_path=str(wav_path),
+            display_name="Voice 76",
+            product_context="showroom",
+            profile_id=76001,
+            route_attempts_func=lambda r, admin_access=False: routes,
+            access_allowed_func=lambda *a, **k: True,
+            ready_for_processing_func=lambda *a, **k: True,
+            readiness={"ready": True},
+            output_dir=str(tmp_path),
+            make_provider_voice_id_func=lambda u, profile_id=0: "v_76_seed",
+        )
+        assert res.ok is False
+        assert res.outcome_certainty == "AMBIGUOUS"
+        assert res.clone_submit_count == 1
+        assert res.metadata.get("ambiguity_reason") == "MISSING_DURABLE_VOICE_ID"
+        assert r2_clone_called == 0
+
+    asyncio.run(_run())
+
+
+def test_77_explicit_deterministic_no_create_rejection_no_second_clone_submit(tmp_path):
+    """77: Explicit 4xx provider rejection with deterministic proof sets DETERMINISTIC_FAILURE."""
+    async def _run():
+        wav_path = tmp_path / "sample_77.wav"
+        wav_path.write_bytes(_make_wav_bytes(12.0))
+
+        r2_clone_called = 0
+
+        async def mock_up_1(b):
+            return "PASS", "file_77_1", "ok", 200
+
+        async def mock_clone_1(fid, seed):
+            return "FAIL", {"error": "audio format corrupt", "deterministic": True}, "Bad Request", 400
+
+        async def mock_up_2(b):
+            return "PASS", "file_77_2", "ok", 200
+
+        async def mock_clone_2(fid, seed):
+            nonlocal r2_clone_called
+            r2_clone_called += 1
+            return "PASS", {"voice_id": "v_77_2"}, "ok", 200
+
+        routes = [
+            ("route_1", mock_up_1, mock_clone_1, None),
+            ("route_2", mock_up_2, mock_clone_2, None),
+        ]
+
+        res = await voice_clone_pipeline.process_custom_voice_create(
+            user_id=70077,
+            sample_path=str(wav_path),
+            display_name="Voice 77",
+            product_context="showroom",
+            profile_id=77001,
+            route_attempts_func=lambda r, admin_access=False: routes,
+            access_allowed_func=lambda *a, **k: True,
+            ready_for_processing_func=lambda *a, **k: True,
+            readiness={"ready": True},
+            output_dir=str(tmp_path),
+            make_provider_voice_id_func=lambda u, profile_id=0: "v_77_seed",
+        )
+        assert res.ok is False
+        assert res.outcome_certainty == "DETERMINISTIC_FAILURE"
+        assert res.clone_submit_count == 1
+        assert r2_clone_called == 0
+
+    asyncio.run(_run())
+
+
+def test_78_pre_clone_sample_validation_failure_zero_clone_submits(tmp_path):
+    """78: Pre-clone sample validation failure yields clone_submit_count=0."""
+    async def _run():
+        short_wav = tmp_path / "sample_short_78.wav"
+        short_wav.write_bytes(_make_wav_bytes(3.0))
+
+        clone_called = 0
+
+        async def mock_clone(fid, seed):
+            nonlocal clone_called
+            clone_called += 1
+            return "PASS", {"voice_id": "v_78"}, "ok", 200
+
+        routes = [("route_1", None, mock_clone, None)]
+
+        res = await voice_clone_pipeline.process_custom_voice_create(
+            user_id=70078,
+            sample_path=str(short_wav),
+            display_name="Voice 78",
+            product_context="showroom",
+            profile_id=78001,
+            route_attempts_func=lambda r, admin_access=False: routes,
+            access_allowed_func=lambda *a, **k: True,
+            ready_for_processing_func=lambda *a, **k: True,
+            readiness={"ready": True},
+            output_dir=str(tmp_path),
+        )
+        assert res.ok is False
+        assert res.outcome_certainty == "DETERMINISTIC_FAILURE"
+        assert res.clone_submit_count == 0
+        assert res.clone_dispatched is False
+        assert clone_called == 0
+
+    asyncio.run(_run())
+
+
+def test_79_provider_readiness_fail_before_clone_zero_clone_submits(tmp_path):
+    """79: Provider readiness failure before clone yields clone_submit_count=0."""
+    async def _run():
+        wav_path = tmp_path / "sample_79.wav"
+        wav_path.write_bytes(_make_wav_bytes(12.0))
+
+        clone_called = 0
+
+        async def mock_clone(fid, seed):
+            nonlocal clone_called
+            clone_called += 1
+            return "PASS", {"voice_id": "v_79"}, "ok", 200
+
+        routes = [("route_1", None, mock_clone, None)]
+
+        res = await voice_clone_pipeline.process_custom_voice_create(
+            user_id=70079,
+            sample_path=str(wav_path),
+            display_name="Voice 79",
+            product_context="showroom",
+            profile_id=79001,
+            route_attempts_func=lambda r, admin_access=False: routes,
+            access_allowed_func=lambda *a, **k: True,
+            ready_for_processing_func=lambda *a, **k: False,
+            readiness={"ready": False},
+            output_dir=str(tmp_path),
+        )
+        assert res.ok is False
+        assert res.outcome_certainty == "DETERMINISTIC_FAILURE"
+        assert res.clone_submit_count == 0
+        assert res.clone_dispatched is False
+        assert clone_called == 0
+
+    asyncio.run(_run())
+
+
+def test_80_first_free_ambiguous_result_quarantined_release_denied(monkeypatch):
+    """80: Ambiguous provider result quarantines first-free entitlement and forbids auto-release."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50080
+    setup_user_wallet(uid, balance=0)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 0)
+
+    async def fake_create(**kwargs):
+        return CustomVoiceCreateResult(
+            ok=False,
+            status="CLONE_NOT_READY",
+            error_code="UPSTREAM_504",
+            safe_public_message="Upstream gateway timeout",
+            outcome_certainty="AMBIGUOUS",
+            clone_submit_count=1,
+            clone_dispatched=True,
+            metadata={"ambiguity_reason": "HTTP_504"},
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+
+    res_prep = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id, "consent": True, "display_name": "Free Ambiguous 80"},
+        actor_id=str(uid),
+    )
+    assert res_prep.status_code == 200
+    job_id = res_prep.json()["job_id"]
+
+    res_confirm = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm", None, actor_id=str(uid))
+    assert res_confirm.status_code == 504
+
+    ent = get_voice_clone_first_free_entitlement(uid)
+    assert ent is not None
+    assert ent["state"] == "provider_ambiguous"
+    assert ent["released_at"] is None
+
+    job = get_web_voice_clone_job(job_id, uid)
+    assert job["status"] == "failed"
+    assert job["provider_outcome_state"] == "provider_ambiguous"
+
+
+def test_81_first_free_ambiguous_result_blocks_subsequent_free_job_zero_second_free_submit(monkeypatch):
+    """81: Ambiguous first-free entitlement prevents subsequent job from submitting a second free clone."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50081
+    setup_user_wallet(uid, balance=0)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 0)
+
+    submits = 0
+
+    async def fake_create(**kwargs):
+        nonlocal submits
+        submits += 1
+        return CustomVoiceCreateResult(
+            ok=False,
+            status="CLONE_NOT_READY",
+            error_code="UPSTREAM_504",
+            outcome_certainty="AMBIGUOUS",
+            clone_submit_count=1,
+            clone_dispatched=True,
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+
+    # Job 1
+    res1 = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id, "consent": True, "display_name": "Job 81-1"},
+        actor_id=str(uid),
+    )
+    j1 = res1.json()["job_id"]
+    post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{j1}/confirm", None, actor_id=str(uid))
+    assert submits == 1
+
+    # Job 2 by same user
+    upload_id_2 = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+    res2 = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id_2, "consent": True, "display_name": "Job 81-2"},
+        actor_id=str(uid),
+    )
+    assert res2.status_code == 200
+    j2 = res2.json()["job_id"]
+
+    # Confirm job 2 fails closed before provider dispatch
+    res_confirm_2 = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{j2}/confirm", None, actor_id=str(uid))
+    assert res_confirm_2.status_code == 409
+    assert res_confirm_2.json()["error_code"] == "FIRST_FREE_QUARANTINED"
+    assert submits == 1  # ZERO second provider clone submit
+
+
+def test_82_paid_ambiguous_result_zero_wallet_debit_profile_not_ready(monkeypatch):
+    """82: Paid job ambiguous result charges 0 Xu and leaves profile in non-ready state."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50082
+    setup_user_wallet(uid, balance=100)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 50)
+
+    async def fake_create(**kwargs):
+        return CustomVoiceCreateResult(
+            ok=False,
+            status="CLONE_NOT_READY",
+            error_code="CONNECTION_RESET",
+            outcome_certainty="AMBIGUOUS",
+            clone_submit_count=1,
+            clone_dispatched=True,
+            metadata={"ambiguity_reason": "POST_DISPATCH_EXCEPTION:ConnectionResetError"},
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+
+    res_prep = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id, "consent": True, "display_name": "Paid Ambiguous 82"},
+        actor_id=str(uid),
+    )
+    job_id = res_prep.json()["job_id"]
+
+    res_confirm = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm", None, actor_id=str(uid))
+    assert res_confirm.status_code == 504
+
+    # Wallet not debited
+    with bot.db_connect() as conn:
+        bal = conn.execute("SELECT credits FROM users WHERE user_id = ?", (str(uid),)).fetchone()[0]
+        assert bal == 100
+
+    job = get_web_voice_clone_job(job_id, uid)
+    assert job["status"] == "failed"
+    assert job["charged_xu"] == 0
+    assert job["provider_outcome_state"] == "provider_ambiguous"
+
+
+def test_83_reconcile_ambiguous_first_free_no_settle_no_release_no_provider_replay(monkeypatch):
+    """83: Reconcile on ambiguous first-free job does not settle, release, or invoke provider."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50083
+    setup_user_wallet(uid, balance=0)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 0)
+
+    calls = 0
+
+    async def fake_create(**kwargs):
+        nonlocal calls
+        calls += 1
+        return CustomVoiceCreateResult(
+            ok=False,
+            status="CLONE_NOT_READY",
+            error_code="HTTP_504",
+            outcome_certainty="AMBIGUOUS",
+            clone_submit_count=1,
+            clone_dispatched=True,
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+
+    res_prep = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id, "consent": True, "display_name": "Reconcile Free 83"},
+        actor_id=str(uid),
+    )
+    job_id = res_prep.json()["job_id"]
+
+    post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm", None, actor_id=str(uid))
+    assert calls == 1
+
+    # Call reconcile
+    res_rec = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id}/reconcile", None, actor_id=str(uid))
+    assert res_rec.status_code == 200
+    assert calls == 1  # No second provider call
+
+    ent = get_voice_clone_first_free_entitlement(uid)
+    assert ent["state"] == "provider_ambiguous"  # Not settled, not released
+    assert ent["released_at"] is None
+
+
+def test_84_reconcile_ambiguous_paid_no_debit_no_provider_replay(monkeypatch):
+    """84: Reconcile on ambiguous paid job does not debit wallet or replay provider."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50084
+    setup_user_wallet(uid, balance=100)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 50)
+
+    calls = 0
+
+    async def fake_create(**kwargs):
+        nonlocal calls
+        calls += 1
+        return CustomVoiceCreateResult(
+            ok=False,
+            status="FAIL",
+            error_code="UPSTREAM_502",
+            outcome_certainty="AMBIGUOUS",
+            clone_submit_count=1,
+            clone_dispatched=True,
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_create)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+
+    res_prep = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id, "consent": True, "display_name": "Reconcile Paid 84"},
+        actor_id=str(uid),
+    )
+    job_id = res_prep.json()["job_id"]
+
+    post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id}/confirm", None, actor_id=str(uid))
+    assert calls == 1
+
+    # Reconcile
+    res_rec = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{job_id}/reconcile", None, actor_id=str(uid))
+    assert res_rec.status_code == 200
+    assert calls == 1  # Zero provider replay
+
+    with bot.db_connect() as conn:
+        bal = conn.execute("SELECT credits FROM users WHERE user_id = ?", (str(uid),)).fetchone()[0]
+        assert bal == 100  # Zero wallet debit
+
+
+def test_85_pipeline_configured_with_two_clone_routes_total_submits_at_most_one(tmp_path):
+    """85: Pipeline with two configured routes dispatches at most one clone submit per job."""
+    async def _run():
+        wav_path = tmp_path / "sample_85.wav"
+        wav_path.write_bytes(_make_wav_bytes(12.0))
+
+        r1_clone_submits = 0
+        r2_clone_submits = 0
+
+        async def up_1(b):
+            return "PASS", "f_85_1", "ok", 200
+
+        async def clone_1(fid, seed):
+            nonlocal r1_clone_submits
+            r1_clone_submits += 1
+            return "FAIL", {}, "Internal Error", 500
+
+        async def up_2(b):
+            return "PASS", "f_85_2", "ok", 200
+
+        async def clone_2(fid, seed):
+            nonlocal r2_clone_submits
+            r2_clone_submits += 1
+            return "PASS", {"voice_id": "v_85_2"}, "ok", 200
+
+        routes = [
+            ("shopaikey_minimax", up_1, clone_1, None),
+            ("key4u_minimax", up_2, clone_2, None),
+        ]
+
+        res = await voice_clone_pipeline.process_custom_voice_create(
+            user_id=70085,
+            sample_path=str(wav_path),
+            display_name="Voice 85",
+            product_context="showroom",
+            profile_id=85001,
+            route_attempts_func=lambda r, admin_access=False: routes,
+            access_allowed_func=lambda *a, **k: True,
+            ready_for_processing_func=lambda *a, **k: True,
+            readiness={"ready": True},
+            output_dir=str(tmp_path),
+            make_provider_voice_id_func=lambda u, profile_id=0: "v_85_seed",
+        )
+        assert res.ok is False
+        assert r1_clone_submits == 1
+        assert r2_clone_submits == 0
+        assert res.clone_submit_count == 1
+        assert res.clone_submit_count <= 1
+
+    asyncio.run(_run())
+
+
+def test_86_provider_execution_count_and_clone_submit_count_coherent(monkeypatch):
+    """86: provider_execution_count and provider_clone_submit_count remain coherent on success and failure."""
+    client = TestClient(bot.fastapi_app)
+    uid = 50086
+    setup_user_wallet(uid, balance=100)
+    monkeypatch.setattr(bot, "voice_profile_storage_price_xu", lambda u: 50)
+
+    # 1. Success case: both counters are 1
+    async def fake_success(**kwargs):
+        return CustomVoiceCreateResult(
+            ok=True,
+            status="SUCCESS",
+            profile_id=kwargs.get("profile_id"),
+            provider="minimax",
+            provider_voice_id="vox_86",
+            provider_file_id="pfile_86",
+            preview_audio_path="/tmp/p_86.mp3",
+            preview_audio_bytes=1000,
+            outcome_certainty="SUCCESS",
+            clone_submit_count=1,
+            clone_dispatched=True,
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_success)
+
+    wav_bytes = _make_wav_bytes(12.0)
+    upload_id = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+
+    res_prep = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id, "consent": True, "display_name": "Job 86 Success"},
+        actor_id=str(uid),
+    )
+    j1 = res_prep.json()["job_id"]
+    res_confirm = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{j1}/confirm", None, actor_id=str(uid))
+    assert res_confirm.status_code == 200
+    job1 = get_web_voice_clone_job(j1, uid)
+    assert job1["provider_execution_count"] == 1
+    assert job1["provider_clone_submit_count"] == 1
+    assert job1["provider_execution_count"] == job1["provider_clone_submit_count"]
+
+    # 2. Pre-dispatch fail case: both counters are 0
+    async def fake_predispatch_fail(**kwargs):
+        return CustomVoiceCreateResult(
+            ok=False,
+            status="FAIL",
+            error_code="sample_missing_or_empty",
+            outcome_certainty="DETERMINISTIC_FAILURE",
+            clone_submit_count=0,
+            clone_dispatched=False,
+            failure_stage="PRE_DISPATCH",
+        )
+
+    monkeypatch.setattr(bot.voice_clone_pipeline, "process_custom_voice_create", fake_predispatch_fail)
+
+    upload_id_2 = stage_test_upload(client, wav_bytes, actor_id=str(uid))
+    res_prep_2 = post_json_auth(
+        client,
+        "/internal/v1/web-voice-clone/jobs",
+        {"upload_id": upload_id_2, "consent": True, "display_name": "Job 86 Pre-Fail"},
+        actor_id=str(uid),
+    )
+    j2 = res_prep_2.json()["job_id"]
+    res_confirm_2 = post_json_auth(client, f"/internal/v1/web-voice-clone/jobs/{j2}/confirm", None, actor_id=str(uid))
+    assert res_confirm_2.status_code == 422
+    job2 = get_web_voice_clone_job(j2, uid)
+    assert job2["provider_execution_count"] == 0
+    assert job2["provider_clone_submit_count"] == 0
+    assert job2["provider_execution_count"] == job2["provider_clone_submit_count"]
+
 
 
 

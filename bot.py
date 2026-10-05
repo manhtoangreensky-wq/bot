@@ -282359,6 +282359,7 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
         update_web_voice_clone_job(
             job_id,
             provider_execution_count=new_exec_count,
+            provider_clone_submit_count=0,
             canonical_profile_id=profile_id,
         )
 
@@ -282389,12 +282390,22 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
             max_preview_seconds=VOICE_PREVIEW_MAX_SECONDS,
         )
 
+        actual_submits = int(getattr(result, "clone_submit_count", 0))
         if not result.ok:
             fail_status = str(result.error_code or result.status or "PROVIDER_EXECUTION_FAILED")
             mark_voice_profile_activation_failed(uid, profile_id, get_user_voice_profile(uid, profile_id), f"failed_{fail_status.lower()}", str(result.admin_debug_summary or fail_status))
-            ambiguity = "NETWORK_AMBIGUOUS" if "timeout" in str(fail_status).lower() or "network" in str(fail_status).lower() else ""
+            
+            outcome_certainty = getattr(result, "outcome_certainty", "")
+            is_ambiguous = (outcome_certainty == "AMBIGUOUS")
+            if not is_ambiguous and ("timeout" in str(fail_status).lower() or "network" in str(fail_status).lower()):
+                is_ambiguous = True
+
+            ambiguity_marker = str((result.metadata or {}).get("ambiguity_reason") or "")
+            if not ambiguity_marker and is_ambiguous:
+                ambiguity_marker = "NETWORK_AMBIGUOUS" if ("timeout" in str(fail_status).lower() or "network" in str(fail_status).lower()) else "PROVIDER_OUTCOME_AMBIGUOUS"
+
             if prepared_quote == 0 and not is_admin_user(uid):
-                if ambiguity:
+                if is_ambiguous:
                     transition_voice_clone_first_free_state(uid, job_id, "provider_ambiguous", reason=fail_status)
                 else:
                     transition_voice_clone_first_free_state(uid, job_id, "provider_failed", reason=fail_status)
@@ -282403,10 +282414,12 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
                 job_id,
                 status="failed",
                 status_reason=fail_status,
-                provider_outcome_state="provider_failed",
-                provider_ambiguity_state=ambiguity,
+                provider_outcome_state="provider_ambiguous" if is_ambiguous else "provider_failed",
+                provider_ambiguity_state=ambiguity_marker,
+                provider_execution_count=actual_submits,
+                provider_clone_submit_count=actual_submits,
             )
-            http_code = 504 if ambiguity else 422
+            http_code = 504 if is_ambiguous else 422
             return JSONResponse(
                 status_code=http_code,
                 content={"ok": False, "error_code": fail_status, "message": str(result.safe_public_message or "Voice clone synthesis failed")},
@@ -282434,6 +282447,8 @@ async def api_internal_web_voice_clone_jobs_confirm(job_id: str, request: Reques
         current_job = update_web_voice_clone_job(
             job_id,
             provider_outcome_state="provider_success",
+            provider_execution_count=actual_submits or 1,
+            provider_clone_submit_count=actual_submits or 1,
             provider_voice_id=provider_voice_id,
             provider_file_id=provider_file_id,
             provider_route=provider_name,

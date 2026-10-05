@@ -101,6 +101,7 @@ def ensure_web_voice_clone_schema(conn: sqlite3.Connection) -> None:
             status_reason TEXT NOT NULL DEFAULT '',
             execution_claim TEXT,
             provider_execution_count INTEGER NOT NULL DEFAULT 0,
+            provider_clone_submit_count INTEGER NOT NULL DEFAULT 0,
             provider_outcome_state TEXT DEFAULT 'unattempted',
             provider_ambiguity_state TEXT DEFAULT '',
             settlement_status TEXT NOT NULL DEFAULT 'unsettled',
@@ -119,6 +120,10 @@ def ensure_web_voice_clone_schema(conn: sqlite3.Connection) -> None:
         );
         """
     )
+    try:
+        conn.execute("ALTER TABLE web_voice_clone_jobs ADD COLUMN provider_clone_submit_count INTEGER NOT NULL DEFAULT 0")
+    except Exception:
+        pass
     conn.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_web_voice_clone_user_id
@@ -304,9 +309,9 @@ def prepare_web_voice_clone_job(
                 job_id, idempotency_key, web_request_id, user_id,
                 payload_hash, upload_id, consent_snapshot, display_name,
                 quote_xu, pricing_state, status, status_reason,
-                provider_execution_count, provider_outcome_state,
+                provider_execution_count, provider_clone_submit_count, provider_outcome_state,
                 settlement_status, charged_xu, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'unattempted', 'unsettled', 0, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'unattempted', 'unsettled', 0, ?, ?)
             """,
             (
                 web_job_id,
@@ -393,6 +398,7 @@ def update_web_voice_clone_job(
     status_reason: str | None = None,
     execution_claim: str | None = None,
     provider_execution_count: int | None = None,
+    provider_clone_submit_count: int | None = None,
     provider_outcome_state: str | None = None,
     provider_ambiguity_state: str | None = None,
     settlement_status: str | None = None,
@@ -430,6 +436,9 @@ def update_web_voice_clone_job(
     if provider_execution_count is not None:
         updates.append("provider_execution_count = ?")
         params.append(int(provider_execution_count))
+    if provider_clone_submit_count is not None:
+        updates.append("provider_clone_submit_count = ?")
+        params.append(int(provider_clone_submit_count))
     if provider_outcome_state is not None:
         updates.append("provider_outcome_state = ?")
         params.append(str(provider_outcome_state))
@@ -510,6 +519,7 @@ def to_safe_voice_clone_job_projection(job: dict[str, Any]) -> dict[str, Any]:
         "has_preview_audio": bool(int(job.get("preview_audio_bytes") or 0) > 0),
         "preview_audio_bytes": int(job.get("preview_audio_bytes") or 0),
         "provider_execution_count": int(job.get("provider_execution_count") or 0),
+        "provider_clone_submit_count": int(job.get("provider_clone_submit_count") or 0),
         "created_at": str(job.get("created_at") or ""),
         "updated_at": str(job.get("updated_at") or ""),
         "completed_at": str(job.get("completed_at") or "") if job.get("completed_at") else None,
