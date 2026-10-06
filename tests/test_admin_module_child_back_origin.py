@@ -54,6 +54,20 @@ def _controls(query):
 
 
 class AdminModuleChildBackTests(unittest.TestCase):
+    def test_provider_worker_route_info_control_matches_its_registered_destination(self):
+        ns, route, _, reads = _runtime()
+        button = next(
+            button
+            for row in ns["admin_module_keyboard"]("provider_worker").inline_keyboard
+            for button in row
+            if button.callback_data.startswith("menu|admin_provider_routes|")
+        )
+
+        self.assertEqual("🧾 Route/Group Info", button.text)
+        opened = _dispatch(route, button.callback_data)
+        self.assertEqual(["admin_provider_routes_text"], reads)
+        self.assertIn("INERT DATA: admin_provider_routes_text", opened.edits[0][0])
+
     def test_all_seven_emitted_controls_and_back_dispatch_to_their_module(self):
         ns, route, _, _ = _runtime()
         for module, action, _legacy_parent in CASES:

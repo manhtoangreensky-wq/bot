@@ -157,3 +157,15 @@ Source baseline: `0929d61ade4b8f0d60b803b62417763e90acce9e`. Production deployme
 - Final focused suite on baseline: 3 behavioral failures, 0 setup errors; business/pending regression passes. Final branch 4 methods OK; adjacent Ticket/inbox subset 24 tests in 36.372s OK. Module/panel/sibling Back, repeat, legacy, permission/origin rejection and callback bounds verified through registrations; data/report calls are inert.
 - UI origin fields and read-panel keyboard arguments are the only handler changes. Data/status/reply/list/file, menu router and engines/services/providers/workers/config unchanged by source comparator. Compile/PR/CI/deploy pending.
 
+- S12.23 delivery: #1388 deployed at `c0a05ce0910dab0242af593ae17b39be430c0d55`; PR/main checks and 178 configured CI tests OK; deploy 37521327174 SUCCESS; SSH exact SHA/tracked source/services verified. Manual Telegram/client QA NOT_TESTED.
+- Remaining A1/A2 route matrix is still partial; continue S12.24 emitted-control/registered-handler evidence. A6 wording backlog records 3 stale Railway mentions across 2 rendered Admin UI functions, with no configuration changes. No whole-bot completion claim.
+
+## S12.24.1 — Provider/Worker route label evidence
+
+- Reproduction: the actual Provider/Worker module keyboard emitted `menu|admin_provider_routes|admin_provider_worker` on the label “🎬 Video job”. The registered `handle_menu_callback` validated that origin and rendered `admin_provider_routes_text`, headed “Route/Group Info”. The label did not describe the destination.
+- RED: focused registered-handler regression failed on the observed label/destination mismatch.
+- Fix: changed the single button label to “🧾 Route/Group Info”; callback, handler, route output, provider state and commands are unchanged.
+- GREEN: Provider/Worker module tests `4 OK`; adjacent Billing guide tests `3 OK`; full `bot.py` and changed-test `py_compile` exit 0; `git diff --check` exit 0 (LF→CRLF warning only).
+- Scope: one UI label plus one assertion in the existing registered-handler regression file; no provider call, secret, wallet, production data or Telegram message.
+- Delivery: pending separate PR, CI, merge, exact-SHA bot-only deploy and runtime check. A1/A2 inventory remains open.
+

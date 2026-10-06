@@ -1,15 +1,15 @@
 task_id: telegram-small-flow-audit-20261006
 goal_status: active
 phase: verify
-base_sha: 8faa35eb93ac5a967d1f3f6eb097c735987ecf91
+base_sha: c0a05ce0910dab0242af593ae17b39be430c0d55
 objective: >-
   Continue the ordered Telegram small-flow audit. Fix wrong callback/Back routes
   narrowly while protecting AutoPost WIP and stable product engines.
-current_spec: S12.23-admin-ticket-hub-read-panel-navigation
-branch: fix/admin-ticket-hub-back-20261007
+current_spec: S12.24.1-admin-provider-route-info-label
+branch: fix/admin-provider-route-info-label-20261007
 allowed_scope:
   - Read-only source registration and candidate-test inventory
-  - Admin Ticket hub and read-only Stats/Templates navigation with inert fixtures
+  - Remaining Admin UI emitted-control/handler evidence; narrow fixes only after reproduced RED
   - Evidence matrix, checklist, operating notes and durable state
 protected_scope:
   - AutoPost WIP
@@ -296,7 +296,7 @@ specs:
       - .agents/state/telegram-small-flow-audit-20261006.yaml
     protected_scope: "Feedback SQL/data/status transitions and command behavior; all product engines/services/providers/workers; wallet/secrets; AutoPost WIP"
   S12.23-admin-ticket-hub-read-panel-navigation:
-    status: local-green-awaiting-final-compile-ci-delivery
+    status: merged-deployed-runtime-sha-verified
     base_sha: 8faa35eb93ac5a967d1f3f6eb097c735987ecf91
     acceptance: >-
       Support → Ticket admin hub Back returns to Support. Read-only Stats/Templates
@@ -307,6 +307,13 @@ specs:
     red: "Exact final 4-method suite on base source: 3 behavioral failures, 0 setup errors; business-controls/legacy pending regression passes"
     green: "24 related Ticket/inbox regressions in 36.372s OK; final focused 4 methods in 4.533s OK; source scope comparator PASS"
     legacy_pending: "Original pending regression list/stats/templates assertions PASS; fixture parses only the same handler AST and accepts optional UI arguments. Whole-file AST attempt intentionally interrupted before scoped replacement, not counted as PASS. Both test files py_compile exit 0"
+    pull_request: 1388
+    merge_sha: c0a05ce0910dab0242af593ae17b39be430c0d55
+    deploy_run: 37521327174
+    runtime_sha: c0a05ce0910dab0242af593ae17b39be430c0d55
+    ci: "178 configured tests OK; full main source compile OK"
+    runtime_services: "bot/web/nginx active/running, all NRestarts=0; tracked bot.py matches and health status=ok"
+    live_pass: "NOT_TESTED for manual Telegram/client UX"
     files:
       - bot.py
       - tests/test_admin_ticket_hub_navigation.py
@@ -320,6 +327,33 @@ specs:
       - KIEM-THU/DANH-SACH-CASE.md
     impact: "support_admin_menu_keyboard: 1 definition and 9 production calls in bot.py; two test consumers. Optional UI parameters preserve no-argument callers; existing pending fixture needs compatible stub"
     protected_scope: "Ticket SQL, mutations, status/reply/file/list logic; product engines, helpers/services/providers/workers/config; AutoPost WIP"
+  S12.24-remaining-admin-route-evidence:
+    status: read-before-contract
+    base_sha: c0a05ce0910dab0242af593ae17b39be430c0d55
+    acceptance: >-
+      Inventory remaining unproven Admin controls against current source, exercise
+      actual emitted buttons through registered handlers with inert data/side effects,
+      and record parent/authorization/stale/expiry/repeat verdicts. Implement only
+      a reproduced UX defect under its own narrow contract and delivery gate.
+    protected_scope: "Product/Edit/Image/SubDub/Voice/Music engines, all business/data/wallet/provider operations, AutoPost WIP and shared router architecture"
+  S12.24.1-admin-provider-route-info-label:
+    status: local-green-awaiting-ci-delivery
+    base_sha: c0a05ce0910dab0242af593ae17b39be430c0d55
+    acceptance: >-
+      The Provider/Worker control that emits menu|admin_provider_routes|admin_provider_worker
+      names the Route/Group Info screen rendered by the registered menu callback.
+    red: "Focused registered-handler fixture observed label '🎬 Video job' while the destination renders admin_provider_routes_text titled 'Route/Group Info'."
+    green: "Changed only the visible label; focused provider module test and adjacent Provider/Worker navigation and Billing guide regressions pass."
+    protected_scope: "Provider route/status logic, commands, engines/services, AutoPost WIP, shared menu router, credentials and production state"
+    files:
+      - bot.py
+      - tests/test_admin_module_child_back_origin.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
+  A6-admin-platform-copy-backlog:
+    status: queued-after-route-audit
+    evidence: "Fake-role execution produced 1 Railway mention in owner_required_text and 2 in registered admin_whoami output (3 references across 2 rendered UI outputs). Actual deployment target is Ubuntu VPS. No ENV/permission writes or real sends"
+    acceptance: "Wording-only VPS correction when A6 begins; permission/configuration/security logic untouched"
 verification:
   runtime_after_1378: "active/running; NRestarts=0; exact SHA 392d2eec8f942c8e5c1232e5ac537b9a84dfd82c"
   runtime_after_1379: "All three services active/running, NRestarts=0; runtime SHA 2099eb319483ba1acc80f1080a094ba9710b5f3d; three new Runtime guide labels; health HTTP 200"
@@ -335,11 +369,14 @@ verification:
   runtime_after_1380: "Exact SHA74a8d86f24d1c8960706bc2c73b0ca984a69ae56; bot/web/nginx active/running; NRestarts=0; health HTTP200"
   pull_request_1381_ci: "Both required gates SUCCESS; Ubuntu Admin routes35 and workflow hygiene99 passed; complete source compile/AST/py_compile/tokenize passed"
   runtime_after_1381: "Exact SHA0929d61ade4b8f0d60b803b62417763e90acce9e; bot/web/nginx active/running; NRestarts=0; health HTTP200; tracked bot.py matches"
-  current_pull_request_ci: "S12.23 local only; previous PR #1387/main checks succeeded, 174 configured tests OK"
+  current_pull_request_ci: "PR #1388/main checks succeeded, 178 configured tests OK; S12.24 read audit not built/pushed"
   current_full_source_compile: "Final S12.23 full py_compile module on bot.py and both changed test files exited 0; both test files recompiled after test-only fixture/coverage updates, exit 0"
   current_focused_route_tests: "Ticket/inbox adjacent subset: 24 tests in 36.372s OK; exact final focused 4 methods in 4.533s OK"
+  S12_24_1_focused_tests: "Provider/Worker route evidence: 4 tests OK; adjacent Billing guide evidence: 3 tests OK"
+  S12_24_1_compile: "python -m py_compile bot.py tests/test_admin_module_child_back_origin.py exited 0"
+  S12_24_1_diff_check: "git diff --check exited 0; Git reports only LF-to-CRLF conversion warning for the existing test file"
   current_diff_check: "git diff --check exited 0; only expected test-file line-ending warning"
-  current_delivery: "PR #1387 deployed at 8faa35eb93ac5a967d1f3f6eb097c735987ecf91; S12.23 local only"
+  current_delivery: "PR #1388 deployed at c0a05ce0910dab0242af593ae17b39be430c0d55; exact SHA/source/services verified; S12.24 not built"
   local_pytest: "Unavailable: bundled Python has no pytest module; test is standard-library unittest and added to Ubuntu CI"
   provider_calls: 0
   real_telegram_sends: 0
@@ -348,6 +385,6 @@ verification:
   current_protected_comparator: "PASS: Ticket UI keyboard plus read-panel origin validation/render args only; all status/reply/list/file and data operations, menu router, engines/services/providers/workers/config and other bot source unchanged"
 blockers: []
 next:
-  - Complete S12.23 hub/read-panel navigation RED/GREEN, scoped comparator and separate CI/PR/merge/deploy/runtime evidence.
+  - Resume S12.24 remaining A1/A2 Admin emitted-control/registered-handler evidence and narrow proven UX fixes.
   - Continue remaining A1/A2 Admin/customer route evidence with inert fixtures; do not infer a bug from missing name references.
   - Resume A3/A4/A5, A6, A7, and A8 in checklist order.
