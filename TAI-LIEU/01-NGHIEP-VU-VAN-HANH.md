@@ -1652,4 +1652,9 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
 
 - Pending, duyệt, từ chối và PayOS trên các keyboard Billing là 4 trang hướng dẫn lệnh. Callback menu không duyệt bill hay chạy test PayOS.
 - Patch đồng bộ 7 nhãn gây hiểu nhầm trên 2 keyboard; 8 emitted guide controls, Back về Billing và public denial đã kiểm chứng qua handler đăng ký. Regression đạt 27/27; source comparator chỉ ra đúng 7 label replacements.
-- Nhãn Billing mới đang chờ PR/CI/deploy; runtime hiện vẫn là `2099eb3`. Case nguồn: `ADMIN-BILLING-GUIDE-01`.
+- PR #1380 đã deploy `74a8d86f`; 25 route tests + 99 deployment tests đạt trên Ubuntu; VPS đúng SHA, ba dịch vụ active/running, NRestarts=0, health200. Case nguồn: `ADMIN-BILLING-GUIDE-01`; manual Telegram QA nhãn mới chưa được ghi PASS.
+
+## Runtime guide Back origin — 06/10/2026, S12.15
+
+- Fixture qua handler thật chứng minh 2 màn Security/DB và System Ops bị mất nguồn, Back về System cũ. Patch mang module nguồn theo đúng 2 callback và chỉ đổi Back của trang Runtime guide.
+- Callback cũ giữ System Back; Admin/Home giữ nguyên; context sai và user thường bị chặn trước cleanup. Local evidence: 31 route regressions, 6 root/timing regressions và 3 public-denial routes đạt. Chờ PR/CI/deploy; runtime vẫn `74a8d86f`.

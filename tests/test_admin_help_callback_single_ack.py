@@ -80,10 +80,14 @@ class AdminHelpCallbackSingleAckTests(unittest.TestCase):
             for screen in screens
             for row in screen.inline_keyboard
             for button in row
-            if button.callback_data == "menu|system_runtime_help"
+            if button.callback_data.startswith("menu|system_runtime_help")
         ]
         self.assertEqual(len(runtime_buttons), 3)
         self.assertTrue(all(button.text == "📘 Hướng dẫn Runtime" for button in runtime_buttons))
+        self.assertEqual({button.callback_data for button in runtime_buttons}, {
+            "menu|system_runtime_help", "menu|system_runtime_help|admin_security_db",
+            "menu|system_runtime_help|admin_system_ops",
+        })
 
     def test_real_callback_route_is_registered(self):
         self.assertIn(

@@ -41,7 +41,10 @@ jobs:
             tests/test_support_ticket_note_stale_guard.py \
             tests/test_support_admin_ticket_back_pagination.py \
             tests/test_admin_help_callback_single_ack.py \
-            tests/test_admin_billing_guide_labels.py
+            tests/test_admin_billing_guide_labels.py \
+            tests/test_admin_runtime_help_back_origin.py \
+            tests/test_admin_root_menu_callback_single_ack.py \
+            tests/test_callback_dispatch_timing.py
 
       - name: Run Workflow Hygiene Unit Tests
         run: |

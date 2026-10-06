@@ -141634,6 +141634,12 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
     if action.startswith("hint_") and not user_is_admin and action not in public_hints:
         return await query.answer("Lệnh nội bộ chỉ dành cho Admin.", show_alert=True)
+    runtime_help_parent = ""
+    if action.startswith("system_runtime_help|"):
+        runtime_help_parent = action.split("|", 1)[1]
+        if runtime_help_parent not in {"admin_security_db", "admin_system_ops"}:
+            return await query.answer("Nút hướng dẫn đã hết phiên. Vui lòng mở lại từ menu Quản trị.", show_alert=True)
+        action = "system_runtime_help"
     menu_ack_start = time.perf_counter() if menu_timing_enabled else 0.0
     await query.answer()
     menu_ack_done = time.perf_counter() if menu_timing_enabled else 0.0
@@ -142210,6 +142216,12 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         text = f"✅ {copy['translation_session_stop']}."
         return await safe_edit_query_message(query, text, reply_markup=translate_language_keyboard(False, lang))
     text, keyboard = localized_menu_content(action, user_is_admin, lang, query.from_user.id)
+    if action == "system_runtime_help" and runtime_help_parent:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Quay lại", callback_data=f"menu|{runtime_help_parent}")
+             if button.callback_data == "menu|system" else button for button in row]
+            for row in keyboard.inline_keyboard
+        ])
     if action == "main":
         menu_build_done = time.perf_counter()
         render_returned = False
@@ -231878,7 +231890,7 @@ ADMIN_CONTROL_MODULES = {
         "when": "Dùng trước/sau deploy, trước khi bán, khi cần backup DB hoặc khi nghi ngờ webhook/security event bất thường.",
         "buttons": [
             [("🗄 DB trạng thái", "menu|admin_db_status"), ("💾 Sao lưu DB", "menu|admin_backup_db")],
-            [("🛡 Nhật ký bảo mật", "menu|admin_security_log"), ("📘 Hướng dẫn Runtime", "menu|system_runtime_help")],
+            [("🛡 Nhật ký bảo mật", "menu|admin_security_log"), ("📘 Hướng dẫn Runtime", "menu|system_runtime_help|admin_security_db")],
             [("✅ Sales ready", "menu|smoke_sales_ready")],
         ],
         "commands": [
@@ -231903,7 +231915,7 @@ ADMIN_CONTROL_MODULES = {
         "purpose": "Dùng để kiểm tra runtime, deployment, webhook Telegram, provider tổng quan, cleanup file tạm và trạng thái sẵn sàng vận hành.",
         "when": "Dùng sau deploy, khi nghi ngờ bot instance cũ giữ webhook, khi cần cleanup hoặc khi kiểm tra dashboard hệ thống.",
         "buttons": [
-            [("📘 Hướng dẫn Runtime", "menu|system_runtime_help"), ("📘 Hướng dẫn kiểm tra Telegram", "admin_help|runtime")],
+            [("📘 Hướng dẫn Runtime", "menu|system_runtime_help|admin_system_ops"), ("📘 Hướng dẫn kiểm tra Telegram", "admin_help|runtime")],
             [("📘 Hướng dẫn nhận quyền webhook Telegram", "admin_help|runtime"), ("📘 Hướng dẫn dọn file tạm", "admin_help|runtime")],
             [("📊 Dashboard", "menu|admin_overview")],
         ],

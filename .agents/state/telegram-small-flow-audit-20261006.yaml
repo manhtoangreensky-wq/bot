@@ -1,15 +1,15 @@
 task_id: telegram-small-flow-audit-20261006
 goal_status: active
 phase: verify
-base_sha: 2099eb319483ba1acc80f1080a094ba9710b5f3d
+base_sha: 74a8d86f24d1c8960706bc2c73b0ca984a69ae56
 objective: >-
   Continue the ordered Telegram small-flow audit. Fix wrong callback/Back routes
   narrowly while protecting AutoPost WIP and stable product engines.
-current_spec: S12.14-admin-billing-guide-labels
-branch: fix/admin-billing-guide-labels-20261006
+current_spec: S12.15-admin-runtime-help-back-origin
+branch: fix/admin-runtime-guide-back-origin-20261006
 allowed_scope:
-  - Billing guide labels in two keyboards; seven misleading labels across four guide destinations
-  - Focused emitted-control, registered menu-handler, Back and public-denial fixture; CI invocation, tester case and docs
+  - Two module Runtime-help emitters and an isolated Runtime-help origin branch in the menu callback
+  - Back origin, legacy, invalid-context and public-denial regressions, CI, tester case and docs
 protected_scope:
   - AutoPost WIP
   - Product Video, Edit, SubDub, Voice, and Music engine behavior
@@ -42,28 +42,44 @@ specs:
     red: "3 actual keyboard-builder outputs were labeled 🧬 Runtime"
     green: "24 admin/package/ticket unittest regressions passed; bot diff comparator proves only 3 labels changed; the label test is included in CI"
   S12.14-admin-billing-guide-labels:
-    status: local-green-ready-for-pr-ci
+    status: merged-deployed-runtime-sha-verified
+    pull_request: 1380
+    merge_sha: 74a8d86f24d1c8960706bc2c73b0ca984a69ae56
+    deploy_run: 37471503412
+    runtime_sha: 74a8d86f24d1c8960706bc2c73b0ca984a69ae56
     acceptance: >-
       Both Billing keyboards accurately label four read-only command-guide destinations;
       every emitted control traverses the registered menu handler, returns to Billing,
       and rejects public access before pending-state cleanup. No financial or provider operation.
     red: "3 tests: actual guide/public paths pass; label case fails on main Pending label"
     green: "27 Admin/Billing/package/ticket regressions passed in 32.017s; all 8 emitted guide controls and their Back paths execute registered menu handler; source comparator proves only 7 labels changed"
+  S12.15-admin-runtime-help-back-origin:
+    status: local-green-awaiting-pr-ci
+    acceptance: >-
+      Runtime guide Back from Security/DB and System Ops dispatches to the same
+      module. Context-free legacy callback keeps System Back and existing Admin/Home
+      controls. Public and invalid-origin callbacks are rejected before cleanup.
+    red: "Real emitted-control/registered-handler test returned 2 expected origin assertions: both modules got menu|system Back"
+    green: "31 route regressions and 6 root-menu/timing regressions passed; 3 original public-denial routes also passed"
 verification:
   runtime_after_1378: "active/running; NRestarts=0; exact SHA 392d2eec8f942c8e5c1232e5ac537b9a84dfd82c"
   runtime_after_1379: "All three services active/running, NRestarts=0; runtime SHA 2099eb319483ba1acc80f1080a094ba9710b5f3d; three new Runtime guide labels; health HTTP 200"
   latest_user_click: "After access recovery, journal query 18:40–18:47 +07 returned no matching timing records; the owner supplied no precise click time, so it is not counted as a latency sample"
   access_recovery: "Escalated execution as martin/toann: gh auth status exit 0, SSH identity accessible, trusted ED25519 host key present; no ACL or credential changes were needed"
-  focused_harness: "27 Admin/Billing/package/ticket unittest regressions passed in 32.017s"
+  focused_harness: "31 route regressions in 39.856s and 6 root/timing regressions in 5.868s passed; public menu denial verified on 3 original routes"
   changed_test_file_py_compile: passed
   git_diff_check: passed
   local_pytest: "Unavailable: bundled Python has no pytest module"
   local_workflow_hygiene: "99 tests, 31 failures in Windows Bash fixtures; deployment script/workflow/test source unchanged, Ubuntu CI required"
-  full_bot_py_compile: "S12.13 returned PY_COMPILE_OK; S12.14 full-file Windows compile is still running. Current complete-source CI remains a merge gate"
+  full_bot_py_compile: "S12.14 full-file Windows py_compile returned BOT_PY_COMPILE_PASS; both PR1380 complete-source CI gates passed"
   pull_request_1379_ci: "Both required gates SUCCESS; Ubuntu Admin routes 22 tests and workflow hygiene 99 tests passed"
+  pull_request_1380_ci: "Both required gates SUCCESS; Ubuntu Admin routes 25 tests and workflow hygiene 99 tests passed"
+  runtime_after_1380: "Exact SHA74a8d86f24d1c8960706bc2c73b0ca984a69ae56; bot/web/nginx active/running; NRestarts=0; health HTTP200"
   current_pull_request_ci: pending
+  current_complete_source_compile: "Required on Ubuntu CI before merge; changed production functions are compiled by actual-route fixtures and changed tests py_compile passed"
+  current_protected_comparator: "ALL_OTHER_SOURCE_IDENTICAL=PASS outside scoped menu handler and two Runtime emitters; complete handler diff reviewed"
 blockers: []
 next:
-  - Deliver S12.14 through its own PR, CI, merge and bot-only deploy; verify exact runtime SHA before another code change.
-  - Next A2 candidate: verify Runtime-help Back from Security/DB and System Ops through the registered menu handler; source shows a legacy System Back that may discard module origin. Preserve legacy callbacks and only fix if route RED is proven.
+  - Deliver S12.15 through its own PR, CI, merge and bot-only deploy; verify runtime SHA before another code change.
+  - Refresh the per-handler route/evidence inventory to identify remaining concrete Admin/customer audit gaps, rather than treating counts as whole-bot completion.
   - Resume remaining A1/A2, then A3/A4/A5, A6, A7, and A8 in checklist order.

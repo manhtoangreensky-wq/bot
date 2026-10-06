@@ -825,4 +825,10 @@ provider-fallback `56`, exact-two `3` passed; changed-file compile và
 
 | Nhãn/cách hiểu cũ | Hành vi thực tế qua handler | Điều chỉnh S12.14 |
 |---|---|---|
-| Pending/Duyệt/Từ chối bill và PayOS Test giống nút tác vụ | 4 callback chỉ render lệnh `/pending`, `/duyet`, `/tuchoi`, `/payos_test_plan`; fixture xác nhận Back về Billing và chặn user thường | Đồng bộ 7 nhãn trên 2 keyboard thành Hướng dẫn/Kế hoạch test; không thay đổi thanh toán. Chờ PR/CI/deploy |
+| Pending/Duyệt/Từ chối bill và PayOS Test giống nút tác vụ | 4 callback chỉ render lệnh `/pending`, `/duyet`, `/tuchoi`, `/payos_test_plan`; fixture xác nhận Back về Billing và chặn user thường | PR #1380 đã deploy `74a8d86f`; đồng bộ 7 nhãn, không thay đổi thanh toán |
+
+## Runtime guide Back origin — 06/10/2026
+
+| Cách hiểu cũ | Bằng chứng qua handler | Điều chỉnh S12.15 |
+|---|---|---|
+| Runtime-help Back luôn về đúng màn vừa mở | Hai module phát cùng callback không chứa nguồn, cả hai Back về `menu|system`: 2 RED | Hai callback mới giữ module nguồn; legacy fallback giữ nguyên. Local route tests đạt, chờ CI/deploy |
