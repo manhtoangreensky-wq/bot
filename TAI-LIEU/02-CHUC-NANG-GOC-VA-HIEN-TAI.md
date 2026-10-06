@@ -831,4 +831,6 @@ provider-fallback `56`, exact-two `3` passed; changed-file compile và
 
 | Cách hiểu cũ | Bằng chứng qua handler | Điều chỉnh S12.15 |
 |---|---|---|
-| Runtime-help Back luôn về đúng màn vừa mở | Hai module phát cùng callback không chứa nguồn, cả hai Back về `menu|system`: 2 RED | Hai callback mới giữ module nguồn; legacy fallback giữ nguyên. Local route tests đạt, chờ CI/deploy |
+| Runtime-help Back luôn về đúng màn vừa mở | Hai module phát cùng callback không chứa nguồn, cả hai Back về `menu|system`: 2 RED | PR #1381 đã deploy `0929d61a`; hai callback mới giữ module nguồn, legacy fallback giữ nguyên. Local/Ubuntu CI route tests đạt |
+
+| Nút Preview/Select cũ vẫn trỏ đúng kết quả cũ sau một lần tìm mới | Callback chỉ có `action|index`; cache mới thay snapshot cũ theo user nên nút cũ đã dispatch qua handler sang item mới: Music chọn `Track B`, Pixabay Preview đọc item B | S12.17 thêm UUID snapshot + product-context check; callback legacy, sai user, sai context, hết 10 phút hoặc index sai dừng trước helper; 19 test route local đạt, CI/PR/deploy còn chờ |

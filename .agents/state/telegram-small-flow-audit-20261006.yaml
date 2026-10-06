@@ -1,15 +1,16 @@
 task_id: telegram-small-flow-audit-20261006
 goal_status: active
 phase: verify
-base_sha: 74a8d86f24d1c8960706bc2c73b0ca984a69ae56
+base_sha: 0929d61ade4b8f0d60b803b62417763e90acce9e
 objective: >-
   Continue the ordered Telegram small-flow audit. Fix wrong callback/Back routes
   narrowly while protecting AutoPost WIP and stable product engines.
-current_spec: S12.15-admin-runtime-help-back-origin
-branch: fix/admin-runtime-guide-back-origin-20261006
+current_spec: S12.17-media-library-stale-result-snapshot
+branch: audit/telegram-handler-evidence-20261006
 allowed_scope:
-  - Two module Runtime-help emitters and an isolated Runtime-help origin branch in the menu callback
-  - Back origin, legacy, invalid-context and public-denial regressions, CI, tester case and docs
+  - Read-only source registration and candidate-test inventory
+  - Media-library callback snapshot/session validation and inert registered-handler tests
+  - Evidence matrix, checklist, operating notes and durable state
 protected_scope:
   - AutoPost WIP
   - Product Video, Edit, SubDub, Voice, and Music engine behavior
@@ -54,13 +55,76 @@ specs:
     red: "3 tests: actual guide/public paths pass; label case fails on main Pending label"
     green: "27 Admin/Billing/package/ticket regressions passed in 32.017s; all 8 emitted guide controls and their Back paths execute registered menu handler; source comparator proves only 7 labels changed"
   S12.15-admin-runtime-help-back-origin:
-    status: local-green-awaiting-pr-ci
+    status: merged-deployed-runtime-sha-verified
+    pull_request: 1381
+    merge_sha: 0929d61ade4b8f0d60b803b62417763e90acce9e
+    deploy_run: 37474025306
+    runtime_sha: 0929d61ade4b8f0d60b803b62417763e90acce9e
     acceptance: >-
       Runtime guide Back from Security/DB and System Ops dispatches to the same
       module. Context-free legacy callback keeps System Back and existing Admin/Home
       controls. Public and invalid-origin callbacks are rejected before cleanup.
     red: "Real emitted-control/registered-handler test returned 2 expected origin assertions: both modules got menu|system Back"
     green: "31 route regressions and 6 root-menu/timing regressions passed; 3 original public-denial routes also passed"
+  S12.16-current-handler-evidence-inventory:
+    status: source-inventory-published-route-audit-open
+    github_report: https://github.com/manhtoangreensky-wq/bot/pull/1381#issuecomment-6018079915
+    source_sha: 0929d61ade4b8f0d60b803b62417763e90acce9e
+    report: docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
+    registration_calls: 87
+    unique_callback_expressions: 85
+    literal_pattern_calls: 83
+    acceptance: >-
+      List every source registration with guard/observer distinction, source line,
+      candidate test references and explicit unproven/partial route status.
+      Filename references never count as executed evidence or whole-bot completion.
+    candidates_without_named_test_references:
+      - handle_buy_plan_callback
+      - handle_image_story_callback
+      - handle_media_preview_callback
+      - handle_pixabay_media_callback
+      - handle_suggest_music_callback
+    initial_review: "Media/Pixabay/suggest top-level handlers acknowledge early; six immediate downstream helpers contain no direct answer call. No duplicate-ack defect was demonstrated. S12.17 now verifies media cache/session/owner/context staleness; suggested-music and other routes remain unproven"
+  S12.17-media-library-stale-result-snapshot:
+    status: local-green-awaiting-ci-pr-deploy
+    base_sha: 0929d61ade4b8f0d60b803b62417763e90acce9e
+    acceptance: >-
+      Controls from Jamendo/SFX/Pixabay result A never resolve to replacement result B;
+      validate per-search callback token, per-user cache, TTL, and active product context
+      through actual emitted keyboards and registered handlers. Reject legacy tokenless
+      item callbacks before preview/selection; keep command routes backward-compatible.
+    protected_scope: "AutoPost WIP; shared router; Product/Edit/SubDub/Voice/Music engines; providers, wallet, production data"
+    impact_check: "Callsites recorded in TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md; production helper callsites stay within bot.py; test_product_context_separation.py and test_core.py are read-only consumers"
+    red: >-
+      On baseline, emitted Music/Pixabay controls had only action|index. After
+      replacing cache A with B, old Music Select resolved Track B, old Pixabay
+      Preview resolved item B, and an old showroom control still reached selection
+      after switching to video_addon. Five behavioral assertions failed after the
+      harness was corrected; none failed during setup.
+    green: >-
+      19 source-extracted unittest cases passed locally. Actual emitted keyboards,
+      exact callback registrations and production Music/Pixabay selection functions
+      were exercised; valid Preview and License controls dispatch their original
+      snapshot token through registered handlers. Telegram/provider sends are inert;
+      stale snapshot, owner, product context, TTL, tokenless legacy and bad-index
+      controls fail closed. Direct music command playback/selection remains functional.
+      Full bot py_compile and changed-test py_compile exited 0; git diff --check exited 0.
+      CI, merge and runtime delivery are still pending.
+    test_output: "Ran 19 tests in 51.593s OK"
+    side_effects: "PROVIDER_CALLS=0; REAL_TELEGRAM_SENDS=0; JOBS=0; WALLET_MUTATIONS=0; PRODUCTION_DATA_WRITES=0"
+    files:
+      - bot.py
+      - tests/test_media_preview_callback_snapshot.py
+      - .github/workflows/ci-main.yml
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
+      - KIEM-THU/DANH-SACH-CASE.md
+      - TAI-LIEU/01-NGHIEP-VU-VAN-HANH.md
+      - TAI-LIEU/02-CHUC-NANG-GOC-VA-HIEN-TAI.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+    provider_calls: 0
+    wallet_mutations: 0
+    production_data_writes: 0
 verification:
   runtime_after_1378: "active/running; NRestarts=0; exact SHA 392d2eec8f942c8e5c1232e5ac537b9a84dfd82c"
   runtime_after_1379: "All three services active/running, NRestarts=0; runtime SHA 2099eb319483ba1acc80f1080a094ba9710b5f3d; three new Runtime guide labels; health HTTP 200"
@@ -75,11 +139,20 @@ verification:
   pull_request_1379_ci: "Both required gates SUCCESS; Ubuntu Admin routes 22 tests and workflow hygiene 99 tests passed"
   pull_request_1380_ci: "Both required gates SUCCESS; Ubuntu Admin routes 25 tests and workflow hygiene 99 tests passed"
   runtime_after_1380: "Exact SHA74a8d86f24d1c8960706bc2c73b0ca984a69ae56; bot/web/nginx active/running; NRestarts=0; health HTTP200"
-  current_pull_request_ci: pending
-  current_complete_source_compile: "Required on Ubuntu CI before merge; changed production functions are compiled by actual-route fixtures and changed tests py_compile passed"
-  current_protected_comparator: "ALL_OTHER_SOURCE_IDENTICAL=PASS outside scoped menu handler and two Runtime emitters; complete handler diff reviewed"
+  pull_request_1381_ci: "Both required gates SUCCESS; Ubuntu Admin routes35 and workflow hygiene99 passed; complete source compile/AST/py_compile/tokenize passed"
+  runtime_after_1381: "Exact SHA0929d61ade4b8f0d60b803b62417763e90acce9e; bot/web/nginx active/running; NRestarts=0; health HTTP200; tracked bot.py matches"
+  current_pull_request_ci: "S12.17 pending branch/PR CI"
+  current_full_source_compile: "Bundled Python -m py_compile bot.py tests/test_media_preview_callback_snapshot.py exited 0 for the final branch state"
+  current_focused_route_tests: "python -m unittest tests/test_media_preview_callback_snapshot.py: Ran 19 tests in 51.593s OK"
+  current_diff_check: "git diff --check exited 0; warning only notes state YAML LF will normalize to CRLF"
+  local_pytest: "Unavailable: bundled Python has no pytest module; test is standard-library unittest and added to Ubuntu CI"
+  provider_calls: 0
+  real_telegram_sends: 0
+  wallet_mutations: 0
+  production_data_writes: 0
+  current_protected_comparator: "Reviewed bot.py diff is limited to media/SFX/Pixabay search cache, callback builders/helpers/handlers, three media result callsites and their two registrations; protected engines and shared router unchanged"
 blockers: []
 next:
-  - Deliver S12.15 through its own PR, CI, merge and bot-only deploy; verify runtime SHA before another code change.
-  - Refresh the per-handler route/evidence inventory to identify remaining concrete Admin/customer audit gaps, rather than treating counts as whole-bot completion.
+  - Complete S12.17's branch CI, merge, exact-SHA deploy and runtime verification using the separate-PR pipeline.
+  - Continue candidate handlers and downstream stale/error paths with inert fixtures. Do not infer a bug from missing name references.
   - Resume remaining A1/A2, then A3/A4/A5, A6, A7, and A8 in checklist order.

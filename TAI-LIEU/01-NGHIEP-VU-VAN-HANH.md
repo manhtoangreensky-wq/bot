@@ -1657,4 +1657,10 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
 ## Runtime guide Back origin — 06/10/2026, S12.15
 
 - Fixture qua handler thật chứng minh 2 màn Security/DB và System Ops bị mất nguồn, Back về System cũ. Patch mang module nguồn theo đúng 2 callback và chỉ đổi Back của trang Runtime guide.
-- Callback cũ giữ System Back; Admin/Home giữ nguyên; context sai và user thường bị chặn trước cleanup. Local evidence: 31 route regressions, 6 root/timing regressions và 3 public-denial routes đạt. Chờ PR/CI/deploy; runtime vẫn `74a8d86f`.
+- Callback cũ giữ System Back; Admin/Home giữ nguyên; context sai và user thường bị chặn trước cleanup. Local evidence: 31 route regressions, 6 root/timing regressions và 3 public-denial routes đạt. PR #1381 đã merge/deploy `0929d61a`; Ubuntu CI35 route +99 deployment tests đạt; VPS đúng SHA, ba dịch vụ active/running, NRestarts=0, health200. Manual Telegram QA của Back mới chưa được ghi PASS.
+
+## Media library stale callback — S12.17, 06/10/2026
+
+- RED tái hiện qua callback đã đăng ký: keyboard Music cũ chỉ mang `select_music|1`; sau search mới, nút cũ đi tới `Track B`. Pixabay Preview cũ cũng đọc item B; nút showroom vẫn tới helper sau khi chuyển sang Video Add-on.
+- Patch gắn UUID và product context vào snapshot cache; nút item/License mang UUID. Handler khóa owner, snapshot, context và TTL trước preview/chọn; nút cũ không mã phiên báo hết hạn. Lệnh `/play_*` và `/select_*` giữ cách gọi trực tiếp cũ.
+- Local: 19 registered-handler/unittest cases đạt; full `bot.py` và test-file py_compile đạt; `git diff --check` sạch. Không provider call, Telegram thật, job, Xu hoặc production data. Đang chờ CI/PR/deploy; chưa có manual Telegram PASS.
