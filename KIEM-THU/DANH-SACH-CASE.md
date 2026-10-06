@@ -235,3 +235,4 @@ hoặc hết timeout mà không fail-closed/cleanup.
 | ID | Bước kiểm thử | PASS bắt buộc |
 |---|---|---|
 | `ADMIN-TICKET-BACK-01` | Trong fixture/staging có ít nhất `7` ticket ưu tiên cao, mở trang `2` (`offset=6`), mở một ticket, chọn `Soạn trả lời`; bấm Back tại prompt, rồi lặp lại và nhập nội dung để mở preview trước khi bấm Back | Cả hai Back quay về cùng danh sách ưu tiên cao trang `2` (`ticket|al|high|6`); pending reply được bỏ khi rời màn ticket; Back từ preview không gửi tin khách; không gọi provider, không thay đổi Xu hoặc dữ liệu production |
+| `ADMIN-TICKET-NOTE-BACK-01` | Từ ticket ưu tiên cao trang `2` (`offset=6`), mở ticket → `Ghi chú admin`; kiểm tra Back tại prompt, rồi lặp lại và lưu ghi chú fixture | Back tại prompt bỏ pending và quay đúng ticket detail; sau khi lưu ghi chú, Back từ detail về đúng `ticket|al|high|6`; không gửi tin khách, không gọi provider, không thay đổi Xu hoặc dữ liệu production |
