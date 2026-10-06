@@ -60935,9 +60935,9 @@ def support_ticket_admin_text(ticket: dict) -> str:
 def support_ticket_admin_keyboard(ticket: dict, source: str = "new", list_offset: int = 0) -> InlineKeyboardMarkup:
     ticket_id = int(ticket["id"])
     rows = [
-        [InlineKeyboardButton("✅ Đã xử lý", callback_data=f"ticket|st|{ticket_id}|resolved"), InlineKeyboardButton("💬 Soạn trả lời", callback_data=f"ticket|reply|{ticket_id}|{source}|{max(0, int(list_offset or 0))}")],
-        [InlineKeyboardButton("🤖 Gợi ý trả lời", callback_data=f"ticket|suggest|{ticket_id}|0"), InlineKeyboardButton("💰 Đánh dấu refund", callback_data=f"ticket|st|{ticket_id}|refund_pending")],
-        [InlineKeyboardButton("⏳ Chờ provider", callback_data=f"ticket|st|{ticket_id}|waiting_provider"), InlineKeyboardButton("👤 Hỏi thêm khách", callback_data=f"ticket|ask|{ticket_id}|{source}|{max(0, int(list_offset or 0))}")],
+        [InlineKeyboardButton("✅ Đã xử lý", callback_data=f"ticket|st|{ticket_id}|resolved|{source}|{max(0, int(list_offset or 0))}"), InlineKeyboardButton("💬 Soạn trả lời", callback_data=f"ticket|reply|{ticket_id}|{source}|{max(0, int(list_offset or 0))}")],
+        [InlineKeyboardButton("🤖 Gợi ý trả lời", callback_data=f"ticket|suggest|{ticket_id}|0"), InlineKeyboardButton("💰 Đánh dấu refund", callback_data=f"ticket|st|{ticket_id}|refund_pending|{source}|{max(0, int(list_offset or 0))}")],
+        [InlineKeyboardButton("⏳ Chờ provider", callback_data=f"ticket|st|{ticket_id}|waiting_provider|{source}|{max(0, int(list_offset or 0))}"), InlineKeyboardButton("👤 Hỏi thêm khách", callback_data=f"ticket|ask|{ticket_id}|{source}|{max(0, int(list_offset or 0))}")],
         [InlineKeyboardButton("📌 Ghi chú admin", callback_data=f"ticket|note|{ticket_id}|{source}|{max(0, int(list_offset or 0))}"), InlineKeyboardButton("🙋 Nhận xử lý", callback_data=f"ticket|assign|{ticket_id}|{source}|{max(0, int(list_offset or 0))}")],
     ]
     if ticket.get("attachment_file_id"):
@@ -140745,6 +140745,11 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
     if action == "st" and len(parts) >= 4:
         ticket_id = int(parts[2])
         new_status = parts[3]
+        source = parts[4] if len(parts) >= 5 and parts[4] in {"new", "high", "refund"} else "new"
+        try:
+            list_offset = max(0, int(parts[5] or 0)) if len(parts) >= 6 else 0
+        except (TypeError, ValueError):
+            list_offset = 0
         previous_ticket = admin_ticket_status if new_status == "refund_pending" else None
         await query.answer()
         ticket = update_support_ticket(ticket_id, status=new_status)
@@ -140752,7 +140757,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
             return await safe_edit_or_send(query, "Không tìm thấy ticket.", reply_markup=support_admin_menu_keyboard())
         if new_status == "refund_pending" and str((previous_ticket or {}).get("status") or "") != new_status:
             await query.message.reply_text("💰 Ticket đã được đánh dấu cần kiểm tra hoàn Xu/refund. Thao tác này chưa cộng hoặc trừ Xu.")
-        return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket))
+        return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket, source, list_offset))
     if action == "reply" and len(parts) >= 3:
         ticket_id = int(parts[2])
         if not get_support_ticket(ticket_id):

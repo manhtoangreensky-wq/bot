@@ -64,9 +64,9 @@ Admin can:
 
 When opening a ticket from a filtered or paginated admin list, reply/note/ask
 prompts and previews keep that list's filter and page. The detail screen also
-keeps the origin after saving a note or assigning the ticket. Back from the
-note or ask-customer prompt cancels only that pending input; Back from the ask
-preview does not send a customer message.
+keeps the origin after saving a note, assigning the ticket, or changing status.
+Back from the note or ask-customer prompt cancels only that pending input; Back
+from the ask preview does not send a customer message.
 
 ## Data Safety
 
