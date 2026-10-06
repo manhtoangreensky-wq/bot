@@ -204,9 +204,10 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 - Impact: `admin_db_status_keyboard` and `security_log_keyboard` have 2 definitions and 8 production call sites, all in `bot.py`; both optional parameters preserve no-argument command callers. Backup creation and security/audit event bodies are unchanged. Engine/service/provider/worker sources are protected comparators.
 - Final verification: focused 5 tests including callback byte limits → `Ran 5 tests in 10.227s — OK`; full `py_compile bot.py` plus both changed test files exited 0; protected comparator passed; legacy security registration assertions passed; `git diff --check` exited 0. Local full pytest suite is not run (bundled Python lacks pytest).
 - Scope lock: two UI keyboard families, one menu-handler origin branch, one focused unittest, one compatibility assertion update, one CI invocation and this ledger. Product/Edit/SubDub/Voice/Music engines, AutoPost WIP and PayOS routes are untouched.
-- Status: LOCAL GREEN — PR #1384 is open; updated patch CI, merge and deploy pending. Runtime remains at the verified #1383 SHA until deployment.
+- Delivery: PR [#1384](https://github.com/manhtoangreensky-wq/bot/pull/1384) merged as `3557b97a59b19b267f07efe5558269ea6894f9ec`; PR/main checks pass, 163 configured CI tests OK. Bot-only deploy [#37505100609](https://github.com/manhtoangreensky-wq/bot/actions/runs/37505100609) succeeded. Read-only SSH confirms exact SHA, tracked bot.py matches, all three services active/running, NRestarts=0 and health status=ok. Manual Telegram/client QA remains NOT_TESTED.
+- Status: MERGED + DEPLOYED + RUNTIME-SHA-VERIFIED.
 
-### Next A2 spec — module children lose their emitting origin (07/10/2026)
+### S12.20 — module children lose their emitting origin (07/10/2026)
 
 Prerequisite: finish S12.19 delivery. Inert dispatch of actual emitted controls through the current menu handler and actual keyboard builders reproduced 7 additional Back mismatches. Report data was replaced with inert fixtures; no DB/provider/backup/wallet/send operations occurred. The first harness run missed a `re` import; the corrected run exited 0 and measured these destinations. These are navigation failures, not engine failures.
 
@@ -220,7 +221,25 @@ Prerequisite: finish S12.19 delivery. Inert dispatch of actual emitted controls 
 | Provider/Worker | `smoke_test` | `admin_provider_worker` | `admin` |
 | Provider/Worker | `admin_provider_routes` | `admin_provider_worker` | `admin_provider` |
 
-Acceptance for the next narrow spec: these 7 entry callbacks retain the emitting module through their UI page, refresh and Back; legacy entry screens keep their existing origin, and invalid/public callbacks stop before cleanup/read/render. Existing queue, provider, report, freeze, backup, financial and product engine operations remain protected. No new implementation is started until S12.19 delivery is verified. The whole-bot error total remains unknown while other checklist entries are unaudited.
+Acceptance: these 7 entry callbacks retain the emitting module through their UI page, refresh and Back; legacy entry screens keep their existing origin, and invalid/public callbacks stop before cleanup/read/render. Existing queue, provider, report, freeze, backup, financial and product engine operations remain protected. S12.19 delivery was verified before this BUILD. The whole-bot error total remains unknown while other checklist entries are unaudited.
+
+- RED: corrected registered-handler fixture on base `3557b97a` ran 3 test methods with 15 behavioral assertion failures and 0 setup errors: 7 lost-parent cases, 7 unrecognized new-origin fallbacks and invalid-origin recovery. The first harness run had missing fallback stubs; it is not counted as product evidence.
+- Fix: 7 module emitters carry a validated parent. A closed, action-specific origin branch changes only the matching Back control and same-page refresh callback after the existing page renderer. Legacy pages and all business controls are preserved; public/invalid contexts stop before reads and cleanup.
+- GREEN: focused suite 3 tests OK; adjacent Security/DB, Package Orders, Finance, Broadcast pending, Runtime, Billing, root and latency regressions → `Ran 27 tests in 38.252s — OK`.
+- Protected comparator: whole bot source outside `handle_menu_callback` and `ADMIN_CONTROL_MODULES` is byte-equivalent to base; services/providers/remote worker/config and callback registration order unchanged. Provider calls, production-data writes, wallet mutations, real messages and jobs: 0.
+- Final full `py_compile bot.py tests/test_admin_module_child_back_origin.py` exited 0; diff check exited 0. Status: LOCAL GREEN; separate PR/CI/merge/deploy pending.
+
+### Next A2 queue confirmation-guide origins — 07/10/2026
+
+Read-only fixture dispatch from the actual Queue module emitted controls reproduced 3 additional immediate-parent mismatches. These pages only show command instructions; no freeze, refund, provider or financial operation was executed.
+
+| Queue entry | Expected immediate Back | Actual Back |
+|---|---|---|
+| `admin_confirm_unfreeze_tool` | `menu|admin_queue` | `menu|unfreeze_tool_help` |
+| `admin_confirm_freeze_video` | `menu|admin_queue` | `menu|freeze_video_help` |
+| `admin_confirm_refund_job` | `menu|admin_queue` | `menu|freeze_queue_help` |
+
+Queued after S12.20 delivery. Acceptance: Queue-entered confirmation guides retain Queue origin through Cancel, Back and instruction acknowledgement; legacy guide-entered controls preserve their current parent. All instruction text and freeze/refund/wallet/provider behavior are protected. No implementation of this next spec is included in S12.20.
 
 ### Final latency spec — partial, server/client split preserved
 
@@ -243,7 +262,7 @@ Acceptance for the next narrow spec: these 7 entry callbacks retain the emitting
 5. S12.15 (#1381) is merged/deployed/runtime verified at `0929d61a`; S12.16 inventories registrations but is not whole-bot route proof.
 6. S12.17 is merged/deployed/runtime verified at `979c0ee5`; its stale media result controls are closed.
 7. S12.18 (#1383) is merged/deployed/runtime verified at `5c040c22`.
-8. Finish S12.19 in PR #1384, including sibling/refresh/backup-origin evidence, before continuing remaining Admin routes.
+8. S12.19 (#1384) is merged/deployed/runtime verified at `3557b97a`; finish S12.20 delivery for the seven next entry routes.
 9. Continue A1–A5 for remaining admin/customer routes, pending-state expiry/stale/repeat behavior, preserving protected product lanes.
 10. Finish A6 UI/UX consistency review and update this ledger with evidence, not assumptions.
 11. Close A7 only after multiple user-timed samples can be compared to anonymous server phases; separate server, Telegram render and client/network wait.
