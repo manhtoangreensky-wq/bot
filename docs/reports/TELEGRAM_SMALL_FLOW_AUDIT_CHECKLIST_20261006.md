@@ -15,7 +15,7 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 |---|---|---|
 | A0 | Current source/main/runtime baseline: `0929d61ade4b8f0d60b803b62417763e90acce9e` after PR #1381. AST inventory measures 87 direct callback registrations, 85 distinct callback expressions and 83 literal patterns; the 4 pattern-free entries are 3 guards plus the final timing observer. Historical emitter snapshot `4f1455ed` had 3,981 constructors/821 dynamic expressions/0 unmatched static callbacks; these older emitter figures have not been refreshed and are not current route proof. | Per-registration matrix drafted in `TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md`; route verdicts remain partial/unproven. |
 | A1 | Admin screens: verify each visible action label matches its handler; test emitted callback, authorization, state transition, and error/stale path. | PARTIAL — report/overview, root/help/package and feedback/access samples have evidence below; S12.13 corrects three Runtime-guide labels without changing their routes; full visible-action matrix remains open. |
-| A2 | Admin Back/Home: verify immediate parent and preserve list/filter/page context; test prompt and preview exits without performing the underlying action. | IN PROGRESS — ticket-origin specs S12.6–S12.10 (#1367–#1374) are in #1376; S12.12 merged/deployed in #1378 at runtime SHA `392d2eec`; S12.18 fixes Package Orders returning to Finance instead of Gói/Combo. Other admin/customer routes remain open. |
+| A2 | Admin Back/Home: verify immediate parent and preserve list/filter/page context; test prompt and preview exits without performing the underlying action. | IN PROGRESS — ticket-origin specs S12.6–S12.10 (#1367–#1374) are in #1376; S12.12 merged/deployed in #1378 at runtime SHA `392d2eec`; S12.18 fixes Package Orders origin and S12.19 fixes Security/DB child Back. Other admin/customer routes remain open. |
 | A3 | Customer screens: verify ownership, same-product navigation, Back/Home, and no cross-user or cross-product route. | OPEN — audit ledger not complete. |
 | A4 | Pending input: verify `/start`, `/menu`, Back, expiry, stale controls, repeated presses, and abandoned drafts clear only the intended state. | PARTIAL — ReplyKeyboard Home preemption PR #1375 is in the deployed #1376 release; the remaining reset/expiry/stale-state matrix is open. |
 | A5 | Callback coverage: check static and dynamic emitted values against actual registrations and dispatched terminal behavior; no module-only route test counts as completion. | OPEN — static unmatched count alone is insufficient. |
@@ -192,6 +192,16 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 - Minimal fix: carry a validated origin token (`admin_packages` or `finance`) in each entry callback; render the matching Back label/destination and reject unknown origin tokens. Catalog, User Packages, Menu chính and all package/payment behavior are unchanged.
 - GREEN: `python -m unittest tests/test_admin_package_orders_back_origin.py tests/test_finance_back_destination.py tests/test_broadcast_lite_back_pending_cleanup.py` → `Ran 6 tests ... OK`. The new test executes the production keyboard builder and registered menu handler for both origins. No DB writes, provider calls, wallet mutations, broadcast sends or production messages.
 - Scope lock: one narrow callback route, two keyboard emitters, one focused unittest, one CI invocation, and this evidence ledger. Product/Edit/SubDub/Voice/Music engines and AutoPost WIP are untouched.
+- Delivery: PR [#1383](https://github.com/manhtoangreensky-wq/bot/pull/1383) merged as `5c040c22f2cf07b9edaa9631c219dbf07c15a6ff`; required checks and main-push CI passed. Bot-only deploy [#37496473987](https://github.com/manhtoangreensky-wq/bot/actions/runs/37496473987) succeeded. Read-only VPS verification confirmed exact runtime SHA, bot/web/nginx `active`, `NRestarts=0`, and health `status=ok`. Manual Telegram QA is not claimed.
+- Status: MERGED + DEPLOYED + RUNTIME-SHA-VERIFIED.
+
+### S12.19 — Admin Security/DB child Back retains module origin
+
+- Trigger: Admin → Bảo mật / DB → DB trạng thái hoặc Nhật ký bảo mật → Quay lại.
+- RED: the production `admin_db_status_keyboard()` and `security_log_keyboard()` both rendered `⬅️ Admin menu` → `menu|admin`, losing the immediate Security/DB parent.
+- Minimal fix: change only those two Back controls to `⬅️ Bảo mật / DB` → `menu|admin_security_db`. Refresh, DB backup, security log and Menu chính callbacks remain unchanged.
+- GREEN: `python -m unittest tests/test_admin_security_db_back_origin.py` → `Ran 1 test ... OK`; the test reads both production keyboard functions and confirms the module entry callbacks. No DB writes, backup creation, provider calls, wallet mutations or production messages.
+- Scope lock: two UI callback rows in `bot.py`, one focused unittest, one CI invocation and this ledger. Product/Edit/SubDub/Voice/Music engines, AutoPost WIP and PayOS routes are untouched.
 - Status: LOCAL GREEN — PR/CI/deploy pending.
 
 ### Final latency spec — partial, server/client split preserved

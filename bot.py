@@ -137454,7 +137454,7 @@ def admin_db_status_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 Làm mới", callback_data="menu|admin_db_status"), InlineKeyboardButton("💾 Sao lưu DB", callback_data="menu|admin_backup_db")],
         [InlineKeyboardButton("🛡 Nhật ký bảo mật", callback_data="menu|admin_security_log")],
-        [InlineKeyboardButton("⬅️ Admin menu", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("⬅️ Bảo mật / DB", callback_data="menu|admin_security_db"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def backup_db_result_text(result: dict) -> str:
@@ -137500,7 +137500,7 @@ def security_log_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 Làm mới", callback_data="menu|admin_security_log")],
         [InlineKeyboardButton("🗄 DB trạng thái", callback_data="menu|admin_db_status"), InlineKeyboardButton("💾 Sao lưu DB", callback_data="menu|admin_backup_db")],
-        [InlineKeyboardButton("⬅️ Admin menu", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("⬅️ Bảo mật / DB", callback_data="menu|admin_security_db"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 async def cmd_security_status(update: Update, context: ContextTypes.DEFAULT_TYPE):

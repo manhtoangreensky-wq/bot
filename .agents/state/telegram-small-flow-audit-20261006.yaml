@@ -5,7 +5,7 @@ base_sha: 0929d61ade4b8f0d60b803b62417763e90acce9e
 objective: >-
   Continue the ordered Telegram small-flow audit. Fix wrong callback/Back routes
   narrowly while protecting AutoPost WIP and stable product engines.
-current_spec: S12.18-admin-package-orders-back-origin
+current_spec: S12.19-admin-security-db-back-origin
 branch: audit/telegram-handler-evidence-20261006
 allowed_scope:
   - Read-only source registration and candidate-test inventory
@@ -131,7 +131,7 @@ specs:
     wallet_mutations: 0
     production_data_writes: 0
   S12.18-admin-package-orders-back-origin:
-    status: local-green-awaiting-ci-pr-deploy
+    status: merged-deployed-runtime-sha-verified
     base_sha: 979c0ee5d9cc3b51d23b5c6470a6d02947f69208
     acceptance: >-
       Admin Gói / Combo → Đơn chờ duyệt → Quay lại returns to the immediate
@@ -147,12 +147,42 @@ specs:
       keyboard emitters;
       no DB, provider, wallet, broadcast or production side effect occurred.
     test_output: "Ran 6 tests in 0.842s OK"
+    pull_request: 1383
+    merge_sha: 5c040c22f2cf07b9edaa9631c219dbf07c15a6ff
+    deploy_run: 37496473987
+    runtime_sha: 5c040c22f2cf07b9edaa9631c219dbf07c15a6ff
+    runtime_services: "toanaas-bot.service active; toanaas-web.service active; nginx.service active; NRestarts=0; health status=ok"
     files:
       - bot.py
       - tests/test_admin_package_orders_back_origin.py
       - .github/workflows/ci-main.yml
       - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
       - docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+    provider_calls: 0
+    wallet_mutations: 0
+    production_data_writes: 0
+  S12.19-admin-security-db-back-origin:
+    status: local-green-awaiting-ci-pr-deploy
+    base_sha: 5c040c22f2cf07b9edaa9631c219dbf07c15a6ff
+    acceptance: >-
+      Admin Security/DB child screens return to menu|admin_security_db, the
+      immediate module parent, while refresh and Menu chính remain unchanged.
+    red: >-
+      Production DB Status and Security Log keyboards both emitted Back to
+      menu|admin instead of the Security/DB module.
+    green: >-
+      The focused unittest reads both production keyboard builders and ran 1
+      test successfully. No DB writes, backup creation, provider calls, wallet
+      mutations or production messages occurred.
+    test_output: "Ran 1 test in 0.217s OK"
+    files:
+      - bot.py
+      - tests/test_admin_security_db_back_origin.py
+      - .github/workflows/ci-main.yml
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
+      - TAI-LIEU/01-NGHIEP-VU-VAN-HANH.md
       - .agents/state/telegram-small-flow-audit-20261006.yaml
     provider_calls: 0
     wallet_mutations: 0
@@ -186,6 +216,6 @@ verification:
   current_protected_comparator: "S12.18 diff is limited to Package Orders origin tokens, two keyboard emitters, one menu-handler branch and focused test/docs; protected engines, AutoPost WIP and shared product workers unchanged"
 blockers: []
 next:
-  - Complete S12.18's branch CI, merge, exact-SHA deploy and runtime verification using the separate-PR pipeline.
-  - Continue candidate handlers and downstream stale/error paths with inert fixtures. Do not infer a bug from missing name references.
-  - Resume remaining A1/A2, then A3/A4/A5, A6, A7, and A8 in checklist order.
+  - Complete S12.19's branch CI, merge, exact-SHA deploy and runtime verification using the separate-PR pipeline.
+  - Continue remaining A1/A2 Admin/customer route evidence with inert fixtures; do not infer a bug from missing name references.
+  - Resume A3/A4/A5, A6, A7, and A8 in checklist order.

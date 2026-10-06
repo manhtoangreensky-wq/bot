@@ -1668,4 +1668,9 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
 ## Admin Package Orders Back origin — S12.18, 06/10/2026
 
 - Từ Admin → Gói / Combo → Đơn chờ duyệt, nút Back cũ ghi Tài chính và phát `menu|finance`, làm mất module cha; cùng màn này cũng được mở từ Finance.
-- Patch mang origin hợp lệ (`admin_packages` hoặc `finance`) trên callback mở màn và dựng Back tương ứng; origin lạ bị từ chối. Local route regression qua handler thật đạt; không chạm xử lý gói, thanh toán, ví hoặc dữ liệu production. Đang chờ CI/PR/deploy.
+- Patch mang origin hợp lệ (`admin_packages` hoặc `finance`) trên callback mở màn và dựng Back tương ứng; origin lạ bị từ chối. Local route regression qua handler thật đạt; không chạm xử lý gói, thanh toán, ví hoặc dữ liệu production. PR #1383 đã merge, deploy bot-only run #37496473987 đạt; runtime đúng SHA `5c040c22`, ba service active/running, NRestarts=0, health=ok.
+
+## Admin Security/DB Back origin — S12.19, 06/10/2026
+
+- Hai màn DB trạng thái và Nhật ký bảo mật từ module Bảo mật/DB trước đây quay về Admin root.
+- Patch đổi đúng hai nút Back về `menu|admin_security_db`; không chạm thao tác DB/backup/security log. Local route regression đạt; đang chờ CI/PR/deploy.

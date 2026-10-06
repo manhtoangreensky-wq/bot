@@ -37,6 +37,9 @@ jobs:
       - name: Admin Package Orders Back Regression
         run: python -m unittest tests/test_admin_package_orders_back_origin.py
 
+      - name: Admin Security DB Back Regression
+        run: python -m unittest tests/test_admin_security_db_back_origin.py
+
       - name: Admin Route Regressions
         run: |
           python -m unittest \
