@@ -3038,6 +3038,30 @@ fi
             self.assertIn("RECONCILIATION_ROLLBACK_DEGRADED", res.stdout)
             self.assertNotIn("SUBDUB_WORKER_RECONCILED", res.stdout)
 
+    def test_bot_only_deploy_can_skip_all_worker_mutations(self):
+        """A bot-only release preserves default worker sync but can skip worker changes."""
+        input_idx = self.content.find("      deploy_workers:")
+        self.assertNotEqual(input_idx, -1, "deploy_workers workflow input missing")
+        input_block = self.content[input_idx:input_idx + 400]
+        self.assertIn("type: boolean", input_block)
+        self.assertIn("default: true", input_block)
+        self.assertIn("DEPLOY_WORKERS: ${{ github.event.inputs.deploy_workers }}", self.content)
+        self.assertIn("DEPLOY_WORKERS='${DEPLOY_WORKERS}'", self.content)
+
+        guard = r'if [[ \"\$DEPLOY_WORKERS\" == \"true\" ]]; then'
+        for marker, start_marker in (
+            ("reconcile_subdub_worker_already_deployed", "PATH 1: ALREADY_DEPLOYED"),
+            ("prepare_product_video_worker_release", "PATH 2: Normal NEW_SHA"),
+            ("activate_product_video_worker_release", "PATH 2: Normal NEW_SHA"),
+            ("commit_product_video_release_transaction", "PATH 2: Normal NEW_SHA"),
+        ):
+            start = self.content.find(start_marker)
+            idx = self.content.find(marker, start)
+            self.assertGreaterEqual(start, 0, f"{start_marker} missing")
+            self.assertGreaterEqual(idx, 0, f"{marker} missing")
+            preceding = self.content[max(start, idx - 350):idx]
+            self.assertIn(guard, preceding, f"{marker} must be behind the deploy_workers guard")
+
 
 if __name__ == "__main__":
     unittest.main()

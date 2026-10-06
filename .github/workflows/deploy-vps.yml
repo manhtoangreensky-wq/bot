@@ -7,6 +7,11 @@ on:
         description: 'Exact 40-character hex commit SHA to deploy'
         required: true
         type: string
+      deploy_workers:
+        description: 'Sync Product Video and SubDub workers; set false for a bot-only release'
+        required: false
+        type: boolean
+        default: true
 
 concurrency:
   group: deploy-vps-bot
@@ -143,6 +148,7 @@ jobs:
           VPS_SSH_KEY_B64: ${{ secrets.VPS_SSH_KEY_B64 }}
           TARGET_SHA: ${{ steps.validate_target.outputs.target_sha }}
           EXPECTED_PREV_SHA: ${{ steps.prod_sha.outputs.prev_deployed_sha }}
+          DEPLOY_WORKERS: ${{ github.event.inputs.deploy_workers }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
@@ -170,6 +176,12 @@ jobs:
             EXPECTED_PREV_SHA='${EXPECTED_PREV_SHA}'
             if [[ ! \"\$EXPECTED_PREV_SHA\" =~ ^[0-9a-fA-F]{40}\$ ]]; then
               echo 'ERROR: EXPECTED_PREV_SHA is not a valid 40-character hex string' >&2
+              exit 1
+            fi
+
+            DEPLOY_WORKERS='${DEPLOY_WORKERS}'
+            if [[ \"\$DEPLOY_WORKERS\" != \"true\" && \"\$DEPLOY_WORKERS\" != \"false\" ]]; then
+              echo 'ERROR: DEPLOY_WORKERS must be true or false' >&2
               exit 1
             fi
 
@@ -281,11 +293,15 @@ jobs:
 
               printf '%s' \"\$HEALTH_JSON\" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get(\"status\") == \"ok\"; print(\"HEALTH_PAYLOAD_VALIDATED:\", data.get(\"status\"))'
 
-              echo '=== Reconciling SubDub Worker State (toanaas-worker-subdub.service) ==='
-              export BOT_DIR=\"\$WEBAPP_DIR\"
-              export TARGET_SHA=\"\$TARGET_SHA\"
-              source \"\$WEBAPP_DIR/scripts/vps/sync_product_video_worker_release.sh\"
-              reconcile_subdub_worker_already_deployed
+              if [[ \"\$DEPLOY_WORKERS\" == \"true\" ]]; then
+                echo '=== Reconciling SubDub Worker State (toanaas-worker-subdub.service) ==='
+                export BOT_DIR=\"\$WEBAPP_DIR\"
+                export TARGET_SHA=\"\$TARGET_SHA\"
+                source \"\$WEBAPP_DIR/scripts/vps/sync_product_video_worker_release.sh\"
+                reconcile_subdub_worker_already_deployed
+              else
+                echo 'WORKER_RECONCILIATION_SKIPPED=bot-only'
+              fi
 
               echo '=== Cleaning up Remote Staging Directory (If Present) ==='
               CLEANUP_TARGET=\"/tmp/deploy-bot-\$TARGET_SHA\"
@@ -318,8 +334,12 @@ jobs:
             cd \"\$STAGING_DIR\"
             sha256sum -c checksums.sha256
 
-            source \"\$STAGING_DIR/sync_product_video_worker_release.sh\"
-            prepare_product_video_worker_release
+            if [[ \"\$DEPLOY_WORKERS\" == \"true\" ]]; then
+              source \"\$STAGING_DIR/sync_product_video_worker_release.sh\"
+              prepare_product_video_worker_release
+            else
+              echo 'WORKER_RELEASE_PREPARE_SKIPPED=bot-only'
+            fi
 
             cd \"\$WEBAPP_DIR\" || fail_after_prepare \"Failed to cd to WEBAPP_DIR (\$WEBAPP_DIR)\"
 
@@ -407,8 +427,12 @@ jobs:
               fail_after_prepare \"Health endpoint payload validation failed (status != ok)\"
             fi
 
-            activate_product_video_worker_release
-            commit_product_video_release_transaction
+            if [[ \"\$DEPLOY_WORKERS\" == \"true\" ]]; then
+              activate_product_video_worker_release
+              commit_product_video_release_transaction
+            else
+              echo 'WORKER_RELEASE_ACTIVATION_SKIPPED=bot-only'
+            fi
 
             echo '=== Cleaning up Remote Staging Directory ==='
             CLEANUP_TARGET=\"/tmp/deploy-bot-\$TARGET_SHA\"
