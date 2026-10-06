@@ -81,13 +81,26 @@ jobs:
             exit 1
           fi
 
-          echo "Discovered previous deployed SHA: $PREV_SHA"
+          echo "Discovered previous deployed bot SHA: $PREV_SHA"
           echo "prev_deployed_sha=$PREV_SHA" >> "$GITHUB_OUTPUT"
+
+          DEPLOY_WORKERS="${{ github.event.inputs.deploy_workers }}"
+          if [[ "$DEPLOY_WORKERS" == "true" ]]; then
+            PREV_WORKER_SHA="$(ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o ConnectTimeout=30 "$VPS_USER@$VPS_HOST" "git -c safe.directory=* -C /opt/toanaas-worker rev-parse HEAD")"
+            if [[ ! "$PREV_WORKER_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+              echo "ERROR: Discovered worker deployed SHA is not a valid 40-character hex string: '$PREV_WORKER_SHA'" >&2
+              exit 1
+            fi
+            echo "Discovered previous deployed worker SHA: $PREV_WORKER_SHA"
+            echo "prev_worker_deployed_sha=$PREV_WORKER_SHA" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Package Release Artifacts
         env:
           TARGET_SHA: ${{ steps.validate_target.outputs.target_sha }}
           PREV_DEPLOYED_SHA: ${{ steps.prod_sha.outputs.prev_deployed_sha }}
+          PREV_WORKER_DEPLOYED_SHA: ${{ steps.prod_sha.outputs.prev_worker_deployed_sha }}
+          DEPLOY_WORKERS: ${{ github.event.inputs.deploy_workers }}
         run: |
           set -euo pipefail
 
@@ -104,7 +117,19 @@ jobs:
           # Idempotency / Already deployed check:
           # If production is already running TARGET_SHA, skip bundle and tar generation
           # to prevent empty bundle error ('fatal: Refusing to create empty bundle').
+          # When deploy_workers=true, BOTH bot and worker must already be at TARGET_SHA.
+          ALREADY_DEPLOYED="false"
           if [[ "$PREV_DEPLOYED_SHA" == "$TARGET_SHA" ]]; then
+            if [[ "$DEPLOY_WORKERS" == "true" ]]; then
+              if [[ "$PREV_WORKER_DEPLOYED_SHA" == "$TARGET_SHA" ]]; then
+                ALREADY_DEPLOYED="true"
+              fi
+            else
+              ALREADY_DEPLOYED="true"
+            fi
+          fi
+
+          if [[ "$ALREADY_DEPLOYED" == "true" ]]; then
             echo "Production is already running TARGET_SHA ($TARGET_SHA)."
             echo "Skipping bundle and tar generation; will perform live health verification and hygiene reconciliation only."
             exit 0
@@ -125,8 +150,26 @@ jobs:
             exit 1
           fi
 
+          # Determine the bundle prerequisite base SHA.
+          # When deploy_workers=true, the bundle must be fetchable into BOTH /opt/toanaas/bot
+          # and /opt/toanaas-worker. These repos may be at different SHAs, so the bundle
+          # prerequisite must be their common ancestor (the oldest SHA both repos contain).
+          BUNDLE_BASE_SHA="${PREV_DEPLOYED_SHA}"
+          if [[ "$DEPLOY_WORKERS" == "true" ]]; then
+            if ! git cat-file -e "${PREV_WORKER_DEPLOYED_SHA}^{commit}"; then
+              echo "ERROR: PREV_WORKER_DEPLOYED_SHA ($PREV_WORKER_DEPLOYED_SHA) not found in runner checkout" >&2
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "${PREV_WORKER_DEPLOYED_SHA}" "${TARGET_SHA}"; then
+              echo "ERROR: PREV_WORKER_DEPLOYED_SHA ($PREV_WORKER_DEPLOYED_SHA) is not an ancestor of TARGET_SHA ($TARGET_SHA)" >&2
+              exit 1
+            fi
+            BUNDLE_BASE_SHA="$(git merge-base "${PREV_DEPLOYED_SHA}" "${PREV_WORKER_DEPLOYED_SHA}")"
+            echo "Computed BUNDLE_BASE_SHA (common ancestor): $BUNDLE_BASE_SHA"
+          fi
+
           git update-ref refs/deployments/bot-release "${TARGET_SHA}"
-          git bundle create "${RELEASE_DIR}/release.bundle" refs/deployments/bot-release "^${PREV_DEPLOYED_SHA}"
+          git bundle create "${RELEASE_DIR}/release.bundle" refs/deployments/bot-release "^${BUNDLE_BASE_SHA}"
           git bundle verify "${RELEASE_DIR}/release.bundle"
 
           ADVERTISED_SHA="$(git bundle list-heads "${RELEASE_DIR}/release.bundle" | awk '{print $1}')"
@@ -148,6 +191,7 @@ jobs:
           VPS_SSH_KEY_B64: ${{ secrets.VPS_SSH_KEY_B64 }}
           TARGET_SHA: ${{ steps.validate_target.outputs.target_sha }}
           EXPECTED_PREV_SHA: ${{ steps.prod_sha.outputs.prev_deployed_sha }}
+          EXPECTED_PREV_WORKER_SHA: ${{ steps.prod_sha.outputs.prev_worker_deployed_sha }}
           DEPLOY_WORKERS: ${{ github.event.inputs.deploy_workers }}
         run: |
           set -euo pipefail
@@ -158,8 +202,19 @@ jobs:
           RELEASE_DIR="/tmp/bot-release-${TARGET_SHA}"
           REMOTE_STAGING="/tmp/deploy-bot-${TARGET_SHA}"
 
-          # Only stage artifacts to remote host if this is a new deployment
-          if [[ "$EXPECTED_PREV_SHA" != "$TARGET_SHA" ]]; then
+          # Only stage artifacts to remote host if this is a new deployment.
+          # Must match the dual already-deployed check in Package Release Artifacts.
+          SKIP_STAGING="false"
+          if [[ "$EXPECTED_PREV_SHA" == "$TARGET_SHA" ]]; then
+            if [[ "$DEPLOY_WORKERS" == "true" ]]; then
+              if [[ "$EXPECTED_PREV_WORKER_SHA" == "$TARGET_SHA" ]]; then
+                SKIP_STAGING="true"
+              fi
+            else
+              SKIP_STAGING="true"
+            fi
+          fi
+          if [[ "$SKIP_STAGING" != "true" ]]; then
             ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o ConnectTimeout=30 "$VPS_USER@$VPS_HOST" "mkdir -p '${REMOTE_STAGING}'"
             scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no "${RELEASE_DIR}/release.tar" "${RELEASE_DIR}/release.bundle" "${RELEASE_DIR}/sync_product_video_worker_release.sh" "${RELEASE_DIR}/checksums.sha256" "$VPS_USER@$VPS_HOST:${REMOTE_STAGING}/"
           fi
@@ -183,6 +238,14 @@ jobs:
             if [[ \"\$DEPLOY_WORKERS\" != \"true\" && \"\$DEPLOY_WORKERS\" != \"false\" ]]; then
               echo 'ERROR: DEPLOY_WORKERS must be true or false' >&2
               exit 1
+            fi
+
+            EXPECTED_PREV_WORKER_SHA='${EXPECTED_PREV_WORKER_SHA}'
+            if [[ \"\$DEPLOY_WORKERS\" == \"true\" ]]; then
+              if [[ ! \"\$EXPECTED_PREV_WORKER_SHA\" =~ ^[0-9a-fA-F]{40}\$ ]]; then
+                echo 'ERROR: EXPECTED_PREV_WORKER_SHA is not a valid 40-character hex string' >&2
+                exit 1
+              fi
             fi
 
             WEBAPP_DIR='/opt/toanaas/bot'
@@ -262,8 +325,19 @@ jobs:
 
             # =============================================================
             # PATH 1: ALREADY_DEPLOYED Reconciliation Path
+            # When deploy_workers=true, both bot and worker must already be at TARGET_SHA.
             # =============================================================
+            ALREADY_DEPLOYED_LIVE=\"false\"
             if [[ \"\$EXPECTED_PREV_SHA\" == \"\$TARGET_SHA\" ]]; then
+              if [[ \"\$DEPLOY_WORKERS\" == \"true\" ]]; then
+                if [[ \"\$EXPECTED_PREV_WORKER_SHA\" == \"\$TARGET_SHA\" ]]; then
+                  ALREADY_DEPLOYED_LIVE=\"true\"
+                fi
+              else
+                ALREADY_DEPLOYED_LIVE=\"true\"
+              fi
+            fi
+            if [[ \"\$ALREADY_DEPLOYED_LIVE\" == \"true\" ]]; then
               echo '=== ALREADY DEPLOYED: Reconciling Live State and Hygiene ==='
               cd \"\$WEBAPP_DIR\"
 
@@ -271,6 +345,14 @@ jobs:
               if [[ \"\$PREV_HEAD\" != \"\$TARGET_SHA\" ]]; then
                 echo \"ERROR: Expected already-deployed SHA (\$TARGET_SHA) but live PREV_HEAD is (\$PREV_HEAD)\" >&2
                 exit 1
+              fi
+
+              if [[ \"\$DEPLOY_WORKERS\" == \"true\" ]]; then
+                WORKER_HEAD=\"\$(git -C /opt/toanaas-worker rev-parse HEAD)\"
+                if [[ \"\$WORKER_HEAD\" != \"\$TARGET_SHA\" ]]; then
+                  echo \"ERROR: Already-deployed but worker HEAD (\$WORKER_HEAD) != TARGET_SHA (\$TARGET_SHA)\" >&2
+                  exit 1
+                fi
               fi
 
               echo '=== Verifying Active Services (No Restart) ==='
@@ -330,6 +412,14 @@ jobs:
               exit 1
             fi
             PREV_HEAD=\"\$LIVE_PREV_HEAD\"
+
+            if [[ \"\$DEPLOY_WORKERS\" == \"true\" ]]; then
+              LIVE_PREV_WORKER_HEAD=\"\$(git -C /opt/toanaas-worker rev-parse HEAD)\"
+              if [[ \"\$LIVE_PREV_WORKER_HEAD\" != \"\$EXPECTED_PREV_WORKER_SHA\" ]]; then
+                echo \"ERROR: Worker production drift detected before mutation! Live worker HEAD (\$LIVE_PREV_WORKER_HEAD) != EXPECTED_PREV_WORKER_SHA (\$EXPECTED_PREV_WORKER_SHA)\" >&2
+                exit 1
+              fi
+            fi
 
             cd \"\$STAGING_DIR\"
             sha256sum -c checksums.sha256
