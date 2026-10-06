@@ -1646,4 +1646,10 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
 
 - Ba shortcut `menu|system_runtime_help` ở System, Security/DB và System Ops mở trang hướng dẫn; chúng không chạy lệnh `/runtime`.
 - Patch đổi cả ba nhãn thành `📘 Hướng dẫn Runtime`. Source comparator xác nhận chỉ ba nhãn thay đổi; 24 regression Admin/package/ticket đạt. Test nhãn chạy trong CI.
-- Trạng thái trước PR: runtime vẫn ở `392d2eec`; nhãn mới chờ CI, merge và deploy. Case tester: `ADMIN-RUNTIME-GUIDE-01` trong `KIEM-THU/DANH-SACH-CASE.md`.
+- PR #1379 đã merge/deploy thành `2099eb3`; runtime xác minh đủ 3 nhãn mới, bot/web/nginx active/running, NRestarts=0. Case tester: `ADMIN-RUNTIME-GUIDE-01` trong `KIEM-THU/DANH-SACH-CASE.md`; manual Telegram QA nhãn mới chưa được ghi PASS.
+
+## Admin Billing guide labels — 06/10/2026, S12.14
+
+- Pending, duyệt, từ chối và PayOS trên các keyboard Billing là 4 trang hướng dẫn lệnh. Callback menu không duyệt bill hay chạy test PayOS.
+- Patch đồng bộ 7 nhãn gây hiểu nhầm trên 2 keyboard; 8 emitted guide controls, Back về Billing và public denial đã kiểm chứng qua handler đăng ký. Regression đạt 27/27; source comparator chỉ ra đúng 7 label replacements.
+- Nhãn Billing mới đang chờ PR/CI/deploy; runtime hiện vẫn là `2099eb3`. Case nguồn: `ADMIN-BILLING-GUIDE-01`.

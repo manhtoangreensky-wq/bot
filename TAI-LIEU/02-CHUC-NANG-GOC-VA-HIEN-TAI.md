@@ -819,4 +819,10 @@ provider-fallback `56`, exact-two `3` passed; changed-file compile và
 
 | Nhãn/cách hiểu cũ | Hành vi nguồn hiện tại | Điều chỉnh S12.13 |
 |---|---|---|
-| `🧬 Runtime` có thể được hiểu là tra trạng thái trực tiếp | 3 shortcut cùng phát `menu|system_runtime_help`, mở `system_help_text("runtime")` | Đổi nhãn thành `📘 Hướng dẫn Runtime`; callback giữ nguyên. Nhãn mới chưa có trên runtime cho đến khi deploy |
+| `🧬 Runtime` có thể được hiểu là tra trạng thái trực tiếp | 3 shortcut cùng phát `menu|system_runtime_help`, mở `system_help_text("runtime")` | PR #1379 đã deploy `2099eb3`, nhãn là `📘 Hướng dẫn Runtime`; callback giữ nguyên |
+
+## Admin Billing guide labels — 06/10/2026
+
+| Nhãn/cách hiểu cũ | Hành vi thực tế qua handler | Điều chỉnh S12.14 |
+|---|---|---|
+| Pending/Duyệt/Từ chối bill và PayOS Test giống nút tác vụ | 4 callback chỉ render lệnh `/pending`, `/duyet`, `/tuchoi`, `/payos_test_plan`; fixture xác nhận Back về Billing và chặn user thường | Đồng bộ 7 nhãn trên 2 keyboard thành Hướng dẫn/Kế hoạch test; không thay đổi thanh toán. Chờ PR/CI/deploy |
