@@ -269,6 +269,12 @@ hoặc hết timeout mà không fail-closed/cleanup.
 |---|---|---|
 | `ADMIN-QUEUE-CONFIRM-BACK-01` | Fixture: từ Queue mở Unfreeze tools, Freeze video, Refund job; thử Back/Hủy tại prompt và xác nhận để đọc hướng dẫn lệnh rồi Back. Lặp callback legacy, user thường, context sai và guard bình thường/bảo trì. Không gửi lệnh thật. | Prompt Back/Hủy về Queue; acknowledgement Back về đúng prompt, rồi Back về Queue. Nội dung lệnh nguyên vẹn, legacy giữ menu trước. Origin sai/user thường bị chặn trước cleanup/render; callbacks ≤64 byte. Không thực hiện freeze/refund/ví/provider/DB/job/tin thật. |
 
+## Admin Feedback Inbox — S12.22, 07/10/2026
+
+| ID | Bước kiểm thử | PASS bắt buộc |
+|---|---|---|
+| `ADMIN-FEEDBACK-INBOX-NAV-01` | Fixture: Admin → CSKH → Góp ý admin với inbox trống, có một mục, lọc nhóm và 15 góp ý dài. Bấm Back và Home ở footer. Thử user thường; không chạy lệnh reviewed/resolved. | Back → CSKH/Home → menu chính qua handler đăng ký. SQL chỉ SELECT; filter đúng; 15 mục giữ đủ, mỗi tin ≤4.096 ký tự hiển thị, footer chỉ ở tin cuối. User thường bị chặn; không commit, provider, ví, job, production data hoặc tin thật. |
+
 ## Media library stale callback — 06/10/2026
 
 | ID | Bước kiểm thử | PASS bắt buộc |

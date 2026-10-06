@@ -43,6 +43,7 @@ jobs:
       - name: Admin Route Regressions
         run: |
           python -m unittest \
+            tests/test_admin_feedback_inbox_navigation.py \
             tests/test_admin_queue_confirm_back_origin.py \
             tests/test_admin_module_child_back_origin.py \
             tests/test_support_ticket_reply_origin_pagination.py \

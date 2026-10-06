@@ -13,7 +13,7 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 
 | ID | Spec / acceptance evidence | State |
 |---|---|---|
-| A0 | Current source/main/runtime baseline: `0929d61ade4b8f0d60b803b62417763e90acce9e` after PR #1381. AST inventory measures 87 direct callback registrations, 85 distinct callback expressions and 83 literal patterns; the 4 pattern-free entries are 3 guards plus the final timing observer. Historical emitter snapshot `4f1455ed` had 3,981 constructors/821 dynamic expressions/0 unmatched static callbacks; these older emitter figures have not been refreshed and are not current route proof. | Per-registration matrix drafted in `TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md`; route verdicts remain partial/unproven. |
+| A0 | Active main/runtime baseline: `877aea89da20037f1c03265e8c2e53a1961f1c0e` after PR #1386. Historical AST registration inventory at `0929d61a` measures 87 direct registrations, 85 distinct expressions and 83 literal patterns; subsequent source comparators preserve registration order. The old emitter snapshot `4f1455ed` had 3,981 constructors/821 dynamic expressions/0 unmatched static callbacks. Those figures and old line locations are historical inventory, not proof of current route behavior. | Per-registration matrix in `TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md`; route verdicts remain partial/unproven. |
 | A1 | Admin screens: verify each visible action label matches its handler; test emitted callback, authorization, state transition, and error/stale path. | PARTIAL — report/overview, root/help/package and feedback/access samples have evidence below; S12.13 corrects three Runtime-guide labels without changing their routes; full visible-action matrix remains open. |
 | A2 | Admin Back/Home: verify immediate parent and preserve list/filter/page context; test prompt and preview exits without performing the underlying action. | IN PROGRESS — ticket-origin specs S12.6–S12.10 (#1367–#1374) are in #1376; S12.12 merged/deployed in #1378 at runtime SHA `392d2eec`; S12.18 fixes Package Orders origin and S12.19 fixes Security/DB child Back. Other admin/customer routes remain open. |
 | A3 | Customer screens: verify ownership, same-product navigation, Back/Home, and no cross-user or cross-product route. | OPEN — audit ledger not complete. |
@@ -247,7 +247,23 @@ Queued after S12.20 delivery. Acceptance: Queue-entered confirmation guides reta
 - RED: baseline focused suite ran 3 methods with 4 behavioral failures and 0 setup errors. Legacy prompt/acknowledgement text and parent assertions passed.
 - GREEN: focused Queue and S12.20 suites ran 6 tests OK; adjacent full route subset ran `30 tests in 48.340s — OK`. Real emitted controls pass through the actual callback registration; malformed/public origins stop before cleanup/render; callback byte limits pass.
 - Protected comparator PASS: whole source outside the menu UI-origin branch and 3 Queue module entry callbacks unchanged, including confirmation builders/text and all financial/freeze/product engines/services/providers/workers/config/registration order. Provider calls, wallet mutations, DB writes, jobs and real sends: 0.
-- Final focused 4 tests in 12.724s OK (including common guards under normal/maintenance fixtures); final full `py_compile bot.py tests/test_admin_queue_confirm_back_origin.py` exited 0; diff check pending. Status: LOCAL GREEN; separate PR/CI/merge/deploy pending.
+- Final focused 4 tests in 12.724s OK (including common guards under normal/maintenance fixtures); final full `py_compile bot.py tests/test_admin_queue_confirm_back_origin.py` exited 0; diff check exited 0.
+- Delivery: PR [#1386](https://github.com/manhtoangreensky-wq/bot/pull/1386) merged as `877aea89da20037f1c03265e8c2e53a1961f1c0e`; PR/main checks pass, 170 configured CI tests OK. Exact-SHA bot-only deploy [#37511737977](https://github.com/manhtoangreensky-wq/bot/actions/runs/37511737977) SUCCESS. SSH confirms exact SHA, tracked bot.py matches, bot/web/nginx active/running, all NRestarts=0, health status=ok. Manual Telegram/client QA NOT_TESTED.
+- Status: MERGED + DEPLOYED + RUNTIME-SHA-VERIFIED.
+
+### S12.22 — Admin feedback inbox navigation and long-message rendering
+
+- Source-extracted `handle_admin_gopy_callback` → `cmd_admin_gopy` replay for empty and populated read-only rows: one callback acknowledgement and one reply, but no `reply_markup` in either branch. Fake DB commit is forbidden, real sends/provider calls are zero.
+- Contract: add Back to Support and Home navigation for read-only inbox results; preserve query/filter/authorization/manual status updates and all 15 returned rows. Long results must fit Telegram message bounds, with the final navigation footer.
+- RED: 3 assertions failed on empty/populated/filtered results because markup was missing. A 15-long-row fixture independently produced 6,937 visible characters in one message, exceeding the [Telegram 4,096-character limit](https://core.telegram.org/bots/api#sendmessage); its size assertion failed, with no setup error.
+- Minimal fix: the empty result uses existing `admin_child_keyboard("admin_support")`; populated results use existing `send_pricing_lines` to split lines and attach the same navigation to the final chunk. Both helpers remain unchanged. SQL, filters, permission checks and manual status-update paths are byte-equivalent to base.
+- GREEN: focused 4 methods OK; adjacent Inbox/Queue/module-child/Security/DB/package/finance/broadcast/runtime/billing/root/timing regressions → `Ran 35 tests in 63.974s — OK`. Tests execute actual emitted Góp ý control, exact callback registrations, command body and shared chunk helper; Back/Home traverse the registered menu handler to existing Support/Home renderers. A 15-row result retains every row, each message ≤4,096 visible characters, navigation only on last chunk. Existing feedback authorization/read-only/handbook tests also run.
+- Protected comparator PASS: only the 2 inbox rendering lines differ in bot.py; all SQL/status/filter/auth/text, helpers, handlers, engine/service/provider/worker/config source is unchanged. Fake DB permits SELECT only and rejects commit; provider calls, wallets, jobs, production data writes and real messages: 0.
+- Final verification: exact final 4-method suite on baseline source reproduces 4 behavioral failures, 0 setup errors (baseline-verifier exit 0). Final full py_compile module via runpy (GC disabled only in compiler process) on bot.py and both changed test files exits 0; diff check exits 0. Status: LOCAL GREEN — separate PR/CI/merge/deploy pending. Other A1–A6 route families and A7 latency remain open; this is not a whole-bot remaining-defect total.
+
+### Next CSKH Back spec — Admin Ticket hub (07/10/2026)
+
+After S12.22 delivery: actual Support module emitter `🎧 Ticket admin` → `ticket|admin` was dispatched through its exact registration and production handler/keyboard. The only Back was `menu|admin`; expected immediate parent is `menu|admin_support`. Fixture used no DB/report/provider reads, writes, wallet or real sends. This is one reproduced UI navigation defect, not a ticket operation/engine defect. The correction must cover entry, nested hub return and legacy paths without altering ticket data/status/reply behavior. No implementation is included in S12.22.
 
 ### Final latency spec — partial, server/client split preserved
 
@@ -270,7 +286,7 @@ Queued after S12.20 delivery. Acceptance: Queue-entered confirmation guides reta
 5. S12.15 (#1381) is merged/deployed/runtime verified at `0929d61a`; S12.16 inventories registrations but is not whole-bot route proof.
 6. S12.17 is merged/deployed/runtime verified at `979c0ee5`; its stale media result controls are closed.
 7. S12.18 (#1383) is merged/deployed/runtime verified at `5c040c22`.
-8. S12.19 (#1384) is merged/deployed/runtime verified at `3557b97a`; S12.20 (#1385) is verified at `406280d6`; finish S12.21 delivery for the three Queue guide origins.
+8. S12.19 (#1384) is verified at `3557b97a`; S12.20 (#1385) at `406280d6`; S12.21 (#1386) at `877aea89`. Finish S12.22 inbox navigation/long-message delivery.
 9. Continue A1–A5 for remaining admin/customer routes, pending-state expiry/stale/repeat behavior, preserving protected product lanes.
 10. Finish A6 UI/UX consistency review and update this ledger with evidence, not assumptions.
 11. Close A7 only after multiple user-timed samples can be compared to anonymous server phases; separate server, Telegram render and client/network wait.

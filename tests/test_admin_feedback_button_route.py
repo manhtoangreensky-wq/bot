@@ -75,6 +75,11 @@ def _load_functions(names, **dependencies):
         "html": html,
         **dependencies,
     }
+    names = list(names)
+    if "cmd_admin_gopy" in names:
+        for helper in ("admin_child_keyboard", "send_pricing_lines"):
+            if helper not in names:
+                names.append(helper)
     source = "from __future__ import annotations\n\n" + "\n\n".join(
         _function_source(name) for name in names
     )

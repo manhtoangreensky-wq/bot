@@ -142,5 +142,10 @@ Source baseline: `0929d61ade4b8f0d60b803b62417763e90acce9e`. Production deployme
 
 - Three Queue-entered confirmation guides lost origin: Unfreeze tools, Freeze video and Refund job. Prompt Back/Cancel retain Queue; acknowledgement Back returns to the same confirmation prompt and then Queue. Legacy guide entries preserve their existing parent and command text.
 - Baseline: 3 methods, 4 behavioral failures, no setup errors. Local adjacent run: 30 tests in 48.340s OK; final focused 4 tests in 12.724s OK, including actual throttle/safe-mode/video-dedupe guard traversal before the registered menu handler under normal and maintenance/tool/provider freeze fixtures.
-- Confirmation text/builders, operation bodies, product engine sources and common guards are unchanged by the protected comparator. Full compilation, PR/CI/merge/deploy are pending.
+- Confirmation text/builders, operation bodies, product engine sources and common guards are unchanged by the protected comparator. #1386 is verified deployed at `877aea89`, 170 configured main CI tests OK, deploy 37511737977 SUCCESS; exact SHA/source/services verified. Manual Telegram/client QA NOT_TESTED.
+
+## CSKH UI evidence — S12.22
+
+- Actual emitted Support → Góp ý admin control executes its exact registered handler and read-only command. Empty/populated/filtered result markup was missing (3 RED assertions); a 15-long-row reply had 6,937 visible characters and failed the Telegram message-limit assertion.
+- Two renderer changes reuse unchanged navigation/chunk helpers. Four focused methods pass; adjacent run `35 tests in 63.974s — OK` includes prior feedback tests, actual Back/Home menu dispatch and full 15-row delivery with navigation on the final chunk. Full source scope comparator passes; final compile/CI/PR/deploy pending.
 
