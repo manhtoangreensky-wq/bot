@@ -137450,11 +137450,16 @@ def db_status_admin_text() -> str:
         "Không hiển thị DB contents, user balances, raw secrets hoặc full private path."
     )
 
-def admin_db_status_keyboard() -> InlineKeyboardMarkup:
+def admin_db_status_keyboard(back_action: str = "admin_security_db") -> InlineKeyboardMarkup:
+    back_target = str(back_action or "").strip()
+    if back_target not in {"admin_security_db", "admin_security_log", "admin_db_status"}:
+        back_target = "admin_security_db"
+    back_label = "⬅️ Nhật ký bảo mật" if back_target == "admin_security_log" else ("⬅️ DB trạng thái" if back_target == "admin_db_status" else "⬅️ Bảo mật / DB")
+    refresh_target = "admin_security_db" if back_target == "admin_db_status" else back_target
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 Làm mới", callback_data="menu|admin_db_status"), InlineKeyboardButton("💾 Sao lưu DB", callback_data="menu|admin_backup_db")],
-        [InlineKeyboardButton("🛡 Nhật ký bảo mật", callback_data="menu|admin_security_log")],
-        [InlineKeyboardButton("⬅️ Bảo mật / DB", callback_data="menu|admin_security_db"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("🔄 Làm mới", callback_data=f"menu|admin_db_status|{refresh_target}"), InlineKeyboardButton("💾 Sao lưu DB", callback_data="menu|admin_backup_db|admin_db_status")],
+        [InlineKeyboardButton("🛡 Nhật ký bảo mật", callback_data="menu|admin_security_log|admin_db_status")],
+        [InlineKeyboardButton(back_label, callback_data=f"menu|{back_target}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def backup_db_result_text(result: dict) -> str:
@@ -137496,11 +137501,15 @@ def security_log_text(limit: int = 8) -> str:
         "Không hiển thị raw payload, checksum, token, secret hoặc full bank data."
     )
 
-def security_log_keyboard() -> InlineKeyboardMarkup:
+def security_log_keyboard(back_action: str = "admin_security_db") -> InlineKeyboardMarkup:
+    back_target = str(back_action or "").strip()
+    if back_target not in {"admin_security_db", "admin_db_status"}:
+        back_target = "admin_security_db"
+    back_label = "⬅️ DB trạng thái" if back_target == "admin_db_status" else "⬅️ Bảo mật / DB"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 Làm mới", callback_data="menu|admin_security_log")],
-        [InlineKeyboardButton("🗄 DB trạng thái", callback_data="menu|admin_db_status"), InlineKeyboardButton("💾 Sao lưu DB", callback_data="menu|admin_backup_db")],
-        [InlineKeyboardButton("⬅️ Bảo mật / DB", callback_data="menu|admin_security_db"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("🔄 Làm mới", callback_data=f"menu|admin_security_log|{back_target}")],
+        [InlineKeyboardButton("🗄 DB trạng thái", callback_data="menu|admin_db_status|admin_security_log"), InlineKeyboardButton("💾 Sao lưu DB", callback_data="menu|admin_backup_db|admin_security_log")],
+        [InlineKeyboardButton(back_label, callback_data=f"menu|{back_target}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 async def cmd_security_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -141613,6 +141622,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     raw_action = (query.data.split("|", 1)[1] if "|" in query.data else "main").strip()
     action = raw_action
     package_orders_origin = ""
+    security_db_origin = ""
     menu_timing_enabled = action in ("main", "main_video")
     menu_timing_start = time.perf_counter() if menu_timing_enabled else 0.0
     user_is_admin = is_admin_user(query.from_user.id)
@@ -141646,6 +141656,19 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         if package_orders_origin not in {"admin_packages", "finance"}:
             return await query.answer("Nút Đơn chờ duyệt đã hết phiên. Vui lòng mở lại từ menu hiện tại.", show_alert=True)
         action = "admin_package_orders"
+    for route_name in ("admin_db_status", "admin_security_log", "admin_backup_db"):
+        if action.startswith(f"{route_name}|"):
+            parts = action.split("|")
+            security_db_origin = parts[1].strip() if len(parts) == 2 else ""
+            allowed_origins = {
+                "admin_db_status": {"admin_security_db", "admin_security_log"},
+                "admin_security_log": {"admin_security_db", "admin_db_status"},
+                "admin_backup_db": {"admin_security_db", "admin_db_status", "admin_security_log"},
+            }[route_name]
+            if security_db_origin not in allowed_origins:
+                return await query.answer("Nút Bảo mật/DB đã hết phiên. Vui lòng mở lại từ menu hiện tại.", show_alert=True)
+            action = route_name
+            break
     runtime_help_parent = ""
     if action.startswith("system_runtime_help|"):
         runtime_help_parent = action.split("|", 1)[1]
@@ -141720,9 +141743,9 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             username=str(query.from_user.username or ""),
             action="db_status",
         )
-        return await safe_edit_query_message(query, db_status_admin_text(), reply_markup=admin_db_status_keyboard())
+        return await safe_edit_query_message(query, db_status_admin_text(), reply_markup=admin_db_status_keyboard(security_db_origin or "admin_security_db"))
     if action == "admin_security_log":
-        return await safe_edit_query_message(query, security_log_text(), reply_markup=security_log_keyboard())
+        return await safe_edit_query_message(query, security_log_text(), reply_markup=security_log_keyboard(security_db_origin or "admin_security_db"))
     if action == "admin_backup_db":
         result = create_db_backup_now(query.from_user.id, "menu|admin_backup_db")
         record_audit_event(
@@ -141742,7 +141765,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             username=str(query.from_user.username or ""),
             action="backup_db",
         )
-        return await safe_edit_query_message(query, backup_db_result_text(result), reply_markup=admin_db_status_keyboard())
+        return await safe_edit_query_message(query, backup_db_result_text(result), reply_markup=admin_db_status_keyboard(security_db_origin or "admin_security_db"))
     if action == "hint_note":
         if not memory_can_use_full(query.from_user.id):
             return await safe_edit_query_message(query, memory_access_message(), reply_markup=main_memory_keyboard(lang, query.from_user.id))
@@ -231955,8 +231978,8 @@ ADMIN_CONTROL_MODULES = {
         "purpose": "Dùng để kiểm tra DB, backup SQLite, nhật ký bảo mật, webhook secret, và dấu hiệu file secret/backup nằm sai vị trí.",
         "when": "Dùng trước/sau deploy, trước khi bán, khi cần backup DB hoặc khi nghi ngờ webhook/security event bất thường.",
         "buttons": [
-            [("🗄 DB trạng thái", "menu|admin_db_status"), ("💾 Sao lưu DB", "menu|admin_backup_db")],
-            [("🛡 Nhật ký bảo mật", "menu|admin_security_log"), ("📘 Hướng dẫn Runtime", "menu|system_runtime_help|admin_security_db")],
+            [("🗄 DB trạng thái", "menu|admin_db_status|admin_security_db"), ("💾 Sao lưu DB", "menu|admin_backup_db|admin_security_db")],
+            [("🛡 Nhật ký bảo mật", "menu|admin_security_log|admin_security_db"), ("📘 Hướng dẫn Runtime", "menu|system_runtime_help|admin_security_db")],
             [("✅ Sales ready", "menu|smoke_sales_ready")],
         ],
         "commands": [

@@ -129,5 +129,5 @@ Source baseline: `0929d61ade4b8f0d60b803b62417763e90acce9e`. Production deployme
 
 ## S12.19 current-branch update — 06/10/2026
 
-- A2 route evidence found two Security/DB child keyboards that returned to the Admin root instead of their immediate module parent. The focused test covers both production builders; PR/merge/deploy are pending.
+- A2 route evidence found two Security/DB child keyboards that returned to the Admin root instead of their immediate module parent; the two child screens also needed origin tokens when opened from each other. The focused test covers both production builders and registered menu dispatch; PR/merge/deploy are pending.
 

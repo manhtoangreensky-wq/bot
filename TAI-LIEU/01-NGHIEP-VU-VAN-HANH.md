@@ -1673,4 +1673,4 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
 ## Admin Security/DB Back origin — S12.19, 06/10/2026
 
 - Hai màn DB trạng thái và Nhật ký bảo mật từ module Bảo mật/DB trước đây quay về Admin root.
-- Patch đổi đúng hai nút Back về `menu|admin_security_db`; không chạm thao tác DB/backup/security log. Local route regression đạt; đang chờ CI/PR/deploy.
+- Patch mang origin hợp lệ qua DB Status, Security Log và backup callback, dựng Back đúng màn vừa mở và từ chối origin lạ; không chạm thao tác DB/backup/security log. Local route regression đạt; đang chờ CI/PR/deploy.

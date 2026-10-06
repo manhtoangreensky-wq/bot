@@ -268,9 +268,9 @@ def test_p0_17c4_command_handlers_registered_and_no_payment_core_markers_added()
     assert 'CommandHandler("db_status", cmd_db_status)' in source
     assert 'CommandHandler("backup_db_now", cmd_backup_db)' in source
     assert 'CommandHandler("security_log", cmd_security_log)' in source
-    assert 'callback_data="menu|admin_db_status"' in source
-    assert 'callback_data="menu|admin_backup_db"' in source
-    assert 'callback_data="menu|admin_security_log"' in source
+    assert '("🗄 DB trạng thái", "menu|admin_db_status|admin_security_db")' in source
+    assert '("💾 Sao lưu DB", "menu|admin_backup_db|admin_security_db")' in source
+    assert '("🛡 Nhật ký bảo mật", "menu|admin_security_log|admin_security_db")' in source
     assert 'webhook_kwargs["secret_token"] = TELEGRAM_WEBHOOK_SECRET' in source
 
 

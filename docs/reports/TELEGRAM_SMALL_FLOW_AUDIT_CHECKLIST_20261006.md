@@ -198,11 +198,29 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 ### S12.19 — Admin Security/DB child Back retains module origin
 
 - Trigger: Admin → Bảo mật / DB → DB trạng thái hoặc Nhật ký bảo mật → Quay lại.
-- RED: the production `admin_db_status_keyboard()` and `security_log_keyboard()` both rendered `⬅️ Admin menu` → `menu|admin`, losing the immediate Security/DB parent.
-- Minimal fix: change only those two Back controls to `⬅️ Bảo mật / DB` → `menu|admin_security_db`. Refresh, DB backup, security log and Menu chính callbacks remain unchanged.
-- GREEN: `python -m unittest tests/test_admin_security_db_back_origin.py` → `Ran 1 test ... OK`; the test reads both production keyboard functions and confirms the module entry callbacks. No DB writes, backup creation, provider calls, wallet mutations or production messages.
-- Scope lock: two UI callback rows in `bot.py`, one focused unittest, one CI invocation and this ledger. Product/Edit/SubDub/Voice/Music engines, AutoPost WIP and PayOS routes are untouched.
-- Status: LOCAL GREEN — PR/CI/deploy pending.
+- RED: the production `admin_db_status_keyboard()` and `security_log_keyboard()` both rendered `⬅️ Admin menu` → `menu|admin`, losing the immediate Security/DB parent; cross-links between the two child screens also had no origin.
+- Minimal fix: carry validated origin tokens through DB Status, Security Log and backup callbacks; render the matching Back label/destination; reject unknown origins. Legacy command entry defaults to Security/DB. Refresh, DB backup, security log and Menu chính behavior remain unchanged.
+- GREEN: Security/DB (5 focused cases), Package Orders, Finance, Broadcast pending cleanup, Runtime, Billing, root and timing regression command → `Ran 24 tests in 40.707s — OK`. Emitted module/sibling controls traverse the actual registered menu handler; Back reaches the actual parent screen, refresh preserves origin and fake backup results return to each emitting screen. Public/unknown origins stop before reads, backup and pending cleanup. Real DB writes, backup creation, provider calls, wallet mutations and production messages: 0.
+- Impact: `admin_db_status_keyboard` and `security_log_keyboard` have 2 definitions and 8 production call sites, all in `bot.py`; both optional parameters preserve no-argument command callers. Backup creation and security/audit event bodies are unchanged. Engine/service/provider/worker sources are protected comparators.
+- Final verification: focused 5 tests including callback byte limits → `Ran 5 tests in 10.227s — OK`; full `py_compile bot.py` plus both changed test files exited 0; protected comparator passed; legacy security registration assertions passed; `git diff --check` exited 0. Local full pytest suite is not run (bundled Python lacks pytest).
+- Scope lock: two UI keyboard families, one menu-handler origin branch, one focused unittest, one compatibility assertion update, one CI invocation and this ledger. Product/Edit/SubDub/Voice/Music engines, AutoPost WIP and PayOS routes are untouched.
+- Status: LOCAL GREEN — PR #1384 is open; updated patch CI, merge and deploy pending. Runtime remains at the verified #1383 SHA until deployment.
+
+### Next A2 spec — module children lose their emitting origin (07/10/2026)
+
+Prerequisite: finish S12.19 delivery. Inert dispatch of actual emitted controls through the current menu handler and actual keyboard builders reproduced 7 additional Back mismatches. Report data was replaced with inert fixtures; no DB/provider/backup/wallet/send operations occurred. The first harness run missed a `re` import; the corrected run exited 0 and measured these destinations. These are navigation failures, not engine failures.
+
+| Opening module | Emitted child action | Expected Back | Actual Back |
+|---|---|---|---|
+| Queue | `freeze_queue_status` | `admin_queue` | `freeze_queue` |
+| Queue | `freeze_queue_help` | `admin_queue` | `admin` |
+| Security/DB | `smoke_sales_ready` | `admin_security_db` | `smoke_test` |
+| System Ops | `admin_overview` | `admin_system_ops` | `admin` |
+| Provider/Worker | `admin_provider_status` | `admin_provider_worker` | `admin_provider` |
+| Provider/Worker | `smoke_test` | `admin_provider_worker` | `admin` |
+| Provider/Worker | `admin_provider_routes` | `admin_provider_worker` | `admin_provider` |
+
+Acceptance for the next narrow spec: these 7 entry callbacks retain the emitting module through their UI page, refresh and Back; legacy entry screens keep their existing origin, and invalid/public callbacks stop before cleanup/read/render. Existing queue, provider, report, freeze, backup, financial and product engine operations remain protected. No new implementation is started until S12.19 delivery is verified. The whole-bot error total remains unknown while other checklist entries are unaudited.
 
 ### Final latency spec — partial, server/client split preserved
 
@@ -224,8 +242,9 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 4. S12.14 (#1380) is merged/deployed/runtime verified at `74a8d86f`; 8 emitted guide controls, Back/public guards, source comparator and CI gates passed.
 5. S12.15 (#1381) is merged/deployed/runtime verified at `0929d61a`; S12.16 inventories registrations but is not whole-bot route proof.
 6. S12.17 is merged/deployed/runtime verified at `979c0ee5`; its stale media result controls are closed.
-7. S12.18 now has local RED/GREEN evidence for shared Package Orders origin; finish separate CI, merge, deploy and exact-runtime verification before marking its delivery closed.
-8. Continue A1–A5 for remaining admin/customer routes, pending-state expiry/stale/repeat behavior, preserving protected product lanes.
-9. Finish A6 UI/UX consistency review and update this ledger with evidence, not assumptions.
-10. Close A7 only after multiple user-timed samples can be compared to anonymous server phases; separate server, Telegram render and client/network wait.
-11. Complete A8 only after every checklist row has evidence and delivery states are separately verified.
+7. S12.18 (#1383) is merged/deployed/runtime verified at `5c040c22`.
+8. Finish S12.19 in PR #1384, including sibling/refresh/backup-origin evidence, before continuing remaining Admin routes.
+9. Continue A1–A5 for remaining admin/customer routes, pending-state expiry/stale/repeat behavior, preserving protected product lanes.
+10. Finish A6 UI/UX consistency review and update this ledger with evidence, not assumptions.
+11. Close A7 only after multiple user-timed samples can be compared to anonymous server phases; separate server, Telegram render and client/network wait.
+12. Complete A8 only after every checklist row has evidence and delivery states are separately verified.
