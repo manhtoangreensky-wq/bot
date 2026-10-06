@@ -60938,7 +60938,7 @@ def support_ticket_admin_keyboard(ticket: dict, source: str = "new", list_offset
         [InlineKeyboardButton("✅ Đã xử lý", callback_data=f"ticket|st|{ticket_id}|resolved"), InlineKeyboardButton("💬 Soạn trả lời", callback_data=f"ticket|reply|{ticket_id}|{source}|{max(0, int(list_offset or 0))}")],
         [InlineKeyboardButton("🤖 Gợi ý trả lời", callback_data=f"ticket|suggest|{ticket_id}|0"), InlineKeyboardButton("💰 Đánh dấu refund", callback_data=f"ticket|st|{ticket_id}|refund_pending")],
         [InlineKeyboardButton("⏳ Chờ provider", callback_data=f"ticket|st|{ticket_id}|waiting_provider"), InlineKeyboardButton("👤 Hỏi thêm khách", callback_data=f"ticket|ask|{ticket_id}|{source}|{max(0, int(list_offset or 0))}")],
-        [InlineKeyboardButton("📌 Ghi chú admin", callback_data=f"ticket|note|{ticket_id}|{source}|{max(0, int(list_offset or 0))}"), InlineKeyboardButton("🙋 Nhận xử lý", callback_data=f"ticket|assign|{ticket_id}")],
+        [InlineKeyboardButton("📌 Ghi chú admin", callback_data=f"ticket|note|{ticket_id}|{source}|{max(0, int(list_offset or 0))}"), InlineKeyboardButton("🙋 Nhận xử lý", callback_data=f"ticket|assign|{ticket_id}|{source}|{max(0, int(list_offset or 0))}")],
     ]
     if ticket.get("attachment_file_id"):
         rows.append([InlineKeyboardButton("📎 Xem file đính kèm", callback_data=f"ticket|file|{ticket_id}")])
@@ -140856,11 +140856,16 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         ticket_id = int(parts[2])
         if not get_support_ticket(ticket_id):
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
+        source = parts[3] if len(parts) >= 4 and parts[3] in {"new", "high", "refund"} else "new"
+        try:
+            list_offset = max(0, int(parts[4] or 0)) if len(parts) >= 5 else 0
+        except (TypeError, ValueError):
+            list_offset = 0
         await query.answer()
         ticket = update_support_ticket(ticket_id, status="reviewing", assigned_admin_id=uid)
         if not ticket:
             return await safe_edit_or_send(query, "Không tìm thấy ticket.", reply_markup=support_admin_menu_keyboard())
-        return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket))
+        return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket, source, list_offset))
     if action == "lead" and len(parts) >= 4:
         ticket = get_support_ticket(int(parts[2]))
         if not ticket:

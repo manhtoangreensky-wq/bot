@@ -13,9 +13,9 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 
 | ID | Spec / acceptance evidence | State |
 |---|---|---|
-| A0 | Pin source baseline and enumerate static/dynamic callbacks. Inventory snapshot: `4f1455ed31c3ebb4acbb6f6d3eff4144bf02185d`; current main after S12.7 merge: `781e23f92e5f169faf2ec7c9cf415d9a0982956a`. Snapshot reports 3,981 button constructors, 83 static handler patterns, 0 unmatched static callbacks, and 821 dynamic callback expressions. Counts do not prove route correctness and have not yet been refreshed after the merges. | Baseline captured; dynamic paths still require route evidence. |
+| A0 | Pin source baseline and enumerate static/dynamic callbacks. Inventory snapshot: `4f1455ed31c3ebb4acbb6f6d3eff4144bf02185d`; current main after S12.8 merge: `e954fcaef968a421e8628428d733f99ec7ee275c`. Snapshot reports 3,981 button constructors, 83 static handler patterns, 0 unmatched static callbacks, and 821 dynamic callback expressions. Counts do not prove route correctness and have not yet been refreshed after the merges. | Baseline captured; dynamic paths still require route evidence. |
 | A1 | Admin screens: verify each visible action label matches its handler; test emitted callback, authorization, state transition, and error/stale path. | OPEN — audit ledger not complete. |
-| A2 | Admin Back/Home: verify immediate parent and preserve list/filter/page context; test prompt and preview exits without performing the underlying action. | IN PROGRESS — S12.6 #1367 and S12.7 #1368 merged; S12.8 ask-customer origin regression is green locally and awaiting its own PR gate. |
+| A2 | Admin Back/Home: verify immediate parent and preserve list/filter/page context; test prompt and preview exits without performing the underlying action. | IN PROGRESS — S12.6 #1367, S12.7 #1368, S12.8 #1370 merged; S12.9 Assign origin regression is green locally and awaiting its own PR gate. |
 | A3 | Customer screens: verify ownership, same-product navigation, Back/Home, and no cross-user or cross-product route. | OPEN — audit ledger not complete. |
 | A4 | Pending input: verify `/start`, `/menu`, Back, expiry, stale controls, repeated presses, and abandoned drafts clear only the intended state. | OPEN — audit ledger not complete. |
 | A5 | Callback coverage: check static and dynamic emitted values against actual registrations and dispatched terminal behavior; no module-only route test counts as completion. | OPEN — static unmatched count alone is insufficient. |
@@ -58,6 +58,17 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 - Minimal fix: include the validated source/offset in the ask callback, carry them in `admin_reply_input`, and use them in the prompt Back. Existing preview construction already preserves that state.
 - GREEN evidence: ask-origin, ask stale-guard, note-origin, note stale-guard, ticket detail pagination, and reply-origin tests ran together: `Ran 13 tests ... OK`. Fake Telegram send spy recorded zero sends during Back paths.
 - Scope: `bot.py`, focused regressions, CI invocation, tester case, support runbook, and this ledger. No real customer message, provider, wallet, or production data was touched.
+- Delivery state: PR #1370 merged to main on 2026-10-06 as `e954fcaef968a421e8628428d733f99ec7ee275c`; both PR CI gates passed. Main push CI passed; no deploy workflow ran for this merge. It was not deployed.
+
+### S12.9 — Admin Ticket assignment origin and pagination
+
+- Trigger: high-priority ticket list `high`, offset `6` → ticket detail → `Nhận xử lý` → `Danh sách`.
+- Root cause: the Assign button emitted `ticket|assign|<id>` without source/offset; after assignment the handler rebuilt the detail keyboard with its default `new|0` context.
+- Expected: Assign updates only the fixture ticket's assignee/status; the refreshed detail's list button remains `ticket|al|high|6`.
+- RED evidence: the registered-handler regression expected `ticket|assign|9006|high|6` but got `ticket|assign|9006`.
+- Minimal fix: carry validated source/offset in the Assign callback, parse them in the handler with legacy `new|0` fallback, and rebuild the detail keyboard with that context.
+- GREEN evidence: ask/assign origin, ask stale-guard, note origin/stale-guard, reply origin, and Admin Ticket Back pagination ran together: `Ran 14 tests ... OK`. Assign is dispatched through the registered ticket handler; no production data or customer message is used.
+- Scope: `bot.py`, the generic focused origin test module, CI invocation, tester case, support runbook, and this ledger. No provider call or wallet mutation.
 - Delivery state: local implementation verified; PR/CI gate pending. No deployment is authorized or included.
 
 ### Final latency spec — provisional runtime sample
@@ -66,12 +77,13 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 - Read-only SSH observation this turn: `toanaas-bot.service` is `active/running`, `NRestarts=0`, runtime SHA `4f1455ed31c3ebb4acbb6f6d3eff4144bf02185d` matches the logger-only target. No restart or deployment was run this turn.
 - Last-24-hour anonymous query returned one admin `menu|main_video` event at `2026-10-06T08:37:49+07:00`: `pre_ack_ms=0.023`, `ack_ms=222.983`, `language_ms=6.130`, `cleanup_ms=11.910`, `build_ms=2.088`, `render_ms=114.876`, `handler_ms=358.009`, `render_returned=1`.
 - The same query returned no `menu|main` event. User-reported 2–3 second experience lacks an exact local timestamp, so the one Video event cannot be attributed conclusively to that click. It proves only that this measured server handler returned in 358.009 ms; it does not identify the remaining client/network wait or describe a distribution.
+- The newly approved logging-only request was checked against source and prior runtime release evidence: #1365 already emits separate timing records for `menu|main` and `menu|main_video`, and #1366 deployed that logger to runtime SHA `4f1455ed31c3ebb4acbb6f6d3eff4144bf02185d`. No duplicate logger PR or deploy was needed. A fresh SSH log query was blocked this turn because the key was inaccessible and no trusted host key was available; no new runtime measurement is claimed.
 - No production action was performed during this check: no deploy, restart, provider call, real message, or wallet mutation.
 
 ## Next execution order
 
-1. S12.6 and S12.7 closed: PRs #1367 and #1368 merged with both required checks green; neither was deployed.
-2. Open the separate S12.8 PR and require its focused route regression plus full-source compile/tokenize checks before merge; no deployment is implied.
+1. S12.6–S12.8 closed: PRs #1367, #1368, and #1370 merged with required checks green; none of these Admin Ticket changes was deployed.
+2. Open the separate S12.9 PR and require its focused route regression plus full-source compile/tokenize checks before merge; no deployment is implied.
 3. Continue A1/A2 with the next concrete admin Back/callback defect found on current main; one route per spec, RED before minimal fix, then actual handler dispatch.
 4. Continue A3/A4/A5 for customer and pending-state flows, preserving protected product lanes.
 5. Finish A6 UI/UX consistency review and update this ledger with evidence, not assumptions.

@@ -1,4 +1,4 @@
-"""Admin ask-customer prompt Back must keep its ticket-list origin."""
+"""Admin ticket actions must keep their ticket-list origin."""
 
 import asyncio
 import html
@@ -71,7 +71,7 @@ def _callbacks(markup):
     return [button.callback_data for row in markup.inline_keyboard for button in row]
 
 
-class AdminTicketAskOriginPaginationTest(unittest.TestCase):
+class AdminTicketOriginPaginationTest(unittest.TestCase):
     def setUp(self):
         self.admin_id = 4242
         self.ticket = {
@@ -223,6 +223,27 @@ class AdminTicketAskOriginPaginationTest(unittest.TestCase):
         )
         self.assertEqual(list_back, "ticket|al|high|6")
         self.assertEqual(self.sent, [])
+
+    def test_assign_from_filtered_page_keeps_origin_and_offset(self):
+        async def exercise():
+            detail = await self._press("ticket|av|9006|high|6")
+            assign_callback = next(
+                button.callback_data
+                for row in detail.reply_markups[-1].inline_keyboard
+                for button in row
+                if button.text == "🙋 Nhận xử lý"
+            )
+            self.assertEqual(assign_callback, "ticket|assign|9006|high|6")
+
+            assigned_detail = await self._press(assign_callback)
+            list_back = next(
+                callback for callback in _callbacks(assigned_detail.reply_markups[-1])
+                if callback.startswith("ticket|al|")
+            )
+            self.assertEqual(list_back, "ticket|al|high|6")
+            self.assertEqual(self.ticket["assigned_admin_id"], self.admin_id)
+
+        asyncio.run(exercise())
 
 
 if __name__ == "__main__":
