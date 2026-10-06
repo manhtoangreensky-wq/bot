@@ -86,7 +86,7 @@ jobs:
 
           DEPLOY_WORKERS="${{ github.event.inputs.deploy_workers }}"
           if [[ "$DEPLOY_WORKERS" == "true" ]]; then
-            PREV_WORKER_SHA="$(ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o ConnectTimeout=30 "$VPS_USER@$VPS_HOST" "git -c safe.directory=* -C /opt/toanaas-worker rev-parse refs/heads/main")"
+            PREV_WORKER_SHA="$(ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o ConnectTimeout=30 "$VPS_USER@$VPS_HOST" "git -c safe.directory=* -C /opt/toanaas-worker rev-parse HEAD")"
             if [[ ! "$PREV_WORKER_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
               echo "ERROR: Discovered worker deployed SHA is not a valid 40-character hex string: '$PREV_WORKER_SHA'" >&2
               exit 1
@@ -348,7 +348,7 @@ jobs:
               fi
 
               if [[ \"\$DEPLOY_WORKERS\" == \"true\" ]]; then
-                WORKER_HEAD=\"\$(git -C /opt/toanaas-worker rev-parse refs/heads/main)\"
+                WORKER_HEAD=\"\$(git -C /opt/toanaas-worker rev-parse HEAD)\"
                 if [[ \"\$WORKER_HEAD\" != \"\$TARGET_SHA\" ]]; then
                   echo \"ERROR: Already-deployed but worker HEAD (\$WORKER_HEAD) != TARGET_SHA (\$TARGET_SHA)\" >&2
                   exit 1
@@ -414,7 +414,7 @@ jobs:
             PREV_HEAD=\"\$LIVE_PREV_HEAD\"
 
             if [[ \"\$DEPLOY_WORKERS\" == \"true\" ]]; then
-              LIVE_PREV_WORKER_HEAD=\"\$(git -C /opt/toanaas-worker rev-parse refs/heads/main)\"
+              LIVE_PREV_WORKER_HEAD=\"\$(git -C /opt/toanaas-worker rev-parse HEAD)\"
               if [[ \"\$LIVE_PREV_WORKER_HEAD\" != \"\$EXPECTED_PREV_WORKER_SHA\" ]]; then
                 echo \"ERROR: Worker production drift detected before mutation! Live worker HEAD (\$LIVE_PREV_WORKER_HEAD) != EXPECTED_PREV_WORKER_SHA (\$EXPECTED_PREV_WORKER_SHA)\" >&2
                 exit 1

@@ -3200,7 +3200,7 @@ echo "$T1,$T2,$T3,$T4,$T5"
         self.assertGreaterEqual(path2_idx, 0)
         path2_body = self.content[path2_idx:]
 
-        self.assertIn('LIVE_PREV_WORKER_HEAD=\\"\\$(git -C /opt/toanaas-worker rev-parse refs/heads/main)\\"', path2_body)
+        self.assertIn('LIVE_PREV_WORKER_HEAD=\\"\\$(git -C /opt/toanaas-worker rev-parse HEAD)\\"', path2_body)
         self.assertIn('if [[ \\"\\$LIVE_PREV_WORKER_HEAD\\" != \\"\\$EXPECTED_PREV_WORKER_SHA\\" ]]; then', path2_body)
         self.assertIn('Worker production drift detected before mutation!', path2_body)
 
@@ -3210,7 +3210,7 @@ echo "$T1,$T2,$T3,$T4,$T5"
         self.assertGreaterEqual(path1_idx, 0)
         path1_body = self.content[path1_idx:path2_idx]
 
-        self.assertIn('WORKER_HEAD=\\"\\$(git -C /opt/toanaas-worker rev-parse refs/heads/main)\\"', path1_body)
+        self.assertIn('WORKER_HEAD=\\"\\$(git -C /opt/toanaas-worker rev-parse HEAD)\\"', path1_body)
         self.assertIn('if [[ \\"\\$WORKER_HEAD\\" != \\"\\$TARGET_SHA\\" ]]; then', path1_body)
         self.assertIn('Already-deployed but worker HEAD', path1_body)
 
