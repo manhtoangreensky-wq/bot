@@ -2,6 +2,12 @@
 
 Nguồn gốc duy nhất cho acceptance live. Sửa case tại file này trước khi tạo/sửa Issue.
 
+## Telegram small-flow route checks
+
+| ID | Mục đích | Flow khóa | PASS bắt buộc |
+|---|---|---|---|
+| `UI-HOME-PENDING-01` | Menu ReplyKeyboard không bị AutoPost lưu nhầm thành nội dung | Test account đang ở màn chờ nhập nội dung AutoPost → nhấn lần lượt `🏠 TOAN AAS MENU` và `🛸 MENU DỊCH VỤ TOAN AAS` | Mỗi nhãn mở `/start` menu; không lưu chính nhãn Menu làm nội dung/draft, không tạo job, gọi provider hay trừ Xu; AutoPost text handler cho nội dung thường giữ nguyên. Chỉ chạy với test account/staging, không dùng draft khách thật. |
+
 ## Product Video Strategy V2 — correction gate đang mở
 
 | ID | Mục đích | Flow khóa | PASS bắt buộc |
