@@ -231391,7 +231391,7 @@ def admin_confirm_text(action_key: str) -> str:
 def admin_confirm_ack_text(action_key: str) -> str:
     item = ADMIN_CONFIRM_ACTIONS.get(action_key) or ADMIN_CONFIRM_ACTIONS["clear_stale_jobs"]
     return (
-        "✅ <b>Đã xác nhận thao tác admin.</b>\n\n"
+        "📋 <b>Hướng dẫn thao tác admin</b>\n\n"
         "Để thực thi thật, admin hãy gửi lệnh dưới đây bằng tay trong chat:\n"
         f"<code>{html.escape(item['command'])}</code>\n\n"
         "Cách này giữ thao tác nguy hiểm có chủ đích, không chạy nhầm từ callback menu."
@@ -231401,7 +231401,7 @@ def admin_confirm_keyboard(action_key: str) -> InlineKeyboardMarkup:
     item = ADMIN_CONFIRM_ACTIONS.get(action_key) or ADMIN_CONFIRM_ACTIONS["clear_stale_jobs"]
     back = item.get("back") or "freeze_queue"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Xác nhận", callback_data=f"menu|admin_confirm_ack_{action_key}"), InlineKeyboardButton("❌ Hủy", callback_data=f"menu|{back}")],
+        [InlineKeyboardButton("📋 Xem lệnh cần chạy", callback_data=f"menu|admin_confirm_ack_{action_key}"), InlineKeyboardButton("❌ Hủy", callback_data=f"menu|{back}")],
         [InlineKeyboardButton("⬅️ Quay lại", callback_data=f"menu|{back}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 

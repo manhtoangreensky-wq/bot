@@ -176,5 +176,16 @@ Source baseline: `0929d61ade4b8f0d60b803b62417763e90acce9e`. Production deployme
 - RED: all four button-label expectations failed before the UI correction; no dispatch/setup error occurred.
 - Fix: label them “Hướng dẫn xem catalog gói”, “Hướng dẫn cấp combo”, “Hướng dẫn cấp gói tháng”, and “Hướng dẫn xem gói của user”. Preserve callback payloads and package/order operations.
 - GREEN: Admin module suite `5 OK`; adjacent Package Orders Back-origin suite `2 OK`; full `bot.py` and changed-test `py_compile` exit 0; `git diff --check` exit 0. Test traverses Admin → Packages → each emitted control → help page → emitted Back → Packages.
-- No package grant, wallet/data mutation, provider call, production job or Telegram send. PR/CI delivery pending.
+- No package grant, wallet/data mutation, provider call, production job or Telegram send.
+- Delivery: [PR #1390](https://github.com/manhtoangreensky-wq/bot/pull/1390) merged as `1f1b035edb225f8fef6b475836c75f6c7b609a81`; both required CI checks SUCCESS. Exact-SHA bot-only deploy [37528116347](https://github.com/manhtoangreensky-wq/bot/actions/runs/37528116347) SUCCESS with workers disabled. Read-only SSH confirms exact runtime/source SHA, bot/web/nginx active, `NRestarts=0`, health `status=ok`. [PR delivery evidence](https://github.com/manhtoangreensky-wq/bot/pull/1390#issuecomment-6025092937).
+- Manual Telegram/client QA remains NOT_TESTED; A1/A2 audit remains partial.
+
+## S12.24.3 — Queue command-guide acknowledgement copy
+
+- The three Queue confirmation prompts emit Freeze Video, Unfreeze Tool and Refund Job controls. Registered dispatch of each button only displayed the manual slash command; no operation was invoked. The old “✅ Xác nhận” CTA and “Đã xác nhận thao tác admin” result heading overstated what happened.
+- RED: the new actual-emitter/registered-handler regression reproduced the ambiguous CTA in all three cases before the code change.
+- Fix: the CTA now says “📋 Xem lệnh cần chạy” and the destination heading says “Hướng dẫn thao tác admin”. Callback values, command text, authorization, Back/Cancel routing and operation handlers are unchanged.
+- GREEN: Queue confirmation suite `5 tests OK`; Admin module child Back suite `5 tests OK`; `git diff --check` exit 0. Local `pytest` is unavailable. Full `bot.py` compile produced no output for over 7 minutes and was interrupted; this is neither PASS nor a syntax failure. Required CI compile/test gates remain pending.
+- No slash command, provider call, wallet/database mutation, job, production-data write or real Telegram send occurred. Manual Telegram/client QA NOT_TESTED.
+- Delivery: pending PR, CI, merge and deploy.
 
