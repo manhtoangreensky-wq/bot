@@ -1,15 +1,15 @@
 task_id: telegram-small-flow-audit-20261006
 goal_status: active
 phase: verify
-base_sha: 27926e15375f9ce7d41bbf37d5fee596c1216fec
+base_sha: 392d2eec8f942c8e5c1232e5ac537b9a84dfd82c
 objective: >-
   Continue the ordered Telegram small-flow audit. Fix wrong callback/Back routes
   narrowly while protecting AutoPost WIP and stable product engines.
-current_spec: S12.12-admin-handbook-return-origin
-branch: fix/admin-help-back-context
+current_spec: S12.13-admin-runtime-guide-labels
+branch: fix/admin-runtime-guide-labels-20261006
 allowed_scope:
-  - Admin handbook callbacks emitted from Admin modules
-  - focused route tests, tester case, and audit checklist/state ledger
+  - Three Admin Runtime-help button labels sharing menu|system_runtime_help
+  - focused label/route regression test and audit checklist/state ledger
 protected_scope:
   - AutoPost WIP
   - Product Video, Edit, SubDub, Voice, and Music engine behavior
@@ -20,23 +20,38 @@ specs:
     pull_request: 1376
     runtime_sha: 27926e15375f9ce7d41bbf37d5fee596c1216fec
   S12.12-admin-handbook-return-origin:
-    status: local-green-awaiting-pr-ci
+    status: merged-and-runtime-sha-verified
+    pull_request: 1378
+    merge_sha: 392d2eec8f942c8e5c1232e5ac537b9a84dfd82c
+    deploy_run: 37453919573
+    runtime_sha: 392d2eec8f942c8e5c1232e5ac537b9a84dfd82c
     acceptance: >-
       Every emitted Admin module guide callback retains its module origin and its
       rendered Back callback returns to that module; legacy handbook callbacks
       without context still return to Admin.
+  S12.13-admin-runtime-guide-labels:
+    status: targeted-red-green-local-commit-awaiting-safe-github-auth
+    acceptance: >-
+      All three Admin shortcuts to menu|system_runtime_help are labeled as guides;
+      callback values and registered behavior remain unchanged.
+    red: "3 actual keyboard-builder outputs were labeled 🧬 Runtime"
+    green: "Exact new test body passed on extracted builders; all 3 labels matched and callbacks were preserved"
 verification:
-  focused_unittest: "4 tests passed in 1.013s"
-  package_guide_unittest: "2 tests passed in 0.932s"
-  feedback_route_functions: "3 functions passed with bundled Python runner"
-  changed_test_files_py_compile: passed
+  runtime_after_1378: "active/running; NRestarts=0; exact SHA 392d2eec8f942c8e5c1232e5ac537b9a84dfd82c"
+  latest_user_click: "Confirmed; journal query 18:08–18:15 +07 found no matching callback timing records; no precise click time, not a latency sample"
+  focused_harness: "Exact new test body passed against extracted production keyboard builders"
+  changed_test_file_py_compile: passed
   git_diff_check: passed
-  full_bot_py_compile: >-
-    Attempted but interrupted after about 65 seconds without output; no local
-    full-file syntax verdict. GitHub source-compile CI is required.
+  local_pytest: "Unavailable: bundled Python has no pytest module"
+  full_bot_py_compile: "Not run for S12.13; full source-compile CI gate required"
   pull_request_ci: pending
+blockers:
+  - >-
+    GitHub CLI credential was exposed in tool output during credential-helper diagnosis.
+    All GitHub CLI and write operations are paused pending Owner direction to revoke/re-auth;
+    S12.13 commit remains local and unpushed. No credential value is stored in this state.
 next:
-  - Review exact diff and checklist scope.
-  - Push a separate PR and wait for required CI.
-  - Merge/deploy only this next spec, then verify exact runtime SHA before continuing.
+  - After safe GitHub re-auth is authorized, push S12.13 as its own PR and wait for compile/hygiene CI.
+  - Merge/deploy this spec in order and verify its exact runtime SHA before another code change.
+  - Planned A1 follow-up after S12.13: S12.14 Admin Billing shortcut-label audit. Source shows Pending/Duyệt/Từ chối buttons open command instructions, not an action; the approval guide says no callback approval. Preserve payment/wallet behavior and verify exact emitted buttons through the registered menu handler before deciding the minimal label fix.
   - Resume remaining A1/A2, then A3/A4/A5, A6, A7, and A8 in checklist order.

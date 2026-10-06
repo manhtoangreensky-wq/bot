@@ -37,6 +37,24 @@ def test_system_ops_runtime_shortcuts_are_labeled_as_guides_without_retargeting(
     assert buttons["📊 Dashboard"] == "menu|admin_overview"
 
 
+def test_all_system_runtime_help_shortcuts_are_labeled_as_guides_without_retargeting():
+    screens = [
+        bot.menu_nav_keyboard("system", True),
+        bot.admin_module_keyboard("security_db"),
+        bot.admin_module_keyboard("system_ops"),
+    ]
+    runtime_buttons = [
+        button
+        for screen in screens
+        for row in screen.inline_keyboard
+        for button in row
+        if button.callback_data == "menu|system_runtime_help"
+    ]
+
+    assert len(runtime_buttons) == 3
+    assert all(button.text == "📘 Hướng dẫn Runtime" for button in runtime_buttons)
+
+
 def test_all_system_ops_guide_callbacks_are_registered_and_open_runtime_handbook(monkeypatch):
     source = inspect.getsource(bot.lifespan)
     assert 'CallbackQueryHandler(handle_admin_help_callback, pattern=r"^admin_help\\|")' in source
