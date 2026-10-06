@@ -1,15 +1,15 @@
 task_id: telegram-small-flow-audit-20261006
 goal_status: active
 phase: verify
-base_sha: 877aea89da20037f1c03265e8c2e53a1961f1c0e
+base_sha: 8faa35eb93ac5a967d1f3f6eb097c735987ecf91
 objective: >-
   Continue the ordered Telegram small-flow audit. Fix wrong callback/Back routes
   narrowly while protecting AutoPost WIP and stable product engines.
-current_spec: S12.22-admin-feedback-inbox-navigation
-branch: audit/admin-support-ui-20261007
+current_spec: S12.23-admin-ticket-hub-read-panel-navigation
+branch: fix/admin-ticket-hub-back-20261007
 allowed_scope:
   - Read-only source registration and candidate-test inventory
-  - CSKH/Admin inbox read-only UI navigation and inert registered-handler tests
+  - Admin Ticket hub and read-only Stats/Templates navigation with inert fixtures
   - Evidence matrix, checklist, operating notes and durable state
 protected_scope:
   - AutoPost WIP
@@ -265,7 +265,7 @@ specs:
       - KIEM-THU/DANH-SACH-CASE.md
       - .agents/state/telegram-small-flow-audit-20261006.yaml
   S12.22-admin-feedback-inbox-navigation:
-    status: local-green-awaiting-final-compile-ci-delivery
+    status: merged-deployed-runtime-sha-verified
     base_sha: 877aea89da20037f1c03265e8c2e53a1961f1c0e
     acceptance: >-
       Admin Support → Góp ý admin inbox provides Back to Support and Home for empty
@@ -276,6 +276,13 @@ specs:
     evidence: "Source-extracted handler/cmd replay: one acknowledgement, reply_markup=None in both empty/populated inbox; fake DB commit forbidden; real sends=0"
     red: "Final 4-method suite replayed against exact baseline source: 4 behavioral failures, 0 setup errors (empty/populated/filtered footer and 6937-character long inbox); baseline-verifier exit 0"
     green: "Final focused 4 methods OK; adjacent regressions Ran 35 tests in 63.974s OK; both actual callback registrations exercised, Back/Home reach existing renderers, 15 rows retained within message limit, SELECT-only fake DB"
+    pull_request: 1387
+    merge_sha: 8faa35eb93ac5a967d1f3f6eb097c735987ecf91
+    deploy_run: 37517206697
+    runtime_sha: 8faa35eb93ac5a967d1f3f6eb097c735987ecf91
+    ci: "174 configured tests OK; full main source compile OK"
+    runtime_services: "bot/web/nginx active/running, NRestarts=0, tracked source matches and health status=ok"
+    live_pass: "NOT_TESTED for manual Telegram/client UX"
     files:
       - bot.py
       - tests/test_admin_feedback_inbox_navigation.py
@@ -288,6 +295,31 @@ specs:
       - KIEM-THU/DANH-SACH-CASE.md
       - .agents/state/telegram-small-flow-audit-20261006.yaml
     protected_scope: "Feedback SQL/data/status transitions and command behavior; all product engines/services/providers/workers; wallet/secrets; AutoPost WIP"
+  S12.23-admin-ticket-hub-read-panel-navigation:
+    status: local-green-awaiting-final-compile-ci-delivery
+    base_sha: 8faa35eb93ac5a967d1f3f6eb097c735987ecf91
+    acceptance: >-
+      Support → Ticket admin hub Back returns to Support. Read-only Stats/Templates
+      Back return to their emitting hub or sibling panel; repeat/self controls keep
+      that origin. Invalid/public controls stop before pending cleanup/report reads.
+      Ticket data/status/reply/file/list behavior and command registration remain unchanged.
+    evidence: "Actual Support emitter, exact registration and Ticket handler/keyboard replay: expected menu|admin_support, actual menu|admin; no reads/writes/provider/wallet/real sends"
+    red: "Exact final 4-method suite on base source: 3 behavioral failures, 0 setup errors; business-controls/legacy pending regression passes"
+    green: "24 related Ticket/inbox regressions in 36.372s OK; final focused 4 methods in 4.533s OK; source scope comparator PASS"
+    legacy_pending: "Original pending regression list/stats/templates assertions PASS; fixture parses only the same handler AST and accepts optional UI arguments. Whole-file AST attempt intentionally interrupted before scoped replacement, not counted as PASS. Both test files py_compile exit 0"
+    files:
+      - bot.py
+      - tests/test_admin_ticket_hub_navigation.py
+      - tests/test_support_admin_navigation_clears_pending_current_main.py
+      - .github/workflows/ci-main.yml
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
+      - TAI-LIEU/01-NGHIEP-VU-VAN-HANH.md
+      - TAI-LIEU/02-CHUC-NANG-GOC-VA-HIEN-TAI.md
+      - KIEM-THU/DANH-SACH-CASE.md
+    impact: "support_admin_menu_keyboard: 1 definition and 9 production calls in bot.py; two test consumers. Optional UI parameters preserve no-argument callers; existing pending fixture needs compatible stub"
+    protected_scope: "Ticket SQL, mutations, status/reply/file/list logic; product engines, helpers/services/providers/workers/config; AutoPost WIP"
 verification:
   runtime_after_1378: "active/running; NRestarts=0; exact SHA 392d2eec8f942c8e5c1232e5ac537b9a84dfd82c"
   runtime_after_1379: "All three services active/running, NRestarts=0; runtime SHA 2099eb319483ba1acc80f1080a094ba9710b5f3d; three new Runtime guide labels; health HTTP 200"
@@ -303,20 +335,19 @@ verification:
   runtime_after_1380: "Exact SHA74a8d86f24d1c8960706bc2c73b0ca984a69ae56; bot/web/nginx active/running; NRestarts=0; health HTTP200"
   pull_request_1381_ci: "Both required gates SUCCESS; Ubuntu Admin routes35 and workflow hygiene99 passed; complete source compile/AST/py_compile/tokenize passed"
   runtime_after_1381: "Exact SHA0929d61ade4b8f0d60b803b62417763e90acce9e; bot/web/nginx active/running; NRestarts=0; health HTTP200; tracked bot.py matches"
-  current_pull_request_ci: "S12.22 local only; separate PR pending. Previous PR #1386/main checks succeeded, 170 configured tests OK"
-  current_full_source_compile: "Final S12.22 bundled Python ran py_compile module via runpy (GC disabled only in compiler process) on full bot.py and both changed test files; exit 0"
-  current_focused_route_tests: "Feedback inbox and adjacent navigation regressions: Ran 35 tests in 63.974s OK"
+  current_pull_request_ci: "S12.23 local only; previous PR #1387/main checks succeeded, 174 configured tests OK"
+  current_full_source_compile: "Final S12.23 full py_compile module on bot.py and both changed test files exited 0; both test files recompiled after test-only fixture/coverage updates, exit 0"
+  current_focused_route_tests: "Ticket/inbox adjacent subset: 24 tests in 36.372s OK; exact final focused 4 methods in 4.533s OK"
   current_diff_check: "git diff --check exited 0; only expected test-file line-ending warning"
-  current_delivery: "PR #1386 deployed at 877aea89da20037f1c03265e8c2e53a1961f1c0e; S12.22 local GREEN, not pushed or deployed"
+  current_delivery: "PR #1387 deployed at 8faa35eb93ac5a967d1f3f6eb097c735987ecf91; S12.23 local only"
   local_pytest: "Unavailable: bundled Python has no pytest module; test is standard-library unittest and added to Ubuntu CI"
   provider_calls: 0
   real_telegram_sends: 0
   wallet_mutations: 0
   production_data_writes: 0
-  current_protected_comparator: "PASS: precisely 2 read-only inbox rendering changes in cmd_admin_gopy; SQL, status writes, filter/auth and text rows byte-equivalent; shared helpers, handlers and all other bot source/services/providers/worker/config unchanged"
+  current_protected_comparator: "PASS: Ticket UI keyboard plus read-panel origin validation/render args only; all status/reply/list/file and data operations, menu router, engines/services/providers/workers/config and other bot source unchanged"
 blockers: []
 next:
-  - Complete S12.22 registered-route RED/GREEN for read-only inbox navigation, separate CI/PR/merge/deploy/runtime evidence.
-  - After S12.22, address reproduced Support → Ticket admin hub Back destination (currently Admin root instead of Support); preserve ticket data/status/reply operations.
+  - Complete S12.23 hub/read-panel navigation RED/GREEN, scoped comparator and separate CI/PR/merge/deploy/runtime evidence.
   - Continue remaining A1/A2 Admin/customer route evidence with inert fixtures; do not infer a bug from missing name references.
   - Resume A3/A4/A5, A6, A7, and A8 in checklist order.

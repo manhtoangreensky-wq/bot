@@ -858,3 +858,9 @@ provider-fallback `56`, exact-two `3` passed; changed-file compile và
 | Cách hiểu trước | Bằng chứng | Điều chỉnh |
 |---|---|---|
 | Inbox đọc-only có điều hướng và đủ dài để chứa 15 góp ý | Ba nhánh thiếu footer; fixture 15 dòng cho tin 6.937 ký tự | Hai renderer dùng keyboard/chunk helper sẵn có; đủ 15 mục, tin dưới limit, Back/Home ở tin cuối. 35 regression đạt; S12.22 delivery chưa xong |
+
+## Ticket hub/read-only panels — S12.23, 07/10/2026
+
+| Cách hiểu trước | Bằng chứng | Điều chỉnh |
+|---|---|---|
+| Ticket hub/Thống kê/Mẫu trả lời Back giữ màn vừa mở | Hub và panel dùng chung Back về Admin root | UI keyboard có parent và callback panel mang origin; 24 regression + 4 focused đạt, thao tác ticket nguyên vẹn. S12.23 delivery còn chờ; S12.22 đã deploy `8faa35eb` |

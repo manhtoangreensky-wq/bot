@@ -1696,3 +1696,10 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
 - Inbox trống/có dữ liệu và kết quả lọc thiếu Back/Home. Fixture 15 góp ý dài cho ra tin 6.937 ký tự, vượt giới hạn Telegram.
 - Patch chỉ sửa hai dòng trả kết quả đọc-only: inbox trống có Back → CSKH/Home; inbox có dữ liệu được chia bằng helper có sẵn, giữ đủ mục và navigation ở tin cuối. SQL, lọc, quyền và cập nhật trạng thái thủ công giữ nguyên.
 - 4 test focused và 35 regression qua callback đăng ký đạt; comparator xác nhận các engine/helper/handler và phần code khác nguyên vẹn. Local GREEN; compile/CI/PR/deploy còn chờ. Không provider/ví/job/production data/tin thật trong kiểm thử.
+
+- Delivery S12.22: #1387 deploy `8faa35eb`, main compile/174 test CI theo cấu hình đạt; VPS đúng SHA và source, ba service active/running, NRestarts=0, health=ok. Manual Telegram QA chưa đo.
+
+## Ticket hub/read-only panel navigation — S12.23, 07/10/2026
+
+- Hub Ticket admin từ CSKH trước đây Back về Admin root; Thống kê/Mẫu trả lời dùng cùng keyboard mất nguồn. Patch giữ parent UI trên hai panel, tự bấm lại vẫn giữ nguồn; hub Back về CSKH và origin lạ bị chặn trước cleanup/đọc dữ liệu.
+- 24 regression Ticket/inbox và 4 test focused đạt. Callback list/search/status/reply/file, truy vấn và các engine giữ nguyên; chỉ UI keyboard và nhánh đọc origin khác. Compile/PR/CI/deploy còn chờ.
