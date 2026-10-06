@@ -30,28 +30,26 @@ specs:
       rendered Back callback returns to that module; legacy handbook callbacks
       without context still return to Admin.
   S12.13-admin-runtime-guide-labels:
-    status: targeted-red-green-local-commit-awaiting-safe-github-auth
+    status: local-green-ready-for-pr-ci
     acceptance: >-
       All three Admin shortcuts to menu|system_runtime_help are labeled as guides;
       callback values and registered behavior remain unchanged.
     red: "3 actual keyboard-builder outputs were labeled 🧬 Runtime"
-    green: "Exact new test body passed on extracted builders; all 3 labels matched and callbacks were preserved"
+    green: "24 admin/package/ticket unittest regressions passed; bot diff comparator proves only 3 labels changed; the label test is included in CI"
 verification:
   runtime_after_1378: "active/running; NRestarts=0; exact SHA 392d2eec8f942c8e5c1232e5ac537b9a84dfd82c"
-  latest_user_click: "Confirmed; journal query 18:08–18:15 +07 found no matching callback timing records; no precise click time, not a latency sample"
-  focused_harness: "Exact new test body passed against extracted production keyboard builders"
+  latest_user_click: "After access recovery, journal query 18:40–18:47 +07 returned no matching timing records; the owner supplied no precise click time, so it is not counted as a latency sample"
+  access_recovery: "Escalated execution as martin/toann: gh auth status exit 0, SSH identity accessible, trusted ED25519 host key present; no ACL or credential changes were needed"
+  focused_harness: "24 admin/package/ticket unittest regressions passed in 25.950s"
   changed_test_file_py_compile: passed
   git_diff_check: passed
   local_pytest: "Unavailable: bundled Python has no pytest module"
-  full_bot_py_compile: "Not run for S12.13; full source-compile CI gate required"
+  local_workflow_hygiene: "99 tests, 31 failures in Windows Bash fixtures; deployment script/workflow/test source unchanged, Ubuntu CI required"
+  full_bot_py_compile: "Codex-bundled Python 3.12.14: py_compile bot.py and tests/test_admin_system_ops_button_labels.py returned PY_COMPILE_OK"
   pull_request_ci: pending
-blockers:
-  - >-
-    GitHub CLI credential was exposed in tool output during credential-helper diagnosis.
-    All GitHub CLI and write operations are paused pending Owner direction to revoke/re-auth;
-    S12.13 commit remains local and unpushed. No credential value is stored in this state.
+blockers: []
 next:
-  - After safe GitHub re-auth is authorized, push S12.13 as its own PR and wait for compile/hygiene CI.
+  - Owner authorized continuing access recovery; GitHub/SSH work as the real Windows account. Push S12.13 as its own PR and wait for compile/hygiene CI.
   - Merge/deploy this spec in order and verify its exact runtime SHA before another code change.
   - Planned A1 follow-up after S12.13: S12.14 Admin Billing shortcut-label audit. Source shows Pending/Duyệt/Từ chối buttons open command instructions, not an action; the approval guide says no callback approval. Preserve payment/wallet behavior and verify exact emitted buttons through the registered menu handler before deciding the minimal label fix.
   - Resume remaining A1/A2, then A3/A4/A5, A6, A7, and A8 in checklist order.

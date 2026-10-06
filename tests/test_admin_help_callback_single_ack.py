@@ -66,6 +66,25 @@ def _load_functions(*names, **dependencies):
 
 
 class AdminHelpCallbackSingleAckTests(unittest.TestCase):
+    def test_runtime_shortcuts_are_labeled_as_guides_without_retargeting(self):
+        namespace = _load_functions(
+            "menu_parent_action", "menu_nav_keyboard", "admin_module_keyboard",
+        )
+        screens = [
+            namespace["menu_nav_keyboard"]("system", True),
+            namespace["admin_module_keyboard"]("security_db"),
+            namespace["admin_module_keyboard"]("system_ops"),
+        ]
+        runtime_buttons = [
+            button
+            for screen in screens
+            for row in screen.inline_keyboard
+            for button in row
+            if button.callback_data == "menu|system_runtime_help"
+        ]
+        self.assertEqual(len(runtime_buttons), 3)
+        self.assertTrue(all(button.text == "📘 Hướng dẫn Runtime" for button in runtime_buttons))
+
     def test_real_callback_route_is_registered(self):
         self.assertIn(
             r'tg_app.add_handler(CallbackQueryHandler(handle_admin_help_callback, pattern=r"^admin_help\|"))',

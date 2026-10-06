@@ -1641,3 +1641,9 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
 
 - Khi danh sách ghi chú rỗng và admin/user bấm Xóa, bot dọn pending delete cũ trước khi hiển thị màn rỗng.
 - Không xóa ghi chú, không mutate dữ liệu, không gọi provider; local evidence gồm `1` RED trước sửa và `1` GREEN sau sửa.
+
+## Admin Runtime shortcut — 06/10/2026, S12.13
+
+- Ba shortcut `menu|system_runtime_help` ở System, Security/DB và System Ops mở trang hướng dẫn; chúng không chạy lệnh `/runtime`.
+- Patch đổi cả ba nhãn thành `📘 Hướng dẫn Runtime`. Source comparator xác nhận chỉ ba nhãn thay đổi; 24 regression Admin/package/ticket đạt. Test nhãn chạy trong CI.
+- Trạng thái trước PR: runtime vẫn ở `392d2eec`; nhãn mới chờ CI, merge và deploy. Case tester: `ADMIN-RUNTIME-GUIDE-01` trong `KIEM-THU/DANH-SACH-CASE.md`.
