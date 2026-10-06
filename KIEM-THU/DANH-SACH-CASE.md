@@ -263,6 +263,12 @@ hoặc hết timeout mà không fail-closed/cleanup.
 |---|---|---|
 | `ADMIN-MODULE-CHILD-BACK-01` | Fixture: từ Queue mở Queue Status/Help; Security/DB mở Sales Ready; Hệ thống mở Dashboard; Provider/Worker mở Provider Status, Smoke Test, Video job. Bấm refresh nếu có rồi Back. Lặp callback legacy và thử user thường/origin sai. | Cả 7 Back về module phát nút, refresh giữ nguồn. Legacy giữ Back cũ; các nút nghiệp vụ không đổi. Callback sai/user thường có một alert, không cleanup pending/đọc report/render. Dữ liệu báo cáo là fixture; không queue/provider/DB/ví/job/tin thật. |
 
+## Admin Queue confirmation-guide Back — S12.21, 07/10/2026
+
+| ID | Bước kiểm thử | PASS bắt buộc |
+|---|---|---|
+| `ADMIN-QUEUE-CONFIRM-BACK-01` | Fixture: từ Queue mở Unfreeze tools, Freeze video, Refund job; thử Back/Hủy tại prompt và xác nhận để đọc hướng dẫn lệnh rồi Back. Lặp callback legacy, user thường, context sai và guard bình thường/bảo trì. Không gửi lệnh thật. | Prompt Back/Hủy về Queue; acknowledgement Back về đúng prompt, rồi Back về Queue. Nội dung lệnh nguyên vẹn, legacy giữ menu trước. Origin sai/user thường bị chặn trước cleanup/render; callbacks ≤64 byte. Không thực hiện freeze/refund/ví/provider/DB/job/tin thật. |
+
 ## Media library stale callback — 06/10/2026
 
 | ID | Bước kiểm thử | PASS bắt buộc |

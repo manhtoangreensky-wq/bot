@@ -1681,3 +1681,10 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
 
 - Tái hiện 7 đường từ module sang màn con bị mất nguồn: Queue Status/Help, Sales Ready từ Security/DB, Dashboard từ Hệ thống, Provider Status/Routes và Smoke Test từ Provider/Worker.
 - Patch giữ origin hợp lệ trên đúng 7 entry, Back và refresh; callback cũ vẫn về menu cũ. Báo cáo, queue, provider, freeze và engine sản phẩm giữ nguyên. 27 regression local đạt; compile/PR/CI/deploy bản mới còn chờ.
+
+- Delivery S12.20: #1385 đã deploy `406280d6`, 166 test CI theo cấu hình đạt; VPS đúng SHA, file bot.py khớp, ba service active/running, NRestarts=0, health=ok. Manual Telegram QA chưa đo.
+
+## Queue confirmation-guide Back — S12.21, 07/10/2026
+
+- Từ Queue mở Unfreeze tools, Freeze video hoặc Refund job, Back/Hủy trước đây về trang hướng dẫn khác. Patch chỉ giữ nguồn Queue ở prompt, Cancel và bước nhắc lệnh; acknowledgement Back về đúng prompt rồi mới về Queue.
+- Nội dung lệnh và thao tác tài chính/freeze không đổi. 30 regression và 4 test focused đạt, gồm các guard chung trước menu callback. Compile/PR/CI/deploy còn chờ.
