@@ -1,5 +1,6 @@
 """Root Video button through the actual menu route, with deterministic API timing."""
 import asyncio
+import html
 import re
 from collections import defaultdict
 from pathlib import Path
@@ -22,7 +23,7 @@ def _function(name):
 CODE = compile("from __future__ import annotations\n" + "\n".join(
     _function(name) for name in (
         "localized_main_menu_keyboard", "localized_menu_content",
-        "menu_text_main_video", "menu_text_main_video_i18n", "main_video_keyboard",
+        "localized_start_menu_text", "menu_text_main_video", "menu_text_main_video_i18n", "main_video_keyboard",
         "safe_edit_query_message", "handle_menu_callback",
     )
 ), "bot.py:menu Video path", "exec")
@@ -75,6 +76,7 @@ def _run(*, admin=False, resume=False, render_error=False, action="main_video"):
 
     ns = {
         "Update": object, "ContextTypes": SimpleNamespace(DEFAULT_TYPE=object),
+        "html": html,
         "InlineKeyboardButton": Button, "InlineKeyboardMarkup": Markup,
         "normalize_user_language": lambda lang: lang,
         "public_hub_copy": lambda _lang: defaultdict(lambda: "label"),
@@ -94,6 +96,9 @@ def _run(*, admin=False, resume=False, render_error=False, action="main_video"):
         "public_video_menu_label": lambda *_args: "Resume",
         "video_uiflow3_state": lambda context: context.user_data.get("draft") or {},
         "video_trend2_cancel_pending_on_video_menu": lambda *_args: step("trend", .005),
+        "get_user": lambda _uid: (100, 0, False),
+        "get_role_badge": lambda _uid: "customer",
+        "user_language_label": lambda _lang: "Tiếng Việt",
         "menu_text_main_image_i18n": lambda _lang: "Image menu",
         "main_image_keyboard": lambda _lang: Markup([]),
     }
@@ -107,9 +112,11 @@ def _run(*, admin=False, resume=False, render_error=False, action="main_video"):
     ):
         ns[name] = cleanup(name)
     exec(CODE, ns)
-    root = ns["localized_main_menu_keyboard"](admin, "vi")
+    root = ns["main_video_keyboard"]("vi") if action == "main" else ns["localized_main_menu_keyboard"](admin, "vi")
     data = next(button.callback_data for row in root.inline_keyboard for button in row
                 if button.callback_data == f"menu|{action}")
+    events.clear()
+    clock["now"] = 0.0
     routes = []
     ns.update(tg_app=SimpleNamespace(add_handler=routes.append),
               CallbackQueryHandler=lambda callback, pattern: (callback, re.compile(pattern)))
@@ -179,3 +186,32 @@ def test_other_root_menu_keeps_existing_ack_render_without_video_timing():
     assert query.answers == [((), {})]
     assert query.edits[0][0] == "Image menu"
     assert logs == []
+
+
+@pytest.mark.parametrize("admin", [False, True])
+def test_emitted_video_back_records_anonymous_main_menu_timing(admin):
+    query, events, logs, context, error = _run(admin=admin, resume=True, action="main")
+    assert error is None
+    assert query.data == "menu|main"
+    assert query.answers == [((), {})]
+    first_events = ["ack"] + (["clear_broadcast_lite_pending"] if admin else []) + ["language"]
+    assert events[:len(first_events)] == first_events
+    assert len(query.edits) == 1
+    text, kwargs = query.edits[0]
+    assert text.startswith("👑 <b>label</b>")
+    callbacks = [button.callback_data for row in kwargs["reply_markup"].inline_keyboard for button in row]
+    assert "menu|main_video" in callbacks
+    assert context.user_data["draft"] == {"keep": "video draft"}
+    assert len(logs) == 1, "missing anonymous Back callback timing evidence"
+    log = logs[0][0] % logs[0][1:]
+    fields = dict(re.findall(r"(\w+)=(\S+)", log))
+    assert fields["route"] == "menu|main"
+    assert fields["role"] == ("admin" if admin else "public")
+    assert float(fields["ack_ms"]) == pytest.approx(400)
+    assert float(fields["language_ms"]) == pytest.approx(25)
+    assert float(fields["render_ms"]) == pytest.approx(600)
+    phases = ("pre_ack_ms", "ack_ms", "language_ms", "cleanup_ms", "build_ms", "render_ms")
+    assert all(float(fields[key]) >= 0 for key in phases)
+    assert float(fields["handler_ms"]) == pytest.approx(sum(float(fields[key]) for key in phases))
+    assert fields["render_returned"] == "1"
+    assert all(secret not in log for secret in ("873999", "synthetic", text))

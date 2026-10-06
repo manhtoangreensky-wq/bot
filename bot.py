@@ -141238,7 +141238,8 @@ exec(compile(autopost_engine_code, f"{__file__}:autopost_engine", "exec"), globa
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     action = (query.data.split("|", 1)[1] if "|" in query.data else "main").strip()
-    menu_timing_start = time.perf_counter() if action == "main_video" else 0.0
+    menu_timing_enabled = action in ("main", "main_video")
+    menu_timing_start = time.perf_counter() if menu_timing_enabled else 0.0
     user_is_admin = is_admin_user(query.from_user.id)
     admin_only = {"affiliate", "operator", "admin", "system", "finance", "billing", "admin_packages", "admin_provider", "internal_archive"}
     admin_only_prefixes = (
@@ -141264,16 +141265,16 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
     if action.startswith("hint_") and not user_is_admin and action not in public_hints:
         return await query.answer("Lệnh nội bộ chỉ dành cho Admin.", show_alert=True)
-    menu_ack_start = time.perf_counter() if action == "main_video" else 0.0
+    menu_ack_start = time.perf_counter() if menu_timing_enabled else 0.0
     await query.answer()
-    menu_ack_done = time.perf_counter() if action == "main_video" else 0.0
+    menu_ack_done = time.perf_counter() if menu_timing_enabled else 0.0
     if isinstance(getattr(context, "user_data", None), dict):
         context.user_data.pop(VIDEO_TAIL9_TEXT_INPUT_KEY, None)
     if user_is_admin:
         clear_broadcast_lite_pending(query.from_user.id)
-    menu_language_start = time.perf_counter() if action == "main_video" else 0.0
+    menu_language_start = time.perf_counter() if menu_timing_enabled else 0.0
     lang = get_user_language(query.from_user.id) or "vi"
-    menu_language_done = time.perf_counter() if action == "main_video" else 0.0
+    menu_language_done = time.perf_counter() if menu_timing_enabled else 0.0
     preserve_translation_menu = action == "translation_text_confirm"
     if not preserve_translation_menu and action not in {"translation_text", "translation_transcript"} and not action.startswith("translation_text_target_"):
         clear_translation_menu_pending(query.from_user.id)
@@ -141304,7 +141305,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         clear_memory_guided_pending(query.from_user.id)
     clear_music_guided_pending(query.from_user.id)
     clear_pending_admin_tool_test(query.from_user.id)
-    menu_cleanup_done = time.perf_counter() if action == "main_video" else 0.0
+    menu_cleanup_done = time.perf_counter() if menu_timing_enabled else 0.0
     if action == "autopost":
         return await safe_edit_query_message(
             query,
@@ -141840,6 +141841,29 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         text = f"✅ {copy['translation_session_stop']}."
         return await safe_edit_query_message(query, text, reply_markup=translate_language_keyboard(False, lang))
     text, keyboard = localized_menu_content(action, user_is_admin, lang, query.from_user.id)
+    if action == "main":
+        menu_build_done = time.perf_counter()
+        render_returned = False
+        try:
+            await safe_edit_query_message(query, text, reply_markup=keyboard)
+            render_returned = True
+        finally:
+            menu_timing_end = time.perf_counter()
+            logger.info(
+                "callback_latency route=menu|main role=%s pre_ack_ms=%.3f ack_ms=%.3f "
+                "language_ms=%.3f cleanup_ms=%.3f build_ms=%.3f render_ms=%.3f "
+                "handler_ms=%.3f render_returned=%d",
+                "admin" if user_is_admin else "public",
+                (menu_ack_start - menu_timing_start) * 1000,
+                (menu_ack_done - menu_ack_start) * 1000,
+                (menu_language_done - menu_language_start) * 1000,
+                (menu_language_start - menu_ack_done + menu_cleanup_done - menu_language_done) * 1000,
+                (menu_build_done - menu_cleanup_done) * 1000,
+                (menu_timing_end - menu_build_done) * 1000,
+                (menu_timing_end - menu_timing_start) * 1000,
+                int(render_returned),
+            )
+        return
     if action == "main_video":
         video_trend2_cancel_pending_on_video_menu(query.from_user.id, context)
         keyboard = main_video_keyboard(
