@@ -59695,10 +59695,14 @@ def admin_package_orders_text(limit: int = 10) -> str:
     ])
     return "\n".join(lines)
 
-def admin_package_orders_keyboard() -> InlineKeyboardMarkup:
+def admin_package_orders_keyboard(back_action: str = "admin_packages") -> InlineKeyboardMarkup:
+    parent = {
+        "admin_packages": ("⬅️ Gói / Combo", "menu|admin_packages"),
+        "finance": ("⬅️ Tài chính", "menu|finance"),
+    }.get(str(back_action or "").strip(), ("⬅️ Gói / Combo", "menu|admin_packages"))
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📦 Catalog", callback_data="menu|admin_packages_catalog"), InlineKeyboardButton("📦 User Packages", callback_data="menu|admin_packages_user")],
-        [InlineKeyboardButton("⬅️ Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🎁 Gói / Combo", callback_data="menu|admin_packages")],
+        [InlineKeyboardButton(parent[0], callback_data=parent[1])],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -141606,7 +141610,9 @@ exec(compile(autopost_engine_code, f"{__file__}:autopost_engine", "exec"), globa
 
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    action = (query.data.split("|", 1)[1] if "|" in query.data else "main").strip()
+    raw_action = (query.data.split("|", 1)[1] if "|" in query.data else "main").strip()
+    action = raw_action
+    package_orders_origin = ""
     menu_timing_enabled = action in ("main", "main_video")
     menu_timing_start = time.perf_counter() if menu_timing_enabled else 0.0
     user_is_admin = is_admin_user(query.from_user.id)
@@ -141634,6 +141640,12 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
     if action.startswith("hint_") and not user_is_admin and action not in public_hints:
         return await query.answer("Lệnh nội bộ chỉ dành cho Admin.", show_alert=True)
+    if action.startswith("admin_package_orders|"):
+        parts = action.split("|")
+        package_orders_origin = parts[1].strip() if len(parts) == 2 else ""
+        if package_orders_origin not in {"admin_packages", "finance"}:
+            return await query.answer("Nút Đơn chờ duyệt đã hết phiên. Vui lòng mở lại từ menu hiện tại.", show_alert=True)
+        action = "admin_package_orders"
     runtime_help_parent = ""
     if action.startswith("system_runtime_help|"):
         runtime_help_parent = action.split("|", 1)[1]
@@ -142216,6 +142228,8 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         text = f"✅ {copy['translation_session_stop']}."
         return await safe_edit_query_message(query, text, reply_markup=translate_language_keyboard(False, lang))
     text, keyboard = localized_menu_content(action, user_is_admin, lang, query.from_user.id)
+    if action == "admin_package_orders" and package_orders_origin:
+        keyboard = admin_package_orders_keyboard(package_orders_origin)
     if action == "system_runtime_help" and runtime_help_parent:
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("⬅️ Quay lại", callback_data=f"menu|{runtime_help_parent}")
@@ -229925,7 +229939,7 @@ def finance_admin_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📊 Tổng quan", callback_data="menu|finance_overview"), InlineKeyboardButton("💵 Doanh thu", callback_data="menu|finance_revenue")],
         [InlineKeyboardButton("🧾 Thuế / VAT", callback_data="menu|finance_tax_vat"), InlineKeyboardButton("🧾 Chi phí", callback_data="menu|finance_expense_month")],
         [InlineKeyboardButton("📈 Lợi nhuận", callback_data="menu|finance_profit"), InlineKeyboardButton("🏦 Vốn & Hòa vốn", callback_data="menu|finance_capital")],
-        [InlineKeyboardButton("🎁 Gói / Combo", callback_data="menu|admin_package_orders"), InlineKeyboardButton("⚠️ Đơn bất thường", callback_data="menu|finance_anomalies")],
+        [InlineKeyboardButton("🎁 Gói / Combo", callback_data="menu|admin_package_orders|finance"), InlineKeyboardButton("⚠️ Đơn bất thường", callback_data="menu|finance_anomalies")],
         [InlineKeyboardButton("🧮 Sổ điều chỉnh", callback_data="menu|finance_adjustments"), InlineKeyboardButton("➕ Thêm chi phí", callback_data="menu|finance_add_expense")],
         [InlineKeyboardButton("📥 Xuất báo cáo", callback_data="menu|finance_export"), InlineKeyboardButton("📚 Hồ sơ/chứng từ", callback_data="menu|tax_checklist")],
         [InlineKeyboardButton("📘 Hướng dẫn tài chính", callback_data="menu|finance_guide"), InlineKeyboardButton("🎟 Mã quà tặng", callback_data="menu|admin_gift_codes")],
@@ -231884,7 +231898,7 @@ ADMIN_CONTROL_MODULES = {
         "buttons": [
             [("📦 Catalog gói", "menu|admin_packages_catalog"), ("🎁 Cấp combo", "menu|admin_packages_grant_combo")],
             [("📅 Cấp tháng", "menu|admin_packages_grant_monthly"), ("📘 Cách cấp lưu trữ", "admin_help|packages")],
-            [("📦 Đơn chờ duyệt", "menu|admin_package_orders"), ("👤 Gói của user", "menu|admin_packages_user")],
+            [("📦 Đơn chờ duyệt", "menu|admin_package_orders|admin_packages"), ("👤 Gói của user", "menu|admin_packages_user")],
         ],
         "commands": [
             ("/package_catalog", "xem danh mục gói"),

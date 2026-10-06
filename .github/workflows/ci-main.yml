@@ -34,6 +34,9 @@ jobs:
       - name: Media Preview Callback Regressions
         run: python -m unittest tests/test_media_preview_callback_snapshot.py
 
+      - name: Admin Package Orders Back Regression
+        run: python -m unittest tests/test_admin_package_orders_back_origin.py
+
       - name: Admin Route Regressions
         run: |
           python -m unittest \
