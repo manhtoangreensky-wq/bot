@@ -13,7 +13,7 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 
 | ID | Spec / acceptance evidence | State |
 |---|---|---|
-| A0 | Pin source baseline and enumerate static/dynamic callbacks. Inventory snapshot source: `4f1455ed31c3ebb4acbb6f6d3eff4144bf02185d`; current main: `392d2eec8f942c8e5c1232e5ac537b9a84dfd82c` after PR #1378. Snapshot reports 3,981 button constructors, 83 static handler patterns, 0 unmatched static callbacks, and 821 dynamic callback expressions, all measured on the older snapshot SHA; counts do not prove route correctness and have not been refreshed. | Baseline pinned; dynamic paths still require route evidence. |
+| A0 | Pin source baseline and enumerate static/dynamic callbacks. Inventory snapshot source: `4f1455ed31c3ebb4acbb6f6d3eff4144bf02185d`; current main: `2099eb319483ba1acc80f1080a094ba9710b5f3d` after PR #1379. Snapshot reports 3,981 button constructors, 83 static handler patterns, 0 unmatched static callbacks, and 821 dynamic callback expressions, all measured on the older snapshot SHA; counts do not prove route correctness and have not been refreshed. | Baseline pinned; dynamic paths still require route evidence. |
 | A1 | Admin screens: verify each visible action label matches its handler; test emitted callback, authorization, state transition, and error/stale path. | PARTIAL — report/overview, root/help/package and feedback/access samples have evidence below; S12.13 corrects three Runtime-guide labels without changing their routes; full visible-action matrix remains open. |
 | A2 | Admin Back/Home: verify immediate parent and preserve list/filter/page context; test prompt and preview exits without performing the underlying action. | IN PROGRESS — ticket-origin specs S12.6–S12.10 (#1367–#1374) are in #1376; S12.12 merged/deployed in #1378 at runtime SHA `392d2eec`. Other admin/customer routes remain open. |
 | A3 | Customer screens: verify ownership, same-product navigation, Back/Home, and no cross-user or cross-product route. | OPEN — audit ledger not complete. |
@@ -132,11 +132,21 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 - GREEN evidence: the label assertion moved into the existing source-extracted `unittest` fixture and is explicitly executed by CI. Admin handbook/package and ticket-origin regressions ran together: `Ran 24 tests in 25.950s — OK`. The same label case on exact main returned one expected assertion failure. A source comparator proves all `bot.py` differences are exactly the three labels. Full local `py_compile bot.py` previously returned `PY_COMPILE_OK`; changed test files compile successfully.
 - Local environment limit: `pytest` is absent. Workflow hygiene ran 99 tests and had 31 failures in Windows Bash fixtures (`bash`/`mkdir`/`dirname` unavailable inside simulated scripts). The deployment workflow, worker-sync script and hygiene test are unchanged; required Ubuntu CI must pass before merge.
 - Scope: three labels in `bot.py`, the existing Admin help `unittest`, one CI invocation, tester case and documentation. No runtime action, DB/user-data write, provider call, wallet action, or production message was performed.
-- Delivery state: local branch `fix/admin-runtime-guide-labels-20261006` from exact current main `392d2eec`; PR/CI/merge/deploy pending.
+- Delivery state: PR [#1379](https://github.com/manhtoangreensky-wq/bot/pull/1379) merged as `2099eb319483ba1acc80f1080a094ba9710b5f3d`. Both CI gates passed; Ubuntu ran 22 Admin route regressions and 99 workflow-hygiene tests successfully. Deploy [#37468134372](https://github.com/manhtoangreensky-wq/bot/actions/runs/37468134372) attempt 2 succeeded. Attempt 1 lost SSH while reading the old SHA, before mutation. Read-only runtime verification confirmed matching SHA, three guide labels, bot/web/nginx active/running with `NRestarts=0`, and HTTP health 200. New-label manual Telegram QA is not claimed.
+
+### S12.14 — Billing shortcuts describe command guides
+
+- Baseline: `2099eb319483ba1acc80f1080a094ba9710b5f3d`; branch `fix/admin-billing-guide-labels-20261006`.
+- Scope: seven misleading labels across the module and legacy Billing keyboards. Four destinations (`pending`, `duyet`, `tuchoi`, `payos`) are read-only instructions; the legacy PayOS shortcut also needs the existing module's plan label.
+- Acceptance: all eight emitted guide controls dispatch through registered `handle_menu_callback`, show the intended slash-command instructions and Back to Billing; public access is denied before state cleanup. Financial/provider/DB behavior is outside this label patch.
+- RED: 3 fixture tests ran; guide dispatch and public-denial tests passed, while the guide-label assertion failed on the actual `📋 Pending` output. Production labels have not yet changed at this evidence point.
+- GREEN: seven labels changed across the two keyboards. All 8 emitted controls traverse the registered menu handler, render their command guide and dispatch Back to the actual Billing module. Public access is denied before state cleanup. The focused and Admin/package/ticket regressions ran `27 tests in 32.017s — OK`; test-file compile and `git diff --check` passed. An exact source comparator proves no `bot.py` difference beyond those seven label replacements.
+- Delivery: local branch ready for its separate PR. Required CI, merge, deploy and runtime verification remain pending.
+- Next route candidate after delivery: Runtime-help Back from Security/DB/System Ops appears to return to the legacy System page. This is source-only evidence; reproduce the real emitted-control/registered-handler path before changing it.
 
 ### Final latency spec — partial, server/client split preserved
 
-- Current main/runtime target: `392d2eec8f942c8e5c1232e5ac537b9a84dfd82c` from PR #1378. Deploy run [#37453919573](https://github.com/manhtoangreensky-wq/bot/actions/runs/37453919573) succeeded; read-only VPS verification found `toanaas-bot.service` active/running, `NRestarts=0`, runtime SHA matching main.
+- Current main/runtime target: `2099eb319483ba1acc80f1080a094ba9710b5f3d` from PR #1379. Deploy run [#37468134372](https://github.com/manhtoangreensky-wq/bot/actions/runs/37468134372) attempt 2 succeeded; read-only VPS verification found all three services active/running with `NRestarts=0` and the matching runtime SHA. The timings below are the earlier historical sample, not fresh measurements of this release.
 - After the owner confirmed clicking “Tạo video AI” then “Quay lại”, the anonymous event sequence was `menu|main_video` at `2026-10-06 16:57:18.250 +07`, then `menu|main` at `16:57:20.867 +07`. This is consistent with the two-button round, but there was no exact user click timestamp and the logs contain no identity/callback data, so attribution is not absolute.
 - Per-route `callback_latency`: handler `156.054 ms` / `156.930 ms`; acknowledgement `58.973 ms` / `58.998 ms`; awaited `safe_edit_query_message` `76.181 ms` / `79.439 ms`; `render_returned=1` for both.
 - `callback_dispatch_timing`: shared guards `35.518 ms` / `33.789 ms`, of which `safe_mode_callback_guard` was `35.405 ms` / `33.724 ms`; total server dispatch `193.403 ms` / `192.631 ms`.
@@ -150,9 +160,9 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 
 1. S12.11 (#1376) is merged/deployed and its exact runtime SHA is verified; its release scope includes ancestors #1367–#1375.
 2. S12.12 (#1378) is merged, deployed, and runtime-SHA verified; no dependent spec starts with an unknown runtime.
-3. Finish S12.13 as its own PR; require compile/hygiene tests, then merge/deploy and verify that exact SHA.
-4. Next A1 candidate after S12.13 delivery: S12.14 Admin Billing shortcut labels. The actual Billing module keyboard emits `menu|admin_billing_pending`, `menu|admin_billing_duyet`, and `menu|admin_billing_tuchoi`; each resolves to command instructions, and the approval page explicitly says the callback does not approve bills. Audit and, if confirmed, label these as instructions while preserving callbacks and all payment/wallet behavior. This is source-only evidence; S12.14 has not started and has no RED/GREEN result.
-5. Continue remaining A1 Admin actions and A2 Back/Home/state-origin routes with one narrow RED/GREEN spec at a time.
+3. S12.13 (#1379) is merged, deployed and runtime-SHA verified at `2099eb3`; its 3-label source comparator and CI gates passed.
+4. Complete S12.14 Billing-guide labels using the emitted-control/registered menu-handler/Back/public fixture, then deliver its separate PR in the same order.
+5. Verify the Runtime-help Back origin candidate in A2, then continue remaining A1 Admin actions and A2 Back/Home/state-origin routes with one narrow RED/GREEN spec at a time.
 6. Continue A3/A4/A5 for customer routes, pending-state expiry/stale/repeat behavior, preserving protected product lanes.
 7. Finish A6 UI/UX consistency review and update this ledger with evidence, not assumptions.
 8. Close A7 only after multiple user-timed samples can be compared to anonymous server phases; separate server, Telegram render and client/network wait.

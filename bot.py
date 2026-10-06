@@ -231456,8 +231456,8 @@ def admin_billing_text() -> str:
 
 def admin_billing_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📋 Pending", callback_data="menu|admin_billing_pending"), InlineKeyboardButton("✅ Duyệt bill", callback_data="menu|admin_billing_duyet")],
-        [InlineKeyboardButton("❌ Từ chối bill", callback_data="menu|admin_billing_tuchoi"), InlineKeyboardButton("🧪 PayOS Test", callback_data="menu|admin_billing_payos")],
+        [InlineKeyboardButton("📘 Hướng dẫn xem bill", callback_data="menu|admin_billing_pending"), InlineKeyboardButton("📘 Hướng dẫn duyệt bill", callback_data="menu|admin_billing_duyet")],
+        [InlineKeyboardButton("📘 Hướng dẫn từ chối bill", callback_data="menu|admin_billing_tuchoi"), InlineKeyboardButton("🧪 Kế hoạch test PayOS", callback_data="menu|admin_billing_payos")],
         [InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -231788,8 +231788,8 @@ ADMIN_CONTROL_MODULES = {
         "purpose": "Dùng để kiểm tra giao dịch nạp tiền, xử lý bill thủ công, theo dõi PayOS và đối soát khi có lỗi thanh toán.",
         "when": "Dùng khi có bill chờ, PayOS cần kiểm tra, user báo chưa cộng Xu hoặc cần review rủi ro nạp tiền.",
         "buttons": [
-            [("⏳ Bill chờ duyệt", "menu|admin_billing_pending"), ("✅ Duyệt bill", "menu|admin_billing_duyet")],
-            [("❌ Từ chối bill", "menu|admin_billing_tuchoi"), ("🧪 Kế hoạch test PayOS", "menu|admin_billing_payos")],
+            [("📘 Hướng dẫn xem bill", "menu|admin_billing_pending"), ("📘 Hướng dẫn duyệt bill", "menu|admin_billing_duyet")],
+            [("📘 Hướng dẫn từ chối bill", "menu|admin_billing_tuchoi"), ("🧪 Kế hoạch test PayOS", "menu|admin_billing_payos")],
             [("🛡 Rủi ro nạp tiền", "menu|payos_risk")],
         ],
         "commands": [
