@@ -13,9 +13,9 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 
 | ID | Spec / acceptance evidence | State |
 |---|---|---|
-| A0 | Pin source baseline and enumerate static/dynamic callbacks. Main baseline: `4f1455ed31c3ebb4acbb6f6d3eff4144bf02185d`; inventory reports 3,981 button constructors, 83 static handler patterns, 0 unmatched static callbacks, and 821 dynamic callback expressions. Counts do not prove route correctness. | Baseline captured; dynamic paths still require route evidence. |
+| A0 | Pin source baseline and enumerate static/dynamic callbacks. Inventory snapshot: `4f1455ed31c3ebb4acbb6f6d3eff4144bf02185d`; current main after S12.6 merge: `eba2652bb4ed142bdb4a3daf77099b55bc825cdb`. Snapshot reports 3,981 button constructors, 83 static handler patterns, 0 unmatched static callbacks, and 821 dynamic callback expressions. Counts do not prove route correctness and have not yet been refreshed after the merge. | Baseline captured; dynamic paths still require route evidence. |
 | A1 | Admin screens: verify each visible action label matches its handler; test emitted callback, authorization, state transition, and error/stale path. | OPEN — audit ledger not complete. |
-| A2 | Admin Back/Home: verify immediate parent and preserve list/filter/page context; test prompt and preview exits without performing the underlying action. | IN PROGRESS — S12.6 has local code and focused tests; delivery gate open. |
+| A2 | Admin Back/Home: verify immediate parent and preserve list/filter/page context; test prompt and preview exits without performing the underlying action. | IN PROGRESS — S12.6 merged as PR #1367; S12.7 note-origin regression is green locally and awaiting its own PR gate. |
 | A3 | Customer screens: verify ownership, same-product navigation, Back/Home, and no cross-user or cross-product route. | OPEN — audit ledger not complete. |
 | A4 | Pending input: verify `/start`, `/menu`, Back, expiry, stale controls, repeated presses, and abandoned drafts clear only the intended state. | OPEN — audit ledger not complete. |
 | A5 | Callback coverage: check static and dynamic emitted values against actual registrations and dispatched terminal behavior; no module-only route test counts as completion. | OPEN — static unmatched count alone is insufficient. |
@@ -35,22 +35,34 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 - Evidence after fix: `python.exe tests/test_support_ticket_reply_origin_pagination.py` → `Ran 2 tests ... OK`; tests dispatch actual emitted controls through the registered ticket handler and assert no send attempt.
 - Scope review: the intended patch is `bot.py`, the new focused route test, CI invocation, this checklist, and the tester case. After all edits, the focused unittest reported `Ran 2 tests ... OK`, test-file `py_compile` returned 0, and `git diff --check` returned 0; untracked text files were also checked for trailing whitespace.
 - Tester source: `KIEM-THU/DANH-SACH-CASE.md` includes `ADMIN-TICKET-BACK-01`; it requires a seven-ticket fixture/staging list, not production data. Existing tester labels and issue templates were found; no GitHub issue/project was created.
-- Delivery state: local branch `fix/admin-ticket-reply-origin-pagination`, based on `4f1455ed…`; committed locally, but not yet pushed or opened as a PR. This Admin Ticket change is separate from the logger-only PRs #1365/#1366 and is not authorized for deployment by the logging approval.
-- Verification limitation: the bundled Python has no `pytest` module. Full `py_compile bot.py` consumed over six minutes of CPU without returning; that run was interrupted and has no pass/fail verdict. The focused harness compiled/executed the modified route functions. `ci-main.yml` now invokes the focused `unittest` regression on PRs; the separate `bot-source-compile` workflow supplies the full-file compile/tokenize gate. Do not merge this spec until both required PR checks are green.
+- Delivery state: PR #1367 merged to main on 2026-10-06 as `eba2652bb4ed142bdb4a3daf77099b55bc825cdb`; both `python_hygiene_and_tests` and `python-311-source-compile` passed. It was not deployed; the logging-only approval did not authorize deployment of this Admin Ticket change.
+- Verification limitation: local `pytest` is unavailable and the earlier full local `py_compile bot.py` run was interrupted after more than six minutes, so it has no local pass/fail verdict. The modified route functions were compiled and exercised by the focused harness, and PR #1367 supplied the missing delivery gates: both `python_hygiene_and_tests` and `python-311-source-compile` passed. No claim is made that the entire repository test suite ran.
+
+### S12.7 — Admin Ticket note origin and pagination
+
+- Trigger: high-priority ticket list `high`, offset `6` → detail → `Ghi chú admin` → Back or submit a note → detail Back.
+- Root cause: the note button omitted source/offset; note pending state and prompt Back then defaulted to `new|0`; successful note save also rebuilt detail with the default keyboard.
+- Expected: prompt Back returns to the same ticket detail and clears only that pending note; after saving a note, the detail's Back returns to `ticket|al|high|6`.
+- RED evidence: three focused tests failed before the fix: emitted callback was `ticket|note|9006` instead of `ticket|note|9006|high|6`; pending data omitted source/offset; saved-note detail linked to `ticket|al|new|0`.
+- Minimal fix: carry the validated source/offset in the emitted note callback, pending state, prompt Back, and post-save detail keyboard; legacy callbacks default to `new|0`.
+- GREEN evidence: the note-origin tests, existing note stale-guard tests, existing ticket detail pagination test, and S12.6 reply-origin test ran together: `Ran 8 tests ... OK`.
+- Scope: `bot.py`, focused regression tests, the CI focused-test command, the tester case, and this ledger. No customer message, provider, wallet, or production data was touched.
+- Delivery state: local implementation verified; PR/CI gate pending. No deployment is authorized or included.
 
 ### Final latency spec — provisional runtime sample
 
 - Logging implementation is in main via PR #1365; bot-only release #1366 targets runtime SHA `4f1455ed31c3ebb4acbb6f6d3eff4144bf02185d`.
-- Read-only VPS observation: `toanaas-bot.service` is `active/running`, `NRestarts=0`, runtime SHA matches the target.
+- Read-only SSH observation this turn: `toanaas-bot.service` is `active/running`, `NRestarts=0`, runtime SHA `4f1455ed31c3ebb4acbb6f6d3eff4144bf02185d` matches the logger-only target. No restart or deployment was run this turn.
 - Last-24-hour anonymous query returned one admin `menu|main_video` event at `2026-10-06T08:37:49+07:00`: `pre_ack_ms=0.023`, `ack_ms=222.983`, `language_ms=6.130`, `cleanup_ms=11.910`, `build_ms=2.088`, `render_ms=114.876`, `handler_ms=358.009`, `render_returned=1`.
 - The same query returned no `menu|main` event. User-reported 2–3 second experience lacks an exact local timestamp, so the one Video event cannot be attributed conclusively to that click. It proves only that this measured server handler returned in 358.009 ms; it does not identify the remaining client/network wait or describe a distribution.
 - No production action was performed during this check: no deploy, restart, provider call, real message, or wallet mutation.
 
 ## Next execution order
 
-1. Push S12.6 as its own PR to run the focused route regression plus full-source compile/tokenize checks; merge only when those PR checks are green under the existing ordered-PR authorization. No deployment is implied.
-2. Continue A1/A2 with the next concrete admin Back/callback defect found on current main; one route per spec, RED before minimal fix, then actual handler dispatch.
-3. Continue A3/A4/A5 for customer and pending-state flows, preserving protected product lanes.
-4. Finish A6 UI/UX consistency review and update this ledger with evidence, not assumptions.
-5. Re-run A7 after a user timing sample can be correlated by local time/timezone; classify only from measured phases.
-6. Complete A8 only after all checklist rows have evidence and delivery states are separately verified.
+1. S12.6 closed: PR #1367 merged with both required checks green; keep its deployed state separate (not deployed).
+2. Open the separate S12.7 PR and require its focused route regression plus full-source compile/tokenize checks before merge; no deployment is implied.
+3. Continue A1/A2 with the next concrete admin Back/callback defect found on current main; one route per spec, RED before minimal fix, then actual handler dispatch.
+4. Continue A3/A4/A5 for customer and pending-state flows, preserving protected product lanes.
+5. Finish A6 UI/UX consistency review and update this ledger with evidence, not assumptions.
+6. Re-run A7 after a user timing sample can be correlated by local time/timezone; classify only from measured phases.
+7. Complete A8 only after all checklist rows have evidence and delivery states are separately verified.

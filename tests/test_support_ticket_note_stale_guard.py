@@ -85,7 +85,7 @@ class SupportTicketNoteStaleGuardTests(unittest.TestCase):
             for button in row
             if button.text == "📌 Ghi chú admin"
         )
-        self.assertEqual(callback_data, f"ticket|note|{ticket_id}")
+        self.assertEqual(callback_data, f"ticket|note|{ticket_id}|new|0")
         routes = re.findall(
             r'(?m)^\s*tg_app\.add_handler\(CallbackQueryHandler\(handle_ticket_callback, pattern=r"([^"]+)"\)\)',
             self.source,
@@ -115,7 +115,10 @@ class SupportTicketNoteStaleGuardTests(unittest.TestCase):
 
         self._run_note_callback(query)
 
-        self.assertEqual(self.pending, [((501, "admin_note_input"), {"ticket_id": 74})])
+        self.assertEqual(
+            self.pending,
+            [((501, "admin_note_input"), {"ticket_id": 74, "source": "new", "list_offset": 0})],
+        )
         self.assertEqual(len(self.edits), 1)
         self.assertIn("📌 Nhập ghi chú nội bộ", self.edits[0][0])
 

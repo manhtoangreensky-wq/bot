@@ -60938,7 +60938,7 @@ def support_ticket_admin_keyboard(ticket: dict, source: str = "new", list_offset
         [InlineKeyboardButton("✅ Đã xử lý", callback_data=f"ticket|st|{ticket_id}|resolved"), InlineKeyboardButton("💬 Soạn trả lời", callback_data=f"ticket|reply|{ticket_id}|{source}|{max(0, int(list_offset or 0))}")],
         [InlineKeyboardButton("🤖 Gợi ý trả lời", callback_data=f"ticket|suggest|{ticket_id}|0"), InlineKeyboardButton("💰 Đánh dấu refund", callback_data=f"ticket|st|{ticket_id}|refund_pending")],
         [InlineKeyboardButton("⏳ Chờ provider", callback_data=f"ticket|st|{ticket_id}|waiting_provider"), InlineKeyboardButton("👤 Hỏi thêm khách", callback_data=f"ticket|ask|{ticket_id}")],
-        [InlineKeyboardButton("📌 Ghi chú admin", callback_data=f"ticket|note|{ticket_id}"), InlineKeyboardButton("🙋 Nhận xử lý", callback_data=f"ticket|assign|{ticket_id}")],
+        [InlineKeyboardButton("📌 Ghi chú admin", callback_data=f"ticket|note|{ticket_id}|{source}|{max(0, int(list_offset or 0))}"), InlineKeyboardButton("🙋 Nhận xử lý", callback_data=f"ticket|assign|{ticket_id}")],
     ]
     if ticket.get("attachment_file_id"):
         rows.append([InlineKeyboardButton("📎 Xem file đính kèm", callback_data=f"ticket|file|{ticket_id}")])
@@ -140438,6 +140438,11 @@ async def handle_support_pending_input(update: Update, context: ContextTypes.DEF
         return True
     if step == "admin_note_input" and is_admin_user(uid):
         ticket_id = int(state.get("ticket_id") or 0)
+        source = state.get("source") if state.get("source") in {"new", "high", "refund"} else "new"
+        try:
+            list_offset = max(0, int(state.get("list_offset") or 0))
+        except (TypeError, ValueError):
+            list_offset = 0
         ticket = get_support_ticket(ticket_id)
         if not ticket:
             clear_support_ticket_pending(uid)
@@ -140447,7 +140452,7 @@ async def handle_support_pending_input(update: Update, context: ContextTypes.DEF
         note = f"{existing}\n[{now_text()} admin {uid}] {text}".strip()[:4000]
         ticket = update_support_ticket(ticket_id, admin_note=note)
         clear_support_ticket_pending(uid)
-        await update.message.reply_text(support_ticket_admin_text(ticket), parse_mode="HTML", reply_markup=support_ticket_admin_keyboard(ticket))
+        await update.message.reply_text(support_ticket_admin_text(ticket), parse_mode="HTML", reply_markup=support_ticket_admin_keyboard(ticket, source, list_offset))
         return True
     if step == "admin_search" and is_admin_user(uid):
         clear_support_ticket_pending(uid)
@@ -140834,9 +140839,14 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         ticket_id = int(parts[2])
         if not get_support_ticket(ticket_id):
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
+        source = parts[3] if len(parts) >= 4 and parts[3] in {"new", "high", "refund"} else "new"
+        try:
+            list_offset = max(0, int(parts[4] or 0)) if len(parts) >= 5 else 0
+        except (TypeError, ValueError):
+            list_offset = 0
         await query.answer()
-        set_support_ticket_pending(uid, "admin_note_input", ticket_id=ticket_id)
-        return await safe_edit_or_send(query, "📌 Nhập ghi chú nội bộ. Nội dung này không hiển thị cho khách.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new")]]))
+        set_support_ticket_pending(uid, "admin_note_input", ticket_id=ticket_id, source=source, list_offset=list_offset)
+        return await safe_edit_or_send(query, "📌 Nhập ghi chú nội bộ. Nội dung này không hiển thị cho khách.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|{source}|{list_offset}")]]))
     if action == "assign" and len(parts) >= 3:
         ticket_id = int(parts[2])
         if not get_support_ticket(ticket_id):
