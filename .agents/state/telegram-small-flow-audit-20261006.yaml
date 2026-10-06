@@ -1,12 +1,12 @@
 task_id: telegram-small-flow-audit-20261006
 goal_status: active
 phase: verify
-base_sha: c0a05ce0910dab0242af593ae17b39be430c0d55
+base_sha: 54ee434aab7c44b09af793bdb7dd9764976cf3bd
 objective: >-
   Continue the ordered Telegram small-flow audit. Fix wrong callback/Back routes
   narrowly while protecting AutoPost WIP and stable product engines.
-current_spec: S12.24.1-admin-provider-route-info-label
-branch: fix/admin-provider-route-info-label-20261007
+current_spec: S12.24.2-admin-package-actions-guide-labels
+branch: fix/admin-package-guide-labels-20261007
 allowed_scope:
   - Read-only source registration and candidate-test inventory
   - Remaining Admin UI emitted-control/handler evidence; narrow fixes only after reproduced RED
@@ -337,14 +337,36 @@ specs:
       a reproduced UX defect under its own narrow contract and delivery gate.
     protected_scope: "Product/Edit/Image/SubDub/Voice/Music engines, all business/data/wallet/provider operations, AutoPost WIP and shared router architecture"
   S12.24.1-admin-provider-route-info-label:
-    status: local-green-awaiting-ci-delivery
+    status: merged-deployed-runtime-sha-verified
     base_sha: c0a05ce0910dab0242af593ae17b39be430c0d55
     acceptance: >-
       The Provider/Worker control that emits menu|admin_provider_routes|admin_provider_worker
       names the Route/Group Info screen rendered by the registered menu callback.
     red: "Focused registered-handler fixture observed label '🎬 Video job' while the destination renders admin_provider_routes_text titled 'Route/Group Info'."
     green: "Changed only the visible label; focused provider module test and adjacent Provider/Worker navigation and Billing guide regressions pass."
+    pull_request: 1389
+    merge_sha: 54ee434aab7c44b09af793bdb7dd9764976cf3bd
+    ci: "python_hygiene_and_tests and python-311-source-compile SUCCESS"
+    deploy_run: 37524980913
+    runtime_sha: 54ee434aab7c44b09af793bdb7dd9764976cf3bd
+    runtime_services: "bot/web/nginx active; all NRestarts=0; tracked bot.py matches HEAD; health status=ok"
+    live_pass: "NOT_TESTED for manual Telegram/client UX"
     protected_scope: "Provider route/status logic, commands, engines/services, AutoPost WIP, shared menu router, credentials and production state"
+    files:
+      - bot.py
+      - tests/test_admin_module_child_back_origin.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
+  S12.24.2-admin-package-actions-guide-labels:
+    status: local-green-awaiting-pr-ci-delivery
+    base_sha: 54ee434aab7c44b09af793bdb7dd9764976cf3bd
+    acceptance: >-
+      The four visible Package module buttons whose registered destinations render
+      command instructions are labeled as guides; each emitted control dispatches
+      to its registered help renderer and Back returns to the Package module.
+    red: "Four test subcases reproduced misleading labels: Catalog gói, Cấp combo, Cấp tháng, Gói của user; their registered route outputs contain /package_catalog, /grant_combo, /grant_monthly, /user_packages instructions."
+    green: "5 Admin module route tests and 2 adjacent Package Orders origin tests pass; full bot.py and changed-test py_compile exit 0; git diff --check exit 0."
+    protected_scope: "Package grant/order business logic, user data, wallet, provider calls, AutoPost WIP, shared router, product engines"
     files:
       - bot.py
       - tests/test_admin_module_child_back_origin.py
@@ -369,14 +391,17 @@ verification:
   runtime_after_1380: "Exact SHA74a8d86f24d1c8960706bc2c73b0ca984a69ae56; bot/web/nginx active/running; NRestarts=0; health HTTP200"
   pull_request_1381_ci: "Both required gates SUCCESS; Ubuntu Admin routes35 and workflow hygiene99 passed; complete source compile/AST/py_compile/tokenize passed"
   runtime_after_1381: "Exact SHA0929d61ade4b8f0d60b803b62417763e90acce9e; bot/web/nginx active/running; NRestarts=0; health HTTP200; tracked bot.py matches"
-  current_pull_request_ci: "PR #1388/main checks succeeded, 178 configured tests OK; S12.24 read audit not built/pushed"
+  current_pull_request_ci: "PR #1389: both required checks SUCCESS; main workflow compiled source and passed configured route/workflow hygiene checks"
   current_full_source_compile: "Final S12.23 full py_compile module on bot.py and both changed test files exited 0; both test files recompiled after test-only fixture/coverage updates, exit 0"
   current_focused_route_tests: "Ticket/inbox adjacent subset: 24 tests in 36.372s OK; exact final focused 4 methods in 4.533s OK"
   S12_24_1_focused_tests: "Provider/Worker route evidence: 4 tests OK; adjacent Billing guide evidence: 3 tests OK"
   S12_24_1_compile: "python -m py_compile bot.py tests/test_admin_module_child_back_origin.py exited 0"
   S12_24_1_diff_check: "git diff --check exited 0; Git reports only LF-to-CRLF conversion warning for the existing test file"
+  S12_24_2_focused_tests: "Admin module callbacks/back: 5 tests OK; Package Orders origin regressions: 2 tests OK"
+  S12_24_2_compile: "python -m py_compile bot.py tests/test_admin_module_child_back_origin.py exited 0"
+  S12_24_2_diff_check: "git diff --check exited 0; Git reports only LF-to-CRLF conversion warning for the existing test file"
   current_diff_check: "git diff --check exited 0; only expected test-file line-ending warning"
-  current_delivery: "PR #1388 deployed at c0a05ce0910dab0242af593ae17b39be430c0d55; exact SHA/source/services verified; S12.24 not built"
+  current_delivery: "PR #1389 deployed at 54ee434aab7c44b09af793bdb7dd9764976cf3bd; exact SHA/source/services/health verified; workers not deployed"
   local_pytest: "Unavailable: bundled Python has no pytest module; test is standard-library unittest and added to Ubuntu CI"
   provider_calls: 0
   real_telegram_sends: 0

@@ -68,6 +68,35 @@ class AdminModuleChildBackTests(unittest.TestCase):
         self.assertEqual(["admin_provider_routes_text"], reads)
         self.assertIn("INERT DATA: admin_provider_routes_text", opened.edits[0][0])
 
+    def test_package_module_commands_are_labeled_as_guides_and_return_to_packages(self):
+        expected = {
+            "menu|admin_packages_catalog": ("📘 Hướng dẫn xem catalog gói", "/package_catalog"),
+            "menu|admin_packages_grant_combo": ("📘 Hướng dẫn cấp combo", "/grant_combo"),
+            "menu|admin_packages_grant_monthly": ("📘 Hướng dẫn cấp gói tháng", "/grant_monthly"),
+            "menu|admin_packages_user": ("📘 Hướng dẫn xem gói của user", "/user_packages"),
+        }
+        ns, route, _, _ = _runtime()
+        for name in ("admin_packages_text", "admin_packages_help_text"):
+            exec(compile(fixture._function(name), f"bot.py:{name}", "exec"), ns)
+        parent = _dispatch(route, "menu|admin_packages")
+        self.assertIn(ns["ADMIN_CONTROL_MODULES"]["packages"]["title"], parent.edits[0][0])
+
+        for callback, (expected_label, command) in expected.items():
+            with self.subTest(callback=callback):
+                button = next(
+                    button
+                    for button in _controls(parent)
+                    if button.callback_data == callback
+                )
+                self.assertEqual(expected_label, button.text)
+                opened = _dispatch(route, button.callback_data)
+                self.assertIn(command, opened.edits[0][0])
+                backs = [b for b in _controls(opened) if b.text.startswith("⬅")]
+                self.assertEqual(["menu|admin_packages"], [b.callback_data for b in backs])
+                returned = _dispatch(route, backs[0].callback_data)
+                self.assertIn(ns["ADMIN_CONTROL_MODULES"]["packages"]["title"], returned.edits[0][0])
+                self.assertIn(callback, [b.callback_data for b in _controls(returned)])
+
     def test_all_seven_emitted_controls_and_back_dispatch_to_their_module(self):
         ns, route, _, _ = _runtime()
         for module, action, _legacy_parent in CASES:
