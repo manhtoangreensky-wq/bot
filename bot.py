@@ -271737,6 +271737,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_state_reset_slash_command(update, context, text):
         return
 
+    if text in {"🏠 TOAN AAS MENU", "🛸 MENU DỊCH VỤ TOAN AAS"}:
+        return await cmd_start(update, context)
+
     # AutoPost Content Input Text Handling
     if context.user_data.get("awaiting_content_input_type"):
         in_type = context.user_data.pop("awaiting_content_input_type")
@@ -271972,9 +271975,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if is_probable_media_tags_text(text):
         return await reply_media_tags_hint(update)
-
-    if text in {"🏠 TOAN AAS MENU", "🛸 MENU DỊCH VỤ TOAN AAS"}:
-        return await cmd_start(update, context)
 
     modes = ensure_user_modes(uid)
     translate_target = modes.get("translate_mode_target") or ""
