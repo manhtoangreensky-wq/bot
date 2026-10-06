@@ -121,6 +121,7 @@ class AdminTicketOriginPaginationTest(unittest.TestCase):
             },
             "support_ticket_admin_text": lambda _ticket: "Ticket detail",
             "support_suggested_reply": _support_suggested_reply,
+            "now_text": lambda: "fixture-time",
             "get_support_ticket": lambda ticket_id: (
                 dict(self.ticket) if ticket_id == self.ticket["id"] else None
             ),
@@ -246,6 +247,46 @@ class AdminTicketOriginPaginationTest(unittest.TestCase):
             )
             self.assertEqual(list_back, "ticket|al|high|6")
             self.assertEqual(self.ticket["assigned_admin_id"], self.admin_id)
+
+        asyncio.run(exercise())
+
+    def test_lead_actions_keep_origin_through_first_and_repeat_clicks(self):
+        async def exercise():
+            self.ticket["category"] = "lead_consulting"
+            for button_label, marker in (
+                ("📞 Cần liên hệ", "Cần liên hệ"),
+                ("⭐ Lead tiềm năng", "Lead tiềm năng"),
+            ):
+                self.ticket.update(status="new", assigned_admin_id=None, admin_note="")
+                detail = await self._press("ticket|av|9006|high|6")
+                lead_callback = next(
+                    button.callback_data
+                    for row in detail.reply_markups[-1].inline_keyboard
+                    for button in row
+                    if button.text == button_label
+                )
+
+                first_detail = await self._press(lead_callback)
+                first_list = next(
+                    callback for callback in _callbacks(first_detail.reply_markups[-1])
+                    if callback.startswith("ticket|al|")
+                )
+                self.assertEqual(first_list, "ticket|al|high|6")
+
+                repeated_detail = await self._press(lead_callback)
+                repeated_list = next(
+                    callback for callback in _callbacks(repeated_detail.reply_markups[-1])
+                    if callback.startswith("ticket|al|")
+                )
+                self.assertEqual(repeated_list, "ticket|al|high|6")
+                self.assertEqual(self.ticket["admin_note"].count(marker), 1)
+
+            legacy_detail = await self._press("ticket|lead|9006|contact")
+            legacy_list = next(
+                callback for callback in _callbacks(legacy_detail.reply_markups[-1])
+                if callback.startswith("ticket|al|")
+            )
+            self.assertEqual(legacy_list, "ticket|al|new|0")
 
         asyncio.run(exercise())
 

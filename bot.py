@@ -61059,7 +61059,7 @@ def support_ticket_admin_keyboard(ticket: dict, source: str = "new", list_offset
     if ticket.get("attachment_file_id"):
         rows.append([InlineKeyboardButton("📎 Xem file đính kèm", callback_data=f"ticket|file|{ticket_id}")])
     if ticket.get("category") == "lead_consulting":
-        rows.append([InlineKeyboardButton("📞 Cần liên hệ", callback_data=f"ticket|lead|{ticket_id}|contact"), InlineKeyboardButton("⭐ Lead tiềm năng", callback_data=f"ticket|lead|{ticket_id}|potential")])
+        rows.append([InlineKeyboardButton("📞 Cần liên hệ", callback_data=f"ticket|lead|{ticket_id}|contact|{source}|{max(0, int(list_offset or 0))}"), InlineKeyboardButton("⭐ Lead tiềm năng", callback_data=f"ticket|lead|{ticket_id}|potential|{source}|{max(0, int(list_offset or 0))}")])
     rows.append([InlineKeyboardButton("⬅️ Danh sách", callback_data=f"ticket|al|{source}|{max(0, int(list_offset or 0))}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
@@ -141036,16 +141036,21 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         ticket = get_support_ticket(int(parts[2]))
         if not ticket:
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
+        source = parts[4] if len(parts) >= 5 and parts[4] in {"new", "high", "refund"} else "new"
+        try:
+            list_offset = max(0, int(parts[5] or 0)) if len(parts) >= 6 else 0
+        except (TypeError, ValueError):
+            list_offset = 0
         await query.answer()
         marker = "Cần liên hệ" if parts[3] == "contact" else "Lead tiềm năng"
         existing_note = str(ticket.get("admin_note") or "")
         note_lines = existing_note.rstrip().splitlines()
         same_last_marker = bool(note_lines) and note_lines[-1].endswith(f"admin {uid}] {marker}")
         if same_last_marker and str(ticket.get("status") or "") == "reviewing" and str(ticket.get("assigned_admin_id") or "") == str(uid):
-            return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket))
+            return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket, source, list_offset))
         note = existing_note if same_last_marker else f"{existing_note}\n[{now_text()} admin {uid}] {marker}".strip()
         ticket = update_support_ticket(ticket["id"], status="reviewing", assigned_admin_id=uid, admin_note=note)
-        return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket))
+        return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket, source, list_offset))
     if action == "file" and len(parts) >= 3:
         ticket = get_support_ticket(int(parts[2]))
         if not ticket or not ticket.get("attachment_file_id"):
