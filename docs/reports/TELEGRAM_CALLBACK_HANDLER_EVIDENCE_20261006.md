@@ -167,5 +167,14 @@ Source baseline: `0929d61ade4b8f0d60b803b62417763e90acce9e`. Production deployme
 - Fix: changed the single button label to “🧾 Route/Group Info”; callback, handler, route output, provider state and commands are unchanged.
 - GREEN: Provider/Worker module tests `4 OK`; adjacent Billing guide tests `3 OK`; full `bot.py` and changed-test `py_compile` exit 0; `git diff --check` exit 0 (LF→CRLF warning only).
 - Scope: one UI label plus one assertion in the existing registered-handler regression file; no provider call, secret, wallet, production data or Telegram message.
-- Delivery: pending separate PR, CI, merge, exact-SHA bot-only deploy and runtime check. A1/A2 inventory remains open.
+- Delivery: [PR #1389](https://github.com/manhtoangreensky-wq/bot/pull/1389) merged as `54ee434aab7c44b09af793bdb7dd9764976cf3bd`; both required CI checks SUCCESS. Exact-SHA bot-only deploy [37524980913](https://github.com/manhtoangreensky-wq/bot/actions/runs/37524980913) SUCCESS with workers disabled. Read-only SSH confirms exact runtime/source SHA, bot/web/nginx active, `NRestarts=0`, health `status=ok`. [PR delivery evidence](https://github.com/manhtoangreensky-wq/bot/pull/1389#issuecomment-6024706054).
+- Manual Telegram/client QA remains NOT_TESTED. A1/A2 inventory remains open.
+
+## S12.24.2 — Admin Package command-guide labels
+
+- Reproduction: the registered Admin Package module emitted “Catalog gói”, “Cấp combo”, “Cấp tháng”, and “Gói của user”. The corresponding registered menu-handler destinations rendered command instructions for `/package_catalog`, `/grant_combo`, `/grant_monthly`, and `/user_packages`.
+- RED: all four button-label expectations failed before the UI correction; no dispatch/setup error occurred.
+- Fix: label them “Hướng dẫn xem catalog gói”, “Hướng dẫn cấp combo”, “Hướng dẫn cấp gói tháng”, and “Hướng dẫn xem gói của user”. Preserve callback payloads and package/order operations.
+- GREEN: Admin module suite `5 OK`; adjacent Package Orders Back-origin suite `2 OK`; full `bot.py` and changed-test `py_compile` exit 0; `git diff --check` exit 0. Test traverses Admin → Packages → each emitted control → help page → emitted Back → Packages.
+- No package grant, wallet/data mutation, provider call, production job or Telegram send. PR/CI delivery pending.
 

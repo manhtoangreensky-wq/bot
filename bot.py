@@ -231977,9 +231977,9 @@ ADMIN_CONTROL_MODULES = {
         "purpose": "Dùng để xem, cấp, chỉnh hoặc thu hồi gói dịch vụ/combo/tháng/lưu trữ cho user.",
         "when": "Dùng khi cần hỗ trợ gói, combo, monthly plan, storage hoặc rà soát quyền lợi hiện có của user.",
         "buttons": [
-            [("📦 Catalog gói", "menu|admin_packages_catalog"), ("🎁 Cấp combo", "menu|admin_packages_grant_combo")],
-            [("📅 Cấp tháng", "menu|admin_packages_grant_monthly"), ("📘 Cách cấp lưu trữ", "admin_help|packages")],
-            [("📦 Đơn chờ duyệt", "menu|admin_package_orders|admin_packages"), ("👤 Gói của user", "menu|admin_packages_user")],
+            [("📘 Hướng dẫn xem catalog gói", "menu|admin_packages_catalog"), ("📘 Hướng dẫn cấp combo", "menu|admin_packages_grant_combo")],
+            [("📘 Hướng dẫn cấp gói tháng", "menu|admin_packages_grant_monthly"), ("📘 Cách cấp lưu trữ", "admin_help|packages")],
+            [("📦 Đơn chờ duyệt", "menu|admin_package_orders|admin_packages"), ("📘 Hướng dẫn xem gói của user", "menu|admin_packages_user")],
         ],
         "commands": [
             ("/package_catalog", "xem danh mục gói"),
