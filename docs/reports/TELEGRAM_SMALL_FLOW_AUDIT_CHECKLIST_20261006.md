@@ -13,9 +13,9 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 
 | ID | Spec / acceptance evidence | State |
 |---|---|---|
-| A0 | Pin source baseline and enumerate static/dynamic callbacks. Inventory snapshot: `4f1455ed31c3ebb4acbb6f6d3eff4144bf02185d`; current main after S12.6 merge: `eba2652bb4ed142bdb4a3daf77099b55bc825cdb`. Snapshot reports 3,981 button constructors, 83 static handler patterns, 0 unmatched static callbacks, and 821 dynamic callback expressions. Counts do not prove route correctness and have not yet been refreshed after the merge. | Baseline captured; dynamic paths still require route evidence. |
+| A0 | Pin source baseline and enumerate static/dynamic callbacks. Inventory snapshot: `4f1455ed31c3ebb4acbb6f6d3eff4144bf02185d`; current main after S12.7 merge: `781e23f92e5f169faf2ec7c9cf415d9a0982956a`. Snapshot reports 3,981 button constructors, 83 static handler patterns, 0 unmatched static callbacks, and 821 dynamic callback expressions. Counts do not prove route correctness and have not yet been refreshed after the merges. | Baseline captured; dynamic paths still require route evidence. |
 | A1 | Admin screens: verify each visible action label matches its handler; test emitted callback, authorization, state transition, and error/stale path. | OPEN — audit ledger not complete. |
-| A2 | Admin Back/Home: verify immediate parent and preserve list/filter/page context; test prompt and preview exits without performing the underlying action. | IN PROGRESS — S12.6 merged as PR #1367; S12.7 note-origin regression is green locally and awaiting its own PR gate. |
+| A2 | Admin Back/Home: verify immediate parent and preserve list/filter/page context; test prompt and preview exits without performing the underlying action. | IN PROGRESS — S12.6 #1367 and S12.7 #1368 merged; S12.8 ask-customer origin regression is green locally and awaiting its own PR gate. |
 | A3 | Customer screens: verify ownership, same-product navigation, Back/Home, and no cross-user or cross-product route. | OPEN — audit ledger not complete. |
 | A4 | Pending input: verify `/start`, `/menu`, Back, expiry, stale controls, repeated presses, and abandoned drafts clear only the intended state. | OPEN — audit ledger not complete. |
 | A5 | Callback coverage: check static and dynamic emitted values against actual registrations and dispatched terminal behavior; no module-only route test counts as completion. | OPEN — static unmatched count alone is insufficient. |
@@ -47,6 +47,17 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 - Minimal fix: carry the validated source/offset in the emitted note callback, pending state, prompt Back, and post-save detail keyboard; legacy callbacks default to `new|0`.
 - GREEN evidence: the note-origin tests, existing note stale-guard tests, existing ticket detail pagination test, and S12.6 reply-origin test ran together: `Ran 8 tests ... OK`.
 - Scope: `bot.py`, focused regression tests, the CI focused-test command, the tester case, and this ledger. No customer message, provider, wallet, or production data was touched.
+- Delivery state: PR #1368 merged to main on 2026-10-06 as `781e23f92e5f169faf2ec7c9cf415d9a0982956a`; `python_hygiene_and_tests` and `python-311-source-compile` passed. It was not deployed.
+
+### S12.8 — Admin Ticket ask-customer origin and pagination
+
+- Trigger: high-priority ticket list `high`, offset `6` → detail → `Hỏi thêm khách` → Back at prompt or at preview.
+- Root cause: the ask callback omitted source/offset and the handler hard-coded `source="new"`; the existing pending-input/preview path could preserve origin, but it received the wrong default.
+- Expected: both Back controls return to the same ticket detail; its list Back returns to `ticket|al|high|6`; pending input is cleared and no customer message is sent.
+- RED evidence: three focused tests failed before the fix: emitted callback was `ticket|ask|9006` instead of `ticket|ask|9006|high|6`; pending source was `new` with no offset; preview Back linked to `ticket|av|9006|new|0`.
+- Minimal fix: include the validated source/offset in the ask callback, carry them in `admin_reply_input`, and use them in the prompt Back. Existing preview construction already preserves that state.
+- GREEN evidence: ask-origin, ask stale-guard, note-origin, note stale-guard, ticket detail pagination, and reply-origin tests ran together: `Ran 13 tests ... OK`. Fake Telegram send spy recorded zero sends during Back paths.
+- Scope: `bot.py`, focused regressions, CI invocation, tester case, support runbook, and this ledger. No real customer message, provider, wallet, or production data was touched.
 - Delivery state: local implementation verified; PR/CI gate pending. No deployment is authorized or included.
 
 ### Final latency spec — provisional runtime sample
@@ -59,8 +70,8 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 
 ## Next execution order
 
-1. S12.6 closed: PR #1367 merged with both required checks green; keep its deployed state separate (not deployed).
-2. Open the separate S12.7 PR and require its focused route regression plus full-source compile/tokenize checks before merge; no deployment is implied.
+1. S12.6 and S12.7 closed: PRs #1367 and #1368 merged with both required checks green; neither was deployed.
+2. Open the separate S12.8 PR and require its focused route regression plus full-source compile/tokenize checks before merge; no deployment is implied.
 3. Continue A1/A2 with the next concrete admin Back/callback defect found on current main; one route per spec, RED before minimal fix, then actual handler dispatch.
 4. Continue A3/A4/A5 for customer and pending-state flows, preserving protected product lanes.
 5. Finish A6 UI/UX consistency review and update this ledger with evidence, not assumptions.

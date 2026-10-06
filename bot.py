@@ -60937,7 +60937,7 @@ def support_ticket_admin_keyboard(ticket: dict, source: str = "new", list_offset
     rows = [
         [InlineKeyboardButton("✅ Đã xử lý", callback_data=f"ticket|st|{ticket_id}|resolved"), InlineKeyboardButton("💬 Soạn trả lời", callback_data=f"ticket|reply|{ticket_id}|{source}|{max(0, int(list_offset or 0))}")],
         [InlineKeyboardButton("🤖 Gợi ý trả lời", callback_data=f"ticket|suggest|{ticket_id}|0"), InlineKeyboardButton("💰 Đánh dấu refund", callback_data=f"ticket|st|{ticket_id}|refund_pending")],
-        [InlineKeyboardButton("⏳ Chờ provider", callback_data=f"ticket|st|{ticket_id}|waiting_provider"), InlineKeyboardButton("👤 Hỏi thêm khách", callback_data=f"ticket|ask|{ticket_id}")],
+        [InlineKeyboardButton("⏳ Chờ provider", callback_data=f"ticket|st|{ticket_id}|waiting_provider"), InlineKeyboardButton("👤 Hỏi thêm khách", callback_data=f"ticket|ask|{ticket_id}|{source}|{max(0, int(list_offset or 0))}")],
         [InlineKeyboardButton("📌 Ghi chú admin", callback_data=f"ticket|note|{ticket_id}|{source}|{max(0, int(list_offset or 0))}"), InlineKeyboardButton("🙋 Nhận xử lý", callback_data=f"ticket|assign|{ticket_id}")],
     ]
     if ticket.get("attachment_file_id"):
@@ -140769,9 +140769,14 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         ticket_id = int(parts[2])
         if not get_support_ticket(ticket_id):
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
+        source = parts[3] if len(parts) >= 4 and parts[3] in {"new", "high", "refund"} else "new"
+        try:
+            list_offset = max(0, int(parts[4] or 0)) if len(parts) >= 5 else 0
+        except (TypeError, ValueError):
+            list_offset = 0
         await query.answer()
-        set_support_ticket_pending(uid, "admin_reply_input", ticket_id=ticket_id, source="new")
-        return await safe_edit_or_send(query, "👤 Nhập câu hỏi hoặc thông tin bạn cần khách bổ sung. Bot sẽ cho xem preview trước khi gửi.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new")]]))
+        set_support_ticket_pending(uid, "admin_reply_input", ticket_id=ticket_id, source=source, list_offset=list_offset)
+        return await safe_edit_or_send(query, "👤 Nhập câu hỏi hoặc thông tin bạn cần khách bổ sung. Bot sẽ cho xem preview trước khi gửi.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|{source}|{list_offset}")]]))
     if action == "suggest" and len(parts) >= 4:
         ticket_id = int(parts[2])
         variant = int(parts[3] or 0)
