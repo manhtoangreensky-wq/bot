@@ -59,9 +59,20 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 - Evidence: the actual emitted control dispatched through registered `handle_menu_callback`. Each “✅ Xác nhận” callback only rendered a page instructing the admin to send a slash command manually; it did not run the command. That page nevertheless said “Đã xác nhận thao tác admin”, which implied a completed action.
 - RED: the registered-handler regression failed on the same misleading CTA in all 3 Queue cases before production text was changed; there were no setup errors.
 - Fix: change the CTA to “📋 Xem lệnh cần chạy” and the result heading to “Hướng dẫn thao tác admin”. Callback payloads, commands, authorization, Cancel/Back routes and all operational handlers are unchanged.
-- GREEN: `tests/test_admin_queue_confirm_back_origin.py` → `Ran 5 tests ... OK`; adjacent `tests/test_admin_module_child_back_origin.py` → `Ran 5 tests ... OK`. Local full `pytest` is unavailable in the bundled Python. The full `bot.py` compile produced no output for over 7 minutes and was interrupted; this is NOT a compile pass or syntax failure. Required PR CI must run the full source compile and changed `test_core.py` assertion before merge. `git diff --check` exits 0 (expected LF→CRLF working-copy warning only).
+- GREEN: `tests/test_admin_queue_confirm_back_origin.py` → 5 tests OK; adjacent `tests/test_admin_module_child_back_origin.py` → 5 tests OK. PR CI, main CI and full-source compile passed.
 - Scope: two UI strings, one focused callback assertion and one existing label assertion. The manual command is never executed by this callback. No provider, wallet, database, production-data, job or real Telegram side effect.
-- Delivery: PR/CI/merge/deploy pending. Manual Telegram/client QA remains NOT_TESTED; this does not close A1/A2 or the whole-bot goal.
+- Delivery: PR [#1391](https://github.com/manhtoangreensky-wq/bot/pull/1391) merged; bot-only deploy [#37532325983](https://github.com/manhtoangreensky-wq/bot/actions/runs/37532325983) succeeded. SSH verified runtime SHA `d05c2ae034f23c7808f3a739e98ebe4826634e40`; bot/web/nginx active, `NRestarts=0`, health `status=ok`. [Delivery evidence](https://github.com/manhtoangreensky-wq/bot/pull/1391#issuecomment-6025641399). Manual Telegram/client QA remains NOT_TESTED; this does not close A1/A2 or the whole-bot goal.
+
+### S12.24.4 — Finance buttons identify command guides and render safely
+
+- Trigger: Admin → Tài chính / Finance → “Thêm chi phí” or “Xuất báo cáo”; also the expense report's add-expense shortcut.
+- Baseline: `d05c2ae034f23c7808f3a739e98ebe4826634e40`, after S12.24.3 delivery.
+- RED: the emitted controls dispatched through the actual registered menu callback. Baseline focused test produced 4 label assertion failures and 2 `NameError`s: `finance_add_expense_help_text` and `finance_export_menu_text` were referenced but undefined. The callback failed before rendering a page. Source review also found the period chooser labels said “Xuất tháng/năm này” although they displayed only a slash-command guide.
+- Minimal fix: define the two missing read-only guide renderers; identify expense/export buttons as “Hướng dẫn”; make export month/year pages explicitly command guides. Callback payloads, admin guard, commands, ledger, export implementation, report logic and Back destinations are unchanged.
+- GREEN: focused Finance renderer test → 4 tests OK. Combined with Finance Back, Admin module child-Back and Queue confirmation regressions → `Ran 15 tests in 44.804s — OK`. Actual emitted Finance controls dispatch through the registered menu callback; page content, Back target and public-user denial are covered. Finance actions are not executed by these tests.
+- CI/local verification: focused test is included in Admin Route Regressions. Test-file execution and `git diff --check` pass. Local `py_compile bot.py` ran over 90 seconds at high CPU on the 15 MB source and was stopped; it is NOT a pass or syntax failure. Complete-source compile and PR CI remain required before merge.
+- Scope/side effects: UI labels and guide renderers in `bot.py`, one registered-handler regression, CI invocation, and this ledger only. Provider calls, financial commands, ledger/wallet mutations, database writes, job creation and real Telegram messages: 0. Product/Edit/SubDub/Voice/Music route/engine and AutoPost WIP are untouched.
+- Delivery: pending complete-source verification, PR CI, merge and bot-only deploy. Manual Telegram/client QA case `UI-ADMIN-FINANCE-GUIDE-01` remains NOT_TESTED.
 
 ### S12.6 — Admin Ticket reply origin and pagination
 
@@ -332,7 +343,7 @@ Fake-role execution of actual UI functions produced 1 Railway reference in `owne
 5. S12.15 (#1381) is merged/deployed/runtime verified at `0929d61a`; S12.16 inventories registrations but is not whole-bot route proof.
 6. S12.17 is merged/deployed/runtime verified at `979c0ee5`; its stale media result controls are closed.
 7. S12.18 (#1383) is merged/deployed/runtime verified at `5c040c22`.
-8. S12.19 (#1384) is verified at `3557b97a`; S12.20 (#1385) at `406280d6`; S12.21 (#1386) at `877aea89`; S12.22 (#1387) at `8faa35eb`; S12.23 (#1388) at `c0a05ce0`; S12.24.1 (#1389) at `54ee434a`; S12.24.2 (#1390) at `1f1b035e`. S12.24.3 is locally focused-green; finish full-source verification and deliver it before continuing remaining Admin evidence.
+8. S12.19 (#1384) is verified at `3557b97a`; S12.20 (#1385) at `406280d6`; S12.21 (#1386) at `877aea89`; S12.22 (#1387) at `8faa35eb`; S12.23 (#1388) at `c0a05ce0`; S12.24.1 (#1389) at `54ee434a`; S12.24.2 (#1390) at `1f1b035e`; S12.24.3 (#1391) merged/deployed and runtime verified at `d05c2ae0`. S12.24.4 is focused-green; complete regressions/CI and deliver this Finance guide correction before continuing remaining Admin evidence.
 9. Continue A1–A5 for remaining admin/customer routes, pending-state expiry/stale/repeat behavior, preserving protected product lanes.
 10. Finish A6 UI/UX consistency review and update this ledger with evidence, not assumptions.
 11. Close A7 only after multiple user-timed samples can be compared to anonymous server phases; separate server, Telegram render and client/network wait.

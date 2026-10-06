@@ -9,6 +9,8 @@ Nguồn gốc duy nhất cho acceptance live. Sửa case tại file này trướ
 | `UI-HOME-PENDING-01` | Menu ReplyKeyboard không bị AutoPost lưu nhầm thành nội dung | Test account đang ở màn chờ nhập nội dung AutoPost → nhấn lần lượt `🏠 TOAN AAS MENU` và `🛸 MENU DỊCH VỤ TOAN AAS` | Mỗi nhãn mở `/start` menu; không lưu chính nhãn Menu làm nội dung/draft, không tạo job, gọi provider hay trừ Xu; AutoPost text handler cho nội dung thường giữ nguyên. Chỉ chạy với test account/staging, không dùng draft khách thật. |
 | `UI-CB-LATENCY-01` | Phân biệt thời gian guard, handler và render-helper | Sau deploy được duyệt, bấm một vòng menu-only `/start` → `Tạo video AI` → `Quay lại`; không xác nhận/tạo job | Ghi giờ bấm thiết bị + múi giờ; log có prefix/handler tĩnh, từng guard, handler, `safe_edit_query_message` và outcome; không có user/chat/message ID, callback data, text hay exception detail. Không suy ra thời gian render trên thiết bị từ log server. |
 
+| `UI-ADMIN-FINANCE-GUIDE-01` | Nhãn Finance không hứa chạy giao dịch/xuất file khi chỉ mở hướng dẫn | Tài khoản staging admin → Admin → Tài chính → Hướng dẫn thêm chi phí → Quay lại; mở Hướng dẫn xuất báo cáo → Hướng dẫn tháng/năm → Quay lại. Không gửi lệnh được hiển thị. | Các trang ghi rõ đây là hướng dẫn, lệnh đúng `/expense_add ...` hoặc `/finance_export <kỳ>`; Back về đúng Tài chính; không có khoản chi mới, tệp CSV gửi ra, Xu/wallet thay đổi hoặc job/provider call. User thường không được mở callback Finance. |
+
 ## Product Video Strategy V2 — correction gate đang mở
 
 | ID | Mục đích | Flow khóa | PASS bắt buộc |
