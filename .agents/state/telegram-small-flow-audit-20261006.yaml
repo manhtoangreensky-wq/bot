@@ -1,19 +1,19 @@
 task_id: telegram-small-flow-audit-20261006
 goal_status: active
 phase: verify
-base_sha: 0929d61ade4b8f0d60b803b62417763e90acce9e
+base_sha: 5c040c22f2cf07b9edaa9631c219dbf07c15a6ff
 objective: >-
   Continue the ordered Telegram small-flow audit. Fix wrong callback/Back routes
   narrowly while protecting AutoPost WIP and stable product engines.
-current_spec: S12.18-admin-package-orders-back-origin
+current_spec: S12.19-admin-security-db-back-origin
 branch: audit/telegram-handler-evidence-20261006
 allowed_scope:
   - Read-only source registration and candidate-test inventory
-  - Media-library callback snapshot/session validation and inert registered-handler tests
+  - Admin Security/DB navigation origin validation and inert registered-handler tests
   - Evidence matrix, checklist, operating notes and durable state
 protected_scope:
   - AutoPost WIP
-  - Product Video, Edit, SubDub, Voice, and Music engine behavior
+  - Product Video, Edit, Image, SubDub, Voice, and Music engine behavior
   - wallet, secrets, production data, paid providers, and customer messages
 specs:
   S12.11-callback-timing:
@@ -131,7 +131,7 @@ specs:
     wallet_mutations: 0
     production_data_writes: 0
   S12.18-admin-package-orders-back-origin:
-    status: local-green-awaiting-ci-pr-deploy
+    status: merged-deployed-runtime-sha-verified
     base_sha: 979c0ee5d9cc3b51d23b5c6470a6d02947f69208
     acceptance: >-
       Admin Gói / Combo → Đơn chờ duyệt → Quay lại returns to the immediate
@@ -147,12 +147,51 @@ specs:
       keyboard emitters;
       no DB, provider, wallet, broadcast or production side effect occurred.
     test_output: "Ran 6 tests in 0.842s OK"
+    pull_request: 1383
+    merge_sha: 5c040c22f2cf07b9edaa9631c219dbf07c15a6ff
+    deploy_run: 37496473987
+    runtime_sha: 5c040c22f2cf07b9edaa9631c219dbf07c15a6ff
+    runtime_services: "toanaas-bot.service active; toanaas-web.service active; nginx.service active; NRestarts=0; health status=ok"
     files:
       - bot.py
       - tests/test_admin_package_orders_back_origin.py
       - .github/workflows/ci-main.yml
       - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
       - docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+    provider_calls: 0
+    wallet_mutations: 0
+    production_data_writes: 0
+  S12.19-admin-security-db-back-origin:
+    status: local-green-awaiting-ci-pr-deploy
+    base_sha: 5c040c22f2cf07b9edaa9631c219dbf07c15a6ff
+    acceptance: >-
+      Admin Security/DB child screens return to their emitting module or sibling
+      screen; refresh preserves that origin; backup results return to the screen
+      that emitted the backup control. Public/invalid origins stop before work.
+    red: >-
+      Production DB Status and Security Log keyboards both emitted Back to
+      menu|admin instead of the Security/DB module.
+    green: >-
+      The focused unittest reads both production keyboard builders and dispatches
+      the registered menu handler across module/sibling origins, refresh and fake
+      backup outcomes, with public/invalid denial before reads and cleanup. The
+      5 focused tests and adjacent route regressions ran 24 tests successfully.
+      No DB writes, backup creation, provider calls, wallet mutations or production
+      messages occurred.
+    test_output: "Ran 24 tests in 40.707s OK"
+    pull_request: 1384
+    live_pass: "NOT_TESTED"
+    files:
+      - bot.py
+      - tests/test_admin_security_db_back_origin.py
+      - tests/test_p0_17c4_webhook_db_html_security_events.py
+      - .github/workflows/ci-main.yml
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
+      - TAI-LIEU/01-NGHIEP-VU-VAN-HANH.md
+      - TAI-LIEU/02-CHUC-NANG-GOC-VA-HIEN-TAI.md
+      - KIEM-THU/DANH-SACH-CASE.md
       - .agents/state/telegram-small-flow-audit-20261006.yaml
     provider_calls: 0
     wallet_mutations: 0
@@ -165,7 +204,6 @@ verification:
   focused_harness: "31 route regressions in 39.856s and 6 root/timing regressions in 5.868s passed; public menu denial verified on 3 original routes"
   changed_test_file_py_compile: passed
   git_diff_check: passed
-  local_pytest: "Unavailable: bundled Python has no pytest module"
   local_workflow_hygiene: "99 tests, 31 failures in Windows Bash fixtures; deployment script/workflow/test source unchanged, Ubuntu CI required"
   full_bot_py_compile: "S12.14 full-file Windows py_compile returned BOT_PY_COMPILE_PASS; both PR1380 complete-source CI gates passed"
   pull_request_1379_ci: "Both required gates SUCCESS; Ubuntu Admin routes 22 tests and workflow hygiene 99 tests passed"
@@ -173,19 +211,20 @@ verification:
   runtime_after_1380: "Exact SHA74a8d86f24d1c8960706bc2c73b0ca984a69ae56; bot/web/nginx active/running; NRestarts=0; health HTTP200"
   pull_request_1381_ci: "Both required gates SUCCESS; Ubuntu Admin routes35 and workflow hygiene99 passed; complete source compile/AST/py_compile/tokenize passed"
   runtime_after_1381: "Exact SHA0929d61ade4b8f0d60b803b62417763e90acce9e; bot/web/nginx active/running; NRestarts=0; health HTTP200; tracked bot.py matches"
-  current_pull_request_ci: "PR #1382 required checks SUCCESS: python_hygiene_and_tests and python-311-source-compile"
-  current_full_source_compile: "Bundled Python -m py_compile bot.py tests/test_media_preview_callback_snapshot.py exited 0 for the final branch state"
-  current_focused_route_tests: "python -m unittest tests/test_media_preview_callback_snapshot.py: Ran 19 tests in 51.593s OK"
-  current_diff_check: "git diff --check exited 0; warning only notes state YAML LF will normalize to CRLF"
-  current_delivery: "PR #1382 merged as 979c0ee5d9cc3b51d23b5c6470a6d02947f69208; deploy run 37486561839 SUCCESS; VPS exact SHA/services/health verified"
+  current_pull_request_ci: "PR #1384 initial head checks succeeded; updated origin/backup patch needs fresh CI"
+  current_full_source_compile: "Final S12.19 bundled Python -m py_compile bot.py tests/test_admin_security_db_back_origin.py tests/test_p0_17c4_webhook_db_html_security_events.py exited 0"
+  current_focused_route_tests: "Security/DB, Package Orders, Finance, Broadcast, Runtime, Billing, root and timing: Ran 24 tests in 40.707s OK"
+  current_diff_check: "git diff --check exited 0; only expected test-file line-ending warning"
+  current_delivery: "PR #1383 deployed at 5c040c22f2cf07b9edaa9631c219dbf07c15a6ff; PR #1384 remains open and is not deployed"
   local_pytest: "Unavailable: bundled Python has no pytest module; test is standard-library unittest and added to Ubuntu CI"
   provider_calls: 0
   real_telegram_sends: 0
   wallet_mutations: 0
   production_data_writes: 0
-  current_protected_comparator: "S12.18 diff is limited to Package Orders origin tokens, two keyboard emitters, one menu-handler branch and focused test/docs; protected engines, AutoPost WIP and shared product workers unchanged"
+  current_protected_comparator: "PASS: entire bot.py outside 3 UI functions and Admin module config byte-equivalent to base; services/providers/remote_worker/config and callback registration order unchanged; legacy security registration assertions pass"
 blockers: []
 next:
-  - Complete S12.18's branch CI, merge, exact-SHA deploy and runtime verification using the separate-PR pipeline.
-  - Continue candidate handlers and downstream stale/error paths with inert fixtures. Do not infer a bug from missing name references.
-  - Resume remaining A1/A2, then A3/A4/A5, A6, A7, and A8 in checklist order.
+  - Complete S12.19's branch CI, merge, exact-SHA deploy and runtime verification using the separate-PR pipeline.
+  - After S12.19, fix the 7 reproduced Admin module child Back mismatches recorded in the checklist (Queue, Sales Ready, System Dashboard, Provider/Worker).
+  - Continue remaining A1/A2 Admin/customer route evidence with inert fixtures; do not infer a bug from missing name references.
+  - Resume A3/A4/A5, A6, A7, and A8 in checklist order.

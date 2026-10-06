@@ -251,6 +251,12 @@ hoặc hết timeout mà không fail-closed/cleanup.
 | `ADMIN-BILLING-GUIDE-01` | Kiểm tra cả keyboard Billing module và legacy: mở lần lượt 4 hướng dẫn pending/duyệt/từ chối/PayOS; từ mỗi hướng dẫn bấm Back; thử callback bằng user thường | 8 shortcut ghi đúng hướng dẫn hoặc kế hoạch test, hiển thị lệnh tương ứng và Back về Billing. User thường nhận một alert từ chối, không render Admin và không dọn pending. Không duyệt/từ chối bill, sửa Xu, gọi provider hay truy cập dữ liệu production trong fixture |
 | `ADMIN-RUNTIME-BACK-ORIGIN-01` | Admin mở Bảo mật/DB hoặc System Ops → Hướng dẫn Runtime → Quay lại; thử callback cũ không có context, context rỗng/sai và user thường | Hai Back mới quay đúng module nguồn; callback cũ giữ Hệ thống. Admin/Menu chính giữ nguyên; context sai nhận một alert hết phiên trước cleanup; user thường bị chặn trước cleanup. Không gọi provider, sửa dữ liệu/Xu hay tạo job |
 
+## Admin Security/DB navigation — S12.19, 07/10/2026
+
+| ID | Bước kiểm thử | PASS bắt buộc |
+|---|---|---|
+| `ADMIN-SECURITY-DB-BACK-01` | Fixture: Admin → Bảo mật/DB → DB Status → Nhật ký bảo mật → Làm mới → Quay lại. Lặp chiều Security Log → DB Status; kiểm tra nút backup bằng kết quả giả lập từ module và cả hai màn con. Thử user thường và origin sai. | Back trả đúng màn đã mở nút, refresh giữ origin. Backup giả lập không gọi DB thật; kết quả Back về màn phát nút. User thường/origin lạ có đúng một alert và không đọc dữ liệu, tạo backup hoặc cleanup pending. Các nút dưới 64 byte. Không gọi provider, ví hoặc production data. |
+
 ## Media library stale callback — 06/10/2026
 
 | ID | Bước kiểm thử | PASS bắt buộc |

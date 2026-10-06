@@ -834,3 +834,9 @@ provider-fallback `56`, exact-two `3` passed; changed-file compile và
 | Runtime-help Back luôn về đúng màn vừa mở | Hai module phát cùng callback không chứa nguồn, cả hai Back về `menu|system`: 2 RED | PR #1381 đã deploy `0929d61a`; hai callback mới giữ module nguồn, legacy fallback giữ nguyên. Local/Ubuntu CI route tests đạt |
 
 | Nút Preview/Select cũ vẫn trỏ đúng kết quả cũ sau một lần tìm mới | Callback chỉ có `action|index`; cache mới thay snapshot cũ theo user nên nút cũ đã dispatch qua handler sang item mới: Music chọn `Track B`, Pixabay Preview đọc item B | S12.17 thêm UUID snapshot + product-context check; callback legacy, sai user, sai context, hết 10 phút hoặc index sai dừng trước helper; 19 test route local đạt, CI/PR/deploy còn chờ |
+
+## Admin Security/DB Back — S12.19, 07/10/2026
+
+| Cách hiểu cũ | Bằng chứng thực tế | Điều chỉnh |
+|---|---|---|
+| DB Status/Security Log Back giữ đúng nơi mở màn | Hai keyboard cũ về Admin root; cross-link giữa hai màn thiếu origin | PR #1384 mang origin trên callback, giữ qua refresh và trả đúng màn phát nút khi backup; 24 regression đạt, CI/deploy bản cập nhật còn chờ |

@@ -124,5 +124,10 @@ Source baseline: `0929d61ade4b8f0d60b803b62417763e90acce9e`. Production deployme
 ## S12.18 current-branch update — 06/10/2026
 
 - A2 route evidence found an immediate-parent mismatch in the shared Admin package-order screen: the package entry rendered a Back control to `menu|finance`. The same screen is reachable from Finance, so the correction carries and validates the opening origin.
-- `tests/test_admin_package_orders_back_origin.py` executes both origin callbacks through the registered menu handler; related Finance and Broadcast pending cleanup regressions remain green. CI invocation is added; PR/merge/deploy are pending.
+- `tests/test_admin_package_orders_back_origin.py` executes both origin callbacks through the registered menu handler; related Finance and Broadcast pending cleanup regressions remain green. CI invocation is included.
+- Delivery: PR [#1383](https://github.com/manhtoangreensky-wq/bot/pull/1383) merged as `5c040c22f2cf07b9edaa9631c219dbf07c15a6ff`; required checks and main-push CI passed. Bot-only deploy [#37496473987](https://github.com/manhtoangreensky-wq/bot/actions/runs/37496473987) succeeded. Read-only VPS verification confirmed exact runtime SHA, all three services active, `NRestarts=0`, and health `status=ok`.
+
+## S12.19 current-branch update — 06/10/2026
+
+- A2 route evidence found two Security/DB child keyboards that returned to the Admin root instead of their immediate module parent; the two child screens also needed origin tokens when opened from each other. The focused test covers both production builders and registered menu dispatch; PR/merge/deploy are pending.
 
