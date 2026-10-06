@@ -138989,6 +138989,179 @@ async def safe_edit_query_message(query, text: str, reply_markup=None, parse_mod
                     return None
         raise
 
+
+_CALLBACK_LATENCY_CONTEXT: ContextVar[dict | None] = ContextVar("callback_latency_context", default=None)
+
+
+def callback_latency_static_prefix(pattern) -> str:
+    """Return a bounded route label from the registered regex, never callback data."""
+    expression = getattr(pattern, "pattern", pattern)
+    if pattern is None:
+        return "all"
+    if not isinstance(expression, str):
+        return "custom"
+    match = re.match(r"^\^([A-Za-z][A-Za-z0-9_:-]*)", expression)
+    return match.group(1)[:40] if match else "multi"
+
+
+def _callback_latency_format_label(value, fallback: str) -> str:
+    safe_value = re.sub(r"[^A-Za-z0-9_:-]", "_", str(value or fallback))
+    return safe_value[:80] or fallback
+
+
+def _callback_latency_begin() -> tuple[dict, bool]:
+    scope = _CALLBACK_LATENCY_CONTEXT.get()
+    if scope is not None:
+        return scope, False
+    scope = {
+        "started_at": time.perf_counter(),
+        "handler": "unmatched",
+        "prefix": "unmatched",
+        "guard_ms": 0.0,
+        "guard_phases": {},
+        "handler_ms": 0.0,
+        "render_helper_ms": 0.0,
+        "render_helper_calls": 0,
+        "outcome": "ok",
+        "logged": False,
+    }
+    scope["token"] = _CALLBACK_LATENCY_CONTEXT.set(scope)
+    return scope, True
+
+
+def _callback_latency_log(scope: dict, outcome: str | None = None) -> None:
+    if not scope or scope.get("logged"):
+        return
+    scope["logged"] = True
+    if outcome:
+        scope["outcome"] = outcome
+    dispatch_ms = max(0.0, (time.perf_counter() - scope["started_at"]) * 1000)
+    guard_phases = ",".join(
+        f"{name}:{elapsed_ms:.3f}"
+        for name, elapsed_ms in sorted(scope["guard_phases"].items())
+    ) or "none"
+    try:
+        logger.info(
+            "callback_dispatch_timing prefix=%s handler=%s guard_ms=%.3f guard_phases=%s handler_ms=%.3f "
+            "render_helper_ms=%.3f render_helper_calls=%d dispatch_ms=%.3f outcome=%s",
+            scope["prefix"],
+            scope["handler"],
+            scope["guard_ms"],
+            guard_phases,
+            scope["handler_ms"],
+            scope["render_helper_ms"],
+            scope["render_helper_calls"],
+            dispatch_ms,
+            scope["outcome"],
+        )
+    finally:
+        token = scope.pop("token", None)
+        if token is not None:
+            _CALLBACK_LATENCY_CONTEXT.reset(token)
+
+
+def _callback_latency_wrap_handler(callback, group: int, pattern):
+    if getattr(callback, "_callback_latency_wrapped", False):
+        return callback
+    handler_name = _callback_latency_format_label(
+        getattr(callback, "__name__", "callback"), "callback"
+    )
+    route_prefix = callback_latency_static_prefix(pattern)
+
+    async def measured(update, context, *args, **kwargs):
+        if not getattr(update, "callback_query", None):
+            return await callback(update, context, *args, **kwargs)
+        scope, _created = _callback_latency_begin()
+        if group >= 0 and scope["handler"] == "unmatched":
+            scope["handler"] = handler_name
+            scope["prefix"] = route_prefix
+        started_at = time.perf_counter()
+        failure_outcome = None
+        try:
+            return await callback(update, context, *args, **kwargs)
+        except ApplicationHandlerStop:
+            failure_outcome = "blocked" if group < 0 else "stopped"
+            raise
+        except Exception:
+            failure_outcome = "error"
+            raise
+        finally:
+            elapsed_ms = max(0.0, (time.perf_counter() - started_at) * 1000)
+            if group < 0:
+                scope["guard_ms"] += elapsed_ms
+                scope["guard_phases"][handler_name] = (
+                    scope["guard_phases"].get(handler_name, 0.0) + elapsed_ms
+                )
+            else:
+                scope["handler_ms"] += elapsed_ms
+            if failure_outcome:
+                _callback_latency_log(scope, failure_outcome)
+
+    measured.__name__ = getattr(callback, "__name__", "callback")
+    measured.__wrapped__ = callback
+    measured._callback_latency_wrapped = True
+    return measured
+
+
+def _callback_latency_wrap_render(render_helper):
+    if getattr(render_helper, "_callback_latency_wrapped", False):
+        return render_helper
+
+    async def measured(query, *args, **kwargs):
+        scope = _CALLBACK_LATENCY_CONTEXT.get()
+        if scope is None:
+            return await render_helper(query, *args, **kwargs)
+        started_at = time.perf_counter()
+        try:
+            return await render_helper(query, *args, **kwargs)
+        finally:
+            scope["render_helper_ms"] += max(
+                0.0, (time.perf_counter() - started_at) * 1000
+            )
+            scope["render_helper_calls"] += 1
+
+    measured.__name__ = getattr(render_helper, "__name__", "safe_edit_query_message")
+    measured.__wrapped__ = render_helper
+    measured._callback_latency_wrapped = True
+    return measured
+
+
+async def callback_latency_observer(update, _context):
+    if getattr(update, "callback_query", None):
+        scope, _created = _callback_latency_begin()
+        _callback_latency_log(scope)
+
+
+def install_callback_latency_instrumentation(application) -> bool:
+    """Measure registered callback guards/routes without logging update data."""
+    global safe_edit_query_message
+    handler_groups = getattr(application, "handlers", {})
+    if any(
+        getattr(getattr(handler, "callback", None), "__name__", "") == "callback_latency_observer"
+        for handlers in handler_groups.values()
+        for handler in handlers
+    ):
+        return False
+    for group, handlers in list(handler_groups.items()):
+        for handler in handlers:
+            if not isinstance(handler, CallbackQueryHandler):
+                continue
+            callback = getattr(handler, "callback", None)
+            if not callable(callback) or getattr(callback, "__name__", "") == "callback_latency_observer":
+                continue
+            handler.callback = _callback_latency_wrap_handler(
+                callback,
+                int(group),
+                getattr(handler, "pattern", None),
+            )
+    safe_edit_query_message = _callback_latency_wrap_render(safe_edit_query_message)
+    observer_group = max(handler_groups, default=0) + 1
+    application.add_handler(
+        CallbackQueryHandler(callback_latency_observer),
+        group=observer_group,
+    )
+    return True
+
 def html_message_to_plain_text(text: str) -> str:
     raw = str(text or "").replace("\r\n", "\n").replace("\\r\\n", "\n").replace("\\n", "\n")
     plain = re.sub(r"<a\s+href=\"([^\"]+)\"[^>]*>(.*?)</a>", r"\2: \1", raw, flags=re.I | re.S)
@@ -273476,6 +273649,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_creative_callback, pattern=r"^creative\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_task_callback, pattern=r"^task\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_operator_menu_callback, pattern=r"^opmenu\|"))
+    install_callback_latency_instrumentation(tg_app)
     PRODUCT_VIDEO_CONFIRM_HANDLER_DIAGNOSTICS = audit_product_video_confirm_handler_registration(tg_app)
     if (
         PRODUCT_VIDEO_CONFIRM_HANDLER_DIAGNOSTICS.get("duplicate_confirm_handler_detected")

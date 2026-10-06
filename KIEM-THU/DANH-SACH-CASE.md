@@ -7,6 +7,7 @@ Nguồn gốc duy nhất cho acceptance live. Sửa case tại file này trướ
 | ID | Mục đích | Flow khóa | PASS bắt buộc |
 |---|---|---|---|
 | `UI-HOME-PENDING-01` | Menu ReplyKeyboard không bị AutoPost lưu nhầm thành nội dung | Test account đang ở màn chờ nhập nội dung AutoPost → nhấn lần lượt `🏠 TOAN AAS MENU` và `🛸 MENU DỊCH VỤ TOAN AAS` | Mỗi nhãn mở `/start` menu; không lưu chính nhãn Menu làm nội dung/draft, không tạo job, gọi provider hay trừ Xu; AutoPost text handler cho nội dung thường giữ nguyên. Chỉ chạy với test account/staging, không dùng draft khách thật. |
+| `UI-CB-LATENCY-01` | Phân biệt thời gian guard, handler và render-helper | Sau deploy được duyệt, bấm một vòng menu-only `/start` → `Tạo video AI` → `Quay lại`; không xác nhận/tạo job | Ghi giờ bấm thiết bị + múi giờ; log có prefix/handler tĩnh, từng guard, handler, `safe_edit_query_message` và outcome; không có user/chat/message ID, callback data, text hay exception detail. Không suy ra thời gian render trên thiết bị từ log server. |
 
 ## Product Video Strategy V2 — correction gate đang mở
 
