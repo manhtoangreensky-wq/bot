@@ -1,15 +1,15 @@
 task_id: telegram-small-flow-audit-20261006
 goal_status: active
 phase: verify
-base_sha: 406280d6c5ec545915f16786cc9e74538fedf436
+base_sha: 877aea89da20037f1c03265e8c2e53a1961f1c0e
 objective: >-
   Continue the ordered Telegram small-flow audit. Fix wrong callback/Back routes
   narrowly while protecting AutoPost WIP and stable product engines.
-current_spec: S12.21-admin-queue-confirm-guide-back-origin
-branch: fix/admin-queue-confirm-back-20261007
+current_spec: S12.22-admin-feedback-inbox-navigation
+branch: audit/admin-support-ui-20261007
 allowed_scope:
   - Read-only source registration and candidate-test inventory
-  - Three Queue confirmation-guide UI origins and inert registered-handler tests
+  - CSKH/Admin inbox read-only UI navigation and inert registered-handler tests
   - Evidence matrix, checklist, operating notes and durable state
 protected_scope:
   - AutoPost WIP
@@ -236,7 +236,7 @@ specs:
       - .agents/state/telegram-small-flow-audit-20261006.yaml
     protected_scope: "Report/queue/provider/freeze bodies; financial rules; all product engines/services/workers; AutoPost WIP"
   S12.21-admin-queue-confirm-guide-back-origin:
-    status: local-green-awaiting-final-compile-ci-delivery
+    status: merged-deployed-runtime-sha-verified
     base_sha: 406280d6c5ec545915f16786cc9e74538fedf436
     acceptance: >-
       Queue-origin Unfreeze tools, Freeze video and Refund job guide prompts retain
@@ -247,6 +247,13 @@ specs:
     red: "3 focused methods on base: 4 behavioral failures (3 wrong prompt Back origins plus invalid-context fallback), 0 setup errors; legacy instructions already pass"
     green: "3 Queue methods and 3 S12.20 methods OK; adjacent regression run Ran 30 tests in 48.340s OK; protected comparator PASS"
     final_focused: "Ran 4 tests in 12.724s OK, including actual common guard traversal; no guard code changed"
+    pull_request: 1386
+    merge_sha: 877aea89da20037f1c03265e8c2e53a1961f1c0e
+    deploy_run: 37511737977
+    runtime_sha: 877aea89da20037f1c03265e8c2e53a1961f1c0e
+    ci: "170 configured tests OK; full main source compile OK"
+    runtime_services: "bot/web/nginx active/running, all NRestarts=0; tracked bot.py matches; health status=ok"
+    live_pass: "NOT_TESTED for manual Telegram/client UX"
     files:
       - bot.py
       - tests/test_admin_queue_confirm_back_origin.py
@@ -257,6 +264,30 @@ specs:
       - TAI-LIEU/02-CHUC-NANG-GOC-VA-HIEN-TAI.md
       - KIEM-THU/DANH-SACH-CASE.md
       - .agents/state/telegram-small-flow-audit-20261006.yaml
+  S12.22-admin-feedback-inbox-navigation:
+    status: local-green-awaiting-final-compile-ci-delivery
+    base_sha: 877aea89da20037f1c03265e8c2e53a1961f1c0e
+    acceptance: >-
+      Admin Support → Góp ý admin inbox provides Back to Support and Home for empty
+      and populated read-only results. Verify emitted control, registration and
+      Back dispatch; preserve SQL, authorization, filtering and manual status writes.
+      Fifteen long feedback rows render in Telegram-sized chunks, all rows retained,
+      with navigation on the final chunk only.
+    evidence: "Source-extracted handler/cmd replay: one acknowledgement, reply_markup=None in both empty/populated inbox; fake DB commit forbidden; real sends=0"
+    red: "Final 4-method suite replayed against exact baseline source: 4 behavioral failures, 0 setup errors (empty/populated/filtered footer and 6937-character long inbox); baseline-verifier exit 0"
+    green: "Final focused 4 methods OK; adjacent regressions Ran 35 tests in 63.974s OK; both actual callback registrations exercised, Back/Home reach existing renderers, 15 rows retained within message limit, SELECT-only fake DB"
+    files:
+      - bot.py
+      - tests/test_admin_feedback_inbox_navigation.py
+      - tests/test_admin_feedback_button_route.py
+      - .github/workflows/ci-main.yml
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
+      - TAI-LIEU/01-NGHIEP-VU-VAN-HANH.md
+      - TAI-LIEU/02-CHUC-NANG-GOC-VA-HIEN-TAI.md
+      - KIEM-THU/DANH-SACH-CASE.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+    protected_scope: "Feedback SQL/data/status transitions and command behavior; all product engines/services/providers/workers; wallet/secrets; AutoPost WIP"
 verification:
   runtime_after_1378: "active/running; NRestarts=0; exact SHA 392d2eec8f942c8e5c1232e5ac537b9a84dfd82c"
   runtime_after_1379: "All three services active/running, NRestarts=0; runtime SHA 2099eb319483ba1acc80f1080a094ba9710b5f3d; three new Runtime guide labels; health HTTP 200"
@@ -272,19 +303,20 @@ verification:
   runtime_after_1380: "Exact SHA74a8d86f24d1c8960706bc2c73b0ca984a69ae56; bot/web/nginx active/running; NRestarts=0; health HTTP200"
   pull_request_1381_ci: "Both required gates SUCCESS; Ubuntu Admin routes35 and workflow hygiene99 passed; complete source compile/AST/py_compile/tokenize passed"
   runtime_after_1381: "Exact SHA0929d61ade4b8f0d60b803b62417763e90acce9e; bot/web/nginx active/running; NRestarts=0; health HTTP200; tracked bot.py matches"
-  current_pull_request_ci: "S12.21 not pushed; previous PR #1385/main CI succeeded with 166 configured tests OK"
-  current_full_source_compile: "S12.21 final bundled Python -m py_compile bot.py tests/test_admin_queue_confirm_back_origin.py exited 0"
-  current_focused_route_tests: "Queue confirmation origins and adjacent regressions: Ran 30 tests in 48.340s OK"
+  current_pull_request_ci: "S12.22 local only; separate PR pending. Previous PR #1386/main checks succeeded, 170 configured tests OK"
+  current_full_source_compile: "Final S12.22 bundled Python ran py_compile module via runpy (GC disabled only in compiler process) on full bot.py and both changed test files; exit 0"
+  current_focused_route_tests: "Feedback inbox and adjacent navigation regressions: Ran 35 tests in 63.974s OK"
   current_diff_check: "git diff --check exited 0; only expected test-file line-ending warning"
-  current_delivery: "PR #1385 deployed at 406280d6c5ec545915f16786cc9e74538fedf436; S12.21 local only"
+  current_delivery: "PR #1386 deployed at 877aea89da20037f1c03265e8c2e53a1961f1c0e; S12.22 local GREEN, not pushed or deployed"
   local_pytest: "Unavailable: bundled Python has no pytest module; test is standard-library unittest and added to Ubuntu CI"
   provider_calls: 0
   real_telegram_sends: 0
   wallet_mutations: 0
   production_data_writes: 0
-  current_protected_comparator: "PASS: bot.py outside UI-origin handler branch and 3 Queue emitters byte-equivalent to base 406280d6; confirmation text/keyboard bodies, all operations and engine sources, services/providers/workers/config/registrations unchanged"
+  current_protected_comparator: "PASS: precisely 2 read-only inbox rendering changes in cmd_admin_gopy; SQL, status writes, filter/auth and text rows byte-equivalent; shared helpers, handlers and all other bot source/services/providers/worker/config unchanged"
 blockers: []
 next:
-  - Complete S12.21 final compile and separate CI/PR/merge/deploy/runtime evidence; preserve all freeze/refund instructions and operations.
+  - Complete S12.22 registered-route RED/GREEN for read-only inbox navigation, separate CI/PR/merge/deploy/runtime evidence.
+  - After S12.22, address reproduced Support → Ticket admin hub Back destination (currently Admin root instead of Support); preserve ticket data/status/reply operations.
   - Continue remaining A1/A2 Admin/customer route evidence with inert fixtures; do not infer a bug from missing name references.
   - Resume A3/A4/A5, A6, A7, and A8 in checklist order.

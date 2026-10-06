@@ -228744,7 +228744,7 @@ async def cmd_admin_gopy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         conn.close()
     if not rows:
-        return await update.message.reply_text("📭 Hòm thư góp ý đang trống.")
+        return await update.message.reply_text("📭 Hòm thư góp ý đang trống.", reply_markup=admin_child_keyboard("admin_support"))
     lines = [
         "📊 <b>GÓP Ý / BÁO LỖI MỚI NHẤT</b>",
         "",
@@ -228761,7 +228761,7 @@ async def cmd_admin_gopy(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Nội dung: {safe_content}\n"
             f"• Context: <code>{safe_context or '-'}</code>"
         )
-    await update.message.reply_text("\n\n".join(lines), parse_mode="HTML")
+    await send_pricing_lines(update.message, lines, reply_markup=admin_child_keyboard("admin_support"))
 
 async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):

@@ -1688,3 +1688,11 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
 
 - Từ Queue mở Unfreeze tools, Freeze video hoặc Refund job, Back/Hủy trước đây về trang hướng dẫn khác. Patch chỉ giữ nguồn Queue ở prompt, Cancel và bước nhắc lệnh; acknowledgement Back về đúng prompt rồi mới về Queue.
 - Nội dung lệnh và thao tác tài chính/freeze không đổi. 30 regression và 4 test focused đạt, gồm các guard chung trước menu callback. Compile/PR/CI/deploy còn chờ.
+
+- Delivery S12.21: #1386 đã deploy `877aea89`, 170 test CI theo cấu hình đạt; VPS đúng SHA, bot.py khớp, ba service active/running, NRestarts=0, health=ok. Manual Telegram QA chưa đo. Mục tiếp theo: điều hướng inbox Góp ý admin; chưa sửa production.
+
+## Góp ý admin inbox — S12.22, 07/10/2026
+
+- Inbox trống/có dữ liệu và kết quả lọc thiếu Back/Home. Fixture 15 góp ý dài cho ra tin 6.937 ký tự, vượt giới hạn Telegram.
+- Patch chỉ sửa hai dòng trả kết quả đọc-only: inbox trống có Back → CSKH/Home; inbox có dữ liệu được chia bằng helper có sẵn, giữ đủ mục và navigation ở tin cuối. SQL, lọc, quyền và cập nhật trạng thái thủ công giữ nguyên.
+- 4 test focused và 35 regression qua callback đăng ký đạt; comparator xác nhận các engine/helper/handler và phần code khác nguyên vẹn. Local GREEN; compile/CI/PR/deploy còn chờ. Không provider/ví/job/production data/tin thật trong kiểm thử.

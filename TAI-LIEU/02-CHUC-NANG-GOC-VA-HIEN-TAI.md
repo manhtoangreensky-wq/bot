@@ -852,3 +852,9 @@ provider-fallback `56`, exact-two `3` passed; changed-file compile và
 | Cách hiểu trước | Bằng chứng | Hiện trạng |
 |---|---|---|
 | Back/Hủy của xác nhận từ Queue về đúng màn trước | 3 entry về unfreeze/freeze/refund guide chưa mở từ Queue | Origin giữ qua prompt và acknowledgement; 30 regression + 4 focused đạt, thao tác freeze/refund nguyên vẹn. S12.21 đang chờ delivery; S12.20 đã deploy `406280d6` |
+
+## Góp ý admin inbox — S12.22, 07/10/2026
+
+| Cách hiểu trước | Bằng chứng | Điều chỉnh |
+|---|---|---|
+| Inbox đọc-only có điều hướng và đủ dài để chứa 15 góp ý | Ba nhánh thiếu footer; fixture 15 dòng cho tin 6.937 ký tự | Hai renderer dùng keyboard/chunk helper sẵn có; đủ 15 mục, tin dưới limit, Back/Home ở tin cuối. 35 regression đạt; S12.22 delivery chưa xong |
