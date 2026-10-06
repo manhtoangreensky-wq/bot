@@ -92,7 +92,7 @@ def test_admin_support_buttons_open_their_labeled_destinations():
     }
 
     assert buttons["📝 Góp ý admin"] == "admin_gopy|inbox"
-    assert buttons["📌 Hướng dẫn hỗ trợ"] == "admin_help|support"
+    assert buttons["📌 Hướng dẫn hỗ trợ"] == "admin_help|support|admin_support"
     assert 'CallbackQueryHandler(handle_admin_gopy_callback, pattern=r"^admin_gopy\\|")' in BOT_SOURCE
     assert 'CallbackQueryHandler(handle_admin_help_callback, pattern=r"^admin_help\\|")' in BOT_SOURCE
 
@@ -152,7 +152,7 @@ def test_admin_support_guidance_callback_still_renders_the_handbook():
         ["handle_admin_help_callback"],
         is_admin_user=lambda user_id: user_id == 123,
         admin_handbook_section_text=lambda kind: f"handbook:{kind}",
-        admin_handbook_section_keyboard=lambda kind: f"keyboard:{kind}",
+        admin_handbook_section_keyboard=lambda kind, return_action="": f"keyboard:{kind}",
         safe_edit_query_message=safe_edit,
     )
     query = _Query("admin_help|support")
