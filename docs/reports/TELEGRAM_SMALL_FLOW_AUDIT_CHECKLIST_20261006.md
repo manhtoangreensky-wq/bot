@@ -13,9 +13,9 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 
 | ID | Spec / acceptance evidence | State |
 |---|---|---|
-| A0 | Pin source baseline and enumerate static/dynamic callbacks. Inventory snapshot: `4f1455ed31c3ebb4acbb6f6d3eff4144bf02185d`; current main after S12.8 merge: `e954fcaef968a421e8628428d733f99ec7ee275c`. Snapshot reports 3,981 button constructors, 83 static handler patterns, 0 unmatched static callbacks, and 821 dynamic callback expressions. Counts do not prove route correctness and have not yet been refreshed after the merges. | Baseline captured; dynamic paths still require route evidence. |
+| A0 | Pin source baseline and enumerate static/dynamic callbacks. Inventory snapshot: `4f1455ed31c3ebb4acbb6f6d3eff4144bf02185d`; current main after S12.9 merge: `b3aa82150c570b139dc36047821eb4bbdd04b99d`. Snapshot reports 3,981 button constructors, 83 static handler patterns, 0 unmatched static callbacks, and 821 dynamic callback expressions. Counts do not prove route correctness and have not yet been refreshed after the merges. | Baseline captured; dynamic paths still require route evidence. |
 | A1 | Admin screens: verify each visible action label matches its handler; test emitted callback, authorization, state transition, and error/stale path. | OPEN — audit ledger not complete. |
-| A2 | Admin Back/Home: verify immediate parent and preserve list/filter/page context; test prompt and preview exits without performing the underlying action. | IN PROGRESS — S12.6 #1367, S12.7 #1368, S12.8 #1370 merged; S12.9 Assign origin regression is green locally and awaiting its own PR gate. |
+| A2 | Admin Back/Home: verify immediate parent and preserve list/filter/page context; test prompt and preview exits without performing the underlying action. | IN PROGRESS — S12.6 #1367, S12.7 #1368, S12.8 #1370, S12.9 #1371 merged; S12.10 status origin regression is green locally and awaiting its own PR gate. |
 | A3 | Customer screens: verify ownership, same-product navigation, Back/Home, and no cross-user or cross-product route. | OPEN — audit ledger not complete. |
 | A4 | Pending input: verify `/start`, `/menu`, Back, expiry, stale controls, repeated presses, and abandoned drafts clear only the intended state. | OPEN — audit ledger not complete. |
 | A5 | Callback coverage: check static and dynamic emitted values against actual registrations and dispatched terminal behavior; no module-only route test counts as completion. | OPEN — static unmatched count alone is insufficient. |
@@ -69,6 +69,17 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 - Minimal fix: carry validated source/offset in the Assign callback, parse them in the handler with legacy `new|0` fallback, and rebuild the detail keyboard with that context.
 - GREEN evidence: ask/assign origin, ask stale-guard, note origin/stale-guard, reply origin, and Admin Ticket Back pagination ran together: `Ran 14 tests ... OK`. Assign is dispatched through the registered ticket handler; no production data or customer message is used.
 - Scope: `bot.py`, the generic focused origin test module, CI invocation, tester case, support runbook, and this ledger. No provider call or wallet mutation.
+- Delivery state: PR #1371 merged to main on 2026-10-06 as `b3aa82150c570b139dc36047821eb4bbdd04b99d`; both PR checks and main-push CI/source-compile passed. No deploy workflow ran for this merge; it was not deployed.
+
+### S12.10 — Admin Ticket status-change origin and pagination
+
+- Trigger: high-priority ticket list `high`, offset `6` → detail → any status action (`Đã xử lý`, `Đánh dấu refund`, or `Chờ provider`) → `Danh sách`.
+- Root cause: all three status callbacks omitted source/offset; after updating status, the handler rebuilt the detail keyboard with the default `new|0` context.
+- Expected: all three emitted callbacks carry the current filter/page; a status update changes only the fixture ticket and keeps `ticket|al|high|6` in the refreshed detail.
+- RED evidence: the registered-handler test expected `ticket|st|9006|resolved|high|6`, `...|refund_pending|high|6`, and `...|waiting_provider|high|6`; all emitted callbacks omitted `high|6`.
+- Minimal fix: append validated source/offset to all three status callbacks; parse them with legacy `new|0` fallback and rebuild the detail with that origin.
+- GREEN evidence: status, Assign, Ask, stale-guard, Note, Reply, and Admin Ticket Back regressions ran together: `Ran 15 tests ... OK`. The test dispatches a real emitted status callback through the registered handler using an in-memory ticket fixture.
+- Scope: `bot.py`, the existing focused origin regression module/CI command, tester case, support runbook, and this ledger. No production ticket, provider call, customer message, or wallet mutation.
 - Delivery state: local implementation verified; PR/CI gate pending. No deployment is authorized or included.
 
 ### Final latency spec — provisional runtime sample
@@ -82,8 +93,8 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 
 ## Next execution order
 
-1. S12.6–S12.8 closed: PRs #1367, #1368, and #1370 merged with required checks green; none of these Admin Ticket changes was deployed.
-2. Open the separate S12.9 PR and require its focused route regression plus full-source compile/tokenize checks before merge; no deployment is implied.
+1. S12.6–S12.9 closed: PRs #1367, #1368, #1370, and #1371 merged with required checks green; none of these Admin Ticket changes was deployed.
+2. Open the separate S12.10 PR and require its focused route regression plus full-source compile/tokenize checks before merge; no deployment is implied.
 3. Continue A1/A2 with the next concrete admin Back/callback defect found on current main; one route per spec, RED before minimal fix, then actual handler dispatch.
 4. Continue A3/A4/A5 for customer and pending-state flows, preserving protected product lanes.
 5. Finish A6 UI/UX consistency review and update this ledger with evidence, not assumptions.

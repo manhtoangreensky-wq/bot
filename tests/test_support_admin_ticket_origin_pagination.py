@@ -245,6 +245,32 @@ class AdminTicketOriginPaginationTest(unittest.TestCase):
 
         asyncio.run(exercise())
 
+    def test_status_updates_from_filtered_page_keep_origin_and_offset(self):
+        async def exercise():
+            detail = await self._press("ticket|av|9006|high|6")
+            expected_callbacks = {
+                "✅ Đã xử lý": "ticket|st|9006|resolved|high|6",
+                "💰 Đánh dấu refund": "ticket|st|9006|refund_pending|high|6",
+                "⏳ Chờ provider": "ticket|st|9006|waiting_provider|high|6",
+            }
+            actual_callbacks = {
+                button.text: button.callback_data
+                for row in detail.reply_markups[-1].inline_keyboard
+                for button in row
+                if button.text in expected_callbacks
+            }
+            self.assertEqual(actual_callbacks, expected_callbacks)
+
+            updated_detail = await self._press(expected_callbacks["⏳ Chờ provider"])
+            self.assertEqual(self.ticket["status"], "waiting_provider")
+            list_back = next(
+                callback for callback in _callbacks(updated_detail.reply_markups[-1])
+                if callback.startswith("ticket|al|")
+            )
+            self.assertEqual(list_back, "ticket|al|high|6")
+
+        asyncio.run(exercise())
+
 
 if __name__ == "__main__":
     unittest.main()
