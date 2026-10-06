@@ -82,7 +82,7 @@ class AdminPackageStorageGuideLabelTests(unittest.TestCase):
             for button in row
         }
 
-        self.assertEqual(buttons.get("📘 Cách cấp lưu trữ"), "admin_help|packages")
+        self.assertEqual(buttons.get("📘 Cách cấp lưu trữ"), "admin_help|packages|admin_packages")
         self.assertNotIn("💾 Cấp lưu trữ", buttons)
         self.assertRegex("admin_help|packages", _registered_admin_help_pattern())
 

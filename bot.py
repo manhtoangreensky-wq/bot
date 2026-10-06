@@ -141257,8 +141257,6 @@ async def handle_admin_help_callback(update: Update, context: ContextTypes.DEFAU
     parts = str(query.data or "").split("|")
     kind = parts[1].strip() if len(parts) > 1 else "payment"
     return_action = parts[2].strip() if len(parts) > 2 else ""
-    if kind not in {"users", "xu"} or return_action != "admin_users":
-        return_action = ""
     return await safe_edit_query_message(
         query,
         admin_handbook_section_text(kind),
@@ -232069,11 +232067,20 @@ def admin_module_page_text(module_key: str) -> str:
 def admin_module_keyboard(module_key: str) -> InlineKeyboardMarkup:
     module = ADMIN_CONTROL_MODULES.get(module_key) or ADMIN_CONTROL_MODULES["users"]
     action = f"admin_{module_key}"
-    help_context = "|admin_users" if module_key == "users" else ""
-    rows = [
-        [InlineKeyboardButton(label, callback_data=callback) for label, callback in row]
-        for row in module.get("buttons") or []
-    ]
+    help_context = f"|{action}" if module_key in ADMIN_CONTROL_MODULES else ""
+    rows = []
+    for row in module.get("buttons") or []:
+        rendered_row = []
+        for label, callback in row:
+            callback_data = callback
+            if (
+                help_context
+                and str(callback_data).startswith("admin_help|")
+                and len(str(callback_data).split("|")) == 2
+            ):
+                callback_data = f"{callback_data}{help_context}"
+            rendered_row.append(InlineKeyboardButton(label, callback_data=callback_data))
+        rows.append(rendered_row)
     rows.append([
         InlineKeyboardButton("🔄 Làm mới", callback_data=f"menu|{action}"),
         InlineKeyboardButton("📘 Hướng dẫn", callback_data=f"admin_help|{module.get('guide') or module_key}{help_context}"),
@@ -232223,9 +232230,16 @@ def admin_handbook_section_text(kind: str) -> str:
     return f"{title_map.get(clean, title_map['payment'])}\n\n{body}"
 
 def admin_handbook_section_keyboard(kind: str = "", return_action: str = "") -> InlineKeyboardMarkup:
-    if kind in {"users", "xu"} and return_action == "admin_users":
+    module_key = str(return_action or "").strip()
+    module_key = module_key[len("admin_"):] if module_key.startswith("admin_") else ""
+    module = ADMIN_CONTROL_MODULES.get(module_key) if module_key else None
+    if module and return_action == f"admin_{module_key}":
+        return_label = str(module.get("title") or module_key)
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("📘 Hướng dẫn Admin", callback_data="menu|admin_handbook"), InlineKeyboardButton("⬅️ User / Xu", callback_data="menu|admin_users")],
+            [
+                InlineKeyboardButton("📘 Hướng dẫn Admin", callback_data="menu|admin_handbook"),
+                InlineKeyboardButton(f"⬅️ {return_label}", callback_data=f"menu|{return_action}"),
+            ],
             [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([

@@ -13,17 +13,24 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 
 | ID | Spec / acceptance evidence | State |
 |---|---|---|
-| A0 | Pin source baseline and enumerate static/dynamic callbacks. Inventory snapshot source: `4f1455ed31c3ebb4acbb6f6d3eff4144bf02185d`; main at last check: `f9e2ea473617409194ad48498beab14b68c2e8dd` after PR #1375. Snapshot reports 3,981 button constructors, 83 static handler patterns, 0 unmatched static callbacks, and 821 dynamic callback expressions, all measured on the older snapshot SHA; counts do not prove route correctness and have not yet been refreshed after the merges. | Baseline captured; dynamic paths still require route evidence. |
-| A1 | Admin screens: verify each visible action label matches its handler; test emitted callback, authorization, state transition, and error/stale path. | OPEN — audit ledger not complete. |
-| A2 | Admin Back/Home: verify immediate parent and preserve list/filter/page context; test prompt and preview exits without performing the underlying action. | IN PROGRESS — S12.6 #1367, S12.7 #1368, S12.8 #1370, S12.9 #1371, S12.10 #1372, and subsequent Admin Ticket navigation #1373/#1374 merged; other admin/customer routes remain open. |
+| A0 | Pin source baseline and enumerate static/dynamic callbacks. Inventory snapshot source: `4f1455ed31c3ebb4acbb6f6d3eff4144bf02185d`; current main: `27926e15375f9ce7d41bbf37d5fee596c1216fec` after PR #1376. Snapshot reports 3,981 button constructors, 83 static handler patterns, 0 unmatched static callbacks, and 821 dynamic callback expressions, all measured on the older snapshot SHA; counts do not prove route correctness and have not been refreshed. | Baseline pinned; dynamic paths still require route evidence. |
+| A1 | Admin screens: verify each visible action label matches its handler; test emitted callback, authorization, state transition, and error/stale path. | PARTIAL — report/overview, root/help/package and feedback/access samples have evidence below; full visible-action matrix remains open. |
+| A2 | Admin Back/Home: verify immediate parent and preserve list/filter/page context; test prompt and preview exits without performing the underlying action. | IN PROGRESS — ticket-origin specs S12.6–S12.10 (#1367–#1374) delivered in the #1376 release; S12.12 fixes Admin handbook module-return context locally, pending PR/CI/merge/deploy. Other admin/customer routes remain open. |
 | A3 | Customer screens: verify ownership, same-product navigation, Back/Home, and no cross-user or cross-product route. | OPEN — audit ledger not complete. |
-| A4 | Pending input: verify `/start`, `/menu`, Back, expiry, stale controls, repeated presses, and abandoned drafts clear only the intended state. | PARTIAL — ReplyKeyboard Home preemption is locally fixed/tested below; the remaining reset/expiry/stale-state matrix is open. |
+| A4 | Pending input: verify `/start`, `/menu`, Back, expiry, stale controls, repeated presses, and abandoned drafts clear only the intended state. | PARTIAL — ReplyKeyboard Home preemption PR #1375 is in the deployed #1376 release; the remaining reset/expiry/stale-state matrix is open. |
 | A5 | Callback coverage: check static and dynamic emitted values against actual registrations and dispatched terminal behavior; no module-only route test counts as completion. | OPEN — static unmatched count alone is insufficient. |
 | A6 | UI/UX consistency: inspect admin/customer button labels, duplicated actions, misleading guide/status labels, row density, and recovery copy; propose or implement only narrow approved fixes. | OPEN — audit ledger not complete. |
-| A7 | Final latency diagnosis (last, after route checks): correlate anonymous server phases with a timed user click; separate callback acknowledgement, local build/cleanup, Telegram render, and client/network wait. Report measured distribution and limits; do not guess hardware/network purchases from an uncorrelated sample. | PARTIAL — one server event below; needs a timestamp-correlated sample and additional events. An approved instrumentation spec is tracked separately below; it does not close A7. |
+| A7 | Final latency diagnosis (last, after route checks): correlate anonymous server phases with a timed user click; separate callback acknowledgement, local build/cleanup, Telegram render, and client/network wait. Report measured distribution and limits; do not guess hardware/network purchases from an uncorrelated sample. | PARTIAL — one user-confirmed two-button round produced closely timed anonymous server events; no exact click timestamp or client/network measurement, and no distribution across routes. |
 | A8 | Closeout: run focused regressions, required syntax/tests, diff/scope review; push a separate PR for each completed spec, merge only in order, and keep deployment/live verification separate. | OPEN. |
 
 ## Current evidence
+
+### A1 — Admin operational surface (partial)
+
+- Prior focused evidence: Admin Overview callback and report-source tests passed (one test each); a read-only handler simulation covered monthly/yearly reports, authorization before report read, and invalid period (4 assertions).
+- Admin root/help/package evidence: admin root and help tests (2 + 3) and package-storage guide tests (2) passed. Admin feedback/access checks covered emitted destinations, read-only inbox query/no commit, handbook rendering, admin guard, and public denial (6 focused cases); a stale fake helper signature was corrected in the local test fixture.
+- Current S12.12 route test exercises the real configured `ADMIN_CONTROL_MODULES` keyboard builders and registered-help callback body; it does not exercise every non-guide admin action or every state-changing handler.
+- A1 remains open until each remaining visible admin action has an emitted-button → registered-handler → authorized outcome/error-path evidence row. No provider, wallet, user-data, or production-message operation was performed.
 
 ### S12.6 — Admin Ticket reply origin and pagination
 
@@ -35,7 +42,7 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 - Evidence after fix: `python.exe tests/test_support_ticket_reply_origin_pagination.py` → `Ran 2 tests ... OK`; tests dispatch actual emitted controls through the registered ticket handler and assert no send attempt.
 - Scope review: the intended patch is `bot.py`, the new focused route test, CI invocation, this checklist, and the tester case. After all edits, the focused unittest reported `Ran 2 tests ... OK`, test-file `py_compile` returned 0, and `git diff --check` returned 0; untracked text files were also checked for trailing whitespace.
 - Tester source: `KIEM-THU/DANH-SACH-CASE.md` includes `ADMIN-TICKET-BACK-01`; it requires a seven-ticket fixture/staging list, not production data. Existing tester labels and issue templates were found; no GitHub issue/project was created.
-- Delivery state: PR #1367 merged to main on 2026-10-06 as `eba2652bb4ed142bdb4a3daf77099b55bc825cdb`; both `python_hygiene_and_tests` and `python-311-source-compile` passed. It was not deployed; the logging-only approval did not authorize deployment of this Admin Ticket change.
+- Delivery state: PR #1367 merged to main on 2026-10-06 as `eba2652bb4ed142bdb4a3daf77099b55bc825cdb`; both required CI checks passed. It was not deployed at its individual merge; it was later deployed as an ancestor in #1376, whose exact runtime SHA is verified below.
 - Verification limitation: local `pytest` is unavailable and the earlier full local `py_compile bot.py` run was interrupted after more than six minutes, so it has no local pass/fail verdict. The modified route functions were compiled and exercised by the focused harness, and PR #1367 supplied the missing delivery gates: both `python_hygiene_and_tests` and `python-311-source-compile` passed. No claim is made that the entire repository test suite ran.
 
 ### S12.7 — Admin Ticket note origin and pagination
@@ -47,7 +54,7 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 - Minimal fix: carry the validated source/offset in the emitted note callback, pending state, prompt Back, and post-save detail keyboard; legacy callbacks default to `new|0`.
 - GREEN evidence: the note-origin tests, existing note stale-guard tests, existing ticket detail pagination test, and S12.6 reply-origin test ran together: `Ran 8 tests ... OK`.
 - Scope: `bot.py`, focused regression tests, the CI focused-test command, the tester case, and this ledger. No customer message, provider, wallet, or production data was touched.
-- Delivery state: PR #1368 merged to main on 2026-10-06 as `781e23f92e5f169faf2ec7c9cf415d9a0982956a`; `python_hygiene_and_tests` and `python-311-source-compile` passed. It was not deployed.
+- Delivery state: PR #1368 merged to main on 2026-10-06 as `781e23f92e5f169faf2ec7c9cf415d9a0982956a`; both required CI checks passed. It was not deployed at its individual merge; it was later deployed as an ancestor in #1376.
 
 ### S12.8 — Admin Ticket ask-customer origin and pagination
 
@@ -58,7 +65,7 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 - Minimal fix: include the validated source/offset in the ask callback, carry them in `admin_reply_input`, and use them in the prompt Back. Existing preview construction already preserves that state.
 - GREEN evidence: ask-origin, ask stale-guard, note-origin, note stale-guard, ticket detail pagination, and reply-origin tests ran together: `Ran 13 tests ... OK`. Fake Telegram send spy recorded zero sends during Back paths.
 - Scope: `bot.py`, focused regressions, CI invocation, tester case, support runbook, and this ledger. No real customer message, provider, wallet, or production data was touched.
-- Delivery state: PR #1370 merged to main on 2026-10-06 as `e954fcaef968a421e8628428d733f99ec7ee275c`; both PR CI gates passed. Main push CI passed; no deploy workflow ran for this merge. It was not deployed.
+- Delivery state: PR #1370 merged to main on 2026-10-06 as `e954fcaef968a421e8628428d733f99ec7ee275c`; both PR CI gates passed. No deploy workflow ran at that individual merge; it was later deployed as an ancestor in #1376.
 
 ### S12.9 — Admin Ticket assignment origin and pagination
 
@@ -69,7 +76,7 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 - Minimal fix: carry validated source/offset in the Assign callback, parse them in the handler with legacy `new|0` fallback, and rebuild the detail keyboard with that context.
 - GREEN evidence: ask/assign origin, ask stale-guard, note origin/stale-guard, reply origin, and Admin Ticket Back pagination ran together: `Ran 14 tests ... OK`. Assign is dispatched through the registered ticket handler; no production data or customer message is used.
 - Scope: `bot.py`, the generic focused origin test module, CI invocation, tester case, support runbook, and this ledger. No provider call or wallet mutation.
-- Delivery state: PR #1371 merged to main on 2026-10-06 as `b3aa82150c570b139dc36047821eb4bbdd04b99d`; both PR checks and main-push CI/source-compile passed. No deploy workflow ran for this merge; it was not deployed.
+- Delivery state: PR #1371 merged to main on 2026-10-06 as `b3aa82150c570b139dc36047821eb4bbdd04b99d`; both PR checks and main-push CI/source-compile passed. No deploy workflow ran at that individual merge; it was later deployed as an ancestor in #1376.
 
 ### S12.10 — Admin Ticket status-change origin and pagination
 
@@ -80,7 +87,7 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 - Minimal fix: append validated source/offset to all three status callbacks; parse them with legacy `new|0` fallback and rebuild the detail with that origin.
 - GREEN evidence: status, Assign, Ask, stale-guard, Note, Reply, and Admin Ticket Back regressions ran together: `Ran 15 tests ... OK`. The test dispatches a real emitted status callback through the registered handler using an in-memory ticket fixture.
 - Scope: `bot.py`, the existing focused origin regression module/CI command, tester case, support runbook, and this ledger. No production ticket, provider call, customer message, or wallet mutation.
-- Delivery state: PR #1372 merged on 2026-10-06. GitHub reports `python_hygiene_and_tests` and `python-311-source-compile` SUCCESS. No deployment is authorized or included.
+- Delivery state: PR #1372 merged on 2026-10-06; both required checks passed. No deploy ran at that individual merge; it was later deployed as an ancestor in #1376.
 
 ### A4 — ReplyKeyboard Home while AutoPost content input is pending
 
@@ -93,38 +100,44 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 - Syntax/scope limit: full `py_compile bot.py` previously produced no result after 60 seconds and was interrupted; the focused harness compiles the complete changed `handle_message` function, but no full-file syntax pass is claimed. GitHub source-compile CI remains a required gate.
 - Scope: `bot.py`, the focused regression test, tester case, and this ledger. No provider call, Telegram send, job, wallet, production data, or protected engine was touched.
 - Boundary: Home now routes correctly, but current `cmd_start` does not clear `awaiting_content_input_type`; therefore later ordinary text still follows the active AutoPost input path. Changing that reset/cancel behavior is outside this approved change.
-- Delivery state: PR #1375 merged on 2026-10-06 as `f9e2ea473617409194ad48498beab14b68c2e8dd`; `python_hygiene_and_tests` and `python-311-source-compile` passed. It has not been deployed.
+- Delivery state: PR #1375 merged on 2026-10-06 as `f9e2ea473617409194ad48498beab14b68c2e8dd`; both required CI checks passed. It was later deployed as an ancestor in #1376.
 
 ### S12.11 — Anonymous timing coverage for registered callback handlers
 
-- State: implemented locally on separate branch `fix/callback-dispatch-latency`, commit `c23e875250cbb153f5e2c2a1d1f109d4b1310ea8` (based on main `f9e2ea47`); not pushed and no PR/CI yet. Owner authorized a separate logging-only PR and deployment after CI. Latest release instruction is one PR at a time: after each merge, deploy and verify that exact merge SHA before merging/deploying the next PR. This branch's base already contains #1367–#1375; its eventual merge SHA therefore includes those ancestors, which must be stated as part of the release scope.
+- State: PR #1376 merged to main as `27926e15375f9ce7d41bbf37d5fee596c1216fec`; required `python_hygiene_and_tests` and `python-311-source-compile` checks passed. Deploy workflow #37445257742 succeeded; read-only VPS check confirmed `toanaas-bot.service` active/running, `NRestarts=0`, runtime SHA equals the merge SHA. This release also contains merged ancestors #1367–#1375 (including Product Video #1369), so it was not logger-only. Worker sync was disabled because the target diff did not include worker source.
 - Trigger/coverage: installer wraps all 87 pre-existing `CallbackQueryHandler` registrations after registration is complete, including the three shared negative-group guards, then adds a final observer. Source review found no `ConversationHandler` and no `CallbackQueryHandler(block=False)` path in this repo. Callback registration patterns and Python handler names are source-defined labels; full callback data is not read for logging.
 - Log fields: `prefix`, `handler`, aggregate `guard_ms`, source-named `guard_phases`, `handler_ms`, `render_helper_ms`, `render_helper_calls`, `dispatch_ms`, and coarse `outcome`. `handler_ms` includes nested awaited work; `render_helper_ms` overlaps it and is not an additive phase.
 - Privacy: the instrumentation does not log user/chat/message IDs, callback payload, message text, exception details, provider/job IDs, or secrets. Synthetic regression cases verify this for success, guard stop, and handler error.
-- RED/GREEN evidence: the first run failed because the instrumentation API was absent; a second RED exposed missing per-guard attribution. Latest standard-library run with the Codex-bundled Python: `Ran 4 tests in 6.112s — OK`. `pytest` is unavailable (`No module named pytest`); test-file `py_compile` and `git diff --check` returned 0. Full `py_compile bot.py` produced no output after 60 seconds and was interrupted; no full local syntax pass is claimed. GitHub source-compile and hygiene/tests CI remain required.
+- RED/GREEN evidence: the first run failed because the instrumentation API was absent; a second RED exposed missing per-guard attribution. Standard-library run with the Codex-bundled Python: `Ran 4 tests in 6.112s — OK`. Full local `py_compile bot.py` produced no output after 60 seconds and was interrupted; no full local syntax pass is claimed. Both GitHub compile and hygiene/tests checks passed for #1376.
 - Coverage limit: `render_helper_ms` measures only the shared `safe_edit_query_message` await time; it is not client display/network time and excludes direct Telegram send/edit calls that bypass this helper. `dispatch_ms` is bot-process dispatch from the first guard to the final observer. Existing `callback_latency` records for `menu|main` and `menu|main_video` remain, so those two callbacks will emit a second, separately named `callback_dispatch_timing` record.
-- Deploy-scope gate: last ledger runtime SHA is `4f1455ed31c3ebb4acbb6f6d3eff4144bf02185d`; recorded `main` `f9e2ea47` is 9 commits ahead, including PR #1369 Product Video and #1367–#1375 admin/UI changes. Before dispatch, re-read live SHA and current `main` SHA, pin the exact logger PR merge SHA, and verify no later merge has moved production ahead of that target. Do not claim the resulting deployment is logger-only; it carries its merged ancestors. Do not merge another PR until this SHA is verified live.
-- Delivery gate: push as a separate PR; wait for both required CI checks. Only claim deploy/live after the target scope is authorized, deployment workflow succeeds, and VPS health/runtime SHA plus an anonymous event are verified. No Telegram click is simulated; server timings alone do not close A7 or identify client/network wait.
+- Post-deploy runtime/event gate: satisfied for #1376. The owner confirmed clicking Product Video then Back; anonymous logs contain the expected route sequence, with limits recorded under A7 below. This does not establish client-render timing or all-route smoothness.
 
-### Final latency spec — provisional runtime sample
+### S12.12 — Admin handbook Back returns to its originating module
 
-- Logging implementation is in main via PR #1365; bot-only release #1366 targets runtime SHA `4f1455ed31c3ebb4acbb6f6d3eff4144bf02185d`.
-- Read-only SSH observation this turn: `toanaas-bot.service` is `active/running`, `NRestarts=0`, runtime SHA `4f1455ed31c3ebb4acbb6f6d3eff4144bf02185d` matches the logger-only target. No restart or deployment was run this turn.
-- Last-24-hour anonymous query returned one admin `menu|main_video` event at `2026-10-06T08:37:49+07:00`: `pre_ack_ms=0.023`, `ack_ms=222.983`, `language_ms=6.130`, `cleanup_ms=11.910`, `build_ms=2.088`, `render_ms=114.876`, `handler_ms=358.009`, `render_returned=1`.
-- The same query returned no `menu|main` event. User-reported 2–3 second experience lacks an exact local timestamp, so the one Video event cannot be attributed conclusively to that click. It proves only that this measured server handler returned in 358.009 ms; it does not identify the remaining client/network wait or describe a distribution.
-- Source coverage gap: shared callback guards run before `handle_menu_callback` starts the per-route timer. In particular, `safe_mode_callback_guard` calls `current_system_mode()`, which opens a DB connection and SELECT for each of seven flags. This is a concrete common-path cost candidate, but its live duration is not measured and it cannot yet be blamed for the delay. Existing route timers cover only `menu|main` and `menu|main_video`; other callback families and shared-guard time are uninstrumented.
-- The existing #1365 logger measures only `menu|main` and `menu|main_video`; it does not include the three shared guards or other callback families. S12.11 adds a distinct `callback_dispatch_timing` record while retaining those prior records. A fresh SSH log query has not been performed in this spec; no new runtime measurement is claimed.
-- Owner reports that the “Tạo video AI” and “Quay lại” buttons now feel smooth after the logging-only release. This is a qualitative user check without a timestamp or per-button duration, so it does not close A7 or establish latency for other button families.
-- A grouped offline callback single-ACK suite across 24 files was started with `--noconftest`; it produced progress dots but no final summary after more than 90 seconds, while the Python process reached about 1.5 GB working set, so it was interrupted. No suite-wide pass/fail is claimed; the three-test route-specific suite above is the only current green evidence for the local change.
-- No production action was performed during this check: no deploy, restart, provider call, real message, or wallet mutation.
+- Trigger: open an Admin module such as Queue/Freeze or CSKH, press a guide button, then use the guide's Back button.
+- Root cause: module guide callbacks omitted their source module (except User/Xu); `handle_admin_help_callback` discarded every parent except `admin_users`; the handbook keyboard therefore fell back to `menu|admin`.
+- RED evidence: before the production patch, focused dispatch expected `admin_help|refund|admin_queue` but the Queue button emitted `admin_help|refund`.
+- Minimal change: scope only Admin-module `admin_help` callbacks to their module; render a validated Back callback to that module. Legacy/context-free handbook links retain their existing Admin-root Back behavior. No guide text, business action, or product engine changed.
+- GREEN evidence: standard-library harness ran `Ran 4 tests ... OK`; it extracts the actual module config and keyboard/handler functions, dispatches every emitted Admin guide callback from all 9 modules, and asserts the Back destination equals the source module. The test also checks registration and non-admin denial. Package-guide tests: `Ran 2 tests ... OK`; three admin-feedback route functions passed via the built-in runner. Changed test files compiled and `git diff --check` returned 0.
+- Limits: full-file `py_compile bot.py` was attempted but had no output after about 65 seconds and was interrupted; local full suite/pytest has not been established for this spec. GitHub required CI must pass before merge. No DB mutation, customer message, provider call, wallet operation, deploy, or restart.
+- Delivery state: local branch `fix/admin-help-back-context`, based on current main `27926e15`; PR/CI/merge/deploy pending. Keep the goal active after this narrow fix and continue the remaining Admin/customer route audit.
+
+### Final latency spec — partial, server/client split preserved
+
+- Current main/runtime target: `27926e15375f9ce7d41bbf37d5fee596c1216fec` from PR #1376. Deploy run [#37445257742](https://github.com/manhtoangreensky-wq/bot/actions/runs/37445257742) succeeded; read-only VPS verification found `toanaas-bot.service` active/running, `NRestarts=0`, runtime SHA matching main.
+- After the owner confirmed clicking “Tạo video AI” then “Quay lại”, the anonymous event sequence was `menu|main_video` at `2026-10-06 16:57:18.250 +07`, then `menu|main` at `16:57:20.867 +07`. This is consistent with the two-button round, but there was no exact user click timestamp and the logs contain no identity/callback data, so attribution is not absolute.
+- Per-route `callback_latency`: handler `156.054 ms` / `156.930 ms`; acknowledgement `58.973 ms` / `58.998 ms`; awaited `safe_edit_query_message` `76.181 ms` / `79.439 ms`; `render_returned=1` for both.
+- `callback_dispatch_timing`: shared guards `35.518 ms` / `33.789 ms`, of which `safe_mode_callback_guard` was `35.405 ms` / `33.724 ms`; total server dispatch `193.403 ms` / `192.631 ms`.
+- Supported conclusion: in this sample the server completed dispatch in about 0.19 seconds and the Telegram edit helper returned in about 0.08 seconds. This does not measure Telegram-client display, device rendering, carrier/Wi-Fi, or the end-to-end interval; it cannot identify a remaining network/device cause or justify a hardware purchase.
+- Coverage: this is one two-route sequence, not a latency distribution and not evidence for every bot button. Continue gathering route families after A1–A6; then compare several user-timed samples with server phases. Keep A7 PARTIAL until that evidence exists.
+- No deploy/restart or live interaction was performed during the S12.12 code change; no provider call, wallet mutation, production-data write, or customer message was made.
 
 ## Next execution order
 
-1. S12.6–S12.10 and A4 Home preemption closed in source: PRs #1367–#1375 merged with required checks green; they were not deployed by this audit.
-2. Push S12.11 as a separate PR, require both CI checks, and merge only after CI is green.
-3. Immediately deploy the exact merge SHA under the approved release scope; verify VPS runtime SHA, service health, and one anonymous event before starting another PR.
-4. Continue A1/A2 with the next concrete admin Back/callback defect on current main; one route per spec, RED before minimal fix, then actual handler dispatch.
-5. Continue A3/A4/A5 for customer and pending-state flows, preserving protected product lanes.
-6. Finish A6 UI/UX consistency review and update this ledger with evidence, not assumptions.
-7. Close A7 only after a user timing sample is correlated by local time/timezone; classify measured server and client/network phases separately.
-8. Complete A8 only after all checklist rows have evidence and delivery states are separately verified.
+1. S12.11 (#1376) is merged/deployed and its exact runtime SHA is verified; its release scope includes ancestors #1367–#1375.
+2. Deliver S12.12 as its own PR, require both CI checks, merge only while it is the next approved spec, then deploy and verify that exact SHA before another PR.
+3. Continue A1 for remaining Admin visible actions and A2 for remaining Admin Back/Home/state-origin routes; use one narrow RED/GREEN spec at a time.
+4. Continue A3/A4/A5 for customer routes, pending-state expiry/stale/repeat behavior, preserving protected product lanes.
+5. Finish A6 UI/UX consistency review and update this ledger with evidence, not assumptions.
+6. Close A7 only after multiple user-timed samples can be compared to anonymous server phases; separate server, Telegram render and client/network wait.
+7. Complete A8 only after every checklist row has evidence and delivery states are separately verified.

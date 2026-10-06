@@ -185,12 +185,12 @@ def test_admin_queue_refund_guide_button_label_and_callback():
         for row in bot.admin_module_keyboard("queue").inline_keyboard
         for button in row
     ]
-    refund_buttons = [button for button in buttons if button.callback_data == "admin_help|refund"]
+    refund_buttons = [button for button in buttons if button.callback_data == "admin_help|refund|admin_queue"]
 
     assert len(refund_buttons) == 1
     assert refund_buttons[0].text == "Hướng dẫn hoàn Xu khi job lỗi"
 
-    query = FakeQuery(bot.ADMIN_ID, "admin_help|refund")
+    query = FakeQuery(bot.ADMIN_ID, "admin_help|refund|admin_queue")
     asyncio.run(bot.handle_admin_help_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
 
     assert "Quy trình hoàn Xu" in query.edits[-1][0]
@@ -266,15 +266,15 @@ def test_admin_provider_worker_action_labels_open_provider_guide(monkeypatch):
     ]
 
     assert {label: routes.get(label) for label in guide_labels} == {
-        label: "admin_help|provider" for label in guide_labels
+        label: "admin_help|provider|admin_provider_worker" for label in guide_labels
     }
     assert set(old_action_labels).isdisjoint(routes)
     assert routes["🎬 Video job"] == "menu|admin_provider_routes"
-    assert routes["📘 Hướng dẫn VPS"] == "admin_help|provider"
+    assert routes["📘 Hướng dẫn VPS"] == "admin_help|provider|admin_provider_worker"
 
     monkeypatch.setattr(bot, "ADMIN_IDS", {"999"})
     monkeypatch.setattr(bot, "OWNER_IDS", set())
-    query = FakeQuery(999, "admin_help|provider")
+    query = FakeQuery(999, "admin_help|provider|admin_provider_worker")
     asyncio.run(
         bot.handle_admin_help_callback(
             SimpleNamespace(callback_query=query),
@@ -375,7 +375,7 @@ def test_admin_back_buttons_work():
 
     assert "menu|admin" in callbacks
     assert "menu|main" in callbacks
-    assert "admin_help|payment" in callbacks
+    assert "admin_help|payment|admin_billing" in callbacks
 
 
 def test_public_user_cannot_open_admin_menu(monkeypatch):

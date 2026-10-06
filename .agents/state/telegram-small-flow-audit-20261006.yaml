@@ -1,0 +1,42 @@
+task_id: telegram-small-flow-audit-20261006
+goal_status: active
+phase: verify
+base_sha: 27926e15375f9ce7d41bbf37d5fee596c1216fec
+objective: >-
+  Continue the ordered Telegram small-flow audit. Fix wrong callback/Back routes
+  narrowly while protecting AutoPost WIP and stable product engines.
+current_spec: S12.12-admin-handbook-return-origin
+branch: fix/admin-help-back-context
+allowed_scope:
+  - Admin handbook callbacks emitted from Admin modules
+  - focused route tests, tester case, and audit checklist/state ledger
+protected_scope:
+  - AutoPost WIP
+  - Product Video, Edit, SubDub, Voice, and Music engine behavior
+  - wallet, secrets, production data, paid providers, and customer messages
+specs:
+  S12.11-callback-timing:
+    status: merged-and-live-verified
+    pull_request: 1376
+    runtime_sha: 27926e15375f9ce7d41bbf37d5fee596c1216fec
+  S12.12-admin-handbook-return-origin:
+    status: local-green-awaiting-pr-ci
+    acceptance: >-
+      Every emitted Admin module guide callback retains its module origin and its
+      rendered Back callback returns to that module; legacy handbook callbacks
+      without context still return to Admin.
+verification:
+  focused_unittest: "4 tests passed in 1.013s"
+  package_guide_unittest: "2 tests passed in 0.932s"
+  feedback_route_functions: "3 functions passed with bundled Python runner"
+  changed_test_files_py_compile: passed
+  git_diff_check: passed
+  full_bot_py_compile: >-
+    Attempted but interrupted after about 65 seconds without output; no local
+    full-file syntax verdict. GitHub source-compile CI is required.
+  pull_request_ci: pending
+next:
+  - Review exact diff and checklist scope.
+  - Push a separate PR and wait for required CI.
+  - Merge/deploy only this next spec, then verify exact runtime SHA before continuing.
+  - Resume remaining A1/A2, then A3/A4/A5, A6, A7, and A8 in checklist order.

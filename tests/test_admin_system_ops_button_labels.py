@@ -31,9 +31,9 @@ def _buttons(markup):
 def test_system_ops_runtime_shortcuts_are_labeled_as_guides_without_retargeting():
     buttons = _buttons(bot.admin_module_keyboard("system_ops"))
 
-    assert buttons["📘 Hướng dẫn kiểm tra Telegram"] == "admin_help|runtime"
-    assert buttons["📘 Hướng dẫn nhận quyền webhook Telegram"] == "admin_help|runtime"
-    assert buttons["📘 Hướng dẫn dọn file tạm"] == "admin_help|runtime"
+    assert buttons["📘 Hướng dẫn kiểm tra Telegram"] == "admin_help|runtime|admin_system_ops"
+    assert buttons["📘 Hướng dẫn nhận quyền webhook Telegram"] == "admin_help|runtime|admin_system_ops"
+    assert buttons["📘 Hướng dẫn dọn file tạm"] == "admin_help|runtime|admin_system_ops"
     assert buttons["📊 Dashboard"] == "menu|admin_overview"
 
 
