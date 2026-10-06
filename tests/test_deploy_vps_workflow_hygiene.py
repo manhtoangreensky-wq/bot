@@ -59,12 +59,17 @@ class TestDeployVpsWorkflowHygiene(unittest.TestCase):
         self.assertIn("prev_deployed_sha", self.content)
         self.assertIn("refs/heads/main", self.content)
         self.assertIn('echo "prev_deployed_sha=$PREV_SHA" >> "$GITHUB_OUTPUT"', self.content)
+        self.assertIn("prev_worker_deployed_sha", self.content)
+        self.assertIn('echo "prev_worker_deployed_sha=$PREV_WORKER_SHA" >> "$GITHUB_OUTPUT"', self.content)
 
     def test_incremental_bundle_excludes_previous_sha(self):
-        """2. Bundle command excludes previous deployed SHA and validates ancestry."""
+        """2. Bundle command excludes common prerequisite base SHA and validates ancestry."""
         self.assertIn("git merge-base --is-ancestor", self.content)
         self.assertIn("PREV_DEPLOYED_SHA", self.content)
-        bundle_cmd = 'git bundle create "${RELEASE_DIR}/release.bundle" refs/deployments/bot-release "^${PREV_DEPLOYED_SHA}"'
+        self.assertIn("PREV_WORKER_DEPLOYED_SHA", self.content)
+        self.assertIn('BUNDLE_BASE_SHA="${PREV_DEPLOYED_SHA}"', self.content)
+        self.assertIn('BUNDLE_BASE_SHA="$(git merge-base "${PREV_DEPLOYED_SHA}" "${PREV_WORKER_DEPLOYED_SHA}")"', self.content)
+        bundle_cmd = 'git bundle create "${RELEASE_DIR}/release.bundle" refs/deployments/bot-release "^${BUNDLE_BASE_SHA}"'
         self.assertIn(bundle_cmd, self.content)
         self.assertIn("git bundle verify", self.content)
 
@@ -3061,6 +3066,153 @@ fi
             self.assertGreaterEqual(idx, 0, f"{marker} missing")
             preceding = self.content[max(start, idx - 350):idx]
             self.assertIn(guard, preceding, f"{marker} must be behind the deploy_workers guard")
+
+
+    def test_multi_repo_bundle_prerequisite_reproduction_and_resolution(self):
+        """Regression simulation: bundle prerequisite with divergent worker/bot SHAs (B14F RED vs B14G GREEN)."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            origin_dir = os.path.join(tmp_dir, "origin")
+            os.makedirs(origin_dir)
+            subprocess.run(["git", "init"], cwd=origin_dir, check=True, capture_output=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=origin_dir, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=origin_dir, check=True)
+
+            # C0
+            with open(os.path.join(origin_dir, "base.txt"), "w") as f:
+                f.write("base")
+            subprocess.run(["git", "add", "."], cwd=origin_dir, check=True)
+            subprocess.run(["git", "commit", "-m", "base commit"], cwd=origin_dir, check=True, capture_output=True)
+
+            # C1: Worker SHA
+            with open(os.path.join(origin_dir, "worker.txt"), "w") as f:
+                f.write("worker")
+            subprocess.run(["git", "add", "."], cwd=origin_dir, check=True)
+            subprocess.run(["git", "commit", "-m", "worker commit"], cwd=origin_dir, check=True, capture_output=True)
+            worker_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=origin_dir, capture_output=True, text=True, check=True).stdout.strip()
+
+            # Clone worker repo at C1
+            worker_dir = os.path.join(tmp_dir, "worker")
+            subprocess.run(["git", "clone", origin_dir, worker_dir], check=True, capture_output=True)
+
+            # C2: Bot SHA
+            with open(os.path.join(origin_dir, "bot.txt"), "w") as f:
+                f.write("bot")
+            subprocess.run(["git", "add", "."], cwd=origin_dir, check=True)
+            subprocess.run(["git", "commit", "-m", "bot commit"], cwd=origin_dir, check=True, capture_output=True)
+            bot_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=origin_dir, capture_output=True, text=True, check=True).stdout.strip()
+
+            # Clone bot repo at C2
+            bot_dir = os.path.join(tmp_dir, "bot")
+            subprocess.run(["git", "clone", origin_dir, bot_dir], check=True, capture_output=True)
+
+            # C3: Target SHA
+            with open(os.path.join(origin_dir, "target.txt"), "w") as f:
+                f.write("target")
+            subprocess.run(["git", "add", "."], cwd=origin_dir, check=True)
+            subprocess.run(["git", "commit", "-m", "target commit"], cwd=origin_dir, check=True, capture_output=True)
+            target_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=origin_dir, capture_output=True, text=True, check=True).stdout.strip()
+
+            subprocess.run(["git", "update-ref", "refs/deployments/bot-release", target_sha], cwd=origin_dir, check=True)
+
+            # RED: Flawed bundle excluding only bot_sha (^bot_sha) fails when fetched into worker
+            flawed_bundle = os.path.join(tmp_dir, "flawed.bundle")
+            subprocess.run(["git", "bundle", "create", flawed_bundle, "refs/deployments/bot-release", f"^{bot_sha}"], cwd=origin_dir, check=True, capture_output=True)
+
+            p_bot_flawed = subprocess.run(["git", "fetch", flawed_bundle, "refs/deployments/bot-release:refs/deployments/bot-release"], cwd=bot_dir, capture_output=True, text=True)
+            self.assertEqual(p_bot_flawed.returncode, 0, "Bot repo should fetch flawed bundle since it contains bot_sha")
+
+            p_worker_flawed = subprocess.run(["git", "fetch", flawed_bundle, "refs/deployments/bot-release:refs/deployments/bot-release"], cwd=worker_dir, capture_output=True, text=True)
+            self.assertNotEqual(p_worker_flawed.returncode, 0, "Worker repo MUST fail to fetch bundle lacking prerequisite")
+            self.assertIn("Repository lacks these prerequisite commits", p_worker_flawed.stderr + p_worker_flawed.stdout)
+
+            # GREEN: Fixed bundle excluding common merge-base succeeds on BOTH repos
+            base_sha = subprocess.run(["git", "merge-base", bot_sha, worker_sha], cwd=origin_dir, capture_output=True, text=True, check=True).stdout.strip()
+            self.assertEqual(base_sha, worker_sha)
+
+            fixed_bundle = os.path.join(tmp_dir, "fixed.bundle")
+            subprocess.run(["git", "bundle", "create", fixed_bundle, "refs/deployments/bot-release", f"^{base_sha}"], cwd=origin_dir, check=True, capture_output=True)
+
+            p_bot_fixed = subprocess.run(["git", "fetch", fixed_bundle, "refs/deployments/bot-release:refs/deployments/bot-release-fixed"], cwd=bot_dir, capture_output=True, text=True)
+            self.assertEqual(p_bot_fixed.returncode, 0, "Bot repo must succeed fetching bundle with common base")
+
+            p_worker_fixed = subprocess.run(["git", "fetch", fixed_bundle, "refs/deployments/bot-release:refs/deployments/bot-release-fixed"], cwd=worker_dir, capture_output=True, text=True)
+            self.assertEqual(p_worker_fixed.returncode, 0, "Worker repo must succeed fetching bundle with common base")
+
+    def test_multi_repo_already_deployed_five_contract_cases(self):
+        """Verify the 5-case matrix for already-deployed idempotency contract."""
+        bash_bin = self._bash_bin()
+        self.assertIsNotNone(bash_bin, "Bash executable required for already-deployed simulation")
+
+        # Bash logic template matching deploy-vps.yml Package & Staging & SSH PATH 1 checks
+        bash_script = '''
+eval_already_deployed() {
+  local PREV_DEPLOYED_SHA="$1"
+  local PREV_WORKER_DEPLOYED_SHA="$2"
+  local TARGET_SHA="$3"
+  local DEPLOY_WORKERS="$4"
+
+  ALREADY_DEPLOYED="false"
+  if [[ "$PREV_DEPLOYED_SHA" == "$TARGET_SHA" ]]; then
+    if [[ "$DEPLOY_WORKERS" == "true" ]]; then
+      if [[ "$PREV_WORKER_DEPLOYED_SHA" == "$TARGET_SHA" ]]; then
+        ALREADY_DEPLOYED="true"
+      fi
+    else
+      ALREADY_DEPLOYED="true"
+    fi
+  fi
+  echo "$ALREADY_DEPLOYED"
+}
+
+# Run 5 test cases
+T1=$(eval_already_deployed "T_SHA" "T_SHA" "T_SHA" "true")
+T2=$(eval_already_deployed "T_SHA" "W_OLD" "T_SHA" "true")
+T3=$(eval_already_deployed "B_OLD" "T_SHA" "T_SHA" "true")
+T4=$(eval_already_deployed "B_OLD" "W_OLD" "T_SHA" "true")
+T5=$(eval_already_deployed "T_SHA" "W_OLD" "T_SHA" "false")
+
+echo "$T1,$T2,$T3,$T4,$T5"
+'''
+        proc = subprocess.run(
+            [bash_bin, "-c", bash_script],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        results = proc.stdout.strip().split(",")
+        self.assertEqual(results[0], "true", "Case 1: Both at target -> ALREADY_DEPLOYED must be true")
+        self.assertEqual(results[1], "false", "Case 2: Bot target, worker behind -> ALREADY_DEPLOYED must be false")
+        self.assertEqual(results[2], "false", "Case 3: Bot behind, worker target -> ALREADY_DEPLOYED must be false")
+        self.assertEqual(results[3], "false", "Case 4: Both behind -> ALREADY_DEPLOYED must be false")
+        self.assertEqual(results[4], "true", "Case 5: Bot-only mode, bot target -> ALREADY_DEPLOYED must be true")
+
+    def test_workflow_worker_drift_guard_and_reconciliation_hygiene(self):
+        """Verify pre-mutation drift guard and dual-SHA validation in deploy workflow."""
+        # SSH step env contains EXPECTED_PREV_WORKER_SHA
+        self.assertIn("EXPECTED_PREV_WORKER_SHA: ${{ steps.prod_sha.outputs.prev_worker_deployed_sha }}", self.content)
+        # Remote bash validates EXPECTED_PREV_WORKER_SHA format when deploy_workers=true
+        self.assertIn('EXPECTED_PREV_WORKER_SHA=\'${EXPECTED_PREV_WORKER_SHA}\'', self.content)
+        self.assertIn('if [[ ! \\"\\$EXPECTED_PREV_WORKER_SHA\\" =~ ^[0-9a-fA-F]{40}\\$ ]]; then', self.content)
+
+        # Pre-mutation drift guard in PATH 2 verifies worker HEAD
+        path2_marker = "PATH 2: Normal NEW_SHA Deployment Path"
+        path2_idx = self.content.find(path2_marker)
+        self.assertGreaterEqual(path2_idx, 0)
+        path2_body = self.content[path2_idx:]
+
+        self.assertIn('LIVE_PREV_WORKER_HEAD=\\"\\$(git -C /opt/toanaas-worker rev-parse refs/heads/main)\\"', path2_body)
+        self.assertIn('if [[ \\"\\$LIVE_PREV_WORKER_HEAD\\" != \\"\\$EXPECTED_PREV_WORKER_SHA\\" ]]; then', path2_body)
+        self.assertIn('Worker production drift detected before mutation!', path2_body)
+
+        # PATH 1 reconciliation validates worker HEAD matches TARGET_SHA
+        path1_marker = "PATH 1: ALREADY_DEPLOYED Reconciliation Path"
+        path1_idx = self.content.find(path1_marker)
+        self.assertGreaterEqual(path1_idx, 0)
+        path1_body = self.content[path1_idx:path2_idx]
+
+        self.assertIn('WORKER_HEAD=\\"\\$(git -C /opt/toanaas-worker rev-parse refs/heads/main)\\"', path1_body)
+        self.assertIn('if [[ \\"\\$WORKER_HEAD\\" != \\"\\$TARGET_SHA\\" ]]; then', path1_body)
+        self.assertIn('Already-deployed but worker HEAD', path1_body)
 
 
 if __name__ == "__main__":
