@@ -61024,12 +61024,23 @@ def support_admin_menu_text() -> str:
         "Kiểm tra persona cũ: <code>/support_persona_test &lt;tin nhắn khách&gt;</code>"
     )
 
-def support_admin_menu_keyboard() -> InlineKeyboardMarkup:
+def support_admin_menu_keyboard(page: str = "admin", origin: str = "admin") -> InlineKeyboardMarkup:
+    page = page if page in {"admin", "stats", "templates"} else "admin"
+    if page == "admin":
+        origin = "admin"
+        back_label, back_callback = "⬅️ CSKH / Góp ý", "menu|admin_support"
+    else:
+        sibling = "templates" if page == "stats" else "stats"
+        origin = origin if origin in {"admin", sibling} else "admin"
+        back_label = {"admin": "⬅️ CSKH/Ticket", "stats": "⬅️ Thống kê", "templates": "⬅️ Mẫu trả lời"}[origin]
+        back_callback = f"ticket|{origin}"
+    stats_origin = origin if page == "stats" else page
+    templates_origin = origin if page == "templates" else page
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🆕 Ticket mới", callback_data="ticket|al|new|0"), InlineKeyboardButton("🔥 Ưu tiên cao", callback_data="ticket|al|high|0")],
         [InlineKeyboardButton("💰 Refund pending", callback_data="ticket|al|refund|0"), InlineKeyboardButton("👤 Theo user", callback_data="ticket|asearch|user")],
-        [InlineKeyboardButton("🔍 Tìm ticket", callback_data="ticket|asearch|all"), InlineKeyboardButton("📊 Thống kê", callback_data="ticket|stats")],
-        [InlineKeyboardButton("📚 Mẫu trả lời", callback_data="ticket|templates"), InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin")],
+        [InlineKeyboardButton("🔍 Tìm ticket", callback_data="ticket|asearch|all"), InlineKeyboardButton("📊 Thống kê", callback_data=f"ticket|stats|{stats_origin}")],
+        [InlineKeyboardButton("📚 Mẫu trả lời", callback_data=f"ticket|templates|{templates_origin}"), InlineKeyboardButton(back_label, callback_data=back_callback)],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -140967,6 +140978,12 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
     admin_actions = {"admin", "al", "av", "asearch", "stats", "templates", "st", "reply", "suggest", "send", "ask", "note", "assign", "lead", "file"}
     if action in admin_actions and not is_admin_user(uid):
         return await query.answer(copy["support_ticket_admin_only"], show_alert=True)
+    read_panel_origin = "admin"
+    if action in {"stats", "templates"} and len(parts) > 2:
+        read_panel_origin = parts[2]
+        sibling = "templates" if action == "stats" else "stats"
+        if len(parts) != 3 or read_panel_origin not in {"admin", sibling}:
+            return await query.answer("Nút CSKH/Ticket đã hết phiên. Vui lòng mở lại từ menu hiện tại.", show_alert=True)
     ticket_preview = None
     if action == "pv":
         if len(parts) < 3 or not parts[2].isdigit():
@@ -141075,10 +141092,10 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         return await safe_edit_or_send(query, f"🔍 <b>Tìm ticket</b>\n\n{prompt}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ CSKH/Ticket", callback_data="ticket|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]]))
     if action == "stats":
         clear_support_ticket_pending(uid)
-        return await safe_edit_or_send(query, support_ticket_stats_text(), reply_markup=support_admin_menu_keyboard())
+        return await safe_edit_or_send(query, support_ticket_stats_text(), reply_markup=support_admin_menu_keyboard("stats", read_panel_origin))
     if action == "templates":
         clear_support_ticket_pending(uid)
-        return await safe_edit_or_send(query, support_reply_templates_text(), reply_markup=support_admin_menu_keyboard())
+        return await safe_edit_or_send(query, support_reply_templates_text(), reply_markup=support_admin_menu_keyboard("templates", read_panel_origin))
     if action == "st" and len(parts) >= 4:
         ticket_id = int(parts[2])
         new_status = parts[3]

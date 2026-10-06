@@ -6,8 +6,10 @@ from types import SimpleNamespace
 
 def test_admin_ticket_navigation_clears_stale_search_state():
     source = (Path(__file__).resolve().parents[1] / "bot.py").read_text(encoding="utf-8")
+    handler_start = source.index("\nasync def handle_ticket_callback(") + 1
+    handler_end = source.index("\nasync def handle_admin_help_callback(", handler_start)
     node = next(
-        item for item in ast.parse(source).body
+        item for item in ast.parse(source[handler_start:handler_end]).body
         if isinstance(item, ast.AsyncFunctionDef) and item.name == "handle_ticket_callback"
     )
     pending = {"pending_action": "support_ticket", "step": "admin_search"}
@@ -27,7 +29,7 @@ def test_admin_ticket_navigation_clears_stale_search_state():
         "support_admin_list_payload": lambda *args: ("list", []),
         "support_ticket_stats_text": lambda: "stats",
         "support_reply_templates_text": lambda: "templates",
-        "support_admin_menu_keyboard": lambda: [],
+        "support_admin_menu_keyboard": lambda *_args, **_kwargs: [],
         "support_admin_menu_text": lambda: "admin",
         "safe_edit_or_send": render,
         "Update": object,

@@ -275,6 +275,12 @@ hoặc hết timeout mà không fail-closed/cleanup.
 |---|---|---|
 | `ADMIN-FEEDBACK-INBOX-NAV-01` | Fixture: Admin → CSKH → Góp ý admin với inbox trống, có một mục, lọc nhóm và 15 góp ý dài. Bấm Back và Home ở footer. Thử user thường; không chạy lệnh reviewed/resolved. | Back → CSKH/Home → menu chính qua handler đăng ký. SQL chỉ SELECT; filter đúng; 15 mục giữ đủ, mỗi tin ≤4.096 ký tự hiển thị, footer chỉ ở tin cuối. User thường bị chặn; không commit, provider, ví, job, production data hoặc tin thật. |
 
+## Admin Ticket hub/read-only panels — S12.23, 07/10/2026
+
+| ID | Bước kiểm thử | PASS bắt buộc |
+|---|---|---|
+| `ADMIN-TICKET-HUB-BACK-01` | Fixture: CSKH → Ticket admin → Back; hub → Thống kê/Mẫu trả lời → Back. Mở hai panel từ nhau, tự bấm lại, callback legacy; thử origin sai và user thường. Reports là fake, không cập nhật ticket. | Hub Back → CSKH; panel Back → hub hoặc đúng panel phát nút; self/repeat giữ origin; business callback list/search/status/reply/file nguyên vẹn. Legacy cleanup pending vẫn gọi; public/origin sai có một alert trước cleanup/report/render; nút ≤64 byte. Không DB/ví/provider/job/tin thật. |
+
 ## Media library stale callback — 06/10/2026
 
 | ID | Bước kiểm thử | PASS bắt buộc |

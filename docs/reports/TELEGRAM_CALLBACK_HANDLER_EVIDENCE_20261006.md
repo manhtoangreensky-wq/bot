@@ -149,3 +149,11 @@ Source baseline: `0929d61ade4b8f0d60b803b62417763e90acce9e`. Production deployme
 - Actual emitted Support → Góp ý admin control executes its exact registered handler and read-only command. Empty/populated/filtered result markup was missing (3 RED assertions); a 15-long-row reply had 6,937 visible characters and failed the Telegram message-limit assertion.
 - Two renderer changes reuse unchanged navigation/chunk helpers. Four focused methods pass; adjacent run `35 tests in 63.974s — OK` includes prior feedback tests, actual Back/Home menu dispatch and full 15-row delivery with navigation on the final chunk. Full source scope comparator passes; final compile/CI/PR/deploy pending.
 
+- S12.22 delivery: #1387 verified deployed at `8faa35eb93ac5a967d1f3f6eb097c735987ecf91`; main compile and 174 configured tests OK; deploy 37517206697 SUCCESS; SSH exact SHA/source/services verified. Manual Telegram/client QA NOT_TESTED.
+
+## S12.23 — Ticket hub/read-only panel UI evidence
+
+- Actual Support emitter → registered Ticket handler/keyboard lost parent. Stats/Templates shared the same unrelated Admin-root Back and did not validate origin.
+- Final focused suite on baseline: 3 behavioral failures, 0 setup errors; business/pending regression passes. Final branch 4 methods OK; adjacent Ticket/inbox subset 24 tests in 36.372s OK. Module/panel/sibling Back, repeat, legacy, permission/origin rejection and callback bounds verified through registrations; data/report calls are inert.
+- UI origin fields and read-panel keyboard arguments are the only handler changes. Data/status/reply/list/file, menu router and engines/services/providers/workers/config unchanged by source comparator. Compile/PR/CI/deploy pending.
+
