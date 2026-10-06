@@ -229,3 +229,9 @@ FAIL nếu test gọi provider, chạy hai local model song song, thay đổi ex
 hoặc hết timeout mà không fail-closed/cleanup.
 
 | `UI-SM-06` | 🟡 vừa | Ghi chú: empty delete state | Pending delete dọn; danh sách và dữ liệu ghi chú không đổi |
+
+## Admin Ticket navigation — 06/10/2026
+
+| ID | Bước kiểm thử | PASS bắt buộc |
+|---|---|---|
+| `ADMIN-TICKET-BACK-01` | Trong fixture/staging có ít nhất `7` ticket ưu tiên cao, mở trang `2` (`offset=6`), mở một ticket, chọn `Soạn trả lời`; bấm Back tại prompt, rồi lặp lại và nhập nội dung để mở preview trước khi bấm Back | Cả hai Back quay về cùng danh sách ưu tiên cao trang `2` (`ticket|al|high|6`); pending reply được bỏ khi rời màn ticket; Back từ preview không gửi tin khách; không gọi provider, không thay đổi Xu hoặc dữ liệu production |
