@@ -1703,3 +1703,7 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
 
 - Hub Ticket admin từ CSKH trước đây Back về Admin root; Thống kê/Mẫu trả lời dùng cùng keyboard mất nguồn. Patch giữ parent UI trên hai panel, tự bấm lại vẫn giữ nguồn; hub Back về CSKH và origin lạ bị chặn trước cleanup/đọc dữ liệu.
 - 24 regression Ticket/inbox và 4 test focused đạt. Callback list/search/status/reply/file, truy vấn và các engine giữ nguyên; chỉ UI keyboard và nhánh đọc origin khác. Compile/PR/CI/deploy còn chờ.
+
+- Delivery S12.23: #1388 deploy `c0a05ce0`, main compile/178 test CI theo cấu hình đạt; VPS đúng SHA/source, ba service active/running, NRestarts=0 và health=ok. Manual Telegram QA chưa đo.
+- Tiếp tục S12.24 rà route Admin chưa có bằng chứng. A6 đã ghi 3 câu UI hướng dẫn Railway cũ trong hai renderer, xếp sau audit route; chưa thay cấu hình/quyền/ENV. Goal vẫn active, không coi toàn bot đã hết lỗi hoặc mọi nút đã hết delay.
+- S12.24.1 tái hiện nhãn “Video job” mở nội dung “Route/Group Info”; đã đổi đúng nhãn, callback giữ nguyên. 4 test Admin Provider/Worker + 3 test Billing đạt, full `py_compile` đạt. PR/CI/deploy đang chờ.

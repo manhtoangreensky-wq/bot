@@ -232088,7 +232088,7 @@ ADMIN_CONTROL_MODULES = {
         "when": "Dùng khi provider lỗi, cần smoke test nội bộ, cần kiểm tra video job hoặc worker trước khi mở public.",
         "buttons": [
             [("🤖 Provider status", "menu|admin_provider_status|admin_provider_worker"), ("🧪 Smoke Test", "menu|smoke_test|admin_provider_worker")],
-            [("🎬 Video job", "menu|admin_provider_routes|admin_provider_worker"), ("📘 Hướng dẫn: TTS/Voice test", "admin_help|provider")],
+            [("🧾 Route/Group Info", "menu|admin_provider_routes|admin_provider_worker"), ("📘 Hướng dẫn: TTS/Voice test", "admin_help|provider")],
             [("📘 Hướng dẫn: ASR/Sub/Dub test", "admin_help|provider")],
             [("📘 Hướng dẫn: Remote Worker Status", "admin_help|provider"), ("📘 Hướng dẫn: Test worker API", "admin_help|provider")],
             [("📘 Hướng dẫn: Remote Worker Canary", "admin_help|provider"), ("📘 Hướng dẫn: Canary status", "admin_help|provider")],

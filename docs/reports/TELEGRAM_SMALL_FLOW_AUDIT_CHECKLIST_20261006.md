@@ -13,7 +13,7 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 
 | ID | Spec / acceptance evidence | State |
 |---|---|---|
-| A0 | Active main/runtime baseline: `877aea89da20037f1c03265e8c2e53a1961f1c0e` after PR #1386. Historical AST registration inventory at `0929d61a` measures 87 direct registrations, 85 distinct expressions and 83 literal patterns; subsequent source comparators preserve registration order. The old emitter snapshot `4f1455ed` had 3,981 constructors/821 dynamic expressions/0 unmatched static callbacks. Those figures and old line locations are historical inventory, not proof of current route behavior. | Per-registration matrix in `TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md`; route verdicts remain partial/unproven. |
+| A0 | Active main/runtime baseline: `c0a05ce0910dab0242af593ae17b39be430c0d55` after PR #1388. Historical AST registration inventory at `0929d61a` measures 87 direct registrations, 85 distinct expressions and 83 literal patterns; subsequent source comparators preserve registration order. The old emitter snapshot `4f1455ed` had 3,981 constructors/821 dynamic expressions/0 unmatched static callbacks. Those figures and old line locations are historical inventory, not proof of current route behavior. | Per-registration matrix in `TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md`; route verdicts remain partial/unproven. |
 | A1 | Admin screens: verify each visible action label matches its handler; test emitted callback, authorization, state transition, and error/stale path. | PARTIAL — report/overview, root/help/package and feedback/access samples have evidence below; S12.13 corrects three Runtime-guide labels without changing their routes; full visible-action matrix remains open. |
 | A2 | Admin Back/Home: verify immediate parent and preserve list/filter/page context; test prompt and preview exits without performing the underlying action. | IN PROGRESS — ticket-origin specs S12.6–S12.10 (#1367–#1374) are in #1376; S12.12 merged/deployed in #1378 at runtime SHA `392d2eec`; S12.18 fixes Package Orders origin and S12.19 fixes Security/DB child Back. Other admin/customer routes remain open. |
 | A3 | Customer screens: verify ownership, same-product navigation, Back/Home, and no cross-user or cross-product route. | OPEN — audit ledger not complete. |
@@ -31,6 +31,14 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 - Admin root/help/package evidence: admin root and help tests (2 + 3) and package-storage guide tests (2) passed. Admin feedback/access checks covered emitted destinations, read-only inbox query/no commit, handbook rendering, admin guard, and public denial (6 focused cases); a stale fake helper signature was corrected in the local test fixture.
 - Current S12.12 route test exercises the real configured `ADMIN_CONTROL_MODULES` keyboard builders and registered-help callback body; it does not exercise every non-guide admin action or every state-changing handler.
 - A1 remains open until each remaining visible admin action has an emitted-button → registered-handler → authorized outcome/error-path evidence row. No provider, wallet, user-data, or production-message operation was performed.
+
+### S12.24.1 — Provider/Worker route label matches its destination
+
+- Emitted control: `ADMIN_CONTROL_MODULES["provider_worker"]` creates “🧾 Route/Group Info” → `menu|admin_provider_routes|admin_provider_worker`.
+- Registered route: `handle_menu_callback` accepts the validated `admin_provider_worker` origin and renders `admin_provider_routes_text`, whose page heading is “Route/Group Info”.
+- RED: the focused source-extracted test observed the old button label “🎬 Video job” while the registered destination rendered Route/Group Info.
+- Fix: change only that button label. No callback, provider state, command, provider call, or execution path changed.
+- GREEN: `test_admin_module_child_back_origin.py` → 4 tests OK; `test_admin_billing_guide_labels.py` → 3 tests OK; `python -m py_compile bot.py tests/test_admin_module_child_back_origin.py` exited 0; `git diff --check` exited 0 (Git reports only the existing LF→CRLF working-copy warning for the test file). PR delivery pending.
 
 ### S12.6 — Admin Ticket reply origin and pagination
 
@@ -272,7 +280,13 @@ After S12.22 delivery: actual Support module emitter `🎧 Ticket admin` → `ti
 - GREEN: Ticket hub, inbox and ticket-origin/reply/note/stale/pagination subset → `Ran 24 tests in 36.372s — OK`; final focused 4 methods → `Ran 4 tests in 4.533s — OK`. Tests use actual module emitter, exact Ticket registration, production handler/keyboard and registered menu Back; reports are inert values. Root/panel/sibling/legacy/repeat/public/bad-origin and 64-byte bounds covered.
 - Impact at base: `support_admin_menu_keyboard` definition `bot.py:61027`; 9 production calls at `141059`, `141078`, `141081`, `141094`, `141219`, `184611`, `184643`, `184649`, `184661`, all in bot.py. Two test consumers; one existing pending fixture stub accepts the new optional UI parameters. No shared router refactor.
 - Scope comparator PASS: Ticket handler restores byte-equivalent after removing only UI origin validation and read-panel keyboard args; all bot source outside handler/keyboard unchanged, including SQL/status/reply/list/file operations, menu router, product engines/services/providers/workers/config and registrations. Provider calls, wallet mutations, jobs, real sends and production writes: 0.
-- Final gates: full py_compile on bot.py/both changed tests exits 0; test files recompile after test-only updates exits 0. Original pending regression list/stats/templates assertions PASS after parsing the same handler only (whole-file AST attempt intentionally interrupted and not counted). Scope comparator and diff check PASS. Status: LOCAL GREEN; separate PR/CI/merge/deploy pending. Whole-bot goal remains active.
+- Final gates: full py_compile on bot.py/both changed tests exits 0; test files recompile after test-only updates exits 0. Original pending regression list/stats/templates assertions PASS after parsing the same handler only (whole-file AST attempt intentionally interrupted and not counted). Scope comparator and diff check PASS.
+- Delivery: PR [#1388](https://github.com/manhtoangreensky-wq/bot/pull/1388) merged as `c0a05ce0910dab0242af593ae17b39be430c0d55`, PR/main checks SUCCESS, 178 configured CI tests OK. Exact-SHA bot-only deploy [37521327174](https://github.com/manhtoangreensky-wq/bot/actions/runs/37521327174) SUCCESS. SSH confirms exact SHA, tracked source matches, all three services active/running, NRestarts=0 and health status=ok. Manual Telegram/client QA NOT_TESTED.
+- Status: MERGED + DEPLOYED + RUNTIME-SHA-VERIFIED. Whole-bot goal remains active; S12.24 resumes remaining Admin route evidence.
+
+### A6 platform-copy backlog — queued after route checks
+
+Fake-role execution of actual UI functions produced 1 Railway reference in `owner_required_text` and 2 in registered `/admin_whoami` output. All 3 are stale because current Owner/runbook/runtime truth is Ubuntu VPS. The eventual fix is wording-only; permission logic, ENV and keys are protected. No config change or copy fix has been implemented. This is queued under A6 while A1–A5 remains incomplete.
 
 ### Final latency spec — partial, server/client split preserved
 
@@ -295,7 +309,7 @@ After S12.22 delivery: actual Support module emitter `🎧 Ticket admin` → `ti
 5. S12.15 (#1381) is merged/deployed/runtime verified at `0929d61a`; S12.16 inventories registrations but is not whole-bot route proof.
 6. S12.17 is merged/deployed/runtime verified at `979c0ee5`; its stale media result controls are closed.
 7. S12.18 (#1383) is merged/deployed/runtime verified at `5c040c22`.
-8. S12.19 (#1384) is verified at `3557b97a`; S12.20 (#1385) at `406280d6`; S12.21 (#1386) at `877aea89`; S12.22 (#1387) at `8faa35eb`. Finish S12.23 Ticket hub/read-panel navigation delivery.
+8. S12.19 (#1384) is verified at `3557b97a`; S12.20 (#1385) at `406280d6`; S12.21 (#1386) at `877aea89`; S12.22 (#1387) at `8faa35eb`; S12.23 (#1388) at `c0a05ce0`. S12.24 resumes remaining Admin route evidence before dependent stages.
 9. Continue A1–A5 for remaining admin/customer routes, pending-state expiry/stale/repeat behavior, preserving protected product lanes.
 10. Finish A6 UI/UX consistency review and update this ledger with evidence, not assumptions.
 11. Close A7 only after multiple user-timed samples can be compared to anonymous server phases; separate server, Telegram render and client/network wait.
