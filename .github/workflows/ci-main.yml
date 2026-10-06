@@ -31,6 +31,9 @@ jobs:
         run: |
           python -m py_compile bot.py remote_worker.py services/remote_worker_api.py services/*.py tests/test_deploy_vps_workflow_hygiene.py
 
+      - name: Media Preview Callback Regressions
+        run: python -m unittest tests/test_media_preview_callback_snapshot.py
+
       - name: Admin Route Regressions
         run: |
           python -m unittest \

@@ -174624,17 +174624,21 @@ def freesound_preview_item(item: dict) -> dict:
         "preview_url": str(previews.get("preview-hq-mp3") or previews.get("preview-lq-mp3") or "").strip(),
     }
 
-def save_media_preview_results(kind: str, user_id, query: str, items: list[dict]):
+def save_media_preview_results(kind: str, user_id, query: str, items: list[dict]) -> str:
     if not user_id:
-        return
+        return ""
     cache = LAST_SFX_RESULTS if kind == "sfx" else LAST_MUSIC_RESULTS
+    callback_token = uuid.uuid4().hex
     cache[int(user_id)] = {
         "created_at": time.time(),
         "query": str(query or "")[:160],
         "results": [item for item in items if item.get("preview_url")],
+        "product_context": current_product_context(user_id),
+        "callback_token": callback_token,
     }
+    return callback_token
 
-def get_media_preview_item(kind: str, user_id, index_text: str) -> tuple[dict | None, str]:
+def get_media_preview_item(kind: str, user_id, index_text: str, callback_token: str | None = None) -> tuple[dict | None, str]:
     try:
         idx = int(str(index_text or "").strip())
     except Exception:
@@ -174645,12 +174649,18 @@ def get_media_preview_item(kind: str, user_id, index_text: str) -> tuple[dict | 
     data = cache.get(int(user_id or 0))
     if not data or time.time() - float(data.get("created_at") or 0) > MEDIA_PREVIEW_TTL_SECONDS:
         return None, "expired"
+    if callback_token is not None:
+        saved_token = str(data.get("callback_token") or "")
+        if not saved_token or str(callback_token or "") != saved_token:
+            return None, "expired"
+        if current_product_context(user_id) != normalize_product_context(data.get("product_context")):
+            return None, "expired"
     results = data.get("results") or []
     if idx > len(results):
         return None, "invalid"
     return results[idx - 1], ""
 
-def media_preview_keyboard(kind: str, items: list[dict], lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup | None:
+def media_preview_keyboard(kind: str, items: list[dict], lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM, callback_token: str = "") -> InlineKeyboardMarkup | None:
     available = [item for item in items if item.get("preview_url")][:5]
     if not available:
         return None
@@ -174670,18 +174680,18 @@ def media_preview_keyboard(kind: str, items: list[dict], lang: str = "vi", produ
         select_label = "Gắn SFX vào video" if ctx == PRODUCT_CONTEXT_VIDEO_ADDON and is_sfx else ("Gắn nhạc vào video" if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else ("Chọn SFX" if is_sfx else "Chọn"))
         find_more = "🔁 Tìm SFX khác" if is_sfx else "🔁 Tìm nhạc khác"
     rows = [[
-        InlineKeyboardButton(f"▶️ {listen_label} {idx}", callback_data=f"play_{kind}|{idx}"),
-        InlineKeyboardButton(f"✅ {select_label} {idx}", callback_data=f"select_{kind}|{idx}"),
+        InlineKeyboardButton(f"▶️ {listen_label} {idx}", callback_data=f"play_{kind}|{callback_token}|{idx}" if callback_token else f"play_{kind}|{idx}"),
+        InlineKeyboardButton(f"✅ {select_label} {idx}", callback_data=f"select_{kind}|{callback_token}|{idx}" if callback_token else f"select_{kind}|{idx}"),
     ] for idx, _ in enumerate(available, start=1)]
     if is_sfx:
         rows.append([
             InlineKeyboardButton(find_more, callback_data=product_context_callback("music_quick", ctx, "sfx")),
-            InlineKeyboardButton("📜 License", callback_data=f"license_{kind}|1"),
+            InlineKeyboardButton("📜 License", callback_data=f"license_{kind}|{callback_token}|1" if callback_token else f"license_{kind}|1"),
         ])
     else:
         rows.append([
             InlineKeyboardButton(find_more, callback_data=product_context_callback("music_quick", ctx, "music")),
-            InlineKeyboardButton("📜 License", callback_data=f"license_{kind}|1"),
+            InlineKeyboardButton("📜 License", callback_data=f"license_{kind}|{callback_token}|1" if callback_token else f"license_{kind}|1"),
         ])
     return InlineKeyboardMarkup(rows)
 
@@ -174834,10 +174844,10 @@ async def send_audio_item_to_chat(context: ContextTypes.DEFAULT_TYPE, chat_id, i
             except Exception:
                 pass
 
-async def send_media_preview_audio(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str, index_text: str):
+async def send_media_preview_audio(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str, index_text: str, callback_token: str | None = None):
     user_id = update.effective_user.id if update.effective_user else 0
     lang = music_ui_lang(user_id)
-    item, error = get_media_preview_item(kind, user_id, index_text)
+    item, error = get_media_preview_item(kind, user_id, index_text, callback_token=callback_token)
     chat_id = update.effective_chat.id if update.effective_chat else None
     if not chat_id:
         return
@@ -174855,10 +174865,10 @@ async def send_media_preview_audio(update: Update, context: ContextTypes.DEFAULT
         )
     return await send_audio_item_to_chat(context, chat_id, item, lang)
 
-async def send_media_preview_source(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str, index_text: str):
+async def send_media_preview_source(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str, index_text: str, callback_token: str | None = None):
     user_id = update.effective_user.id if update.effective_user else 0
     lang = music_ui_lang(user_id)
-    item, error = get_media_preview_item(kind, user_id, index_text)
+    item, error = get_media_preview_item(kind, user_id, index_text, callback_token=callback_token)
     chat_id = update.effective_chat.id if update.effective_chat else None
     if not chat_id:
         return
@@ -174879,10 +174889,10 @@ async def send_media_preview_source(update: Update, context: ContextTypes.DEFAUL
         disable_web_page_preview=True,
     )
 
-async def send_media_preview_license(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str, index_text: str):
+async def send_media_preview_license(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str, index_text: str, callback_token: str | None = None):
     user_id = update.effective_user.id if update.effective_user else 0
     lang = music_ui_lang(user_id)
-    item, error = get_media_preview_item(kind, user_id, index_text)
+    item, error = get_media_preview_item(kind, user_id, index_text, callback_token=callback_token)
     chat_id = update.effective_chat.id if update.effective_chat else None
     if not chat_id:
         return
@@ -174951,7 +174961,7 @@ def selected_music_video_followup_text(item: dict, lang: str = "vi") -> str:
         "Bạn muốn làm gì tiếp?"
     )
 
-def selected_music_video_followup_keyboard(source: str = "cinematic_ad", index_text: str = "1", lang: str = "vi") -> InlineKeyboardMarkup:
+def selected_music_video_followup_keyboard(source: str = "cinematic_ad", index_text: str = "1", lang: str = "vi", callback_token: str = "") -> InlineKeyboardMarkup:
     lang = music_ui_lang(lang=lang)
     source = str(source or "cinematic_ad")
     index_text = str(index_text or "1").strip() or "1"
@@ -174999,7 +175009,7 @@ def selected_music_video_followup_keyboard(source: str = "cinematic_ad", index_t
             (labels["create"], create_cb),
             (labels["none"], no_music_cb),
             (labels["choose"], choose_cb),
-            (labels["license"], f"license_music|{index_text}"),
+            (labels["license"], f"license_music|{callback_token}|{index_text}" if callback_token else f"license_music|{index_text}"),
         ],
         nav_main=False,
         lang=lang,
@@ -175008,10 +175018,10 @@ def selected_music_video_followup_keyboard(source: str = "cinematic_ad", index_t
     rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data=main_cb)])
     return InlineKeyboardMarkup(rows)
 
-async def select_media_preview(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str, index_text: str):
+async def select_media_preview(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str, index_text: str, callback_token: str | None = None):
     user_id = update.effective_user.id if update.effective_user else 0
     lang = music_ui_lang(user_id)
-    item, error = get_media_preview_item(kind, user_id, index_text)
+    item, error = get_media_preview_item(kind, user_id, index_text, callback_token=callback_token)
     chat_id = update.effective_chat.id if update.effective_chat else None
     if not chat_id:
         return
@@ -175100,7 +175110,7 @@ async def select_media_preview(update: Update, context: ContextTypes.DEFAULT_TYP
                 text=selected_music_video_followup_text(selected, lang),
                 parse_mode="HTML",
                 disable_web_page_preview=True,
-                reply_markup=selected_music_video_followup_keyboard(flow_context.get("source") or "cinematic_ad", index_text, lang),
+                reply_markup=selected_music_video_followup_keyboard(flow_context.get("source") or "cinematic_ad", index_text, lang, callback_token),
             )
     if lang == "zh":
         text = (
@@ -175148,18 +175158,34 @@ async def handle_media_preview_callback(update: Update, context: ContextTypes.DE
     query = update.callback_query
     if not query:
         return
-    action, index_text = (query.data or "").split("|", 1)
+    user_id = update.effective_user.id if update.effective_user else 0
+    lang = music_ui_lang(user_id)
+    expired_text = "⚠️ Kết quả nghe thử đã hết hạn. Vui lòng tìm lại bằng /sfx_library hoặc /music_library." if lang == "vi" else ("⚠️ 试听结果已过期。请使用 /sfx_library 或 /music_library 重新查找。" if lang == "zh" else "⚠️ Preview results expired. Please search again with /sfx_library or /music_library.")
+    parts = str(query.data or "").split("|")
+    if len(parts) == 3:
+        action, callback_token, index_text = parts
+    elif len(parts) == 2:
+        action, index_text = parts
+        callback_token = ""
+    else:
+        await query.answer(expired_text, show_alert=True)
+        return
     kind = "sfx" if "_sfx" in action or action.endswith("_sfx") else "music"
-    lang = music_ui_lang(update.effective_user.id if update.effective_user else 0)
+    _, error = get_media_preview_item(kind, user_id, index_text, callback_token=callback_token)
+    if error:
+        if error == "invalid":
+            expired_text = "⚠️ Không tìm thấy số kết quả này. Hãy chọn lại từ danh sách mới nhất." if lang == "vi" else ("⚠️ 未找到这个编号。请从最新结果中重新选择。" if lang == "zh" else "⚠️ Result number not found. Choose an item from the latest results.")
+        await query.answer(expired_text, show_alert=True)
+        return
     if action.startswith("play_"):
         await query.answer("Sending preview..." if lang == "en" else ("正在发送试听..." if lang == "zh" else "Đang gửi nghe thử..."))
-        return await send_media_preview_audio(update, context, kind, index_text)
+        return await send_media_preview_audio(update, context, kind, index_text, callback_token=callback_token)
     await query.answer()
     if action.startswith("select_"):
-        return await select_media_preview(update, context, kind, index_text)
+        return await select_media_preview(update, context, kind, index_text, callback_token=callback_token)
     if action.startswith("open_"):
-        return await send_media_preview_source(update, context, kind, index_text)
-    return await send_media_preview_license(update, context, kind, index_text)
+        return await send_media_preview_source(update, context, kind, index_text, callback_token=callback_token)
+    return await send_media_preview_license(update, context, kind, index_text, callback_token=callback_token)
 
 async def cmd_play_sfx(update: Update, context: ContextTypes.DEFAULT_TYPE):
     index_text = (context.args or [""])[0]
@@ -175597,16 +175623,20 @@ def pixabay_video_preview_item(item: dict) -> dict:
         "license": "Pixabay Content License",
     }
 
-def save_pixabay_media_results(user_id, query: str, items: list[dict]):
+def save_pixabay_media_results(user_id, query: str, items: list[dict]) -> str:
     if not user_id:
-        return
+        return ""
+    callback_token = uuid.uuid4().hex
     LAST_MEDIA_RESULTS[int(user_id)] = {
         "created_at": time.time(),
         "query": str(query or "")[:160],
         "results": [item for item in items if item.get("preview_url") or item.get("source_url")],
+        "product_context": current_product_context(user_id),
+        "callback_token": callback_token,
     }
+    return callback_token
 
-def get_pixabay_media_item(user_id, index_text: str) -> tuple[dict | None, str]:
+def get_pixabay_media_item(user_id, index_text: str, callback_token: str | None = None) -> tuple[dict | None, str]:
     try:
         idx = int(str(index_text or "").strip())
     except Exception:
@@ -175616,12 +175646,18 @@ def get_pixabay_media_item(user_id, index_text: str) -> tuple[dict | None, str]:
     data = LAST_MEDIA_RESULTS.get(int(user_id or 0))
     if not data or time.time() - float(data.get("created_at") or 0) > MEDIA_PREVIEW_TTL_SECONDS:
         return None, "expired"
+    if callback_token is not None:
+        saved_token = str(data.get("callback_token") or "")
+        if not saved_token or str(callback_token or "") != saved_token:
+            return None, "expired"
+        if current_product_context(user_id) != normalize_product_context(data.get("product_context")):
+            return None, "expired"
     results = data.get("results") or []
     if idx > len(results):
         return None, "invalid"
     return results[idx - 1], ""
 
-def pixabay_media_keyboard(items: list[dict], lang: str = "vi") -> InlineKeyboardMarkup | None:
+def pixabay_media_keyboard(items: list[dict], lang: str = "vi", callback_token: str = "") -> InlineKeyboardMarkup | None:
     available = [item for item in items if item.get("preview_url") or item.get("source_url")][:5]
     if not available:
         return None
@@ -175638,20 +175674,20 @@ def pixabay_media_keyboard(items: list[dict], lang: str = "vi") -> InlineKeyboar
             view = "🎬 Xem video" if item.get("type") == "video" else "🖼 Xem"
             select = "✅ Chọn"
         rows.append([
-            InlineKeyboardButton(f"{view} {idx}", callback_data=f"play_media|{idx}"),
-            InlineKeyboardButton(f"{select} {idx}", callback_data=f"select_media|{idx}"),
+            InlineKeyboardButton(f"{view} {idx}", callback_data=f"play_media|{callback_token}|{idx}" if callback_token else f"play_media|{idx}"),
+            InlineKeyboardButton(f"{select} {idx}", callback_data=f"select_media|{callback_token}|{idx}" if callback_token else f"select_media|{idx}"),
         ])
     find_more = "🔁 查找其他素材" if lang == "zh" else ("🔁 Find more media" if lang == "en" else "🔁 Tìm media khác")
     rows.append([InlineKeyboardButton(find_more, callback_data="music_quick|media")])
     return InlineKeyboardMarkup(rows)
 
-async def send_pixabay_media_preview(update: Update, context: ContextTypes.DEFAULT_TYPE, index_text: str):
+async def send_pixabay_media_preview(update: Update, context: ContextTypes.DEFAULT_TYPE, index_text: str, callback_token: str | None = None):
     user_id = update.effective_user.id if update.effective_user else 0
     lang = music_ui_lang(user_id)
     chat_id = update.effective_chat.id if update.effective_chat else None
     if not chat_id:
         return
-    item, error = get_pixabay_media_item(user_id, index_text)
+    item, error = get_pixabay_media_item(user_id, index_text, callback_token=callback_token)
     if error == "expired":
         text = "⚠️ Media results expired. Please search again with /media_library." if lang == "en" else ("⚠️ 媒体结果已过期。请使用 /media_library 重新查找。" if lang == "zh" else "⚠️ Kết quả media đã hết hạn. Vui lòng tìm lại bằng /media_library.")
         return await context.bot.send_message(chat_id=chat_id, text=text)
@@ -175686,13 +175722,13 @@ async def send_pixabay_media_preview(update: Update, context: ContextTypes.DEFAU
         disable_web_page_preview=True,
     )
 
-async def select_pixabay_media(update: Update, context: ContextTypes.DEFAULT_TYPE, index_text: str):
+async def select_pixabay_media(update: Update, context: ContextTypes.DEFAULT_TYPE, index_text: str, callback_token: str | None = None):
     user_id = update.effective_user.id if update.effective_user else 0
     lang = music_ui_lang(user_id)
     chat_id = update.effective_chat.id if update.effective_chat else None
     if not chat_id:
         return
-    item, error = get_pixabay_media_item(user_id, index_text)
+    item, error = get_pixabay_media_item(user_id, index_text, callback_token=callback_token)
     if error == "expired":
         text = "⚠️ Media results expired. Please search again with /media_library." if lang == "en" else ("⚠️ 媒体结果已过期。请使用 /media_library 重新查找。" if lang == "zh" else "⚠️ Kết quả media đã hết hạn. Vui lòng tìm lại bằng /media_library.")
         return await context.bot.send_message(chat_id=chat_id, text=text)
@@ -175739,13 +175775,29 @@ async def handle_pixabay_media_callback(update: Update, context: ContextTypes.DE
     query = update.callback_query
     if not query:
         return
-    action, index_text = (query.data or "").split("|", 1)
-    lang = music_ui_lang(update.effective_user.id if update.effective_user else 0)
+    user_id = update.effective_user.id if update.effective_user else 0
+    lang = music_ui_lang(user_id)
+    expired_text = "⚠️ Kết quả media đã hết hạn. Vui lòng tìm lại bằng /media_library." if lang == "vi" else ("⚠️ 媒体结果已过期。请使用 /media_library 重新查找。" if lang == "zh" else "⚠️ Media results expired. Please search again with /media_library.")
+    parts = str(query.data or "").split("|")
+    if len(parts) == 3:
+        action, callback_token, index_text = parts
+    elif len(parts) == 2:
+        action, index_text = parts
+        callback_token = ""
+    else:
+        await query.answer(expired_text, show_alert=True)
+        return
+    _, error = get_pixabay_media_item(user_id, index_text, callback_token=callback_token)
+    if error:
+        if error == "invalid":
+            expired_text = "⚠️ Không tìm thấy số media này. Hãy chọn lại từ kết quả mới nhất." if lang == "vi" else ("⚠️ 未找到这个编号。请从最新结果中重新选择。" if lang == "zh" else "⚠️ Result number not found. Choose an item from the latest results.")
+        await query.answer(expired_text, show_alert=True)
+        return
     if action == "play_media":
         await query.answer("Opening media..." if lang == "en" else ("正在打开媒体..." if lang == "zh" else "Đang mở media..."))
-        return await send_pixabay_media_preview(update, context, index_text)
+        return await send_pixabay_media_preview(update, context, index_text, callback_token=callback_token)
     await query.answer()
-    return await select_pixabay_media(update, context, index_text)
+    return await select_pixabay_media(update, context, index_text, callback_token=callback_token)
 
 async def cmd_play_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     index_text = (context.args or [""])[0]
@@ -175840,8 +175892,8 @@ async def send_music_library_results(message, user_id, query: str):
     ]
     await message.reply_text("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
     preview_items = [jamendo_preview_item(item) for item in results[:8]]
-    save_media_preview_results("music", user_id, query, preview_items)
-    kb = media_preview_keyboard("music", preview_items, lang, current_product_context(user_id))
+    callback_token = save_media_preview_results("music", user_id, query, preview_items)
+    kb = media_preview_keyboard("music", preview_items, lang, current_product_context(user_id), callback_token=callback_token)
     if kb:
         prompt = "🎧 Preview/select quickly:" if lang == "en" else ("🎧 快速试听/选择:" if lang == "zh" else "🎧 Nghe/chọn nhanh:")
         await message.reply_text(prompt, reply_markup=kb)
@@ -175911,8 +175963,8 @@ async def send_sfx_library_results(message, user_id, query: str):
     ]
     await message.reply_text("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
     preview_items = [freesound_preview_item(item) for item in results[:5]]
-    save_media_preview_results("sfx", user_id, query, preview_items)
-    kb = media_preview_keyboard("sfx", preview_items, lang, current_product_context(user_id))
+    callback_token = save_media_preview_results("sfx", user_id, query, preview_items)
+    kb = media_preview_keyboard("sfx", preview_items, lang, current_product_context(user_id), callback_token=callback_token)
     if kb:
         prompt = "🎧 Preview/select quickly:" if lang == "en" else ("🎧 快速试听/选择:" if lang == "zh" else "🎧 Nghe/chọn nhanh:")
         await message.reply_text(prompt, reply_markup=kb)
@@ -175960,8 +176012,8 @@ async def send_media_library_results(message, user_id, query: str):
         music_no_xu_text(lang),
     ])
     await message.reply_text("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
-    save_pixabay_media_results(user_id, query, media_items)
-    kb = pixabay_media_keyboard(media_items, lang)
+    callback_token = save_pixabay_media_results(user_id, query, media_items)
+    kb = pixabay_media_keyboard(media_items, lang, callback_token=callback_token)
     if kb:
         prompt = "🖼 Preview/select media quickly:" if lang == "en" else ("🖼 快速查看/选择素材:" if lang == "zh" else "🖼 Xem/chọn media nhanh:")
         await message.reply_text(prompt, reply_markup=kb)
@@ -273593,8 +273645,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     tg_app.add_handler(CallbackQueryHandler(handle_music_quick_callback, pattern=r"^(music_quick|sfx_quick|media_quick)\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_product_progress_callback, pattern=r"^progress\|status\|"))
-    tg_app.add_handler(CallbackQueryHandler(handle_media_preview_callback, pattern=r"^(play_sfx|play_music|select_sfx|select_music|open_sfx_source|open_music_source|license_sfx|license_music)\|\d+$"))
-    tg_app.add_handler(CallbackQueryHandler(handle_pixabay_media_callback, pattern=r"^(play_media|select_media)\|\d+$"))
+    tg_app.add_handler(CallbackQueryHandler(handle_media_preview_callback, pattern=r"^(play_sfx|play_music|select_sfx|select_music|open_sfx_source|open_music_source|license_sfx|license_music)\|(?:[0-9a-f]{32}\|)?\d+$"))
+    tg_app.add_handler(CallbackQueryHandler(handle_pixabay_media_callback, pattern=r"^(play_media|select_media)\|(?:[0-9a-f]{32}\|)?\d+$"))
     tg_app.add_handler(CallbackQueryHandler(handle_image_story_callback, pattern=r"^(image_story_aspect\|.+|image_story_render_hint)$"))
     tg_app.add_handler(CallbackQueryHandler(handle_local_video_studio_preview_callback, pattern=r"^lvs27a\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_local_video_studio_public_callback, pattern=r"^lvs27b\|"))
