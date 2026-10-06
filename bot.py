@@ -125246,7 +125246,7 @@ def menu_nav_keyboard(section: str = "main", is_admin: bool = False) -> InlineKe
         rows.append([InlineKeyboardButton("📊 Queue Status", callback_data="menu|freeze_queue_status"), InlineKeyboardButton("🧊 Freeze Status", callback_data="menu|freeze_status")])
         rows.append([InlineKeyboardButton("📚 Hướng dẫn lệnh", callback_data="menu|freeze_queue_help"), InlineKeyboardButton("📊 Quản trị", callback_data="menu|admin")])
     elif section == "system" and is_admin:
-        rows.append([InlineKeyboardButton("🧬 Runtime", callback_data="menu|system_runtime_help"), InlineKeyboardButton("🗄 Data Status", callback_data="menu|system_data_status_help")])
+        rows.append([InlineKeyboardButton("📘 Hướng dẫn Runtime", callback_data="menu|system_runtime_help"), InlineKeyboardButton("🗄 Data Status", callback_data="menu|system_data_status_help")])
         rows.append([InlineKeyboardButton("💾 Backup DB", callback_data="menu|system_backup_help"), InlineKeyboardButton("❤️ Health", callback_data="menu|system_health_help")])
         rows.append([InlineKeyboardButton("📊 Providers", callback_data="menu|admin_provider_status"), InlineKeyboardButton("✅ Sales Ready", callback_data="menu|smoke_sales_ready")])
         rows.append([InlineKeyboardButton("📊 Quản trị", callback_data="menu|admin"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")])
@@ -231878,7 +231878,7 @@ ADMIN_CONTROL_MODULES = {
         "when": "Dùng trước/sau deploy, trước khi bán, khi cần backup DB hoặc khi nghi ngờ webhook/security event bất thường.",
         "buttons": [
             [("🗄 DB trạng thái", "menu|admin_db_status"), ("💾 Sao lưu DB", "menu|admin_backup_db")],
-            [("🛡 Nhật ký bảo mật", "menu|admin_security_log"), ("🧬 Runtime", "menu|system_runtime_help")],
+            [("🛡 Nhật ký bảo mật", "menu|admin_security_log"), ("📘 Hướng dẫn Runtime", "menu|system_runtime_help")],
             [("✅ Sales ready", "menu|smoke_sales_ready")],
         ],
         "commands": [
@@ -231903,7 +231903,7 @@ ADMIN_CONTROL_MODULES = {
         "purpose": "Dùng để kiểm tra runtime, deployment, webhook Telegram, provider tổng quan, cleanup file tạm và trạng thái sẵn sàng vận hành.",
         "when": "Dùng sau deploy, khi nghi ngờ bot instance cũ giữ webhook, khi cần cleanup hoặc khi kiểm tra dashboard hệ thống.",
         "buttons": [
-            [("🧬 Runtime", "menu|system_runtime_help"), ("📘 Hướng dẫn kiểm tra Telegram", "admin_help|runtime")],
+            [("📘 Hướng dẫn Runtime", "menu|system_runtime_help"), ("📘 Hướng dẫn kiểm tra Telegram", "admin_help|runtime")],
             [("📘 Hướng dẫn nhận quyền webhook Telegram", "admin_help|runtime"), ("📘 Hướng dẫn dọn file tạm", "admin_help|runtime")],
             [("📊 Dashboard", "menu|admin_overview")],
         ],

@@ -814,3 +814,9 @@ provider-fallback `56`, exact-two `3` passed; changed-file compile và
 |---|---|---|
 | Danh sách rỗng không cần reset pending | Xóa pending trước khi render empty state | Đã sửa |
 | Test module pass là runtime pass | Test gọi embedded handler; deploy/LIVE vẫn tách riêng | Giữ nguyên nguyên tắc |
+
+## Admin Runtime shortcut — 06/10/2026
+
+| Nhãn/cách hiểu cũ | Hành vi nguồn hiện tại | Điều chỉnh S12.13 |
+|---|---|---|
+| `🧬 Runtime` có thể được hiểu là tra trạng thái trực tiếp | 3 shortcut cùng phát `menu|system_runtime_help`, mở `system_help_text("runtime")` | Đổi nhãn thành `📘 Hướng dẫn Runtime`; callback giữ nguyên. Nhãn mới chưa có trên runtime cho đến khi deploy |
