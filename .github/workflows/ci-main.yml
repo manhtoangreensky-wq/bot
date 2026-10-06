@@ -35,7 +35,7 @@ jobs:
         run: |
           python -m unittest \
             tests/test_support_ticket_reply_origin_pagination.py \
-            tests/test_support_admin_ticket_ask_origin_pagination.py \
+            tests/test_support_admin_ticket_origin_pagination.py \
             tests/test_support_admin_ticket_note_origin_pagination.py \
             tests/test_support_ticket_ask_stale_guard.py \
             tests/test_support_ticket_note_stale_guard.py \
