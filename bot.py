@@ -230021,8 +230021,8 @@ def finance_admin_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🧾 Thuế / VAT", callback_data="menu|finance_tax_vat"), InlineKeyboardButton("🧾 Chi phí", callback_data="menu|finance_expense_month")],
         [InlineKeyboardButton("📈 Lợi nhuận", callback_data="menu|finance_profit"), InlineKeyboardButton("🏦 Vốn & Hòa vốn", callback_data="menu|finance_capital")],
         [InlineKeyboardButton("🎁 Gói / Combo", callback_data="menu|admin_package_orders|finance"), InlineKeyboardButton("⚠️ Đơn bất thường", callback_data="menu|finance_anomalies")],
-        [InlineKeyboardButton("🧮 Sổ điều chỉnh", callback_data="menu|finance_adjustments"), InlineKeyboardButton("➕ Thêm chi phí", callback_data="menu|finance_add_expense")],
-        [InlineKeyboardButton("📥 Xuất báo cáo", callback_data="menu|finance_export"), InlineKeyboardButton("📚 Hồ sơ/chứng từ", callback_data="menu|tax_checklist")],
+        [InlineKeyboardButton("🧮 Sổ điều chỉnh", callback_data="menu|finance_adjustments"), InlineKeyboardButton("📘 Hướng dẫn thêm chi phí", callback_data="menu|finance_add_expense")],
+        [InlineKeyboardButton("📘 Hướng dẫn xuất báo cáo", callback_data="menu|finance_export"), InlineKeyboardButton("📚 Hồ sơ/chứng từ", callback_data="menu|tax_checklist")],
         [InlineKeyboardButton("📘 Hướng dẫn tài chính", callback_data="menu|finance_guide"), InlineKeyboardButton("🎟 Mã quà tặng", callback_data="menu|admin_gift_codes")],
         [InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
@@ -230051,7 +230051,7 @@ def finance_period_keyboard(kind: str) -> InlineKeyboardMarkup:
     if kind == "expense":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("📅 Tháng này", callback_data="menu|finance_expense_this_month"), InlineKeyboardButton("↩️ Tháng trước", callback_data="menu|finance_expense_last_month")],
-            [InlineKeyboardButton("📆 Năm nay", callback_data="menu|finance_expense_year"), InlineKeyboardButton("➕ Thêm chi phí", callback_data="menu|finance_add_expense")],
+            [InlineKeyboardButton("📆 Năm nay", callback_data="menu|finance_expense_year"), InlineKeyboardButton("📘 Hướng dẫn thêm chi phí", callback_data="menu|finance_add_expense")],
             [InlineKeyboardButton("🏷 Categories", callback_data="menu|finance_expense_categories"), InlineKeyboardButton("⬅️ Tài chính", callback_data="menu|finance")],
             [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
         ])
@@ -230061,7 +230061,7 @@ def finance_period_keyboard(kind: str) -> InlineKeyboardMarkup:
             [InlineKeyboardButton("⬅️ Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📤 Xuất tháng này", callback_data="menu|finance_export_month"), InlineKeyboardButton("📤 Xuất năm nay", callback_data="menu|finance_export_year")],
+        [InlineKeyboardButton("📘 Hướng dẫn xuất tháng này", callback_data="menu|finance_export_month"), InlineKeyboardButton("📘 Hướng dẫn xuất năm nay", callback_data="menu|finance_export_year")],
         [InlineKeyboardButton("⬅️ Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -230976,9 +230976,21 @@ def finance_profit_period_text(raw: str, title: str, default_period: str = "mont
 def finance_export_instruction_text(period: str) -> str:
     if period == "year":
         year = datetime.now().strftime("%Y")
-        return f"📤 <b>Xuất báo cáo năm</b>\n\nDùng lệnh: <code>/finance_export {year}</code>"
+        return f"📘 <b>Hướng dẫn xuất báo cáo năm</b>\n\nDùng lệnh: <code>/finance_export {year}</code>"
     month = datetime.now().strftime("%Y-%m")
-    return f"📤 <b>Xuất báo cáo tháng</b>\n\nDùng lệnh: <code>/finance_export {month}</code>"
+    return f"📘 <b>Hướng dẫn xuất báo cáo tháng</b>\n\nDùng lệnh: <code>/finance_export {month}</code>"
+
+def finance_export_menu_text() -> str:
+    return "📘 <b>Hướng dẫn xuất báo cáo</b>\n\nChọn kỳ để xem lệnh xuất CSV. Nút này chưa tạo hoặc gửi tệp; hãy chạy lệnh được hiển thị ở bước tiếp theo."
+
+def finance_add_expense_help_text() -> str:
+    return (
+        "📘 <b>Hướng dẫn thêm chi phí</b>\n\n"
+        "Gửi lệnh sau để ghi nhận một khoản chi:\n"
+        "<code>/expense_add &lt;amount_vnd&gt; &lt;category&gt; &lt;vendor&gt; &lt;note&gt;</code>\n"
+        "Ví dụ: <code>/expense_add 32500 provider_ai ShopAIKey nap api credit</code>\n\n"
+        "Nút này chỉ hiển thị hướng dẫn; chưa tạo hay sửa bút toán."
+    )
 
 def tax_accounting_menu_text() -> str:
     return (
@@ -232153,7 +232165,7 @@ ADMIN_CONTROL_MODULES = {
         "buttons": [
             [("📊 Tổng quan", "menu|finance_overview"), ("💵 Doanh thu", "menu|finance_revenue")],
             [("🧾 Chi phí", "menu|finance_expense_month"), ("📈 Lợi nhuận", "menu|finance_profit")],
-            [("➕ Thêm chi phí", "menu|finance_add_expense"), ("📤 Xuất báo cáo", "menu|finance_export")],
+            [("📘 Hướng dẫn thêm chi phí", "menu|finance_add_expense"), ("📘 Hướng dẫn xuất báo cáo", "menu|finance_export")],
         ],
         "commands": [
             ("/finance_dashboard", "tổng quan tài chính"),
