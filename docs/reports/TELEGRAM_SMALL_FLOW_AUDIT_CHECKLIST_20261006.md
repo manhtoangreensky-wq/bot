@@ -15,7 +15,7 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 |---|---|---|
 | A0 | Current source/main/runtime baseline: `0929d61ade4b8f0d60b803b62417763e90acce9e` after PR #1381. AST inventory measures 87 direct callback registrations, 85 distinct callback expressions and 83 literal patterns; the 4 pattern-free entries are 3 guards plus the final timing observer. Historical emitter snapshot `4f1455ed` had 3,981 constructors/821 dynamic expressions/0 unmatched static callbacks; these older emitter figures have not been refreshed and are not current route proof. | Per-registration matrix drafted in `TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md`; route verdicts remain partial/unproven. |
 | A1 | Admin screens: verify each visible action label matches its handler; test emitted callback, authorization, state transition, and error/stale path. | PARTIAL — report/overview, root/help/package and feedback/access samples have evidence below; S12.13 corrects three Runtime-guide labels without changing their routes; full visible-action matrix remains open. |
-| A2 | Admin Back/Home: verify immediate parent and preserve list/filter/page context; test prompt and preview exits without performing the underlying action. | IN PROGRESS — ticket-origin specs S12.6–S12.10 (#1367–#1374) are in #1376; S12.12 merged/deployed in #1378 at runtime SHA `392d2eec`. Other admin/customer routes remain open. |
+| A2 | Admin Back/Home: verify immediate parent and preserve list/filter/page context; test prompt and preview exits without performing the underlying action. | IN PROGRESS — ticket-origin specs S12.6–S12.10 (#1367–#1374) are in #1376; S12.12 merged/deployed in #1378 at runtime SHA `392d2eec`; S12.18 fixes Package Orders returning to Finance instead of Gói/Combo. Other admin/customer routes remain open. |
 | A3 | Customer screens: verify ownership, same-product navigation, Back/Home, and no cross-user or cross-product route. | OPEN — audit ledger not complete. |
 | A4 | Pending input: verify `/start`, `/menu`, Back, expiry, stale controls, repeated presses, and abandoned drafts clear only the intended state. | PARTIAL — ReplyKeyboard Home preemption PR #1375 is in the deployed #1376 release; the remaining reset/expiry/stale-state matrix is open. |
 | A5 | Callback coverage: check static and dynamic emitted values against actual registrations and dispatched terminal behavior; no module-only route test counts as completion. | OPEN — static unmatched count alone is insufficient. |
@@ -182,7 +182,17 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
   | `selected_music_video_followup_keyboard` | `bot.py:174954`, call at `175103`; label regression at `tests/test_core.py:4234` | 2 |
 
 - Planned delivery files: `bot.py`, one focused registered-handler unittest, the explicit CI route-test command, this checklist, the handler evidence matrix, the tester case and durable state. The existing modified operating notes remain in scope only for an evidence-backed progress update.
-- Status: LOCAL GREEN — code and focused test are built and reviewed; waiting for branch CI/PR delivery gates. Overall audit remains open.
+- Delivery: PR [#1382](https://github.com/manhtoangreensky-wq/bot/pull/1382) merged as `979c0ee5d9cc3b51d23b5c6470a6d02947f69208`; required PR checks and main-push CI passed. Deploy run [#37486561839](https://github.com/manhtoangreensky-wq/bot/actions/runs/37486561839) succeeded with `deploy_workers=false`. Read-only VPS verification returned exact runtime SHA `979c0ee5d9cc3b51d23b5c6470a6d02947f69208`, bot/web/nginx `active`, `NRestarts=0`, and health `status=ok`. Manual Telegram/provider QA is not claimed.
+- Status: MERGED + DEPLOYED + RUNTIME-SHA-VERIFIED. Overall bot audit remains open.
+
+### S12.18 — Admin Package Orders Back retains package-module origin
+
+- Trigger: Admin → Gói / Combo → Đơn chờ duyệt → Quay lại.
+- RED: the actual `admin_module_keyboard("packages")` emitted `menu|admin_package_orders`, but `admin_package_orders_keyboard()` rendered `⬅️ Tài chính` with `menu|finance`; the immediate parent was lost. The same child screen is also reachable from Finance, so a fixed static Back would break the Finance entry.
+- Minimal fix: carry a validated origin token (`admin_packages` or `finance`) in each entry callback; render the matching Back label/destination and reject unknown origin tokens. Catalog, User Packages, Menu chính and all package/payment behavior are unchanged.
+- GREEN: `python -m unittest tests/test_admin_package_orders_back_origin.py tests/test_finance_back_destination.py tests/test_broadcast_lite_back_pending_cleanup.py` → `Ran 6 tests ... OK`. The new test executes the production keyboard builder and registered menu handler for both origins. No DB writes, provider calls, wallet mutations, broadcast sends or production messages.
+- Scope lock: one narrow callback route, two keyboard emitters, one focused unittest, one CI invocation, and this evidence ledger. Product/Edit/SubDub/Voice/Music engines and AutoPost WIP are untouched.
+- Status: LOCAL GREEN — PR/CI/deploy pending.
 
 ### Final latency spec — partial, server/client split preserved
 
@@ -203,8 +213,9 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 3. S12.13 (#1379) is merged, deployed and runtime-SHA verified at `2099eb3`; its 3-label source comparator and CI gates passed.
 4. S12.14 (#1380) is merged/deployed/runtime verified at `74a8d86f`; 8 emitted guide controls, Back/public guards, source comparator and CI gates passed.
 5. S12.15 (#1381) is merged/deployed/runtime verified at `0929d61a`; S12.16 inventories registrations but is not whole-bot route proof.
-6. S12.17 now has local RED/GREEN evidence for stale media result controls; finish separate CI, merge, deploy and exact-runtime verification before marking its delivery closed.
-7. Continue A1–A5 for remaining admin/customer routes, pending-state expiry/stale/repeat behavior, preserving protected product lanes.
-8. Finish A6 UI/UX consistency review and update this ledger with evidence, not assumptions.
-9. Close A7 only after multiple user-timed samples can be compared to anonymous server phases; separate server, Telegram render and client/network wait.
-10. Complete A8 only after every checklist row has evidence and delivery states are separately verified.
+6. S12.17 is merged/deployed/runtime verified at `979c0ee5`; its stale media result controls are closed.
+7. S12.18 now has local RED/GREEN evidence for shared Package Orders origin; finish separate CI, merge, deploy and exact-runtime verification before marking its delivery closed.
+8. Continue A1–A5 for remaining admin/customer routes, pending-state expiry/stale/repeat behavior, preserving protected product lanes.
+9. Finish A6 UI/UX consistency review and update this ledger with evidence, not assumptions.
+10. Close A7 only after multiple user-timed samples can be compared to anonymous server phases; separate server, Telegram render and client/network wait.
+11. Complete A8 only after every checklist row has evidence and delivery states are separately verified.

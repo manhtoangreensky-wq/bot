@@ -5,7 +5,7 @@ base_sha: 0929d61ade4b8f0d60b803b62417763e90acce9e
 objective: >-
   Continue the ordered Telegram small-flow audit. Fix wrong callback/Back routes
   narrowly while protecting AutoPost WIP and stable product engines.
-current_spec: S12.17-media-library-stale-result-snapshot
+current_spec: S12.18-admin-package-orders-back-origin
 branch: audit/telegram-handler-evidence-20261006
 allowed_scope:
   - Read-only source registration and candidate-test inventory
@@ -86,7 +86,7 @@ specs:
       - handle_suggest_music_callback
     initial_review: "Media/Pixabay/suggest top-level handlers acknowledge early; six immediate downstream helpers contain no direct answer call. No duplicate-ack defect was demonstrated. S12.17 now verifies media cache/session/owner/context staleness; suggested-music and other routes remain unproven"
   S12.17-media-library-stale-result-snapshot:
-    status: local-green-awaiting-ci-pr-deploy
+    status: merged-deployed-runtime-sha-verified
     base_sha: 0929d61ade4b8f0d60b803b62417763e90acce9e
     acceptance: >-
       Controls from Jamendo/SFX/Pixabay result A never resolve to replacement result B;
@@ -109,8 +109,13 @@ specs:
       stale snapshot, owner, product context, TTL, tokenless legacy and bad-index
       controls fail closed. Direct music command playback/selection remains functional.
       Full bot py_compile and changed-test py_compile exited 0; git diff --check exited 0.
-      CI, merge and runtime delivery are still pending.
+      PR #1382 CI, merge and bot-only runtime delivery are verified.
     test_output: "Ran 19 tests in 51.593s OK"
+    pull_request: 1382
+    merge_sha: 979c0ee5d9cc3b51d23b5c6470a6d02947f69208
+    deploy_run: 37486561839
+    runtime_sha: 979c0ee5d9cc3b51d23b5c6470a6d02947f69208
+    runtime_services: "toanaas-bot.service active; toanaas-web.service active; nginx.service active; NRestarts=0; health status=ok"
     side_effects: "PROVIDER_CALLS=0; REAL_TELEGRAM_SENDS=0; JOBS=0; WALLET_MUTATIONS=0; PRODUCTION_DATA_WRITES=0"
     files:
       - bot.py
@@ -121,6 +126,33 @@ specs:
       - KIEM-THU/DANH-SACH-CASE.md
       - TAI-LIEU/01-NGHIEP-VU-VAN-HANH.md
       - TAI-LIEU/02-CHUC-NANG-GOC-VA-HIEN-TAI.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+    provider_calls: 0
+    wallet_mutations: 0
+    production_data_writes: 0
+  S12.18-admin-package-orders-back-origin:
+    status: local-green-awaiting-ci-pr-deploy
+    base_sha: 979c0ee5d9cc3b51d23b5c6470a6d02947f69208
+    acceptance: >-
+      Admin Gói / Combo → Đơn chờ duyệt → Quay lại returns to the immediate
+      package module; the Finance menu remains reachable only from Finance.
+    red: >-
+      The package entry emitted menu|admin_package_orders without origin, while
+      the shared child keyboard always labelled Back as Tài chính and emitted
+      menu|finance; Finance also uses the same child screen.
+    green: >-
+      The focused route test executes both opening origins through the registered
+      menu handler; related Finance/Broadcast pending cleanup regressions ran 6
+      tests and passed. The patch changes one narrow callback route and two
+      keyboard emitters;
+      no DB, provider, wallet, broadcast or production side effect occurred.
+    test_output: "Ran 6 tests in 0.842s OK"
+    files:
+      - bot.py
+      - tests/test_admin_package_orders_back_origin.py
+      - .github/workflows/ci-main.yml
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
       - .agents/state/telegram-small-flow-audit-20261006.yaml
     provider_calls: 0
     wallet_mutations: 0
@@ -141,18 +173,19 @@ verification:
   runtime_after_1380: "Exact SHA74a8d86f24d1c8960706bc2c73b0ca984a69ae56; bot/web/nginx active/running; NRestarts=0; health HTTP200"
   pull_request_1381_ci: "Both required gates SUCCESS; Ubuntu Admin routes35 and workflow hygiene99 passed; complete source compile/AST/py_compile/tokenize passed"
   runtime_after_1381: "Exact SHA0929d61ade4b8f0d60b803b62417763e90acce9e; bot/web/nginx active/running; NRestarts=0; health HTTP200; tracked bot.py matches"
-  current_pull_request_ci: "S12.17 pending branch/PR CI"
+  current_pull_request_ci: "PR #1382 required checks SUCCESS: python_hygiene_and_tests and python-311-source-compile"
   current_full_source_compile: "Bundled Python -m py_compile bot.py tests/test_media_preview_callback_snapshot.py exited 0 for the final branch state"
   current_focused_route_tests: "python -m unittest tests/test_media_preview_callback_snapshot.py: Ran 19 tests in 51.593s OK"
   current_diff_check: "git diff --check exited 0; warning only notes state YAML LF will normalize to CRLF"
+  current_delivery: "PR #1382 merged as 979c0ee5d9cc3b51d23b5c6470a6d02947f69208; deploy run 37486561839 SUCCESS; VPS exact SHA/services/health verified"
   local_pytest: "Unavailable: bundled Python has no pytest module; test is standard-library unittest and added to Ubuntu CI"
   provider_calls: 0
   real_telegram_sends: 0
   wallet_mutations: 0
   production_data_writes: 0
-  current_protected_comparator: "Reviewed bot.py diff is limited to media/SFX/Pixabay search cache, callback builders/helpers/handlers, three media result callsites and their two registrations; protected engines and shared router unchanged"
+  current_protected_comparator: "S12.18 diff is limited to Package Orders origin tokens, two keyboard emitters, one menu-handler branch and focused test/docs; protected engines, AutoPost WIP and shared product workers unchanged"
 blockers: []
 next:
-  - Complete S12.17's branch CI, merge, exact-SHA deploy and runtime verification using the separate-PR pipeline.
+  - Complete S12.18's branch CI, merge, exact-SHA deploy and runtime verification using the separate-PR pipeline.
   - Continue candidate handlers and downstream stale/error paths with inert fixtures. Do not infer a bug from missing name references.
   - Resume remaining A1/A2, then A3/A4/A5, A6, A7, and A8 in checklist order.

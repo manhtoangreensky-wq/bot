@@ -1663,4 +1663,9 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
 
 - RED tái hiện qua callback đã đăng ký: keyboard Music cũ chỉ mang `select_music|1`; sau search mới, nút cũ đi tới `Track B`. Pixabay Preview cũ cũng đọc item B; nút showroom vẫn tới helper sau khi chuyển sang Video Add-on.
 - Patch gắn UUID và product context vào snapshot cache; nút item/License mang UUID. Handler khóa owner, snapshot, context và TTL trước preview/chọn; nút cũ không mã phiên báo hết hạn. Lệnh `/play_*` và `/select_*` giữ cách gọi trực tiếp cũ.
-- Local: 19 registered-handler/unittest cases đạt; full `bot.py` và test-file py_compile đạt; `git diff --check` sạch. Không provider call, Telegram thật, job, Xu hoặc production data. Đang chờ CI/PR/deploy; chưa có manual Telegram PASS.
+- Local: 19 registered-handler/unittest cases đạt; full `bot.py` và test-file py_compile đạt; `git diff --check` sạch. Không provider call, Telegram thật, job, Xu hoặc production data. PR #1382 đã merge, deploy bot-only run #37486561839 đạt; VPS đúng SHA `979c0ee5`, ba service active/running, NRestarts=0, health=ok. Chưa có manual Telegram PASS.
+
+## Admin Package Orders Back origin — S12.18, 06/10/2026
+
+- Từ Admin → Gói / Combo → Đơn chờ duyệt, nút Back cũ ghi Tài chính và phát `menu|finance`, làm mất module cha; cùng màn này cũng được mở từ Finance.
+- Patch mang origin hợp lệ (`admin_packages` hoặc `finance`) trên callback mở màn và dựng Back tương ứng; origin lạ bị từ chối. Local route regression qua handler thật đạt; không chạm xử lý gói, thanh toán, ví hoặc dữ liệu production. Đang chờ CI/PR/deploy.
