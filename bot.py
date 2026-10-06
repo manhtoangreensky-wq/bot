@@ -141660,6 +141660,12 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         "admin_provider_status": ("admin_provider_worker", "admin_provider"),
         "smoke_test": ("admin_provider_worker", "admin"),
         "admin_provider_routes": ("admin_provider_worker", "admin_provider"),
+        "admin_confirm_unfreeze_tool": ("admin_queue", "unfreeze_tool_help"),
+        "admin_confirm_freeze_video": ("admin_queue", "freeze_video_help"),
+        "admin_confirm_refund_job": ("admin_queue", "freeze_queue_help"),
+        "admin_confirm_ack_unfreeze_tool": ("admin_queue", "unfreeze_tool_help"),
+        "admin_confirm_ack_freeze_video": ("admin_queue", "freeze_video_help"),
+        "admin_confirm_ack_refund_job": ("admin_queue", "freeze_queue_help"),
     }
     child_action, separator, child_origin = action.partition("|")
     if separator and child_action in module_child_contexts:
@@ -142271,11 +142277,19 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     text, keyboard = localized_menu_content(action, user_is_admin, lang, query.from_user.id)
     if module_child_origin:
         module_title = ADMIN_CONTROL_MODULES[module_child_origin[len("admin_"):]]["title"]
+        child_back_callback = f"menu|{module_child_origin}"
+        child_back_label = f"⬅️ {module_title}"
+        if action.startswith("admin_confirm_ack_"):
+            child_back_callback = f"menu|admin_confirm_{action.removeprefix('admin_confirm_ack_')}|{module_child_origin}"
+            child_back_label = "⬅️ Xác nhận"
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton(f"⬅️ {module_title}", callback_data=f"menu|{module_child_origin}")
-             if button.text.startswith("⬅") and button.callback_data == f"menu|{module_child_back}"
+            [InlineKeyboardButton(child_back_label if button.text.startswith("⬅") else button.text, callback_data=child_back_callback)
+             if button.text.startswith(("⬅", "❌")) and button.callback_data == f"menu|{module_child_back}"
              else InlineKeyboardButton(button.text, callback_data=f"menu|{action}|{module_child_origin}")
-             if button.callback_data == f"menu|{action}" else button for button in row]
+             if button.callback_data == f"menu|{action}"
+             else InlineKeyboardButton(button.text, callback_data=f"{button.callback_data}|{module_child_origin}")
+             if action.startswith("admin_confirm_") and button.callback_data.startswith("menu|admin_confirm_ack_")
+             else button for button in row]
             for row in keyboard.inline_keyboard
         ])
     if action == "admin_package_orders" and package_orders_origin:
@@ -231974,8 +231988,8 @@ ADMIN_CONTROL_MODULES = {
         "when": "Dùng khi provider lỗi, job kẹt, cần bảo trì, cần hoàn Xu/lượt hoặc cần kiểm tra queue trước khi mở lại public.",
         "buttons": [
             [("📊 Queue status", "menu|freeze_queue_status|admin_queue"), ("Hướng dẫn hoàn Xu khi job lỗi", "admin_help|refund")],
-            [("🧊 Freeze tools", "menu|freeze_queue_help|admin_queue"), ("🔓 Unfreeze tools", "menu|admin_confirm_unfreeze_tool")],
-            [("🎬 Freeze video", "menu|admin_confirm_freeze_video"), ("💸 Refund job", "menu|admin_confirm_refund_job")],
+            [("🧊 Freeze tools", "menu|freeze_queue_help|admin_queue"), ("🔓 Unfreeze tools", "menu|admin_confirm_unfreeze_tool|admin_queue")],
+            [("🎬 Freeze video", "menu|admin_confirm_freeze_video|admin_queue"), ("💸 Refund job", "menu|admin_confirm_refund_job|admin_queue")],
         ],
         "commands": [
             ("/queue_status", "xem hàng chờ"),

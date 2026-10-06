@@ -846,3 +846,9 @@ provider-fallback `56`, exact-two `3` passed; changed-file compile và
 | Cách hiểu trước | Bằng chứng | Hiện trạng |
 |---|---|---|
 | Back của mọi màn con giữ module đã mở nó | 7 entry qua handler thật quay về hub cũ/Admin root | Origin được mang qua 7 entry và refresh; 27 regression đạt. Triển khai S12.20 còn chờ; S12.19 đã deploy `3557b97a` |
+
+## Queue confirmation-guide Back — S12.21, 07/10/2026
+
+| Cách hiểu trước | Bằng chứng | Hiện trạng |
+|---|---|---|
+| Back/Hủy của xác nhận từ Queue về đúng màn trước | 3 entry về unfreeze/freeze/refund guide chưa mở từ Queue | Origin giữ qua prompt và acknowledgement; 30 regression + 4 focused đạt, thao tác freeze/refund nguyên vẹn. S12.21 đang chờ delivery; S12.20 đã deploy `406280d6` |

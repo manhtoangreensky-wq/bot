@@ -227,9 +227,11 @@ Acceptance: these 7 entry callbacks retain the emitting module through their UI 
 - Fix: 7 module emitters carry a validated parent. A closed, action-specific origin branch changes only the matching Back control and same-page refresh callback after the existing page renderer. Legacy pages and all business controls are preserved; public/invalid contexts stop before reads and cleanup.
 - GREEN: focused suite 3 tests OK; adjacent Security/DB, Package Orders, Finance, Broadcast pending, Runtime, Billing, root and latency regressions → `Ran 27 tests in 38.252s — OK`.
 - Protected comparator: whole bot source outside `handle_menu_callback` and `ADMIN_CONTROL_MODULES` is byte-equivalent to base; services/providers/remote worker/config and callback registration order unchanged. Provider calls, production-data writes, wallet mutations, real messages and jobs: 0.
-- Final full `py_compile bot.py tests/test_admin_module_child_back_origin.py` exited 0; diff check exited 0. Status: LOCAL GREEN; separate PR/CI/merge/deploy pending.
+- Final full `py_compile bot.py tests/test_admin_module_child_back_origin.py` exited 0; diff check exited 0.
+- Delivery: PR [#1385](https://github.com/manhtoangreensky-wq/bot/pull/1385) merged as `406280d6c5ec545915f16786cc9e74538fedf436`; main compile and quality CI pass, 166 configured tests OK. Bot-only deploy [#37508350342](https://github.com/manhtoangreensky-wq/bot/actions/runs/37508350342) SUCCESS; SSH confirms exact SHA, tracked bot.py matches, all three services active/running with NRestarts=0 and health status=ok. Manual Telegram/client QA NOT_TESTED.
+- Status: MERGED + DEPLOYED + RUNTIME-SHA-VERIFIED.
 
-### Next A2 queue confirmation-guide origins — 07/10/2026
+### S12.21 — Queue confirmation-guide origins, 07/10/2026
 
 Read-only fixture dispatch from the actual Queue module emitted controls reproduced 3 additional immediate-parent mismatches. These pages only show command instructions; no freeze, refund, provider or financial operation was executed.
 
@@ -240,6 +242,12 @@ Read-only fixture dispatch from the actual Queue module emitted controls reprodu
 | `admin_confirm_refund_job` | `menu|admin_queue` | `menu|freeze_queue_help` |
 
 Queued after S12.20 delivery. Acceptance: Queue-entered confirmation guides retain Queue origin through Cancel, Back and instruction acknowledgement; legacy guide-entered controls preserve their current parent. All instruction text and freeze/refund/wallet/provider behavior are protected. No implementation of this next spec is included in S12.20.
+
+- S12.20 delivery was verified before this spec's BUILD. Corrected flow: prompt Back/Cancel → Queue; acknowledgement Back → the same confirmation prompt → Queue. All instruction text and operations remain byte-equivalent.
+- RED: baseline focused suite ran 3 methods with 4 behavioral failures and 0 setup errors. Legacy prompt/acknowledgement text and parent assertions passed.
+- GREEN: focused Queue and S12.20 suites ran 6 tests OK; adjacent full route subset ran `30 tests in 48.340s — OK`. Real emitted controls pass through the actual callback registration; malformed/public origins stop before cleanup/render; callback byte limits pass.
+- Protected comparator PASS: whole source outside the menu UI-origin branch and 3 Queue module entry callbacks unchanged, including confirmation builders/text and all financial/freeze/product engines/services/providers/workers/config/registration order. Provider calls, wallet mutations, DB writes, jobs and real sends: 0.
+- Final focused 4 tests in 12.724s OK (including common guards under normal/maintenance fixtures); final full `py_compile bot.py tests/test_admin_queue_confirm_back_origin.py` exited 0; diff check pending. Status: LOCAL GREEN; separate PR/CI/merge/deploy pending.
 
 ### Final latency spec — partial, server/client split preserved
 
@@ -262,7 +270,7 @@ Queued after S12.20 delivery. Acceptance: Queue-entered confirmation guides reta
 5. S12.15 (#1381) is merged/deployed/runtime verified at `0929d61a`; S12.16 inventories registrations but is not whole-bot route proof.
 6. S12.17 is merged/deployed/runtime verified at `979c0ee5`; its stale media result controls are closed.
 7. S12.18 (#1383) is merged/deployed/runtime verified at `5c040c22`.
-8. S12.19 (#1384) is merged/deployed/runtime verified at `3557b97a`; finish S12.20 delivery for the seven next entry routes.
+8. S12.19 (#1384) is merged/deployed/runtime verified at `3557b97a`; S12.20 (#1385) is verified at `406280d6`; finish S12.21 delivery for the three Queue guide origins.
 9. Continue A1–A5 for remaining admin/customer routes, pending-state expiry/stale/repeat behavior, preserving protected product lanes.
 10. Finish A6 UI/UX consistency review and update this ledger with evidence, not assumptions.
 11. Close A7 only after multiple user-timed samples can be compared to anonymous server phases; separate server, Telegram render and client/network wait.

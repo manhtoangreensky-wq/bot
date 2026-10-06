@@ -136,5 +136,11 @@ Source baseline: `0929d61ade4b8f0d60b803b62417763e90acce9e`. Production deployme
 
 - Seven Admin module entry routes lost their parent (Queue Status/Help, Sales Ready, Dashboard, Provider Status/Routes, Smoke Test). Actual emitted callbacks and registered menu dispatch reproduced the mismatches.
 - A closed UI-origin branch preserves each allowed parent through Back and refresh; original report/queue/provider renderers and business controls stay in use. Legacy callbacks retain their original parent. Public/invalid contexts stop before cleanup/read/render.
-- Corrected baseline fixture: 15 behavioral assertions fail, 0 setup errors. Focused 3 tests and adjacent regression command: 27 tests OK in 38.252s. Protected source comparator passes; full compilation and PR/CI/runtime delivery pending.
+- Corrected baseline fixture: 15 behavioral assertions fail, 0 setup errors. Focused 3 tests and adjacent regression command: 27 tests OK in 38.252s. Protected source comparator passes; #1385 is verified deployed at `406280d6`, main CI 166 configured tests OK, deploy 37508350342 SUCCESS, exact runtime SHA/tracked source/services verified. Manual Telegram QA NOT_TESTED.
+
+## S12.21 current-branch update — 07/10/2026
+
+- Three Queue-entered confirmation guides lost origin: Unfreeze tools, Freeze video and Refund job. Prompt Back/Cancel retain Queue; acknowledgement Back returns to the same confirmation prompt and then Queue. Legacy guide entries preserve their existing parent and command text.
+- Baseline: 3 methods, 4 behavioral failures, no setup errors. Local adjacent run: 30 tests in 48.340s OK; final focused 4 tests in 12.724s OK, including actual throttle/safe-mode/video-dedupe guard traversal before the registered menu handler under normal and maintenance/tool/provider freeze fixtures.
+- Confirmation text/builders, operation bodies, product engine sources and common guards are unchanged by the protected comparator. Full compilation, PR/CI/merge/deploy are pending.
 
