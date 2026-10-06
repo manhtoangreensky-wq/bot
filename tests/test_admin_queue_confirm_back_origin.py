@@ -84,7 +84,10 @@ class QueueConfirmGuideOriginTests(unittest.TestCase):
                 self.assertEqual("menu|admin_queue", cancel.callback_data)
                 parent = _dispatch(route, cancel.callback_data)
                 self.assertIn(ns["ADMIN_CONTROL_MODULES"]["queue"]["title"], parent.edits[0][0])
-                confirm = next(b for b in _controls(prompt) if b.text.startswith("✅"))
+                confirm = next(
+                    b for b in _controls(prompt)
+                    if b.callback_data == "menu|admin_confirm_ack_" + key + "|admin_queue"
+                )
                 acknowledged = _dispatch(route, confirm.callback_data)
                 self.assertEqual(ns["admin_confirm_ack_text"](key), acknowledged.edits[0][0])
                 ack_back = next(b for b in _controls(acknowledged) if b.text.startswith("⬅"))
@@ -96,6 +99,23 @@ class QueueConfirmGuideOriginTests(unittest.TestCase):
                     self.assertEqual([((), {})], page.answers)
                     for b in _controls(page):
                         self.assertLessEqual(len(b.callback_data.encode("utf-8")), 64)
+
+    def test_manual_command_guidance_is_not_labelled_as_executed_confirmation(self):
+        ns, route, _ = _runtime()
+        for key in CASES:
+            with self.subTest(key=key):
+                prompt = _dispatch(route, "menu|admin_confirm_" + key + "|admin_queue")
+                show_command = next(
+                    b for b in _controls(prompt)
+                    if b.callback_data == "menu|admin_confirm_ack_" + key + "|admin_queue"
+                )
+                self.assertEqual("📋 Xem lệnh cần chạy", show_command.text)
+
+                acknowledgement = _dispatch(route, show_command.callback_data)
+                self.assertNotIn("Đã xác nhận thao tác admin", acknowledgement.edits[0][0])
+                self.assertIn("Hướng dẫn", acknowledgement.edits[0][0])
+                self.assertIn(ns["ADMIN_CONFIRM_ACTIONS"][key]["command"], html.unescape(acknowledgement.edits[0][0]))
+                self.assertIn("gửi lệnh dưới đây bằng tay", acknowledgement.edits[0][0])
 
     def test_legacy_confirmation_and_ack_keep_their_original_instructions_and_back(self):
         ns, route, _ = _runtime()

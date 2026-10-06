@@ -415,7 +415,7 @@ def test_admin_menu_contains_grouped_operator_and_system():
     assert "🔄 Refresh Queue" in queue_labels
     assert "🧹 Dọn job kẹt" in queue_labels
     confirm_labels = [button.text for row in bot.admin_confirm_keyboard("freeze_video").inline_keyboard for button in row]
-    assert "✅ Xác nhận" in confirm_labels
+    assert "📋 Xem lệnh cần chạy" in confirm_labels
     assert "❌ Hủy" in confirm_labels
     assert "⬅️ Quay lại" in confirm_labels
     assert "/freeze_video" in bot.admin_confirm_text("freeze_video")

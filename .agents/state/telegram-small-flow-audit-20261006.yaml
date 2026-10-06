@@ -1,12 +1,12 @@
 task_id: telegram-small-flow-audit-20261006
 goal_status: active
 phase: verify
-base_sha: 54ee434aab7c44b09af793bdb7dd9764976cf3bd
+base_sha: 1f1b035edb225f8fef6b475836c75f6c7b609a81
 objective: >-
   Continue the ordered Telegram small-flow audit. Fix wrong callback/Back routes
   narrowly while protecting AutoPost WIP and stable product engines.
-current_spec: S12.24.2-admin-package-actions-guide-labels
-branch: fix/admin-package-guide-labels-20261007
+current_spec: S12.24.3-admin-queue-manual-confirm-copy
+branch: audit/telegram-ui-continuation-20261007
 allowed_scope:
   - Read-only source registration and candidate-test inventory
   - Remaining Admin UI emitted-control/handler evidence; narrow fixes only after reproduced RED
@@ -358,7 +358,7 @@ specs:
       - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
       - docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
   S12.24.2-admin-package-actions-guide-labels:
-    status: local-green-awaiting-pr-ci-delivery
+    status: merged-deployed-runtime-sha-verified
     base_sha: 54ee434aab7c44b09af793bdb7dd9764976cf3bd
     acceptance: >-
       The four visible Package module buttons whose registered destinations render
@@ -366,12 +366,45 @@ specs:
       to its registered help renderer and Back returns to the Package module.
     red: "Four test subcases reproduced misleading labels: Catalog gói, Cấp combo, Cấp tháng, Gói của user; their registered route outputs contain /package_catalog, /grant_combo, /grant_monthly, /user_packages instructions."
     green: "5 Admin module route tests and 2 adjacent Package Orders origin tests pass; full bot.py and changed-test py_compile exit 0; git diff --check exit 0."
+    pull_request: 1390
+    merge_sha: 1f1b035edb225f8fef6b475836c75f6c7b609a81
+    ci: "python_hygiene_and_tests and python-311-source-compile SUCCESS"
+    deploy_run: 37528116347
+    runtime_sha: 1f1b035edb225f8fef6b475836c75f6c7b609a81
+    runtime_services: "bot/web/nginx active; all NRestarts=0; tracked bot.py matches HEAD; health status=ok"
+    live_pass: "NOT_TESTED for manual Telegram/client UX"
     protected_scope: "Package grant/order business logic, user data, wallet, provider calls, AutoPost WIP, shared router, product engines"
     files:
       - bot.py
       - tests/test_admin_module_child_back_origin.py
       - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
       - docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
+  S12.24.3-admin-queue-manual-confirm-copy:
+    status: focused-green-awaiting-pr-ci-source-compile-and-tests
+    base_sha: 1f1b035edb225f8fef6b475836c75f6c7b609a81
+    acceptance: >-
+      Queue Freeze Video, Unfreeze Tool and Refund Job buttons accurately state
+      that they display a command guide and do not execute or complete the action.
+      Keep callback payloads, command text, authorization, navigation and operation
+      handlers unchanged.
+    red: >-
+      Actual emitted controls dispatched through the registered menu callback showed
+      the label '✅ Xác nhận' although the callback only displayed manual command
+      instructions; the result heading claimed 'Đã xác nhận thao tác admin'. The
+      focused test reproduced the CTA mismatch in all three Queue cases.
+    green: >-
+      Queue registered-handler suite ran 5 tests OK; adjacent Admin module-child
+      suite ran 5 tests OK. Full local bot compile produced no output for over 7
+      minutes and was interrupted (not a pass and not a syntax failure); local pytest
+      is absent. Changed core label assertion and complete source compile await PR CI.
+    protected_scope: "All Admin command/operation handlers, permission checks, callback values, business/data/wallet/provider operations, all product engines, AutoPost WIP and shared router architecture"
+    files:
+      - bot.py
+      - tests/test_admin_queue_confirm_back_origin.py
+      - tests/test_core.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
+      - TAI-LIEU/01-NGHIEP-VU-VAN-HANH.md
   A6-admin-platform-copy-backlog:
     status: queued-after-route-audit
     evidence: "Fake-role execution produced 1 Railway mention in owner_required_text and 2 in registered admin_whoami output (3 references across 2 rendered UI outputs). Actual deployment target is Ubuntu VPS. No ENV/permission writes or real sends"
@@ -391,25 +424,29 @@ verification:
   runtime_after_1380: "Exact SHA74a8d86f24d1c8960706bc2c73b0ca984a69ae56; bot/web/nginx active/running; NRestarts=0; health HTTP200"
   pull_request_1381_ci: "Both required gates SUCCESS; Ubuntu Admin routes35 and workflow hygiene99 passed; complete source compile/AST/py_compile/tokenize passed"
   runtime_after_1381: "Exact SHA0929d61ade4b8f0d60b803b62417763e90acce9e; bot/web/nginx active/running; NRestarts=0; health HTTP200; tracked bot.py matches"
-  current_pull_request_ci: "PR #1389: both required checks SUCCESS; main workflow compiled source and passed configured route/workflow hygiene checks"
+  current_pull_request_ci: "PR #1390: both required checks SUCCESS; main workflow compiled source and passed configured route/workflow hygiene checks"
   current_full_source_compile: "Final S12.23 full py_compile module on bot.py and both changed test files exited 0; both test files recompiled after test-only fixture/coverage updates, exit 0"
-  current_focused_route_tests: "Ticket/inbox adjacent subset: 24 tests in 36.372s OK; exact final focused 4 methods in 4.533s OK"
+  current_focused_route_tests: "S12.24.3 Queue confirmation suite: 5 tests OK; adjacent Admin module child suite: 5 tests OK; core pytest unavailable locally"
   S12_24_1_focused_tests: "Provider/Worker route evidence: 4 tests OK; adjacent Billing guide evidence: 3 tests OK"
   S12_24_1_compile: "python -m py_compile bot.py tests/test_admin_module_child_back_origin.py exited 0"
   S12_24_1_diff_check: "git diff --check exited 0; Git reports only LF-to-CRLF conversion warning for the existing test file"
   S12_24_2_focused_tests: "Admin module callbacks/back: 5 tests OK; Package Orders origin regressions: 2 tests OK"
   S12_24_2_compile: "python -m py_compile bot.py tests/test_admin_module_child_back_origin.py exited 0"
   S12_24_2_diff_check: "git diff --check exited 0; Git reports only LF-to-CRLF conversion warning for the existing test file"
-  current_diff_check: "git diff --check exited 0; only expected test-file line-ending warning"
-  current_delivery: "PR #1389 deployed at 54ee434aab7c44b09af793bdb7dd9764976cf3bd; exact SHA/source/services/health verified; workers not deployed"
+  S12_24_2_delivery: "PR #1390 merged/deployed at 1f1b035edb225f8fef6b475836c75f6c7b609a81; exact VPS SHA/source/services/health verified; deploy_workers=false"
+  S12_24_3_focused_tests: "Queue confirmation suite: 5 tests OK; adjacent Admin module child suite: 5 tests OK"
+  S12_24_3_local_compile: "bot.py full py_compile produced no output for >7 minutes and was interrupted; NOT_VERIFIED locally; full Ubuntu PR CI compile is required"
+  S12_24_3_local_pytest: "Unavailable: bundled Python has no pytest; test_core assertion and full suite await PR CI"
+  current_diff_check: "S12.24.3 git diff --check exited 0; only expected LF-to-CRLF working-copy warning"
+  current_delivery: "S12.24.3 PR/CI/merge/deploy pending; latest verified main/runtime SHA remains 1f1b035edb225f8fef6b475836c75f6c7b609a81"
   local_pytest: "Unavailable: bundled Python has no pytest module; test is standard-library unittest and added to Ubuntu CI"
   provider_calls: 0
   real_telegram_sends: 0
   wallet_mutations: 0
   production_data_writes: 0
-  current_protected_comparator: "PASS: Ticket UI keyboard plus read-panel origin validation/render args only; all status/reply/list/file and data operations, menu router, engines/services/providers/workers/config and other bot source unchanged"
+  current_protected_comparator: "PASS: bot.py diff is only the two manual-command CTA/heading strings; callback values, commands, authorization, navigation, operations, common router and all product engines are unchanged; provider calls, wallet writes, DB writes, jobs and real messages are 0"
 blockers: []
 next:
-  - Resume S12.24 remaining A1/A2 Admin emitted-control/registered-handler evidence and narrow proven UX fixes.
+  - Complete the S12.24.3 full-source compile and PR/CI gates, then continue remaining A1/A2 Admin emitted-control/registered-handler evidence and narrow proven UX fixes.
   - Continue remaining A1/A2 Admin/customer route evidence with inert fixtures; do not infer a bug from missing name references.
   - Resume A3/A4/A5, A6, A7, and A8 in checklist order.

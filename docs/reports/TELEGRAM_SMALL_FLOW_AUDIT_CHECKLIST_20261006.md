@@ -13,7 +13,7 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 
 | ID | Spec / acceptance evidence | State |
 |---|---|---|
-| A0 | Active main/runtime baseline: `54ee434aab7c44b09af793bdb7dd9764976cf3bd` after PR #1389. Historical AST registration inventory at `0929d61a` measures 87 direct registrations, 85 distinct expressions and 83 literal patterns; subsequent source comparators preserve registration order. The old emitter snapshot `4f1455ed` had 3,981 constructors/821 dynamic expressions/0 unmatched static callbacks. Those figures and old line locations are historical inventory, not proof of current route behavior. | Per-registration matrix in `TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md`; route verdicts remain partial/unproven. |
+| A0 | Active main/runtime baseline: `1f1b035edb225f8fef6b475836c75f6c7b609a81` after PR #1390. Historical AST registration inventory at `0929d61a` measures 87 direct registrations, 85 distinct expressions and 83 literal patterns; subsequent source comparators preserve registration order. The old emitter snapshot `4f1455ed` had 3,981 constructors/821 dynamic expressions/0 unmatched static callbacks. Those figures and old line locations are historical inventory, not proof of current route behavior. | Per-registration matrix in `TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md`; route verdicts remain partial/unproven. |
 | A1 | Admin screens: verify each visible action label matches its handler; test emitted callback, authorization, state transition, and error/stale path. | PARTIAL — report/overview, root/help/package and feedback/access samples have evidence below; S12.13 corrects three Runtime-guide labels without changing their routes; full visible-action matrix remains open. |
 | A2 | Admin Back/Home: verify immediate parent and preserve list/filter/page context; test prompt and preview exits without performing the underlying action. | IN PROGRESS — ticket-origin specs S12.6–S12.10 (#1367–#1374) are in #1376; S12.12 merged/deployed in #1378 at runtime SHA `392d2eec`; S12.18 fixes Package Orders origin and S12.19 fixes Security/DB child Back. Other admin/customer routes remain open. |
 | A3 | Customer screens: verify ownership, same-product navigation, Back/Home, and no cross-user or cross-product route. | OPEN — audit ledger not complete. |
@@ -48,8 +48,20 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 - The registered menu handler rendered command instructions (`/package_catalog`, `/grant_combo`, `/grant_monthly`, `/user_packages`) rather than executing those operations or displaying user/package records.
 - RED: four subcases failed against the observed labels before the correction.
 - Fix: prefix each of those four buttons with “Hướng dẫn…”; callback payloads stay unchanged. Storage, order, and other actions are unchanged.
-- GREEN: source-extracted test opens Admin → Gói/Combo through the registered menu callback, dispatches each emitted guide button, verifies the command and emitted Back to Gói/Combo, then presses Back. Five Admin module tests and two Package Orders origin regressions pass; `python -m py_compile bot.py tests/test_admin_module_child_back_origin.py` and `git diff --check` pass. PR/CI delivery pending.
+- GREEN: source-extracted test opens Admin → Gói/Combo through the registered menu callback, dispatches each emitted guide button, verifies the command and emitted Back to Gói/Combo, then presses Back. Five Admin module tests and two Package Orders origin regressions pass; `python -m py_compile bot.py tests/test_admin_module_child_back_origin.py` and `git diff --check` pass.
+- Delivery: [PR #1390](https://github.com/manhtoangreensky-wq/bot/pull/1390) merged at `1f1b035edb225f8fef6b475836c75f6c7b609a81`; both required checks SUCCESS. Exact-SHA bot-only deploy [37528116347](https://github.com/manhtoangreensky-wq/bot/actions/runs/37528116347) SUCCESS (`deploy_workers=false`). SSH confirms runtime SHA/source match, bot/web/nginx active, all `NRestarts=0`, health `status=ok`. [PR delivery evidence comment](https://github.com/manhtoangreensky-wq/bot/pull/1390#issuecomment-6025092937).
+- Manual Telegram/client QA remains NOT_TESTED; other A1/A2 routes remain open.
 - Business-operation, wallet, production-data and provider calls: 0.
+
+### S12.24.3 — Queue command-guide controls do not claim an action was confirmed
+
+- Trigger: Admin → Queue → Freeze Video / Unfreeze Tool / Refund Job prompt.
+- Evidence: the actual emitted control dispatched through registered `handle_menu_callback`. Each “✅ Xác nhận” callback only rendered a page instructing the admin to send a slash command manually; it did not run the command. That page nevertheless said “Đã xác nhận thao tác admin”, which implied a completed action.
+- RED: the registered-handler regression failed on the same misleading CTA in all 3 Queue cases before production text was changed; there were no setup errors.
+- Fix: change the CTA to “📋 Xem lệnh cần chạy” and the result heading to “Hướng dẫn thao tác admin”. Callback payloads, commands, authorization, Cancel/Back routes and all operational handlers are unchanged.
+- GREEN: `tests/test_admin_queue_confirm_back_origin.py` → `Ran 5 tests ... OK`; adjacent `tests/test_admin_module_child_back_origin.py` → `Ran 5 tests ... OK`. Local full `pytest` is unavailable in the bundled Python. The full `bot.py` compile produced no output for over 7 minutes and was interrupted; this is NOT a compile pass or syntax failure. Required PR CI must run the full source compile and changed `test_core.py` assertion before merge. `git diff --check` exits 0 (expected LF→CRLF working-copy warning only).
+- Scope: two UI strings, one focused callback assertion and one existing label assertion. The manual command is never executed by this callback. No provider, wallet, database, production-data, job or real Telegram side effect.
+- Delivery: PR/CI/merge/deploy pending. Manual Telegram/client QA remains NOT_TESTED; this does not close A1/A2 or the whole-bot goal.
 
 ### S12.6 — Admin Ticket reply origin and pagination
 
@@ -320,7 +332,7 @@ Fake-role execution of actual UI functions produced 1 Railway reference in `owne
 5. S12.15 (#1381) is merged/deployed/runtime verified at `0929d61a`; S12.16 inventories registrations but is not whole-bot route proof.
 6. S12.17 is merged/deployed/runtime verified at `979c0ee5`; its stale media result controls are closed.
 7. S12.18 (#1383) is merged/deployed/runtime verified at `5c040c22`.
-8. S12.19 (#1384) is verified at `3557b97a`; S12.20 (#1385) at `406280d6`; S12.21 (#1386) at `877aea89`; S12.22 (#1387) at `8faa35eb`; S12.23 (#1388) at `c0a05ce0`; S12.24.1 (#1389) at `54ee434a`. Continue remaining Admin route evidence before dependent stages.
+8. S12.19 (#1384) is verified at `3557b97a`; S12.20 (#1385) at `406280d6`; S12.21 (#1386) at `877aea89`; S12.22 (#1387) at `8faa35eb`; S12.23 (#1388) at `c0a05ce0`; S12.24.1 (#1389) at `54ee434a`; S12.24.2 (#1390) at `1f1b035e`. S12.24.3 is locally focused-green; finish full-source verification and deliver it before continuing remaining Admin evidence.
 9. Continue A1–A5 for remaining admin/customer routes, pending-state expiry/stale/repeat behavior, preserving protected product lanes.
 10. Finish A6 UI/UX consistency review and update this ledger with evidence, not assumptions.
 11. Close A7 only after multiple user-timed samples can be compared to anonymous server phases; separate server, Telegram render and client/network wait.
