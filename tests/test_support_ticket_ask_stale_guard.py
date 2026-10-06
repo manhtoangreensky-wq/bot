@@ -80,7 +80,7 @@ class SupportTicketAskStaleGuardTests(unittest.TestCase):
             for button in row
             if button.text == "👤 Hỏi thêm khách"
         )
-        self.assertRegex(callback_data, rf"^ticket\|ask\|{ticket_id}$")
+        self.assertEqual(callback_data, f"ticket|ask|{ticket_id}|new|0")
         route = re.search(
             r'CallbackQueryHandler\(handle_ticket_callback, pattern=r"([^"]+)"\)',
             self.source,
@@ -118,7 +118,7 @@ class SupportTicketAskStaleGuardTests(unittest.TestCase):
 
         self.assertEqual(
             self.pending,
-            [((501, "admin_reply_input"), {"ticket_id": 73, "source": "new"})],
+            [((501, "admin_reply_input"), {"ticket_id": 73, "source": "new", "list_offset": 0})],
         )
         self.assertEqual(len(self.edits), 1)
         self.assertIn("👤 Nhập câu hỏi", self.edits[0][0])

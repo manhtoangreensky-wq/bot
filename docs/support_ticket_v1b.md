@@ -63,9 +63,10 @@ Admin can:
 - Check overdue tickets with `/ticket_overdue`.
 
 When opening a ticket from a filtered or paginated admin list, the internal-note
-prompt and the detail screen after saving preserve that list's filter and page.
-Back from the note prompt cancels only the pending note; it does not send a
-customer message or change the ticket note.
+prompt, the detail screen after saving, and the ask-customer prompt/preview keep
+that list's filter and page. Back from the note or ask-customer prompt cancels
+only that pending input; Back from the ask preview does not send a customer
+message.
 
 ## Data Safety
 
