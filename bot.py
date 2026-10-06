@@ -5921,22 +5921,127 @@ def build_product_video_public_final_admission(
     worker = product_video_worker_admission_status()
     asset_pack = _product_video_json_dict(project.get("asset_pack_json"))
     invoice = _product_video_json_dict(project.get("invoice_json"))
+    requested_product_type = str(
+        asset_pack.get("product_type")
+        or invoice.get("product_type")
+        or project.get("profile_id")
+        or ""
+    )
+    engine_contract = video_project_queue.product_video_engine_contract(requested_product_type)
+    quality_tier = video_project_queue._product_video_route_tier_value(invoice, project)
+    required_capability = str(engine_contract.get("required_capability") or "text_to_video_or_scene_video")
+    scene_count = max(
+        1,
+        safe_int(
+            project.get("scene_count")
+            or invoice.get("scene_count")
+            or scene_gate.get("scene_count")
+            or preflight.get("scene_count")
+            or 1
+        ),
+    )
     route_contract = video_provider_router.product_video_route_contract(
-        str(asset_pack.get("product_type") or invoice.get("product_type") or project.get("profile_id") or ""),
+        requested_product_type,
         str(asset_pack.get("engine_adapter") or invoice.get("engine_adapter") or ""),
         str(asset_pack.get("orchestration_mode") or invoice.get("orchestration_mode") or ""),
         explicit_local_renderer=bool(asset_pack.get("explicit_local_renderer") or invoice.get("explicit_local_renderer")),
     )
-    candidates = [
+    configured_chain = [
         str(item or "").strip()
         for item in (
-            scene_gate.get("eligible_provider_keys")
-            or scene_gate.get("runtime_candidate_keys")
+            scene_gate.get("configured_provider_keys")
+            or scene_gate.get("configured_provider_chain")
+            or preflight.get("configured_provider_chain")
             or preflight.get("effective_provider_chain")
+            or scene_gate.get("eligible_provider_keys")
+            or scene_gate.get("runtime_candidate_keys")
             or []
         )
         if str(item or "").strip()
     ]
+    if not configured_chain:
+        configured_chain = list(video_provider_catalog.resolve_product_video_provider_chain())
+
+    contract_valid_chain, contract_invalid_providers = _product_video_contract_valid_provider_chain(
+        configured_chain,
+        scene_count=scene_count,
+        tier=quality_tier,
+        required_capability=required_capability,
+        project=project,
+        product_type=requested_product_type,
+    )
+    freeze_truth = dict(
+        scene_gate.get("freeze_truth")
+        or preflight.get("freeze_truth")
+        or {}
+    )
+    freeze_ok = bool(freeze_truth.get("public_final_confirm_allowed", True))
+
+    raw_snapshot = dict(scene_gate.get("provider_eligibility_snapshot") or preflight.get("provider_eligibility_snapshot") or {})
+    eligibility_evaluated = False
+    eligibility_snapshot: dict = {}
+    if raw_snapshot or preflight.get("provider_health_summary"):
+        hard_block_reasons = dict(
+            scene_gate.get("hard_block_reason_by_provider")
+            or preflight.get("hard_block_reason_by_provider")
+            or {}
+        )
+        status_snapshot = preflight.get("provider_status_snapshot") or raw_snapshot.get("provider_status_snapshot") or {}
+        health_summary = preflight.get("provider_health_summary") or raw_snapshot.get("provider_health_summary") or {}
+        eligibility_snapshot = video_provider_router.product_video_provider_eligibility_snapshot(
+            status=status_snapshot if isinstance(status_snapshot, dict) else {},
+            chain=configured_chain,
+            required_capability=required_capability,
+            provider_health=health_summary if isinstance(health_summary, dict) else {},
+            contract_valid_provider_chain=contract_valid_chain,
+            scene_count=scene_count,
+            require_live_health=True,
+            allow_public_confirmed_probation=True,
+            allow_operational_degradation_probation=True,
+            admission_source=video_provider_router.PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
+            public_user_confirmed=True,
+            public_submit_enabled=bool(
+                preflight.get("public_submit_enabled", True)
+                and freeze_truth.get("public_live_allowed", True)
+            ),
+            worker_compatible=bool(worker.get("worker_version_compatible") if worker else preflight.get("worker_compatible", True)),
+            probation_lock_clear=bool(preflight.get("probation_lock_clear", True)),
+            hard_block_reason_by_provider=hard_block_reasons,
+            global_hard_block_reason=str(freeze_truth.get("public_blocker_code") or preflight.get("global_hard_block_reason") or ""),
+        )
+        eligibility_evaluated = True
+        candidates = list(eligibility_snapshot.get("eligible_provider_keys") or [])
+        admission_mode = str(eligibility_snapshot.get("admission_mode") or "healthy").strip()
+        probation_candidate_key = str(eligibility_snapshot.get("probation_candidate_selected") or "").strip()
+        probation_reason = str(eligibility_snapshot.get("probation_reason") or "").strip()
+        probation_lock_clear = bool(eligibility_snapshot.get("probation_lock_clear", True))
+    else:
+        raw_candidates = [
+            str(item or "").strip()
+            for item in (
+                scene_gate.get("eligible_provider_keys")
+                or scene_gate.get("runtime_candidate_keys")
+                or preflight.get("effective_provider_chain")
+                or []
+            )
+            if str(item or "").strip()
+        ]
+        candidates = [c for c in raw_candidates if c in contract_valid_chain]
+        admission_mode = str(
+            scene_gate.get("admission_mode")
+            or preflight.get("admission_mode")
+            or "healthy"
+        ).strip()
+        probation_candidate_key = str(
+            scene_gate.get("probation_candidate_selected")
+            or preflight.get("probation_candidate_selected")
+            or (candidates[0] if admission_mode == video_project_queue.PRODUCT_VIDEO_PROBATION_ADMISSION_MODE and candidates else "")
+        ).strip()
+        if probation_candidate_key and probation_candidate_key not in candidates:
+            probation_candidate_key = candidates[0] if candidates else ""
+        probation_reason = str(scene_gate.get("probation_reason") or preflight.get("probation_reason") or "").strip()
+        probation_lock_clear = bool(scene_gate.get("probation_lock_clear", preflight.get("probation_lock_clear")))
+
     diagnostics = dict(PRODUCT_VIDEO_CONFIRM_HANDLER_DIAGNOSTICS or {})
     handler_ok = bool(
         diagnostics.get("product_video_confirm_handler_count") == 1
@@ -5960,28 +6065,18 @@ def build_product_video_public_final_admission(
     worker_sha_match = bool(worker.get("sha_match"))
     worker_capability_match = bool(worker.get("capability_match"))
     worker_identity_conflict = bool(worker.get("worker_identity_conflict"))
-    gate_ok = bool(preflight.get("ok") and scene_gate.get("ok"))
+    if eligibility_evaluated:
+        gate_ok = bool(
+            preflight.get("ok", True)
+            and eligibility_snapshot.get("eligibility_state") in {"healthy", "probation"}
+        )
+    else:
+        gate_ok = bool(preflight.get("ok") and scene_gate.get("ok"))
     route_ok = bool(route_contract.get("route_requires_provider") or has_cloud)
-    freeze_truth = dict(
-        scene_gate.get("freeze_truth")
-        or preflight.get("freeze_truth")
-        or {}
-    )
-    freeze_ok = bool(freeze_truth.get("public_final_confirm_allowed", True))
-    admission_mode = str(
-        scene_gate.get("admission_mode")
-        or preflight.get("admission_mode")
-        or "healthy"
-    ).strip()
-    probation_candidate_key = str(
-        scene_gate.get("probation_candidate_selected")
-        or preflight.get("probation_candidate_selected")
-        or (candidates[0] if admission_mode == video_project_queue.PRODUCT_VIDEO_PROBATION_ADMISSION_MODE and candidates else "")
-    ).strip()
-    probation_reason = str(scene_gate.get("probation_reason") or preflight.get("probation_reason") or "").strip()
-    probation_lock_clear = bool(scene_gate.get("probation_lock_clear", preflight.get("probation_lock_clear")))
 
-    if execution_mode == "cloud":
+    if not contract_valid_chain:
+        allowed = False
+    elif execution_mode == "cloud":
         allowed = bool(
             candidates
             and gate_ok
@@ -6013,6 +6108,12 @@ def build_product_video_public_final_admission(
             or freeze_truth.get("public_blocker_code")
             or "product_video_public_freeze_active"
         )
+    elif not contract_valid_chain:
+        block_reason = (
+            str(contract_invalid_providers[0].get("reason"))
+            if contract_invalid_providers
+            else "provider_contract_missing_no_charge"
+        )
     elif not candidates:
         block_reason = "no_eligible_product_video_provider"
     elif not handler_ok:
@@ -6022,11 +6123,17 @@ def build_product_video_public_final_admission(
     elif not route_ok:
         block_reason = "product_video_route_contract_mismatch"
     elif not gate_ok:
-        block_reason = str(scene_gate.get("blocker") or preflight.get("blocker") or "product_video_admission_blocked")
+        block_reason = str(
+            (eligibility_snapshot.get("blocker") if eligibility_evaluated else "")
+            or scene_gate.get("blocker")
+            or preflight.get("blocker")
+            or "product_video_admission_blocked"
+        )
     else:
         block_reason = ""
     snapshot = {
         **dict(scene_gate.get("provider_eligibility_snapshot") or {}),
+        **eligibility_snapshot,
         "provider_eligibility_snapshot_id": snapshot_id,
         "admission_snapshot_id": snapshot_id,
         "admission_checked_at": checked_at,
@@ -6038,11 +6145,16 @@ def build_product_video_public_final_admission(
         "eligible_provider_keys": candidates,
         "runtime_candidate_keys": candidates,
         "final_eligible_provider_count": len(candidates),
+        "contract_valid_provider_chain": list(contract_valid_chain),
+        "contract_invalid_providers": list(contract_invalid_providers),
+        "project_quality_tier": quality_tier,
+        "project_required_capability": required_capability,
     }
     admission = {
         **preflight,
         **scene_gate,
         **route_contract,
+        **eligibility_snapshot,
         "ok": allowed,
         "execution_mode": execution_mode,
         "local_worker_required": local_worker_required,
@@ -6065,7 +6177,7 @@ def build_product_video_public_final_admission(
         "admission_worker_sha": str(worker.get("worker_sha") or ""),
         "admission_worker_version_compatible": worker_ok,
         "admission_route_requires_provider": route_ok,
-        "admission_provider_health_gate_pass": gate_ok,
+        "admission_provider_health_gate_pass": gate_ok and bool(candidates),
         "product_video_freeze_truth": freeze_truth,
         "public_provider_freeze": bool(freeze_truth.get("public_provider_freeze")),
         "hidden_submit_freeze": bool(freeze_truth.get("hidden_submit_freeze")),
@@ -6078,6 +6190,10 @@ def build_product_video_public_final_admission(
         "probation_candidate_key": probation_candidate_key,
         "probation_reason": probation_reason,
         "probation_lock_clear": probation_lock_clear,
+        "contract_valid_provider_chain": list(contract_valid_chain),
+        "contract_invalid_providers": list(contract_invalid_providers),
+        "project_quality_tier": quality_tier,
+        "project_required_capability": required_capability,
         "submit_source": "public_user_final_confirm",
         "public_user_confirmed": True,
         "worker_generation_id": str(worker.get("generation_id") or worker.get("authoritative_worker_generation_id") or ""),
@@ -105453,17 +105569,44 @@ def _product_video_contract_valid_provider_chain(
     chain: list[str] | tuple[str, ...],
     *,
     scene_count: int = 1,
+    tier=None,
+    required_capability: str = "",
+    project: dict | None = None,
+    product_type: str = "",
+    requires_concat: bool = True,
+    env: dict | None = None,
 ) -> tuple[list[str], list[dict]]:
     valid: list[str] = []
     invalid: list[dict] = []
+    proj = dict(project or {})
+    invoice = _product_video_json_dict(proj.get("invoice_json")) if proj else {}
+    asset_pack = _product_video_json_dict(proj.get("asset_pack_json")) if proj else {}
+    if tier is None and proj:
+        tier = video_project_queue._product_video_route_tier_value(invoice, proj)
+    if tier is None:
+        tier = 300
+    if not product_type and proj:
+        product_type = str(
+            asset_pack.get("product_type")
+            or invoice.get("product_type")
+            or proj.get("profile_id")
+            or ""
+        )
+    if not required_capability and product_type:
+        engine_contract = video_project_queue.product_video_engine_contract(product_type)
+        required_capability = str(engine_contract.get("required_capability") or "")
+    if not required_capability:
+        required_capability = "text_to_video_or_scene_video"
+    count = max(1, safe_int(scene_count, 1))
     for provider in [str(item or "").strip() for item in (chain or []) if str(item or "").strip()]:
         try:
             resolution = video_provider_catalog.resolve_product_video_model(
-                tier=300,
+                tier=tier,
                 provider_chain=[provider],
-                scene_count=max(1, safe_int(scene_count, 1)),
-                required_capability="text_to_video_or_scene_video",
-                requires_concat=True,
+                scene_count=count,
+                required_capability=required_capability,
+                requires_concat=requires_concat,
+                env=env,
             )
         except Exception as exc:
             invalid.append({"provider": provider, "reason": f"model_contract_check_error:{type(exc).__name__}"})
@@ -105883,9 +106026,17 @@ def product_video_multi_scene_health_gate(
         for item in (preflight.get("configured_provider_chain") or preflight.get("effective_provider_chain") or [])
         if str(item or "").strip()
     ]
+    gate_tier = preflight.get("quality_tier") or preflight.get("tier")
+    gate_product_type = str(preflight.get("product_type") or "")
+    gate_capability = str(preflight.get("required_capability") or "")
+    gate_project = preflight.get("project") if isinstance(preflight.get("project"), dict) else None
     contract_valid, contract_invalid = _product_video_contract_valid_provider_chain(
         configured,
         scene_count=count,
+        tier=gate_tier,
+        required_capability=gate_capability,
+        project=gate_project,
+        product_type=gate_product_type,
     )
     eligibility_snapshot = dict(preflight.get("provider_eligibility_snapshot") or {})
     explicit_public_final_confirm = bool(

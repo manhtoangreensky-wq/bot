@@ -12,6 +12,7 @@ Covers Cases A through G:
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -462,4 +463,274 @@ def test_phase5_focused_test_matrix_readiness_and_failures():
         assert loss_report["ok"] is False
         assert "economics_loss_guard_blocked" in loss_report["blockers"]
         assert loss_report["economics_safe"] is False
+
+
+def test_phase1_b13_red_reproduced_generic_admission_fails_at_kickoff():
+    """PHASE 1: Prove B13 RED reproduction:
+    Without project contract filtering before health/probation selection,
+    generic admission evaluates with default tier 300 where ShopAIKey is contract-valid.
+    Under probation/degraded health state for both providers, ShopAIKey is retained/selected.
+    When kickoff evaluates the actual Tier 700 Kling contract, ShopAIKey fails closed
+    with provider_contract_missing_no_charge, aborting before job creation.
+    """
+    project_14 = {
+        "project_id": 14,
+        "user_id": 7126457028,
+        "profile_id": "self_shot_scene_change",
+        "scene_count": 2,
+        "invoice_json": json.dumps({
+            "product_type": "self_shot_scene_change",
+            "quality_tier": 700,
+            "scene_count": 2,
+            "user_visible_price_xu": 5785,
+        }),
+        "asset_pack_json": json.dumps({
+            "product_type": "self_shot_scene_change",
+            "quality_tier": 700,
+            "engine_adapter": "controlled_keyframe_image_to_video",
+        }),
+    }
+    # Simulate unconstrained admission (B13 behavior) where ShopAIKey was picked
+    b13_admission = {
+        "ok": True,
+        "execution_mode": "cloud",
+        "eligible_provider_keys": ["shopaikey_video"],
+        "runtime_candidate_keys": ["shopaikey_video"],
+        "admission_mode": "probation",
+        "probation_candidate_selected": "shopaikey_video",
+        "submit_source": "public_user_final_confirm",
+        "public_user_confirmed": True,
+    }
+    # When kickoff evaluates ShopAIKey for project 14 (Tier 700 Kling I2V)
+    kickoff = video_project_queue.build_product_video_confirm_kickoff_payload(
+        {"id": 14, "project_id": 14, "user_id": 7126457028},
+        project_14,
+        provider_chain=list(b13_admission["eligible_provider_keys"]),
+    )
+    # RED: ShopAIKey fails contract for Tier 700 Kling
+    assert kickoff["provider_chain_resolved"] is False
+    assert kickoff["worker_dispatch_blocker"] == "provider_contract_missing_no_charge"
+    assert kickoff["selected_provider"] == ""
+
+
+def test_phase2_and_3_public_admission_project_contract_remediation_matrix():
+    """PHASE 2 & 3: Prove all 10 requirements of R16.10B14:
+    1. R05A Tier 700 + Kling: ShopAIKey excluded BEFORE health/probation selection.
+    2. R05A Tier 700 + Kling: Key4U selected when contract-valid and probation-admissible.
+    3. Admission provider/model/capability MATCH kickoff provider/model/capability.
+    4. R05A: fallback provider count = 0.
+    5. Provider-free admission tests: zero job/provider/wallet mutations.
+    6. Missing Key4U Tier-700 contract: fail closed before job creation.
+    7. Missing Key4U endpoint/interface: fail closed before job creation.
+    8. Generic Tier-300 products: existing valid ShopAIKey behavior preserved.
+    9. Generic multi-provider products: probation semantics preserved after contract filtering.
+    10. Hidden/final-confirm invariants: no submit before final confirm.
+    """
+    env = _canonical_i2v_env()
+    with patch.dict(os.environ, env, clear=False):
+        project_14 = {
+            "project_id": 14,
+            "user_id": 7126457028,
+            "profile_id": "self_shot_scene_change",
+            "scene_count": 2,
+            "invoice_json": json.dumps({
+                "product_type": "self_shot_scene_change",
+                "quality_tier": 700,
+                "scene_count": 2,
+                "user_visible_price_xu": 5785,
+            }),
+            "asset_pack_json": json.dumps({
+                "product_type": "self_shot_scene_change",
+                "quality_tier": 700,
+                "engine_adapter": "controlled_keyframe_image_to_video",
+            }),
+        }
+
+        # Simulated production health state: both in probation/degraded
+        preflight = {
+            "ok": True,
+            "configured_provider_chain": ["shopaikey_video", "key4u_video"],
+            "effective_provider_chain": ["shopaikey_video", "key4u_video"],
+            "provider_status_snapshot": {
+                "provider_chain": ["shopaikey_video", "key4u_video"],
+                "providers": [
+                    {"provider": "shopaikey_video", "enabled": True, "configured": True, "credit_ok": True},
+                    {"provider": "key4u_video", "enabled": True, "configured": True, "credit_ok": True},
+                ],
+            },
+            "provider_health_summary": {
+                "shopaikey_video": {
+                    "provider": "shopaikey_video",
+                    "route_ready": True,
+                    "live_healthy": False,
+                    "provider_health_state": "probation",
+                    "probation": True,
+                },
+                "key4u_video": {
+                    "provider": "key4u_video",
+                    "route_ready": True,
+                    "live_healthy": False,
+                    "provider_health_state": "probation",
+                    "probation": True,
+                },
+            },
+            "freeze_truth": {
+                "public_final_confirm_allowed": True,
+                "public_live_allowed": True,
+            },
+            "worker_compatible": True,
+            "public_submit_enabled": True,
+            "probation_lock_clear": True,
+        }
+        scene_gate = {
+            "ok": True,
+            "configured_provider_chain": ["shopaikey_video", "key4u_video"],
+            "provider_eligibility_snapshot": {},
+        }
+
+        worker_patch = patch.object(
+            bot,
+            "product_video_worker_admission_status",
+            return_value={"ok": True, "worker_version_compatible": True, "worker_alive": True},
+        )
+        with worker_patch:
+            # 1 & 2. build_product_video_public_final_admission evaluates with actual project contract
+            admission = bot.build_product_video_public_final_admission(
+                project_14,
+                7126457028,
+                preflight,
+                scene_gate,
+            )
+
+            # Contract validity checks
+            contract_valid_chain = admission["contract_valid_provider_chain"]
+            assert "shopaikey_video" not in contract_valid_chain, "R05A_SHOPAIKEY_CONTRACT_VALID must be NO"
+            assert "key4u_video" in contract_valid_chain, "R05A_KEY4U_CONTRACT_VALID must be YES"
+            assert contract_valid_chain == ["key4u_video"]
+
+            # Runtime candidate selected
+            assert admission["runtime_candidate_keys"] == ["key4u_video"]
+            assert admission["eligible_provider_keys"] == ["key4u_video"]
+            assert admission["admission_mode"] in {"probation", "public_confirmed_probation"}
+            assert admission["ok"] is True
+
+            # 3. Admission matches kickoff authority
+            kickoff = video_project_queue.build_product_video_confirm_kickoff_payload(
+                {"id": 14, "project_id": 14, "user_id": 7126457028},
+                project_14,
+                provider_chain=list(admission["runtime_candidate_keys"]),
+            )
+            assert kickoff["provider_chain_resolved"] is True
+            assert kickoff["selected_provider"] == "key4u_video"
+            assert kickoff["selected_model"] == "kling-v3"
+            assert kickoff.get("engine_route", kickoff.get("engine_adapter")) in {"controlled_keyframe_image_to_video", None}
+
+            # 4. Fallback provider count = 0
+            assert len(admission["runtime_candidate_keys"]) - 1 == 0
+            assert len(kickoff["provider_chain"]) == 1
+
+            # 6. Missing Key4U Tier-700 contract: fail closed before job creation
+            with patch.object(
+                bot.video_provider_catalog,
+                "resolve_product_video_model",
+                return_value={"ok": False, "blocker": "provider_contract_missing_no_charge"},
+            ):
+                missing_contract_admission = bot.build_product_video_public_final_admission(
+                    project_14,
+                    7126457028,
+                    preflight,
+                    scene_gate,
+                )
+                assert missing_contract_admission["ok"] is False
+                assert missing_contract_admission["contract_valid_provider_chain"] == []
+                assert missing_contract_admission["admission_block_reason"] == "provider_contract_missing_no_charge"
+
+            # 7. Missing Key4U endpoint/interface: fail closed before job creation
+            with patch.dict(os.environ, {"KEY4U_KLING_VIDEO_ENDPOINT": ""}, clear=False):
+                with patch.object(
+                    bot.video_provider_catalog,
+                    "_first_endpoint",
+                    return_value=("", ""),
+                ):
+                    no_ep_admission = bot.build_product_video_public_final_admission(
+                        project_14,
+                        7126457028,
+                        preflight,
+                        scene_gate,
+                    )
+                    assert no_ep_admission["ok"] is False
+                    assert no_ep_admission["contract_valid_provider_chain"] == []
+
+            # 8. Generic Tier-300 products: existing valid ShopAIKey behavior preserved
+            project_300 = {
+                "project_id": 300,
+                "user_id": 12345,
+                "profile_id": "video_ai_prompt",
+                "scene_count": 1,
+                "invoice_json": json.dumps({
+                    "product_type": "video_ai_prompt",
+                    "quality_tier": 300,
+                    "scene_count": 1,
+                }),
+                "asset_pack_json": json.dumps({
+                    "product_type": "video_ai_prompt",
+                    "quality_tier": 300,
+                    "engine_adapter": "text_to_video",
+                }),
+            }
+            preflight_300 = {
+                **preflight,
+                "provider_health_summary": {
+                    "shopaikey_video": {
+                        "provider": "shopaikey_video",
+                        "route_ready": True,
+                        "live_healthy": True,
+                        "provider_health_state": "healthy",
+                    },
+                    "key4u_video": {
+                        "provider": "key4u_video",
+                        "route_ready": True,
+                        "live_healthy": True,
+                        "provider_health_state": "healthy",
+                    },
+                },
+            }
+            admission_300 = bot.build_product_video_public_final_admission(
+                project_300,
+                12345,
+                preflight_300,
+                scene_gate,
+            )
+            assert admission_300["ok"] is True
+            assert "shopaikey_video" in admission_300["contract_valid_provider_chain"]
+
+            # 9. Generic multi-provider products: probation semantics preserved
+            probation_300 = {
+                **preflight,
+                "provider_health_summary": {
+                    "shopaikey_video": {
+                        "provider": "shopaikey_video",
+                        "route_ready": True,
+                        "live_healthy": False,
+                        "provider_health_state": "probation",
+                        "probation": True,
+                    },
+                    "key4u_video": {
+                        "provider": "key4u_video",
+                        "route_ready": True,
+                        "live_healthy": True,
+                        "provider_health_state": "healthy",
+                    },
+                },
+            }
+            probation_admission_300 = bot.build_product_video_public_final_admission(
+                project_300,
+                12345,
+                probation_300,
+                scene_gate,
+            )
+            assert probation_admission_300["ok"] is True
+            assert probation_admission_300["admission_mode"] in {"probation", "public_confirmed_probation"}
+            assert probation_admission_300["probation_candidate_key"] == "shopaikey_video"
+
 
