@@ -257,6 +257,12 @@ hoặc hết timeout mà không fail-closed/cleanup.
 |---|---|---|
 | `ADMIN-SECURITY-DB-BACK-01` | Fixture: Admin → Bảo mật/DB → DB Status → Nhật ký bảo mật → Làm mới → Quay lại. Lặp chiều Security Log → DB Status; kiểm tra nút backup bằng kết quả giả lập từ module và cả hai màn con. Thử user thường và origin sai. | Back trả đúng màn đã mở nút, refresh giữ origin. Backup giả lập không gọi DB thật; kết quả Back về màn phát nút. User thường/origin lạ có đúng một alert và không đọc dữ liệu, tạo backup hoặc cleanup pending. Các nút dưới 64 byte. Không gọi provider, ví hoặc production data. |
 
+## Admin module child Back — S12.20, 07/10/2026
+
+| ID | Bước kiểm thử | PASS bắt buộc |
+|---|---|---|
+| `ADMIN-MODULE-CHILD-BACK-01` | Fixture: từ Queue mở Queue Status/Help; Security/DB mở Sales Ready; Hệ thống mở Dashboard; Provider/Worker mở Provider Status, Smoke Test, Video job. Bấm refresh nếu có rồi Back. Lặp callback legacy và thử user thường/origin sai. | Cả 7 Back về module phát nút, refresh giữ nguồn. Legacy giữ Back cũ; các nút nghiệp vụ không đổi. Callback sai/user thường có một alert, không cleanup pending/đọc report/render. Dữ liệu báo cáo là fixture; không queue/provider/DB/ví/job/tin thật. |
+
 ## Media library stale callback — 06/10/2026
 
 | ID | Bước kiểm thử | PASS bắt buộc |

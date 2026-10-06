@@ -141623,6 +141623,8 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     action = raw_action
     package_orders_origin = ""
     security_db_origin = ""
+    module_child_origin = ""
+    module_child_back = ""
     menu_timing_enabled = action in ("main", "main_video")
     menu_timing_start = time.perf_counter() if menu_timing_enabled else 0.0
     user_is_admin = is_admin_user(query.from_user.id)
@@ -141650,6 +141652,22 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
     if action.startswith("hint_") and not user_is_admin and action not in public_hints:
         return await query.answer("Lệnh nội bộ chỉ dành cho Admin.", show_alert=True)
+    module_child_contexts = {
+        "freeze_queue_status": ("admin_queue", "freeze_queue"),
+        "freeze_queue_help": ("admin_queue", "admin"),
+        "smoke_sales_ready": ("admin_security_db", "smoke_test"),
+        "admin_overview": ("admin_system_ops", "admin"),
+        "admin_provider_status": ("admin_provider_worker", "admin_provider"),
+        "smoke_test": ("admin_provider_worker", "admin"),
+        "admin_provider_routes": ("admin_provider_worker", "admin_provider"),
+    }
+    child_action, separator, child_origin = action.partition("|")
+    if separator and child_action in module_child_contexts:
+        expected_origin, module_child_back = module_child_contexts[child_action]
+        if child_origin != expected_origin:
+            return await query.answer("Nút Quản trị đã hết phiên. Vui lòng mở lại từ module hiện tại.", show_alert=True)
+        module_child_origin = child_origin
+        action = child_action
     if action.startswith("admin_package_orders|"):
         parts = action.split("|")
         package_orders_origin = parts[1].strip() if len(parts) == 2 else ""
@@ -142251,6 +142269,15 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         text = f"✅ {copy['translation_session_stop']}."
         return await safe_edit_query_message(query, text, reply_markup=translate_language_keyboard(False, lang))
     text, keyboard = localized_menu_content(action, user_is_admin, lang, query.from_user.id)
+    if module_child_origin:
+        module_title = ADMIN_CONTROL_MODULES[module_child_origin[len("admin_"):]]["title"]
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"⬅️ {module_title}", callback_data=f"menu|{module_child_origin}")
+             if button.text.startswith("⬅") and button.callback_data == f"menu|{module_child_back}"
+             else InlineKeyboardButton(button.text, callback_data=f"menu|{action}|{module_child_origin}")
+             if button.callback_data == f"menu|{action}" else button for button in row]
+            for row in keyboard.inline_keyboard
+        ])
     if action == "admin_package_orders" and package_orders_origin:
         keyboard = admin_package_orders_keyboard(package_orders_origin)
     if action == "system_runtime_help" and runtime_help_parent:
@@ -231946,8 +231973,8 @@ ADMIN_CONTROL_MODULES = {
         "purpose": "Dùng để kiểm tra hàng chờ job, đóng/mở công cụ, hoàn Xu/lượt khi job lỗi, và xử lý lock job.",
         "when": "Dùng khi provider lỗi, job kẹt, cần bảo trì, cần hoàn Xu/lượt hoặc cần kiểm tra queue trước khi mở lại public.",
         "buttons": [
-            [("📊 Queue status", "menu|freeze_queue_status"), ("Hướng dẫn hoàn Xu khi job lỗi", "admin_help|refund")],
-            [("🧊 Freeze tools", "menu|freeze_queue_help"), ("🔓 Unfreeze tools", "menu|admin_confirm_unfreeze_tool")],
+            [("📊 Queue status", "menu|freeze_queue_status|admin_queue"), ("Hướng dẫn hoàn Xu khi job lỗi", "admin_help|refund")],
+            [("🧊 Freeze tools", "menu|freeze_queue_help|admin_queue"), ("🔓 Unfreeze tools", "menu|admin_confirm_unfreeze_tool")],
             [("🎬 Freeze video", "menu|admin_confirm_freeze_video"), ("💸 Refund job", "menu|admin_confirm_refund_job")],
         ],
         "commands": [
@@ -231980,7 +232007,7 @@ ADMIN_CONTROL_MODULES = {
         "buttons": [
             [("🗄 DB trạng thái", "menu|admin_db_status|admin_security_db"), ("💾 Sao lưu DB", "menu|admin_backup_db|admin_security_db")],
             [("🛡 Nhật ký bảo mật", "menu|admin_security_log|admin_security_db"), ("📘 Hướng dẫn Runtime", "menu|system_runtime_help|admin_security_db")],
-            [("✅ Sales ready", "menu|smoke_sales_ready")],
+            [("✅ Sales ready", "menu|smoke_sales_ready|admin_security_db")],
         ],
         "commands": [
             ("/db_status", "kiểm tra DB, bảng quan trọng, backup, file risk"),
@@ -232006,7 +232033,7 @@ ADMIN_CONTROL_MODULES = {
         "buttons": [
             [("📘 Hướng dẫn Runtime", "menu|system_runtime_help|admin_system_ops"), ("📘 Hướng dẫn kiểm tra Telegram", "admin_help|runtime")],
             [("📘 Hướng dẫn nhận quyền webhook Telegram", "admin_help|runtime"), ("📘 Hướng dẫn dọn file tạm", "admin_help|runtime")],
-            [("📊 Dashboard", "menu|admin_overview")],
+            [("📊 Dashboard", "menu|admin_overview|admin_system_ops")],
         ],
         "commands": [
             ("/runtime", "build/deploy/current webhook owner"),
@@ -232029,8 +232056,8 @@ ADMIN_CONTROL_MODULES = {
         "purpose": "Dùng để kiểm tra ShopAIKey, Key4U, ASR/TTS/STT/video/music provider, worker/video job và các smoke test nội bộ.",
         "when": "Dùng khi provider lỗi, cần smoke test nội bộ, cần kiểm tra video job hoặc worker trước khi mở public.",
         "buttons": [
-            [("🤖 Provider status", "menu|admin_provider_status"), ("🧪 Smoke Test", "menu|smoke_test")],
-            [("🎬 Video job", "menu|admin_provider_routes"), ("📘 Hướng dẫn: TTS/Voice test", "admin_help|provider")],
+            [("🤖 Provider status", "menu|admin_provider_status|admin_provider_worker"), ("🧪 Smoke Test", "menu|smoke_test|admin_provider_worker")],
+            [("🎬 Video job", "menu|admin_provider_routes|admin_provider_worker"), ("📘 Hướng dẫn: TTS/Voice test", "admin_help|provider")],
             [("📘 Hướng dẫn: ASR/Sub/Dub test", "admin_help|provider")],
             [("📘 Hướng dẫn: Remote Worker Status", "admin_help|provider"), ("📘 Hướng dẫn: Test worker API", "admin_help|provider")],
             [("📘 Hướng dẫn: Remote Worker Canary", "admin_help|provider"), ("📘 Hướng dẫn: Canary status", "admin_help|provider")],

@@ -130,4 +130,11 @@ Source baseline: `0929d61ade4b8f0d60b803b62417763e90acce9e`. Production deployme
 ## S12.19 current-branch update — 06/10/2026
 
 - A2 route evidence found two Security/DB child keyboards that returned to the Admin root instead of their immediate module parent; the two child screens also needed origin tokens when opened from each other. The focused test covers both production builders and registered menu dispatch; PR/merge/deploy are pending.
+- Delivery: #1384 merged/deployed at `3557b97a59b19b267f07efe5558269ea6894f9ec`; 163 configured CI tests OK; deploy 37505100609 SUCCESS; exact SHA/tracked source/services verified, manual Telegram navigation NOT_TESTED.
+
+## S12.20 current-branch update — 07/10/2026
+
+- Seven Admin module entry routes lost their parent (Queue Status/Help, Sales Ready, Dashboard, Provider Status/Routes, Smoke Test). Actual emitted callbacks and registered menu dispatch reproduced the mismatches.
+- A closed UI-origin branch preserves each allowed parent through Back and refresh; original report/queue/provider renderers and business controls stay in use. Legacy callbacks retain their original parent. Public/invalid contexts stop before cleanup/read/render.
+- Corrected baseline fixture: 15 behavioral assertions fail, 0 setup errors. Focused 3 tests and adjacent regression command: 27 tests OK in 38.252s. Protected source comparator passes; full compilation and PR/CI/runtime delivery pending.
 

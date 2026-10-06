@@ -1674,3 +1674,10 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
 
 - Hai màn DB trạng thái và Nhật ký bảo mật từ module Bảo mật/DB trước đây quay về Admin root.
 - Patch mang origin hợp lệ qua DB Status, Security Log và backup callback, dựng Back đúng màn vừa mở và từ chối origin lạ; không chạm thao tác DB/backup/security log. Local route regression đạt; đang chờ CI/PR/deploy.
+
+- Delivery S12.19: #1384 đã deploy `3557b97a`, 163 test CI theo cấu hình đạt; VPS đúng SHA, file bot.py khớp, ba service active/running, NRestarts=0 và health=ok. Manual Telegram QA chưa đo.
+
+## Admin module child Back — S12.20, 07/10/2026
+
+- Tái hiện 7 đường từ module sang màn con bị mất nguồn: Queue Status/Help, Sales Ready từ Security/DB, Dashboard từ Hệ thống, Provider Status/Routes và Smoke Test từ Provider/Worker.
+- Patch giữ origin hợp lệ trên đúng 7 entry, Back và refresh; callback cũ vẫn về menu cũ. Báo cáo, queue, provider, freeze và engine sản phẩm giữ nguyên. 27 regression local đạt; compile/PR/CI/deploy bản mới còn chờ.

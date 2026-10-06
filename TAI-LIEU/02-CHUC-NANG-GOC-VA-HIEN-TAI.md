@@ -840,3 +840,9 @@ provider-fallback `56`, exact-two `3` passed; changed-file compile và
 | Cách hiểu cũ | Bằng chứng thực tế | Điều chỉnh |
 |---|---|---|
 | DB Status/Security Log Back giữ đúng nơi mở màn | Hai keyboard cũ về Admin root; cross-link giữa hai màn thiếu origin | PR #1384 mang origin trên callback, giữ qua refresh và trả đúng màn phát nút khi backup; 24 regression đạt, CI/deploy bản cập nhật còn chờ |
+
+## Module Admin sang màn con — S12.20, 07/10/2026
+
+| Cách hiểu trước | Bằng chứng | Hiện trạng |
+|---|---|---|
+| Back của mọi màn con giữ module đã mở nó | 7 entry qua handler thật quay về hub cũ/Admin root | Origin được mang qua 7 entry và refresh; 27 regression đạt. Triển khai S12.20 còn chờ; S12.19 đã deploy `3557b97a` |
