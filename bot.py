@@ -61052,7 +61052,7 @@ def support_ticket_admin_keyboard(ticket: dict, source: str = "new", list_offset
     ticket_id = int(ticket["id"])
     rows = [
         [InlineKeyboardButton("✅ Đã xử lý", callback_data=f"ticket|st|{ticket_id}|resolved|{source}|{max(0, int(list_offset or 0))}"), InlineKeyboardButton("💬 Soạn trả lời", callback_data=f"ticket|reply|{ticket_id}|{source}|{max(0, int(list_offset or 0))}")],
-        [InlineKeyboardButton("🤖 Gợi ý trả lời", callback_data=f"ticket|suggest|{ticket_id}|0"), InlineKeyboardButton("💰 Đánh dấu refund", callback_data=f"ticket|st|{ticket_id}|refund_pending|{source}|{max(0, int(list_offset or 0))}")],
+        [InlineKeyboardButton("🤖 Gợi ý trả lời", callback_data=f"ticket|suggest|{ticket_id}|0|{source}|{max(0, int(list_offset or 0))}"), InlineKeyboardButton("💰 Đánh dấu refund", callback_data=f"ticket|st|{ticket_id}|refund_pending|{source}|{max(0, int(list_offset or 0))}")],
         [InlineKeyboardButton("⏳ Chờ provider", callback_data=f"ticket|st|{ticket_id}|waiting_provider|{source}|{max(0, int(list_offset or 0))}"), InlineKeyboardButton("👤 Hỏi thêm khách", callback_data=f"ticket|ask|{ticket_id}|{source}|{max(0, int(list_offset or 0))}")],
         [InlineKeyboardButton("📌 Ghi chú admin", callback_data=f"ticket|note|{ticket_id}|{source}|{max(0, int(list_offset or 0))}"), InlineKeyboardButton("🙋 Nhận xử lý", callback_data=f"ticket|assign|{ticket_id}|{source}|{max(0, int(list_offset or 0))}")],
     ]
@@ -140936,6 +140936,11 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
     if action == "suggest" and len(parts) >= 4:
         ticket_id = int(parts[2])
         variant = int(parts[3] or 0)
+        source = parts[4] if len(parts) >= 5 and parts[4] in {"new", "high", "refund"} else "new"
+        try:
+            list_offset = max(0, int(parts[5] or 0)) if len(parts) >= 6 else 0
+        except (TypeError, ValueError):
+            list_offset = 0
         ticket = get_support_ticket(ticket_id)
         if not ticket:
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
@@ -140943,14 +140948,14 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         reply_text = support_suggested_reply(ticket.get("category"), variant, ticket.get("message") or "")
         update_support_ticket(ticket_id, suggested_reply=reply_text)
         preview_token = uuid.uuid4().hex[:16]
-        set_support_ticket_pending(uid, "admin_reply_preview", ticket_id=ticket_id, reply_text=reply_text, variant=variant, source="new", preview_token=preview_token)
+        set_support_ticket_pending(uid, "admin_reply_preview", ticket_id=ticket_id, reply_text=reply_text, variant=variant, source=source, list_offset=list_offset, preview_token=preview_token)
         return await safe_edit_or_send(
             query,
             "🤖 <b>Gợi ý trả lời</b>\n\n"
             f"{html.escape(reply_text)}\n\nBot chưa gửi nội dung này cho khách.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📨 Gửi cho khách", callback_data=f"ticket|send|{ticket_id}|{preview_token}"), InlineKeyboardButton("✍️ Sửa lại", callback_data=f"ticket|reply|{ticket_id}")],
-                [InlineKeyboardButton("🔄 Gợi ý khác", callback_data=f"ticket|suggest|{ticket_id}|{variant + 1}"), InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new")],
+                [InlineKeyboardButton("📨 Gửi cho khách", callback_data=f"ticket|send|{ticket_id}|{preview_token}"), InlineKeyboardButton("✍️ Sửa lại", callback_data=f"ticket|reply|{ticket_id}|{source}|{list_offset}")],
+                [InlineKeyboardButton("🔄 Gợi ý khác", callback_data=f"ticket|suggest|{ticket_id}|{variant + 1}|{source}|{list_offset}"), InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|{source}|{list_offset}")],
             ]),
         )
     if action == "send" and len(parts) >= 3:
@@ -140964,6 +140969,11 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
             or parts[3] != state.get("preview_token")
         ):
             return await query.answer("Bản xem trước đã hết hạn. Vui lòng soạn hoặc tạo gợi ý lại.", show_alert=True)
+        source = state.get("source") if state.get("source") in {"new", "high", "refund"} else "new"
+        try:
+            list_offset = max(0, int(state.get("list_offset") or 0))
+        except (TypeError, ValueError):
+            list_offset = 0
         ticket = get_support_ticket(ticket_id)
         reply_text = str(state.get("reply_text") or "").strip()
         if not ticket or not reply_text:
@@ -140995,7 +141005,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         add_support_ticket_message(ticket_id, "admin", uid, reply_text, "sent")
         ticket = update_support_ticket(ticket_id, status="waiting_user", assigned_admin_id=uid)
         await query.message.reply_text("✅ Đã gửi phản hồi cho đúng user của ticket.")
-        return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket))
+        return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket, source, list_offset))
     if action == "note" and len(parts) >= 3:
         ticket_id = int(parts[2])
         if not get_support_ticket(ticket_id):

@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 import uuid
+from support_v1b import suggested_reply as _support_suggested_reply
 
 
 class _Button:
@@ -36,7 +37,7 @@ class _Query:
     def __init__(self, data, user_id):
         self.data = data
         self.from_user = SimpleNamespace(id=user_id)
-        self.message = SimpleNamespace()
+        self.message = _Message("")
         self.answers = []
         self.reply_markups = []
 
@@ -119,13 +120,16 @@ class AdminTicketOriginPaginationTest(unittest.TestCase):
                 "support_ticket_action_unsupported": "Unsupported",
             },
             "support_ticket_admin_text": lambda _ticket: "Ticket detail",
+            "support_suggested_reply": _support_suggested_reply,
             "get_support_ticket": lambda ticket_id: (
                 dict(self.ticket) if ticket_id == self.ticket["id"] else None
             ),
             "update_support_ticket": update_ticket,
+            "add_support_ticket_message": lambda *_args: None,
             "clear_support_ticket_pending": lambda user_id: self.pending.pop(user_id, None),
             "get_support_ticket_pending": lambda user_id: self.pending.get(user_id),
             "set_support_ticket_pending": set_pending,
+            "USER_PENDING": {},
             "safe_edit_or_send": safe_edit_or_send,
         }
         self.context = SimpleNamespace(bot=SimpleNamespace(send_message=fake_send_message))
@@ -268,6 +272,62 @@ class AdminTicketOriginPaginationTest(unittest.TestCase):
                 if callback.startswith("ticket|al|")
             )
             self.assertEqual(list_back, "ticket|al|high|6")
+
+        asyncio.run(exercise())
+
+    def test_suggested_reply_keeps_origin_through_preview_back_and_send(self):
+        async def exercise():
+            detail = await self._press("ticket|av|9006|high|6")
+            suggest_callback = next(
+                button.callback_data
+                for row in detail.reply_markups[-1].inline_keyboard
+                for button in row
+                if button.text == "🤖 Gợi ý trả lời"
+            )
+            self.assertEqual(suggest_callback, "ticket|suggest|9006|0|high|6")
+
+            preview = await self._press(suggest_callback)
+            state = self.pending[self.admin_id]
+            self.assertEqual(state["source"], "high")
+            self.assertEqual(state["list_offset"], 6)
+            preview_callbacks = {
+                button.text: button.callback_data
+                for row in preview.reply_markups[-1].inline_keyboard
+                for button in row
+            }
+            self.assertEqual(preview_callbacks["⬅️ Ticket"], "ticket|av|9006|high|6")
+            self.assertEqual(preview_callbacks["✍️ Sửa lại"], "ticket|reply|9006|high|6")
+            self.assertEqual(preview_callbacks["🔄 Gợi ý khác"], "ticket|suggest|9006|1|high|6")
+
+            back_detail = await self._press(preview_callbacks["⬅️ Ticket"])
+            back_list = next(
+                callback for callback in _callbacks(back_detail.reply_markups[-1])
+                if callback.startswith("ticket|al|")
+            )
+            self.assertEqual(back_list, "ticket|al|high|6")
+
+            detail = await self._press("ticket|av|9006|high|6")
+            suggest_callback = next(
+                button.callback_data
+                for row in detail.reply_markups[-1].inline_keyboard
+                for button in row
+                if button.text == "🤖 Gợi ý trả lời"
+            )
+            preview = await self._press(suggest_callback)
+            send_callback = next(
+                button.callback_data
+                for row in preview.reply_markups[-1].inline_keyboard
+                for button in row
+                if button.text == "📨 Gửi cho khách"
+            )
+            sent_detail = await self._press(send_callback)
+            self.assertEqual(len(self.sent), 1)
+            self.assertEqual(self.sent[0]["chat_id"], "fixture-customer")
+            send_list = next(
+                callback for callback in _callbacks(sent_detail.reply_markups[-1])
+                if callback.startswith("ticket|al|")
+            )
+            self.assertEqual(send_list, "ticket|al|high|6")
 
         asyncio.run(exercise())
 
