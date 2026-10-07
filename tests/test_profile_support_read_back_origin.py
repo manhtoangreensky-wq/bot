@@ -38,7 +38,7 @@ def _runtime():
     })
     for name in ("SUPPORT_CUSTOM_BOT_DETAILS", "SUPPORT_CONSULT_DETAILS"):
         exec(fixture.fixture._assignment(name), ns)
-    for name in ("support_form_origin_keyboard", "support_read_origin_keyboard", "human_support_text", "human_support_keyboard", "support_admin_contact_text",
+    for name in ("ticket_customer_origin_keyboard", "support_form_origin_keyboard", "support_read_origin_keyboard", "human_support_text", "human_support_keyboard", "support_admin_contact_text",
                  "support_admin_contact_keyboard", "support_cskh_auto_text", "support_cskh_auto_keyboard",
                  "support_premium_text", "support_premium_keyboard", "support_custom_bot_text",
                  "support_custom_bot_keyboard", "support_consult_keyboard", "support_custom_bot_public_label",
@@ -121,7 +121,8 @@ class AccountSupportReadOriginTests(unittest.TestCase):
             protected = lambda markup: [button.callback_data for row in markup.inline_keyboard for button in row
                                          if str(button.callback_data).startswith("ticket|") or str(button.callback_data).split("|")[1:2] in
                                          (["ticket"], ["premium_type"], ["bot_input"], ["consult_need"], ["consult_input"])]
-            self.assertEqual(protected(original), protected(scoped))
+            expected = [callback + "|profile" if callback in {"ticket|mine", "support|ticket"} else callback for callback in protected(original)]
+            self.assertEqual(expected, protected(scoped))
             self.assertTrue(all(len(button.callback_data.encode("utf-8")) <= 64 for row in scoped.inline_keyboard
                                 for button in row if button.callback_data))
 

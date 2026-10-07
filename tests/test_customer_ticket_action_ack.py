@@ -39,7 +39,7 @@ def _runtime(ticket=None):
         "get_support_ticket": lambda ticket_id, uid=None: reads.append((ticket_id, uid)) or ticket,
         "update_support_ticket": lambda ticket_id, **fields: writes.append((ticket_id, fields)) or {**ticket, **fields},
     })
-    for name in ("support_ticket_detail_keyboard", "support_flow_back_keyboard", "support_ticket_pending_key",
+    for name in ("ticket_customer_origin_keyboard", "support_ticket_detail_keyboard", "support_flow_back_keyboard", "support_ticket_pending_key",
                  "set_support_ticket_pending", "clear_support_ticket_pending"):
         match = re.search(rf"(?ms)^def {name}\(.*?(?=^(?:async )?def |^class |^[A-Z][A-Z0-9_]*\s*=|\Z)", fixture.BOT_SOURCE)
         assert match, name
