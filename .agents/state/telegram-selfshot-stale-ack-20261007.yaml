@@ -1,5 +1,5 @@
 task: S12.25_SELF_SHOT_STALE_ACK
-phase: VERIFY
+phase: REPORT
 base_sha: c00e42b054164fcfaa560d81fefae6edcda651d1
 trigger: Emitted SS2 or SS3 source button in an old message while another Product Video session is active.
 allowed: [bot.py stale-product Hub recovery branches, tests/test_selfshot_stale_callback_ack.py, .github/workflows/ci-main.yml test invocation, audit ledger, tester case]
@@ -8,5 +8,5 @@ acceptance: Exactly one best-effort ACK precedes existing Hub render; active ses
 red: Two test methods produced four behavioral failures (SS2/SS3), zero setup errors; events were [edit] instead of [answer, edit].
 verification_command: python3.11 -S -m unittest tests.test_selfshot_stale_callback_ack -v
 green: Two focused test methods plus four timing regressions passed (6 tests in 16.408s); full bot/test py_compile exit 0; exact-base comparator permits only two four-line ACK blocks.
-delivery: PR/CI/merge/deploy pending; manual Telegram QA unverified.
+delivery: PR 1394 merged/deployed at ffc0da03165e31e4a23ca7a352cdd65f7c66f4ce; deploy 37562883724 SUCCESS with workers disabled; exact runtime/source/service/health checks passed. Manual Telegram QA unverified.
 side_effects: {provider: 0, telegram_send: 0, jobs: 0, wallet: 0, production_db: 0}

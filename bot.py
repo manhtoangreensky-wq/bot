@@ -8353,7 +8353,7 @@ def engine_async_status_keyboard(internal_job_id: str, kind: str = "music") -> I
         retry_callback = f"enginejob|multiscene_retry|{safe_id}"
         if len(retry_callback.encode("utf-8")) <= 64:
             rows.append([InlineKeyboardButton("🔁 Retry cảnh lỗi", callback_data=retry_callback)])
-        rows.append([InlineKeyboardButton("🟡 Freeze", callback_data="menu|admin_confirm_provider_freeze_video"), InlineKeyboardButton("📊 Provider Status", callback_data="menu|admin_provider_status")])
+        rows.append([InlineKeyboardButton("📘 Hướng dẫn Freeze", callback_data="menu|admin_confirm_provider_freeze_video"), InlineKeyboardButton("📊 Provider Status", callback_data="menu|admin_provider_status")])
         rows.append([InlineKeyboardButton("⚙️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     else:
         rows.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
@@ -56128,7 +56128,7 @@ def multiscene_retry_help_keyboard(parent_task_id: str, *, confirmed: bool = Fal
             rows.append([InlineKeyboardButton("✅ Xác nhận retry cảnh lỗi", callback_data=confirm_callback)])
     if safe_id:
         rows.append([InlineKeyboardButton("🔄 Làm mới", callback_data=f"enginejob|multiscene|{safe_id}")])
-    rows.append([InlineKeyboardButton("🟡 Freeze", callback_data="menu|admin_confirm_provider_freeze_video"), InlineKeyboardButton("📊 Provider Status", callback_data="menu|admin_provider_status")])
+    rows.append([InlineKeyboardButton("📘 Hướng dẫn Freeze", callback_data="menu|admin_confirm_provider_freeze_video"), InlineKeyboardButton("📊 Provider Status", callback_data="menu|admin_provider_status")])
     rows.append([InlineKeyboardButton("⚙️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
@@ -231164,7 +231164,7 @@ def freeze_queue_menu_text() -> str:
 
 def queue_status_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 Refresh Queue", callback_data="menu|freeze_queue_status"), InlineKeyboardButton("🧹 Dọn job kẹt", callback_data="menu|admin_confirm_clear_stale_jobs")],
+        [InlineKeyboardButton("🔄 Refresh Queue", callback_data="menu|freeze_queue_status"), InlineKeyboardButton("📘 Hướng dẫn dọn job kẹt", callback_data="menu|admin_confirm_clear_stale_jobs")],
         [InlineKeyboardButton("⬅️ Freeze / Queue", callback_data="menu|freeze_queue"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -231228,7 +231228,7 @@ def freeze_queue_status_text() -> str:
 def freeze_status_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 Refresh Freeze", callback_data="menu|freeze_status"), InlineKeyboardButton("✅ Unfreeze Tool", callback_data="menu|unfreeze_tool_help")],
-        [InlineKeyboardButton("🛠 Maintenance ON", callback_data="menu|admin_confirm_maintenance_on"), InlineKeyboardButton("✅ Maintenance OFF", callback_data="menu|admin_confirm_maintenance_off")],
+        [InlineKeyboardButton("📘 Hướng dẫn bật bảo trì", callback_data="menu|admin_confirm_maintenance_on"), InlineKeyboardButton("📘 Hướng dẫn tắt bảo trì", callback_data="menu|admin_confirm_maintenance_off")],
         [InlineKeyboardButton("🤖 Provider", callback_data="menu|admin_provider")],
         [InlineKeyboardButton("⬅️ Freeze / Queue", callback_data="menu|freeze_queue"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
@@ -231319,79 +231319,79 @@ def freeze_action_help_text(kind: str) -> str:
 
 ADMIN_CONFIRM_ACTIONS = {
     "freeze_image": {
-        "title": "🖼 Xác nhận Freeze Image",
+        "title": "📘 Hướng dẫn Freeze Image",
         "command": "/provider_freeze shopaikey_image <reason>",
         "impact": "Khách public image sẽ bị chặn mềm, không gọi provider và không trừ Xu.",
         "back": "freeze_image_help",
     },
     "freeze_video": {
-        "title": "🎬 Xác nhận Freeze Video",
+        "title": "📘 Hướng dẫn Freeze Video",
         "command": "/freeze_video <reason>",
         "impact": "Public video sẽ dừng tạm; job mới không được gửi provider, không trừ Xu/lượt.",
         "back": "freeze_video_help",
     },
     "freeze_frame": {
-        "title": "🎞 Xác nhận Freeze Frame Video",
+        "title": "📘 Hướng dẫn Freeze Frame Video",
         "command": "/provider_freeze frame_video <reason>",
         "impact": "Ghép ảnh thành video sẽ báo bảo trì/worker chưa sẵn sàng, không render trên Railway.",
         "back": "freeze_frame_help",
     },
     "provider_freeze_shopaikey": {
-        "title": "🟡 Xác nhận Freeze ShopAIKey",
+        "title": "📘 Hướng dẫn Freeze ShopAIKey",
         "command": "/provider_freeze shopaikey <reason>",
         "impact": "Khóa rộng ShopAIKey; cân nhắc khóa nhánh nhỏ hơn nếu chỉ video/image lỗi.",
         "back": "freeze_provider_help",
     },
     "provider_unfreeze_shopaikey": {
-        "title": "🟢 Xác nhận Unfreeze ShopAIKey",
+        "title": "📘 Hướng dẫn Unfreeze ShopAIKey",
         "command": "/provider_unfreeze shopaikey",
         "impact": "Mở lại ShopAIKey sau khi smoke test PASS.",
         "back": "freeze_provider_help",
     },
     "provider_freeze_video": {
-        "title": "🎬 Xác nhận Freeze ShopAIKey Video",
+        "title": "📘 Hướng dẫn Freeze ShopAIKey Video",
         "command": "/provider_freeze shopaikey_video <reason>",
         "impact": "Khóa riêng video provider; chat/TTS/image vẫn có thể hoạt động nếu không bị freeze riêng.",
         "back": "freeze_provider_help",
     },
     "provider_freeze_image": {
-        "title": "🖼 Xác nhận Freeze ShopAIKey Image",
+        "title": "📘 Hướng dẫn Freeze ShopAIKey Image",
         "command": "/provider_freeze shopaikey_image <reason>",
         "impact": "Khóa riêng image provider để bảo vệ public image billing/refund.",
         "back": "freeze_provider_help",
     },
     "unfreeze_video": {
-        "title": "✅ Xác nhận Unfreeze Video",
+        "title": "📘 Hướng dẫn Unfreeze Video",
         "command": "/unfreeze_video",
         "impact": "Mở lại public video guard nếu ENV và provider cũng cho phép.",
         "back": "unfreeze_tool_help",
     },
     "unfreeze_tool": {
-        "title": "✅ Xác nhận Unfreeze Tool",
+        "title": "📘 Hướng dẫn Unfreeze Tool",
         "command": "/unfreeze_tools",
         "impact": "Mở lại tool freeze chung; chỉ làm khi hệ thống đã ổn.",
         "back": "unfreeze_tool_help",
     },
     "maintenance_on": {
-        "title": "🛠 Xác nhận Maintenance ON",
+        "title": "📘 Hướng dẫn bật bảo trì",
         "command": "/maintenance_on <reason>",
         "impact": "Khách sẽ thấy thông báo bảo trì, các flow nhạy cảm bị chặn mềm.",
         "back": "freeze_status",
     },
     "maintenance_off": {
-        "title": "✅ Xác nhận Maintenance OFF",
+        "title": "📘 Hướng dẫn tắt bảo trì",
         "command": "/maintenance_off",
         "impact": "Mở lại hệ thống sau bảo trì.",
         "back": "freeze_status",
     },
     "clear_stale_jobs": {
-        "title": "🧹 Xác nhận Clear Stale Jobs",
+        "title": "📘 Hướng dẫn dọn job kẹt",
         "command": "/clear_job_lock <user_id>",
         "impact": "Chỉ clear đúng user/job đã kiểm tra. Không dùng để xóa dữ liệu hay reset Xu.",
         "back": "clear_stale_jobs_help",
     },
     "refund_job": {
-        "title": "↩️ Xác nhận Refund Job",
+        "title": "📘 Hướng dẫn Refund Job",
         "command": "/refund_job <job_id>",
         "impact": "Hoàn Xu/lượt thủ công cho job lỗi nếu guard chưa xử lý.",
         "back": "freeze_queue_help",
@@ -231404,8 +231404,8 @@ def admin_confirm_text(action_key: str) -> str:
         f"{item['title']}\n\n"
         f"• Tác động: {html.escape(item['impact'])}\n"
         f"• Lệnh thật cần chạy: <code>{html.escape(item['command'])}</code>\n\n"
-        "Màn này là lớp xác nhận UX để tránh bấm nhầm trong admin menu. "
-        "Nút xác nhận bên dưới chỉ nhắc lại lệnh cần chạy, không tự sửa DB, không trừ Xu, không gọi provider."
+        "Trang này hướng dẫn lệnh cần chạy thủ công. "
+        "Nút Xem lệnh cần chạy chỉ hiển thị hướng dẫn; chưa thực hiện thao tác, chưa sửa DB, chưa trừ Xu và chưa gọi provider."
     )
 
 def admin_confirm_ack_text(action_key: str) -> str:
@@ -231435,33 +231435,33 @@ def admin_confirm_ack_keyboard(action_key: str) -> InlineKeyboardMarkup:
 def freeze_action_keyboard(kind: str) -> InlineKeyboardMarkup:
     if kind == "image":
         rows = [
-            [InlineKeyboardButton("⚠️ Xác nhận Freeze Image", callback_data="menu|admin_confirm_freeze_image"), InlineKeyboardButton("🧪 Test Image", callback_data="menu|smoke_image")],
+            [InlineKeyboardButton("📘 Hướng dẫn Freeze Image", callback_data="menu|admin_confirm_freeze_image"), InlineKeyboardButton("🧪 Test Image", callback_data="menu|smoke_image")],
         ]
     elif kind == "video":
         rows = [
-            [InlineKeyboardButton("⚠️ Xác nhận Freeze Video", callback_data="menu|admin_confirm_freeze_video"), InlineKeyboardButton("✅ Unfreeze Video", callback_data="menu|admin_confirm_unfreeze_video")],
+            [InlineKeyboardButton("📘 Hướng dẫn Freeze Video", callback_data="menu|admin_confirm_freeze_video"), InlineKeyboardButton("📘 Hướng dẫn Unfreeze Video", callback_data="menu|admin_confirm_unfreeze_video")],
             [InlineKeyboardButton("🧪 Test Video", callback_data="menu|smoke_video"), InlineKeyboardButton("📊 Queue Status", callback_data="menu|freeze_queue_status")],
         ]
     elif kind == "frame":
         rows = [
-            [InlineKeyboardButton("⚠️ Xác nhận Freeze Frame", callback_data="menu|admin_confirm_freeze_frame"), InlineKeyboardButton("🎞 Test FFmpeg", callback_data="menu|smoke_ffmpeg")],
+            [InlineKeyboardButton("📘 Hướng dẫn Freeze Frame", callback_data="menu|admin_confirm_freeze_frame"), InlineKeyboardButton("🎞 Test FFmpeg", callback_data="menu|smoke_ffmpeg")],
         ]
     elif kind == "provider":
         rows = [
-            [InlineKeyboardButton("🟡 Freeze ShopAIKey", callback_data="menu|admin_confirm_provider_freeze_shopaikey"), InlineKeyboardButton("🟢 Unfreeze ShopAIKey", callback_data="menu|admin_confirm_provider_unfreeze_shopaikey")],
-            [InlineKeyboardButton("🎬 Freeze ShopAIKey Video", callback_data="menu|admin_confirm_provider_freeze_video"), InlineKeyboardButton("🖼 Freeze ShopAIKey Image", callback_data="menu|admin_confirm_provider_freeze_image")],
+            [InlineKeyboardButton("📘 Hướng dẫn Freeze ShopAIKey", callback_data="menu|admin_confirm_provider_freeze_shopaikey"), InlineKeyboardButton("📘 Hướng dẫn Unfreeze ShopAIKey", callback_data="menu|admin_confirm_provider_unfreeze_shopaikey")],
+            [InlineKeyboardButton("📘 Hướng dẫn Freeze Video", callback_data="menu|admin_confirm_provider_freeze_video"), InlineKeyboardButton("📘 Hướng dẫn Freeze Image", callback_data="menu|admin_confirm_provider_freeze_image")],
             [InlineKeyboardButton("✍️ Nhập provider khác", callback_data="menu|provider_custom_help")],
             [InlineKeyboardButton("⬅️ Freeze / Queue", callback_data="menu|freeze_queue"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
         ]
         return InlineKeyboardMarkup(rows)
     elif kind == "unfreeze":
         rows = [
-            [InlineKeyboardButton("✅ Unfreeze Video", callback_data="menu|admin_confirm_unfreeze_video"), InlineKeyboardButton("✅ Unfreeze Tool", callback_data="menu|admin_confirm_unfreeze_tool")],
-            [InlineKeyboardButton("✅ Maintenance OFF", callback_data="menu|admin_confirm_maintenance_off"), InlineKeyboardButton("🧪 Smoke Test", callback_data="menu|smoke_test")],
+            [InlineKeyboardButton("📘 Hướng dẫn Unfreeze Video", callback_data="menu|admin_confirm_unfreeze_video"), InlineKeyboardButton("📘 Hướng dẫn Unfreeze Tool", callback_data="menu|admin_confirm_unfreeze_tool")],
+            [InlineKeyboardButton("📘 Hướng dẫn tắt bảo trì", callback_data="menu|admin_confirm_maintenance_off"), InlineKeyboardButton("🧪 Smoke Test", callback_data="menu|smoke_test")],
         ]
     else:
         rows = [
-            [InlineKeyboardButton("🧹 Xác nhận Clear Job Lock", callback_data="menu|admin_confirm_clear_stale_jobs"), InlineKeyboardButton("↩️ Refund Job", callback_data="menu|admin_confirm_refund_job")],
+            [InlineKeyboardButton("📘 Hướng dẫn dọn job kẹt", callback_data="menu|admin_confirm_clear_stale_jobs"), InlineKeyboardButton("📘 Hướng dẫn Refund Job", callback_data="menu|admin_confirm_refund_job")],
             [InlineKeyboardButton("📊 Queue Status", callback_data="menu|freeze_queue_status"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|freeze_queue_help")],
         ]
     rows.append([InlineKeyboardButton("⬅️ Freeze / Queue", callback_data="menu|freeze_queue"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
@@ -231536,7 +231536,7 @@ def admin_provider_menu_text() -> str:
 def admin_provider_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📊 Provider Status", callback_data="menu|admin_provider_status"), InlineKeyboardButton("🧪 Test Provider", callback_data="menu|admin_provider_test")],
-        [InlineKeyboardButton("🟡 Freeze Provider", callback_data="menu|freeze_provider_help"), InlineKeyboardButton("🟢 Unfreeze Provider", callback_data="menu|admin_confirm_provider_unfreeze_shopaikey")],
+        [InlineKeyboardButton("🟡 Freeze Provider", callback_data="menu|freeze_provider_help"), InlineKeyboardButton("📘 Hướng dẫn Unfreeze Provider", callback_data="menu|admin_confirm_provider_unfreeze_shopaikey")],
         [InlineKeyboardButton("🧾 Provider Usage", callback_data="menu|admin_provider_usage")],
         [InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
@@ -232025,8 +232025,8 @@ ADMIN_CONTROL_MODULES = {
         "when": "Dùng khi provider lỗi, job kẹt, cần bảo trì, cần hoàn Xu/lượt hoặc cần kiểm tra queue trước khi mở lại public.",
         "buttons": [
             [("📊 Queue status", "menu|freeze_queue_status|admin_queue"), ("Hướng dẫn hoàn Xu khi job lỗi", "admin_help|refund")],
-            [("📚 Hướng dẫn Freeze / Queue", "menu|freeze_queue_help|admin_queue"), ("🔓 Unfreeze tools", "menu|admin_confirm_unfreeze_tool|admin_queue")],
-            [("🎬 Freeze video", "menu|admin_confirm_freeze_video|admin_queue"), ("💸 Refund job", "menu|admin_confirm_refund_job|admin_queue")],
+            [("📚 Hướng dẫn Freeze / Queue", "menu|freeze_queue_help|admin_queue"), ("📘 Hướng dẫn Unfreeze tools", "menu|admin_confirm_unfreeze_tool|admin_queue")],
+            [("📘 Hướng dẫn Freeze video", "menu|admin_confirm_freeze_video|admin_queue"), ("📘 Hướng dẫn Refund job", "menu|admin_confirm_refund_job|admin_queue")],
         ],
         "commands": [
             ("/queue_status", "xem hàng chờ"),
@@ -232760,11 +232760,11 @@ def admin_provider_freeze_text(kind: str) -> str:
 
 def admin_provider_freeze_keyboard(kind: str) -> InlineKeyboardMarkup:
     if kind == "unfreeze":
-        first_row = [InlineKeyboardButton("🟢 Unfreeze", callback_data="menu|admin_confirm_provider_unfreeze_shopaikey")]
+        first_row = [InlineKeyboardButton("📘 Hướng dẫn Unfreeze", callback_data="menu|admin_confirm_provider_unfreeze_shopaikey")]
     else:
         first_row = [
-            InlineKeyboardButton("🟡 Freeze", callback_data="menu|admin_confirm_provider_freeze_shopaikey"),
-            InlineKeyboardButton("🎬 Freeze video", callback_data="menu|admin_confirm_provider_freeze_video"),
+            InlineKeyboardButton("📘 Hướng dẫn Freeze", callback_data="menu|admin_confirm_provider_freeze_shopaikey"),
+            InlineKeyboardButton("📘 Hướng dẫn Freeze video", callback_data="menu|admin_confirm_provider_freeze_video"),
         ]
     return InlineKeyboardMarkup([
         first_row,

@@ -44,6 +44,32 @@ def _controls(query):
 
 
 class QueueConfirmGuideOriginTests(unittest.TestCase):
+    def test_command_guide_entry_labels_identify_read_only_pages_across_admin_surfaces(self):
+        ns, route, _ = _runtime()
+        for name in ("queue_status_keyboard", "freeze_status_keyboard", "freeze_action_keyboard",
+                     "admin_provider_keyboard", "admin_provider_freeze_keyboard"):
+            exec(compile("from __future__ import annotations\n" + fixture._function(name), "bot.py:" + name, "exec"), ns)
+        surfaces = [ns["admin_module_keyboard"]("queue"), ns["queue_status_keyboard"](),
+                    ns["freeze_status_keyboard"](), ns["admin_provider_keyboard"]()]
+        surfaces.extend(ns["freeze_action_keyboard"](kind) for kind in
+                        ("image", "video", "frame", "provider", "unfreeze", "clear"))
+        surfaces.extend(ns["admin_provider_freeze_keyboard"](kind) for kind in ("freeze", "unfreeze"))
+        seen = set()
+        for markup in surfaces:
+            for row in markup.inline_keyboard:
+                for button in row:
+                    if not button.callback_data.startswith("menu|admin_confirm_"):
+                        continue
+                    key = button.callback_data.split("|")[1].removeprefix("admin_confirm_")
+                    seen.add(key)
+                    with self.subTest(callback=button.callback_data, label=button.text):
+                        page = _dispatch(route, button.callback_data)
+                        self.assertEqual(1, len(page.edits))
+                        self.assertEqual([((), {})], page.answers)
+                        self.assertIn(ns["ADMIN_CONFIRM_ACTIONS"][key]["command"], html.unescape(page.edits[0][0]))
+                        self.assertIn("Hướng dẫn", button.text)
+        self.assertEqual(set(ns["ADMIN_CONFIRM_ACTIONS"]), seen)
+
     def test_admin_module_freeze_tools_button_matches_guide_only_destination(self):
         ns, route, _ = _runtime()
         for name in ("freeze_queue_help_text", "freeze_queue_keyboard"):
