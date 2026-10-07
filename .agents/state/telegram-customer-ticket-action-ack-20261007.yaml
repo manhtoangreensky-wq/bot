@@ -1,0 +1,12 @@
+task: S12.34.1_CUSTOMER_TICKET_STALE_ACTION_ACK
+phase: VERIFY
+base_sha: ba60dfed0dca5bc37734f6d55c8f0ed980b95e7d
+trigger: Actual customer Ticket detail Reply/Done/Attach controls with missing/unowned ticket or malformed ID.
+red: 6 behavioral failures (double ACK) plus 3 production ValueErrors on malformed IDs; no fixture/setup errors. Valid owner actions already pass.
+allowed: [handle_ticket_callback ID/owner prevalidation and reuse for those 3 actions, focused regression/CI/checklist]
+protected: [valid reply/attachment pending writes, done operation fields, admin actions, message/financial/engine/provider/worker/AutoPost logic]
+acceptance: Exactly one alert for missing/unowned/malformed ticket actions; malformed ID stops before lookup, no data writes; valid actions retain one ACK and same operations.
+green: 3 focused methods in 2.126s OK plus 3 legacy Ticket-view direct cases; full source/test compile/diff pass. Registered controls, actor-scoped single lookup, valid pending/done behavior and malformed IDs checked.
+protected_comparator: Exact source restored to base after removing only shared customer-action prevalidation and replacing the 3 reused lookups; other valid/admin operations and engine directories unchanged.
+delivery: PR/CI/merge/bot-only deployment pending; client QA unverified. S12.34.2 My Tickets ancestry remains open.
+side_effects: {provider: 0, telegram_send: 0, jobs: 0, wallet: 0, production_db: 0}
