@@ -38,7 +38,7 @@ def _runtime():
     })
     for name in ("SUPPORT_CUSTOM_BOT_DETAILS", "SUPPORT_CONSULT_DETAILS"):
         exec(fixture.fixture._assignment(name), ns)
-    for name in ("support_read_origin_keyboard", "human_support_text", "human_support_keyboard", "support_admin_contact_text",
+    for name in ("support_form_origin_keyboard", "support_read_origin_keyboard", "human_support_text", "human_support_keyboard", "support_admin_contact_text",
                  "support_admin_contact_keyboard", "support_cskh_auto_text", "support_cskh_auto_keyboard",
                  "support_premium_text", "support_premium_keyboard", "support_custom_bot_text",
                  "support_custom_bot_keyboard", "support_consult_keyboard", "support_custom_bot_public_label",

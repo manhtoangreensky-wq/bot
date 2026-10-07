@@ -1,5 +1,5 @@
 task: S12.32_ACCOUNT_SUPPORT_READ_ANCESTRY
-phase: VERIFY
+phase: REPORT
 base_sha: a02af2d0edf80edf64a4aa17972bb5274fc40f4d
 red: Actual Account Support emitter/hub lacks Account Back; 5 read-only children return hub without Account origin. 6 behavioral failures, zero setup errors.
 allowed: [one Account Support emitter, closed menu/support read-origin validation and keyboard propagation, focused tests/CI/ledger]
@@ -8,5 +8,5 @@ acceptance: Root/read-only Support and bot/consult detail Back retain Account; l
 dependent_specs: Pending Ticket/Lead and My Tickets UI context are explicitly queued after this read-only spec; this spec does not claim full Support closure.
 green: 8 Support-read/credit-guide methods in 45.623s OK, including 5 hub children, 5 Bot and 6 Consult detail paths, invalid context, legacy and protected form/ticket links. Full compile/diff pass; 3 existing legacy ACK cases pass after loading the real helper into their fixture.
 protected_comparator: Support operation AST unchanged after removing read-origin and keyboard wrappers; all pending/form/message statements remain identical. Remaining bot source matches base outside one emitter/menu read branch/pure helper/support read handler; engine directories unchanged.
-delivery: PR/CI/merge/bot-only deploy pending; client QA unverified.
+delivery: PR 1400 merged/deployed at 72f46e1a12657491f15878d4f368cad4aa9c89de; deploy 37573625803 SUCCESS with workers excluded; exact runtime/source/services/health verified at 07/10 11:58 +07. Client QA unverified.
 side_effects: {provider: 0, telegram_send: 0, jobs: 0, wallet: 0, production_db: 0}
