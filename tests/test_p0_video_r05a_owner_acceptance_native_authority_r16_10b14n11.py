@@ -618,3 +618,274 @@ def test_phase_g_20_verified_output_remains_canonical():
     assert verified["automatic_fallback_allowed"] is False
     assert verified["automatic_resubmit_allowed"] is False
     assert verified["max_provider_submits"] == 1
+
+
+def test_phase_7_01_auth_missing_nonce_denied():
+    """Phase 7-01 auth missing nonce -> DENY with owner_acceptance_nonce_missing."""
+    auth = _make_r05a_auth()
+    del auth["nonce"]
+    ctx = _make_r05a_ctx()
+    valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is False
+    assert reason == "owner_acceptance_nonce_missing"
+
+
+def test_phase_7_02_auth_nonce_blank_denied():
+    """Phase 7-02 auth nonce blank -> DENY with owner_acceptance_nonce_missing."""
+    for blank_nonce in ["", "   "]:
+        auth = _make_r05a_auth(nonce=blank_nonce)
+        ctx = _make_r05a_ctx()
+        valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+        assert valid is False
+        assert reason == "owner_acceptance_nonce_missing"
+
+
+def test_phase_7_03_auth_missing_expires_at_denied():
+    """Phase 7-03 auth missing expires_at -> DENY with owner_acceptance_expiry_missing."""
+    auth = _make_r05a_auth()
+    del auth["expires_at"]
+    ctx = _make_r05a_ctx()
+    valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is False
+    assert reason == "owner_acceptance_expiry_missing"
+
+    auth_blank = _make_r05a_auth()
+    auth_blank["expires_at"] = ""
+    valid_b, reason_b, _ = video_provider_router.validate_owner_acceptance_authorization(auth_blank, context=ctx)
+    assert valid_b is False
+    assert reason_b == "owner_acceptance_expiry_missing"
+
+
+def test_phase_7_04_auth_expires_at_malformed_denied():
+    """Phase 7-04 auth expires_at malformed -> DENY with owner_acceptance_expiry_invalid."""
+    for malformed in ["not-a-timestamp", "null", "invalid"]:
+        auth = _make_r05a_auth()
+        auth["expires_at"] = malformed
+        ctx = _make_r05a_ctx()
+        valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+        assert valid is False
+        assert reason == "owner_acceptance_expiry_invalid"
+
+
+def test_phase_7_05_auth_expires_at_expired_denied():
+    """Phase 7-05 auth expires_at expired -> DENY with owner_acceptance_expired."""
+    auth = _make_r05a_auth()
+    auth["expires_at"] = time.time() - 60
+    ctx = _make_r05a_ctx()
+    valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is False
+    assert reason == "owner_acceptance_expired"
+
+
+def test_phase_7_06_auth_missing_max_provider_spend_denied():
+    """Phase 7-06 auth missing max_provider_spend -> DENY with owner_acceptance_max_provider_spend_missing."""
+    auth = _make_r05a_auth()
+    del auth["max_provider_spend"]
+    ctx = _make_r05a_ctx()
+    valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is False
+    assert reason == "owner_acceptance_max_provider_spend_missing"
+
+    auth_blank = _make_r05a_auth(max_provider_spend=None)
+    assert "max_provider_spend" not in auth_blank
+    valid_b, reason_b, _ = video_provider_router.validate_owner_acceptance_authorization(auth_blank, context=ctx)
+    assert valid_b is False
+    assert reason_b == "owner_acceptance_max_provider_spend_missing"
+
+
+def test_phase_7_07_auth_max_provider_spend_invalid_denied():
+    """Phase 7-07 auth max_provider_spend invalid numeric -> DENY with owner_acceptance_spend_invalid."""
+    for bad_spend in ["unlimited", "free", "abc"]:
+        auth = _make_r05a_auth(max_provider_spend=bad_spend)
+        ctx = _make_r05a_ctx()
+        valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+        assert valid is False
+        assert reason == "owner_acceptance_spend_invalid"
+
+
+def test_phase_7_08_auth_missing_max_provider_spend_unit_denied():
+    """Phase 7-08 auth missing max_provider_spend_unit -> DENY with owner_acceptance_spend_unit_missing."""
+    auth = _make_r05a_auth()
+    del auth["max_provider_spend_unit"]
+    ctx = _make_r05a_ctx()
+    valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is False
+    assert reason == "owner_acceptance_spend_unit_missing"
+
+    auth_blank = _make_r05a_auth(max_provider_spend_unit="")
+    auth_blank["max_provider_spend_unit"] = ""
+    valid_b, reason_b, _ = video_provider_router.validate_owner_acceptance_authorization(auth_blank, context=ctx)
+    assert valid_b is False
+    assert reason_b == "owner_acceptance_spend_unit_missing"
+
+
+def test_phase_7_09_ctx_missing_runtime_sha_denied():
+    """Phase 7-09 ctx missing explicit runtime_sha -> DENY with owner_acceptance_runtime_sha_missing (no dynamic fallback)."""
+    auth = _make_r05a_auth()
+    ctx = _make_r05a_ctx()
+    del ctx["runtime_sha"]
+    valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is False
+    assert reason == "owner_acceptance_runtime_sha_missing"
+
+    ctx_blank = _make_r05a_ctx()
+    ctx_blank["runtime_sha"] = ""
+    valid_b, reason_b, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx_blank)
+    assert valid_b is False
+    assert reason_b == "owner_acceptance_runtime_sha_missing"
+
+
+def test_phase_7_10_ctx_runtime_sha_mismatch_denied():
+    """Phase 7-10 ctx runtime_sha mismatch vs auth.runtime_sha -> DENY with owner_acceptance_runtime_sha_mismatch."""
+    auth = _make_r05a_auth(runtime_sha="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    ctx = _make_r05a_ctx(runtime_sha="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+    valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is False
+    assert reason == "owner_acceptance_runtime_sha_mismatch"
+
+
+def test_phase_7_11_exact_complete_canonical_r05a_auth_ctx_tuple_passes():
+    """Phase 7-11 exact complete canonical R05A auth+ctx tuple passes."""
+    auth = _make_r05a_auth(
+        job_id=101,
+        user_id=12345,
+        project_id=501,
+        product_type="self_shot_scene_change",
+        provider="key4u_video",
+        capability="image_to_video",
+        tier=700,
+        model="kling-v3",
+        engine_adapter="controlled_keyframe_image_to_video",
+        nonce="nonce-canonical-r05a",
+        max_provider_spend=1.50,
+        max_provider_spend_unit="USD",
+    )
+    ctx = _make_r05a_ctx(
+        job_id=101,
+        user_id=12345,
+        project_id=501,
+        product_type="self_shot_scene_change",
+        provider="key4u_video",
+        capability="image_to_video",
+        tier=700,
+        model="kling-v3",
+        engine_adapter="controlled_keyframe_image_to_video",
+        estimated_provider_cost=0.50,
+        estimated_provider_cost_unit="USD",
+    )
+    valid, reason, verified = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is True
+    assert reason == ""
+    assert verified.get("verified") is True
+
+
+def test_phase_7_12_exact_tuple_verified_output_remains_canonical():
+    """Phase 7-12 verified output retains exact canonical contract fields."""
+    auth = _make_r05a_auth()
+    ctx = _make_r05a_ctx()
+    valid, reason, verified = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is True
+    assert reason == ""
+    assert verified["pinned_product"] == "self_shot_scene_change"
+    assert verified["pinned_provider"] == "key4u_video"
+    assert verified["pinned_tier"] == "700"
+    assert verified["model"] == "kling-v3"
+    assert verified["engine_adapter"] == "controlled_keyframe_image_to_video"
+    assert verified["required_capability"] == "image_to_video"
+    assert verified["provider_order"] == ["key4u_video"]
+    assert verified["effective_provider_chain"] == ["key4u_video"]
+    assert verified["automatic_fallback_allowed"] is False
+    assert verified["automatic_resubmit_allowed"] is False
+    assert verified["max_provider_submits"] == 1
+    assert verified["max_provider_spend"] == 1.00
+    assert verified["max_provider_spend_unit"] == "USD"
+
+
+def test_phase_7_13_video_ai_prompt_legacy_valid_case_passes():
+    """Phase 7-13 video_ai_prompt legacy valid case passes without R05A strictness regressions."""
+    runtime_sha = _current_runtime()
+    auth = {
+        "owner_authorized": True,
+        "acceptance_type": video_provider_router.OWNER_AUTHORIZED_LIVE_ACCEPTANCE,
+        "product_type": "video_ai_prompt",
+        "provider": "shopaikey_video",
+        "tier": "400",
+        "runtime_sha": runtime_sha,
+        "consumed": False,
+    }
+    ctx = {
+        "product_type": "video_ai_prompt",
+        "provider": "shopaikey_video",
+        "tier": "400",
+        "runtime_sha": runtime_sha,
+    }
+    valid, reason, verified = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is True
+    assert reason == ""
+    assert verified.get("verified") is True
+
+
+def test_phase_7_14_video_ai_video_reference_regression_passes():
+    """Phase 7-14 video_ai_video_reference exact contract passes without regression."""
+    runtime_sha = _current_runtime()
+    auth = {
+        "owner_authorized": True,
+        "acceptance_type": video_provider_router.OWNER_AUTHORIZED_LIVE_ACCEPTANCE,
+        "product_type": "video_ai_video_reference",
+        "provider": "shopaikey_video",
+        "capability": "image_to_video",
+        "model": "veo3.1-fast",
+        "execution_mode": "video_reference_guided_i2v",
+        "source_video_sha256": "source_sha_val",
+        "frame_1_sha256": "f1_sha_val",
+        "frame_2_sha256": "f2_sha_val",
+        "prompt_sha256": "p_sha_val",
+        "pricing_snapshot_id_or_hash": "psnap_val",
+        "aspect_ratio": "16:9",
+        "duration_seconds": 5.0,
+        "quality_tier": "500",
+        "user_id": 12345,
+        "job_id": 999,
+        "runtime_sha": runtime_sha,
+        "consumed": False,
+    }
+    ctx = {
+        "product_type": "video_ai_video_reference",
+        "provider": "shopaikey_video",
+        "required_capability": "image_to_video",
+        "model": "veo3.1-fast",
+        "execution_mode": "video_reference_guided_i2v",
+        "source_video_sha256": "source_sha_val",
+        "frame_1_sha256": "f1_sha_val",
+        "frame_2_sha256": "f2_sha_val",
+        "prompt_sha256": "p_sha_val",
+        "pricing_snapshot_id_or_hash": "psnap_val",
+        "aspect_ratio": "16:9",
+        "duration_seconds": 5.0,
+        "quality_tier": "500",
+        "user_id": 12345,
+        "job_id": 999,
+        "runtime_sha": runtime_sha,
+    }
+    valid, reason, verified = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is True
+    assert reason == ""
+    assert verified.get("verified") is True
+
+
+def test_phase_7_15_r05b_self_shot_cinematic_transform_owner_acceptance_denied():
+    """Phase 7-15 R05B self_shot_cinematic_transform denied under current owner acceptance contract."""
+    auth = _make_r05a_auth(product_type="self_shot_cinematic_transform")
+    ctx = _make_r05a_ctx(product_type="self_shot_cinematic_transform")
+    valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is False
+    assert reason == "owner_acceptance_product_mismatch"
+
+
+def test_phase_7_16_r06_storyboard_owner_acceptance_denied():
+    """Phase 7-16 R06 Storyboard denied under current owner acceptance contract."""
+    auth = _make_r05a_auth(product_type="storyboard")
+    ctx = _make_r05a_ctx(product_type="storyboard")
+    valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is False
+    assert reason == "owner_acceptance_product_mismatch"

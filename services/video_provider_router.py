@@ -3258,14 +3258,40 @@ def validate_owner_acceptance_authorization(
     if bool(auth.get("consumed")):
         return False, "owner_acceptance_already_consumed", {}
 
+    ctx = dict(context or {})
+
+    # Product type pinning and R05A detection
+    pinned_product = str(auth.get("product_type") or CANONICAL_ACCEPTANCE_PRODUCT_TYPE).strip()
+    ctx_product = str(ctx.get("product_type") or "").strip()
+    is_r05a = (
+        pinned_product == "self_shot_scene_change"
+        or ctx_product == "self_shot_scene_change"
+        or str(auth.get("engine_adapter") or auth.get("engine_route") or "").strip() == "controlled_keyframe_image_to_video"
+        or str(ctx.get("engine_adapter") or ctx.get("engine_route") or "").strip() == "controlled_keyframe_image_to_video"
+    )
+
     now = float(current_time if current_time is not None else time.time())
     expires_at = auth.get("expires_at")
-    if expires_at is not None:
+    if is_r05a:
+        if expires_at is None or str(expires_at).strip() == "":
+            return False, "owner_acceptance_expiry_missing", {}
         try:
-            if float(expires_at) <= now:
-                return False, "owner_acceptance_expired", {}
-        except Exception:
+            expires_at_num = float(expires_at)
+        except (ValueError, TypeError):
             return False, "owner_acceptance_expiry_invalid", {}
+        if expires_at_num <= now:
+            return False, "owner_acceptance_expired", {}
+
+        auth_nonce = str(auth.get("nonce") or "").strip()
+        if not auth_nonce:
+            return False, "owner_acceptance_nonce_missing", {}
+    else:
+        if expires_at is not None and str(expires_at).strip() != "":
+            try:
+                if float(expires_at) <= now:
+                    return False, "owner_acceptance_expired", {}
+            except Exception:
+                return False, "owner_acceptance_expiry_invalid", {}
 
     # Durable persistent claim check (SPEC-02C & SPEC-02D: ONE_TIME_USE_DURABLE=YES, SINGLE_JOB_ATTEMPT=YES)
     fingerprint = compute_owner_acceptance_token_fingerprint(auth)
@@ -3277,17 +3303,6 @@ def validate_owner_acceptance_authorization(
     if is_owner_acceptance_attempt_claimed_or_consumed(attempt_fingerprint, db_path=effective_db_path):
         return False, "owner_acceptance_already_consumed", {"attempt_fingerprint": attempt_fingerprint}
 
-    ctx = dict(context or {})
-
-    # Product type pinning
-    pinned_product = str(auth.get("product_type") or CANONICAL_ACCEPTANCE_PRODUCT_TYPE).strip()
-    ctx_product = str(ctx.get("product_type") or "").strip()
-    is_r05a = (
-        pinned_product == "self_shot_scene_change"
-        or ctx_product == "self_shot_scene_change"
-        or str(auth.get("engine_adapter") or auth.get("engine_route") or "").strip() == "controlled_keyframe_image_to_video"
-        or str(ctx.get("engine_adapter") or ctx.get("engine_route") or "").strip() == "controlled_keyframe_image_to_video"
-    )
     if is_r05a:
         if pinned_product != "self_shot_scene_change":
             return False, "owner_acceptance_product_mismatch", {}
@@ -3546,21 +3561,68 @@ def validate_owner_acceptance_authorization(
         return False, "owner_acceptance_runtime_sha_missing", {}
 
     ctx_sha = str(ctx.get("runtime_sha") or "").strip()
-    if not ctx_sha:
-        try:
-            from services.remote_worker_api import resolve_runtime_sha
-            ctx_sha = resolve_runtime_sha(environ=env)
-        except Exception:
-            ctx_sha = ""
-    if not ctx_sha:
-        return False, "owner_acceptance_runtime_sha_unresolvable", {}
+    if is_r05a:
+        if not ctx_sha:
+            return False, "owner_acceptance_runtime_sha_missing", {}
+    else:
+        if not ctx_sha:
+            try:
+                from services.remote_worker_api import resolve_runtime_sha
+                ctx_sha = resolve_runtime_sha(environ=env)
+            except Exception:
+                ctx_sha = ""
+        if not ctx_sha:
+            return False, "owner_acceptance_runtime_sha_unresolvable", {}
 
     if not (ctx_sha.startswith(auth_runtime_sha) or auth_runtime_sha.startswith(ctx_sha)):
         return False, "owner_acceptance_runtime_sha_mismatch", {}
 
     # 8. Spend bound & currency unit contract (SPEC-02C: CROSS_UNIT_COMPARISON=NO)
     max_spend = auth.get("max_provider_spend")
-    if max_spend is not None:
+    if is_r05a:
+        if max_spend is None or str(max_spend).strip() == "":
+            return False, "owner_acceptance_max_provider_spend_missing", {}
+        try:
+            max_spend_num = float(max_spend)
+        except (ValueError, TypeError):
+            return False, "owner_acceptance_spend_invalid", {}
+
+        auth_spend_unit = str(
+            auth.get("max_provider_spend_unit")
+            or auth.get("spend_unit")
+            or auth.get("currency")
+            or ""
+        ).strip().upper()
+        if not auth_spend_unit:
+            return False, "owner_acceptance_spend_unit_missing", {}
+
+        ctx_spend_unit = str(
+            ctx.get("estimated_provider_cost_unit")
+            or ctx.get("provider_cost_unit")
+            or ctx.get("spend_unit")
+            or ctx.get("currency")
+            or ""
+        ).strip().upper()
+
+        if not ctx_spend_unit:
+            if ctx.get("estimated_provider_cost") is not None or ctx.get("spend_amount") is not None:
+                return False, "owner_acceptance_spend_unit_missing", {}
+            ctx_spend_unit = auth_spend_unit
+
+        if auth_spend_unit != ctx_spend_unit:
+            return False, "owner_acceptance_spend_unit_mismatch", {}
+
+        try:
+            estimated_cost = float(
+                ctx.get("estimated_provider_cost")
+                if ctx.get("estimated_provider_cost") is not None
+                else (ctx.get("spend_amount") if ctx.get("spend_amount") is not None else 0.0)
+            )
+            if estimated_cost > max_spend_num:
+                return False, "owner_acceptance_spend_limit_exceeded", {}
+        except (ValueError, TypeError):
+            return False, "owner_acceptance_spend_invalid", {}
+    elif max_spend is not None:
         auth_spend_unit = str(
             auth.get("max_provider_spend_unit")
             or auth.get("spend_unit")
