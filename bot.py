@@ -60218,6 +60218,27 @@ def support_read_origin_keyboard(markup, profile_origin: bool = False, lang: str
         rows.insert(max(0, len(rows) - 1), [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="menu|main_profile")])
     return InlineKeyboardMarkup(rows)
 
+def support_form_origin_keyboard(markup, profile_origin: bool = False):
+    if not profile_origin:
+        return markup
+    form_actions = {"ticket", "premium_type", "bot_input", "consult_need", "consult_input"}
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(button.text, callback_data=f"{button.callback_data}|profile")
+         if str(button.callback_data or "").startswith("support|") and button.callback_data.split("|")[1] in form_actions
+         else button for button in row]
+        for row in markup.inline_keyboard
+    ])
+
+def support_pending_back_keyboard(markup, state: dict):
+    back_to = str(state.get("back_to") or "")
+    if not back_to.endswith("|profile"):
+        return markup
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(button.text, callback_data=back_to)
+         if button.text.startswith(("⬅", "🔙", "←")) else button for button in row]
+        for row in markup.inline_keyboard
+    ])
+
 def human_support_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return InlineKeyboardMarkup([
@@ -140658,6 +140679,7 @@ async def handle_support_pending_input(update: Update, context: ContextTypes.DEF
     state = get_support_ticket_pending(uid)
     if not state:
         return False
+    support_profile_origin = str(state.get("back_to") or "").endswith("|profile")
     step = state.get("step")
     text = update.message.text.strip()
     if step == "lead_input":
@@ -140693,7 +140715,7 @@ async def handle_support_pending_input(update: Update, context: ContextTypes.DEF
             f"{copy['support_ticket_label_code']}: <code>{html.escape(ticket.get('ticket_code') or '')}</code>\n"
             f"{copy['support_ticket_label_status']}: {html.escape(public_support_ticket_status_label(ticket.get('status'), lang))}",
             parse_mode="HTML",
-            reply_markup=support_ticket_created_keyboard(ticket["id"], lang),
+            reply_markup=support_read_origin_keyboard(support_ticket_created_keyboard(ticket["id"], lang), True, lang) if support_profile_origin else support_ticket_created_keyboard(ticket["id"], lang),
         )
         if classification.get("should_alert_admin") and (
             is_new or str(classification.get("priority") or "") == "urgent"
@@ -140709,7 +140731,7 @@ async def handle_support_pending_input(update: Update, context: ContextTypes.DEF
         return True
     if step == "awaiting_message":
         if len(text) < 5:
-            await update.message.reply_text(copy["support_ticket_message_too_short"], reply_markup=support_ticket_input_keyboard(lang))
+            await update.message.reply_text(copy["support_ticket_message_too_short"], reply_markup=support_pending_back_keyboard(support_ticket_input_keyboard(lang), state) if support_profile_origin else support_ticket_input_keyboard(lang))
             return True
         classification = await classify_support_message(text, uid)
         selected_category = state.get("category") or "other"
@@ -140734,7 +140756,7 @@ async def handle_support_pending_input(update: Update, context: ContextTypes.DEF
         await update.message.reply_text(
             f"{html.escape(intro)}\n\n{ticket_text}",
             parse_mode="HTML",
-            reply_markup=support_ticket_created_keyboard(ticket["id"], lang),
+            reply_markup=support_read_origin_keyboard(support_ticket_created_keyboard(ticket["id"], lang), True, lang) if support_profile_origin else support_ticket_created_keyboard(ticket["id"], lang),
         )
         if is_new or str(classification.get("priority") or "") == "urgent":
             await notify_admin_new_support_ticket(
@@ -140847,6 +140869,13 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
             return await query.answer("Nút hỗ trợ đã hết phiên. Vui lòng mở lại từ Tài khoản.", show_alert=True)
         profile_origin = True
         parts = parts[:-1]
+    form_arities = {"ticket": 2, "premium_type": 3, "bot_input": 3, "consult_input": 3, "consult_need": 4}
+    if action in form_arities and len(parts) > form_arities[action]:
+        if (len(parts) != form_arities[action] + 1 or parts[-1] != "profile"
+                or (action == "consult_need" and not parts[3].isdigit())):
+            return await query.answer("Nút nhập hỗ trợ đã hết phiên. Vui lòng mở lại từ Tài khoản.", show_alert=True)
+        profile_origin = True
+        parts = parts[:-1]
     supported_actions = {
         "start", "admin_contact", "cskh_auto", "ticket", "premium", "premium_type",
         "bot", "bot_type", "bot_input", "consult", "consult_type", "consult_need", "consult_input",
@@ -140859,13 +140888,13 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
     lang = normalize_user_language(get_user_language(uid)) or "vi"
     if action == "start":
         clear_support_ticket_pending(uid)
-        return await safe_edit_or_send(query, human_support_text(lang), reply_markup=support_read_origin_keyboard(human_support_keyboard(lang), profile_origin, lang, root=True))
+        return await safe_edit_or_send(query, human_support_text(lang), reply_markup=support_form_origin_keyboard(support_read_origin_keyboard(human_support_keyboard(lang), profile_origin, lang, root=True), profile_origin))
     if action == "admin_contact":
         clear_support_ticket_pending(uid)
-        return await safe_edit_or_send(query, support_admin_contact_text(lang), reply_markup=support_read_origin_keyboard(support_admin_contact_keyboard(lang), profile_origin, lang))
+        return await safe_edit_or_send(query, support_admin_contact_text(lang), reply_markup=support_form_origin_keyboard(support_read_origin_keyboard(support_admin_contact_keyboard(lang), profile_origin, lang), profile_origin))
     if action == "cskh_auto":
         clear_support_ticket_pending(uid)
-        return await safe_edit_or_send(query, support_cskh_auto_text(lang), reply_markup=support_read_origin_keyboard(support_cskh_auto_keyboard(lang), profile_origin, lang))
+        return await safe_edit_or_send(query, support_cskh_auto_text(lang), reply_markup=support_form_origin_keyboard(support_read_origin_keyboard(support_cskh_auto_keyboard(lang), profile_origin, lang), profile_origin))
     if action == "ticket":
         set_support_ticket_pending(
             uid,
@@ -140875,16 +140904,16 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
             support_flow="create_support_ticket",
             support_origin="support_main",
             awaiting_support_message="1",
-            back_to="support|start",
+            back_to="support|start|profile" if profile_origin else "support|start",
         )
         return await safe_edit_or_send(
             query,
             support_general_ticket_prompt(lang),
-            reply_markup=support_flow_back_keyboard("support|start", f"⬅️ {public_hub_copy(lang)['support_back']}", include_tickets=True, lang=lang),
+            reply_markup=support_read_origin_keyboard(support_flow_back_keyboard("support|start", f"⬅️ {public_hub_copy(lang)['support_back']}", include_tickets=True, lang=lang), profile_origin, lang),
         )
     if action == "premium":
         clear_support_ticket_pending(uid)
-        return await safe_edit_or_send(query, support_premium_text(lang), reply_markup=support_read_origin_keyboard(support_premium_keyboard(lang), profile_origin, lang))
+        return await safe_edit_or_send(query, support_premium_text(lang), reply_markup=support_form_origin_keyboard(support_read_origin_keyboard(support_premium_keyboard(lang), profile_origin, lang), profile_origin))
     if action == "premium_type" and len(parts) >= 3:
         copy = public_hub_copy(lang)
         options = {
@@ -140909,23 +140938,23 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
             support_flow="premium_lead",
             support_origin="premium",
             awaiting_support_message="1",
-            back_to="support|premium",
+            back_to="support|premium|profile" if profile_origin else "support|premium",
         )
         return await safe_edit_or_send(
             query,
             support_lead_input_text("premium_lead", selected, lang),
-            reply_markup=support_flow_back_keyboard("support|premium", f"⬅️ {copy['support_premium']}", include_tickets=True, lang=lang),
+            reply_markup=support_read_origin_keyboard(support_flow_back_keyboard("support|premium", f"⬅️ {copy['support_premium']}", include_tickets=True, lang=lang), profile_origin, lang),
         )
     if action == "bot":
         clear_support_ticket_pending(uid)
-        return await safe_edit_or_send(query, support_custom_bot_text(lang), reply_markup=support_read_origin_keyboard(support_custom_bot_keyboard(lang), profile_origin, lang))
+        return await safe_edit_or_send(query, support_custom_bot_text(lang), reply_markup=support_form_origin_keyboard(support_read_origin_keyboard(support_custom_bot_keyboard(lang), profile_origin, lang), profile_origin))
     if action == "bot_type" and len(parts) >= 3:
         bot_type = parts[2] if parts[2] in SUPPORT_CUSTOM_BOT_DETAILS else "custom"
         clear_support_ticket_pending(uid)
         return await safe_edit_or_send(
             query,
             support_custom_bot_detail_text(bot_type, lang),
-            reply_markup=support_read_origin_keyboard(support_custom_bot_detail_keyboard(bot_type, lang), profile_origin, lang),
+            reply_markup=support_form_origin_keyboard(support_read_origin_keyboard(support_custom_bot_detail_keyboard(bot_type, lang), profile_origin, lang), profile_origin),
         )
     if action == "bot_input" and len(parts) >= 3:
         bot_type = parts[2] if parts[2] in SUPPORT_CUSTOM_BOT_DETAILS else "custom"
@@ -140940,19 +140969,19 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
             support_flow="custom_bot_lead",
             support_origin="custom_bot",
             awaiting_support_message="1",
-            back_to=f"support|bot_type|{bot_type}",
+            back_to=f"support|bot_type|{bot_type}|profile" if profile_origin else f"support|bot_type|{bot_type}",
         )
         return await safe_edit_or_send(
             query,
             support_custom_bot_detail_text(bot_type, lang) + f"\n\n✍️ {public_hub_copy(lang)['support_input_one_message']}",
-            reply_markup=support_flow_back_keyboard(f"support|bot_type|{bot_type}", f"⬅️ {public_hub_copy(lang)['support_detail_back_bot']}", include_tickets=True, lang=lang),
+            reply_markup=support_read_origin_keyboard(support_flow_back_keyboard(f"support|bot_type|{bot_type}", f"⬅️ {public_hub_copy(lang)['support_detail_back_bot']}", include_tickets=True, lang=lang), profile_origin, lang),
         )
     if action == "consult":
         clear_support_ticket_pending(uid)
         return await safe_edit_or_send(
             query,
             f"📦 <b>{public_hub_copy(lang)['support_consult']}</b>\n\n{public_hub_copy(lang)['support_consult_body']}",
-            reply_markup=support_read_origin_keyboard(support_consult_keyboard(lang), profile_origin, lang),
+            reply_markup=support_form_origin_keyboard(support_read_origin_keyboard(support_consult_keyboard(lang), profile_origin, lang), profile_origin),
         )
     if action == "consult_type" and len(parts) >= 3:
         clear_support_ticket_pending(uid)
@@ -140960,7 +140989,7 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
         return await safe_edit_or_send(
             query,
             support_consult_detail_text(service_type, lang),
-            reply_markup=support_read_origin_keyboard(support_consult_detail_keyboard(service_type, lang), profile_origin, lang),
+            reply_markup=support_form_origin_keyboard(support_read_origin_keyboard(support_consult_detail_keyboard(service_type, lang), profile_origin, lang), profile_origin),
         )
     if action in {"consult_need", "consult_input"} and len(parts) >= 3:
         service_type = parts[2] if parts[2] in SUPPORT_CONSULT_DETAILS else "video"
@@ -140983,17 +141012,17 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
             support_origin="service_consulting",
             service_group=service_type,
             awaiting_support_message="1",
-            back_to=f"support|consult_type|{service_type}",
+            back_to=f"support|consult_type|{service_type}|profile" if profile_origin else f"support|consult_type|{service_type}",
         )
         return await safe_edit_or_send(
             query,
             f"📦 <b>{html.escape(selected)}</b>\n\n{public_hub_copy(lang)['support_input_one_message']}",
-            reply_markup=support_flow_back_keyboard(
+            reply_markup=support_read_origin_keyboard(support_flow_back_keyboard(
                 f"support|consult_type|{service_type}",
                 f"⬅️ {public_hub_copy(lang)['support_consult_detail_back']}",
                 include_tickets=True,
                 lang=lang,
-            ),
+            ), profile_origin, lang),
         )
     return
 
@@ -141890,7 +141919,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return await safe_edit_query_message(
             query,
             human_support_text(lang),
-            reply_markup=support_read_origin_keyboard(human_support_keyboard(lang), profile_support_origin, lang, root=True),
+            reply_markup=support_form_origin_keyboard(support_read_origin_keyboard(human_support_keyboard(lang), profile_support_origin, lang, root=True), profile_support_origin),
         )
     if action == "internal_archive":
         return await safe_edit_query_message(

@@ -45,6 +45,10 @@ def _load_handler(cleared, edits):
                   and item.name == "support_read_origin_keyboard")
     helper_source = "\n".join(BOT_SOURCE.splitlines()[helper.lineno - 1:helper.end_lineno])
     exec(compile(helper_source, "bot.py:support_read_origin_keyboard", "exec"), namespace)
+    form_helper = next(item for item in tree.body if isinstance(item, ast.FunctionDef)
+                       and item.name == "support_form_origin_keyboard")
+    form_source = "\n".join(BOT_SOURCE.splitlines()[form_helper.lineno - 1:form_helper.end_lineno])
+    exec(compile(form_source, "bot.py:support_form_origin_keyboard", "exec"), namespace)
     exec(compile(function_source, "bot.py:handle_human_support_callback", "exec"), namespace)
     return namespace["handle_human_support_callback"]
 
