@@ -109,6 +109,7 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 - Same-guide UI correction: those 8 buttons also had direct-test/status labels although their pages only display manual instructions. Registered dispatch reproduced 8 label failures; only their Smoke menu labels now say `Hướng dẫn`. Final emitted-label/guide/Back round-trip method passes in 3.412s; full bot/test compile passes after this copy-only correction.
 - GREEN: 15 Queue/Admin child-route test methods in `47.856s — OK`; full bot/test compile and diff check exit 0; exact-base source comparator allows only the closed Smoke guide validation and keyboard propagation blocks. Protected services/providers/workers/deploy/config unchanged. One prior test assumption about equal legacy/scoped payloads was updated for exactly the 8 newly scoped controls, retaining all remaining exact comparisons.
 - Delivery: PR/CI/merge/bot-only deployment pending. `UI-ADMIN-SMOKE-BACK-01` manual client QA NOT_TESTED.
+- Delivery verified: PR [#1396](https://github.com/manhtoangreensky-wq/bot/pull/1396) merged as `df82d1ae13c777d07d36f1e727d15903aca3b91b`; both required checks passed. Bot-only deploy [37565200990](https://github.com/manhtoangreensky-wq/bot/actions/runs/37565200990) SUCCESS, workers excluded. Strict SSH verifies exact runtime SHA, deployed/tracked bot blob `c3937f4a43cb42e66c7ff9dae41278460f76e8e3`, all three services active/status 0/restarts 0 and health `ok`. The pending line above is historical; manual client QA remains unverified.
 
 ### S12.28 — Broader offline callback ACK evidence (no product changes)
 
@@ -116,6 +117,14 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 - Additional direct cases: SubDub emitted Status/Download controls 4; SubDub Edit/Branding/error handoff 3; Provider Choice ownership/expiry 2; Support Admin permission/ACK 2 = **11 cases, all pass**. The two parameterized SubDub cases were invoked explicitly with only the pytest decorator shimmed; this is not a pytest run. The earlier unittest attempt failed to import missing pytest and did not prove these cases; the explicit direct run supersedes it.
 - Updated 19 corresponding handler rows from NOT PROVEN to PARTIAL. Their unexercised emitted values, complete Back/expiry/repeat matrix and live timing remain open. Menu/help and other family rows retain their already-partial evidence.
 - No provider calls, real Telegram sends, production data/wallet writes, jobs or product engine changes. These assertions are not evidence that every button is smooth or that a generated media job completes.
+
+### S12.29 — Account credit-guide Back returns to Account
+
+- RED on `df82d1ae`: actual `main_profile_keyboard` emits the generic `menu|guide_credits`; registered menu dispatch and real guide keyboard render Back=`menu|main_guide`. Expected immediate parent is Account. Vietnamese/English produce 2 behavioral failures, zero setup errors.
+- Fix: scope only the Account credit-guide emitter to `main_profile`; validate that closed UI origin before cleanup and render its existing guide keyboard with Account Back. Generic guide callbacks retain Guide-index Back. Guide helper signature/content, prices, top-up, wallet/payment and engine routes are unchanged.
+- GREEN: 11 Account/Admin child-route methods in `32.918s — OK`; full bot/test compile and diff check pass. Exact-source comparator allows one UI emitter plus closed guide-origin/Back blocks; services/providers/workers/deploy/config unchanged. Fixture corrections target the actual profile data seam and preserve the existing outer action trimming.
+- Delivery: PR/CI/merge/bot-only deploy pending. `UI-PROFILE-CREDIT-GUIDE-BACK-01` manual client QA NOT_TESTED.
+- Next A3 checks: Account Pricing/Membership/Language/Support child navigation, using actual emitters and registered handlers with financial/provider seams inert. Scope only confirmed UI origin/Back defects; every unproven route remains incomplete.
 
 ### S12.6 — Admin Ticket reply origin and pagination
 
@@ -386,7 +395,7 @@ Fake-role execution of actual UI functions produced 1 Railway reference in `owne
 5. S12.15 (#1381) is merged/deployed/runtime verified at `0929d61a`; S12.16 inventories registrations but is not whole-bot route proof.
 6. S12.17 is merged/deployed/runtime verified at `979c0ee5`; its stale media result controls are closed.
 7. S12.18 (#1383) is merged/deployed/runtime verified at `5c040c22`.
-8. S12.19–S12.26 (#1384–#1395) are merged/deployed/runtime verified; latest runtime `2f185dbd`. S12.27 Smoke guide ancestry is locally verified and requires PR/CI/merge/deploy. S12.28 adds bounded offline ACK evidence, not whole-bot completion.
+8. S12.19–S12.27 (#1384–#1396) are merged/deployed/runtime verified; latest runtime `df82d1ae`. S12.29 Account guide origin is locally verified and requires PR/CI/merge/deploy. S12.28 adds bounded offline ACK evidence; 23 of 87 registration rows have PARTIAL evidence and 64 remain NOT PROVEN in that ledger. Those counts are coverage states, not error counts or whole-bot completion.
 9. Continue A1–A5 for remaining admin/customer routes, pending-state expiry/stale/repeat behavior, preserving protected product lanes.
 10. Finish A6 UI/UX consistency review and update this ledger with evidence, not assumptions.
 11. Close A7 only after multiple user-timed samples can be compared to anonymous server phases; separate server, Telegram render and client/network wait.

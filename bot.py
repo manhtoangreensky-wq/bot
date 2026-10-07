@@ -135956,7 +135956,7 @@ def main_profile_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(f"💰 {copy['profile_topup']}", callback_data="menu|main_topup"), InlineKeyboardButton(f"💳 {copy['profile_pricing']}", callback_data="pricing|main")],
         [InlineKeyboardButton(f"🎁 {copy['profile_packages']}", callback_data="menu|profile_packages"), InlineKeyboardButton(f"👑 {copy['profile_membership']}", callback_data="pricing|member")],
-        [InlineKeyboardButton(f"📚 {copy['profile_xu_guide']}", callback_data="menu|guide_credits"), InlineKeyboardButton(f"👨‍💼 {copy['support']}", callback_data="menu|support")],
+        [InlineKeyboardButton(f"📚 {copy['profile_xu_guide']}", callback_data="menu|guide_credits|main_profile"), InlineKeyboardButton(f"👨‍💼 {copy['support']}", callback_data="menu|support")],
         [InlineKeyboardButton(f"🎁 {copy['profile_referral_link']}", callback_data="menu|profile_ref_link"), InlineKeyboardButton(f"👥 {copy['profile_referral_stats']}", callback_data="menu|profile_ref_stats")],
         [InlineKeyboardButton(f"📋 {copy['profile_referral_policy']}", callback_data="menu|profile_ref_policy"), InlineKeyboardButton(f"🌍 {copy['profile_change_language']}", callback_data="back_lang")],
         [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
@@ -141729,6 +141729,12 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                 return await query.answer("Nút Bảo mật/DB đã hết phiên. Vui lòng mở lại từ menu hiện tại.", show_alert=True)
             action = route_name
             break
+    profile_credit_guide = False
+    if action.startswith("guide_credits|"):
+        if action != "guide_credits|main_profile":
+            return await query.answer("Nút hướng dẫn Xu đã hết phiên. Vui lòng mở lại từ Tài khoản.", show_alert=True)
+        profile_credit_guide = True
+        action = "guide_credits"
     runtime_help_parent = ""
     if action.startswith("system_runtime_help|"):
         runtime_help_parent = action.split("|", 1)[1]
@@ -142311,6 +142317,8 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         text = f"✅ {copy['translation_session_stop']}."
         return await safe_edit_query_message(query, text, reply_markup=translate_language_keyboard(False, lang))
     text, keyboard = localized_menu_content(action, user_is_admin, lang, query.from_user.id)
+    if profile_credit_guide:
+        keyboard = guide_keyboard("credits", lang, back_callback="menu|main_profile", back_label=ui_text(lang, "common.back"))
     if module_child_origin:
         module_title = ADMIN_CONTROL_MODULES[module_child_origin[len("admin_"):]]["title"]
         child_back_callback = f"menu|{module_child_origin}"

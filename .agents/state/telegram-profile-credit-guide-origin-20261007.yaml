@@ -1,0 +1,11 @@
+task: S12.29_ACCOUNT_CREDIT_GUIDE_BACK
+phase: VERIFY
+base_sha: df82d1ae13c777d07d36f1e727d15903aca3b91b
+red: Actual Account keyboard -> registered menu handler -> actual credit-guide keyboard returns Back to main_guide instead of main_profile; Vietnamese/English assertions fail, zero setup errors.
+allowed: [main_profile_keyboard credit-guide callback, narrow handle_menu_callback origin/Back override, focused fixture/CI invocation, audit/tester docs]
+protected: [guide helper signature/content, pricing/top-up/wallet/payment logic, other menus, product/engine/provider/worker/AutoPost]
+acceptance: Account credit-guide Back returns to Account; legacy guide Back remains guide index; malformed origin stops before cleanup/render; no financial operation.
+green: 11 Account/Admin child-route tests in 32.918s OK; full bot/test compile, diff check and exact-base source comparator PASS. One emitter and closed origin/Back blocks only.
+fixture_note: Corrected profile data seam name to menu_text_main_profile_i18n and tested inner-origin whitespace, preserving the existing outer action-strip semantics; no production change for those fixture corrections.
+delivery: PR/CI/merge/deploy pending; manual client QA unverified.
+side_effects: {provider: 0, telegram_send: 0, jobs: 0, wallet: 0, production_db: 0}
