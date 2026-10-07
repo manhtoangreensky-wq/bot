@@ -117997,6 +117997,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         # SELFSHOT2 has one callback owner. Buttons from old messages are
         # read-only unless they belong to the currently rendered screen.
         if product_id and product_id not in {video_selfshot2.PRODUCT_ID, "selfshot2"}:
+            try:
+                await query.answer()
+            except Exception:
+                pass
             return await safe_edit_or_send(
                 query,
                 video_selfshot_product_hub_text(),
@@ -118204,6 +118208,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         # SELFSHOT3 owns its callbacks end-to-end.  A callback from another
         # product or an old session is read-only and returns to the hub.
         if product_id and product_id not in {video_selfshot3.PRODUCT_ID, "selfshot3", "self_shot_cinematic_transform", "self_shot_scene_change"}:
+            try:
+                await query.answer()
+            except Exception:
+                pass
             return await safe_edit_or_send(
                 query,
                 video_selfshot_product_hub_text(),
