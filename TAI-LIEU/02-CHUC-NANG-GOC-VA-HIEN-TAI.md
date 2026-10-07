@@ -869,4 +869,10 @@ provider-fallback `56`, exact-two `3` passed; changed-file compile và
 
 | Cách hiểu trước | Bằng chứng thực tế | Hiện trạng |
 |---|---|---|
-| Mọi nút Nạp Xu từ Bảng giá có thể quay lại Pricing main | Baseline RED: 5 tuyến Account Pricing; mở rộng phát hiện 14 locale ngoài VI/EN/ZH dùng Catalog fallback và một route từ emitter Xu cũng mất trang cha. | Menu Top-up mang origin token allowlist để Back về đúng màn đã phát nút; 19 test nhóm Pricing/Top-up/credit-guide đạt trong `93.459s`, gồm 25 emitter→handler→Back cycles; 7 callback thanh toán, Home, actor và byte limit giữ nguyên. CI/merge/deploy là trạng thái tách biệt và vẫn pending tại thời điểm ghi; kiểm thử không chạy giao dịch. |
+| Mọi nút Nạp Xu từ Bảng giá có thể quay lại Pricing main | Baseline RED: 5 tuyến Account Pricing; mở rộng phát hiện 14 locale ngoài VI/EN/ZH dùng Catalog fallback và một route từ emitter Xu cũng mất trang cha. | Menu Top-up mang origin token allowlist để Back về đúng màn đã phát nút; 19 test nhóm Pricing/Top-up/credit-guide đạt trong `93.459s`, gồm 25 emitter→handler→Back cycles; 7 callback thanh toán, Home, actor và byte limit giữ nguyên. PR #1406 merged, exact-SHA bot-only deploy #37589150697 SUCCESS, runtime SHA/blob khớp, ba services active, health `ok`. Manual Telegram QA chưa thử; warning worker SHA mismatch có trước deploy và không được sửa ở PR UI này. |
+
+## Lệnh `/pricing_xu` — Back từ Nạp Xu — S12.35.4
+
+| Cách hiểu trước | Bằng chứng thực tế | Hiện trạng |
+|---|---|---|
+| Lệnh `/pricing_xu` mở Nạp Xu rồi Back về chính trang Xu | RED qua command emitter và registered Menu/Pricing handlers: callback thiếu origin nên Back về `pricing|main` | Sửa callback của keyboard do riêng lệnh phát ra; 20 test offline đạt trong `137.681s`, gồm callback thật phát ra từ command và đường Back qua handler đã đăng ký. Test-file compile/diff-check đạt; full local `bot.py` compile chưa xác minh sau giới hạn 7 phút. PR/CI/runtime/manual QA còn chờ. Không đổi giá/payment/wallet/engine/provider hay AutoPost. |

@@ -13,10 +13,10 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 
 | ID | Spec / acceptance evidence | State |
 |---|---|---|
-| A0 | Active main/runtime baseline: `938f6813717831e17cb564c8de9172e6c22906df` after Account Top-up Back PR #1405; bot blob `e3532eae3ff45fdf7617096c9a2d8c0a5b87bd5c`. Exact-SHA deploy #37582086304 succeeded with workers excluded; SSH at 07/10 13:39 +07 verified tracked source, bot/web/nginx active, zero restarts and health `ok`. Historical AST registration inventory at `0929d61a` measures 87 direct registrations, 85 distinct expressions and 83 literal patterns; the old emitter snapshot `4f1455ed` had 3,981 constructors/821 dynamic expressions/0 unmatched static callbacks. These inventories and old line locations do not prove current route behavior. | Per-registration matrix in `TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md`; route verdicts remain partial/unproven. |
+| A0 | Active main/runtime baseline: `03558c3408498201d6b2e0f1bce27485a8fb3b7a` after Pricing Top-up Back PR #1406; bot blob `f61fd958a35076ccfd6a4157519d4b883cf8dad0`. Exact-SHA bot-only deploy #37589150697 succeeded (`deploy_workers=false`); strict-host SSH verified exact source, bot/web/nginx active, `NRestarts=0`, and deploy health `ok`. A pre-existing Product Video `worker_sha_mismatch` warning was logged before the SSH deploy step; workers were not touched. Historical AST registration inventory at `0929d61a` measures 87 direct registrations, 85 distinct expressions and 83 literal patterns; the old emitter snapshot `4f1455ed` had 3,981 constructors/821 dynamic expressions/0 unmatched static callbacks. These inventories and old line locations do not prove current route behavior. |
 | A1 | Admin screens: verify each visible action label matches its handler; test emitted callback, authorization, state transition, and error/stale path. | PARTIAL — report/overview, root/help/package, Queue/Finance guide labels and feedback/access samples have evidence below; full visible-action matrix remains open. |
 | A2 | Admin Back/Home: verify immediate parent and preserve list/filter/page context; test prompt and preview exits without performing the underlying action. | IN PROGRESS — ticket-origin specs S12.6–S12.10 (#1367–#1374) are in #1376; S12.12 merged/deployed in #1378 at runtime SHA `392d2eec`; S12.18 fixes Package Orders origin and S12.19 fixes Security/DB child Back. Other admin/customer routes remain open. |
-| A3 | Customer screens: verify ownership, same-product navigation, Back/Home, and no cross-user or cross-product route. | PARTIAL — Account Pricing/member, Support/Ticket, credit guide, packages/referrals and Top-up have scoped evidence. S12.35.3 now covers 25 emitted Top-up→Back paths, including 14 fallback locales and Xu; PR/CI/deploy pending. Manual command-entry ancestry and remaining customer matrix open. |
+| A3 | Customer screens: verify ownership, same-product navigation, Back/Home, and no cross-user or cross-product route. | PARTIAL — Account Pricing/member, Support/Ticket, credit guide, packages/referrals and Top-up have scoped evidence. S12.35.3 covers 25 emitted Top-up→Back paths and is merged/deployed. S12.35.4 offline GREEN: 20/20 focused handler tests verify direct `/pricing_xu` command ancestry; PR/CI/deploy and manual client QA remain open, as does the remaining customer matrix. |
 | A4 | Pending input: verify `/start`, `/menu`, Back, expiry, stale controls, repeated presses, and abandoned drafts clear only the intended state. | PARTIAL — ReplyKeyboard Home preemption PR #1375 is in the deployed #1376 release; the remaining reset/expiry/stale-state matrix is open. |
 | A5 | Callback coverage: check static and dynamic emitted values against actual registrations and dispatched terminal behavior; no module-only route test counts as completion. | OPEN — static unmatched count alone is insufficient. |
 | A6 | UI/UX consistency: inspect admin/customer button labels, duplicated actions, misleading guide/status labels, row density, and recovery copy; propose or implement only narrow approved fixes. | OPEN — audit ledger not complete. |
@@ -198,8 +198,20 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 - RED: the original registered-handler test failed 5/5 behavioral cases, zero setup errors: Top-up from Account Pricing main, Offers, promo guide, Video pricing and Image pricing returned Pricing main. Follow-up emitter checks reproduced 14 more failures across every non-VI/EN/ZH Catalog fallback locale, plus one Xu screen failure; these were behavior failures, not fixture/setup errors.
 - Minimal fix: encode one allowlisted Pricing screen token into the existing Menu Top-up callback and map it back to that read-only Pricing screen. Account Pricing origin is retained. The direct legacy Menu Top-up route still uses its existing Pricing parent. No payment/order callback or producer is changed.
 - GREEN: Python 3.11 `-S -m unittest tests.test_profile_pricing_back_origin tests.test_profile_topup_back_origin tests.test_profile_credit_guide_back_origin -v` → `Ran 19 tests in 93.459s — OK`. The verified route cycles cover ten existing Account/legacy Pricing paths, all 14 locale-fallback Catalog emitters, and the actual `vip_services_keyboard` → registered Pricing handler → Xu → Top-up path. Malformed origins stop before read/cleanup/render; Home, seven payment payloads and callback length stay intact.
-- Verification: Python 3.11 `py_compile bot.py tests/test_profile_pricing_back_origin.py tests/test_profile_topup_back_origin.py` exit `0`; `git diff --check` exit `0` (only the configured LF→CRLF working-copy notice). CI/deploy pending. No payment/order/provider action or real Telegram message was used.
-- Other manual command-entry screens whose keyboards bypass the registered Pricing callback flow remain split into S12.35.4 after delivery of this focused route fix.
+- Verification: Python 3.11 `py_compile bot.py tests/test_profile_pricing_back_origin.py tests/test_profile_topup_back_origin.py` exit `0`; `git diff --check` exit `0`. Required PR checks passed. PR [#1406](https://github.com/manhtoangreensky-wq/bot/pull/1406) merged at `03558c3408498201d6b2e0f1bce27485a8fb3b7a`; exact-SHA bot-only deploy [37589150697](https://github.com/manhtoangreensky-wq/bot/actions/runs/37589150697) SUCCESS with workers excluded. Strict-host SSH verified matching bot blob, three services active and `NRestarts=0`; deploy validated health `status=ok`. No payment/order/provider action or real Telegram message was used; manual client QA remains NOT_TESTED.
+- Runtime note: Product Video `worker_sha_mismatch` warnings were already present at 14:44:47 +07 before the SSH deploy step started at 14:44:48 +07 and continued afterwards. No worker/engine file or deployment was changed in this UI-only spec; track that warning separately.
+
+### S12.35.4 — Direct `/pricing_xu` command Top-up Back
+
+- Baseline: main/runtime `03558c3408498201d6b2e0f1bce27485a8fb3b7a` after S12.35.3 deployment.
+- Trigger: registered `/pricing_xu` command directly emits `pricing_xu_keyboard`; its `menu|main_topup` callback lacks Pricing-screen origin, so selector Back defaults to Pricing main instead of Xu.
+- Acceptance: execute actual command handler, dispatch its emitted Top-up through registered Menu callback, press its emitted Back through registered Pricing callback, and verify it returns to the Xu page content. `/pricing`, callback-driven Xu, payments, Home, price/text producers and route engines remain unchanged.
+- Allowed scope: one command's read-only keyboard origin, focused command-emitter/registered-handler regression, checklist and delivery evidence.
+- Protected scope: denominations/manual/payment/order/wallet, provider/worker, Product/Edit/SubDub/Voice/Music/Image engines, AutoPost WIP, shared router architecture.
+- RED: the actual registered `cmd_pricing_xu` emitted an unscoped `menu|main_topup`; after dispatch through registered Menu callback, the selector emitted Back `pricing|main` instead of `pricing|xu`. One behavioral failure, zero setup errors.
+- Minimal fix: only `cmd_pricing_xu` rewrites its emitted Top-up callback to the existing allowlisted `pricing_xu` origin. Shared `pricing_xu_keyboard`, the Pricing callback path and Top-up/payment logic stay unchanged.
+- GREEN: Python 3.11 `-S -m unittest tests.test_profile_pricing_back_origin tests.test_profile_topup_back_origin tests.test_profile_credit_guide_back_origin -v` → `Ran 20 tests in 137.681s — OK`; the command-emitted selector Back dispatched through registered handlers to `pricing|xu`. Test-file `py_compile` and `git diff --check` exit `0`. Full local `bot.py` compile did not finish within 7 minutes and was stopped; it is explicitly UNVERIFIED locally. `pytest` is unavailable in the workspace Python. No provider/payment API, Telegram send, job, wallet, or production DB side effects.
+- Delivery: PR/CI/merge/exact-SHA bot-only deploy pending; manual Telegram client QA is NOT_TESTED.
 
 ### S12.6 — Admin Ticket reply origin and pagination
 
@@ -463,12 +475,11 @@ Fake-role execution of actual UI functions produced 1 Railway reference in `owne
 
 ## Current next steps
 
-1. Finish S12.35.3 delivery as its own PR, with CI, merge, bot-only deploy and exact runtime verification against current main `938f6813717831e17cb564c8de9172e6c22906df`.
-2. Inspect S12.35.4 manual read-screen ancestry as a separate narrow customer spec; verify actual emitters/registered handlers before changing it.
-3. Continue remaining A1/A2 visible Admin actions and Back/Home routes, then A3–A5 customer, pending/expiry/repeat and dynamic callback coverage.
-4. Finish A6 wording/layout consistency after route checks. Keep ShopAIKey/Key4U notices diagnostic until policy is clear.
-5. Finish A7 only with multiple user-timed clicks correlated to anonymous server phases; retain the network/device uncertainty limits.
-6. Close A8 only when each required route family and delivery/runtime state has direct evidence; keep this goal ACTIVE meanwhile.
+1. Finish S12.35.4 as its own PR; require CI compile/tests, merge and bot-only exact-SHA deploy verification.
+2. Continue remaining A1/A2 visible Admin actions and Back/Home routes, then A3–A5 customer, pending/expiry/repeat and dynamic callback coverage.
+3. Finish A6 wording/layout consistency after route checks. Keep ShopAIKey/Key4U notices diagnostic until policy is clear.
+4. Finish A7 only with multiple user-timed clicks correlated to anonymous server phases; retain the network/device uncertainty limits.
+5. Close A8 only when each required route family and delivery/runtime state has direct evidence; keep this goal ACTIVE meanwhile.
 
 ## Historical execution-order notes
 

@@ -82,6 +82,29 @@ def _callback(query, action):
 
 
 class AccountPricingOriginTests(unittest.TestCase):
+    def test_direct_pricing_xu_command_topup_back_returns_to_xu(self):
+        ns, route, menu, _, _ = _runtime()
+        _install_topup_fixture(ns)
+        sent = []
+
+        async def send_pricing(_message, lines, keyboard, **_kwargs):
+            sent.append((lines, keyboard))
+
+        ns.update(get_user_language=lambda _uid: "vi", send_pricing_lines=send_pricing)
+        command = fixture.fixture._function("cmd_pricing_xu")
+        exec(compile("from __future__ import annotations\n" + command, "bot.py:cmd_pricing_xu", "exec"), ns)
+        update = SimpleNamespace(effective_user=SimpleNamespace(id=123), message=object())
+        asyncio.run(ns["cmd_pricing_xu"](update, SimpleNamespace()))
+
+        emitted = next(button.callback_data for row in sent[0][1].inline_keyboard for button in row
+                       if button.callback_data.startswith("menu|main_topup"))
+        self.assertEqual("menu|main_topup|pricing_xu", emitted)
+        self.assertLessEqual(len(emitted.encode("utf-8")), 64)
+        topup = fixture._dispatch(menu, emitted)
+        self.assertEqual("pricing|xu", _back(topup))
+        returned = fixture._dispatch(route, _back(topup))
+        self.assertEqual("pricing_xu_lines_i18n", returned.edits[0][0])
+
     def test_unsupported_locale_catalog_topup_returns_to_catalog(self):
         from services.pricing_guide_content import PUBLIC_COPY_LOCALES
         for locale in sorted(PUBLIC_COPY_LOCALES - {"vi", "en", "zh"}):

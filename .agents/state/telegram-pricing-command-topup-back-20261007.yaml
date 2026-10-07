@@ -1,0 +1,14 @@
+task: S12.35.4_COMMAND_PRICING_XU_TOPUP_BACK
+phase: VERIFY
+base_sha: 03558c3408498201d6b2e0f1bce27485a8fb3b7a
+trigger: Registered /pricing_xu command directly emits pricing_xu_keyboard with menu|main_topup; Back from the selector defaults to Pricing main instead of Xu.
+allowed: [read-only command-emitter origin token, focused actual-command and registered Menu/Pricing handler tests, checklist and delivery evidence]
+protected: [pricing text/price producer, /pricing command, denominations/manual/payment/order/wallet, provider/worker, Product/Edit/SubDub/Voice/Music/Image engines, AutoPost WIP, common router architecture]
+acceptance: [execute registered cmd_pricing_xu and its emitted keyboard; dispatch emitted Top-up through registered Menu handler; emitted Back through registered Pricing handler returns same Xu read page; /pricing, Home, payment payloads and other routes remain unchanged]
+red: Actual registered command-emitter test failed behaviorally: it emitted unscoped menu|main_topup, and registered Top-up Back was pricing|main rather than pricing|xu; zero fixture errors.
+green: "20 registered-handler unittests passed in 137.681s; direct cmd_pricing_xu -> emitted Top-up -> registered Menu handler -> emitted Back -> registered Pricing handler returned pricing|xu; zero provider, Telegram-send, job, wallet, production DB or payment side effects."
+verification: {focused_unittest: "20 passed in 137.681s", test_files_py_compile: PASS, full_bot_py_compile_local: UNVERIFIED_AFTER_7M, diff_check: PASS, pytest: UNAVAILABLE_IN_WORKSPACE_PYTHON}
+delivery: PENDING_CI_PR_MERGE_BOT_ONLY_DEPLOY
+manual_client_qa: NOT_TESTED
+side_effects: {provider: 0, telegram_send: 0, jobs: 0, wallet: 0, production_db: 0, payment_api: 0}
+next_spec: Continue ordered Admin/customer route checklist after this narrow command-origin fix.

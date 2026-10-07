@@ -1,5 +1,5 @@
 task: S12.35.3_PRICING_TOPUP_BACK_ORIGIN
-phase: DELIVERY
+phase: REPORT
 base_sha: 938f6813717831e17cb564c8de9172e6c22906df
 trigger: Actual Pricing main/offers/promo-apply/video/image, fallback-locale Catalog, and Xu read screen emit Top-up; selector Back needs exact source context.
 allowed: [read-only Pricing keyboard origin metadata, closed Menu Top-up origin decode/Back override, focused registered-handler tests, CI invocation if needed, audit ledger]
@@ -7,9 +7,10 @@ protected: [price/content producers, denomination/manual/payment/order/wallet op
 acceptance: [each emitted Pricing Top-up control dispatches through registered handler; selector Back returns to the exact emitting Pricing screen including Account-origin context; legacy direct menu|main_topup still returns to Pricing main; malformed origin stops before cleanup/read/render; payment callbacks and Home remain identical]
 red: Original 5/5 Account-origin paths failed behaviorally; expanded gap RED reproduced 14 fallback-locale failures plus 1 Xu read-screen failure, zero fixture/setup errors.
 green: 19 tests in 93.459s OK across Pricing, Top-up and credit-guide registered handlers; 10 existing Account/legacy paths, all 14 fallback locales, actual Xu emitter path, malformed-origin no-side-effect, Home, seven payment payloads, legacy callbacks and callback byte limit covered.
-delivery: PENDING
+delivery: PR #1406 merged at 03558c3408498201d6b2e0f1bce27485a8fb3b7a; exact-SHA bot-only deploy #37589150697 SUCCESS; strict SSH verified matching runtime SHA/blob, bot/web/nginx active, NRestarts=0, health status=ok.
 side_effects: {provider: 0, telegram_send: 0, jobs: 0, wallet: 0, production_db: 0, payment_api: 0}
 manual_client_qa: NOT_TESTED
 local_pytest: UNAVAILABLE
 verification: {registered_handler_unittest: "19 passed in 93.459s", py_compile: PASS, diff_check: PASS}
-next_spec: S12.35.4 manual read-screen ancestry, independently contract after this spec.
+runtime_note: worker_sha_mismatch was logged before the SSH deploy step and continued afterwards; worker/engine not modified.
+next_spec: S12.35.4 direct /pricing_xu command Top-up Back ancestry.
