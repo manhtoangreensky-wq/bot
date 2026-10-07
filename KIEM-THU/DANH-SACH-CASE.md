@@ -10,6 +10,7 @@ Nguồn gốc duy nhất cho acceptance live. Sửa case tại file này trướ
 | `UI-CB-LATENCY-01` | Phân biệt thời gian guard, handler và render-helper | Sau deploy được duyệt, bấm một vòng menu-only `/start` → `Tạo video AI` → `Quay lại`; không xác nhận/tạo job | Ghi giờ bấm thiết bị + múi giờ; log có prefix/handler tĩnh, từng guard, handler, `safe_edit_query_message` và outcome; không có user/chat/message ID, callback data, text hay exception detail. Không suy ra thời gian render trên thiết bị từ log server. |
 
 | `UI-ADMIN-FINANCE-GUIDE-01` | Nhãn Finance không hứa chạy giao dịch/xuất file khi chỉ mở hướng dẫn | Tài khoản staging admin → Admin → Tài chính → Hướng dẫn thêm chi phí → Quay lại; mở Hướng dẫn xuất báo cáo → Hướng dẫn tháng/năm → Quay lại. Không gửi lệnh được hiển thị. | Các trang ghi rõ đây là hướng dẫn, lệnh đúng `/expense_add ...` hoặc `/finance_export <kỳ>`; Back về đúng Tài chính; không có khoản chi mới, tệp CSV gửi ra, Xu/wallet thay đổi hoặc job/provider call. User thường không được mở callback Finance. |
+| `UI-ADMIN-QUEUE-GUIDE-01` | Nhãn Freeze tools khớp với trang hướng dẫn chỉ đọc | Tài khoản staging admin → Admin → Queue / Freeze → `📚 Hướng dẫn Freeze / Queue` → Quay lại. Không chạy lệnh trong trang. | Trang liệt kê lệnh nhưng ghi rõ không thao tác trực tiếp từ nút; Back về đúng Queue; không freeze/unfreeze/refund, thay đổi ví/DB, gọi provider hay tạo job. |
 
 ## Product Video Strategy V2 — correction gate đang mở
 
