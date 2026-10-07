@@ -136012,7 +136012,7 @@ def main_profile_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
     copy = public_hub_copy(lang)
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"💰 {copy['profile_topup']}", callback_data="menu|main_topup"), InlineKeyboardButton(f"💳 {copy['profile_pricing']}", callback_data="pricing|main|profile")],
+        [InlineKeyboardButton(f"💰 {copy['profile_topup']}", callback_data="menu|main_topup|main_profile"), InlineKeyboardButton(f"💳 {copy['profile_pricing']}", callback_data="pricing|main|profile")],
         [InlineKeyboardButton(f"🎁 {copy['profile_packages']}", callback_data="menu|profile_packages"), InlineKeyboardButton(f"👑 {copy['profile_membership']}", callback_data="pricing|member|profile")],
         [InlineKeyboardButton(f"📚 {copy['profile_xu_guide']}", callback_data="menu|guide_credits|main_profile"), InlineKeyboardButton(f"👨‍💼 {copy['support']}", callback_data="menu|support|main_profile")],
         [InlineKeyboardButton(f"🎁 {copy['profile_referral_link']}", callback_data="menu|profile_ref_link"), InlineKeyboardButton(f"👥 {copy['profile_referral_stats']}", callback_data="menu|profile_ref_stats")],
@@ -141831,6 +141831,12 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                 return await query.answer("Nút Bảo mật/DB đã hết phiên. Vui lòng mở lại từ menu hiện tại.", show_alert=True)
             action = route_name
             break
+    profile_topup_origin = False
+    if action.startswith("main_topup|"):
+        if action != "main_topup|main_profile":
+            return await query.answer("Nút Nạp Xu đã hết phiên. Vui lòng mở lại từ Tài khoản.", show_alert=True)
+        profile_topup_origin = True
+        action = "main_topup"
     profile_support_origin = False
     if action.startswith("support|"):
         if action != "support|main_profile":
@@ -142425,6 +142431,12 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         text = f"✅ {copy['translation_session_stop']}."
         return await safe_edit_query_message(query, text, reply_markup=translate_language_keyboard(False, lang))
     text, keyboard = localized_menu_content(action, user_is_admin, lang, query.from_user.id)
+    if profile_topup_origin:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="menu|main_profile")
+             if button.callback_data == "pricing|main" else button for button in row]
+            for row in keyboard.inline_keyboard
+        ])
     if profile_credit_guide:
         keyboard = guide_keyboard("credits", lang, back_callback="menu|main_profile", back_label=ui_text(lang, "common.back"))
     if module_child_origin:

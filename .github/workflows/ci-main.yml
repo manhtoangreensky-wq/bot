@@ -84,6 +84,9 @@ jobs:
       - name: Account Owned Ticket Ancestry
         run: python -m unittest tests/test_profile_ticket_ancestry.py
 
+      - name: Account Top-up Selector Back
+        run: python -m unittest tests/test_profile_topup_back_origin.py
+
       - name: Run Workflow Hygiene Unit Tests
         run: |
           python -m unittest tests/test_deploy_vps_workflow_hygiene.py
