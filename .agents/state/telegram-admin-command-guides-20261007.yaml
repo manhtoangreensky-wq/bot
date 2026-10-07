@@ -1,5 +1,5 @@
 task: S12.26_ADMIN_MANUAL_COMMAND_GUIDE_LABELS
-phase: VERIFY
+phase: REPORT
 base_sha: ffc0da03165e31e4a23ca7a352cdd65f7c66f4ce
 trigger: Admin Queue/Freeze/Maintenance/Provider controls that only display a manual slash-command guide.
 allowed: [bot.py UI string literals in these guide emitters and prompt copy, tests/test_admin_queue_confirm_back_origin.py, audit ledger, tester case]
@@ -7,6 +7,6 @@ protected: [callback payloads, registrations, commands, operation implementation
 acceptance: All 13 ADMIN_CONFIRM_ACTIONS are reachable from actual emitted controls; labels identify guides, commands/Back/authorization are preserved, no operation executes.
 red: One registered-handler method produced 23 label assertion failures and no setup errors across 12 emitted UI surfaces.
 green: 12 Queue/Admin module regression methods passed in 44.830s; full bot/test compile and diff check exit 0. AST comparator allows exactly 39 UI string literal changes (25 entry labels, 13 headings, 1 paragraph), with code/commands/callbacks unchanged.
-delivery: PR/CI/merge/deploy pending; Telegram manual QA unverified.
+delivery: PR 1395 merged/deployed at 2f185dbd6c8f2d0d6e26a76a50c074ae50168fdf; deploy 37563691766 SUCCESS with workers excluded; exact runtime/source/services/health verified. Telegram manual QA unverified.
 verification: python3.11 -S -m unittest tests.test_admin_queue_confirm_back_origin tests.test_admin_module_child_back_origin -v
 side_effects: {provider: 0, telegram_send: 0, jobs: 0, wallet: 0, production_db: 0}

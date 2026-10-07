@@ -1,0 +1,12 @@
+task: S12.27_ADMIN_SMOKE_GUIDE_BACK_ORIGIN
+phase: VERIFY
+base_sha: 2f185dbd6c8f2d0d6e26a76a50c074ae50168fdf
+trigger: Provider/Worker -> Smoke Test -> any of its 8 read-only guides -> Back -> Back.
+red: All 8 emitted guide round-trips lose Provider/Worker origin and return Smoke Test to Admin root; 8 assertion failures, zero setup errors.
+allowed: [bot.py narrow menu origin validation/keyboard propagation, tests/test_admin_module_child_back_origin.py, checklist/evidence/tester docs]
+protected: [shared router architecture, callback registrations, guide content/commands, provider/worker/engine/state/financial logic, AutoPost]
+acceptance: Leaf Back restores same-context Smoke menu, its Back restores Provider/Worker; invalid/public contexts stop before state/render; legacy and Security/DB Sales Ready routes unchanged.
+green: 15 related tests in 47.856s OK; full bot/test compile and exact source comparator PASS; only closed Smoke guide origin validation/keyboard branches differ.
+fixture_update: Prior comparison assumed all non-Back child callbacks were identical between legacy/scoped entries. Updated only the 8 literal Smoke guide expectations to carry required origin; legacy and all unrelated exact comparisons retained.
+delivery: PR/CI/merge/bot-only deploy pending; manual client QA unverified.
+side_effects: {provider: 0, telegram_send: 0, jobs: 0, wallet: 0, production_db: 0}

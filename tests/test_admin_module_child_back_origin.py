@@ -54,6 +54,54 @@ def _controls(query):
 
 
 class AdminModuleChildBackTests(unittest.TestCase):
+    def test_smoke_guide_round_trip_retains_provider_worker_parent(self):
+        ns, route, _, _ = _runtime()
+        exec(fixture._assignment("SMOKE_TEST_ACTIONS"), ns)
+        for name in ("smoke_action_text", "smoke_action_keyboard"):
+            exec(compile(fixture._function(name), "bot.py:" + name, "exec"), ns)
+        entry = next(button for row in ns["admin_module_keyboard"]("provider_worker").inline_keyboard
+                     for button in row if button.callback_data.startswith("menu|smoke_test"))
+        smoke = _dispatch(route, entry.callback_data)
+        guides = [button for button in _controls(smoke)
+                  if button.callback_data.startswith("menu|smoke_") and "smoke_test" not in button.callback_data]
+        self.assertEqual(8, len(guides))
+        for button in guides:
+            with self.subTest(callback=button.callback_data):
+                guide = _dispatch(route, button.callback_data)
+                self.assertIn("chỉ hướng dẫn thao tác", guide.edits[0][0])
+                back = next(button for button in _controls(guide) if button.text.startswith("⬅"))
+                returned = _dispatch(route, back.callback_data)
+                self.assertIn("menu|admin_provider_worker", [button.callback_data for button in _controls(returned)])
+                self.assertEqual([((), {})], guide.answers)
+                self.assertEqual([((), {})], returned.answers)
+                self.assertTrue(all(len(item.callback_data.encode("utf-8")) <= 64 for item in _controls(guide)))
+
+    def test_smoke_guide_invalid_public_contexts_stop_before_cleanup_or_reads(self):
+        actions = ("smoke_shopaikey", "smoke_tts", "smoke_image", "smoke_video",
+                   "smoke_ffmpeg", "smoke_comfy", "smoke_providers", "smoke_sales_ready")
+        for admin in (False, True):
+            ns, route, cleared, reads = _runtime(admin)
+            origins = ("", "main", "admin_queue", "admin_provider_worker|extra") if admin else ("admin_provider_worker",)
+            for action in actions:
+                for origin in origins:
+                    query = _dispatch(route, f"menu|{action}|{origin}")
+                    self.assertEqual(1, len(query.answers))
+                    self.assertTrue(query.answers[0][1].get("show_alert"))
+                    self.assertEqual([], query.edits)
+            self.assertEqual([], cleared)
+            self.assertEqual([], reads)
+
+    def test_legacy_smoke_guides_keep_original_admin_parent(self):
+        ns, route, _, _ = _runtime()
+        exec(fixture._assignment("SMOKE_TEST_ACTIONS"), ns)
+        for name in ("smoke_action_text", "smoke_action_keyboard"):
+            exec(compile(fixture._function(name), "bot.py:" + name, "exec"), ns)
+        for key in ns["SMOKE_TEST_ACTIONS"]:
+            guide = _dispatch(route, "menu|smoke_" + key)
+            self.assertIn("menu|smoke_test", [button.callback_data for button in _controls(guide)])
+            returned = _dispatch(route, "menu|smoke_test")
+            self.assertIn("menu|admin", [button.callback_data for button in _controls(returned)])
+
     def test_provider_worker_route_info_control_matches_its_registered_destination(self):
         ns, route, _, reads = _runtime()
         button = next(
@@ -124,7 +172,15 @@ class AdminModuleChildBackTests(unittest.TestCase):
                 module_entry = _dispatch(route, "menu|" + action + "|admin_" + module)
                 def business_callbacks(query):
                     return [b.callback_data for b in _controls(query) if not b.text.startswith("⬅") and b.callback_data.split("|")[1] != action]
-                self.assertEqual(business_callbacks(legacy), business_callbacks(module_entry))
+                expected = business_callbacks(legacy)
+                if action == "smoke_test":
+                    guide_callbacks = {
+                        "menu|smoke_shopaikey", "menu|smoke_tts", "menu|smoke_image", "menu|smoke_video",
+                        "menu|smoke_ffmpeg", "menu|smoke_comfy", "menu|smoke_providers", "menu|smoke_sales_ready",
+                    }
+                    expected = [callback + "|admin_provider_worker" if callback in guide_callbacks else callback
+                                for callback in expected]
+                self.assertEqual(expected, business_callbacks(module_entry))
 
     def test_public_or_invalid_origins_stop_before_cleanup_reads_or_render(self):
         for admin in (True, False):
