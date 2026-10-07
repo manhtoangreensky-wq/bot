@@ -1,0 +1,10 @@
+task: S12.35.2_ACCOUNT_TOPUP_SELECTOR_BACK
+phase: VERIFY
+base_sha: 39c92d8f382581964cc49fe97fc6303e2843e559
+red: Actual Account emitter -> registered menu handler -> actual selector has Back pricing|main instead of Account; 3 VI/EN/ZH failures, zero setup errors. Legacy payment payload check passes.
+allowed: [one Account selector emitter, closed menu origin decoder and Back keyboard override, regression/CI/ledger]
+protected: [all denomination/manual/payment callbacks and handlers, price/top-up/wallet/order logic, producers, other router/engine/provider/worker/AutoPost]
+acceptance: Account selector Back returns Account; malformed origin stops before cleanup/read/render; generic selector retains Pricing Back; all 7 payment callback literals and Home remain unchanged; no payment button clicked.
+green: 7 Top-up/credit-guide methods in 19.221s OK; 34 language/role combinations preserve actor and 7 literal payment callbacks. Full compile/diff and exact source comparator PASS.
+delivery: PR/CI/merge/bot-only deploy pending; client QA unverified. Payment/order execution not tested or changed.
+side_effects: {provider: 0, telegram_send: 0, jobs: 0, wallet: 0, production_db: 0, payment_api: 0}

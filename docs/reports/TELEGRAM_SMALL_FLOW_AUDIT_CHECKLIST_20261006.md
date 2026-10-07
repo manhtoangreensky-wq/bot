@@ -13,7 +13,7 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 
 | ID | Spec / acceptance evidence | State |
 |---|---|---|
-| A0 | Active main/runtime baseline: `d43864a3827ece9ddf68515785712fac131c048f` after customer Ticket ACK PR #1402; bot source matches its tracked blob. Historical AST registration inventory at `0929d61a` measures 87 direct registrations, 85 distinct expressions and 83 literal patterns; subsequent source comparators preserve registration order. The old emitter snapshot `4f1455ed` had 3,981 constructors/821 dynamic expressions/0 unmatched static callbacks. Those figures and old line locations are historical inventory, not proof of current route behavior. | Per-registration matrix in `TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md`; route verdicts remain partial/unproven. |
+| A0 | Active main/runtime baseline: `39c92d8f382581964cc49fe97fc6303e2843e559` after owned Ticket ancestry PR #1404; bot source matches its tracked blob. Historical AST registration inventory at `0929d61a` measures 87 direct registrations, 85 distinct expressions and 83 literal patterns; subsequent source comparators preserve registration order. The old emitter snapshot `4f1455ed` had 3,981 constructors/821 dynamic expressions/0 unmatched static callbacks. Those figures and old line locations are historical inventory, not proof of current route behavior. | Per-registration matrix in `TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md`; route verdicts remain partial/unproven. |
 | A1 | Admin screens: verify each visible action label matches its handler; test emitted callback, authorization, state transition, and error/stale path. | PARTIAL — report/overview, root/help/package, Queue/Finance guide labels and feedback/access samples have evidence below; full visible-action matrix remains open. |
 | A2 | Admin Back/Home: verify immediate parent and preserve list/filter/page context; test prompt and preview exits without performing the underlying action. | IN PROGRESS — ticket-origin specs S12.6–S12.10 (#1367–#1374) are in #1376; S12.12 merged/deployed in #1378 at runtime SHA `392d2eec`; S12.18 fixes Package Orders origin and S12.19 fixes Security/DB child Back. Other admin/customer routes remain open. |
 | A3 | Customer screens: verify ownership, same-product navigation, Back/Home, and no cross-user or cross-product route. | PARTIAL — Account credit-guide verified; pricing/member origin tests pass locally in S12.30; remaining customer matrix open. |
@@ -176,6 +176,19 @@ Status: ACTIVE — do not treat this file or any isolated green test as whole-bo
 - Existing result restoration reads the owned ticket and reuses the current result renderer; classification/create/append/update/notify decisions remain unchanged. Engines/providers/workers/config/deploy unchanged. Manual Telegram/client timing NOT_TESTED.
 - Adjacent gates: 5 read-Support methods in `25.262s — OK` and 6 legacy Support/Ticket direct cases pass. The prior read-only fixture comparison now expects origin metadata on exactly `ticket|mine` and `support|ticket`, retaining all other literal comparisons; real form/pending execution remains verified by the 17-method suite.
 - Delivery: PR/CI/merge/bot-only deploy pending. Full UI audit and remaining pending/expiry/repeat route matrix remain open after this bounded Support/Ticket context spec.
+- Delivery verified: [#1404](https://github.com/manhtoangreensky-wq/bot/pull/1404) merged/deployed at `39c92d8f382581964cc49fe97fc6303e2843e559`; deploy [37580095807](https://github.com/manhtoangreensky-wq/bot/actions/runs/37580095807) SUCCESS, workers excluded. Strict SSH at 07/10 13:17 +07 verified matching bot blob `3b9f8b9aa524b325f767f7182950736d68277380`, active services/status 0/restarts 0 and health `ok`. Prior pending line historical; manual/client QA remains open.
+
+### S12.35.1 — Account package/referral read navigation (no defect)
+
+- Executed 4 actual Account emitters for Packages/Referral link/policy/stats through the registered Menu callback, real `profile_child_keyboard`, and emitted Back through the same registration. VI/EN/ZH × customer/admin = 24 direct navigation cases pass, one normal ACK per action, correct actor passed to each data producer.
+- Data producers were inert; this verifies UI/Back and actor routing only, not package balances/referral data accuracy or live latency. No source fix or standalone PR needed. Remaining data/route matrix stays partial.
+
+### S12.35.2 — Account Top-up selector Back
+
+- Base `39c92d8f`; Account Top-up emits the generic selector and its Back opens Pricing. Actual registered menu/selector RED: 3 VI/EN/ZH parent failures, zero setup errors; legacy amount-payload assertion already passes.
+- Fix: one Account emitter and a closed Menu origin/Back override. Scoped Back returns Account; generic selector retains Pricing Back. Existing price/text producers, 6 denomination callbacks, manual callback, Home and all payment/order/wallet code are unchanged. No amount/order button is clicked.
+- GREEN: 7 Top-up/credit-guide methods in `19.221s — OK`, including 34 locale/role contexts, exact 7 payment payloads/actor, legacy and malformed scope. Full compile/diff and exact source comparator pass; bot outside the emitter/closed UI blocks and all protected directories matches base.
+- Delivery: PR/CI/merge/bot-only deploy pending. `UI-PROFILE-TOPUP-SELECTOR-BACK-01` manual client QA NOT_TESTED. Next checks include Pricing-origin Top-up/manual screen ancestry and other Support/Ticket entry sources; preserved legacy behavior in this spec is not whole-goal Back proof.
 
 ### S12.6 — Admin Ticket reply origin and pagination
 
