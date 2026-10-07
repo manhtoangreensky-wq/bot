@@ -231200,6 +231200,29 @@ def finance_admin_guide_text() -> str:
         "• <code>/pricing_voice_subdub_status</code>, <code>/finance_menu_audit</code>",
     ])
 
+def finance_overview_text() -> str:
+    return finance_brief_report_text(
+        finance_period_payload("", "month"),
+        "📊 <b>Tổng quan tài chính</b>",
+    )
+
+def finance_command_help_text() -> str:
+    return finance_admin_guide_text()
+
+def finance_revenue_text() -> str:
+    return finance_revenue_period_text("", "💵 <b>Doanh thu tháng này</b>")
+
+def finance_revenue_month_menu_text() -> str:
+    example_month = datetime.now().strftime("%Y-%m")
+    return (
+        "✍️ <b>Nhập kỳ doanh thu</b>\n\n"
+        "Dùng lệnh <code>/revenue_report YYYY-MM</code> hoặc <code>/revenue_report YYYY</code>.\n"
+        f"Ví dụ: <code>/revenue_report {example_month}</code>."
+    )
+
+def finance_expense_month_menu_text() -> str:
+    return finance_expense_period_text("", "🧾 <b>Chi phí tháng này</b>")
+
 def finance_expense_categories_text() -> str:
     return (
         "🏷 <b>Category chi phí</b>\n\n"
