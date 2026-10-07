@@ -25,6 +25,7 @@ from services import (
 from services.video_provider_catalog import (
     model_interface_contract,
     model_metadata_from_resolution,
+    provider_model_config,
     resolve_product_video_model,
     selected_model_for_provider,
 )
@@ -1459,6 +1460,205 @@ def _scene_cards_from_project(project: dict, scenes: list[dict]) -> list[dict]:
     return strip_secret_fields(result)
 
 
+def is_canonical_r05a_provider_model_proven(provider: str, model: str) -> bool:
+    """Validate that provider and model independently pass catalog + selfshot I2V contract."""
+    from services.video_real_render_connector import SELFSHOT_PROVEN_I2V_MODELS_BY_PROVIDER
+
+    p = str(provider or "").strip().lower()
+    m = str(model or "").strip()
+    if not p or not m:
+        return False
+    cfg = provider_model_config(p, m)
+    if not isinstance(cfg, dict) or not cfg:
+        return False
+    caps = cfg.get("capabilities") or []
+    if not isinstance(caps, list) or "image_to_video" not in caps:
+        return False
+    proven_models = SELFSHOT_PROVEN_I2V_MODELS_BY_PROVIDER.get(p) or set()
+    if m not in proven_models:
+        return False
+    return True
+
+
+def _reconcile_r05a_zero_submit_worker_authority(
+    payload: dict[str, Any],
+    hydrated_job: dict[str, Any],
+    project: dict[str, Any],
+    persisted_result: dict[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(payload, dict) or not payload:
+        return payload
+
+    product_type = str(
+        payload.get("product_type")
+        or hydrated_job.get("product_type")
+        or project.get("product_type")
+        or ""
+    ).strip().lower()
+    if product_type != "self_shot_scene_change":
+        return payload
+
+    quality_tier = _safe_int(
+        payload.get("quality_tier")
+        or project.get("quality_tier")
+        or hydrated_job.get("quality_tier"),
+        0,
+    )
+    if quality_tier != 700:
+        return payload
+
+    engine_adapter = str(
+        payload.get("engine_adapter")
+        or hydrated_job.get("engine_adapter")
+        or persisted_result.get("engine_adapter")
+        or ""
+    ).strip()
+    required_capability = str(
+        payload.get("required_capability")
+        or hydrated_job.get("required_capability")
+        or persisted_result.get("required_capability")
+        or ""
+    ).strip()
+    if (
+        engine_adapter != "controlled_keyframe_image_to_video"
+        or required_capability != "image_to_video"
+    ):
+        return payload
+
+    # ── ZERO-SUBMIT BOUNDARY GUARD ──
+    scene_tasks = payload.get("scene_tasks") or persisted_result.get("scene_tasks") or []
+    has_scene_task = any(
+        bool(
+            str(
+                item.get("provider_task_id")
+                or item.get("task_id")
+                or item.get("provider_video_id")
+                or item.get("video_id")
+                or item.get("active_task_id")
+                or item.get("winning_task_id")
+                or ""
+            ).strip()
+        )
+        for item in scene_tasks
+        if isinstance(item, dict)
+    )
+    provider_task_count = _safe_int(
+        persisted_result.get("provider_task_count")
+        or payload.get("provider_task_count")
+        or payload.get("scene_tasks_submitted_count"),
+        0,
+    )
+    provider_submit_count = _safe_int(
+        persisted_result.get("provider_submit_count")
+        or payload.get("provider_submit_count")
+        or payload.get("submit_count"),
+        0,
+    )
+    provider_http_sent = _safe_bool(
+        persisted_result.get("provider_http_request_sent")
+        or payload.get("provider_http_request_sent")
+    )
+    provider_attempted = _safe_bool(
+        persisted_result.get("provider_attempted")
+        or payload.get("provider_attempted")
+    )
+    provider_submit_called = _safe_bool(
+        persisted_result.get("provider_submit_called")
+        or payload.get("provider_submit_called")
+    )
+    has_pending_task_ids = bool(
+        persisted_result.get("provider_task_ids")
+        or persisted_result.get("provider_video_ids")
+        or payload.get("provider_pending_task_id")
+        or payload.get("provider_pending_video_id")
+    )
+
+    if (
+        has_scene_task
+        or provider_task_count > 0
+        or provider_submit_count > 0
+        or provider_http_sent
+        or provider_attempted
+        or provider_submit_called
+        or has_pending_task_ids
+    ):
+        payload["cross_provider_rebind_allowed"] = False
+        payload["automatic_resubmit_allowed"] = False
+        payload["automatic_fallback_allowed"] = False
+        return payload
+
+    # ── SELECTED PROVIDER & MODEL AUTHORITY ──
+    asset_pack = _json_loads(project.get("asset_pack_json"), {}) if isinstance(project.get("asset_pack_json"), str) else (project.get("asset_pack") or {})
+    invoice = _json_loads(project.get("invoice_json"), {}) if isinstance(project.get("invoice_json"), str) else (project.get("invoice") or {})
+    raw_provider = str(
+        payload.get("selected_provider")
+        or persisted_result.get("selected_provider")
+        or (asset_pack.get("selected_provider") if isinstance(asset_pack, dict) else "")
+        or (invoice.get("selected_provider") if isinstance(invoice, dict) else "")
+        or ""
+    ).strip().lower()
+
+    if raw_provider in {"key4u", "k4u", "key4u_video"}:
+        selected_provider = "key4u_video"
+    elif raw_provider in {"shopai", "shopaikey", "shopaikey_video"}:
+        selected_provider = "shopaikey_video"
+    else:
+        selected_provider = raw_provider
+
+    if not selected_provider:
+        payload["cross_provider_rebind_allowed"] = False
+        return payload
+
+    selected_model = str(
+        payload.get("selected_model")
+        or payload.get("model")
+        or persisted_result.get("selected_model")
+        or persisted_result.get("model")
+        or (asset_pack.get("selected_model") if isinstance(asset_pack, dict) else "")
+        or (invoice.get("selected_model") if isinstance(invoice, dict) else "")
+        or ""
+    ).strip()
+
+    if not selected_model or not is_canonical_r05a_provider_model_proven(selected_provider, selected_model):
+        payload["cross_provider_rebind_allowed"] = False
+        payload["r05a_provider_model_proven"] = False
+        return payload
+
+    if selected_provider == "shopaikey_video":
+        return payload
+
+    if selected_provider == "key4u_video" and selected_model == "kling-v3":
+        payload["selected_provider"] = "key4u_video"
+        payload["selected_model"] = "kling-v3"
+        payload["model"] = "kling-v3"
+        payload["pinned_wire_model"] = "kling-v3"
+        payload["configured_provider_chain"] = ["key4u_video"]
+        payload["effective_provider_chain"] = ["key4u_video"]
+        payload["provider_chain"] = ["key4u_video"]
+        payload["provider_order"] = ["key4u_video"]
+        payload["runtime_candidate_keys"] = ["key4u_video"]
+        payload["preconfirm_candidate_keys"] = ["key4u_video"]
+        payload["candidate_set_consistent"] = True
+        payload["final_eligible_provider_count"] = 1
+        payload["cross_provider_rebind_allowed"] = True
+        payload["rebind_reason"] = "r05a_zero_submit_reconcile_selected_provider_model_authority"
+        payload["r05a_provider_chain_reconciled"] = True
+        payload["automatic_fallback_allowed"] = False
+        payload["automatic_resubmit_allowed"] = False
+        payload["provider_model_map"] = {"key4u_video": "kling-v3"}
+
+        if isinstance(payload.get("scene_tasks"), list):
+            for item in payload["scene_tasks"]:
+                if isinstance(item, dict):
+                    item["selected_provider"] = "key4u_video"
+                    item["selected_model"] = "kling-v3"
+                    item["model_used"] = "kling-v3"
+                    item["model_used_in_payload"] = "kling-v3"
+                    item["provider_model_map"] = {"key4u_video": "kling-v3"}
+
+    return payload
+
+
 def build_worker_job_payload(hydrated_job: dict) -> dict:
     if not hydrated_job:
         return {}
@@ -2611,6 +2811,7 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                 "final_video_bytes_gt_zero": True,
             }
         )
+    payload = _reconcile_r05a_zero_submit_worker_authority(payload, hydrated_job, project, persisted_result)
     return payload
 
 
