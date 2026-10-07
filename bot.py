@@ -141831,11 +141831,28 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                 return await query.answer("Nút Bảo mật/DB đã hết phiên. Vui lòng mở lại từ menu hiện tại.", show_alert=True)
             action = route_name
             break
-    profile_topup_origin = False
+    topup_back_callback = ""
     if action.startswith("main_topup|"):
-        if action != "main_topup|main_profile":
-            return await query.answer("Nút Nạp Xu đã hết phiên. Vui lòng mở lại từ Tài khoản.", show_alert=True)
-        profile_topup_origin = True
+        topup_origin = action.split("|", 1)[1]
+        topup_back_callback = {
+            "main_profile": "menu|main_profile",
+            "pricing_main": "pricing|main",
+            "pricing_catalog": "pricing|catalog",
+            "pricing_xu": "pricing|xu",
+            "pricing_promotions": "pricing|promotions",
+            "pricing_promo_apply": "pricing|promo_apply",
+            "pricing_video": "pricing|video",
+            "pricing_image": "pricing|image",
+            "pricing_main_profile": "pricing|main|profile",
+            "pricing_catalog_profile": "pricing|catalog|profile",
+            "pricing_xu_profile": "pricing|xu|profile",
+            "pricing_promotions_profile": "pricing|promotions|profile",
+            "pricing_promo_apply_profile": "pricing|promo_apply|profile",
+            "pricing_video_profile": "pricing|video|profile",
+            "pricing_image_profile": "pricing|image|profile",
+        }.get(topup_origin, "")
+        if not topup_back_callback:
+            return await query.answer("Nút Nạp Xu đã hết phiên. Vui lòng mở lại từ màn hình trước đó.", show_alert=True)
         action = "main_topup"
     profile_support_origin = False
     if action.startswith("support|"):
@@ -142431,9 +142448,9 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         text = f"✅ {copy['translation_session_stop']}."
         return await safe_edit_query_message(query, text, reply_markup=translate_language_keyboard(False, lang))
     text, keyboard = localized_menu_content(action, user_is_admin, lang, query.from_user.id)
-    if profile_topup_origin:
+    if topup_back_callback:
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="menu|main_profile")
+            [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=topup_back_callback)
              if button.callback_data == "pricing|main" else button for button in row]
             for row in keyboard.inline_keyboard
         ])
@@ -213662,7 +213679,8 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
     lang = get_user_language(query.from_user.id) if query.from_user else "vi"
     uid = query.from_user.id if query.from_user else None
     def ui_keyboard(markup):
-        if not profile_origin or markup is None:
+        topup_actions = {"main", "catalog", "xu", "promotions", "promo_apply", "video", "image"}
+        if markup is None or (not profile_origin and action not in topup_actions):
             return markup
         rows = []
         has_back = False
@@ -213672,9 +213690,16 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
                 data = str(button.callback_data or "")
                 is_back = button.text.startswith(("⬅", "🔙", "←"))
                 has_back = has_back or is_back
+                if data == "menu|main_topup" and action in topup_actions:
+                    origin = f"pricing_{action}"
+                    if profile_origin == "profile":
+                        origin += "_profile"
+                    data = f"menu|main_topup|{origin}"
+                    controls.append(InlineKeyboardButton(button.text, callback_data=data))
+                    continue
                 if data.startswith("pricing|"):
                     target = data.split("|", 1)[1]
-                    if target in read_actions or target.startswith("package_group_"):
+                    if profile_origin and (target in read_actions or target.startswith("package_group_")):
                         origin = "profile_catalog" if action == "catalog" and target == "member" else profile_origin
                         data = f"pricing|{target}|{origin}"
                         if is_back and action == "member":
@@ -213687,7 +213712,7 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
                         continue
                 controls.append(button)
             rows.append(controls)
-        if not has_back:
+        if profile_origin and not has_back:
             back = "menu|main_profile" if action == "main" else ("pricing|catalog|profile" if action == "total" else "pricing|main|profile")
             rows.insert(max(0, len(rows) - 1), [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=back)])
         return InlineKeyboardMarkup(rows)
