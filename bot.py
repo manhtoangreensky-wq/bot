@@ -141693,7 +141693,18 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         "admin_confirm_ack_refund_job": ("admin_queue", "freeze_queue_help"),
     }
     child_action, separator, child_origin = action.partition("|")
-    if separator and child_action in module_child_contexts:
+    smoke_guide_origin = ""
+    smoke_guide_actions = {
+        "smoke_shopaikey", "smoke_tts", "smoke_image", "smoke_video",
+        "smoke_ffmpeg", "smoke_comfy", "smoke_providers", "smoke_sales_ready",
+    }
+    if separator and child_action in smoke_guide_actions:
+        if child_origin == "admin_provider_worker":
+            smoke_guide_origin = child_origin
+            action = child_action
+        elif child_action != "smoke_sales_ready" or child_origin != "admin_security_db":
+            return await query.answer("Nút hướng dẫn test đã hết phiên. Vui lòng mở lại từ module hiện tại.", show_alert=True)
+    if separator and child_action in module_child_contexts and not smoke_guide_origin:
         expected_origin, module_child_back = module_child_contexts[child_action]
         if child_origin != expected_origin:
             return await query.answer("Nút Quản trị đã hết phiên. Vui lòng mở lại từ module hiện tại.", show_alert=True)
@@ -142319,6 +142330,19 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         ])
     if action == "admin_package_orders" and package_orders_origin:
         keyboard = admin_package_orders_keyboard(package_orders_origin)
+    if action == "smoke_test" and module_child_origin == "admin_provider_worker":
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(button.text, callback_data=f"{button.callback_data}|{module_child_origin}")
+             if button.callback_data in {f"menu|{guide}" for guide in smoke_guide_actions}
+             else button for button in row]
+            for row in keyboard.inline_keyboard
+        ])
+    if smoke_guide_origin:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(button.text, callback_data=f"menu|smoke_test|{smoke_guide_origin}")
+             if button.callback_data == "menu|smoke_test" else button for button in row]
+            for row in keyboard.inline_keyboard
+        ])
     if action == "system_runtime_help" and runtime_help_parent:
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("⬅️ Quay lại", callback_data=f"menu|{runtime_help_parent}")
@@ -231489,10 +231513,10 @@ def smoke_test_menu_text() -> str:
 
 def smoke_test_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🤖 Test ShopAIKey", callback_data="menu|smoke_shopaikey"), InlineKeyboardButton("🗣 Test TTS", callback_data="menu|smoke_tts")],
-        [InlineKeyboardButton("🖼 Test Image", callback_data="menu|smoke_image"), InlineKeyboardButton("🎬 Test Video", callback_data="menu|smoke_video")],
-        [InlineKeyboardButton("🎞 Test FFmpeg", callback_data="menu|smoke_ffmpeg"), InlineKeyboardButton("🧩 Test ComfyUI", callback_data="menu|smoke_comfy")],
-        [InlineKeyboardButton("📊 Providers", callback_data="menu|smoke_providers"), InlineKeyboardButton("✅ Sales Ready", callback_data="menu|smoke_sales_ready")],
+        [InlineKeyboardButton("📘 Hướng dẫn test ShopAIKey", callback_data="menu|smoke_shopaikey"), InlineKeyboardButton("📘 Hướng dẫn test TTS", callback_data="menu|smoke_tts")],
+        [InlineKeyboardButton("📘 Hướng dẫn test Image", callback_data="menu|smoke_image"), InlineKeyboardButton("📘 Hướng dẫn test Video", callback_data="menu|smoke_video")],
+        [InlineKeyboardButton("📘 Hướng dẫn test FFmpeg", callback_data="menu|smoke_ffmpeg"), InlineKeyboardButton("📘 Hướng dẫn test ComfyUI", callback_data="menu|smoke_comfy")],
+        [InlineKeyboardButton("📘 Hướng dẫn Providers", callback_data="menu|smoke_providers"), InlineKeyboardButton("📘 Hướng dẫn Sales Ready", callback_data="menu|smoke_sales_ready")],
         [InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
