@@ -60204,6 +60204,20 @@ def human_support_text(lang: str = "vi") -> str:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return f"👨‍💼 <b>{copy['support_title']}</b>\n\n{copy['support_body']}"
 
+def support_read_origin_keyboard(markup, profile_origin: bool = False, lang: str = "vi", *, root: bool = False):
+    if not profile_origin:
+        return markup
+    read_actions = {"start", "admin_contact", "cskh_auto", "premium", "bot", "bot_type", "consult", "consult_type"}
+    rows = [
+        [InlineKeyboardButton(button.text, callback_data=f"{button.callback_data}|profile")
+         if str(button.callback_data or "").startswith("support|") and button.callback_data.split("|")[1] in read_actions
+         else button for button in row]
+        for row in markup.inline_keyboard
+    ]
+    if root:
+        rows.insert(max(0, len(rows) - 1), [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="menu|main_profile")])
+    return InlineKeyboardMarkup(rows)
+
 def human_support_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return InlineKeyboardMarkup([
@@ -135956,7 +135970,7 @@ def main_profile_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(f"💰 {copy['profile_topup']}", callback_data="menu|main_topup"), InlineKeyboardButton(f"💳 {copy['profile_pricing']}", callback_data="pricing|main|profile")],
         [InlineKeyboardButton(f"🎁 {copy['profile_packages']}", callback_data="menu|profile_packages"), InlineKeyboardButton(f"👑 {copy['profile_membership']}", callback_data="pricing|member|profile")],
-        [InlineKeyboardButton(f"📚 {copy['profile_xu_guide']}", callback_data="menu|guide_credits|main_profile"), InlineKeyboardButton(f"👨‍💼 {copy['support']}", callback_data="menu|support")],
+        [InlineKeyboardButton(f"📚 {copy['profile_xu_guide']}", callback_data="menu|guide_credits|main_profile"), InlineKeyboardButton(f"👨‍💼 {copy['support']}", callback_data="menu|support|main_profile")],
         [InlineKeyboardButton(f"🎁 {copy['profile_referral_link']}", callback_data="menu|profile_ref_link"), InlineKeyboardButton(f"👥 {copy['profile_referral_stats']}", callback_data="menu|profile_ref_stats")],
         [InlineKeyboardButton(f"📋 {copy['profile_referral_policy']}", callback_data="menu|profile_ref_policy"), InlineKeyboardButton(f"🌍 {copy['profile_change_language']}", callback_data="back_lang|profile")],
         [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
@@ -140825,6 +140839,14 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
     query = update.callback_query
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "start"
+    profile_origin = False
+    read_actions = {"start", "admin_contact", "cskh_auto", "premium", "bot", "bot_type", "consult", "consult_type"}
+    read_arity = 3 if action in {"bot_type", "consult_type"} else 2
+    if action in read_actions and len(parts) > read_arity:
+        if len(parts) != read_arity + 1 or parts[-1] != "profile":
+            return await query.answer("Nút hỗ trợ đã hết phiên. Vui lòng mở lại từ Tài khoản.", show_alert=True)
+        profile_origin = True
+        parts = parts[:-1]
     supported_actions = {
         "start", "admin_contact", "cskh_auto", "ticket", "premium", "premium_type",
         "bot", "bot_type", "bot_input", "consult", "consult_type", "consult_need", "consult_input",
@@ -140837,13 +140859,13 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
     lang = normalize_user_language(get_user_language(uid)) or "vi"
     if action == "start":
         clear_support_ticket_pending(uid)
-        return await safe_edit_or_send(query, human_support_text(lang), reply_markup=human_support_keyboard(lang))
+        return await safe_edit_or_send(query, human_support_text(lang), reply_markup=support_read_origin_keyboard(human_support_keyboard(lang), profile_origin, lang, root=True))
     if action == "admin_contact":
         clear_support_ticket_pending(uid)
-        return await safe_edit_or_send(query, support_admin_contact_text(lang), reply_markup=support_admin_contact_keyboard(lang))
+        return await safe_edit_or_send(query, support_admin_contact_text(lang), reply_markup=support_read_origin_keyboard(support_admin_contact_keyboard(lang), profile_origin, lang))
     if action == "cskh_auto":
         clear_support_ticket_pending(uid)
-        return await safe_edit_or_send(query, support_cskh_auto_text(lang), reply_markup=support_cskh_auto_keyboard(lang))
+        return await safe_edit_or_send(query, support_cskh_auto_text(lang), reply_markup=support_read_origin_keyboard(support_cskh_auto_keyboard(lang), profile_origin, lang))
     if action == "ticket":
         set_support_ticket_pending(
             uid,
@@ -140862,7 +140884,7 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
         )
     if action == "premium":
         clear_support_ticket_pending(uid)
-        return await safe_edit_or_send(query, support_premium_text(lang), reply_markup=support_premium_keyboard(lang))
+        return await safe_edit_or_send(query, support_premium_text(lang), reply_markup=support_read_origin_keyboard(support_premium_keyboard(lang), profile_origin, lang))
     if action == "premium_type" and len(parts) >= 3:
         copy = public_hub_copy(lang)
         options = {
@@ -140896,14 +140918,14 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
         )
     if action == "bot":
         clear_support_ticket_pending(uid)
-        return await safe_edit_or_send(query, support_custom_bot_text(lang), reply_markup=support_custom_bot_keyboard(lang))
+        return await safe_edit_or_send(query, support_custom_bot_text(lang), reply_markup=support_read_origin_keyboard(support_custom_bot_keyboard(lang), profile_origin, lang))
     if action == "bot_type" and len(parts) >= 3:
         bot_type = parts[2] if parts[2] in SUPPORT_CUSTOM_BOT_DETAILS else "custom"
         clear_support_ticket_pending(uid)
         return await safe_edit_or_send(
             query,
             support_custom_bot_detail_text(bot_type, lang),
-            reply_markup=support_custom_bot_detail_keyboard(bot_type, lang),
+            reply_markup=support_read_origin_keyboard(support_custom_bot_detail_keyboard(bot_type, lang), profile_origin, lang),
         )
     if action == "bot_input" and len(parts) >= 3:
         bot_type = parts[2] if parts[2] in SUPPORT_CUSTOM_BOT_DETAILS else "custom"
@@ -140930,7 +140952,7 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
         return await safe_edit_or_send(
             query,
             f"📦 <b>{public_hub_copy(lang)['support_consult']}</b>\n\n{public_hub_copy(lang)['support_consult_body']}",
-            reply_markup=support_consult_keyboard(lang),
+            reply_markup=support_read_origin_keyboard(support_consult_keyboard(lang), profile_origin, lang),
         )
     if action == "consult_type" and len(parts) >= 3:
         clear_support_ticket_pending(uid)
@@ -140938,7 +140960,7 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
         return await safe_edit_or_send(
             query,
             support_consult_detail_text(service_type, lang),
-            reply_markup=support_consult_detail_keyboard(service_type, lang),
+            reply_markup=support_read_origin_keyboard(support_consult_detail_keyboard(service_type, lang), profile_origin, lang),
         )
     if action in {"consult_need", "consult_input"} and len(parts) >= 3:
         service_type = parts[2] if parts[2] in SUPPORT_CONSULT_DETAILS else "video"
@@ -141729,6 +141751,12 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                 return await query.answer("Nút Bảo mật/DB đã hết phiên. Vui lòng mở lại từ menu hiện tại.", show_alert=True)
             action = route_name
             break
+    profile_support_origin = False
+    if action.startswith("support|"):
+        if action != "support|main_profile":
+            return await query.answer("Nút hỗ trợ đã hết phiên. Vui lòng mở lại từ Tài khoản.", show_alert=True)
+        profile_support_origin = True
+        action = "support"
     profile_credit_guide = False
     if action.startswith("guide_credits|"):
         if action != "guide_credits|main_profile":
@@ -141862,7 +141890,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return await safe_edit_query_message(
             query,
             human_support_text(lang),
-            reply_markup=human_support_keyboard(lang),
+            reply_markup=support_read_origin_keyboard(human_support_keyboard(lang), profile_support_origin, lang, root=True),
         )
     if action == "internal_archive":
         return await safe_edit_query_message(
