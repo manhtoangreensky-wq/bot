@@ -141051,6 +141051,13 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         ticket_preview = get_support_ticket(int(parts[2]), uid)
         if not ticket_preview:
             return await query.answer(copy["support_ticket_not_found"], show_alert=True)
+    customer_action_ticket = None
+    if action in {"reply_user", "done", "attach"}:
+        if len(parts) < 3 or not parts[2].isdecimal():
+            return await query.answer(copy["support_ticket_action_unsupported"], show_alert=True)
+        customer_action_ticket = get_support_ticket(int(parts[2]), uid)
+        if not customer_action_ticket:
+            return await query.answer(copy["support_ticket_not_found"], show_alert=True)
     admin_ticket_detail = None
     if action == "av":
         if len(parts) < 3 or not parts[2].isdigit():
@@ -141090,9 +141097,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
             reply_markup=support_ticket_detail_keyboard(ticket, lang),
         )
     if action == "reply_user" and len(parts) >= 3:
-        ticket = get_support_ticket(int(parts[2]), uid)
-        if not ticket:
-            return await query.answer(copy["support_ticket_not_found"], show_alert=True)
+        ticket = customer_action_ticket
         set_support_ticket_pending(
             uid,
             "awaiting_ticket_reply",
@@ -141107,9 +141112,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
             reply_markup=support_flow_back_keyboard(f"ticket|pv|{ticket['id']}", f"⬅️ {copy['support_ticket_back_to_ticket']}", lang=lang),
         )
     if action == "done" and len(parts) >= 3:
-        ticket = get_support_ticket(int(parts[2]), uid)
-        if not ticket:
-            return await query.answer(copy["support_ticket_not_found"], show_alert=True)
+        ticket = customer_action_ticket
         ticket = update_support_ticket(ticket["id"], status="resolved") or ticket
         clear_support_ticket_pending(uid)
         return await safe_edit_or_send(
@@ -141121,9 +141124,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
             ]),
         )
     if action == "attach" and len(parts) >= 3:
-        ticket = get_support_ticket(int(parts[2]), uid)
-        if not ticket:
-            return await query.answer(copy["support_ticket_not_found"], show_alert=True)
+        ticket = customer_action_ticket
         set_support_ticket_pending(uid, "awaiting_attachment", ticket_id=ticket["id"])
         return await safe_edit_or_send(
             query,

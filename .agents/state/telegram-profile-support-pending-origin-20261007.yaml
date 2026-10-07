@@ -1,5 +1,5 @@
 task: S12.33_ACCOUNT_SUPPORT_PENDING_BACK
-phase: VERIFY
+phase: REPORT
 base_sha: 72f46e1a12657491f15878d4f368cad4aa9c89de
 red: Four actual form emitters through registered Support handler and real pending setter store context-free back_to; four behavioral failures, zero setup errors.
 allowed: [scoped form callback/prompt keyboards, validated UI suffix parser, existing back_to UI value, short-retry/result keyboard origin, tests/CI/ledger]
@@ -7,5 +7,5 @@ protected: [pending helper schema/TTL/clear behavior, classification/create/appe
 acceptance: Four scoped forms preserve real pending back_to, short Ticket retry retains state/Back, successful fixture-only submission clears pending and keeps Account via Support; legacy and malformed/expired variants safe.
 green: 10 pending/read-support methods in 56.663s OK; full bot/test compile and diff pass; 3 legacy ACK direct cases pass. Real pending setter/getter/TTL/clear/complete used; creation/classification/notification/transport intercepted.
 protected_comparator: Support callback and pending-input operation AST identical after removing presentation additions/back_to UI suffix; create/append/classification/notify/clear statements and other bot source unchanged outside UI scope. Engines/providers/workers/config/deploy unchanged.
-delivery: PR/CI/merge/bot-only deploy pending; client QA unverified; My Tickets/view/reply/attachment origin remains next S12.34.
+delivery: PR 1401 merged/deployed at ba60dfed0dca5bc37734f6d55c8f0ed980b95e7d; deploy 37576223955 SUCCESS with workers excluded; runtime/source/services/health verified 07/10 12:32 +07. Client QA unverified; My Tickets/view/reply/attachment origin remains S12.34.2.
 side_effects: {provider: 0, telegram_send: 0, jobs: 0, wallet: 0, production_db: 0}
