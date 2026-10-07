@@ -1,0 +1,12 @@
+task: S12.30_ACCOUNT_PRICING_MEMBERSHIP_BACK
+phase: VERIFY
+base_sha: ae01c60dc8a28e6179d3da7df23ef30f81fa7592
+trigger: Account -> Pricing -> Catalog -> detail -> Back chain, and Account -> Member -> birthday guide -> Back chain.
+red: 4 behavioral failures (VI/EN/ZH Pricing lacks Account Back, direct Member Back goes to Pricing), zero setup errors.
+allowed: [main_profile_keyboard pricing/member emitter context, handle_pricing_callback closed read-only UI origin/keyboard transformation, focused tests/CI/ledger]
+protected: [price/content producers, finance/payment/wallet/entitlement operations, query object immutability, other router architecture, engines/providers/workers/AutoPost]
+acceptance: Preserve Account through pricing subtree and Member/birthday ancestry; keep legacy parent destinations and non-pricing callbacks; malformed origin stops before cleanup/data/render.
+green: 9 Account pricing/credit-guide methods in 26.897s OK; scoped catalog/detail, direct/nested membership, birthday, all international fallback layouts, invalid origin, legacy/non-pricing controls verified. Full compile/diff check pass.
+protected_comparator: Pricing operation AST identical after removing UI metadata/keyboard wrappers and restoring ACK placement; bot outside two Account emitters and pricing handler byte-identical to base; engine/service/provider/worker/config/deploy unchanged.
+delivery: PR/CI/merge/bot-only deploy pending; client QA unverified.
+side_effects: {provider: 0, telegram_send: 0, jobs: 0, wallet: 0, production_db: 0}

@@ -135954,8 +135954,8 @@ def main_profile_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
     copy = public_hub_copy(lang)
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"💰 {copy['profile_topup']}", callback_data="menu|main_topup"), InlineKeyboardButton(f"💳 {copy['profile_pricing']}", callback_data="pricing|main")],
-        [InlineKeyboardButton(f"🎁 {copy['profile_packages']}", callback_data="menu|profile_packages"), InlineKeyboardButton(f"👑 {copy['profile_membership']}", callback_data="pricing|member")],
+        [InlineKeyboardButton(f"💰 {copy['profile_topup']}", callback_data="menu|main_topup"), InlineKeyboardButton(f"💳 {copy['profile_pricing']}", callback_data="pricing|main|profile")],
+        [InlineKeyboardButton(f"🎁 {copy['profile_packages']}", callback_data="menu|profile_packages"), InlineKeyboardButton(f"👑 {copy['profile_membership']}", callback_data="pricing|member|profile")],
         [InlineKeyboardButton(f"📚 {copy['profile_xu_guide']}", callback_data="menu|guide_credits|main_profile"), InlineKeyboardButton(f"👨‍💼 {copy['support']}", callback_data="menu|support")],
         [InlineKeyboardButton(f"🎁 {copy['profile_referral_link']}", callback_data="menu|profile_ref_link"), InlineKeyboardButton(f"👥 {copy['profile_referral_stats']}", callback_data="menu|profile_ref_stats")],
         [InlineKeyboardButton(f"📋 {copy['profile_referral_policy']}", callback_data="menu|profile_ref_policy"), InlineKeyboardButton(f"🌍 {copy['profile_change_language']}", callback_data="back_lang")],
@@ -213505,50 +213505,92 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query
     if not query:
         return
-    await query.answer()
     action = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else "main"
+    profile_origin = ""
+    read_actions = {
+        "main", "promotions", "promo_apply", "catalog", "total", "packages", "package_summary",
+        "xu", "free", "music", "subtitle", "guide", "download_pricing", "download_guide",
+        "image", "video", "frame", "voice", "docs", "storage", "combo", "premium",
+        "my_packages", "plans", "vip", "member", "birthday", "terms",
+    }
+    if "|" in action:
+        parts = action.split("|")
+        if (len(parts) != 2 or parts[1] not in {"profile", "profile_catalog"}
+                or (parts[0] not in read_actions and not parts[0].startswith("package_group_"))
+                or (parts[1] == "profile_catalog" and parts[0] not in {"member", "birthday"})):
+            return await query.answer("Nút bảng giá đã hết phiên. Vui lòng mở lại từ Tài khoản.", show_alert=True)
+        action, profile_origin = parts
+    await query.answer()
     lang = get_user_language(query.from_user.id) if query.from_user else "vi"
     uid = query.from_user.id if query.from_user else None
+    def ui_keyboard(markup):
+        if not profile_origin or markup is None:
+            return markup
+        rows = []
+        has_back = False
+        for row in markup.inline_keyboard:
+            controls = []
+            for button in row:
+                data = str(button.callback_data or "")
+                is_back = button.text.startswith(("⬅", "🔙", "←"))
+                has_back = has_back or is_back
+                if data.startswith("pricing|"):
+                    target = data.split("|", 1)[1]
+                    if target in read_actions or target.startswith("package_group_"):
+                        origin = "profile_catalog" if action == "catalog" and target == "member" else profile_origin
+                        data = f"pricing|{target}|{origin}"
+                        if is_back and action == "member":
+                            data = "menu|main_profile" if profile_origin == "profile" else "pricing|catalog|profile"
+                        elif is_back and action == "birthday":
+                            data = f"pricing|member|{profile_origin}"
+                        controls.append(InlineKeyboardButton(ui_text(lang, "common.back") if is_back and action in {"member", "birthday"} else button.text, callback_data=data))
+                        continue
+                controls.append(button)
+            rows.append(controls)
+        if not has_back:
+            back = "menu|main_profile" if action == "main" else "pricing|main|profile"
+            rows.insert(max(0, len(rows) - 1), [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=back)])
+        return InlineKeyboardMarkup(rows)
     if query.from_user:
         clear_media_creator_pending_states(query.from_user.id)
     if action == "main":
-        return await edit_or_send_pricing_lines(query, pricing_hub_lines(lang, uid), pricing_main_keyboard(lang, uid))
+        return await edit_or_send_pricing_lines(query, pricing_hub_lines(lang, uid), ui_keyboard(pricing_main_keyboard(lang, uid)))
     if action == "promotions":
-        return await edit_or_send_pricing_lines(query, billing_promotions_lines(lang, uid), billing_promotions_keyboard(lang, uid))
+        return await edit_or_send_pricing_lines(query, billing_promotions_lines(lang, uid), ui_keyboard(billing_promotions_keyboard(lang, uid)))
     if action == "promo_apply":
-        return await edit_or_send_pricing_lines(query, billing_promo_apply_lines(lang, uid), billing_promotions_keyboard(lang, uid))
+        return await edit_or_send_pricing_lines(query, billing_promo_apply_lines(lang, uid), ui_keyboard(billing_promotions_keyboard(lang, uid)))
     if action == "gift_code":
         if query.from_user and is_admin_user(query.from_user.id):
             return await safe_edit_or_send(query, admin_gift_code_text(), parse_mode="HTML", reply_markup=admin_gift_code_keyboard())
         return await edit_or_send_pricing_lines(query, billing_promotions_lines(lang, uid), billing_promotions_keyboard(lang, uid))
     if action == "catalog":
-        return await edit_or_send_pricing_lines(query, pricing_catalog_lines(lang), pricing_catalog_keyboard(lang))
+        return await edit_or_send_pricing_lines(query, pricing_catalog_lines(lang), ui_keyboard(pricing_catalog_keyboard(lang)))
     if action == "total":
-        return await edit_or_send_pricing_lines(query, pricing_main_lines(lang), pricing_catalog_keyboard(lang))
+        return await edit_or_send_pricing_lines(query, pricing_main_lines(lang), ui_keyboard(pricing_catalog_keyboard(lang)))
     if action == "packages":
-        return await edit_or_send_pricing_lines(query, pricing_packages_lines(lang), pricing_packages_keyboard(lang))
+        return await edit_or_send_pricing_lines(query, pricing_packages_lines(lang), ui_keyboard(pricing_packages_keyboard(lang)))
     if action == "package_summary":
-        return await edit_or_send_pricing_lines(query, pricing_package_summary_lines(lang), pricing_package_summary_keyboard(lang))
+        return await edit_or_send_pricing_lines(query, pricing_package_summary_lines(lang), ui_keyboard(pricing_package_summary_keyboard(lang)))
     if action.startswith("package_group_"):
         group = action.replace("package_group_", "", 1)
-        return await edit_or_send_pricing_lines(query, pricing_task_package_group_lines(group, lang), pricing_task_package_group_keyboard(group, lang))
+        return await edit_or_send_pricing_lines(query, pricing_task_package_group_lines(group, lang), ui_keyboard(pricing_task_package_group_keyboard(group, lang)))
     if action == "need_larger":
         return await render_pkgcombo_large_order(query, context, ["home"])
     if action == "xu":
-        return await edit_or_send_pricing_lines(query, pricing_xu_lines_i18n(lang, uid), pricing_xu_keyboard(lang))
+        return await edit_or_send_pricing_lines(query, pricing_xu_lines_i18n(lang, uid), ui_keyboard(pricing_xu_keyboard(lang)))
     if action == "free":
-        return await edit_or_send_pricing_lines(query, pricing_free_lines(lang), pricing_detail_keyboard("free", lang))
+        return await edit_or_send_pricing_lines(query, pricing_free_lines(lang), ui_keyboard(pricing_detail_keyboard("free", lang)))
     if action == "music":
-        return await edit_or_send_pricing_lines(query, pricing_music_lines(lang), pricing_detail_keyboard("music", lang))
+        return await edit_or_send_pricing_lines(query, pricing_music_lines(lang), ui_keyboard(pricing_detail_keyboard("music", lang)))
     if action == "subtitle":
-        return await edit_or_send_pricing_lines(query, pricing_subtitle_lines(lang), pricing_detail_keyboard("subtitle", lang))
+        return await edit_or_send_pricing_lines(query, pricing_subtitle_lines(lang), ui_keyboard(pricing_detail_keyboard("subtitle", lang)))
     if action == "guide":
         guide_locale = public_pricing_locale(lang)
         back_label = f"← {public_page_title('pricing', guide_locale)}"
         return await edit_or_send_pricing_lines(
             query,
             pricing_guide_lines(lang),
-            guide_keyboard("", lang, back_callback="pricing|main", back_label=back_label),
+            ui_keyboard(guide_keyboard("", lang, back_callback="pricing|main", back_label=back_label)),
         )
     if action == "download_pricing":
         pricing_locale = public_pricing_locale(lang)
@@ -213567,29 +213609,29 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
             f"📘 {public_page_title('guide', guide_locale)}",
         )
     if action == "image":
-        return await edit_or_send_pricing_lines(query, pricing_image_lines(lang), pricing_detail_keyboard("image", lang))
+        return await edit_or_send_pricing_lines(query, pricing_image_lines(lang), ui_keyboard(pricing_detail_keyboard("image", lang)))
     if action == "video":
-        return await edit_or_send_pricing_lines(query, pricing_video_lines(lang), pricing_detail_keyboard("video", lang))
+        return await edit_or_send_pricing_lines(query, pricing_video_lines(lang), ui_keyboard(pricing_detail_keyboard("video", lang)))
     if action == "frame":
-        return await edit_or_send_pricing_lines(query, pricing_frame_video_lines(), pricing_detail_keyboard("frame", lang))
+        return await edit_or_send_pricing_lines(query, pricing_frame_video_lines(), ui_keyboard(pricing_detail_keyboard("frame", lang)))
     if action == "voice":
-        return await edit_or_send_pricing_lines(query, pricing_voice_lines(lang), pricing_detail_keyboard("voice", lang))
+        return await edit_or_send_pricing_lines(query, pricing_voice_lines(lang), ui_keyboard(pricing_detail_keyboard("voice", lang)))
     if action == "docs":
-        return await edit_or_send_pricing_lines(query, pricing_docs_lines(lang), pricing_detail_keyboard("docs", lang))
+        return await edit_or_send_pricing_lines(query, pricing_docs_lines(lang), ui_keyboard(pricing_detail_keyboard("docs", lang)))
     if action == "storage":
-        return await edit_or_send_pricing_lines(query, pricing_storage_lines(), pricing_detail_keyboard("storage", lang))
+        return await edit_or_send_pricing_lines(query, pricing_storage_lines(), ui_keyboard(pricing_detail_keyboard("storage", lang)))
     if action == "combo":
-        return await edit_or_send_pricing_lines(query, pricing_combo_lines(lang), pricing_combo_keyboard(lang))
+        return await edit_or_send_pricing_lines(query, pricing_combo_lines(lang), ui_keyboard(pricing_combo_keyboard(lang)))
     if action == "premium":
-        return await edit_or_send_pricing_lines(query, pricing_premium_lines(), pricing_detail_keyboard("premium", lang))
+        return await edit_or_send_pricing_lines(query, pricing_premium_lines(), ui_keyboard(pricing_detail_keyboard("premium", lang)))
     if action == "my_packages":
-        return await edit_or_send_pricing_lines(query, [user_package_summary_text(query.from_user.id, lang=lang)], my_packages_keyboard(lang))
+        return await edit_or_send_pricing_lines(query, [user_package_summary_text(query.from_user.id, lang=lang)], ui_keyboard(my_packages_keyboard(lang)))
     if action == "plans":
-        return await edit_or_send_pricing_lines(query, pricing_plans_lines_i18n(lang), pricing_plans_keyboard(lang))
+        return await edit_or_send_pricing_lines(query, pricing_plans_lines_i18n(lang), ui_keyboard(pricing_plans_keyboard(lang)))
     if action == "vip":
-        return await edit_or_send_pricing_lines(query, vip_services_lines(), vip_services_keyboard(lang))
+        return await edit_or_send_pricing_lines(query, vip_services_lines(), ui_keyboard(vip_services_keyboard(lang)))
     if action == "member":
-        return await edit_or_send_pricing_lines(query, public_pricing_lines("member", public_pricing_context(), lang), member_policy_keyboard(lang))
+        return await edit_or_send_pricing_lines(query, public_pricing_lines("member", public_pricing_context(), lang), ui_keyboard(member_policy_keyboard(lang)))
     if action == "birthday":
         copy = public_account_flow_copy(lang)
         text = (
@@ -213600,9 +213642,9 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
             f"{html.escape(copy['birthday_manual_review'])}\n"
             f"{html.escape(public_hub_copy(lang)['common_no_charge'])}"
         )
-        return await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=member_policy_keyboard(lang))
+        return await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=ui_keyboard(member_policy_keyboard(lang)))
     if action == "terms":
-        return await edit_or_send_pricing_lines(query, pricing_terms_lines(), pricing_terms_keyboard(lang))
+        return await edit_or_send_pricing_lines(query, pricing_terms_lines(), ui_keyboard(pricing_terms_keyboard(lang)))
     return await edit_or_send_pricing_lines(query, pricing_hub_lines(lang, uid), pricing_main_keyboard(lang, uid))
 
 def parse_chat_pro_args(raw: str) -> dict:
