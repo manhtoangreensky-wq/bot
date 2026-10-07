@@ -44,6 +44,23 @@ def _controls(query):
 
 
 class QueueConfirmGuideOriginTests(unittest.TestCase):
+    def test_admin_module_freeze_tools_button_matches_guide_only_destination(self):
+        ns, route, _ = _runtime()
+        for name in ("freeze_queue_help_text", "freeze_queue_keyboard"):
+            exec(compile(fixture._function(name), "bot.py:" + name, "exec"), ns)
+        button = next(
+            button
+            for row in ns["admin_module_keyboard"]("queue").inline_keyboard
+            for button in row
+            if button.callback_data == "menu|freeze_queue_help|admin_queue"
+        )
+        page = _dispatch(route, button.callback_data)
+        self.assertIn("Hướng dẫn Freeze / Queue", page.edits[0][0])
+        self.assertIn("Không thao tác trực tiếp từ nút này", page.edits[0][0])
+        back = next(item for item in _controls(page) if item.text.startswith("⬅"))
+        self.assertEqual("menu|admin_queue", back.callback_data)
+        self.assertEqual("📚 Hướng dẫn Freeze / Queue", button.text)
+
     def test_new_controls_traverse_actual_common_guards_before_registered_menu(self):
         ns, route, _ = _runtime()
         ns.update({

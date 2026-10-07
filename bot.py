@@ -232017,7 +232017,7 @@ ADMIN_CONTROL_MODULES = {
         "when": "Dùng khi provider lỗi, job kẹt, cần bảo trì, cần hoàn Xu/lượt hoặc cần kiểm tra queue trước khi mở lại public.",
         "buttons": [
             [("📊 Queue status", "menu|freeze_queue_status|admin_queue"), ("Hướng dẫn hoàn Xu khi job lỗi", "admin_help|refund")],
-            [("🧊 Freeze tools", "menu|freeze_queue_help|admin_queue"), ("🔓 Unfreeze tools", "menu|admin_confirm_unfreeze_tool|admin_queue")],
+            [("📚 Hướng dẫn Freeze / Queue", "menu|freeze_queue_help|admin_queue"), ("🔓 Unfreeze tools", "menu|admin_confirm_unfreeze_tool|admin_queue")],
             [("🎬 Freeze video", "menu|admin_confirm_freeze_video|admin_queue"), ("💸 Refund job", "menu|admin_confirm_refund_job|admin_queue")],
         ],
         "commands": [
