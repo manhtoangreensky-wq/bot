@@ -37,10 +37,11 @@ def _runtime(lang="vi"):
     })
     original_copy = ns["public_hub_copy"]
     ns["public_hub_copy"] = lambda locale: {**original_copy(locale), "common_no_charge": "No charge", "packages_label": "Packages"}
-    for name in ("pricing_hub_lines", "pricing_catalog_lines", "pricing_video_lines"):
+    for name in ("pricing_hub_lines", "pricing_catalog_lines", "pricing_video_lines", "pricing_main_lines",
+                 "billing_promotions_lines", "billing_promo_apply_lines"):
         ns[name] = lambda *args, name=name: reads.append((name, args)) or [name]
     for name in ("pricing_main_keyboard", "pricing_catalog_keyboard", "pricing_detail_keyboard",
-                 "member_policy_keyboard", "handle_pricing_callback"):
+                 "member_policy_keyboard", "billing_promotions_keyboard", "handle_pricing_callback"):
         exec(compile("from __future__ import annotations\n" + fixture.fixture._function(name), "bot.py:" + name, "exec"), ns)
     routes = []
     ns.update(tg_app=SimpleNamespace(add_handler=routes.append),
@@ -104,6 +105,23 @@ class AccountPricingOriginTests(unittest.TestCase):
         self.assertEqual("pricing_catalog_lines", catalog_again.edits[0][0])
         main_again = fixture._dispatch(route, _back(catalog_again))
         self.assertEqual("menu|main_profile", _back(main_again))
+
+    def test_catalog_total_returns_to_catalog_before_account_pricing(self):
+        ns, route, _, _, _ = _runtime()
+        main = fixture._dispatch(route, "pricing|main|profile")
+        catalog = fixture._dispatch(route, _callback(main, "catalog"))
+        total = fixture._dispatch(route, _callback(catalog, "total"))
+        catalog_again = fixture._dispatch(route, _back(total))
+        self.assertEqual("pricing_catalog_lines", catalog_again.edits[0][0])
+
+    def test_offer_code_guide_returns_to_offers_before_account_pricing(self):
+        ns, route, _, _, _ = _runtime()
+        ns["user_is_vietnam_market"] = lambda _uid: True
+        main = fixture._dispatch(route, "pricing|main|profile")
+        offers = fixture._dispatch(route, _callback(main, "promotions"))
+        guide = fixture._dispatch(route, _callback(offers, "promo_apply"))
+        offers_again = fixture._dispatch(route, _back(guide))
+        self.assertEqual("billing_promotions_lines", offers_again.edits[0][0])
 
     def test_international_catalog_fallback_keeps_account_back_chain(self):
         from services.pricing_guide_content import PUBLIC_COPY_LOCALES

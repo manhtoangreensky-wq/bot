@@ -7,6 +7,7 @@ allowed: [main_profile_keyboard pricing/member emitter context, handle_pricing_c
 protected: [price/content producers, finance/payment/wallet/entitlement operations, query object immutability, other router architecture, engines/providers/workers/AutoPost]
 acceptance: Preserve Account through pricing subtree and Member/birthday ancestry; keep legacy parent destinations and non-pricing callbacks; malformed origin stops before cleanup/data/render.
 green: 9 Account pricing/credit-guide methods in 26.897s OK; scoped catalog/detail, direct/nested membership, birthday, all international fallback layouts, invalid origin, legacy/non-pricing controls verified. Full compile/diff check pass.
+final_green: Two further parent skips (Total -> Catalog and promo-code guide -> Offers) were reproduced and fixed in the same UI mapping. Final combined run 11 tests in 34.086s OK; full compile/diff pass.
 protected_comparator: Pricing operation AST identical after removing UI metadata/keyboard wrappers and restoring ACK placement; bot outside two Account emitters and pricing handler byte-identical to base; engine/service/provider/worker/config/deploy unchanged.
 delivery: PR/CI/merge/bot-only deploy pending; client QA unverified.
 side_effects: {provider: 0, telegram_send: 0, jobs: 0, wallet: 0, production_db: 0}

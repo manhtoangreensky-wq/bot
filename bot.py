@@ -213543,12 +213543,14 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
                             data = "menu|main_profile" if profile_origin == "profile" else "pricing|catalog|profile"
                         elif is_back and action == "birthday":
                             data = f"pricing|member|{profile_origin}"
-                        controls.append(InlineKeyboardButton(ui_text(lang, "common.back") if is_back and action in {"member", "birthday"} else button.text, callback_data=data))
+                        elif is_back and action in {"total", "promo_apply"}:
+                            data = f"pricing|{'catalog' if action == 'total' else 'promotions'}|profile"
+                        controls.append(InlineKeyboardButton(ui_text(lang, "common.back") if is_back and action in {"member", "birthday", "total", "promo_apply"} else button.text, callback_data=data))
                         continue
                 controls.append(button)
             rows.append(controls)
         if not has_back:
-            back = "menu|main_profile" if action == "main" else "pricing|main|profile"
+            back = "menu|main_profile" if action == "main" else ("pricing|catalog|profile" if action == "total" else "pricing|main|profile")
             rows.insert(max(0, len(rows) - 1), [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=back)])
         return InlineKeyboardMarkup(rows)
     if query.from_user:
