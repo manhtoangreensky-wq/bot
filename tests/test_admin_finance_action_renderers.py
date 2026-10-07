@@ -19,11 +19,32 @@ def _runtime(admin=True):
     ns, route, cleared, reads = fixture._runtime(admin)
     source_fixture = fixture.fixture
     ns["datetime"] = datetime
-    for name in ("finance_child_keyboard", "finance_period_keyboard"):
+    for name in (
+        "finance_child_keyboard", "finance_period_keyboard",
+        "finance_menu_text",
+        "finance_payload_has_data", "finance_money_or_no_data",
+        "finance_xu_or_no_data", "finance_brief_report_text",
+        "finance_revenue_period_text", "finance_expense_period_text",
+    ):
         exec(compile(source_fixture._function(name), "bot.py:" + name, "exec"), ns)
-    for name in ("finance_add_expense_help_text", "finance_export_menu_text", "finance_export_instruction_text"):
+    for name in (
+        "finance_add_expense_help_text", "finance_export_menu_text", "finance_export_instruction_text",
+        "finance_admin_guide_text",
+        "finance_overview_text", "finance_revenue_text", "finance_revenue_month_menu_text",
+        "finance_expense_month_menu_text", "finance_command_help_text",
+    ):
         if re.search(r"(?m)^def " + name + r"\(", source_fixture.SOURCE):
             exec(compile(source_fixture._function(name), "bot.py:" + name, "exec"), ns)
+    ns["finance_period_payload"] = lambda *_args, **_kwargs: {
+        "label": "Fixture month", "revenue_success": 1000, "revenue_count": 2,
+        "xu_credited": 20, "expenses_after": 300, "expenses_pre_period": 0,
+        "provider_cost_estimate": 10, "tax_reserve": 100,
+        "profit_operating": 590, "profit_management": 590,
+        "expenses_by_category": [("tools", 1, 300)],
+    }
+    ns["vnd_text"] = lambda amount: f"{int(amount or 0)} VND"
+    ns["xu_text"] = lambda amount: f"{int(amount or 0)} Xu"
+    ns["TAX_PREP_DISCLAIMER"] = "Fixture-only financial disclaimer."
     return ns, route, cleared, reads
 
 
@@ -37,6 +58,47 @@ def _buttons(markup, callback):
 
 
 class AdminFinanceActionRendererTests(unittest.TestCase):
+    def test_finance_report_buttons_render_readonly_pages_and_return_to_finance(self):
+        ns, route, _, _ = _runtime()
+        visible_controls = (ns["admin_module_keyboard"]("finance"), ns["finance_admin_keyboard"]())
+        emitted_by_menu = [
+            {button.callback_data for row in markup.inline_keyboard for button in row}
+            for markup in visible_controls
+        ]
+        for emitted in emitted_by_menu:
+            self.assertTrue({"menu|finance_overview", "menu|finance_revenue", "menu|finance_expense_month"} <= emitted)
+        expected = {
+            "menu|finance_overview": "Tổng quan tài chính",
+            "menu|finance_revenue": "Doanh thu tháng này",
+            "menu|finance_revenue_month": "Nhập kỳ doanh thu",
+            "menu|finance_revenue_custom_help": "Nhập kỳ doanh thu",
+            "menu|finance_expense_month": "Chi phí tháng này",
+            "menu|finance_help": "Hướng dẫn Admin Tài chính",
+        }
+        for callback, heading in expected.items():
+            with self.subTest(callback=callback):
+                query = fixture._dispatch(route, callback)
+                self.assertEqual([((), {})], query.answers)
+                self.assertEqual(1, len(query.edits))
+                self.assertIn(heading, query.edits[0][0])
+                if callback in {"menu|finance_revenue", "menu|finance_expense_month"}:
+                    self.assertIn("Fixture month", query.edits[0][0])
+                back = [
+                    button.callback_data
+                    for row in query.edits[0][1]["reply_markup"].inline_keyboard
+                    for button in row
+                    if button.text.startswith("⬅")
+                ]
+                self.assertEqual(["menu|finance"], back)
+
+        parent = fixture._dispatch(route, "menu|finance")
+        parent_callbacks = {
+            button.callback_data
+            for row in parent.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+        }
+        self.assertTrue({"menu|finance_overview", "menu|finance_revenue", "menu|finance_expense_month"} <= parent_callbacks)
+
     def test_all_expense_guide_entries_are_labeled_as_guides(self):
         ns, _, _, _ = _runtime()
         markups = (
@@ -104,6 +166,12 @@ class AdminFinanceActionRendererTests(unittest.TestCase):
     def test_public_user_is_denied_before_finance_renderer_or_cleanup(self):
         ns, route, cleared, _ = _runtime(admin=False)
         for callback in (
+            "menu|finance_overview",
+            "menu|finance_revenue",
+            "menu|finance_revenue_month",
+            "menu|finance_revenue_custom_help",
+            "menu|finance_expense_month",
+            "menu|finance_help",
             "menu|finance_add_expense",
             "menu|finance_export",
             "menu|finance_export_month",
