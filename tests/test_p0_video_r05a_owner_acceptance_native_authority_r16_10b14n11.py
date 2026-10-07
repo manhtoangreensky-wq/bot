@@ -52,42 +52,56 @@ def _current_runtime() -> str:
 
 def _make_r05a_auth(
     *,
-    job_id: int = 101,
-    user_id: int = 12345,
-    project_id: int = 501,
-    product_type: str = "self_shot_scene_change",
-    provider: str = "key4u_video",
-    capability: str = "image_to_video",
+    job_id: Any = 101,
+    user_id: Any = 12345,
+    project_id: Any = 501,
+    product_type: Any = "self_shot_scene_change",
+    provider: Any = "key4u_video",
+    capability: Any = "image_to_video",
     tier: Any = 700,
-    model: str = "kling-v3",
-    engine_adapter: str = "controlled_keyframe_image_to_video",
+    model: Any = "kling-v3",
+    engine_adapter: Any = "controlled_keyframe_image_to_video",
     runtime_sha: str | None = None,
-    max_provider_spend: float = 1.00,
-    max_provider_spend_unit: str = "USD",
+    max_provider_spend: float | None = 1.00,
+    max_provider_spend_unit: str | None = "USD",
     nonce: str = "nonce-r05a-test",
     allow_other_product: bool | None = None,
     allow_secondary_provider: bool | None = None,
 ) -> dict[str, Any]:
-    auth = {
+    auth: dict[str, Any] = {
         "owner_authorized": True,
         "acceptance_type": video_provider_router.OWNER_AUTHORIZED_LIVE_ACCEPTANCE,
-        "product_type": product_type,
-        "provider": provider,
-        "capability": capability,
-        "tier": tier,
-        "quality_tier": tier,
-        "model": model,
-        "engine_adapter": engine_adapter,
-        "job_id": job_id,
-        "user_id": user_id,
-        "project_id": project_id,
-        "runtime_sha": _current_runtime() if runtime_sha is None else runtime_sha,
-        "max_provider_spend": max_provider_spend,
-        "max_provider_spend_unit": max_provider_spend_unit,
         "nonce": nonce,
         "consumed": False,
         "expires_at": time.time() + 3600,
     }
+    if product_type is not None:
+        auth["product_type"] = product_type
+    if provider is not None:
+        auth["provider"] = provider
+    if capability is not None:
+        auth["capability"] = capability
+    if tier is not None:
+        auth["tier"] = tier
+        auth["quality_tier"] = tier
+    if model is not None:
+        auth["model"] = model
+    if engine_adapter is not None:
+        auth["engine_adapter"] = engine_adapter
+    if job_id is not None:
+        auth["job_id"] = job_id
+    if user_id is not None:
+        auth["user_id"] = user_id
+    if project_id is not None:
+        auth["project_id"] = project_id
+    if runtime_sha is not None:
+        auth["runtime_sha"] = runtime_sha
+    elif runtime_sha is None and runtime_sha != "":
+        auth["runtime_sha"] = _current_runtime()
+    if max_provider_spend is not None:
+        auth["max_provider_spend"] = max_provider_spend
+    if max_provider_spend_unit is not None:
+        auth["max_provider_spend_unit"] = max_provider_spend_unit
     if allow_other_product is not None:
         auth["allow_other_product"] = allow_other_product
     if allow_secondary_provider is not None:
@@ -97,37 +111,54 @@ def _make_r05a_auth(
 
 def _make_r05a_ctx(
     *,
-    job_id: int = 101,
-    user_id: int = 12345,
-    project_id: int = 501,
-    product_type: str = "self_shot_scene_change",
-    provider: str = "key4u_video",
-    capability: str = "image_to_video",
+    job_id: Any = 101,
+    user_id: Any = 12345,
+    account_id: Any = None,
+    project_id: Any = 501,
+    product_type: Any = "self_shot_scene_change",
+    provider: Any = "key4u_video",
+    capability: Any = "image_to_video",
     tier: Any = 700,
-    model: str = "kling-v3",
-    engine_adapter: str = "controlled_keyframe_image_to_video",
+    model: Any = "kling-v3",
+    engine_adapter: Any = "controlled_keyframe_image_to_video",
     runtime_sha: str | None = None,
-    estimated_provider_cost: float = 0.50,
-    estimated_provider_cost_unit: str = "USD",
+    estimated_provider_cost: float | None = 0.50,
+    estimated_provider_cost_unit: str | None = "USD",
 ) -> dict[str, Any]:
-    return {
-        "job_id": job_id,
-        "user_id": user_id,
-        "project_id": project_id,
-        "product_type": product_type,
-        "provider": provider,
-        "selected_provider": provider,
-        "capability": capability,
-        "required_capability": capability,
-        "tier": tier,
-        "quality_tier": tier,
-        "model": model,
-        "selected_model": model,
-        "engine_adapter": engine_adapter,
-        "runtime_sha": _current_runtime() if runtime_sha is None else runtime_sha,
-        "estimated_provider_cost": estimated_provider_cost,
-        "estimated_provider_cost_unit": estimated_provider_cost_unit,
-    }
+    ctx: dict[str, Any] = {}
+    if job_id is not None:
+        ctx["job_id"] = job_id
+    if user_id is not None:
+        ctx["user_id"] = user_id
+    if account_id is not None:
+        ctx["account_id"] = account_id
+    if project_id is not None:
+        ctx["project_id"] = project_id
+    if product_type is not None:
+        ctx["product_type"] = product_type
+    if provider is not None:
+        ctx["provider"] = provider
+        ctx["selected_provider"] = provider
+    if capability is not None:
+        ctx["capability"] = capability
+        ctx["required_capability"] = capability
+    if tier is not None:
+        ctx["tier"] = tier
+        ctx["quality_tier"] = tier
+    if model is not None:
+        ctx["model"] = model
+        ctx["selected_model"] = model
+    if engine_adapter is not None:
+        ctx["engine_adapter"] = engine_adapter
+    if runtime_sha is not None:
+        ctx["runtime_sha"] = runtime_sha
+    elif runtime_sha is None and runtime_sha != "":
+        ctx["runtime_sha"] = _current_runtime()
+    if estimated_provider_cost is not None:
+        ctx["estimated_provider_cost"] = estimated_provider_cost
+    if estimated_provider_cost_unit is not None:
+        ctx["estimated_provider_cost_unit"] = estimated_provider_cost_unit
+    return ctx
 
 
 def test_01_exact_r05a_tuple_passes_without_escape_flags():
@@ -165,7 +196,7 @@ def test_02_allow_other_product_and_secondary_provider_absent_passes():
 
 def test_03_tier_not_700_denied():
     """03 tier != 700 -> DENY."""
-    for bad_tier in [500, 600, 800, "500", "standard", "veo31_fast_8"]:
+    for bad_tier in [500, 600, 800, "500", "standard", "veo31_fast_8", "long", "kling_long_audio_15"]:
         auth = _make_r05a_auth(tier=bad_tier)
         ctx = _make_r05a_ctx(tier=bad_tier)
         valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
@@ -369,3 +400,221 @@ def test_18_video_ai_video_reference_no_regression():
     )
     assert valid is False
     assert reason in {"owner_acceptance_provider_missing", "owner_acceptance_capability_missing"}
+
+
+# ==============================================================================
+# PHASE G — 20 MANDATORY PROVIDER-FREE TEST CASES (R16.10B14N11A)
+# ==============================================================================
+
+
+def test_phase_g_01_auth_missing_user_id_denied():
+    """01 auth missing user_id -> DENY."""
+    auth = _make_r05a_auth(user_id=None)
+    assert "user_id" not in auth
+    ctx = _make_r05a_ctx()
+    valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is False
+    assert reason == "owner_acceptance_user_id_missing"
+
+
+def test_phase_g_02_auth_missing_job_id_denied():
+    """02 auth missing job_id -> DENY."""
+    auth = _make_r05a_auth(job_id=None)
+    assert "job_id" not in auth
+    ctx = _make_r05a_ctx()
+    valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is False
+    assert reason == "owner_acceptance_job_id_missing"
+
+
+def test_phase_g_03_auth_missing_project_id_denied():
+    """03 auth missing project_id -> DENY."""
+    auth = _make_r05a_auth(project_id=None)
+    assert "project_id" not in auth
+    ctx = _make_r05a_ctx()
+    valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is False
+    assert reason == "owner_acceptance_project_id_missing"
+
+
+def test_phase_g_04_ctx_missing_user_id_and_account_id_denied():
+    """04 ctx missing user_id/account_id -> DENY."""
+    auth = _make_r05a_auth()
+    ctx = _make_r05a_ctx(user_id=None, account_id=None)
+    assert "user_id" not in ctx and "account_id" not in ctx
+    valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is False
+    assert reason == "owner_acceptance_user_id_missing"
+
+
+def test_phase_g_05_ctx_missing_job_id_denied():
+    """05 ctx missing job_id -> DENY."""
+    auth = _make_r05a_auth()
+    ctx = _make_r05a_ctx(job_id=None)
+    assert "job_id" not in ctx
+    valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is False
+    assert reason == "owner_acceptance_job_id_missing"
+
+
+def test_phase_g_06_ctx_missing_project_id_denied():
+    """06 ctx missing project_id -> DENY."""
+    auth = _make_r05a_auth()
+    ctx = _make_r05a_ctx(project_id=None)
+    assert "project_id" not in ctx
+    valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is False
+    assert reason == "owner_acceptance_project_id_missing"
+
+
+def test_phase_g_07_ctx_missing_provider_denied():
+    """07 ctx missing provider -> DENY."""
+    auth = _make_r05a_auth()
+    ctx = _make_r05a_ctx(provider=None)
+    assert "provider" not in ctx and "selected_provider" not in ctx
+    valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is False
+    assert reason == "owner_acceptance_provider_missing"
+
+
+def test_phase_g_08_ctx_missing_capability_denied():
+    """08 ctx missing capability -> DENY."""
+    auth = _make_r05a_auth()
+    ctx = _make_r05a_ctx(capability=None)
+    assert "capability" not in ctx and "required_capability" not in ctx
+    valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is False
+    assert reason == "owner_acceptance_capability_missing"
+
+
+def test_phase_g_09_ctx_missing_tier_denied():
+    """09 ctx missing tier -> DENY."""
+    auth = _make_r05a_auth()
+    ctx = _make_r05a_ctx(tier=None)
+    assert "tier" not in ctx and "quality_tier" not in ctx
+    valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is False
+    assert reason == "owner_acceptance_tier_missing"
+
+
+def test_phase_g_10_ctx_missing_model_denied():
+    """10 ctx missing model -> DENY."""
+    auth = _make_r05a_auth()
+    ctx = _make_r05a_ctx(model=None)
+    assert "model" not in ctx and "selected_model" not in ctx
+    valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is False
+    assert reason == "owner_acceptance_model_missing"
+
+
+def test_phase_g_11_ctx_missing_engine_denied():
+    """11 ctx missing engine -> DENY."""
+    auth = _make_r05a_auth()
+    ctx = _make_r05a_ctx(engine_adapter=None)
+    assert "engine_adapter" not in ctx
+    valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is False
+    assert reason == "owner_acceptance_engine_adapter_mismatch"
+
+
+def test_phase_g_12_auth_tier_long_denied():
+    """12 auth tier="long" -> DENY."""
+    auth = _make_r05a_auth(tier="long")
+    ctx = _make_r05a_ctx(tier=700)
+    valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is False
+    assert reason == "owner_acceptance_tier_mismatch"
+
+
+def test_phase_g_13_auth_tier_kling_long_audio_15_denied():
+    """13 auth tier="kling_long_audio_15" -> DENY."""
+    auth = _make_r05a_auth(tier="kling_long_audio_15")
+    ctx = _make_r05a_ctx(tier=700)
+    valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is False
+    assert reason == "owner_acceptance_tier_mismatch"
+
+
+def test_phase_g_14_ctx_tier_long_denied():
+    """14 ctx tier="long" -> DENY."""
+    auth = _make_r05a_auth(tier=700)
+    ctx = _make_r05a_ctx(tier="long")
+    valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is False
+    assert reason == "owner_acceptance_tier_mismatch"
+
+
+def test_phase_g_15_ctx_tier_kling_long_audio_15_denied():
+    """15 ctx tier="kling_long_audio_15" -> DENY."""
+    auth = _make_r05a_auth(tier=700)
+    ctx = _make_r05a_ctx(tier="kling_long_audio_15")
+    valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is False
+    assert reason == "owner_acceptance_tier_mismatch"
+
+
+def test_phase_g_16_wrong_provider_with_allow_secondary_provider_denied():
+    """16 wrong provider + allow_secondary_provider=True -> DENY."""
+    for bad_provider in ["shopaikey_video", "fal_video", "fal.ai"]:
+        auth = _make_r05a_auth(provider=bad_provider, allow_secondary_provider=True)
+        ctx = _make_r05a_ctx(provider=bad_provider)
+        valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+        assert valid is False, f"Provider {bad_provider} with allow_secondary_provider=True must be rejected"
+        assert reason == "owner_acceptance_provider_mismatch"
+
+
+def test_phase_g_17_wrong_product_with_allow_other_product_denied():
+    """17 wrong product + allow_other_product=True -> DENY."""
+    for bad_product in ["self_shot_cinematic_transform", "storyboard", "video_ai_prompt"]:
+        auth = _make_r05a_auth(product_type=bad_product, allow_other_product=True)
+        ctx = _make_r05a_ctx(product_type=bad_product)
+        valid, reason, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+        assert valid is False, f"Product {bad_product} with allow_other_product=True must be rejected"
+        assert reason == "owner_acceptance_product_mismatch"
+
+
+def test_phase_g_18_exact_canonical_auth_ctx_tuple_passes():
+    """18 exact canonical auth+ctx tuple -> PASS."""
+    auth = _make_r05a_auth()
+    ctx = _make_r05a_ctx()
+    valid, reason, verified = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is True
+    assert reason == ""
+    assert verified.get("verified") is True
+
+
+def test_phase_g_19_account_id_alias_supported_when_user_id_absent():
+    """19 account_id alias chỉ được dùng nếu đây là documented canonical runtime identity source."""
+    auth = _make_r05a_auth(user_id=12345)
+    ctx = _make_r05a_ctx(user_id=None, account_id=12345)
+    assert "user_id" not in ctx
+    assert ctx.get("account_id") == 12345
+    valid, reason, verified = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is True
+    assert reason == ""
+
+    # Mismatch with account_id -> DENY
+    ctx_mismatch = _make_r05a_ctx(user_id=None, account_id=99999)
+    valid_m, reason_m, _ = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx_mismatch)
+    assert valid_m is False
+    assert reason_m == "owner_acceptance_user_mismatch"
+
+
+def test_phase_g_20_verified_output_remains_canonical():
+    """20 verified output remains exactly canonical."""
+    auth = _make_r05a_auth()
+    ctx = _make_r05a_ctx()
+    valid, reason, verified = video_provider_router.validate_owner_acceptance_authorization(auth, context=ctx)
+    assert valid is True
+    assert reason == ""
+    assert verified["pinned_product"] == "self_shot_scene_change"
+    assert verified["pinned_provider"] == "key4u_video"
+    assert verified["pinned_tier"] == "700"
+    assert verified["model"] == "kling-v3"
+    assert verified["engine_adapter"] == "controlled_keyframe_image_to_video"
+    assert verified["required_capability"] == "image_to_video"
+    assert verified["provider_order"] == ["key4u_video"]
+    assert verified["effective_provider_chain"] == ["key4u_video"]
+    assert verified["automatic_fallback_allowed"] is False
+    assert verified["automatic_resubmit_allowed"] is False
+    assert verified["max_provider_submits"] == 1
