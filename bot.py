@@ -60204,6 +60204,29 @@ def human_support_text(lang: str = "vi") -> str:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return f"👨‍💼 <b>{copy['support_title']}</b>\n\n{copy['support_body']}"
 
+def ticket_customer_origin_keyboard(markup, origin: str = "", lang: str = "vi", *, back_callback: str = ""):
+    if origin not in {"profile", "profile_result"} or markup is None:
+        return markup
+    rows = []
+    for row in markup.inline_keyboard:
+        controls = []
+        for button in row:
+            data = str(button.callback_data or "")
+            parts = data.split("|")
+            if back_callback and data.startswith("support|start") and button.text.startswith(("⬅", "🔙", "←")):
+                controls.append(InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=back_callback))
+            elif len(parts) >= 2 and parts[0] == "ticket" and parts[1] in {"mine", "pv", "reply_user", "done", "attach", "summary"}:
+                if parts[-1] in {"profile", "profile_result"}:
+                    parts = parts[:-1]
+                target_origin = "profile" if parts[1] == "mine" else origin
+                controls.append(InlineKeyboardButton(button.text, callback_data="|".join([*parts, target_origin])))
+            elif data in {"support|start", "support|ticket"}:
+                controls.append(InlineKeyboardButton(button.text, callback_data=data + "|profile"))
+            else:
+                controls.append(button)
+        rows.append(controls)
+    return InlineKeyboardMarkup(rows)
+
 def support_read_origin_keyboard(markup, profile_origin: bool = False, lang: str = "vi", *, root: bool = False):
     if not profile_origin:
         return markup
@@ -60216,7 +60239,7 @@ def support_read_origin_keyboard(markup, profile_origin: bool = False, lang: str
     ]
     if root:
         rows.insert(max(0, len(rows) - 1), [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="menu|main_profile")])
-    return InlineKeyboardMarkup(rows)
+    return ticket_customer_origin_keyboard(InlineKeyboardMarkup(rows), "profile", lang)
 
 def support_form_origin_keyboard(markup, profile_origin: bool = False):
     if not profile_origin:
@@ -60224,14 +60247,14 @@ def support_form_origin_keyboard(markup, profile_origin: bool = False):
     form_actions = {"ticket", "premium_type", "bot_input", "consult_need", "consult_input"}
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(button.text, callback_data=f"{button.callback_data}|profile")
-         if str(button.callback_data or "").startswith("support|") and button.callback_data.split("|")[1] in form_actions
+         if str(button.callback_data or "").startswith("support|") and button.callback_data.split("|")[1] in form_actions and not button.callback_data.endswith("|profile")
          else button for button in row]
         for row in markup.inline_keyboard
     ])
 
 def support_pending_back_keyboard(markup, state: dict):
     back_to = str(state.get("back_to") or "")
-    if not back_to.endswith("|profile"):
+    if back_to.rsplit("|", 1)[-1] not in {"profile", "profile_result"}:
         return markup
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(button.text, callback_data=back_to)
@@ -139761,6 +139784,7 @@ async def handle_support_ticket_attachment(update: Update, context: ContextTypes
     state = get_support_ticket_pending(uid)
     if not state or state.get("step") != "awaiting_attachment":
         return False
+    support_profile_origin = str(state.get("back_to") or "").rsplit("|", 1)[-1] in {"profile", "profile_result"}
     ticket_id = int(state.get("ticket_id") or 0)
     ticket = get_support_ticket(ticket_id, uid)
     if not ticket:
@@ -139791,7 +139815,7 @@ async def handle_support_ticket_attachment(update: Update, context: ContextTypes
     await update.message.reply_text(
         f"✅ {copy['support_ticket_attachment_success']}\n\n<code>{html.escape(ticket['ticket_code'])}</code>",
         parse_mode="HTML",
-        reply_markup=support_ticket_created_keyboard(ticket_id, lang),
+        reply_markup=ticket_customer_origin_keyboard(support_ticket_created_keyboard(ticket_id, lang), "profile_result", lang) if support_profile_origin else support_ticket_created_keyboard(ticket_id, lang),
     )
     return True
 
@@ -140679,7 +140703,7 @@ async def handle_support_pending_input(update: Update, context: ContextTypes.DEF
     state = get_support_ticket_pending(uid)
     if not state:
         return False
-    support_profile_origin = str(state.get("back_to") or "").endswith("|profile")
+    support_profile_origin = str(state.get("back_to") or "").rsplit("|", 1)[-1] in {"profile", "profile_result"}
     step = state.get("step")
     text = update.message.text.strip()
     if step == "lead_input":
@@ -140715,7 +140739,7 @@ async def handle_support_pending_input(update: Update, context: ContextTypes.DEF
             f"{copy['support_ticket_label_code']}: <code>{html.escape(ticket.get('ticket_code') or '')}</code>\n"
             f"{copy['support_ticket_label_status']}: {html.escape(public_support_ticket_status_label(ticket.get('status'), lang))}",
             parse_mode="HTML",
-            reply_markup=support_read_origin_keyboard(support_ticket_created_keyboard(ticket["id"], lang), True, lang) if support_profile_origin else support_ticket_created_keyboard(ticket["id"], lang),
+            reply_markup=ticket_customer_origin_keyboard(support_ticket_created_keyboard(ticket["id"], lang), "profile_result", lang) if support_profile_origin else support_ticket_created_keyboard(ticket["id"], lang),
         )
         if classification.get("should_alert_admin") and (
             is_new or str(classification.get("priority") or "") == "urgent"
@@ -140756,7 +140780,7 @@ async def handle_support_pending_input(update: Update, context: ContextTypes.DEF
         await update.message.reply_text(
             f"{html.escape(intro)}\n\n{ticket_text}",
             parse_mode="HTML",
-            reply_markup=support_read_origin_keyboard(support_ticket_created_keyboard(ticket["id"], lang), True, lang) if support_profile_origin else support_ticket_created_keyboard(ticket["id"], lang),
+            reply_markup=ticket_customer_origin_keyboard(support_ticket_created_keyboard(ticket["id"], lang), "profile_result", lang) if support_profile_origin else support_ticket_created_keyboard(ticket["id"], lang),
         )
         if is_new or str(classification.get("priority") or "") == "urgent":
             await notify_admin_new_support_ticket(
@@ -140776,7 +140800,10 @@ async def handle_support_pending_input(update: Update, context: ContextTypes.DEF
             await update.message.reply_text(f"⚠️ {copy['support_ticket_not_found']}")
             return True
         if len(text) < 2:
-            await update.message.reply_text(copy["support_ticket_reply_too_short"])
+            if support_profile_origin:
+                await update.message.reply_text(copy["support_ticket_reply_too_short"], reply_markup=support_flow_back_keyboard(str(state["back_to"]), ui_text(lang, "common.back"), lang=lang))
+            else:
+                await update.message.reply_text(copy["support_ticket_reply_too_short"])
             return True
         add_support_ticket_message(ticket_id, "user", uid, text[:4000], "recorded")
         classification = await classify_support_message(text, uid)
@@ -140791,7 +140818,7 @@ async def handle_support_pending_input(update: Update, context: ContextTypes.DEF
             f"✅ {copy['support_ticket_append_success']}\n\n<code>{html.escape(ticket.get('ticket_code') or '')}</code>\n\n"
             f"{copy['support_ticket_append_notice']}",
             parse_mode="HTML",
-            reply_markup=support_ticket_created_keyboard(ticket_id, lang),
+            reply_markup=ticket_customer_origin_keyboard(support_ticket_created_keyboard(ticket_id, lang), "profile_result", lang) if support_profile_origin else support_ticket_created_keyboard(ticket_id, lang),
         )
         if classification.get("needs_admin") or str(ticket.get("priority")) in {"high", "urgent"}:
             await notify_admin_new_support_ticket(
@@ -141034,6 +141061,23 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
     uid = query.from_user.id
     lang = normalize_user_language(get_user_language(uid)) or "vi"
     copy = public_hub_copy(lang)
+    ticket_profile_origin = ""
+    customer_arities = {"mine": 2, "pv": 3, "reply_user": 3, "done": 3, "attach": 3, "summary": 3}
+    if action in customer_arities and len(parts) > customer_arities[action]:
+        if (len(parts) != customer_arities[action] + 1 or parts[-1] not in {"profile", "profile_result"}
+                or (action == "mine" and parts[-1] != "profile")
+                or (action == "summary" and parts[-1] != "profile_result")
+                or (action != "mine" and not parts[2].isdecimal())):
+            return await query.answer(copy["support_ticket_action_unsupported"], show_alert=True)
+        ticket_profile_origin = parts[-1]
+        parts = parts[:-1]
+    ticket_summary = None
+    if action == "summary":
+        if ticket_profile_origin != "profile_result":
+            return await query.answer(copy["support_ticket_action_unsupported"], show_alert=True)
+        ticket_summary = get_support_ticket(int(parts[2]), uid)
+        if not ticket_summary:
+            return await query.answer(copy["support_ticket_not_found"], show_alert=True)
     admin_actions = {"admin", "al", "av", "asearch", "stats", "templates", "st", "reply", "suggest", "send", "ask", "note", "assign", "lead", "file"}
     if action in admin_actions and not is_admin_user(uid):
         return await query.answer(copy["support_ticket_admin_only"], show_alert=True)
@@ -141047,10 +141091,13 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
     if action == "pv":
         if len(parts) < 3 or not parts[2].isdigit():
             return await query.answer(copy["support_ticket_action_unsupported"], show_alert=True)
-        clear_support_ticket_pending(uid)
+        if not ticket_profile_origin:
+            clear_support_ticket_pending(uid)
         ticket_preview = get_support_ticket(int(parts[2]), uid)
         if not ticket_preview:
             return await query.answer(copy["support_ticket_not_found"], show_alert=True)
+        if ticket_profile_origin:
+            clear_support_ticket_pending(uid)
     customer_action_ticket = None
     if action in {"reply_user", "done", "attach"}:
         if len(parts) < 3 or not parts[2].isdecimal():
@@ -141087,14 +141134,17 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
     if action == "mine":
         clear_support_ticket_pending(uid)
         text, keyboard = public_support_ticket_list_keyboard(uid, lang)
-        return await safe_edit_or_send(query, text, reply_markup=keyboard)
+        return await safe_edit_or_send(query, text, reply_markup=ticket_customer_origin_keyboard(keyboard, ticket_profile_origin, lang) if ticket_profile_origin else keyboard)
+    if action == "summary":
+        clear_support_ticket_pending(uid)
+        return await safe_edit_or_send(query, support_ticket_created_text(ticket_summary, lang), reply_markup=ticket_customer_origin_keyboard(support_ticket_created_keyboard(ticket_summary["id"], lang), "profile_result", lang))
     if action == "pv" and len(parts) >= 3:
         await query.answer()
         ticket = ticket_preview
         return await safe_edit_or_send(
             query,
             public_support_ticket_text(ticket, lang),
-            reply_markup=support_ticket_detail_keyboard(ticket, lang),
+            reply_markup=ticket_customer_origin_keyboard(support_ticket_detail_keyboard(ticket, lang), ticket_profile_origin, lang, back_callback=f"ticket|summary|{ticket['id']}|profile_result" if ticket_profile_origin == "profile_result" else "ticket|mine|profile") if ticket_profile_origin else support_ticket_detail_keyboard(ticket, lang),
         )
     if action == "reply_user" and len(parts) >= 3:
         ticket = customer_action_ticket
@@ -141104,12 +141154,12 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
             ticket_id=ticket["id"],
             support_flow="ticket_reply",
             awaiting_support_message="1",
-            back_to=f"ticket|pv|{ticket['id']}",
+            back_to=f"ticket|pv|{ticket['id']}|{ticket_profile_origin}" if ticket_profile_origin else f"ticket|pv|{ticket['id']}",
         )
         return await safe_edit_or_send(
             query,
             f"💬 <b>{copy['support_ticket_back_to_ticket']} {html.escape(ticket['ticket_code'])}</b>\n\n{copy['support_ticket_reply_prompt']}",
-            reply_markup=support_flow_back_keyboard(f"ticket|pv|{ticket['id']}", f"⬅️ {copy['support_ticket_back_to_ticket']}", lang=lang),
+            reply_markup=ticket_customer_origin_keyboard(support_flow_back_keyboard(f"ticket|pv|{ticket['id']}", f"⬅️ {copy['support_ticket_back_to_ticket']}", lang=lang), ticket_profile_origin, lang) if ticket_profile_origin else support_flow_back_keyboard(f"ticket|pv|{ticket['id']}", f"⬅️ {copy['support_ticket_back_to_ticket']}", lang=lang),
         )
     if action == "done" and len(parts) >= 3:
         ticket = customer_action_ticket
@@ -141118,18 +141168,18 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         return await safe_edit_or_send(
             query,
             f"✅ {copy['support_ticket_back_to_ticket']} <code>{html.escape(ticket['ticket_code'])}</code> {copy['support_ticket_done_success']}",
-            reply_markup=InlineKeyboardMarkup([
+            reply_markup=ticket_customer_origin_keyboard(InlineKeyboardMarkup([
                 [InlineKeyboardButton(f"📂 {copy['support_my_tickets']}", callback_data="ticket|mine"), InlineKeyboardButton(f"⬅️ {copy['support_back']}", callback_data="support|start")],
                 [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
-            ]),
+            ]), ticket_profile_origin, lang, back_callback=f"ticket|pv|{ticket['id']}|{ticket_profile_origin}" if ticket_profile_origin else ""),
         )
     if action == "attach" and len(parts) >= 3:
         ticket = customer_action_ticket
-        set_support_ticket_pending(uid, "awaiting_attachment", ticket_id=ticket["id"])
+        set_support_ticket_pending(uid, "awaiting_attachment", ticket_id=ticket["id"], **({"back_to": f"ticket|pv|{ticket['id']}|{ticket_profile_origin}"} if ticket_profile_origin else {}))
         return await safe_edit_or_send(
             query,
             f"📎 {copy['support_ticket_attachment_prompt']}\n\n<code>{html.escape(ticket['ticket_code'])}</code>",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(f"⬅️ {copy['support_ticket_back_to_ticket']}", callback_data=f"ticket|pv|{ticket['id']}"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")]]),
+            reply_markup=ticket_customer_origin_keyboard(InlineKeyboardMarkup([[InlineKeyboardButton(f"⬅️ {copy['support_ticket_back_to_ticket']}", callback_data=f"ticket|pv|{ticket['id']}"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")]]), ticket_profile_origin, lang) if ticket_profile_origin else InlineKeyboardMarkup([[InlineKeyboardButton(f"⬅️ {copy['support_ticket_back_to_ticket']}", callback_data=f"ticket|pv|{ticket['id']}"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")]]),
         )
     if action == "admin":
         clear_support_ticket_pending(uid)

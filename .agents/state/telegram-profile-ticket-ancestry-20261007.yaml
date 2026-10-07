@@ -1,0 +1,12 @@
+task: S12.34.2_ACCOUNT_OWNED_TICKET_ANCESTRY
+phase: VERIFY
+base_sha: d43864a3827ece9ddf68515785712fac131c048f
+red: Actual Account Support -> My Tickets/detail/input and actual fixture-created result buttons reproduce 5 parent/context failures, zero setup errors.
+allowed: [closed customer ticket UI origin parser/keyboard propagation, actor-owned read-only result return, existing pending back_to metadata and reply/attachment output keyboards, tests/CI/ledger]
+protected: [ticket lifecycle/classification/create/update/notification fields and decisions, Admin paths, pending helper schema/TTL and legacy clear semantics, finances/engines/providers/workers/AutoPost]
+acceptance: List detail Back returns list; result detail Back returns actor-owned result without resubmission; reply/attach Back and completion keep origin; invalid/unowned controls do not mutate pending/data; legacy and Admin behavior preserved.
+green: 17 ancestry/pending/stale-action test methods in 86.088s OK; full source/test compile and scope/business-operation comparators pass. Registered routes, real pending helpers, owner-scoped reads and fixture-only data/transport boundaries used.
+adjacent_green: 5 read-Support methods in 25.262s OK and 6 legacy Support/Ticket direct cases PASS. Prior read-fixture exact payload comparison now expects origin on precisely ticket|mine and support|ticket; all other literal comparisons retained.
+local_regression_resolved: Combined read/form keyboard transforms initially appended profile twice to Ticket entry; result-flow regression caught blocked entry before publication. Form transform is now idempotent; all four form submission regressions pass.
+delivery: PR/CI/merge/bot-only deploy pending; manual client QA unverified; overall bot checklist remains partial.
+side_effects: {provider: 0, telegram_send: 0, jobs: 0, wallet: 0, production_db: 0}

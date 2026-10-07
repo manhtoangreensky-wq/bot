@@ -81,6 +81,9 @@ jobs:
       - name: Customer Ticket Action Acknowledgement
         run: python -m unittest tests/test_customer_ticket_action_ack.py
 
+      - name: Account Owned Ticket Ancestry
+        run: python -m unittest tests/test_profile_ticket_ancestry.py
+
       - name: Run Workflow Hygiene Unit Tests
         run: |
           python -m unittest tests/test_deploy_vps_workflow_hygiene.py
