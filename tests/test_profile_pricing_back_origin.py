@@ -37,8 +37,8 @@ def _runtime(lang="vi"):
     })
     original_copy = ns["public_hub_copy"]
     ns["public_hub_copy"] = lambda locale: {**original_copy(locale), "common_no_charge": "No charge", "packages_label": "Packages"}
-    for name in ("pricing_hub_lines", "pricing_catalog_lines", "pricing_video_lines", "pricing_main_lines",
-                 "billing_promotions_lines", "billing_promo_apply_lines"):
+    for name in ("pricing_hub_lines", "pricing_catalog_lines", "pricing_video_lines", "pricing_image_lines", "pricing_main_lines",
+                 "pricing_xu_lines_i18n", "billing_promotions_lines", "billing_promo_apply_lines"):
         ns[name] = lambda *args, name=name: reads.append((name, args)) or [name]
     for name in ("pricing_main_keyboard", "pricing_catalog_keyboard", "pricing_detail_keyboard",
                  "member_policy_keyboard", "billing_promotions_keyboard", "handle_pricing_callback"):
@@ -50,6 +50,21 @@ def _runtime(lang="vi"):
                         if "tg_app.add_handler(CallbackQueryHandler(handle_pricing_callback," in line)
     exec(registration, ns)
     return ns, routes[0], menu_route, reads, clears
+
+
+def _install_topup_fixture(ns):
+    original_copy = ns["public_hub_copy"]
+    ns.update({
+        "public_hub_copy": lambda locale: {**original_copy(locale), "topup_label": "Top up",
+                                             "manual_topup": "Manual top up", "main_menu": "Main menu"},
+        "ui_text": lambda _locale, key: "🔙 Back" if key in {"common.back", "pricing.back"} else "Main menu",
+        "menu_text_main_topup_i18n": lambda _locale, _uid: "TOPUP SELECTOR",
+        "payos_package_callback_data": lambda package, uid: f"payos_pkg|{package}|{uid}",
+        "manual_package_callback_data": lambda package, uid: f"manual|start|{package}|{uid}",
+    })
+    for name in ("main_topup_keyboard", "pricing_xu_keyboard", "vip_services_keyboard"):
+        exec(compile("from __future__ import annotations\n" + fixture.fixture._function(name),
+                     "bot.py:" + name, "exec"), ns)
 
 
 def _buttons(query):
@@ -67,6 +82,101 @@ def _callback(query, action):
 
 
 class AccountPricingOriginTests(unittest.TestCase):
+    def test_unsupported_locale_catalog_topup_returns_to_catalog(self):
+        from services.pricing_guide_content import PUBLIC_COPY_LOCALES
+        for locale in sorted(PUBLIC_COPY_LOCALES - {"vi", "en", "zh"}):
+            with self.subTest(locale=locale):
+                ns, route, menu, _, _ = _runtime(locale)
+                _install_topup_fixture(ns)
+                entry = next(button.callback_data for row in ns["main_profile_keyboard"](locale).inline_keyboard
+                             for button in row if button.callback_data.split("|")[:2] == ["pricing", "main"])
+                main = fixture._dispatch(route, entry)
+                catalog = fixture._dispatch(route, _callback(main, "catalog"))
+                topup_callback = next(button.callback_data for button in _buttons(catalog)
+                                      if button.callback_data.startswith("menu|main_topup"))
+                topup = fixture._dispatch(menu, topup_callback)
+                self.assertEqual("pricing|catalog|profile", _back(topup))
+                returned = fixture._dispatch(route, _back(topup))
+                self.assertEqual(catalog.edits[0][0], returned.edits[0][0])
+
+    def test_xu_read_screen_topup_returns_to_the_same_xu_screen(self):
+        ns, route, menu, _, _ = _runtime()
+        _install_topup_fixture(ns)
+        source = ns["vip_services_keyboard"]("vi")
+        xu_callback = next(button.callback_data for row in source.inline_keyboard for button in row
+                           if button.callback_data == "pricing|xu")
+        xu = fixture._dispatch(route, xu_callback)
+        topup_callback = next(button.callback_data for button in _buttons(xu)
+                              if button.callback_data.startswith("menu|main_topup"))
+        topup = fixture._dispatch(menu, topup_callback)
+        self.assertEqual("pricing|xu", _back(topup))
+        returned = fixture._dispatch(route, _back(topup))
+        self.assertEqual(xu.edits[0][0], returned.edits[0][0])
+
+    def test_topup_back_returns_to_the_pricing_screen_that_emitted_it(self):
+        ns, route, menu, _, _ = _runtime()
+        _install_topup_fixture(ns)
+        ns["user_is_vietnam_market"] = lambda _uid: True
+
+        main = fixture._dispatch(route, "pricing|main|profile")
+        offers = fixture._dispatch(route, _callback(main, "promotions"))
+        promo_guide = fixture._dispatch(route, _callback(offers, "promo_apply"))
+        catalog = fixture._dispatch(route, _callback(main, "catalog"))
+        video = fixture._dispatch(route, _callback(catalog, "video"))
+        image = fixture._dispatch(route, _callback(catalog, "image"))
+        cases = (
+            (main, "pricing|main|profile"),
+            (offers, "pricing|promotions|profile"),
+            (promo_guide, "pricing|promo_apply|profile"),
+            (video, "pricing|video|profile"),
+            (image, "pricing|image|profile"),
+        )
+        for parent, expected_parent in cases:
+            with self.subTest(parent=expected_parent):
+                topup_callback = next(button.callback_data for button in _buttons(parent)
+                                      if button.callback_data.startswith("menu|main_topup"))
+                topup = fixture._dispatch(menu, topup_callback)
+                self.assertEqual("TOPUP SELECTOR", topup.edits[0][0])
+                callbacks = [button.callback_data for button in _buttons(topup)]
+                self.assertEqual(
+                    ["payos_pkg|10k|123", "payos_pkg|20k|123", "payos_pkg|50k|123",
+                     "payos_pkg|100k|123", "payos_pkg|200k|123", "payos_pkg|500k|123",
+                     "manual|start|manual_custom|123"],
+                    [data for data in callbacks if data.startswith(("payos_pkg|", "manual|"))],
+                )
+                self.assertIn("menu|main", callbacks)
+                self.assertTrue(all(len(data.encode("utf-8")) <= 64 for data in callbacks))
+                self.assertEqual(expected_parent, _back(topup))
+                returned = fixture._dispatch(route, _back(topup))
+                self.assertEqual(parent.edits[0][0], returned.edits[0][0])
+
+    def test_legacy_pricing_screens_keep_their_exact_topup_parent(self):
+        ns, route, menu, _, _ = _runtime()
+        _install_topup_fixture(ns)
+        ns["user_is_vietnam_market"] = lambda _uid: True
+
+        main = fixture._dispatch(route, "pricing|main")
+        offers = fixture._dispatch(route, _callback(main, "promotions"))
+        promo_guide = fixture._dispatch(route, _callback(offers, "promo_apply"))
+        catalog = fixture._dispatch(route, _callback(main, "catalog"))
+        video = fixture._dispatch(route, _callback(catalog, "video"))
+        image = fixture._dispatch(route, _callback(catalog, "image"))
+        cases = (
+            (main, "pricing|main"),
+            (offers, "pricing|promotions"),
+            (promo_guide, "pricing|promo_apply"),
+            (video, "pricing|video"),
+            (image, "pricing|image"),
+        )
+        for parent, expected_parent in cases:
+            with self.subTest(parent=expected_parent):
+                topup_callback = next(button.callback_data for button in _buttons(parent)
+                                      if button.callback_data.startswith("menu|main_topup"))
+                topup = fixture._dispatch(menu, topup_callback)
+                self.assertEqual(expected_parent, _back(topup))
+                returned = fixture._dispatch(route, _back(topup))
+                self.assertEqual(parent.edits[0][0], returned.edits[0][0])
+
     def test_account_pricing_catalog_detail_back_chain_returns_to_account(self):
         for lang in ("vi", "en", "zh"):
             with self.subTest(lang=lang):
@@ -151,14 +261,19 @@ class AccountPricingOriginTests(unittest.TestCase):
     def test_legacy_destinations_and_non_pricing_controls_are_preserved(self):
         ns, route, _, _, _ = _runtime()
         legacy = fixture._dispatch(route, "pricing|main")
-        self.assertEqual([button.callback_data for row in ns["pricing_main_keyboard"]("vi", 123).inline_keyboard
-                          for button in row], [button.callback_data for button in _buttons(legacy)])
+        raw_callbacks = [button.callback_data for row in ns["pricing_main_keyboard"]("vi", 123).inline_keyboard
+                         for button in row]
+        expected_legacy = ["menu|main_topup|pricing_main" if data == "menu|main_topup" else data
+                           for data in raw_callbacks]
+        self.assertEqual(expected_legacy, [button.callback_data for button in _buttons(legacy)])
         scoped = fixture._dispatch(route, "pricing|main|profile")
         original_other = [button.callback_data for button in _buttons(legacy)
                           if not button.callback_data.startswith("pricing|")]
         scoped_other = [button.callback_data for button in _buttons(scoped)
                         if not button.callback_data.startswith("pricing|") and button.callback_data != "menu|main_profile"]
-        self.assertEqual(original_other, scoped_other)
+        expected_scoped_other = ["menu|main_topup|pricing_main_profile" if data == "menu|main_topup|pricing_main" else data
+                                 for data in original_other]
+        self.assertEqual(expected_scoped_other, scoped_other)
         member = fixture._dispatch(route, "pricing|member")
         self.assertEqual("pricing|main", _back(member))
         for button in _buttons(scoped):

@@ -75,7 +75,8 @@ class AccountTopupOriginTests(unittest.TestCase):
 
     def test_invalid_selector_origin_stops_before_cleanup_read_or_render(self):
         _ns, route, cleared, reads = _runtime()
-        for origin in ("", "admin", "main", "main_profile|extra"):
+        for origin in ("", "admin", "main", "main_profile|extra", "pricing_unknown",
+                       "pricing_main|profile", "pricing_promotions_profile|extra", "pricing_download_pricing"):
             query = fixture._dispatch(route, "menu|main_topup|" + origin)
             self.assertEqual(1, len(query.answers))
             self.assertTrue(query.answers[0][1].get("show_alert"))

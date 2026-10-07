@@ -864,3 +864,9 @@ provider-fallback `56`, exact-two `3` passed; changed-file compile và
 | Cách hiểu trước | Bằng chứng | Điều chỉnh |
 |---|---|---|
 | Ticket hub/Thống kê/Mẫu trả lời Back giữ màn vừa mở | Hub và panel dùng chung Back về Admin root | UI keyboard có parent và callback panel mang origin; 24 regression + 4 focused đạt, thao tác ticket nguyên vẹn. S12.23 delivery còn chờ; S12.22 đã deploy `8faa35eb` |
+
+## Pricing Top-up return route — S12.35.3
+
+| Cách hiểu trước | Bằng chứng thực tế | Hiện trạng |
+|---|---|---|
+| Mọi nút Nạp Xu từ Bảng giá có thể quay lại Pricing main | Baseline RED: 5 tuyến Account Pricing; mở rộng phát hiện 14 locale ngoài VI/EN/ZH dùng Catalog fallback và một route từ emitter Xu cũng mất trang cha. | Menu Top-up mang origin token allowlist để Back về đúng màn đã phát nút; 19 test nhóm Pricing/Top-up/credit-guide đạt trong `93.459s`, gồm 25 emitter→handler→Back cycles; 7 callback thanh toán, Home, actor và byte limit giữ nguyên. CI/merge/deploy là trạng thái tách biệt và vẫn pending tại thời điểm ghi; kiểm thử không chạy giao dịch. |
