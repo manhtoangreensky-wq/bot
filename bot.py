@@ -212895,7 +212895,13 @@ async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_pricing_xu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = get_user_language(update.effective_user.id) if update.effective_user else "vi"
-    await send_pricing_lines(update.message, pricing_xu_lines_i18n(lang, update.effective_user.id if update.effective_user else None), pricing_xu_keyboard(lang))
+    keyboard = pricing_xu_keyboard(lang)
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(button.text, callback_data="menu|main_topup|pricing_xu")
+         if button.callback_data == "menu|main_topup" else button for button in row]
+        for row in keyboard.inline_keyboard
+    ])
+    await send_pricing_lines(update.message, pricing_xu_lines_i18n(lang, update.effective_user.id if update.effective_user else None), keyboard)
 
 async def cmd_pricing_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = get_user_language(update.effective_user.id) if update.effective_user else "vi"
