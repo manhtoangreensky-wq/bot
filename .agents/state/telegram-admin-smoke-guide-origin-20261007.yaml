@@ -4,6 +4,7 @@ base_sha: 2f185dbd6c8f2d0d6e26a76a50c074ae50168fdf
 trigger: Provider/Worker -> Smoke Test -> any of its 8 read-only guides -> Back -> Back.
 red: All 8 emitted guide round-trips lose Provider/Worker origin and return Smoke Test to Admin root; 8 assertion failures, zero setup errors.
 allowed: [bot.py narrow menu origin validation/keyboard propagation, tests/test_admin_module_child_back_origin.py, checklist/evidence/tester docs]
+guide_labels: Same 8 Smoke menu controls are labelled as direct tests/status despite displaying manual guides; registered-handler label assertions reproduced 8 failures. Rename only their menu labels; commands/content remain unchanged.
 protected: [shared router architecture, callback registrations, guide content/commands, provider/worker/engine/state/financial logic, AutoPost]
 acceptance: Leaf Back restores same-context Smoke menu, its Back restores Provider/Worker; invalid/public contexts stop before state/render; legacy and Security/DB Sales Ready routes unchanged.
 green: 15 related tests in 47.856s OK; full bot/test compile and exact source comparator PASS; only closed Smoke guide origin validation/keyboard branches differ.

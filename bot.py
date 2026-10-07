@@ -231513,10 +231513,10 @@ def smoke_test_menu_text() -> str:
 
 def smoke_test_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🤖 Test ShopAIKey", callback_data="menu|smoke_shopaikey"), InlineKeyboardButton("🗣 Test TTS", callback_data="menu|smoke_tts")],
-        [InlineKeyboardButton("🖼 Test Image", callback_data="menu|smoke_image"), InlineKeyboardButton("🎬 Test Video", callback_data="menu|smoke_video")],
-        [InlineKeyboardButton("🎞 Test FFmpeg", callback_data="menu|smoke_ffmpeg"), InlineKeyboardButton("🧩 Test ComfyUI", callback_data="menu|smoke_comfy")],
-        [InlineKeyboardButton("📊 Providers", callback_data="menu|smoke_providers"), InlineKeyboardButton("✅ Sales Ready", callback_data="menu|smoke_sales_ready")],
+        [InlineKeyboardButton("📘 Hướng dẫn test ShopAIKey", callback_data="menu|smoke_shopaikey"), InlineKeyboardButton("📘 Hướng dẫn test TTS", callback_data="menu|smoke_tts")],
+        [InlineKeyboardButton("📘 Hướng dẫn test Image", callback_data="menu|smoke_image"), InlineKeyboardButton("📘 Hướng dẫn test Video", callback_data="menu|smoke_video")],
+        [InlineKeyboardButton("📘 Hướng dẫn test FFmpeg", callback_data="menu|smoke_ffmpeg"), InlineKeyboardButton("📘 Hướng dẫn test ComfyUI", callback_data="menu|smoke_comfy")],
+        [InlineKeyboardButton("📘 Hướng dẫn Providers", callback_data="menu|smoke_providers"), InlineKeyboardButton("📘 Hướng dẫn Sales Ready", callback_data="menu|smoke_sales_ready")],
         [InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 

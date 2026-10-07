@@ -69,6 +69,7 @@ class AdminModuleChildBackTests(unittest.TestCase):
             with self.subTest(callback=button.callback_data):
                 guide = _dispatch(route, button.callback_data)
                 self.assertIn("chỉ hướng dẫn thao tác", guide.edits[0][0])
+                self.assertIn("Hướng dẫn", button.text)
                 back = next(button for button in _controls(guide) if button.text.startswith("⬅"))
                 returned = _dispatch(route, back.callback_data)
                 self.assertIn("menu|admin_provider_worker", [button.callback_data for button in _controls(returned)])
