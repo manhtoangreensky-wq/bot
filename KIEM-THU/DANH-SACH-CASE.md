@@ -11,6 +11,7 @@ Nguồn gốc duy nhất cho acceptance live. Sửa case tại file này trướ
 
 | `UI-ADMIN-FINANCE-GUIDE-01` | Nhãn Finance không hứa chạy giao dịch/xuất file khi chỉ mở hướng dẫn | Tài khoản staging admin → Admin → Tài chính → Hướng dẫn thêm chi phí → Quay lại; mở Hướng dẫn xuất báo cáo → Hướng dẫn tháng/năm → Quay lại. Không gửi lệnh được hiển thị. | Các trang ghi rõ đây là hướng dẫn, lệnh đúng `/expense_add ...` hoặc `/finance_export <kỳ>`; Back về đúng Tài chính; không có khoản chi mới, tệp CSV gửi ra, Xu/wallet thay đổi hoặc job/provider call. User thường không được mở callback Finance. |
 | `UI-ADMIN-QUEUE-GUIDE-01` | Nhãn Freeze tools khớp với trang hướng dẫn chỉ đọc | Tài khoản staging admin → Admin → Queue / Freeze → `📚 Hướng dẫn Freeze / Queue` → Quay lại. Không chạy lệnh trong trang. | Trang liệt kê lệnh nhưng ghi rõ không thao tác trực tiếp từ nút; Back về đúng Queue; không freeze/unfreeze/refund, thay đổi ví/DB, gọi provider hay tạo job. |
+| `UI-SELFSHOT-STALE-ACK-01` | Nút SS2/SS3 cũ ngừng spinner và mở màn khôi phục | Với tài khoản test, lưu màn intro SS2/SS3 rồi mở draft sản phẩm Video khác; nhấn `Gửi video nguồn` trên tin SS2/SS3 cũ. Không confirm/tạo job. | Spinner được ACK trước khi Hub Video tự quay được render; draft sản phẩm đang mở giữ nguyên; không nhận source mới, không tạo job/provider/charge; Menu Video ở Hub hoạt động. Đo thời gian client riêng, không suy ra từ log server. |
 
 ## Product Video Strategy V2 — correction gate đang mở
 

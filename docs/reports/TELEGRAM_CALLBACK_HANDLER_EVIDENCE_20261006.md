@@ -105,6 +105,8 @@ Source baseline: `0929d61ade4b8f0d60b803b62417763e90acce9e`. Production deployme
 
 ## Next verification order
 
+Current narrow evidence: S12.25 exercises SS2/SS3 intro source controls from real service rows through the registered `handle_video_product_callback`, its failure guard, the real Hub builder and `safe_edit_or_send`. It reproduces missing acknowledgement in both stale-product recovery branches; the minimal fix precedes render with one best-effort ACK. Active product/session data remains unchanged, including when ACK times out. Other Product Video callbacks are not covered by this fixture and remain unproven here.
+
 1. Separate negative-group guards/final timing observer from business routes; they do not make an unmatched business callback functional.
 2. For remaining Admin actions, exercise an emitted control through its registered handler, then verify result/error, pending state, Back/Home and authorization with inert fixtures.
 3. Continue customer route families and dynamic values, retaining ownership and product/mode context; stable engines and AutoPost WIP are protected.
