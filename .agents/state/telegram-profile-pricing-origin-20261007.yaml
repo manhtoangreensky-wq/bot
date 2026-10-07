@@ -1,5 +1,5 @@
 task: S12.30_ACCOUNT_PRICING_MEMBERSHIP_BACK
-phase: VERIFY
+phase: REPORT
 base_sha: ae01c60dc8a28e6179d3da7df23ef30f81fa7592
 trigger: Account -> Pricing -> Catalog -> detail -> Back chain, and Account -> Member -> birthday guide -> Back chain.
 red: 4 behavioral failures (VI/EN/ZH Pricing lacks Account Back, direct Member Back goes to Pricing), zero setup errors.
@@ -9,5 +9,5 @@ acceptance: Preserve Account through pricing subtree and Member/birthday ancestr
 green: 9 Account pricing/credit-guide methods in 26.897s OK; scoped catalog/detail, direct/nested membership, birthday, all international fallback layouts, invalid origin, legacy/non-pricing controls verified. Full compile/diff check pass.
 final_green: Two further parent skips (Total -> Catalog and promo-code guide -> Offers) were reproduced and fixed in the same UI mapping. Final combined run 11 tests in 34.086s OK; full compile/diff pass.
 protected_comparator: Pricing operation AST identical after removing UI metadata/keyboard wrappers and restoring ACK placement; bot outside two Account emitters and pricing handler byte-identical to base; engine/service/provider/worker/config/deploy unchanged.
-delivery: PR/CI/merge/bot-only deploy pending; client QA unverified.
+delivery: PR 1398 merged/deployed at a63934cc868a91e65d8093816deabc89b0221d8a; deploy 37570356211 SUCCESS with workers excluded; exact runtime/source/services/health verified 07/10 11:17 +07. Client QA unverified.
 side_effects: {provider: 0, telegram_send: 0, jobs: 0, wallet: 0, production_db: 0}

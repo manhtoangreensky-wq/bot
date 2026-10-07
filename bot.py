@@ -135958,7 +135958,7 @@ def main_profile_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton(f"🎁 {copy['profile_packages']}", callback_data="menu|profile_packages"), InlineKeyboardButton(f"👑 {copy['profile_membership']}", callback_data="pricing|member|profile")],
         [InlineKeyboardButton(f"📚 {copy['profile_xu_guide']}", callback_data="menu|guide_credits|main_profile"), InlineKeyboardButton(f"👨‍💼 {copy['support']}", callback_data="menu|support")],
         [InlineKeyboardButton(f"🎁 {copy['profile_referral_link']}", callback_data="menu|profile_ref_link"), InlineKeyboardButton(f"👥 {copy['profile_referral_stats']}", callback_data="menu|profile_ref_stats")],
-        [InlineKeyboardButton(f"📋 {copy['profile_referral_policy']}", callback_data="menu|profile_ref_policy"), InlineKeyboardButton(f"🌍 {copy['profile_change_language']}", callback_data="back_lang")],
+        [InlineKeyboardButton(f"📋 {copy['profile_referral_policy']}", callback_data="menu|profile_ref_policy"), InlineKeyboardButton(f"🌍 {copy['profile_change_language']}", callback_data="back_lang|profile")],
         [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
 
@@ -143071,31 +143071,49 @@ async def handle_feedback_callback(update: Update, context: ContextTypes.DEFAULT
 async def handle_language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = (query.data or "").strip()
+    profile_origin = False
+    parts = data.split("|")
+    base_arity = 2 if parts[0] == "lang" else 1
+    if len(parts) > base_arity:
+        if (parts[0] not in {"lang", "lang_more", "back_lang", "lang_back"}
+                or len(parts) != base_arity + 1 or parts[-1] != "profile"):
+            return await query.answer("Nút ngôn ngữ đã hết phiên. Vui lòng mở lại từ Tài khoản.", show_alert=True)
+        profile_origin = True
+        data = "|".join(parts[:-1])
     uid = query.from_user.id
     lang = normalize_user_language(data.split("|", 1)[1]) if data.startswith("lang|") else None
     if data.startswith("lang|") and not lang:
         return await query.answer("Language is not supported.", show_alert=True)
     await query.answer()
+    def ui_picker(markup):
+        if not profile_origin:
+            return markup
+        return _TelegramInlineKeyboardMarkup([
+            [InlineKeyboardButton(button.text, callback_data=f"{button.callback_data}|profile")
+             if str(button.callback_data or "").startswith("lang|") or button.callback_data in {"lang_more", "back_lang", "lang_back"}
+             else button for button in row]
+            for row in markup.inline_keyboard
+        ])
     if data == "lang_more":
         current_lang = normalize_user_language(get_user_language(uid)) or "vi"
         return await safe_edit_query_message(
             query,
             language_choice_text(current_lang),
-            reply_markup=language_choice_keyboard(current_lang),
+            reply_markup=ui_picker(language_choice_keyboard(current_lang)),
         )
     if data == "back_lang":
         current_lang = normalize_user_language(get_user_language(uid)) or "vi"
         return await safe_edit_query_message(
             query,
             language_choice_text(current_lang),
-            reply_markup=language_choice_keyboard(current_lang),
+            reply_markup=ui_picker(language_choice_keyboard(current_lang)),
         )
     if data == "lang_back":
         previous_lang = normalize_user_language(get_user_language(uid)) or "vi"
         return await safe_edit_query_message(
             query,
-            localized_start_menu_text(uid, previous_lang),
-            reply_markup=localized_main_menu_keyboard(is_admin_user(uid), previous_lang),
+            menu_text_main_profile_i18n(uid, previous_lang) if profile_origin else localized_start_menu_text(uid, previous_lang),
+            reply_markup=main_profile_keyboard(previous_lang) if profile_origin else localized_main_menu_keyboard(is_admin_user(uid), previous_lang),
         )
     if data.startswith("lang|"):
         selected = set_user_language(uid, lang)
@@ -143113,8 +143131,8 @@ async def handle_language_callback(update: Update, context: ContextTypes.DEFAULT
         )
         return await safe_edit_query_message(
             query,
-            localized_start_menu_text(uid, selected),
-            reply_markup=localized_main_menu_keyboard(is_admin_user(uid), selected),
+            menu_text_main_profile_i18n(uid, selected) if profile_origin else localized_start_menu_text(uid, selected),
+            reply_markup=main_profile_keyboard(selected) if profile_origin else localized_main_menu_keyboard(is_admin_user(uid), selected),
         )
 
 async def handle_translation_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -273890,7 +273908,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_storage_addon_callback, pattern=r"^storage\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_memory_callback, pattern=r"^memory\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_translation_callback, pattern=r"^tr_(target|more|pick|transcribe)(\||$)"))
-    tg_app.add_handler(CallbackQueryHandler(handle_language_callback, pattern=r"^(lang\|(?:[a-z]{2}|fil)|lang_more|back_lang|lang_back)$"))
+    tg_app.add_handler(CallbackQueryHandler(handle_language_callback, pattern=r"^(lang\|(?:[a-z]{2}|fil)|lang_more|back_lang|lang_back)(?:\|.*)?$"))
     tg_app.add_handler(CallbackQueryHandler(handle_package_purchase_callback, pattern=r"^pkgbuy\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_pkgcombo_callback, pattern=r"^pkgcombo:"))
     tg_app.add_handler(CallbackQueryHandler(handle_pricing_callback, pattern=r"^pricing\|"))
