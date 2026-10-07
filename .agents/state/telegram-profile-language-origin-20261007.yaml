@@ -1,0 +1,11 @@
+task: S12.31_ACCOUNT_LANGUAGE_RETURN
+phase: VERIFY
+base_sha: a63934cc868a91e65d8093816deabc89b0221d8a
+red: Actual Account language button -> registered picker -> Back or EN selection renders Main instead of Account; 2 behavioral failures, zero setup errors.
+allowed: [Account language emitter, closed language UI origin/parser/picker/return, matching registration suffix, focused tests/CI/ledger]
+protected: [preference persistence/usage/broadcast behavior, shared router architecture, wallet/payments, product/engine/provider/worker/AutoPost]
+acceptance: Account picker Back/selection return Account; locale written once exactly as before; global/legacy language flows return Main; malformed origin stops before preference/event/render.
+green: 9 language/credit-guide methods in 21.255s OK, including all 17 emitted locales, scoped/legacy/malformed controls, single preference/event update and immutable payload. Full compile/diff pass.
+protected_comparator: Preference/event/broadcast AST unchanged after removing UI origin/picker/return additions; all other bot source identical except one Account emitter and registration suffix. Engine/service/provider/worker/config/deploy unchanged.
+delivery: PR/CI/merge/bot-only deploy pending; client QA unverified.
+side_effects: {provider: 0, telegram_send: 0, jobs: 0, wallet: 0, production_db: 0}

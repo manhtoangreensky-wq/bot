@@ -69,6 +69,9 @@ jobs:
       - name: Account Pricing Back Regressions
         run: python -m unittest tests/test_profile_pricing_back_origin.py
 
+      - name: Account Language Back Regressions
+        run: python -m unittest tests/test_profile_language_back_origin.py
+
       - name: Run Workflow Hygiene Unit Tests
         run: |
           python -m unittest tests/test_deploy_vps_workflow_hygiene.py
