@@ -1728,11 +1728,12 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
 
 ## Batch Telegram UI/callback — rà cuối 08/10/2026
 
-- Runtime đọc lúc 09:27–09:31 +07: `76f0454fbab5e467f9ca71a0135b6fd05d8d70c4`; bot/web/nginx active, NRestarts=0. Các sửa dưới đây đang ở nhánh `audit/telegram-small-flow-batch-20261007`, chưa triển khai tại thời điểm ghi.
+- PR #1410 đã merge tại `87bf32064473b02ee32aa6a6b63997ae3ef9b533`; CI `37723283055` và bot-only deploy `37727154776` đạt. VPS readback đúng SHA, bot/web/nginx active và `NRestarts=0`; PR #1409 đã được triển khai trước đó. Follow-up timing/UI evidence S12.35.81–83 vẫn là nhánh local, chưa phải runtime claim.
 - Kho Prompt: Copy hiển thị hướng dẫn sao chép thủ công và giữ Back về đúng danh sách gợi ý cũ; nhãn không còn ngụ ý gửi sang Meta. RED 3 assertion → GREEN 1 method/1.531s.
 - Marketing từ CSKH: cả sáu follow-up và kết quả nội dung tự nhập giữ Back về gợi ý, rồi Marketing, rồi CSKH. RED 7 assertion → GREEN 5 tests/7.439s; entry Admin cũ giữ Back cũ.
 - Memory search: View/Delete mang search origin kiểm token, TTL và ID trong snapshot trước đọc/cleanup; Back hợp lệ dọn draft của đúng người. RED 11 assertion → GREEN 6 regression/5.960s. Saved-list, delete-picker và SQL ownership không đổi; không chạy thao tác xóa thật.
 - Operator → System: sáu màn con, Provider Details/Refresh và Back giữ origin Operator; callback sai bị chặn. RED 7 assertion → GREEN 3 regression/39.974s; System legacy vẫn về Admin.
 - Comparator văn bản source từ base `93919f93`: 23 block UI/keyboard/origin thay đổi, 9.742 block khai báo không đổi; không có file thay đổi trong services/providers/workers/engines/config. Báo cáo cuối và số đo cổng tổng nằm tại `docs/reports/TELEGRAM_UI_BATCH_CLOSURE_20261008.md`.
 - Độ trễ Account → Back 2–3s còn hoãn cho Owner theo chỉ đạo mới: mẫu menu phía server đo 306.038–512.953 ms, chưa có sample click-to-screen khớp thời gian và chưa đo pre-handler/client. Không kết luận lỗi mạng/thiết bị/VPS hay cần mua phần cứng.
-- Main hiện có thêm PR Product Video #1409 ở `d24716db`, chưa có trên runtime đọc ở trên. Khi chốt deploy phải đối chiếu delta main/runtime và phạm vi bot-only; không coi MERGED là LIVE.
+- S12.35.82 kiểm chứng Account → Gói của tôi → Back → Account qua handler `menu|` đã đăng ký; S12.35.83 kiểm chứng ba màn referral chỉ đọc và Back/Home. Cả hai dùng fixture, không đọc package/referral production, không checkout, ví, provider, job hay Telegram thật.
+- Không coi route fixture hoặc số đo handler là live/client proof: mọi terminal động, payment và protected processing vẫn ngoài phạm vi UI audit; A3/A5/A6/A7 còn partial theo checklist.

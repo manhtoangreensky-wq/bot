@@ -5,8 +5,9 @@ base_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
 objective: >-
   Continue the ordered Telegram small-flow audit. Fix wrong callback/Back routes
   narrowly while protecting AutoPost WIP and stable product engines.
-current_spec: S12.35.80-single-batch-ci-delivery
-current_branch: audit/telegram-small-flow-batch-20261007
+current_spec: S12.35.83-account-referral-read-only-roundtrips
+current_branch: audit/telegram-small-flow-followup-20261008
+current_base_sha: 87bf32064473b02ee32aa6a6b63997ae3ef9b533
 release_cadence: >-
   Keep the remaining specs on one batch branch. Do not create a PR, merge, deploy,
   or restart per spec; complete the ordered checklist and final CI first, then
@@ -1698,6 +1699,46 @@ specs:
     evidence: "Runtime 76f0454f, services active NRestarts=0; recent menu dispatch 306.038–512.953 ms; guard 33.458–118.951 ms; render helper 89.179–101.572 ms"
     owner_observation: "Account→Back ~2–3s, no exact matched click timestamp; pre-handler/client phases unmeasured"
     conclusion: "No proven source bottleneck or network/device cause; no speculative latency change or hardware recommendation"
+  S12.35.81-account-root-route-key:
+    status: locally-verified-fixture-only
+    acceptance: "Anonymous callback timing records a fixed account_root key only for exact menu|main_profile; dynamic/private callback data remains unclassified and no payload, user ID or message is logged"
+    red: "Two expected route-key assertions failed before the narrow observer initialization"
+    green: "Timing suite plus Account-root registered-handler regression: 6 tests in 8.200s — OK"
+    scope: "Diagnostic route label only; no menu or processing behavior"
+    limits: "Not deployed; no post-change live sample; full local bot compile was not completed"
+    files:
+      - bot.py
+      - tests/test_callback_dispatch_timing.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - docs/reports/TELEGRAM_UI_BATCH_CLOSURE_20261008.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+    delivery: "Local follow-up branch; no push, PR, merge, deploy or restart"
+  S12.35.82-account-packages-account-roundtrip:
+    status: locally-verified-fixture-only
+    acceptance: "Account → Gói của tôi → Back dispatches through the registered menu handler and restores the exact Account callback set; one ACK per callback"
+    red: "Fixture setup omitted the existing profile_back_account label; no production assertion failed"
+    green: "test_customer_root_account_renders_actual_keyboard_and_home_returns_to_main: Ran 1 test in 1.630s — OK"
+    scope: "Customer Account/package-summary navigation only; inert package summary"
+    limits: "No production DB/package read, checkout, payment, wallet, provider, job, AutoPost, product engine, customer message or real Telegram action; A3/A5 remain partial outside this route"
+    files:
+      - tests/test_admin_root_menu_callback_single_ack.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+    side_effects: "provider=0, wallet=0, production DB=0, jobs=0, real Telegram=0, AutoPost=0, engine=0"
+    delivery: "Local cumulative follow-up branch; no push, PR, merge, deploy or restart"
+  S12.35.83-account-referral-read-only-roundtrips:
+    status: locally-verified-fixture-only
+    acceptance: "Account referral link/stats/policy controls dispatch through the registered menu handler; each read-only child Back returns to Account and Home returns to Main with one ACK per callback"
+    red: "Fixture setup omitted BOT_USERNAME; no production assertion failed"
+    green: "Expanded Account regression: Ran 1 test in 0.696s — OK; all three referral child routes and Back/Home destinations matched"
+    scope: "Customer Account referral read-only UI only; inert text and identity"
+    limits: "No referral ledger/profile write, database, payment, provider, job, AutoPost, product engine, customer message or real Telegram action; A3/A5 remain partial outside these children"
+    files:
+      - tests/test_admin_root_menu_callback_single_ack.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+    side_effects: "provider=0, wallet=0, production DB=0, jobs=0, real Telegram=0, AutoPost=0, engine=0"
+    delivery: "Local cumulative follow-up branch; no push, PR, merge, deploy or restart"
 verification:
   final_ui_pytest_20261008: "41 CI-configured safe UI modules: 218 passed, 355 subtests passed in 589.44s; --noconftest avoids unrelated legacy autouse runtime import; NO_BOT_RUNTIME_IMPORTED"
   final_bot_compile_20261008: "Current bot blob be492b669138370639318763ce4436411b7bcc8f: python -B -S -m py_compile bot.py exit 0, FINAL_BOT_PY_COMPILE_OK"
@@ -1720,6 +1761,10 @@ verification:
   latest_service_status_20261007_2259: "Read-only strict-host SSH: toanaas-bot.service active/running; NRestarts=0; ExecMainStartTimestamp=2026-10-07 19:43:18 +07."
   S12_35_47_account_pricing_regressions: "Account Pricing/member/Top-up focused regression set: 13 tests in 77.406s — OK; fixtures only, no payment/wallet/provider/production-data/job/real Telegram side effects"
   S12_35_49_callback_timing_tests: "tests.test_callback_dispatch_timing: 4 tests in 7.490s — OK, fake application only; no payload/message/user ID logging"
+  S12_35_82_account_packages_roundtrip: "Account → Gói của tôi → Back through actual emitted keyboard and registered menu handler: 1 test in 1.630s — OK; fixture-only, no package DB/checkout/payment/provider/Telegram action"
+  S12_35_83_account_referral_roundtrips: "Account referral link/stats/policy → read-only child → Back/Home through registered menu handler: 1 test in 0.696s — OK; fixture-only, no ledger/profile/DB/payment/provider/Telegram action"
+  current_root_and_timing_regressions_20261008: "tests.test_admin_root_menu_callback_single_ack + tests.test_callback_dispatch_timing: 30 tests in 16.453s — OK; no production runtime import/DB/provider/wallet/Telegram action"
+  account_package_regression_set_20261008: "Account credit/pricing/language/support/ticket/top-up plus registered package navigation: 46 tests in 200.865s — OK; fixture-only, no payment/provider/production DB/job/Telegram action"
   access_recovery: "Escalated execution as martin/toann: gh auth status exit 0, SSH identity accessible, trusted ED25519 host key present; no ACL or credential changes were needed"
   focused_harness: "31 route regressions in 39.856s and 6 root/timing regressions in 5.868s passed; public menu denial verified on 3 original routes"
   changed_test_file_py_compile: passed
@@ -1793,4 +1838,6 @@ next:
   - Final review fixes S12.35.75–78 are locally verified sequentially; safe UI gate 218 tests/355 subtests passed. Keep protected processing and action terminals excluded, not passed.
   - Complete one batch commit, rebase once on current main, then PR/Ubuntu CI/one merge. Record actual SHA and PR checks.
   - Before exact-SHA bot-only deploy, recheck independent #1409 runtime delta against Owner's protected-engine restriction; do not enable an unreviewed protected change.
+  - Account → Packages → Back is closed offline by S12.35.82; continue the next safe customer terminal while keeping dynamic/payment/processing actions excluded.
+  - Account referral link/stats/policy read-only children are closed offline by S12.35.83; continue the next safe route or A6 review without entering stateful terminals.
   - Account Back 2–3s cause remains explicitly Owner-deferred under S12.35.79. Manual visual/client UX and all-button end-to-end smoothness remain unproven; retain this in final report.

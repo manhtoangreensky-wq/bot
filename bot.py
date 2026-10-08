@@ -139111,6 +139111,7 @@ def _callback_latency_begin() -> tuple[dict, bool]:
         "started_at": time.perf_counter(),
         "handler": "unmatched",
         "prefix": "unmatched",
+        "route_key": "unclassified",
         "guard_ms": 0.0,
         "guard_phases": {},
         "handler_ms": 0.0,
@@ -139136,9 +139137,10 @@ def _callback_latency_log(scope: dict, outcome: str | None = None) -> None:
     ) or "none"
     try:
         logger.info(
-            "callback_dispatch_timing prefix=%s handler=%s guard_ms=%.3f guard_phases=%s handler_ms=%.3f "
+            "callback_dispatch_timing prefix=%s route_key=%s handler=%s guard_ms=%.3f guard_phases=%s handler_ms=%.3f "
             "render_helper_ms=%.3f render_helper_calls=%d dispatch_ms=%.3f outcome=%s",
             scope["prefix"],
+            scope["route_key"],
             scope["handler"],
             scope["guard_ms"],
             guard_phases,
@@ -139169,6 +139171,8 @@ def _callback_latency_wrap_handler(callback, group: int, pattern):
         if group >= 0 and scope["handler"] == "unmatched":
             scope["handler"] = handler_name
             scope["prefix"] = route_prefix
+            if route_prefix == "menu" and getattr(update.callback_query, "data", None) == "menu|main_profile":
+                scope["route_key"] = "account_root"
         started_at = time.perf_counter()
         failure_outcome = None
         try:

@@ -75,7 +75,12 @@ class CallbackDispatchTimingTests(unittest.TestCase):
         self.now += 0.005
         return "rendered"
 
-    def _fixture(self, route_callback):
+    def _fixture(
+        self,
+        route_callback,
+        callback_data="shopai|PRIVATE-CALLBACK-SECRET",
+        pattern=r"^shopai\|",
+    ):
         async def dispatch_throttle_callback_guard(_update, _context):
             self.now += 0.001
 
@@ -89,11 +94,11 @@ class CallbackDispatchTimingTests(unittest.TestCase):
             -11: [CallbackQueryHandler(dispatch_throttle_callback_guard)],
             -10: [CallbackQueryHandler(safe_mode_callback_guard)],
             -9: [CallbackQueryHandler(video_public_callback_dedupe_guard)],
-            0: [CallbackQueryHandler(route_callback, r"^shopai\|")],
+            0: [CallbackQueryHandler(route_callback, pattern)],
         })
         self.namespace["install_callback_latency_instrumentation"](app)
         update = SimpleNamespace(callback_query=SimpleNamespace(
-            data="shopai|PRIVATE-CALLBACK-SECRET",
+            data=callback_data,
             from_user=SimpleNamespace(id=987654321),
         ))
         return app, update, SimpleNamespace()
@@ -143,6 +148,39 @@ class CallbackDispatchTimingTests(unittest.TestCase):
             "PRIVATE-CALLBACK-SECRET", "PRIVATE-MESSAGE-SECRET", "987654321"
         )))
         self.assertIsNone(self.namespace["_CALLBACK_LATENCY_CONTEXT"].get())
+
+    def test_account_root_records_only_its_fixed_route_key(self):
+        async def route(update, _context):
+            await self.namespace["safe_edit_query_message"](
+                update.callback_query, "PRIVATE-MESSAGE-SECRET"
+            )
+
+        route.__name__ = "handle_menu_callback"
+        observer_logs = []
+        for callback_data, expected_route_key in (
+            ("menu|main_profile", "account_root"),
+            ("menu|main_profile|PRIVATE-CALLBACK-SECRET", "unclassified"),
+        ):
+            with self.subTest(callback_data=callback_data.split("|")[1]):
+                app, update, context = self._fixture(
+                    route, callback_data=callback_data, pattern=r"^menu\|"
+                )
+                observer_group = max(app.handlers)
+
+                async def dispatch():
+                    await self._run_guards(app, update, context)
+                    await app.handlers[0][0].callback(update, context)
+                    await app.handlers[observer_group][0].callback(update, context)
+
+                asyncio.run(dispatch())
+                observer_logs.append(self.logs[-1])
+                fields = dict(re.findall(r"(\w+)=([^ ]+)", self.logs[-1]))
+                self.assertEqual(fields.get("route_key"), expected_route_key)
+                self.assertNotIn("PRIVATE-CALLBACK-SECRET", self.logs[-1])
+                self.assertNotIn("PRIVATE-MESSAGE-SECRET", self.logs[-1])
+                self.assertNotIn("987654321", self.logs[-1])
+
+        self.assertEqual(len(observer_logs), 2)
 
     def test_stopped_shared_guard_logs_coarse_block_and_resets_scope(self):
         async def blocked_guard(_update, _context):
