@@ -2,10 +2,12 @@
 """Provider-free test matrix for R05A source-video transfer via Local Bot API / canonical media transport.
 
 Enforces:
-- Fixture token fail-closed (tokens like PV-L05-SELFSHOT-FIXTURE-AUTHORITATIVE-001 cannot masquerade as Telegram file_id)
-- Delegation to canonical shared downloader (download_video_editor_asset_bytes)
+- Opaque file_id delegation to canonical shared downloader (download_video_editor_asset_bytes)
+- Removal of ungrounded shape/content guessing (no substring or regex authority heuristics)
+- Fail-closed behavior for missing/blank file_id and downstream Telegram transfer failures
 - Local Bot API absolute path and streaming transport safety
-- Integrity verification (hash and size verification)
+- Truthful large-media test evidence (actual 32,391,742-byte payload, >20 MiB capability)
+- Integrity verification (hash and size verification without overclaiming fixture identity)
 - Remote worker download integration and cleanup on failure
 - Zero real provider calls, zero DB mutations, zero wallet mutations.
 """
@@ -85,46 +87,12 @@ def _insert_job(
     return job_id
 
 
-# ─── CANONICAL SHARED TRANSPORT WIRING TEST ──────────────────────────────────
+# ─── 19-CASE TEST MATRIX (PHASE 7) ───────────────────────────────────────────
 
-def test_canonical_shared_downloader_wiring() -> None:
-    """Proves the hardened post-fix wiring: delegates to download_video_editor_asset_bytes."""
-    endpoint_src = inspect.getsource(bot.api_worker_selfshot3_source_video)
-    assert "download_video_editor_asset_bytes" in endpoint_src, (
-        "Endpoint must delegate to download_video_editor_asset_bytes"
-    )
-    assert "download_as_bytearray" not in endpoint_src, (
-        "Endpoint must not directly call download_as_bytearray"
-    )
-
-
-# ─── 18-CASE TEST MATRIX ─────────────────────────────────────────────────────
-
-def test_01_invalid_fixture_token_cannot_masquerade_as_telegram_file_id(
+def test_01_missing_source_file_id_fails_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """01: Internal fixture tokens (e.g. PV-L05-SELFSHOT-FIXTURE-AUTHORITATIVE-001) fail closed."""
-    db_path = _setup_test_db(tmp_path)
-    job_id = _insert_job(db_path, source_file_id=INVALID_FIXTURE_TOKEN)
-    monkeypatch.setattr(bot, "db_connect", lambda: sqlite3.connect(str(db_path), check_same_thread=False))
-    monkeypatch.setattr(bot, "LOCAL_WORKER_TOKEN", "test-token")
-    mock_bot = MagicMock()
-    monkeypatch.setattr(bot, "tg_app", SimpleNamespace(bot=mock_bot))
-
-    client = TestClient(bot.fastapi_app)
-    response = client.get(
-        f"/api/v1/worker/jobs/{job_id}/source-video",
-        headers={"Authorization": "Bearer test-token"},
-    )
-    # Must fail closed with 422 (or 400), and MUST NOT call tg_app.bot.get_file
-    assert response.status_code in (400, 422)
-    assert not mock_bot.get_file.called
-
-
-def test_02_missing_source_file_id_fails_closed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """02: Missing source_file_id fails closed with 404."""
+    """01: Missing source_file_id fails closed with 404."""
     db_path = _setup_test_db(tmp_path)
     job_id = _insert_job(db_path, source_file_id="")
     monkeypatch.setattr(bot, "db_connect", lambda: sqlite3.connect(str(db_path), check_same_thread=False))
@@ -139,10 +107,10 @@ def test_02_missing_source_file_id_fails_closed(
     assert "source_file_id_missing" in response.text
 
 
-def test_03_blank_source_file_id_fails_closed(
+def test_02_blank_source_file_id_fails_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """03: Blank or whitespace source_file_id fails closed with 404."""
+    """02: Blank or whitespace source_file_id fails closed with 404."""
     db_path = _setup_test_db(tmp_path)
     job_id = _insert_job(db_path, source_file_id="   ")
     monkeypatch.setattr(bot, "db_connect", lambda: sqlite3.connect(str(db_path), check_same_thread=False))
@@ -157,60 +125,13 @@ def test_03_blank_source_file_id_fails_closed(
     assert "source_file_id_missing" in response.text
 
 
-def test_04_source_endpoint_requires_worker_authentication(
+def test_03_arbitrary_opaque_file_id_delegates_to_shared_transport(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """04: Source endpoint strictly requires valid worker bearer authentication."""
+    """03: Arbitrary non-empty opaque file_id delegates to shared transport without fuzzy lexical rejection."""
     db_path = _setup_test_db(tmp_path)
-    job_id = _insert_job(db_path)
-    monkeypatch.setattr(bot, "db_connect", lambda: sqlite3.connect(str(db_path), check_same_thread=False))
-    monkeypatch.setattr(bot, "LOCAL_WORKER_TOKEN", "valid-secret-token")
-
-    client = TestClient(bot.fastapi_app)
-    # Missing token
-    resp_no_auth = client.get(f"/api/v1/worker/jobs/{job_id}/source-video")
-    assert resp_no_auth.status_code in (401, 403)
-
-    # Wrong token
-    resp_bad_auth = client.get(
-        f"/api/v1/worker/jobs/{job_id}/source-video",
-        headers={"Authorization": "Bearer invalid-wrong-token"},
-    )
-    assert resp_bad_auth.status_code in (401, 403)
-
-
-def test_05_wrong_job_cannot_cross_use_r05a_source_authority(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """05: Non-selfshot product or inactive job cannot cross-use source authority."""
-    db_path = _setup_test_db(tmp_path)
-    monkeypatch.setattr(bot, "db_connect", lambda: sqlite3.connect(str(db_path), check_same_thread=False))
-    monkeypatch.setattr(bot, "LOCAL_WORKER_TOKEN", "test-token")
-
-    # Inactive job status
-    inactive_job_id = _insert_job(db_path, status="completed")
-    client = TestClient(bot.fastapi_app)
-    resp_inactive = client.get(
-        f"/api/v1/worker/jobs/{inactive_job_id}/source-video",
-        headers={"Authorization": "Bearer test-token"},
-    )
-    assert resp_inactive.status_code == 409
-
-    # Non-selfshot product type
-    other_product_job_id = _insert_job(db_path, product_type="standard_video")
-    resp_other = client.get(
-        f"/api/v1/worker/jobs/{other_product_job_id}/source-video",
-        headers={"Authorization": "Bearer test-token"},
-    )
-    assert resp_other.status_code == 404
-
-
-def test_06_valid_telegram_file_id_delegates_to_canonical_shared_downloader(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """06: Valid Telegram file_id delegates to canonical download_video_editor_asset_bytes."""
-    db_path = _setup_test_db(tmp_path)
-    job_id = _insert_job(db_path, source_file_id=VALID_TELEGRAM_FILE_ID)
+    opaque_file_id = "arbitrary_opaque_source_file_id_987654321"
+    job_id = _insert_job(db_path, source_file_id=opaque_file_id)
     monkeypatch.setattr(bot, "db_connect", lambda: sqlite3.connect(str(db_path), check_same_thread=False))
     monkeypatch.setattr(bot, "LOCAL_WORKER_TOKEN", "test-token")
     mock_bot = MagicMock()
@@ -220,7 +141,7 @@ def test_06_valid_telegram_file_id_delegates_to_canonical_shared_downloader(
 
     async def fake_shared_downloader(context, source, maximum_bytes, **kwargs):
         downloader_called.append((source.get("file_id"), maximum_bytes))
-        return b"fake-video-content-from-shared-downloader"
+        return b"arbitrary-opaque-content"
 
     monkeypatch.setattr(bot, "download_video_editor_asset_bytes", fake_shared_downloader)
 
@@ -230,15 +151,131 @@ def test_06_valid_telegram_file_id_delegates_to_canonical_shared_downloader(
         headers={"Authorization": "Bearer test-token"},
     )
     assert response.status_code == 200
-    assert response.content == b"fake-video-content-from-shared-downloader"
+    assert response.content == b"arbitrary-opaque-content"
     assert len(downloader_called) == 1
-    assert downloader_called[0][0] == VALID_TELEGRAM_FILE_ID
+    assert downloader_called[0][0] == opaque_file_id
 
 
-def test_07_local_bot_api_absolute_file_path_handled_through_safe_transport(
+def test_04_file_id_containing_test_substring_not_rejected_by_spelling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """04: file_id containing text such as 'test', 'fixture', 'mock' is not rejected solely by substring content."""
+    db_path = _setup_test_db(tmp_path)
+    token_with_substrings = "test_fixture_mock_sample_authoritative_source_001"
+    job_id = _insert_job(db_path, source_file_id=token_with_substrings)
+    monkeypatch.setattr(bot, "db_connect", lambda: sqlite3.connect(str(db_path), check_same_thread=False))
+    monkeypatch.setattr(bot, "LOCAL_WORKER_TOKEN", "test-token")
+    mock_bot = MagicMock()
+    monkeypatch.setattr(bot, "tg_app", SimpleNamespace(bot=mock_bot))
+
+    downloader_called = []
+
+    async def fake_shared_downloader(context, source, maximum_bytes, **kwargs):
+        downloader_called.append(source.get("file_id"))
+        return b"content-for-token-with-test-substring"
+
+    monkeypatch.setattr(bot, "download_video_editor_asset_bytes", fake_shared_downloader)
+
+    client = TestClient(bot.fastapi_app)
+    response = client.get(
+        f"/api/v1/worker/jobs/{job_id}/source-video",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert response.status_code == 200
+    assert response.content == b"content-for-token-with-test-substring"
+    assert downloader_called == [token_with_substrings]
+
+
+def test_05_non_semantic_opaque_file_id_not_rejected_by_regex(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """05: file_id with non-semantic opaque form is not rejected by invented regex, and downstream failure maps fail closed."""
+    db_path = _setup_test_db(tmp_path)
+    non_semantic_file_id = "pv-source-input-stream.01.mp4"
+    job_id = _insert_job(db_path, source_file_id=non_semantic_file_id)
+    monkeypatch.setattr(bot, "db_connect", lambda: sqlite3.connect(str(db_path), check_same_thread=False))
+    monkeypatch.setattr(bot, "LOCAL_WORKER_TOKEN", "test-token")
+    mock_bot = MagicMock()
+    monkeypatch.setattr(bot, "tg_app", SimpleNamespace(bot=mock_bot))
+
+    downloader_called = []
+
+    async def fake_shared_downloader(context, source, maximum_bytes, **kwargs):
+        downloader_called.append(source.get("file_id"))
+        return b"non-semantic-content"
+
+    monkeypatch.setattr(bot, "download_video_editor_asset_bytes", fake_shared_downloader)
+
+    client = TestClient(bot.fastapi_app)
+    response = client.get(
+        f"/api/v1/worker/jobs/{job_id}/source-video",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert response.status_code == 200
+    assert response.content == b"non-semantic-content"
+    assert downloader_called == [non_semantic_file_id]
+
+    # Verify downstream Telegram download failure maps fail closed without leaking details
+    async def fake_failing_downloader(context, source, maximum_bytes, **kwargs):
+        raise RuntimeError("telegram_file_not_found: Invalid file_id")
+
+    monkeypatch.setattr(bot, "download_video_editor_asset_bytes", fake_failing_downloader)
+    failing_response = client.get(
+        f"/api/v1/worker/jobs/{job_id}/source-video",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert failing_response.status_code == 502
+    assert "source_video_download_failed" in failing_response.text
+
+
+def test_06_canonical_shared_downloader_called_exactly_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """06: Canonical shared downloader (download_video_editor_asset_bytes) is called exactly once."""
+    db_path = _setup_test_db(tmp_path)
+    job_id = _insert_job(db_path, source_file_id=VALID_TELEGRAM_FILE_ID)
+    monkeypatch.setattr(bot, "db_connect", lambda: sqlite3.connect(str(db_path), check_same_thread=False))
+    monkeypatch.setattr(bot, "LOCAL_WORKER_TOKEN", "test-token")
+    mock_bot = MagicMock()
+    monkeypatch.setattr(bot, "tg_app", SimpleNamespace(bot=mock_bot))
+
+    downloader_invocations = []
+
+    async def fake_shared_downloader(context, source, maximum_bytes, **kwargs):
+        downloader_invocations.append((context, source, maximum_bytes))
+        return b"single-call-video-payload"
+
+    monkeypatch.setattr(bot, "download_video_editor_asset_bytes", fake_shared_downloader)
+
+    client = TestClient(bot.fastapi_app)
+    response = client.get(
+        f"/api/v1/worker/jobs/{job_id}/source-video",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert response.status_code == 200
+    assert response.content == b"single-call-video-payload"
+    assert len(downloader_invocations) == 1
+    assert downloader_invocations[0][1]["file_id"] == VALID_TELEGRAM_FILE_ID
+
+
+def test_07_endpoint_contains_no_direct_download_as_bytearray_coupling() -> None:
+    """07: Endpoint contains no direct download_as_bytearray coupling; delegates to canonical shared transport."""
+    endpoint_src = inspect.getsource(bot.api_worker_selfshot3_source_video)
+    assert "download_video_editor_asset_bytes" in endpoint_src, (
+        "Endpoint must delegate to download_video_editor_asset_bytes"
+    )
+    assert "download_as_bytearray" not in endpoint_src, (
+        "Endpoint must not directly couple to download_as_bytearray"
+    )
+    assert "tg_app.bot.get_file" not in endpoint_src, (
+        "Endpoint must not directly call tg_app.bot.get_file"
+    )
+
+
+def test_08_local_bot_api_absolute_path_contract_preserved(
     monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """07: Local Bot API server path is safely converted to reverse proxy URL."""
+    """08: Local Bot API absolute file path contract is preserved and mapped to reverse proxy URL."""
     monkeypatch.setattr(bot, "telegram_local_api_enabled", lambda: True)
     monkeypatch.setattr(bot, "TELEGRAM_LOCAL_API_FILE_ROOT", "/var/lib/telegram-bot-api")
     monkeypatch.setattr(bot, "TELEGRAM_API_ROOT", "http://127.0.0.1:8081")
@@ -248,10 +285,10 @@ def test_07_local_bot_api_absolute_file_path_handled_through_safe_transport(
     assert url == "http://127.0.0.1:8081/local-media/bot12345/videos/file_42.mp4"
 
 
-def test_08_local_bot_api_path_traversal_rejected(
+def test_09_unsafe_local_media_traversal_origin_protection_preserved(
     monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """08: Path traversal attempts in file_path return empty URL."""
+    """09: Unsafe path traversal attempts return empty URL, and disallowed origins are rejected."""
     monkeypatch.setattr(bot, "telegram_local_api_enabled", lambda: True)
     monkeypatch.setattr(bot, "TELEGRAM_LOCAL_API_FILE_ROOT", "/var/lib/telegram-bot-api")
 
@@ -259,20 +296,15 @@ def test_08_local_bot_api_path_traversal_rejected(
     assert bot.telegram_local_media_url("/var/lib/telegram-bot-api/../etc/passwd") == ""
     assert bot.telegram_local_media_url("/var/lib/telegram-bot-api/token/../../shadow") == ""
 
-
-def test_09_unsafe_origin_or_redirect_cannot_receive_credentials(
-    monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """09: validate_api_url rejects non-local/disallowed hosts and redirects are disabled."""
     from services import telegram_transport
     with pytest.raises(ValueError):
         telegram_transport.validate_api_url("http://remote-attacker.com/evil")
 
 
-def test_10_simulated_32mb_source_contract_succeeds_without_cloud_limits(
+def test_10_truthful_large_media_transport_capability_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """10: Simulated canonical fixture length (32,391,742 bytes) transfers through abstraction."""
+    """10: Truthful >20 MiB / 32,391,742-byte transport-capability evidence without fake 1KB mock."""
     db_path = _setup_test_db(tmp_path)
     job_id = _insert_job(db_path, source_file_id=VALID_TELEGRAM_FILE_ID)
     monkeypatch.setattr(bot, "db_connect", lambda: sqlite3.connect(str(db_path), check_same_thread=False))
@@ -280,10 +312,16 @@ def test_10_simulated_32mb_source_contract_succeeds_without_cloud_limits(
     mock_bot = MagicMock()
     monkeypatch.setattr(bot, "tg_app", SimpleNamespace(bot=mock_bot))
 
-    simulated_payload = b"X" * 1024  # Lightweight payload with simulated length
+    # Truthful provider-free exact-size payload of 32,391,742 bytes (CANONICAL_FIXTURE_BYTES)
+    actual_32mb_payload = b"M" * CANONICAL_FIXTURE_BYTES
+    downloader_called = []
+
     async def fake_shared_downloader(context, source, maximum_bytes, **kwargs):
-        assert maximum_bytes >= CANONICAL_FIXTURE_BYTES
-        return simulated_payload
+        downloader_called.append(maximum_bytes)
+        assert maximum_bytes >= CANONICAL_FIXTURE_BYTES, (
+            f"max_bytes ({maximum_bytes}) must admit canonical fixture bytes ({CANONICAL_FIXTURE_BYTES})"
+        )
+        return actual_32mb_payload
 
     monkeypatch.setattr(bot, "download_video_editor_asset_bytes", fake_shared_downloader)
 
@@ -293,18 +331,20 @@ def test_10_simulated_32mb_source_contract_succeeds_without_cloud_limits(
         headers={"Authorization": "Bearer test-token"},
     )
     assert response.status_code == 200
-    assert response.content == simulated_payload
+    assert len(response.content) == CANONICAL_FIXTURE_BYTES
+    assert len(response.content) > 20 * 1024 * 1024, "Evidence proves >20 MiB transport capability"
+    assert response.content == actual_32mb_payload
+    assert len(downloader_called) == 1
 
 
-def test_11_transferred_bytes_hash_mismatch_fails_closed(
+def test_11_size_mismatch_fails_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """11: If expected_hash or expected_bytes mismatch, endpoint fails closed."""
+    """11: Size mismatch between asset_pack and downloaded bytes fails closed with 502."""
     db_path = _setup_test_db(tmp_path)
     job_id = _insert_job(
         db_path,
         source_file_id=VALID_TELEGRAM_FILE_ID,
-        source_hash="0000000000000000000000000000000000000000000000000000000000000000",
         source_bytes=999999,
     )
     monkeypatch.setattr(bot, "db_connect", lambda: sqlite3.connect(str(db_path), check_same_thread=False))
@@ -313,7 +353,7 @@ def test_11_transferred_bytes_hash_mismatch_fails_closed(
     monkeypatch.setattr(bot, "tg_app", SimpleNamespace(bot=mock_bot))
 
     async def fake_shared_downloader(context, source, maximum_bytes, **kwargs):
-        return b"some-actual-bytes-with-different-hash"
+        return b"only-12-bytes"
 
     monkeypatch.setattr(bot, "download_video_editor_asset_bytes", fake_shared_downloader)
 
@@ -323,22 +363,18 @@ def test_11_transferred_bytes_hash_mismatch_fails_closed(
         headers={"Authorization": "Bearer test-token"},
     )
     assert response.status_code == 502
-    assert "integrity_mismatch" in response.text or "hash_mismatch" in response.text or "size_mismatch" in response.text
+    assert "source_video_size_mismatch" in response.text
 
 
-def test_12_exact_fixture_sha_succeeds(
+def test_12_hash_mismatch_fails_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """12: Exact fixture SHA matches and transfer succeeds."""
-    payload = b"typing-source-sample-bytes"
-    payload_sha = hashlib.sha256(payload).hexdigest()
-
+    """12: Hash mismatch between asset_pack and downloaded bytes fails closed with 502."""
     db_path = _setup_test_db(tmp_path)
     job_id = _insert_job(
         db_path,
         source_file_id=VALID_TELEGRAM_FILE_ID,
-        source_hash=payload_sha,
-        source_bytes=len(payload),
+        source_hash="0000000000000000000000000000000000000000000000000000000000000000",
     )
     monkeypatch.setattr(bot, "db_connect", lambda: sqlite3.connect(str(db_path), check_same_thread=False))
     monkeypatch.setattr(bot, "LOCAL_WORKER_TOKEN", "test-token")
@@ -346,7 +382,41 @@ def test_12_exact_fixture_sha_succeeds(
     monkeypatch.setattr(bot, "tg_app", SimpleNamespace(bot=mock_bot))
 
     async def fake_shared_downloader(context, source, maximum_bytes, **kwargs):
-        return payload
+        return b"actual-bytes-with-mismatched-hash"
+
+    monkeypatch.setattr(bot, "download_video_editor_asset_bytes", fake_shared_downloader)
+
+    client = TestClient(bot.fastapi_app)
+    response = client.get(
+        f"/api/v1/worker/jobs/{job_id}/source-video",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert response.status_code == 502
+    assert "source_video_hash_mismatch" in response.text
+
+
+def test_13_matching_size_and_hash_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """13: Matching expected SHA-256 and size passes integrity verification without overclaiming canonical fixture bytes."""
+    test_payload = b"truthful-sample-bytes-for-integrity-verification"
+    payload_sha = hashlib.sha256(test_payload).hexdigest()
+    payload_size = len(test_payload)
+
+    db_path = _setup_test_db(tmp_path)
+    job_id = _insert_job(
+        db_path,
+        source_file_id=VALID_TELEGRAM_FILE_ID,
+        source_hash=payload_sha,
+        source_bytes=payload_size,
+    )
+    monkeypatch.setattr(bot, "db_connect", lambda: sqlite3.connect(str(db_path), check_same_thread=False))
+    monkeypatch.setattr(bot, "LOCAL_WORKER_TOKEN", "test-token")
+    mock_bot = MagicMock()
+    monkeypatch.setattr(bot, "tg_app", SimpleNamespace(bot=mock_bot))
+
+    async def fake_shared_downloader(context, source, maximum_bytes, **kwargs):
+        return test_payload
 
     monkeypatch.setattr(bot, "download_video_editor_asset_bytes", fake_shared_downloader)
 
@@ -356,13 +426,15 @@ def test_12_exact_fixture_sha_succeeds(
         headers={"Authorization": "Bearer test-token"},
     )
     assert response.status_code == 200
-    assert response.content == payload
+    assert response.content == test_payload
+    assert hashlib.sha256(response.content).hexdigest() == payload_sha
+    assert len(response.content) == payload_size
 
 
-def test_13_remote_worker_download_selfshot2_source_video_receives_exact_bytes(
+def test_14_remote_worker_materializes_exact_returned_bytes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """13: remote_worker.download_selfshot2_source_video materializes exact downloaded bytes."""
+    """14: remote_worker.download_selfshot2_source_video materializes exact downloaded bytes."""
     class _FakeResponse:
         def __init__(self, data: bytes):
             self._data = data
@@ -397,10 +469,10 @@ def test_13_remote_worker_download_selfshot2_source_video_receives_exact_bytes(
     assert job["source_video_local_path"] == str(target_path)
 
 
-def test_14_no_temporary_partial_file_remains_after_transfer_failure(
+def test_15_partial_worker_file_cleanup_on_transfer_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """14: On transfer failure, partial downloaded files are cleaned up immediately."""
+    """15: On transfer failure, partial downloaded files are cleaned up immediately."""
     class _FailingResponse:
         def read(self, n: int = -1):
             raise ConnectionResetError("network dropped mid-stream")
@@ -427,25 +499,64 @@ def test_14_no_temporary_partial_file_remains_after_transfer_failure(
     assert not expected_file.exists(), "Partial file must be unlinked on failure"
 
 
-def test_15_r05a_provider_route_not_invoked_during_source_transfer_tests() -> None:
-    """15: Strictly provider-free: no external video provider API calls in this test module."""
-    test_src = Path(__file__).read_text(encoding="utf-8").lower()
-    assert "key" + "4u" not in test_src
-    assert "shop" + "aikey" not in test_src
+def test_16_inactive_or_wrong_product_job_cannot_cross_use_source_authority(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """16: Inactive job (409) or wrong product job (404) cannot cross-use source authority."""
+    db_path = _setup_test_db(tmp_path)
+    monkeypatch.setattr(bot, "db_connect", lambda: sqlite3.connect(str(db_path), check_same_thread=False))
+    monkeypatch.setattr(bot, "LOCAL_WORKER_TOKEN", "test-token")
+
+    # Inactive job status
+    inactive_job_id = _insert_job(db_path, status="completed")
+    client = TestClient(bot.fastapi_app)
+    resp_inactive = client.get(
+        f"/api/v1/worker/jobs/{inactive_job_id}/source-video",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert resp_inactive.status_code == 409
+
+    # Non-selfshot product type
+    other_product_job_id = _insert_job(db_path, product_type="standard_video")
+    resp_other = client.get(
+        f"/api/v1/worker/jobs/{other_product_job_id}/source-video",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert resp_other.status_code == 404
 
 
-def test_16_wallet_customer_charging_not_invoked() -> None:
-    """16: Wallet mutation functions are not referenced or called."""
-    test_src = Path(__file__).read_text(encoding="utf-8").lower()
-    assert "wallet" + "_debit" not in test_src
-    assert "product_video_" + "charge" not in test_src
+def test_17_worker_authentication_required(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """17: Source endpoint strictly requires valid worker bearer authentication."""
+    db_path = _setup_test_db(tmp_path)
+    job_id = _insert_job(db_path)
+    monkeypatch.setattr(bot, "db_connect", lambda: sqlite3.connect(str(db_path), check_same_thread=False))
+    monkeypatch.setattr(bot, "LOCAL_WORKER_TOKEN", "valid-secret-token")
+
+    client = TestClient(bot.fastapi_app)
+    # Missing token
+    resp_no_auth = client.get(f"/api/v1/worker/jobs/{job_id}/source-video")
+    assert resp_no_auth.status_code in (401, 403)
+
+    # Wrong token
+    resp_bad_auth = client.get(
+        f"/api/v1/worker/jobs/{job_id}/source-video",
+        headers={"Authorization": "Bearer invalid-wrong-token"},
+    )
+    assert resp_bad_auth.status_code in (401, 403)
 
 
-def test_17_r05b_remains_unauthorized() -> None:
-    """17: R05B remains strictly unauthorized."""
+def test_18_r05b_remains_unauthorized() -> None:
+    """18: R05B remains strictly unauthorized."""
     assert os.getenv("R05B_AUTHORIZED", "NO").upper() == "NO"
 
 
-def test_18_r06_remains_unauthorized() -> None:
-    """18: R06 remains strictly unauthorized."""
+def test_19_r06_remains_unauthorized() -> None:
+    """19: R06 remains strictly unauthorized, and module is verified provider-free and mutation-free."""
     assert os.getenv("R06_AUTHORIZED", "NO").upper() == "NO"
+    test_src = Path(__file__).read_text(encoding="utf-8").lower()
+    assert "key" + "4u" not in test_src
+    assert "shop" + "aikey" not in test_src
+    assert "wallet" + "_debit" not in test_src
+    assert "product_video_" + "charge" not in test_src

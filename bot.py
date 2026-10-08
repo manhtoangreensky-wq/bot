@@ -277116,29 +277116,6 @@ async def api_worker_product_video_logo_material(job_id: int, request: Request):
     )
 
 
-def is_fixture_source_token(token: str) -> bool:
-    """Return True if token is an internal fixture label rather than a downloadable Telegram file_id."""
-    raw = str(token or "").strip()
-    if not raw:
-        return False
-    lower = raw.lower()
-    if any(k in lower for k in ("fixture", "authoritative", "mock", "sample", "test")):
-        return True
-    if re.match(r"(?i)^pv-[a-z0-9]", raw):
-        return True
-    if any(raw.endswith(ext) for ext in (".mp4", ".mov", ".mkv", ".webm", ".avi", ".bin", ".jpg", ".png")):
-        return True
-    return False
-
-
-def is_telegram_downloadable_file_id(token: str) -> bool:
-    """Return True if token conforms to downloadable Telegram file_id format."""
-    raw = str(token or "").strip()
-    if not raw or is_fixture_source_token(raw):
-        return False
-    return bool(re.fullmatch(r"^[A-Za-z0-9_-]{10,512}$", raw))
-
-
 @fastapi_app.get("/api/v1/worker/jobs/{job_id}/source-video")
 async def api_worker_selfshot3_source_video(job_id: int, request: Request):
     """Transfer a confirmed self-shot source to its authenticated worker only."""
@@ -277183,8 +277160,6 @@ async def api_worker_selfshot3_source_video(job_id: int, request: Request):
     ).strip()
     if not file_id:
         raise HTTPException(status_code=404, detail="source_file_id_missing")
-    if is_fixture_source_token(file_id) or not is_telegram_downloadable_file_id(file_id):
-        raise HTTPException(status_code=422, detail="source_file_id_invalid")
     if tg_app is None or getattr(tg_app, "bot", None) is None:
         raise HTTPException(status_code=503, detail="telegram_source_transfer_unavailable")
     default_source_max = (
