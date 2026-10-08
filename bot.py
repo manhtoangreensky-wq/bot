@@ -277179,14 +277179,29 @@ async def api_worker_selfshot3_source_video(job_id: int, request: Request):
             default_source_max,
         ),
     )
+    context = SimpleNamespace(bot=tg_app.bot)
     try:
-        telegram_file = await tg_app.bot.get_file(file_id)
-        declared_size = safe_int(getattr(telegram_file, "file_size", 0), 0)
-        if declared_size and declared_size > max_bytes:
-            raise HTTPException(status_code=413, detail="source_video_too_large")
-        content = bytes(await telegram_file.download_as_bytearray())
+        content = await download_video_editor_asset_bytes(
+            context,
+            {"file_id": file_id},
+            max_bytes,
+            read_timeout=float(os.getenv("TELEGRAM_DOWNLOAD_TIMEOUT_SECONDS", "180.0")),
+        )
     except HTTPException:
         raise
+    except RuntimeError as exc:
+        err_msg = str(exc)
+        if "asset_too_large" in err_msg:
+            raise HTTPException(status_code=413, detail="source_video_too_large") from exc
+        if "asset_empty" in err_msg:
+            raise HTTPException(status_code=502, detail="source_video_empty") from exc
+        logger.warning(
+            "selfshot_source_transfer_failed | job_id=%s | product=%s | error=%s",
+            job_id,
+            product_type,
+            err_msg,
+        )
+        raise HTTPException(status_code=502, detail="source_video_download_failed") from exc
     except Exception as exc:
         logger.warning(
             "selfshot_source_transfer_failed | job_id=%s | product=%s | error=%s",
@@ -277199,6 +277214,42 @@ async def api_worker_selfshot3_source_video(job_id: int, request: Request):
         raise HTTPException(status_code=502, detail="source_video_empty")
     if len(content) > max_bytes:
         raise HTTPException(status_code=413, detail="source_video_too_large")
+
+    expected_bytes = safe_int(
+        asset_pack.get("source_bytes")
+        or source_video.get("file_size")
+        or source_video.get("declared_size")
+        or 0,
+        0,
+    )
+    if expected_bytes and len(content) != expected_bytes:
+        logger.warning(
+            "selfshot_source_size_mismatch | job_id=%s | expected=%s | actual=%s",
+            job_id,
+            expected_bytes,
+            len(content),
+        )
+        raise HTTPException(status_code=502, detail="source_video_size_mismatch")
+
+    expected_hash = str(
+        asset_pack.get("source_hash")
+        or asset_pack.get("source_sha256")
+        or source_video.get("source_sha256")
+        or source_video.get("sha256")
+        or source_video.get("file_hash")
+        or ""
+    ).strip().lower()
+    if expected_hash:
+        actual_hash = hashlib.sha256(content).hexdigest().lower()
+        if actual_hash != expected_hash:
+            logger.warning(
+                "selfshot_source_hash_mismatch | job_id=%s | expected=%s | actual=%s",
+                job_id,
+                expected_hash,
+                actual_hash,
+            )
+            raise HTTPException(status_code=502, detail="source_video_hash_mismatch")
+
     default_filename = "selfshot2-source.mp4" if product_type == video_selfshot2.JOB_TYPE else "selfshot3-source.mp4"
     filename = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(source_video.get("file_name") or default_filename))[:120]
     if not filename.lower().endswith((".mp4", ".mov", ".mkv", ".webm")):
