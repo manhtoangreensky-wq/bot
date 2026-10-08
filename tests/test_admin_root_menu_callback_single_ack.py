@@ -1740,6 +1740,7 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
             "profile_referral_stats": "Referral stats",
             "profile_referral_policy": "Referral policy",
             "profile_change_language": "Language",
+            "profile_back_account": "Back to Account",
             "main_menu": "Main menu",
         }
         dependencies.update({
@@ -1749,11 +1750,16 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
             "get_user": lambda uid: (37, 120, False),
             "get_role_badge": lambda _uid: "Member",
             "user_package_account_short_text": lambda _uid, _lang: "Packages: none",
+            "user_package_summary_text": lambda _uid, lang="vi": "Packages: fixture only",
+            "referral_account_link_text": lambda _uid, _bot, _lang: "Referral link fixture",
+            "referral_account_stats_text": lambda _uid, _lang: "Referral stats fixture",
+            "referral_account_policy_text": lambda _uid, _lang: "Referral policy fixture",
+            "BOT_USERNAME": "fixture_bot",
             "public_hub_copy": lambda lang: {**root_copy(lang), **profile_copy},
             "localized_start_menu_text": lambda _uid, _lang: "MAIN SCREEN",
         })
         ui = _load_functions(
-            "localized_main_menu_keyboard", "main_profile_keyboard",
+            "localized_main_menu_keyboard", "main_profile_keyboard", "profile_child_keyboard",
             "menu_text_main_profile_i18n", "localized_menu_content",
             **dependencies,
         )
@@ -1761,6 +1767,7 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
             name: ui[name]
             for name in (
                 "localized_main_menu_keyboard", "main_profile_keyboard",
+                "profile_child_keyboard",
                 "menu_text_main_profile_i18n", "localized_menu_content",
             )
         })
@@ -1813,6 +1820,84 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
         self.assertEqual([((), {})], home_query.answers)
         self.assertEqual("MAIN SCREEN", home_query.edits[0][0])
         self.assertIsInstance(home_query.edits[0][1]["reply_markup"], _Markup)
+
+        packages_callback = next(
+            button.callback_data
+            for row in account_markup.inline_keyboard
+            for button in row
+            if button.callback_data == "menu|profile_packages"
+        )
+        self.assertRegex(packages_callback, _registered_menu_pattern())
+        packages_query = _Query(991127, packages_callback)
+        asyncio.run(namespace["handle_menu_callback"](
+            SimpleNamespace(callback_query=packages_query), context,
+        ))
+        self.assertEqual([((), {})], packages_query.answers)
+        self.assertEqual("Packages: fixture only", packages_query.edits[0][0])
+        packages_markup = packages_query.edits[0][1]["reply_markup"]
+        packages_callbacks = [
+            button.callback_data
+            for row in packages_markup.inline_keyboard
+            for button in row
+        ]
+        self.assertIn("menu|main_profile", packages_callbacks)
+        self.assertIn("menu|main", packages_callbacks)
+
+        account_back = next(
+            callback for callback in packages_callbacks
+            if callback == "menu|main_profile"
+        )
+        self.assertRegex(account_back, _registered_menu_pattern())
+        account_return_query = _Query(991127, account_back)
+        asyncio.run(namespace["handle_menu_callback"](
+            SimpleNamespace(callback_query=account_return_query), context,
+        ))
+        self.assertEqual([((), {})], account_return_query.answers)
+        self.assertIn("<b>Account</b>", account_return_query.edits[0][0])
+        returned_account_callbacks = [
+            button.callback_data
+            for row in account_return_query.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+        ]
+        self.assertEqual(
+            [button.callback_data for button in account_buttons],
+            returned_account_callbacks,
+        )
+
+        for referral_callback, expected_text in (
+            ("menu|profile_ref_link", "Referral link fixture"),
+            ("menu|profile_ref_stats", "Referral stats fixture"),
+            ("menu|profile_ref_policy", "Referral policy fixture"),
+        ):
+            with self.subTest(referral_callback=referral_callback):
+                self.assertRegex(referral_callback, _registered_menu_pattern())
+                referral_query = _Query(991127, referral_callback)
+                asyncio.run(namespace["handle_menu_callback"](
+                    SimpleNamespace(callback_query=referral_query), context,
+                ))
+                self.assertEqual([((), {})], referral_query.answers)
+                self.assertEqual(expected_text, referral_query.edits[0][0])
+                child_callbacks = [
+                    button.callback_data
+                    for row in referral_query.edits[0][1]["reply_markup"].inline_keyboard
+                    for button in row
+                ]
+                self.assertEqual(["menu|main_profile", "menu|main"], child_callbacks)
+
+                referral_back = _Query(991127, "menu|main_profile")
+                asyncio.run(namespace["handle_menu_callback"](
+                    SimpleNamespace(callback_query=referral_back), context,
+                ))
+                self.assertEqual([((), {})], referral_back.answers)
+                self.assertIn("<b>Account</b>", referral_back.edits[0][0])
+                self.assertEqual(
+                    [button.callback_data for button in account_buttons],
+                    [
+                        button.callback_data
+                        for row in referral_back.edits[0][1]["reply_markup"].inline_keyboard
+                        for button in row
+                    ],
+                )
 
     def test_customer_feedback_root_button_dispatches_to_registered_feedback_handler(self):
         effects = []
