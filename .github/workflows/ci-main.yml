@@ -114,7 +114,11 @@ jobs:
             tests/test_support_ticket_send_concurrency.py \
             tests/test_support_ticket_file_send_concurrency.py \
             tests/test_support_ticket_send_matches_preview.py \
-            tests/test_subdub_voice_child_back.py
+            tests/test_internal_archive_type_back_label.py \
+            tests/test_internal_archive_search_back_origin.py \
+            tests/test_doc_split_back_emitted_callback.py \
+            tests/test_subdub_voice_child_back.py \
+            tests/test_voice_settings_input_back.py
 
       - name: Run Workflow Hygiene Unit Tests
         run: |

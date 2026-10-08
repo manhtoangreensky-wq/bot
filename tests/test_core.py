@@ -9056,7 +9056,7 @@ def test_document_pdf_tools_v6_guided_upload_confirm_flow():
     confirm_callbacks = [button.callback_data for row in bot.doc_tool_confirm_keyboard().inline_keyboard for button in row]
     assert "docflow|run" in confirm_callbacks
     assert "docflow|reset_files" in confirm_callbacks
-    assert "docflow|back" in confirm_callbacks
+    assert "docflow|back|main_docs" in confirm_callbacks
 
     merge_state = bot.set_doc_tool_pending("u-doc", "merge_pdf")
     merge_state["doc_tool_files"] = [pdf_info, {**pdf_info, "file_name": "b.pdf"}]
@@ -9080,7 +9080,7 @@ def test_document_pdf_tools_v6_guided_upload_confirm_flow():
     assert save_start_callbacks == [
         "docflow|send_more",
         "menu|memory_storage_status",
-        "docflow|back",
+        "docflow|back|main_memory",
         "menu|main",
     ]
     callback_source = source_between(source, "async def handle_doc_tool_callback", "async def cmd_doc_tools")

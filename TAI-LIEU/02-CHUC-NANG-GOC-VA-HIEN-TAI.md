@@ -888,3 +888,10 @@ provider-fallback `56`, exact-two `3` passed; changed-file compile và
 | Mẫu handler dưới 1s chứng minh mọi nút mượt trên thiết bị | Sample menu 306.038–512.953ms không gồm click-to-screen hoặc pre-handler/client | Chưa chứng minh; ghi Owner-deferred để đo tương quan, không thay routing/engine theo suy đoán |
 
 Các trạng thái trên là bằng chứng fixture/source của batch; CI, merge, deploy và live được ghi riêng trong báo cáo closure.
+
+## Ranh giới Product Video/SubDub trong batch UI Telegram — 09/10/2026
+
+- Batch callback/UI đang tiếp tục trong `TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md`; đây không phải thay đổi chức năng hoặc engine Product Video/SubDub.
+- Diff local có thay đổi trong `bot.py` ở các nhánh UI/callback và các test/CI/tài liệu; không có module service/provider/worker/engine. Không suy từ test điều hướng rằng engine hoặc mọi terminal nghiệp vụ đã được kiểm thử.
+- Owner loại S12.35.106 (áp dụng lựa chọn tỉ lệ vào prompt pack Image Story) khỏi batch; không giữ thay đổi đầu ra prompt. Vì vậy bảng so sánh chức năng Product Video/SubDub phía trên không được cập nhật thành “đã sửa” bởi đợt UI này.
+- Trạng thái cập nhật 09/10/2026 04:32 +07: sau rebase lên main `96dd9020…`, regression chuẩn-library chạy lại `Ran 53 tests in 25.490s — OK`; một lệnh mở rộng không import được `tests.test_core` vì local thiếu `fastapi`, và Voice Settings thiếu `pytest`, nên hai cổng đó chờ CI. Full `bot.py` local compile vẫn `NOT_VERIFIED` sau lần chạy hơn 6 phút không có output. Main/VPS hiện cùng `96dd90201a89465555871276cf687fdebfff8cb0`; batch UI chưa push/PR/merge/deploy. Chi tiết A7 và các giới hạn Telegram-client nằm trong checklist và báo cáo closure.

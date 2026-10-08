@@ -42978,7 +42978,7 @@ def translation_voice_menu_keyboard(lang: str = "vi", parent: str = "media") -> 
         back = (f"⬅️ {copy['translation_language']}", "menu|translation_language_hub")
     return build_2col_keyboard(
         [
-            (f"📝 {copy['translation_text']}", "tr_pick|voice"),
+            (f"🌐 {copy['translation_audio']}", "tr_pick|voice"),
             (f"🔊 {copy['translation_session_enable_voice']}", "menu|translation_output_voice"),
         ],
         nav_back=back,
@@ -61223,6 +61223,28 @@ def feedback_start_text(lang: str = "vi") -> str:
         "Nếu liên quan đến nạp Xu, tạo ảnh/video, tài liệu hoặc hoàn Xu, "
         "TOAN AAS sẽ tạo ticket để admin kiểm tra."
     )
+
+def feedback_expired_text(lang: str = "vi") -> str:
+    lang = normalize_user_language(lang) or "en"
+    return {
+        "vi": "⏰ Phiên góp ý đã hết hạn. Vui lòng chọn lại nhóm để gửi nội dung.",
+        "en": "⏰ The feedback form expired. Please choose a category again.",
+        "zh": "⏰ 反馈表单已过期，请重新选择类别。",
+        "es": "⏰ El formulario de comentarios ha caducado. Selecciona de nuevo una categoría.",
+        "pt": "⏰ O formulário de feedback expirou. Selecione novamente uma categoria.",
+        "fr": "⏰ Le formulaire de retour a expiré. Veuillez sélectionner une catégorie à nouveau.",
+        "de": "⏰ Das Feedback-Formular ist abgelaufen. Bitte wählen Sie erneut eine Kategorie.",
+        "ja": "⏰ フィードバックフォームの有効期限が切れました。カテゴリを選び直してください。",
+        "ko": "⏰ 피드백 양식이 만료되었습니다. 카테고리를 다시 선택해 주세요.",
+        "hi": "⏰ फ़ीडबैक फ़ॉर्म की अवधि समाप्त हो गई है। कृपया श्रेणी फिर से चुनें।",
+        "ar": "⏰ انتهت صلاحية نموذج الملاحظات. يُرجى اختيار فئة مرة أخرى.",
+        "ru": "⏰ Срок действия формы отзыва истёк. Выберите категорию заново.",
+        "tr": "⏰ Geri bildirim formunun süresi doldu. Lütfen kategoriyi yeniden seçin.",
+        "th": "⏰ แบบฟอร์มข้อเสนอแนะหมดอายุแล้ว โปรดเลือกหมวดหมู่อีกครั้ง",
+        "fil": "⏰ Nag-expire ang feedback form. Pumili muli ng kategorya.",
+        "it": "⏰ Il modulo di feedback è scaduto. Seleziona di nuovo una categoria.",
+        "id": "⏰ Formulir masukan telah kedaluwarsa. Silakan pilih kategori lagi.",
+    }.get(lang, "⏰ The feedback form expired. Please choose a category again.")
 
 def feedback_category_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
@@ -143392,6 +143414,11 @@ async def handle_feedback_callback(update: Update, context: ContextTypes.DEFAULT
     lang = user_ui_lang(uid)
     if data not in {"feedback|start", "feedback|cancel"} and not data.startswith("feedback|cat|"):
         return await query.answer("Feedback action not supported.", show_alert=True)
+    category = ""
+    if data.startswith("feedback|cat|"):
+        category = data.split("|", 2)[2]
+        if category not in FEEDBACK_CATEGORY_LABELS:
+            return await query.answer("Feedback category not supported.", show_alert=True)
     await query.answer()
     if data == "feedback|start":
         clear_feedback_pending(uid)
@@ -143401,7 +143428,6 @@ async def handle_feedback_callback(update: Update, context: ContextTypes.DEFAULT
         clear_feedback_pending(uid)
         return await safe_edit_or_send(query, ui_text(lang, "common.cancelled_not_charged"), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
     if data.startswith("feedback|cat|"):
-        category = data.split("|", 2)[2]
         set_feedback_pending(uid, category)
         copy = public_hub_copy(lang)
         return await safe_edit_or_send(
@@ -186252,6 +186278,7 @@ def doc_tool_start_keyboard(tool: str, lang: str = "vi", state: dict | None = No
     config = doc_tool_config(tool)
     expected = config.get("expected")
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    back_callback = f"docflow|back|{doc_tool_parent_action(state, tool)}"
     label = f"➕ {copy['docs_send_image']}" if expected == "image" else f"📎 {copy['docs_send_pdf']}" if expected == "pdf" else f"📎 {copy['docs_send_file']}"
     if tool == "save_document":
         rows = [
@@ -186260,7 +186287,7 @@ def doc_tool_start_keyboard(tool: str, lang: str = "vi", state: dict | None = No
                 InlineKeyboardButton(f"💾 {copy['notes_storage']}", callback_data="menu|memory_storage_status"),
             ],
             [
-                InlineKeyboardButton(doc_tool_parent_label(state, tool, lang), callback_data="docflow|back"),
+                InlineKeyboardButton(doc_tool_parent_label(state, tool, lang), callback_data=back_callback),
                 InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
             ],
         ]
@@ -186268,7 +186295,7 @@ def doc_tool_start_keyboard(tool: str, lang: str = "vi", state: dict | None = No
         rows = [
             [
                 InlineKeyboardButton(label, callback_data="docflow|send_more"),
-                InlineKeyboardButton(doc_tool_parent_label(state, tool, lang), callback_data="docflow|back"),
+                InlineKeyboardButton(doc_tool_parent_label(state, tool, lang), callback_data=back_callback),
             ],
             [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ]
@@ -186332,7 +186359,7 @@ def doc_tool_after_file_keyboard(state: dict, lang: str = "vi") -> InlineKeyboar
     tool = str(state.get("doc_tool_current") or "")
     config = doc_tool_config(tool)
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
-    back_callback = "docflow|back"
+    back_callback = f"docflow|back|{doc_tool_parent_action(state, tool)}"
     back_label = doc_tool_parent_label(state, tool, lang)
     if tool == "compress_pdf":
         buttons = [
@@ -186352,7 +186379,7 @@ def doc_tool_after_file_keyboard(state: dict, lang: str = "vi") -> InlineKeyboar
             ],
             [
                 InlineKeyboardButton(f"💾 {copy['notes_storage']}", callback_data="menu|memory_storage_status"),
-                InlineKeyboardButton(doc_tool_parent_label(state, tool, lang), callback_data="docflow|back"),
+                InlineKeyboardButton(doc_tool_parent_label(state, tool, lang), callback_data=back_callback),
             ],
             [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
@@ -186363,7 +186390,7 @@ def doc_tool_after_file_keyboard(state: dict, lang: str = "vi") -> InlineKeyboar
                 InlineKeyboardButton(f"📎 {copy['docs_send_file']}", callback_data="docflow|reset_files"),
             ],
             [
-                InlineKeyboardButton(doc_tool_parent_label(state, tool, lang), callback_data="docflow|back"),
+                InlineKeyboardButton(doc_tool_parent_label(state, tool, lang), callback_data=back_callback),
                 InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
             ],
         ])
@@ -186408,13 +186435,14 @@ def doc_tool_confirm_text(state: dict, lang: str = "vi") -> str:
 def doc_tool_confirm_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
     tool = str((state or {}).get("doc_tool_current") or "")
+    back_callback = f"docflow|back|{doc_tool_parent_action(state, tool)}"
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(f"✅ {copy['docs_confirm']}", callback_data="docflow|run"),
             InlineKeyboardButton(f"📎 {copy['docs_add_more']}", callback_data="docflow|reset_files"),
         ],
         [
-            InlineKeyboardButton(doc_tool_parent_label(state, tool, lang), callback_data="docflow|back"),
+            InlineKeyboardButton(doc_tool_parent_label(state, tool, lang), callback_data=back_callback),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
     ])
@@ -186891,7 +186919,10 @@ async def run_doc_tool_state(message, context: ContextTypes.DEFAULT_TYPE, uid, s
                     parse_mode="HTML",
                     reply_markup=build_2col_keyboard(
                         [("📦 Mua thêm dung lượng", "menu|memory_storage_addon"), ("🧹 Dọn file cũ", "menu|memory_storage_cleanup")],
-                        nav_back=(doc_tool_parent_label(state, tool, lang), "docflow|back"),
+                        nav_back=(
+                            doc_tool_parent_label(state, tool, lang),
+                            f"docflow|back|{doc_tool_parent_action(state, tool)}",
+                        ),
                         lang=lang,
                     ),
                 )
@@ -186977,6 +187008,9 @@ async def handle_doc_tool_callback(update: Update, context: ContextTypes.DEFAULT
     uid = query.from_user.id
     lang = get_user_language(uid) or "vi"
     action = str(query.data or "").split("|", 1)[1] if "|" in str(query.data or "") else "start"
+    back_origin = ""
+    if action.startswith("back|"):
+        action, back_origin = action.split("|", 1)
     if action != "confirm":
         await query.answer()
     state = get_doc_tool_pending(uid)
@@ -186994,7 +187028,11 @@ async def handle_doc_tool_callback(update: Update, context: ContextTypes.DEFAULT
         clear_doc_tool_pending(uid)
         return await safe_edit_or_send(query, localized_start_menu_text(uid, lang), parse_mode="HTML", reply_markup=localized_main_menu_keyboard(is_admin_user(uid), lang))
     if action == "back":
-        parent_action = doc_tool_parent_action(state)
+        parent_action = (
+            doc_tool_parent_action(state)
+            if state
+            else back_origin if back_origin in {"main_memory", "main_docs"} else "main_docs"
+        )
         clear_doc_tool_pending(uid)
         if parent_action == "main_memory":
             return await safe_edit_or_send(query, menu_text_main_memory_i18n(lang), parse_mode="HTML", reply_markup=main_memory_keyboard(lang, uid))
@@ -188129,7 +188167,7 @@ def memory_delete_confirm_text(note: dict, lang: str = "vi") -> str:
 
 def memory_delete_confirm_keyboard(
     note_id: int, lang: str = "vi", from_list: bool = False,
-    from_delete_picker: bool = False, search_token: str = "",
+    from_delete_picker: bool = False, search_token: str = "", confirm_token: str = "",
 ) -> InlineKeyboardMarkup:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
     cancel_callback = (
@@ -188139,7 +188177,10 @@ def memory_delete_confirm_keyboard(
         f"memory|view|{int(note_id)}"
     )
     confirm_buttons = [
-        InlineKeyboardButton(f"✅ {copy['notes_delete']}", callback_data=f"memory|delete_yes|{int(note_id)}"),
+        InlineKeyboardButton(
+            f"✅ {copy['notes_delete']}",
+            callback_data=f"memory|delete_yes|{int(note_id)}|{str(confirm_token or '')}",
+        ),
         InlineKeyboardButton(f"❌ {copy['common_cancel']}", callback_data=cancel_callback),
     ]
     if from_delete_picker:
@@ -188646,16 +188687,35 @@ async def handle_memory_callback(update: Update, context: ContextTypes.DEFAULT_T
         note = memory_fetch_note(uid, note_id)
         if not note:
             return await safe_edit_or_send(query, "⚠️ Không tìm thấy ghi chú active của bạn.", reply_markup=memory_main_keyboard(lang))
+        confirm_token = str(time.time_ns())
+        set_memory_guided_pending(
+            uid, "delete_confirm", note_id=note_id, confirm_token=confirm_token,
+        )
         return await safe_edit_or_send(
             query, memory_delete_confirm_text(note, lang), parse_mode="HTML",
             reply_markup=memory_delete_confirm_keyboard(
                 note_id, lang, from_list=from_list, from_delete_picker=from_delete_picker,
-                search_token=search_token,
+                search_token=search_token, confirm_token=confirm_token,
             ),
         )
-    if action == "delete_yes" and len(action_parts) > 2:
+    if action == "delete_yes":
+        note_id = safe_int(action_parts[2], 0) if len(action_parts) > 2 else 0
+        confirm_token = str(action_parts[3] or "") if len(action_parts) == 4 else ""
+        pending = get_memory_guided_pending(uid) or {}
+        if (
+            len(action_parts) != 4
+            or note_id <= 0
+            or not confirm_token
+            or pending.get("pending_action") != "delete_confirm"
+            or str(pending.get("note_id") or "") != str(note_id)
+            or str(pending.get("confirm_token") or "") != confirm_token
+        ):
+            return await safe_edit_or_send(
+                query,
+                "⚠️ Xác nhận xóa đã hết hạn hoặc không còn hợp lệ. Vui lòng chọn lại.",
+                reply_markup=memory_main_keyboard(lang),
+            )
         clear_memory_guided_pending(uid)
-        note_id = safe_int(action_parts[2], 0)
         note = memory_fetch_note(uid, note_id)
         if not note:
             return await safe_edit_or_send(query, "⚠️ Không tìm thấy ghi chú active của bạn.", reply_markup=memory_main_keyboard(lang))
@@ -188737,10 +188797,14 @@ async def handle_memory_pending_text(update: Update, context: ContextTypes.DEFAU
             )
             return True
         clear_memory_guided_pending(uid)
+        confirm_token = str(time.time_ns())
+        set_memory_guided_pending(
+            uid, "delete_confirm", note_id=note_id, confirm_token=confirm_token,
+        )
         await update.message.reply_text(
             memory_delete_confirm_text(note, lang),
             parse_mode="HTML",
-            reply_markup=memory_delete_confirm_keyboard(note_id, lang),
+            reply_markup=memory_delete_confirm_keyboard(note_id, lang, confirm_token=confirm_token),
         )
         return True
     return False
@@ -209771,7 +209835,7 @@ def vault_admin_keyboard() -> InlineKeyboardMarkup:
         [
             [
                 InlineKeyboardButton("🧠 Kho học liệu", callback_data="vault|status"),
-                InlineKeyboardButton("📥 Import học liệu", callback_data="vault|import"),
+                InlineKeyboardButton("📘 Hướng dẫn import học liệu", callback_data="vault|import"),
             ],
             [
                 InlineKeyboardButton("📚 Kho Prompt", callback_data="vault|prompts"),
@@ -209783,8 +209847,9 @@ def vault_admin_keyboard() -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton("🧾 Nháp cần duyệt", callback_data="vault|review"),
-                InlineKeyboardButton("🔎 Tìm kiếm kho", callback_data="vault|search"),
+                InlineKeyboardButton("📘 Hướng dẫn tìm kiếm", callback_data="vault|search"),
             ],
+            [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
         ]
     )
 
@@ -234300,10 +234365,14 @@ def internal_archive_menu_text() -> str:
         "Chỉ admin hoặc owner được xem và lưu hồ sơ. Bot chỉ lưu Telegram file ID và metadata; không lưu API key/token."
     )
 
-def internal_archive_menu_keyboard() -> InlineKeyboardMarkup:
+def internal_archive_menu_keyboard(back_to_preview: bool = False) -> InlineKeyboardMarkup:
     items = [(label, f"archive|dept|{code}") for code, label in INTERNAL_DOC_DEPARTMENTS.items()]
     rows = [[InlineKeyboardButton(label, callback_data=callback) for label, callback in items[index:index + 2]] for index in range(0, len(items), 2)]
-    rows.append([InlineKeyboardButton("🔍 Tìm hồ sơ", callback_data="archive|search"), InlineKeyboardButton("⬅️ Ghi chú/Tài liệu", callback_data="menu|main_memory")])
+    back_text, back_callback = ("⬅️ Xem lại hồ sơ", "archive|preview") if back_to_preview else ("⬅️ Ghi chú/Tài liệu", "menu|main_memory")
+    if back_to_preview:
+        rows.append([InlineKeyboardButton(back_text, callback_data=back_callback)])
+    else:
+        rows.append([InlineKeyboardButton("🔍 Tìm hồ sơ", callback_data="archive|search"), InlineKeyboardButton(back_text, callback_data=back_callback)])
     rows.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
@@ -234716,6 +234785,8 @@ async def handle_internal_archive_callback(update: Update, context: ContextTypes
         )
     if action == "back_department":
         department = state.get("department")
+        if not state and len(parts) > 2 and parts[2] in INTERNAL_DOC_DEPARTMENTS:
+            department = parts[2]
         if department not in INTERNAL_DOC_DEPARTMENTS:
             return await safe_edit_query_message(query, internal_archive_menu_text(), reply_markup=internal_archive_menu_keyboard())
         if state.get("file_info") and state.get("step") == "choosing_type":
@@ -234790,7 +234861,7 @@ async def handle_internal_archive_callback(update: Update, context: ContextTypes
         state = set_internal_archive_pending(uid, "preview", **{key: value for key, value in state.items() if key not in {"pending_action", "step", "created_at_ts"}})
         return await safe_edit_query_message(query, internal_archive_preview_text(state), reply_markup=internal_archive_preview_keyboard())
     if action == "change_dept":
-        return await safe_edit_query_message(query, "📁 <b>Chọn phòng ban mới</b>", reply_markup=internal_archive_menu_keyboard())
+        return await safe_edit_query_message(query, "📁 <b>Chọn phòng ban mới</b>", reply_markup=internal_archive_menu_keyboard(back_to_preview=True))
     if action == "search_dept":
         department = state.get("department")
         if department not in INTERNAL_DOC_DEPARTMENTS:
@@ -234800,7 +234871,7 @@ async def handle_internal_archive_callback(update: Update, context: ContextTypes
             query,
             f"🔍 <b>Tìm trong {html.escape(INTERNAL_DOC_DEPARTMENTS.get(department, department))}</b>\n\nNhập từ khóa cần tìm.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⬅️ Phòng ban", callback_data="archive|back_department"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+                [InlineKeyboardButton("⬅️ Phòng ban", callback_data=f"archive|back_department|{department}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
             ]),
         )
     if action == "search":
@@ -271969,8 +272040,21 @@ async def handle_feedback_pending_text(update: Update, context: ContextTypes.DEF
     if not update.message or not update.message.text or not update.effective_user:
         return False
     uid = update.effective_user.id
+    pending_key = feedback_pending_key(uid)
+    pending_before_expiry = USER_PENDING.get(pending_key)
     pending = get_feedback_pending(uid)
     if not pending:
+        if (
+            isinstance(pending_before_expiry, dict)
+            and pending_before_expiry.get("pending_action") == "feedback"
+            and pending_key not in USER_PENDING
+        ):
+            lang = normalize_user_language(user_ui_lang(uid)) or "vi"
+            await update.message.reply_text(
+                feedback_expired_text(lang),
+                reply_markup=feedback_category_keyboard(lang),
+            )
+            return True
         return False
     text = update.message.text.strip()
     if not text:

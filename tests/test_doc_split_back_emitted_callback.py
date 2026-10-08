@@ -33,6 +33,7 @@ class _Query:
     def __init__(self, data, user_id):
         self.data = data
         self.from_user = SimpleNamespace(id=user_id)
+        self.message = SimpleNamespace()
         self.answers = []
 
     async def answer(self, *args, **kwargs):
@@ -82,6 +83,8 @@ def _runtime(user_id, files, options):
         "safe_edit_or_send": render,
         "menu_text_main_docs_i18n": lambda _lang: "Docs menu",
         "main_docs_keyboard": lambda _lang: "docs-keyboard",
+        "menu_text_main_memory_i18n": lambda _lang: "Notes menu",
+        "main_memory_keyboard": lambda *_args: "notes-keyboard",
         "logger": SimpleNamespace(warning=lambda *args, **kwargs: None),
     }
     for name in (
@@ -89,7 +92,9 @@ def _runtime(user_id, files, options):
         "clear_doc_tool_pending",
         "get_doc_tool_pending",
         "doc_tool_parent_action",
+        "doc_tool_start_keyboard",
         "doc_tool_after_file_keyboard",
+        "doc_tool_confirm_keyboard",
         "handle_doc_tool_callback",
     ):
         exec(
@@ -179,7 +184,106 @@ def test_document_tool_parent_back_still_clears_session_and_returns_docs_menu():
     emitted_back = _callback_for(markup, "⬅️")
     query = _click(callback, pattern, emitted_back, user_id)
 
-    assert emitted_back == "docflow|back"
+    assert emitted_back == "docflow|back|main_docs"
     assert runtime["get_doc_tool_pending"](user_id) == {}
     assert screens[-1] == ("Docs menu", "docs-keyboard")
     assert query.answers == [((), {})]
+
+
+def test_expired_save_document_back_returns_to_notes_parent_from_emitted_button():
+    user_id = 79
+    runtime, screens, callback, pattern = _runtime(
+        user_id,
+        [{"file_id": "keep-file", "file_name": "note.pdf"}],
+        {},
+    )
+    state = runtime["USER_PENDING"][f"doc_tool:{user_id}"]
+    state["doc_tool_current"] = "save_document"
+    state["doc_tool_previous_step"] = "main_memory"
+    state["doc_previous_menu"] = "main_memory"
+    markup = runtime["doc_tool_after_file_keyboard"](state, "vi")
+    emitted_back = _callback_for(markup, "⬅️")
+
+    # Let the actual TTL getter remove state before the previously emitted button is clicked.
+    state["created_at_ts"] = time.time() - runtime["DOC_TOOL_STATE_TTL_SECONDS"] - 1
+    query = _click(callback, pattern, emitted_back, user_id)
+
+    assert runtime["get_doc_tool_pending"](user_id) == {}
+    assert screens[-1] == ("Notes menu", "notes-keyboard")
+    assert query.answers == [((), {})]
+
+
+def test_document_parent_back_emitters_keep_the_known_origin():
+    user_id = 80
+    runtime, _screens, _callback, _pattern = _runtime(user_id, [], {})
+
+    for tool, parent in (("save_document", "main_memory"), ("split_pdf", "main_docs")):
+        state = {
+            "doc_tool_current": tool,
+            "doc_tool_previous_step": parent,
+            "doc_previous_menu": parent,
+            "doc_tool_files": [{"file_id": "fixture-file", "file_name": "fixture.pdf"}],
+            "awaiting_page_spec": "0",
+        }
+        markups = (
+            runtime["doc_tool_start_keyboard"](tool, "vi", state),
+            runtime["doc_tool_after_file_keyboard"](state, "vi"),
+            runtime["doc_tool_confirm_keyboard"]("vi", state),
+        )
+        callbacks = {_callback_for(markup, "⬅️") for markup in markups}
+
+        assert callbacks == {f"docflow|back|{parent}"}, (tool, callbacks)
+
+
+def test_expired_save_document_quota_error_back_keeps_notes_parent():
+    user_id = 81
+    files = [
+        {"file_id": "fixture-1", "file_name": "one.pdf", "file_size": 10},
+        {"file_id": "fixture-2", "file_name": "two.pdf", "file_size": 20},
+    ]
+    runtime, screens, callback, pattern = _runtime(user_id, files, {})
+    state = runtime["USER_PENDING"][f"doc_tool:{user_id}"]
+    state.update({
+        "doc_tool_current": "save_document",
+        "doc_tool_previous_step": "main_memory",
+        "doc_previous_menu": "main_memory",
+    })
+    emitted = {}
+
+    def _build_error_keyboard(_buttons, nav_back, lang=None):
+        emitted["back"] = _Button(*nav_back)
+        return _Markup([[emitted["back"]]])
+
+    runtime.update(
+        memory_quota_error=lambda *_args: "Quota full",
+        memory_create_note=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not save a file")),
+        build_2col_keyboard=_build_error_keyboard,
+        logger=SimpleNamespace(warning=lambda *_args, **_kwargs: None),
+        sanitize_log_text=lambda text: text,
+    )
+    exec(
+        compile("from __future__ import annotations\n" + _source_function("run_doc_tool_state"),
+                "bot.py:run_doc_tool_state", "exec"),
+        runtime,
+    )
+    query = _Query("docflow|run", user_id)
+    replies = []
+
+    async def _reply_text(text, **kwargs):
+        replies.append((text, kwargs))
+
+    query.message.reply_text = _reply_text
+    assert pattern.search(query.data)
+    asyncio.run(callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+
+    assert emitted["back"].callback_data == "docflow|back|main_memory"
+    assert [text for text, _kwargs in replies] == [
+        "⏳ TOAN AAS đang xử lý file của bạn.\nVui lòng không bấm lại nút này.",
+        "Quota full",
+    ]
+    state["created_at_ts"] = time.time() - runtime["DOC_TOOL_STATE_TTL_SECONDS"] - 1
+    back_query = _click(callback, pattern, emitted["back"].callback_data, user_id)
+
+    assert runtime["get_doc_tool_pending"](user_id) == {}
+    assert screens[-1] == ("Notes menu", "notes-keyboard")
+    assert back_query.answers == [((), {})]
