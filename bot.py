@@ -71758,7 +71758,7 @@ def free_hub_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             (f"🖼 {copy['freehub_prompts']}", "freehub|prompts"),
             (f"📚 {copy['freehub_library']}", "freehub|library"),
             (f"📦 {copy['freehub_publish_package']}", "freehub|publish_package"),
-            (f"📝 {copy['freehub_notes_docs']}", "menu|main_memory"),
+            (f"📝 {copy['freehub_notes_docs']}", "menu|main_memory|freehub"),
             (f"📥 {copy['freehub_save_temp_media']}", "freehub|upload"),
             (f"🎙 {copy['freehub_voice_subdub_script']}", "freehub|hook"),
             (f"🎵 {copy['freehub_music_sfx_ideas']}", "freehub|lib_music"),
@@ -136638,6 +136638,8 @@ async def cmd_linkweb(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_command_received("start", update)
+    if isinstance(getattr(context, "user_data", None), dict):
+        context.user_data.pop("memory_nav_origin", None)
     uid = update.effective_user.id
     clear_pending_admin_tool_test(uid)
     clear_support_ticket_pending(uid)
@@ -141756,6 +141758,14 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     raw_action = (query.data.split("|", 1)[1] if "|" in query.data else "main").strip()
     action = raw_action
+    memory_back_to_freehub = action == "main_memory|freehub"
+    if memory_back_to_freehub:
+        action = "main_memory"
+        if isinstance(getattr(context, "user_data", None), dict):
+            context.user_data["memory_nav_origin"] = "freehub"
+    elif action == "main":
+        if isinstance(getattr(context, "user_data", None), dict):
+            context.user_data.pop("memory_nav_origin", None)
     package_orders_origin = ""
     security_db_origin = ""
     module_child_origin = ""
@@ -142526,6 +142536,18 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         text = f"✅ {copy['translation_session_stop']}."
         return await safe_edit_query_message(query, text, reply_markup=translate_language_keyboard(False, lang))
     text, keyboard = localized_menu_content(action, user_is_admin, lang, query.from_user.id)
+    if action == "main_memory" and not memory_back_to_freehub:
+        memory_user_data = getattr(context, "user_data", None)
+        memory_back_to_freehub = isinstance(memory_user_data, dict) and (
+            memory_user_data.get("memory_nav_origin") == "freehub"
+        )
+    if action == "main_memory" and memory_back_to_freehub:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(button.text, callback_data="freehub|main")
+             if button.text.startswith("⬅") and button.callback_data == "menu|main" else button
+             for button in row]
+            for row in keyboard.inline_keyboard
+        ])
     if guide_video_ai_origin:
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton(button.text, callback_data="menu|main_guide")
@@ -142722,6 +142744,8 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
     uid = query.from_user.id
     lang = get_user_language(uid) or "vi"
     if action == "main":
+        if isinstance(getattr(context, "user_data", None), dict):
+            context.user_data.pop("memory_nav_origin", None)
         clear_video_downloader_pending(uid)
     if not FREE_HUB_ENABLED:
         if action == "main":
@@ -188722,6 +188746,8 @@ async def handle_memory_pending_text(update: Update, context: ContextTypes.DEFAU
     return False
 
 async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if isinstance(getattr(context, "user_data", None), dict):
+        context.user_data.pop("memory_nav_origin", None)
     uid = update.effective_user.id if update.effective_user else 0
     lang = get_user_language(uid) or "vi"
     await update.message.reply_text(

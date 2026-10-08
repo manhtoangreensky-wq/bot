@@ -32,9 +32,10 @@ def test_live10_source_and_combo_buttons_route_to_subdub_only():
     assert 'callback_data="videodub|back_type"' in source
     assert 'callback_data="menu|main"' in source
     assert "VIDEO_DUBBING_FLOW_HAS_SUBTITLE" in source
-    assert "VIDEO_DUBBING_FLOW_NO_SUBTITLE" in source
     assert 'f"videodub|path|{VIDEO_DUBBING_FLOW_HAS_SUBTITLE}"' in source
-    assert 'f"videodub|path|{VIDEO_DUBBING_FLOW_NO_SUBTITLE}"' in source
+    missing_subtitle = _function_source("video_dubbing_missing_existing_subtitle_keyboard")
+    assert "VIDEO_DUBBING_FLOW_NO_SUBTITLE" in missing_subtitle
+    assert 'f"videodub|path|{VIDEO_DUBBING_FLOW_NO_SUBTITLE}"' in missing_subtitle
 
 
 def test_live10_language_voice_and_audio_buttons_have_matching_handlers():
@@ -58,7 +59,7 @@ def test_live10_language_voice_and_audio_buttons_have_matching_handlers():
         assert f'callback_data="videodub|{callback}"' in mix
     for callback in ("audio_original_input", "audio_dub_input", "audio_keep", "audio_mix"):
         assert f"videodub|{callback}" in layer
-    assert 'callback_data="menu|main"' in layer
+    assert 'callback_data="videodub|audio_mix"' in layer
 
     handler = _function_source("handle_video_dubbing_callback")
     for action in (

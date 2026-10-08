@@ -186,3 +186,21 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
     receipt v3 làm superseded history, tuyệt đối không gửi lại artifact đó, restore
     exact source SHA/bytes vào cùng workspace, CAS cùng internal job đúng một lần,
     rồi chạy full v4. Không tạo job, không dùng command recovery cũ, không đổi Xu.
+
+## Cách test Telegram menu / nút Quay lại
+
+1. Dùng bot/account test và chỉ đi qua màn hình menu; không tạo/xóa ghi chú, không
+   mở công cụ xử lý tài liệu, không tạo job hoặc xác nhận thanh toán.
+2. Chạy `/start` → Công cụ miễn phí → Notes/Docs → Tạo ghi chú. Bấm Quay lại ở
+   prompt để về Memory; bấm Quay lại lần nữa. PASS khi về đúng Free Tools.
+3. Mở Memory từ menu chính rồi bấm Quay lại. PASS khi về menu chính, không phải
+   Free Tools.
+4. Từ Free Tools → Notes/Docs, thoát bằng `/menu` hoặc `/start`, rồi mở Memory
+   từ menu mới. Back phải về menu chính. Lặp `/memory`; origin cũ cũng không được
+   giữ lại.
+5. Với độ trễ, bấm từng nút một lần, ghi riêng thời gian chờ và giờ
+   `HH:MM:SS +07`; đánh dấu số đo là đồng hồ hoặc ước lượng. Không gửi username,
+   user ID, token hay thông tin tài khoản.
+6. Ghi kết quả theo `UI-FREEHUB-MEMORY-ORIGIN-01` và mẫu
+   `.github/ISSUE_TEMPLATE/05-telegram-ui-callback.yml`. Không suy nguyên nhân
+   mạng/server chỉ từ một lần bấm hoặc một ảnh chụp.
