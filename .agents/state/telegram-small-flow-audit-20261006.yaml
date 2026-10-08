@@ -2367,13 +2367,13 @@ verification:
     exit code: NOT_VERIFIED, not pass/fail. git diff --check passed before this
     evidence update. Bundled Python/Node lack a YAML parser; require remote CI
     validation before merge. No provider/wallet/Telegram/job/runtime side effect.
-  S12_35_consolidated_local_verification_refresh_20261009_0420: >-
+  S12_35_consolidated_local_verification_post_rebase_20261009_0432: >-
     Exact standard-library rerun of tests.test_admin_root_menu_callback_single_ack,
     tests.test_doc_split_back_emitted_callback, tests.test_feedback_callback_single_ack,
     tests.test_internal_archive_type_back_label,
     tests.test_internal_archive_search_back_origin, and
     tests.test_pkgcombo_navigation_registered_callback completed `Ran 53 tests in
-    26.548s — OK`. A broader invocation additionally named tests.test_core but could
+    25.490s — OK after rebase to `96dd9020…`. A broader invocation additionally named tests.test_core but could
     not import it because FastAPI is absent locally; its edited assertion did not
     execute and remains a CI gate. pytest/yaml are also unavailable locally. Full
     bot.py compilation remains NOT_VERIFIED after a previous >6 minute no-output
