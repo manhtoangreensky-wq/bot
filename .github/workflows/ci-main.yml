@@ -110,7 +110,11 @@ jobs:
             tests/test_admin_tool_test_pending_reset.py \
             tests/test_broadcast_lite_back_pending_cleanup.py \
             tests/test_start_translation_pending_reset.py \
-            tests/test_menu_video_callback_timing.py
+            tests/test_menu_video_callback_timing.py \
+            tests/test_support_ticket_send_concurrency.py \
+            tests/test_support_ticket_file_send_concurrency.py \
+            tests/test_support_ticket_send_matches_preview.py \
+            tests/test_subdub_voice_child_back.py
 
       - name: Run Workflow Hygiene Unit Tests
         run: |

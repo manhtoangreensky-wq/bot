@@ -109,7 +109,7 @@ class SupportTicketSendConcurrencyTests(unittest.TestCase):
             "add_support_ticket_message": lambda *args: self.ticket_messages.append(args),
             "safe_edit_or_send": self._safe_edit,
             "support_ticket_admin_text": lambda ticket: "Ticket admin",
-            "support_ticket_admin_keyboard": lambda ticket: _Markup([]),
+            "support_ticket_admin_keyboard": lambda ticket, source="new", list_offset=0: _Markup([]),
         }
         _load_source_functions(
             self.namespace,

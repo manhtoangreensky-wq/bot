@@ -76,6 +76,13 @@ def _load_scope(public):
         "InlineKeyboardButton": _Button, "InlineKeyboardMarkup": _Markup,
         "normalize_user_language": lambda lang: lang,
         "get_user_language": lambda uid: "vi", "ui_text": lambda *args: "Home",
+        "SUBDUB_VOLUME_MIX_UI_ENABLED": True,
+        "subdub_audio_mix_state_fields": lambda _state: {
+            "keep_original_audio": False,
+            "original_audio_volume_percent": 0,
+            "dubbed_voice_volume_percent": 100,
+        },
+        "subdub_audio_mix_text": lambda _state, _lang: "Audio mix settings",
         "public_subdub_deep_copy": lambda lang: copy,
         "current_product_context": lambda uid: "showroom",
         "PRODUCT_CONTEXT_SHOWROOM": "showroom", "PRODUCT_CONTEXT_VIDEO_ADDON": "video_addon",
@@ -117,6 +124,7 @@ def _load_scope(public):
         "video_dubbing_saved_voice_keyboard", "handle_video_dubbing_callback",
         "video_dubbing_missing_upload_recovery_text", "video_dubbing_missing_upload_recovery_keyboard",
         "video_dubbing_back_target", "video_dubbing_menu_keyboard",
+        "subdub_audio_mix_available", "subdub_audio_mix_keyboard", "subdub_audio_layer_keyboard",
     ):
         exec(_function_code(name), scope)
     return scope
@@ -159,6 +167,28 @@ def _back(markup):
 
 
 class SubDubVoiceChildBackTests(unittest.TestCase):
+    def test_audio_layer_back_returns_to_audio_mix_parent_via_registered_handler(self):
+        scope = _load_scope(False)
+        state = _seed(scope)
+        layer = scope["subdub_audio_layer_keyboard"](state, "original", "vi")
+        back = _back(layer)
+        self.assertEqual(back, "videodub|audio_mix")
+
+        query = _Query(back)
+        _dispatch(scope, query)
+
+        restored = scope["get_video_dubbing_pending"](81001)
+        self.assertEqual(restored["step"], "audio_mix")
+        self.assertEqual(query.screens[-1][0], "Audio mix settings")
+        parent_callbacks = {
+            button.callback_data
+            for row in query.screens[-1][1].inline_keyboard
+            for button in row
+        }
+        self.assertIn("videodub|audio_original", parent_callbacks)
+        self.assertIn("videodub|audio_dub", parent_callbacks)
+        self.assertEqual(len(query.answers), 1)
+
     def test_expired_child_back_recovers_to_subdub_menu_without_recreating_session(self):
         scope = _load_scope(False)
         _seed(scope)

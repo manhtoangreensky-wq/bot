@@ -118,7 +118,7 @@ def _load_actual_code():
         "add_support_ticket_message": lambda *args: sent_rows.append(args),
         "support_suggested_reply": lambda _category, variant, _message: f"Suggested reply variant {variant}",
         "support_ticket_admin_text": lambda _ticket: "Admin ticket",
-        "support_ticket_admin_keyboard": lambda _ticket, **_kwargs: _Markup([]),
+        "support_ticket_admin_keyboard": lambda _ticket, source="new", list_offset=0: _Markup([]),
         "get_user_language": lambda _uid: "vi",
         "normalize_user_language": lambda language: language,
         "public_hub_copy": lambda _language: {
