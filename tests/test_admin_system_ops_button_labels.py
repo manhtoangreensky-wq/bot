@@ -34,7 +34,7 @@ def test_system_ops_runtime_shortcuts_are_labeled_as_guides_without_retargeting(
     assert buttons["📘 Hướng dẫn kiểm tra Telegram"] == "admin_help|runtime|admin_system_ops"
     assert buttons["📘 Hướng dẫn nhận quyền webhook Telegram"] == "admin_help|runtime|admin_system_ops"
     assert buttons["📘 Hướng dẫn dọn file tạm"] == "admin_help|runtime|admin_system_ops"
-    assert buttons["📊 Dashboard"] == "menu|admin_overview"
+    assert buttons["📊 Dashboard"] == "menu|admin_overview|admin_system_ops"
 
 
 def test_all_system_ops_guide_callbacks_are_registered_and_open_runtime_handbook(monkeypatch):

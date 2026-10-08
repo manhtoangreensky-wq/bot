@@ -385,8 +385,6 @@ def test_back_button_returns_exactly_free_tools_menu_and_main_returns_main_menu(
         bot.free_hub_input_keyboard("vi"),
         bot.free_hub_prompts_keyboard("vi"),
         bot.free_hub_library_keyboard("vi"),
-        bot.free_hub_library_suggestions_keyboard("vi"),
-        bot.free_hub_library_item_keyboard("vi"),
         bot.free_hub_notes_keyboard("vi"),
         bot.free_hub_docs_keyboard("vi"),
     ]
@@ -394,6 +392,8 @@ def test_back_button_returns_exactly_free_tools_menu_and_main_returns_main_menu(
         callbacks = _callbacks(markup)
         assert "freehub|main" in callbacks
         assert "menu|main" in callbacks
+    assert "freehub|library" in _callbacks(bot.free_hub_library_suggestions_keyboard("vi"))
+    assert "freehub|lib_back" in _callbacks(bot.free_hub_library_item_keyboard("vi"))
     assert _callbacks(_free_menu())[-1] == "menu|main"
 
 

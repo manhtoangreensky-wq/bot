@@ -45520,7 +45520,7 @@ def owner_required_text(user_id) -> str:
     return (
         "⛔ Lệnh này chỉ dành cho Owner.\n\n"
         f"ID Telegram hiện tại của bạn: <code>{html.escape(str(user_id))}</code>\n"
-        "Hãy thêm ID này vào <code>OWNER_IDS</code> trên Railway nếu đây là tài khoản chủ.\n"
+        "Hãy thêm ID này vào <code>OWNER_IDS</code> trên VPS nếu đây là tài khoản chủ.\n"
         "Gõ <code>/admin_whoami</code> để kiểm tra quyền hiện tại."
     )
 
@@ -45563,9 +45563,9 @@ async def cmd_admin_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
     admin_ids_count = len([x for x in ADMIN_IDS if str(x).strip()])
     warnings = []
     if owner_ids_count <= 0:
-        warnings.append("⚠️ OWNER_IDS đang rỗng, hãy set OWNER_IDS trên Railway.")
+        warnings.append("⚠️ OWNER_IDS đang rỗng, hãy cấu hình OWNER_IDS trên VPS.")
     if not is_owner_user(uid):
-        warnings.append("Nếu đây là tài khoản chủ, thêm ID này vào OWNER_IDS trên Railway.")
+        warnings.append("Nếu đây là tài khoản chủ, thêm ID này vào OWNER_IDS trên VPS.")
     warning_block = ("\n\n" + "\n".join(warnings)) if warnings else ""
     await update.message.reply_text(
         "🛡 <b>ADMIN DEBUG</b>\n\n"
@@ -72305,7 +72305,7 @@ def free_hub_library_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMar
             (f"1️⃣ {copy['freehub_choose_1']}", "freehub|lib_pick1"), (f"2️⃣ {copy['freehub_choose_2']}", "freehub|lib_pick2"),
             (f"3️⃣ {copy['freehub_choose_3']}", "freehub|lib_pick3"), (f"🔁 {copy['freehub_more']}", "freehub|lib_more"),
         ],
-        nav_back=(f"⬅️ {copy['freehub_main']}", "freehub|main"),
+        nav_back=(f"⬅️ {copy['freehub_library']}", "freehub|library"),
         lang=lang,
     )
 
@@ -72314,9 +72314,9 @@ def free_hub_library_item_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return build_2col_keyboard(
         [
             (f"📌 {copy['freehub_save_template']}", "freehub|save"), (f"🧩 {copy['freehub_use_product']}", "freehub|meta"),
-            (f"📤 {copy['freehub_use_meta']}", "freehub|copy"), (f"✍️ {copy['freehub_caption_from_prompt']}", "freehub|caption_more"),
+            (f"📋 {copy['freehub_result_copy']}", "freehub|copy"), (f"✍️ {copy['freehub_caption_from_prompt']}", "freehub|caption_more"),
         ],
-        nav_back=(f"⬅️ {copy['freehub_main']}", "freehub|main"),
+        nav_back=(f"⬅️ {copy['freehub_library_title']}", "freehub|lib_back"),
         lang=lang,
     )
 
@@ -125285,7 +125285,7 @@ def main_guide_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             first_row.append(InlineKeyboardButton(f"📋 {public_page_title('pricing', requested_locale)}", callback_data="pricing|catalog"))
         return InlineKeyboardMarkup([
             first_row,
-            [InlineKeyboardButton(f"🖼 {navigation['create_image']}", callback_data="menu|guide_image_ai"), InlineKeyboardButton(f"🎬 {navigation['create_video']}", callback_data="menu|guide_video_ai")],
+            [InlineKeyboardButton(f"🖼 {navigation['create_image']}", callback_data="menu|guide_image_ai"), InlineKeyboardButton(f"🎬 {navigation['create_video']}", callback_data="menu|guide_video_ai|main_guide")],
             [InlineKeyboardButton(f"🔥 {navigation['trend_video']}", callback_data="menu|guide_guided_video"), InlineKeyboardButton(f"🎵 {navigation['video_music']}", callback_data="menu|guide_music_add")],
             [InlineKeyboardButton(f"💰 {navigation['credits_topup']}", callback_data="menu|guide_credits"), InlineKeyboardButton(f"❓ {navigation['faq_refunds']}", callback_data="menu|guide_faq")],
             [InlineKeyboardButton(f"🎧 {copy['support']}", callback_data="menu|support"), InlineKeyboardButton(f"🌐 {copy['center']}", url=TOAN_AAS_COMMUNITY_URL)],
@@ -125294,10 +125294,10 @@ def main_guide_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🚀 Bắt đầu nhanh", callback_data="menu|guide_quick_start")],
-        [InlineKeyboardButton("🖼 Tạo ảnh", callback_data="menu|guide_image_ai"), InlineKeyboardButton("🎬 Tạo video", callback_data="menu|guide_video_ai")],
+        [InlineKeyboardButton("🖼 Tạo ảnh", callback_data="menu|guide_image_ai"), InlineKeyboardButton("🎬 Tạo video", callback_data="menu|guide_video_ai|main_guide")],
         [InlineKeyboardButton("🔥 Video trend", callback_data="menu|guide_guided_video"), InlineKeyboardButton("🎵 Nhạc video", callback_data="menu|guide_music_add")],
         [InlineKeyboardButton("💰 Xu & nạp", callback_data="menu|guide_credits"), InlineKeyboardButton("❓ FAQ & hoàn Xu", callback_data="menu|guide_faq")],
-        [InlineKeyboardButton("👨‍💼 Admin", callback_data="menu|support"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
+        [InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
         [InlineKeyboardButton("📥 Tải bảng giá", callback_data="pricing|download_pricing"), InlineKeyboardButton("📘 Tải hướng dẫn sử dụng", callback_data="pricing|download_guide")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
@@ -125327,14 +125327,14 @@ def menu_nav_keyboard(section: str = "main", is_admin: bool = False) -> InlineKe
         rows.append([InlineKeyboardButton("📊 Queue Status", callback_data="menu|freeze_queue_status"), InlineKeyboardButton("🧊 Freeze Status", callback_data="menu|freeze_status")])
         rows.append([InlineKeyboardButton("📚 Hướng dẫn lệnh", callback_data="menu|freeze_queue_help"), InlineKeyboardButton("📊 Quản trị", callback_data="menu|admin")])
     elif section == "system" and is_admin:
-        rows.append([InlineKeyboardButton("📘 Hướng dẫn Runtime", callback_data="menu|system_runtime_help"), InlineKeyboardButton("🗄 Data Status", callback_data="menu|system_data_status_help")])
-        rows.append([InlineKeyboardButton("💾 Backup DB", callback_data="menu|system_backup_help"), InlineKeyboardButton("❤️ Health", callback_data="menu|system_health_help")])
-        rows.append([InlineKeyboardButton("📊 Providers", callback_data="menu|admin_provider_status"), InlineKeyboardButton("✅ Sales Ready", callback_data="menu|smoke_sales_ready")])
-        rows.append([InlineKeyboardButton("📊 Quản trị", callback_data="menu|admin"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")])
+        rows.append([InlineKeyboardButton("📘 Hướng dẫn Runtime", callback_data="menu|system_runtime_help"), InlineKeyboardButton("📘 Hướng dẫn Data Status", callback_data="menu|system_data_status_help")])
+        rows.append([InlineKeyboardButton("📘 Hướng dẫn Backup DB", callback_data="menu|system_backup_help"), InlineKeyboardButton("📘 Hướng dẫn Health", callback_data="menu|system_health_help")])
+        rows.append([InlineKeyboardButton("📊 Providers", callback_data="menu|admin_provider_status|system"), InlineKeyboardButton("📘 Hướng dẫn Sales Ready", callback_data="menu|smoke_sales_ready|system")])
+        rows.append([InlineKeyboardButton("📊 Quản trị", callback_data="menu|admin"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator|system")])
     elif section == "support":
         rows.append([InlineKeyboardButton("💰 Nạp Xu ngay", callback_data="pricing|main"), InlineKeyboardButton("📖 Hướng dẫn chi tiết", callback_data="menu|main_guide")])
     elif section == "operator" and is_admin:
-        rows.append([InlineKeyboardButton("📊 Quản trị", callback_data="menu|admin"), InlineKeyboardButton("⚙️ Hệ thống", callback_data="menu|system")])
+        rows.append([InlineKeyboardButton("📊 Quản trị", callback_data="menu|admin"), InlineKeyboardButton("⚙️ Hệ thống", callback_data="menu|system|operator")])
     rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data=f"menu|{menu_parent_action(section)}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
@@ -136421,6 +136421,10 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
         return menu_text_admin(), menu_nav_keyboard("admin", True)
     if action == "finance" and is_admin:
         return finance_menu_text(), finance_admin_keyboard()
+    if action == "system" and is_admin:
+        return menu_text_system(), menu_nav_keyboard("system", True)
+    if action == "operator" and is_admin:
+        return menu_text_operator(True), menu_nav_keyboard("operator", True)
     if action in ADMIN_MENU_PAGE_HANDLERS:
         return ADMIN_MENU_PAGE_HANDLERS[action]()
     if action == "doc_tools":
@@ -141752,9 +141756,44 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     security_db_origin = ""
     module_child_origin = ""
     module_child_back = ""
+    finance_overview_origin = ""
+    payos_risk_back_origin = ""
+    operator_back_origin = ""
+    system_back_origin = ""
+    system_operator_child_origin = False
     menu_timing_enabled = action in ("main", "main_video")
     menu_timing_start = time.perf_counter() if menu_timing_enabled else 0.0
     user_is_admin = is_admin_user(query.from_user.id)
+    if action.startswith("operator|"):
+        parts = action.split("|")
+        operator_back_origin = parts[1].strip() if len(parts) == 2 else ""
+        if operator_back_origin != "system":
+            return await query.answer("Nút Operator đã hết phiên. Vui lòng mở lại từ Hệ thống.", show_alert=True)
+        if not user_is_admin:
+            return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
+        action = "operator"
+    if action.startswith("system|"):
+        parts = action.split("|")
+        system_back_origin = parts[1].strip() if len(parts) == 2 else ""
+        if system_back_origin != "operator":
+            return await query.answer("Nút Hệ thống đã hết phiên. Vui lòng mở lại từ Operator.", show_alert=True)
+        if not user_is_admin:
+            return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
+        action = "system"
+    system_operator_guides = {
+        "system_runtime_help", "system_data_status_help", "system_backup_help", "system_health_help",
+    }
+    system_child_action, system_child_separator, system_child_context = action.partition("|")
+    if system_child_separator and system_child_action in (
+        system_operator_guides | {"admin_provider_status", "admin_provider_routes", "smoke_sales_ready"}
+    ):
+        if system_child_context == "system|operator":
+            if not user_is_admin:
+                return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
+            system_operator_child_origin = True
+            action = system_child_action if system_child_action in system_operator_guides else f"{system_child_action}|system"
+        elif system_child_action in system_operator_guides - {"system_runtime_help"}:
+            return await query.answer("Nút hướng dẫn đã hết phiên. Vui lòng mở lại từ Hệ thống.", show_alert=True)
     admin_only = {"affiliate", "operator", "admin", "system", "finance", "billing", "admin_packages", "admin_provider", "internal_archive"}
     admin_only_prefixes = (
         "finance_",
@@ -141766,6 +141805,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         "provider_custom",
         "clear_stale",
         "unfreeze_",
+        "payos_risk|",
     )
     admin_only_pages = {"admin_overview", "freeze_queue", "freeze_status", "smoke_test", "payos_risk"}
     public_hints = {
@@ -141796,6 +141836,9 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     }
     child_action, separator, child_origin = action.partition("|")
     smoke_guide_origin = ""
+    smoke_sales_ready_system_origin = False
+    provider_status_system_origin = False
+    provider_routes_system_origin = False
     smoke_guide_actions = {
         "smoke_shopaikey", "smoke_tts", "smoke_image", "smoke_video",
         "smoke_ffmpeg", "smoke_comfy", "smoke_providers", "smoke_sales_ready",
@@ -141804,9 +141847,22 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         if child_origin == "admin_provider_worker":
             smoke_guide_origin = child_origin
             action = child_action
+        elif child_action == "smoke_sales_ready" and child_origin == "system":
+            if not user_is_admin:
+                return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
+            smoke_sales_ready_system_origin = True
+            action = child_action
         elif child_action != "smoke_sales_ready" or child_origin != "admin_security_db":
             return await query.answer("Nút hướng dẫn test đã hết phiên. Vui lòng mở lại từ module hiện tại.", show_alert=True)
-    if separator and child_action in module_child_contexts and not smoke_guide_origin:
+    if separator and child_action == "admin_provider_status" and child_origin == "system":
+        provider_status_system_origin = True
+        action = child_action
+    elif separator and child_action == "admin_provider_routes" and child_origin == "system":
+        provider_routes_system_origin = True
+        action = child_action
+    if (separator and child_action in module_child_contexts and not smoke_guide_origin
+            and not smoke_sales_ready_system_origin and not provider_status_system_origin
+            and not provider_routes_system_origin):
         expected_origin, module_child_back = module_child_contexts[child_action]
         if child_origin != expected_origin:
             return await query.answer("Nút Quản trị đã hết phiên. Vui lòng mở lại từ module hiện tại.", show_alert=True)
@@ -141818,6 +141874,18 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         if package_orders_origin not in {"admin_packages", "finance"}:
             return await query.answer("Nút Đơn chờ duyệt đã hết phiên. Vui lòng mở lại từ menu hiện tại.", show_alert=True)
         action = "admin_package_orders"
+    if action.startswith("payos_risk|"):
+        parts = action.split("|")
+        payos_risk_back_origin = parts[1].strip() if len(parts) == 2 else ""
+        if payos_risk_back_origin != "admin_billing":
+            return await query.answer("Nút Rủi ro nạp tiền đã hết phiên. Vui lòng mở lại từ Bill / PayOS.", show_alert=True)
+        action = "payos_risk"
+    if action.startswith("finance_overview|"):
+        parts = action.split("|")
+        finance_overview_origin = "|".join(parts[1:])
+        if finance_overview_origin not in {"admin_overview", "admin_overview|admin_system_ops"}:
+            return await query.answer("Nút báo cáo tài chính đã hết phiên. Vui lòng mở lại từ Dashboard.", show_alert=True)
+        action = "finance_overview"
     for route_name in ("admin_db_status", "admin_security_log", "admin_backup_db"):
         if action.startswith(f"{route_name}|"):
             parts = action.split("|")
@@ -141866,6 +141934,12 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             return await query.answer("Nút hướng dẫn Xu đã hết phiên. Vui lòng mở lại từ Tài khoản.", show_alert=True)
         profile_credit_guide = True
         action = "guide_credits"
+    guide_video_ai_origin = ""
+    if action.startswith("guide_video_ai|"):
+        guide_video_ai_origin = action.split("|", 1)[1].strip()
+        if guide_video_ai_origin != "main_guide":
+            return await query.answer("Nút hướng dẫn Video đã hết phiên. Vui lòng mở lại từ Hướng dẫn.", show_alert=True)
+        action = "guide_video_ai"
     runtime_help_parent = ""
     if action.startswith("system_runtime_help|"):
         runtime_help_parent = action.split("|", 1)[1]
@@ -142448,6 +142522,12 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         text = f"✅ {copy['translation_session_stop']}."
         return await safe_edit_query_message(query, text, reply_markup=translate_language_keyboard(False, lang))
     text, keyboard = localized_menu_content(action, user_is_admin, lang, query.from_user.id)
+    if guide_video_ai_origin:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(button.text, callback_data="menu|main_guide")
+             if button.callback_data == "menu|main_video" else button for button in row]
+            for row in keyboard.inline_keyboard
+        ])
     if topup_back_callback:
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=topup_back_callback)
@@ -142473,8 +142553,65 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
              else button for button in row]
             for row in keyboard.inline_keyboard
         ])
+    if provider_status_system_origin:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Hệ thống", callback_data="menu|system")
+             if button.callback_data == "menu|admin_provider" else
+             InlineKeyboardButton(button.text, callback_data="menu|admin_provider_status|system")
+             if button.callback_data == "menu|admin_provider_status" else
+             InlineKeyboardButton(button.text, callback_data="menu|admin_provider_routes|system")
+             if button.callback_data == "menu|admin_provider_routes" else button
+             for button in row]
+            for row in keyboard.inline_keyboard
+        ])
+    if provider_routes_system_origin:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(button.text, callback_data="menu|admin_provider_routes|system")
+             if button.callback_data == "menu|admin_provider_routes" else
+             InlineKeyboardButton("⬅️ Provider Status", callback_data="menu|admin_provider_status|system")
+             if button.callback_data == "menu|admin_provider" else button
+             for button in row]
+            for row in keyboard.inline_keyboard
+        ])
+    if system_back_origin == "operator":
+        system_operator_callbacks = {
+            f"menu|{guide}": f"menu|{guide}|system|operator" for guide in system_operator_guides
+        }
+        system_operator_callbacks.update({
+            "menu|admin_provider_status|system": "menu|admin_provider_status|system|operator",
+            "menu|smoke_sales_ready|system": "menu|smoke_sales_ready|system|operator",
+        })
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Operator", callback_data="menu|operator")
+             if button.text.startswith("⬅") and button.callback_data == "menu|admin" else
+             InlineKeyboardButton(button.text, callback_data=system_operator_callbacks[button.callback_data])
+             if button.callback_data in system_operator_callbacks else button
+             for button in row]
+            for row in keyboard.inline_keyboard
+        ])
+    if action == "admin_overview":
+        finance_overview_callback = "menu|finance_overview|admin_overview"
+        if module_child_origin == "admin_system_ops":
+            finance_overview_callback += "|admin_system_ops"
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(button.text, callback_data=finance_overview_callback)
+             if button.callback_data == "menu|finance_overview|admin_overview" else button for button in row]
+            for row in keyboard.inline_keyboard
+        ])
+    if action == "finance_overview" and finance_overview_origin:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Dashboard", callback_data=f"menu|{finance_overview_origin}")
+             if button.callback_data == "menu|finance" else button for button in row]
+            for row in keyboard.inline_keyboard
+        ])
     if action == "admin_package_orders" and package_orders_origin:
         keyboard = admin_package_orders_keyboard(package_orders_origin)
+    if action == "payos_risk" and payos_risk_back_origin:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Bill / PayOS", callback_data="menu|admin_billing")
+             if button.callback_data == "menu|admin" else button for button in row]
+            for row in keyboard.inline_keyboard
+        ])
     if action == "smoke_test" and module_child_origin == "admin_provider_worker":
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton(button.text, callback_data=f"{button.callback_data}|{module_child_origin}")
@@ -142482,6 +142619,26 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
              else button for button in row]
             for row in keyboard.inline_keyboard
         ])
+    if smoke_sales_ready_system_origin:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Hệ thống", callback_data="menu|system")
+             if button.callback_data == "menu|smoke_test" else button for button in row]
+            for row in keyboard.inline_keyboard
+        ])
+    if operator_back_origin == "system":
+        operator_rows = []
+        for row in keyboard.inline_keyboard:
+            operator_row = []
+            for button in row:
+                if button.text == "⚙️ Hệ thống" and button.callback_data in {"menu|system", "menu|system|operator"}:
+                    continue
+                if button.text.startswith("⬅") and button.callback_data == "menu|admin":
+                    operator_row.append(InlineKeyboardButton("⬅️ Hệ thống", callback_data="menu|system"))
+                else:
+                    operator_row.append(button)
+            if operator_row:
+                operator_rows.append(operator_row)
+        keyboard = InlineKeyboardMarkup(operator_rows)
     if smoke_guide_origin:
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton(button.text, callback_data=f"menu|smoke_test|{smoke_guide_origin}")
@@ -142492,6 +142649,13 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("⬅️ Quay lại", callback_data=f"menu|{runtime_help_parent}")
              if button.callback_data == "menu|system" else button for button in row]
+            for row in keyboard.inline_keyboard
+        ])
+    if system_operator_child_origin:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(button.text, callback_data=f"{button.callback_data}|operator")
+             if button.callback_data in {"menu|system", "menu|admin_provider_status|system", "menu|admin_provider_routes|system"}
+             else button for button in row]
             for row in keyboard.inline_keyboard
         ])
     if action == "main":
@@ -142921,15 +143085,23 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
         industry_id = str(state.get("library_industry") or "")
         if not category_id:
             return await safe_edit_or_send(query, free_hub_library_text(lang), reply_markup=free_hub_library_keyboard(lang))
-        exclude = list(state.get("library_ids") or []) if action == "lib_more" else []
-        items = prompt_library_suggestions(
-            FREE_PROMPT_LIBRARY,
-            category_id,
-            count=3,
-            exclude_ids=exclude,
-            seed=int(time.time()),
-            industry_id=industry_id,
-        )
+        if action == "lib_back":
+            items = [
+                prompt_library_item(FREE_PROMPT_LIBRARY, item_id)
+                for item_id in state.get("library_ids") or []
+            ]
+            items = [item for item in items if item]
+            if not items:
+                return await safe_edit_or_send(query, free_hub_library_text(lang), reply_markup=free_hub_library_keyboard(lang))
+        else:
+            items = prompt_library_suggestions(
+                FREE_PROMPT_LIBRARY,
+                category_id,
+                count=3,
+                exclude_ids=list(state.get("library_ids") or []),
+                seed=int(time.time()),
+                industry_id=industry_id,
+            )
         set_free_hub_pending(uid, "library_suggestions", library_ids=[item.get("id") for item in items])
         return await safe_edit_or_send(
             query,
@@ -143045,10 +143217,20 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
         source = str(state.get("user_input") or result.get("topic") or ((result.get("context") or {}).get("product_name")) or result.get("title") or "")
         provider = str(state.get("provider") or "local_prompt_library")
         if action in {"copy", "prompt_back"}:
+            if action == "copy":
+                copy_help = {
+                    "vi": "Chạm giữ đoạn văn bản phía trên rồi chọn Sao chép để dùng ở nơi khác.",
+                    "en": "Press and hold the text above, then choose Copy to use it elsewhere.",
+                    "zh": "长按上方文本并选择复制，即可在其他地方使用。",
+                }
+                result["copy_instruction"] = "\n".join(filter(None, (
+                    str(result.get("copy_instruction") or ""), copy_help.get(lang, copy_help["en"]),
+                )))
             return await safe_edit_or_send(
                 query,
                 free_hub_prompt_result_text(result, task_type, provider, lang),
-                reply_markup=free_hub_result_keyboard(lang, task_type, meta=task_type == "meta_ai_prompt"),
+                reply_markup=(free_hub_library_item_keyboard(lang) if task_type == "prompt_library"
+                              else free_hub_result_keyboard(lang, task_type, meta=task_type == "meta_ai_prompt")),
             )
         if action == "edit":
             set_free_hub_pending(uid, "input", task_type=task_type or "meta_ai_prompt", previous_result=result)
@@ -187842,7 +188024,10 @@ def memory_notes_list_text(notes: list[dict], title: str = "", lang: str = "vi")
         )
     return "\n\n".join(lines)
 
-def memory_notes_list_keyboard(notes: list[dict], lang: str = "vi", delete_mode: bool = False) -> InlineKeyboardMarkup:
+def memory_notes_list_keyboard(
+    notes: list[dict], lang: str = "vi", delete_mode: bool = False,
+    from_list: bool = False, delete_from_picker: bool = False, search_token: str = "",
+) -> InlineKeyboardMarkup:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
     buttons: list[tuple[str, str]] = []
     for note in notes[:6]:
@@ -187850,9 +188035,19 @@ def memory_notes_list_keyboard(notes: list[dict], lang: str = "vi", delete_mode:
         if not note_id:
             continue
         if delete_mode:
-            buttons.append((f"🗑 {copy['notes_delete']} #{note_id}", f"memory|delete|{note_id}"))
+            callback = (
+                f"memory|delete|{note_id}|delete_start" if delete_from_picker else
+                f"memory|delete|{note_id}|search|{search_token}" if search_token else
+                f"memory|delete|{note_id}"
+            )
+            buttons.append((f"🗑 {copy['notes_delete']} #{note_id}", callback))
         else:
-            buttons.append((f"👁 {copy['memory_detail_title']} #{note_id}", f"memory|view|{note_id}"))
+            callback = (
+                f"memory|view|{note_id}|search|{search_token}" if search_token else
+                f"memory|view|{note_id}|list" if from_list else
+                f"memory|view|{note_id}"
+            )
+            buttons.append((f"👁 {copy['memory_detail_title']} #{note_id}", callback))
     buttons.extend([
         (f"🔍 {copy['notes_search']}", "memory|search"), (f"📝 {copy['notes_create']}", "memory|create"),
     ])
@@ -187873,13 +188068,26 @@ def memory_note_detail_text(note: dict, lang: str = "vi") -> str:
         f"<b>{copy['memory_field_content']}:</b>\n{html.escape(note.get('content') or '')}"
     )
 
-def memory_note_detail_keyboard(note_id: int, lang: str = "vi") -> InlineKeyboardMarkup:
+def memory_note_detail_keyboard(
+    note_id: int, lang: str = "vi", from_list: bool = False, search_token: str = "",
+) -> InlineKeyboardMarkup:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    delete_callback = (
+        f"memory|delete|{int(note_id)}|search|{search_token}" if search_token else
+        f"memory|delete|{int(note_id)}|list" if from_list else
+        f"memory|delete|{int(note_id)}"
+    )
     buttons = [
-        (f"🗑 {copy['notes_delete']}", f"memory|delete|{int(note_id)}"),
+        (f"🗑 {copy['notes_delete']}", delete_callback),
         (f"🔍 {copy['notes_search']}", "memory|search"), (f"📋 {copy['memory_list_title']}", "memory|list"),
     ]
-    back = (f"⬅️ {copy['notes_docs_label']}", "menu|main_memory")
+    if search_token:
+        back = (f"⬅️ {copy['memory_search_title']}", f"memory|search_results|{search_token}")
+    elif from_list:
+        buttons = buttons[:2]
+        back = (f"⬅️ {copy['memory_list_title']}", "memory|list")
+    else:
+        back = (f"⬅️ {copy['notes_docs_label']}", "menu|main_memory")
     return build_2col_keyboard(buttons, nav_back=back, lang=lang)
 
 def memory_delete_confirm_text(note: dict, lang: str = "vi") -> str:
@@ -187891,13 +188099,28 @@ def memory_delete_confirm_text(note: dict, lang: str = "vi") -> str:
         f"{copy['memory_delete_confirm_body']}"
     )
 
-def memory_delete_confirm_keyboard(note_id: int, lang: str = "vi") -> InlineKeyboardMarkup:
+def memory_delete_confirm_keyboard(
+    note_id: int, lang: str = "vi", from_list: bool = False,
+    from_delete_picker: bool = False, search_token: str = "",
+) -> InlineKeyboardMarkup:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    cancel_callback = (
+        "memory|delete_start" if from_delete_picker else
+        f"memory|view|{int(note_id)}|list" if from_list else
+        f"memory|view|{int(note_id)}|search|{search_token}" if search_token else
+        f"memory|view|{int(note_id)}"
+    )
+    confirm_buttons = [
+        InlineKeyboardButton(f"✅ {copy['notes_delete']}", callback_data=f"memory|delete_yes|{int(note_id)}"),
+        InlineKeyboardButton(f"❌ {copy['common_cancel']}", callback_data=cancel_callback),
+    ]
+    if from_delete_picker:
+        return InlineKeyboardMarkup([
+            confirm_buttons,
+            [InlineKeyboardButton(f"🏠 {copy['common_main_menu']}", callback_data="menu|main")],
+        ])
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(f"✅ {copy['notes_delete']}", callback_data=f"memory|delete_yes|{int(note_id)}"),
-            InlineKeyboardButton(f"❌ {copy['common_cancel']}", callback_data=f"memory|view|{int(note_id)}"),
-        ],
+        confirm_buttons,
         [
             InlineKeyboardButton(f"⬅️ {copy['memory_list_title']}", callback_data="memory|list"),
             InlineKeyboardButton(f"🏠 {copy['common_main_menu']}", callback_data="menu|main"),
@@ -188327,7 +188550,7 @@ async def handle_memory_callback(update: Update, context: ContextTypes.DEFAULT_T
             query,
             "🗑 <b>Chọn ghi chú muốn xóa</b>\n\n" + "\n\n".join(memory_format_note_item_with_time(note) for note in notes),
             parse_mode="HTML",
-            reply_markup=memory_notes_list_keyboard(notes, lang, delete_mode=True),
+            reply_markup=memory_notes_list_keyboard(notes, lang, delete_mode=True, delete_from_picker=True),
         )
     if action == "list":
         clear_memory_guided_pending(uid)
@@ -188336,22 +188559,72 @@ async def handle_memory_callback(update: Update, context: ContextTypes.DEFAULT_T
             query,
             memory_notes_list_text(notes, "📋 <b>Ghi chú đã lưu</b>" if normalize_user_language(lang) == "vi" else "📋 <b>Saved notes</b>", lang),
             parse_mode="HTML",
-            reply_markup=memory_notes_list_keyboard(notes, lang),
+            reply_markup=memory_notes_list_keyboard(notes, lang, from_list=True),
         )
+    if action == "search_results" or (
+        action in {"view", "delete"} and len(action_parts) > 3 and action_parts[3] == "search"
+    ):
+        search_token = (action_parts[2] if len(action_parts) > 2 else "") if action == "search_results" else (
+            action_parts[4] if len(action_parts) > 4 else ""
+        )
+        search_state = (getattr(context, "user_data", {}) or {}).get("memory_search_results") or {}
+        search_ids = search_state.get("note_ids")
+        try:
+            search_created_at = float(search_state.get("created_at_ts") or 0)
+        except (TypeError, ValueError):
+            search_created_at = 0
+        if (
+            not search_token
+            or search_token != str(search_state.get("token") or "")
+            or not 0 <= time.time() - search_created_at <= QUICK_MEDIA_PENDING_TTL_SECONDS
+            or not isinstance(search_ids, (list, tuple))
+        ):
+            return await safe_edit_or_send(
+                query, menu_text_main_memory_i18n(lang), parse_mode="HTML",
+                reply_markup=main_memory_keyboard(lang, uid),
+            )
+        search_ids = [safe_int(note_id, 0) for note_id in search_ids]
+        search_ids = [note_id for note_id in search_ids if note_id > 0][:10]
+        if not search_ids or (action != "search_results" and safe_int(action_parts[2], 0) not in search_ids):
+            return await safe_edit_or_send(
+                query, menu_text_main_memory_i18n(lang), parse_mode="HTML",
+                reply_markup=main_memory_keyboard(lang, uid),
+            )
+        if action == "search_results":
+            clear_memory_guided_pending(uid)
+            placeholders = ",".join("?" for _ in search_ids)
+            notes = memory_list_notes(uid, f"id IN ({placeholders})", tuple(search_ids), limit=len(search_ids))
+            search_query = str(search_state.get("query") or "")[:80]
+            title = f"🔎 <b>Kết quả tìm: {html.escape(search_query)}</b>"
+            return await safe_edit_or_send(
+                query, memory_notes_list_text(notes, title, lang), parse_mode="HTML",
+                reply_markup=memory_notes_list_keyboard(notes, lang, search_token=search_token),
+            )
     if action == "view" and len(action_parts) > 2:
         clear_memory_guided_pending(uid)
         note_id = safe_int(action_parts[2], 0)
+        from_list = len(action_parts) > 3 and action_parts[3] == "list"
+        search_token = action_parts[4] if len(action_parts) > 4 and action_parts[3] == "search" else ""
         note = memory_fetch_note(uid, note_id)
         if not note:
             return await safe_edit_or_send(query, "⚠️ Không tìm thấy ghi chú của bạn hoặc ghi chú đã archive.", reply_markup=memory_main_keyboard(lang))
-        return await safe_edit_or_send(query, memory_note_detail_text(note, lang), parse_mode="HTML", reply_markup=memory_note_detail_keyboard(note_id, lang))
+        return await safe_edit_or_send(query, memory_note_detail_text(note, lang), parse_mode="HTML", reply_markup=memory_note_detail_keyboard(note_id, lang, from_list=from_list, search_token=search_token))
     if action == "delete" and len(action_parts) > 2:
         clear_memory_guided_pending(uid)
         note_id = safe_int(action_parts[2], 0)
+        from_list = len(action_parts) > 3 and action_parts[3] == "list"
+        from_delete_picker = len(action_parts) > 3 and action_parts[3] == "delete_start"
+        search_token = action_parts[4] if len(action_parts) > 4 and action_parts[3] == "search" else ""
         note = memory_fetch_note(uid, note_id)
         if not note:
             return await safe_edit_or_send(query, "⚠️ Không tìm thấy ghi chú active của bạn.", reply_markup=memory_main_keyboard(lang))
-        return await safe_edit_or_send(query, memory_delete_confirm_text(note, lang), parse_mode="HTML", reply_markup=memory_delete_confirm_keyboard(note_id, lang))
+        return await safe_edit_or_send(
+            query, memory_delete_confirm_text(note, lang), parse_mode="HTML",
+            reply_markup=memory_delete_confirm_keyboard(
+                note_id, lang, from_list=from_list, from_delete_picker=from_delete_picker,
+                search_token=search_token,
+            ),
+        )
     if action == "delete_yes" and len(action_parts) > 2:
         clear_memory_guided_pending(uid)
         note_id = safe_int(action_parts[2], 0)
@@ -188412,11 +188685,18 @@ async def handle_memory_pending_text(update: Update, context: ContextTypes.DEFAU
         like = f"%{text}%"
         notes = memory_list_notes(uid, "(title LIKE ? OR content LIKE ? OR summary LIKE ? OR tags LIKE ? OR category LIKE ?)", (like, like, like, like, like), limit=10)
         clear_memory_guided_pending(uid)
+        search_token = str(time.time_ns())
+        context.user_data["memory_search_results"] = {
+            "token": search_token,
+            "query": text[:80],
+            "note_ids": [safe_int(note.get("id"), 0) for note in notes if safe_int(note.get("id"), 0) > 0][:10],
+            "created_at_ts": time.time(),
+        }
         title = f"🔎 <b>Kết quả tìm: {html.escape(text[:80])}</b>"
         await update.message.reply_text(
             memory_notes_list_text(notes, title, lang),
             parse_mode="HTML",
-            reply_markup=memory_notes_list_keyboard(notes, lang),
+            reply_markup=memory_notes_list_keyboard(notes, lang, search_token=search_token),
         )
         return True
     if action == "delete_id":
@@ -231957,7 +232237,7 @@ def admin_growth_marketing_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🔗 Kho Link Affiliate", callback_data="admin_growth|affiliates"),
-            InlineKeyboardButton("🧠 Tạo Nội Dung & Gắn Link", callback_data="admin_growth|ideas"),
+            InlineKeyboardButton("📘 Hướng dẫn tạo nội dung & gắn link", callback_data="admin_growth|ideas"),
         ],
         [
             InlineKeyboardButton("🗓️ Lịch Đăng MXH", callback_data="admin_growth|calendar"),
@@ -231975,12 +232255,39 @@ def admin_growth_marketing_keyboard() -> InlineKeyboardMarkup:
 
 async def handle_admin_growth_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     uid = query.from_user.id
     if not is_admin_user(uid):
+        await query.answer()
         return await safe_edit_or_send(query, "⛔ Chỉ dành cho Quản trị viên.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]]))
 
-    action = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else "main"
+    parts = (query.data or "").split("|")
+    actions = {"main", "affiliates", "aff_add", "aff_import", "ideas", "calendar", "campaigns", "cockpit", "channels", "packages"}
+    growth_parents = {
+        "aff_add": {"affiliates"}, "aff_import": {"affiliates"}, "ideas": {"packages"},
+        "calendar": {"campaigns"}, "campaigns": {"calendar"}, "affiliates": {"ideas"},
+        "packages": {"channels", "ideas"},
+    }
+    action = parts[1] if len(parts) > 1 else "main"
+    nav_path = parts[2:]
+    valid_nav_path = not nav_path or (
+        nav_path[0] in growth_parents.get(action, set())
+        and all(nav_path[index + 1] in growth_parents.get(nav_path[index], set()) for index in range(len(nav_path) - 1))
+    )
+    if parts[0] != "admin_growth" or action not in actions or len(nav_path) > 3 or any(item not in actions for item in nav_path) or not valid_nav_path:
+        await query.answer("Nút đã hết hạn. Mở lại mục Marketing.", show_alert=True)
+        return
+    await query.answer()
+
+    def growth_nav(target, push=True):
+        path = (([action] if push and action != "main" else []) + nav_path)[:3]
+        return "|".join(("admin_growth", target, *path))
+
+    def growth_back():
+        if nav_path:
+            return "|".join(("admin_growth", *nav_path))
+        if action in {"aff_add", "aff_import"}:
+            return "admin_growth|affiliates"
+        return "admin_growth|main"
 
     if action == "main":
         pack = affiliate_campaign_cockpit_data(uid, days=30, limit=5)
@@ -232016,8 +232323,8 @@ async def handle_admin_growth_callback(update: Update, context: ContextTypes.DEF
             "\n".join(lines),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("➕ Thêm link mới", callback_data="admin_growth|aff_add"), InlineKeyboardButton("📥 Nhập hàng loạt", callback_data="admin_growth|aff_import")],
-                [InlineKeyboardButton("⬅️ Marketing", callback_data="admin_growth|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+                [InlineKeyboardButton("📘 Hướng dẫn thêm link", callback_data=growth_nav("aff_add")), InlineKeyboardButton("📘 Hướng dẫn nhập hàng loạt", callback_data=growth_nav("aff_import"))],
+                [InlineKeyboardButton("⬅️ Marketing", callback_data=growth_back()), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
             ]),
         )
 
@@ -232029,7 +232336,7 @@ async def handle_admin_growth_callback(update: Update, context: ContextTypes.DEF
             "<code>/addlink url=https://... product=\'Tên sản phẩm\' niche=\'ngách\' network=\'Shopee\' rate=10</code>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⬅️ Kho Affiliate", callback_data="admin_growth|affiliates")],
+                [InlineKeyboardButton("⬅️ Kho Affiliate", callback_data=growth_back())],
                 [InlineKeyboardButton("⬅️ Marketing", callback_data="admin_growth|main")],
             ]),
         )
@@ -232042,7 +232349,7 @@ async def handle_admin_growth_callback(update: Update, context: ContextTypes.DEF
             "<code>/affiliate_import niche=cong_nghe\nhttps://shorten.asia/link1 (Tai nghe Bluetooth TWS)\nhttps://shorten.asia/link2 (Bàn phím cơ không dây)</code>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⬅️ Kho Affiliate", callback_data="admin_growth|affiliates")],
+                [InlineKeyboardButton("⬅️ Kho Affiliate", callback_data=growth_back())],
                 [InlineKeyboardButton("⬅️ Marketing", callback_data="admin_growth|main")],
             ]),
         )
@@ -232066,8 +232373,8 @@ async def handle_admin_growth_callback(update: Update, context: ContextTypes.DEF
             "\n".join(lines),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔗 Kho Link", callback_data="admin_growth|affiliates"), InlineKeyboardButton("📦 Gói đăng bài", callback_data="admin_growth|packages")],
-                [InlineKeyboardButton("⬅️ Marketing", callback_data="admin_growth|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+                [InlineKeyboardButton("🔗 Kho Link", callback_data=growth_nav("affiliates")), InlineKeyboardButton("📦 Gói đăng bài", callback_data=growth_nav("packages"))],
+                [InlineKeyboardButton("⬅️ Marketing", callback_data=growth_back()), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
             ]),
         )
 
@@ -232091,8 +232398,8 @@ async def handle_admin_growth_callback(update: Update, context: ContextTypes.DEF
             "\n".join(lines),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📌 Quản lý Campaign", callback_data="admin_growth|campaigns")],
-                [InlineKeyboardButton("⬅️ Marketing", callback_data="admin_growth|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+                [InlineKeyboardButton("📋 Danh sách Campaign", callback_data=growth_nav("campaigns"))],
+                [InlineKeyboardButton("⬅️ Marketing", callback_data=growth_back()), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
             ]),
         )
 
@@ -232109,8 +232416,8 @@ async def handle_admin_growth_callback(update: Update, context: ContextTypes.DEF
             "\n".join(lines),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🗓️ Xem lịch đăng", callback_data="admin_growth|calendar")],
-                [InlineKeyboardButton("⬅️ Marketing", callback_data="admin_growth|main")],
+                [InlineKeyboardButton("🗓️ Xem lịch đăng", callback_data=growth_nav("calendar"))],
+                [InlineKeyboardButton("⬅️ Marketing", callback_data=growth_back())],
             ]),
         )
 
@@ -232139,8 +232446,8 @@ async def handle_admin_growth_callback(update: Update, context: ContextTypes.DEF
             "\n".join(lines),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Làm mới", callback_data="admin_growth|cockpit")],
-                [InlineKeyboardButton("⬅️ Marketing", callback_data="admin_growth|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+                [InlineKeyboardButton("🔄 Làm mới", callback_data=growth_nav("cockpit", push=False))],
+                [InlineKeyboardButton("⬅️ Marketing", callback_data=growth_back()), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
             ]),
         )
 
@@ -232164,8 +232471,8 @@ async def handle_admin_growth_callback(update: Update, context: ContextTypes.DEF
             "\n".join(lines),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📦 Gói đăng bài", callback_data="admin_growth|packages")],
-                [InlineKeyboardButton("⬅️ Marketing", callback_data="admin_growth|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+                [InlineKeyboardButton("📦 Gói đăng bài", callback_data=growth_nav("packages"))],
+                [InlineKeyboardButton("⬅️ Marketing", callback_data=growth_back()), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
             ]),
         )
 
@@ -232187,8 +232494,8 @@ async def handle_admin_growth_callback(update: Update, context: ContextTypes.DEF
             "\n".join(lines),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🧠 Tạo nội dung mới", callback_data="admin_growth|ideas")],
-                [InlineKeyboardButton("⬅️ Marketing", callback_data="admin_growth|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+                [InlineKeyboardButton("📘 Hướng dẫn tạo nội dung", callback_data=growth_nav("ideas"))],
+                [InlineKeyboardButton("⬅️ Marketing", callback_data=growth_back()), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
             ]),
         )
 
@@ -232237,7 +232544,7 @@ ADMIN_CONTROL_MODULES = {
         "buttons": [
             [("📘 Hướng dẫn xem bill", "menu|admin_billing_pending"), ("📘 Hướng dẫn duyệt bill", "menu|admin_billing_duyet")],
             [("📘 Hướng dẫn từ chối bill", "menu|admin_billing_tuchoi"), ("🧪 Kế hoạch test PayOS", "menu|admin_billing_payos")],
-            [("🛡 Rủi ro nạp tiền", "menu|payos_risk")],
+            [("🛡 Rủi ro nạp tiền", "menu|payos_risk|admin_billing")],
         ],
         "commands": [
             ("/pending", "xem bill chờ"),
@@ -232326,7 +232633,7 @@ ADMIN_CONTROL_MODULES = {
         "buttons": [
             [("🗄 DB trạng thái", "menu|admin_db_status|admin_security_db"), ("💾 Sao lưu DB", "menu|admin_backup_db|admin_security_db")],
             [("🛡 Nhật ký bảo mật", "menu|admin_security_log|admin_security_db"), ("📘 Hướng dẫn Runtime", "menu|system_runtime_help|admin_security_db")],
-            [("✅ Sales ready", "menu|smoke_sales_ready|admin_security_db")],
+            [("📘 Hướng dẫn Sales Ready", "menu|smoke_sales_ready|admin_security_db")],
         ],
         "commands": [
             ("/db_status", "kiểm tra DB, bảng quan trọng, backup, file risk"),
@@ -232375,7 +232682,7 @@ ADMIN_CONTROL_MODULES = {
         "purpose": "Dùng để kiểm tra ShopAIKey, Key4U, ASR/TTS/STT/video/music provider, worker/video job và các smoke test nội bộ.",
         "when": "Dùng khi provider lỗi, cần smoke test nội bộ, cần kiểm tra video job hoặc worker trước khi mở public.",
         "buttons": [
-            [("🤖 Provider status", "menu|admin_provider_status|admin_provider_worker"), ("🧪 Smoke Test", "menu|smoke_test|admin_provider_worker")],
+            [("🤖 Provider status", "menu|admin_provider_status|admin_provider_worker"), ("📘 Hướng dẫn Smoke Test", "menu|smoke_test|admin_provider_worker")],
             [("🧾 Route/Group Info", "menu|admin_provider_routes|admin_provider_worker"), ("📘 Hướng dẫn: TTS/Voice test", "admin_help|provider")],
             [("📘 Hướng dẫn: ASR/Sub/Dub test", "admin_help|provider")],
             [("📘 Hướng dẫn: Remote Worker Status", "admin_help|provider"), ("📘 Hướng dẫn: Test worker API", "admin_help|provider")],
@@ -232464,7 +232771,7 @@ ADMIN_CONTROL_MODULES = {
         "when": "Dùng khi có user cần hỗ trợ, cần xem ticket, hoặc cần ghi chú vận hành sau ca trực.",
         "buttons": [
             [("🎧 Ticket admin", "ticket|admin"), ("📝 Góp ý admin", "admin_gopy|inbox")],
-            [("📌 Hướng dẫn hỗ trợ", "admin_help|support"), ("📣 Marketing tự động", "marketing|start")],
+            [("📌 Hướng dẫn hỗ trợ", "admin_help|support"), ("📣 Marketing tự động", "marketing|start|admin_support")],
         ],
         "commands": [
             ("/admin_gopy", "xem/gửi ghi chú góp ý admin"),
@@ -233061,6 +233368,12 @@ def admin_overview_text() -> str:
         f"• Lượt gọi: <b>{int(tools['requested'] or 0)}</b> | Thành công: <b>{int(tools['success'] or 0)}</b> | Lỗi: <b>{int(tools['fail'] or 0)}</b>",
     ])
 
+def admin_overview_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 Báo cáo tài chính", callback_data="menu|finance_overview|admin_overview")],
+        [InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
 ADMIN_MENU_PAGE_HANDLERS = {
     "admin_users": lambda: (admin_module_page_text("users"), admin_module_keyboard("users")),
     "admin_billing": lambda: (admin_module_page_text("billing"), admin_module_keyboard("billing")),
@@ -233071,7 +233384,7 @@ ADMIN_MENU_PAGE_HANDLERS = {
     "admin_finance": lambda: (finance_menu_text(), finance_admin_keyboard()),
     "admin_support": lambda: (admin_module_page_text("support"), admin_module_keyboard("support")),
     "admin_handbook": lambda: (admin_handbook_menu_text(), admin_handbook_menu_keyboard()),
-    "admin_overview": lambda: (admin_overview_text(), finance_admin_keyboard()),
+    "admin_overview": lambda: (admin_overview_text(), admin_overview_keyboard()),
     "smoke_test": lambda: (smoke_test_menu_text(), smoke_test_menu_keyboard()),
     "payos_risk": lambda: (payos_risk_menu_text(), payos_risk_menu_keyboard()),
     "admin_db_status": lambda: (db_status_admin_text(), admin_db_status_keyboard()),
@@ -260922,7 +261235,11 @@ def marketing_menu_text() -> str:
         "V1 chỉ tạo kế hoạch. Bot chưa gọi social API, chưa tự đăng bài và chưa trừ Xu."
     )
 
-def marketing_menu_keyboard() -> InlineKeyboardMarkup:
+def marketing_menu_keyboard(back_action: str = "admin") -> InlineKeyboardMarkup:
+    back_action = str(back_action or "admin").strip()
+    if back_action not in {"admin", "admin_support"}:
+        back_action = "admin"
+    back_label = "CSKH / Góp ý" if back_action == "admin_support" else "Quản trị"
     return video_v6_keyboard(
         [
             ("📦 Sản phẩm vật lý", "marketing|kind|physical"),
@@ -260933,7 +261250,7 @@ def marketing_menu_keyboard() -> InlineKeyboardMarkup:
             ("✍️ Nhập ngành khác", "marketing|kind_custom"),
         ],
         "vi",
-        back=("⬅️ Quản trị", "menu|admin"),
+        back=(f"⬅️ {back_label}", f"menu|{back_action}"),
     )
 
 def marketing_suggestions(state: dict | None = None) -> list[str]:
@@ -261018,7 +261335,9 @@ def marketing_plan_text(state: dict | None = None) -> str:
         "V1 chỉ tạo kế hoạch. Chưa tự đăng bài, chưa gọi social API, chưa trừ Xu."
     )
 
-def marketing_result_keyboard() -> InlineKeyboardMarkup:
+def marketing_result_keyboard(back_to_suggestions: bool = False) -> InlineKeyboardMarkup:
+    back_action = "marketing|back_suggestions" if back_to_suggestions else "menu|admin"
+    back_label = "Quay lại gợi ý" if back_to_suggestions else "Quản trị"
     return video_v6_keyboard(
         [
             ("🎬 Chọn video đã duyệt", "marketing|select_video"),
@@ -261030,7 +261349,7 @@ def marketing_result_keyboard() -> InlineKeyboardMarkup:
             ("🔄 Chọn hướng khác", "marketing|back_suggestions"),
         ],
         "vi",
-        back=("⬅️ Quản trị", "menu|admin"),
+        back=(f"⬅️ {back_label}", back_action),
     )
 
 def marketing_followup_text(action: str, state: dict | None = None) -> str:
@@ -261067,7 +261386,9 @@ async def handle_marketing_pending_text(update: Update, context: ContextTypes.DE
         await update.message.reply_text(marketing_suggestions_text(state), parse_mode="HTML", reply_markup=marketing_suggestions_keyboard())
         return True
     state = set_marketing_pending(uid, "plan", custom_brief=text, selected_brief=text, processing="0")
-    await update.message.reply_text(marketing_plan_text(state), parse_mode="HTML", reply_markup=marketing_result_keyboard())
+    user_data = getattr(context, "user_data", None)
+    back_to_suggestions = isinstance(user_data, dict) and user_data.get("marketing_menu_back_action") == "admin_support"
+    await update.message.reply_text(marketing_plan_text(state), parse_mode="HTML", reply_markup=marketing_result_keyboard(back_to_suggestions=back_to_suggestions))
     return True
 
 async def handle_marketing_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -261079,12 +261400,23 @@ async def handle_marketing_callback(update: Update, context: ContextTypes.DEFAUL
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "start"
     value = parts[2] if len(parts) > 2 else ""
+    requested_back_action = value.strip() if action == "start" else ""
+    user_data = getattr(context, "user_data", None)
+    if isinstance(user_data, dict) and requested_back_action == "admin_support":
+        user_data["marketing_menu_back_action"] = requested_back_action
+    marketing_back_action = (
+        user_data.get("marketing_menu_back_action")
+        if isinstance(user_data, dict)
+        else ""
+    )
+    if marketing_back_action not in {"admin_support"}:
+        marketing_back_action = "admin"
     state = get_marketing_pending(uid) or {}
     if state.get("processing") == "1" and VIDEO_WAITING_LOCK_ENABLED:
         return await safe_edit_or_send(query, "⏳ Yêu cầu trước vẫn đang được xử lý. TOAN AAS chưa tạo thêm kế hoạch mới.", parse_mode=None)
     if action == "start":
         clear_marketing_pending(uid)
-        return await safe_edit_or_send(query, marketing_menu_text(), parse_mode="HTML", reply_markup=marketing_menu_keyboard())
+        return await safe_edit_or_send(query, marketing_menu_text(), parse_mode="HTML", reply_markup=marketing_menu_keyboard(marketing_back_action))
     if action == "kind_custom":
         set_marketing_pending(uid, "kind_custom")
         return await safe_edit_or_send(
@@ -261098,12 +261430,12 @@ async def handle_marketing_callback(update: Update, context: ContextTypes.DEFAUL
         return await safe_edit_or_send(query, marketing_suggestions_text(state), parse_mode="HTML", reply_markup=marketing_suggestions_keyboard())
     if action == "refresh":
         if not state.get("kind"):
-            return await safe_edit_or_send(query, marketing_menu_text(), parse_mode="HTML", reply_markup=marketing_menu_keyboard())
+            return await safe_edit_or_send(query, marketing_menu_text(), parse_mode="HTML", reply_markup=marketing_menu_keyboard(marketing_back_action))
         state = set_marketing_pending(uid, "suggestions", suggest_offset=_safe_int(state.get("suggest_offset"), 0) + 3)
         return await safe_edit_or_send(query, marketing_suggestions_text(state), parse_mode="HTML", reply_markup=marketing_suggestions_keyboard())
     if action == "brief_custom":
         if not state.get("kind"):
-            return await safe_edit_or_send(query, marketing_menu_text(), parse_mode="HTML", reply_markup=marketing_menu_keyboard())
+            return await safe_edit_or_send(query, marketing_menu_text(), parse_mode="HTML", reply_markup=marketing_menu_keyboard(marketing_back_action))
         set_marketing_pending(uid, "brief_custom")
         return await safe_edit_or_send(
             query,
@@ -261113,7 +261445,7 @@ async def handle_marketing_callback(update: Update, context: ContextTypes.DEFAUL
         )
     if action == "back_suggestions":
         if not state.get("kind"):
-            return await safe_edit_or_send(query, marketing_menu_text(), parse_mode="HTML", reply_markup=marketing_menu_keyboard())
+            return await safe_edit_or_send(query, marketing_menu_text(), parse_mode="HTML", reply_markup=marketing_menu_keyboard(marketing_back_action))
         state = set_marketing_pending(uid, "suggestions")
         return await safe_edit_or_send(query, marketing_suggestions_text(state), parse_mode="HTML", reply_markup=marketing_suggestions_keyboard())
     if action == "choice":
@@ -261126,12 +261458,16 @@ async def handle_marketing_callback(update: Update, context: ContextTypes.DEFAUL
         state = set_marketing_pending(uid, "plan", selected_brief=selected, processing="1")
         await safe_edit_or_send(query, marketing_waiting_text(), parse_mode=None)
         state = set_marketing_pending(uid, "plan", processing="0")
-        return await safe_edit_or_send_long_html(query, marketing_plan_text(state), reply_markup=marketing_result_keyboard())
+        return await safe_edit_or_send_long_html(
+            query,
+            marketing_plan_text(state),
+            reply_markup=marketing_result_keyboard(back_to_suggestions=marketing_back_action == "admin_support"),
+        )
     if action in {"select_video", "caption", "schedule", "cskh", "kpi", "save"}:
         if not state:
-            return await safe_edit_or_send(query, marketing_menu_text(), parse_mode="HTML", reply_markup=marketing_menu_keyboard())
-        return await safe_edit_or_send(query, marketing_followup_text(action, state), parse_mode="HTML", reply_markup=marketing_result_keyboard())
-    return await safe_edit_or_send(query, marketing_menu_text(), parse_mode="HTML", reply_markup=marketing_menu_keyboard())
+            return await safe_edit_or_send(query, marketing_menu_text(), parse_mode="HTML", reply_markup=marketing_menu_keyboard(marketing_back_action))
+        return await safe_edit_or_send(query, marketing_followup_text(action, state), parse_mode="HTML", reply_markup=marketing_result_keyboard(back_to_suggestions=marketing_back_action == "admin_support"))
+    return await safe_edit_or_send(query, marketing_menu_text(), parse_mode="HTML", reply_markup=marketing_menu_keyboard(marketing_back_action))
 
 def video_upload_received_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":

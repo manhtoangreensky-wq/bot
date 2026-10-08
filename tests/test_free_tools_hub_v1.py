@@ -82,15 +82,16 @@ def test_main_menu_layout_regular_user():
     labels = _labels(markup)
 
     assert labels == [
-        ["🆓 Công cụ miễn phí", "💎 Chat Pro • 5/25 Xu/1K"],
+        ["🆓 Công cụ miễn phí"],
         ["🎬 Tạo video AI", "🖼 Tạo ảnh AI"],
-        ["👤 Tài khoản", "🎧 Studio âm thanh"],
-        ["🌐 Dịch thuật", "📝 Ghi chú / Tài liệu"],
-        ["📚 Hướng dẫn", "👨‍💼 Hỗ trợ"],
-        ["💰 Nạp Xu / Bảng giá", "💬 Góp ý / Báo lỗi"],
+        ["🌐 Dịch thuật", "🎧 Studio âm thanh"],
+        ["👤 Tài khoản", "💰 Nạp Xu / Bảng giá"],
+        ["📢 Đăng bài tự động", "💎 Chat Pro • 5/25 Xu/1K"],
+        ["📝 Ghi chú / Tài liệu", "👨‍💼 Hỗ trợ"],
+        ["📚 Hướng dẫn", "💬 Góp ý / Báo lỗi"],
         ["📊 Trung tâm", "🌐 Đổi ngôn ngữ"],
     ]
-    assert [len(row) for row in markup.inline_keyboard] == [2, 2, 2, 2, 2, 2, 2]
+    assert [len(row) for row in markup.inline_keyboard] == [1, 2, 2, 2, 2, 2, 2, 2]
     assert all("🔐 Admin" not in label for row in labels for label in row)
     assert "menu|main_video" in _callback_set(markup)
 
@@ -99,12 +100,12 @@ def test_main_menu_layout_admin():
     markup = bot.localized_main_menu_keyboard(True, "vi")
     labels = _labels(markup)
 
-    assert labels[0] == ["🆓 Công cụ miễn phí", "💎 Chat Pro • 5/25 Xu/1K"]
-    assert labels[5] == ["💰 Nạp Xu / Bảng giá", "💬 Góp ý / Báo lỗi"]
-    assert labels[6] == ["📊 Trung tâm", "🌐 Đổi ngôn ngữ"]
+    assert labels[0] == ["🆓 Công cụ miễn phí"]
+    assert labels[4] == ["📢 Đăng bài tự động", "💎 Chat Pro • 5/25 Xu/1K"]
+    assert labels[7] == ["📊 Trung tâm", "🌐 Đổi ngôn ngữ"]
     assert labels[-1] == ["🔐 Admin"]
     assert len(markup.inline_keyboard[-1]) == 1
-    assert [len(row) for row in markup.inline_keyboard[:-1]] == [2, 2, 2, 2, 2, 2, 2]
+    assert [len(row) for row in markup.inline_keyboard] == [1, 2, 2, 2, 2, 2, 2, 2, 1]
 
 
 def test_main_menu_callbacks_have_handlers():
@@ -114,6 +115,7 @@ def test_main_menu_callbacks_have_handlers():
 
     assert callbacks == {
         "freehub|main",
+        "menu|autopost",
         "menu|chat_pro",
         "menu|main_profile",
         "menu|main_image",
@@ -331,8 +333,8 @@ def test_prompt_create_video_ai_guard_has_no_local_export():
 def test_free_hub_back_routing():
     assert "freehub|main" in _callbacks(bot.free_hub_input_keyboard("vi"))
     assert "freehub|main" in _callbacks(bot.free_hub_prompts_keyboard("vi"))
-    assert "freehub|main" in _callbacks(bot.free_hub_library_suggestions_keyboard("vi"))
-    assert "freehub|main" in _callbacks(bot.free_hub_library_item_keyboard("vi"))
+    assert "freehub|library" in _callbacks(bot.free_hub_library_suggestions_keyboard("vi"))
+    assert "freehub|lib_back" in _callbacks(bot.free_hub_library_item_keyboard("vi"))
     assert "freehub|meta_back_goal" in _callbacks(bot.free_hub_meta_choice_keyboard("meta_platform", "vi"))
     assert "freehub|meta_back_platform" in _callbacks(bot.free_hub_meta_choice_keyboard("meta_ratio", "vi"))
     assert "freehub|meta_back_ratio" in _callbacks(bot.free_hub_meta_choice_keyboard("meta_style", "vi"))

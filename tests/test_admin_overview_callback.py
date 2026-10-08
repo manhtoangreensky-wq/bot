@@ -77,7 +77,8 @@ class AdminOverviewActualCallbackTest(unittest.TestCase):
             "html": html,
             "Update": object,
             "ContextTypes": SimpleNamespace(DEFAULT_TYPE=object),
-            "InlineKeyboardMarkup": object,
+            "InlineKeyboardButton": lambda text, callback_data=None: SimpleNamespace(text=text, callback_data=callback_data),
+            "InlineKeyboardMarkup": lambda rows: SimpleNamespace(inline_keyboard=rows),
             "VIDEO_TAIL9_TEXT_INPUT_KEY": "probe-only",
             "DOC_TOOL_MENU_ACTIONS": set(),
             "is_admin_user": lambda _uid: True,
@@ -87,7 +88,6 @@ class AdminOverviewActualCallbackTest(unittest.TestCase):
             "admin_report_payload": lambda *_args: sample_payload,
             "vnd_text": lambda amount: f"{int(amount):,} VND",
             "xu_text": lambda amount: f"{int(amount):,} Xu",
-            "finance_admin_keyboard": lambda: "finance-keyboard",
             "safe_edit_query_message": capture_edit,
         }
         for helper_name in (
@@ -117,7 +117,14 @@ class AdminOverviewActualCallbackTest(unittest.TestCase):
         self.assertIn("Báo cáo tổng TOAN AAS", rendered["text"])
         self.assertIn("Tổng: <b>12</b>", rendered["text"])
         self.assertIn("Doanh thu hôm nay: <b>30,000 VND</b>", rendered["text"])
-        self.assertIs(rendered["reply_markup"], "finance-keyboard")
+        dashboard_callbacks = [
+            button.callback_data
+            for row in rendered["reply_markup"].inline_keyboard
+            for button in row
+        ]
+        self.assertIn("menu|finance_overview|admin_overview", dashboard_callbacks)
+        self.assertIn("menu|admin", dashboard_callbacks)
+        self.assertIn("menu|main", dashboard_callbacks)
 
 
 if __name__ == "__main__":

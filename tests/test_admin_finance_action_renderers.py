@@ -58,6 +58,131 @@ def _buttons(markup, callback):
 
 
 class AdminFinanceActionRendererTests(unittest.TestCase):
+    def test_admin_control_center_finance_button_opens_finance_hub(self):
+        ns, route, _, _ = _runtime()
+        source_fixture = fixture.fixture
+        for name in ("admin_control_center_keyboard", "menu_nav_keyboard", "finance_menu_text", "finance_admin_keyboard"):
+            exec(compile(source_fixture._function(name), "bot.py:" + name, "exec"), ns)
+        ns["TAX_PREP_DISCLAIMER"] = "Fixture-only financial disclaimer."
+
+        root = ns["menu_nav_keyboard"]("admin", True)
+        button = next(
+            button
+            for row in root.inline_keyboard
+            for button in row
+            if button.text == "💰 Tài chính"
+        )
+        self.assertEqual("menu|admin_finance", button.callback_data)
+
+        query = fixture._dispatch(route, button.callback_data)
+        self.assertEqual([((), {})], query.answers)
+        self.assertIn("Admin Tài chính TOAN AAS", query.edits[0][0])
+        callbacks = [
+            button.callback_data
+            for row in query.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+        ]
+        self.assertIn("menu|finance_overview", callbacks)
+        self.assertIn("menu|admin", callbacks)
+
+    def test_system_ops_dashboard_finance_child_back_returns_to_dashboard(self):
+        ns, route, _, _ = _runtime()
+        source_fixture = fixture.fixture
+        exec(compile(source_fixture._function("admin_overview_keyboard"), "bot.py:admin_overview_keyboard", "exec"), ns)
+        ns["admin_overview_text"] = lambda: "INERT DASHBOARD FIXTURE"
+
+        system_ops = ns["admin_module_keyboard"]("system_ops")
+        dashboard = next(
+            button
+            for row in system_ops.inline_keyboard
+            for button in row
+            if button.callback_data.startswith("menu|admin_overview")
+        )
+        opened = fixture._dispatch(route, dashboard.callback_data)
+        self.assertEqual([((), {})], opened.answers)
+        self.assertEqual(["menu|admin_system_ops"], [
+            button.callback_data
+            for row in opened.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+            if button.text.startswith("⬅")
+        ])
+
+        dashboard_controls = [
+            button
+            for row in opened.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+        ]
+        finance_entries = [button for button in dashboard_controls if button.callback_data.startswith("menu|finance_overview|")]
+        self.assertEqual(1, len(finance_entries))
+        finance_entry = finance_entries[0]
+        self.assertEqual("📊 Báo cáo tài chính", finance_entry.text)
+        self.assertEqual("menu|finance_overview|admin_overview|admin_system_ops", finance_entry.callback_data)
+        self.assertEqual(
+            {"menu|finance_overview|admin_overview|admin_system_ops", "menu|admin_system_ops", "menu|main"},
+            {button.callback_data for button in dashboard_controls},
+        )
+        self.assertTrue(all(len(button.callback_data.encode("utf-8")) <= 64 for button in dashboard_controls))
+
+        report = fixture._dispatch(route, finance_entry.callback_data)
+        self.assertIn("Tổng quan tài chính", report.edits[0][0])
+        back_callbacks = [
+            button.callback_data
+            for row in report.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+            if button.text.startswith("⬅")
+        ]
+        self.assertEqual([dashboard.callback_data], back_callbacks)
+        self.assertTrue(all(len(button.callback_data.encode("utf-8")) <= 64 for row in report.edits[0][1]["reply_markup"].inline_keyboard for button in row))
+
+        returned = fixture._dispatch(route, back_callbacks[0])
+        self.assertEqual(["menu|admin_system_ops"], [
+            button.callback_data
+            for row in returned.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+            if button.text.startswith("⬅")
+        ])
+
+    def test_legacy_dashboard_context_and_finance_hub_back_remain_distinct(self):
+        ns, route, _, _ = _runtime()
+        source_fixture = fixture.fixture
+        exec(compile(source_fixture._function("admin_overview_keyboard"), "bot.py:admin_overview_keyboard", "exec"), ns)
+        ns["admin_overview_text"] = lambda: "INERT DASHBOARD FIXTURE"
+
+        legacy_finance = fixture._dispatch(route, "menu|admin_finance")
+        self.assertEqual(["menu|admin"], [
+            button.callback_data
+            for row in legacy_finance.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+            if button.text.startswith("⬅")
+        ])
+
+        legacy_dashboard = fixture._dispatch(route, "menu|admin_overview")
+        finance_entries = _buttons(legacy_dashboard.edits[0][1]["reply_markup"], "menu|finance_overview|admin_overview")
+        self.assertEqual(1, len(finance_entries))
+        finance_entry = finance_entries[0]
+        legacy_dashboard_report = fixture._dispatch(route, finance_entry.callback_data)
+        self.assertIn("Tổng quan tài chính", legacy_dashboard_report.edits[0][0])
+        self.assertEqual(["menu|admin_overview"], [
+            button.callback_data
+            for row in legacy_dashboard_report.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+            if button.text.startswith("⬅")
+        ])
+
+    def test_dashboard_finance_overview_rejects_public_and_stale_origins(self):
+        for admin, callback in (
+            (False, "menu|finance_overview|admin_overview"),
+            (True, "menu|finance_overview|unknown"),
+            (True, "menu|finance_overview|admin_overview|extra"),
+            (True, "menu|finance_overview|admin_system_ops"),
+        ):
+            with self.subTest(admin=admin, callback=callback):
+                ns, route, cleared, _ = _runtime(admin=admin)
+                query = fixture._dispatch(route, callback)
+                self.assertTrue(query.answers[0][1].get("show_alert"))
+                self.assertEqual([], query.edits)
+                self.assertEqual([], cleared)
+
     def test_finance_report_buttons_render_readonly_pages_and_return_to_finance(self):
         ns, route, _, _ = _runtime()
         visible_controls = (ns["admin_module_keyboard"]("finance"), ns["finance_admin_keyboard"]())

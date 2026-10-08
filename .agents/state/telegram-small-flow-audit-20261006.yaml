@@ -1,16 +1,21 @@
 task_id: telegram-small-flow-audit-20261006
 goal_status: active
 phase: verify
-base_sha: 1f1b035edb225f8fef6b475836c75f6c7b609a81
+base_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
 objective: >-
   Continue the ordered Telegram small-flow audit. Fix wrong callback/Back routes
   narrowly while protecting AutoPost WIP and stable product engines.
-current_spec: S12.24.3-admin-queue-manual-confirm-copy
-branch: audit/telegram-ui-continuation-20261007
+current_spec: S12.35.80-single-batch-ci-delivery
+current_branch: audit/telegram-small-flow-batch-20261007
+release_cadence: >-
+  Keep the remaining specs on one batch branch. Do not create a PR, merge, deploy,
+  or restart per spec; complete the ordered checklist and final CI first, then
+  deliver one batch PR and one merge/deploy cycle with runtime verification.
+branch: audit/telegram-small-flow-batch-20261007
 allowed_scope:
-  - Read-only source registration and candidate-test inventory
-  - Remaining Admin UI emitted-control/handler evidence; narrow fixes only after reproduced RED
-  - Evidence matrix, checklist, operating notes and durable state
+  - Checklist-ordered small-flow emitted-control, callback, pending-state and UI evidence with inert fixtures
+  - Narrow fixes only after a reproducible UX/callback/pending failure; no speculative edits
+  - Evidence matrix, checklist, test coverage, operating notes and durable state
 protected_scope:
   - AutoPost WIP
   - Product Video, Edit, Image, SubDub, Voice, and Music engine behavior
@@ -380,7 +385,7 @@ specs:
       - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
       - docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
   S12.24.3-admin-queue-manual-confirm-copy:
-    status: focused-green-awaiting-pr-ci-source-compile-and-tests
+    status: merged-deployed-runtime-sha-verified
     base_sha: 1f1b035edb225f8fef6b475836c75f6c7b609a81
     acceptance: >-
       Queue Freeze Video, Unfreeze Tool and Refund Job buttons accurately state
@@ -397,6 +402,11 @@ specs:
       suite ran 5 tests OK. Full local bot compile produced no output for over 7
       minutes and was interrupted (not a pass and not a syntax failure); local pytest
       is absent. Changed core label assertion and complete source compile await PR CI.
+    pull_request: 1391
+    merge_sha: d05c2ae034f23c7808f3a739e98ebe4826634e40
+    ci: "python_hygiene_and_tests and python-311-source-compile SUCCESS"
+    deploy_run: 37532325983
+    runtime_sha: d05c2ae034f23c7808f3a739e98ebe4826634e40
     protected_scope: "All Admin command/operation handlers, permission checks, callback values, business/data/wallet/provider operations, all product engines, AutoPost WIP and shared router architecture"
     files:
       - bot.py
@@ -405,14 +415,1311 @@ specs:
       - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
       - docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
       - TAI-LIEU/01-NGHIEP-VU-VAN-HANH.md
+  S12.35.16-start-menu-pending-input-release:
+    status: local-focused-evidence-no-production-fix
+    acceptance: >-
+      /start and /menu release selected input ownership while preserving saved
+      Broadcast Lite content and unrelated user pending entries; subsequent text
+      is not captured by the closed prompt.
+    green: >-
+      Three Broadcast/Memory/Document tests passed; three Archive/Storage/Downloader
+      tests passed; three Admin Tool reset checks passed by direct invocation.
+      No production-code change or live operation.
+  S12.35.17-pending-expiry-stale-replay-and-back-spot-check:
+    status: local-focused-evidence-no-production-fix
+    acceptance: >-
+      Expired Support input is not consumed; stale Archive Save replay is
+      single-acknowledged and does not save twice; Downloader Home clears its input;
+      Document nested Back preserves selection and parent Back clears the session.
+    green: >-
+      8 unittest cases passed in 55.928s; 2 directly invoked Document Back checks
+      passed. No production DB/archive write, provider, wallet, job, or real message.
+  S12.35.18-small-flow-pending-expiry-contract:
+    status: locally-verified-test-only
+    acceptance: >-
+      Actual getter bodies for Free Tools, Downloader, Admin Tool, Support, Document,
+      Memory, Storage Add-on and Internal Archive expire old in-memory state and
+      preserve another user's pending entry.
+    green: >-
+      Bundled Python unittest: 1 test OK in 1.373s; changed-test py_compile and
+      git diff --check exited 0.
+    protected_scope: "No Broadcast draft deletion; no Translation/SubDub or Product/Edit/Image/Voice/Music engine paths"
+    production_code_changed: false
+    side_effects: "DB=0; providers=0; wallet=0; jobs=0; real Telegram messages=0"
+  S12.35.19-scope-start-cleanup-ast-test:
+    status: locally-verified-test-performance-only
+    baseline: "Test parsed all 14.5 MB of bot.py to inspect only cmd_start; a direct run exceeded 30s and was interrupted without test result."
+    change: "Parse only the exact cmd_start function; keep the six required clear-helper assertions unchanged."
+    green: "Direct test invocation: 1 test OK in 0.648s; changed tests py_compile and git diff --check exit 0."
+    production_code_changed: false
+    protected_scope: "No bot callback/engine/runtime changes"
+  S12.35.20-admin-marketing-planner-back-origin:
+    status: local-focused-green-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      The actual Admin Support Marketing planner entry returns to Support from its
+      landing page, and internal Back to that landing page preserves the Support
+      origin. A fresh legacy unscoped marketing|start retains Admin Back.
+    red: >-
+      Actual Support module button dispatched through the marketing callback handler
+      returned menu|admin; expected immediate parent menu|admin_support. One
+      behavioral failure, zero setup errors.
+    green: >-
+      tests.test_admin_marketing_support_back_origin and
+      tests.test_marketing_callback_single_ack: 5 unittest cases OK in 2.597s;
+      Support entry/industry suggestions/internal landing Back returns to Support;
+      unscoped legacy start remains Admin; public denial occurs before state access.
+    change: >-
+      Add only the Support origin callback, an allowlisted per-user UI-context return
+      marker, and the matching Marketing landing Back target; no content or publish
+      behavior change.
+    protected_scope: "AutoPost WIP, media/product engines/workers, content generation/publish, wallet, providers and production data"
+    side_effects: "Provider calls=0; job creation=0; wallet=0; DB writes=0; real Telegram sends=0"
+    files:
+      - bot.py
+      - tests/test_admin_marketing_support_back_origin.py
+      - tests/test_marketing_callback_single_ack.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+  S12.35.21-broadcast-lite-read-only-navigation:
+    status: local-focused-evidence-no-fix
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Dispatch the actual Broadcast Lite root-emitted History, Schedule and Limits
+      controls through the registered callback. Back returns to the emitting parent;
+      Schedule → Limits returns to Schedule. Do not perform broadcast or schedule
+      mutations.
+    result: "No navigation mismatch reproduced."
+    green: >-
+      tests.test_broadcast_lite_back_pending_cleanup: 4 unittest cases OK in 0.739s;
+      includes actual registered-handler round trips for History, Schedule, root
+      Limits and Schedule → Limits, plus existing pending-exit regressions.
+    fixture: "History/list, schedule list, limit read and pending cleanup are inert; only read-only callback branches are dispatched."
+    protected_scope: "Broadcast delivery/confirm, schedule create/toggle, limit writes, AutoPost WIP, all product/media engines"
+    side_effects: "Production DB=0; delivery=0; schedules/drafts/limits mutated=0; providers=0; wallet=0; customer messages=0"
+    files:
+      - tests/test_broadcast_lite_back_pending_cleanup.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+  S12.35.22-marketing-plan-result-back-origin:
+    status: local-focused-green-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Support-origin Marketing planner result Back returns to its suggestion parent,
+      then retains the Support parent through the landing Back. The legacy unscoped
+      plan result still returns to Admin.
+    red: >-
+      Actual plan-result keyboard for a Support-origin route emitted menu|admin;
+      expected marketing|back_suggestions. One behavioral mismatch, zero setup errors.
+    green: >-
+      tests.test_admin_marketing_support_back_origin plus
+      tests.test_marketing_callback_single_ack: 7 focused route/authorization/legacy
+      cases OK in 4.609s. Inert plan/suggestion renderers; Support → result → suggestions →
+      landing retains Support; legacy result still targets Admin.
+    change: >-
+      Add a closed optional Back choice to the existing Marketing result keyboard and
+      select it only for Support-origin plan results; default behavior stays unchanged.
+    protected_scope: "Plan generation/content, input handling, publish, AutoPost WIP, media/product engines/workers, providers, wallet, production data"
+    side_effects: "Provider calls=0; jobs=0; wallet=0; DB writes=0; real Telegram sends=0"
+    files:
+      - bot.py
+      - tests/test_admin_marketing_support_back_origin.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+  S12.35.23-provider-worker-smoke-test-guide-label:
+    status: locally-verified-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      The Provider/Worker module entry accurately identifies the Smoke Test
+      destination as a guide; dispatch its actual emitted callback through the
+      registered menu handler and assert the rendered command hub and child guide
+      labels. Do not run any command, provider, or worker test.
+    red: >-
+      Focused registered-handler test observed the emitted label "🧪 Smoke Test"
+      while the callback only opened the static Smoke Test command hub.
+    green: >-
+      Changed label to "📘 Hướng dẫn Smoke Test" only. Admin module-child and
+      Billing guide regressions: Ran 22 tests in 61.431s OK; the new test verifies
+      the registered route, "Lệnh nhanh" hub and all emitted child guide labels.
+      S12.35.22 Marketing regressions: Ran 7 tests in 4.229s OK. Changed-test
+      py_compile and git diff --check exited 0.
+    test_note: >-
+      The first post-patch broad run exposed an incorrect test assertion that
+      expected child-page wording on the root hub; after aligning the assertion
+      with the actual root output, the focused and full 22-test suites passed.
+    protected_scope: "Smoke command execution, Provider/Worker runtime, all product/media engines and workers, AutoPost WIP, wallet, DB, paid providers, customer messages"
+    side_effects: "Provider calls=0; worker calls=0; jobs=0; wallet=0; production DB writes=0; real Telegram sends=0"
+    files:
+      - bot.py
+      - tests/test_admin_module_child_back_origin.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+  S12.35.24-sales-ready-guide-label-and-legacy-system-back:
+    status: locally-verified-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Security/DB and legacy System Sales Ready controls are clearly labeled as
+      guides. The legacy System control dispatches through its actual emitted
+      callback and registered handler; guide Back renders the existing System
+      menu. Reject public use before cleanup or data reads. No readiness/system
+      command is run.
+    red: >-
+      Both emitted labels implied a readiness result, but the callback rendered
+      static /sales_ready instructions. The legacy System emitter omitted its
+      origin; actual callback Back targeted menu|smoke_test, and menu|system then
+      fell through localized_menu_content to the main-menu fallback.
+    green: >-
+      Both labels now identify the guide. The legacy System emitter carries a
+      `system` origin; its specific admin-only callback returns Back to menu|system,
+      and localized_menu_content reuses the existing System text/keyboard. New
+      focused tests verify both labels, route, rendered guide, System Back/render,
+      and public denial. Admin module-child/Billing suites: Ran 24 tests in
+      84.682s OK; focused tests: Ran 2 tests in 8.745s OK. Changed-test py_compile
+      and git diff --check exited 0.
+    protected_scope: "System commands/operations/status checks, secrets, configuration, engines/providers/workers, AutoPost WIP, wallet, production data and real messages"
+    side_effects: "Provider calls=0; system commands=0; worker calls=0; jobs=0; wallet=0; production DB writes=0; real Telegram sends=0"
+    files:
+      - bot.py
+      - tests/test_admin_module_child_back_origin.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+  S12.35.25-legacy-system-operator-entry-and-back:
+    status: locally-verified-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      The actual legacy System menu Operator control reaches the existing
+      admin-only Operator page through its registered callback. Scoped Back
+      returns to the existing System menu, with no duplicate System shortcut;
+      legacy unscoped Operator behavior stays unchanged. Reject public scoped
+      callbacks before cleanup/render.
+    red: >-
+      Actual System menu emitted menu|operator; registered menu handler fell
+      through localized_menu_content and rendered MAIN MENU instead of Operator.
+    green: >-
+      System emitter now appends the `system` origin; the menu handler validates
+      it and renders the existing Operator text/keyboard. Scoped Back is relabeled
+      and targets menu|system; the duplicate explicit System button is removed
+      only for this scoped page. Focused route test: Ran 1 test in 7.125s OK.
+      Admin module-child/Billing regression: Ran 25 tests in 109.778s OK.
+    protected_scope: "Operator commands/actions, system operations, provider/worker operations, all product/media engines, AutoPost WIP, wallet, production data, customer messages"
+    side_effects: "System commands=0; provider calls=0; worker calls=0; jobs=0; wallet=0; production DB writes=0; real Telegram sends=0"
+    files:
+      - bot.py
+      - tests/test_admin_module_child_back_origin.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+  S12.35.26-legacy-system-read-only-guide-labels:
+    status: locally-verified-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      The legacy System menu labels Data Status, Backup DB and Health as guides,
+      because each emitted callback opens static instructions rather than running
+      a status check or backup. Dispatch all three emitted controls through the
+      registered menu callback; preserve payloads, rendered instructions, and
+      existing System/Admin/Home destinations. Provider status is read-only data
+      and is explicitly outside the label-only change.
+    red: >-
+      Registered-handler test dispatched the three actual System menu controls;
+      it failed only on the three labels, which claimed a live Data Status,
+      Backup DB or Health action while each destination rendered static
+      instructions. No setup errors or external side effects.
+    green: >-
+      Only the three labels now identify guide destinations; callbacks and
+      renderers are byte-preserved. The focused test verified all commands/API
+      text and Back to the existing System renderer through the registered menu
+      handler. Three focused System guide/Sales Ready/Operator route tests ran in
+      13.835s OK. No system command, backup, provider or worker call occurred.
+    protected_scope: "System commands/status, DB/backup operations, providers/workers, secrets/configuration, all product/media engines, AutoPost WIP, wallet, production data and real messages"
+    side_effects: "Provider calls=0; system commands=0; worker calls=0; jobs=0; wallet=0; production DB writes=0; real Telegram sends=0"
+    files:
+      - bot.py
+      - tests/test_admin_module_child_back_origin.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+  S12.35.27-legacy-system-provider-status-back-origin:
+    status: locally-verified-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      System → Providers opens the existing read-only provider status page. Its
+      Back returns to System, Refresh preserves that origin, and Details returns
+      to the status page as its immediate parent. Existing Admin Provider/Worker
+      routes retain their current ancestry. Reject public or stale origins before
+      status reads/render. No provider probe/test/freeze or worker operation.
+    red: >-
+      The actual System emitter produced the unscoped menu|admin_provider_status.
+      Registered-handler dispatch opened the inert read-only Provider Status
+      page, but its controls sent Back to menu|admin_provider, Refresh to the
+      unscoped status page and Details to the unscoped route page. No setup error.
+    green: >-
+      System-origin status and detail callbacks now carry a closed `system`
+      origin; Back follows System → status → System and details → status, while
+      Refresh preserves the current page origin. Public and malformed-origin
+      cases stop before reads/cleanup. The exact focused route test and the
+      seven-route Admin module back regression ran 3 tests in 22.997s OK.
+      Changed-test py_compile and git diff --check both exited 0; diff check only
+      reported existing LF-to-CRLF working-copy warnings.
+    protected_scope: "Provider status/read APIs, secrets/configuration, engines, providers/workers, AutoPost WIP, wallet, production data and real messages"
+    side_effects: "Provider probes/calls=0; worker calls=0; jobs=0; wallet=0; production DB writes=0; real Telegram sends=0"
+    files:
+      - bot.py
+      - tests/test_admin_module_child_back_origin.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+  S12.35.28-operator-system-back-origin:
+    status: locally-verified-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      The emitted Operator → System control carries a validated operator origin;
+      System Back returns to the actual Operator menu. Preserve the existing
+      unscoped System → Admin parent, the System → Operator scoped Back, and the
+      no-duplicate-System rule on that scoped Operator page. Reject public/stale
+      origins before cleanup or rendering. No system command/status operation.
+    red: >-
+      The actual Operator keyboard emitted menu|system; registered-handler
+      dispatch rendered System with Back → menu|admin. The focused RED test
+      failed on the missing operator origin; there were no setup errors.
+    green: >-
+      Operator emits a closed `system|operator` origin. That scoped System page
+      returns to Operator; context-free `menu|system` still returns to Admin,
+      and System → Operator keeps its parent Back without a duplicate System
+      shortcut. Public/stale contexts stop before cleanup/render. The focused
+      two-direction System route matrix plus unchanged Admin-module origins ran
+      5 tests in 50.643s OK; changed-test py_compile and git diff --check exited
+      0 (existing LF-to-CRLF warnings only). No system/provider/worker command or
+      side effect.
+    protected_scope: "System/Operator commands, runtime, provider/worker state, secrets/configuration, all product/media engines, AutoPost WIP, wallet, production data and real messages"
+    side_effects: "System commands=0; provider calls=0; worker calls=0; jobs=0; wallet=0; production DB writes=0; real Telegram sends=0"
+    files:
+      - bot.py
+      - tests/test_admin_module_child_back_origin.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
   A6-admin-platform-copy-backlog:
-    status: queued-after-route-audit
-    evidence: "Fake-role execution produced 1 Railway mention in owner_required_text and 2 in registered admin_whoami output (3 references across 2 rendered UI outputs). Actual deployment target is Ubuntu VPS. No ENV/permission writes or real sends"
-    acceptance: "Wording-only VPS correction when A6 begins; permission/configuration/security logic untouched"
+    status: locally-verified-partial-ui-copy
+    evidence: "Baseline fake-role execution produced 1 Railway mention in owner_required_text and 2 in registered /admin_whoami output. S12.35.36 changed only these three displayed references to VPS and source-extracted output checks pass; no ENV/permission changes or real sends. Full visual and remaining copy audit still open."
+    acceptance: "Wording-only VPS correction; permission/configuration/security logic untouched"
+  S12.35.29-customer-root-account-support-language-navigation:
+    status: locally-verified-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Existing customer root/account/support/language emitted controls keep their
+      registered destinations, reject invalid scoped contexts before cleanup,
+      and return Back to the account or immediate read-only parent. Do not enter
+      product processing routes.
+    green: >-
+      tests.test_admin_root_menu_callback_single_ack,
+      tests.test_profile_credit_guide_back_origin,
+      tests.test_profile_support_read_back_origin, and
+      tests.test_profile_language_back_origin: Ran 17 tests in 50.025s OK.
+      No mismatch reproduced in this bounded subset.
+    protected_scope: "Product/Edit/Image/SubDub/Voice/Music processing, AutoPost WIP, providers, wallet, production data, customer messages"
+    side_effects: "Provider calls=0; jobs=0; wallet=0; production DB writes=0; real Telegram sends=0"
+    files:
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+  S12.35.30-small-flow-stale-repeat-back-regressions:
+    status: locally-verified-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Current small-flow stale/repeat controls fail closed or remain idempotent;
+      scoped Support Back/expiry preserves its parent; maintenance exit clears
+      only the owning pending state. Keep provider, wallet, production writes,
+      and real-message effects inert.
+    green: >-
+      tests.test_marketing_callback_single_ack,
+      tests.test_admin_marketing_support_back_origin,
+      tests.test_internal_archive_save_callback_single_ack,
+      tests.test_support_ticket_lead_action_repeat,
+      tests.test_freehub_maintenance_main_pending_reset, and
+      tests.test_profile_support_pending_origin: Ran 18 tests in 45.676s OK.
+      No mismatch reproduced in this bounded set.
+    protected_scope: "AutoPost WIP; Product/Edit/Image/SubDub/Voice/Music engines; provider, wallet, production-data, customer-message side effects"
+    side_effects: "Provider calls=0; jobs=0; wallet=0; production DB writes=0; real Telegram sends=0"
+    files:
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+  S12.35.31-start-menu-pending-owner-and-ttl-closeout:
+    status: locally-verified-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      In-scope small-flow owners release only their own pending input on Home,
+      /start, /menu, Back or expiry and retain unrelated state/saved drafts.
+      AutoPost WIP input semantics and engine-owned product/job pending state
+      remain outside this spec.
+    green: >-
+      Seven current-branch pending/expiry tests across Broadcast Lite, Memory,
+      Document, Internal Archive, Storage Add-on, Video Downloader and small-flow
+      owner TTL: Ran 7 tests in 13.082s OK. Three Admin Tool pending-exit checks
+      and the Start cleanup check invoked directly: 4 checks OK.
+    protected_scope: "AutoPost WIP input; Product/Edit/Image/SubDub/Voice/Music engine action state; provider, wallet, job and production-data effects"
+    side_effects: "Provider calls=0; jobs=0; wallet=0; production DB writes=0; real Telegram sends=0"
+    files:
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+  S12.35.32-root-video-home-timing-harness-extraction:
+    status: locally-verified-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Existing deterministic root Video/Home timing scenarios execute the actual
+      registered menu handler, preserve pending draft behavior, and log anonymous
+      success/failure phases. Fix only the test source extractor; no production
+      timing or route change.
+    red: >-
+      The bundled standard-library invocation stopped before dispatch with
+      NameError: ContextVar because the helper included the following module-level
+      callback instrumentation block. A regex boundary beginning mid-signature
+      also misclassified a default-valued argument as a top-level assignment.
+    green: >-
+      After switching to top-level line boundaries, eight direct scenarios passed:
+      public/admin root Video × new/resume, render failure, other-root no timing,
+      and public/admin Back/Home. Output: 8 Video/Home callback timing checks OK
+      (stdlib runner; pytest decorators and approx shimmed).
+    protected_scope: "Production bot timing, callback routing, Product/Edit/Image/SubDub/Voice/Music engines, AutoPost WIP"
+    side_effects: "Provider calls=0; jobs=0; wallet=0; production DB writes=0; real Telegram sends=0"
+    files:
+      - tests/test_menu_video_callback_timing.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+  S12.35.33-main-menu-callback-registration-inventory:
+    status: locally-verified-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Current public/admin main-menu callback values match a registered literal
+      CallbackQueryHandler pattern and fit Telegram's 64-byte callback bound.
+      Treat this as inventory only, not terminal-route proof.
+    green: >-
+      Production localized_main_menu_keyboard emitted 14 public and 15 admin
+      callbacks across 8 and 9 rows respectively. Current literal registrations
+      matched all values; unmatched_registered_routes=[] and over_64_bytes=[].
+    protected_scope: "All product/media processing routes, AutoPost WIP, callback registry order"
+    side_effects: "Read-only source/fixture inspection; no provider/job/wallet/data/Telegram side effects"
+    files:
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+  S12.35.34-public-main-small-flow-root-dispatch:
+    status: locally-verified-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Ten safe small-flow callbacks emitted by the public main menu match their
+      respective registered Menu/FreeHub/Pricing/Language/Feedback handlers.
+      Image/Account/Memory/Support/Guide and Feedback also have actual-handler
+      dispatch evidence. Do not enter translation, Music, AutoPost, Chat Pro,
+      or product-processing routes.
+    harness_note: >-
+      Initial extracted test reached the real handler but lacked the Guide and
+      Support screen renderer dependencies; added inert fixture-only seams. This
+      was a harness setup error, not a product failure.
+    green: >-
+      tests.test_admin_root_menu_callback_single_ack: Ran 6 tests in 1.612s OK.
+      Ten actual-root safe callbacks match their respective registrations;
+      Image/Account/Memory/Support/Guide and Feedback route through actual
+      handlers; Support Home returns to Main; current 8-row layout is asserted;
+      admin allow/deny regressions pass in the same module.
+    protected_scope: "bot.py production routes and renderers; Product/Edit/Image/SubDub/Voice/Music processing; AutoPost WIP; providers and shared routing architecture"
+    side_effects: "Provider calls=0; jobs=0; wallet=0; production DB writes=0; real Telegram sends=0"
+    files:
+      - tests/test_admin_root_menu_callback_single_ack.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+  S12.35.35-align-stale-main-menu-layout-test:
+    status: locally-verified-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Keep the existing production main-menu controls and order unchanged.
+      Update the obsolete compact-layout expectation to match the current
+      8-row emitter including AutoPost; do not enter or alter AutoPost.
+    finding: >-
+      The old test encoded the 7-row/14-control layout from commit f1773441 and
+      omitted the subsequently added AutoPost shortcut. Current emitter contains
+      14 callbacks plus a community URL, requiring 8 rows at two columns.
+    green: >-
+      The current emitted 8-row layout and all ten safe root callback
+      registrations are checked by tests.test_admin_root_menu_callback_single_ack:
+      Ran 6 tests in 1.612s OK. Updated test_translation_main_menu_hotfix.py
+      syntax-compiles; its pytest assertions could not be run locally because
+      pytest/full bot import dependencies are unavailable.
+    protected_scope: "bot.py menu rendering and callback payloads/order; AutoPost WIP; Product/Edit/Image/SubDub/Voice/Music engines"
+    side_effects: "Test/source inspection only; provider/job/wallet/production-data/Telegram effects=0"
+    files:
+      - tests/test_translation_main_menu_hotfix.py
+      - tests/test_admin_root_menu_callback_single_ack.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+  S12.35.36-owner-access-vps-runtime-copy:
+    status: locally-verified-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      owner_required_text and cmd_admin_whoami give setup guidance consistent
+      with the active Ubuntu VPS runtime. Change only rendered wording; retain
+      role checks, OWNER_IDS/ADMIN_IDS, secrets, and operational behavior.
+    red: >-
+      Fake-owner renderer output had one stale Railway reference and
+      /admin_whoami had two, despite the project running on the Ubuntu VPS.
+    green: >-
+      Source-extracted fake-role tests: Owner UI runtime copy: 2 checks OK.
+      Both outputs say VPS, contain no Railway, and preserve ID/effective-role
+      diagnostics. Only a captured fixture reply occurred.
+    protected_scope: "Authorization/role logic, ENV/secrets, VPS services/restart/deployment, wallet, all product engines and AutoPost WIP"
+    side_effects: "No real Telegram messages; no configuration write, role mutation, restart, provider/job/wallet/database operation"
+    files:
+      - bot.py
+      - tests/test_owner_access_ui_runtime_copy.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+  S12.35.37-public-chat-pro-root-navigation:
+    status: locally-verified-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Dispatch the actual public-root menu|chat_pro control through its registered
+      menu handler to the read-only information screen; dispatch the emitted Home
+      control back to Main. Do not toggle Chat Pro, send prompts, call providers,
+      or mutate billing/wallet state.
+    finding: "No wrong destination or Back defect reproduced."
+    green: >-
+      tests.test_admin_root_menu_callback_single_ack: Ran 7 tests in 1.781s OK.
+      One fixture account read rendered the shown balance; emitted menu|main
+      returned through the same registered handler; no mode write was invoked.
+    protected_scope: "Chat Pro mode/toggle, prompts/provider, billing/wallet; AutoPost WIP; Product/Edit/Image/SubDub/Voice/Music engines"
+    side_effects: "Fixture state only; provider calls=0; wallet mutations=0; production DB writes=0; jobs=0; real Telegram sends=0"
+    files:
+      - tests/test_admin_root_menu_callback_single_ack.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+  S12.35.38-public-account-root-route:
+    status: locally-verified-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Dispatch the public Account root control through the registered menu
+      callback; render the actual account screen and keyboard using inert
+      account/package data; verify every emitted child callback pattern and
+      return Home to Main without production reads or writes.
+    green: >-
+      tests.test_admin_root_menu_callback_single_ack: Ran 8 tests in 2.941s OK.
+      The Account renderer shows fixture ID/tier/balance; all 11 emitted child
+      controls match their registered Menu/Pricing/Language patterns; emitted
+      Home returns through the registered handler to Main. No real account or
+      database access, wallet/provider operation, job, or Telegram send.
+    protected_scope: "Account data/payment behavior; AutoPost WIP; Product/Edit/Image/SubDub/Voice/Music engines"
+    files:
+      - tests/test_admin_root_menu_callback_single_ack.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+  S12.35.39-align-root-menu-test-contracts:
+    status: locally-verified-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Update only obsolete test expectations to match the existing current and
+      legacy public/admin menu emitters (8 public rows, 9 admin rows), preserving
+      every production button, callback and ordering; do not enter AutoPost.
+    finding: >-
+      Four tests encoded a stale seven-row/14-callback layout and omitted the
+      existing AutoPost shortcut. The current emitter already has 8 public rows
+      and 9 admin rows; this is test drift, not a production menu regression.
+    green: >-
+      Source-extracted current and legacy menu layout tests passed (2 checks),
+      with supported locales checked. Root callback regressions: Ran 8 tests in
+      2.941s OK. py_compile for the four affected tests and git diff --check
+      exited 0. Full pytest and bot-import tests remain CI gates because the
+      local runtime lacks pytest/full bot import dependencies.
+    protected_scope: "Production menu rendering/order/callbacks; AutoPost WIP; Product/Edit/Image/SubDub/Voice/Music engines"
+    side_effects: "Test/source inspection only; provider/job/wallet/production-data/Telegram effects=0"
+    files:
+      - tests/test_free_tools_hub_v1.py
+      - tests/test_p0_i18n_native_hub_restore.py
+      - tests/test_core.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+  S12.35.40-non-engine-customer-route-gap-review:
+    status: locally-verified-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Recheck selected public root, Account credit guide, Support read-only panels,
+      and Language controls through emitted callbacks and registered handlers;
+      keep Product/Edit/Image/SubDub/Voice/Music processing and AutoPost WIP excluded.
+    finding: "No callback registration, ownership, or Back mismatch reproduced in the bounded set."
+    green: >-
+      tests.test_admin_root_menu_callback_single_ack,
+      tests.test_profile_credit_guide_back_origin,
+      tests.test_profile_support_read_back_origin, and
+      tests.test_profile_language_back_origin ran 22 tests in 72.487s — OK.
+    protected_scope: "Protected product processing lanes; AutoPost WIP; payment/wallet; providers; production data"
+    side_effects: "Inert fixtures only; provider=0, wallet=0, DB writes=0, jobs=0, real Telegram sends=0"
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.41-public-image-menu-display-back:
+    status: locally-verified-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Dispatch the emitted public menu|main_image through the registered menu
+      handler, render the existing Image menu, assert its Back/Home destinations,
+      and do not dispatch any image tool callback.
+    finding: "No wrong render or Home destination reproduced; no image tool was entered."
+    green: >-
+      The focused Image root route test passed; the combined root/Account/credit-guide/
+      Support/Language regression set ran 23 tests in 72.314s — OK.
+      Changed test py_compile exited 0 and git diff --check exited 0.
+    protected_scope: "Image generation/edit engine and providers; all other product engines; AutoPost WIP"
+    side_effects: "Menu fixture only; provider=0, wallet=0, DB writes=0, jobs=0, real Telegram sends=0"
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.42-customer-dynamic-non-engine-route-inventory:
+    status: source-inventoried-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Map each emitted public root callback to its registered handler and present
+      terminal evidence, while clearly separating untested terminals and protected
+      product flows from verified paths.
+    finding: >-
+      Fourteen public-root callbacks are registered and within Telegram's 64-byte
+      callback limit. Evidence now covers the joined Notes/Documents and Guide
+      landing routes through S12.35.43/.44; dynamic action terminals and protected
+      AutoPost, Voice/Music, Translation and product-processing routes remain excluded.
+    green: >-
+      Source and existing test inventory review against S12.35.33 and S12.35.40–.44
+      registered-handler evidence; remaining action terminals are separated from the
+      read-only menu-flow tests.
+    protected_scope: "AutoPost WIP; protected product and media processing; all side-effecting route terminals"
+    side_effects: "Read-only source/test inventory; provider=0, wallet=0, DB writes=0, jobs=0, real Telegram sends=0"
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.43-customer-notes-docs-route-display-back:
+    status: locally-verified-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Dispatch public Notes/Documents root through the registered Menu callback,
+      render actual Notes and Documents UI builders, and verify emitted Documents
+      Back returns to Notes while Home returns to Main. Do not execute note or
+      document actions.
+    finding: "No wrong screen or Back/Home destination reproduced."
+    green: >-
+      Combined root/Account/credit-guide/Support/Language suite ran 24 tests in
+      55.024s — OK; focused Notes/Documents route passed. Changed root test py_compile
+      and git diff --check exited 0.
+    protected_scope: "Note/document data tools and PDF/Word processing; AutoPost WIP; all product engines"
+    side_effects: "Fixture-only; production storage/DB=0, providers=0, wallet=0, jobs=0, Telegram sends=0"
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.44-customer-guide-landing-back:
+    status: locally-verified-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Dispatch public Guide root through registered Menu handler, render the
+      production Guide keyboard, and return Home to Main without dispatching
+      engine-linked articles.
+    finding: "No Guide landing or Home route mismatch reproduced."
+    green: >-
+      Combined root/Account/credit-guide/Support/Language suite ran 25 tests in
+      47.425s — OK; focused Guide test passed. Changed test py_compile and git
+      diff --check exited 0.
+    protected_scope: "Video/Image/Music and other product guide/action terminals; AutoPost WIP; product engines"
+    side_effects: "Inert UI fixture only; provider=0, wallet=0, production data=0, jobs=0, real Telegram sends=0"
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.45-existing-memory-feedback-language-callback-evidence:
+    status: locally-verified-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Reuse existing tests for Memory Home pending ownership and Feedback/Language
+      supported and rejected callback paths; keep all writes/messages inert.
+    finding: "All accepted/rejected Feedback and Language paths and Memory pending reset passed."
+    green: >-
+      Memory pending reset unittest: Ran 1 test in 1.812s — OK.
+      Four direct Feedback/Language callback checks returned OK.
+    limitation: >-
+      Legacy empty-delete helper was interrupted while ast.parse processed the
+      full large bot.py; NOT_COUNTED. No product defect inferred; CI/full-suite
+      evidence remains required.
+    side_effects: "Fixture-only; production DB=0, language writes=0, notes=0, wallet=0, providers=0, sends=0"
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.46-feedback-category-cancel-navigation:
+    status: locally-verified-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Dispatch one emitted Feedback category and the legacy Cancel value through
+      the registered handler; assert acknowledgement, only the Feedback pending
+      state, and Back/Home controls with inert UI fixtures.
+    finding: "Category prompt emits Feedback Back/Home; Cancel clears only Feedback pending state and returns a Home control."
+    green: "All four direct tests in test_feedback_callback_single_ack.py returned OK."
+    side_effects: "Fixture only; no real customer/admin message, production state, DB, wallet, provider or job"
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.47-account-pricing-member-topup-regression:
+    status: locally-verified-batch-closeout-pending
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Rerun Account Pricing/member/Top-up navigation regressions, verify Back
+      ancestry and destinations with inert fixtures, and do not initiate payment.
+    finding: "No wrong Account Pricing/member/Top-up Back destination reproduced in the bounded regression set."
+    green: "Focused regression set: 13 tests in 77.406s — OK."
+    side_effects: "Fixture-only; payment=0, wallet=0, provider=0, production writes=0, jobs=0, real sends=0"
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.48-provider-low-balance-notice-source-audit:
+    status: source-reviewed-live-unverified
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Verify the existing owner-approved $100 reference and below-$10 notification
+      path without provider calls, real Telegram messages, or settings changes.
+    finding: >-
+      Source uses a strict below-$10 threshold, six-hour cooldown, stale/unknown
+      fail-closed checks and an admin send seam. Production credentials/flags and
+      actual message delivery were not verified.
+    regression_files: >-
+      tests/test_provider_balance_alert_policy.py,
+      tests/test_provider_balance_notifications.py,
+      tests/test_provider_balance_runtime_seam.py (inspected, not executed here)
+    side_effects: "Source/test inspection only; provider=0, sends=0, runtime settings=0"
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.49-callback-latency-instrumentation-regression:
+    status: locally-verified-user-reported-delay-live-correlation-missing
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Verify anonymous callback observer/handler/render logging using only a fake
+      application and ensure callback data, message text and user ID stay out of logs.
+    green: "python -m unittest tests.test_callback_dispatch_timing -v: Ran 4 tests in 7.490s — OK."
+    live_evidence: >-
+      Owner estimates Account → Back takes about 2–3 seconds, but supplied no exact
+      click timestamp. Strict-host journal query 2026-10-07 22:49:45–22:59:45 +07
+      contained 301 INFO lines but no callback timing events. Read-only service
+      check at 22:59 +07: active/running, NRestarts=0. No event correlation or
+      latency-cause inference is supported.
+    side_effects: "Mock tests and read-only VPS queries only; provider=0, real sends=0, writes=0, deploy=0"
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.50-account-back-latency-correlation:
+    status: user-reported-delay-live-correlation-open
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Record the owner's Account → Back duration accurately and correlate route-specific
+      user-timed samples to anonymous server phases without inferring an unobserved
+      Telegram/client/network cause.
+    owner_observation: "Account → Back takes approximately 2–3 seconds; no exact HH:MM:SS was supplied"
+    live_evidence: >-
+      Prior strict-host query 2026-10-07 22:49:45–22:59:45 +07 returned no callback
+      timing events despite 301 INFO lines; bot service was active/running with
+      NRestarts=0 at 22:59 +07. Unknown click time prevents proving the query covered
+      that click. Delay source remains unassigned.
+    source_coverage: >-
+      Account child Back emits menu|main_profile and Account Home emits menu|main;
+      both are registered under the shared menu| callback handler. The observer is
+      installed after registrations and wraps every CallbackQueryHandler. A click
+      reaching these handlers during the queried window should be eligible for a
+      timing record, but the unknown click time prevents attribution.
+    next_evidence: >-
+      Collect multiple route-specific samples with exact local click time and duration;
+      correlate only when the anonymous server event is in the matching window.
+    side_effects: "Checklist/state update and prior read-only VPS checks only; provider=0, sends=0, production writes=0, deploy=0, restart=0"
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.51-public-admin-root-menu-regression:
+    status: locally-verified-fixture-only
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Rerun public/Admin root button shape, registered callback destinations,
+      selected Back/Home screens, and authorization gates using inert fixtures;
+      do not invoke AutoPost, translation processing, Music/Voice, jobs, or mutations.
+    green: "python -m unittest tests.test_admin_root_menu_callback_single_ack -v: Ran 11 tests in 6.271s — OK"
+    coverage: >-
+      Actual dispatch/Back/Home assertions cover Image, Account, Notes/Documents,
+      Support, Guide and Feedback plus Chat Pro read-only landing and Admin root
+      authorization. Video timing/navigation is covered separately. AutoPost,
+      Translation and Music/Voice entries are not dispatched by this spec.
+    source_layout: >-
+      Public root emitter has 8 rows sized 1,2,2,2,2,2,2,2 (14 callbacks and one URL
+      button); Admin adds one final row. This does not measure Telegram viewport,
+      wrapping or visual scroll behavior.
+    side_effects: "Fixture-only; provider=0, job=0, DB/wallet/payment mutations=0, real sends=0, protected engine execution=0"
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.52-guide-origin-video-article-back:
+    status: locally-verified-fixture-only
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    finding: >-
+      main_guide_keyboard emits menu|guide_video_ai; its informational page uses
+      video_uiflow3_guide_keyboard with Back to menu|main_video. That target is
+      correct for existing Video-origin entries but incorrect for Guide-origin entry.
+    contract: >-
+      Give only the Guide-menu entry a validated Guide return context. Verify all
+      seven emitted Guide article routes through handle_menu_callback, Back to Guide,
+      Home to Main, and preserve the old Video-origin callback target. Do not dispatch
+      article action buttons or enter any tool/engine.
+    acceptance: >-
+      Focused RED/GREEN test over actual menu/article emitters and registered menu
+      handler, followed by changed-test py_compile, relevant unittest regression,
+      diff check, and review showing no engine/provider/worker/config changes.
+    red: >-
+      The new actual-handler test failed at the expected assertion: Guide-origin
+      Video article Back emitted menu|main_video instead of menu|main_guide.
+    green: >-
+      python -m unittest tests.test_admin_root_menu_callback_single_ack -v:
+      Ran 13 tests in 7.632s — OK. All seven articles dispatch through the
+      registered menu handler; Back/Home render Guide/Main. The legacy
+      menu|guide_video_ai callback still returns to Video.
+    compile_and_diff: >-
+      Changed test files py_compile exited 0; git diff --check exited 0 with
+      existing LF-to-CRLF warnings. Full bot.py py_compile was attempted normally
+      and with GC disabled, then interrupted after more than eight minutes and
+      about 700 MB with no result. Selected changed function source was compiled
+      and executed in the actual-handler fixture. Full-source compile remains
+      NOT_VERIFIED and is a final-batch CI gate. Video timing unittest import is
+      unavailable because bundled Python does not include pytest.
+    side_effects: "Fixture-only; provider=0, job=0, DB/wallet/payment mutations=0, real sends=0, protected engine execution=0"
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.53-vietnamese-guide-support-label:
+    status: locally-verified-fixture-only
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    finding: >-
+      Vietnamese main_guide_keyboard labels callback menu|support as “Admin”,
+      although the registered customer route renders the Support screen.
+    contract: >-
+      Change only that button's Vietnamese label to “Hỗ trợ”; preserve callback,
+      position, other locales, and support behavior.
+    acceptance: >-
+      Source-extracted test builds the actual Vietnamese Guide keyboard and asserts
+      the label/callback pair and its existing registered menu handler.
+    red: >-
+      The focused emitter test failed at the expected text assertion: emitted label
+      was “👨‍💼 Admin”, expected “👨‍💼 Hỗ trợ”; callback remained menu|support.
+    green: >-
+      python -m unittest tests.test_admin_root_menu_callback_single_ack -v:
+      Ran 14 tests in 6.734s — OK; includes the all-seven Guide article navigation
+      checks and the legacy Video Back preservation test.
+    compile_and_diff: >-
+      Changed test files py_compile exited 0; git diff --check exited 0 with
+      existing line-ending warnings. Changed main_guide_keyboard source was
+      extracted and executed by the focused fixture; full bot.py py_compile remains
+      NOT_VERIFIED and Ubuntu CI remains required before batch delivery.
+    read_only_review: >-
+      Other Guide article labels, downloads, Back/Home callbacks and community URL
+      were reviewed; no other source mismatch in the Guide menu was found. Actual
+      Telegram viewport/wrapping remains unverified.
+    side_effects: "Fixture-only; no ticket, DB, provider, wallet/payment, job, or real message action"
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.54-public-admin-root-guide-label-recheck:
+    status: locally-verified-fixture-only
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Emitted public/Admin root and Guide label/destination regression suite remains
+      green through source-extracted keyboard builders and registered handlers.
+    result: "No new root/Guide label-to-destination or Back/Home mismatch reproduced."
+    green: >-
+      Bundled Python unittest command ran 14 tests in 5.179s — OK. Guide Video origin
+      returns to Guide; legacy Video origin remains Video; Vietnamese Guide Support
+      label still matches the Support route.
+    limits: >-
+      Fixture-only; no Telegram visual viewport, live latency sample, protected product
+      entry, media/tool/payment action, or state mutation was exercised.
+    side_effects: "provider=0, job=0, DB/wallet/payment mutations=0, real sends=0, protected engine execution=0"
+    production_code_changed: false
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.55-admin-billing-finance-system-ui-recheck:
+    status: locally-verified-fixture-only
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Current emitted Billing/Finance/System controls show accurate guide/action labels,
+      enforce Admin/stale-origin guards before cleanup or render, and Back to the
+      emitting logical parent through registered callbacks.
+    billing: >-
+      tests.test_admin_billing_guide_labels: Ran 6 tests in 12.726s — OK; emitted
+      controls, both billing keyboards, risk-menu Back, public denial and stale origin.
+    finance: >-
+      tests.test_admin_finance_action_renderers: Ran 9 tests in 83.266s — OK; Finance
+      hub, action/report guide labels, read-only report routes, Dashboard origin and
+      public/stale denial.
+    admin_overview: >-
+      tests.test_admin_overview_callback: Ran 1 test in 0.160s — OK; registered
+      menu callback renders a report page from inert fixture data and emits Finance,
+      Admin and Home destinations. Production report-data freshness is not covered.
+    system_provider_operator: >-
+      Four focused tests in tests.test_admin_module_child_back_origin ran 4 tests in
+      29.083s — OK; Provider Status, Operator/System origin, legacy guide labels and
+      seven module child controls.
+    broad_attempt: >-
+      Combined five-module invocation produced no output for about two minutes and was
+      interrupted; NOT_COUNTED. Narrow independent invocations above are the counted
+      results. A separate focused Admin root/Guide suite ran 14 tests in 5.179s — OK.
+    limits: >-
+      Source-extracted fixtures only; no production report query, payment/provider/
+      operator command, worker/product-engine action, or Telegram viewport QA.
+    side_effects: "provider=0, wallet/payment=0, production DB writes=0, jobs=0, real sends=0, engine execution=0"
+    production_code_changed: false
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.56-a3-a5-handler-family-evidence-reconciliation:
+    status: evidence-reconciled-remains-partial
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    current_main_sha: 76f0454fbab5e467f9ca71a0135b6fd05d8d70c4
+    acceptance: >-
+      Reconcile historical candidate-only registration rows with current emitted,
+      registered-handler test evidence for in-scope small-flow families, and retain
+      NOT_TESTED/EXCLUDED labels for actions outside the UI-only boundary.
+    evidence: >-
+      Checklist specs S12.35.3/.4/.15/.20/.21/.22/.34/.43-.47/.51-.55 map selected
+      FreeHub, Pricing, Feedback/Language, Notes/Documents, Support inbox, Ticket,
+      Marketing planner, Broadcast Lite, public-root, Billing, Finance and
+      System/Provider/Operator routes to actual callback/handler fixtures.
+    remaining: >-
+      Stateful notes/documents, payment, posting/publishing, protected Translation,
+      Voice/Music and product-processing handlers, remaining dynamic terminal routes,
+      and Telegram client UX are not proven. A3/A5 remain PARTIAL.
+    source_delta: >-
+      Current main's only commit beyond the audit base is Product Video worker
+      authority in services/remote_worker_api.py plus its test; the bot callback and
+      keyboard source is unchanged. This is outside the audit branch.
+    side_effects: "Documentation only; no provider, wallet, DB, job, customer message, or engine action"
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.57-memory-empty-delete-doc-back-check:
+    status: locally-verified-fixture-only
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Empty Memory Delete clears stale delete pending state; emitted document-tool
+      split-page Back releases only the page prompt, and parent Back returns to Docs
+      while clearing the tool state through the exact registered callback.
+    evidence: >-
+      Empty-delete handler assertion passed using narrow source extraction;
+      the CI-target Memory/Storage command ran 3 tests in 3.384s — OK; four direct
+      document callback checks passed (two single-ack branches and two emitted-control/
+      registered Back routes). Five focused test files py_compile and git diff --check
+      passed. The three-module Memory/Storage unittest command is wired in ci-main.yml;
+      remote CI has not run yet.
+    limits: >-
+      Fixture-only. No note CRUD, uploaded file, PDF/Word processing, provider,
+      payment, job, production DB, or Telegram client action. A3/A5 remain partial.
+    production_code_changed: false
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.58-storage-addon-custom-input-back:
+    status: locally-verified-fixture-only
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      The emitted Storage Add-on custom-input Back traverses its exact registered
+      storage callback, clears only the add-on draft, returns to the Storage Add-on
+      menu, and the menu Back targets the registered Notes menu route.
+    evidence: >-
+      The CI-target unittest command ran 3 tests in 3.384s — OK, including one
+      source-extracted emitted-control/registered-handler round trip;
+      pending existed before custom Back and was absent afterward; returned menu
+      callbacks matched the initial emitter; registered menu pattern accepts the
+      Notes parent target. Focused py_compile and diff check passed. The regression
+      is included in ci-main.yml; remote CI has not run yet.
+    limits: >-
+      Fixture-only; payment confirmation, PayOS, Xu/wallet, order/DB writes,
+      provider, or Telegram client actions were not invoked. A3/A5 remain partial.
+    production_code_changed: false
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.59-admin-internal-archive-back-to-notes:
+    status: locally-verified-fixture-only
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Dispatch the emitted Admin Notes → Internal Archive entry and emitted Back
+      through the registered menu handler; verify exact Notes parent return and
+      preserve its original keyboard, without reading archive contents.
+    evidence: >-
+      tests.test_admin_root_menu_callback_single_ack ran 15 tests in 6.292s — OK.
+      The new case verified both emitted callbacks match the registered menu
+      pattern, exactly one acknowledgement per dispatch, archive render, and
+      return to the original Notes screen/keyboard. Memory/Storage regressions
+      reran 3 tests in 4.280s — OK. Focused test py_compile and git diff --check
+      exited 0; existing LF-to-CRLF warnings only.
+    limits: >-
+      Fixture-only. Archive contents, customer files, database, payment, provider,
+      Telegram delivery and visual client behavior were not exercised; A2/A5
+      remain partial and manual visual QA remains NOT_TESTED.
+    production_code_changed: false
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.60-customer-ticket-ownership-back-ancestry:
+    status: locally-verified-fixture-only
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Dispatch selected owned Ticket list/detail/prompt Back and malformed/foreign
+      controls through the registered callback; assert immediate-parent navigation,
+      pending release and fail-closed owner checks without a customer send.
+    evidence: >-
+      Five bounded methods from tests.test_profile_ticket_ancestry ran 21.280s — OK:
+      Account-origin list Back, detail/list round trip, reply/attachment prompt
+      Back, malformed/foreign rejection, and empty-list/legacy destinations.
+      All user/ticket/read/update/send seams in these cases are inert fixture data;
+      calls were asserted absent where applicable.
+    limits: >-
+      Fixture-only; no real ticket data/message/attachment, production DB, payment,
+      wallet, provider or job was accessed. Submit/completion actions and other
+      Ticket callbacks remain unverified.
+    production_code_changed: false
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.61-package-group-back-registered-dispatch:
+    status: locally-verified-fixture-only
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Dispatch the actual emitted package group through the exact registered
+      handler; press the emitted Back and verify the package menu/keyboard returns
+      unchanged. Do not open a purchase, checkout, payment or engine action.
+    evidence: >-
+      tests.test_pkgcombo_navigation_registered_callback ran 1 test in 0.468s — OK.
+      The production package keyboard emitted Gói Ảnh → pkgcombo:group:image;
+      registered pkgcombo: handler rendered the group, then Back returned to the
+      Packages screen with the original callback set and pricing/Home destinations.
+      Focused py_compile exited 0; git diff --check exited 0 with existing LF-to-CRLF
+      warnings on unrelated modified tests only.
+    limits: >-
+      Source-extracted UI fixture only; no purchase, wallet/Xu, order, provider,
+      job, database or Telegram action. Product details/purchase are not tested.
+    production_code_changed: false
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.62-memory-empty-list-back-to-notes:
+    status: locally-verified-fixture-only
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Dispatch the emitted Memory empty-delete option through its registered
+      handler, release only its user's stale pending state, then dispatch the
+      emitted Notes/Docs Back through the registered Menu handler.
+    evidence: >-
+      Focused AdminRootMenuCallbackSingleAckTests case ran 1 test in 0.380s — OK.
+      Memory empty-delete and Menu Back callbacks match their registered patterns,
+      both receive one acknowledgement, and Menu handler renders the Notes/Docs
+      parent screen. The full adjacent root-menu module reran 16 tests in 6.292s —
+      OK. Only inert empty-list/pending fixtures were used.
+    limits: >-
+      No note content or record, production DB, delete/write, payment, provider,
+      job or Telegram action was accessed. Memory non-empty/detail/delete-confirm
+      terminals remain unverified.
+    production_code_changed: false
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.63-account-keyboard-layout-source-review:
+    status: source-reviewed-no-production-change
+    acceptance: >-
+      Recheck the Account root and child keyboard shape and verify Back/Home callback
+      destinations against existing registered-handler evidence; do not repeat referral
+      dispatch tests already covered by S12.35.1.
+    evidence: >-
+      Read-only source inspection of main_profile_keyboard and profile_child_keyboard:
+      Account root has six rows (five paired rows and one Main-menu row); child screens
+      have one paired Back-to-Account/Home row. Back emits menu|main_profile and Home
+      emits menu|main. Existing S12.35.1/.38 tests cover those account routes.
+    limits: >-
+      This confirms source structure only, not Telegram viewport wrapping, scrolling,
+      visual polish or live latency. Referral route tests were not repeated.
+    production_code_changed: false
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.64-audio-studio-landing-back-home-navigation:
+    status: locally-verified-fixture-only
+    acceptance: >-
+      Dispatch the actual public-root Studio âm thanh callback through the exact
+      registered music callback, verify its landing page and emitted Back/Home,
+      then dispatch each navigation control through the exact registered Menu
+      callback and confirm it returns to Main. No voice/music creation or processing.
+    protected_scope: "Music/Voice engine, product generation, provider, credit, AutoPost, database, production user state, real Telegram"
+    test_plan: "Source-extracted unittest with fake context/pending seams and inert reply/edit helpers; CI already runs the containing root-menu test module"
+    evidence: >-
+      Final tests.test_admin_root_menu_callback_single_ack run: 17 tests in 7.672s — OK.
+      The new case proves the actual root emitter produced music_quick|showroom|root;
+      the exact registered music pattern reached the landing once; actual Back and
+      Home callbacks matched the registered Menu handler and rendered Main. Changed
+      test py_compile and git diff --check exited 0.
+    finding: >-
+      Back and Home both currently target menu|main, a redundant UI destination.
+      No production correction was made because the Music/Voice UI lane is protected.
+    limits: >-
+      UI-only fixture; context/pending and Telegram transports are inert. No child
+      action, generation, provider, Xu, job, DB, AutoPost or real Telegram behavior.
+      Does not establish client viewport/visual polish or live latency.
+    production_code_changed: false
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.65-memory-saved-list-detail-back-origin:
+    status: locally-verified-fixture-only
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      Actual Saved Notes keyboard -> owned fixture detail -> Back returns to the
+      saved list. Delete confirmation Cancel returns to the same list-origin detail,
+      whose Back still returns to the saved list. No destructive action is dispatched.
+    red: >-
+      Focused registered-handler test on baseline failed for the expected behavior:
+      actual list item callback was memory|view|440 rather than memory|view|440|list;
+      no setup error occurred.
+    change: >-
+      Preserve the fixed list origin in emitted detail/delete callbacks; render one
+      unambiguous Back-to-saved-list control on list-origin detail; keep default
+      command/search/delete-start callers unchanged.
+    evidence: >-
+      Root/list/detail/confirm/cancel/list flow exercised using the actual main_memory_keyboard,
+      actual production Memory keyboard builders, and actual registered Memory callback.
+      Owner-scoped note read is fixture-local; one ACK per callback; db_connect and
+      delete/event effects are guarded. Related root, empty-delete, Start/Menu Memory,
+      and document-prompt regressions: Ran 21 tests in 11.220s — OK.
+    limits: >-
+      No production note read/write/archive/delete, full CRUD, search-query restoration,
+      payment, provider, job, AutoPost, product engine, real Telegram, or viewport QA.
+      A3/A5 remain partial.
+    files:
+      - bot.py
+      - tests/test_admin_root_menu_callback_single_ack.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+    side_effects: "provider=0, wallet=0, production DB=0, delete/archive=0, jobs=0, real Telegram=0, AutoPost=0, engine=0"
+    production_code_changed: true
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.66-memory-delete-picker-cancel-origin:
+    status: locally-verified-fixture-only
+    baseline_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
+    acceptance: >-
+      The actual Memory Delete picker choice reaches confirmation; Cancel returns
+      to the same picker with its pending selection restored. Never dispatch the
+      destructive delete confirmation.
+    red: >-
+      Focused registered-handler case failed because the picker callback
+      memory|delete|441 omitted its delete_start origin; no setup error occurred.
+    change: >-
+      Preserve picker origin in the emitted item callback, restore its selection
+      on Cancel, and remove the misleading alternate saved-notes shortcut from
+      this picker-origin confirmation only.
+    evidence: >-
+      The focused route test dispatches the actual main_memory_keyboard picker
+      choice and confirmation/cancel through the registered Memory handler; Cancel
+      restores the same item callback and picker pending state. db_connect is
+      forbidden by the fixture. Focused test: 1 test in 0.477s — OK. Memory,
+      Notes, root, Start/Menu and Document regression group: 22 tests in 11.496s —
+      OK; focused test py_compile and git diff --check passed.
+    limits: >-
+      Fixture-only. memory|delete_yes was never dispatched; no real DB, note
+      deletion, archive, payment, provider, job, AutoPost, engine or Telegram
+      action. S12.35.67 separately verifies search-result ancestry. Delete
+      execution and other Memory expiry/repeat paths remain unverified; A3/A5
+      remain partial.
+    files:
+      - bot.py
+      - tests/test_admin_root_menu_callback_single_ack.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+    side_effects: "provider=0, wallet=0, production DB=0, delete/archive=0, jobs=0, real Telegram=0, AutoPost=0, engine=0"
+    production_code_changed: true
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.67-memory-search-result-back-origin:
+    status: locally-verified-fixture-only
+    acceptance: >-
+      Dispatch actual Memory search prompt/text, emitted result item, detail, and
+      Back through the registered handler. Back must restore the exact originating
+      search-result set, fail closed for stale/foreign origins, and perform no
+      delete/archive/write/provider/wallet/job/Telegram side effect.
+    red: >-
+      Focused actual search-prompt/text/emitted-result callback test fails at the
+      expected route assertion: emitted callback is memory|view|442, not a callback
+      preserving search origin. Failure is behavioral, with no setup error.
+    hypothesis: >-
+      Confirmed root cause: search-result note items use memory_notes_list_keyboard
+      without origin data, so handle_memory_callback renders the generic detail
+      keyboard whose Back points to Notes/Documents.
+    change: >-
+      Store a bounded per-user search token/query/note-ID snapshot for the existing
+      pending TTL; propagate token through result detail and delete-confirm Cancel;
+      restore only the matching owner's active result IDs, and fail closed for
+      expired, mismatched, empty, or foreign contexts.
+    evidence: >-
+      Actual search prompt/text handler emits the search-result keyboard; the exact
+      registered Memory handler dispatches detail, Delete confirmation Cancel, and
+      Back to the identical rendered result text/IDs. Stale, expired and foreign tokens
+      return to Memory root without result lookup. Callback byte assertions pass
+      for normal controls and maximum signed SQLite ID + 19-digit token. Memory,
+      Notes, root, Start/Menu and Document group: Ran 23 tests in 12.134s — OK.
+      Focused test py_compile and git diff --check exit 0.
+    limits: >-
+      Fixture-local result IDs/query and in-memory user_data; memory list/fetch
+      seams are stubbed. No production DB access, note deletion/archive/write,
+      provider, wallet, job, AutoPost, engine, customer message or real Telegram.
+      No live visual or latency claim; A3/A5 remain partial.
+    files:
+      - bot.py
+      - tests/test_admin_root_menu_callback_single_ack.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+    side_effects: "provider=0, wallet=0, production DB=0, delete/archive=0, jobs=0, real Telegram=0, AutoPost=0, engine=0"
+    production_code_changed: true
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.68-free-tools-prompt-menu-roundtrip:
+    status: locally-verified-fixture-only
+    acceptance: >-
+      Dispatch the emitted public-root Free Tools control through the registered
+      FreeHub handler; open the static Prompt Library choice screen; Back returns
+      to Free Tools and Home returns to the public Main menu through its registered
+      handler. The child pending marker is cleared on Back.
+    scope: "FreeHub main/prompt-picker menu navigation and its owned pending marker only"
+    protected_scope: "Prompt generation/input/upload, paid provider, wallet, production data, AutoPost, media engines, real Telegram"
+    test_plan: "Source-extracted actual root emitter + exact registered FreeHub and Menu handlers; inert suggestion/quota seams; assert one ACK and route/pending destinations"
+    finding: "No route mismatch reproduced; no production-code change"
+    evidence: >-
+      Actual root freehub|main -> FreeHub handler -> emitted Prompt Library button
+      -> static suggestions picker -> emitted freehub|main Back -> FreeHub menu
+      -> menu|main Home through registered Menu handler. One acknowledgement per
+      callback; only FreeHub's pending marker is cleared on Back. Suite: 24 tests
+      in 12.687s — OK; focused test py_compile and git diff --check exit 0.
+    limits: >-
+      Fixture-only; quota/suggestions are inert. No suggestion selection/input,
+      upload, generation, provider, wallet, DB, job, AutoPost, engine or real
+      Telegram action. Other Free Tools terminals remain open.
+    files:
+      - tests/test_admin_root_menu_callback_single_ack.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+    side_effects: "provider=0, wallet=0, production DB=0, jobs=0, real Telegram=0, AutoPost=0, engine=0"
+    production_code_changed: false
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.69-free-prompt-library-category-back-origin:
+    status: locally-verified-fixture-only
+    acceptance: >-
+      Dispatch actual public-root Free Tools -> Kho Prompt -> category suggestions
+      through the registered FreeHub handler. Back returns to the Kho Prompt category
+      menu, not the Free Tools root; Home remains Main. Clear only FreeHub-owned state.
+    baseline: "Actual category-suggestions keyboard emitted freehub|main; registered dispatch rendered Free Tools root rather than Kho Prompt"
+    red: "Focused source-extracted test initially failed at the expected callback mismatch after correcting fixture setup; no production change was present during RED"
+    change: "Only the category-suggestions keyboard Back label and callback now point to Kho Prompt / freehub|library; existing handler renders the category menu and clears FreeHub pending"
+    evidence: "test_free_tools_prompt_library_back_stack_restores_parent_and_exact_results: Ran 1 test in 0.608s — OK; actual root/library/category/item emitters and registered FreeHub handler, one ACK per callback"
+    limits: "Inert local suggestions; no selection/save/generation/provider/wallet/production DB/job/AutoPost/engine/Telegram action"
+    files:
+      - bot.py
+      - tests/test_admin_root_menu_callback_single_ack.py
+      - tests/test_free_tools_hub_v1.py
+      - tests/test_p0_free1_refresh_free_tools_menu_existing_zero_cost_shortcuts.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+    side_effects: "provider=0, wallet=0, production DB=0, jobs=0, real Telegram=0, AutoPost=0, engine=0"
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.70-free-prompt-library-detail-back-origin:
+    status: locally-verified-fixture-only
+    acceptance: >-
+      From category suggestions -> local prompt detail, Back restores the exact same
+      suggestion text and IDs without rerolling; category Back still returns to Kho
+      Prompt and Home remains Main.
+    baseline: "Actual prompt detail keyboard emitted freehub|main, losing the selected category's suggestion-list context"
+    red: "The expanded registered-handler test failed on the expected emitted callback mismatch before production code changed"
+    change: "Prompt-detail Back emits freehub|lib_back; that handler reconstructs the prior list from preserved library_ids using local prompt lookup, without invoking randomized suggestions"
+    evidence: "test_free_tools_prompt_library_back_stack_restores_parent_and_exact_results: Ran 1 test in 0.608s — OK; same text and ID snapshot restored; randomized suggestions called once total; category Back and Main Home remain correct"
+    limits: "Fixture-only library/pending values; no prompt save/write, generation, provider, wallet, production data, job, AutoPost, engine, or Telegram"
+    files:
+      - bot.py
+      - tests/test_admin_root_menu_callback_single_ack.py
+      - tests/test_free_tools_hub_v1.py
+      - tests/test_p0_free1_refresh_free_tools_menu_existing_zero_cost_shortcuts.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+    side_effects: "provider=0, wallet=0, production DB=0, jobs=0, real Telegram=0, AutoPost=0, engine=0"
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.71-free-tools-utilities-landing-back:
+    status: locally-verified-fixture-only
+    acceptance: >-
+      Dispatch the actual Free Tools -> Utilities chooser through the registered
+      FreeHub handler; its Back returns to Free Tools. Inventory the emitted utility
+      choices without invoking any utility terminal.
+    finding: "Static chooser and Back are correctly routed; all four utility callback values match the registered FreeHub prefix"
+    evidence: "test_free_tools_prompt_library_back_stack_restores_parent_and_exact_results: Ran 1 test in 0.608s — OK; actual Free Tools keyboard/handler, one ACK each, Back returns to Free Tools"
+    limits: "Rate/weather/QR/avatar actions were not dispatched; no network/API/provider, wallet, production data, job, AutoPost, engine, or Telegram"
+    files:
+      - tests/test_admin_root_menu_callback_single_ack.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+    side_effects: "provider=0, wallet=0, production DB=0, jobs=0, real Telegram=0, AutoPost=0, engine=0"
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.72-free-tools-translation-prompt-back:
+    status: locally-verified-fixture-only
+    acceptance: >-
+      Dispatch the actual Free Tools translation entry through the registered FreeHub
+      handler; show the prompt and owned input marker. Its Back returns to Free Tools
+      and clears only that FreeHub state.
+    finding: "Prompt and Back route are correct; FreeHub pending marker is released on Back"
+    evidence: "test_free_tools_translation_prompt_back_clears_only_its_pending_state: Ran 1 test in 0.222s — OK; actual emitted main keyboard entry and registered FreeHub handler, one ACK per callback"
+    limits: "No translation input/provider, wallet, production data, job, AutoPost, media engine, or real Telegram"
+    files:
+      - tests/test_admin_root_menu_callback_single_ack.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+    side_effects: "provider=0, wallet=0, production DB=0, jobs=0, real Telegram=0, AutoPost=0, engine=0"
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.73-free-tools-prompt-generator-back:
+    status: locally-verified-fixture-only
+    acceptance: >-
+      Dispatch the emitted Free Tools Prompt ảnh/video entry through the registered
+      FreeHub handler, render its local suggestion screen, and dispatch its emitted
+      Back. Return to Free Tools, clear only this owner's pending marker, and retain
+      another user's marker.
+    finding: "No route/pending defect reproduced; Back target and owner isolation are correct"
+    evidence: "Focused method Ran 1 test in 0.266s — OK; full Admin root/selected route module Ran 24 tests in 10.355s — OK; actual emitted keyboard, registered FreeHub handler, one ACK per dispatch"
+    compile: "python -m py_compile tests/test_admin_root_menu_callback_single_ack.py exited 0"
+    diff_check: "git diff --check exited 0; three existing LF→CRLF warnings are on unrelated tests"
+    limits: "Fixture-only local suggestions and pending state; no prompt selection/processing, provider, wallet, database, job, AutoPost, image/video engine, production data, or real Telegram"
+    files:
+      - tests/test_admin_root_menu_callback_single_ack.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+    side_effects: "provider=0, wallet=0, production DB=0, jobs=0, real Telegram=0, AutoPost=0, engine=0"
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.74-free-tools-upload-back:
+    status: locally-verified-fixture-only
+    acceptance: >-
+      Dispatch the emitted Free Tools Lưu tệp tạm entry through the registered
+      FreeHub handler, render only the upload prompt, and dispatch its Back.
+      Return to Free Tools, clear only this owner's pending marker, and preserve
+      another user's pending marker.
+    finding: "No route/label/pending-isolation defect reproduced; prompt and Back are correct"
+    evidence: "Focused method Ran 1 test in 0.346s — OK; full Admin root/selected route module Ran 25 tests in 10.108s — OK; actual emitted keyboard and registered FreeHub handler, one ACK per dispatch"
+    limits: "Prompt-only fixture; no file/media, processing, provider, wallet, database, job, AutoPost, product engine, production data, or real Telegram"
+    files:
+      - tests/test_admin_root_menu_callback_single_ack.py
+      - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+      - docs/reports/TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md
+      - .agents/state/telegram-small-flow-audit-20261006.yaml
+    side_effects: "provider=0, wallet=0, production DB=0, jobs=0, real Telegram=0, AutoPost=0, engine=0"
+    delivery: "Local cumulative branch; no commit, push, PR, merge, deploy, or restart"
+  S12.35.75-freehub-result-copy-control:
+    status: locally-verified-fixture-only
+    acceptance: "Copy displays manual-copy help, accurate label, and library-item Back; exact suggestion ID snapshot is preserved with one ACK per dispatch"
+    red: "3 behavioral failures, 0 setup errors: misleading Meta label, missing copy help, library Back changed to Free Tools"
+    green: "Focused registered-handler test Ran 1 test in 1.531s — OK; Copy/Back/category/utility round trips and unchanged IDs"
+    scope: "library copy label and existing Copy render branch; no engine/generator/save behavior"
+    side_effects: "provider=0, wallet=0, production DB=0, jobs=0, real Telegram=0, AutoPost=0, engine=0"
+    delivery: "Local batch; no push, PR, merge, deploy, restart"
+  S12.35.76-marketing-followup-back-origin:
+    status: locally-verified-fixture-only
+    acceptance: "CSKH-origin follow-ups/custom-brief result retain suggestions→Marketing→CSKH ancestry; legacy Admin keeps Admin Back"
+    red: "5 methods, 7 behavioral failures, 0 setup errors"
+    green: "Ran 5 tests in 7.439s — OK; emitted registered callbacks and inert pending-text output"
+    scope: "two result-keyboard arguments using existing UI origin; no generation/publishing logic changes"
+    side_effects: "provider=0, wallet=0, production DB=0, jobs=0, real Telegram=0, AutoPost=0, engine=0"
+    delivery: "Local cumulative batch; no push/PR/merge/deploy/restart"
+  S12.35.77-memory-search-control-validation:
+    status: locally-verified-fixture-only
+    acceptance: "Search-tagged View/Delete validate matching token/TTL/result IDs before reads/cleanup; valid search Back clears actor draft only"
+    red: "11 behavioral failures, 0 setup errors in registered-handler search fixture"
+    green: "Ran 6 tests in 5.960s — OK, including saved-list/delete-picker/Start/Menu and draft isolation"
+    scope: "existing search UI validation/Back branch; SQL ownership and delete_yes unchanged"
+    side_effects: "provider=0, wallet=0, production DB=0, jobs=0, real Telegram=0, AutoPost=0, engine=0"
+    delivery: "Local cumulative batch; final CI/delivery pending"
+  S12.35.78-system-operator-descendant-back:
+    status: locally-verified-fixture-only
+    red: "7 behavioral failures, 0 setup errors: six child round-trips and invalid guide origin"
+    green: "Ran 3 tests in 39.974s — OK; Operator descendants, Provider Details/Refresh, static guides, legacy and public/stale denial"
+    scope: "closed System UI origin propagation; reports/operator/provider bodies unchanged"
+    delivery: "Local cumulative batch; final CI/delivery pending"
+  S12.35.79-latency-evidence:
+    status: deferred-for-owner-per-explicit-instruction
+    evidence: "Runtime 76f0454f, services active NRestarts=0; recent menu dispatch 306.038–512.953 ms; guard 33.458–118.951 ms; render helper 89.179–101.572 ms"
+    owner_observation: "Account→Back ~2–3s, no exact matched click timestamp; pre-handler/client phases unmeasured"
+    conclusion: "No proven source bottleneck or network/device cause; no speculative latency change or hardware recommendation"
 verification:
+  final_ui_pytest_20261008: "41 CI-configured safe UI modules: 218 passed, 355 subtests passed in 589.44s; --noconftest avoids unrelated legacy autouse runtime import; NO_BOT_RUNTIME_IMPORTED"
+  final_bot_compile_20261008: "Current bot blob be492b669138370639318763ce4436411b7bcc8f: python -B -S -m py_compile bot.py exit 0, FINAL_BOT_PY_COMPILE_OK"
+  final_scope_comparator_20261008: "PROTECTED_SCOPE_COMPARATOR_PASS changed_ui_blocks=23 unchanged_declaration_blocks=9742; no changes under protected service/provider/engine/worker/config files"
+  final_state_yaml_20261008: "Two historical verification lines misindented; corrected whitespace and YAML parse passed"
+  current_main_20261008: "Fetched d24716db154b77aadebfdefe87ab9cac17416bd2; bot.py unchanged since UI audit base; protected service changes from independent #1409 are not part of this UI diff"
   runtime_after_1378: "active/running; NRestarts=0; exact SHA 392d2eec8f942c8e5c1232e5ac537b9a84dfd82c"
   runtime_after_1379: "All three services active/running, NRestarts=0; runtime SHA 2099eb319483ba1acc80f1080a094ba9710b5f3d; three new Runtime guide labels; health HTTP 200"
-  latest_user_click: "After access recovery, journal query 18:40–18:47 +07 returned no matching timing records; the owner supplied no precise click time, so it is not counted as a latency sample"
+  latest_user_click: "Latest follow-up quantifies Account → Back at approximately 2–3 seconds; no exact HH:MM:SS. This remains approximate click-to-screen feedback, not an instrumented server sample"
+  latest_latency_log_query_20261007: "Read-only strict-host SSH at 2026-10-07 21:23 +07 returned no callback_latency/callback_dispatch_timing events dated 2026-10-07. Seven older main/main_video route events from 2026-10-06: handler 138–358 ms, awaited render helper 71–115 ms, callback ACK 52–223 ms; two generic dispatch samples 193.403/192.631 ms. These are two root routes only and do not measure client/device/network end-to-end delay."
+  latest_latency_zero_record_check: "Read-only strict-host SSH at 2026-10-07 21:40 +07 counted 0 callback_latency/callback_dispatch_timing events for 2026-10-07; no live per-route distribution or device/network inference available."
+  latest_latency_click_window_check: "Prior read-only strict-host SSH query 2026-10-07 22:49:45–22:59:45 +07 contained 301 INFO lines but no callback timing events; owner later estimated Account → Back at 2–3 seconds, with no exact click time, so the query cannot be tied to the click and the cause remains unassigned."
+  latest_runtime_observation_20261007: >-
+    VPS runtime commit 76f0454fbab5e467f9ca71a0135b6fd05d8d70c4, parent
+    93919f93d7207f252252f10f9c03d1e8a2d458f8, subject fix(product-video): reconcile
+    R05A zero-submit worker provider authority (R16.10B14N). Changes services/remote_worker_api.py
+    and a Product Video R05A test file only; the narrow guard targets self_shot_scene_change,
+    quality tier 700 and controlled keyframe/image-to-video modes. This is separate from
+    the local UI batch; no provider/job execution or deployment was performed here.
+  latest_service_status_20261007_2259: "Read-only strict-host SSH: toanaas-bot.service active/running; NRestarts=0; ExecMainStartTimestamp=2026-10-07 19:43:18 +07."
+  S12_35_47_account_pricing_regressions: "Account Pricing/member/Top-up focused regression set: 13 tests in 77.406s — OK; fixtures only, no payment/wallet/provider/production-data/job/real Telegram side effects"
+  S12_35_49_callback_timing_tests: "tests.test_callback_dispatch_timing: 4 tests in 7.490s — OK, fake application only; no payload/message/user ID logging"
   access_recovery: "Escalated execution as martin/toann: gh auth status exit 0, SSH identity accessible, trusted ED25519 host key present; no ACL or credential changes were needed"
   focused_harness: "31 route regressions in 39.856s and 6 root/timing regressions in 5.868s passed; public menu denial verified on 3 original routes"
   changed_test_file_py_compile: passed
@@ -424,9 +1731,37 @@ verification:
   runtime_after_1380: "Exact SHA74a8d86f24d1c8960706bc2c73b0ca984a69ae56; bot/web/nginx active/running; NRestarts=0; health HTTP200"
   pull_request_1381_ci: "Both required gates SUCCESS; Ubuntu Admin routes35 and workflow hygiene99 passed; complete source compile/AST/py_compile/tokenize passed"
   runtime_after_1381: "Exact SHA0929d61ade4b8f0d60b803b62417763e90acce9e; bot/web/nginx active/running; NRestarts=0; health HTTP200; tracked bot.py matches"
-  current_pull_request_ci: "PR #1390: both required checks SUCCESS; main workflow compiled source and passed configured route/workflow hygiene checks"
-  current_full_source_compile: "Final S12.23 full py_compile module on bot.py and both changed test files exited 0; both test files recompiled after test-only fixture/coverage updates, exit 0"
-  current_focused_route_tests: "S12.24.3 Queue confirmation suite: 5 tests OK; adjacent Admin module child suite: 5 tests OK; core pytest unavailable locally"
+  historical_pr_1390_ci: "PR #1390: both required checks SUCCESS; retained as historical delivery evidence"
+  current_batch_ci: "NOT_RUN by design; no batch PR exists until the ordered checklist and final source review are complete"
+  current_full_source_compile: "2026-10-08 local full bot.py py_compile attempted normally and with GC disabled; both were stopped after >8 minutes / ~700 MB without result, NOT_VERIFIED. The callback fixture compiled/executed changed function source; full-source Ubuntu CI is mandatory before the single batch merge."
+  S12_35_52_route_regression: "Guide articles emitted/handled with Back to Guide and Home to Main; legacy Video-guide Back preserved: Ran 13 tests in 7.632s — OK; RED reproduced menu|main_video instead of menu|main_guide"
+  S12_35_52_test_compile: "python -m py_compile tests/test_admin_root_menu_callback_single_ack.py tests/test_core.py exited 0"
+  S12_35_52_timing_suite_attempt: "tests.test_menu_video_callback_timing could not import: bundled Python has no pytest; no product assertion was run"
+  S12_35_53_guide_support_label: "RED: Admin label did not match menu|support; GREEN: 14 root/Guide callback regressions in 6.734s — OK; test compile and diff check exit 0"
+  latest_user_click_20261008: "Owner again reports Account → Back takes approximately 2–3 seconds; no exact HH:MM:SS, so the click cannot be matched to an anonymous server event; do not assign server/Telegram/device/network cause"
+  S12_35_60_ticket_ancestry_tests: "Five selected AccountTicketAncestryTests ran 21.280s — OK; fixture-only, no ticket message or production data/write"
+  S12_35_31_internal_archive_type_back_checks: "Three direct handler/source-registration checks OK; type Back preserved fixture pending file and returned to preview or department dashboard; no archive data access"
+  S12_35_61_pkgcombo_navigation_test: "tests.test_pkgcombo_navigation_registered_callback: Ran 1 test in 0.468s — OK; actual emitted Gói Ảnh group and Back dispatched through registered pkgcombo handler; fixture only, no purchase/provider/job"
+  S12_35_62_memory_back_navigation_test: "Focused AdminRootMenuCallbackSingleAckTests Memory empty-delete/Notes Back case: Ran 1 test in 0.380s — OK; registered memory+menu patterns, fixture only"
+  S12_35_65_memory_saved_list_route_tests: "Memory saved-list/detail/delete-confirm Cancel/Back route plus root, empty-delete, Memory Start/Menu and Document regressions: Ran 21 tests in 11.220s — OK; fixture-only, no DB connection/delete/write, payment, provider, job or real Telegram"
+  S12_35_66_memory_delete_picker_route_tests: "Focused Memory delete-picker Cancel route: Ran 1 test in 0.477s — OK; Memory/Notes/root/Start/Menu/Document regression group: Ran 22 tests in 11.496s — OK; fixture-only, db_connect forbidden, memory|delete_yes never dispatched; focused test py_compile and git diff --check passed"
+  S12_35_67_memory_search_result_route_tests: "RED on pre-fix source: emitted memory|view|442 omitted search origin. GREEN: registered-handler search prompt/text → result → detail → delete-confirm Cancel → Back restores identical result list; stale, expired and foreign tokens fail closed; maximum SQLite ID plus 19-digit token stays ≤64 UTF-8 bytes. Memory/Notes/root/Start/Menu/Document group: Ran 23 tests in 12.134s — OK; focused test py_compile and git diff --check exited 0; fixture-only, no DB connection or destructive action"
+  S12_35_68_freehub_menu_roundtrip_tests: "Actual public root → FreeHub → Prompt Library picker → Back → FreeHub → Home → registered Menu; one ACK each, FreeHub pending cleared on Back. Memory/Notes/root/Start/Menu/Document group: Ran 24 tests in 12.687s — OK; focused test py_compile and git diff --check exited 0; no production code/provider/wallet/DB/job/AutoPost/engine/Telegram activity"
+  S12_35_69_70_71_freehub_navigation_tests: "Actual public root → FreeHub → Kho Prompt → category → selected prompt → Back restores exact suggestion text/IDs without reroll → category Back to Kho Prompt; then Utilities chooser → Back to Free Tools; RED confirmed old freehub|main routes for category and detail; GREEN Ran 1 test in 0.608s — OK; no utility terminal/provider/wallet/DB/job/AutoPost/engine/Telegram side effects"
+  latest_main_runtime_20261008: "Read-only GitHub API and VPS check at 2026-10-08 00:18:30 +07: main=runtime SHA 76f0454fbab5e467f9ca71a0135b6fd05d8d70c4; bot active/running, NRestarts=0; deployed callback timing source present. One commit after local audit base 93919f9 touches only services/remote_worker_api.py and its focused test; not modified by this audit."
+  latency_window_20261008: "VPS journal query 00:03:30–00:18:30 +07 returned no callback_dispatch_timing prefix=menu or callback_latency route=menu lines. No exact click timestamp; delay source remains unassigned. The shared menu handler logger records prefix, not Account subroute."
+  latest_latency_window_recheck_20261008: "Strict-host SSH succeeded at VPS time 2026-10-08 01:39:52 +07. journalctl -u toanaas-bot.service --since '15 minutes ago' returned no callback_dispatch_timing or callback_latency lines. Owner estimate remains 2–3s without exact click time; no cause is assigned."
+  current_a6_admin_regressions_20261008: "Billing 6 tests/12.726s OK; Finance 9 tests/83.266s OK; Admin Overview 1 test/0.160s OK with inert report data; System/Provider/Operator 4 tests/29.083s OK; fixture-only, no production data/provider/payment/operator action. Combined batch attempt was interrupted without result and NOT_COUNTED."
+  current_a3_a5_reconciliation_20261008: "Historical candidate table statuses reconciled with current checklist evidence; named route-family coverage remains partial and action/engine terminals are explicitly excluded, not passed. Main/runtime source delta after base is services/remote_worker_api.py and its test only, outside bot UI audit."
+  S12_35_57_callback_regressions: "CI-target Memory/Storage unittest command ran 3 tests in 3.384s — OK (Memory empty-delete and Start/Menu pending reset plus Storage custom Back); four direct Document callback checks OK; five focused test files py_compile PASS; diff --check PASS. Test-only harness change; no bot.py edit. ci-main.yml wired, remote CI not run."
+  S12_35_58_storage_addon_route: "One emitted Storage Add-on custom-input → Back path dispatched through exact storage registration; Back clears draft and returns to add-on menu; emitted Notes parent target matches registered menu pattern. Included in 3-test local unittest command/3.384s; focused py_compile/diff check PASS; no purchase/payment callback; remote CI not run."
+  current_focused_route_tests: "S12.35.15–51 evidence is recorded in the checklist; S12.35.26 tests ran 3 cases in 13.835s OK; S12.35.27 tests ran 3 cases in 22.997s OK; S12.35.28 System-origin/Admin-origin regressions ran 5 tests in 50.643s OK; S12.35.29 root/account/support/language regressions ran 17 tests in 50.025s OK; S12.35.30 stale/repeat/back regressions ran 18 tests in 45.676s OK; S12.35.31 pending/expiry regressions ran 7 tests in 13.082s OK plus 4 direct checks; S12.35.32 timing harness scenarios 8 OK; S12.35.33 current root emitter inventory found 0 unmatched and 0 over-length callbacks; S12.35.34 public small-flow root callback tests ran 6 cases in 1.612s OK; S12.35.35 updated layout test contract is in S12.35.39; S12.35.36 owner copy output checks 2 OK; S12.35.37 Chat Pro info→Home ran 7 cases in 1.781s OK; S12.35.38 Account root renderer/child registration/Home ran 8 tests in 2.941s OK; S12.35.39 source-extracted current/legacy menu layout checks ran 2 tests OK and root handler suite ran 8 tests in 2.941s OK; S12.35.40 combined non-engine customer root/account/credit-guide/support/language regression set ran 22 tests in 72.487s OK; S12.35.41 combined set including actual Image menu display/Back ran 23 tests in 72.314s OK, changed root test py_compile and git diff --check exited 0; S12.35.42 read-only public root evidence inventory recorded 14 registered, ≤64-byte callbacks; its Notes/Documents and Guide landing gaps are closed by .43/.44; S12.35.43 Notes → Documents → Back/Home ran in a combined 24-test set; S12.35.44 Guide landing → Home ran in the combined 25-test set in 47.425s OK; S12.35.45 Memory pending reset unittest ran 1 test in 1.812s OK plus 4 direct Feedback/Language checks OK, with the legacy empty-delete full-file AST helper interrupted and NOT_COUNTED; S12.35.46 all four Feedback callback checks returned OK for start, rejected action, category prompt, and cancel Back/Home; S12.35.47 Account Pricing/member/Top-up ran 13 tests in 77.406s OK; S12.35.48 provider notice source review confirmed the strict below-$10/$100 policy and six-hour cooldown, without executing tests or a live call; S12.35.49 callback instrumentation regression ran 4 tests in 7.490s OK; S12.35.50 records a user-reported 2–3 second Account → Back delay, with no exact timestamp and no matching live callback event; S12.35.51 public/Admin root callback regression ran 11 tests in 6.271s OK. Admin A1/A2 and in-scope A4 are verified offline; A3/A5/A6 and live A7 remain partial/open."
+  S12_35_27_route_regression: "tests.test_admin_module_child_back_origin.AdminModuleChildBackTests.test_all_seven_emitted_controls_and_back_dispatch_to_their_module + test_system_provider_status_refresh_details_and_back_keep_system_parent + test_legacy_system_read_only_shortcuts_are_labeled_as_guides: Ran 3 tests in 22.997s — OK"
+  S12_35_27_test_py_compile: "python -m py_compile tests/test_admin_module_child_back_origin.py exited 0"
+  S12_35_27_diff_check: "git diff --check exited 0; existing LF-to-CRLF working-copy warnings only"
+  S12_35_27_combined_suite_attempt: "A broader three-module unittest invocation produced no output for >3 minutes and was interrupted; NOT_COUNTED and replaced with the narrow registered-route regressions above"
+  S12_35_28_route_regression: "tests.test_admin_module_child_back_origin focused System Operator/Provider cases plus test_all_seven_emitted_controls_and_back_dispatch_to_their_module: Ran 5 tests in 50.643s — OK"
+  admin_help_module_matrix: "tests.test_admin_help_callback_single_ack: Ran 5 tests in 1.079s — OK; all configured module-guide controls dispatch through the registered handler and retain their module Back context"
   S12_24_1_focused_tests: "Provider/Worker route evidence: 4 tests OK; adjacent Billing guide evidence: 3 tests OK"
   S12_24_1_compile: "python -m py_compile bot.py tests/test_admin_module_child_back_origin.py exited 0"
   S12_24_1_diff_check: "git diff --check exited 0; Git reports only LF-to-CRLF conversion warning for the existing test file"
@@ -437,16 +1772,25 @@ verification:
   S12_24_3_focused_tests: "Queue confirmation suite: 5 tests OK; adjacent Admin module child suite: 5 tests OK"
   S12_24_3_local_compile: "bot.py full py_compile produced no output for >7 minutes and was interrupted; NOT_VERIFIED locally; full Ubuntu PR CI compile is required"
   S12_24_3_local_pytest: "Unavailable: bundled Python has no pytest; test_core assertion and full suite await PR CI"
-  current_diff_check: "S12.24.3 git diff --check exited 0; only expected LF-to-CRLF working-copy warning"
-  current_delivery: "S12.24.3 PR/CI/merge/deploy pending; latest verified main/runtime SHA remains 1f1b035edb225f8fef6b475836c75f6c7b609a81"
-  local_pytest: "Unavailable: bundled Python has no pytest module; test is standard-library unittest and added to Ubuntu CI"
+  S12_35_28_test_py_compile: "python -m py_compile tests/test_admin_module_child_back_origin.py exited 0"
+  S12_35_28_diff_check: "git diff --check exited 0 after code, test, checklist and runbook edits; LF-to-CRLF working-copy warnings only"
+  S12_35_29_route_regression: "tests.test_admin_root_menu_callback_single_ack tests.test_profile_credit_guide_back_origin tests.test_profile_support_read_back_origin tests.test_profile_language_back_origin: Ran 17 tests in 50.025s — OK"
+  S12_35_30_stale_repeat_back_regressions: "six targeted modules (Marketing, Support origin/pending, Internal Archive stale Save, Ticket repeat marker, FreeHub maintenance): Ran 18 tests in 45.676s — OK"
+  S12_35_31_pending_expiry_regressions: "seven unittest cases across Broadcast Lite, Memory, Document, Internal Archive, Storage Add-on, Video Downloader, and TTL expiry: Ran 7 tests in 13.082s — OK; three Admin Tool pending exit checks plus Start cleanup invoked directly: 4 checks OK"
+  S12_35_32_timing_harness: "8 Video/Home callback timing checks — OK (stdlib runner; pytest decorators and approx shimmed); deterministic synthetic timing only"
+  S12_35_33_root_callback_inventory: "public: 8 rows/14 callbacks; admin: 9 rows/15 callbacks; unmatched_registered_routes=[]; over_64_bytes=[]"
+  current_diff_check: "git diff --check exited 0 after S12.35.28 code/test and checklist/runbook edits on 2026-10-07; existing LF-to-CRLF working-copy warnings for three modified tests only"
+  latest_verified_main_runtime: "76f0454fbab5e467f9ca71a0135b6fd05d8d70c4; read-only GitHub main SHA equals VPS SHA at 2026-10-08 00:18:30 +07. Historical A0 exact deploy evidence remains at 93919f93d7207f252252f10f9c03d1e8a2d458f8."
+  current_delivery: "Batch remains local/uncommitted; no push, PR, merge, deploy, or restart. Release only once after full checklist and CI."
+  local_pytest: "Unavailable: bundled Python has no pytest module; focused stdlib unittest/direct invocations are used and CI remains required"
   provider_calls: 0
   real_telegram_sends: 0
   wallet_mutations: 0
   production_data_writes: 0
-  current_protected_comparator: "PASS: bot.py diff is only the two manual-command CTA/heading strings; callback values, commands, authorization, navigation, operations, common router and all product engines are unchanged; provider calls, wallet writes, DB writes, jobs and real messages are 0"
+  current_protected_comparator: "Manual review of the current full bot.py diff found only bounded menu navigation/labels, Memory saved-list/delete-picker/search-result UI origins, and legacy Marketing UI callbacks. This audit branch changes no services/, providers/, workers/, or config/ file, no Product/Edit/Image/SubDub/Voice/Music engine behavior, and no AutoPost WIP handler/pending semantics. Separately, current main/runtime includes one newer Product Video worker-authority commit in services/remote_worker_api.py plus its test; it is not part of this branch. Automated final scope comparator for the complete batch remains a closeout gate."
 blockers: []
 next:
-  - Complete the S12.24.3 full-source compile and PR/CI gates, then continue remaining A1/A2 Admin emitted-control/registered-handler evidence and narrow proven UX fixes.
-  - Continue remaining A1/A2 Admin/customer route evidence with inert fixtures; do not infer a bug from missing name references.
-  - Resume A3/A4/A5, A6, A7, and A8 in checklist order.
+  - Final review fixes S12.35.75–78 are locally verified sequentially; safe UI gate 218 tests/355 subtests passed. Keep protected processing and action terminals excluded, not passed.
+  - Complete one batch commit, rebase once on current main, then PR/Ubuntu CI/one merge. Record actual SHA and PR checks.
+  - Before exact-SHA bot-only deploy, recheck independent #1409 runtime delta against Owner's protected-engine restriction; do not enable an unreviewed protected change.
+  - Account Back 2–3s cause remains explicitly Owner-deferred under S12.35.79. Manual visual/client UX and all-button end-to-end smoothness remain unproven; retain this in final report.
