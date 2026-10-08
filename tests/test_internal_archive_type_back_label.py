@@ -1,5 +1,6 @@
 import asyncio
 import time
+import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -24,6 +25,7 @@ def _runtime():
 
     definitions = "\n".join((
         block("def internal_archive_pending_key(", "def internal_archive_menu_text()"),
+        block("def internal_archive_menu_keyboard(", "def internal_archive_department_text("),
         block("def internal_archive_type_keyboard(", "def internal_archive_type_text("),
         block("async def handle_internal_archive_callback(", "async def handle_internal_archive_pending_upload("),
     ))
@@ -32,9 +34,19 @@ def _runtime():
         "time": time,
         "USER_PENDING": {},
         "INTERNAL_ARCHIVE_TTL_SECONDS": 900,
-        "INTERNAL_DOC_DEPARTMENTS": {"customers": "Hồ sơ khách hàng"},
-        "INTERNAL_DOC_TYPES": {"customers": ("customer_profile",)},
+        "INTERNAL_DOC_DEPARTMENTS": {
+            "customers": "Hồ sơ khách hàng",
+            "sales": "Hồ sơ kinh doanh",
+        },
+        "INTERNAL_DOC_TYPES": {
+            "customers": ("customer_profile",),
+            "sales": ("sales_record",),
+        },
         "document_type_label": lambda _value: "Hồ sơ khách hàng",
+        "default_document_type": lambda department: {
+            "customers": "customer_profile",
+            "sales": "sales_record",
+        }[department],
         "InlineKeyboardButton": _Button,
         "InlineKeyboardMarkup": _Markup,
         "SimpleNamespace": SimpleNamespace,
@@ -81,55 +93,146 @@ def _back_button(markup):
     )
 
 
-def test_internal_archive_callback_is_registered_on_telegram_application():
-    source = (Path(__file__).resolve().parents[1] / "bot.py").read_text(encoding="utf-8")
-    assert r'tg_app.add_handler(CallbackQueryHandler(handle_internal_archive_callback, pattern=r"^archive\|"))' in source
+class TestInternalArchiveTypeBackLabel(unittest.TestCase):
+    def test_internal_archive_callback_is_registered_on_telegram_application(self):
+        source = (Path(__file__).resolve().parents[1] / "bot.py").read_text(encoding="utf-8")
+        self.assertIn(
+            r'tg_app.add_handler(CallbackQueryHandler(handle_internal_archive_callback, pattern=r"^archive\|"))',
+            source,
+        )
 
 
-def test_internal_archive_type_back_label_matches_pending_file_destination():
-    runtime, captured, click = _runtime()
-    user_id = 887766
-    file_info = {
-        "file_id": "pending-file-id",
-        "file_name": "draft.pdf",
-        "mime_type": "application/pdf",
-        "size_bytes": 123,
-    }
-    runtime["set_internal_archive_pending"](
-        user_id,
-        "preview",
-        department="customers",
-        document_type="customer_profile",
-        file_info=file_info,
-        title="Pending customer document",
-    )
+    def test_change_department_choice_preserves_pending_file_and_returns_to_preview(self):
+        runtime, captured, click = _runtime()
+        user_id = 887764
+        file_info = {
+            "file_id": "pending-file-id",
+            "file_name": "draft.pdf",
+            "mime_type": "application/pdf",
+            "size_bytes": 123,
+        }
+        runtime["set_internal_archive_pending"](
+            user_id,
+            "preview",
+            department="customers",
+            document_type="customer_profile",
+            file_info=file_info,
+            title="Pending customer document",
+        )
 
-    asyncio.run(click(user_id, "archive|types"))
-    state = runtime["get_internal_archive_pending"](user_id)
-    assert state["step"] == "choosing_type"
-    assert state["file_info"] == file_info
-    back_button = _back_button(captured[-1][1])
+        asyncio.run(click(user_id, "archive|change_dept"))
+        picker_markup = captured[-1][1]
+        department_callback = "archive|dept|sales"
+        emitted_callbacks = [
+            button.callback_data
+            for row in picker_markup.inline_keyboard
+            for button in row
+        ]
+        self.assertIn(department_callback, emitted_callbacks)
 
-    asyncio.run(click(user_id, "archive|back_department"))
-    state = runtime["get_internal_archive_pending"](user_id)
-    assert state["step"] == "preview"
-    assert state["file_info"] == file_info
-    assert state["title"] == "Pending customer document"
-    assert "draft.pdf" in captured[-1][0]
+        asyncio.run(click(user_id, department_callback))
 
-    assert back_button.text == "⬅️ Xem lại hồ sơ"
+        state = runtime["get_internal_archive_pending"](user_id)
+        self.assertEqual(state["step"], "preview")
+        self.assertEqual(state["department"], "sales")
+        self.assertEqual(state["document_type"], "sales_record")
+        self.assertEqual(state["file_info"], file_info)
+        self.assertEqual(state["title"], "Pending customer document")
+        self.assertEqual(captured[-1][0], "PREVIEW: draft.pdf")
+
+    def test_change_department_back_returns_to_pending_preview(self):
+        runtime, captured, click = _runtime()
+        user_id = 887765
+        file_info = {
+            "file_id": "pending-file-id",
+            "file_name": "draft.pdf",
+            "mime_type": "application/pdf",
+            "size_bytes": 123,
+        }
+        runtime["set_internal_archive_pending"](
+            user_id,
+            "preview",
+            department="customers",
+            document_type="customer_profile",
+            file_info=file_info,
+            title="Pending customer document",
+        )
+
+        asyncio.run(click(user_id, "archive|change_dept"))
+
+        state = runtime["get_internal_archive_pending"](user_id)
+        self.assertEqual(state["file_info"], file_info)
+        picker_markup = captured[-1][1]
+        picker_callbacks = [
+            button.callback_data
+            for row in picker_markup.inline_keyboard
+            for button in row
+        ]
+        self.assertNotIn("archive|search", picker_callbacks)
+        back_button = next(
+            button
+            for row in picker_markup.inline_keyboard
+            for button in row
+            if button.text.startswith("⬅️")
+        )
+        self.assertEqual(
+            back_button.callback_data,
+            "archive|preview",
+            f"Change-department Back emitted {back_button.callback_data!r}",
+        )
+        self.assertEqual(back_button.text, "⬅️ Xem lại hồ sơ")
+
+        asyncio.run(click(user_id, back_button.callback_data))
+        state = runtime["get_internal_archive_pending"](user_id)
+        self.assertEqual(state["step"], "preview")
+        self.assertEqual(state["file_info"], file_info)
+        self.assertEqual(captured[-1][0], "PREVIEW: draft.pdf")
 
 
-def test_internal_archive_type_back_label_stays_department_without_pending_file():
-    runtime, captured, click = _runtime()
-    user_id = 887767
-    runtime["set_internal_archive_pending"](user_id, "department_dashboard", department="customers")
+    def test_internal_archive_type_back_label_matches_pending_file_destination(self):
+        runtime, captured, click = _runtime()
+        user_id = 887766
+        file_info = {
+            "file_id": "pending-file-id",
+            "file_name": "draft.pdf",
+            "mime_type": "application/pdf",
+            "size_bytes": 123,
+        }
+        runtime["set_internal_archive_pending"](
+            user_id,
+            "preview",
+            department="customers",
+            document_type="customer_profile",
+            file_info=file_info,
+            title="Pending customer document",
+        )
 
-    asyncio.run(click(user_id, "archive|types"))
-    back_button = _back_button(captured[-1][1])
+        asyncio.run(click(user_id, "archive|types"))
+        state = runtime["get_internal_archive_pending"](user_id)
+        self.assertEqual(state["step"], "choosing_type")
+        self.assertEqual(state["file_info"], file_info)
+        back_button = _back_button(captured[-1][1])
 
-    asyncio.run(click(user_id, "archive|back_department"))
-    state = runtime["get_internal_archive_pending"](user_id)
-    assert state["step"] == "department_dashboard"
-    assert state["department"] == "customers"
-    assert back_button.text == "⬅️ Phòng ban"
+        asyncio.run(click(user_id, "archive|back_department"))
+        state = runtime["get_internal_archive_pending"](user_id)
+        self.assertEqual(state["step"], "preview")
+        self.assertEqual(state["file_info"], file_info)
+        self.assertEqual(state["title"], "Pending customer document")
+        self.assertIn("draft.pdf", captured[-1][0])
+
+        self.assertEqual(back_button.text, "⬅️ Xem lại hồ sơ")
+
+
+    def test_internal_archive_type_back_label_stays_department_without_pending_file(self):
+        runtime, captured, click = _runtime()
+        user_id = 887767
+        runtime["set_internal_archive_pending"](user_id, "department_dashboard", department="customers")
+
+        asyncio.run(click(user_id, "archive|types"))
+        back_button = _back_button(captured[-1][1])
+
+        asyncio.run(click(user_id, "archive|back_department"))
+        state = runtime["get_internal_archive_pending"](user_id)
+        self.assertEqual(state["step"], "department_dashboard")
+        self.assertEqual(state["department"], "customers")
+        self.assertEqual(back_button.text, "⬅️ Phòng ban")

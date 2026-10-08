@@ -5,9 +5,9 @@ base_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
 objective: >-
   Continue the ordered Telegram small-flow audit. Fix wrong callback/Back routes
   narrowly while protecting AutoPost WIP and stable product engines.
-current_spec: S12.35.104-customer-root-safe-route-reconciliation
+current_spec: S12.35.146-a7-anonymous-callback-log-recheck
 current_branch: audit/telegram-ui-navigation-fix-20261008
-current_base_sha: ea516e37c1e482b5cb8708d5b7591cf93c1ecfcc
+current_base_sha: 9835b432464c4ccd94fe43690d41b6500c75eb7b
 release_cadence: >-
   Keep the remaining specs on one batch branch. Do not create a PR, merge, deploy,
   or restart per spec; complete the ordered checklist and final CI first, then
@@ -1767,13 +1767,13 @@ specs:
     side_effects: "Pending/context state and Telegram render/ack seams were in-memory/intercepted; provider=0, jobs=0, DB=0, wallet=0, production writes=0, real Telegram sends=0"
     delivery: "No source delta, PR, merge, deploy, or restart. Continue the consolidated batch only after remaining checklist and closeout gates."
   S12.35.88-voice-settings-back-pending-preservation:
-    status: direct-fixture-assertions-pass-not-pytest
+    status: direct-fixture-assertions-pass-ci-wired-awaiting-consolidated-ci
     acceptance: "Verify emitted Voice TTS settings speed/volume prompts, prompt Back to settings, parent Back to the prior source screen, matching pending-state release, preservation of voice options, and protection of unrelated pending/context without generation or provider actions"
-    evidence: "tests/test_voice_settings_input_back.py was source-reviewed; all 19 explicit parameter combinations/assertion calls passed through the registered handle_music_quick_callback with in-memory state: DIRECT_FIXTURE_ASSERTIONS_OK count=19"
+    evidence: "Fresh revalidation: all 19 explicit parameter combinations/assertion calls passed through the registered handle_music_quick_callback with in-memory state: DIRECT_FIXTURE_ASSERTIONS_OK count=19. Generation/provider/price-summary functions are hard-failed. tests/test_voice_settings_input_back.py is now in the Small Navigation and UI Closure Regressions CI command."
     finding: "No Back-origin or pending-state defect reproduced. The path is UI/settings-only in this fixture; generation, provider, and price-summary functions are replaced with hard failures. No production source or test file changed."
-    test_limit: "The local shell had no python command and the bundled interpreter has no pytest package; assertions were invoked directly with a no-op pytest.parametrize shim. This is not a pytest/CI pass or Telegram-client verification."
+    test_limit: "The bundled interpreter has no pytest package; assertions were invoked directly with a no-op pytest.parametrize shim. This is not a local pytest or remote CI pass or Telegram-client verification; consolidated remote CI remains pending."
     side_effects: "In-memory user/context maps only; provider=0, generation=0, price quote=0, wallet=0, DB=0, jobs=0, AutoPost=0, real Telegram=0"
-    delivery: "No production source/test delta, PR, merge, deploy, or restart. Include the test module in the consolidated batch CI; A3/A5 remain partial."
+    delivery: "Workflow-only test gate added locally; no production source/test delta, PR, merge, deploy, or restart. Consolidated CI and the broader A3/A5 audit remain pending."
   S12.35.89-current-main-source-evidence-reconciliation:
     status: report-source-corrected
     acceptance: "Ensure the current-main A3/A5 reconciliation report distinguishes its historical 76f0454 snapshot from verified current GitHub/VPS main ea516e37"
@@ -1842,12 +1842,12 @@ specs:
     protected: "Ticket creation/delivery business logic, production DB, customer messages, wallet, providers, AutoPost and all product engines."
     side_effects: "Source inspection and prompt-only in-memory fixture; no ticket submission, DB, real Telegram, provider, wallet, job, deploy or restart."
   S12.35.96-root-menu-layout-expectation-reconciliation:
-    status: source-reconciled-fixture-verified-direct-pytest-unverified
+    status: source-reconciled-focused-root-layout-pass-broader-locale-qa-open
     acceptance: "Current root-menu emitter shape/order matches test_translation_main_menu_hotfix.py without changing production UI"
     source: "Public root is 8 rows (1 singleton + 7 pairs), Admin adds one singleton; current test contract matches the source and retains shortcuts."
-    verification: "Source-extracted actual-emitter/registered-route fixture Ran 1 test in 0.422s — OK. Direct pytest import test did not return during local bot import and was stopped; not counted as pass."
+    verification: "Source-extracted actual-emitter/registered-route fixture Ran 1 test in 0.422s — OK. Fresh exact CI-listed test tests.test_admin_root_menu_callback_single_ack.AdminRootMenuCallbackSingleAckTests.test_public_main_menu_small_flow_callbacks_match_their_registered_handlers ran 1 test in 0.241s — OK; it verifies eight Vietnamese public rows and selected emitted routes/registration patterns. A separate full-bot pytest import remained CPU-bound and was stopped; not counted."
     side_effects: "No production source/UI, provider, job, wallet, DB, AutoPost, product engine or Telegram change/action."
-    delivery: "Local documentation/state only; final batch CI remains required."
+    delivery: "Existing root/menu test module is already in consolidated CI; final batch CI remains required. All-locale/admin rendering and Telegram viewport/client QA remain open."
   S12.35.97-customer-translation-root-navigation:
     status: locally-verified-registered-handler-navigation-only
     acceptance: "Dispatch the actual main-menu menu|translate control through the registered menu handler; verify the emitted translation hub, its language-hub child, Back to Translation, and Home to Main. Never submit translation input or enter provider/processing actions."
@@ -1899,7 +1899,551 @@ specs:
     protected: "AutoPost WIP, stateful and action-capable terminals, Product/Edit/Image/SubDub/Voice/Music engines, providers/workers, wallet, production data, secrets, customer messages."
     side_effects: "Offline/source-based review and local test fixtures only; provider=0, wallet=0, production DB=0, jobs=0, real Telegram=0, deploy=0, restart=0."
     delivery: "Local only; remote CI and final consolidated delivery/scope gates remain pending."
+  S12.35.105-pr1413-ci-deploy-reconciliation:
+    status: merged-deployed-runtime-sha-verified
+    acceptance: "Reconcile the Owner-approved three Ticket test modules and SubDub safe-navigation test with remote CI, merge, bot-only deploy, and exact VPS runtime evidence; retain the larger audit as ACTIVE."
+    ci: "PR #1413 checks 37782845604 and 37782845591 SUCCESS; deploy workflow run 37783893626 SUCCESS for merge SHA 9835b432464c4ccd94fe43690d41b6500c75eb7b."
+    evidence: "GitHub main and VPS bot SHA both equal 9835b432464c4ccd94fe43690d41b6500c75eb7b; VPS bot.py blob 70633821294c449fe61b70b96aafb86449c12da3. Six checked units (bot, web, nginx, both Product Video workers, SubDub worker) active/running with NRestarts=0; /health returned status=ok."
+    finding: "The previously Owner-approved Ticket concurrency/file/preview modules and SubDub safe-navigation module were included in PR #1413's safe-navigation CI step. The approval and delivery gate are satisfied; do not repeat this work."
+    limits: "CI/runtime health do not prove Telegram viewport behavior, per-button latency, paid product output, or the remaining excluded stateful/protected terminal routes. A3/A5/A6/A7 remain partial/open."
+    side_effects: "Read-only GitHub/SSH verification only in this reconciliation; no new provider, wallet, production-data, job, customer-message, worker-sync, deploy, or restart action was initiated."
+    delivery: "PR #1413 merged at 9835b432464c4ccd94fe43690d41b6500c75eb7b; deploy run 37783893626 is successful and exact VPS source/services/health are verified. Delivery note is recorded on PR #1413; keep the whole-goal status ACTIVE."
+  S12.35.106-image-story-aspect-application:
+    status: owner-excluded-reverted-not-in-batch
+    acceptance: "Excluded by Owner on 2026-10-09 because applying the selected aspect changes prompt-pack output, outside the UI/navigation-only batch. Not a completion criterion for this batch."
+    reproduced: "Before the change /image_story always built the shot pack at 9:16, ignoring a selected 16:9; the callback accepted unsupported aspect values without a warning."
+    implementation: "The experimental aspect-application and associated pending-state changes were reverted after the Owner scope decision. Current cmd_image_story still builds at 9:16; do not claim the selected aspect is applied. The pre-existing aspect callback and its user-facing promise remain an unresolved mismatch, deferred outside this batch."
+    historical_tests: "tests.test_admin_root_menu_callback_single_ack.test_image_story_aspect_callback_applies_once_to_prompt_pack and test_image_story_expired_or_invalid_aspect_is_not_applied; these covered only the reverted experiment."
+    historical_evidence: "Those tests passed against the excluded experimental implementation before it was reverted; they are no longer in the current diff and do not verify current behavior."
+    protected: "AutoPost WIP, stable Image rendering/provider engine, Product/Edit/SubDub/Voice/Music, workers, wallet, secrets, production DB and customer messages."
+    side_effects: "No provider, wallet, production DB, job, real Telegram, deploy, or restart side effect."
+    delivery: "Owner explicitly excluded this output-affecting change; reverted and not to be included in the consolidated UI batch. The residual label/prompt mismatch remains unresolved, not passed."
+  S12.35.107-image-story-render-hint-route:
+    status: locally-verified-test-only-retained
+    acceptance: "Dispatch the actual public Image Story Admin render-hint button through its registered callback; verify one acknowledgement, its informational reply, and zero render/job/provider seams. Do not change the label or engine."
+    allowed_scope: "One source-extracted inert callback test and evidence/checklist update only."
+    verification: "tests.test_admin_root_menu_callback_single_ack.AdminRootMenuCallbackSingleAckTests.test_image_story_render_hint_only_informs_without_creating_media_job: Ran 1 test in 0.218s — OK."
+    historical_combined_regression: "The earlier three-case run included the now-reverted aspect/expiry tests; it is not a current test result. Only the render-hint test remains current and must be rerun independently."
+    side_effects: "Source-extracted fixture only; exactly one acknowledgement and the expected informational reply; media-job seam stayed untouched; provider=0, wallet=0, production DB=0, real Telegram=0."
+    delivery: "Retain this test-only coverage in the consolidated batch; no separate PR, merge, deploy, or restart. The containing root/menu test module is already in the approved CI safe-navigation list."
+  S12.35.108-image-story-aspect-pending-reset:
+    status: owner-dropped-dependent-spec
+    acceptance: "Dropped as dependent on S12.35.106: the new Image Story aspect pending state was excluded and reverted, so its cleanup extension is not needed in this batch."
+    reproduced: >-
+      Source review found the new image_story_aspect:<uid> key was not included in
+      clear_media_creator_pending_states, which is used by the menu router and
+      clear_pending_start_notice for /start and /menu. The baseline regression
+      then confirmed image_story_aspect:991129 remained after /menu while the
+      other user's key also remained as expected.
+    allowed_scope: "One per-user clear helper, one line in the existing pending aggregator, and focused regressions/state evidence only. No menu/router redesign or Image engine changes."
+    correction: "The experimental Image Story pending-state cleanup was reverted together with its dependent S12.35.106 state. No image_story_aspect:<uid> pending key or added cleanup is present in the current diff."
+    historical_verification: "The focused reset and module tests passed against the reverted experiment; they are historical only and are not evidence for current code."
+    side_effects: "Fixture-local pending maps only; actor key cleared, other user's key preserved; provider=0, wallet=0, production DB=0, jobs=0, real Telegram=0, deploy=0, restart=0."
+    delivery: "Dropped after the Owner excluded S12.35.106; do not include in the consolidated UI batch."
+  S12.35.109-admin-growth-readonly-route-evidence:
+    status: locally-verified-route-evidence-only
+    acceptance: "Dispatch the emitted Admin Growth root, read-only pages, guide controls, and nested Back paths through the exact registered handler; reject public/invalid contexts before report reads. Keep all report/list helpers in-memory and do not execute affiliate, publish, package, or campaign actions."
+    finding: "No route/Back or public-access defect reproduced in the covered read-only pages."
+    evidence: "AdminGrowthNavigationTests: 5 tests in 15.089s — OK. Emitted root links to Affiliates, Ideas, Calendar, Revenue/Click report, Channels, and Packages all rendered; each immediate Back restored its parent. Nested Packages→Channels and Ideas, Calendar→Campaigns histories were preserved; guide-only controls were labeled; malformed/public contexts stopped before report reads."
+    protected: "AutoPost WIP, affiliate/publish/campaign writes, payment, wallet, providers, production data, customer messages, product engines."
+    side_effects: "Source-extracted fixture; all list/report helpers and render/Telegram seams stubbed in memory. No production DB, external network, provider, wallet, publish job, real Telegram, deploy, or restart."
+    delivery: "Documentation-only evidence update; the test module is already in ci-main.yml. No production source or CI workflow change."
+  S12.35.110-translation-text-file-picker-back:
+    status: locally-verified-registered-handler-navigation-only
+    acceptance: "Render the no-input Translation text and file target pickers, dispatch each emitted More Languages control through the exact registered tr_ handler, then dispatch its emitted Back and verify the original target-picker callback set returns with one ACK per callback. Do not dispatch target selection, transcribe, submit media/text, or enter provider/action paths."
+    finding: "No picker/back route defect reproduced. tr_more|text/file is emitted by the actual target keyboard; expanded lists emit matching tr_pick|text/file Back callbacks; all match the registered handle_translation_callback pattern and restore the same target options."
+    evidence: "Focused source-extracted test Ran 1 test in 0.345s — OK; fresh tests.test_admin_root_menu_callback_single_ack module Ran 34 tests in 17.550s — OK. The actual target renderer/keyboard, show_translation_picker, callback handler, and registration were extracted; both callback ACKs and identical restored text/file target callback values were asserted. The initial fixture omitted translation_text and raised KeyError before assertions; adding that copy field corrected the fixture, not production code."
+    protected: "Translation execution/provider, ASR/TTS, Voice/Music/SubDub/Product engines, payment/wallet, AutoPost, production DB/data, customer messages."
+    side_effects: "Inert in-memory context/query/render fixtures only; no translation input, target dispatch, user media retrieval, provider, job, wallet, DB, real Telegram, deploy, or restart. bot.py and ci-main.yml unchanged."
+    delivery: "Test-only navigation evidence added to the existing CI-listed root/menu module. Remains on the consolidated local batch; no separate PR, merge, deploy, or restart."
+  S12.35.111-translation-voice-picker-label-and-back:
+    status: locally-verified-red-green-awaiting-consolidated-batch
+    acceptance: "The Translation Voice menu control emitting tr_pick|voice is labeled as audio translation; dispatch it through the registered handler, then verify its emitted More Languages and Back controls restore the exact original audio target options with one ACK each. Do not select a target, transcribe, or call translation/ASR/TTS providers."
+    red: "Actual translation_voice_menu_keyboard emitted tr_pick|voice with label 📝 Văn bản; the focused assertion expecting 🌐 Dịch audio failed exactly on this mismatch. Source says this menu is for sending/replying to voice/audio and handler opens the audio target picker."
+    correction: "Changed only the first button label to 🌐 plus existing localized translation_audio copy. Callback, Back/Home destinations, handler/context and all processing behavior stay unchanged."
+    evidence: "Focused source-extracted GREEN Ran 1 test in 0.238s — OK; fresh tests.test_admin_root_menu_callback_single_ack Ran 35 tests in 14.869s — OK. The test asserts actual keyboard label/callback, exact registered tr_ handler dispatch, audio picker More → Back restoring identical callback options, and one ACK each."
+    protected: "Translation processing/provider, ASR/TTS, Voice/Music/SubDub/Product engines, payment/wallet, AutoPost, DB/data and customer messaging."
+    side_effects: "Only one localized UI label changed. Inert fixture set has_recent_audio_input=True; no media read/submitted and no target, transcribe, provider, job, wallet, DB, Telegram, deploy, or restart action ran."
+    delivery: "One bot.py label line plus regression/evidence updates on consolidated branch; no separate PR, merge, deploy, or restart. Root/menu test module is already in CI safe-navigation list."
+  S12.35.112-freehub-aichat-consent-back:
+    status: locally-verified-registered-handler-navigation-only
+    acceptance: "Render the actual Free Tools root, dispatch its emitted aichat|on control through the registered handler, verify the consent-request screen and its emitted Back, then dispatch Back and verify Free Tools root returns. Assert one ACK per callback and that consent is requested but never granted."
+    finding: "No navigation or consent-bypass defect reproduced: aichat|on requests consent and offers aichat|back_freehub; the registered Back returns to the actual Free Tools root. enable_with_consent is not called."
+    evidence: "Focused source-extracted test Ran 1 test in 0.298s — OK; fresh tests.test_admin_root_menu_callback_single_ack module Ran 36 tests in 18.816s — OK; git diff --check exit 0. The actual Free Tools root keyboard and emitted consent-screen callbacks were dispatched through the exact registered handler; one ACK each asserted."
+    protected: "AI Chat consent grant/activation, AutoPost, Translation/Voice/Music/SubDub/Product processing, provider/network, DB/data, wallet, publishing jobs, real Telegram, deploy, restart."
+    side_effects: "Source-extracted offline fixture with in-memory state, consent request/grant seams, and Telegram query/render fakes only; request_enable was observed, enable_with_consent remained untouched. No provider, user data, production DB, wallet, job, real Telegram, deploy, or restart."
+    delivery: "Test-only route evidence in the existing CI-listed root/menu module; no production source or CI workflow change. Remains in the consolidated batch; no separate PR, merge, deploy, or restart."
+  S12.35.113-public-root-language-picker-back:
+    status: locally-verified-registered-handler-navigation-only
+    acceptance: "Start from the actual emitted public main-menu back_lang entry; dispatch it through the exact registered handle_language_callback and verify the actual locale picker is rendered. Dispatch only the picker-emitted lang_back control through the same registration and assert the exact original Main-menu callback set returns, one ACK per callback, with set_user_language and other preference/event-write seams untouched. Do not select a language."
+    source_boundary: "localized_main_menu_keyboard -> back_lang -> language_choice_keyboard -> lang_back -> localized_main_menu_keyboard; handle_language_callback registration. menu|main Home is checked only for registered route shape if needed, not treated as the Back edge."
+    protected: "Persistent language preference, broadcasts, usage writes, AutoPost, protected product processing, provider/network, production DB/data, wallet, real Telegram, deploy, restart."
+    finding: "No wrong Back destination reproduced: the actual public menu back_lang entry renders language_choice_keyboard; its emitted lang_back returns the exact original main-menu callback set. One initial extracted-fixture run stopped at setup because localized_main_menu_keyboard was not injected into the handler namespace; adding that fixture dependency allowed the route assertions to execute. No product assertion failed."
+    evidence: "test_public_root_language_picker_back_restores_exact_main_menu_without_preference_write Ran 1 test in 0.275s — OK; fresh tests.test_admin_root_menu_callback_single_ack module Ran 37 tests in 17.159s — OK; git diff --check exit 0. Exact registered handler, actual emitted picker, one ACK each, exact callback-set restoration and zero preference/usage/broadcast writes asserted."
+    side_effects: "Offline source-extracted keyboards/handler with in-memory preference/write stubs and fake Telegram query/render; no locale-selection callback or persistent state change."
+    delivery: "Test-only evidence in the existing CI-listed root/menu module; no production source or CI workflow change. Retain in consolidated batch; no separate PR, merge, deploy or restart."
+  S12.35.114-final-anonymous-callback-timing-sample:
+    status: read-only-runtime-observed-no-owner-click-correlation
+    acceptance: "Inspect only anonymous callback timing fields from the last 24h; report bot guard/handler/render timings separately from client wait. Correlate the Owner-reported 2–3s Account Back only if a precise timestamp and matching route event exist; never infer device/network cause from unmatched events."
+    evidence: "Strict-host read-only VPS query at 2026-10-08T15:25:38Z found two menu dispatch entries: 09:29:31 +07 prefix=menu dispatch_ms=306.038, handler_ms=271.747, render_helper_ms=90.793; and 09:30:17 +07 route=menu|main role=admin callback handler_ms=309.919, ack_ms=179.210, render_ms=101.631, followed by dispatch_ms=360.419. No Account route event or exact Owner click timestamp was correlated."
+    finding: "These are anonymous server-side timings for generic menu routes, not the reported Account Back click and not client-display/network measurements. The user's 2–3s estimate remains unexplained; no server, Telegram, device, network, or hardware cause is assigned."
+    protected: "User identity/content, provider/product actions, wallet, production data, Telegram writes, restart, deploy."
+    side_effects: "Read-only systemd journal query and health/status checks; no source/config/data change, provider call, customer action, deploy or restart."
+    delivery: "A7 remains PARTIAL pending an accurately timed Account Back sample; retain existing telemetry and do not change callback routes based on these unmatched events."
+  S12.35.115-protected-main-vps-delivery-gate:
+    status: protected-main-runtime-aligned-ui-batch-closeout-still-pending
+    acceptance: "Before the one consolidated UI deployment, compare exact GitHub main with VPS runtime, source, health and CI. Deploy only if the diff from runtime contains the approved UI batch and no unapproved Product/engine/provider/worker delta; otherwise hold without restart."
+    evidence: "Fresh read-only check on 2026-10-09: GitHub main and VPS bot both equal f232deafaef5461e1de0494e750db16e26612b78. PR #1412 is MERGED and both required checks are SUCCESS (runs 37796119546 and 37796119564); therefore the previously held protected Product Video delta is now on runtime. VPS bot/web/nginx are active, NRestarts=0, /health returns {ok:true}, and bot.py SHA-256 is 6ca402671331c7580861ff1fc9ab1491b6c061defe6cb68a9961dd150179be9b. The read-only source/runtime SHA match means #1409 and #1412 are live. No deploy/restart was initiated by this audit."
+    finding: "The old runtime hold is cleared because main and VPS match, including the previously protected Product Video delta. The local consolidated UI batch is still based on 9835b432 and its checklist/final CI/scope review are incomplete, so do not deploy now. Recheck exact main/runtime, refresh/rebase once, run protected-source comparison and consolidated CI, then one delivery cycle only if the diff is UI/test/docs-only and the authorized pipeline is valid."
+    protected: "Product Video/SubDub/Voice/Music/engine/provider/worker scope, secrets, wallet, production data, restart/deploy."
+    side_effects: "Read-only GitHub CLI compare/PR/CI/deploy-run queries and strict-host SSH source/hash/service/health/log checks only. No push, merge, deploy, restart, secret read, provider, wallet, DB, or Telegram action."
+    delivery: "Keep UI batch local until ordered checklist and consolidated gates complete. Then refresh main, rebase once, rerun exact-SHA scope/tests, and use one bot-only deploy only if the runtime-to-target diff is UI/test/docs-only and all checks pass."
+  S12.35.116-freehub-root-label-route-source-review:
+    status: source-reviewed-no-mismatch-client-layout-unverified
+    acceptance: "Compare each actual Free Tools root button label key and emitted callback against the source route family/visible screen; verify Home control is present. Do not dispatch action, upload, downloader, publish, Music, Voice/SubDub, or provider paths."
+    finding: "The 14 Free Tools root buttons map to their intended route families in source: AI Chat consent; Utilities; Meta/Caption/Ideas/Prompt suggestions; Prompt Library; publishing-package prompt; Notes/Docs; media-upload prompt; Voice/SubDub script helper; Music/SFX helper; Translation; and Video Downloader. No label/callback mismatch reproduced in this static pass. Previously tested safe Navigation destinations are recorded in S12.35.98–.113; excluded processing/helper actions are not called passed."
+    evidence: "Read-only source comparison of free_hub_main_keyboard (14 controls + build_2col_keyboard Home) and handle_free_hub_callback branches; existing offline handler evidence was cross-referenced. No source, test, CI, or report output suggests a root label targets a different product."
+    protected: "AutoPost/publish execution, upload processing, Video Downloader, Music, Voice/SubDub/Product engines, provider/network, wallet, production DB/data, customer messages, deploy, restart."
+    side_effects: "Source-only review; no callback dispatch, prompt input, upload, download, generation, provider, DB, wallet, job, Telegram, deploy, or restart."
+    delivery: "Documentation-only source-audit evidence; A6 remains partial until Telegram-client viewport/wrapping and visual QA are observed."
+  S12.35.124-internal-archive-change-department-back:
+    status: locally-fixed-focused-unittest-verified-ci-pending
+    acceptance: "Admin Archive preview → Change group must show department choices without unrelated Search. Selecting a different department applies its default document type and returns to the same preview retaining the file; Back restores that preview. Preview Home returns to Main and clears only this user's pending Archive draft; the emitted Notes parent Back is also validated. Normal Archive root Back/Search remain unchanged."
+    red: "The actual change-department handler reused the root Archive keyboard, exposing `archive|search` and emitting `menu|main_memory` instead of the pending preview (`archive|preview`). The unrelated Search prompt routes its Back to Archive root, which clears pending state."
+    fix: "The existing department keyboard has an opt-in preview variant: it omits Search and routes Back to `archive|preview`; only the change-group picker opts in. Default root keyboard and department-selection callbacks remain unchanged."
+    evidence: "The inert fixture reproduced both the wrong Back and stray Search before the fix; after the fix it asserts Search is absent and dispatches `archive|preview`, restoring step=preview with the same fake file. A selection case dispatches emitted `archive|dept|sales` through the extracted production handler and verifies the changed department/default type while preserving the same pending file. The exact registered Menu handler tests dispatch Archive→Notes Back and the actual preview Home control; both verify only that actor's pending Archive state is cleared and the correct parent screen renders. Final combined runs: Archive picker module 5 tests/0.764s OK; Menu routes 2 tests/0.679s OK; both test files py_compile and git diff --check exit 0. Initial unittest discovery ran 0 tests; the harness was corrected to unittest.TestCase so CI executes the assertions."
+    ci: "Added tests/test_internal_archive_type_back_label.py to the existing Small Navigation and UI Closure Regressions step. The three Owner-approved Ticket modules were already listed, confirmed present, and were not duplicated. The Archive regression module now uses unittest.TestCase to match the CI runner."
+    limits: "No real archive file/DB, file send, save, provider, wallet, job, product engine, AutoPost, or Telegram action. Full bot.py compile and consolidated remote CI remain required."
+    delivery: "Local-only on the consolidated batch branch; no separate PR, push, merge, deploy, or restart."
+  S12.35.125-anonymous-callback-latency-recheck:
+    status: read-only-server-sample-no-owner-click-correlation
+    acceptance: "Aggregate only anonymous server callback timing fields from the latest 24h; correlate the reported Account Back delay only if a precise owner click timestamp and matching route event exist."
+    evidence: "Strict-host SSH query at 2026-10-09 00:05:48 +07 found 2 callback_dispatch_timing events: prefix=menu, route_key=unclassified, avg dispatch=333.2ms, max=360.4ms; max guard=48.0ms, max render helper=101.6ms; 0 above 500ms and 0 above 1000ms. No account_root callback event was present."
+    classifier_recheck: "The exact `menu|main_profile` route is classified as `account_root`; other menu routes default to `unclassified`. Existing `tests/test_callback_dispatch_timing.py` ran 5 tests in 7.764s — OK, including exact Account classification and privacy assertions. No telemetry defect reproduced; no code change."
+    finding: "The two observed server-side events are sub-500ms, but neither is the reported Account Back click. The verified classifier would label an exact `menu|main_profile` event `account_root`; no such event exists in the sampled window. They do not explain or localize the owner's estimated 2–3s and cannot distinguish Telegram rendering, client/device, or network delay. No cause is assigned."
+    protected: "User identity/content, callback payloads, provider/product actions, wallet, production data, Telegram writes, restart/deploy."
+    side_effects: "Read-only journal aggregation output only route prefix, static route class and timing fields; no raw IDs or callback data were returned."
+    delivery: "A7 remains partial; obtain an exact owner click timestamp plus a matching Account event before diagnosing the reported delay. Continue other independent offline specs."
+  S12.35.134-document-expired-back-origin:
+    status: locally-fixed-focused-verified-ci-pending
+    acceptance: >-
+      Document parent Back buttons preserve `main_memory` for save_document and
+      `main_docs` for PDF tools after the TTL getter clears pending state. All three
+      parent-Back keyboard emitters and the quota-error Back control are covered;
+      live per-user pending state remains authoritative over callback context. No
+      file processing or send.
+    red: >-
+      The actual save_document after-file keyboard emitted generic `docflow|back`.
+      After the exact TTL getter expired and removed pending state, the registered
+      callback rendered the PDF Documents menu instead of Notes/Documents.
+    fix: >-
+      Start, after-file and confirmation keyboards plus the quota-error screen
+      encode only the existing parent menu (`main_memory` or `main_docs`) in
+      `docflow|back|<parent>`. The callback handler uses per-user pending state when
+      live and accepts only the two allowlisted origins after expiry;
+      legacy/malformed stale values retain the Documents fallback. Split-page
+      `back_received` is unchanged.
+    evidence: >-
+      The source-extracted exact-handler regressions failed before fixes on both the
+      after-file and quota-error save_document Back outputs/destinations. Final
+      five-function Document Back runner passed; it checks all three keyboard
+      builders for save_document and split_pdf, the quota-only early stop with fake
+      metadata, actual TTL expiry, registered-handler restoration to Notes, and
+      existing split-page selection preservation. Additional direct source-extracted
+      checks dispatched legacy, malformed, and non-allowlisted stale Back values;
+      all 3 returned the safe Documents menu with one ACK. `git diff --check` passed;
+      remote CI and full bot.py compile remain delivery gates.
+    protected: >-
+      Document processing/file send, production DB/files, provider, wallet, AutoPost,
+      Product/Edit/Image/SubDub/Voice/Music engines, and Telegram delivery.
+    side_effects: >-
+      Test-only in-memory file metadata and UI fixtures; no actual document/file,
+      processing, storage, provider, DB, wallet, customer message, deploy or restart.
+    delivery: >-
+      Local on the consolidated audit branch; no per-spec PR/push/merge/deploy.
+  S12.35.135-vault-admin-guide-labels-20261009:
+    status: locally-fixed-focused-verified-ci-pending
+    acceptance: >-
+      Admin Knowledge Vault controls that open slash-command instructions are labeled
+      as guides; callback values, list controls, Home, and Vault operations remain
+      unchanged.
+    red: >-
+      Source-extracted `vault_admin_keyboard` labeled the `vault|import` instruction
+      screen as `Import học liệu`, implying an immediate action rather than a command
+      guide. The focused label assertion failed on that emitted label.
+    fix: >-
+      Renamed only the two instruction shortcuts to `Hướng dẫn import học liệu` and
+      `Hướng dẫn tìm kiếm`; retained `vault|import` and `vault|search` callbacks.
+    verification: >-
+      Focused Vault guide-label plus existing Home/menu route tests ran 2 tests in
+      0.374s — OK. The complete CI-listed root/menu module then ran 39 tests in
+      16.171s — OK. `tests/test_admin_root_menu_callback_single_ack.py` py_compile and
+      `git diff --check` exited 0. Remote CI remains a consolidated gate; no full bot.py
+      compile is claimed locally.
+    protected: >-
+      Vault import/search/approval/sync/backup operations, production data, AutoPost,
+      Product/Edit/Image/SubDub/Voice/Music engines, providers, wallet, secrets, and DB.
+    side_effects: >-
+      Source-extracted keyboard and inert Home fixture only; no Vault handler operation,
+      DB read/write, Telegram action, provider, job, deploy, or restart.
+    delivery: >-
+      Local on the consolidated audit branch; no per-spec PR/push/merge/deploy.
+  S12.35.137-document-staged-file-controls-20261009:
+    status: locally-verified-no-mismatch
+    acceptance: >-
+      Exercise actual Document Add-more and Remove-last controls from emitted
+      keyboards through the exact registered handler; Add-more must preserve staged
+      file/options state, and Remove-last must remove only the latest staged file,
+      returning to the upload prompt when none remain. No file processing or send.
+    finding: >-
+      No route/state mismatch reproduced. `docflow|send_more` returns the upload
+      prompt without clearing the current two-file fixture or its awaiting option.
+      Repeated emitted `docflow|pop` removes the last file, then transitions to the
+      upload prompt when the list reaches zero. Each click receives exactly one ACK.
+    verification: >-
+      Source-extracted production keyboard builders and exact registered handler ran
+      against inert in-memory file metadata. The first harness attempt exposed a
+      missing `doc_tool_display_copy` fixture dependency; after adding an inert local
+      stub, both routes passed. No product source/test change; remote full-suite CI
+      remains a batch gate.
+    protected: >-
+      Document file processing/send, persistent storage/production DB, provider,
+      wallet, AutoPost, Product/Edit/Image/SubDub/Voice/Music engines, and Telegram.
+    delivery: >-
+      Evidence-only local audit; no per-spec PR/push/merge/deploy.
+  S12.35.138-internal-archive-expired-search-back-origin-20261009:
+    status: locally-fixed-focused-verified-ci-pending
+    acceptance: >-
+      Archive root Search Back returns to the Archive root. Department Search Back
+      returns to the same department dashboard even if its pending state expires;
+      a live per-user department state remains authoritative over callback context.
+      The emitted Home control reaches Main and clears only the actor's Archive
+      search pending state. Search execution and document actions remain outside.
+    red: >-
+      The emitted department-search prompt used generic `archive|back_department`.
+      After the production TTL getter removed pending state, the exact registered
+      handler returned to Archive root instead of the originating department.
+    fix: >-
+      Only the department-search prompt now includes its validated department in
+      the Back callback. The handler uses that allowlisted context only when no
+      pending state remains; any live pending state stays authoritative.
+    verification: >-
+      Exact-handler inert fixture covers root Search Back, department Search Back
+      after TTL expiry, and precedence of a live department state over stale callback
+      context. A second exact-handler chain dispatches the emitted Search Home via
+      registered `menu|` handler and proves only the actor's pending search is
+      cleared. Archive/type/expiry/save modules Ran 11 tests — OK; Search Home focused
+      method Ran 1 test — OK; the full CI-listed root/menu module Ran 51 tests in
+      22.448s — OK. Local pytest is not installed; the new Archive module is added to
+      consolidated CI.
+    protected: >-
+      Archive search/query and stored documents, persistent/production data, file
+      handling, provider, wallet, AutoPost, Product/Edit/Image/SubDub/Voice/Music
+      engines, and real Telegram actions.
+    side_effects: >-
+      Source-extracted callbacks and in-memory pending state only; no search query,
+      document read/write, DB, provider, wallet, job, message, deploy, or restart.
+    delivery: >-
+      Local on the consolidated audit branch; no per-spec PR/push/merge/deploy.
+  S12.35.139-package-detail-back-to-origin-group-20261009:
+    status: locally-verified-no-mismatch-batch-closeout-pending
+    acceptance: >-
+      Follow the emitted package group button to a monthly package detail, then use
+      the detail keyboard's emitted Back through the exact registered pkgcombo handler.
+      It must restore the same package group and emitted controls. Do not execute
+      purchase, checkout, order-request, or payment actions.
+    evidence_gap: >-
+      Existing tests covered group-to-home registered navigation and separately
+      asserted the detail Back helper output, but did not traverse emitted detail
+      and Back controls as one exact registered-handler chain.
+    finding: >-
+      No mismatch reproduced. The Image group emitted pkgcombo:detail:image_mini_monthly;
+      the actual registered handler rendered the fixture-only detail and production
+      manual-detail keyboard emitted pkgcombo:group:image. Dispatch restored the
+      same group text and callback set.
+    verification: >-
+      tests.test_pkgcombo_navigation_registered_callback Ran 2 tests in 1.460s — OK
+      using bundled Python stdlib. The test module was already in the safe-navigation
+      CI step; workflow unchanged.
+    protected: >-
+      All package purchase/order/payment paths, checkout, wallet, provider, database,
+      product engines, AutoPost WIP, production Telegram and runtime delivery.
+    side_effects: >-
+      Source-extracted builders and exact registered handler with inert fixture data;
+      no purchase confirmation, pkgcombo pay, large-order dispatch, DB, wallet,
+      provider, job, Telegram message, deploy, or restart.
+    delivery: >-
+      Local on the consolidated audit branch; no per-spec PR/push/merge/deploy/restart.
+  S12.35.140-combo-detail-back-to-combo-group-20261009:
+    status: locally-verified-no-mismatch-batch-closeout-pending
+    acceptance: >-
+      Open the actual Combo group from the emitted package menu, select a Combo
+      detail from the production group keyboard, then dispatch the detail keyboard's
+      emitted Back through the exact registered pkgcombo handler. Restore the same
+      Combo group and its controls; do not execute purchase/order/payment actions.
+    evidence_gap: >-
+      Earlier tests covered monthly Image detail navigation and separately checked
+      the static Combo detail Back helper, but did not traverse the actual Combo
+      group/detail/Back chain.
+    finding: >-
+      No mismatch reproduced. The actual Combo group keyboard emitted
+      pkgcombo:combo_detail:combo_ad_video_588k; its production manual-detail keyboard
+      emitted pkgcombo:group:combo, and the registered handler restored the same Combo
+      text and callback set.
+    verification: >-
+      tests.test_pkgcombo_navigation_registered_callback Ran 3 tests in 2.542s — OK
+      using bundled Python stdlib. The module was already in safe-navigation CI.
+      First attempt hit the legacy test fixture's empty Combo keyboard override;
+      removing that fixture-only stub allowed the production builder to be tested.
+    protected: >-
+      All package purchase/order/payment paths, checkout, wallet, provider, database,
+      product engines, AutoPost WIP, production Telegram and runtime delivery.
+    side_effects: >-
+      Source-extracted builders and registered handler with inert fixture data only;
+      no purchase, order, checkout, payment, DB, wallet, provider, job, Telegram,
+      deploy, or restart action.
+    delivery: >-
+      Local on consolidated audit branch; no per-spec PR/push/merge/deploy/restart.
+  S12.35.141-package-notes-back-to-home-20261009:
+    status: locally-verified-no-mismatch-batch-closeout-pending
+    acceptance: >-
+      Dispatch the actual pkgcombo:notes entry from package home through the exact
+      registered pkgcombo handler. Dispatch the Notes keyboard's emitted Back and
+      verify it restores the package home and identical callback set. Do not dispatch
+      the large-order entry or any package action terminal.
+    evidence_gap: >-
+      Existing tests checked package-notes copy and static Back callback presence,
+      but did not traverse emitted Notes and Back controls through the handler.
+    finding: >-
+      No mismatch reproduced. The actual Notes keyboard emitted pkgcombo:home; the
+      registered handler restored the package-home fixture render and same callback
+      set.
+    verification: >-
+      tests.test_pkgcombo_navigation_registered_callback Ran 4 tests in 4.387s — OK
+      with bundled Python stdlib. The module was already included in safe-navigation CI.
+    protected: >-
+      Package order/large-order/purchase/checkout/payment flows, wallet, provider,
+      database, product engines, AutoPost WIP, production Telegram/runtime delivery.
+    side_effects: >-
+      Inert source-extracted builders and exact registered callback; no order,
+      purchase, payment, DB, wallet, provider, job, Telegram, deploy, or restart.
+    delivery: >-
+      Local on consolidated batch branch; no per-spec PR/push/merge/deploy/restart.
+  S12.35.142-my-packages-back-to-package-home-20261009:
+    status: locally-verified-no-mismatch-batch-closeout-pending
+    acceptance: >-
+      Dispatch the actual pkgcombo:my control emitted by the package home through
+      the exact registered handler with an inert package-summary seam. Dispatch
+      the My Packages keyboard's emitted Back and verify restoration of the same
+      package-home callback set. Do not read customer package data or purchase.
+    evidence_gap: >-
+      Existing evidence checked the static My Packages Back callback and separately
+      covered Account-origin navigation, but did not traverse package home → My
+      Packages → Back through the registered pkgcombo handler.
+    finding: >-
+      No mismatch reproduced. The fixture summary rendered, emitted Back was
+      pkgcombo:home, and the registered handler restored the package-home render
+      and identical callback set.
+    verification: >-
+      tests.test_pkgcombo_navigation_registered_callback Ran 5 tests in 7.581s — OK
+      with bundled Python stdlib. The module was already included in safe-navigation CI.
+    protected: >-
+      Real account/package data, DB, package purchase/order/payment flows, wallet,
+      provider, product engines, AutoPost WIP, production Telegram/runtime delivery.
+    side_effects: >-
+      Inert source-extracted keyboard/handler and summary stub only; no user data,
+      DB, order, checkout, payment, wallet, provider, job, Telegram, deploy, restart.
+    delivery: >-
+      Local on consolidated batch branch; no per-spec PR/push/merge/deploy/restart.
+  S12.35.143-pricing-member-label-route-reconciliation-20261009:
+    status: source-reviewed-no-mismatch-existing-regressions
+    acceptance: >-
+      Compare the Vietnamese Pricing catalog button label, emitted callback,
+      registered handler destination, destination copy, and existing Back-origin
+      evidence. Do not change wording unless the destination is misleading.
+    evidence: >-
+      pricing_catalog_keyboard emits “🎁 Khuyến mãi / Thành viên” with pricing|member.
+      handle_pricing_callback routes member to the public member-pricing section and
+      policy keyboard. The destination title is “Khuyến mãi & Thành viên” and its
+      content covers member discounts plus promotion/top-up boundaries.
+    existing_regressions: >-
+      test_p0_21a_pricing_tables_user_guides_only asserts the actual menu label/callback
+      pair and membership/promotion copy; test_profile_pricing_back_origin dispatches
+      pricing|member through the registered handler and preserves Back ancestry.
+    finding: >-
+      No mismatch found. Slash versus ampersand is only wording variation; both
+      concepts are present at the destination. No source or test change was warranted.
+    protected: >-
+      Prices, market eligibility, payment/wallet, Account DB data, providers, product
+      engines, AutoPost WIP, production Telegram/runtime delivery.
+  S12.35.144-pricing-catalog-16-control-reconciliation-20261009:
+    status: source-reviewed-16-controls-no-mismatch
+    acceptance: >-
+      Reconcile all 16 Vietnamese Pricing catalog label/callback pairs with their
+      exact registered Pricing/package/Menu handler and source branch. Do not send
+      generated documents or dispatch package purchase, top-up, payment, or provider actions.
+    evidence: >-
+      pricing_catalog_keyboard("vi") pairs all 16 labels with registered destinations:
+      pricing|total, voice, music, video, subtitle, image, docs, free, member, guide,
+      download_pricing, download_guide, storage, pkgcombo:home, pricing|main, menu|main.
+      The Pricing handler contains the corresponding summary/detail/guide/member and
+      generated-document branches; pkgcombo:home is registered separately to render
+      package home; menu|main is registered separately to render the main menu. No
+      mismatch was found and no code/test/workflow edit was justified.
+    regression: >-
+      tests.test_profile_pricing_back_origin ran 13 tests in 89.627s — OK, covering
+      catalog-total Back restoration, member ancestry, Account origin and invalid-origin
+      denial. A separate static catalog assertion invocation was stopped before its
+      assertions because importing the full bot remained CPU-bound with no output; it
+      is not counted as a result. Source review, not full dispatch of all 16 controls.
+    protected: >-
+      Document sends, package purchase/order, top-up/payment, wallet, provider, customer
+      or production data, product engines, AutoPost WIP, production Telegram/runtime.
+    side_effects: >-
+      Read-only source inspection and inert Account/Back fixtures only; no document sent,
+      transaction, DB operation, provider call, customer message, job, deploy or restart.
+    delivery: >-
+      Local on consolidated batch branch; no per-spec PR/push/merge/deploy/restart.
+  S12.35.145-pricing-hub-dynamic-control-reconciliation-20261009:
+    status: source-reviewed-no-mismatch-selected-origin-regressions-pass
+    acceptance: >-
+      Reconcile every Pricing hub control across Vietnamese domestic/non-domestic,
+      English/Chinese, and other-locale branches with its registered destination.
+      Do not query real market eligibility or invoke send/transaction actions.
+    evidence: >-
+      Source review covered all four pricing_main_keyboard branches. Domestic Vietnamese
+      alone exposes pricing|promotions; non-domestic Vietnamese substitutes Top-up;
+      English/Chinese expose Pricing, Top-up, package home and Main; other-locale
+      fallback also exposes Guide, generated-document controls and Support. The
+      handle_pricing_callback presentation wrapper adds pricing_main origin to rendered
+      Top-up; exact Pricing/Menu/Package registrations and destination branches match.
+      No mismatch or code/test/workflow edit was warranted.
+    regression: >-
+      tests.test_profile_pricing_back_origin ran 13 tests in 89.627s — OK, including
+      selected Promotions/Top-up ancestry and Pricing-origin Top-up Back. This does not
+      claim all locale/market variants were dispatched. No actual market lookup ran.
+    protected: >-
+      Generated document sends, market/user data, top-up/payment, wallet, providers,
+      production DB/data, product engines, AutoPost WIP, production Telegram/runtime.
+    side_effects: >-
+      Read-only source and existing-test review plus inert selected-origin fixtures;
+      no document send, market lookup, pricing mutation, transaction, payment, wallet,
+      DB read, provider call, customer message, job, deploy, or restart.
+    delivery: >-
+      Evidence-only local audit on the consolidated branch; no source/test/workflow
+      change or per-spec PR/push/merge/deploy/restart.
+  S12.35.146-a7-anonymous-callback-log-recheck:
+    status: partial-two-anonymous-events-route-correlation-unavailable
+    acceptance: >-
+      Read only the latest 24-hour callback_dispatch_timing records, aggregate the
+      allowed route/timing fields, and attribute Account Back latency only if a
+      route-key event matches a precisely timed Owner click. Never infer client,
+      Telegram, network, or server cause from unrelated events.
+    evidence: >-
+      Strict-host read-only journal query around 2026-10-09 03:50 +07 found two
+      callback timing records. Aggregate dispatch was 333.228 ms average and
+      360.419 ms maximum; guard maximum 48.036 ms, handler maximum 310.951 ms,
+      and render-helper maximum 101.572 ms. The records returned no route_key field,
+      so they cannot be attributed to account_root or another route.
+    finding: >-
+      No matching Account Back event or Owner click timestamp is available. These
+      two generic timings do not explain the reported 2–3 second client delay and
+      do not establish that every button is smooth. A7 remains partial; no cause or
+      hardware purchase is inferred.
+    side_effects: >-
+      Read-only strict-host query and local aggregation of anonymous callback timing
+      fields only; no raw unrelated journal output, ID/payload, source/config change,
+      customer action, provider, wallet, deploy, or restart.
+    delivery: >-
+      Local evidence only; no PR, merge, deploy, or restart.
 verification:
+  S12_35_consolidated_local_verification_20261009: >-
+    Using the configured bundled Python, the safe standard-library modules for
+    root navigation, Document Back, Feedback, Internal Archive, and package
+    navigation ran 53 tests in 34.370s — OK. The combined attempt including
+    tests.test_voice_settings_input_back stopped at import because pytest is
+    absent locally; no assertion ran in that attempt. Full bot.py py_compile
+    was attempted and interrupted after more than six minutes without output or
+    exit code: NOT_VERIFIED, not pass/fail. git diff --check passed before this
+    evidence update. Bundled Python/Node lack a YAML parser; require remote CI
+    validation before merge. No provider/wallet/Telegram/job/runtime side effect.
+  S12_35_consolidated_local_verification_refresh_20261009_0420: >-
+    Exact standard-library rerun of tests.test_admin_root_menu_callback_single_ack,
+    tests.test_doc_split_back_emitted_callback, tests.test_feedback_callback_single_ack,
+    tests.test_internal_archive_type_back_label,
+    tests.test_internal_archive_search_back_origin, and
+    tests.test_pkgcombo_navigation_registered_callback completed `Ran 53 tests in
+    26.548s — OK`. A broader invocation additionally named tests.test_core but could
+    not import it because FastAPI is absent locally; its edited assertion did not
+    execute and remains a CI gate. pytest/yaml are also unavailable locally. Full
+    bot.py compilation remains NOT_VERIFIED after a previous >6 minute no-output
+    attempt; remote full-source compile and workflow validation remain mandatory.
+    No production/provider/Telegram/wallet/job side effects.
+  S12_35_143_pricing_member_label_20261009: >-
+    Source comparison matched the emitted Vietnamese catalog label “Khuyến mãi /
+    Thành viên” to pricing|member, the registered handler's member-pricing section,
+    destination title/copy, and existing exact-handler Back-origin tests. No mismatch
+    reproduced and no change was needed. Source/test review only; no payment, wallet,
+    database, provider, production message, or runtime action.
+  S12_35_139_package_detail_back_20261009: >-
+    The CI-listed source-extracted package navigation module dispatched the actual
+    Gói Ảnh group entry, its emitted monthly detail callback, and the detail keyboard's
+    emitted Back through the exact registered pkgcombo handler. Back restored the
+    identical group callback set. Ran 2 tests in 1.460s — OK. No product source or CI
+    change; purchase/large-order/payment/database/wallet/provider/engine/Telegram
+    paths were not invoked.
+  S12_35_140_combo_detail_back_20261009: >-
+    The CI-listed source-extracted package navigation module dispatched the actual
+    Combo group entry, production Combo group keyboard, emitted Combo detail, and
+    production manual-detail keyboard's Back through the exact registered pkgcombo
+    handler. Back restored the identical Combo callback set. Ran 3 tests in 2.542s —
+    OK. The initial empty result was caused by a legacy fixture-only keyboard stub;
+    removing it made the production builder execute. No product source/CI change and
+    no purchase/order/payment/DB/wallet/provider/engine/Telegram action.
+  S12_35_141_package_notes_back_20261009: >-
+    The CI-listed source-extracted module dispatched the emitted package-home Notes
+    entry and Notes Back through the exact registered pkgcombo handler; Back restored
+    the exact package-home callback set. Ran 4 tests in 4.387s — OK. No product source
+    or workflow change; large-order/purchase/payment/provider/database/wallet/engine/
+    Telegram actions were not invoked.
+  S12_35_142_my_packages_back_20261009: >-
+    The CI-listed source-extracted package module dispatched emitted pkgcombo:my and
+    My Packages Back through the exact registered handler with an inert summary seam.
+    Back restored the package-home callback set. The combined module ran 5 tests in
+    7.581s — OK. No account data, database, purchase, order, checkout, payment,
+    provider, wallet, engine, AutoPost, Telegram, deployment, or restart action.
+  S12_35_134_document_expired_back_origin_20261009: >-
+    Before fix, `test_expired_save_document_back_returns_to_notes_parent_from_emitted_button`
+    failed on the observed destination: the actual TTL getter removed the state and
+    the registered handler returned the Docs screen instead of Notes. After the fix,
+    the complete source-extracted `tests/test_doc_split_back_emitted_callback.py`
+    runner reported `Ran 5 Document Back tests — OK`, covering the actual three
+    keyboard emitters, the save_document quota-error early stop, a stale pending
+    record with the production TTL getter, Notes/Docs parent routing and split-page
+    state preservation. Both after-file and quota-error generic Back callbacks were
+    RED before their respective scoped fixes. The new test file is included in the
+    consolidated safe-navigation CI step. No file contents, DB, wallet, provider,
+    engine, AutoPost or Telegram side effect.
+  S12_35_136_latency_log_query_20261009_0238: >-
+    Fresh read-only 24h journal query at approximately 2026-10-09 02:38 +07 found
+    only the same two `callback_dispatch_timing` records from 2026-10-08 09:29:31 and
+    09:30:17 +07. Dispatch 306.038/360.419ms (avg 333.2, max 360.4); guard
+    33.458/48.036ms; handler 271.747/310.951ms; render helper 90.793/101.572ms.
+    Both prefix=menu, route_key=unclassified, outcome=ok. No >500ms, >1000ms, or
+    account_root events. No IDs/payloads/content returned. This does not correlate
+    the Owner's Account Back click or establish an all-button/client/network cause.
+  S12_35_138_archive_search_back_home_20261009: >-
+    Before the product patch the focused test reproduced a behavioral failure: the
+    emitted `archive|back_department` prompt Back expired its only department state
+    and rendered Archive root. The actual registered handler now receives the
+    allowlisted department on that prompt's Back callback and restores that dashboard
+    only when pending state is absent; live pending state wins over stale callback
+    context. Root Search Back, TTL-expired department Back, and live-state precedence
+    pass through the exact registered Archive callback. Emitted Search Home then
+    passes through the registered Menu callback and clears only that actor's pending
+    search state. Archive unittest set Ran 11 tests — OK; Search Home focused method
+    Ran 1 test — OK; full root/menu module Ran 51 tests in 22.448s — OK. No
+    search/database/document/provider/wallet/Telegram action.
   final_ui_pytest_20261008: "41 CI-configured safe UI modules: 218 passed, 355 subtests passed in 589.44s; --noconftest avoids unrelated legacy autouse runtime import; NO_BOT_RUNTIME_IMPORTED"
   final_bot_compile_20261008: "Current bot blob be492b669138370639318763ce4436411b7bcc8f: python -B -S -m py_compile bot.py exit 0, FINAL_BOT_PY_COMPILE_OK"
   final_scope_comparator_20261008: "PROTECTED_SCOPE_COMPARATOR_PASS changed_ui_blocks=23 unchanged_declaration_blocks=9742; no changes under protected service/provider/engine/worker/config files"
@@ -1913,12 +2457,19 @@ verification:
   S12_35_102_freehub_suggestion_menu_back: "Actual root emits freehub|meta, freehub|caption, freehub|ideas; registered handler maps each to its expected local suggestion task; emitted Back restores Free Tools root and clears only current fixture user's pending state. Initial harness run raised NameError due omitted normalize_free_hub_task_type dependency; identity stub added. Retest: focused method Ran 1 test in 0.327s — OK; full root/menu module Ran 28 tests in 16.090s — OK. No suggestion selected, provider/network/generation/DB/wallet/job/AutoPost/engine/real Telegram effects; no bot.py change."
   S12_35_103_freehub_notes_docs_back: "Actual Free Tools Notes/Docs callback → registered menu handler → emitted Memory create prompt → registered Memory handler → prompt Back → Memory root Back; confirmed RED destination menu|main, fixed origin to freehub|main while preserving ordinary Main origin. Fresh /start and /memory clear the temporary UI origin. Focused origin/reset methods Ran 2 tests in 0.935s — OK; full root/menu module Ran 30 tests in 12.859s — OK; fixture-only/no note or document operation/provider/DB/wallet/job/real Telegram."
   S12_35_104_customer_root_routes_20261008: "Reconciled public root emitter inventory and registered-handler evidence for safe navigation. No untested safe root route/new defect found; AutoPost WIP and stateful/protected terminals excluded, not passed. Consolidated local focused unittest run: 46 tests in 33.547s — OK; py_compile bot.py exit code 0; git diff --check exit 0."
+  S12_35_106_image_story_aspect_20261008: "RED: aspect selection did not affect /image_story (always 9:16) and unsupported ratio was not rejected. GREEN: the registered callback stores an allowed selection; the next prompt-only shot pack consumes it once, expired/invalid selection uses 9:16. Focused tests Ran 2 tests in 0.654s — OK; full root/menu module Ran 32 tests in 13.778s — OK."
+  S12_35_107_image_story_render_hint_20261008: "Actual emitted image_story_render_hint matched the registered Image Story callback; one acknowledgement and the expected admin-test informational response were asserted; media-job seam remained unused. Focused unittest Ran 1 test in 0.218s — OK; no production code changed."
+  S12_35_108_image_story_pending_reset: "Baseline test returned one behavioral failure: image_story_aspect:991129 remained after /menu. After wiring actor-scoped clear into clear_media_creator_pending_states, registered Image Story Home + actual cmd_menu/cmd_start pending cleanup regression Ran 1 test in 0.641s — OK; fresh full tests.test_admin_root_menu_callback_single_ack Ran 33 tests in 14.691s — OK. Other user's key remains; no external side effects."
+  S12_35_106_107_image_story_regression_rerun: "Combined current aspect/expiry/render-hint unittest invocation: Ran 3 tests in 0.879s — OK; git diff --check exited 0."
+  current_worktree_compile_after_s12_35_106: "Bundled Python -B -S -m py_compile bot.py tests/test_admin_root_menu_callback_single_ack.py exited 0; terminal marker PY_COMPILE_OK."
+  current_diff_check_after_s12_35_106: "git diff --check exited 0; terminal marker DIFF_CHECK_OK."
   current_worktree_bot_compile_20261008: "Bundled Python -m py_compile bot.py completed successfully with process exit code 0 on the current working source after S12.35.103; no output/error."
   current_focused_unittest_20261008: "tests.test_admin_root_menu_callback_single_ack + tests.test_support_ticket_send_concurrency + tests.test_support_ticket_file_send_concurrency + tests.test_support_ticket_send_matches_preview + tests.test_subdub_voice_child_back; Ran 46 tests in 33.547s — OK."
   latest_state_yaml_after_s12_35_104: "Downloaded PyYAML 6.0.3 wheel from the configured package cache into system TEMP only; yaml.safe_load parsed both .github/workflows/ci-main.yml and this state file successfully. No repository dependency or file was added for the parser. Remote CI remains a separate delivery gate."
   latest_state_yaml_after_s12_35_102: "Bundled Python -B -S lacks PyYAML (ModuleNotFoundError), so this state file has not been parser-validated; git diff --check is the syntax-adjacent local check, and parser validation remains a consolidated closeout gate."
   S12_35_90_ticket_tests_rerun_20261008: "Bundled Python: -B -m unittest tests.test_support_ticket_send_concurrency tests.test_support_ticket_file_send_concurrency tests.test_support_ticket_send_matches_preview; Ran 11 tests in 21.488s — OK. FakeBot/in-memory only."
-  current_main_20261008: "Read-only gh api recheck during S12.35.100 confirms current GitHub main ea516e37c1e482b5cb8708d5b7591cf93c1ecfcc; gh auth status confirms active manhtoangreensky-wq session. Local origin/main ref is stale at 87bf3206; current task source tree was previously verified identical to ea516e37's tree. No fetch/push/PR mutation performed."
+  current_main_20261008: "Read-only gh api recheck and git fetch confirmed GitHub/origin main 9835b432464c4ccd94fe43690d41b6500c75eb7b (PR #1413 merge); active GitHub CLI session was manhtoangreensky-wq. At that earlier check the audit worktree was clean and matched main; S12.35.106–.108 and subsequent local evidence edits are uncommitted on the audit branch."
+  branch_head_tree_relationship_20261008: "Checkout HEAD is tested PR head 33e0890ea657fe0eef567e4d78065733b2a769e5; merged main 9835b432464c4ccd94fe43690d41b6500c75eb7b has the identical tree 99d832df4063788842eabfae6e824e972b578e32. Their merge-base is ea516e37c1e482b5cb8708d5b7591cf93c1ecfcc because #1413 was squash-merged. Do not rebase mid-checklist; rebase once onto current main at the consolidated delivery gate."
   runtime_after_1378: "active/running; NRestarts=0; exact SHA 392d2eec8f942c8e5c1232e5ac537b9a84dfd82c"
   runtime_after_1379: "All three services active/running, NRestarts=0; runtime SHA 2099eb319483ba1acc80f1080a094ba9710b5f3d; three new Runtime guide labels; health HTTP 200"
   latest_user_click: "Latest follow-up quantifies Account → Back at approximately 2–3 seconds; no exact HH:MM:SS. This remains approximate click-to-screen feedback, not an instrumented server sample"
@@ -2003,14 +2554,14 @@ verification:
   S12_35_32_timing_harness: "8 Video/Home callback timing checks — OK (stdlib runner; pytest decorators and approx shimmed); deterministic synthetic timing only"
   S12_35_33_root_callback_inventory: "public: 8 rows/14 callbacks; admin: 9 rows/15 callbacks; unmatched_registered_routes=[]; over_64_bytes=[]"
   current_diff_check: "git diff --check exited 0 after S12.35.28 code/test and checklist/runbook edits on 2026-10-07; existing LF-to-CRLF working-copy warnings for three modified tests only"
-  latest_verified_main_runtime: "ea516e37c1e482b5cb8708d5b7591cf93c1ecfcc; GitHub main equals VPS bot and worker SHA. Exact bot/web/nginx, Product Video, SubDub and admin worker units are active/running, NRestarts=0; internal 127.0.0.1:8080/health status=ok. Worker-inclusive dispatch and protected source delta are recorded in S12.35.84."
+  latest_verified_main_runtime: "9835b432464c4ccd94fe43690d41b6500c75eb7b; GitHub main equals VPS bot SHA, bot.py blob 70633821294c449fe61b70b96aafb86449c12da3. Bot/web/nginx, both Product Video workers, and SubDub worker are active/running, NRestarts=0; internal 127.0.0.1:8080/health status=ok. Earlier worker-inclusive dispatch and protected source delta are recorded in S12.35.84."
   local_tree_matches_merged_main_20261008: "The committed source tree at HEAD 9efc8ac1c6527b944c6a0d4458097024450126f7 was previously verified equal to GitHub main ea516e37c1e482b5cb8708d5b7591cf93c1ecfcc (tree 0855f5ebd8587f2cb371412bc3f1f34154d108c5). The current working tree additionally has local checklist/evidence/state/test/CI changes and the bounded S12.35.103 bot.py navigation-origin change; services/providers/workers/engines/config remain unchanged."
-  current_delivery: "PR #1411 is merged and its bot-only deploy is verified. The consolidated audit's documentation, test, safe-navigation CI, and S12.35.103 navigation-only bot.py deltas remain local/uncommitted; no additional push, merge, deploy, or restart in this continuation. Any future batch waits for the ordered checklist and consolidated CI."
+  current_delivery: "PR #1413 is merged at 9835b432464c4ccd94fe43690d41b6500c75eb7b; required CI checks and bot-only deploy run 37783893626 succeeded; VPS exact SHA, six unit health states, NRestarts=0, and /health are read-back verified. The broader A3/A5/A6/A7 audit remains active; future UI changes stay consolidated until checklist and final scope gates are complete."
   PR_1410_followup_evidence_comment: "Owner-requested runtime/scope update posted to https://github.com/manhtoangreensky-wq/bot/pull/1410#issuecomment-6056024507; it records main/runtime SHA, CI and bot-only deploy evidence, the separate worker-enabled run, and the still-open audit limits."
-  latest_merged_bot_compile: "PR #1411 source-compile run 37733054147 SUCCESS for merge SHA ea516e37c1e482b5cb8708d5b7591cf93c1ecfcc; bot.py blob 9cef0f6f9e0f3a0d476642817ce1beb1778c6dfe"
+  latest_merged_bot_compile: "PR #1413 source-compile run 37782845591 SUCCESS for tested head 33e0890ea657fe0eef567e4d78065733b2a769e5; merge SHA 9835b432464c4ccd94fe43690d41b6500c75eb7b is live with bot.py blob 70633821294c449fe61b70b96aafb86449c12da3"
   latest_worker_deploy_run: "Run 37736313510 workflow_dispatch used DEPLOY_WORKERS=true; Product Video worker target health and SubDub worker reconciliation were reported in logs; independent VPS readback shows both worker services active, NRestarts=0"
   voice_settings_back_direct_fixture_20261008: "19 direct calls across the exact test parameter matrix passed with a no-op pytest.parametrize shim; not a pytest/CI result"
-  current_main_report_recheck_20261008: "GitHub main and VPS bot SHA both ea516e37c1e482b5cb8708d5b7591cf93c1ecfcc; stale 76f0454 current-main phrasing corrected in TELEGRAM_CALLBACK_HANDLER_EVIDENCE_20261006.md"
+  current_main_report_recheck_20261008: "Latest recorded GitHub main and VPS bot SHA are both 9835b432464c4ccd94fe43690d41b6500c75eb7b (PR #1413); the earlier ea516e37 value is superseded. Exact runtime evidence is recorded under S12.35.105."
   S12_35_64_audio_ui_recheck: "Duplicate-route recheck on merged head: test_public_audio_studio_landing_back_and_home_return_to_main_via_registered_handlers, Ran 1 test in 0.880s — OK; same Audio Studio landing Back/Home route, no new coverage"
   S12_35_86_progress_status_side_effect_review: "Static source review found Music manual status can allow provider polling/download and SubDub status can recover/re-deliver an existing MP4; no callback was executed. Keep outside read-only UI fixture until safely isolated/authorized in the owning engine task."
   S12_35_87_subdub_entry_no_subtitle_navigation: "Inert registered-handler traversal: publish_package_keyboard videodub|start -> SubDub menu -> Back menu|main_video; missing-existing-subtitle speech-only control videodub|path|no_subtitle -> no_subtitle_menu and next SubDub action. Both passed; 4 existing child-Back unittest cases passed in 6.658s. No processing/provider/job/DB/wallet/real Telegram sends. No product defect reproduced and no production code changed."
@@ -2022,19 +2573,277 @@ verification:
   real_telegram_sends: 0
   wallet_mutations: 0
   production_data_writes: 0
-  current_protected_comparator: "Manual review of this UI branch found only bounded menu navigation/labels, Memory list/search UI origins, timing labels, tests, and S12.35.103 Free Tools/Memory origin navigation; it changes no services/, providers/, workers/, config/, protected engine, or AutoPost WIP path. Independently, runtime worker SHA ea516e37 includes the #1409 services/video_provider_router.py delta and the worker-inclusive run advanced/reconciled workers; this is not part of the UI source diff and is not evidence of paid output. Automated final scope comparator remains a closeout gate."
-blockers: []
+  current_protected_comparator: "Updated after the 2026-10-09 Owner scope decision: no S12.35.106 aspect application or S12.35.108 pending cleanup remains in the current diff; S12.35.107 is test-only. Current UI source changes remain limited to the independently scoped navigation/label specs; no Product Video/SubDub/Voice/Music engine, services/, providers/, workers/, config/, wallet, or AutoPost WIP changes. The safe UI CI diff adds focused Archive type/search navigation and Document Back tests; the three approved Ticket modules were already present. Fresh read 2026-10-09 04:25 +07 confirms GitHub main and VPS both at 96dd90201a89465555871276cf687fdebfff8cb0, including merged PR #1409; bot/web/nginx active, NRestarts=0, /health status=ok. Rebase and re-prove the outgoing diff before delivery."
+  latest_ui_delta_scope_20261008: "Superseded scope note: S12.35.106 aspect application and S12.35.108 pending cleanup were reverted/excluded on 2026-10-09; only S12.35.107 render-hint test remains. S12.35.111 localized Translation Voice label and the independent navigation specs remain. No Product Video/SubDub/Voice/Music route-engine/provider/worker change. The current CI workflow diff adds test_internal_archive_type_back_label.py, test_internal_archive_search_back_origin.py, and test_doc_split_back_emitted_callback.py; the three approved Ticket modules were already in the safe-navigation step."
+  ticket_ci_recheck_20261008: "Owner approval to add the three Ticket concurrency/file/preview modules was checked against ci-main.yml; all three exact modules are already in the Small Navigation and UI Closure Regressions step and were CI-green in PR #1413. No workflow diff or duplicate gate was added."
+  ticket_ci_owner_approval_recheck_20261009: "Owner approved adding the three focused Ticket modules to the explicit safe-navigation CI list; send_concurrency, file_send_concurrency, and send_matches_preview are already present there, so no duplicate entries were added."
+  local_bot_py_compile_recheck_20261009: "Bundled Python -B -m py_compile bot.py produced no output and remained active after 60 seconds; the local process was interrupted to cap repeated compile cost. This is NOT a pass. CI full-source compile is still required at the consolidated gate. Both changed test modules py_compile exited 0 and git diff --check exited 0."
+  yaml_parser_recheck_20261008: "The bundled Python runtime has no PyYAML and bundled Node has neither yaml nor js-yaml. The duplicate reproduced key in S12.35.108 was removed and the evidence merged; fresh parser validation remains a CI/final-closeout gate."
+  S12_35_109_admin_growth_20261008: "Bundled Python -B -S -m unittest tests.test_admin_module_child_back_origin.AdminGrowthNavigationTests -v; Ran 5 tests in 15.089s — OK. The fixture source-extracts the actual Growth keyboard/handler/registration, replaces report/list getters with in-memory data, and intercepts render/ACK; no production DB, publish action, provider, wallet, or Telegram send."
+  S12_35_110_translation_picker_20261008: "Codex bundled Python: focused test_translation_text_and_file_picker_more_and_back_dispatch_registered_callback Ran 1 test in 0.345s — OK; fresh tests.test_admin_root_menu_callback_single_ack Ran 34 tests in 17.550s — OK. Inert source-extracted renderer/handler/registration; exact tr_more|text/file → emitted tr_pick|text/file Back restores identical corresponding target callbacks; one ACK each; provider/action seams not loaded."
+  S12_35_111_translation_voice_ui_20261008: "RED: actual emitted tr_pick|voice control displayed 📝 Văn bản; focused assertion expected 🌐 Dịch audio and failed on the label mismatch. GREEN after one-line localized label correction: focused test_translation_voice_picker_label_matches_audio_callback_and_returns_from_more Ran 1 test in 0.238s — OK; fresh tests.test_admin_root_menu_callback_single_ack Ran 35 tests in 14.869s — OK. Exact registered route exercised for voice picker → More → Back; options restored and one ACK each. No media/provider/action path ran."
+  S12_35_112_freehub_aichat_consent_back: "Focused source-extracted registered-handler test Ran 1 test in 0.298s — OK; fresh tests.test_admin_root_menu_callback_single_ack module Ran 36 tests in 18.816s — OK; git diff --check exit 0. Actual emitted Free Tools root → aichat|on consent request → emitted aichat|back_freehub returned to root; one ACK each; consent grant seam untouched. Existing root/menu module and the three Owner-approved Ticket modules are already in ci-main.yml; workflow unchanged."
+  S12_35_113_public_root_language_back: "Initial fixture stopped before behavior assertions because localized_main_menu_keyboard was absent from the extracted handler namespace; this was corrected in the test fixture only. GREEN: test_public_root_language_picker_back_restores_exact_main_menu_without_preference_write Ran 1 test in 0.275s — OK; fresh tests.test_admin_root_menu_callback_single_ack Ran 37 tests in 17.159s — OK; git diff --check exit 0. Actual public root back_lang → emitted language picker → emitted lang_back through exact registered handler restored the identical main callback set; one ACK each; no set_user_language, usage, or broadcast write. No locale selection or bot.py change."
+  S12_35_114_callback_timing_20261008: "Strict-host read-only journal query at 2026-10-08T15:25:38Z covered 24h and found two menu dispatch entries only: 09:29:31 +07 dispatch 306.038ms, handler 271.747ms, render_helper 90.793ms; 09:30:17 +07 route menu|main role=admin handler 309.919ms/ACK 179.210ms/render 101.631ms and generic dispatch 360.419ms. No exact Owner Account-click timestamp or matching Account event; the reported 2–3s remains unassigned, not a device/network diagnosis."
+  S12_35_115_delivery_gate_20261008: "GitHub main f232deafaef5461e1de0494e750db16e26612b78 is one commit ahead of VPS 9835b432464c4ccd94fe43690d41b6500c75eb7b: merged Product Video PR #1412 changes api_worker_selfshot3_source_video in bot.py plus its Product Video test; CI/source-compile runs 37796119546 and 37796119564 passed. VPS: #1409 ancestor YES, bot active/running, NRestarts=0, internal health=ok. No deploy run targets f232de; do not deploy because the protected Product Video delta is outside UX-only authorization. Hold until the owning task deploys it or Owner separately approves the delta, then compare/rebase and ship the consolidated UI-only batch once."
+  S12_35_116_freehub_root_a6_20261008: "Source-only comparison of actual Free Tools root keyboard, 14 label/callback pairs, Home row, and handler branches found no visible-label-to-route mismatch. Safe navigation routes cross-reference S12.35.98–.113; upload/publish/downloader/Music/Voice/SubDub processing helpers remain excluded, not passed. No production/test/workflow change; Telegram client row-wrap/visual behavior remains unverified."
+  S12_35_117_public_main_root_a6_20261008: "Read-only source comparison of localized_main_menu_keyboard label keys, 14 public callback controls plus community URL, conditional Admin row, handler registrations and landing branches found no label-to-route mismatch. AutoPost is confirmed only as a dashboard entry; no actions or product children were dispatched. Translation quality, Telegram viewport/rendering and latency remain unverified; no code/test/workflow/runtime changes."
+  S12_35_118_public_root_language_selection_20261008: "Focused public Main picker test dispatched all 17 locale buttons emitted by the production language keyboard through the exact registered production language handler; each acknowledged once, called the fixture setter and usage recorder once, and rendered Main with the chosen locale. Focused: 1 test/0.976s OK; fresh full CI-listed root/menu module: 38 tests/57.760s OK. All storage, usage, broadcast, rendering and Telegram seams were in-memory fakes; no preference, provider, DB, wallet, job, AutoPost, product, delivery, deploy or restart side effect. Coverage only; no product defect reproduced and bot.py/CI unchanged."
+  S12_35_119_callback_evidence_reconciliation_20261008: "Updated the current callback evidence ledger to supersede stale status only for the public-root menu-label/source-registration and 17-locale public language selection slices; historical baseline inventory retained. Fresh SSH read at 2026-10-08 22:52 +07: main f232deafaef5461e1de0494e750db16e26612b78, VPS 9835b432464c4ccd94fe43690d41b6500c75eb7b, bot active/running, NRestarts=0, health=ok. Sole ahead commit remains protected PR #1412; no deploy/restart. No product behavior or CI/workflow changes."
+  latest_delivery_gate_readback_20261008_2247: "Read-only GitHub main SHA f232deafaef5461e1de0494e750db16e26612b78; VPS bot SHA 9835b432464c4ccd94fe43690d41b6500c75eb7b. Exact GitHub compare ahead_by=1, sole commit #1412; changed files bot.py +56/-5 and tests/test_p0_video_r05a_source_video_transfer_local_bot_api.py +562. #1412 is MERGED with required CI/source-compile SUCCESS. VPS bot active/running, NRestarts=0, internal /health status=ok at 2026-10-08 22:46:47 +07. Product Video delta remains protected and not live; no deploy/restart attempted."
+  PR_1410_followup_evidence_comment_20261008_2249: "https://github.com/manhtoangreensky-wq/bot/pull/1410#issuecomment-6063693918 — documents S12.35.117/.118 local evidence, unchanged Ticket CI membership, latest #1412 deployment blocker, remaining manual/owner-choice gates, and explicitly states that this local continuation is not included in merged #1410/#1413."
+  current_bot_compile_attempt_20261008: "Full bot.py py_compile remained CPU-active without output for >1 minute and was interrupted to avoid unbounded local resource use; it is NOT_VERIFIED and remains required in consolidated Ubuntu CI. The edited root/menu test module was subsequently imported and executed successfully (37 tests, 17.159s)."
+  latest_memory_confirm_tests_20261008: >-
+    S12.35.123: exact RED showed cancelled stale memory|delete_yes archived the
+    fixture note; the final test replays tokenless/old token after same-note
+    reconfirmation and verifies no write, then accepts the current token against
+    fake DB. Focused: 1 test/0.859s OK; callback/navigation module: 39 tests/21.574s
+    OK; Memory pending reset: 1/2.663s OK; empty delete state: 1/0.307s OK;
+    test-file py_compile and git diff --check exit 0. Full bot.py py_compile is
+    NOT_VERIFIED locally; no production data access/write.
+  latest_local_scope_recheck_20261008: >-
+    Current local bot.py delta includes S12.35.103 Free Tools/Memory navigation
+    origin, S12.35.111 Translation Voice label, S12.35.123 Memory delete-confirm
+    pending/token guard, and S12.35.124 Archive picker Back origin. The only CI
+    workflow addition is the focused Archive navigation test in the safe UI step;
+    the three approved Ticket modules were already present. No Product
+    Video/SubDub/Voice/Music route engine, services/, providers/, workers/,
+    config/, wallet or AutoPost WIP changed. Final automated protected-source
+    comparator remains a consolidated-delivery gate. S12.35.106 is Owner-excluded
+    and reverted, S12.35.108 is dropped as dependent, and only the independent
+    S12.35.107 render-hint test remains. Main-only Product Video #1412 remains separate.
+  current_bot_compile_recheck_20261008: >-
+    Two local full bot.py py_compile attempts remained CPU-active with no output
+    on the 15 MB source file (older duplicate several minutes; newer over 2
+    minutes) and were stopped to avoid repeated resource use. Full source compile
+    remains NOT_VERIFIED locally and required in consolidated Ubuntu CI. The
+    edited test file py_compile exits 0.
+  latest_main_vps_gate_20261008_2339: >-
+    Read-only GitHub/VPS recheck: GitHub main remains
+    f232deafaef5461e1de0494e750db16e26612b78; PR #1412 is MERGED with both CI
+    and source-compile checks SUCCESS. Latest deploy workflow run is 37783893626
+    on 9835b432464c4ccd94fe43690d41b6500c75eb7b, not on main. VPS bot remains
+    9835b432464c4ccd94fe43690d41b6500c75eb7b, bot/web/nginx active/running,
+    NRestarts=0, /health status=ok at 2026-10-08 23:39:11 +07. No open PR exists.
+    #1412 is not live; do not deploy the consolidated UI batch yet.
+  latest_main_vps_gate_20261009: >-
+    Read-only GitHub/VPS recheck: main is f232deafaef5461e1de0494e750db16e26612b78.
+    PR #1409 is MERGED at d24716db154b77aadebfdefe87ab9cac17416bd2 and its
+    python_hygiene_and_tests check succeeded. VPS bot remains
+    9835b432464c4ccd94fe43690d41b6500c75eb7b; #1409 is an ancestor of runtime,
+    toanaas-bot.service is active/running and NRestarts=0. PR #1412 remains
+    merged at f232deafaef5461e1de0494e750db16e26612b78 with CI and source-compile
+    checks successful, but main is ahead of runtime. Deploying main with the UI
+    batch would include the protected Product Video engine change; no deploy or
+    restart was run. Keep the release gate pending until #1412 is live or the
+    Owner explicitly approves including that delta.
+  latest_main_vps_gate_20261009_0235: >-
+    Fresh read-only check at 2026-10-09 02:35 +07: GitHub main and VPS bot both
+    equal f232deafaef5461e1de0494e750db16e26612b78; deployed bot.py blob is
+    9cb361a490d7e1292af1a7516c39d02e11e05ab0. PR #1412 is MERGED with both
+    required CI/source-compile checks SUCCESS and is an ancestor of the current
+    exact runtime. toanaas-bot.service is active/running, NRestarts=0, and local
+    /health reports ok. This resolves the prior protected-delta deployment hold.
+    No deploy/restart was run. The UI audit branch remains based on 9835b432 and
+    must be refreshed/rebased once after its ordered checklist, followed by an
+    exact scope comparator before one consolidated delivery.
+  S12_35_123_progress_comment: "Owner-requested local-only evidence update posted to merged PR #1410: https://github.com/manhtoangreensky-wq/bot/pull/1410#issuecomment-6064603175. The comment explicitly says S12.35.123 is not part of the merged code and records tests, local compile limitation, #1412 runtime gate, and remaining whole-bot blockers."
+  S12_35_124_archive_change_department_back: >-
+    RED reproduced with an inert pending-file fixture: Archive preview →
+    `archive|change_dept` exposed root `archive|search` and emitted
+    `menu|main_memory` instead of `archive|preview`; the stray Search prompt's
+    Back targets Archive root, which clears pending state. The nested picker now
+    omits Search and uses preview-origin Back; default root behavior is unchanged.
+    GREEN: four focused Archive functions plus the existing Archive→Notes parent
+    `TestCase` were invoked directly and passed (5 checks — OK); focused test
+    `py_compile` and `git diff --check` exited 0. Added the regression module to
+    the safe-navigation CI step. No real data/file, provider, wallet, job,
+    product engine, AutoPost, or Telegram side effect; no delivery action.
+  S12_35_125_latency_recheck_20261009_0005: >-
+    Strict-host read-only journal aggregate covering the last 24h at 2026-10-09
+    00:05:48 +07 found two callback_dispatch_timing events, both prefix=menu,
+    route_key=unclassified. Average dispatch 333.2ms; maximum 360.4ms; max guard
+    48.0ms and max render helper 101.6ms; none exceeded 500ms or 1000ms. No
+    account_root event appeared, so these are not correlated with the reported
+    2–3s Account Back click and do not identify client/network/Telegram cause.
+    No IDs or callback payloads were returned; no writes or changes.
+  S12_35_126_admin_root_label_callback_audit_20261009: >-
+    Source-extracted comparison of the production Admin root keyboard found 12
+    exact visible-label/callback pairs (10 module entries, Growth, and Main/Home);
+    all matched the intended destinations. Existing registered-handler test
+    evidence covers module landing screens and Back. No product source, CI,
+    runtime, client, DB, provider, wallet, or Telegram mutation. This closes only
+    the Admin root label-to-route source slice; visual layout and child/action
+    route behavior remain open or separately evidenced.
+  S12_35_127_admin_help_route_and_back_evidence_20261009: >-
+    Fresh source-extracted run of the exact registered Admin help route suite:
+    `python -B -S -m unittest tests.test_admin_help_callback_single_ack.AdminHelpCallbackSingleAckTests -v`
+    reported Ran 5 tests in 1.077s — OK. Evidence covers one ACK plus handbook
+    rendering, callback registration, all emitted module-guide Back origins,
+    runtime shortcuts labeled as guides without retargeting, and stale Support
+    guide denial for non-admin before render. Test-file py_compile and diff check
+    exited 0. Inert source/Telegram fixtures; no handbook mutation, production
+    data, provider, wallet, job, customer message, deploy, or restart. Whole Admin
+    help handler remains partial outside these guide/navigation branches.
+  S12_35_128_knowledge_vault_home_navigation_20261009:
+    status: locally-verified-awaiting-consolidated-batch
+    acceptance: >-
+      The actual Vault admin keyboard emits `menu|main`; that callback matches
+      the registered `handle_menu_callback` pattern and dispatches to the Main
+      renderer with exactly one acknowledgement. Existing Vault action callbacks
+      and handler behavior are unchanged.
+    red: >-
+      On unchanged production source, the source-extracted actual `vault_admin_keyboard`
+      emitted eight Vault callbacks and no `menu|main`; the focused test failed
+      on the missing Home control before any callback was dispatched.
+    correction: >-
+      Added exactly one Main/Home row to `vault_admin_keyboard`. Added one focused
+      regression to the existing CI-listed root/menu test module, checking Vault
+      action registration, emitted Home registration, and actual registered Menu
+      handler dispatch/render with one acknowledgement. An initial fixture attempt
+      stopped at missing extracted `time` and `logger` names; inert stubs were
+      added to the test fixture only, with no production behavior change.
+    verification: >-
+      Focused final GREEN: test_knowledge_vault_home_returns_to_main_via_registered_menu_handler
+      Ran 1 test in 0.296s — OK. Root/menu + Admin-help modules ran 43 tests
+      in 23.468s — OK; both changed test modules compiled and git diff --check
+      exited 0. Full bot.py py_compile remained active without output for about
+      two minutes and was interrupted to avoid further resource use; it is
+      NOT_VERIFIED locally and remains a consolidated CI gate. Earlier NameError
+      results were fixture setup only, not production assertion failures.
+    protected: >-
+      Vault import/search/approval/sync/backup operations, AutoPost WIP, all
+      Product/Edit/Image/SubDub/Voice/Music engines, providers, wallet, secrets,
+      and production data.
+    side_effects: >-
+      Source-extracted keyboard and menu handler with in-memory callback/render
+      fakes only; vault readers/writers, providers, DB, wallet, jobs, real Telegram,
+      deploy, and restart were not called.
+    delivery: >-
+      Local on the consolidated UI audit branch; do not create a per-spec PR/merge/
+      deploy/restart. The existing test module is already in the approved CI list.
+  S12_35_129_support_ticket_direct_route_recheck_20261009: >-
+    Existing Account Support, Support pending-input, and customer Ticket ancestry
+    suites were rerun with the bundled Python: Ran 19 tests in 141.541s — OK. The
+    current direct general-support Ticket form traverses the emitted Support callback,
+    preserves Account/Support Back origins, and keeps fixture pending cleanup/retry
+    behavior. No ticket was submitted and no production data/message/DB side effect
+    occurred. The separate `ticket|start` category chooser still lacks a public entry;
+    S12.35.95's Owner UX decision remains open. No source, test, workflow, or delivery
+    change.
+  S12_35_130_support_root_label_callback_source_review_20261009: >-
+    Source-extracted actual `human_support_keyboard` produced 5 rows and 8 unique
+    callback controls. Each label/callback matched the intended route: Admin contact,
+    direct general-support Ticket, My Tickets, Premium, custom-bot details, consultation,
+    automatic support, and Main/Home. The support callbacks map to supported branches
+    of the registered `^support\\|` handler; My Tickets uses the registered Ticket
+    handler. No duplicate, missing Home, or source-level label/route mismatch found.
+    This source review does not verify translated rendered copy, viewport/wrapping, or
+    real-client UX; category-picker choice and account latency remain open. No change.
+  S12_35_131_feedback_duplicate_message_delivery_20261009: >-
+    Source-extracted the actual Feedback pending handler plus message dedupe key,
+    lock/prune helpers and idempotency wrapper. Two concurrent copies of the same
+    Telegram chat/message id were passed through the wrapper attached to `handle_message`;
+    one classification, ticket create, pending clear, customer reply and admin
+    notification occurred, and the duplicate was suppressed. All five plain test
+    functions in the CI-listed Feedback module passed via a bundled-Python stdlib
+    runner (`Ran 5 focused test functions — OK`). An earlier unittest attempt ran
+    zero functions because this module uses pytest-style tests; local pytest is
+    unavailable, so consolidated CI remains required. No product code, DB,
+    customer/admin message, provider, wallet, job, engine, AutoPost, deploy, or
+    restart changed. Distinct rapid message ids, cross-process behavior, error/retry,
+    full expiry and client behavior remain unverified.
+  S12_35_132_feedback_expired_pending_consumed_20261009: >-
+    RED: with a 601-second old Feedback record and a 600-second TTL, the actual
+    pending getter removed the record and `handle_feedback_pending_text` returned
+    False without a reply; the message handler therefore continued into later
+    CSKH/AI-capable routes. Minimal fix snapshots that user's Feedback record before
+    the getter; when the getter expires and removes it, the handler replies with
+    `feedback_expired_text(lang)` and the category keyboard, then consumes the
+    message. The dedicated copy helper is populated for all 17 supported locales.
+    Active/no-pending paths are unchanged. The new expiry test plus locale-copy test
+    and five prior focused functions passed (`Ran 7 focused test functions — OK`)
+    via a stdlib runner because bundled pytest is unavailable. Test syntax and diff
+    check pass. One Feedback branch, localized helper and focused tests only; no DB,
+    real message, provider, wallet, product engine, AutoPost, deploy or restart.
+  S12_35_133_feedback_category_fail_closed_20261009: >-
+    RED: `feedback|cat|retired_category` passed the callback prefix check and
+    would be normalized by `set_feedback_pending` to `other`; the focused assertion
+    for one unsupported-category alert failed without setup errors. The handler now
+    validates only this suffix against `FEEDBACK_CATEGORY_LABELS` before normal ACK
+    and reuses it for the existing flow. The actual source-extracted keyboard emitted
+    eight unique categories, all whitelisted, and retained Home. All nine plain
+    functions in the Feedback module passed (`Ran 9 focused test functions — OK`)
+    through the stdlib runner; the expiry-copy helper is separately checked for all
+    17 locales; local pytest unavailable. No DB, real message, provider, wallet, job,
+    engine, AutoPost, deploy or restart.
+  S12_35_129_130_pr_1410_progress_comment_20261009: >-
+    Requested local-only progress evidence for S12.35.129–.130 was posted to merged
+    PR #1410 at https://github.com/manhtoangreensky-wq/bot/pull/1410#issuecomment-6066458445.
+    The note states explicitly that no source was changed in those specs and that the
+    category-picker, Account latency, Telegram client QA, and #1412 runtime gates remain.
+latest_runtime_delivery_gate_20261009_0425: >-
+  Read-only GH main and VPS /opt/toanaas/bot HEAD both equal
+  96dd90201a89465555871276cf687fdebfff8cb0. PR #1409 is MERGED (head
+  8bb43166d4853c75a4be49ffe96baa57e66117ea; CI run 37663011626 SUCCESS), and the
+  current main/runtime include it. bot.py SHA-256 on VPS is
+  7a38efddb2feae5aebac9410c1fdf2069dbe9e86b4266284f1187aa7d650da57; bot, web,
+  nginx active/running, each NRestarts=0; 127.0.0.1:8080/health returned status=ok
+  at 04:25:05 +07. This clears the old #1409/#1412 runtime hold. The local UI WIP
+  is still unpushed; after one rebase to this main, prove the outgoing diff excludes
+  services/providers/workers/engines and other protected behavior before CI/delivery.
+blockers:
+  - UI batch is still local and undelivered: current main/runtime are both 96dd90201a89465555871276cf687fdebfff8cb0. Finish the final ordered safe checklist and diff comparator, commit only task files, rebase once onto this SHA, then require CI/source-compile/YAML validation before the single PR/merge/bot-only-deploy cycle.
+  - "A7 remains partial: the latest 24-hour query found two generic timings but no route_key in those records; no exact Account Back click timestamp or matching callback event is available."
+  - "Manual Telegram client visual/wrapping and all-button latency QA remain unverified; source/unit tests do not prove client smoothness."
+  - "S12.35.95 Support Create Ticket currently opens the direct general-support form while a separate category picker has no public entry. Its discoverability/entry behavior is an Owner UX choice; no behavior change is authorized by this audit ledger."
 next:
   - Final review fixes S12.35.75–78 are locally verified sequentially; safe UI gate 218 tests/355 subtests passed. Keep protected processing and action terminals excluded, not passed.
   - S12.35.91–.93 are locally verified: SubDub Audio Back reaches its immediate parent; stale SubDub source expectations now target actual emitters; public Voice Hub Back/Home reach Audio Studio/Main through exact registered handlers. One protected terminal source-marker check remains excluded, not passed.
   - S12.35.94 Ticket category prompt/Back is locally verified; remote CI remains pending with the consolidated batch. For S12.35.95, do not change Support → Create Ticket behavior until the Owner selects direct form vs category picker; continue only independent read-only/offline audit work meanwhile.
-  - Keep the three Owner-approved Ticket test modules and the S12.35.91 SubDub navigation test wired locally until the consolidated checklist/CI batch; local unittest results are not remote CI.
+  - The three Owner-approved Ticket test modules and S12.35.91 SubDub navigation test are wired, CI-green, merged, and deployed in PR #1413; do not rerun/re-add them unless a new failure appears.
   - S12.35.98–.104 close reviewed Free Tools QR/Avatar/rate/weather/Meta/Caption/Ideas and Notes/Docs Back evidence and reconcile safe public root routes. Continue only distinct A3/A5 gaps; keep utility terminals, stateful actions and protected processing explicitly unverified/excluded.
+  - Owner excluded S12.35.106 on 2026-10-09 because it changes prompt-pack output; its experiment was reverted and must not enter the UI batch. S12.35.108 is dropped as dependent. Retain only the independent S12.35.107 render-hint test; the existing aspect-button/prompt mismatch is unresolved, not passed.
+  - S12.35.109 closes only Admin Growth read-only route/Back evidence using inert data; do not repeat that test. Continue distinct A3/A5 and A6 gaps; Admin Growth write/action paths remain excluded.
+  - S12.35.110 closes only the Translation text/file target pickers' More/Back navigation evidence; do not dispatch tr_target|, tr_transcribe, media, or provider paths. Continue distinct A3/A5/A6 gaps; route-family status stays partial.
+  - S12.35.111 fixes only the mislabeled Translation audio-picker entry and verifies voice-picker More/Back navigation. Do not dispatch target selection, transcribe, or provider paths; Translation route-family status remains partial.
+  - S12.35.112 verifies only Free Tools AI Chat consent request and Back-to-Free-Tools navigation; consent grant/action behavior remains excluded and unverified.
+  - S12.35.113 verifies only the public main-menu language picker Back route; language selection/preference writes remain unexecuted.
+  - S12.35.116 is a source-only Free Tools root label/route comparison; no mismatch found, but client viewport/wrapping remains unverified.
   - Revalidate state YAML with a real YAML parser during consolidated CI/closeout; no parser is installed in the local bundled runtime, and this is not claimed as verified.
   - Treat progress|status as an action-capable route per S12.35.86; do not dispatch it live or call its Music/SubDub recovery seams in this UI audit.
   - Continue A6 source/keyboard label and route-destination review; do not infer Telegram viewport behavior from source.
   - Do not initiate another worker-enabled sync under this UI goal; the separately executed run 37736313510 already changed Product Video worker state. Keep any output-path validation in the owning Product Video/SubDub task and do not run paid calls here.
-  - Complete the ordered checklist and final protected-source comparator before one consolidated PR/merge/deploy batch. Account Back 2–3s and manual visual/all-button QA remain unproven; keep the goal ACTIVE.
-  - Account → Packages → Back is closed offline by S12.35.82; continue the next safe customer terminal while keeping dynamic/payment/processing actions excluded.
-  - Account referral link/stats/policy read-only children are closed offline by S12.35.83; continue the next safe route or A6 review without entering stateful terminals.
+  - Complete the ordered safe checklist and final protected-source comparator before one consolidated PR/merge/deploy batch. Freshly verified GitHub main and VPS are aligned at 96dd90201a89465555871276cf687fdebfff8cb0, including live #1409. After the checklist, rebase once from that SHA and prove the outgoing diff contains no unapproved engine/provider/worker changes. Account Back 2–3s and manual visual/all-button QA remain unproven; keep the goal ACTIVE.
+  - Account → Packages → Back and referral read-only children are closed offline by S12.35.82/.83. S12.35.112/.113 additionally cover the AI Chat consent-request/Back and public-root Language picker Back. Do not dispatch remaining dynamic/payment/processing actions.
+  - The source-only Free Tools root label/action comparison is recorded in S12.35.116 with no mismatch found. Remaining A3/A5 gaps are protected action terminals or the explicit Support category-picker UX decision in S12.35.95; keep them unverified until authorized/safely testable.
+  - S12.35.117 records the public Main menu label-key/callback/registered-handler comparison with no source-level mismatch; do not repeat it. Remaining A6 work is client viewport/wrapping and localization QA, which source inspection cannot close.
+  - S12.35.118 covers selection of all 17 locales from the public-root Language picker through its registered handler with fixture-only effects; do not repeat it. Language-specific visual copy, stale UI rendering, Telegram client behavior and route-family action terminals remain unverified.
+  - S12.35.119 refreshes the callback inventory's current evidence without changing historical registration counts; the remaining PARTIAL/NOT PROVEN rows are still open or intentionally excluded.
+  - S12.35.120 confirms the three Owner-approved Ticket regression modules are already in the safe-navigation CI job; exact local unittest rerun passed 11 tests in 5.115s. No workflow edit was needed; remote CI remains a final consolidated-batch gate.
+  - >-
+    S12.35.121 rechecks the release guard: GitHub main `f232deafaef5461e1de0494e750db16e26612b78` is one commit ahead of VPS `9835b432464c4ccd94fe43690d41b6500c75eb7b`; exact compare lists only Product Video PR #1412 (`bot.py`, focused transfer test). Bot is active, `NRestarts=0`, health `ok` at 2026-10-08 23:01:29 +07. Keep UI deploy held; no deploy/restart.
+  - >-
+    S12.35.122 rechecks the Admin root landing destinations: all 10 `menu|admin_*` controls dispatch to their matching registered module screens and Admin Back; focused test ran 1 in 5.148s — OK. Existing S12.35.8 also covers `admin_growth|main`; child/action routes remain partial.
   - Account Back 2–3s cause remains explicitly Owner-deferred under S12.35.79. Manual visual/client UX and all-button end-to-end smoothness remain unproven; retain this in final report.
+  - S12.35.128 adds a one-row Home control to the shared Vault admin keyboard; keep a protected-source scope review at batch closeout, and do not run any Vault action while validating it.
+  - S12.35.129 revalidates the existing public/Account Support direct Ticket form through registered handlers (19 tests, OK); the separate category-picker entry remains an Owner UX choice, not an authorized behavior change.
+  - S12.35.130 source-reviews the five-row/eight-control customer Support root keyboard and label/callback mapping; no source mismatch found. This does not prove translation rendering or Telegram-client layout.
+  - S12.35.131 verifies same-message concurrent redelivery suppression through the in-process wrapper, not rapid distinct message IDs or cross-process replay. Failure/retry, full expiry, localization/client rendering and live timing remain open; rerun with the configured consolidated CI step because local pytest is unavailable.
+  - S12.35.132 fixes only an expired Feedback form silently falling through to later text handlers; live Telegram rendering and user acknowledgement are still unverified. Preserve the active Feedback and other pending routes; consolidate this narrow source/test delta in the planned batch.
+  - S12.35.133 rejects invalid Feedback category suffixes before ACK or state mutation; source-emitted categories remain whitelisted. Continue only distinct audit gaps; keep live client rendering and full Support/Ticket route family partial.
+  - S12.35.134 fixes only expired Document parent Back origin and covers all three relevant keyboard emitters; file processing and remaining Document callback actions stay excluded or partial.
+  - S12.35.135 corrects two Admin Vault instruction labels only; keep all Vault operations unexecuted and continue the remaining non-protected A3/A5/A6 audit before consolidated closeout.
+  - S12.35.136/.146 record two generic anonymous callback timings in the latest 24-hour window, but the current records have no route_key and cannot be matched to an Owner click; A7 remains open. S12.35.137 covers emitted Document Add-more/Remove-last UI controls only; file processing remains excluded.
+  - S12.35.138 fixes only expired Internal Archive department-Search Back ancestry and verifies Search Home clears only the actor's pending state; do not run searches or read documents. Continue distinct non-protected A3/A5/A6 gaps; latency, visual/client QA and the broad callback inventory remain partial.
+  - S12.35.139 adds registered-handler evidence for emitted package group → detail → Back ancestry with no mismatch found. Continue the ordered non-protected A3/A5/A6 audit; package purchase/order/payment actions, client visual QA, Account-correlated latency and broad route completion remain partial or excluded.
+  - S12.35.140 adds registered-handler evidence for emitted Combo group → detail → Back ancestry with no mismatch found. Continue distinct safe A3/A5/A6 gaps; do not dispatch package purchases/orders/payments or infer manual Telegram-client rendering/latency.
+  - S12.35.141 adds registered-handler evidence for emitted package Home → Notes → Back ancestry with no mismatch found. Continue remaining safe A3/A5/A6 review; keep package order/purchase/payment and unresolved Telegram-client/Account-latency gates excluded or partial.
+  - S12.35.142 adds registered-handler evidence for emitted package Home → My Packages → Back ancestry with no mismatch found using a fake summary. Continue remaining safe A3/A5/A6 review; no claim about live account data or excluded package actions.
+  - S12.35.143 confirms the Pricing “Khuyến mãi / Thành viên” button accurately targets the member/promotion section; do not alter this label. Continue safe A3/A5/A6 review; full Pricing visual rendering and payment/top-up action behavior remain outside this navigation proof.
+  - S12.35.144 reconciles all 16 Vietnamese Pricing catalog label/callback pairs against registered handlers with no source mismatch; keep document sends and transaction/action terminals unexecuted. Continue distinct safe A3/A5/A6 gaps; visual/client QA and full all-button dispatch remain partial.
+  - S12.35.145 source-reviews all dynamic Pricing hub control branches with no mismatch and selected origin regressions pass; do not query real market eligibility or send documents. Continue ordered non-protected gaps; visual/client QA, full callback dispatch and Account-correlated latency remain open.
+  - S12.35.88 was re-run as 19 direct in-memory Voice-settings assertions and added to the consolidated safe-navigation CI list; local pytest is unavailable, so keep it awaiting remote batch CI. No Voice/SubDub engine route was changed.
+  - Fresh deploy-gate check confirms GitHub main = VPS `f232deafaef5461e1de0494e750db16e26612b78`; compare shows required #1409 SHA `d24716db154b77aadebfdefe87ab9cac17416bd2` is an ancestor, #1412 CI is green/live, services active and health `ok`. This only clears the old protected-runtime hold; the unfinished consolidated UI checklist still blocks rebase/PR/deploy.
+  - S12.35.96's CI-listed Vietnamese public root layout/route test was rerun: 1 test/0.241s — OK. It proves the eight-row shape and selected callbacks only, not admin/all-locale Telegram visuals.
+  - The combined S12.35.129–.130 evidence note is posted to merged PR #1410 as issuecomment-6066458445; local continuation is not part of its merged source.
