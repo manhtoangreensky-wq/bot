@@ -284078,6 +284078,517 @@ async def api_internal_web_voice_clone_jobs_preview(job_id: str, request: Reques
     return Response(content=audio_bytes, media_type="audio/mpeg")
 
 
+# ─── CANONICAL WEB MUSIC RUNTIME ENDPOINTS (BOT-WEB-MUSIC-R1) ──────────
+
+@fastapi_app.post("/internal/v1/web-music/jobs")
+async def api_internal_web_music_jobs_create(request: Request):
+    """Canonical Bot Core Web Music job preparation & quote endpoint."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.web_music_runtime_service import (
+        FORBIDDEN_AUTHORITY_FIELDS_NORMALIZED,
+        prepare_web_music_job,
+        sanitize_music_job_projection,
+    )
+
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:
+        payload = {}
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    body_actor = str(payload.get("canonical_user_id") or payload.get("user_id") or "").strip()
+    actor_candidate = header_actor or body_actor
+    clean_actor = normalize_target_user_id(actor_candidate) if actor_candidate else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = "/internal/v1/web-music/jobs"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    # Strictly reject forbidden authority fields
+    for key in payload.keys():
+        norm = "".join(ch for ch in str(key).lower() if ch.isalnum())
+        if norm in FORBIDDEN_AUTHORITY_FIELDS_NORMALIZED:
+            return JSONResponse(
+                status_code=400,
+                content={"ok": False, "error_code": "FORBIDDEN_AUTHORITY_FIELD_REJECTED", "message": f"Forbidden field: {key}"},
+            )
+
+    try:
+        job, replayed = prepare_web_music_job(payload, int(clean_actor))
+    except ValueError as exc:
+        err_msg = str(exc)
+        code = err_msg.split(":", 1)[0].strip() if ":" in err_msg else "INVALID_INPUT"
+        if "IDEMPOTENCY_CONFLICT" in code:
+            return JSONResponse(status_code=409, content={"ok": False, "error_code": "IDEMPOTENCY_CONFLICT", "message": err_msg})
+        return JSONResponse(status_code=400, content={"ok": False, "error_code": code, "message": err_msg})
+    except PermissionError as exc:
+        return JSONResponse(status_code=403, content={"ok": False, "error_code": "CROSS_TENANT_IDEMPOTENCY_COLLISION", "message": str(exc)})
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"ok": False, "error_code": "INTERNAL_ERROR", "message": str(exc)})
+
+    sanitized = sanitize_music_job_projection(job)
+    return JSONResponse(status_code=200, content={"ok": True, "job": sanitized, "replayed": replayed})
+
+
+@fastapi_app.get("/internal/v1/web-music/jobs/{job_id}")
+async def api_internal_web_music_jobs_detail(job_id: str, request: Request):
+    """Canonical Bot Core Web Music job detail endpoint."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.web_music_runtime_service import (
+        get_web_music_job,
+        sanitize_music_job_projection,
+    )
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = f"/internal/v1/web-music/jobs/{job_id}"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path=path,
+        body_bytes=b"",
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    job = get_web_music_job(job_id, int(clean_actor))
+    if not job:
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error_code": "JOB_NOT_FOUND", "message": f"Job #{job_id} not found"},
+        )
+
+    sanitized = sanitize_music_job_projection(job)
+    return JSONResponse(status_code=200, content={"ok": True, "job": sanitized})
+
+
+@fastapi_app.get("/internal/v1/web-music/jobs")
+async def api_internal_web_music_jobs_list(request: Request):
+    """Canonical Bot Core Web Music list jobs endpoint for actor."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.web_music_runtime_service import (
+        list_web_music_jobs,
+        sanitize_music_job_projection,
+    )
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = "/internal/v1/web-music/jobs"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path=path,
+        body_bytes=b"",
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    jobs = list_web_music_jobs(int(clean_actor))
+    return JSONResponse(status_code=200, content={"ok": True, "jobs": [sanitize_music_job_projection(j) for j in jobs]})
+
+
+@fastapi_app.post("/internal/v1/web-music/jobs/{job_id}/confirm")
+async def api_internal_web_music_jobs_confirm(job_id: str, request: Request):
+    """Execute and confirm Web Music job with atomic claim and provider submission."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.web_music_runtime_service import (
+        claim_web_music_job_for_execution,
+        get_web_music_job,
+        update_web_music_job_status,
+        sanitize_music_job_projection,
+        music_asset_storage_dir,
+    )
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = f"/internal/v1/web-music/jobs/{job_id}/confirm"
+    raw_body = await request.body()
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    uid = int(clean_actor)
+    claimed, current_job = claim_web_music_job_for_execution(job_id, uid)
+    if not current_job:
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error_code": "JOB_NOT_FOUND", "message": f"Job #{job_id} not found"},
+        )
+
+    if not claimed:
+        current_status = current_job.get("status")
+        if current_status == "completed":
+            return JSONResponse(status_code=200, content={"ok": True, "job": sanitize_music_job_projection(current_job)})
+        elif current_status == "processing":
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "ok": False,
+                    "error_code": "CONCURRENT_CONFIRM_IN_PROGRESS",
+                    "message": "Job is currently being processed by another execution request",
+                },
+            )
+        else:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "ok": False,
+                    "error_code": "JOB_NOT_CLAIMABLE",
+                    "message": f"Job in status '{current_status}' cannot be confirmed",
+                },
+            )
+
+    # Provider submission with zero blind retry
+    product_kind = current_job.get("product_kind")
+    mode = current_job.get("mode")
+    tier = current_job.get("tier")
+    brief = current_job.get("brief")
+    style_prompt = current_job.get("style_prompt") or brief
+    lyrics = current_job.get("lyrics") or ""
+    vocal_mode = current_job.get("vocal_mode") or ""
+    duration = int(current_job.get("duration_seconds") or 30)
+
+    result_payload = {
+        "product_kind": product_kind,
+        "music_product_flow": "p0_20a_3_tier",
+        "music_product_tier": tier,
+        "music_product_mode": mode,
+        "prompt": brief,
+        "provider_style_prompt": style_prompt,
+        "provider_lyrics": lyrics,
+        "song_vocal": vocal_mode,
+        "requested_vocal_mode": vocal_mode,
+        "selected_vocal_mode": vocal_mode,
+        "duration_seconds": duration,
+        "song_product": bool(product_kind == "song"),
+    }
+
+    try:
+        submitted = await submit_music_generation_job(
+            result_payload,
+            preview=False,
+            admin_smoke=is_admin_user(uid),
+            updated_by=str(uid),
+        )
+    except Exception as exc:
+        safe_err = sanitize_provider_error(exc)[:240]
+        update_web_music_job_status(job_id, "failed", status_reason=f"PROVIDER_SUBMIT_EXCEPTION: {safe_err}")
+        return JSONResponse(status_code=503, content={"ok": False, "error_code": "PROVIDER_SUBMIT_EXCEPTION", "message": safe_err})
+
+    task_id = str(submitted.get("task_id") or "").strip()
+    provider_name = str(submitted.get("provider") or "shopaikey_music").strip()
+
+    # Check for direct audio bytes (synchronous test mock or immediate engine return)
+    output_bytes = engine_output_bytes(submitted) if callable(globals().get("engine_output_bytes")) else b""
+    if not output_bytes and isinstance(submitted.get("audio_bytes"), (bytes, bytearray)):
+        output_bytes = bytes(submitted.get("audio_bytes"))
+
+    if output_bytes and len(output_bytes) > 0:
+        out_path = str(music_asset_storage_dir() / f"web_music_{uid}_{job_id}.mp3")
+        Path(out_path).write_bytes(output_bytes)
+        quote_xu = int(current_job.get("quote_xu") or 0)
+        settle_key = f"music_settle:{uid}:{job_id}"
+        charged = 0
+        if quote_xu > 0 and not is_admin_user(uid):
+            charge = spend_fixed_credit_idempotent_info(
+                uid,
+                quote_xu,
+                "web_music",
+                ref_id=settle_key,
+                note=f"job_id={job_id}; product={product_kind}; tier={tier}",
+            )
+            charged = int(charge.get("final_cost") or quote_xu) if charge.get("ok") else 0
+
+        updated_job = update_web_music_job_status(
+            job_id,
+            "completed",
+            status_reason="COMPLETED",
+            charged_xu=charged,
+            artifact_path=out_path,
+            artifact_bytes=len(output_bytes),
+            settlement_status="settled" if charged > 0 or quote_xu == 0 else "unsettled",
+            provider_task_id=task_id,
+            provider_name=provider_name,
+            completed_at=_utc_now(),
+        )
+        return JSONResponse(status_code=200, content={"ok": True, "job": sanitize_music_job_projection(updated_job or current_job)})
+
+    if not submitted.get("ok") or not task_id:
+        err_msg = str(submitted.get("detail") or submitted.get("status") or "PROVIDER_SUBMIT_REJECTED")
+        updated_job = update_web_music_job_status(
+            job_id,
+            "failed",
+            status_reason=err_msg[:240],
+            provider_name=provider_name,
+            settlement_status="no_charge",
+        )
+        return JSONResponse(
+            status_code=422,
+            content={"ok": False, "error_code": "PROVIDER_SUBMIT_FAILED", "message": err_msg, "job": sanitize_music_job_projection(updated_job or current_job)},
+        )
+
+    # Provider job accepted and queued/processing
+    updated_job = update_web_music_job_status(
+        job_id,
+        "processing",
+        status_reason="PROVIDER_SUBMITTED",
+        provider_task_id=task_id,
+        provider_name=provider_name,
+    )
+    return JSONResponse(status_code=200, content={"ok": True, "job": sanitize_music_job_projection(updated_job or current_job)})
+
+
+@fastapi_app.post("/internal/v1/web-music/jobs/{job_id}/reconcile")
+async def api_internal_web_music_jobs_reconcile(job_id: str, request: Request):
+    """Reconcile and poll Web Music job provider progress with verified audio settlement."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.web_music_runtime_service import (
+        get_web_music_job,
+        update_web_music_job_status,
+        sanitize_music_job_projection,
+        music_asset_storage_dir,
+    )
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = f"/internal/v1/web-music/jobs/{job_id}/reconcile"
+    raw_body = await request.body()
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    uid = int(clean_actor)
+    current_job = get_web_music_job(job_id, uid)
+    if not current_job:
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error_code": "JOB_NOT_FOUND", "message": f"Job #{job_id} not found"},
+        )
+
+    status = str(current_job.get("status") or "")
+    if status == "completed":
+        return JSONResponse(status_code=200, content={"ok": True, "job": sanitize_music_job_projection(current_job)})
+
+    if status in ("failed", "ambiguous"):
+        return JSONResponse(status_code=200, content={"ok": True, "job": sanitize_music_job_projection(current_job)})
+
+    task_id = str(current_job.get("provider_task_id") or "").strip()
+    provider_name = str(current_job.get("provider_name") or "shopaikey_music").strip()
+
+    if not task_id:
+        updated_job = update_web_music_job_status(job_id, "failed", status_reason="MISSING_PROVIDER_TASK_ID", settlement_status="no_charge")
+        return JSONResponse(status_code=200, content={"ok": True, "job": sanitize_music_job_projection(updated_job or current_job)})
+
+    # Poll provider
+    poll_state = {
+        "music_provider": provider_name,
+        "music_task_id": task_id,
+        "provider": provider_name,
+        "task_id": task_id,
+    }
+
+    try:
+        polled = await poll_music_generation_job(poll_state, updated_by=str(uid))
+    except Exception as exc:
+        safe_err = sanitize_provider_error(exc)[:240]
+        return JSONResponse(
+            status_code=200,
+            content={"ok": True, "job": sanitize_music_job_projection(current_job), "detail": f"Poll retry pending: {safe_err}"},
+        )
+
+    output_url = str(polled.get("output_url") or "").strip()
+    audio_bytes = bytes(polled.get("audio_bytes") or b"") if isinstance(polled.get("audio_bytes"), (bytes, bytearray)) else b""
+
+    # Download output if output_url exists and audio_bytes empty
+    if output_url and not audio_bytes:
+        try:
+            async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
+                resp = await client.get(output_url)
+                if resp.status_code == 200 and len(resp.content) > 0:
+                    audio_bytes = resp.content
+        except Exception:
+            pass
+
+    if audio_bytes and len(audio_bytes) > 0:
+        out_path = str(music_asset_storage_dir() / f"web_music_{uid}_{job_id}.mp3")
+        Path(out_path).write_bytes(audio_bytes)
+        quote_xu = int(current_job.get("quote_xu") or 0)
+        settle_key = f"music_settle:{uid}:{job_id}"
+        charged = 0
+        if quote_xu > 0 and not is_admin_user(uid):
+            charge = spend_fixed_credit_idempotent_info(
+                uid,
+                quote_xu,
+                "web_music",
+                ref_id=settle_key,
+                note=f"job_id={job_id}; product={current_job.get('product_kind')}; tier={current_job.get('tier')}",
+            )
+            charged = int(charge.get("final_cost") or quote_xu) if charge.get("ok") else 0
+
+        updated_job = update_web_music_job_status(
+            job_id,
+            "completed",
+            status_reason="COMPLETED",
+            charged_xu=charged,
+            artifact_path=out_path,
+            artifact_bytes=len(audio_bytes),
+            settlement_status="settled" if charged > 0 or quote_xu == 0 else "unsettled",
+            completed_at=_utc_now(),
+        )
+        return JSONResponse(status_code=200, content={"ok": True, "job": sanitize_music_job_projection(updated_job or current_job)})
+
+    # Check terminal failure from provider
+    polled_status = str(polled.get("status") or "").upper()
+    if polled_status in ("FAIL", "FAILED", "FAIL_PROVIDER_ERROR", "ERROR", "TERMINAL_FAILED", "COMPLETED_NO_DOWNLOADABLE_AUDIO"):
+        err_detail = str(polled.get("detail") or polled.get("error") or polled_status)[:240]
+        updated_job = update_web_music_job_status(
+            job_id,
+            "failed",
+            status_reason=err_detail,
+            settlement_status="no_charge",
+            completed_at=_utc_now(),
+        )
+        return JSONResponse(status_code=200, content={"ok": True, "job": sanitize_music_job_projection(updated_job or current_job)})
+
+    return JSONResponse(status_code=200, content={"ok": True, "job": sanitize_music_job_projection(current_job)})
+
+
+@fastapi_app.get("/internal/v1/web-music/jobs/{job_id}/artifact")
+async def api_internal_web_music_jobs_artifact(job_id: str, request: Request):
+    """Retrieve audio artifact stream for completed Web Music job."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.web_music_runtime_service import get_web_music_job
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = f"/internal/v1/web-music/jobs/{job_id}/artifact"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path=path,
+        body_bytes=b"",
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    job = get_web_music_job(job_id, int(clean_actor))
+    if not job or job.get("status") != "completed":
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error_code": "ARTIFACT_NOT_FOUND", "message": "Job not found or not yet completed"},
+        )
+
+    artifact_path = job.get("artifact_path")
+    if not artifact_path or not Path(artifact_path).exists():
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error_code": "ARTIFACT_FILE_MISSING", "message": "Audio artifact missing"},
+        )
+
+    audio_bytes = Path(artifact_path).read_bytes()
+    return Response(content=audio_bytes, media_type="audio/mpeg")
+
+
 # ─── ENTRY POINT ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     uvicorn.run(
