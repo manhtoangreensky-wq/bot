@@ -3258,14 +3258,40 @@ def validate_owner_acceptance_authorization(
     if bool(auth.get("consumed")):
         return False, "owner_acceptance_already_consumed", {}
 
+    ctx = dict(context or {})
+
+    # Product type pinning and R05A detection
+    pinned_product = str(auth.get("product_type") or CANONICAL_ACCEPTANCE_PRODUCT_TYPE).strip()
+    ctx_product = str(ctx.get("product_type") or "").strip()
+    is_r05a = (
+        pinned_product == "self_shot_scene_change"
+        or ctx_product == "self_shot_scene_change"
+        or str(auth.get("engine_adapter") or auth.get("engine_route") or "").strip() == "controlled_keyframe_image_to_video"
+        or str(ctx.get("engine_adapter") or ctx.get("engine_route") or "").strip() == "controlled_keyframe_image_to_video"
+    )
+
     now = float(current_time if current_time is not None else time.time())
     expires_at = auth.get("expires_at")
-    if expires_at is not None:
+    if is_r05a:
+        if expires_at is None or str(expires_at).strip() == "":
+            return False, "owner_acceptance_expiry_missing", {}
         try:
-            if float(expires_at) <= now:
-                return False, "owner_acceptance_expired", {}
-        except Exception:
+            expires_at_num = float(expires_at)
+        except (ValueError, TypeError):
             return False, "owner_acceptance_expiry_invalid", {}
+        if expires_at_num <= now:
+            return False, "owner_acceptance_expired", {}
+
+        auth_nonce = str(auth.get("nonce") or "").strip()
+        if not auth_nonce:
+            return False, "owner_acceptance_nonce_missing", {}
+    else:
+        if expires_at is not None and str(expires_at).strip() != "":
+            try:
+                if float(expires_at) <= now:
+                    return False, "owner_acceptance_expired", {}
+            except Exception:
+                return False, "owner_acceptance_expiry_invalid", {}
 
     # Durable persistent claim check (SPEC-02C & SPEC-02D: ONE_TIME_USE_DURABLE=YES, SINGLE_JOB_ATTEMPT=YES)
     fingerprint = compute_owner_acceptance_token_fingerprint(auth)
@@ -3277,35 +3303,41 @@ def validate_owner_acceptance_authorization(
     if is_owner_acceptance_attempt_claimed_or_consumed(attempt_fingerprint, db_path=effective_db_path):
         return False, "owner_acceptance_already_consumed", {"attempt_fingerprint": attempt_fingerprint}
 
-    ctx = dict(context or {})
-
-    # Product type pinning
-    pinned_product = str(auth.get("product_type") or CANONICAL_ACCEPTANCE_PRODUCT_TYPE).strip()
-    allowed_acceptance_products = {CANONICAL_ACCEPTANCE_PRODUCT_TYPE, "video_ai_video_reference"}
-    if pinned_product not in allowed_acceptance_products and not auth.get("allow_other_product"):
-        return False, "owner_acceptance_product_mismatch", {}
-    ctx_product = str(ctx.get("product_type") or "").strip()
-    if ctx_product and ctx_product != pinned_product:
-        return False, "owner_acceptance_product_mismatch", {}
+    if is_r05a:
+        if pinned_product != "self_shot_scene_change":
+            return False, "owner_acceptance_product_mismatch", {}
+        if not ctx_product or ctx_product != "self_shot_scene_change":
+            return False, "owner_acceptance_product_mismatch", {}
+    else:
+        allowed_acceptance_products = {
+            CANONICAL_ACCEPTANCE_PRODUCT_TYPE,
+            "video_ai_video_reference",
+            "self_shot_scene_change",
+        }
+        if pinned_product not in allowed_acceptance_products and not auth.get("allow_other_product"):
+            return False, "owner_acceptance_product_mismatch", {}
+        if ctx_product and ctx_product != pinned_product:
+            return False, "owner_acceptance_product_mismatch", {}
 
     # 1. User binding
     auth_user_id = str(auth.get("user_id") or "").strip()
-    if pinned_product == "video_ai_video_reference":
+    if is_r05a or pinned_product == "video_ai_video_reference":
         if not auth_user_id:
             return False, "owner_acceptance_user_id_missing", {}
-        ctx_user_id = str(ctx.get("user_id") or "").strip()
-        if not ctx_user_id:
+        ctx_user_id = ctx.get("user_id") if ctx.get("user_id") is not None else ctx.get("account_id")
+        ctx_user_id_str = str(ctx_user_id or "").strip()
+        if not ctx_user_id_str:
             return False, "owner_acceptance_user_id_missing", {}
-        if ctx_user_id != auth_user_id:
+        if ctx_user_id_str != auth_user_id:
             return False, "owner_acceptance_user_mismatch", {}
     elif auth_user_id:
-        ctx_user_id = ctx.get("user_id")
+        ctx_user_id = ctx.get("user_id") if ctx.get("user_id") is not None else ctx.get("account_id")
         if ctx_user_id is not None and str(ctx_user_id).strip() != auth_user_id:
             return False, "owner_acceptance_user_mismatch", {}
 
     # 2. Job / Project binding
     auth_job_id = str(auth.get("job_id") or "").strip()
-    if pinned_product == "video_ai_video_reference":
+    if is_r05a or pinned_product == "video_ai_video_reference":
         if not auth_job_id:
             return False, "owner_acceptance_job_id_missing", {}
         ctx_job_id = str(ctx.get("job_id") or "").strip()
@@ -3318,14 +3350,25 @@ def validate_owner_acceptance_authorization(
         if ctx_job_id is not None and str(ctx_job_id).strip() != auth_job_id:
             return False, "owner_acceptance_job_mismatch", {}
 
-    auth_project_id = auth.get("project_id")
-    if auth_project_id is not None:
+    auth_project_id = str(auth.get("project_id") or "").strip()
+    if is_r05a:
+        if not auth_project_id:
+            return False, "owner_acceptance_project_id_missing", {}
+        ctx_project_id = str(ctx.get("project_id") or "").strip()
+        if not ctx_project_id:
+            return False, "owner_acceptance_project_id_missing", {}
+        if ctx_project_id != auth_project_id:
+            return False, "owner_acceptance_project_mismatch", {}
+    elif auth.get("project_id") is not None:
         ctx_project_id = ctx.get("project_id")
-        if ctx_project_id is not None and str(ctx_project_id).strip() != str(auth_project_id).strip():
+        if ctx_project_id is not None and str(ctx_project_id).strip() != str(auth.get("project_id")).strip():
             return False, "owner_acceptance_project_mismatch", {}
 
-    # 4. Provider pinning (shopaikey_video or fal_video for owner acceptance)
-    pinned_provider = str(auth.get("provider") or (CANONICAL_ACCEPTANCE_PROVIDER if pinned_product != "video_ai_video_reference" else "")).strip()
+    # 4. Provider pinning (shopaikey_video or fal_video for owner acceptance; key4u_video for R05A)
+    pinned_provider = str(
+        auth.get("provider")
+        or (CANONICAL_ACCEPTANCE_PROVIDER if (pinned_product != "video_ai_video_reference" and not is_r05a) else "")
+    ).strip()
     if pinned_product == "video_ai_video_reference":
         if not pinned_provider:
             return False, "owner_acceptance_provider_missing", {}
@@ -3336,12 +3379,18 @@ def validate_owner_acceptance_authorization(
         if pinned_provider not in {"shopaikey_video", "shopaikey"}:
             return False, "owner_acceptance_provider_mismatch", {}
         allowed_acceptance_providers = {"shopaikey_video", "shopaikey"}
+    elif is_r05a:
+        if not pinned_provider:
+            return False, "owner_acceptance_provider_missing", {}
+        if pinned_provider != "key4u_video":
+            return False, "owner_acceptance_provider_mismatch", {}
+        allowed_acceptance_providers = {"key4u_video"}
     else:
         allowed_acceptance_providers = {CANONICAL_ACCEPTANCE_PROVIDER, "fal_video", "fal.ai", "fal-video"}
-    if pinned_provider not in allowed_acceptance_providers and not auth.get("allow_secondary_provider"):
+    if not is_r05a and pinned_provider not in allowed_acceptance_providers and not auth.get("allow_secondary_provider"):
         return False, "owner_acceptance_provider_mismatch", {}
     ctx_provider = str(ctx.get("provider") or ctx.get("selected_provider") or "").strip()
-    if pinned_product == "video_ai_video_reference" and not ctx_provider:
+    if (is_r05a or pinned_product == "video_ai_video_reference") and not ctx_provider:
         return False, "owner_acceptance_provider_missing", {}
     if ctx_provider and ctx_provider != pinned_provider:
         return False, "owner_acceptance_provider_mismatch", {}
@@ -3350,6 +3399,15 @@ def validate_owner_acceptance_authorization(
     pinned_capability = str(auth.get("capability") or auth.get("required_capability") or "").strip()
     ctx_capability = str(ctx.get("required_capability") or ctx.get("capability") or "").strip()
     if pinned_product == "video_ai_video_reference":
+        if not pinned_capability:
+            return False, "owner_acceptance_capability_missing", {}
+        if pinned_capability != "image_to_video":
+            return False, "owner_acceptance_capability_mismatch", {}
+        if not ctx_capability:
+            return False, "owner_acceptance_capability_missing", {}
+        if ctx_capability != "image_to_video":
+            return False, "owner_acceptance_capability_mismatch", {}
+    elif is_r05a:
         if not pinned_capability:
             return False, "owner_acceptance_capability_missing", {}
         if pinned_capability != "image_to_video":
@@ -3438,14 +3496,64 @@ def validate_owner_acceptance_authorization(
         if t_map.get(auth_q, auth_q) != t_map.get(ctx_q, ctx_q):
             return False, "owner_acceptance_quality_tier_mismatch", {"expected": auth_q, "actual": ctx_q}
 
-    # 6. Tier binding (SPEC-02C: CROSS_TIER_REUSE=NO)
-    auth_tier = str(auth.get("tier") or auth.get("selected_model") or auth.get("model") or "").strip()
-    ctx_tier = str(ctx.get("tier") or ctx.get("selected_model") or ctx.get("model") or "").strip()
-    if auth_tier:
-        if ctx_tier and ctx_tier != auth_tier:
+    if is_r05a:
+        # Tier check: must be strictly canonical 700
+        auth_tier_raw = (
+            auth.get("tier")
+            if auth.get("tier") is not None
+            else (auth.get("quality_tier") if auth.get("quality_tier") is not None else auth.get("package_xu"))
+        )
+        auth_tier_str = str(auth_tier_raw or "").strip().lower()
+        if not auth_tier_str:
+            return False, "owner_acceptance_tier_missing", {}
+        if auth_tier_str != "700":
             return False, "owner_acceptance_tier_mismatch", {}
-    elif ctx_tier:
-        return False, "owner_acceptance_tier_missing", {}
+
+        ctx_tier_raw = (
+            ctx.get("tier")
+            if ctx.get("tier") is not None
+            else (ctx.get("quality_tier") if ctx.get("quality_tier") is not None else ctx.get("package_xu"))
+        )
+        ctx_tier_str = str(ctx_tier_raw or "").strip().lower()
+        if not ctx_tier_str:
+            return False, "owner_acceptance_tier_missing", {}
+        if ctx_tier_str != "700":
+            return False, "owner_acceptance_tier_mismatch", {}
+
+        # Model check: must be kling-v3
+        auth_model = str(auth.get("model") or auth.get("selected_model") or "").strip()
+        if not auth_model:
+            return False, "owner_acceptance_model_missing", {}
+        if auth_model != "kling-v3":
+            return False, "owner_acceptance_model_mismatch", {}
+
+        ctx_model = str(ctx.get("model") or ctx.get("selected_model") or "").strip()
+        if not ctx_model:
+            return False, "owner_acceptance_model_missing", {}
+        if ctx_model != "kling-v3":
+            return False, "owner_acceptance_model_mismatch", {}
+
+        # Engine adapter check: must be controlled_keyframe_image_to_video
+        auth_engine = str(auth.get("engine_adapter") or auth.get("engine_route") or "").strip()
+        if not auth_engine:
+            return False, "owner_acceptance_engine_adapter_mismatch", {}
+        if auth_engine != "controlled_keyframe_image_to_video":
+            return False, "owner_acceptance_engine_adapter_mismatch", {}
+
+        ctx_engine = str(ctx.get("engine_adapter") or ctx.get("engine_route") or "").strip()
+        if not ctx_engine:
+            return False, "owner_acceptance_engine_adapter_mismatch", {}
+        if ctx_engine != "controlled_keyframe_image_to_video":
+            return False, "owner_acceptance_engine_adapter_mismatch", {}
+    elif pinned_product != "video_ai_video_reference":
+        # 6. Tier binding (SPEC-02C: CROSS_TIER_REUSE=NO)
+        auth_tier = str(auth.get("tier") or auth.get("selected_model") or auth.get("model") or "").strip()
+        ctx_tier = str(ctx.get("tier") or ctx.get("selected_model") or ctx.get("model") or "").strip()
+        if auth_tier:
+            if ctx_tier and ctx_tier != auth_tier:
+                return False, "owner_acceptance_tier_mismatch", {}
+        elif ctx_tier:
+            return False, "owner_acceptance_tier_missing", {}
 
     # 7. Runtime SHA authority & fail-closed (SPEC-02C: RUNTIME_SHA_SOURCE=CURRENT_RUNTIME_DYNAMIC)
     auth_runtime_sha = str(auth.get("runtime_sha") or auth.get("authorized_runtime_sha") or "").strip()
@@ -3453,21 +3561,68 @@ def validate_owner_acceptance_authorization(
         return False, "owner_acceptance_runtime_sha_missing", {}
 
     ctx_sha = str(ctx.get("runtime_sha") or "").strip()
-    if not ctx_sha:
-        try:
-            from services.remote_worker_api import resolve_runtime_sha
-            ctx_sha = resolve_runtime_sha(environ=env)
-        except Exception:
-            ctx_sha = ""
-    if not ctx_sha:
-        return False, "owner_acceptance_runtime_sha_unresolvable", {}
+    if is_r05a:
+        if not ctx_sha:
+            return False, "owner_acceptance_runtime_sha_missing", {}
+    else:
+        if not ctx_sha:
+            try:
+                from services.remote_worker_api import resolve_runtime_sha
+                ctx_sha = resolve_runtime_sha(environ=env)
+            except Exception:
+                ctx_sha = ""
+        if not ctx_sha:
+            return False, "owner_acceptance_runtime_sha_unresolvable", {}
 
     if not (ctx_sha.startswith(auth_runtime_sha) or auth_runtime_sha.startswith(ctx_sha)):
         return False, "owner_acceptance_runtime_sha_mismatch", {}
 
     # 8. Spend bound & currency unit contract (SPEC-02C: CROSS_UNIT_COMPARISON=NO)
     max_spend = auth.get("max_provider_spend")
-    if max_spend is not None:
+    if is_r05a:
+        if max_spend is None or str(max_spend).strip() == "":
+            return False, "owner_acceptance_max_provider_spend_missing", {}
+        try:
+            max_spend_num = float(max_spend)
+        except (ValueError, TypeError):
+            return False, "owner_acceptance_spend_invalid", {}
+
+        auth_spend_unit = str(
+            auth.get("max_provider_spend_unit")
+            or auth.get("spend_unit")
+            or auth.get("currency")
+            or ""
+        ).strip().upper()
+        if not auth_spend_unit:
+            return False, "owner_acceptance_spend_unit_missing", {}
+
+        ctx_spend_unit = str(
+            ctx.get("estimated_provider_cost_unit")
+            or ctx.get("provider_cost_unit")
+            or ctx.get("spend_unit")
+            or ctx.get("currency")
+            or ""
+        ).strip().upper()
+
+        if not ctx_spend_unit:
+            if ctx.get("estimated_provider_cost") is not None or ctx.get("spend_amount") is not None:
+                return False, "owner_acceptance_spend_unit_missing", {}
+            ctx_spend_unit = auth_spend_unit
+
+        if auth_spend_unit != ctx_spend_unit:
+            return False, "owner_acceptance_spend_unit_mismatch", {}
+
+        try:
+            estimated_cost = float(
+                ctx.get("estimated_provider_cost")
+                if ctx.get("estimated_provider_cost") is not None
+                else (ctx.get("spend_amount") if ctx.get("spend_amount") is not None else 0.0)
+            )
+            if estimated_cost > max_spend_num:
+                return False, "owner_acceptance_spend_limit_exceeded", {}
+        except (ValueError, TypeError):
+            return False, "owner_acceptance_spend_invalid", {}
+    elif max_spend is not None:
         auth_spend_unit = str(
             auth.get("max_provider_spend_unit")
             or auth.get("spend_unit")
@@ -3527,12 +3682,24 @@ def validate_owner_acceptance_authorization(
     verified["token_fingerprint"] = fingerprint
     verified["pinned_provider"] = pinned_provider
     verified["pinned_product"] = pinned_product
-    verified["pinned_tier"] = auth_tier or CANONICAL_ACCEPTANCE_TIER
+    verified["pinned_tier"] = "700" if is_r05a else (auth_tier if not is_r05a and pinned_product != "video_ai_video_reference" else CANONICAL_ACCEPTANCE_TIER)
     verified["runtime_sha"] = ctx_sha
     verified["max_provider_spend"] = float(max_spend) if max_spend is not None else None
     verified["max_provider_spend_unit"] = auth_spend_unit
     verified["bypass_scope"] = ACCEPTANCE_BYPASS_SCOPE_PROBATION_LIVENESS_ONLY
     verified["paid_fallback_allowed"] = False
+    if is_r05a:
+        verified["model"] = "kling-v3"
+        verified["selected_model"] = "kling-v3"
+        verified["selected_provider"] = "key4u_video"
+        verified["engine_adapter"] = "controlled_keyframe_image_to_video"
+        verified["engine_route"] = "controlled_keyframe_image_to_video"
+        verified["required_capability"] = "image_to_video"
+        verified["provider_order"] = ["key4u_video"]
+        verified["effective_provider_chain"] = ["key4u_video"]
+        verified["automatic_fallback_allowed"] = False
+        verified["automatic_resubmit_allowed"] = False
+        verified["max_provider_submits"] = 1
     if recovery_ref:
         verified["is_recovery"] = True
         verified["recovery_previous_attempt_key"] = recovery_ref
