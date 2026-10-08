@@ -92,7 +92,7 @@ class MarketingCallbackSingleAckTests(unittest.TestCase):
             for row in markup.inline_keyboard
             for button in row
         ]
-        self.assertIn("marketing|start", callbacks)
+        self.assertIn("marketing|start|admin_support", callbacks)
 
         query = _Query(991122, "marketing|start")
         asyncio.run(namespace["handle_marketing_callback"](

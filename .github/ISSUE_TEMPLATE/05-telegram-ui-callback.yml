@@ -1,0 +1,34 @@
+name: Telegram UI / callback
+description: Báo nút sai màn, Back sai menu hoặc độ trễ Telegram.
+title: "[Telegram UI] "
+labels: ["bug", "chờ-test"]
+body:
+  - type: input
+    id: flow
+    attributes:
+      label: Đường đi và nút gặp lỗi
+      placeholder: Start → Account → Quay lại
+    validations:
+      required: true
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: Kết quả mong đợi và thực tế
+      description: Ghi từng bước, menu mong đợi và menu thực tế; có thể đính ảnh màn hình.
+    validations:
+      required: true
+  - type: input
+    id: measured_time
+    attributes:
+      label: Giờ bấm HH:MM:SS +07 và thời gian chờ
+      description: Nếu báo độ trễ, ghi riêng từng nút và cho biết đo bằng đồng hồ hay ước lượng.
+  - type: input
+    id: client
+    attributes:
+      label: Thiết bị / Telegram / kết nối
+      placeholder: Android, Telegram app, Wi-Fi
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Runtime và case liên quan
+      description: Tham chiếu case trong KIEM-THU/DANH-SACH-CASE.md; không cần thông tin tài khoản hoặc credential.

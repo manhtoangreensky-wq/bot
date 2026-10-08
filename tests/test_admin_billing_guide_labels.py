@@ -63,6 +63,8 @@ def _load(admin=True):
         "normalize_user_language": lambda lang: lang,
         "safe_html": lambda value: html.escape(str(value)),
         "safe_edit_query_message": edit,
+        "localized_start_menu_text": lambda *_args: "MAIN MENU",
+        "localized_main_menu_keyboard": lambda *_args: Markup([]),
         "VIDEO_TAIL9_TEXT_INPUT_KEY": "fixture_tail_input",
         "DOC_TOOL_MENU_ACTIONS": set(),
         "db_connect": forbidden, "charge_user": forbidden,
@@ -99,6 +101,84 @@ def _controls(namespace):
 
 
 class BillingGuideRouteTests(unittest.TestCase):
+    def test_billing_risk_menu_back_returns_to_billing_module(self):
+        namespace, _ = _load()
+        for name in ("payos_risk_menu_text", "payos_risk_menu_keyboard"):
+            exec(compile(_function(name), "bot.py:" + name, "exec"), namespace)
+
+        billing = namespace["admin_module_keyboard"]("billing")
+        entry = next(
+            button
+            for row in billing.inline_keyboard
+            for button in row
+            if button.callback_data.startswith("menu|payos_risk")
+        )
+
+        risk_page = Query(entry.callback_data)
+        asyncio.run(namespace["handle_menu_callback"](
+            SimpleNamespace(callback_query=risk_page), SimpleNamespace(user_data={}),
+        ))
+        self.assertEqual(risk_page.answers, [((), {})])
+        risk_controls = [
+            button
+            for row in risk_page.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+        ]
+        back = next(button for button in risk_controls if button.text.startswith("⬅"))
+        self.assertEqual("menu|admin_billing", back.callback_data)
+        self.assertEqual("menu|payos_risk|admin_billing", entry.callback_data)
+
+        returned = Query(back.callback_data)
+        asyncio.run(namespace["handle_menu_callback"](
+            SimpleNamespace(callback_query=returned), SimpleNamespace(user_data={}),
+        ))
+        self.assertIn(namespace["ADMIN_CONTROL_MODULES"]["billing"]["title"], returned.edits[0][0])
+        self.assertIn(
+            "menu|payos_risk|admin_billing",
+            [button.callback_data for row in returned.edits[0][1]["reply_markup"].inline_keyboard for button in row],
+        )
+
+    def test_unscoped_risk_entry_keeps_legacy_admin_back(self):
+        namespace, _ = _load()
+        for name in ("payos_risk_menu_text", "payos_risk_menu_keyboard"):
+            exec(compile(_function(name), "bot.py:" + name, "exec"), namespace)
+
+        query = Query("menu|payos_risk")
+        asyncio.run(namespace["handle_menu_callback"](
+            SimpleNamespace(callback_query=query), SimpleNamespace(user_data={}),
+        ))
+        callbacks = [button.callback_data for row in query.edits[0][1]["reply_markup"].inline_keyboard for button in row]
+        self.assertIn("menu|admin", callbacks)
+        self.assertNotIn("menu|admin_billing", callbacks)
+
+    def test_scoped_risk_callback_rejects_public_and_stale_origin_before_cleanup(self):
+        for admin in (True, False):
+            namespace, cleared = _load(admin=admin)
+            for name in ("payos_risk_menu_text", "payos_risk_menu_keyboard"):
+                exec(compile(_function(name), "bot.py:" + name, "exec"), namespace)
+
+            callback = "menu|payos_risk|unknown" if admin else "menu|payos_risk|admin_billing"
+            query = Query(callback)
+            asyncio.run(namespace["handle_menu_callback"](
+                SimpleNamespace(callback_query=query), SimpleNamespace(user_data={}),
+            ))
+            self.assertTrue(query.answers)
+            self.assertTrue(query.answers[0][1].get("show_alert"))
+            self.assertEqual([], query.edits)
+            self.assertEqual([], cleared)
+
+        namespace, cleared = _load()
+        for name in ("payos_risk_menu_text", "payos_risk_menu_keyboard"):
+            exec(compile(_function(name), "bot.py:" + name, "exec"), namespace)
+        for callback in ("menu|payos_risk|unknown", "menu|payos_risk|admin_billing|extra"):
+            query = Query(callback)
+            asyncio.run(namespace["handle_menu_callback"](
+                SimpleNamespace(callback_query=query), SimpleNamespace(user_data={}),
+            ))
+            self.assertTrue(query.answers[0][1].get("show_alert"))
+            self.assertEqual([], query.edits)
+            self.assertEqual([], cleared)
+
     def test_both_keyboards_label_every_command_page_as_a_guide(self):
         namespace, _ = _load()
         controls = list(_controls(namespace))

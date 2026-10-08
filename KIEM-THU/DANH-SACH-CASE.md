@@ -301,3 +301,13 @@ hoặc hết timeout mà không fail-closed/cleanup.
 | ID | Bước kiểm thử | PASS bắt buộc |
 |---|---|---|
 | `MEDIA-LIBRARY-STALE-CALLBACK-01` | Trên fixture/staging có hai bộ kết quả A và B cho cùng user; mở keyboard A, tìm B rồi bấm Preview/Select/License trên A. Lặp với music, SFX và Pixabay. Thử nút A sau khi đổi showroom ↔ video add-on, bằng user khác, sau 10 phút, và callback cũ không có mã phiên. | Nút còn hạn chỉ đọc đúng mục của snapshot đã phát keyboard. Nút cũ, sai user/ngữ cảnh, hết hạn hoặc index không còn phải hiện cảnh báo hết hạn/không tìm thấy và không gọi helper preview/chọn. Nút License follow-up vẫn tham chiếu đúng track đã chọn. Không tạo job, gọi provider, trừ Xu, sửa dữ liệu production hoặc gửi tin khách. |
+
+## Batch UI closure — 08/10/2026
+
+| ID | Bước kiểm thử | PASS bắt buộc / bằng chứng |
+|---|---|---|
+| `UI-PROMPT-COPY-BACK-01` | Free Tools → Kho Prompt → danh mục → item → Copy → Back → danh mục. Không lưu/generate. | Hướng dẫn sao chép thủ công; Back khôi phục đúng text/ID gợi ý, không reroll. Fixture GREEN S12.35.75; live sau deploy |
+| `UI-MARKETING-CSKH-FOLLOWUP-01` | CSKH → Marketing → loại → gợi ý → plan → từng follow-up → Back; lặp với custom brief và Admin legacy. Chỉ fixture, không đăng/gửi. | CSKH giữ suggestions→Marketing→CSKH; legacy giữ Admin. 5 tests GREEN S12.35.76 |
+| `UI-MEMORY-SEARCH-SNAPSHOT-01` | Fixture search → View/Delete/Cancel/Back; thay token, hết TTL, ID ngoài kết quả và dùng user khác; thêm draft từ màn khác rồi Back hợp lệ. Không `delete_yes`. | Reject trước đọc note/cleanup đối với invalid; valid Back dọn draft đúng actor, giữ draft actor khác và exact result list. 6 regression GREEN S12.35.77 |
+| `UI-OPERATOR-SYSTEM-CHILD-01` | Operator → System → mỗi guide/Providers → Details/Refresh nếu có → Back → System → Back; lặp legacy/public/invalid origin. | Cuối chuỗi về Operator; legacy về Admin; invalid/public dừng trước read/cleanup. 3 regression GREEN S12.35.78 |
+| `UI-BUTTON-LATENCY-OWNER-DEFERRED-01` | Sau deploy, ghi vài vòng Account/Admin/product landing menu-only; gửi HH:MM:SS +07 và click-to-screen từng nút, kèm cách đo. | Ghép được với anonymous server phases; phân biệt wait/ACK/build/render/client. Chưa PASS; hoãn cho Owner S12.35.79 theo chỉ đạo |

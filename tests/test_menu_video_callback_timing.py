@@ -13,11 +13,21 @@ SOURCE = (Path(__file__).resolve().parents[1] / "bot.py").read_text(encoding="ut
 
 
 def _function(name):
-    start = re.search(rf"(?m)^(?:async )?def {name}\(", SOURCE)
-    assert start, name
-    following = re.search(r"(?m)^(?:async )?def \w+\(", SOURCE[start.end():])
-    end = start.end() + following.start() if following else len(SOURCE)
-    return SOURCE[start.start():end]
+    lines = SOURCE.splitlines(keepends=True)
+    start = next(
+        (index for index, line in enumerate(lines)
+         if line.startswith((f"def {name}(", f"async def {name}("))),
+        None,
+    )
+    assert start is not None, name
+    following = next(
+        (index for index in range(start + 1, len(lines))
+         if lines[index].startswith(("def ", "async def ", "class "))
+         or (lines[index].strip() and not lines[index][0].isspace()
+             and "=" in lines[index] and not lines[index].startswith("@"))),
+        len(lines),
+    )
+    return "".join(lines[start:following]).rstrip()
 
 
 CODE = compile("from __future__ import annotations\n" + "\n".join(

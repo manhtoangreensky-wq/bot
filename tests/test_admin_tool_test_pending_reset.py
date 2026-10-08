@@ -1,4 +1,5 @@
 import asyncio
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -43,6 +44,8 @@ def _load_menu_handler(source, pending, set_pending, get_pending, clear_pending)
     namespace = {
         "Update": object,
         "ContextTypes": SimpleNamespace(DEFAULT_TYPE=object),
+        "time": time,
+        "logger": SimpleNamespace(info=lambda *_args, **_kwargs: None),
         "VIDEO_TAIL9_TEXT_INPUT_KEY": "probe-only",
         "DOC_TOOL_MENU_ACTIONS": set(),
         "PENDING_ADMIN_TOOL_TEST": pending,
@@ -86,6 +89,14 @@ def _load_start_handler(source, pending, set_pending, get_pending, clear_pending
         "set_pending_admin_tool_test": set_pending,
         "get_pending_admin_tool_test": get_pending,
         "clear_pending_admin_tool_test": clear_pending,
+        "clear_support_ticket_pending": lambda *_args, **_kwargs: None,
+        "clear_internal_archive_pending": lambda *_args, **_kwargs: None,
+        "clear_memory_guided_pending": lambda *_args, **_kwargs: None,
+        "clear_doc_tool_pending": lambda *_args, **_kwargs: None,
+        "clear_storage_addon_pending": lambda *_args, **_kwargs: None,
+        "clear_translation_menu_pending": lambda *_args, **_kwargs: None,
+        "clear_translation_session": lambda *_args, **_kwargs: None,
+        "clear_broadcast_lite_pending": lambda *_args, **_kwargs: None,
         "log_command_received": lambda *_args, **_kwargs: None,
         "user_exists": lambda _uid: True,
         "get_user": lambda *_args, **_kwargs: None,

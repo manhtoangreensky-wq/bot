@@ -338,18 +338,19 @@ def test_start_text_contains_legal_links(monkeypatch):
     assert "chính sách sở hữu trí tuệ của TOAN AAS" in text
 
 
-def test_start_keyboard_callbacks_unchanged():
+def test_start_keyboard_callbacks_match_current_public_menu_contract():
     rows = [
         [(button.text, button.callback_data, button.url) for button in row]
         for row in bot.localized_main_menu_keyboard(False, "vi").inline_keyboard
     ]
     assert rows == [
-        [("🆓 Công cụ miễn phí", "freehub|main", None), ("💎 Chat Pro • 5/25 Xu/1K", "menu|chat_pro", None)],
+        [("🆓 Công cụ miễn phí", "freehub|main", None)],
         [("🎬 Tạo video AI", "menu|main_video", None), ("🖼 Tạo ảnh AI", "menu|main_image", None)],
-        [("👤 Tài khoản", "menu|main_profile", None), ("🎧 Studio âm thanh", "music_quick|showroom|root", None)],
-        [("🌐 Dịch thuật", "menu|translate", None), ("📝 Ghi chú / Tài liệu", "menu|main_memory", None)],
-        [("📚 Hướng dẫn", "menu|main_guide", None), ("👨‍💼 Hỗ trợ", "menu|support", None)],
-        [("💰 Nạp Xu / Bảng giá", "pricing|main", None), ("💬 Góp ý / Báo lỗi", "feedback|start", None)],
+        [("🌐 Dịch thuật", "menu|translate", None), ("🎧 Studio âm thanh", "music_quick|showroom|root", None)],
+        [("👤 Tài khoản", "menu|main_profile", None), ("💰 Nạp Xu / Bảng giá", "pricing|main", None)],
+        [("📢 Đăng bài tự động", "menu|autopost", None), ("💎 Chat Pro • 5/25 Xu/1K", "menu|chat_pro", None)],
+        [("📝 Ghi chú / Tài liệu", "menu|main_memory", None), ("👨‍💼 Hỗ trợ", "menu|support", None)],
+        [("📚 Hướng dẫn", "menu|main_guide", None), ("💬 Góp ý / Báo lỗi", "feedback|start", None)],
         [("📊 Trung tâm", None, bot.TOAN_AAS_COMMUNITY_URL), ("🌐 Đổi ngôn ngữ", "back_lang", None)],
     ]
 
@@ -5632,7 +5633,7 @@ def test_help_main_menu_has_current_sections():
     assert guide_callbacks[:7] == [
         "menu|guide_quick_start",
         "menu|guide_image_ai",
-        "menu|guide_video_ai",
+        "menu|guide_video_ai|main_guide",
         "menu|guide_guided_video",
         "menu|guide_music_add",
         "menu|guide_credits",

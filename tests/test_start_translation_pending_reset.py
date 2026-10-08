@@ -4,10 +4,10 @@ from pathlib import Path
 
 def test_start_clears_all_small_navigation_pending_states():
     source = (Path(__file__).resolve().parents[1] / "bot.py").read_text(encoding="utf-8")
-    node = next(
-        item for item in ast.parse(source).body
-        if isinstance(item, ast.AsyncFunctionDef) and item.name == "cmd_start"
-    )
+    start = source.index("async def cmd_start(")
+    end = source.index("\nasync def cmd_menu(", start)
+    node = ast.parse(source[start:end]).body[0]
+    assert isinstance(node, ast.AsyncFunctionDef) and node.name == "cmd_start"
     calls = {
         item.func.id
         for item in ast.walk(node)

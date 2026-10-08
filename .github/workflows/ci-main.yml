@@ -87,6 +87,31 @@ jobs:
       - name: Account Top-up Selector Back
         run: python -m unittest tests/test_profile_topup_back_origin.py
 
+      - name: Package Combo Registered Navigation Back
+        run: python -m unittest tests/test_pkgcombo_navigation_registered_callback.py
+
+      - name: Customer Memory and Storage Add-on Navigation Regressions
+        run: |
+          python -m unittest \
+            tests/test_memory_empty_delete_state.py \
+            tests/test_memory_pending_reset_on_start.py \
+            tests/test_storage_addon_navigation_callbacks.py
+
+      - name: Small Navigation and UI Closure Regressions
+        run: |
+          python -m pip install pytest PyYAML
+          python -c "from pathlib import Path; import yaml; yaml.safe_load(Path('.agents/state/telegram-small-flow-audit-20261006.yaml').read_text(encoding='utf-8')); print('UI state YAML PASS')"
+          python -m pytest -q --noconftest \
+            tests/test_admin_marketing_support_back_origin.py \
+            tests/test_owner_access_ui_runtime_copy.py \
+            tests/test_small_flow_pending_expiry.py \
+            tests/test_feedback_callback_single_ack.py \
+            tests/test_marketing_callback_single_ack.py \
+            tests/test_admin_tool_test_pending_reset.py \
+            tests/test_broadcast_lite_back_pending_cleanup.py \
+            tests/test_start_translation_pending_reset.py \
+            tests/test_menu_video_callback_timing.py
+
       - name: Run Workflow Hygiene Unit Tests
         run: |
           python -m unittest tests/test_deploy_vps_workflow_hygiene.py

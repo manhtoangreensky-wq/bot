@@ -13,12 +13,24 @@ from services import video_scene3_flow, video_selfshot2, video_selfshot3
 
 
 SOURCE = (Path(__file__).resolve().parents[1] / "bot.py").read_text(encoding="utf-8")
-LINES = SOURCE.splitlines(keepends=True)
-FUNCTIONS = {
-    node.name: "".join(LINES[node.lineno - 1:node.end_lineno])
-    for node in ast.parse(SOURCE).body
-    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-}
+def _function_source(name):
+    start = re.search(rf"(?m)^(?:async\s+)?def {re.escape(name)}\s*\(", SOURCE)
+    assert start is not None, f"missing source function: {name}"
+    boundary = re.search(
+        r"(?m)^(?:async\s+)?def\s+\w+\s*\(|^class\s+\w+|^[A-Z][A-Z0-9_]*\s*=|^@",
+        SOURCE[start.end():],
+    )
+    end = start.end() + boundary.start() if boundary else len(SOURCE)
+    source = SOURCE[start.start():end]
+    node = ast.parse(source).body[0]
+    return "".join(source.splitlines(keepends=True)[:node.end_lineno])
+
+
+FUNCTIONS = {name: _function_source(name) for name in (
+    "video_public_callback_failure_guard", "video_scene3_keyboard",
+    "video_selfshot_product_hub_text", "video_selfshot_product_hub_keyboard",
+    "safe_edit_or_send", "handle_video_product_callback",
+)}
 
 
 class Button:

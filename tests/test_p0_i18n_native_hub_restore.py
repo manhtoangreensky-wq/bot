@@ -117,7 +117,7 @@ def _runtime_namespace() -> dict:
         "InlineKeyboardMarkup": _Markup,
         "_TelegramInlineKeyboardMarkup": _Markup,
         "TOAN_AAS_COMMUNITY_URL": "https://t.me/toanaas",
-        "product_context_callback": lambda *parts: "context|" + "|".join(str(part) for part in parts),
+        "product_context_callback": lambda *parts: "music_quick|" + "|".join(str(part) for part in parts[1:]),
         "PRODUCT_CONTEXT_SHOWROOM": "showroom",
         "public_chat_runtime": SimpleNamespace(CHAT_PRO_RATE_LABEL="5/25 Xu/1K"),
         "public_hub_copy": public_copy.public_hub_copy,
@@ -151,7 +151,7 @@ def _legacy_menu_runtime_namespace() -> dict:
         "InlineKeyboardMarkup": _Markup,
         "_TelegramInlineKeyboardMarkup": _Markup,
         "TOAN_AAS_COMMUNITY_URL": "https://t.me/toanaas",
-        "product_context_callback": lambda *parts: "context|" + "|".join(str(part) for part in parts),
+        "product_context_callback": lambda *parts: "music_quick|" + "|".join(str(part) for part in parts[1:]),
         "PRODUCT_CONTEXT_SHOWROOM": "showroom",
         "public_chat_runtime": SimpleNamespace(CHAT_PRO_RATE_LABEL="5/25 Xu/1K"),
         "public_hub_copy": public_copy.public_hub_copy,
@@ -258,31 +258,35 @@ def test_user_locale_registry_and_main_picker_are_exact_and_deduplicated():
             assert runtime["pricing_copy_language"](locale) == "en"
 
 
-def test_hub_layout_has_the_exact_owner_rows_and_preserves_existing_routes():
+def test_hub_layout_matches_the_current_owner_rows_and_preserves_routes():
     runtime = _runtime_namespace()
     for locale in SUPPORTED_LOCALES:
         markup = runtime["localized_main_menu_keyboard"](False, locale)
-        assert len(markup.inline_keyboard) == 7
-        assert [len(row) for row in markup.inline_keyboard] == [2, 2, 2, 2, 2, 2, 2]
+        assert len(markup.inline_keyboard) == 8
+        assert [len(row) for row in markup.inline_keyboard] == [1, 2, 2, 2, 2, 2, 2, 2]
         assert [button.callback_data for button in markup.inline_keyboard[0]] == [
-            "freehub|main", "menu|chat_pro",
+            "freehub|main",
         ]
         assert [button.callback_data for button in markup.inline_keyboard[1]] == [
             "menu|main_video", "menu|main_image",
         ]
-        assert markup.inline_keyboard[2][0].callback_data == "menu|main_profile"
-        assert markup.inline_keyboard[2][1].callback_data.startswith("context|")
+        assert [button.callback_data for button in markup.inline_keyboard[2]] == [
+            "menu|translate", "music_quick|showroom|root",
+        ]
         assert [button.callback_data for button in markup.inline_keyboard[3]] == [
-            "menu|translate", "menu|main_memory",
+            "menu|main_profile", "pricing|main",
         ]
         assert [button.callback_data for button in markup.inline_keyboard[4]] == [
-            "menu|main_guide", "menu|support",
+            "menu|autopost", "menu|chat_pro",
         ]
         assert [button.callback_data for button in markup.inline_keyboard[5]] == [
-            "pricing|main", "feedback|start",
+            "menu|main_memory", "menu|support",
         ]
-        assert markup.inline_keyboard[6][0].url == "https://t.me/toanaas"
-        assert markup.inline_keyboard[6][1].callback_data == "back_lang"
+        assert [button.callback_data for button in markup.inline_keyboard[6]] == [
+            "menu|main_guide", "feedback|start",
+        ]
+        assert markup.inline_keyboard[7][0].url == "https://t.me/toanaas"
+        assert markup.inline_keyboard[7][1].callback_data == "back_lang"
         callbacks = [
             button.callback_data
             for row in markup.inline_keyboard
@@ -293,40 +297,50 @@ def test_hub_layout_has_the_exact_owner_rows_and_preserves_existing_routes():
         assert not any("❌" in button.text for row in markup.inline_keyboard for button in row)
 
         admin_markup = runtime["localized_main_menu_keyboard"](True, locale)
-        assert [len(row) for row in admin_markup.inline_keyboard] == [2, 2, 2, 2, 2, 2, 2, 1]
+        assert [len(row) for row in admin_markup.inline_keyboard] == [1, 2, 2, 2, 2, 2, 2, 2, 1]
         assert [button.callback_data for button in admin_markup.inline_keyboard[-1]] == ["menu|admin"]
 
         copy = public_copy.public_hub_copy(locale)
         for row, fields in zip(
             markup.inline_keyboard,
             (
-                ("free_tools_label", "chat_pro_label"),
+                ("free_tools_label",),
                 ("video_label", "image_label"),
-                ("account_label", "audio_studio_label"),
-                ("translation_label", "notes_docs_label"),
-                ("guide_label", "support"),
-                ("topup_pricing_label", "feedback_label"),
+                ("translation_label", "audio_studio_label"),
+                ("account_label", "topup_pricing_label"),
+                ("autopost_label", "chat_pro_label"),
+                ("notes_docs_label", "support"),
+                ("guide_label", "feedback_label"),
                 ("center", "change_language"),
             ),
         ):
             assert all(copy[field] in button.text for field, button in zip(fields, row))
 
 
-def test_legacy_vietnamese_menu_uses_the_same_exact_seven_row_contract():
+def test_legacy_vietnamese_menu_uses_the_same_eight_row_contract():
     runtime = _legacy_menu_runtime_namespace()
     markup = runtime["main_menu_keyboard"](False)
-    assert [len(row) for row in markup.inline_keyboard] == [2, 2, 2, 2, 2, 2, 2]
+    assert [len(row) for row in markup.inline_keyboard] == [1, 2, 2, 2, 2, 2, 2, 2]
     assert [button.callback_data for button in markup.inline_keyboard[0]] == [
-        "freehub|main", "menu|chat_pro",
+        "freehub|main",
     ]
-    assert [button.callback_data for button in markup.inline_keyboard[5]] == [
-        "pricing|main", "feedback|start",
+    assert [button.callback_data for button in markup.inline_keyboard[2]] == [
+        "menu|translate", "music_quick|showroom|root",
     ]
-    assert markup.inline_keyboard[6][0].url == "https://t.me/toanaas"
-    assert markup.inline_keyboard[6][1].callback_data == "back_lang"
+    assert [button.callback_data for button in markup.inline_keyboard[3]] == [
+        "menu|main_profile", "pricing|main",
+    ]
+    assert [button.callback_data for button in markup.inline_keyboard[4]] == [
+        "menu|autopost", "menu|chat_pro",
+    ]
+    assert [button.callback_data for button in markup.inline_keyboard[6]] == [
+        "menu|main_guide", "feedback|start",
+    ]
+    assert markup.inline_keyboard[7][0].url == "https://t.me/toanaas"
+    assert markup.inline_keyboard[7][1].callback_data == "back_lang"
 
     admin_markup = runtime["main_menu_keyboard"](True)
-    assert [len(row) for row in admin_markup.inline_keyboard] == [2, 2, 2, 2, 2, 2, 2, 1]
+    assert [len(row) for row in admin_markup.inline_keyboard] == [1, 2, 2, 2, 2, 2, 2, 2, 1]
     assert admin_markup.inline_keyboard[-1][0].callback_data == "menu|admin"
 
 

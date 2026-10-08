@@ -876,3 +876,15 @@ provider-fallback `56`, exact-two `3` passed; changed-file compile và
 | Cách hiểu trước | Bằng chứng thực tế | Hiện trạng |
 |---|---|---|
 | Lệnh `/pricing_xu` mở Nạp Xu rồi Back về chính trang Xu | RED qua command emitter và registered Menu/Pricing handlers: callback thiếu origin nên Back về `pricing|main` | Sửa callback của keyboard do riêng lệnh phát ra; 20 test offline đạt trong `137.681s`, gồm callback thật phát ra từ command và đường Back qua handler đã đăng ký. Test-file compile/diff-check đạt; full local `bot.py` compile chưa xác minh sau giới hạn 7 phút. PR/CI/runtime/manual QA còn chờ. Không đổi giá/payment/wallet/engine/provider hay AutoPost. |
+
+## Đối chiếu batch UI cuối — 08/10/2026
+
+| Cách hiểu cũ chưa đủ | Bằng chứng qua handler | Hành vi đã sửa trên batch |
+|---|---|---|
+| Copy ở Kho Prompt giữ nguyên backstack và gửi sang Meta | Copy chỉ render lại, nhãn sai; Back đổi từ `lib_back` sang Free Tools (3 RED) | Hướng dẫn sao chép thủ công, nhãn Copy và keyboard của item giữ exact-list Back; GREEN 1 method |
+| Marketing CSKH đã giữ nguồn sau mọi bước | Plan chọn gợi ý giữ nguồn, nhưng 6 follow-up và custom brief quay về Admin (7 RED) | Hai renderer dùng origin CSKH đã xác nhận; GREEN 5 tests |
+| Token search đã bảo vệ mọi nút Memory | Chỉ Back kiểm token; View/Delete cũ vẫn đọc note, Back hợp lệ còn draft (11 RED) | Token/TTL/result membership trước read/cleanup, dọn đúng draft trên valid Back; GREEN 6 regression |
+| System từ Operator giữ parent sau mọi màn con | 6 child round-trip và 1 invalid guide origin sai (7 RED) | Carry closed origin qua guide/provider details/refresh; GREEN 3 regression |
+| Mẫu handler dưới 1s chứng minh mọi nút mượt trên thiết bị | Sample menu 306.038–512.953ms không gồm click-to-screen hoặc pre-handler/client | Chưa chứng minh; ghi Owner-deferred để đo tương quan, không thay routing/engine theo suy đoán |
+
+Các trạng thái trên là bằng chứng fixture/source của batch; CI, merge, deploy và live được ghi riêng trong báo cáo closure.
