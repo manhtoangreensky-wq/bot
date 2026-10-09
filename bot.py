@@ -284366,6 +284366,7 @@ async def api_internal_web_music_jobs_confirm(job_id: str, request: Request):
         update_web_music_job_status,
         sanitize_music_job_projection,
         music_asset_storage_dir,
+        _utc_now,
     )
 
     header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
@@ -284535,6 +284536,7 @@ async def api_internal_web_music_jobs_reconcile(job_id: str, request: Request):
         update_web_music_job_status,
         sanitize_music_job_projection,
         music_asset_storage_dir,
+        _utc_now,
     )
 
     header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
@@ -284707,6 +284709,363 @@ async def api_internal_web_music_jobs_artifact(job_id: str, request: Request):
 
     audio_bytes = Path(artifact_path).read_bytes()
     return Response(content=audio_bytes, media_type="audio/mpeg")
+
+
+# ─── CANONICAL WEB IMAGE RUNTIME ENDPOINTS (BOT-WEB-IMAGE-R1) ──────────
+
+@fastapi_app.post("/internal/v1/web-image/jobs")
+async def api_internal_web_image_jobs_create(request: Request):
+    """Canonical Bot Core Web Image job preparation & quote endpoint."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.web_image_runtime_service import (
+        FORBIDDEN_AUTHORITY_FIELDS_NORMALIZED,
+        prepare_web_image_job,
+        sanitize_image_job_projection,
+    )
+
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:
+        payload = {}
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    body_actor = str(payload.get("canonical_user_id") or payload.get("user_id") or "").strip()
+    actor_candidate = header_actor or body_actor
+    clean_actor = normalize_target_user_id(actor_candidate) if actor_candidate else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = "/internal/v1/web-image/jobs"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    # Strictly reject forbidden authority fields
+    for key in payload.keys():
+        norm = "".join(ch for ch in str(key).lower() if ch.isalnum())
+        if norm in FORBIDDEN_AUTHORITY_FIELDS_NORMALIZED:
+            return JSONResponse(
+                status_code=400,
+                content={"ok": False, "error_code": "FORBIDDEN_AUTHORITY_FIELD_REJECTED", "message": f"Forbidden field: {key}"},
+            )
+
+    try:
+        job, replayed = prepare_web_image_job(payload, int(clean_actor))
+    except ValueError as exc:
+        err_msg = str(exc)
+        code = err_msg.split(":", 1)[0].strip() if ":" in err_msg else "INVALID_INPUT"
+        if "IDEMPOTENCY_CONFLICT" in code:
+            return JSONResponse(status_code=409, content={"ok": False, "error_code": "IDEMPOTENCY_CONFLICT", "message": err_msg})
+        return JSONResponse(status_code=400, content={"ok": False, "error_code": code, "message": err_msg})
+    except PermissionError as exc:
+        return JSONResponse(status_code=403, content={"ok": False, "error_code": "CROSS_TENANT_IDEMPOTENCY_COLLISION", "message": str(exc)})
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"ok": False, "error_code": "INTERNAL_ERROR", "message": str(exc)})
+
+    sanitized = sanitize_image_job_projection(job)
+    return JSONResponse(status_code=200, content={"ok": True, "job": sanitized, "replayed": replayed})
+
+
+@fastapi_app.get("/internal/v1/web-image/jobs/{job_id}")
+async def api_internal_web_image_jobs_detail(job_id: str, request: Request):
+    """Canonical Bot Core Web Image job detail endpoint."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.web_image_runtime_service import (
+        get_web_image_job,
+        sanitize_image_job_projection,
+    )
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = f"/internal/v1/web-image/jobs/{job_id}"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path=path,
+        body_bytes=b"",
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    job = get_web_image_job(job_id, int(clean_actor))
+    if not job:
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error_code": "JOB_NOT_FOUND", "message": f"Job #{job_id} not found"},
+        )
+
+    sanitized = sanitize_image_job_projection(job)
+    return JSONResponse(status_code=200, content={"ok": True, "job": sanitized})
+
+
+@fastapi_app.get("/internal/v1/web-image/jobs")
+async def api_internal_web_image_jobs_list(request: Request):
+    """Canonical Bot Core Web Image list jobs endpoint for actor."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.web_image_runtime_service import (
+        list_web_image_jobs,
+        sanitize_image_job_projection,
+    )
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = "/internal/v1/web-image/jobs"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path=path,
+        body_bytes=b"",
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    jobs = list_web_image_jobs(int(clean_actor))
+    return JSONResponse(status_code=200, content={"ok": True, "jobs": [sanitize_image_job_projection(j) for j in jobs]})
+
+
+@fastapi_app.post("/internal/v1/web-image/jobs/{job_id}/confirm")
+async def api_internal_web_image_jobs_confirm(job_id: str, request: Request):
+    """Execute and confirm Web Image job with atomic claim, provider submission, and exact settlement."""
+    import base64
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.web_image_runtime_service import (
+        claim_web_image_job_for_execution,
+        get_web_image_job,
+        update_web_image_job_status,
+        sanitize_image_job_projection,
+        image_asset_storage_dir,
+        _utc_now,
+    )
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = f"/internal/v1/web-image/jobs/{job_id}/confirm"
+    raw_body = await request.body()
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    claimed, current_job = claim_web_image_job_for_execution(job_id, int(clean_actor))
+    if not current_job:
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error_code": "JOB_NOT_FOUND", "message": f"Job #{job_id} not found"},
+        )
+
+    if not claimed:
+        current_status = current_job.get("status")
+        if current_status == "completed":
+            return JSONResponse(status_code=200, content={"ok": True, "job": sanitize_image_job_projection(current_job)})
+        elif current_status == "processing":
+            return JSONResponse(
+                status_code=409,
+                content={"ok": False, "error_code": "CONCURRENT_CONFIRM_IN_PROGRESS", "message": "Job is currently being processed"},
+            )
+        else:
+            return JSONResponse(
+                status_code=409,
+                content={"ok": False, "error_code": "JOB_NOT_CLAIMABLE", "message": f"Job in status '{current_status}' cannot be confirmed"},
+            )
+
+    uid = int(clean_actor)
+    prompt = str(current_job.get("prompt") or "").strip()
+    tier = str(current_job.get("tier_key") or "standard").strip().lower()
+    aspect_ratio = str(current_job.get("aspect_ratio") or "1:1").strip()
+    model = str(globals().get("SHOPAIKEY_IMAGE_MODEL") or "nano-banana").strip()
+
+    try:
+        result = await shopaikey_image_generate(prompt, model, aspect_ratio=aspect_ratio, tier=tier)
+    except Exception as exc:
+        err_msg = str(exc)[:240]
+        update_web_image_job_status(job_id, "failed", status_reason=f"PROVIDER_EXCEPTION: {err_msg}")
+        return JSONResponse(status_code=503, content={"ok": False, "error_code": "PROVIDER_EXCEPTION", "message": err_msg})
+
+    status = str(result.get("status") or "FAIL")
+    if status == "PASS":
+        image_bytes = b""
+        if isinstance(result.get("image_bytes"), (bytes, bytearray)):
+            image_bytes = bytes(result["image_bytes"])
+        elif result.get("b64_json"):
+            try:
+                image_bytes = base64.b64decode(result["b64_json"])
+            except Exception:
+                image_bytes = b""
+
+        img_url = str(result.get("image_url") or "").strip()
+        # Fallback to download URL if bytes not provided directly
+        if not image_bytes and img_url:
+            try:
+                import httpx
+                async with httpx.AsyncClient(timeout=30.0) as http_client:
+                    img_resp = await http_client.get(img_url)
+                    if img_resp.status_code == 200:
+                        image_bytes = img_resp.content
+            except Exception:
+                pass
+
+        if not image_bytes or len(image_bytes) == 0:
+            update_web_image_job_status(job_id, "failed", status_reason="PROVIDER_NO_IMAGE_BYTES_DELIVERED")
+            return JSONResponse(status_code=422, content={"ok": False, "error_code": "PROVIDER_IMAGE_FAILED", "message": "Provider returned PASS but zero image bytes"})
+
+        out_path = str(image_asset_storage_dir() / f"web_image_{uid}_{job_id}.png")
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(out_path).write_bytes(image_bytes)
+
+        quote_xu = int(current_job.get("quote_xu") or 0)
+        settle_key = f"image_settle:{uid}:{job_id}"
+        charged = 0
+        if quote_xu > 0 and not is_admin_user(uid):
+            charge = spend_fixed_credit_idempotent_info(
+                uid,
+                quote_xu,
+                "web_image",
+                ref_id=settle_key,
+                note=f"job_id={job_id}; tier={tier}",
+            )
+            charged = int(charge.get("final_cost") or quote_xu) if charge.get("ok") else 0
+
+        updated_job = update_web_image_job_status(
+            job_id,
+            "completed",
+            status_reason="COMPLETED",
+            charged_xu=charged,
+            artifact_path=out_path,
+            artifact_bytes=len(image_bytes),
+            output_url=img_url or None,
+            settlement_status="settled" if charged > 0 or quote_xu == 0 else "unsettled",
+            provider_name="shopaikey_image",
+            completed_at=_utc_now(),
+        )
+        return JSONResponse(status_code=200, content={"ok": True, "job": sanitize_image_job_projection(updated_job or current_job)})
+
+    else:
+        err_msg = str(result.get("detail") or result.get("status") or "PROVIDER_IMAGE_REJECTED")
+        updated_job = update_web_image_job_status(
+            job_id,
+            "failed",
+            status_reason=err_msg[:240],
+            provider_name="shopaikey_image",
+            settlement_status="no_charge",
+        )
+        return JSONResponse(
+            status_code=422,
+            content={"ok": False, "error_code": "PROVIDER_IMAGE_FAILED", "message": err_msg, "job": sanitize_image_job_projection(updated_job or current_job)},
+        )
+
+
+@fastapi_app.get("/internal/v1/web-image/jobs/{job_id}/artifact")
+async def api_internal_web_image_jobs_artifact(job_id: str, request: Request):
+    """Serve verified image artifact for completed Web Image job."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.web_image_runtime_service import get_web_image_job
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = f"/internal/v1/web-image/jobs/{job_id}/artifact"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path=path,
+        body_bytes=b"",
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    job = get_web_image_job(job_id, int(clean_actor))
+    if not job or job.get("status") != "completed":
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error_code": "ARTIFACT_NOT_FOUND", "message": "Job not found or not yet completed"},
+        )
+
+    artifact_path = job.get("artifact_path")
+    if not artifact_path or not Path(artifact_path).exists():
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error_code": "ARTIFACT_FILE_MISSING", "message": "Image artifact missing"},
+        )
+
+    img_bytes = Path(artifact_path).read_bytes()
+    media_type = "image/png" if artifact_path.endswith(".png") else "image/jpeg"
+    return Response(content=img_bytes, media_type=media_type)
 
 
 # ─── ENTRY POINT ──────────────────────────────────────────────────────────────
