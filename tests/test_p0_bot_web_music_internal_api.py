@@ -304,8 +304,7 @@ def test_cross_account_tenant_isolation():
 
 # ─── TEST 8: ATOMIC CLAIM & CONFIRM SUBMISSION ────────────────────────────────
 
-@pytest.mark.asyncio
-async def test_confirm_job_execution_atomic_claim_and_provider_submit():
+def test_confirm_job_execution_atomic_claim_and_provider_submit():
     client = TestClient(bot.fastapi_app)
     path = "/internal/v1/web-music/jobs"
 
@@ -351,8 +350,7 @@ async def test_confirm_job_execution_atomic_claim_and_provider_submit():
 
 # ─── TEST 9: RECONCILE POLL, AUDIO VERIFICATION, AND EXACTLY-ONCE DEBIT ───────
 
-@pytest.mark.asyncio
-async def test_reconcile_poll_completes_with_audio_and_charges_exactly_once():
+def test_reconcile_poll_completes_with_audio_and_charges_exactly_once():
     client = TestClient(bot.fastapi_app)
     path = "/internal/v1/web-music/jobs"
 
