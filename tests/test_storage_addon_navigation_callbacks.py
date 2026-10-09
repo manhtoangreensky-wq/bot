@@ -42,7 +42,7 @@ def _source_function(name):
     return SOURCE[start.start():end]
 
 
-def _runtime():
+def _runtime(lang="vi"):
     screens = []
     routes = []
     tiers = [{"code": "test-tier", "addon_mb": 50, "amount_vnd": 10000}]
@@ -66,7 +66,9 @@ def _runtime():
         "normalize_user_language": lambda lang: lang,
         "storage_addon_tiers": lambda: tiers,
         "storage_addon_label": lambda _spec: "50MB",
-        "get_user_language": lambda _uid: "vi",
+        "get_user_language": lambda _uid: lang,
+        "user_ui_lang": lambda _uid: lang,
+        "ui_text": lambda lang, key, **_kwargs: f"{key}:{lang}",
         "safe_edit_or_send": render,
         "memory_storage_addon_text": lambda _lang: "Storage add-on menu",
         "time": time,
@@ -82,7 +84,9 @@ def _runtime():
         "set_storage_addon_pending",
         "get_storage_addon_pending",
         "clear_storage_addon_pending",
+        "storage_addon_expired_custom_text",
         "handle_storage_addon_callback",
+        "handle_storage_addon_pending_text",
     ):
         exec(compile(_source_function(name), f"bot.py:{name}", "exec"), scope)
 
@@ -146,6 +150,222 @@ class StorageAddonNavigationCallbacksTests(unittest.TestCase):
             ],
             [button.callback_data for button in menu_buttons],
         )
+
+    def test_expired_custom_amount_is_consumed_and_returns_to_storage_menu(self):
+        user_id = 90818
+        other_user_id = 90819
+        scope, _screens, callback, pattern = _runtime()
+        menu = scope["memory_storage_addon_keyboard"]("vi")
+        custom = next(
+            button
+            for row in menu.inline_keyboard
+            for button in row
+            if button.callback_data == "storage|custom"
+        )
+        _click(callback, pattern, custom.callback_data, user_id)
+
+        pending_key = scope["storage_addon_pending_key"](user_id)
+        scope["USER_PENDING"][pending_key]["created_at_ts"] = time.time() - 601
+        scope["set_storage_addon_pending"](other_user_id, "custom")
+
+        class _Message:
+            text = "150MB"
+
+            def __init__(self):
+                self.replies = []
+
+            async def reply_text(self, text, **kwargs):
+                self.replies.append((text, kwargs))
+
+        message = _Message()
+        update = SimpleNamespace(
+            message=message,
+            effective_user=SimpleNamespace(id=user_id),
+        )
+        async def _not_pending(*_args):
+            return False
+
+        scope.update(
+            Application=object,
+            telegram_message_idempotent=lambda handler: handler,
+            handle_state_reset_slash_command=_not_pending,
+            get_video_downloader_pending=lambda _uid: None,
+            handle_video_ai_edit_pending_text=_not_pending,
+            get_video_editor_pending=lambda _uid: None,
+            handle_video_editor_invalid_intake_text=_not_pending,
+            handle_video_editor_pending_text=_not_pending,
+            handle_video_editor_owned_text_fallback=_not_pending,
+            VideoEditorStateUnavailableError=type("VideoEditorStateUnavailableError", (Exception,), {}),
+            handle_broadcast_lite_pending_text=_not_pending,
+            get_video_dubbing_pending=lambda _uid: {},
+            VIDEO_DUBBING_PENDING_TEXT_STEPS=set(),
+            handle_video_dubbing_pending_text=_not_pending,
+            handle_manual_approval_pending_text=_not_pending,
+            handle_manual_topup_pending_text=_not_pending,
+            handle_local_video_planning_pending_text=_not_pending,
+            handle_free_hub_pending_text=_not_pending,
+            handle_translation_menu_pending_text=_not_pending,
+            handle_translation_session_text=_not_pending,
+            handle_finance_compliance_pending_text=_not_pending,
+            handle_feedback_pending_text=_not_pending,
+            handle_internal_archive_pending_text=_not_pending,
+            handle_doc_tool_pending_text=_not_pending,
+            handle_storyboard2_pending_text=_not_pending,
+            handle_video_uiflow3_pending_text=_not_pending,
+            handle_frame_video_pending_text=_not_pending,
+            handle_architecture_profile_pending_text=_not_pending,
+            handle_video_tail9_pending_text=_not_pending,
+            handle_video_profile_studio_pending_text=_not_pending,
+            handle_video_product_pending_text=_not_pending,
+            handle_memory_pending_text=lambda *_args: (_ for _ in ()).throw(
+                AssertionError("expired Storage input must be consumed before Memory")
+            ),
+        )
+        exec(compile(_source_function("handle_message"), "bot.py:handle_message", "exec"), scope)
+        context = SimpleNamespace(user_data={})
+        result = asyncio.run(scope["handle_message"](update, context))
+
+        self.assertIsNone(result)
+        self.assertNotIn(pending_key, scope["USER_PENDING"])
+        self.assertEqual(
+            scope["get_storage_addon_pending"](other_user_id)["pending_action"],
+            "custom",
+        )
+        self.assertEqual(len(message.replies), 1)
+        text, kwargs = message.replies[0]
+        self.assertEqual(
+            text,
+            "⏰ Yêu cầu nhập dung lượng tùy chỉnh đã hết hạn. Bot chưa trừ Xu.",
+        )
+        callbacks = [
+            button.callback_data
+            for row in kwargs["reply_markup"].inline_keyboard
+            for button in row
+        ]
+        self.assertIn("storage|custom", callbacks)
+        self.assertIn("menu|main_memory", callbacks)
+        self.assertIn("menu|main", callbacks)
+
+    def test_expired_storage_notice_is_localized_for_spanish(self):
+        user_id = 90822
+        scope, _screens, callback, pattern = _runtime("es")
+        _click(callback, pattern, "storage|custom", user_id)
+        pending_key = scope["storage_addon_pending_key"](user_id)
+        scope["USER_PENDING"][pending_key]["created_at_ts"] = time.time() - 601
+
+        class _Message:
+            text = "150MB"
+
+            def __init__(self):
+                self.replies = []
+
+            async def reply_text(self, text, **kwargs):
+                self.replies.append((text, kwargs))
+
+        message = _Message()
+        update = SimpleNamespace(
+            message=message,
+            effective_user=SimpleNamespace(id=user_id),
+        )
+        handled = asyncio.run(
+            scope["handle_storage_addon_pending_text"](update, SimpleNamespace())
+        )
+
+        self.assertTrue(handled)
+        self.assertEqual(
+            message.replies[0][0],
+            "⏰ La solicitud de almacenamiento personalizado ha caducado. "
+            "No se han descontado Xu.",
+        )
+
+    def test_expired_storage_notice_has_copy_for_all_supported_locales(self):
+        scope, _screens, _callback, _pattern = _runtime()
+        expected = {
+            "vi": "⏰ Yêu cầu nhập dung lượng tùy chỉnh đã hết hạn. Bot chưa trừ Xu.",
+            "en": "⏰ The custom storage request expired. The bot has not charged Xu.",
+            "zh": "⏰ 自定义存储请求已过期。本次未扣除 Xu。",
+            "es": "⏰ La solicitud de almacenamiento personalizado ha caducado. No se han descontado Xu.",
+            "pt": "⏰ A solicitação de armazenamento personalizado expirou. Nenhum Xu foi cobrado.",
+            "fr": "⏰ La demande de stockage personnalisé a expiré. Aucun Xu n’a été débité.",
+            "de": "⏰ Die Anfrage für benutzerdefinierten Speicher ist abgelaufen. Es wurden keine Xu abgezogen.",
+            "ja": "⏰ カスタムストレージのリクエストは期限切れです。Xuは差し引かれていません。",
+            "ko": "⏰ 사용자 지정 저장 공간 요청이 만료되었습니다. Xu는 차감되지 않았습니다.",
+            "hi": "⏰ कस्टम स्टोरेज अनुरोध की समय-सीमा समाप्त हो गई है। कोई Xu नहीं काटा गया है।",
+            "ar": "⏰ انتهت صلاحية طلب التخزين المخصص. لم يتم خصم أي Xu.",
+            "ru": "⏰ Срок действия запроса на дополнительное хранилище истёк. Xu не списаны.",
+            "tr": "⏰ Özel depolama isteğinin süresi doldu. Xu kesilmedi.",
+            "th": "⏰ คำขอพื้นที่จัดเก็บแบบกำหนดเองหมดอายุแล้ว ไม่มีการหัก Xu",
+            "fil": "⏰ Nag-expire na ang kahilingan para sa custom na storage. Walang Xu na ibinawas.",
+            "it": "⏰ La richiesta di spazio di archiviazione personalizzato è scaduta. Non è stato addebitato alcun Xu.",
+            "id": "⏰ Permintaan penyimpanan kustom telah kedaluwarsa. Tidak ada Xu yang dipotong.",
+        }
+        text_for_language = scope["storage_addon_expired_custom_text"]
+        self.assertEqual(
+            {lang: text_for_language(lang) for lang in expected},
+            expected,
+        )
+        self.assertEqual(text_for_language("unsupported"), expected["en"])
+
+    def test_active_custom_amount_still_reaches_confirmation(self):
+        user_id = 90821
+        scope, _screens, callback, pattern = _runtime()
+        _click(callback, pattern, "storage|custom", user_id)
+        scope["storage_addon_spec_from_custom"] = lambda value: {"addon_mb": value}
+        scope["memory_storage_addon_confirm_text"] = lambda spec, lang: (
+            f"confirm:{spec['addon_mb']}:{lang}"
+        )
+        scope["memory_storage_addon_confirm_keyboard"] = lambda *_args: _Markup([])
+
+        class _Message:
+            text = "150"
+
+            def __init__(self):
+                self.replies = []
+
+            async def reply_text(self, text, **kwargs):
+                self.replies.append((text, kwargs))
+
+        message = _Message()
+        update = SimpleNamespace(
+            message=message,
+            effective_user=SimpleNamespace(id=user_id),
+        )
+        handled = asyncio.run(
+            scope["handle_storage_addon_pending_text"](update, SimpleNamespace())
+        )
+
+        self.assertTrue(handled)
+        self.assertEqual(message.replies[0][0], "confirm:150:vi")
+        self.assertNotIn(scope["storage_addon_pending_key"](user_id), scope["USER_PENDING"])
+
+    def test_expired_custom_pending_does_not_swallow_slash_command(self):
+        user_id = 90820
+        scope, _screens, callback, pattern = _runtime()
+        _click(callback, pattern, "storage|custom", user_id)
+        pending_key = scope["storage_addon_pending_key"](user_id)
+        scope["USER_PENDING"][pending_key]["created_at_ts"] = time.time() - 601
+
+        class _Message:
+            text = "/start"
+
+            def __init__(self):
+                self.replies = []
+
+            async def reply_text(self, text, **kwargs):
+                self.replies.append((text, kwargs))
+
+        message = _Message()
+        update = SimpleNamespace(
+            message=message,
+            effective_user=SimpleNamespace(id=user_id),
+        )
+        handled = asyncio.run(
+            scope["handle_storage_addon_pending_text"](update, SimpleNamespace())
+        )
+
+        self.assertFalse(handled)
+        self.assertNotIn(pending_key, scope["USER_PENDING"])
+        self.assertEqual(message.replies, [])
 
 
 if __name__ == "__main__":

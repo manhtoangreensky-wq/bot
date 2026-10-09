@@ -130,6 +130,74 @@ def _registered_pattern(handler_name):
 
 
 class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
+    def test_public_and_admin_root_menus_keep_registered_routes_across_all_locales(self):
+        from services.pricing_guide_content import public_hub_copy
+
+        locale_start = re.search(r"(?m)^USER_LANGUAGE_ORDER\s*=", BOT_SOURCE)
+        self.assertIsNotNone(locale_start)
+        locale_end_match = re.search(
+            r"(?m)^[A-Z][A-Z0-9_]*\s*=", BOT_SOURCE[locale_start.end():]
+        )
+        self.assertIsNotNone(locale_end_match)
+        locale_end = locale_start.end() + locale_end_match.start()
+        locale_scope = {}
+        exec(
+            compile(BOT_SOURCE[locale_start.start():locale_end], "bot.py:USER_LANGUAGE_ORDER", "exec"),
+            locale_scope,
+        )
+
+        handlers = {
+            "freehub|": "handle_free_hub_callback",
+            "menu|": "handle_menu_callback",
+            "music_quick|": "handle_music_quick_callback",
+            "pricing|": "handle_pricing_callback",
+            "feedback|": "handle_feedback_callback",
+            "back_lang": "handle_language_callback",
+        }
+        callback_patterns = {
+            prefix: _registered_pattern(handler)
+            for prefix, handler in handlers.items()
+        }
+        copy_keys = (
+            "free_tools_label", "video_label", "image_label", "translation_label",
+            "audio_studio_label", "account_label", "topup_pricing_label",
+            "autopost_label", "chat_pro_label", "notes_docs_label", "support",
+            "guide_label", "feedback_label", "center", "change_language", "admin_label",
+        )
+
+        for is_admin in (False, True):
+            baseline_callbacks = None
+            for locale in locale_scope["USER_LANGUAGE_ORDER"]:
+                with self.subTest(is_admin=is_admin, locale=locale):
+                    dependencies = _main_menu_dependencies(is_admin, [])
+                    dependencies["public_hub_copy"] = public_hub_copy
+                    markup = _load_functions(
+                        "localized_main_menu_keyboard", **dependencies
+                    )["localized_main_menu_keyboard"](is_admin, locale)
+                    buttons = [button for row in markup.inline_keyboard for button in row]
+                    copy = public_hub_copy(locale)
+
+                    for key in copy_keys:
+                        self.assertTrue(copy.get(key, "").strip(), key)
+                        self.assertNotEqual(copy[key], key)
+                    self.assertTrue(all(button.text.strip() for button in buttons))
+
+                    callbacks = [button.callback_data for button in buttons if button.callback_data]
+                    if baseline_callbacks is None:
+                        baseline_callbacks = callbacks
+                    else:
+                        self.assertEqual(callbacks, baseline_callbacks)
+
+                    for callback_data in callbacks:
+                        self.assertLessEqual(len(callback_data.encode("utf-8")), 64)
+                        matching = next(
+                            (pattern for prefix, pattern in callback_patterns.items()
+                             if callback_data.startswith(prefix)),
+                            None,
+                        )
+                        self.assertIsNotNone(matching, callback_data)
+                        self.assertRegex(callback_data, matching)
+
     def test_public_main_menu_small_flow_callbacks_match_their_registered_handlers(self):
         dependencies = _main_menu_dependencies(False, [])
         namespace = _load_functions("localized_main_menu_keyboard", **dependencies)

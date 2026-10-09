@@ -188381,6 +188381,28 @@ def get_storage_addon_pending(user_id) -> dict | None:
 def clear_storage_addon_pending(user_id) -> bool:
     return USER_PENDING.pop(storage_addon_pending_key(user_id), None) is not None
 
+def storage_addon_expired_custom_text(lang: str = "vi") -> str:
+    lang = normalize_user_language(lang) or "vi"
+    return {
+        "vi": "⏰ Yêu cầu nhập dung lượng tùy chỉnh đã hết hạn. Bot chưa trừ Xu.",
+        "en": "⏰ The custom storage request expired. The bot has not charged Xu.",
+        "zh": "⏰ 自定义存储请求已过期。本次未扣除 Xu。",
+        "es": "⏰ La solicitud de almacenamiento personalizado ha caducado. No se han descontado Xu.",
+        "pt": "⏰ A solicitação de armazenamento personalizado expirou. Nenhum Xu foi cobrado.",
+        "fr": "⏰ La demande de stockage personnalisé a expiré. Aucun Xu n’a été débité.",
+        "de": "⏰ Die Anfrage für benutzerdefinierten Speicher ist abgelaufen. Es wurden keine Xu abgezogen.",
+        "ja": "⏰ カスタムストレージのリクエストは期限切れです。Xuは差し引かれていません。",
+        "ko": "⏰ 사용자 지정 저장 공간 요청이 만료되었습니다. Xu는 차감되지 않았습니다.",
+        "hi": "⏰ कस्टम स्टोरेज अनुरोध की समय-सीमा समाप्त हो गई है। कोई Xu नहीं काटा गया है।",
+        "ar": "⏰ انتهت صلاحية طلب التخزين المخصص. لم يتم خصم أي Xu.",
+        "ru": "⏰ Срок действия запроса на дополнительное хранилище истёк. Xu не списаны.",
+        "tr": "⏰ Özel depolama isteğinin süresi doldu. Xu kesilmedi.",
+        "th": "⏰ คำขอพื้นที่จัดเก็บแบบกำหนดเองหมดอายุแล้ว ไม่มีการหัก Xu",
+        "fil": "⏰ Nag-expire na ang kahilingan para sa custom na storage. Walang Xu na ibinawas.",
+        "it": "⏰ La richiesta di spazio di archiviazione personalizzato è scaduta. Non è stato addebitato alcun Xu.",
+        "id": "⏰ Permintaan penyimpanan kustom telah kedaluwarsa. Tidak ada Xu yang dipotong.",
+    }.get(lang, "⏰ The custom storage request expired. The bot has not charged Xu.")
+
 def make_payos_storage_description(spec: dict) -> str:
     addon_mb = max(0, int((spec or {}).get("addon_mb") or 0))
     return f"AASSTOR{addon_mb}MB"[:25] or "AASSTORAGE"
@@ -188564,10 +188586,24 @@ async def handle_storage_addon_pending_text(update: Update, context: ContextType
     if not update.message or not update.message.text or not update.effective_user:
         return False
     uid = update.effective_user.id
+    text = update.message.text.strip()
+    pending_key = storage_addon_pending_key(uid)
+    pending_before_expiry = USER_PENDING.get(pending_key)
     pending = get_storage_addon_pending(uid)
     if not pending:
+        if (
+            not text.startswith("/")
+            and isinstance(pending_before_expiry, dict)
+            and pending_before_expiry.get("pending_action") == "custom"
+            and pending_key not in USER_PENDING
+        ):
+            lang = user_ui_lang(uid)
+            await update.message.reply_text(
+                storage_addon_expired_custom_text(lang),
+                reply_markup=memory_storage_addon_keyboard(lang),
+            )
+            return True
         return False
-    text = update.message.text.strip()
     if text.startswith("/"):
         return False
     clear_storage_addon_pending(uid)
