@@ -810,7 +810,7 @@ def build_key4u_video_payload(request: VideoGenerationRequest, env: dict[str, st
 
 
 KLING_MODEL_SUPPORTED_I2V_DURATIONS: dict[str, set[int]] = {
-    "kling-v3": {5, 8, 10},
+    "kling-v3": {5, 8, 10, 15},
     "kling-3.0-turbo": {5, 10},
     "kling-v2-6": {5, 10},
     "kling-v2-5-turbo": {5, 10},
