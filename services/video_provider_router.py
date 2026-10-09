@@ -2483,6 +2483,252 @@ def _product_video_attempt_clip_valid(attempt: dict[str, Any]) -> bool:
     )
 
 
+def _product_video_attempt_model(attempt: dict[str, Any]) -> str:
+    return str(
+        attempt.get("model")
+        or attempt.get("provider_model")
+        or attempt.get("selected_model")
+        or attempt.get("kling_model")
+        or ""
+    ).strip().lower()
+
+
+def _product_video_attempt_product_type(attempt: dict[str, Any]) -> str:
+    return str(
+        attempt.get("product_type")
+        or attempt.get("product_family")
+        or attempt.get("service_type")
+        or ""
+    ).strip().lower()
+
+
+def _product_video_attempt_duration_seconds(attempt: dict[str, Any]) -> int:
+    for key in (
+        "duration_seconds",
+        "scene_duration_seconds",
+        "scene_seconds",
+        "duration",
+        "seconds_per_scene",
+        "seconds",
+    ):
+        try:
+            val = int(float(attempt.get(key) or 0))
+            if val > 0:
+                return val
+        except Exception:
+            continue
+    return 0
+
+
+R05A_CANONICAL_PRODUCT_TYPE: str = "self_shot_scene_change"
+R05A_CANONICAL_PROVIDER: str = "key4u_video"
+R05A_CANONICAL_MODEL: str = "kling-v3"
+R05A_CANONICAL_DURATION_SECONDS: int = 15
+R05A_KEY4U_KLING_V3_15S_IN_PROGRESS_STALL_SECONDS: int = 480
+R05A_KEY4U_KLING_V3_15S_TOTAL_SCENE_TIMEOUT_SECONDS: int = 600
+DEFAULT_PRODUCT_VIDEO_IN_PROGRESS_STALL_SECONDS: int = 300
+
+
+def is_r05a_kling_v3_15s_tuple(
+    job: dict[str, Any] | None = None,
+    scene_task: dict[str, Any] | None = None,
+    attempt: dict[str, Any] | None = None,
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+    product_type: str | None = None,
+    duration_seconds: int | float | None = None,
+) -> bool:
+    """Deterministically check if runtime evidence matches the exact canonical R05A tuple:
+    - product_type: self_shot_scene_change
+    - provider: key4u_video (or key4u)
+    - model: kling-v3
+    - duration_seconds: 15
+    """
+    job = dict(job or {})
+    scene_task = dict(scene_task or {})
+    attempt = dict(attempt or {})
+
+    # 1. Resolve Provider
+    resolved_provider = str(
+        provider
+        or scene_task.get("provider")
+        or scene_task.get("selected_provider")
+        or scene_task.get("provider_key")
+        or _product_video_attempt_provider(attempt)
+        or job.get("provider")
+        or job.get("primary_provider")
+        or job.get("selected_provider")
+        or job.get("current_provider")
+        or job.get("provider_key")
+        or ""
+    ).strip().lower()
+
+    # 2. Resolve Model
+    resolved_model = str(
+        model
+        or scene_task.get("model")
+        or scene_task.get("provider_model")
+        or scene_task.get("selected_model")
+        or scene_task.get("kling_model")
+        or _product_video_attempt_model(attempt)
+        or job.get("model")
+        or job.get("provider_model")
+        or job.get("selected_model")
+        or job.get("kling_model")
+        or ""
+    ).strip().lower()
+
+    # 3. Resolve Product Type
+    resolved_product = str(
+        product_type
+        or scene_task.get("product_type")
+        or scene_task.get("product_family")
+        or _product_video_attempt_product_type(attempt)
+        or job.get("product_type")
+        or job.get("product_family")
+        or job.get("service_type")
+        or ""
+    ).strip().lower()
+
+    # 4. Resolve Duration
+    resolved_duration = 0
+    if duration_seconds is not None:
+        try:
+            resolved_duration = int(float(duration_seconds or 0))
+        except Exception:
+            resolved_duration = 0
+
+    if resolved_duration <= 0:
+        for src in (scene_task, attempt, job):
+            if not src:
+                continue
+            for k in (
+                "duration_seconds",
+                "scene_duration_seconds",
+                "scene_seconds",
+                "duration",
+                "seconds_per_scene",
+                "seconds",
+            ):
+                try:
+                    val = int(float(src.get(k) or 0))
+                    if val > 0:
+                        resolved_duration = val
+                        break
+                except Exception:
+                    continue
+            if resolved_duration > 0:
+                break
+
+    # If duration was not explicit, check if tier is 700 for self_shot_scene_change
+    if resolved_duration <= 0 and resolved_product == R05A_CANONICAL_PRODUCT_TYPE:
+        tier_val = 0
+        for src in (scene_task, attempt, job):
+            if not src:
+                continue
+            for k in ("quality_tier", "tier", "selected_tier"):
+                try:
+                    val = int(float(src.get(k) or 0))
+                    if val > 0:
+                        tier_val = val
+                        break
+                except Exception:
+                    continue
+            if tier_val > 0:
+                break
+        if tier_val == 700:
+            resolved_duration = 15
+
+    provider_match = resolved_provider in {R05A_CANONICAL_PROVIDER, "key4u"}
+    model_match = resolved_model == R05A_CANONICAL_MODEL
+    product_match = resolved_product == R05A_CANONICAL_PRODUCT_TYPE
+    duration_match = resolved_duration == R05A_CANONICAL_DURATION_SECONDS
+
+    return bool(provider_match and model_match and product_match and duration_match)
+
+
+def resolve_product_video_in_progress_stall_threshold(
+    job: dict[str, Any] | None = None,
+    scene_task: dict[str, Any] | None = None,
+    attempt: dict[str, Any] | None = None,
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+    product_type: str | None = None,
+    duration_seconds: int | float | None = None,
+    environ: dict[str, str] | None = None,
+    default_seconds: int = DEFAULT_PRODUCT_VIDEO_IN_PROGRESS_STALL_SECONDS,
+) -> int:
+    env = dict(environ or os.environ)
+    if is_r05a_kling_v3_15s_tuple(
+        job=job,
+        scene_task=scene_task,
+        attempt=attempt,
+        provider=provider,
+        model=model,
+        product_type=product_type,
+        duration_seconds=duration_seconds,
+    ):
+        # Exact R05A tuple deterministically locks to canonical 480s budget
+        # Neither specific nor generic env overrides are allowed to shrink or widen it
+        return R05A_KEY4U_KLING_V3_15S_IN_PROGRESS_STALL_SECONDS
+
+    # Baseline for all other workloads
+    baseline_env = env.get("VIDEO_PROVIDER_IN_PROGRESS_STALL_SECONDS") or env.get("PRODUCT_VIDEO_SCENE_RUNNING_WITHOUT_RESULT_GRACE_SECONDS")
+    if baseline_env:
+        try:
+            val = int(baseline_env)
+            if val > 0:
+                return max(60, val)
+        except Exception:
+            pass
+    return max(60, int(default_seconds or DEFAULT_PRODUCT_VIDEO_IN_PROGRESS_STALL_SECONDS))
+
+
+def resolve_product_video_total_scene_timeout_threshold(
+    job: dict[str, Any] | None = None,
+    scene_task: dict[str, Any] | None = None,
+    attempt: dict[str, Any] | None = None,
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+    product_type: str | None = None,
+    duration_seconds: int | float | None = None,
+    environ: dict[str, str] | None = None,
+    default_seconds: int = 600,
+    running_threshold: int | None = None,
+) -> int:
+    env = dict(environ or os.environ)
+    if is_r05a_kling_v3_15s_tuple(
+        job=job,
+        scene_task=scene_task,
+        attempt=attempt,
+        provider=provider,
+        model=model,
+        product_type=product_type,
+        duration_seconds=duration_seconds,
+    ):
+        # Exact R05A tuple deterministically locks to canonical 600s hard total ceiling
+        # Env overrides cannot widen or shrink this ceiling
+        return R05A_KEY4U_KLING_V3_15S_TOTAL_SCENE_TIMEOUT_SECONDS
+
+    # Baseline for all other workloads
+    baseline_env = env.get("PRODUCT_VIDEO_TOTAL_SCENE_TIMEOUT_SECONDS")
+    base_val = 0
+    if baseline_env:
+        try:
+            base_val = int(baseline_env)
+        except Exception:
+            base_val = 0
+    if base_val <= 0:
+        base_val = int(default_seconds or 600)
+
+    if running_threshold is not None and running_threshold > 0:
+        return max(running_threshold, base_val)
+    return max(60, base_val)
+
+
 def product_video_provider_public_degradation(
     provider: str,
     attempts: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None,
@@ -2618,6 +2864,13 @@ def product_video_provider_public_degradation(
             int(state.get("progress_last_changed_elapsed") or 0),
             progress_stall_elapsed,
         )
+        attempt_stall_threshold = resolve_product_video_in_progress_stall_threshold(
+            attempt=attempt,
+            provider=attempt_provider,
+            environ=env,
+            default_seconds=in_progress_stall_seconds,
+        )
+        state["in_progress_stall_threshold"] = attempt_stall_threshold
         state["in_progress_stalled"] = bool(
             state.get("in_progress_stalled")
             or (
@@ -2625,7 +2878,7 @@ def product_video_provider_public_degradation(
                 and not state.get("valid_scene")
                 and not state.get("result_url_present")
                 and int(state.get("artifact_size") or 0) <= 0
-                and progress_stall_elapsed >= in_progress_stall_seconds
+                and progress_stall_elapsed >= attempt_stall_threshold
             )
         )
         state["not_start_stalled"] = bool(
