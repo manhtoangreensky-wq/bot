@@ -52,6 +52,9 @@ from services.video_provider_router import (
     product_video_route_contract,
     provider_status_payload,
     run_provider_generation,
+    R05A_KEY4U_KLING_V3_15S_IN_PROGRESS_STALL_SECONDS as ROUTER_R05A_KEY4U_KLING_V3_15S_IN_PROGRESS_STALL_SECONDS,
+    is_r05a_kling_v3_15s_tuple,
+    resolve_product_video_in_progress_stall_threshold,
 )
 from services.video_provider_catalog import (
     model_interface_contract,
@@ -155,6 +158,7 @@ PROVIDER_PENDING_STATUS_MARKERS = {
 DEFAULT_PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS = 20 * 60
 DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS = 60
 DEFAULT_PRODUCT_VIDEO_SCENE_RUNNING_WITHOUT_RESULT_GRACE_SECONDS = 300
+R05A_KEY4U_KLING_V3_15S_IN_PROGRESS_STALL_SECONDS = 480
 DEFAULT_PRODUCT_VIDEO_TOTAL_SCENE_TIMEOUT_SECONDS = 600
 PRODUCT_VIDEO_PROVIDER_STALLED_NOT_START = "provider_stalled_not_start"
 
@@ -1696,16 +1700,29 @@ def _scene_task_elapsed_seconds(item: dict | None = None, job: dict | None = Non
     return max(values) if values else 0
 
 
-def _product_video_in_progress_stall_threshold() -> int:
-    return max(
-        60,
-        _env_int(
-            "VIDEO_PROVIDER_IN_PROGRESS_STALL_SECONDS",
-            _env_int(
-                "PRODUCT_VIDEO_SCENE_RUNNING_WITHOUT_RESULT_GRACE_SECONDS",
-                DEFAULT_PRODUCT_VIDEO_SCENE_RUNNING_WITHOUT_RESULT_GRACE_SECONDS,
-            ),
-        ),
+def _product_video_in_progress_stall_threshold(
+    job: dict[str, Any] | None = None,
+    scene_task: dict[str, Any] | None = None,
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+    product_type: str | None = None,
+    duration_seconds: int | float | None = None,
+) -> int:
+    resolved_duration = duration_seconds
+    if resolved_duration is None and job:
+        try:
+            resolved_duration = _product_video_scene_seconds(job)
+        except Exception:
+            resolved_duration = None
+    return resolve_product_video_in_progress_stall_threshold(
+        job=job,
+        scene_task=scene_task,
+        provider=provider,
+        model=model,
+        product_type=product_type,
+        duration_seconds=resolved_duration,
+        default_seconds=DEFAULT_PRODUCT_VIDEO_SCENE_RUNNING_WITHOUT_RESULT_GRACE_SECONDS,
     )
 
 
@@ -1775,7 +1792,7 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
     progress = _scene_task_progress_number(scene_task)
     elapsed = _scene_task_elapsed_seconds(scene_task, job)
     not_start_threshold, not_start_threshold_source = _product_video_not_start_threshold()
-    running_threshold = max(not_start_threshold, _product_video_in_progress_stall_threshold())
+    running_threshold = max(not_start_threshold, _product_video_in_progress_stall_threshold(job=job, scene_task=scene_task))
     total_threshold = max(
         running_threshold,
         _env_int("PRODUCT_VIDEO_TOTAL_SCENE_TIMEOUT_SECONDS", DEFAULT_PRODUCT_VIDEO_TOTAL_SCENE_TIMEOUT_SECONDS),
