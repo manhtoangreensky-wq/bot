@@ -52,9 +52,11 @@ from services.video_provider_router import (
     product_video_route_contract,
     provider_status_payload,
     run_provider_generation,
-    R05A_KEY4U_KLING_V3_15S_IN_PROGRESS_STALL_SECONDS as ROUTER_R05A_KEY4U_KLING_V3_15S_IN_PROGRESS_STALL_SECONDS,
+    R05A_KEY4U_KLING_V3_15S_IN_PROGRESS_STALL_SECONDS,
+    R05A_KEY4U_KLING_V3_15S_TOTAL_SCENE_TIMEOUT_SECONDS,
     is_r05a_kling_v3_15s_tuple,
     resolve_product_video_in_progress_stall_threshold,
+    resolve_product_video_total_scene_timeout_threshold,
 )
 from services.video_provider_catalog import (
     model_interface_contract,
@@ -158,7 +160,6 @@ PROVIDER_PENDING_STATUS_MARKERS = {
 DEFAULT_PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS = 20 * 60
 DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS = 60
 DEFAULT_PRODUCT_VIDEO_SCENE_RUNNING_WITHOUT_RESULT_GRACE_SECONDS = 300
-R05A_KEY4U_KLING_V3_15S_IN_PROGRESS_STALL_SECONDS = 480
 DEFAULT_PRODUCT_VIDEO_TOTAL_SCENE_TIMEOUT_SECONDS = 600
 PRODUCT_VIDEO_PROVIDER_STALLED_NOT_START = "provider_stalled_not_start"
 
@@ -1726,6 +1727,34 @@ def _product_video_in_progress_stall_threshold(
     )
 
 
+def _product_video_total_scene_timeout_threshold(
+    job: dict[str, Any] | None = None,
+    scene_task: dict[str, Any] | None = None,
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+    product_type: str | None = None,
+    duration_seconds: int | float | None = None,
+    running_threshold: int | None = None,
+) -> int:
+    resolved_duration = duration_seconds
+    if resolved_duration is None and job:
+        try:
+            resolved_duration = _product_video_scene_seconds(job)
+        except Exception:
+            resolved_duration = None
+    return resolve_product_video_total_scene_timeout_threshold(
+        job=job,
+        scene_task=scene_task,
+        provider=provider,
+        model=model,
+        product_type=product_type,
+        duration_seconds=resolved_duration,
+        default_seconds=DEFAULT_PRODUCT_VIDEO_TOTAL_SCENE_TIMEOUT_SECONDS,
+        running_threshold=running_threshold,
+    )
+
+
 def product_video_scene_fallback_idempotency_key(job_id: Any, scene_index: int, fallback_provider: str) -> str:
     return hashlib.sha256(
         f"{str(job_id or '').strip()}|{max(1, _safe_int(scene_index, 1))}|{str(fallback_provider or '').strip()}|product_video_scene_fallback_once".encode("utf-8")
@@ -1792,11 +1821,17 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
     progress = _scene_task_progress_number(scene_task)
     elapsed = _scene_task_elapsed_seconds(scene_task, job)
     not_start_threshold, not_start_threshold_source = _product_video_not_start_threshold()
-    running_threshold = max(not_start_threshold, _product_video_in_progress_stall_threshold(job=job, scene_task=scene_task))
-    total_threshold = max(
-        running_threshold,
-        _env_int("PRODUCT_VIDEO_TOTAL_SCENE_TIMEOUT_SECONDS", DEFAULT_PRODUCT_VIDEO_TOTAL_SCENE_TIMEOUT_SECONDS),
-    )
+    is_r05a = is_r05a_kling_v3_15s_tuple(job=job, scene_task=scene_task)
+    if is_r05a:
+        running_threshold = R05A_KEY4U_KLING_V3_15S_IN_PROGRESS_STALL_SECONDS
+        total_threshold = R05A_KEY4U_KLING_V3_15S_TOTAL_SCENE_TIMEOUT_SECONDS
+    else:
+        running_threshold = max(not_start_threshold, _product_video_in_progress_stall_threshold(job=job, scene_task=scene_task))
+        total_threshold = _product_video_total_scene_timeout_threshold(
+            job=job,
+            scene_task=scene_task,
+            running_threshold=running_threshold,
+        )
     result_url_valid = bool(
         scene_task.get("result_url_valid")
         or scene_task.get("download_url_present")
@@ -1828,7 +1863,10 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
     progress_changed_elapsed, progress_changed_source, progress_changed_at = _scene_task_progress_last_changed_elapsed(scene_task, job, elapsed)
     provider_progress_stuck = bool(running_active and not result_url_valid and progress_changed_elapsed >= running_threshold)
     running_stalled = bool(running_active and not result_url_valid and elapsed >= running_threshold and provider_progress_stuck)
-    timed_out = bool(_scene_task_has_provider_id(scene_task) and not result_url_valid and elapsed >= total_threshold)
+    if is_r05a:
+        timed_out = bool(not result_url_valid and elapsed >= total_threshold)
+    else:
+        timed_out = bool(_scene_task_has_provider_id(scene_task) and not result_url_valid and elapsed >= total_threshold)
     stalled = bool(not_start_stalled or running_stalled or timed_out)
     fallback_count = _safe_int(scene_task.get("fallback_count") or scene_task.get("provider_fallback_count"), 0)
     replacement = product_video_controlled_replacement_authorization_context(
@@ -2014,7 +2052,7 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         fallback_block_reason = ""
     fallbackable_blocker = bool(stalled or replacement_taskless_selected)
     fallback_eligibility_reason = "eligible" if fallback_allowed else fallback_block_reason
-    threshold = not_start_threshold if is_not_start else (running_threshold if running_stalled else total_threshold)
+    threshold = not_start_threshold if is_not_start else (total_threshold if timed_out else (running_threshold if running_stalled else total_threshold))
     fallback_provider = str((fallback_chain or [""])[0] or "")
     if fallback_provider and replacement_scene_authorized:
         fallback_idempotency_key = product_video_scene_replacement_idempotency_key(
@@ -2063,6 +2101,8 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         ),
         "fallback_due_to_in_progress_stall": bool(running_stalled and fallback_allowed),
         "scene_total_timeout": bool(timed_out),
+        "timed_out": bool(timed_out),
+        "total_timeout_threshold": total_threshold,
         "fallback_scene_index": max(1, _safe_int(scene_index, 1)) if (stalled or replacement_taskless_selected) else 0,
         "fallback_allowed": fallback_allowed,
         "automatic_fallback_forbidden": automatic_fallback_forbidden,

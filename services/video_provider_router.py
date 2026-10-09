@@ -2525,6 +2525,7 @@ R05A_CANONICAL_PROVIDER: str = "key4u_video"
 R05A_CANONICAL_MODEL: str = "kling-v3"
 R05A_CANONICAL_DURATION_SECONDS: int = 15
 R05A_KEY4U_KLING_V3_15S_IN_PROGRESS_STALL_SECONDS: int = 480
+R05A_KEY4U_KLING_V3_15S_TOTAL_SCENE_TIMEOUT_SECONDS: int = 600
 DEFAULT_PRODUCT_VIDEO_IN_PROGRESS_STALL_SECONDS: int = 300
 
 
@@ -2669,22 +2670,8 @@ def resolve_product_video_in_progress_stall_threshold(
         product_type=product_type,
         duration_seconds=duration_seconds,
     ):
-        r05a_override = env.get("R05A_KEY4U_KLING_V3_15S_IN_PROGRESS_STALL_SECONDS") or env.get("VIDEO_PROVIDER_KEY4U_KLING_V3_15S_IN_PROGRESS_STALL_SECONDS")
-        if r05a_override:
-            try:
-                val = int(r05a_override)
-                if val > 0:
-                    return val
-            except Exception:
-                pass
-        base_override = env.get("VIDEO_PROVIDER_IN_PROGRESS_STALL_SECONDS") or env.get("PRODUCT_VIDEO_SCENE_RUNNING_WITHOUT_RESULT_GRACE_SECONDS")
-        if base_override:
-            try:
-                val = int(base_override)
-                if val > R05A_KEY4U_KLING_V3_15S_IN_PROGRESS_STALL_SECONDS:
-                    return val
-            except Exception:
-                pass
+        # Exact R05A tuple deterministically locks to canonical 480s budget
+        # Neither specific nor generic env overrides are allowed to shrink or widen it
         return R05A_KEY4U_KLING_V3_15S_IN_PROGRESS_STALL_SECONDS
 
     # Baseline for all other workloads
@@ -2697,6 +2684,49 @@ def resolve_product_video_in_progress_stall_threshold(
         except Exception:
             pass
     return max(60, int(default_seconds or DEFAULT_PRODUCT_VIDEO_IN_PROGRESS_STALL_SECONDS))
+
+
+def resolve_product_video_total_scene_timeout_threshold(
+    job: dict[str, Any] | None = None,
+    scene_task: dict[str, Any] | None = None,
+    attempt: dict[str, Any] | None = None,
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+    product_type: str | None = None,
+    duration_seconds: int | float | None = None,
+    environ: dict[str, str] | None = None,
+    default_seconds: int = 600,
+    running_threshold: int | None = None,
+) -> int:
+    env = dict(environ or os.environ)
+    if is_r05a_kling_v3_15s_tuple(
+        job=job,
+        scene_task=scene_task,
+        attempt=attempt,
+        provider=provider,
+        model=model,
+        product_type=product_type,
+        duration_seconds=duration_seconds,
+    ):
+        # Exact R05A tuple deterministically locks to canonical 600s hard total ceiling
+        # Env overrides cannot widen or shrink this ceiling
+        return R05A_KEY4U_KLING_V3_15S_TOTAL_SCENE_TIMEOUT_SECONDS
+
+    # Baseline for all other workloads
+    baseline_env = env.get("PRODUCT_VIDEO_TOTAL_SCENE_TIMEOUT_SECONDS")
+    base_val = 0
+    if baseline_env:
+        try:
+            base_val = int(baseline_env)
+        except Exception:
+            base_val = 0
+    if base_val <= 0:
+        base_val = int(default_seconds or 600)
+
+    if running_threshold is not None and running_threshold > 0:
+        return max(running_threshold, base_val)
+    return max(60, base_val)
 
 
 def product_video_provider_public_degradation(
