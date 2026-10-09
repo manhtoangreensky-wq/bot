@@ -324,3 +324,51 @@ def test_case_o_unmapped_model_fails_closed(tmp_path: Path):
         assert result.raw.get("no_charge") is True
         assert result.raw.get("poll_allowed") is False
         assert mock_urlopen.call_count == 0
+
+
+# ===========================================================================
+# N19I — Kling V3 15s Wire Duration Contract Tests (R16_10B14N19I)
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# P. kling-v3 duration 15 accepted (RED before fix, GREEN after fix)
+# ---------------------------------------------------------------------------
+def test_case_p_kling_v3_duration_15_accepted(tmp_path: Path):
+    """Canonical R05A Tier 700 scene duration must pass through for kling-v3."""
+    img = _make_dummy_image(tmp_path / "img15.png")
+    payload = _dummy_i2v_payload(str(img), model_name="kling-v3", duration=15)
+    wire = vgp._key4u_wire_payload(payload, submit_url="https://api.key4u.vn/kling/v1/videos/image2video")
+    assert wire["duration"] == 15
+
+
+# ---------------------------------------------------------------------------
+# Q. kling-v3 unsupported duration 16 fails closed
+# ---------------------------------------------------------------------------
+def test_case_q_kling_v3_duration_16_fails_closed(tmp_path: Path):
+    img = _make_dummy_image(tmp_path / "img16.png")
+    payload = _dummy_i2v_payload(str(img), model_name="kling-v3", duration=16)
+    with pytest.raises(VideoProviderContractError) as exc_info:
+        vgp._key4u_wire_payload(payload, submit_url="https://api.key4u.vn/kling/v1/videos/image2video")
+    assert exc_info.value.blocker == "provider_duration_unsupported_no_charge"
+    assert exc_info.value.debug.get("no_charge") is True
+
+
+# ---------------------------------------------------------------------------
+# R. Other Kling models reject duration 15 (isolation guard)
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("model_name", [
+    "kling-3.0-turbo",
+    "kling-v2-6",
+    "kling-v2-5-turbo",
+    "kling-v2-5-pro",
+    "kling-v2-1",
+])
+def test_case_r_other_kling_models_reject_duration_15(tmp_path: Path, model_name: str):
+    """Duration 15 must NOT be accepted for any Kling model except kling-v3."""
+    img = _make_dummy_image(tmp_path / "img_other15.png")
+    payload = _dummy_i2v_payload(str(img), model_name=model_name, duration=15)
+    with pytest.raises(VideoProviderContractError) as exc_info:
+        vgp._key4u_wire_payload(payload, submit_url="https://api.key4u.vn/kling/v1/videos/image2video")
+    assert exc_info.value.blocker == "provider_duration_unsupported_no_charge"
+    assert exc_info.value.debug.get("no_charge") is True
