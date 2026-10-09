@@ -5,14 +5,14 @@ base_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
 objective: >-
   Continue the ordered Telegram small-flow audit. Fix wrong callback/Back routes
   narrowly while protecting AutoPost WIP and stable product engines.
-current_spec: S12.35.146-a7-anonymous-callback-log-recheck
-current_branch: audit/telegram-ui-navigation-fix-20261008
-current_base_sha: 9835b432464c4ccd94fe43690d41b6500c75eb7b
+current_spec: A7-callback-latency-final-recheck
+current_branch: audit/storage-addon-expiry-20261009
+current_base_sha: 4dc0c31bab44d2c0427a7d4ab38b28b1e72693ec
 release_cadence: >-
   Keep the remaining specs on one batch branch. Do not create a PR, merge, deploy,
   or restart per spec; complete the ordered checklist and final CI first, then
   deliver one batch PR and one merge/deploy cycle with runtime verification.
-branch: audit/telegram-ui-navigation-fix-20261008
+branch: audit/storage-addon-expiry-20261009
 allowed_scope:
   - Checklist-ordered small-flow emitted-control, callback, pending-state and UI evidence with inert fixtures
   - Narrow fixes only after a reproducible UX/callback/pending failure; no speculative edits
@@ -2444,6 +2444,50 @@ verification:
     search state. Archive unittest set Ran 11 tests — OK; Search Home focused method
     Ran 1 test — OK; full root/menu module Ran 51 tests in 22.448s — OK. No
     search/database/document/provider/wallet/Telegram action.
+  S12_35_147_storage_addon_expired_custom_input_20261009: >-
+    On the baseline, the real TTL getter removed the expired `storage|custom` state,
+    after which `handle_storage_addon_pending_text` returned False and allowed
+    `handle_message` to continue to later pending/text handlers. The focused RED
+    assertion failed at `handled is True` as expected. The minimal fix snapshots only
+    that user's pending record before the getter; expired non-command custom input
+    receives `common.expired_not_charged` plus the Storage Add-on keyboard and is
+    consumed, while slash commands still fall through and active custom input still
+    reaches its existing confirmation path. Final source-extracted suite:
+    Latest rerun: `Ran 6 tests in 8.682s — OK`; it covers emitted Back/registered menu route,
+    expiry consumption/localized menu, isolation of another user's pending state,
+    localized expiry copy for all 17 supported locales (including a Spanish
+    handler-level assertion), slash-command fall-through, active confirmation, and
+    the actual source-extracted `handle_message` chain with inert neighboring
+    handlers, proving Storage consumes the text before Memory is reached. Changed test module py_compile and
+    git diff --check exited 0. Full bot.py local compile is NOT_VERIFIED and remains
+    a consolidated CI gate. No purchase/payment, wallet, provider, DB, real Telegram,
+    job, protected engine, AutoPost, deploy, worker sync, or restart side effect.
+  S12_35_148_public_root_menu_locale_callback_reconciliation_20261009: >-
+    Read-only audit of the actual `localized_main_menu_keyboard` plus
+    `services.pricing_guide_content.public_hub_copy` across every locale in the
+    production `USER_LANGUAGE_ORDER` and both public/admin modes. The new root-menu
+    regression proves required customer-facing label copy exists and is not a raw key,
+    every button has text, callbacks match the same baseline set/order across all 17
+    locales, each callback matches its actual handler registration, and callback data
+    stays within 64 UTF-8 bytes. Focused test: 1 test in 1.883s — OK. The complete
+    CI-listed root/menu module ran `Ran 41 tests in 20.707s — OK`. No production
+    change, language preference write, Telegram delivery, AutoPost action, product
+    engine, provider, wallet, database, job, deployment, or restart. This does not
+    prove translated copy quality or real-client rendering/viewport behavior.
+  S12_35_149_admin_handbook_root_section_dispatch_20261009: >-
+    The actual Admin Handbook keyboard emits eight section callbacks (`xu`, `payment`,
+    `refund`, `freeze`, `backup`, `runtime`, `sales`, `roles`). All eight were checked
+    against the exact registered admin_help pattern and dispatched through the
+    source-extracted `handle_admin_help_callback` with an authorized fixture user.
+    Each produced exactly one normal ACK, the corresponding production handbook text
+    and production section keyboard. Each emitted handbook Back, Admin, and Home
+    destination matched the registered Menu callback pattern; every visible label
+    was matched to its intended section. The CI-listed module reported
+    `Ran 6 tests in 2.840s — OK`. An initial fixture assertion compared
+    distinct markup object identities and failed during test setup; replacing that
+    with a comparison of actual emitted labels/callback values made the focused
+    test pass; no product defect was indicated. No finance/provider/RBAC, Xu,
+    backup, DB, message, deployment or restart operation.
   final_ui_pytest_20261008: "41 CI-configured safe UI modules: 218 passed, 355 subtests passed in 589.44s; --noconftest avoids unrelated legacy autouse runtime import; NO_BOT_RUNTIME_IMPORTED"
   final_bot_compile_20261008: "Current bot blob be492b669138370639318763ce4436411b7bcc8f: python -B -S -m py_compile bot.py exit 0, FINAL_BOT_PY_COMPILE_OK"
   final_scope_comparator_20261008: "PROTECTED_SCOPE_COMPARATOR_PASS changed_ui_blocks=23 unchanged_declaration_blocks=9742; no changes under protected service/provider/engine/worker/config files"
@@ -2792,12 +2836,23 @@ latest_runtime_delivery_gate_20261009_0425: >-
   at 04:25:05 +07. This clears the old #1409/#1412 runtime hold. The local UI WIP
   is still unpushed; after one rebase to this main, prove the outgoing diff excludes
   services/providers/workers/engines and other protected behavior before CI/delivery.
+latest_runtime_delivery_gate_after_pr1415: >-
+  PR #1415 is merged at `4dc0c31bab44d2c0427a7d4ab38b28b1e72693ec`; deploy workflow
+  run 37849493306 succeeded with `deploy_workers=false`. Readback recorded GitHub
+  main and VPS bot at the merge SHA; bot/web/nginx and checked workers active with
+  NRestarts=0 and internal health status=ok. Evidence/comment:
+  https://github.com/manhtoangreensky-wq/bot/pull/1415#issuecomment-6069784833.
+  Account Back 2–3s remains uncorrelated; no callback timing event was available in
+  the post-deploy window. This supersedes the preceding 96dd9020 delivery snapshot.
 blockers:
-  - UI batch is still local and undelivered: current main/runtime are both 96dd90201a89465555871276cf687fdebfff8cb0. Finish the final ordered safe checklist and diff comparator, commit only task files, rebase once onto this SHA, then require CI/source-compile/YAML validation before the single PR/merge/bot-only-deploy cycle.
-  - "A7 remains partial: the latest 24-hour query found two generic timings but no route_key in those records; no exact Account Back click timestamp or matching callback event is available."
+  - UI batch is still local and undelivered on `audit/storage-addon-expiry-20261009`, based on verified main/runtime `4dc0c31bab44d2c0427a7d4ab38b28b1e72693ec`. S12.35.147 is locally verified; finish the ordered safe checklist, then run one protected-source comparator and consolidated CI/source-compile/YAML validation before the single PR/merge/bot-only-deploy cycle. No per-spec delivery.
+  - "A7 remains partial: final 24-hour read-only runtime recheck at 2026-10-09 10:33 +07 found zero callback timing records and zero matching transport/Telegram warning/error lines; service was active with NRestarts=0. No exact Account Back click timestamp/event is available, so server, network and client causes cannot be distinguished."
   - "Manual Telegram client visual/wrapping and all-button latency QA remain unverified; source/unit tests do not prove client smoothness."
   - "S12.35.95 Support Create Ticket currently opens the direct general-support form while a separate category picker has no public entry. Its discoverability/entry behavior is an Owner UX choice; no behavior change is authorized by this audit ledger."
 next:
+  - S12.35.147 fixes expired Storage Add-on custom text falling through to later message handlers and adds feature-local expiry copy for all 17 supported locales; latest rerun: 6 focused tests passed in 8.682s, including the actual source-extracted `handle_message` chain; changed test py_compile and diff check passed. Full `bot.py` compile/CI, final ordered audit and scope comparator remain open; keep it in the one local batch.
+  - S12.35.148 verifies actual public/Admin root keyboard labels and callback registrations across all 17 supported locales; focused test passed and root/menu module ran 41 tests in 20.707s. Locale-specific copy semantic quality and Telegram-client viewport/rendering remain unverified.
+  - S12.35.149 dispatches each of the eight actual Admin Handbook section controls through the exact registered `admin_help|` handler; every visible label maps to the intended section, each renders the matching page and emits registered Handbook/Admin/Home routes. The full Admin Help module passed 6 tests in 2.840s. Full admin data/action screens remain distinct and are not inferred from this guide-only spec.
   - Final review fixes S12.35.75–78 are locally verified sequentially; safe UI gate 218 tests/355 subtests passed. Keep protected processing and action terminals excluded, not passed.
   - S12.35.91–.93 are locally verified: SubDub Audio Back reaches its immediate parent; stale SubDub source expectations now target actual emitters; public Voice Hub Back/Home reach Audio Studio/Main through exact registered handlers. One protected terminal source-marker check remains excluded, not passed.
   - S12.35.94 Ticket category prompt/Back is locally verified; remote CI remains pending with the consolidated batch. For S12.35.95, do not change Support → Create Ticket behavior until the Owner selects direct form vs category picker; continue only independent read-only/offline audit work meanwhile.
@@ -2834,7 +2889,7 @@ next:
   - S12.35.133 rejects invalid Feedback category suffixes before ACK or state mutation; source-emitted categories remain whitelisted. Continue only distinct audit gaps; keep live client rendering and full Support/Ticket route family partial.
   - S12.35.134 fixes only expired Document parent Back origin and covers all three relevant keyboard emitters; file processing and remaining Document callback actions stay excluded or partial.
   - S12.35.135 corrects two Admin Vault instruction labels only; keep all Vault operations unexecuted and continue the remaining non-protected A3/A5/A6 audit before consolidated closeout.
-  - S12.35.136/.146 record two generic anonymous callback timings in the latest 24-hour window, but the current records have no route_key and cannot be matched to an Owner click; A7 remains open. S12.35.137 covers emitted Document Add-more/Remove-last UI controls only; file processing remains excluded.
+  - S12.35.136/.146 captured two older generic anonymous callback timings; the final A7 recheck at 2026-10-09 10:33 +07 found zero timing events and zero matching transport/Telegram warning lines. No Owner click correlation exists, so A7 remains partial. S12.35.137 covers emitted Document Add-more/Remove-last UI controls only; file processing remains excluded.
   - S12.35.138 fixes only expired Internal Archive department-Search Back ancestry and verifies Search Home clears only the actor's pending state; do not run searches or read documents. Continue distinct non-protected A3/A5/A6 gaps; latency, visual/client QA and the broad callback inventory remain partial.
   - S12.35.139 adds registered-handler evidence for emitted package group → detail → Back ancestry with no mismatch found. Continue the ordered non-protected A3/A5/A6 audit; package purchase/order/payment actions, client visual QA, Account-correlated latency and broad route completion remain partial or excluded.
   - S12.35.140 adds registered-handler evidence for emitted Combo group → detail → Back ancestry with no mismatch found. Continue distinct safe A3/A5/A6 gaps; do not dispatch package purchases/orders/payments or infer manual Telegram-client rendering/latency.

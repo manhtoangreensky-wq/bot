@@ -66,6 +66,89 @@ def _load_functions(*names, **dependencies):
 
 
 class AdminHelpCallbackSingleAckTests(unittest.TestCase):
+    def test_all_emitted_handbook_sections_dispatch_and_return_to_admin_handbook(self):
+        async def safe_edit(query, text, **kwargs):
+            query.edits.append((text, kwargs))
+
+        namespace = _load_functions(
+            "admin_handbook_menu_keyboard",
+            "admin_handbook_section_text",
+            "admin_handbook_section_keyboard",
+            "handle_admin_help_callback",
+            is_admin_user=lambda uid: uid == 123,
+            safe_edit_query_message=safe_edit,
+        )
+        root_markup = namespace["admin_handbook_menu_keyboard"]()
+        emitted = [
+            button
+            for row in root_markup.inline_keyboard
+            for button in row
+            if (button.callback_data or "").startswith("admin_help|")
+        ]
+        expected_sections = {
+            "1. An toàn Xu": "xu",
+            "2. Nạp tiền": "payment",
+            "3. Hoàn Xu": "refund",
+            "4. Freeze": "freeze",
+            "5. Backup DB": "backup",
+            "6. Runtime": "runtime",
+            "7. Trước khi bán": "sales",
+            "8. Quyền hạn": "roles",
+        }
+        self.assertEqual(
+            {button.text: button.callback_data.split("|", 1)[1] for button in emitted},
+            expected_sections,
+        )
+        registered = re.search(
+            r'tg_app\.add_handler\(CallbackQueryHandler\(handle_admin_help_callback,\s*pattern=r"([^\"]+)"\)\)',
+            BOT_SOURCE,
+        )
+        self.assertIsNotNone(registered)
+        admin_help_pattern = re.compile(registered.group(1))
+        menu_route = re.search(
+            r'CallbackQueryHandler\(\s*handle_menu_callback\s*,\s*pattern\s*=\s*(r?"[^"]+")\s*\)',
+            BOT_SOURCE,
+        )
+        self.assertIsNotNone(menu_route)
+        menu_pattern = re.compile(ast.literal_eval(menu_route.group(1)))
+
+        for button in emitted:
+            with self.subTest(callback=button.callback_data):
+                self.assertRegex(button.callback_data, admin_help_pattern)
+                query = _Query(123, button.callback_data)
+                asyncio.run(namespace["handle_admin_help_callback"](
+                    SimpleNamespace(callback_query=query), SimpleNamespace(),
+                ))
+                self.assertEqual(query.answers, [((), {})])
+                kind = button.callback_data.split("|", 1)[1]
+                rendered_text, options = query.edits[0]
+                self.assertEqual(
+                    rendered_text,
+                    namespace["admin_handbook_section_text"](kind),
+                )
+                expected_markup = namespace["admin_handbook_section_keyboard"](kind)
+                self.assertEqual(
+                    [
+                        [(item.text, item.callback_data) for item in row]
+                        for row in options["reply_markup"].inline_keyboard
+                    ],
+                    [
+                        [(item.text, item.callback_data) for item in row]
+                        for row in expected_markup.inline_keyboard
+                    ],
+                )
+                callbacks = [
+                    item.callback_data
+                    for row in options["reply_markup"].inline_keyboard
+                    for item in row
+                    if item.callback_data
+                ]
+                self.assertIn("menu|admin_handbook", callbacks)
+                self.assertIn("menu|admin", callbacks)
+                self.assertIn("menu|main", callbacks)
+                for back in callbacks:
+                    self.assertRegex(back, menu_pattern)
+
     def test_runtime_shortcuts_are_labeled_as_guides_without_retargeting(self):
         namespace = _load_functions(
             "menu_parent_action", "menu_nav_keyboard", "admin_module_keyboard",
