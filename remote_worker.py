@@ -34,6 +34,8 @@ ACTIVE_WORKER_CAPABILITIES: list[str] = ["ffmpeg", "video_postprocess"]
 PRODUCT_VIDEO_TERMINAL_NO_CHARGE_REASONS = frozenset({
     "all_scene_providers_exhausted_no_charge",
     "scene_submit_missing_no_charge",
+    "key4u_video_auth_missing_no_charge",
+    "key4u_video_auth_alias_conflict_no_charge",
 })
 
 

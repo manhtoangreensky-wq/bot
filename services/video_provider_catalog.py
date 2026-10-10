@@ -36,6 +36,98 @@ KEY4U_MODEL_CONTRACT_MISSING = "key4u_model_contract_missing_no_charge"
 KEY4U_COST_ROUTING_OVERRIDE_WARNING = "COST_ROUTING_OVERRIDE_KEY4U_PRIMARY"
 PUBLIC_LOW_TIER_KEY4U_WARNING = "PUBLIC_LOW_TIER_PRIMARY_PROVIDER_NOT_COST_OPTIMAL"
 
+PRODUCT_VIDEO_CANONICAL_VIDEO_AUTH_ENV = "KEY4U_VIDEO_AUTH_HEADER_VALUE"
+PRODUCT_VIDEO_LEGACY_VIDEO_AUTH_ALIASES = ("VIDEO_KEY4U_AUTH_HEADER_VALUE",)
+PRODUCT_VIDEO_NON_VIDEO_KEY4U_KEYS = ("KEY4U_API_KEY", "KEY4U_TOKEN", "KEY4U_SYSTEM_API_KEY")
+
+KEY4U_VIDEO_AUTH_MISSING = "key4u_video_auth_missing_no_charge"
+KEY4U_VIDEO_AUTH_ALIAS_CONFLICT = "key4u_video_auth_alias_conflict_no_charge"
+
+
+def _normalize_auth_val(val: str) -> str:
+    return str(val or "").strip().strip('\'"')
+
+
+def _auth_tokens_differ(val1: str, val2: str) -> bool:
+    v1 = _normalize_auth_val(val1)
+    v2 = _normalize_auth_val(val2)
+    if v1 == v2:
+        return False
+    def _strip_bearer(s: str) -> str:
+        if s.lower().startswith("bearer "):
+            return s[7:].strip()
+        return s
+    return _strip_bearer(v1) != _strip_bearer(v2)
+
+
+def resolve_product_video_key4u_auth(
+    env: dict[str, str] | os._Environ[str] | None = None,
+) -> dict[str, Any]:
+    environ = os.environ if env is None else env
+    canonical_raw = str(environ.get(PRODUCT_VIDEO_CANONICAL_VIDEO_AUTH_ENV) or "").strip()
+    legacy_raw = str(environ.get("VIDEO_KEY4U_AUTH_HEADER_VALUE") or "").strip()
+
+    canonical_present = bool(canonical_raw)
+    legacy_present = bool(legacy_raw)
+
+    has_api_key = bool(str(environ.get("KEY4U_API_KEY") or "").strip())
+    has_token = bool(str(environ.get("KEY4U_TOKEN") or "").strip())
+    has_system_key = bool(str(environ.get("KEY4U_SYSTEM_API_KEY") or "").strip())
+
+    if not canonical_present:
+        return {
+            "ready": False,
+            "reason": KEY4U_VIDEO_AUTH_MISSING,
+            "blocker": KEY4U_VIDEO_AUTH_MISSING,
+            "canonical_env": PRODUCT_VIDEO_CANONICAL_VIDEO_AUTH_ENV,
+            "canonical_present": False,
+            "legacy_present": legacy_present,
+            "has_api_key": has_api_key,
+            "has_token": has_token,
+            "has_system_key": has_system_key,
+            "alias_conflict": False,
+            "resolved_value": "",
+        }
+
+    if legacy_present and _auth_tokens_differ(canonical_raw, legacy_raw):
+        return {
+            "ready": False,
+            "reason": KEY4U_VIDEO_AUTH_ALIAS_CONFLICT,
+            "blocker": KEY4U_VIDEO_AUTH_ALIAS_CONFLICT,
+            "canonical_env": PRODUCT_VIDEO_CANONICAL_VIDEO_AUTH_ENV,
+            "canonical_present": True,
+            "legacy_present": True,
+            "has_api_key": has_api_key,
+            "has_token": has_token,
+            "has_system_key": has_system_key,
+            "alias_conflict": True,
+            "resolved_value": "",
+        }
+
+    norm_val = _normalize_auth_val(canonical_raw)
+    resolved_val = norm_val if norm_val.lower().startswith(("bearer ", "apikey ", "key ")) else f"Bearer {norm_val}"
+
+    return {
+        "ready": True,
+        "reason": "",
+        "blocker": "",
+        "canonical_env": PRODUCT_VIDEO_CANONICAL_VIDEO_AUTH_ENV,
+        "canonical_present": True,
+        "legacy_present": legacy_present,
+        "has_api_key": has_api_key,
+        "has_token": has_token,
+        "has_system_key": has_system_key,
+        "alias_conflict": False,
+        "resolved_value": resolved_val,
+    }
+
+
+def product_video_key4u_auth_diagnostics(auth_result: dict[str, Any]) -> dict[str, Any]:
+    diag = dict(auth_result)
+    diag.pop("resolved_value", None)
+    return diag
+
+
 _URL_PREFIXES = ("http://", "https://")
 _MEDIA_INPUT_FIELDS = ("storyboard", "image_paths", "source_video_path", "image")
 _TIER_COST_ORDER = {
@@ -248,16 +340,8 @@ def _first_endpoint(env: dict[str, str] | os._Environ[str], names: tuple[str, ..
 def _key4u_official_google_veo_endpoints(
     env: dict[str, str] | os._Environ[str],
 ) -> tuple[str, str, str, str]:
-    auth_present = any(
-        str(env.get(name) or "").strip()
-        for name in (
-            "KEY4U_VIDEO_AUTH_HEADER_VALUE",
-            "VIDEO_KEY4U_AUTH_HEADER_VALUE",
-            "KEY4U_API_KEY",
-            "KEY4U_TOKEN",
-        )
-    )
-    if not auth_present:
+    auth_decision = resolve_product_video_key4u_auth(env)
+    if not auth_decision.get("ready"):
         return "", "", "", ""
     base = next(
         (

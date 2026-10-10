@@ -27,11 +27,14 @@ from services.video_provider_base import (
     normalize_provider_status,
 )
 from services.video_provider_catalog import (
+    KEY4U_VIDEO_AUTH_ALIAS_CONFLICT,
+    KEY4U_VIDEO_AUTH_MISSING,
     MODEL_UNKNOWN,
     enforce_payload_contract,
     enrich_metadata_with_model_contract,
     model_interface_contract,
     provider_model_config,
+    resolve_product_video_key4u_auth,
     selected_model_for_provider,
 )
 
@@ -1720,6 +1723,16 @@ class GenericHttpVideoProvider:
             invalid_fields.append("model")
             invalid_env.append(self.model_env)
         blocker = "provider_config_placeholder_or_invalid_url" if invalid_fields else ""
+        if self.provider_name == "key4u_video":
+            stored_blocker = str(self.env.get("KEY4U_VIDEO_AUTH_BLOCKER") or "").strip()
+            auth_decision = resolve_product_video_key4u_auth(self.env)
+            if stored_blocker or not auth_decision.get("ready"):
+                key4u_blocker = stored_blocker or str(auth_decision.get("reason") or KEY4U_VIDEO_AUTH_MISSING)
+                if "auth" not in invalid_fields:
+                    invalid_fields.append("auth")
+                if self.auth_header_value_env not in invalid_env:
+                    invalid_env.append(self.auth_header_value_env)
+                blocker = key4u_blocker
         return {
             "enabled": enabled,
             "configured": bool(enabled and not missing and not invalid_fields),
@@ -1967,13 +1980,16 @@ class GenericHttpVideoProvider:
                 "missing": list(caps.get("missing") or []),
                 "invalid_fields": list(caps.get("invalid_fields") or []),
                 "invalid_env": list(caps.get("invalid_env") or []),
-                "provider_submit_blocker": "provider_config_missing_at_submit",
+                "provider_submit_blocker": str(caps.get("blocker") or "provider_config_missing_at_submit"),
+                "blocker": str(caps.get("blocker") or "provider_config_missing_at_submit"),
+                "no_charge": True,
             }
+            config_blocker = str(caps.get("blocker") or "provider_config_missing_at_submit")
             return VideoSubmitResult(
                 ok=False,
                 provider_name=self.provider_name,
                 provider_status="config_invalid",
-                error_code="provider_config_missing_at_submit",
+                error_code=config_blocker,
                 raw=raw_debug,
             )
         try:
@@ -2209,6 +2225,8 @@ class GenericHttpVideoProvider:
             )
         raw_debug["provider_submit_blocker"] = "provider_submit_response_invalid_shape"
         return VideoSubmitResult(ok=False, provider_name=self.provider_name, provider_status=status, error_code="provider_submit_response_invalid_shape", raw=raw_debug)
+
+    submit = submit_video_job
 
     def poll_video_job(self, provider_task_id: str, *, poll_url_override: str = "") -> VideoPollResult:
         caps = self.capabilities()

@@ -159,7 +159,7 @@ def test_key4u_veo_no_normalization_rewrite():
     assert "/v1/video/create" not in submit_url
 
     derived_submit, derived_source, derived_poll, poll_source = _key4u_official_google_veo_endpoints(
-        {"KEY4U_BASE_URL": KEY4U_VN, "KEY4U_API_KEY": "test-token"}
+        {"KEY4U_BASE_URL": KEY4U_VN, "KEY4U_VIDEO_AUTH_HEADER_VALUE": "test-token"}
     )
     assert derived_submit == f"{KEY4U_VN}/v1/videos"
     assert derived_source == "derived:key4u_official_veo_videos"
@@ -185,6 +185,7 @@ def test_key4u_veo_adapter_ignores_generic_create_when_specialized_env_missing()
         "KEY4U_VIDEO_ENABLED": "1",
         "KEY4U_BASE_URL": KEY4U_VN,
         "KEY4U_API_KEY": "test-key-veo-token",
+        "KEY4U_VIDEO_AUTH_HEADER_VALUE": "Bearer test-key-veo-token",
         "KEY4U_VIDEO_SUBMIT_URL": f"{KEY4U_VN}/v1/video/create",
         "KEY4U_VIDEO_POLL_URL": f"{KEY4U_VN}/v1/video/query?id={{task_id}}",
         "KEY4U_VIDEO_MODEL": "veo_3_1-fast",
