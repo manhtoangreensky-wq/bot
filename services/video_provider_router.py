@@ -29,7 +29,11 @@ from services.video_provider_base import (
     split_provider_chain,
 )
 from services.video_provider_catalog import (
+    KEY4U_VIDEO_AUTH_ALIAS_CONFLICT,
+    KEY4U_VIDEO_AUTH_MISSING,
+    PRODUCT_VIDEO_CANONICAL_VIDEO_AUTH_ENV,
     model_interface_contract,
+    resolve_product_video_key4u_auth,
     selected_model_for_provider,
 )
 from services import video_ai_real_pricing
@@ -1898,7 +1902,7 @@ VIDEO_PROVIDER_ENV_NAMESPACES: dict[str, dict[str, Any]] = {
         "submit_url": ["KEY4U_VIDEO_SUBMIT_URL", "VIDEO_KEY4U_SUBMIT_URL"],
         "poll_url": ["KEY4U_VIDEO_POLL_URL", "VIDEO_KEY4U_POLL_URL"],
         "auth_header_name": ["KEY4U_VIDEO_AUTH_HEADER_NAME", "VIDEO_KEY4U_AUTH_HEADER_NAME"],
-        "auth_header_value": ["KEY4U_VIDEO_AUTH_HEADER_VALUE", "VIDEO_KEY4U_AUTH_HEADER_VALUE"],
+        "auth_header_value": ["KEY4U_VIDEO_AUTH_HEADER_VALUE"],
         "model": ["KEY4U_VIDEO_MODEL", "VIDEO_KEY4U_MODEL"],
         "capabilities": ["KEY4U_VIDEO_CAPABILITIES", "VIDEO_KEY4U_CAPABILITIES"],
     },
@@ -2155,7 +2159,8 @@ def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter
         namespace_cfg = video_provider_namespace_config("key4u_video", env)
         base_url = str(env.get("KEY4U_BASE_URL") or env.get("KEY4U_API_BASE") or "https://api.key4u.vn").rstrip("/")
         model_name = str(env.get("KEY4U_VIDEO_MODEL") or namespace_cfg.get("model") or "")
-        if not model_name and (env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN") or namespace_cfg.get("auth_header_value")):
+        auth_decision = resolve_product_video_key4u_auth(env)
+        if not model_name and auth_decision.get("ready"):
             model_name = "kling-video"
 
         is_veo = model_name in {"veo_3_1-fast", "veo3.1-fast"}
@@ -2164,7 +2169,7 @@ def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter
             submit_url = submit_url or str(namespace_cfg.get("submit_url") or "")
             if submit_url and submit_url.rstrip("/").endswith(("/v1/video/create", "/video/create", "/video/generate", "/generate")):
                 submit_url = ""
-            if not submit_url and (env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN") or namespace_cfg.get("auth_header_value")):
+            if not submit_url and auth_decision.get("ready"):
                 submit_url = f"{base_url}/v1/videos"
             poll_url = _endpoint_alias(env, "KEY4U_VEO_VIDEO_POLL_URL", "KEY4U_BASE_URL", "KEY4U_GOOGLE_VEO_VIDEO_POLL_URL")
             poll_url = poll_url or str(namespace_cfg.get("poll_url") or "")
@@ -2180,7 +2185,7 @@ def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter
             submit_url = submit_url or str(namespace_cfg.get("submit_url") or "")
             if submit_url and submit_url.rstrip("/").endswith(("/video/generate", "/generate")):
                 submit_url = ""
-            if not submit_url and (env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN") or namespace_cfg.get("auth_header_value")):
+            if not submit_url and auth_decision.get("ready"):
                 submit_url = f"{base_url}/v1/video/create"
 
             poll_url = _endpoint_alias(env, "KEY4U_VIDEO_POLL_URL", "KEY4U_BASE_URL", "KEY4U_VIDEO_POLL_ENDPOINT", "VIDEO_KEY4U_POLL_URL")
@@ -2198,7 +2203,7 @@ def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter
         generic_ready = bool(
             submit_url
             and poll_url
-            and (namespace_cfg.get("auth_header_value") or env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN"))
+            and auth_decision.get("ready")
             and model_valid
         )
         derived = dict(env)
@@ -2207,9 +2212,11 @@ def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter
         derived["KEY4U_VIDEO_SUBMIT_URL"] = submit_url
         derived["KEY4U_VIDEO_POLL_URL"] = poll_url
         derived["KEY4U_VIDEO_AUTH_HEADER_NAME"] = env.get("KEY4U_VIDEO_AUTH_HEADER_NAME") or namespace_cfg.get("auth_header_name") or "Authorization"
-        derived["KEY4U_VIDEO_AUTH_HEADER_VALUE"] = env.get("KEY4U_VIDEO_AUTH_HEADER_VALUE") or namespace_cfg.get("auth_header_value") or _bearer(env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN") or "")
+        derived["KEY4U_VIDEO_AUTH_HEADER_VALUE"] = auth_decision.get("resolved_value") if auth_decision.get("ready") else ""
         derived["KEY4U_VIDEO_MODEL"] = model_name if model_valid else ""
         derived["KEY4U_VIDEO_CAPABILITIES"] = env.get("KEY4U_VIDEO_CAPABILITIES") or namespace_cfg.get("capabilities") or "text_to_video,image_to_video,multi_scene_video,scene_video"
+        if not auth_decision.get("ready"):
+            derived["KEY4U_VIDEO_AUTH_BLOCKER"] = str(auth_decision.get("reason") or KEY4U_VIDEO_AUTH_MISSING)
 
         return GenericHttpVideoProvider(
             provider_name="key4u_video",
@@ -3296,6 +3303,10 @@ def product_video_multi_scene_public_gate(
         "final_eligible_provider_count": len(healthy),
         "candidate_rejection_reason_by_provider": dict(snapshot.get("candidate_rejection_reason_by_provider") or {}),
     }
+
+
+def load_video_provider_adapter(provider: str, env: dict[str, str] | None = None) -> VideoProviderAdapter:
+    return _generic_adapter_for(str(provider or "").strip().lower(), dict(env or os.environ))
 
 
 def load_video_provider_adapters(environ: dict[str, str] | None = None) -> list[VideoProviderAdapter]:

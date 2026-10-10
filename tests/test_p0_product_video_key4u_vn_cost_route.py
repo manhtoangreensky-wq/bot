@@ -46,6 +46,7 @@ def test_key4u_active_defaults_and_video_adapter_use_vn(monkeypatch):
         "key4u_video",
         {
             "KEY4U_API_KEY": "test-key",
+            "KEY4U_VIDEO_AUTH_HEADER_VALUE": "Bearer test-key",
             "KEY4U_VIDEO_MODEL": "veo_3_1-fast",
         },
     )
