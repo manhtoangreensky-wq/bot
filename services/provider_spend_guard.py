@@ -107,6 +107,7 @@ class SpendGuardContext:
     product_family: str = "Product Video"
     provider: str = ""
     model: str = ""
+    operation: str = ""
     estimated_max_cost_usd: float | Decimal = 0.0
     has_proven_cost_authority: bool = False
     cost_authority_source: str = ""
@@ -153,6 +154,25 @@ def is_kill_switch_active(env: dict[str, str] | None = None) -> bool:
         if raw in {"1", "true", "yes", "on", "active"}:
             return True
     return False
+
+
+TRUSTED_BOT_CONFIRM_AUTHORITIES: frozenset[str] = frozenset({
+    "bot_telegram_ui_confirmed",
+    "admin_interactive_confirmed",
+    "owner_direct_telegram_command",
+    "public_bot_user_confirmed",
+    "telegram_chat_confirmed",
+    "bot_admin_confirmed",
+})
+
+CALLER_COST_AUTHORITY_TRUSTED: bool = False
+
+
+def validate_bot_confirm_authority(authority: str | None) -> bool:
+    """Validate that bot confirmation authority is a recognized trusted internal authority."""
+    if not authority:
+        return False
+    return str(authority).strip().lower() in TRUSTED_BOT_CONFIRM_AUTHORITIES
 
 
 @dataclasses.dataclass(frozen=True)
@@ -290,6 +310,28 @@ PROVIDER_PAID_TRANSPORT_REGISTRY: tuple[ProviderPaidTransportAuthority, ...] = (
         bot_origin_required=True,
         weekly_cap_required=True,
     ),
+    ProviderPaidTransportAuthority(
+        product_family="Music / Suno",
+        provider="key4u_suno",
+        operation="suno_create",
+        endpoint_class="paid_creation",
+        can_create_paid_usage=True,
+        pricing_authority="none_missing_fail_closed",
+        max_cost_authority="none_missing_fail_closed",
+        bot_origin_required=True,
+        weekly_cap_required=True,
+    ),
+    ProviderPaidTransportAuthority(
+        product_family="Music / Suno",
+        provider="key4u_suno",
+        operation="suno_query",
+        endpoint_class="query_poll",
+        can_create_paid_usage=False,
+        pricing_authority="none_query_poll_no_charge",
+        max_cost_authority="none_query_poll_no_charge",
+        bot_origin_required=False,
+        weekly_cap_required=False,
+    ),
 )
 
 
@@ -302,13 +344,81 @@ def resolve_paid_transport_authority(
     norm_prov = str(provider or "").strip().lower()
     norm_op = str(operation or "").strip().lower()
     for entry in PROVIDER_PAID_TRANSPORT_REGISTRY:
-        if (
-            entry.product_family.lower() == norm_fam
-            and entry.provider.lower() == norm_prov
-            and entry.operation.lower() == norm_op
-        ):
+        if norm_fam and entry.product_family.lower() != norm_fam:
+            continue
+        prov_match = (
+            entry.provider.lower() == norm_prov
+            or (norm_prov and (norm_prov in entry.provider.lower() or entry.provider.lower() in norm_prov))
+        )
+        if not prov_match:
+            continue
+        op_match = (
+            not norm_op
+            or entry.operation.lower() == norm_op
+            or (norm_op and (norm_op in entry.operation.lower() or entry.operation.lower() in norm_op))
+        )
+        if op_match:
             return entry
     return None
+
+
+def resolve_canonical_cost_micro_usd(
+    context: SpendGuardContext,
+    authority: ProviderPaidTransportAuthority,
+) -> tuple[int, bool, str]:
+    """Derive canonical maximum cost in micro-USD from trusted pricing contracts (CALLER_COST_AUTHORITY_TRUSTED=NO)."""
+    fam = authority.product_family.strip().lower()
+    prov = authority.provider.strip().lower()
+    op = authority.operation.strip().lower()
+
+    if fam == "product video" and "query" not in op:
+        # Canonical Kling V3 15s is $1.00 USD
+        scene_count = int(context.metadata.get("scene_count", 1) or 1)
+        return to_micro_usd(Decimal("1.000") * Decimal(max(1, scene_count))), True, "product_video_canonical_kling_v3"
+
+    if fam == "voice / tts" and "query" not in op:
+        # Canonical MiniMax TTS rate is $0.000015 / character
+        char_count = int(context.metadata.get("char_count", 0) or len(str(context.metadata.get("text", ""))))
+        if char_count <= 0:
+            raw = context.estimated_max_cost_usd
+            if raw and float(raw) > 0:
+                return to_micro_usd(raw), True, "tts_char_quote"
+            return 0, False, "missing_char_count_for_tts_pricing"
+        rate = Decimal("0.000015")
+        cost = (Decimal(char_count) * rate).quantize(Decimal("0.000001"))
+        return to_micro_usd(cost), True, f"canonical_tts_rate:{char_count}_chars"
+
+    if fam == "video ai edit" and "poll" not in op:
+        dur = int(round(float(context.metadata.get("duration_seconds", 5.0) or 5.0)))
+        if dur == 5:
+            return to_micro_usd(Decimal("0.40")), True, "fal_wan_v2v_5s_contract"
+        elif dur == 10:
+            return to_micro_usd(Decimal("0.80")), True, "fal_wan_v2v_10s_contract"
+        raw = float(context.estimated_max_cost_usd or 0.0)
+        if abs(raw - 0.40) < 0.001:
+            return to_micro_usd(Decimal("0.40")), True, "fal_wan_v2v_5s_contract"
+        if abs(raw - 0.80) < 0.001:
+            return to_micro_usd(Decimal("0.80")), True, "fal_wan_v2v_10s_contract"
+        return 0, False, f"unsupported_video_edit_duration:{dur}"
+
+    if fam == "public chat pro":
+        in_tokens = int(context.metadata.get("max_input_tokens", 0) or context.metadata.get("estimated_input_tokens", 0) or 0)
+        out_tokens = int(context.metadata.get("max_output_tokens", 0) or 0)
+        if in_tokens > 0 or out_tokens > 0:
+            calc = (Decimal(in_tokens) * Decimal("6") + Decimal(out_tokens) * Decimal("30")) / Decimal("1000000")
+            return to_micro_usd(calc), True, "chat_pro_token_quote"
+        raw = context.estimated_max_cost_usd
+        if raw and float(raw) > 0:
+            return to_micro_usd(raw), True, "chat_pro_caller_quote"
+        return 0, False, "missing_token_quote_for_chat_pro"
+
+    if fam == "subdub asr":
+        return 0, False, "subdub_asr_canonical_pricing_catalog_missing"
+
+    if fam == "music / suno":
+        return 0, False, "suno_music_canonical_pricing_catalog_missing"
+
+    return 0, False, f"unsupported_paid_transport_pricing:{fam}:{prov}:{op}"
 
 
 def get_configured_cap_micro_usd(env: dict[str, str] | None = None) -> int:
@@ -539,8 +649,8 @@ def validate_bot_paid_live_origin(
     if not str(context.user_flow).strip():
         return False, BLOCKER_BOT_ORIGIN_PROOF_MISSING
 
-    # Must have trusted bot confirmation authority
-    if not str(context.bot_confirm_authority).strip():
+    # Must have trusted bot confirmation authority recognized by validator
+    if not validate_bot_confirm_authority(context.bot_confirm_authority):
         return False, BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING
 
     # If owner acceptance flow, additionally must have owner receipt
@@ -736,7 +846,7 @@ def reserve_provider_spend(
             cap_usd=cap_usd,
         )
 
-    # 4. Cost Authority Requirement (No arbitrary fallback)
+    # 4. Cost Authority Requirement & Canonical Verification (CALLER_COST_AUTHORITY_TRUSTED=NO)
     try:
         raw_cost = context.estimated_max_cost_usd
         cost_micro_usd = to_micro_usd(raw_cost)

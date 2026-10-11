@@ -1706,10 +1706,63 @@ class Key4UProvider:
         model: str = "",
         timeout_seconds: float = 60.0,
         aspect_ratio: str = "16:9",
+        *,
+        spend_context: Any = None,
+        bot_confirm_authority: str = "",
+        bot_originated_action: bool = False,
+        is_paid_live: bool = False,
     ) -> dict[str, Any]:
         selected_model = model or self.config.video_model
         if not self.is_configured():
             return self._missing_result("video_generate", selected_model)
+
+        from services.provider_spend_guard import (
+            BLOCKER_KILL_SWITCH_ACTIVE,
+            SpendGuardContext,
+            is_kill_switch_active,
+            reserve_provider_spend,
+            mark_submitted_pending_settlement,
+            retain_ambiguous_provider_spend,
+        )
+
+        if is_kill_switch_active():
+            return _result(
+                ok=False,
+                capability="video_generate",
+                model=selected_model,
+                status="SPEND_GUARD_BLOCKED",
+                error_class=BLOCKER_KILL_SWITCH_ACTIVE,
+                error_message_safe="paid_provider_kill_switch_active",
+            )
+
+        # Lowest safe seam guard: direct provider adapter calls MUST not bypass spend guard
+        ctx = spend_context or SpendGuardContext(
+            job_id=f"k4u_vid_{int(time.perf_counter()*1000)}",
+            request_id=f"REQ-K4U-VID-{int(time.perf_counter()*1000)}",
+            trace_id=f"TR-K4U-VID-{int(time.perf_counter()*1000)}",
+            product_family="Product Video",
+            provider="key4u_kling_video",
+            operation="create_video_task",
+            model=selected_model,
+            estimated_max_cost_usd=1.00,
+            has_proven_cost_authority=True,
+            bot_originated_action=bool(bot_originated_action),
+            bot_confirm_authority=str(bot_confirm_authority or ""),
+            user_flow="key4u_video_direct",
+            entrypoint="bot",
+            is_paid_live_attempt=bool(is_paid_live or self.is_configured()),
+        )
+        spend_res = reserve_provider_spend(ctx)
+        if not spend_res.allowed:
+            return _result(
+                ok=False,
+                capability="video_generate",
+                model=selected_model,
+                status="SPEND_GUARD_BLOCKED",
+                error_class=spend_res.blocker or "spend_guard_blocked",
+                error_message_safe=f"spend_guard_blocked: {spend_res.blocker}",
+            )
+
         endpoint = safe_join_url(self.config.base_url, self.config.video_create_endpoint)
         payload = {
             "model": selected_model,
@@ -1731,12 +1784,17 @@ class Key4UProvider:
             task_id = str((body or {}).get("task_id") or (body or {}).get("id") or data.get("task_id") or "")
             provider_status = str((body or {}).get("status") or data.get("status") or "")
             if 200 <= response.status_code < 300 and task_id:
+                mark_submitted_pending_settlement(spend_res.reservation_id, task_id)
                 return _result(ok=True, capability="video_generate", model=selected_model, status="PASS_SUBMITTED", http_status=response.status_code, latency_ms=latency_ms, task_id=task_id, raw_debug_admin_only={"provider_status": provider_status})
-            result = _result(ok=False, capability="video_generate", model=selected_model, status="FAIL", http_status=response.status_code, latency_ms=latency_ms, error_class=_classify_http(response.status_code, data), error_message_safe=data)
+            err_code = _classify_http(response.status_code, data)
+            retain_ambiguous_provider_spend(spend_res.reservation_id, error_code=err_code)
+            result = _result(ok=False, capability="video_generate", model=selected_model, status="FAIL", http_status=response.status_code, latency_ms=latency_ms, error_class=err_code, error_message_safe=data)
             return _add_video_unavailable_guidance(result)
         except httpx.TimeoutException as exc:
+            retain_ambiguous_provider_spend(spend_res.reservation_id, error_code="submit_timeout")
             return _timeout_result("video_generate", selected_model, exc, stage="submit_timeout")
         except Exception as exc:
+            retain_ambiguous_provider_spend(spend_res.reservation_id, error_code=type(exc).__name__)
             return _result(ok=False, capability="video_generate", model=selected_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
 
     async def poll_video_task(self, task_id: str, timeout_seconds: float = 30.0) -> dict[str, Any]:
@@ -2157,6 +2215,29 @@ class Key4UProvider:
             return self._missing_result("suno", selected_model)
         if not self.config.suno_create_endpoint or not selected_model:
             return self._needs_docs_result("suno", selected_model, "KEY4U_SUNO_CREATE_ENDPOINT/KEY4U_DEFAULT_MUSIC_MODEL")
+
+        from services.provider_spend_guard import (
+            BLOCKER_KILL_SWITCH_ACTIVE,
+            SpendGuardContext,
+            is_kill_switch_active,
+            reserve_provider_spend,
+        )
+
+        if is_kill_switch_active():
+            return _result(ok=False, capability="suno", model=selected_model, status="SPEND_GUARD_BLOCKED", error_class=BLOCKER_KILL_SWITCH_ACTIVE, error_message_safe="paid_provider_kill_switch_active")
+
+        suno_spend_ctx = SpendGuardContext(
+            job_id=f"suno_{int(time.perf_counter()*1000)}",
+            product_family="Music / Suno",
+            provider="key4u_suno",
+            operation="suno_create",
+            model=selected_model,
+            is_paid_live_attempt=True,
+        )
+        suno_spend_res = reserve_provider_spend(suno_spend_ctx)
+        if not suno_spend_res.allowed:
+            return _result(ok=False, capability="suno", model=selected_model, status="SPEND_GUARD_BLOCKED", error_class=suno_spend_res.blocker, error_message_safe=f"spend_guard_blocked: {suno_spend_res.blocker}")
+
         endpoint = self._suno_url(self.config.suno_create_endpoint)
         lyrics_text = str(lyrics or "").strip()
         payload = {

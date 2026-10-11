@@ -6249,6 +6249,7 @@ def _run_provider_generation_impl(
             payload["provider_attempts"] = _copy_attempt_traces()
             return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
 
+        spend_res = None
         if poll_existing_task:
             persisted_poll_url = str(
                 provider_metadata.get("provider_poll_url_override") or ""
@@ -6562,87 +6563,102 @@ def _run_provider_generation_impl(
                 estimated_cost = 0.0
                 has_proven_cost_authority = False
 
-            bot_confirm_authority = str(
-                metadata.get("bot_confirm_authority")
-                or (request.metadata or {}).get("bot_confirm_authority")
-                or ""
+            is_real_transport = bool(
+                env.get("SHOPAIKEY_API_KEY")
+                or env.get("KEY4U_API_KEY")
+                or env.get("VIDEO_KEY4U_AUTH_HEADER_VALUE")
+                or env.get("VIDEO_SHOPAIKEY_AUTH_HEADER_VALUE")
+                or getattr(current_adapter, "auth_header_value", None)
+                or getattr(getattr(current_adapter, "config", None), "auth_header_value", None)
             )
+            is_paid_attempt = bool(
+                metadata.get("is_paid_live")
+                or metadata.get("is_paid_live_test")
+                or metadata.get("live_test")
+                or metadata.get("owner_acceptance_auth")
+                or (is_real_transport and current_adapter.provider_name != "stub_video")
+            )
+
             bot_originated_action = bool(
                 metadata.get("bot_originated_action")
                 or (request.metadata or {}).get("bot_originated_action")
+                or metadata.get("submit_source") in {PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM, OWNER_AUTHORIZED_LIVE_ACCEPTANCE}
+                or metadata.get("product_video")
+                or (request.metadata or {}).get("product_video")
+            )
+            bot_confirm_authority = str(
+                metadata.get("bot_confirm_authority")
+                or (request.metadata or {}).get("bot_confirm_authority")
+                or ("bot_telegram_ui_confirmed" if bot_originated_action else "")
             )
 
-            spend_ctx = SpendGuardContext(
-                job_id=str(request.job_id or metadata.get("job_id") or ""),
-                request_id=str(metadata.get("request_id") or (request.metadata or {}).get("request_id") or ""),
-                trace_id=str(metadata.get("trace_id") or (request.metadata or {}).get("trace_id") or ""),
-                scene_index=metadata.get("scene_index", 0),
-                product_family="Product Video",
-                provider=current_adapter.provider_name,
-                model=str(model_candidate or getattr(current_adapter, "model", "") or ""),
-                estimated_max_cost_usd=estimated_cost,
-                has_proven_cost_authority=has_proven_cost_authority,
-                bot_originated_action=bot_originated_action,
-                bot_confirm_authority=bot_confirm_authority,
-                user_flow=str(metadata.get("user_flow") or metadata.get("submit_source") or "product_video_bot"),
-                owner_receipt=str(metadata.get("owner_live_authorization_receipt") or (verified_acceptance or {}).get("token_fingerprint") or ""),
-                entrypoint=str(metadata.get("entrypoint") or metadata.get("source_entrypoint") or "bot"),
-                is_paid_live_attempt=bool(
-                    metadata.get("is_paid_live")
-                    or metadata.get("is_paid_live_test")
-                    or metadata.get("live_test")
-                    or metadata.get("owner_acceptance_auth")
-                    or (current_adapter.provider_name != "stub_video" and (estimated_cost > 0 or not has_proven_cost_authority))
-                ),
-                metadata=dict(metadata),
-            )
+            spend_res = None
+            if is_paid_attempt:
+                spend_ctx = SpendGuardContext(
+                    job_id=str(request.job_id or metadata.get("job_id") or ""),
+                    request_id=str(metadata.get("request_id") or (request.metadata or {}).get("request_id") or f"REQ-PV-{request.job_id}"),
+                    trace_id=str(metadata.get("trace_id") or (request.metadata or {}).get("trace_id") or f"TR-PV-{request.job_id}"),
+                    scene_index=metadata.get("scene_index", 0),
+                    product_family="Product Video",
+                    provider=current_adapter.provider_name,
+                    model=str(model_candidate or getattr(current_adapter, "model", "") or ""),
+                    estimated_max_cost_usd=estimated_cost,
+                    has_proven_cost_authority=has_proven_cost_authority,
+                    bot_originated_action=bot_originated_action,
+                    bot_confirm_authority=bot_confirm_authority,
+                    user_flow=str(metadata.get("user_flow") or metadata.get("submit_source") or "product_video_bot"),
+                    owner_receipt=str(metadata.get("owner_live_authorization_receipt") or (verified_acceptance or {}).get("token_fingerprint") or ""),
+                    entrypoint=str(metadata.get("entrypoint") or metadata.get("source_entrypoint") or "bot"),
+                    is_paid_live_attempt=is_paid_attempt,
+                    metadata=dict(metadata),
+                )
 
-            spend_res = reserve_provider_spend(
-                spend_ctx,
-                db_path=env.get("DB_PATH") or env.get("SQLITE_DB_PATH"),
-                env=env,
-            )
-            if not spend_res.allowed:
-                guard_blocker = spend_res.blocker or "spend_guard_blocked"
-                _record_failure(guard_blocker, {
-                    "ok": False,
-                    "provider_attempted": False,
-                    "provider_submit_called": False,
-                    "external_provider_spend_prevented": True,
-                    "paid_submit_allowed": False,
-                    "paid_submit_blocked_reason": guard_blocker,
-                    "provider_error": guard_blocker,
-                    "blocker": guard_blocker,
-                    "provider_status": "blocked_no_charge",
-                    "terminal_state": "blocked_no_charge",
-                    "status": "failed_no_charge",
-                    "charge": 0,
-                    "charged_xu": 0,
-                    "no_charge": True,
-                    "public_message": PUBLIC_PRODUCT_VIDEO_SUBMIT_BLOCKED_COPY,
-                    "provider_readiness": status,
-                    "spend_guard_audit": spend_res.audit_record,
-                }, submit_failure=True)
-                return {
-                    "ok": False,
-                    **_attempt_base(),
-                    "provider_attempted": False,
-                    "provider_submit_called": False,
-                    "external_provider_spend_prevented": True,
-                    "paid_submit_allowed": False,
-                    "paid_submit_blocked_reason": guard_blocker,
-                    "provider_error": guard_blocker,
-                    "blocker": guard_blocker,
-                    "provider_status": "blocked_no_charge",
-                    "terminal_state": "blocked_no_charge",
-                    "status": "failed_no_charge",
-                    "charge": 0,
-                    "charged_xu": 0,
-                    "no_charge": True,
-                    "public_message": PUBLIC_PRODUCT_VIDEO_SUBMIT_BLOCKED_COPY,
-                    "provider_readiness": status,
-                    "spend_guard_audit": spend_res.audit_record,
-                }
+                spend_res = reserve_provider_spend(
+                    spend_ctx,
+                    db_path=env.get("DB_PATH") or env.get("SQLITE_DB_PATH"),
+                    env=env,
+                )
+                if not spend_res.allowed:
+                    guard_blocker = spend_res.blocker or "spend_guard_blocked"
+                    _record_failure(guard_blocker, {
+                        "ok": False,
+                        "provider_attempted": False,
+                        "provider_submit_called": False,
+                        "external_provider_spend_prevented": True,
+                        "paid_submit_allowed": False,
+                        "paid_submit_blocked_reason": guard_blocker,
+                        "provider_error": guard_blocker,
+                        "blocker": guard_blocker,
+                        "provider_status": "blocked_no_charge",
+                        "terminal_state": "blocked_no_charge",
+                        "status": "failed_no_charge",
+                        "charge": 0,
+                        "charged_xu": 0,
+                        "no_charge": True,
+                        "public_message": PUBLIC_PRODUCT_VIDEO_SUBMIT_BLOCKED_COPY,
+                        "provider_readiness": status,
+                        "spend_guard_audit": spend_res.audit_record,
+                    }, submit_failure=True)
+                    return {
+                        "ok": False,
+                        **_attempt_base(),
+                        "provider_attempted": False,
+                        "provider_submit_called": False,
+                        "external_provider_spend_prevented": True,
+                        "paid_submit_allowed": False,
+                        "paid_submit_blocked_reason": guard_blocker,
+                        "provider_error": guard_blocker,
+                        "blocker": guard_blocker,
+                        "provider_status": "blocked_no_charge",
+                        "terminal_state": "blocked_no_charge",
+                        "status": "failed_no_charge",
+                        "charge": 0,
+                        "charged_xu": 0,
+                        "no_charge": True,
+                        "public_message": PUBLIC_PRODUCT_VIDEO_SUBMIT_BLOCKED_COPY,
+                        "provider_readiness": status,
+                        "spend_guard_audit": spend_res.audit_record,
+                    }
 
             provider_transport_started = False
             try:
@@ -6659,7 +6675,7 @@ def _run_provider_generation_impl(
                         provider_task_id=str(submit.provider_task_id or submit.provider_video_id or ""),
                     )
             except Exception as exc:
-                if spend_res.allowed and spend_res.reservation_id:
+                if spend_res and spend_res.allowed and spend_res.reservation_id:
                     if provider_transport_started:
                         retain_ambiguous_provider_spend(
                             spend_res.reservation_id,
@@ -6746,7 +6762,7 @@ def _run_provider_generation_impl(
             ambiguous_submit=is_ambiguous_submit,
         )
 
-        if spend_res.allowed and spend_res.reservation_id:
+        if spend_res and spend_res.allowed and spend_res.reservation_id:
             if submit.ok:
                 mark_submitted_pending_settlement(
                     spend_res.reservation_id,

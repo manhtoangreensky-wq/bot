@@ -217,8 +217,11 @@ class PublicChatRuntime:
             self.store.mark_pro_reserved(decision.request_id, 0, "admin-free")
 
         spend_guard_res = None
+        # Canonical Pro provider is ALWAYS paid-capable external transport; caller flags CANNOT bypass
+        is_canonical_pro_provider = bool(self.pro_provider is not None)
         is_paid_provider = bool(
-            getattr(request, "is_paid_external_provider", False)
+            is_canonical_pro_provider
+            or getattr(request, "is_paid_external_provider", False)
             or getattr(self.pro_provider, "is_paid_provider", False)
             or getattr(request, "spend_context", None) is not None
             or os.environ.get("CHAT_PRO_PROVIDER_IS_PAID") == "true"
@@ -254,6 +257,9 @@ class PublicChatRuntime:
                 self.store.fail_pro(decision.request_id, result=failure, reason=BLOCKER_KILL_SWITCH_ACTIVE)
                 return failure
 
+            in_tokens = max(0, int(request.estimated_input_tokens or 0))
+            out_tokens = max(0, int(request.max_output_tokens or 0))
+
             if getattr(request, "spend_context", None) is not None:
                 spend_ctx = request.spend_context
             else:
@@ -262,8 +268,6 @@ class PublicChatRuntime:
                     cost_proven = True
                     cost_source = "caller_proven_cost_authority"
                 else:
-                    in_tokens = max(0, int(request.estimated_input_tokens or 0))
-                    out_tokens = max(0, int(request.max_output_tokens or 0))
                     if in_tokens > 0 or out_tokens > 0:
                         calc = (Decimal(in_tokens) * OPUS_INPUT_USD_PER_MILLION + Decimal(out_tokens) * OPUS_OUTPUT_USD_PER_MILLION) / Decimal("1000000")
                         cost_usd = float(calc.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP))
@@ -280,6 +284,7 @@ class PublicChatRuntime:
                     product_family="Public Chat Pro",
                     provider="claude-opus",
                     model=CLAUDE_OPUS_MODEL,
+                    operation="chat_completion",
                     estimated_max_cost_usd=cost_usd,
                     has_proven_cost_authority=cost_proven,
                     cost_authority_source=cost_source,
@@ -288,6 +293,7 @@ class PublicChatRuntime:
                     user_flow="public_chat_pro",
                     entrypoint=str(getattr(request, "entrypoint", "bot") or "bot"),
                     is_paid_live_attempt=bool(getattr(request, "is_paid_live_attempt", False) or is_paid_provider),
+                    metadata={"max_input_tokens": in_tokens, "max_output_tokens": out_tokens},
                 )
             spend_guard_res = reserve_provider_spend(
                 spend_ctx,

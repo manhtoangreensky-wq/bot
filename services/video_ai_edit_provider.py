@@ -871,9 +871,7 @@ def submit_video_edit(
 
     is_real_provider_transport = bool(
         config.auth_header_value
-        and not config.auth_header_value.startswith("mock_")
-        and not config.auth_header_value.startswith("test_")
-        and not config.auth_header_value.startswith("fake_")
+        or str(config.provider_name or "").strip().lower().startswith("fal")
     )
     is_paid_attempt = bool(
         is_paid_live
@@ -900,31 +898,34 @@ def submit_video_edit(
             cost_usd = float(FAL_10S_PROVIDER_COST_USD)
             cost_proven = True
             cost_source = f"fal_wan_v2v_10s_contract:${FAL_10S_PROVIDER_COST_USD}"
-        elif getattr(spend_context, "has_proven_cost_authority", False) and float(getattr(spend_context, "estimated_max_cost_usd", 0.0) or 0.0) > 0:
-            cost_usd = float(spend_context.estimated_max_cost_usd)
-            cost_proven = True
-            cost_source = "caller_proven_cost_authority"
         else:
             cost_usd = 0.0
             cost_proven = False
             cost_source = ""
 
-        spend_ctx = spend_context or SpendGuardContext(
-            job_id=str(job_id or ""),
-            request_id=f"AIEDIT-{job_id}",
-            trace_id=f"TR-AIEDIT-{job_id}",
-            product_family="Video AI Edit",
-            provider=config.provider_name,
-            model=config.model,
-            estimated_max_cost_usd=cost_usd,
-            has_proven_cost_authority=cost_proven,
-            cost_authority_source=cost_source,
-            bot_originated_action=bool(bot_originated_action),
-            bot_confirm_authority=clean_bot_confirm,
-            user_flow="public_video_ai_edit_confirm",
-            entrypoint="bot",
-            is_paid_live_attempt=bool(is_paid_live or is_real_provider_transport),
-        )
+        if spend_context is not None:
+            spend_ctx = spend_context
+            # Central guard does not trust caller-forged low cost (CALLER_COST_AUTHORITY_TRUSTED=NO)
+            if cost_usd > 0 and float(getattr(spend_ctx, "estimated_max_cost_usd", 0.0) or 0.0) < cost_usd:
+                spend_ctx.has_proven_cost_authority = False
+        else:
+            spend_ctx = SpendGuardContext(
+                job_id=str(job_id or ""),
+                request_id=f"AIEDIT-{job_id}",
+                trace_id=f"TR-AIEDIT-{job_id}",
+                product_family="Video AI Edit",
+                provider=config.provider_name,
+                model=config.model,
+                operation="submit_video_edit",
+                estimated_max_cost_usd=cost_usd,
+                has_proven_cost_authority=cost_proven,
+                cost_authority_source=cost_source,
+                bot_originated_action=bool(bot_originated_action),
+                bot_confirm_authority=clean_bot_confirm,
+                user_flow="video_ai_edit_bot",
+                entrypoint="bot",
+                is_paid_live_attempt=bool(is_paid_live or is_real_provider_transport),
+            )
         spend_res = reserve_provider_spend(spend_ctx, db_path=db_path, env=effective_env)
         if not spend_res.allowed:
             raise AiEditProviderError(spend_res.blocker or "spend_guard_blocked")

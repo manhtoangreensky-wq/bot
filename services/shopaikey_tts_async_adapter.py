@@ -201,12 +201,7 @@ async def shopaikey_minimax_tts_async_submit(
     if is_kill_switch_active(effective_env):
         return "FAIL_SPEND_GUARD_BLOCKED", "", f"spend_guard_blocked: {BLOCKER_KILL_SWITCH_ACTIVE}", 0
 
-    is_real_provider_transport = bool(
-        key
-        and not key.startswith("mock_")
-        and not key.startswith("test_")
-        and not key.startswith("fake_")
-    )
+    is_real_provider_transport = bool(key)
     should_guard = bool(
         spend_context is not None
         or is_paid_live
@@ -214,28 +209,30 @@ async def shopaikey_minimax_tts_async_submit(
     )
     spend_res = None
     if should_guard:
+        if has_proven_cost_authority and float(estimated_max_cost_usd or 0.0) > 0:
+            cost_usd = float(estimated_max_cost_usd)
+            cost_proven = True
+            cost_source = "caller_proven_cost_authority"
+        elif len(text_clean) > 0 and CANONICAL_TTS_RATE_USD_PER_CHAR > 0:
+            calc = (Decimal(len(text_clean)) * CANONICAL_TTS_RATE_USD_PER_CHAR).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+            cost_usd = float(calc)
+            cost_proven = bool(calc > 0)
+            cost_source = f"canonical_tts_char_rate:{CANONICAL_TTS_RATE_USD_PER_CHAR}:chars={len(text_clean)}"
+        else:
+            cost_usd = 0.0
+            cost_proven = False
+            cost_source = ""
+
         if spend_context is not None:
             spend_ctx = spend_context
         else:
-            if has_proven_cost_authority and float(estimated_max_cost_usd or 0.0) > 0:
-                cost_usd = float(estimated_max_cost_usd)
-                cost_proven = True
-                cost_source = "caller_proven_cost_authority"
-            elif len(text_clean) > 0 and CANONICAL_TTS_RATE_USD_PER_CHAR > 0:
-                calc = (Decimal(len(text_clean)) * CANONICAL_TTS_RATE_USD_PER_CHAR).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
-                cost_usd = float(calc)
-                cost_proven = bool(calc > 0)
-                cost_source = f"canonical_tts_char_rate:{CANONICAL_TTS_RATE_USD_PER_CHAR}:chars={len(text_clean)}"
-            else:
-                cost_usd = 0.0
-                cost_proven = False
-                cost_source = ""
             spend_ctx = SpendGuardContext(
                 job_id=str(job_id or request_id or text_clean[:32]),
                 request_id=str(request_id or ""),
                 trace_id=str(trace_id or ""),
                 product_family="Voice / TTS",
                 provider="shopaikey_minimax_tts",
+                operation="create_tts_task",
                 model=str(model or "speech-01-turbo"),
                 estimated_max_cost_usd=cost_usd,
                 has_proven_cost_authority=cost_proven,
@@ -245,6 +242,7 @@ async def shopaikey_minimax_tts_async_submit(
                 user_flow="bot_tts_confirm",
                 entrypoint="bot",
                 is_paid_live_attempt=bool(is_paid_live or is_real_provider_transport),
+                metadata={"char_count": len(text_clean), "text": text_clean},
             )
         spend_res = reserve_provider_spend(spend_ctx, db_path=db_path, env=effective_env)
         if not spend_res.allowed:
