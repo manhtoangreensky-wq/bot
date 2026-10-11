@@ -6579,18 +6579,36 @@ def _run_provider_generation_impl(
                 or (is_real_transport and current_adapter.provider_name != "stub_video")
             )
 
-            bot_originated_action = bool(
-                metadata.get("bot_originated_action")
-                or (request.metadata or {}).get("bot_originated_action")
-                or metadata.get("submit_source") in {PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM, OWNER_AUTHORIZED_LIVE_ACCEPTANCE}
-                or metadata.get("product_video")
-                or (request.metadata or {}).get("product_video")
+            scene_idx = metadata.get("scene_index", 0)
+            try:
+                scene_idx = int(scene_idx)
+            except Exception:
+                scene_idx = 0
+
+            scene_confirm_map = (
+                metadata.get("scene_confirmations")
+                or (request.metadata or {}).get("scene_confirmations")
+                or {}
             )
-            bot_confirm_authority = str(
-                metadata.get("bot_confirm_authority")
-                or (request.metadata or {}).get("bot_confirm_authority")
-                or ""
-            )
+            bot_confirm_authority = ""
+            if isinstance(scene_confirm_map, dict):
+                bot_confirm_authority = str(
+                    scene_confirm_map.get(scene_idx)
+                    or scene_confirm_map.get(str(scene_idx))
+                    or scene_confirm_map.get(scene_idx + 1)
+                    or scene_confirm_map.get(str(scene_idx + 1))
+                    or ""
+                )
+            if not bot_confirm_authority:
+                bot_confirm_authority = str(
+                    metadata.get("bot_confirm_authority")
+                    or (request.metadata or {}).get("bot_confirm_authority")
+                    or ""
+                )
+
+            # Strict trust boundary: Caller metadata is NOT trusted for bot origin (Section 5 & 11)
+            # CALLER_BOT_ORIGIN_METADATA_TRUSTED = NO
+            bot_originated_action = bool(bot_confirm_authority)
 
             spend_res = None
             if is_paid_attempt:
@@ -6598,15 +6616,18 @@ def _run_provider_generation_impl(
                     job_id=str(request.job_id or metadata.get("job_id") or ""),
                     request_id=str(metadata.get("request_id") or (request.metadata or {}).get("request_id") or f"REQ-PV-{request.job_id}"),
                     trace_id=str(metadata.get("trace_id") or (request.metadata or {}).get("trace_id") or f"TR-PV-{request.job_id}"),
-                    scene_index=metadata.get("scene_index", 0),
+                    chat_id=str(metadata.get("chat_id") or (request.metadata or {}).get("chat_id") or getattr(request, "chat_id", "") or ""),
+                    user_id=str(metadata.get("user_id") or (request.metadata or {}).get("user_id") or getattr(request, "user_id", "") or ""),
+                    scene_index=scene_idx,
                     product_family="Product Video",
                     provider=current_adapter.provider_name,
                     model=str(model_candidate or getattr(current_adapter, "model", "") or ""),
+                    operation="create_video_task",
                     estimated_max_cost_usd=estimated_cost,
                     has_proven_cost_authority=has_proven_cost_authority,
                     bot_originated_action=bot_originated_action,
                     bot_confirm_authority=bot_confirm_authority,
-                    user_flow=str(metadata.get("user_flow") or metadata.get("submit_source") or "product_video_bot"),
+                    user_flow=str(metadata.get("user_flow") or "product_video_bot"),
                     owner_receipt=str(metadata.get("owner_live_authorization_receipt") or (verified_acceptance or {}).get("token_fingerprint") or ""),
                     entrypoint=str(metadata.get("entrypoint") or metadata.get("source_entrypoint") or "bot"),
                     is_paid_live_attempt=is_paid_attempt,

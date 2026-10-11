@@ -104,6 +104,8 @@ class SpendGuardContext:
     job_id: str = ""
     request_id: str = ""
     trace_id: str = ""
+    chat_id: str | int = ""
+    user_id: str | int = ""
     scene_index: int | str = 0
     product_family: str = "Product Video"
     provider: str = ""
@@ -167,6 +169,11 @@ TRUSTED_BOT_CONFIRM_AUTHORITIES: frozenset[str] = frozenset({
 })
 
 CALLER_COST_AUTHORITY_TRUSTED: bool = False
+CALLER_BOT_ORIGIN_METADATA_TRUSTED: bool = False
+WORKER_CAN_MINT_BOT_CONFIRMATION: bool = False
+PROVIDER_CAN_MINT_BOT_CONFIRMATION: bool = False
+EMPTY_PAID_OPERATION_BLOCKED: bool = True
+PRODUCTION_BOT_CONFIRM_MINT_CALLSITE: str = "bot.py:handle_video_product_callback:b14_confirm"
 
 
 def validate_bot_confirm_authority(authority: str | None) -> bool:
@@ -416,8 +423,30 @@ PROVIDER_PAID_TRANSPORT_REGISTRY: tuple[ProviderPaidTransportAuthority, ...] = (
     ),
     ProviderPaidTransportAuthority(
         product_family="SubDub ASR",
+        provider="gemini_transcribe",
+        operation="asr_transcribe",
+        endpoint_class="paid_creation",
+        can_create_paid_usage=True,
+        pricing_authority="gemini_interactions_catalog",
+        max_cost_authority="gemini_transcribe_audio_duration",
+        bot_origin_required=True,
+        weekly_cap_required=True,
+    ),
+    ProviderPaidTransportAuthority(
+        product_family="SubDub ASR",
         provider="key4u_whisper",
         operation="openai_compatible_asr_transcribe",
+        endpoint_class="paid_creation",
+        can_create_paid_usage=True,
+        pricing_authority="key4u_stt_catalog",
+        max_cost_authority="key4u_stt_minute_quote",
+        bot_origin_required=True,
+        weekly_cap_required=True,
+    ),
+    ProviderPaidTransportAuthority(
+        product_family="SubDub ASR",
+        provider="key4u_whisper",
+        operation="asr_transcribe",
         endpoint_class="paid_creation",
         can_create_paid_usage=True,
         pricing_authority="key4u_stt_catalog",
@@ -429,6 +458,17 @@ PROVIDER_PAID_TRANSPORT_REGISTRY: tuple[ProviderPaidTransportAuthority, ...] = (
         product_family="Music / Suno",
         provider="key4u_suno",
         operation="suno_create",
+        endpoint_class="paid_creation",
+        can_create_paid_usage=True,
+        pricing_authority="none_missing_fail_closed",
+        max_cost_authority="none_missing_fail_closed",
+        bot_origin_required=True,
+        weekly_cap_required=True,
+    ),
+    ProviderPaidTransportAuthority(
+        product_family="Music / Suno",
+        provider="key4u_suno",
+        operation="suno_create_task",
         endpoint_class="paid_creation",
         can_create_paid_usage=True,
         pricing_authority="none_missing_fail_closed",
@@ -458,7 +498,7 @@ def resolve_paid_transport_authority(
     norm_fam = str(product_family or "").strip().lower()
     norm_prov = str(provider or "").strip().lower()
     norm_op = str(operation or "").strip().lower()
-    if not norm_fam or not norm_prov:
+    if not norm_fam or not norm_prov or not norm_op:
         return None
     for entry in PROVIDER_PAID_TRANSPORT_REGISTRY:
         if entry.product_family.lower() != norm_fam:
@@ -474,9 +514,9 @@ def resolve_paid_transport_authority(
         if not prov_match:
             continue
         op_match = (
-            not norm_op
-            or entry.operation.lower() == norm_op
-            or (norm_op and (norm_op in entry.operation.lower() or entry.operation.lower() in norm_op))
+            entry.operation.lower() == norm_op
+            or norm_op in entry.operation.lower()
+            or entry.operation.lower() in norm_op
         )
         if op_match:
             return entry
@@ -538,8 +578,40 @@ def resolve_canonical_cost_micro_usd(
         raw_model = str(context.model or "").strip()
         target_model = PRODUCT_VIDEO_MODEL_ALIAS_MAP.get((prov_key, raw_model), raw_model)
 
+        target_tier = str(
+            context.metadata.get("quality_key")
+            or context.metadata.get("tier")
+            or context.metadata.get("b14_quality")
+            or ""
+        ).strip().lower()
+
+        duration_param = (
+            context.metadata.get("duration_seconds")
+            or context.metadata.get("duration")
+            or context.metadata.get("provider_submit_seconds")
+            or context.metadata.get("public_scene_seconds")
+        )
+
+        filtered_tiers = tiers
+        if target_tier:
+            filtered_tiers = [
+                t for t in tiers
+                if str(t.get("quality_key") or "").lower() == target_tier
+                or str(t.get("tier_id") or "") == target_tier
+            ]
+            if not filtered_tiers:
+                return 0, False, f"tier_not_found_in_route_map:{target_tier}"
+        elif duration_param and float(duration_param) > 0:
+            dur_int = int(float(duration_param))
+            matching_dur_tiers = [
+                t for t in tiers
+                if int(t.get("seconds_per_scene") or 0) == dur_int
+            ]
+            if matching_dur_tiers:
+                filtered_tiers = matching_dur_tiers
+
         matching_candidates = []
-        for tier in tiers:
+        for tier in filtered_tiers:
             for c in tier.get("candidates", []):
                 if (
                     str(c.get("provider") or "").lower() == prov_key
@@ -550,13 +622,6 @@ def resolve_canonical_cost_micro_usd(
 
         if not matching_candidates:
             return 0, False, f"unknown_product_video_model_pricing:{prov_key}:{raw_model}"
-
-        duration_param = (
-            context.metadata.get("duration_seconds")
-            or context.metadata.get("duration")
-            or context.metadata.get("provider_submit_seconds")
-            or context.metadata.get("public_scene_seconds")
-        )
 
         costs: list[Decimal] = []
         for tier, c in matching_candidates:
@@ -575,9 +640,14 @@ def resolve_canonical_cost_micro_usd(
         if not costs:
             return 0, False, f"unpriced_product_video_candidates:{prov_key}:{raw_model}"
 
+        distinct_costs = set(costs)
+        # If no explicit tier was specified and candidates have differing costs, fail closed (ambiguous route pricing)
+        if not target_tier and len(distinct_costs) > 1:
+            return 0, False, f"ambiguous_product_video_route_pricing_multiple_tiers_match:{prov_key}:{raw_model}"
+
         scene_count = int(context.metadata.get("scene_count", 1) or 1)
-        max_unit_cost = max(costs)
-        total_usd = max_unit_cost * Decimal(max(1, scene_count))
+        unit_cost = list(distinct_costs)[0] if len(distinct_costs) == 1 else max(costs)
+        total_usd = unit_cost * Decimal(max(1, scene_count))
         source_id = f"config/product_video_price_route_map_20260827.json:{prov_key}:{target_model}"
         return to_micro_usd(total_usd), True, source_id
 
@@ -811,20 +881,33 @@ def init_spend_guard_db(
             """
             CREATE TABLE IF NOT EXISTS bot_spend_confirmations (
                 confirmation_id TEXT PRIMARY KEY,
+                parent_confirmation_id TEXT NOT NULL DEFAULT '',
                 chat_id TEXT NOT NULL DEFAULT '',
                 user_id TEXT NOT NULL DEFAULT '',
                 job_id TEXT NOT NULL DEFAULT '',
                 request_id TEXT NOT NULL DEFAULT '',
                 product_family TEXT NOT NULL,
                 operation TEXT NOT NULL,
+                scene_index INTEGER NOT NULL DEFAULT 0,
                 created_at REAL NOT NULL,
                 expires_at REAL NOT NULL,
                 consumed_at REAL,
+                status TEXT NOT NULL DEFAULT 'active',
                 origin TEXT NOT NULL DEFAULT 'telegram_bot_callback_or_command',
                 metadata_json TEXT NOT NULL DEFAULT '{}'
             )
             """
         )
+        cur = conn.cursor()
+        cur.execute("PRAGMA table_info(bot_spend_confirmations)")
+        cols = {row[1] for row in cur.fetchall()}
+        if cols:
+            if "parent_confirmation_id" not in cols:
+                conn.execute("ALTER TABLE bot_spend_confirmations ADD COLUMN parent_confirmation_id TEXT NOT NULL DEFAULT ''")
+            if "scene_index" not in cols:
+                conn.execute("ALTER TABLE bot_spend_confirmations ADD COLUMN scene_index INTEGER NOT NULL DEFAULT 0")
+            if "status" not in cols:
+                conn.execute("ALTER TABLE bot_spend_confirmations ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_bot_confirm_lookup ON bot_spend_confirmations(job_id, product_family, operation)"
         )
@@ -839,12 +922,14 @@ def init_spend_guard_db(
 
 def create_bot_confirmation(
     *,
+    parent_confirmation_id: str = "",
     chat_id: str | int = "",
     user_id: str | int = "",
     job_id: str = "",
     request_id: str = "",
     product_family: str = "Product Video",
     operation: str = "create_video_task",
+    scene_index: int = 0,
     origin: str = "telegram_bot_callback_or_command",
     ttl_seconds: float = 600.0,
     confirmation_id: str | None = None,
@@ -855,6 +940,9 @@ def create_bot_confirmation(
     """Create a durable, single-use bot confirmation record in SQLite WAL database."""
     target_path = resolve_spend_guard_db_path(db_path, env)
     init_spend_guard_db(db_path=target_path, env=env)
+    norm_origin = str(origin or "telegram_bot_callback_or_command").strip().lower()
+    if norm_origin in {"worker", "provider", "worker_injection", "direct_provider", "shell"}:
+        raise PermissionError(f"Worker or provider cannot mint bot confirmation (origin='{origin}')")
     c_id = confirmation_id or f"bot_conf_{secrets.token_hex(12)}"
     now_ts = time.time()
     expires_at = now_ts + float(ttl_seconds)
@@ -866,21 +954,96 @@ def create_bot_confirmation(
             """
             INSERT INTO bot_spend_confirmations (
                 confirmation_id,
+                parent_confirmation_id,
                 chat_id,
                 user_id,
                 job_id,
                 request_id,
                 product_family,
                 operation,
+                scene_index,
                 created_at,
                 expires_at,
                 consumed_at,
+                status,
                 origin,
                 metadata_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'active', ?, ?)
             """,
             (
                 c_id,
+                str(parent_confirmation_id or ""),
+                str(chat_id or ""),
+                str(user_id or ""),
+                str(job_id or ""),
+                str(request_id or ""),
+                str(product_family or "Product Video"),
+                str(operation or "create_video_task"),
+                int(scene_index or 0),
+                now_ts,
+                expires_at,
+                str(origin or "telegram_bot_callback_or_command"),
+                meta_json,
+            ),
+        )
+        conn.commit()
+        return c_id
+    finally:
+        conn.close()
+
+
+def mint_multiscene_bot_confirmation_plan(
+    *,
+    chat_id: str | int = "",
+    user_id: str | int = "",
+    job_id: str = "",
+    request_id: str = "",
+    product_family: str = "Product Video",
+    operation: str = "create_video_task",
+    scene_count: int = 1,
+    ttl_seconds: float = 600.0,
+    origin: str = "telegram_bot_callback_or_command",
+    metadata: dict[str, Any] | None = None,
+    db_path: str | None = None,
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Mint a bounded authorization plan for multi-scene Product Video with 1 parent and N child confirmations."""
+    target_path = resolve_spend_guard_db_path(db_path, env)
+    init_spend_guard_db(db_path=target_path, env=env)
+    norm_origin = str(origin or "telegram_bot_callback_or_command").strip().lower()
+    if norm_origin in {"worker", "provider", "worker_injection", "direct_provider", "shell"}:
+        raise PermissionError(f"Worker or provider cannot mint bot confirmation (origin='{origin}')")
+
+    parent_id = f"bot_conf_parent_{secrets.token_hex(12)}"
+    now_ts = time.time()
+    expires_at = now_ts + float(ttl_seconds)
+    meta_json = json.dumps(metadata or {})
+
+    conn = _get_sqlite_connection(target_path)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            """
+            INSERT INTO bot_spend_confirmations (
+                confirmation_id,
+                parent_confirmation_id,
+                chat_id,
+                user_id,
+                job_id,
+                request_id,
+                product_family,
+                operation,
+                scene_index,
+                created_at,
+                expires_at,
+                consumed_at,
+                status,
+                origin,
+                metadata_json
+            ) VALUES (?, '', ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL, 'active', ?, ?)
+            """,
+            (
+                parent_id,
                 str(chat_id or ""),
                 str(user_id or ""),
                 str(job_id or ""),
@@ -893,8 +1056,56 @@ def create_bot_confirmation(
                 meta_json,
             ),
         )
+
+        child_confirmations: list[str] = []
+        scene_confirmations: dict[int, str] = {}
+        total_scenes = max(1, int(scene_count or 1))
+        for scene_idx in range(1, total_scenes + 1):
+            child_id = f"bot_conf_child_s{scene_idx}_{secrets.token_hex(10)}"
+            child_confirmations.append(child_id)
+            scene_confirmations[scene_idx] = child_id
+            conn.execute(
+                """
+                INSERT INTO bot_spend_confirmations (
+                    confirmation_id,
+                    parent_confirmation_id,
+                    chat_id,
+                    user_id,
+                    job_id,
+                    request_id,
+                    product_family,
+                    operation,
+                    scene_index,
+                    created_at,
+                    expires_at,
+                    consumed_at,
+                    status,
+                    origin,
+                    metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'active', ?, ?)
+                """,
+                (
+                    child_id,
+                    parent_id,
+                    str(chat_id or ""),
+                    str(user_id or ""),
+                    str(job_id or ""),
+                    str(request_id or ""),
+                    str(product_family or "Product Video"),
+                    str(operation or "create_video_task"),
+                    scene_idx,
+                    now_ts,
+                    expires_at,
+                    str(origin or "telegram_bot_callback_or_command"),
+                    meta_json,
+                ),
+            )
         conn.commit()
-        return c_id
+        return {
+            "parent_confirmation_id": parent_id,
+            "child_confirmations": child_confirmations,
+            "scene_confirmations": scene_confirmations,
+        }
     finally:
         conn.close()
 
@@ -954,7 +1165,7 @@ def validate_bot_paid_live_origin(
 
 
 def compute_idempotency_key(context: SpendGuardContext) -> str:
-    """Compute deterministic idempotency key for paid submit binding job, scene, product, provider, operation."""
+    """Compute deterministic idempotency key for paid submit binding confirmation, job, scene, product, provider, operation."""
     if context.idempotency_key:
         return str(context.idempotency_key).strip()
     job_part = str(context.job_id or "").strip()
@@ -964,7 +1175,8 @@ def compute_idempotency_key(context: SpendGuardContext) -> str:
     prov_part = str(context.provider or "").strip().lower()
     op_part = str(context.operation or "").strip().lower()
     model_part = str(context.model or "").strip().lower()
-    raw = f"{fam_part}:{prov_part}:{op_part}:{job_part}:{scene_part}:{req_part}:{model_part}"
+    conf_part = str(context.bot_confirm_authority or "").strip()
+    raw = f"{fam_part}:{prov_part}:{op_part}:{job_part}:{scene_part}:{req_part}:{model_part}:{conf_part}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
 
 
@@ -1193,20 +1405,6 @@ def reserve_provider_spend(
             week_id=week_id,
         )
 
-    # 7. Canonical Cost Derivation (CALLER_COST_AUTHORITY_TRUSTED=NO) (Section 4)
-    cost_micro_usd, cost_proven, cost_source = resolve_canonical_cost_micro_usd(context, authority)
-    if not cost_proven or cost_micro_usd <= 0:
-        return SpendReservationResult(
-            allowed=False,
-            blocker=BLOCKER_MAX_COST_AUTHORITY_MISSING,
-            reason=f"Canonical provider max cost authority failed: {cost_source}",
-            cap_micro_usd=cap_micro_usd,
-            cap_usd=cap_usd,
-            week_id=week_id,
-        )
-
-    idempotency_key = compute_idempotency_key(context)
-
     try:
         init_spend_guard_db(db_path=target_db_path, env=effective_env)
         conn = _get_sqlite_connection(target_db_path)
@@ -1225,7 +1423,21 @@ def reserve_provider_spend(
         conn.execute("BEGIN IMMEDIATE")
         cur = conn.cursor()
 
-        # 8. Check Idempotency and Existing Reservations (Section 11)
+        # 7. Canonical Cost Derivation (CALLER_COST_AUTHORITY_TRUSTED=NO) (Section 4 & 10)
+        cost_micro_usd, cost_proven, cost_source = resolve_canonical_cost_micro_usd(context, authority)
+        if not cost_proven or cost_micro_usd <= 0:
+            conn.rollback()
+            return SpendReservationResult(
+                allowed=False,
+                blocker=BLOCKER_MAX_COST_AUTHORITY_MISSING,
+                reason=f"Canonical provider max cost authority failed: {cost_source}",
+                cap_micro_usd=cap_micro_usd,
+                cap_usd=cap_usd,
+                week_id=week_id,
+            )
+
+        # 8. Check Idempotency and Existing Reservations (Section 9 & 11)
+        idempotency_key = compute_idempotency_key(context)
         cur.execute(
             """
             SELECT status, error_code, reserved_cost_micro_usd, actual_settled_cost_micro_usd, reservation_id
@@ -1260,7 +1472,7 @@ def reserve_provider_spend(
                     cap_usd=cap_usd,
                 )
 
-        # 9. Durable Bot Confirmation Record Verification (Section 8 & 9)
+        # 9. Durable Bot Confirmation Record Verification (Section 2)
         confirmation_to_consume: str | None = None
         require_durable_confirmation = bool(
             context.is_paid_live_attempt
@@ -1269,18 +1481,27 @@ def reserve_provider_spend(
         )
         if require_durable_confirmation:
             c_auth = str(context.bot_confirm_authority or "").strip()
-            c_job = str(context.job_id or "").strip()
-            c_req = str(context.request_id or "").strip()
+            if not c_auth:
+                conn.rollback()
+                return SpendReservationResult(
+                    allowed=False,
+                    blocker=BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING,
+                    reason="Durable bot confirmation authority identifier missing",
+                    week_id=week_id,
+                    cap_micro_usd=cap_micro_usd,
+                    cap_usd=cap_usd,
+                )
 
+            # Strict lookup: ONLY by confirmation_id (Section 2)
             cur.execute(
                 """
-                SELECT confirmation_id, created_at, expires_at, consumed_at, product_family, operation, job_id, request_id, origin
+                SELECT confirmation_id, parent_confirmation_id, chat_id, user_id, job_id, request_id,
+                       product_family, operation, scene_index, created_at, expires_at, consumed_at,
+                       status, origin, metadata_json
                 FROM bot_spend_confirmations
-                WHERE confirmation_id = ? OR (job_id != '' AND job_id = ?) OR (request_id != '' AND request_id = ?)
-                ORDER BY created_at DESC
-                LIMIT 1
+                WHERE confirmation_id = ?
                 """,
-                (c_auth, c_job, c_req),
+                (c_auth,),
             )
             confirm_row = cur.fetchone()
             if not confirm_row:
@@ -1288,7 +1509,7 @@ def reserve_provider_spend(
                 return SpendReservationResult(
                     allowed=False,
                     blocker=BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING,
-                    reason="Durable bot confirmation record missing; caller-provided string alone forbidden",
+                    reason=f"Durable bot confirmation record missing for '{c_auth}'; caller-provided string alone forbidden",
                     week_id=week_id,
                     cap_micro_usd=cap_micro_usd,
                     cap_usd=cap_usd,
@@ -1296,18 +1517,24 @@ def reserve_provider_spend(
 
             (
                 c_id,
+                c_parent,
+                rec_chat,
+                rec_user,
+                rec_job,
+                rec_req,
+                c_family,
+                c_op,
+                rec_scene,
                 c_created,
                 c_expires,
                 c_consumed,
-                c_family,
-                c_op,
-                rec_job,
-                rec_req,
+                c_status,
                 c_origin,
+                meta_json,
             ) = confirm_row
 
             now_ts = time.time()
-            if c_consumed is not None:
+            if c_consumed is not None or str(c_status or "").lower() == "consumed":
                 conn.rollback()
                 return SpendReservationResult(
                     allowed=False,
@@ -1347,27 +1574,77 @@ def reserve_provider_spend(
                     cap_micro_usd=cap_micro_usd,
                     cap_usd=cap_usd,
                 )
-            if rec_job and c_job and rec_job != c_job:
+
+            # Exact job_id match
+            ctx_job = str(context.job_id or "").strip()
+            if rec_job and ctx_job and rec_job != ctx_job:
                 conn.rollback()
                 return SpendReservationResult(
                     allowed=False,
                     blocker=BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING,
-                    reason=f"Durable bot confirmation job mismatch: '{rec_job}' != '{c_job}'",
+                    reason=f"Durable bot confirmation job mismatch: '{rec_job}' != '{ctx_job}'",
                     week_id=week_id,
                     cap_micro_usd=cap_micro_usd,
                     cap_usd=cap_usd,
                 )
-            if rec_req and c_req and rec_req != c_req:
+
+            # Exact request_id match
+            ctx_req = str(context.request_id or "").strip()
+            if rec_req and ctx_req and rec_req != ctx_req:
                 conn.rollback()
                 return SpendReservationResult(
                     allowed=False,
                     blocker=BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING,
-                    reason=f"Durable bot confirmation request mismatch: '{rec_req}' != '{c_req}'",
+                    reason=f"Durable bot confirmation request mismatch: '{rec_req}' != '{ctx_req}'",
                     week_id=week_id,
                     cap_micro_usd=cap_micro_usd,
                     cap_usd=cap_usd,
                 )
-            if c_origin not in {"telegram_bot_callback_or_command", "bot_telegram_ui_confirmed", "bot"}:
+
+            # Exact chat_id match
+            ctx_chat = str(getattr(context, "chat_id", "") or context.metadata.get("chat_id") or "").strip()
+            if rec_chat and ctx_chat and rec_chat != ctx_chat:
+                conn.rollback()
+                return SpendReservationResult(
+                    allowed=False,
+                    blocker=BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING,
+                    reason=f"Durable bot confirmation chat mismatch: '{rec_chat}' != '{ctx_chat}'",
+                    week_id=week_id,
+                    cap_micro_usd=cap_micro_usd,
+                    cap_usd=cap_usd,
+                )
+
+            # Exact user_id match
+            ctx_user = str(getattr(context, "user_id", "") or context.metadata.get("user_id") or "").strip()
+            if rec_user and ctx_user and rec_user != ctx_user:
+                conn.rollback()
+                return SpendReservationResult(
+                    allowed=False,
+                    blocker=BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING,
+                    reason=f"Durable bot confirmation user mismatch: '{rec_user}' != '{ctx_user}'",
+                    week_id=week_id,
+                    cap_micro_usd=cap_micro_usd,
+                    cap_usd=cap_usd,
+                )
+
+            # Exact scene_index match (if child bound to specific scene)
+            ctx_scene = 0
+            try:
+                ctx_scene = int(context.scene_index or 0)
+            except Exception:
+                pass
+            if rec_scene and rec_scene > 0 and ctx_scene > 0 and rec_scene != ctx_scene:
+                conn.rollback()
+                return SpendReservationResult(
+                    allowed=False,
+                    blocker=BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING,
+                    reason=f"Durable bot confirmation scene mismatch: scene {rec_scene} != {ctx_scene}",
+                    week_id=week_id,
+                    cap_micro_usd=cap_micro_usd,
+                    cap_usd=cap_usd,
+                )
+
+            if c_origin not in {"telegram_bot_callback_or_command", "bot_telegram_ui_confirmed", "telegram_ui", "bot"}:
                 conn.rollback()
                 return SpendReservationResult(
                     allowed=False,
@@ -1487,7 +1764,7 @@ def reserve_provider_spend(
 
         if confirmation_to_consume:
             cur.execute(
-                "UPDATE bot_spend_confirmations SET consumed_at = ? WHERE confirmation_id = ?",
+                "UPDATE bot_spend_confirmations SET consumed_at = ?, status = 'consumed' WHERE confirmation_id = ?",
                 (now_ts, confirmation_to_consume),
             )
 

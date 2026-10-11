@@ -121902,6 +121902,38 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 query, context, blocked_session, None, uid, lang
             )
         session = dict(ready.get("session") or session)
+        telegram_update_id = safe_int(getattr(update, "update_id", 0), 0)
+        try:
+            from services.provider_spend_guard import mint_multiscene_bot_confirmation_plan
+            confirm_plan = mint_multiscene_bot_confirmation_plan(
+                chat_id=chat_id,
+                user_id=uid,
+                job_id=job_id,
+                request_id=str(intake_result.get("request_id") or ""),
+                product_family="Product Video",
+                operation="create_video_task",
+                scene_count=confirm_scene_count,
+                ttl_seconds=600.0,
+                origin="telegram_bot_callback_or_command",
+                metadata={
+                    "telegram_update_id": telegram_update_id,
+                    "production_callsite": "bot.py:handle_video_product_callback:b14_confirm",
+                    "chat_id": chat_id,
+                    "user_id": uid,
+                    "job_id": job_id,
+                    "request_id": str(intake_result.get("request_id") or ""),
+                },
+            )
+            final_admission["bot_confirm_authority"] = confirm_plan.get("parent_confirmation_id", "")
+            final_admission["child_confirmations"] = confirm_plan.get("child_confirmations", [])
+            final_admission["scene_confirmations"] = confirm_plan.get("scene_confirmations", {})
+        except Exception as mint_exc:
+            logger.warning(
+                "bot_spend_guard_mint_failed | user_id=%s | job_id=%s | exc=%s",
+                uid,
+                job_id,
+                mint_exc,
+            )
         queue_result = confirm_video_project_invoice(
             project_id,
             uid,
