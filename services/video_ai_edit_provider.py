@@ -560,7 +560,15 @@ def _multipart_body(fields: dict[str, Any], file_field: str, file_path: str) -> 
 
 
 def _json_response(response: Any) -> tuple[int, dict[str, Any]]:
-    status = int(getattr(response, "status", 0) or getattr(response, "code", 0) or 0)
+    code_val = getattr(response, "status", None)
+    if code_val is None and callable(getattr(response, "getcode", None)):
+        code_val = response.getcode()
+    if code_val is None:
+        code_val = getattr(response, "code", 0)
+    try:
+        status = int(code_val or 0)
+    except (TypeError, ValueError):
+        status = 0
     raw = response.read() if callable(getattr(response, "read", None)) else b""
     if isinstance(raw, str):
         raw = raw.encode("utf-8")
@@ -833,12 +841,57 @@ def submit_video_edit(
     opener: Callable[..., Any] | None = None,
     deadline_monotonic: float | None = None,
     monotonic: Callable[[], float] = time.monotonic,
+    bot_confirm_authority: str = "",
+    bot_originated_action: bool = False,
+    spend_context: Any = None,
+    is_paid_live: bool = False,
+    db_path: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     validation = validate_provider_config(config)
     if not validation.get("ok"):
         raise AiEditProviderError(str(validation.get("reason") or "ai_edit_provider_invalid"))
     if submit_source != PUBLIC_FINAL_CONFIRM_SOURCE or not public_user_confirmed:
         raise AiEditProviderError("ai_edit_hidden_submit_blocked")
+
+    effective_env = os.environ if env is None else env
+    is_paid_attempt = bool(
+        is_paid_live
+        or spend_context is not None
+        or (config.auth_header_value and not config.auth_header_value.startswith("mock_") and not config.auth_header_value.startswith("test_") and effective_env.get("AI_EDIT_GUARD_ALL") == "true")
+    )
+    spend_res = None
+    if is_paid_attempt:
+        from services.provider_spend_guard import (
+            SpendGuardContext,
+            reserve_provider_spend,
+            mark_submitted_pending_settlement,
+            retain_ambiguous_provider_spend,
+            release_provider_spend_no_charge,
+            BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING,
+        )
+        if not bot_confirm_authority and not getattr(spend_context, "bot_confirm_authority", ""):
+            raise AiEditProviderError(BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING)
+
+        spend_ctx = spend_context or SpendGuardContext(
+            job_id=str(job_id or ""),
+            request_id=f"AIEDIT-{job_id}",
+            trace_id=f"TR-AIEDIT-{job_id}",
+            product_family="Video AI Edit",
+            provider=config.provider_name,
+            model=config.model,
+            estimated_max_cost_usd=0.20,
+            has_proven_cost_authority=True,
+            bot_originated_action=bot_originated_action or bool(bot_confirm_authority),
+            bot_confirm_authority=bot_confirm_authority,
+            user_flow="public_video_ai_edit_confirm",
+            entrypoint="bot",
+            is_paid_live_attempt=True,
+        )
+        spend_res = reserve_provider_spend(spend_ctx, db_path=db_path, env=effective_env)
+        if not spend_res.allowed:
+            raise AiEditProviderError(spend_res.blocker or "spend_guard_blocked")
+
     if config.interface in {"video_to_video_json", "fal_wan_v2v_json"}:
         json_fields = build_fal_wan_v2v_payload(
             config,
@@ -870,7 +923,9 @@ def submit_video_edit(
     }
     request = urllib.request.Request(config.submit_url, data=body, headers=headers, method="POST")
     transport = opener or urllib.request.urlopen
+    transport_started = False
     try:
+        transport_started = True
         response = transport(
             request,
             timeout=_remaining_timeout(
@@ -881,14 +936,39 @@ def submit_video_edit(
         )
         status, payload = _json_response(response)
     except urllib.error.HTTPError as exc:
+        if is_paid_attempt and spend_res and spend_res.allowed and spend_res.reservation_id:
+            release_provider_spend_no_charge(spend_res.reservation_id, reason=f"http_{exc.code}", db_path=db_path, env=effective_env)
         raise AiEditProviderError(f"provider_submit_http_{exc.code}") from exc
     except urllib.error.URLError as exc:
+        if is_paid_attempt and spend_res and spend_res.allowed and spend_res.reservation_id:
+            if transport_started:
+                retain_ambiguous_provider_spend(spend_res.reservation_id, error_code="URLError", db_path=db_path, env=effective_env)
+            else:
+                release_provider_spend_no_charge(spend_res.reservation_id, reason="URLError", db_path=db_path, env=effective_env)
         raise AiEditProviderError("provider_submit_connection_failed") from exc
+    except Exception as exc:
+        if is_paid_attempt and spend_res and spend_res.allowed and spend_res.reservation_id:
+            if transport_started:
+                retain_ambiguous_provider_spend(spend_res.reservation_id, error_code=type(exc).__name__, db_path=db_path, env=effective_env)
+            else:
+                release_provider_spend_no_charge(spend_res.reservation_id, reason=type(exc).__name__, db_path=db_path, env=effective_env)
+        raise
     if status < 200 or status >= 300:
+        if is_paid_attempt and spend_res and spend_res.allowed and spend_res.reservation_id:
+            release_provider_spend_no_charge(spend_res.reservation_id, reason=f"http_{status}", db_path=db_path, env=effective_env)
         raise AiEditProviderError(f"provider_submit_http_{status or 0}")
     parsed = parse_provider_payload(payload)
     if not parsed["provider_task_id"] and not parsed["result_url_present"]:
+        if is_paid_attempt and spend_res and spend_res.allowed and spend_res.reservation_id:
+            release_provider_spend_no_charge(spend_res.reservation_id, reason="provider_submit_task_id_missing", db_path=db_path, env=effective_env)
         raise AiEditProviderError("provider_submit_task_id_missing")
+    if is_paid_attempt and spend_res and spend_res.allowed and spend_res.reservation_id:
+        mark_submitted_pending_settlement(
+            spend_res.reservation_id,
+            provider_task_id=str(parsed.get("provider_task_id") or ""),
+            db_path=db_path,
+            env=effective_env,
+        )
     return {
         **parsed,
         "accepted": True,

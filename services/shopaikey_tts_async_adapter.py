@@ -160,6 +160,18 @@ async def shopaikey_minimax_tts_async_submit(
     api_key: str = "",
     endpoint: str = "",
     timeout_seconds: float = 60.0,
+    *,
+    job_id: str = "",
+    request_id: str = "",
+    trace_id: str = "",
+    bot_originated_action: bool = False,
+    bot_confirm_authority: str = "",
+    estimated_max_cost_usd: float = 0.0,
+    has_proven_cost_authority: bool = False,
+    spend_context: Any = None,
+    is_paid_live: bool = False,
+    db_path: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> tuple[str, str, str, int]:
     key = str(api_key or get_shopaikey_env("SHOPAIKEY_API_KEY")).strip()
     if not key:
@@ -172,6 +184,41 @@ async def shopaikey_minimax_tts_async_submit(
     selected_voice = str(voice_id or "").strip()
     if not selected_voice:
         return "FAIL_BAD_REQUEST", "", "missing_voice_id", 0
+
+    from services.provider_spend_guard import (
+        SpendGuardContext,
+        reserve_provider_spend,
+        mark_submitted_pending_settlement,
+        retain_ambiguous_provider_spend,
+        release_provider_spend_no_charge,
+    )
+
+    effective_env = os.environ if env is None else env
+    should_guard = bool(
+        spend_context is not None
+        or is_paid_live
+        or (key and not key.startswith("mock_") and not key.startswith("test_") and effective_env.get("SHOPAIKEY_GUARD_ALL") == "true")
+    )
+    spend_res = None
+    if should_guard:
+        spend_ctx = spend_context or SpendGuardContext(
+            job_id=str(job_id or request_id or text_clean[:32]),
+            request_id=str(request_id or ""),
+            trace_id=str(trace_id or ""),
+            product_family="Voice / TTS",
+            provider="shopaikey_minimax_tts",
+            model=str(model or "speech-01-turbo"),
+            estimated_max_cost_usd=float(estimated_max_cost_usd or 0.05),
+            has_proven_cost_authority=has_proven_cost_authority or bool(estimated_max_cost_usd > 0),
+            bot_originated_action=bot_originated_action,
+            bot_confirm_authority=bot_confirm_authority,
+            user_flow="bot_tts_confirm",
+            entrypoint="bot",
+            is_paid_live_attempt=is_paid_live or bool(key and not key.startswith("mock_")),
+        )
+        spend_res = reserve_provider_spend(spend_ctx, db_path=db_path, env=effective_env)
+        if not spend_res.allowed:
+            return "FAIL_SPEND_GUARD_BLOCKED", "", f"spend_guard_blocked: {spend_res.blocker}", 0
 
     target_endpoint = endpoint or get_shopaikey_env("MINIMAX_TTS_ASYNC_ENDPOINT") or DEFAULT_MINIMAX_TTS_ASYNC_ENDPOINT
     target_url = resolve_shopaikey_async_endpoint_url(target_endpoint, base_url)
@@ -187,6 +234,7 @@ async def shopaikey_minimax_tts_async_submit(
         "Content-Type": "application/json",
     }
 
+    transport_started = False
     try:
         should_close = False
         if client is None:
@@ -194,6 +242,7 @@ async def shopaikey_minimax_tts_async_submit(
             should_close = True
 
         try:
+            transport_started = True
             res = await client.post(target_url, headers=headers, json=payload)
         finally:
             if should_close:
@@ -208,15 +257,66 @@ async def shopaikey_minimax_tts_async_submit(
         if http_status < 400:
             task_id = parse_shopaikey_task_id(data)
             if task_id:
+                if should_guard and spend_res and spend_res.allowed and spend_res.reservation_id:
+                    mark_submitted_pending_settlement(
+                        spend_res.reservation_id,
+                        provider_task_id=task_id,
+                        db_path=db_path,
+                        env=effective_env,
+                    )
                 return "PASS", task_id, f"http={http_status}; task_id={task_id}; url={target_url}", http_status
+            if should_guard and spend_res and spend_res.allowed and spend_res.reservation_id:
+                release_provider_spend_no_charge(
+                    spend_res.reservation_id,
+                    reason="no_task_id_in_response",
+                    db_path=db_path,
+                    env=effective_env,
+                )
             return "FAIL_NO_TASK_ID", "", f"http={http_status}; no_task_id_in_response; url={target_url}", http_status
 
+        if should_guard and spend_res and spend_res.allowed and spend_res.reservation_id:
+            release_provider_spend_no_charge(
+                spend_res.reservation_id,
+                reason=f"http_{http_status}",
+                db_path=db_path,
+                env=effective_env,
+            )
         error_detail = str(res.text[:300] if getattr(res, "text", "") else f"HTTP {http_status}")
         return "FAIL_HTTP_STATUS", "", f"http={http_status}; detail={error_detail}; url={target_url}", http_status
 
     except httpx.TimeoutException as exc:
+        if should_guard and spend_res and spend_res.allowed and spend_res.reservation_id:
+            if transport_started:
+                retain_ambiguous_provider_spend(
+                    spend_res.reservation_id,
+                    error_code="TimeoutException",
+                    db_path=db_path,
+                    env=effective_env,
+                )
+            else:
+                release_provider_spend_no_charge(
+                    spend_res.reservation_id,
+                    reason="pre_transport_timeout",
+                    db_path=db_path,
+                    env=effective_env,
+                )
         return "FAIL_TIMEOUT", "", f"timeout: {exc}", 0
     except Exception as exc:
+        if should_guard and spend_res and spend_res.allowed and spend_res.reservation_id:
+            if transport_started:
+                retain_ambiguous_provider_spend(
+                    spend_res.reservation_id,
+                    error_code=type(exc).__name__,
+                    db_path=db_path,
+                    env=effective_env,
+                )
+            else:
+                release_provider_spend_no_charge(
+                    spend_res.reservation_id,
+                    reason=type(exc).__name__,
+                    db_path=db_path,
+                    env=effective_env,
+                )
         return "FAIL_PROVIDER_ERROR", "", f"{type(exc).__name__}: {exc}", 0
 
 

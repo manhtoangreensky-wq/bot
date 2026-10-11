@@ -213,23 +213,28 @@ def resolve_spend_guard_db_path(
     db_path: str | None = None,
     env: dict[str, str] | None = None,
 ) -> str:
-    """Resolve shared central SQLite database path.
+    """Resolve shared central SQLite database path according to canonical authority priority:
+    1. explicit db_path argument (caller/test provided);
+    2. SPEND_GUARD_DB_PATH from environment;
+    3. canonical existing DB_PATH from environment;
+    4. canonical existing DB_FILE from environment;
+    5. canonical existing SQLITE_DB_PATH from environment;
+    6. production durable authority: /data/toandaas_system.db (if file exists).
 
-    Fail-closed: Does not silently fall back to relative 'toanaas.db' in ambient directory.
-    Must have an explicit path or canonical shared VPS path.
+    Fail-closed: Does not silently fall back to arbitrary /opt/toanaas/bot/toanaas.db or relative toanaas.db/spend_guard.db.
     """
     if db_path:
         return os.path.abspath(db_path)
     effective_env = os.environ if env is None else env
-    for key in ("SPEND_GUARD_DB_PATH", "DB_PATH", "SQLITE_DB_PATH"):
+    for key in ("SPEND_GUARD_DB_PATH", "DB_PATH", "DB_FILE", "SQLITE_DB_PATH"):
         val = str(effective_env.get(key) or "").strip()
         if val:
             return os.path.abspath(val)
 
-    # Check production canonical VPS shared DB path
-    vps_canonical = "/opt/toanaas/bot/toanaas.db"
-    if os.path.exists(vps_canonical):
-        return vps_canonical
+    # Production durable authority proven by deploy contract
+    production_durable = "/data/toandaas_system.db"
+    if os.path.exists(production_durable):
+        return production_durable
 
     raise ValueError("Shared spend guard DB path authority unavailable; explicit configuration required")
 
