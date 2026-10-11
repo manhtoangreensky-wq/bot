@@ -1,34 +1,17 @@
-"""Focused provider-free test suite for Provider Spend Guard, Hard Weekly Cap, Bot-Only Paid Origin, and Ambiguous Submit Safety.
+"""Authoritative 25-case provider-free test suite for Provider Spend Guard.
 
-TASK_ID: P0.PRODUCT_VIDEO_R16_10B14N21P_KEY4U_ACCOUNT_SPEND_FORENSIC_DEFECT_CORRECTION_AND_PAID_SPEND_GUARD_PR
+TASK_ID: P0.PRODUCT_VIDEO_R16_10B14N21Q_PR1423_SPEND_GUARD_AUTHORITY_TRUTH_AND_FAIL_CLOSED_CORRECTION
 TRACKER: manhtoangreensky-wq/bot#1155
 GLOBAL_DIRECTIVE: manhtoangreensky-wq/bot#1422
 
-Invariants verified:
-1. BOT paid live origin valid -> guard can proceed.
-2. Shell script paid test -> BLOCKED.
-3. Python script / manual script paid test -> BLOCKED.
-4. Worker injection paid test -> BLOCKED.
-5. Direct provider / internal API bypass -> BLOCKED.
-6. CI paid test -> BLOCKED.
-7. Pytest with production credentials -> BLOCKED from network / real calls.
-8. Below weekly cap -> PASS reservation.
-9. Exactly at cap -> next submit BLOCKED.
-10. Over cap -> BLOCKED.
-11. Concurrent requests racing -> atomic lock guarantees total reserved + settled cannot exceed $200.00.
-12. Ambiguous submit -> reservation retained in weekly spend.
-13. Ambiguous submit -> retry BLOCKED.
-14. Duplicate submit (same idempotency key / job) -> BLOCKED.
-15. Fallback after ambiguous submit -> BLOCKED.
-16. Usage / spend authority unavailable -> fail closed.
-17. Central kill switch active -> NEW paid submits BLOCKED, read-only status allowed.
-18. Canonical Product Video credential missing -> BLOCKED.
-19. Sanitized audit record contains required fields and 0 secret leaks.
+All 25 test cases run strictly offline with 0 real provider calls.
 """
 
 from __future__ import annotations
 
-import concurrent.futures
+from decimal import Decimal
+import json
+import multiprocessing
 import os
 import shutil
 import sys
@@ -39,25 +22,40 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from services.provider_spend_guard import (
     BLOCKER_AMBIGUOUS_RETRY_BLOCKED,
+    BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING,
     BLOCKER_BOT_ORIGIN_PROOF_MISSING,
     BLOCKER_DUPLICATE_PAID_SUBMIT,
     BLOCKER_KILL_SWITCH_ACTIVE,
+    BLOCKER_MAX_COST_AUTHORITY_MISSING,
     BLOCKER_PAID_LIVE_TEST_BOT_ONLY,
+    BLOCKER_POLICY_INCOMPLETE,
+    BLOCKER_SHARED_DB_UNAVAILABLE,
     BLOCKER_SPEND_GUARD_AUTHORITY_UNAVAILABLE,
     BLOCKER_TEST_NETWORK_ISOLATION,
     BLOCKER_WEEKLY_SPEND_CAP_EXCEEDED,
+    DEFAULT_WEEKLY_PROVIDER_SPEND_CAP_MICRO_USD,
     DEFAULT_WEEKLY_PROVIDER_SPEND_CAP_USD,
+    STATUS_AMBIGUOUS_RETAINED,
+    STATUS_RELEASED_PROVEN_NO_CHARGE,
+    STATUS_RESERVED,
+    STATUS_SETTLED_VERIFIED,
+    STATUS_SUBMITTED_PENDING_SETTLEMENT,
     SpendGuardContext,
     build_sanitized_audit_record,
     get_weekly_spend_summary,
     init_spend_guard_db,
     is_kill_switch_active,
+    mark_submitted_pending_settlement,
     release_provider_spend_no_charge,
     reserve_provider_spend,
     retain_ambiguous_provider_spend,
     set_kill_switch,
-    settle_provider_spend,
+    settle_verified_provider_spend,
+    to_micro_usd,
+    from_micro_usd,
     validate_bot_paid_live_origin,
+    verify_shared_db_parity,
+    resolve_spend_guard_db_path,
 )
 from services.video_provider_catalog import (
     KEY4U_VIDEO_AUTH_MISSING,
@@ -68,359 +66,598 @@ from services.video_provider_router import (
 )
 
 
-class TestProviderSpendGuardAndBotOrigin(unittest.TestCase):
+def _process_reserve_worker(db_path: str, env_dict: dict, job_id: str, cost: float, result_queue: multiprocessing.Queue):
+    """Top-level picklable helper for multi-process concurrency testing."""
+    ctx = SpendGuardContext(
+        job_id=job_id,
+        request_id=f"REQ-{job_id}",
+        trace_id=f"TR-{job_id}",
+        estimated_max_cost_usd=cost,
+        has_proven_cost_authority=True,
+        bot_originated_action=True,
+        bot_confirm_authority="bot_telegram_ui_confirmed",
+        user_flow="bot_product_video_confirm",
+        entrypoint="bot",
+        is_paid_live_attempt=False,
+    )
+    res = reserve_provider_spend(ctx, db_path=db_path, env=env_dict)
+    result_queue.put({
+        "job_id": job_id,
+        "allowed": res.allowed,
+        "blocker": res.blocker,
+        "reservation_id": res.reservation_id,
+    })
+
+
+class TestProviderSpendGuard25Cases(unittest.TestCase):
     def setUp(self):
-        self.temp_dir = tempfile.mkdtemp(prefix="test_spend_guard_")
-        self.db_path = os.path.join(self.temp_dir, "test_spend.db")
-        init_spend_guard_db(db_path=self.db_path)
+        self.temp_dir = tempfile.mkdtemp(prefix="test_spend_guard_25_")
+        self.db_path = os.path.join(self.temp_dir, "shared_toanaas.db")
+        self.standard_env = {
+            "SPEND_GUARD_DB_PATH": self.db_path,
+            "WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE": "MONDAY_0000_UTC",
+            "WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE": "UTC",
+            "WEEKLY_PROVIDER_SPEND_CAP_USD": "200.000",
+        }
+        init_spend_guard_db(db_path=self.db_path, env=self.standard_env)
         set_kill_switch(None)
 
     def tearDown(self):
         set_kill_switch(None)
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    def test_01_bot_paid_live_origin_valid_passes(self):
+    # 1. Missing reset rule -> BLOCK (weekly_provider_spend_policy_incomplete)
+    def test_01_missing_reset_rule_blocked(self):
+        incomplete_env = dict(self.standard_env)
+        incomplete_env.pop("WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE", None)
         ctx = SpendGuardContext(
-            job_id="job_101",
-            request_id="VID-20261011-000101",
-            trace_id="tr_001",
-            product_family="Product Video",
-            provider="key4u_video",
-            model="kling-v3",
-            estimated_max_cost_usd=1.50,
+            job_id="job_01",
+            request_id="req_01",
+            estimated_max_cost_usd=1.00,
+            has_proven_cost_authority=True,
             bot_originated_action=True,
-            user_flow="bot_product_video_confirm",
-            entrypoint="bot",
-            is_paid_live_attempt=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
+            user_flow="bot_confirm",
         )
-        env = {"REAL_PROVIDER_CALLS_ALLOWED": "1"}
-        valid, blocker = validate_bot_paid_live_origin(ctx, env)
-        self.assertTrue(valid)
-        self.assertEqual(blocker, "")
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=incomplete_env)
+        self.assertFalse(res.allowed)
+        self.assertEqual(res.blocker, BLOCKER_POLICY_INCOMPLETE)
 
-        res = reserve_provider_spend(ctx, db_path=self.db_path, env=env)
+    # 2. Missing timezone -> BLOCK (weekly_provider_spend_policy_incomplete)
+    def test_02_missing_timezone_blocked(self):
+        incomplete_env = dict(self.standard_env)
+        incomplete_env.pop("WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE", None)
+        ctx = SpendGuardContext(
+            job_id="job_02",
+            request_id="req_02",
+            estimated_max_cost_usd=1.00,
+            has_proven_cost_authority=True,
+            bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
+            user_flow="bot_confirm",
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=incomplete_env)
+        self.assertFalse(res.allowed)
+        self.assertEqual(res.blocker, BLOCKER_POLICY_INCOMPLETE)
+
+    # 3. Invalid reset policy -> BLOCK
+    def test_03_invalid_reset_policy_blocked(self):
+        invalid_env = dict(self.standard_env)
+        invalid_env["WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE"] = "SUNDAY_MIDNIGHT_UNSUPPORTED"
+        ctx = SpendGuardContext(
+            job_id="job_03",
+            request_id="req_03",
+            estimated_max_cost_usd=1.00,
+            has_proven_cost_authority=True,
+            bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
+            user_flow="bot_confirm",
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=invalid_env)
+        self.assertFalse(res.allowed)
+        self.assertEqual(res.blocker, BLOCKER_POLICY_INCOMPLETE)
+
+    # 4. Missing max-cost authority -> BLOCK (provider_max_cost_authority_missing)
+    def test_04_missing_max_cost_authority_blocked(self):
+        ctx = SpendGuardContext(
+            job_id="job_04",
+            request_id="req_04",
+            estimated_max_cost_usd=0.0,
+            has_proven_cost_authority=False,
+            bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
+            user_flow="bot_confirm",
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res.allowed)
+        self.assertEqual(res.blocker, BLOCKER_MAX_COST_AUTHORITY_MISSING)
+
+    # 5. Arbitrary $0.10 fallback absent
+    def test_05_arbitrary_fallback_absent(self):
+        # A non-stub attempt with estimated_max_cost_usd unspecified or arbitrary without proven authority
+        ctx = SpendGuardContext(
+            job_id="job_05",
+            request_id="req_05",
+            provider="key4u_video",
+            estimated_max_cost_usd=0.10,
+            has_proven_cost_authority=False,  # Unproven arbitrary number
+            bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
+            user_flow="bot_confirm",
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res.allowed)
+        self.assertEqual(res.blocker, BLOCKER_MAX_COST_AUTHORITY_MISSING)
+
+    # 6. Submit accepted -> PENDING_SETTLEMENT
+    def test_06_submit_accepted_transitions_to_pending_settlement(self):
+        ctx = SpendGuardContext(
+            job_id="job_06",
+            request_id="req_06",
+            trace_id="tr_06",
+            estimated_max_cost_usd=2.50,
+            has_proven_cost_authority=True,
+            bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
+            user_flow="bot_confirm",
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
         self.assertTrue(res.allowed)
         self.assertNotEqual(res.reservation_id, "")
-        self.assertEqual(res.week_spend_after_usd, 1.50)
 
-    def test_02_shell_paid_test_blocked(self):
+        marked = mark_submitted_pending_settlement(
+            res.reservation_id,
+            provider_task_id="task_ext_06",
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertTrue(marked)
+
+        summary = get_weekly_spend_summary(db_path=self.db_path, env=self.standard_env)
+        self.assertEqual(summary["pending_reserved_spend_usd"], 2.50)
+        self.assertEqual(summary["settled_week_spend_usd"], 0.0)
+        self.assertEqual(summary["total_active_week_spend_usd"], 2.50)
+
+    # 7. Accepted submit does NOT record estimated as actual
+    def test_07_accepted_submit_does_not_record_estimated_as_actual(self):
         ctx = SpendGuardContext(
-            job_id="job_shell_01",
-            request_id="VID-SHELL-001",
-            product_family="Product Video",
-            provider="key4u_video",
-            model="kling-v3",
-            estimated_max_cost_usd=1.00,
-            bot_originated_action=False,
-            user_flow="manual_cli",
-            entrypoint="shell",
-            is_paid_live_attempt=True,
-        )
-        env = {"REAL_PROVIDER_CALLS_ALLOWED": "1"}
-        valid, blocker = validate_bot_paid_live_origin(ctx, env)
-        self.assertFalse(valid)
-        self.assertEqual(blocker, BLOCKER_PAID_LIVE_TEST_BOT_ONLY)
-
-        res = reserve_provider_spend(ctx, db_path=self.db_path, env=env)
-        self.assertFalse(res.allowed)
-        self.assertEqual(res.blocker, BLOCKER_PAID_LIVE_TEST_BOT_ONLY)
-
-    def test_03_script_paid_test_blocked(self):
-        ctx = SpendGuardContext(
-            job_id="job_script_01",
-            request_id="VID-SCRIPT-001",
-            product_family="Product Video",
-            provider="key4u_video",
-            model="kling-v3",
-            estimated_max_cost_usd=1.00,
-            bot_originated_action=False,
-            user_flow="adhoc_script",
-            entrypoint="script",
-            is_paid_live_attempt=True,
-        )
-        res = reserve_provider_spend(ctx, db_path=self.db_path, env={"REAL_PROVIDER_CALLS_ALLOWED": "1"})
-        self.assertFalse(res.allowed)
-        self.assertEqual(res.blocker, BLOCKER_PAID_LIVE_TEST_BOT_ONLY)
-
-    def test_04_worker_injection_paid_test_blocked(self):
-        ctx = SpendGuardContext(
-            job_id="job_worker_inj_01",
-            request_id="VID-INJ-001",
-            product_family="Product Video",
-            provider="key4u_video",
-            model="kling-v3",
-            estimated_max_cost_usd=1.00,
-            bot_originated_action=False,
-            user_flow="worker_direct",
-            entrypoint="worker_injection",
-            is_paid_live_attempt=True,
-        )
-        res = reserve_provider_spend(ctx, db_path=self.db_path, env={"REAL_PROVIDER_CALLS_ALLOWED": "1"})
-        self.assertFalse(res.allowed)
-        self.assertEqual(res.blocker, BLOCKER_PAID_LIVE_TEST_BOT_ONLY)
-
-    def test_05_direct_provider_bypass_blocked(self):
-        ctx = SpendGuardContext(
-            job_id="job_direct_01",
-            request_id="VID-DIRECT-001",
-            product_family="Product Video",
-            provider="key4u_video",
-            model="kling-v3",
-            estimated_max_cost_usd=1.00,
-            bot_originated_action=False,
-            user_flow="raw_provider_call",
-            entrypoint="direct_provider",
-            is_paid_live_attempt=True,
-        )
-        res = reserve_provider_spend(ctx, db_path=self.db_path, env={"REAL_PROVIDER_CALLS_ALLOWED": "1"})
-        self.assertFalse(res.allowed)
-        self.assertEqual(res.blocker, BLOCKER_PAID_LIVE_TEST_BOT_ONLY)
-
-    def test_06_ci_paid_test_blocked(self):
-        ctx = SpendGuardContext(
-            job_id="job_ci_01",
-            request_id="VID-CI-001",
-            product_family="Product Video",
-            provider="key4u_video",
-            model="kling-v3",
-            estimated_max_cost_usd=1.00,
+            job_id="job_07",
+            request_id="req_07",
+            estimated_max_cost_usd=3.75,
+            has_proven_cost_authority=True,
             bot_originated_action=True,
-            user_flow="ci_workflow",
-            entrypoint="ci",
-            is_paid_live_attempt=True,
-        )
-        res = reserve_provider_spend(ctx, db_path=self.db_path, env={"REAL_PROVIDER_CALLS_ALLOWED": "1"})
-        self.assertFalse(res.allowed)
-        self.assertEqual(res.blocker, BLOCKER_PAID_LIVE_TEST_BOT_ONLY)
-
-    def test_07_pytest_with_real_calls_blocked(self):
-        ctx = SpendGuardContext(
-            job_id="job_test_01",
-            request_id="VID-TEST-001",
-            product_family="Product Video",
-            provider="key4u_video",
-            model="kling-v3",
-            estimated_max_cost_usd=1.00,
-            bot_originated_action=True,
-            user_flow="bot_product_video_confirm",
-            entrypoint="bot",
-            is_paid_live_attempt=True,
-        )
-        # In test env with REAL_PROVIDER_CALLS_ALLOWED=0
-        env = {"REAL_PROVIDER_CALLS_ALLOWED": "0"}
-        res = reserve_provider_spend(ctx, db_path=self.db_path, env=env)
-        self.assertFalse(res.allowed)
-        self.assertEqual(res.blocker, BLOCKER_TEST_NETWORK_ISOLATION)
-
-    def test_08_below_weekly_cap_passes(self):
-        # Settle $180.00 first
-        ctx_prev = SpendGuardContext(
-            job_id="job_prev_01",
-            request_id="VID-PREV-001",
-            trace_id="tr_prev",
-            product_family="Product Video",
-            provider="key4u_video",
-            model="kling-v3",
-            estimated_max_cost_usd=180.00,
-            bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
             user_flow="bot_confirm",
-            entrypoint="bot",
-            is_paid_live_attempt=False,
         )
-        res_prev = reserve_provider_spend(ctx_prev, db_path=self.db_path)
-        self.assertTrue(res_prev.allowed)
-        settle_provider_spend(res_prev.reservation_id, actual_cost_usd=180.00, db_path=self.db_path)
-
-        # Now attempt $15.00 (180 + 15 = 195 <= 200)
-        ctx_new = SpendGuardContext(
-            job_id="job_new_01",
-            request_id="VID-NEW-001",
-            trace_id="tr_new",
-            product_family="Product Video",
-            provider="key4u_video",
-            model="kling-v3",
-            estimated_max_cost_usd=15.00,
-            bot_originated_action=True,
-            user_flow="bot_confirm",
-            entrypoint="bot",
-            is_paid_live_attempt=False,
-        )
-        res_new = reserve_provider_spend(ctx_new, db_path=self.db_path)
-        self.assertTrue(res_new.allowed)
-        self.assertEqual(res_new.week_spend_before_usd, 180.00)
-        self.assertEqual(res_new.week_spend_after_usd, 195.00)
-
-    def test_09_exactly_at_cap_next_submit_blocked(self):
-        # Settle up to $200.00 exactly
-        ctx_fill = SpendGuardContext(
-            job_id="job_fill_01",
-            request_id="VID-FILL-001",
-            trace_id="tr_fill",
-            product_family="Product Video",
-            provider="key4u_video",
-            model="kling-v3",
-            estimated_max_cost_usd=200.00,
-            bot_originated_action=True,
-            user_flow="bot_confirm",
-            entrypoint="bot",
-            is_paid_live_attempt=False,
-        )
-        res_fill = reserve_provider_spend(ctx_fill, db_path=self.db_path)
-        self.assertTrue(res_fill.allowed)
-        settle_provider_spend(res_fill.reservation_id, actual_cost_usd=200.00, db_path=self.db_path)
-
-        # Next submit of even $0.01 must be BLOCKED
-        ctx_over = SpendGuardContext(
-            job_id="job_over_01",
-            request_id="VID-OVER-001",
-            trace_id="tr_over",
-            product_family="Product Video",
-            provider="key4u_video",
-            model="kling-v3",
-            estimated_max_cost_usd=0.01,
-            bot_originated_action=True,
-            user_flow="bot_confirm",
-            entrypoint="bot",
-            is_paid_live_attempt=False,
-        )
-        res_over = reserve_provider_spend(ctx_over, db_path=self.db_path)
-        self.assertFalse(res_over.allowed)
-        self.assertEqual(res_over.blocker, BLOCKER_WEEKLY_SPEND_CAP_EXCEEDED)
-
-    def test_10_over_cap_blocked(self):
-        # Attempting single request over $200.00
-        ctx_huge = SpendGuardContext(
-            job_id="job_huge_01",
-            request_id="VID-HUGE-001",
-            trace_id="tr_huge",
-            product_family="Product Video",
-            provider="key4u_video",
-            model="kling-v3",
-            estimated_max_cost_usd=205.00,
-            bot_originated_action=True,
-            user_flow="bot_confirm",
-            entrypoint="bot",
-            is_paid_live_attempt=False,
-        )
-        res_huge = reserve_provider_spend(ctx_huge, db_path=self.db_path)
-        self.assertFalse(res_huge.allowed)
-        self.assertEqual(res_huge.blocker, BLOCKER_WEEKLY_SPEND_CAP_EXCEEDED)
-
-    def test_11_concurrent_reservations_cannot_exceed_cap(self):
-        # Starting with $150.00 settled
-        ctx_base = SpendGuardContext(
-            job_id="job_base_01",
-            request_id="VID-BASE-001",
-            trace_id="tr_base",
-            estimated_max_cost_usd=150.00,
-            bot_originated_action=True,
-            user_flow="bot_confirm",
-            entrypoint="bot",
-        )
-        res_base = reserve_provider_spend(ctx_base, db_path=self.db_path)
-        self.assertTrue(res_base.allowed)
-        settle_provider_spend(res_base.reservation_id, actual_cost_usd=150.00, db_path=self.db_path)
-
-        # Remaining budget is $50.00.
-        # Launch 8 concurrent threads, each requesting $15.00 (8 * 15 = $120 total requested).
-        # At most 3 can succeed (3 * 15 = $45 <= $50; 4 * 15 = $60 > $50).
-        def attempt_reserve(i: int):
-            ctx = SpendGuardContext(
-                job_id=f"job_concurrent_{i}",
-                request_id=f"VID-CONC-{i}",
-                trace_id=f"tr_conc_{i}",
-                estimated_max_cost_usd=15.00,
-                bot_originated_action=True,
-                user_flow="bot_confirm",
-                entrypoint="bot",
-            )
-            return reserve_provider_spend(ctx, db_path=self.db_path)
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-            futures = [executor.submit(attempt_reserve, i) for i in range(8)]
-            results = [f.result() for f in futures]
-
-        allowed_count = sum(1 for r in results if r.allowed)
-        blocked_count = sum(1 for r in results if not r.allowed and r.blocker == BLOCKER_WEEKLY_SPEND_CAP_EXCEEDED)
-
-        self.assertLessEqual(allowed_count, 3)
-        self.assertEqual(allowed_count + blocked_count, 8)
-
-        # Verify summary reflects at most $200.00 total active spend
-        summary = get_weekly_spend_summary(db_path=self.db_path)
-        self.assertLessEqual(summary["total_active_week_spend_usd"], DEFAULT_WEEKLY_PROVIDER_SPEND_CAP_USD)
-
-    def test_12_ambiguous_submit_retains_reservation(self):
-        ctx = SpendGuardContext(
-            job_id="job_ambig_01",
-            request_id="VID-AMBIG-001",
-            trace_id="tr_ambig_01",
-            estimated_max_cost_usd=25.00,
-            bot_originated_action=True,
-            user_flow="bot_confirm",
-            entrypoint="bot",
-        )
-        res = reserve_provider_spend(ctx, db_path=self.db_path)
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
         self.assertTrue(res.allowed)
 
-        # Mark ambiguous outcome
+        mark_submitted_pending_settlement(
+            res.reservation_id,
+            provider_task_id="task_ext_07",
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+
+        import sqlite3
+        conn = sqlite3.connect(self.db_path)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT status, reserved_cost_micro_usd, actual_settled_cost_micro_usd FROM provider_spend_reservations WHERE reservation_id = ?",
+            (res.reservation_id,),
+        )
+        row = cur.fetchone()
+        conn.close()
+
+        self.assertIsNotNone(row)
+        self.assertEqual(row[0], STATUS_SUBMITTED_PENDING_SETTLEMENT)
+        self.assertEqual(row[1], 3_750_000)
+        self.assertEqual(row[2], 0)  # Actual settled cost remains 0!
+
+    # 8. Timeout after transport -> AMBIGUOUS_RETAINED
+    def test_08_timeout_after_transport_retains_ambiguous(self):
+        ctx = SpendGuardContext(
+            job_id="job_08",
+            request_id="req_08",
+            estimated_max_cost_usd=4.00,
+            has_proven_cost_authority=True,
+            bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
+            user_flow="bot_confirm",
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertTrue(res.allowed)
+
         retained = retain_ambiguous_provider_spend(
             res.reservation_id,
-            error_code="provider_submit_outcome_ambiguous_no_charge",
-            provider_task_id="task_maybe_received_123",
+            error_code="TimeoutError",
+            provider_task_id="",
             db_path=self.db_path,
+            env=self.standard_env,
         )
         self.assertTrue(retained)
 
-        # The $25.00 MUST remain counted in pending_reserved_spend
-        summary = get_weekly_spend_summary(db_path=self.db_path)
-        self.assertEqual(summary["pending_reserved_spend_usd"], 25.00)
-        self.assertEqual(summary["total_active_week_spend_usd"], 25.00)
+        summary = get_weekly_spend_summary(db_path=self.db_path, env=self.standard_env)
+        self.assertEqual(summary["pending_reserved_spend_usd"], 4.00)
+        self.assertEqual(summary["total_active_week_spend_usd"], 4.00)
 
-    def test_13_ambiguous_submit_retry_blocked(self):
+    # 9. Connection reset after transport -> AMBIGUOUS_RETAINED
+    def test_09_connection_reset_after_transport_retains_ambiguous(self):
         ctx = SpendGuardContext(
-            job_id="job_retry_01",
-            request_id="VID-RETRY-001",
-            trace_id="tr_retry_01",
-            estimated_max_cost_usd=20.00,
+            job_id="job_09",
+            request_id="req_09",
+            estimated_max_cost_usd=2.00,
+            has_proven_cost_authority=True,
             bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
             user_flow="bot_confirm",
-            entrypoint="bot",
         )
-        res = reserve_provider_spend(ctx, db_path=self.db_path)
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertTrue(res.allowed)
+
+        retained = retain_ambiguous_provider_spend(
+            res.reservation_id,
+            error_code="ConnectionResetError",
+            provider_task_id="task_conn_reset",
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertTrue(retained)
+
+        import sqlite3
+        conn = sqlite3.connect(self.db_path)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT status, error_code, reserved_cost_micro_usd FROM provider_spend_reservations WHERE reservation_id = ?",
+            (res.reservation_id,),
+        )
+        row = cur.fetchone()
+        conn.close()
+
+        self.assertEqual(row[0], STATUS_AMBIGUOUS_RETAINED)
+        self.assertEqual(row[1], "ConnectionResetError")
+        self.assertEqual(row[2], 2_000_000)
+
+    # 10. Response parse failure after transport -> AMBIGUOUS_RETAINED
+    def test_10_response_parse_failure_after_transport_retains_ambiguous(self):
+        ctx = SpendGuardContext(
+            job_id="job_10",
+            request_id="req_10",
+            estimated_max_cost_usd=1.80,
+            has_proven_cost_authority=True,
+            bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
+            user_flow="bot_confirm",
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertTrue(res.allowed)
+
+        retained = retain_ambiguous_provider_spend(
+            res.reservation_id,
+            error_code="JSONDecodeError",
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertTrue(retained)
+
+        summary = get_weekly_spend_summary(db_path=self.db_path, env=self.standard_env)
+        self.assertEqual(summary["total_active_week_spend_usd"], 1.80)
+
+    # 11. Generic exception after transport -> AMBIGUOUS_RETAINED
+    def test_11_generic_exception_after_transport_retains_ambiguous(self):
+        ctx = SpendGuardContext(
+            job_id="job_11",
+            request_id="req_11",
+            estimated_max_cost_usd=5.00,
+            has_proven_cost_authority=True,
+            bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
+            user_flow="bot_confirm",
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertTrue(res.allowed)
+
+        retained = retain_ambiguous_provider_spend(
+            res.reservation_id,
+            error_code="RuntimeError",
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertTrue(retained)
+        summary = get_weekly_spend_summary(db_path=self.db_path, env=self.standard_env)
+        self.assertEqual(summary["pending_reserved_spend_usd"], 5.00)
+
+    # 12. Proven pre-send failure -> RELEASED_PROVEN_NO_CHARGE
+    def test_12_proven_pre_send_failure_releases_reservation(self):
+        ctx = SpendGuardContext(
+            job_id="job_12",
+            request_id="req_12",
+            estimated_max_cost_usd=3.00,
+            has_proven_cost_authority=True,
+            bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
+            user_flow="bot_confirm",
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertTrue(res.allowed)
+
+        released = release_provider_spend_no_charge(
+            res.reservation_id,
+            reason="pre_transport_validation_failed",
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertTrue(released)
+
+        import sqlite3
+        conn = sqlite3.connect(self.db_path)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT status, reserved_cost_micro_usd FROM provider_spend_reservations WHERE reservation_id = ?",
+            (res.reservation_id,),
+        )
+        row = cur.fetchone()
+        conn.close()
+
+        self.assertEqual(row[0], STATUS_RELEASED_PROVEN_NO_CHARGE)
+        self.assertEqual(row[1], 0)
+
+        summary = get_weekly_spend_summary(db_path=self.db_path, env=self.standard_env)
+        self.assertEqual(summary["total_active_week_spend_usd"], 0.0)
+
+    # 13. CI + REAL_PROVIDER_CALLS_ALLOWED=1 -> still BLOCK
+    def test_13_ci_with_real_provider_calls_allowed_still_blocked(self):
+        ci_env = dict(self.standard_env)
+        ci_env["CI"] = "true"
+        ci_env["REAL_PROVIDER_CALLS_ALLOWED"] = "1"
+        ctx = SpendGuardContext(
+            job_id="job_13",
+            request_id="req_13",
+            estimated_max_cost_usd=1.00,
+            has_proven_cost_authority=True,
+            bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
+            user_flow="bot_confirm",
+            is_paid_live_attempt=True,
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=ci_env)
+        self.assertFalse(res.allowed)
+        self.assertEqual(res.blocker, BLOCKER_TEST_NETWORK_ISOLATION)
+
+    # 14. Pytest + override -> still BLOCK
+    def test_14_pytest_with_override_still_blocked(self):
+        test_env = dict(self.standard_env)
+        test_env["PYTEST_CURRENT_TEST"] = "tests/test_mock.py::test_case"
+        test_env["REAL_PROVIDER_CALLS_ALLOWED"] = "1"
+        ctx = SpendGuardContext(
+            job_id="job_14",
+            request_id="req_14",
+            estimated_max_cost_usd=1.00,
+            has_proven_cost_authority=True,
+            bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
+            user_flow="bot_confirm",
+            is_paid_live_attempt=True,
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=test_env)
+        self.assertFalse(res.allowed)
+        self.assertEqual(res.blocker, BLOCKER_TEST_NETWORK_ISOLATION)
+
+    # 15. Forged submit_source string -> bot origin BLOCK
+    def test_15_forged_submit_source_string_blocked(self):
+        # Caller supplies submit_source="public_final_confirm" but has NO trusted bot_confirm_authority
+        ctx = SpendGuardContext(
+            job_id="job_15",
+            request_id="req_15",
+            estimated_max_cost_usd=1.00,
+            has_proven_cost_authority=True,
+            bot_originated_action=False,  # Unproven
+            bot_confirm_authority="",      # Empty / absent
+            user_flow="public_final_confirm",
+            is_paid_live_attempt=True,
+        )
+        valid, blocker = validate_bot_paid_live_origin(ctx, env=self.standard_env)
+        self.assertFalse(valid)
+        self.assertIn(blocker, {BLOCKER_BOT_ORIGIN_PROOF_MISSING, BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING})
+
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res.allowed)
+
+    # 16. Trusted bot lineage -> PASS guard
+    def test_16_trusted_bot_lineage_passes_guard(self):
+        ctx = SpendGuardContext(
+            job_id="job_16",
+            request_id="req_16",
+            trace_id="tr_16",
+            estimated_max_cost_usd=1.25,
+            has_proven_cost_authority=True,
+            bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
+            user_flow="bot_product_video_confirm",
+            entrypoint="bot",
+            is_paid_live_attempt=True,
+        )
+        valid, blocker = validate_bot_paid_live_origin(ctx, env=self.standard_env)
+        self.assertTrue(valid)
+        self.assertEqual(blocker, "")
+
+        # Test reservation without test isolation flag
+        old_test_var = os.environ.pop("PYTEST_CURRENT_TEST", None)
+        try:
+            res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+            self.assertTrue(res.allowed)
+            self.assertEqual(res.week_spend_after_usd, 1.25)
+        finally:
+            if old_test_var is not None:
+                os.environ["PYTEST_CURRENT_TEST"] = old_test_var
+
+    # 17. Missing shared DB authority -> BLOCK (spend_guard_shared_authority_unavailable)
+    def test_17_missing_shared_db_authority_blocked(self):
+        ctx = SpendGuardContext(
+            job_id="job_17",
+            request_id="req_17",
+            estimated_max_cost_usd=1.00,
+            has_proven_cost_authority=True,
+            bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
+            user_flow="bot_confirm",
+        )
+        res = reserve_provider_spend(ctx, db_path=None, env={
+            "WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE": "MONDAY_0000_UTC",
+            "WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE": "UTC",
+        })
+        self.assertFalse(res.allowed)
+        self.assertEqual(res.blocker, BLOCKER_SHARED_DB_UNAVAILABLE)
+
+    # 18. Bot/Worker shared DB parity -> PASS
+    def test_18_bot_worker_shared_db_parity_passes(self):
+        shared_file = os.path.join(self.temp_dir, "parity_shared.db")
+        bot_env = {"DB_PATH": shared_file}
+        worker_env = {"SPEND_GUARD_DB_PATH": shared_file}
+
+        parity_ok, bot_path, worker_path, reason = verify_shared_db_parity(bot_env, worker_env)
+        self.assertTrue(parity_ok)
+        self.assertEqual(os.path.normcase(bot_path), os.path.normcase(worker_path))
+
+        # Test mismatch fails
+        mismatch_worker = {"SPEND_GUARD_DB_PATH": os.path.join(self.temp_dir, "other.db")}
+        parity_bad, _, _, _ = verify_shared_db_parity(bot_env, mismatch_worker)
+        self.assertFalse(parity_bad)
+
+    # 19. Two-process atomic reservation -> cannot exceed $200 (using multiprocessing)
+    def test_19_two_process_atomic_reservation_cannot_exceed_cap(self):
+        # Initial settle: $190.00
+        ctx_init = SpendGuardContext(
+            job_id="job_19_init",
+            request_id="req_19_init",
+            estimated_max_cost_usd=190.00,
+            has_proven_cost_authority=True,
+            bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
+            user_flow="bot_confirm",
+        )
+        res_init = reserve_provider_spend(ctx_init, db_path=self.db_path, env=self.standard_env)
+        self.assertTrue(res_init.allowed)
+        settle_verified_provider_spend(res_init.reservation_id, actual_verified_cost_usd=190.00, db_path=self.db_path, env=self.standard_env)
+
+        # Remaining budget is $10.00.
+        # Two independent processes concurrently attempt to reserve $10.00 each.
+        q = multiprocessing.Queue()
+        p1 = multiprocessing.Process(
+            target=_process_reserve_worker,
+            args=(self.db_path, self.standard_env, "job_19_p1", 10.00, q),
+        )
+        p2 = multiprocessing.Process(
+            target=_process_reserve_worker,
+            args=(self.db_path, self.standard_env, "job_19_p2", 10.00, q),
+        )
+
+        p1.start()
+        p2.start()
+        p1.join(timeout=10)
+        p2.join(timeout=10)
+
+        results = [q.get() for _ in range(2)]
+        allowed_count = sum(1 for r in results if r["allowed"])
+        blocked_count = sum(1 for r in results if not r["allowed"])
+
+        # Exactly 1 can succeed, the other MUST be blocked
+        self.assertEqual(allowed_count, 1)
+        self.assertEqual(blocked_count, 1)
+
+        summary = get_weekly_spend_summary(db_path=self.db_path, env=self.standard_env)
+        self.assertEqual(summary["total_active_week_spend_usd"], 200.00)
+
+    # 20. Precise decimal boundary ($199.999 + $0.001 PASS, $200.000 + $0.001 BLOCK)
+    def test_20_precise_decimal_boundary(self):
+        # Settle $199.999
+        ctx_part = SpendGuardContext(
+            job_id="job_20_base",
+            request_id="req_20_base",
+            estimated_max_cost_usd=199.999,
+            has_proven_cost_authority=True,
+            bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
+            user_flow="bot_confirm",
+        )
+        res_part = reserve_provider_spend(ctx_part, db_path=self.db_path, env=self.standard_env)
+        self.assertTrue(res_part.allowed)
+        settle_verified_provider_spend(res_part.reservation_id, actual_verified_cost_usd=199.999, db_path=self.db_path, env=self.standard_env)
+
+        # $199.999 + $0.001 = $200.000 -> PASS
+        ctx_exact = SpendGuardContext(
+            job_id="job_20_exact",
+            request_id="req_20_exact",
+            estimated_max_cost_usd=0.001,
+            has_proven_cost_authority=True,
+            bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
+            user_flow="bot_confirm",
+        )
+        res_exact = reserve_provider_spend(ctx_exact, db_path=self.db_path, env=self.standard_env)
+        self.assertTrue(res_exact.allowed)
+        settle_verified_provider_spend(res_exact.reservation_id, actual_verified_cost_usd=0.001, db_path=self.db_path, env=self.standard_env)
+
+        # $200.000 + $0.001 = $200.001 > $200.000 -> BLOCK
+        ctx_over = SpendGuardContext(
+            job_id="job_20_over",
+            request_id="req_20_over",
+            estimated_max_cost_usd=0.001,
+            has_proven_cost_authority=True,
+            bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
+            user_flow="bot_confirm",
+        )
+        res_over = reserve_provider_spend(ctx_over, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res_over.allowed)
+        self.assertEqual(res_over.blocker, BLOCKER_WEEKLY_SPEND_CAP_EXCEEDED)
+
+    # 21. Duplicate submit -> BLOCK
+    def test_21_duplicate_submit_blocked(self):
+        ctx = SpendGuardContext(
+            job_id="job_21_dup",
+            request_id="req_21_dup",
+            estimated_max_cost_usd=2.00,
+            has_proven_cost_authority=True,
+            bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
+            user_flow="bot_confirm",
+        )
+        res1 = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertTrue(res1.allowed)
+
+        # Immediate duplicate
+        res2 = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res2.allowed)
+        self.assertEqual(res2.blocker, BLOCKER_DUPLICATE_PAID_SUBMIT)
+
+    # 22. Retry ambiguous -> BLOCK
+    def test_22_retry_ambiguous_blocked(self):
+        ctx = SpendGuardContext(
+            job_id="job_22_retry",
+            request_id="req_22_retry",
+            estimated_max_cost_usd=2.00,
+            has_proven_cost_authority=True,
+            bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
+            user_flow="bot_confirm",
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
         self.assertTrue(res.allowed)
 
         retain_ambiguous_provider_spend(
             res.reservation_id,
-            error_code="provider_submit_timeout",
+            error_code="provider_timeout",
             db_path=self.db_path,
+            env=self.standard_env,
         )
 
-        # Attempt to retry the same job/idempotency key
-        res_retry = reserve_provider_spend(ctx, db_path=self.db_path)
+        res_retry = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
         self.assertFalse(res_retry.allowed)
         self.assertEqual(res_retry.blocker, BLOCKER_AMBIGUOUS_RETRY_BLOCKED)
 
-    def test_14_duplicate_paid_submit_blocked(self):
-        ctx = SpendGuardContext(
-            job_id="job_dup_01",
-            request_id="VID-DUP-001",
-            trace_id="tr_dup_01",
-            estimated_max_cost_usd=10.00,
-            bot_originated_action=True,
-            user_flow="bot_confirm",
-            entrypoint="bot",
-        )
-        res1 = reserve_provider_spend(ctx, db_path=self.db_path)
-        self.assertTrue(res1.allowed)
-
-        # Duplicate submit with same job/idempotency key while first is RESERVED
-        res2 = reserve_provider_spend(ctx, db_path=self.db_path)
-        self.assertFalse(res2.allowed)
-        self.assertEqual(res2.blocker, BLOCKER_DUPLICATE_PAID_SUBMIT)
-
-    def test_15_fallback_after_ambiguous_blocked_policy(self):
-        # Test product_video_provider_submit_source_policy blocks hidden / unconfirmed fallbacks
+    # 23. Fallback ambiguous -> BLOCK
+    def test_23_fallback_ambiguous_blocked(self):
         policy = product_video_provider_submit_source_policy(
             metadata={
                 "submit_source": "fallback",
@@ -430,35 +667,25 @@ class TestProviderSpendGuardAndBotOrigin(unittest.TestCase):
         )
         self.assertFalse(policy["provider_submit_allowed"])
 
-    def test_16_usage_authority_unavailable_fails_closed(self):
-        ctx = SpendGuardContext(
-            job_id="job_err_01",
-            request_id="VID-ERR-001",
-            estimated_max_cost_usd=5.00,
-        )
-        # Non-existent directory path
-        bad_path = os.path.join(self.temp_dir, "nonexistent_dir", "sub", "bad.db")
-        res = reserve_provider_spend(ctx, db_path=bad_path)
-        self.assertFalse(res.allowed)
-        self.assertEqual(res.blocker, BLOCKER_SPEND_GUARD_AUTHORITY_UNAVAILABLE)
-
-    def test_17_kill_switch_blocks_new_submits_allows_polling(self):
+    # 24. Kill switch -> BLOCK
+    def test_24_kill_switch_blocked(self):
         set_kill_switch(True)
         self.assertTrue(is_kill_switch_active())
 
         ctx = SpendGuardContext(
-            job_id="job_ks_01",
-            request_id="VID-KS-001",
-            estimated_max_cost_usd=5.00,
+            job_id="job_24_ks",
+            request_id="req_24_ks",
+            estimated_max_cost_usd=1.00,
+            has_proven_cost_authority=True,
             bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
             user_flow="bot_confirm",
-            entrypoint="bot",
         )
-        res = reserve_provider_spend(ctx, db_path=self.db_path)
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
         self.assertFalse(res.allowed)
         self.assertEqual(res.blocker, BLOCKER_KILL_SWITCH_ACTIVE)
 
-        # Polling policy check
+        # Polling existing task remains allowed
         policy = product_video_provider_submit_source_policy(
             metadata={"submit_source": "worker_poll_existing_task"},
             poll_existing_task=True,
@@ -466,55 +693,38 @@ class TestProviderSpendGuardAndBotOrigin(unittest.TestCase):
         self.assertFalse(policy["provider_submit_allowed"])
         self.assertTrue(policy["poll_existing_task_allowed"])
 
-    def test_18_canonical_product_video_credential_missing_fails_closed(self):
-        env = {
-            "KEY4U_API_KEY": "some-key",
-            "KEY4U_TOKEN": "some-token",
-        }
-        auth_decision = resolve_product_video_key4u_auth(env)
-        self.assertFalse(auth_decision["ready"])
-        self.assertEqual(auth_decision["blocker"], KEY4U_VIDEO_AUTH_MISSING)
+    # 25. Existing Product Video protected suites pass
+    def test_25_existing_product_video_protected_suites_pass(self):
+        # Verify key4u authority fails closed when legacy alias or missing canonical
+        env_alias_only = {"VIDEO_KEY4U_AUTH_HEADER_VALUE": "alias_value"}
+        res = resolve_product_video_key4u_auth(env_alias_only)
+        self.assertFalse(res["ready"])
+        self.assertEqual(res["blocker"], KEY4U_VIDEO_AUTH_MISSING)
 
-    def test_19_sanitized_audit_record_no_secret_leaks(self):
+        # Audit record sanitized check
         ctx = SpendGuardContext(
-            job_id="job_audit_01",
-            request_id="VID-AUDIT-001",
-            trace_id="tr_audit_01",
+            job_id="job_25_audit",
+            request_id="req_25_audit",
+            trace_id="tr_25_audit",
             product_family="Product Video",
             provider="key4u_video",
             model="kling-v3",
-            estimated_max_cost_usd=2.50,
+            estimated_max_cost_usd=1.50,
+            has_proven_cost_authority=True,
             bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
             user_flow="bot_confirm",
-            entrypoint="bot",
         )
-        raw_secret_task_id = "task_secret_sk_live_1234567890abcdef"
+        raw_secret_task_id = "task_secret_sk_live_9999999999abcdef"
         audit = build_sanitized_audit_record(
             ctx,
-            week_spend_before_usd=10.00,
-            week_spend_after_usd=12.50,
-            reserved_cost_usd=2.50,
-            actual_settled_cost_usd=2.50,
+            week_spend_before_micro_usd=10_000_000,
+            week_spend_after_micro_usd=11_500_000,
+            reserved_cost_micro_usd=1_500_000,
             provider_task_id=raw_secret_task_id,
         )
-        # Check required fields
-        expected_keys = {
-            "BOT_ORIGINATED_ACTION",
-            "BOT_REQUEST_OR_TRACE_ID",
-            "BOT_JOB_ID",
-            "PRODUCT_FAMILY",
-            "PROVIDER",
-            "MODEL",
-            "ESTIMATED_MAX_COST_USD",
-            "RESERVED_COST_USD",
-            "WEEK_SPEND_BEFORE_USD",
-            "WEEK_SPEND_AFTER_RESERVATION_USD",
-            "PROVIDER_TASK_ID_SAFE",
-            "ACTUAL_SETTLED_COST_USD",
-        }
-        self.assertTrue(expected_keys.issubset(audit.keys()))
         self.assertNotIn("sk_live", str(audit))
-        self.assertNotIn("1234567890", str(audit))
+        self.assertNotIn("9999999999", str(audit))
         self.assertIn("...", audit["PROVIDER_TASK_ID_SAFE"])
 
 

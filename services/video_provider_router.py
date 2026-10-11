@@ -6328,6 +6328,19 @@ def _run_provider_generation_impl(
                 },
             )
         else:
+            econ_check: dict[str, Any] = {}
+            model_candidate = (
+                selected_model_for_provider(provider_metadata, current_adapter.provider_name)
+                or (provider_metadata.get("storyboard_model") if is_storyboard else "")
+                or (metadata.get("storyboard_model") if is_storyboard else "")
+                or (provider_metadata.get("selected_model") if is_storyboard else "")
+                or (metadata.get("selected_model") if is_storyboard else "")
+                or (provider_metadata.get("model") if is_storyboard else "")
+                or (metadata.get("model") if is_storyboard else "")
+                or getattr(current_adapter, "model", "")
+                or getattr(current_adapter, "provider_payload_model", "")
+                or ""
+            )
             has_explicit_economics_context = bool(
                 metadata.get("tier_id") is not None
                 or metadata.get("quality_tier") is not None
@@ -6525,17 +6538,39 @@ def _run_provider_generation_impl(
 
             from services.provider_spend_guard import (
                 SpendGuardContext,
+                mark_submitted_pending_settlement,
                 release_provider_spend_no_charge,
                 reserve_provider_spend,
                 retain_ambiguous_provider_spend,
-                settle_provider_spend,
+                settle_verified_provider_spend,
             )
 
-            estimated_cost = float(
-                econ_check.get("expected_provider_cost_usd")
-                or econ_check.get("computed_provider_cost_usd")
-                or (0.10 if current_adapter.provider_name != "stub_video" else 0.0)
-            ) if is_product_video or is_storyboard else 0.0
+            proven_cost = None
+            if is_product_video or is_storyboard:
+                proven_cost = (
+                    econ_check.get("expected_provider_cost_usd")
+                    if econ_check.get("expected_provider_cost_usd") is not None
+                    else econ_check.get("computed_provider_cost_usd")
+                )
+            if current_adapter.provider_name == "stub_video":
+                estimated_cost = 0.0
+                has_proven_cost_authority = True
+            elif proven_cost is not None and float(proven_cost) > 0:
+                estimated_cost = float(proven_cost)
+                has_proven_cost_authority = True
+            else:
+                estimated_cost = 0.0
+                has_proven_cost_authority = False
+
+            bot_confirm_authority = str(
+                metadata.get("bot_confirm_authority")
+                or (request.metadata or {}).get("bot_confirm_authority")
+                or ""
+            )
+            bot_originated_action = bool(
+                metadata.get("bot_originated_action")
+                or (request.metadata or {}).get("bot_originated_action")
+            )
 
             spend_ctx = SpendGuardContext(
                 job_id=str(request.job_id or metadata.get("job_id") or ""),
@@ -6546,11 +6581,9 @@ def _run_provider_generation_impl(
                 provider=current_adapter.provider_name,
                 model=str(model_candidate or getattr(current_adapter, "model", "") or ""),
                 estimated_max_cost_usd=estimated_cost,
-                bot_originated_action=bool(
-                    metadata.get("bot_originated_action")
-                    or (request.metadata or {}).get("bot_originated_action")
-                    or metadata.get("submit_source") in {PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM, OWNER_AUTHORIZED_LIVE_ACCEPTANCE}
-                ),
+                has_proven_cost_authority=has_proven_cost_authority,
+                bot_originated_action=bot_originated_action,
+                bot_confirm_authority=bot_confirm_authority,
                 user_flow=str(metadata.get("user_flow") or metadata.get("submit_source") or "product_video_bot"),
                 owner_receipt=str(metadata.get("owner_live_authorization_receipt") or (verified_acceptance or {}).get("token_fingerprint") or ""),
                 entrypoint=str(metadata.get("entrypoint") or metadata.get("source_entrypoint") or "bot"),
@@ -6559,7 +6592,7 @@ def _run_provider_generation_impl(
                     or metadata.get("is_paid_live_test")
                     or metadata.get("live_test")
                     or metadata.get("owner_acceptance_auth")
-                    or (current_adapter.provider_name != "stub_video" and estimated_cost > 0)
+                    or (current_adapter.provider_name != "stub_video" and (estimated_cost > 0 or not has_proven_cost_authority))
                 ),
                 metadata=dict(metadata),
             )
@@ -6611,8 +6644,10 @@ def _run_provider_generation_impl(
                     "spend_guard_audit": spend_res.audit_record,
                 }
 
+            provider_transport_started = False
             try:
                 _mark_trace("submit", submit_called=True)
+                provider_transport_started = True
                 submit = current_adapter.submit_video_job(provider_request)
                 if acceptance_valid and verified_acceptance:
                     token_fp = verified_acceptance.get("token_fingerprint") or ""
@@ -6625,11 +6660,10 @@ def _run_provider_generation_impl(
                     )
             except Exception as exc:
                 if spend_res.allowed and spend_res.reservation_id:
-                    is_exc_ambiguous = isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.lower() or "timeout" in str(exc).lower()
-                    if is_exc_ambiguous:
+                    if provider_transport_started:
                         retain_ambiguous_provider_spend(
                             spend_res.reservation_id,
-                            error_code="provider_submit_outcome_ambiguous_no_charge",
+                            error_code=type(exc).__name__,
                             db_path=env.get("DB_PATH") or env.get("SQLITE_DB_PATH"),
                             env=env,
                         )
@@ -6643,7 +6677,7 @@ def _run_provider_generation_impl(
                 if acceptance_valid and verified_acceptance:
                     token_fp = verified_acceptance.get("token_fingerprint") or ""
                     is_timeout_early = isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.lower() or "timeout" in str(exc).lower()
-                    exc_stage = STAGE_OAT_CONSUMED_AMBIGUOUS if is_timeout_early else STAGE_OAT_CONSUMED_FAILED
+                    exc_stage = STAGE_OAT_CONSUMED_AMBIGUOUS if (is_timeout_early or provider_transport_started) else STAGE_OAT_CONSUMED_FAILED
                     finalize_owner_acceptance_token(
                         token_fp,
                         stage=exc_stage,
@@ -6657,7 +6691,8 @@ def _run_provider_generation_impl(
                 }
                 blocker = str(exc_payload.get("blocker") or "provider_unhandled_exception")
                 is_timeout = isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.lower() or "timeout" in str(exc).lower()
-                if is_timeout or blocker in {"provider_submit_outcome_ambiguous_no_charge", "provider_timeout", "provider_submit_timeout"}:
+                is_post_transport_fail_closed = provider_transport_started or is_timeout
+                if is_post_transport_fail_closed or blocker in {"provider_submit_outcome_ambiguous_no_charge", "provider_timeout", "provider_submit_timeout"}:
                     blocker = "provider_submit_outcome_ambiguous_no_charge"
                     exc_payload["blocker"] = blocker
                     exc_payload["provider_error"] = blocker
@@ -6713,9 +6748,8 @@ def _run_provider_generation_impl(
 
         if spend_res.allowed and spend_res.reservation_id:
             if submit.ok:
-                settle_provider_spend(
+                mark_submitted_pending_settlement(
                     spend_res.reservation_id,
-                    actual_cost_usd=estimated_cost,
                     provider_task_id=str(submit.provider_task_id or submit.provider_video_id or ""),
                     db_path=env.get("DB_PATH") or env.get("SQLITE_DB_PATH"),
                     env=env,
