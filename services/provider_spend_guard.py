@@ -45,6 +45,7 @@ DEFAULT_WEEKLY_PROVIDER_SPEND_CAP_MICRO_USD = 200_000_000
 
 # Environment variable keys
 KILL_SWITCH_ENV = "PAID_PROVIDER_KILL_SWITCH_ACTIVE"
+KILL_SWITCH_ALIAS_ENV = "PAID_EXTERNAL_PROVIDERS_DISABLED"
 WEEKLY_SPEND_CAP_ENV = "WEEKLY_PROVIDER_SPEND_CAP_USD"
 RESET_RULE_ENV = "WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE"
 RESET_RULE_ALIAS_ENV = "WEEKLY_SPEND_RESET_RULE"
@@ -147,8 +148,167 @@ def is_kill_switch_active(env: dict[str, str] | None = None) -> bool:
     if _IN_MEMORY_KILL_SWITCH is not None:
         return _IN_MEMORY_KILL_SWITCH
     effective_env = os.environ if env is None else env
-    raw = str(effective_env.get(KILL_SWITCH_ENV, "")).strip().lower()
-    return raw in {"1", "true", "yes", "on", "active"}
+    for key in (KILL_SWITCH_ENV, KILL_SWITCH_ALIAS_ENV):
+        raw = str(effective_env.get(key, "")).strip().lower()
+        if raw in {"1", "true", "yes", "on", "active"}:
+            return True
+    return False
+
+
+@dataclasses.dataclass(frozen=True)
+class ProviderPaidTransportAuthority:
+    product_family: str
+    provider: str
+    operation: str
+    endpoint_class: str  # paid_creation | query_poll | download | webhook_ack
+    can_create_paid_usage: bool
+    pricing_authority: str
+    max_cost_authority: str
+    bot_origin_required: bool
+    weekly_cap_required: bool
+
+
+PROVIDER_PAID_TRANSPORT_REGISTRY: tuple[ProviderPaidTransportAuthority, ...] = (
+    ProviderPaidTransportAuthority(
+        product_family="Product Video",
+        provider="shopaikey_kling_video",
+        operation="create_video_task",
+        endpoint_class="paid_creation",
+        can_create_paid_usage=True,
+        pricing_authority="services/video_ai_real_pricing.py",
+        max_cost_authority="config/product_video_price_route_map_20260827.json:kling-v3-15s",
+        bot_origin_required=True,
+        weekly_cap_required=True,
+    ),
+    ProviderPaidTransportAuthority(
+        product_family="Product Video",
+        provider="key4u_kling_video",
+        operation="create_video_task",
+        endpoint_class="paid_creation",
+        can_create_paid_usage=True,
+        pricing_authority="services/video_ai_real_pricing.py",
+        max_cost_authority="config/product_video_price_route_map_20260827.json:kling-v3-15s",
+        bot_origin_required=True,
+        weekly_cap_required=True,
+    ),
+    ProviderPaidTransportAuthority(
+        product_family="Product Video",
+        provider="shopaikey_kling_video",
+        operation="query_video_task",
+        endpoint_class="query_poll",
+        can_create_paid_usage=False,
+        pricing_authority="none_query_poll_no_charge",
+        max_cost_authority="none_query_poll_no_charge",
+        bot_origin_required=False,
+        weekly_cap_required=False,
+    ),
+    ProviderPaidTransportAuthority(
+        product_family="Product Video",
+        provider="key4u_kling_video",
+        operation="query_video_task",
+        endpoint_class="query_poll",
+        can_create_paid_usage=False,
+        pricing_authority="none_query_poll_no_charge",
+        max_cost_authority="none_query_poll_no_charge",
+        bot_origin_required=False,
+        weekly_cap_required=False,
+    ),
+    ProviderPaidTransportAuthority(
+        product_family="Voice / TTS",
+        provider="shopaikey_minimax_tts",
+        operation="create_tts_task",
+        endpoint_class="paid_creation",
+        can_create_paid_usage=True,
+        pricing_authority="services/video_ai_real_pricing.py:CANONICAL_TTS_RATE_USD_PER_CHAR",
+        max_cost_authority="services/video_ai_real_pricing.py:calculate_tts_cost_vnd",
+        bot_origin_required=True,
+        weekly_cap_required=True,
+    ),
+    ProviderPaidTransportAuthority(
+        product_family="Voice / TTS",
+        provider="shopaikey_minimax_tts",
+        operation="query_tts_task",
+        endpoint_class="query_poll",
+        can_create_paid_usage=False,
+        pricing_authority="none_query_poll_no_charge",
+        max_cost_authority="none_query_poll_no_charge",
+        bot_origin_required=False,
+        weekly_cap_required=False,
+    ),
+    ProviderPaidTransportAuthority(
+        product_family="Public Chat Pro",
+        provider="claude-opus",
+        operation="chat_completion",
+        endpoint_class="paid_creation",
+        can_create_paid_usage=True,
+        pricing_authority="services/chat_pro_pricing.py:OPUS_INPUT_USD_PER_MILLION+OPUS_OUTPUT_USD_PER_MILLION",
+        max_cost_authority="services/chat_pro_pricing.py:token_quote",
+        bot_origin_required=True,
+        weekly_cap_required=True,
+    ),
+    ProviderPaidTransportAuthority(
+        product_family="Video AI Edit",
+        provider="fal_video",
+        operation="submit_video_edit",
+        endpoint_class="paid_creation",
+        can_create_paid_usage=True,
+        pricing_authority="services/video_ai_edit_provider.py:FAL_5S_PROVIDER_COST_USD+FAL_10S_PROVIDER_COST_USD",
+        max_cost_authority="services/video_ai_edit_provider.py:duration_fixed_quote",
+        bot_origin_required=True,
+        weekly_cap_required=True,
+    ),
+    ProviderPaidTransportAuthority(
+        product_family="Video AI Edit",
+        provider="fal_video",
+        operation="poll_video_edit",
+        endpoint_class="query_poll",
+        can_create_paid_usage=False,
+        pricing_authority="none_query_poll_no_charge",
+        max_cost_authority="none_query_poll_no_charge",
+        bot_origin_required=False,
+        weekly_cap_required=False,
+    ),
+    ProviderPaidTransportAuthority(
+        product_family="SubDub ASR",
+        provider="gemini_transcribe",
+        operation="transcribe_diarized_words",
+        endpoint_class="paid_creation",
+        can_create_paid_usage=True,
+        pricing_authority="gemini_interactions_catalog",
+        max_cost_authority="gemini_transcribe_audio_duration",
+        bot_origin_required=True,
+        weekly_cap_required=True,
+    ),
+    ProviderPaidTransportAuthority(
+        product_family="SubDub ASR",
+        provider="key4u_whisper",
+        operation="openai_compatible_asr_transcribe",
+        endpoint_class="paid_creation",
+        can_create_paid_usage=True,
+        pricing_authority="key4u_stt_catalog",
+        max_cost_authority="key4u_stt_minute_quote",
+        bot_origin_required=True,
+        weekly_cap_required=True,
+    ),
+)
+
+
+def resolve_paid_transport_authority(
+    product_family: str,
+    provider: str,
+    operation: str,
+) -> ProviderPaidTransportAuthority | None:
+    norm_fam = str(product_family or "").strip().lower()
+    norm_prov = str(provider or "").strip().lower()
+    norm_op = str(operation or "").strip().lower()
+    for entry in PROVIDER_PAID_TRANSPORT_REGISTRY:
+        if (
+            entry.product_family.lower() == norm_fam
+            and entry.provider.lower() == norm_prov
+            and entry.operation.lower() == norm_op
+        ):
+            return entry
+    return None
 
 
 def get_configured_cap_micro_usd(env: dict[str, str] | None = None) -> int:

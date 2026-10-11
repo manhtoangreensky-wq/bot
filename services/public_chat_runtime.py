@@ -74,10 +74,10 @@ class PublicChatRequest:
     estimated_input_tokens: int = 0
     max_output_tokens: int = PUBLIC_CHAT_MAX_OUTPUT_TOKENS
     is_paid_external_provider: bool = False
-    bot_originated_action: bool = True
+    bot_originated_action: bool = False
     bot_confirm_authority: str = ""
     has_proven_cost_authority: bool = False
-    estimated_max_cost_usd: float = 0.05
+    estimated_max_cost_usd: float = 0.0
     db_path: str | None = None
     env: dict[str, str] | None = None
     spend_context: Any = None
@@ -224,28 +224,71 @@ class PublicChatRuntime:
             or os.environ.get("CHAT_PRO_PROVIDER_IS_PAID") == "true"
         )
         if is_paid_provider:
+            from decimal import Decimal, ROUND_HALF_UP
+            from services.chat_pro_pricing import (
+                OPUS_INPUT_USD_PER_MILLION,
+                OPUS_OUTPUT_USD_PER_MILLION,
+            )
             from services.provider_spend_guard import (
+                BLOCKER_KILL_SWITCH_ACTIVE,
                 SpendGuardContext,
+                is_kill_switch_active,
                 reserve_provider_spend,
                 mark_submitted_pending_settlement,
                 retain_ambiguous_provider_spend,
                 release_provider_spend_no_charge,
             )
-            spend_ctx = getattr(request, "spend_context", None) or SpendGuardContext(
-                job_id=str(decision.request_id),
-                request_id=str(decision.request_id),
-                trace_id=str(getattr(request, "trace_id", "") or decision.request_id),
-                product_family="Public Chat Pro",
-                provider="claude-opus",
-                model=CLAUDE_OPUS_MODEL,
-                estimated_max_cost_usd=float(getattr(request, "estimated_max_cost_usd", 0.05) or 0.05),
-                has_proven_cost_authority=bool(getattr(request, "has_proven_cost_authority", False)),
-                bot_originated_action=bool(getattr(request, "bot_originated_action", True)),
-                bot_confirm_authority=str(getattr(request, "bot_confirm_authority", "") or ""),
-                user_flow="public_chat_pro",
-                entrypoint=str(getattr(request, "entrypoint", "bot") or "bot"),
-                is_paid_live_attempt=bool(getattr(request, "is_paid_live_attempt", False) or is_paid_provider),
-            )
+            if is_kill_switch_active(getattr(request, "env", None)):
+                if not is_free and self.wallet is not None and wallet_reservation_id:
+                    try:
+                        await _wallet(self.wallet, "release", request.account_id, wallet_reservation_id, decision.request_id)
+                    except Exception:
+                        pass
+                failure = {
+                    "ok": False,
+                    "status": "SPEND_GUARD_BLOCKED",
+                    "blocker": BLOCKER_KILL_SWITCH_ACTIVE,
+                    "request_id": decision.request_id,
+                    "provider_calls": 0,
+                }
+                self.store.fail_pro(decision.request_id, result=failure, reason=BLOCKER_KILL_SWITCH_ACTIVE)
+                return failure
+
+            if getattr(request, "spend_context", None) is not None:
+                spend_ctx = request.spend_context
+            else:
+                if getattr(request, "has_proven_cost_authority", False) and float(getattr(request, "estimated_max_cost_usd", 0.0) or 0.0) > 0:
+                    cost_usd = float(request.estimated_max_cost_usd)
+                    cost_proven = True
+                    cost_source = "caller_proven_cost_authority"
+                else:
+                    in_tokens = max(0, int(request.estimated_input_tokens or 0))
+                    out_tokens = max(0, int(request.max_output_tokens or 0))
+                    if in_tokens > 0 or out_tokens > 0:
+                        calc = (Decimal(in_tokens) * OPUS_INPUT_USD_PER_MILLION + Decimal(out_tokens) * OPUS_OUTPUT_USD_PER_MILLION) / Decimal("1000000")
+                        cost_usd = float(calc.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP))
+                        cost_proven = bool(calc > 0)
+                        cost_source = f"chat_pro_token_pricing:input={in_tokens}*${OPUS_INPUT_USD_PER_MILLION}/M+output={out_tokens}*${OPUS_OUTPUT_USD_PER_MILLION}/M"
+                    else:
+                        cost_usd = 0.0
+                        cost_proven = False
+                        cost_source = ""
+                spend_ctx = SpendGuardContext(
+                    job_id=str(decision.request_id),
+                    request_id=str(decision.request_id),
+                    trace_id=str(getattr(request, "trace_id", "") or decision.request_id),
+                    product_family="Public Chat Pro",
+                    provider="claude-opus",
+                    model=CLAUDE_OPUS_MODEL,
+                    estimated_max_cost_usd=cost_usd,
+                    has_proven_cost_authority=cost_proven,
+                    cost_authority_source=cost_source,
+                    bot_originated_action=bool(getattr(request, "bot_originated_action", False)),
+                    bot_confirm_authority=str(getattr(request, "bot_confirm_authority", "") or ""),
+                    user_flow="public_chat_pro",
+                    entrypoint=str(getattr(request, "entrypoint", "bot") or "bot"),
+                    is_paid_live_attempt=bool(getattr(request, "is_paid_live_attempt", False) or is_paid_provider),
+                )
             spend_guard_res = reserve_provider_spend(
                 spend_ctx,
                 db_path=getattr(request, "db_path", None),
@@ -280,9 +323,9 @@ class PublicChatRuntime:
                         env=getattr(request, "env", None),
                     )
                 else:
-                    release_provider_spend_no_charge(
+                    retain_ambiguous_provider_spend(
                         spend_guard_res.reservation_id,
-                        reason="provider_response_not_ok",
+                        error_code="provider_response_not_ok",
                         db_path=getattr(request, "db_path", None),
                         env=getattr(request, "env", None),
                     )

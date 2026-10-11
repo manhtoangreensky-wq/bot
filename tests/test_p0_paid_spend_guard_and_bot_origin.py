@@ -56,6 +56,9 @@ from services.provider_spend_guard import (
     validate_bot_paid_live_origin,
     verify_shared_db_parity,
     resolve_spend_guard_db_path,
+    ProviderPaidTransportAuthority,
+    PROVIDER_PAID_TRANSPORT_REGISTRY,
+    resolve_paid_transport_authority,
 )
 from services.video_provider_catalog import (
     KEY4U_VIDEO_AUTH_MISSING,
@@ -1027,7 +1030,7 @@ class TestProviderSpendGuard25Cases(unittest.TestCase):
         self.assertEqual(res.get("provider_task_id"), "aiedit_task_001")
 
         summary = get_weekly_spend_summary(db_path=self.db_path, env=self.standard_env)
-        self.assertEqual(summary["pending_reserved_spend_usd"], 0.20)
+        self.assertEqual(summary["pending_reserved_spend_usd"], 0.40)
 
     # 34. Ambiguous AI Edit retains reservation -> RETAIN
     def test_34_ambiguous_ai_edit_retains_reservation(self):
@@ -1073,7 +1076,7 @@ class TestProviderSpendGuard25Cases(unittest.TestCase):
                 os.environ["PYTEST_CURRENT_TEST"] = old_test_var
 
         summary = get_weekly_spend_summary(db_path=self.db_path, env=self.standard_env)
-        self.assertEqual(summary["pending_reserved_spend_usd"], 0.20)
+        self.assertEqual(summary["pending_reserved_spend_usd"], 0.40)
 
     # 35. Kill switch blocks all paid entrypoints -> BLOCK
     def test_35_kill_switch_all_paid_entrypoints_blocked(self):
@@ -1146,6 +1149,453 @@ class TestProviderSpendGuard25Cases(unittest.TestCase):
             res = reserve_provider_spend(ctx, db_path=self.db_path, env=ci_env)
             self.assertFalse(res.allowed)
             self.assertEqual(res.blocker, BLOCKER_TEST_NETWORK_ISOLATION)
+
+    # 38. TTS real key without SHOPAIKEY_GUARD_ALL still enforces spend guard -> BLOCK
+    def test_38_tts_real_key_without_guard_all_still_blocked(self):
+        env_no_guard = dict(self.standard_env)
+        env_no_guard.pop("SHOPAIKEY_GUARD_ALL", None)
+        status, task_id, detail, code = asyncio.run(
+            shopaikey_minimax_tts_async_submit(
+                text="Test text with real key",
+                voice_id="voice_1",
+                api_key="sk-real-live-shopaikey-key",
+                is_paid_live=False,  # Caller attempts bypass
+                bot_originated_action=False,
+                bot_confirm_authority="",
+                db_path=self.db_path,
+                env=env_no_guard,
+            )
+        )
+        self.assertEqual(status, "FAIL_SPEND_GUARD_BLOCKED")
+        self.assertIn("spend_guard_blocked", detail)
+
+    # 39. TTS missing max cost authority -> BLOCK
+    def test_39_tts_missing_max_cost_authority_blocked(self):
+        # When text is empty and no proven cost provided
+        status, task_id, detail, code = asyncio.run(
+            shopaikey_minimax_tts_async_submit(
+                text="",
+                voice_id="voice_1",
+                api_key="sk-real-live-token",
+                is_paid_live=True,
+                bot_originated_action=True,
+                bot_confirm_authority="bot_telegram_ui_confirmed",
+                estimated_max_cost_usd=0.0,
+                has_proven_cost_authority=False,
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+        )
+        self.assertEqual(status, "FAIL_BAD_REQUEST")
+        self.assertEqual(detail, "empty_text")
+
+    # 40. TTS post-transport HTTP 500 retains ambiguous -> RETAIN
+    def test_40_tts_post_transport_http_500_retains_ambiguous(self):
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_response.text = '{"error": "Internal Server Error"}'
+        mock_response.json.return_value = {"error": "Internal Server Error"}
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        old_test_var = os.environ.pop("PYTEST_CURRENT_TEST", None)
+        try:
+            status, task_id, detail, code = asyncio.run(
+                shopaikey_minimax_tts_async_submit(
+                    text="Test TTS 500 ambiguity",
+                    voice_id="voice_1",
+                    api_key="mock_key",
+                    client=mock_client,
+                    job_id="job_tts_500",
+                    request_id="req_tts_500",
+                    bot_originated_action=True,
+                    bot_confirm_authority="bot_telegram_ui_confirmed",
+                    estimated_max_cost_usd=0.10,
+                    has_proven_cost_authority=True,
+                    is_paid_live=True,
+                    db_path=self.db_path,
+                    env=self.standard_env,
+                )
+            )
+        finally:
+            if old_test_var is not None:
+                os.environ["PYTEST_CURRENT_TEST"] = old_test_var
+
+        self.assertEqual(status, "FAIL_HTTP_STATUS")
+        summary = get_weekly_spend_summary(db_path=self.db_path, env=self.standard_env)
+        self.assertEqual(summary["pending_reserved_spend_usd"], 0.10)
+
+    # 41. TTS post-transport missing task_id in 200 response retains ambiguous -> RETAIN
+    def test_41_tts_post_transport_missing_task_id_retains_ambiguous(self):
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = '{"status": "ok"}'  # Missing task_id
+        mock_response.json.return_value = {"status": "ok"}
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        old_test_var = os.environ.pop("PYTEST_CURRENT_TEST", None)
+        try:
+            status, task_id, detail, code = asyncio.run(
+                shopaikey_minimax_tts_async_submit(
+                    text="Test TTS missing task_id ambiguity",
+                    voice_id="voice_1",
+                    api_key="mock_key",
+                    client=mock_client,
+                    job_id="job_tts_no_task",
+                    request_id="req_tts_no_task",
+                    bot_originated_action=True,
+                    bot_confirm_authority="bot_telegram_ui_confirmed",
+                    estimated_max_cost_usd=0.10,
+                    has_proven_cost_authority=True,
+                    is_paid_live=True,
+                    db_path=self.db_path,
+                    env=self.standard_env,
+                )
+            )
+        finally:
+            if old_test_var is not None:
+                os.environ["PYTEST_CURRENT_TEST"] = old_test_var
+
+        self.assertEqual(status, "FAIL_NO_TASK_ID")
+        summary = get_weekly_spend_summary(db_path=self.db_path, env=self.standard_env)
+        self.assertEqual(summary["pending_reserved_spend_usd"], 0.10)
+
+    # 42. Chat Pro caller defaults fail-closed without bot origin -> BLOCK
+    def test_42_chat_pro_caller_default_blocked_without_bot_origin(self):
+        store = PublicChatStore(os.path.join(self.temp_dir, "chat_def.db"))
+        pro_mock = MagicMock()
+        pro_mock.is_paid_provider = True
+        wallet = MagicMock()
+        wallet.get_balance = AsyncMock(return_value=50_000)
+        wallet.reserve = AsyncMock(return_value={"ok": True, "reservation_id": "res_def"})
+        wallet.release = AsyncMock(return_value={"ok": True})
+        runtime = PublicChatRuntime(store=store, pro_provider=pro_mock, wallet=wallet, pricing=ClaudeOpusPricing(100, 500, 3))
+
+        # Use pure defaults of PublicChatRequest
+        req = PublicChatRequest(
+            account_id="u_default",
+            chat_id="chat_def",
+            source_message_id="msg_def",
+            mode="pro",
+            prompt="hello world",
+            role="user",
+            is_paid_external_provider=True,
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertFalse(req.bot_originated_action)
+        self.assertEqual(req.bot_confirm_authority, "")
+
+        res = asyncio.run(runtime.generate_pro(req))
+        self.assertFalse(res.get("ok"))
+        self.assertEqual(res.get("status"), "SPEND_GUARD_BLOCKED")
+        self.assertEqual(res.get("provider_calls"), 0)
+
+    # 43. Chat Pro missing cost authority -> BLOCK
+    def test_43_chat_pro_missing_cost_authority_blocked(self):
+        store = PublicChatStore(os.path.join(self.temp_dir, "chat_nocost.db"))
+        pro_mock = MagicMock()
+        pro_mock.is_paid_provider = True
+        wallet = MagicMock()
+        wallet.get_balance = AsyncMock(return_value=50_000)
+        wallet.reserve = AsyncMock(return_value={"ok": True, "reservation_id": "res_nocost"})
+        wallet.release = AsyncMock(return_value={"ok": True})
+        runtime = PublicChatRuntime(store=store, pro_provider=pro_mock, wallet=wallet, pricing=ClaudeOpusPricing(100, 500, 3))
+
+        req = PublicChatRequest(
+            account_id="u_nocost",
+            chat_id="chat_nocost",
+            source_message_id="msg_nocost",
+            mode="pro",
+            prompt="hello",
+            role="user",
+            estimated_input_tokens=0,
+            max_output_tokens=0,
+            has_proven_cost_authority=False,
+            is_paid_external_provider=True,
+            bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+
+        res = asyncio.run(runtime.generate_pro(req))
+        self.assertFalse(res.get("ok"))
+        self.assertEqual(res.get("status"), "SPEND_GUARD_BLOCKED")
+        self.assertEqual(res.get("blocker"), BLOCKER_MAX_COST_AUTHORITY_MISSING)
+
+    # 43. Chat Pro missing cost authority -> BLOCK
+    def test_43_chat_pro_missing_cost_authority_blocked(self):
+        store = PublicChatStore(os.path.join(self.temp_dir, "chat_nocost.db"))
+        pro_mock = MagicMock()
+        pro_mock.is_paid_provider = True
+        wallet = MagicMock()
+        wallet.get_balance = AsyncMock(return_value=50_000)
+        wallet.reserve = AsyncMock(return_value={"ok": True, "reservation_id": "res_nocost"})
+        wallet.release = AsyncMock(return_value={"ok": True})
+        runtime = PublicChatRuntime(store=store, pro_provider=pro_mock, wallet=wallet, pricing=ClaudeOpusPricing(100, 500, 3))
+
+        req = PublicChatRequest(
+            account_id="u_nocost",
+            chat_id="chat_nocost",
+            source_message_id="msg_nocost",
+            mode="pro",
+            prompt="hello",
+            role="user",
+            estimated_input_tokens=0,
+            max_output_tokens=0,
+            has_proven_cost_authority=False,
+            is_paid_external_provider=True,
+            bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+
+        old_test_var = os.environ.pop("PYTEST_CURRENT_TEST", None)
+        try:
+            res = asyncio.run(runtime.generate_pro(req))
+        finally:
+            if old_test_var is not None:
+                os.environ["PYTEST_CURRENT_TEST"] = old_test_var
+
+        self.assertFalse(res.get("ok"))
+        self.assertEqual(res.get("status"), "SPEND_GUARD_BLOCKED")
+        self.assertEqual(res.get("blocker"), BLOCKER_MAX_COST_AUTHORITY_MISSING)
+
+    # 44. Chat Pro trusted bot origin + valid token cost quote -> ALLOW (mock transport)
+    def test_44_chat_pro_trusted_bot_with_valid_cost_quote_passes(self):
+        store = PublicChatStore(os.path.join(self.temp_dir, "chat_ok.db"))
+        pro_mock = MagicMock(return_value={"ok": True, "text": "Claude reply", "model": CLAUDE_OPUS_MODEL, "usage": {"input_tokens": 100, "output_tokens": 50}})
+        pro_mock.is_paid_provider = True
+        wallet = MagicMock()
+        wallet.get_balance = AsyncMock(return_value=50_000)
+        wallet.reserve = AsyncMock(return_value={"ok": True, "reservation_id": "res_ok"})
+        wallet.settle = AsyncMock(return_value={"ok": True})
+        runtime = PublicChatRuntime(store=store, pro_provider=pro_mock, wallet=wallet, pricing=ClaudeOpusPricing(100, 500, 3))
+
+        req = PublicChatRequest(
+            account_id="u_ok",
+            chat_id="chat_ok",
+            source_message_id="msg_ok",
+            mode="pro",
+            prompt="tell me a joke",
+            role="user",
+            estimated_input_tokens=500,
+            max_output_tokens=500,
+            is_paid_external_provider=True,
+            bot_originated_action=True,
+            bot_confirm_authority="bot_telegram_ui_confirmed",
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+
+        old_test_var = os.environ.pop("PYTEST_CURRENT_TEST", None)
+        try:
+            res = asyncio.run(runtime.generate_pro(req))
+        finally:
+            if old_test_var is not None:
+                os.environ["PYTEST_CURRENT_TEST"] = old_test_var
+
+        self.assertTrue(res.get("ok"))
+        self.assertEqual(res.get("status"), "ok")
+        pro_mock.assert_called_once()
+
+    # 45. AI Edit real key without AI_EDIT_GUARD_ALL still guarded -> BLOCK
+    def test_45_ai_edit_real_key_without_guard_all_still_guarded(self):
+        config = AiEditProviderConfig(
+            provider_name="fal_video",
+            enabled=True,
+            submit_url="https://queue.fal.run/fal-ai/wan/v2.2-a14b/video-to-video",
+            poll_url="https://queue.fal.run/fal-ai/wan/v2.2-a14b/video-to-video/requests/{task_id}/status",
+            auth_header_name="Authorization",
+            auth_header_value="Key real_fal_live_secret",
+            model="fal-ai/wan/v2.2-a14b/video-to-video",
+            interface="video_to_video_json",
+            capabilities=("video_to_video",),
+        )
+        fake_source = "https://storage.fal.run/fake_vid.mp4"
+        env_no_guard = dict(self.standard_env)
+        env_no_guard.pop("AI_EDIT_GUARD_ALL", None)
+
+        with self.assertRaises(AiEditProviderError) as cm:
+            submit_video_edit(
+                config,
+                source_video_path=fake_source,
+                prompt="make anime",
+                negative_prompt="",
+                aspect_ratio="9:16",
+                duration_seconds=5,
+                job_id="job_aiedit_noguardall",
+                submit_source=PUBLIC_FINAL_CONFIRM_SOURCE,
+                public_user_confirmed=True,
+                is_paid_live=False,  # Attempt bypass
+                bot_originated_action=False,
+                bot_confirm_authority="",
+                db_path=self.db_path,
+                env=env_no_guard,
+            )
+        self.assertIn("bot_confirm_authority_missing", str(cm.exception))
+
+    # 46. AI Edit unsupported duration missing cost authority -> BLOCK
+    def test_46_ai_edit_unsupported_duration_missing_cost_authority_blocked(self):
+        config = AiEditProviderConfig(
+            provider_name="fal_video",
+            enabled=True,
+            submit_url="https://queue.fal.run/fal-ai/wan/v2.2-a14b/video-to-video",
+            poll_url="https://queue.fal.run/fal-ai/wan/v2.2-a14b/video-to-video/requests/{task_id}/status",
+            auth_header_name="Authorization",
+            auth_header_value="Key mock_key",
+            model="fal-ai/wan/v2.2-a14b/video-to-video",
+            interface="video_to_video_json",
+            capabilities=("video_to_video",),
+        )
+        fake_source = "https://storage.fal.run/fake_vid.mp4"
+
+        old_test_var = os.environ.pop("PYTEST_CURRENT_TEST", None)
+        try:
+            with self.assertRaises(AiEditProviderError) as cm:
+                submit_video_edit(
+                    config,
+                    source_video_path=fake_source,
+                    prompt="make anime",
+                    negative_prompt="",
+                    aspect_ratio="9:16",
+                    duration_seconds=7,  # Unsupported duration (not 5s or 10s)
+                    job_id="job_aiedit_7s",
+                    submit_source=PUBLIC_FINAL_CONFIRM_SOURCE,
+                    public_user_confirmed=True,
+                    is_paid_live=True,
+                    bot_originated_action=True,
+                    bot_confirm_authority="bot_telegram_ui_confirmed",
+                    db_path=self.db_path,
+                    env=self.standard_env,
+                )
+        finally:
+            if old_test_var is not None:
+                os.environ["PYTEST_CURRENT_TEST"] = old_test_var
+
+        self.assertIn(BLOCKER_MAX_COST_AUTHORITY_MISSING, str(cm.exception))
+
+    # 47. AI Edit synthetic bot origin rejected -> BLOCK
+    def test_47_ai_edit_synthetic_bot_origin_rejected(self):
+        config = AiEditProviderConfig(
+            provider_name="fal_video",
+            enabled=True,
+            submit_url="https://queue.fal.run/fal-ai/wan/v2.2-a14b/video-to-video",
+            poll_url="https://queue.fal.run/fal-ai/wan/v2.2-a14b/video-to-video/requests/{task_id}/status",
+            auth_header_name="Authorization",
+            auth_header_value="Key mock_key",
+            model="fal-ai/wan/v2.2-a14b/video-to-video",
+            interface="video_to_video_json",
+            capabilities=("video_to_video",),
+        )
+        fake_source = "https://storage.fal.run/fake_vid.mp4"
+
+        old_test_var = os.environ.pop("PYTEST_CURRENT_TEST", None)
+        try:
+            with self.assertRaises(AiEditProviderError) as cm:
+                submit_video_edit(
+                    config,
+                    source_video_path=fake_source,
+                    prompt="make anime",
+                    negative_prompt="",
+                    aspect_ratio="9:16",
+                    duration_seconds=5,
+                    job_id="job_aiedit_synth",
+                    submit_source=PUBLIC_FINAL_CONFIRM_SOURCE,
+                    public_user_confirmed=True,
+                    is_paid_live=True,
+                    bot_originated_action=False,
+                    bot_confirm_authority="bot_telegram_ui_confirmed",
+                    db_path=self.db_path,
+                    env=self.standard_env,
+                )
+        finally:
+            if old_test_var is not None:
+                os.environ["PYTEST_CURRENT_TEST"] = old_test_var
+
+        self.assertIn(BLOCKER_BOT_ORIGIN_PROOF_MISSING, str(cm.exception))
+
+    # 48. AI Edit post-transport HTTP error retains ambiguous -> RETAIN
+    def test_48_ai_edit_post_transport_http_error_retains_ambiguous(self):
+        config = AiEditProviderConfig(
+            provider_name="fal_video",
+            enabled=True,
+            submit_url="https://queue.fal.run/fal-ai/wan/v2.2-a14b/video-to-video",
+            poll_url="https://queue.fal.run/fal-ai/wan/v2.2-a14b/video-to-video/requests/{task_id}/status",
+            auth_header_name="Authorization",
+            auth_header_value="Key mock_key",
+            model="fal-ai/wan/v2.2-a14b/video-to-video",
+            interface="video_to_video_json",
+            capabilities=("video_to_video",),
+        )
+        fake_source = "https://storage.fal.run/fake_vid.mp4"
+
+        import io
+        def mock_opener_http_error(req, timeout=0):
+            fp = io.BytesIO(b'{"detail": "Internal Server Error"}')
+            raise urllib.error.HTTPError(req.full_url, 500, "Internal Server Error", hdrs={}, fp=fp)
+
+        old_test_var = os.environ.pop("PYTEST_CURRENT_TEST", None)
+        try:
+            with self.assertRaises(AiEditProviderError):
+                submit_video_edit(
+                    config,
+                    source_video_path=fake_source,
+                    prompt="make anime",
+                    negative_prompt="",
+                    aspect_ratio="9:16",
+                    duration_seconds=5,
+                    job_id="job_aiedit_http500",
+                    submit_source=PUBLIC_FINAL_CONFIRM_SOURCE,
+                    public_user_confirmed=True,
+                    opener=mock_opener_http_error,
+                    is_paid_live=True,
+                    bot_originated_action=True,
+                    bot_confirm_authority="bot_telegram_ui_confirmed",
+                    db_path=self.db_path,
+                    env=self.standard_env,
+                )
+        finally:
+            if old_test_var is not None:
+                os.environ["PYTEST_CURRENT_TEST"] = old_test_var
+
+        summary = get_weekly_spend_summary(db_path=self.db_path, env=self.standard_env)
+        self.assertEqual(summary["pending_reserved_spend_usd"], 0.40)
+
+    # 49. Kill switch alias PAID_EXTERNAL_PROVIDERS_DISABLED=true -> BLOCK
+    def test_49_kill_switch_paid_external_providers_disabled_env(self):
+        kill_env = dict(self.standard_env)
+        kill_env["PAID_EXTERNAL_PROVIDERS_DISABLED"] = "true"
+        self.assertTrue(is_kill_switch_active(kill_env))
+
+        # Check all product families fail closed
+        for fam in ("Product Video", "Voice / TTS", "Public Chat Pro", "Video AI Edit"):
+            ctx = SpendGuardContext(product_family=fam, estimated_max_cost_usd=1.00, has_proven_cost_authority=True, bot_originated_action=True, bot_confirm_authority="bot_telegram_ui_confirmed")
+            res = reserve_provider_spend(ctx, db_path=self.db_path, env=kill_env)
+            self.assertFalse(res.allowed)
+            self.assertEqual(res.blocker, BLOCKER_KILL_SWITCH_ACTIVE)
+
+    # 50. ProviderPaidTransportAuthority registry completeness
+    def test_50_provider_paid_transport_registry_complete(self):
+        self.assertGreaterEqual(len(PROVIDER_PAID_TRANSPORT_REGISTRY), 10)
+        families = {entry.product_family for entry in PROVIDER_PAID_TRANSPORT_REGISTRY}
+        self.assertIn("Product Video", families)
+        self.assertIn("Voice / TTS", families)
+        self.assertIn("Public Chat Pro", families)
+        self.assertIn("Video AI Edit", families)
+        self.assertIn("SubDub ASR", families)
+
+        tts_auth = resolve_paid_transport_authority("Voice / TTS", "shopaikey_minimax_tts", "create_tts_task")
+        self.assertIsNotNone(tts_auth)
+        self.assertTrue(tts_auth.can_create_paid_usage)
+        self.assertTrue(tts_auth.bot_origin_required)
+
+        chat_auth = resolve_paid_transport_authority("Public Chat Pro", "claude-opus", "chat_completion")
+        self.assertIsNotNone(chat_auth)
+        self.assertTrue(chat_auth.can_create_paid_usage)
 
 
 if __name__ == "__main__":

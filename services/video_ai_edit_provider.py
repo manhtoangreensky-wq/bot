@@ -855,23 +855,59 @@ def submit_video_edit(
         raise AiEditProviderError("ai_edit_hidden_submit_blocked")
 
     effective_env = os.environ if env is None else env
+    from services.provider_spend_guard import (
+        BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING,
+        BLOCKER_KILL_SWITCH_ACTIVE,
+        SpendGuardContext,
+        is_kill_switch_active,
+        mark_submitted_pending_settlement,
+        release_provider_spend_no_charge,
+        reserve_provider_spend,
+        retain_ambiguous_provider_spend,
+    )
+
+    if is_kill_switch_active(effective_env):
+        raise AiEditProviderError(BLOCKER_KILL_SWITCH_ACTIVE)
+
+    is_real_provider_transport = bool(
+        config.auth_header_value
+        and not config.auth_header_value.startswith("mock_")
+        and not config.auth_header_value.startswith("test_")
+        and not config.auth_header_value.startswith("fake_")
+    )
     is_paid_attempt = bool(
         is_paid_live
         or spend_context is not None
-        or (config.auth_header_value and not config.auth_header_value.startswith("mock_") and not config.auth_header_value.startswith("test_") and effective_env.get("AI_EDIT_GUARD_ALL") == "true")
+        or is_real_provider_transport
     )
     spend_res = None
     if is_paid_attempt:
-        from services.provider_spend_guard import (
-            SpendGuardContext,
-            reserve_provider_spend,
-            mark_submitted_pending_settlement,
-            retain_ambiguous_provider_spend,
-            release_provider_spend_no_charge,
-            BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING,
-        )
-        if not bot_confirm_authority and not getattr(spend_context, "bot_confirm_authority", ""):
+        clean_bot_confirm = str(
+            bot_confirm_authority
+            or getattr(spend_context, "bot_confirm_authority", "")
+            or ""
+        ).strip()
+        if not clean_bot_confirm:
             raise AiEditProviderError(BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING)
+
+        dur = int(round(float(duration_seconds or 5.0)))
+        is_fal = str(config.provider_name or "").strip().lower().startswith("fal")
+        if is_fal and dur == 5:
+            cost_usd = float(FAL_5S_PROVIDER_COST_USD)
+            cost_proven = True
+            cost_source = f"fal_wan_v2v_5s_contract:${FAL_5S_PROVIDER_COST_USD}"
+        elif is_fal and dur == 10:
+            cost_usd = float(FAL_10S_PROVIDER_COST_USD)
+            cost_proven = True
+            cost_source = f"fal_wan_v2v_10s_contract:${FAL_10S_PROVIDER_COST_USD}"
+        elif getattr(spend_context, "has_proven_cost_authority", False) and float(getattr(spend_context, "estimated_max_cost_usd", 0.0) or 0.0) > 0:
+            cost_usd = float(spend_context.estimated_max_cost_usd)
+            cost_proven = True
+            cost_source = "caller_proven_cost_authority"
+        else:
+            cost_usd = 0.0
+            cost_proven = False
+            cost_source = ""
 
         spend_ctx = spend_context or SpendGuardContext(
             job_id=str(job_id or ""),
@@ -880,13 +916,14 @@ def submit_video_edit(
             product_family="Video AI Edit",
             provider=config.provider_name,
             model=config.model,
-            estimated_max_cost_usd=0.20,
-            has_proven_cost_authority=True,
-            bot_originated_action=bot_originated_action or bool(bot_confirm_authority),
-            bot_confirm_authority=bot_confirm_authority,
+            estimated_max_cost_usd=cost_usd,
+            has_proven_cost_authority=cost_proven,
+            cost_authority_source=cost_source,
+            bot_originated_action=bool(bot_originated_action),
+            bot_confirm_authority=clean_bot_confirm,
             user_flow="public_video_ai_edit_confirm",
             entrypoint="bot",
-            is_paid_live_attempt=True,
+            is_paid_live_attempt=bool(is_paid_live or is_real_provider_transport),
         )
         spend_res = reserve_provider_spend(spend_ctx, db_path=db_path, env=effective_env)
         if not spend_res.allowed:
@@ -937,7 +974,7 @@ def submit_video_edit(
         status, payload = _json_response(response)
     except urllib.error.HTTPError as exc:
         if is_paid_attempt and spend_res and spend_res.allowed and spend_res.reservation_id:
-            release_provider_spend_no_charge(spend_res.reservation_id, reason=f"http_{exc.code}", db_path=db_path, env=effective_env)
+            retain_ambiguous_provider_spend(spend_res.reservation_id, error_code=f"http_{exc.code}", db_path=db_path, env=effective_env)
         raise AiEditProviderError(f"provider_submit_http_{exc.code}") from exc
     except urllib.error.URLError as exc:
         if is_paid_attempt and spend_res and spend_res.allowed and spend_res.reservation_id:
@@ -955,12 +992,12 @@ def submit_video_edit(
         raise
     if status < 200 or status >= 300:
         if is_paid_attempt and spend_res and spend_res.allowed and spend_res.reservation_id:
-            release_provider_spend_no_charge(spend_res.reservation_id, reason=f"http_{status}", db_path=db_path, env=effective_env)
+            retain_ambiguous_provider_spend(spend_res.reservation_id, error_code=f"http_{status}", db_path=db_path, env=effective_env)
         raise AiEditProviderError(f"provider_submit_http_{status or 0}")
     parsed = parse_provider_payload(payload)
     if not parsed["provider_task_id"] and not parsed["result_url_present"]:
         if is_paid_attempt and spend_res and spend_res.allowed and spend_res.reservation_id:
-            release_provider_spend_no_charge(spend_res.reservation_id, reason="provider_submit_task_id_missing", db_path=db_path, env=effective_env)
+            retain_ambiguous_provider_spend(spend_res.reservation_id, error_code="provider_submit_task_id_missing", db_path=db_path, env=effective_env)
         raise AiEditProviderError("provider_submit_task_id_missing")
     if is_paid_attempt and spend_res and spend_res.allowed and spend_res.reservation_id:
         mark_submitted_pending_settlement(
