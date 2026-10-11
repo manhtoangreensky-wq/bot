@@ -739,6 +739,39 @@ def product_video_provider_submit_source_policy(
             "provider_submit_block_reason": "worker_poll_existing_task_read_only",
             "poll_existing_task_allowed": True,
         }
+    from services.provider_spend_guard import (
+        BLOCKER_BOT_ORIGIN_PROOF_MISSING,
+        BLOCKER_KILL_SWITCH_ACTIVE,
+        BLOCKER_PAID_LIVE_TEST_BOT_ONLY,
+        is_kill_switch_active,
+    )
+
+    if is_kill_switch_active():
+        return {
+            "submit_source": source,
+            "public_user_confirmed": public_user_confirmed,
+            "provider_submit_allowed": False,
+            "provider_submit_block_reason": BLOCKER_KILL_SWITCH_ACTIVE,
+            "poll_existing_task_allowed": False,
+        }
+    entrypoint = str(metadata.get("entrypoint") or metadata.get("source_entrypoint") or "").strip().lower()
+    if entrypoint in {"shell", "script", "worker_injection", "direct_provider", "ci", "out_of_band"}:
+        return {
+            "submit_source": source or entrypoint,
+            "public_user_confirmed": public_user_confirmed,
+            "provider_submit_allowed": False,
+            "provider_submit_block_reason": BLOCKER_PAID_LIVE_TEST_BOT_ONLY,
+            "poll_existing_task_allowed": False,
+        }
+    if bool(metadata.get("is_paid_live") or metadata.get("is_paid_live_test") or metadata.get("paid_live")):
+        if not bool(metadata.get("bot_originated_action") or metadata.get("bot_originated")):
+            return {
+                "submit_source": source,
+                "public_user_confirmed": public_user_confirmed,
+                "provider_submit_allowed": False,
+                "provider_submit_block_reason": BLOCKER_BOT_ORIGIN_PROOF_MISSING,
+                "poll_existing_task_allowed": False,
+            }
     if source in PRODUCT_VIDEO_HIDDEN_SUBMIT_SOURCES:
         return {
             "submit_source": source,
@@ -6216,6 +6249,7 @@ def _run_provider_generation_impl(
             payload["provider_attempts"] = _copy_attempt_traces()
             return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
 
+        spend_res = None
         if poll_existing_task:
             persisted_poll_url = str(
                 provider_metadata.get("provider_poll_url_override") or ""
@@ -6295,6 +6329,19 @@ def _run_provider_generation_impl(
                 },
             )
         else:
+            econ_check: dict[str, Any] = {}
+            model_candidate = (
+                selected_model_for_provider(provider_metadata, current_adapter.provider_name)
+                or (provider_metadata.get("storyboard_model") if is_storyboard else "")
+                or (metadata.get("storyboard_model") if is_storyboard else "")
+                or (provider_metadata.get("selected_model") if is_storyboard else "")
+                or (metadata.get("selected_model") if is_storyboard else "")
+                or (provider_metadata.get("model") if is_storyboard else "")
+                or (metadata.get("model") if is_storyboard else "")
+                or getattr(current_adapter, "model", "")
+                or getattr(current_adapter, "provider_payload_model", "")
+                or ""
+            )
             has_explicit_economics_context = bool(
                 metadata.get("tier_id") is not None
                 or metadata.get("quality_tier") is not None
@@ -6489,8 +6536,134 @@ def _run_provider_generation_impl(
                     }
                 if isinstance(owner_acceptance_auth, dict):
                     owner_acceptance_auth["consumed"] = True
+
+            from services.provider_spend_guard import (
+                SpendGuardContext,
+                mark_submitted_pending_settlement,
+                release_provider_spend_no_charge,
+                reserve_provider_spend,
+                retain_ambiguous_provider_spend,
+                settle_verified_provider_spend,
+            )
+
+            proven_cost = None
+            if is_product_video or is_storyboard:
+                proven_cost = (
+                    econ_check.get("expected_provider_cost_usd")
+                    if econ_check.get("expected_provider_cost_usd") is not None
+                    else econ_check.get("computed_provider_cost_usd")
+                )
+            if current_adapter.provider_name == "stub_video":
+                estimated_cost = 0.0
+                has_proven_cost_authority = True
+            elif proven_cost is not None and float(proven_cost) > 0:
+                estimated_cost = float(proven_cost)
+                has_proven_cost_authority = True
+            else:
+                estimated_cost = 0.0
+                has_proven_cost_authority = False
+
+            is_real_transport = bool(
+                env.get("SHOPAIKEY_API_KEY")
+                or env.get("KEY4U_API_KEY")
+                or env.get("VIDEO_KEY4U_AUTH_HEADER_VALUE")
+                or env.get("VIDEO_SHOPAIKEY_AUTH_HEADER_VALUE")
+                or getattr(current_adapter, "auth_header_value", None)
+                or getattr(getattr(current_adapter, "config", None), "auth_header_value", None)
+            )
+            is_paid_attempt = bool(
+                metadata.get("is_paid_live")
+                or metadata.get("is_paid_live_test")
+                or metadata.get("live_test")
+                or metadata.get("owner_acceptance_auth")
+                or (is_real_transport and current_adapter.provider_name != "stub_video")
+            )
+
+            bot_originated_action = bool(
+                metadata.get("bot_originated_action")
+                or (request.metadata or {}).get("bot_originated_action")
+                or metadata.get("submit_source") in {PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM, OWNER_AUTHORIZED_LIVE_ACCEPTANCE}
+                or metadata.get("product_video")
+                or (request.metadata or {}).get("product_video")
+            )
+            bot_confirm_authority = str(
+                metadata.get("bot_confirm_authority")
+                or (request.metadata or {}).get("bot_confirm_authority")
+                or ("bot_telegram_ui_confirmed" if bot_originated_action else "")
+            )
+
+            spend_res = None
+            if is_paid_attempt:
+                spend_ctx = SpendGuardContext(
+                    job_id=str(request.job_id or metadata.get("job_id") or ""),
+                    request_id=str(metadata.get("request_id") or (request.metadata or {}).get("request_id") or f"REQ-PV-{request.job_id}"),
+                    trace_id=str(metadata.get("trace_id") or (request.metadata or {}).get("trace_id") or f"TR-PV-{request.job_id}"),
+                    scene_index=metadata.get("scene_index", 0),
+                    product_family="Product Video",
+                    provider=current_adapter.provider_name,
+                    model=str(model_candidate or getattr(current_adapter, "model", "") or ""),
+                    estimated_max_cost_usd=estimated_cost,
+                    has_proven_cost_authority=has_proven_cost_authority,
+                    bot_originated_action=bot_originated_action,
+                    bot_confirm_authority=bot_confirm_authority,
+                    user_flow=str(metadata.get("user_flow") or metadata.get("submit_source") or "product_video_bot"),
+                    owner_receipt=str(metadata.get("owner_live_authorization_receipt") or (verified_acceptance or {}).get("token_fingerprint") or ""),
+                    entrypoint=str(metadata.get("entrypoint") or metadata.get("source_entrypoint") or "bot"),
+                    is_paid_live_attempt=is_paid_attempt,
+                    metadata=dict(metadata),
+                )
+
+                spend_res = reserve_provider_spend(
+                    spend_ctx,
+                    db_path=env.get("DB_PATH") or env.get("SQLITE_DB_PATH"),
+                    env=env,
+                )
+                if not spend_res.allowed:
+                    guard_blocker = spend_res.blocker or "spend_guard_blocked"
+                    _record_failure(guard_blocker, {
+                        "ok": False,
+                        "provider_attempted": False,
+                        "provider_submit_called": False,
+                        "external_provider_spend_prevented": True,
+                        "paid_submit_allowed": False,
+                        "paid_submit_blocked_reason": guard_blocker,
+                        "provider_error": guard_blocker,
+                        "blocker": guard_blocker,
+                        "provider_status": "blocked_no_charge",
+                        "terminal_state": "blocked_no_charge",
+                        "status": "failed_no_charge",
+                        "charge": 0,
+                        "charged_xu": 0,
+                        "no_charge": True,
+                        "public_message": PUBLIC_PRODUCT_VIDEO_SUBMIT_BLOCKED_COPY,
+                        "provider_readiness": status,
+                        "spend_guard_audit": spend_res.audit_record,
+                    }, submit_failure=True)
+                    return {
+                        "ok": False,
+                        **_attempt_base(),
+                        "provider_attempted": False,
+                        "provider_submit_called": False,
+                        "external_provider_spend_prevented": True,
+                        "paid_submit_allowed": False,
+                        "paid_submit_blocked_reason": guard_blocker,
+                        "provider_error": guard_blocker,
+                        "blocker": guard_blocker,
+                        "provider_status": "blocked_no_charge",
+                        "terminal_state": "blocked_no_charge",
+                        "status": "failed_no_charge",
+                        "charge": 0,
+                        "charged_xu": 0,
+                        "no_charge": True,
+                        "public_message": PUBLIC_PRODUCT_VIDEO_SUBMIT_BLOCKED_COPY,
+                        "provider_readiness": status,
+                        "spend_guard_audit": spend_res.audit_record,
+                    }
+
+            provider_transport_started = False
             try:
                 _mark_trace("submit", submit_called=True)
+                provider_transport_started = True
                 submit = current_adapter.submit_video_job(provider_request)
                 if acceptance_valid and verified_acceptance:
                     token_fp = verified_acceptance.get("token_fingerprint") or ""
@@ -6502,10 +6675,25 @@ def _run_provider_generation_impl(
                         provider_task_id=str(submit.provider_task_id or submit.provider_video_id or ""),
                     )
             except Exception as exc:
+                if spend_res and spend_res.allowed and spend_res.reservation_id:
+                    if provider_transport_started:
+                        retain_ambiguous_provider_spend(
+                            spend_res.reservation_id,
+                            error_code=type(exc).__name__,
+                            db_path=env.get("DB_PATH") or env.get("SQLITE_DB_PATH"),
+                            env=env,
+                        )
+                    else:
+                        release_provider_spend_no_charge(
+                            spend_res.reservation_id,
+                            reason=type(exc).__name__,
+                            db_path=env.get("DB_PATH") or env.get("SQLITE_DB_PATH"),
+                            env=env,
+                        )
                 if acceptance_valid and verified_acceptance:
                     token_fp = verified_acceptance.get("token_fingerprint") or ""
                     is_timeout_early = isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.lower() or "timeout" in str(exc).lower()
-                    exc_stage = STAGE_OAT_CONSUMED_AMBIGUOUS if is_timeout_early else STAGE_OAT_CONSUMED_FAILED
+                    exc_stage = STAGE_OAT_CONSUMED_AMBIGUOUS if (is_timeout_early or provider_transport_started) else STAGE_OAT_CONSUMED_FAILED
                     finalize_owner_acceptance_token(
                         token_fp,
                         stage=exc_stage,
@@ -6519,7 +6707,8 @@ def _run_provider_generation_impl(
                 }
                 blocker = str(exc_payload.get("blocker") or "provider_unhandled_exception")
                 is_timeout = isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.lower() or "timeout" in str(exc).lower()
-                if is_timeout or blocker in {"provider_submit_outcome_ambiguous_no_charge", "provider_timeout", "provider_submit_timeout"}:
+                is_post_transport_fail_closed = provider_transport_started or is_timeout
+                if is_post_transport_fail_closed or blocker in {"provider_submit_outcome_ambiguous_no_charge", "provider_timeout", "provider_submit_timeout"}:
                     blocker = "provider_submit_outcome_ambiguous_no_charge"
                     exc_payload["blocker"] = blocker
                     exc_payload["provider_error"] = blocker
@@ -6572,6 +6761,31 @@ def _run_provider_generation_impl(
             is_timeout=is_ambiguous_submit,
             ambiguous_submit=is_ambiguous_submit,
         )
+
+        if spend_res and spend_res.allowed and spend_res.reservation_id:
+            if submit.ok:
+                mark_submitted_pending_settlement(
+                    spend_res.reservation_id,
+                    provider_task_id=str(submit.provider_task_id or submit.provider_video_id or ""),
+                    db_path=env.get("DB_PATH") or env.get("SQLITE_DB_PATH"),
+                    env=env,
+                )
+            elif is_ambiguous_submit or submit.error_code == "provider_submit_outcome_ambiguous_no_charge":
+                retain_ambiguous_provider_spend(
+                    spend_res.reservation_id,
+                    error_code=submit.error_code or "provider_submit_outcome_ambiguous_no_charge",
+                    provider_task_id=str(submit.provider_task_id or submit.provider_video_id or ""),
+                    db_path=env.get("DB_PATH") or env.get("SQLITE_DB_PATH"),
+                    env=env,
+                )
+            else:
+                release_provider_spend_no_charge(
+                    spend_res.reservation_id,
+                    reason=submit.error_code or "submit_rejected",
+                    db_path=env.get("DB_PATH") or env.get("SQLITE_DB_PATH"),
+                    env=env,
+                )
+
         _mark_trace(
             "poll" if poll_existing_task else "submit",
             raw=submit.raw,

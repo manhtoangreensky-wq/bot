@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import inspect
+import os
 import sqlite3
 import time
 from dataclasses import dataclass, replace
@@ -72,6 +73,14 @@ class PublicChatRequest:
     media: tuple[MediaInput, ...] = ()
     estimated_input_tokens: int = 0
     max_output_tokens: int = PUBLIC_CHAT_MAX_OUTPUT_TOKENS
+    is_paid_external_provider: bool = False
+    bot_originated_action: bool = False
+    bot_confirm_authority: str = ""
+    has_proven_cost_authority: bool = False
+    estimated_max_cost_usd: float = 0.0
+    db_path: str | None = None
+    env: dict[str, str] | None = None
+    spend_context: Any = None
 
 
 async def _maybe_call(target: Any, *args: Any, **kwargs: Any) -> Any:
@@ -206,9 +215,134 @@ class PublicChatRuntime:
                 return failure
         else:
             self.store.mark_pro_reserved(decision.request_id, 0, "admin-free")
+
+        spend_guard_res = None
+        # Canonical Pro provider is ALWAYS paid-capable external transport; caller flags CANNOT bypass
+        is_canonical_pro_provider = bool(self.pro_provider is not None)
+        is_paid_provider = bool(
+            is_canonical_pro_provider
+            or getattr(request, "is_paid_external_provider", False)
+            or getattr(self.pro_provider, "is_paid_provider", False)
+            or getattr(request, "spend_context", None) is not None
+            or os.environ.get("CHAT_PRO_PROVIDER_IS_PAID") == "true"
+        )
+        if is_paid_provider:
+            from decimal import Decimal, ROUND_HALF_UP
+            from services.chat_pro_pricing import (
+                OPUS_INPUT_USD_PER_MILLION,
+                OPUS_OUTPUT_USD_PER_MILLION,
+            )
+            from services.provider_spend_guard import (
+                BLOCKER_KILL_SWITCH_ACTIVE,
+                SpendGuardContext,
+                is_kill_switch_active,
+                reserve_provider_spend,
+                mark_submitted_pending_settlement,
+                retain_ambiguous_provider_spend,
+                release_provider_spend_no_charge,
+            )
+            if is_kill_switch_active(getattr(request, "env", None)):
+                if not is_free and self.wallet is not None and wallet_reservation_id:
+                    try:
+                        await _wallet(self.wallet, "release", request.account_id, wallet_reservation_id, decision.request_id)
+                    except Exception:
+                        pass
+                failure = {
+                    "ok": False,
+                    "status": "SPEND_GUARD_BLOCKED",
+                    "blocker": BLOCKER_KILL_SWITCH_ACTIVE,
+                    "request_id": decision.request_id,
+                    "provider_calls": 0,
+                }
+                self.store.fail_pro(decision.request_id, result=failure, reason=BLOCKER_KILL_SWITCH_ACTIVE)
+                return failure
+
+            in_tokens = max(0, int(request.estimated_input_tokens or 0))
+            out_tokens = max(0, int(request.max_output_tokens or 0))
+
+            if getattr(request, "spend_context", None) is not None:
+                spend_ctx = request.spend_context
+            else:
+                if getattr(request, "has_proven_cost_authority", False) and float(getattr(request, "estimated_max_cost_usd", 0.0) or 0.0) > 0:
+                    cost_usd = float(request.estimated_max_cost_usd)
+                    cost_proven = True
+                    cost_source = "caller_proven_cost_authority"
+                else:
+                    if in_tokens > 0 or out_tokens > 0:
+                        calc = (Decimal(in_tokens) * OPUS_INPUT_USD_PER_MILLION + Decimal(out_tokens) * OPUS_OUTPUT_USD_PER_MILLION) / Decimal("1000000")
+                        cost_usd = float(calc.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP))
+                        cost_proven = bool(calc > 0)
+                        cost_source = f"chat_pro_token_pricing:input={in_tokens}*${OPUS_INPUT_USD_PER_MILLION}/M+output={out_tokens}*${OPUS_OUTPUT_USD_PER_MILLION}/M"
+                    else:
+                        cost_usd = 0.0
+                        cost_proven = False
+                        cost_source = ""
+                spend_ctx = SpendGuardContext(
+                    job_id=str(decision.request_id),
+                    request_id=str(decision.request_id),
+                    trace_id=str(getattr(request, "trace_id", "") or decision.request_id),
+                    product_family="Public Chat Pro",
+                    provider="claude-opus",
+                    model=CLAUDE_OPUS_MODEL,
+                    operation="chat_completion",
+                    estimated_max_cost_usd=cost_usd,
+                    has_proven_cost_authority=cost_proven,
+                    cost_authority_source=cost_source,
+                    bot_originated_action=bool(getattr(request, "bot_originated_action", False)),
+                    bot_confirm_authority=str(getattr(request, "bot_confirm_authority", "") or ""),
+                    user_flow="public_chat_pro",
+                    entrypoint=str(getattr(request, "entrypoint", "bot") or "bot"),
+                    is_paid_live_attempt=bool(getattr(request, "is_paid_live_attempt", False) or is_paid_provider),
+                    metadata={"max_input_tokens": in_tokens, "max_output_tokens": out_tokens},
+                )
+            spend_guard_res = reserve_provider_spend(
+                spend_ctx,
+                db_path=getattr(request, "db_path", None),
+                env=getattr(request, "env", None),
+            )
+            if not spend_guard_res.allowed:
+                if not is_free and self.wallet is not None and wallet_reservation_id:
+                    try:
+                        await _wallet(self.wallet, "release", request.account_id, wallet_reservation_id, decision.request_id)
+                    except Exception:
+                        pass
+                failure = {
+                    "ok": False,
+                    "status": "SPEND_GUARD_BLOCKED",
+                    "blocker": spend_guard_res.blocker,
+                    "request_id": decision.request_id,
+                    "provider_calls": 0,
+                }
+                self.store.fail_pro(decision.request_id, result=failure, reason=spend_guard_res.blocker or "spend_guard_blocked")
+                return failure
+
+        provider_transport_started = False
         try:
+            provider_transport_started = True
             result = await _maybe_call(self.pro_provider, request, model=CLAUDE_OPUS_MODEL)
+            if spend_guard_res and spend_guard_res.allowed and spend_guard_res.reservation_id:
+                if isinstance(result, Mapping) and result.get("ok"):
+                    mark_submitted_pending_settlement(
+                        spend_guard_res.reservation_id,
+                        provider_task_id=str(decision.request_id),
+                        db_path=getattr(request, "db_path", None),
+                        env=getattr(request, "env", None),
+                    )
+                else:
+                    retain_ambiguous_provider_spend(
+                        spend_guard_res.reservation_id,
+                        error_code="provider_response_not_ok",
+                        db_path=getattr(request, "db_path", None),
+                        env=getattr(request, "env", None),
+                    )
         except asyncio.CancelledError:
+            if spend_guard_res and spend_guard_res.allowed and spend_guard_res.reservation_id:
+                retain_ambiguous_provider_spend(
+                    spend_guard_res.reservation_id,
+                    error_code="CancelledError",
+                    db_path=getattr(request, "db_path", None),
+                    env=getattr(request, "env", None),
+                )
             if not is_free and self.wallet is not None and wallet_reservation_id:
                 try:
                     await _wallet(self.wallet, "release", request.account_id, wallet_reservation_id, decision.request_id)
@@ -217,7 +351,22 @@ class PublicChatRuntime:
             failure = {"ok": False, "status": "CANCELLED", "request_id": decision.request_id, "provider_calls": 1}
             self.store.fail_pro(decision.request_id, result=failure, reason="cancelled")
             raise
-        except Exception:
+        except Exception as exc:
+            if spend_guard_res and spend_guard_res.allowed and spend_guard_res.reservation_id:
+                if provider_transport_started:
+                    retain_ambiguous_provider_spend(
+                        spend_guard_res.reservation_id,
+                        error_code=type(exc).__name__,
+                        db_path=getattr(request, "db_path", None),
+                        env=getattr(request, "env", None),
+                    )
+                else:
+                    release_provider_spend_no_charge(
+                        spend_guard_res.reservation_id,
+                        reason=type(exc).__name__,
+                        db_path=getattr(request, "db_path", None),
+                        env=getattr(request, "env", None),
+                    )
             result = {"ok": False, "status": "PROVIDER_FAILURE"}
         text = result.get("text") if isinstance(result, Mapping) else ""
         usage = _usage_from_result(result) if isinstance(result, Mapping) else None
@@ -252,6 +401,9 @@ class PublicChatRuntime:
         answer = {"ok": True, "status": "ok", "mode": "pro", "text": output, "model": CLAUDE_OPUS_MODEL, "request_id": decision.request_id, "provider_calls": 1, "cost_xu": actual, "provider_request_id": str(result.get("provider_request_id") or "")}
         self.store.finish_pro(decision.request_id, result=answer, usage=usage or OpusUsage(), cost_xu=actual, answer=output, prompt=request.prompt, provider_request_id=str(result.get("provider_request_id") or ""))
         return answer
+
+    async def generate_pro(self, request: PublicChatRequest) -> dict[str, Any]:
+        return await self._pro(request)
 
     async def run(self, request: PublicChatRequest) -> dict[str, Any]:
         mode = "pro" if str(request.mode or "free").lower() == "pro" else "free"

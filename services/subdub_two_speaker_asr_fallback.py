@@ -312,6 +312,42 @@ async def gemini_transcribe_diarized_words(
         "generation_config": {"transcription_config": transcription_config},
     }
     try:
+        from services.provider_spend_guard import (
+            BLOCKER_KILL_SWITCH_ACTIVE,
+            BLOCKER_MAX_COST_AUTHORITY_MISSING,
+            SpendGuardContext,
+            is_kill_switch_active,
+            reserve_provider_spend,
+        )
+        if is_kill_switch_active():
+            return {
+                "ok": False,
+                "status": "SPEND_GUARD_BLOCKED",
+                "words": [],
+                "speaker_ids": [],
+                "http_status": 0,
+                "detail": f"spend_guard_blocked: {BLOCKER_KILL_SWITCH_ACTIVE}",
+            }
+        asr_spend_ctx = SpendGuardContext(
+            job_id="subdub_gemini_two_asr",
+            request_id="REQ-SUBDUB-GEMINI-TWO",
+            trace_id="TR-SUBDUB-GEMINI-TWO",
+            product_family="SubDub ASR",
+            provider="gemini_transcribe",
+            operation="transcribe_diarized_words",
+            model=GEMINI_TRANSCRIBE_MODEL,
+            is_paid_live_attempt=bool(api_key),
+        )
+        asr_spend_res = reserve_provider_spend(asr_spend_ctx)
+        if not asr_spend_res.allowed:
+            return {
+                "ok": False,
+                "status": "SPEND_GUARD_BLOCKED",
+                "words": [],
+                "speaker_ids": [],
+                "http_status": 0,
+                "detail": f"spend_guard_blocked: {asr_spend_res.blocker or BLOCKER_MAX_COST_AUTHORITY_MISSING}",
+            }
         async with httpx.AsyncClient(timeout=180.0) as client:
             response = await client.post(
                 GEMINI_INTERACTIONS_URL,

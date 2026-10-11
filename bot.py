@@ -65933,6 +65933,30 @@ async def openai_compatible_asr_transcribe(
     if str(language or "auto").strip().lower() not in {"", "auto"}:
         data["language"] = str(language).strip()
     try:
+        from services.provider_spend_guard import (
+            BLOCKER_KILL_SWITCH_ACTIVE,
+            BLOCKER_MAX_COST_AUTHORITY_MISSING,
+            SpendGuardContext,
+            is_kill_switch_active,
+            reserve_provider_spend,
+        )
+        if is_kill_switch_active():
+            return {"ok": False, "status": "SPEND_GUARD_BLOCKED", "error_class": BLOCKER_KILL_SWITCH_ACTIVE, "text": "", "segments": [], "detail": f"spend_guard_blocked: {BLOCKER_KILL_SWITCH_ACTIVE}"}
+
+        whisper_spend_ctx = SpendGuardContext(
+            job_id="key4u_whisper_asr",
+            request_id="REQ-KEY4U-WHISPER-ASR",
+            trace_id="TR-KEY4U-WHISPER-ASR",
+            product_family="SubDub ASR",
+            provider="key4u_whisper",
+            operation="openai_compatible_asr_transcribe",
+            model=str(model or "whisper-1"),
+            is_paid_live_attempt=bool(api_key),
+        )
+        whisper_spend_res = reserve_provider_spend(whisper_spend_ctx)
+        if not whisper_spend_res.allowed:
+            return {"ok": False, "status": "SPEND_GUARD_BLOCKED", "error_class": whisper_spend_res.blocker, "text": "", "segments": [], "detail": f"spend_guard_blocked: {whisper_spend_res.blocker or BLOCKER_MAX_COST_AUTHORITY_MISSING}"}
+
         async with httpx.AsyncClient(timeout=60.0) as client:
             res = await client.post(final_url, headers={"Authorization": f"Bearer {api_key}"}, data=data, files=files)
         try:
@@ -68430,6 +68454,38 @@ def public_video_active_job_keyboard(active_job: dict | None, lang: str = "vi") 
 async def shopaikey_video_create_for_model(model: str, prompt: str = "") -> dict:
     if not SHOPAIKEY_API_KEY:
         return {"status": "MISSING", "http_status": 0, "latency_ms": 0, "model": SHOPAIKEY_VIDEO_MODEL, "task_id": "", "provider_status": "", "message": "SHOPAIKEY_API_KEY missing", "error_class": "missing_api_key"}
+
+    from services.provider_spend_guard import (
+        BLOCKER_KILL_SWITCH_ACTIVE,
+        SpendGuardContext,
+        is_kill_switch_active,
+        reserve_provider_spend,
+        mark_submitted_pending_settlement,
+        retain_ambiguous_provider_spend,
+    )
+    if is_kill_switch_active():
+        return {"status": "SPEND_GUARD_BLOCKED", "http_status": 0, "latency_ms": 0, "model": model, "task_id": "", "provider_status": "", "message": "paid_provider_kill_switch_active", "error_class": BLOCKER_KILL_SWITCH_ACTIVE}
+
+    shopai_spend_ctx = SpendGuardContext(
+        job_id=f"shopai_vid_{int(time.perf_counter()*1000)}",
+        request_id=f"REQ-SHOPAI-VID-{int(time.perf_counter()*1000)}",
+        trace_id=f"TR-SHOPAI-VID-{int(time.perf_counter()*1000)}",
+        product_family="Product Video",
+        provider="shopaikey_kling_video",
+        operation="create_video_task",
+        model=model,
+        estimated_max_cost_usd=1.00,
+        has_proven_cost_authority=True,
+        bot_originated_action=True,
+        bot_confirm_authority="bot_telegram_ui_confirmed",
+        user_flow="shopaikey_video_direct",
+        entrypoint="bot",
+        is_paid_live_attempt=bool(SHOPAIKEY_API_KEY),
+    )
+    shopai_spend_res = reserve_provider_spend(shopai_spend_ctx)
+    if not shopai_spend_res.allowed:
+        return {"status": "SPEND_GUARD_BLOCKED", "http_status": 0, "latency_ms": 0, "model": model, "task_id": "", "provider_status": "", "message": f"spend_guard_blocked: {shopai_spend_res.blocker}", "error_class": shopai_spend_res.blocker}
+
     started = time.perf_counter()
     payload = shopaikey_video_request_payload(model, prompt)
     try:

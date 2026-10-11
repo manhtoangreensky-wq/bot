@@ -160,6 +160,18 @@ async def shopaikey_minimax_tts_async_submit(
     api_key: str = "",
     endpoint: str = "",
     timeout_seconds: float = 60.0,
+    *,
+    job_id: str = "",
+    request_id: str = "",
+    trace_id: str = "",
+    bot_originated_action: bool = False,
+    bot_confirm_authority: str = "",
+    estimated_max_cost_usd: float = 0.0,
+    has_proven_cost_authority: bool = False,
+    spend_context: Any = None,
+    is_paid_live: bool = False,
+    db_path: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> tuple[str, str, str, int]:
     key = str(api_key or get_shopaikey_env("SHOPAIKEY_API_KEY")).strip()
     if not key:
@@ -172,6 +184,69 @@ async def shopaikey_minimax_tts_async_submit(
     selected_voice = str(voice_id or "").strip()
     if not selected_voice:
         return "FAIL_BAD_REQUEST", "", "missing_voice_id", 0
+
+    from decimal import Decimal, ROUND_HALF_UP
+    from services.video_ai_real_pricing import CANONICAL_TTS_RATE_USD_PER_CHAR
+    from services.provider_spend_guard import (
+        BLOCKER_KILL_SWITCH_ACTIVE,
+        SpendGuardContext,
+        is_kill_switch_active,
+        reserve_provider_spend,
+        mark_submitted_pending_settlement,
+        retain_ambiguous_provider_spend,
+        release_provider_spend_no_charge,
+    )
+
+    effective_env = os.environ if env is None else env
+    if is_kill_switch_active(effective_env):
+        return "FAIL_SPEND_GUARD_BLOCKED", "", f"spend_guard_blocked: {BLOCKER_KILL_SWITCH_ACTIVE}", 0
+
+    is_real_provider_transport = bool(key)
+    should_guard = bool(
+        spend_context is not None
+        or is_paid_live
+        or is_real_provider_transport
+    )
+    spend_res = None
+    if should_guard:
+        if has_proven_cost_authority and float(estimated_max_cost_usd or 0.0) > 0:
+            cost_usd = float(estimated_max_cost_usd)
+            cost_proven = True
+            cost_source = "caller_proven_cost_authority"
+        elif len(text_clean) > 0 and CANONICAL_TTS_RATE_USD_PER_CHAR > 0:
+            calc = (Decimal(len(text_clean)) * CANONICAL_TTS_RATE_USD_PER_CHAR).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+            cost_usd = float(calc)
+            cost_proven = bool(calc > 0)
+            cost_source = f"canonical_tts_char_rate:{CANONICAL_TTS_RATE_USD_PER_CHAR}:chars={len(text_clean)}"
+        else:
+            cost_usd = 0.0
+            cost_proven = False
+            cost_source = ""
+
+        if spend_context is not None:
+            spend_ctx = spend_context
+        else:
+            spend_ctx = SpendGuardContext(
+                job_id=str(job_id or request_id or text_clean[:32]),
+                request_id=str(request_id or ""),
+                trace_id=str(trace_id or ""),
+                product_family="Voice / TTS",
+                provider="shopaikey_minimax_tts",
+                operation="create_tts_task",
+                model=str(model or "speech-01-turbo"),
+                estimated_max_cost_usd=cost_usd,
+                has_proven_cost_authority=cost_proven,
+                cost_authority_source=cost_source,
+                bot_originated_action=bool(bot_originated_action),
+                bot_confirm_authority=str(bot_confirm_authority or ""),
+                user_flow="bot_tts_confirm",
+                entrypoint="bot",
+                is_paid_live_attempt=bool(is_paid_live or is_real_provider_transport),
+                metadata={"char_count": len(text_clean), "text": text_clean},
+            )
+        spend_res = reserve_provider_spend(spend_ctx, db_path=db_path, env=effective_env)
+        if not spend_res.allowed:
+            return "FAIL_SPEND_GUARD_BLOCKED", "", f"spend_guard_blocked: {spend_res.blocker}", 0
 
     target_endpoint = endpoint or get_shopaikey_env("MINIMAX_TTS_ASYNC_ENDPOINT") or DEFAULT_MINIMAX_TTS_ASYNC_ENDPOINT
     target_url = resolve_shopaikey_async_endpoint_url(target_endpoint, base_url)
@@ -187,6 +262,7 @@ async def shopaikey_minimax_tts_async_submit(
         "Content-Type": "application/json",
     }
 
+    transport_started = False
     try:
         should_close = False
         if client is None:
@@ -194,6 +270,7 @@ async def shopaikey_minimax_tts_async_submit(
             should_close = True
 
         try:
+            transport_started = True
             res = await client.post(target_url, headers=headers, json=payload)
         finally:
             if should_close:
@@ -208,15 +285,66 @@ async def shopaikey_minimax_tts_async_submit(
         if http_status < 400:
             task_id = parse_shopaikey_task_id(data)
             if task_id:
+                if should_guard and spend_res and spend_res.allowed and spend_res.reservation_id:
+                    mark_submitted_pending_settlement(
+                        spend_res.reservation_id,
+                        provider_task_id=task_id,
+                        db_path=db_path,
+                        env=effective_env,
+                    )
                 return "PASS", task_id, f"http={http_status}; task_id={task_id}; url={target_url}", http_status
+            if should_guard and spend_res and spend_res.allowed and spend_res.reservation_id:
+                retain_ambiguous_provider_spend(
+                    spend_res.reservation_id,
+                    error_code="no_task_id_in_response",
+                    db_path=db_path,
+                    env=effective_env,
+                )
             return "FAIL_NO_TASK_ID", "", f"http={http_status}; no_task_id_in_response; url={target_url}", http_status
 
+        if should_guard and spend_res and spend_res.allowed and spend_res.reservation_id:
+            retain_ambiguous_provider_spend(
+                spend_res.reservation_id,
+                error_code=f"http_{http_status}",
+                db_path=db_path,
+                env=effective_env,
+            )
         error_detail = str(res.text[:300] if getattr(res, "text", "") else f"HTTP {http_status}")
         return "FAIL_HTTP_STATUS", "", f"http={http_status}; detail={error_detail}; url={target_url}", http_status
 
     except httpx.TimeoutException as exc:
+        if should_guard and spend_res and spend_res.allowed and spend_res.reservation_id:
+            if transport_started:
+                retain_ambiguous_provider_spend(
+                    spend_res.reservation_id,
+                    error_code="TimeoutException",
+                    db_path=db_path,
+                    env=effective_env,
+                )
+            else:
+                release_provider_spend_no_charge(
+                    spend_res.reservation_id,
+                    reason="pre_transport_timeout",
+                    db_path=db_path,
+                    env=effective_env,
+                )
         return "FAIL_TIMEOUT", "", f"timeout: {exc}", 0
     except Exception as exc:
+        if should_guard and spend_res and spend_res.allowed and spend_res.reservation_id:
+            if transport_started:
+                retain_ambiguous_provider_spend(
+                    spend_res.reservation_id,
+                    error_code=type(exc).__name__,
+                    db_path=db_path,
+                    env=effective_env,
+                )
+            else:
+                release_provider_spend_no_charge(
+                    spend_res.reservation_id,
+                    reason=type(exc).__name__,
+                    db_path=db_path,
+                    env=effective_env,
+                )
         return "FAIL_PROVIDER_ERROR", "", f"{type(exc).__name__}: {exc}", 0
 
 
