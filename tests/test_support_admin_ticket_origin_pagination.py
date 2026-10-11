@@ -94,6 +94,9 @@ class AdminTicketOriginPaginationTest(unittest.TestCase):
             query.reply_markups.append(markup)
             self.edits.append((text, markup))
 
+        async def to_thread(function, *args, **kwargs):
+            return function(*args, **kwargs)
+
         def set_pending(user_id, step, **fields):
             self.pending[user_id] = {"step": step, **fields}
 
@@ -106,6 +109,7 @@ class AdminTicketOriginPaginationTest(unittest.TestCase):
             self.sent.append(kwargs)
 
         self.namespace = {
+            "asyncio": SimpleNamespace(to_thread=to_thread),
             "html": html,
             "uuid": uuid,
             "InlineKeyboardButton": _Button,
@@ -130,6 +134,7 @@ class AdminTicketOriginPaginationTest(unittest.TestCase):
             "clear_support_ticket_pending": lambda user_id: self.pending.pop(user_id, None),
             "get_support_ticket_pending": lambda user_id: self.pending.get(user_id),
             "set_support_ticket_pending": set_pending,
+            "support_ticket_pending_key": lambda user_id: f"support_ticket:{user_id}",
             "USER_PENDING": {},
             "safe_edit_or_send": safe_edit_or_send,
         }

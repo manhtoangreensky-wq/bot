@@ -2,6 +2,7 @@
 import asyncio
 import re
 import time
+from copy import deepcopy
 from collections import defaultdict
 from pathlib import Path
 from types import SimpleNamespace
@@ -169,6 +170,94 @@ def test_split_pdf_page_prompt_back_emits_preserving_route_and_keeps_selection()
     assert emitted_back == "docflow|back_received"
     assert back_button.text == "⬅️ label"
     assert back_query.answers == [((), {})]
+
+
+def test_confirmation_add_more_preserves_staged_files_options_and_other_user_state():
+    user_id = 82
+    files = [{"file_id": "keep-file", "file_name": "input.pdf"}]
+    options = {"page_spec": "1-2", "preserved_option": "value"}
+    runtime, screens, callback, pattern = _runtime(user_id, files, options)
+    other_state = {
+        "doc_tool_current": "split_pdf",
+        "doc_tool_files": [{"file_id": "other-file", "file_name": "other.pdf"}],
+        "doc_files": [{"file_id": "other-file", "file_name": "other.pdf"}],
+        "doc_tool_file_count": 1,
+        "doc_tool_options": {"page_spec": "8-9"},
+    }
+    runtime["USER_PENDING"]["doc_tool:182"] = deepcopy(other_state)
+    other_state_before = deepcopy(runtime["USER_PENDING"]["doc_tool:182"])
+    state = runtime["get_doc_tool_pending"](user_id)
+
+    # Dispatch the Add-more control exactly as emitted on the confirmation screen.
+    markup = runtime["doc_tool_confirm_keyboard"]("vi", state)
+    emitted_add_more = _callback_for(markup, "📎")
+    query = _click(callback, pattern, emitted_add_more, user_id)
+
+    state_after = runtime["get_doc_tool_pending"](user_id)
+    assert screens[-1][0] == "Upload files"
+    assert state_after["doc_tool_files"] == files
+    assert state_after["doc_files"] == files
+    assert state_after["doc_tool_file_count"] == len(files)
+    assert state_after["doc_tool_options"] == options
+    assert runtime["USER_PENDING"]["doc_tool:182"] == other_state_before
+    assert emitted_add_more == "docflow|send_more"
+    assert query.answers == [((), {})]
+
+
+def test_after_file_send_file_keeps_its_intentional_reset_route():
+    user_id = 83
+    files = [{"file_id": "fresh-file", "file_name": "fresh.pdf"}]
+    options = {"page_spec": "4-5"}
+    runtime, screens, callback, pattern = _runtime(user_id, files, options)
+    state = runtime["get_doc_tool_pending"](user_id)
+
+    markup = runtime["doc_tool_after_file_keyboard"](state, "vi")
+    emitted_send_file = _callback_for(markup, "📎")
+    query = _click(callback, pattern, emitted_send_file, user_id)
+
+    state_after = runtime["get_doc_tool_pending"](user_id)
+    assert emitted_send_file == "docflow|reset_files"
+    assert state_after["doc_tool_files"] == []
+    assert state_after["doc_files"] == []
+    assert state_after["doc_tool_file_count"] == 0
+    assert state_after["doc_tool_options"] == {}
+    assert screens[-1][0] == "Upload files"
+    assert query.answers == [((), {})]
+
+
+def test_confirmation_back_returns_to_parent_and_preserves_other_users_pending():
+    scenarios = (
+        (84, "split_pdf", "main_docs", "Docs menu", "docs-keyboard"),
+        (85, "save_document", "main_memory", "Notes menu", "notes-keyboard"),
+    )
+    for user_id, tool, parent, expected_text, expected_keyboard in scenarios:
+        files = [{"file_id": f"fixture-{user_id}", "file_name": "inert.pdf"}]
+        options = {"preserved_option": "value"}
+        runtime, screens, callback, pattern = _runtime(user_id, files, options)
+        state = runtime["get_doc_tool_pending"](user_id)
+        state.update({
+            "doc_tool_current": tool,
+            "doc_tool_previous_step": parent,
+            "doc_previous_menu": parent,
+        })
+        other_key = f"doc_tool:{user_id + 100}"
+        runtime["USER_PENDING"][other_key] = {
+            "doc_tool_current": "split_pdf",
+            "doc_tool_files": [{"file_id": "other-file", "file_name": "other.pdf"}],
+            "doc_tool_file_count": 1,
+            "doc_tool_options": {"other_user": True},
+        }
+        other_before = deepcopy(runtime["USER_PENDING"][other_key])
+
+        markup = runtime["doc_tool_confirm_keyboard"]("vi", state)
+        emitted_back = _callback_for(markup, "⬅️")
+        assert emitted_back == f"docflow|back|{parent}"
+        query = _click(callback, pattern, emitted_back, user_id)
+
+        assert runtime["get_doc_tool_pending"](user_id) == {}
+        assert runtime["USER_PENDING"][other_key] == other_before
+        assert screens[-1] == (expected_text, expected_keyboard)
+        assert query.answers == [((), {})]
 
 
 def test_document_tool_parent_back_still_clears_session_and_returns_docs_menu():

@@ -1,5 +1,13 @@
 # Nghiệp vụ vận hành Product Video
 
+## Snapshot bổ trợ Telegram UI — 11/10/2026
+
+GitHub main và VPS bot hiện cùng `5c38bd31…`; bot/web/nginx active/running,
+NRestarts=0. Batch UI tiếp theo đang kiểm chứng, chưa triển khai. Phạm vi và
+case vận hành của batch nằm trong
+[Telegram UI handover](../docs/reports/TELEGRAM_UI_BATCH_HANDOVER_20261011.md).
+Các số đo Product Video bên dưới giữ nguyên ngày/phạm vi gốc của tài liệu.
+
 Đo từ `KIEM-THU/product-video-live-strategy-v2.json` và source Product Video tại
 local commit `d7f296d2a00eba050d437ca51962d33acc5b4ffa`, ngày 2026-08-28.
 

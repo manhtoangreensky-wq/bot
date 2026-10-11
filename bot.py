@@ -42972,13 +42972,14 @@ def translation_voice_menu_text(lang: str = "vi") -> str:
 def translation_voice_menu_keyboard(lang: str = "vi", parent: str = "media") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
     copy = public_hub_copy(lang)
-    if str(parent or "") == "media":
+    origin = "language" if str(parent or "") == "language" else "media"
+    if origin == "media":
         back = (f"⬅️ {copy['translation_subtitle_dubbing']}", "menu|translation_video_factory")
     else:
         back = (f"⬅️ {copy['translation_language']}", "menu|translation_language_hub")
     return build_2col_keyboard(
         [
-            (f"🌐 {copy['translation_audio']}", "tr_pick|voice"),
+            (f"🌐 {copy['translation_audio']}", f"tr_pick|voice|{origin}"),
             (f"🔊 {copy['translation_session_enable_voice']}", "menu|translation_output_voice"),
         ],
         nav_back=back,
@@ -42986,6 +42987,18 @@ def translation_voice_menu_keyboard(lang: str = "vi", parent: str = "media") -> 
         lang=lang,
         main_label=f"🏠 {copy['main_menu']}",
     )
+
+def translation_voice_recovery_keyboard(origin: str, lang: str, user_id) -> InlineKeyboardMarkup:
+    if origin == "actions":
+        return voice_translation_action_keyboard(lang)
+    if origin in {"language", "media"}:
+        return translation_voice_menu_keyboard(lang, parent=origin)
+    if origin == "command":
+        return translation_language_hub_keyboard(lang, user_id)
+    copy = public_hub_copy(lang)
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")
+    ]])
 
 def translation_stop_text(lang: str = "vi", changed: bool = True) -> str:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
@@ -43032,31 +43045,46 @@ def has_recent_audio_input(update: Update) -> bool:
     cache = LAST_AUDIO_FILE.get(uid) or {}
     return bool(cache and float(cache.get("created_at_ts") or 0) + LAST_MEDIA_CACHE_TTL_SECONDS >= time.time())
 
-def translation_target_keyboard(source_type: str, more: bool = False, lang: str = "vi") -> InlineKeyboardMarkup:
+def translation_target_keyboard(source_type: str, more: bool = False, lang: str = "vi", origin: str = "legacy") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
     copy = public_hub_copy(lang)
     source = str(source_type or "text").strip()
     if source == "voice":
+        origin = str(origin or "legacy").strip()
+        if origin not in {"language", "media", "actions", "command", "legacy"}:
+            origin = "legacy"
+        callback_origin = f"|{origin}" if origin != "legacy" else ""
         if more:
             codes = TRANSLATION_MORE_LANGS
             rows = []
             for i in range(0, len(codes), 2):
                 rows.append([
-                    InlineKeyboardButton(translate_target_button_label(code), callback_data=f"tr_target|voice|{code}")
+                    InlineKeyboardButton(translate_target_button_label(code), callback_data=f"tr_target|voice|{code}{callback_origin}")
                     for code in codes[i:i + 2]
                 ])
-            rows.append([InlineKeyboardButton(copy["translation_picker_back"], callback_data="tr_pick|voice")])
+            rows.append([
+                InlineKeyboardButton(copy["translation_picker_back"], callback_data=f"tr_pick_back|voice{callback_origin}"),
+                InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main"),
+            ])
             return InlineKeyboardMarkup(rows)
-        return InlineKeyboardMarkup([
+        rows = [
             [
-                InlineKeyboardButton("🇺🇸 English", callback_data="tr_target|voice|en"),
-                InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="tr_target|voice|vi"),
+                InlineKeyboardButton("🇺🇸 English", callback_data=f"tr_target|voice|en{callback_origin}"),
+                InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data=f"tr_target|voice|vi{callback_origin}"),
             ],
             [
-                InlineKeyboardButton("🇨🇳 中文", callback_data="tr_target|voice|zh"),
-                InlineKeyboardButton(copy["translation_picker_more"], callback_data="tr_more|voice"),
+                InlineKeyboardButton("🇨🇳 中文", callback_data=f"tr_target|voice|zh{callback_origin}"),
+                InlineKeyboardButton(copy["translation_picker_more"], callback_data=f"tr_more|voice{callback_origin}"),
             ],
-        ])
+        ]
+        if origin != "legacy":
+            rows.append([
+                InlineKeyboardButton(copy["translation_picker_back"], callback_data=f"tr_back|voice|{origin}"),
+                InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main"),
+            ])
+        else:
+            rows.append([InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")])
+        return InlineKeyboardMarkup(rows)
     if more:
         codes = TRANSLATION_MORE_LANGS
         rows = []
@@ -43087,13 +43115,14 @@ def voice_translation_action_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(copy["translation_transcribe"], callback_data="tr_transcribe"),
-            InlineKeyboardButton(f"🌐 {copy['translation_audio']}", callback_data="tr_pick|voice"),
+            InlineKeyboardButton(f"🌐 {copy['translation_audio']}", callback_data="tr_pick|voice|actions"),
         ],
         [
-            InlineKeyboardButton("🇺🇸 English", callback_data="tr_target|voice|en"),
-            InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="tr_target|voice|vi"),
+            InlineKeyboardButton("🇺🇸 English", callback_data="tr_target|voice|en|actions"),
+            InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="tr_target|voice|vi|actions"),
         ],
-        [InlineKeyboardButton(copy["translation_picker_more"], callback_data="tr_more|voice")],
+        [InlineKeyboardButton(copy["translation_picker_more"], callback_data="tr_more|voice|actions")],
+        [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
 
 def translation_pick_text(source_type: str, lang: str = "vi") -> str:
@@ -43125,7 +43154,7 @@ async def reply_translation_surface(update: Update, text: str, parse_mode=None, 
         return await update.callback_query.message.reply_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
     return await update.message.reply_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
 
-async def show_translation_picker(update: Update, source_type: str, edit: bool = False, more: bool = False, lang: str | None = None):
+async def show_translation_picker(update: Update, source_type: str, edit: bool = False, more: bool = False, lang: str | None = None, origin: str = "legacy"):
     if lang is None:
         uid = update.effective_user.id if update.effective_user else None
         lang = get_user_language(uid) if uid is not None else "vi"
@@ -43135,7 +43164,7 @@ async def show_translation_picker(update: Update, source_type: str, edit: bool =
         f"{copy['translation_picker_more']}\n\n{copy['translation_picker_target']}. {copy['translation_picker_no_charge']}"
         if more else translation_pick_text(source_type, lang)
     )
-    keyboard = translation_target_keyboard(source_type, more=more, lang=lang)
+    keyboard = translation_target_keyboard(source_type, more=more, lang=lang, origin=origin)
     if edit and update.callback_query:
         return await safe_edit_query_message(update.callback_query, text, reply_markup=keyboard)
     return await reply_translation_surface(update, text, parse_mode="HTML", reply_markup=keyboard)
@@ -59228,19 +59257,48 @@ def pkgcombo_large_order_callback(origin: str = "home", package_type: str = "", 
         return "pkgcombo:large_order:combo_group"
     return "pkgcombo:large_order:home"
 
+def pkgcombo_large_order_origin_token(origin_token: str = "", decode: bool = False) -> str:
+    origin_codes = {
+        "pricing_main_profile": "a", "pricing_catalog": "b", "pricing_catalog_profile": "c",
+        "pricing_total_catalog": "d", "pricing_total_profile": "e", "pricing_image": "f",
+        "pricing_image_profile": "g", "pricing_video": "h", "pricing_video_profile": "i",
+    }
+    token = str(origin_token or "").strip()
+    if decode:
+        return next((origin for origin, code in origin_codes.items() if code == token), token)
+    return origin_codes.get(token, token)
+
 def pkgcombo_large_order_back_callback(origin_parts: list[str] | tuple[str, ...] | None = None) -> str:
     parts = [str(part or "").strip() for part in (origin_parts or []) if str(part or "").strip()]
+    allowed_origins = {
+        "pricing_main_profile", "pricing_catalog", "pricing_catalog_profile",
+        "pricing_total_catalog", "pricing_total_profile", "pricing_image",
+        "pricing_image_profile", "pricing_video", "pricing_video_profile",
+    }
+    origin_token = parts[-1] if parts else ""
+    if (
+        len(parts) >= 3 and parts[0] in {"detail", "combo_detail", "group"}
+        or len(parts) >= 2 and parts[0] == "combo_group"
+    ):
+        origin_token = pkgcombo_large_order_origin_token(origin_token, decode=True)
+    origin_token = origin_token if origin_token in allowed_origins else ""
+    suffix = f":{origin_token}" if origin_token else ""
+    detail_suffix = f":{pkgcombo_large_order_origin_token(origin_token)}" if origin_token else ""
     if not parts:
         return "pkgcombo:home"
     origin = parts[0]
+    if origin == "home":
+        return f"pkgcombo:home{suffix}"
+    if origin in {"notes", "my"}:
+        return f"pkgcombo:{origin}{suffix}"
     if origin == "detail" and len(parts) >= 2:
-        return f"pkgcombo:detail:{parts[1]}"
+        return f"pkgcombo:detail:{parts[1]}{detail_suffix}"
     if origin == "combo_detail" and len(parts) >= 2:
-        return f"pkgcombo:combo_detail:{parts[1]}"
+        return f"pkgcombo:combo_detail:{parts[1]}{detail_suffix}"
     if origin == "group" and len(parts) >= 2:
-        return pkgcombo_group_callback(parts[1])
+        return f"{pkgcombo_group_callback(parts[1])}{suffix}"
     if origin == "combo_group":
-        return "pkgcombo:group:combo"
+        return f"pkgcombo:group:combo{suffix}"
     return "pkgcombo:home"
 
 def package_purchase_success_message(info: dict) -> str:
@@ -60205,7 +60263,10 @@ def human_support_text(lang: str = "vi") -> str:
     return f"👨‍💼 <b>{copy['support_title']}</b>\n\n{copy['support_body']}"
 
 def ticket_customer_origin_keyboard(markup, origin: str = "", lang: str = "vi", *, back_callback: str = ""):
-    if origin not in {"profile", "profile_result"} or markup is None:
+    support_child_origins = {"admin_contact", "cskh_auto", "premium"}
+    profile_child_origins = {f"profile_{child}" for child in support_child_origins}
+    valid_origins = {"profile", "profile_result", "feedback_result", "support", "ticket_menu", *support_child_origins, *profile_child_origins}
+    if origin not in valid_origins or markup is None:
         return markup
     rows = []
     for row in markup.inline_keyboard:
@@ -60216,12 +60277,19 @@ def ticket_customer_origin_keyboard(markup, origin: str = "", lang: str = "vi", 
             if back_callback and data.startswith("support|start") and button.text.startswith(("⬅", "🔙", "←")):
                 controls.append(InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=back_callback))
             elif len(parts) >= 2 and parts[0] == "ticket" and parts[1] in {"mine", "pv", "reply_user", "done", "attach", "summary"}:
-                if parts[-1] in {"profile", "profile_result"}:
+                child_origin = parts[-1] if parts[1] == "mine" and parts[-1] in support_child_origins else ""
+                if parts[-1] in valid_origins:
                     parts = parts[:-1]
-                target_origin = "profile" if parts[1] == "mine" else origin
-                controls.append(InlineKeyboardButton(button.text, callback_data="|".join([*parts, target_origin])))
+                target_origin = origin
+                if parts[1] == "mine":
+                    target_origin = (
+                        f"profile_{child_origin}" if child_origin else "profile"
+                    ) if origin in {"profile", "profile_result"} else (
+                        origin if origin in {"support", "ticket_menu", *support_child_origins, *profile_child_origins} else ""
+                    )
+                controls.append(InlineKeyboardButton(button.text, callback_data="|".join([*parts, target_origin]) if target_origin else "|".join(parts)))
             elif data in {"support|start", "support|ticket"}:
-                controls.append(InlineKeyboardButton(button.text, callback_data=data + "|profile"))
+                controls.append(InlineKeyboardButton(button.text, callback_data=data + "|profile" if origin in {"profile", "profile_result"} else data))
             else:
                 controls.append(button)
         rows.append(controls)
@@ -60270,7 +60338,7 @@ def human_support_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             InlineKeyboardButton(f"🎫 {copy['support_ticket']}", callback_data="support|ticket"),
         ],
         [
-            InlineKeyboardButton(f"📂 {copy['support_my_tickets']}", callback_data="ticket|mine"),
+            InlineKeyboardButton(f"📂 {copy['support_my_tickets']}", callback_data="ticket|mine|support"),
             InlineKeyboardButton(f"⭐ {copy['support_premium']}", callback_data="support|premium"),
         ],
         [
@@ -60289,7 +60357,7 @@ def support_cskh_auto_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(f"💬 {copy['support_open_telegram']}", url=SUPPORT_TELEGRAM_URL)],
-        [InlineKeyboardButton(f"🎫 {copy['support_ticket']}", callback_data="support|ticket"), InlineKeyboardButton(f"📂 {copy['support_my_tickets']}", callback_data="ticket|mine")],
+        [InlineKeyboardButton(f"🎫 {copy['support_ticket']}", callback_data="support|ticket"), InlineKeyboardButton(f"📂 {copy['support_my_tickets']}", callback_data="ticket|mine|cskh_auto")],
         [InlineKeyboardButton(f"⬅️ {copy['support_back']}", callback_data="support|start"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
 
@@ -60301,7 +60369,7 @@ def support_admin_contact_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(f"💬 {copy['support_open_telegram']}", url=SUPPORT_TELEGRAM_URL)],
-        [InlineKeyboardButton(f"🎫 {copy['support_ticket']}", callback_data="support|ticket"), InlineKeyboardButton(f"📂 {copy['support_my_tickets']}", callback_data="ticket|mine")],
+        [InlineKeyboardButton(f"🎫 {copy['support_ticket']}", callback_data="support|ticket"), InlineKeyboardButton(f"📂 {copy['support_my_tickets']}", callback_data="ticket|mine|admin_contact")],
         [InlineKeyboardButton(f"⬅️ {copy['support_back']}", callback_data="support|start"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
 
@@ -60318,7 +60386,7 @@ def support_premium_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(f"👤 {copy['support_personal']}", callback_data="support|premium_type|personal"), InlineKeyboardButton(f"🛒 {copy['support_shop']}", callback_data="support|premium_type|shop")],
         [InlineKeyboardButton(f"🏢 {copy['support_business']}", callback_data="support|premium_type|business"), InlineKeyboardButton(f"🤝 {copy['support_private']}", callback_data="support|premium_type|private")],
-        [InlineKeyboardButton(f"📂 {copy['support_my_tickets']}", callback_data="ticket|mine"), InlineKeyboardButton(f"⬅️ {copy['support_back']}", callback_data="support|start")],
+        [InlineKeyboardButton(f"📂 {copy['support_my_tickets']}", callback_data="ticket|mine|premium"), InlineKeyboardButton(f"⬅️ {copy['support_back']}", callback_data="support|start")],
         [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
 
@@ -60485,12 +60553,14 @@ def support_flow_back_keyboard(
     back_label: str = "⬅️ Hỗ trợ",
     *,
     include_tickets: bool = False,
+    ticket_origin: str = "",
     lang: str = "vi",
 ) -> InlineKeyboardMarkup:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
     rows = []
     if include_tickets:
-        rows.append([InlineKeyboardButton(f"📂 {copy['support_my_tickets']}", callback_data="ticket|mine")])
+        callback = f"ticket|mine|{ticket_origin}" if ticket_origin else "ticket|mine"
+        rows.append([InlineKeyboardButton(f"📂 {copy['support_my_tickets']}", callback_data=callback)])
     rows.append([
         InlineKeyboardButton(back_label, callback_data=back_callback),
         InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main"),
@@ -60609,7 +60679,7 @@ def support_ticket_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton(f"🎬 {copy['feedback_video_error']}", callback_data="ticket|cat|video_error"), InlineKeyboardButton(f"📄 {copy['feedback_document_pdf']}", callback_data="ticket|cat|document_pdf")],
         [InlineKeyboardButton(f"🎁 {copy['feedback_package_combo']}", callback_data="ticket|cat|package_combo"), InlineKeyboardButton(f"💰 {copy['feedback_refund']}", callback_data="ticket|cat|refund")],
         [InlineKeyboardButton(f"💡 {copy['feedback_feature_request']}", callback_data="ticket|cat|feature_request"), InlineKeyboardButton(f"🧑‍💼 {copy['support_consult']}", callback_data="ticket|cat|lead_consulting")],
-        [InlineKeyboardButton(f"✍️ {copy['feedback_other']}", callback_data="ticket|cat|other"), InlineKeyboardButton(f"🔍 {copy['support_my_tickets']}", callback_data="ticket|mine")],
+        [InlineKeyboardButton(f"✍️ {copy['feedback_other']}", callback_data="ticket|cat|other"), InlineKeyboardButton(f"🔍 {copy['support_my_tickets']}", callback_data="ticket|mine|ticket_menu")],
         [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
     ])
 
@@ -61056,9 +61126,10 @@ def support_ticket_detail_keyboard(ticket: dict, lang: str = "vi") -> InlineKeyb
     ])
 
 
-def public_support_ticket_list_keyboard(user_id, lang: str = "vi") -> tuple[str, InlineKeyboardMarkup]:
+def public_support_ticket_list_keyboard(user_id, lang: str = "vi", tickets=None) -> tuple[str, InlineKeyboardMarkup]:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
-    tickets = list_support_tickets(user_id=user_id, limit=10)
+    if tickets is None:
+        tickets = list_support_tickets(user_id=user_id, limit=10)
     if not tickets:
         text = f"📂 <b>{copy['support_my_tickets']}</b>\n\n{copy['support_ticket_list_empty']}"
     else:
@@ -71785,7 +71856,7 @@ def free_hub_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             (f"🎙 {copy['freehub_voice_subdub_script']}", "freehub|hook"),
             (f"🎵 {copy['freehub_music_sfx_ideas']}", "freehub|lib_music"),
             (f"🌐 {copy.get('freehub_translation', 'Dịch thuật')}", "freehub|open_translate"),
-            (f"📥 {copy.get('freehub_video_downloader', 'Tải video từ link')}", "vdownload|start"),
+            (f"📥 {copy.get('freehub_video_downloader', 'Tải video từ link')}", "vdownload|start|freehub"),
         ],
         nav_back=None,
         nav_main=True,
@@ -139195,8 +139266,12 @@ def _callback_latency_wrap_handler(callback, group: int, pattern):
         if group >= 0 and scope["handler"] == "unmatched":
             scope["handler"] = handler_name
             scope["prefix"] = route_prefix
-            if route_prefix == "menu" and getattr(update.callback_query, "data", None) == "menu|main_profile":
-                scope["route_key"] = "account_root"
+            if route_prefix == "menu":
+                callback_data = getattr(update.callback_query, "data", None)
+                if callback_data == "menu|main_profile":
+                    scope["route_key"] = "account_root"
+                elif callback_data == "menu|main":
+                    scope["route_key"] = "main_home"
         started_at = time.perf_counter()
         failure_outcome = None
         try:
@@ -140234,6 +140309,21 @@ async def handle_aichat_callback(update: Update, context: ContextTypes.DEFAULT_T
         save_aichat_state(state)
         return await safe_edit_or_send(query, "🤖 <b>AAS ONE AI Chatbot</b>\n\n" + result["reply"], parse_mode="HTML", reply_markup=aichat_consent_keyboard())
     if action == "consent_on":
+        payload = ai_chatbot_copilot.status_payload(state, uid)
+        if not payload.get("pending_consent"):
+            if payload.get("enabled"):
+                return await safe_edit_or_send(
+                    query,
+                    aichat_status_text(payload),
+                    parse_mode="HTML",
+                    reply_markup=aichat_control_keyboard(payload),
+                )
+            return await safe_edit_or_send(
+                query,
+                free_hub_main_text(lang),
+                parse_mode="HTML",
+                reply_markup=free_hub_main_keyboard(lang),
+            )
         state, result = ai_chatbot_copilot.enable_with_consent(state, uid)
         save_aichat_state(state)
         payload = ai_chatbot_copilot.status_payload(state, uid)
@@ -140732,6 +140822,24 @@ async def handle_support_pending_input(update: Update, context: ContextTypes.DEF
     uid = update.effective_user.id
     lang = normalize_user_language(get_user_language(uid)) or "vi"
     copy = public_hub_copy(lang)
+    pending_key = support_ticket_pending_key(uid)
+    stored_state = USER_PENDING.get(pending_key) or {}
+    if (
+        stored_state.get("pending_action") == "support_ticket"
+        and stored_state.get("step") in {"awaiting_message", "lead_input", "awaiting_ticket_reply"}
+        and time.time() - float(stored_state.get("created_at_ts") or 0) > SUPPORT_TICKET_TTL_SECONDS
+    ):
+        USER_PENDING.pop(pending_key, None)
+        back_to = str(stored_state.get("back_to") or "support|start")
+        await update.message.reply_text(
+            ui_text(lang, "common.expired_not_charged"),
+            reply_markup=support_flow_back_keyboard(
+                back_to,
+                f"⬅️ {copy['support_back']}",
+                lang=lang,
+            ),
+        )
+        return True
     state = get_support_ticket_pending(uid)
     if not state:
         return False
@@ -140907,7 +141015,7 @@ async def handle_support_pending_input(update: Update, context: ContextTypes.DEF
         return True
     if step == "admin_search" and is_admin_user(uid):
         clear_support_ticket_pending(uid)
-        payload, keyboard = support_admin_search_payload(text)
+        payload, keyboard = await asyncio.to_thread(support_admin_search_payload, text)
         await update.message.reply_text(payload, parse_mode="HTML", reply_markup=keyboard)
         return True
     return False
@@ -141002,7 +141110,7 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
         return await safe_edit_or_send(
             query,
             support_lead_input_text("premium_lead", selected, lang),
-            reply_markup=support_read_origin_keyboard(support_flow_back_keyboard("support|premium", f"⬅️ {copy['support_premium']}", include_tickets=True, lang=lang), profile_origin, lang),
+            reply_markup=support_read_origin_keyboard(support_flow_back_keyboard("support|premium", f"⬅️ {copy['support_premium']}", include_tickets=True, ticket_origin="premium", lang=lang), profile_origin, lang),
         )
     if action == "bot":
         clear_support_ticket_pending(uid)
@@ -141091,28 +141199,137 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
     parts = data.split("|")
     action = parts[1] if len(parts) > 1 else "start"
     uid = query.from_user.id
+    support_child_origins = {"admin_contact", "cskh_auto", "premium"}
+    profile_child_origins = {f"profile_{child}" for child in support_child_origins}
+    customer_origin_values = {
+        "profile", "profile_result", "feedback_result", "support", "ticket_menu",
+        *support_child_origins, *profile_child_origins,
+    }
+    ticket_detail_id_ok = (
+        action in {"pv", "av"}
+        and len(parts) > 2
+        and parts[2].isascii()
+        and parts[2].isdecimal()
+        and len(parts[2]) <= 19
+        and int(parts[2]) <= 9223372036854775807
+    )
+    early_start_ack = data == "ticket|start"
+    if early_start_ack:
+        await query.answer()
+    early_ticket_mine_ack = (
+        action == "mine"
+        and (
+            len(parts) == 2
+            or (len(parts) == 3 and parts[2] in {"profile", "support", "ticket_menu", *support_child_origins, *profile_child_origins})
+        )
+    )
+    if early_ticket_mine_ack:
+        await query.answer()
+    early_ticket_category_ack = (
+        action == "cat"
+        and len(parts) == 3
+        and parts[2] in SUPPORT_CATEGORIES
+    )
+    if early_ticket_category_ack:
+        await query.answer()
+    preview_origins = {
+        "profile", "profile_result", "feedback_result", "support", "ticket_menu",
+        "admin_contact", "cskh_auto", "premium", "profile_admin_contact",
+        "profile_cskh_auto", "profile_premium",
+    }
+    early_ticket_preview_ack = (
+        action == "pv"
+        and ticket_detail_id_ok
+        and (
+            len(parts) == 3
+            or (len(parts) == 4 and parts[3] in preview_origins)
+        )
+    )
+    if early_ticket_preview_ack:
+        await query.answer()
+    early_ticket_summary_ack = (
+        action == "summary"
+        and len(parts) == 4
+        and parts[2].isascii()
+        and parts[2].isdecimal()
+        and parts[3] in {"profile_result", "feedback_result"}
+    )
+    if early_ticket_summary_ack:
+        await query.answer()
+    early_ticket_reply_ack = (
+        action == "reply_user"
+        and len(parts) in {3, 4}
+        and parts[2].isascii()
+        and parts[2].isdecimal()
+        and (len(parts) == 3 or parts[3] in customer_origin_values)
+    )
+    if early_ticket_reply_ack:
+        await query.answer()
+    early_ticket_attach_ack = (
+        action == "attach"
+        and len(parts) in {3, 4}
+        and parts[2].isascii()
+        and parts[2].isdecimal()
+        and (len(parts) == 3 or parts[3] in customer_origin_values)
+    )
+    if early_ticket_attach_ack:
+        await query.answer()
+    early_ticket_done_ack = (
+        action == "done"
+        and len(parts) in {3, 4}
+        and parts[2].isascii()
+        and parts[2].isdecimal()
+        and (len(parts) == 3 or parts[3] in customer_origin_values)
+    )
+    if early_ticket_done_ack:
+        await query.answer()
+    early_admin_ticket_detail_ack = (
+        action == "av"
+        and is_admin_user(uid)
+        and len(parts) in {3, 4, 5}
+        and ticket_detail_id_ok
+        and (len(parts) < 4 or parts[3] in {"new", "high", "refund"})
+        and (len(parts) < 5 or (parts[4].isascii() and parts[4].isdecimal()))
+    )
+    if early_admin_ticket_detail_ack:
+        await query.answer()
     lang = normalize_user_language(get_user_language(uid)) or "vi"
     copy = public_hub_copy(lang)
     ticket_profile_origin = ""
     customer_arities = {"mine": 2, "pv": 3, "reply_user": 3, "done": 3, "attach": 3, "summary": 3}
     if action in customer_arities and len(parts) > customer_arities[action]:
-        if (len(parts) != customer_arities[action] + 1 or parts[-1] not in {"profile", "profile_result"}
-                or (action == "mine" and parts[-1] != "profile")
-                or (action == "summary" and parts[-1] != "profile_result")
+        valid_origins = customer_origin_values
+        if action == "summary":
+            valid_origins = {"profile_result", "feedback_result"}
+        if (len(parts) != customer_arities[action] + 1 or parts[-1] not in valid_origins
+                or (action == "mine" and parts[-1] not in {"profile", "support", "ticket_menu", *support_child_origins, *profile_child_origins})
                 or (action != "mine" and not parts[2].isdecimal())):
             return await query.answer(copy["support_ticket_action_unsupported"], show_alert=True)
         ticket_profile_origin = parts[-1]
         parts = parts[:-1]
     ticket_summary = None
     if action == "summary":
-        if ticket_profile_origin != "profile_result":
+        if ticket_profile_origin not in {"profile_result", "feedback_result"}:
             return await query.answer(copy["support_ticket_action_unsupported"], show_alert=True)
-        ticket_summary = get_support_ticket(int(parts[2]), uid)
+        ticket_summary = await asyncio.to_thread(get_support_ticket, int(parts[2]), uid)
         if not ticket_summary:
-            return await query.answer(copy["support_ticket_not_found"], show_alert=True)
+            return await safe_edit_or_send(
+                query,
+                f"⚠️ {copy['support_ticket_not_found']}",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(f"📂 {copy['support_ticket']}", callback_data="ticket|start")],
+                    [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+                ]),
+            )
     admin_actions = {"admin", "al", "av", "asearch", "stats", "templates", "st", "reply", "suggest", "send", "ask", "note", "assign", "lead", "file"}
     if action in admin_actions and not is_admin_user(uid):
         return await query.answer(copy["support_ticket_admin_only"], show_alert=True)
+    if action == "al" and (
+        len(parts) != 4
+        or parts[2] not in {"new", "high", "refund"}
+        or not (parts[3].isascii() and parts[3].isdecimal())
+    ):
+        return await query.answer("Nút danh sách ticket đã hết phiên. Vui lòng mở lại từ CSKH/Ticket.", show_alert=True)
     read_panel_origin = "admin"
     if action in {"stats", "templates"} and len(parts) > 2:
         read_panel_origin = parts[2]
@@ -141121,29 +141338,69 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
             return await query.answer("Nút CSKH/Ticket đã hết phiên. Vui lòng mở lại từ menu hiện tại.", show_alert=True)
     ticket_preview = None
     if action == "pv":
-        if len(parts) < 3 or not parts[2].isdigit():
+        if not ticket_detail_id_ok:
             return await query.answer(copy["support_ticket_action_unsupported"], show_alert=True)
         if not ticket_profile_origin:
             clear_support_ticket_pending(uid)
-        ticket_preview = get_support_ticket(int(parts[2]), uid)
+        ticket_preview = await asyncio.to_thread(get_support_ticket, int(parts[2]), uid)
         if not ticket_preview:
-            return await query.answer(copy["support_ticket_not_found"], show_alert=True)
+            list_origins = {"profile", "support", "ticket_menu", *support_child_origins, *profile_child_origins}
+            if not ticket_profile_origin or ticket_profile_origin in list_origins:
+                recovery_callback = f"ticket|mine|{ticket_profile_origin}" if ticket_profile_origin else "ticket|mine"
+                recovery_label = copy["support_my_tickets"]
+            else:
+                recovery_callback = "ticket|start"
+                recovery_label = copy["support_ticket"]
+            return await safe_edit_or_send(
+                query,
+                f"⚠️ {copy['support_ticket_not_found']}",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(f"📂 {recovery_label}", callback_data=recovery_callback)],
+                    [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+                ]),
+            )
         if ticket_profile_origin:
             clear_support_ticket_pending(uid)
     customer_action_ticket = None
     if action in {"reply_user", "done", "attach"}:
         if len(parts) < 3 or not parts[2].isdecimal():
             return await query.answer(copy["support_ticket_action_unsupported"], show_alert=True)
-        customer_action_ticket = get_support_ticket(int(parts[2]), uid)
+        if action in {"reply_user", "attach", "done"}:
+            customer_action_ticket = await asyncio.to_thread(get_support_ticket, int(parts[2]), uid)
+        else:
+            customer_action_ticket = get_support_ticket(int(parts[2]), uid)
         if not customer_action_ticket:
+            if early_ticket_reply_ack or early_ticket_attach_ack or early_ticket_done_ack:
+                return await safe_edit_or_send(
+                    query,
+                    f"⚠️ {copy['support_ticket_not_found']}",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton(f"📂 {copy['support_ticket']}", callback_data="ticket|start")],
+                        [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+                    ]),
+                )
             return await query.answer(copy["support_ticket_not_found"], show_alert=True)
     admin_ticket_detail = None
     if action == "av":
-        if len(parts) < 3 or not parts[2].isdigit():
+        if not ticket_detail_id_ok:
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
         clear_support_ticket_pending(uid)
-        admin_ticket_detail = get_support_ticket(int(parts[2]))
+        if early_admin_ticket_detail_ack:
+            admin_ticket_detail = await asyncio.to_thread(get_support_ticket, int(parts[2]))
+        else:
+            admin_ticket_detail = get_support_ticket(int(parts[2]))
         if not admin_ticket_detail:
+            if early_admin_ticket_detail_ack:
+                source = parts[3] if len(parts) >= 4 else "new"
+                list_offset = int(parts[4]) if len(parts) >= 5 else 0
+                return await safe_edit_or_send(
+                    query,
+                    "⚠️ Không tìm thấy ticket.",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("⬅️ CSKH/Ticket", callback_data=f"ticket|al|{source}|{list_offset}")],
+                        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+                    ]),
+                )
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
     admin_ticket_status = None
     if action == "st":
@@ -141152,7 +141409,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         admin_ticket_status = get_support_ticket(int(parts[2]))
         if not admin_ticket_status:
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
-    if action not in {"send", "file", "pv", "av", "st", "reply", "ask", "suggest", "note", "assign", "lead"}:
+    if not early_start_ack and not early_ticket_mine_ack and not early_ticket_category_ack and not early_ticket_summary_ack and not early_ticket_reply_ack and not early_ticket_attach_ack and not early_ticket_done_ack and action not in {"send", "file", "pv", "av", "st", "reply", "ask", "suggest", "note", "assign", "lead"}:
         await query.answer()
     if action == "start":
         clear_support_ticket_pending(uid)
@@ -141165,18 +141422,40 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         return await safe_edit_or_send(query, support_ticket_message_prompt(category, lang), reply_markup=support_ticket_input_keyboard(lang))
     if action == "mine":
         clear_support_ticket_pending(uid)
-        text, keyboard = public_support_ticket_list_keyboard(uid, lang)
-        return await safe_edit_or_send(query, text, reply_markup=ticket_customer_origin_keyboard(keyboard, ticket_profile_origin, lang) if ticket_profile_origin else keyboard)
+        tickets = await asyncio.to_thread(list_support_tickets, user_id=uid, limit=10)
+        text, keyboard = public_support_ticket_list_keyboard(uid, lang, tickets=tickets)
+        back_to_parent = {
+            "ticket_menu": "ticket|start",
+            "admin_contact": "support|admin_contact",
+            "cskh_auto": "support|cskh_auto",
+            "premium": "support|premium",
+            "profile_admin_contact": "support|admin_contact|profile",
+            "profile_cskh_auto": "support|cskh_auto|profile",
+            "profile_premium": "support|premium|profile",
+        }
+        return await safe_edit_or_send(
+            query, text,
+            reply_markup=ticket_customer_origin_keyboard(
+                keyboard, ticket_profile_origin, lang,
+                back_callback=back_to_parent.get(ticket_profile_origin, ""),
+            ) if ticket_profile_origin else keyboard,
+        )
     if action == "summary":
         clear_support_ticket_pending(uid)
-        return await safe_edit_or_send(query, support_ticket_created_text(ticket_summary, lang), reply_markup=ticket_customer_origin_keyboard(support_ticket_created_keyboard(ticket_summary["id"], lang), "profile_result", lang))
+        return await safe_edit_or_send(query, support_ticket_created_text(ticket_summary, lang), reply_markup=ticket_customer_origin_keyboard(support_ticket_created_keyboard(ticket_summary["id"], lang), ticket_profile_origin, lang))
     if action == "pv" and len(parts) >= 3:
-        await query.answer()
         ticket = ticket_preview
         return await safe_edit_or_send(
             query,
             public_support_ticket_text(ticket, lang),
-            reply_markup=ticket_customer_origin_keyboard(support_ticket_detail_keyboard(ticket, lang), ticket_profile_origin, lang, back_callback=f"ticket|summary|{ticket['id']}|profile_result" if ticket_profile_origin == "profile_result" else "ticket|mine|profile") if ticket_profile_origin else support_ticket_detail_keyboard(ticket, lang),
+            reply_markup=ticket_customer_origin_keyboard(
+                support_ticket_detail_keyboard(ticket, lang), ticket_profile_origin, lang,
+                back_callback=(
+                    f"ticket|summary|{ticket['id']}|{ticket_profile_origin}"
+                    if ticket_profile_origin in {"profile_result", "feedback_result"}
+                    else f"ticket|mine|{ticket_profile_origin}"
+                ),
+            ) if ticket_profile_origin else support_ticket_detail_keyboard(ticket, lang),
         )
     if action == "reply_user" and len(parts) >= 3:
         ticket = customer_action_ticket
@@ -141220,10 +141499,11 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         clear_support_ticket_pending(uid)
         kind = parts[2]
         offset = max(0, int(parts[3] or 0))
-        text, keyboard = support_admin_list_payload(kind, offset)
+        text, keyboard = await asyncio.to_thread(support_admin_list_payload, kind, offset)
         return await safe_edit_or_send(query, text, reply_markup=keyboard)
     if action == "av" and len(parts) >= 3:
-        await query.answer()
+        if not early_admin_ticket_detail_ack:
+            await query.answer()
         ticket = admin_ticket_detail
         source = parts[3] if len(parts) >= 4 else "new"
         list_offset = max(0, int(parts[4] or 0)) if len(parts) >= 5 else 0
@@ -141234,7 +141514,8 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         return await safe_edit_or_send(query, f"🔍 <b>Tìm ticket</b>\n\n{prompt}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ CSKH/Ticket", callback_data="ticket|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]]))
     if action == "stats":
         clear_support_ticket_pending(uid)
-        return await safe_edit_or_send(query, support_ticket_stats_text(), reply_markup=support_admin_menu_keyboard("stats", read_panel_origin))
+        stats_text = await asyncio.to_thread(support_ticket_stats_text)
+        return await safe_edit_or_send(query, stats_text, reply_markup=support_admin_menu_keyboard("stats", read_panel_origin))
     if action == "templates":
         clear_support_ticket_pending(uid)
         return await safe_edit_or_send(query, support_reply_templates_text(), reply_markup=support_admin_menu_keyboard("templates", read_panel_origin))
@@ -143411,7 +143692,6 @@ async def handle_feedback_callback(update: Update, context: ContextTypes.DEFAULT
     query = update.callback_query
     data = (query.data or "").strip()
     uid = query.from_user.id
-    lang = user_ui_lang(uid)
     if data not in {"feedback|start", "feedback|cancel"} and not data.startswith("feedback|cat|"):
         return await query.answer("Feedback action not supported.", show_alert=True)
     category = ""
@@ -143420,6 +143700,7 @@ async def handle_feedback_callback(update: Update, context: ContextTypes.DEFAULT
         if category not in FEEDBACK_CATEGORY_LABELS:
             return await query.answer("Feedback category not supported.", show_alert=True)
     await query.answer()
+    lang = user_ui_lang(uid)
     if data == "feedback|start":
         clear_feedback_pending(uid)
         clear_support_ticket_pending(uid)
@@ -143520,26 +143801,86 @@ async def handle_translation_callback(update: Update, context: ContextTypes.DEFA
         if not has_recent_audio_input(update):
             return await query.message.reply_text(f"⚠️ {copy['translation_recent_media_missing']}")
         return await cmd_transcribe(update, context)
+    if data.startswith("tr_back|voice|"):
+        parts = data.split("|")
+        origin = parts[2] if len(parts) == 3 else ""
+        if origin == "actions":
+            return await safe_edit_query_message(
+                query,
+                audio_voice_received_text(lang),
+                reply_markup=voice_translation_action_keyboard(lang),
+            )
+        if origin in {"language", "media"}:
+            return await safe_edit_query_message(
+                query,
+                translation_voice_menu_text(lang),
+                parse_mode="HTML",
+                reply_markup=translation_voice_menu_keyboard(lang, parent=origin),
+            )
+        if origin == "command":
+            return await safe_edit_query_message(
+                query,
+                translation_language_hub_text(lang),
+                parse_mode="HTML",
+                reply_markup=translation_language_hub_keyboard(lang, uid),
+            )
+        return await safe_edit_query_message(
+            query,
+            translation_language_hub_text(lang),
+            parse_mode="HTML",
+            reply_markup=translation_language_hub_keyboard(lang, uid),
+        )
+    if data.startswith("tr_pick_back|"):
+        parts = data.split("|")
+        if len(parts) not in {2, 3} or parts[1] != "voice":
+            return await query.message.reply_text(copy["translation_invalid_selection"])
+        origin = parts[2] if len(parts) == 3 else "legacy"
+        if origin not in {"language", "media", "actions", "command", "legacy"}:
+            return await query.message.reply_text(copy["translation_invalid_selection"])
+        return await show_translation_picker(update, "voice", edit=True, origin=origin)
     if data.startswith("tr_pick|"):
-        source_type = data.split("|", 1)[1]
+        parts = data.split("|")
+        if len(parts) not in {2, 3}:
+            return await query.message.reply_text(copy["translation_invalid_selection"])
+        source_type = parts[1]
+        origin = parts[2] if len(parts) == 3 else "legacy"
+        if source_type == "voice" and origin not in {"language", "media", "actions", "command", "legacy"}:
+            return await query.message.reply_text(copy["translation_invalid_selection"])
         if source_type == "voice" and not has_recent_audio_input(update):
-            return await query.message.reply_text(f"⚠️ {copy['translation_recent_media_missing']}")
-        return await show_translation_picker(update, source_type, edit=True)
+            recovery_markup = translation_voice_recovery_keyboard(origin, lang, uid)
+            return await query.message.reply_text(
+                f"⚠️ {copy['translation_recent_media_missing']}",
+                reply_markup=recovery_markup,
+            )
+        return await show_translation_picker(update, source_type, edit=True, origin=origin)
     if data.startswith("tr_more|"):
-        source_type = data.split("|", 1)[1]
-        return await show_translation_picker(update, source_type, edit=True, more=True)
+        parts = data.split("|")
+        if len(parts) not in {2, 3}:
+            return await query.message.reply_text(copy["translation_invalid_selection"])
+        source_type = parts[1]
+        origin = parts[2] if len(parts) == 3 else "legacy"
+        if source_type == "voice" and origin not in {"language", "media", "actions", "command", "legacy"}:
+            return await query.message.reply_text(copy["translation_invalid_selection"])
+        return await show_translation_picker(update, source_type, edit=True, more=True, origin=origin)
     if not data.startswith("tr_target|"):
         return await query.answer(copy["translation_invalid_selection"], show_alert=True)
     parts = data.split("|")
-    if len(parts) != 3:
+    if len(parts) not in {3, 4}:
         return await query.answer(copy["translation_invalid_target"], show_alert=True)
-    _prefix, source_type, target = parts
+    _prefix, source_type, target = parts[:3]
+    origin = parts[3] if len(parts) == 4 else "legacy"
+    if (source_type == "voice" and origin not in {"language", "media", "actions", "command", "legacy"}) or (source_type != "voice" and len(parts) != 3):
+        return await query.answer(copy["translation_invalid_target"], show_alert=True)
     target = normalize_translate_target(target)
     if not target:
         return await query.answer(copy["translation_invalid_target"], show_alert=True)
     if source_type == "voice":
         if not has_recent_audio_input(update):
-            return await query.message.reply_text(f"⚠️ {copy['translation_recent_media_missing']}")
+            recovery_markup = translation_voice_recovery_keyboard(origin, lang, uid)
+            return await query.message.reply_text(
+                f"⚠️ {copy['translation_recent_media_missing']}",
+                reply_markup=recovery_markup,
+            )
         save_translation_request(uid, "voice")
         return await run_translate_voice_to_target(update, context, target)
     if source_type == "file":
@@ -159247,7 +159588,7 @@ async def cmd_translate_voice(update: Update, context: ContextTypes.DEFAULT_TYPE
         if not has_recent_audio_input(update):
             return await update.message.reply_text(f"⚠️ {copy['translation_recent_media_missing']}")
         save_translation_request(uid, "voice")
-        return await show_translation_picker(update, "voice")
+        return await show_translation_picker(update, "voice", origin="command")
     target = normalize_translate_target(raw_target)
     if not target:
         return await update.message.reply_text(translate_voice_missing_target_text(lang), parse_mode="HTML")
@@ -186439,7 +186780,7 @@ def doc_tool_confirm_keyboard(lang: str = "vi", state: dict | None = None) -> In
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(f"✅ {copy['docs_confirm']}", callback_data="docflow|run"),
-            InlineKeyboardButton(f"📎 {copy['docs_add_more']}", callback_data="docflow|reset_files"),
+            InlineKeyboardButton(f"📎 {copy['docs_add_more']}", callback_data="docflow|send_more"),
         ],
         [
             InlineKeyboardButton(doc_tool_parent_label(state, tool, lang), callback_data=back_callback),
@@ -186872,6 +187213,22 @@ async def handle_doc_tool_pending_text(update: Update, context: ContextTypes.DEF
     if not update.message or not update.message.text or not update.effective_user:
         return False
     uid = update.effective_user.id
+    pending_key = doc_tool_pending_key(uid)
+    stored_state = USER_PENDING.get(pending_key) or {}
+    if (
+        stored_state.get("doc_tool_current") == "split_pdf"
+        and stored_state.get("awaiting_page_spec") == "1"
+        and float(stored_state.get("created_at_ts") or 0) + DOC_TOOL_STATE_TTL_SECONDS < time.time()
+    ):
+        USER_PENDING.pop(pending_key, None)
+        lang = get_user_language(uid) or "vi"
+        expired_text = (
+            "⏰ Phiên nhập số trang Tách PDF đã hết hạn. Hãy mở lại công cụ để bắt đầu lại."
+            if lang == "vi"
+            else "⏰ The Split PDF page-range prompt has expired. Open the tool again to start over."
+        )
+        await update.message.reply_text(expired_text, reply_markup=main_docs_keyboard(lang))
+        return True
     state = get_doc_tool_pending(uid)
     if not state or state.get("doc_tool_current") != "split_pdf" or state.get("awaiting_page_spec") != "1":
         return False
@@ -187006,13 +187363,15 @@ async def run_doc_tool_state(message, context: ContextTypes.DEFAULT_TYPE, uid, s
 async def handle_doc_tool_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     uid = query.from_user.id
-    lang = get_user_language(uid) or "vi"
     action = str(query.data or "").split("|", 1)[1] if "|" in str(query.data or "") else "start"
     back_origin = ""
     if action.startswith("back|"):
         action, back_origin = action.split("|", 1)
-    if action != "confirm":
+    if action == "confirm":
+        lang = get_user_language(uid) or "vi"
+    else:
         await query.answer()
+        lang = get_user_language(uid) or "vi"
     state = get_doc_tool_pending(uid)
     tool = str(state.get("doc_tool_current") or "save_document") if state else "save_document"
     config = None
@@ -211803,7 +212162,16 @@ def pricing_main_keyboard(lang: str = "vi", user_id=None) -> InlineKeyboardMarku
 
 def pricing_catalog_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if public_pricing_locale(lang) not in {"vi", "en", "zh"}:
-        return pricing_main_keyboard(lang)
+        rows = []
+        for row in pricing_main_keyboard(lang).inline_keyboard:
+            controls = []
+            for button in row:
+                if button.callback_data == "pricing|catalog":
+                    controls.append(InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="pricing|main"))
+                else:
+                    controls.append(button)
+            rows.append(controls)
+        return InlineKeyboardMarkup(rows)
     lang = pricing_copy_language(lang)
     catalog_labels = {
         "vi": ("💰 Bảng giá tổng", "🎙 Giọng nói", "🎵 Nhạc AI", "🎬 Video", "🌐 Phụ đề / Lồng tiếng", "🖼 Hình ảnh", "📄 Tài liệu/PDF", "🎁 Miễn phí / Không tính Xu", "🎁 Khuyến mãi / Thành viên", "📘 Hướng dẫn sử dụng", "📥 Tải bảng giá", "📘 Tải hướng dẫn", "📝 Ghi chú/Lưu trữ", "🎁 Gói/Combo", "⬅️ Quay lại", "🏠 Menu chính"),
@@ -211813,11 +212181,11 @@ def pricing_catalog_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     labels = catalog_labels.get(lang, catalog_labels["en"])
     if lang == "vi":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton(labels[0], callback_data="pricing|total"), InlineKeyboardButton(labels[1], callback_data="pricing|voice")],
+            [InlineKeyboardButton(labels[0], callback_data="pricing|total|catalog"), InlineKeyboardButton(labels[1], callback_data="pricing|voice")],
             [InlineKeyboardButton(labels[2], callback_data="pricing|music"), InlineKeyboardButton(labels[3], callback_data="pricing|video")],
             [InlineKeyboardButton(labels[4], callback_data="pricing|subtitle"), InlineKeyboardButton(labels[5], callback_data="pricing|image")],
             [InlineKeyboardButton(labels[6], callback_data="pricing|docs"), InlineKeyboardButton(labels[7], callback_data="pricing|free")],
-            [InlineKeyboardButton(labels[8], callback_data="pricing|member"), InlineKeyboardButton(labels[9], callback_data="pricing|guide")],
+            [InlineKeyboardButton(labels[8], callback_data="pricing|member|catalog"), InlineKeyboardButton(labels[9], callback_data="pricing|guide")],
             [InlineKeyboardButton(labels[10], callback_data="pricing|download_pricing"), InlineKeyboardButton(labels[11], callback_data="pricing|download_guide")],
             [InlineKeyboardButton(labels[12], callback_data="pricing|storage"), InlineKeyboardButton(labels[13], callback_data="pkgcombo:home")],
             [InlineKeyboardButton(labels[14], callback_data="pricing|main"), InlineKeyboardButton(labels[15], callback_data="menu|main")],
@@ -211830,14 +212198,26 @@ def pricing_catalog_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton(labels[8], callback_data="pricing|main"), InlineKeyboardButton(labels[9], callback_data="menu|main")],
     ])
 
-def pricing_packages_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def pricing_packages_keyboard(lang: str = "vi", back_callback: str = "pricing|main", origin_token: str = "") -> InlineKeyboardMarkup:
+    def group_callback(group: str) -> str:
+        callback = f"pkgcombo:group:{group}"
+        return f"{callback}:{origin_token}" if origin_token else callback
+
+    def child_callback(action: str) -> str:
+        callback = f"pkgcombo:{action}"
+        return f"{callback}:{origin_token}" if origin_token else callback
+
+    large_order_callback = pkgcombo_large_order_callback("home")
+    if origin_token:
+        large_order_callback = f"{large_order_callback}:{origin_token}"
+
     requested_locale = public_pricing_locale(lang)
     if requested_locale not in {"vi", "en", "zh"}:
         copy = public_hub_copy(requested_locale)
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton(f"📦 {copy['monthly_plans']}", callback_data="pkgcombo:home"), InlineKeyboardButton(f"🎁 {copy['finished_combos']}", callback_data="pkgcombo:group:combo")],
-            [InlineKeyboardButton(f"📦 {copy['my_packages']}", callback_data="pkgcombo:my"), InlineKeyboardButton(f"📩 {copy['large_order']}", callback_data="pkgcombo:large_order:home")],
-            [InlineKeyboardButton(f"⬅️ {public_page_title('pricing', requested_locale)}", callback_data="pricing|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+            [InlineKeyboardButton(f"📦 {copy['monthly_plans']}", callback_data="pkgcombo:home"), InlineKeyboardButton(f"🎁 {copy['finished_combos']}", callback_data=group_callback("combo"))],
+            [InlineKeyboardButton(f"📦 {copy['my_packages']}", callback_data=child_callback("my")), InlineKeyboardButton(f"📩 {copy['large_order']}", callback_data=large_order_callback)],
+            [InlineKeyboardButton(f"⬅️ {public_page_title('pricing', requested_locale)}", callback_data=back_callback), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
         ])
     lang = pricing_copy_language(lang)
     package_labels = {
@@ -211848,17 +212228,17 @@ def pricing_packages_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     labels = package_labels.get(lang, package_labels["en"])
     if lang == "vi":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton(labels[0], callback_data="pkgcombo:group:image"), InlineKeyboardButton(labels[1], callback_data="pkgcombo:group:video")],
-            [InlineKeyboardButton(labels[2], callback_data="pkgcombo:group:music"), InlineKeyboardButton(labels[3], callback_data="pkgcombo:group:voice")],
-            [InlineKeyboardButton(labels[4], callback_data="pkgcombo:group:subtitle_dub"), InlineKeyboardButton(labels[5], callback_data="pkgcombo:group:prompt_workflow")],
-            [InlineKeyboardButton(labels[6], callback_data="pkgcombo:group:combo"), InlineKeyboardButton(labels[7], callback_data="pkgcombo:my")],
-            [InlineKeyboardButton(labels[8], callback_data="pkgcombo:large_order:home"), InlineKeyboardButton(labels[9], callback_data="pkgcombo:notes")],
-            [InlineKeyboardButton(labels[10], callback_data="pricing|main"), InlineKeyboardButton(labels[11], callback_data="menu|main")],
+            [InlineKeyboardButton(labels[0], callback_data=group_callback("image")), InlineKeyboardButton(labels[1], callback_data=group_callback("video"))],
+            [InlineKeyboardButton(labels[2], callback_data=group_callback("music")), InlineKeyboardButton(labels[3], callback_data=group_callback("voice"))],
+            [InlineKeyboardButton(labels[4], callback_data=group_callback("subtitle_dub")), InlineKeyboardButton(labels[5], callback_data=group_callback("prompt_workflow"))],
+            [InlineKeyboardButton(labels[6], callback_data=group_callback("combo")), InlineKeyboardButton(labels[7], callback_data=child_callback("my"))],
+            [InlineKeyboardButton(labels[8], callback_data=large_order_callback), InlineKeyboardButton(labels[9], callback_data=child_callback("notes"))],
+            [InlineKeyboardButton(labels[10], callback_data=back_callback), InlineKeyboardButton(labels[11], callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(labels[0], callback_data="pkgcombo:home"), InlineKeyboardButton(labels[1], callback_data="pkgcombo:group:combo")],
-        [InlineKeyboardButton(labels[2], callback_data="pkgcombo:my"), InlineKeyboardButton(labels[3], callback_data="pkgcombo:large_order:home")],
-        [InlineKeyboardButton(labels[4], callback_data="pricing|main"), InlineKeyboardButton(labels[5], callback_data="menu|main")],
+        [InlineKeyboardButton(labels[0], callback_data="pkgcombo:home"), InlineKeyboardButton(labels[1], callback_data=group_callback("combo"))],
+        [InlineKeyboardButton(labels[2], callback_data=child_callback("my")), InlineKeyboardButton(labels[3], callback_data=large_order_callback)],
+        [InlineKeyboardButton(labels[4], callback_data=back_callback), InlineKeyboardButton(labels[5], callback_data="menu|main")],
     ])
 
 def pricing_xu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -213911,7 +214291,7 @@ def pkgcombo_large_order_keyboard(back_callback: str = "pkgcombo:home") -> Inlin
         [InlineKeyboardButton("⬅️ Quay lại", callback_data=back_callback), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
-async def render_pkgcombo_detail(query, package_type: str, code: str, lang: str = "vi"):
+async def render_pkgcombo_detail(query, package_type: str, code: str, lang: str = "vi", origin_token: str = ""):
     requested_locale = public_pricing_locale(lang)
     entry = package_catalog_entry(code, package_type)
     if not entry:
@@ -213924,8 +214304,45 @@ async def render_pkgcombo_detail(query, package_type: str, code: str, lang: str 
             text = "⚠️ Invalid package. No order was created."
         else:
             text = "⚠️ Gói không hợp lệ. Bot chưa tạo đơn."
-        return await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=pricing_packages_keyboard(requested_locale))
+        back_callback = {
+            "pricing_catalog": "pricing|catalog",
+            "pricing_catalog_profile": "pricing|catalog|profile",
+            "pricing_image": "pricing|image",
+            "pricing_image_profile": "pricing|image|profile",
+            "pricing_video": "pricing|video",
+            "pricing_video_profile": "pricing|video|profile",
+        }.get(origin_token, "pricing|main")
+        return await safe_edit_or_send(
+            query,
+            text,
+            parse_mode="HTML",
+            reply_markup=pricing_packages_keyboard(
+                requested_locale,
+                back_callback=back_callback,
+                origin_token=origin_token if back_callback != "pricing|main" else "",
+            ),
+        )
     keyboard = package_purchase_manual_keyboard(package_type, code, requested_locale) if (entry.get("manual") or not package_entry_auto_checkout_enabled(entry)) else package_purchase_confirm_keyboard(package_type, code, requested_locale)
+    if origin_token in {
+        "pricing_main_profile", "pricing_total_catalog", "pricing_total_profile",
+        "pricing_catalog", "pricing_catalog_profile", "pricing_image", "pricing_image_profile",
+        "pricing_video", "pricing_video_profile",
+    }:
+        group_back = package_detail_back_callback(package_type, code)
+        large_order_origin_token = pkgcombo_large_order_origin_token(origin_token)
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(
+                button.text,
+                callback_data=(
+                    f"{group_back}:{origin_token}" if button.callback_data == group_back
+                    else f"{button.callback_data}:{large_order_origin_token}"
+                    if str(button.callback_data or "").startswith("pkgcombo:large_order:")
+                    else button.callback_data
+                ),
+            )
+             for button in row]
+            for row in keyboard.inline_keyboard
+        ])
     return await edit_or_send_pricing_lines(query, package_purchase_detail_lines(package_type, code, requested_locale), keyboard)
 
 async def render_pkgcombo_large_order(query, context: ContextTypes.DEFAULT_TYPE, origin_parts: list[str] | None = None):
@@ -213954,6 +214371,34 @@ async def handle_pkgcombo_callback(update: Update, context: ContextTypes.DEFAULT
     lang = get_user_language(query.from_user.id) if query.from_user else "vi"
     if query.from_user:
         clear_media_creator_pending_states(query.from_user.id)
+    package_back_targets = {
+        "pricing_main_profile": "pricing|main|profile",
+        "pricing_catalog": "pricing|catalog",
+        "pricing_catalog_profile": "pricing|catalog|profile",
+        "pricing_total_catalog": "pricing|total|catalog",
+        "pricing_total_profile": "pricing|total|profile",
+        "pricing_image": "pricing|image",
+        "pricing_image_profile": "pricing|image|profile",
+        "pricing_video": "pricing|video",
+        "pricing_video_profile": "pricing|video|profile",
+    }
+    def with_package_home_origin(markup, origin_token: str):
+        if origin_token not in package_back_targets:
+            return markup
+        home_callback = f"pkgcombo:home:{origin_token}"
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(
+                button.text,
+                callback_data=(
+                    home_callback if button.callback_data == "pkgcombo:home"
+                    else f"{button.callback_data}:{origin_token}"
+                    if str(button.callback_data or "").startswith("pkgcombo:large_order:")
+                    else button.callback_data
+                ),
+            )
+             for button in row]
+            for row in markup.inline_keyboard
+        ])
     if action in {"home", "back"}:
         if action == "back" and len(parts) >= 3:
             target = parts[2]
@@ -213965,20 +214410,58 @@ async def handle_pkgcombo_callback(update: Update, context: ContextTypes.DEFAULT
                 return await render_pkgcombo_detail(query, "monthly", parts[3], lang)
             if target == "combo_detail" and len(parts) >= 4:
                 return await render_pkgcombo_detail(query, "combo", parts[3], lang)
-        return await edit_or_send_pricing_lines(query, pricing_packages_lines(lang), pricing_packages_keyboard(lang))
+        package_home_origin = parts[2] if action == "home" and len(parts) >= 3 else ""
+        origin_token = package_home_origin if package_home_origin in package_back_targets else ""
+        back_callback = package_back_targets.get(origin_token, "pricing|main")
+        return await edit_or_send_pricing_lines(
+            query,
+            pricing_packages_lines(lang),
+            pricing_packages_keyboard(lang, back_callback=back_callback, origin_token=origin_token),
+        )
     if action == "notes":
-        return await edit_or_send_pricing_lines(query, pricing_pkgcombo_notes_lines(lang), pricing_pkgcombo_notes_keyboard(lang))
+        origin_token = parts[2] if len(parts) >= 3 and parts[2] in package_back_targets else ""
+        notes_markup = with_package_home_origin(pricing_pkgcombo_notes_keyboard(lang), origin_token)
+        return await edit_or_send_pricing_lines(query, pricing_pkgcombo_notes_lines(lang), notes_markup)
     if action == "my":
-        return await edit_or_send_pricing_lines(query, [user_package_summary_text(query.from_user.id, lang=lang)], my_packages_keyboard(lang))
+        origin_token = parts[2] if len(parts) >= 3 and parts[2] in package_back_targets else ""
+        my_packages_markup = with_package_home_origin(my_packages_keyboard(lang), origin_token)
+        return await edit_or_send_pricing_lines(query, [user_package_summary_text(query.from_user.id, lang=lang)], my_packages_markup)
     if action == "group":
         group = pkgcombo_normalize_group(parts[2] if len(parts) > 2 else "")
+        origin_token = pkgcombo_large_order_origin_token(parts[3], decode=True) if len(parts) > 3 else ""
+        origin_token = origin_token if origin_token in package_back_targets else ""
         if group == "combo":
-            return await edit_or_send_pricing_lines(query, pricing_combo_lines(lang), pricing_combo_keyboard(lang))
-        return await edit_or_send_pricing_lines(query, pricing_task_package_group_lines(group, lang), pricing_task_package_group_keyboard(group, lang))
+            group_lines = pricing_combo_lines(lang)
+            group_markup = pricing_combo_keyboard(lang)
+        else:
+            group_lines = pricing_task_package_group_lines(group, lang)
+            group_markup = pricing_task_package_group_keyboard(group, lang)
+        if origin_token:
+            compact_origin_token = pkgcombo_large_order_origin_token(origin_token)
+            group_markup = InlineKeyboardMarkup([
+                [InlineKeyboardButton(
+                    button.text,
+                    callback_data=(
+                        f"pkgcombo:home:{origin_token}" if button.callback_data == "pkgcombo:home"
+                        else f"{button.callback_data}:{compact_origin_token}"
+                        if str(button.callback_data or "").startswith(("pkgcombo:detail:", "pkgcombo:combo_detail:"))
+                        else f"{button.callback_data}:{compact_origin_token}"
+                        if str(button.callback_data or "").startswith("pkgcombo:large_order:")
+                        else button.callback_data
+                    ),
+                )
+                 for button in row]
+                for row in group_markup.inline_keyboard
+            ])
+        return await edit_or_send_pricing_lines(query, group_lines, group_markup)
     if action == "detail" and len(parts) >= 3:
-        return await render_pkgcombo_detail(query, "monthly", parts[2], lang)
+        origin_token = pkgcombo_large_order_origin_token(parts[3], decode=True) if len(parts) >= 4 else ""
+        origin_token = origin_token if origin_token in package_back_targets else ""
+        return await render_pkgcombo_detail(query, "monthly", parts[2], lang, origin_token=origin_token)
     if action == "combo_detail" and len(parts) >= 3:
-        return await render_pkgcombo_detail(query, "combo", parts[2], lang)
+        origin_token = pkgcombo_large_order_origin_token(parts[3], decode=True) if len(parts) >= 4 else ""
+        origin_token = origin_token if origin_token in package_back_targets else ""
+        return await render_pkgcombo_detail(query, "combo", parts[2], lang, origin_token=origin_token)
     if action == "pay" and len(parts) >= 3:
         return await start_package_purchase(update, context, "monthly", parts[2], message=query.message)
     if action == "combo_pay" and len(parts) >= 3:
@@ -214087,9 +214570,9 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
     }
     if "|" in action:
         parts = action.split("|")
-        if (len(parts) != 2 or parts[1] not in {"profile", "profile_catalog"}
+        if (len(parts) != 2 or parts[1] not in {"profile", "profile_catalog", "catalog"}
                 or (parts[0] not in read_actions and not parts[0].startswith("package_group_"))
-                or (parts[1] == "profile_catalog" and parts[0] not in {"member", "birthday"})):
+                or (parts[1] in {"profile_catalog", "catalog"} and parts[0] not in {"member", "birthday", "total"})):
             return await query.answer("Nút bảng giá đã hết phiên. Vui lòng mở lại từ Tài khoản.", show_alert=True)
         action, profile_origin = parts
     await query.answer()
@@ -214114,17 +214597,45 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
                     data = f"menu|main_topup|{origin}"
                     controls.append(InlineKeyboardButton(button.text, callback_data=data))
                     continue
+                if data == "pkgcombo:home" and (
+                    action in {"catalog", "image", "video"}
+                    or (action == "main" and profile_origin == "profile")
+                    or (action == "total" and profile_origin in {"profile", "catalog"})
+                ):
+                    if action in {"main", "total"}:
+                        origin = f"pricing_{action}_{profile_origin}"
+                    else:
+                        origin = f"pricing_{action}"
+                        if profile_origin == "profile":
+                            origin += "_profile"
+                    controls.append(InlineKeyboardButton(button.text, callback_data=f"pkgcombo:home:{origin}"))
+                    continue
+                if data == "pricing|member|catalog" and profile_origin in {"profile", "profile_catalog"}:
+                    data = "pricing|member|profile_catalog"
+                    controls.append(InlineKeyboardButton(button.text, callback_data=data))
+                    continue
+                if data == "pricing|total|catalog" and profile_origin in {"profile", "profile_catalog"}:
+                    data = "pricing|total|profile"
+                    controls.append(InlineKeyboardButton(button.text, callback_data=data))
+                    continue
                 if data.startswith("pricing|"):
                     target = data.split("|", 1)[1]
                     if profile_origin and (target in read_actions or target.startswith("package_group_")):
                         origin = "profile_catalog" if action == "catalog" and target == "member" else profile_origin
                         data = f"pricing|{target}|{origin}"
                         if is_back and action == "member":
-                            data = "menu|main_profile" if profile_origin == "profile" else "pricing|catalog|profile"
+                            if profile_origin == "profile":
+                                data = "menu|main_profile"
+                            elif profile_origin == "catalog":
+                                data = "pricing|catalog"
+                            else:
+                                data = "pricing|catalog|profile"
                         elif is_back and action == "birthday":
                             data = f"pricing|member|{profile_origin}"
-                        elif is_back and action in {"total", "promo_apply"}:
-                            data = f"pricing|{'catalog' if action == 'total' else 'promotions'}|profile"
+                        elif is_back and action == "total":
+                            data = "pricing|catalog" if profile_origin == "catalog" else "pricing|catalog|profile"
+                        elif is_back and action == "promo_apply":
+                            data = "pricing|promotions|profile"
                         controls.append(InlineKeyboardButton(ui_text(lang, "common.back") if is_back and action in {"member", "birthday", "total", "promo_apply"} else button.text, callback_data=data))
                         continue
                 controls.append(button)
@@ -223132,7 +223643,7 @@ def operator_menu_keyboard():
         ],
         [
             InlineKeyboardButton("🛠 Nội bộ", callback_data="opmenu|cat_internal"),
-            InlineKeyboardButton("📊 Dashboard", callback_data="opmenu|dashboard")
+            InlineKeyboardButton("📘 Hướng dẫn Dashboard", callback_data="opmenu|dashboard")
         ],
     ])
 
@@ -223217,13 +223728,13 @@ def operator_category_keyboard(category):
             ("📦 Publish pack", "publish"), ("📈 Post publish", "postpublish"),
             ("🧭 Distribution pack", "distributionpack"),
             ("💬 Comment pack", "commentpack"),
-            ("🎛 Publish cockpit", "publishcockpit"),
-            ("📮 Publish queue", "publishqueue"),
-            ("🤖 Publisher handoff", "publisherhandoff"), ("✅ Approve publish", "approvepublish"),
-            ("▶️ Publisher run", "publisherrun"), ("📡 Publisher status", "publisherstatus"),
+            ("📘 Hướng dẫn bảng điều khiển đăng bài", "publishcockpit"),
+            ("📘 Hướng dẫn hàng đợi đăng bài", "publishqueue"),
+            ("📘 Hướng dẫn bàn giao Publisher", "publisherhandoff"), ("📘 Hướng dẫn duyệt bài đăng", "approvepublish"),
+            ("📘 Hướng dẫn chạy Publisher", "publisherrun"), ("📘 Hướng dẫn trạng thái Publisher", "publisherstatus"),
             ("🧭 Capability pack", "publishercapabilities"), ("🧩 Platform adapters", "platformadapters"),
-            ("🧪 Publish readiness", "readiness"),
-            ("✅ Mark published", "markpublished"),
+            ("📘 Hướng dẫn kiểm tra điều kiện đăng", "readiness"),
+            ("📘 Hướng dẫn đánh dấu đã đăng", "markpublished"),
         ],
         "cat_money": [
             ("💸 Money pack", "moneypack"), ("🎛 Affiliate cockpit", "affcockpit"),
@@ -223259,7 +223770,7 @@ def operator_category_keyboard(category):
     rows = []
     items = categories.get(category, [])
     for i in range(0, len(items), 2):
-        rows.append([InlineKeyboardButton(text, callback_data=f"opmenu|{action}") for text, action in items[i:i + 2]])
+        rows.append([InlineKeyboardButton(text, callback_data=f"opmenu|{action}|{category}") for text, action in items[i:i + 2]])
     rows.append([InlineKeyboardButton("⬅️ Quay lại thư mục", callback_data="opmenu|root")])
     return InlineKeyboardMarkup(rows)
 
@@ -223683,7 +224194,9 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
     if not is_admin_user(query.from_user.id):
         return await query.answer("Chỉ Admin được dùng.", show_alert=True)
     await query.answer()
-    action = query.data.split("|", 1)[1]
+    route_parts = (query.data or "").split("|")
+    action = route_parts[1] if len(route_parts) > 1 else ""
+    parent_category = route_parts[2] if len(route_parts) == 3 else ""
     if action == "root":
         return await query.edit_message_text(
             "🧠 <b>AI OPERATOR MENU</b>\n\nChọn một thư mục để mở các lệnh liên quan.",
@@ -223692,7 +224205,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         )
     if action.startswith("cat_"):
         return await query.edit_message_text(
-            f"{operator_category_title(action)}\n\nChọn mục cần thao tác:",
+            f"{operator_category_title(action)}\n\nChọn lệnh cần xem hướng dẫn:",
             parse_mode="HTML",
             reply_markup=operator_category_keyboard(action)
         )
@@ -223834,7 +224347,12 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         f"🧠 <b>AI OPERATOR MENU</b>\n\n"
         f"Lệnh nhanh:\n<pre>{html.escape(snippets.get(action, '/operator_dashboard'))}</pre>",
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại thư mục", callback_data="opmenu|root")]])
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton(
+                "⬅️ Quay lại thư mục",
+                callback_data=f"opmenu|{parent_category}" if parent_category else "opmenu|root",
+            )
+        ]])
     )
 
 async def cmd_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -230755,7 +231273,7 @@ def finance_tax_report_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📆 Tháng này", callback_data="menu|finance_tax_report_month"), InlineKeyboardButton("📊 Quý này", callback_data="menu|finance_tax_report_quarter")],
         [InlineKeyboardButton("📅 Năm nay", callback_data="menu|finance_tax_report_year"), InlineKeyboardButton("📤 Xuất báo cáo thuế", callback_data="menu|tax_export")],
-        [InlineKeyboardButton("⬅️ Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("⬅️ Thuế / VAT / TNDN", callback_data="menu|finance_tax_vat"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def finance_adjustments_keyboard() -> InlineKeyboardMarkup:
@@ -233577,7 +234095,7 @@ ADMIN_MENU_PAGE_HANDLERS = {
     "finance_policy_status": lambda: (finance_policy_status_text(), finance_tax_child_keyboard()),
     "finance_tax_scenario": lambda: (finance_tax_scenario_report_text(), finance_tax_child_keyboard()),
     "finance_provider_cost_tax": lambda: (provider_cost_tax_status_text(), finance_tax_child_keyboard()),
-    "finance_menu_audit": lambda: (finance_menu_audit_text(), finance_child_keyboard()),
+    "finance_menu_audit": lambda: (finance_menu_audit_text(), finance_tax_child_keyboard()),
     "finance_vat_rate_help": lambda: (finance_vat_rate_help_text(), finance_tax_child_keyboard()),
     "finance_cit_rate_help": lambda: (finance_cit_rate_help_text(), finance_tax_child_keyboard()),
     "finance_profit": lambda: (finance_profit_dashboard_text(), finance_period_keyboard("profit")),
@@ -234753,6 +235271,36 @@ async def handle_internal_archive_callback(update: Update, context: ContextTypes
         )
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "root"
+    if action in {"view", "file"}:
+        if len(parts) <= 2 or not parts[2].isdecimal():
+            return await query.answer("Mã hồ sơ không hợp lệ.", show_alert=True)
+        await query.answer()
+        item = await asyncio.to_thread(get_internal_document, uid, int(parts[2]))
+        if action == "view":
+            if not item:
+                return await safe_edit_query_message(
+                    query,
+                    "⚠️ Không tìm thấy hồ sơ. Hãy tìm lại hoặc mở Hồ sơ nội bộ.",
+                    reply_markup=internal_archive_menu_keyboard(),
+                )
+            clear_doc_tool_pending(uid)
+            clear_media_creator_pending_states(uid)
+            state = get_internal_archive_pending(uid) or {}
+            department = state.get("department") if state.get("department") in INTERNAL_DOC_DEPARTMENTS else ""
+            return await safe_edit_query_message(query, internal_archive_document_text(item), reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📎 Gửi file", callback_data=f"archive|file|{item['id']}"), InlineKeyboardButton("🔍 Tìm lại", callback_data="archive|search_dept" if department else "archive|search")],
+                [InlineKeyboardButton("⬅️ Phòng ban", callback_data="archive|back_department") if department else InlineKeyboardButton("⬅️ Hồ sơ nội bộ", callback_data="archive|root"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            ]))
+        if not item or not item.get("file_id"):
+            return await safe_edit_query_message(
+                query,
+                "⚠️ File không còn khả dụng. Hãy tìm lại hoặc mở Hồ sơ nội bộ.",
+                reply_markup=internal_archive_menu_keyboard(),
+            )
+        clear_doc_tool_pending(uid)
+        clear_media_creator_pending_states(uid)
+        await context.bot.send_document(chat_id=query.message.chat_id, document=item["file_id"], caption=f"Hồ sơ #{item['id']}: {item.get('title') or item.get('file_name')}")
+        return
     if action not in {"save", "preview"}:
         await query.answer()
     clear_doc_tool_pending(uid)
@@ -234913,22 +235461,6 @@ async def handle_internal_archive_callback(update: Update, context: ContextTypes
     if action == "search":
         set_internal_archive_pending(uid, "awaiting_search")
         return await safe_edit_query_message(query, "🔍 <b>Tìm hồ sơ nội bộ</b>\n\nNhập từ khóa, ví dụ: PayOS, thuế tháng 6, hợp đồng, provider, khách hàng A.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Hồ sơ nội bộ", callback_data="archive|root"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]]))
-    if action == "view" and len(parts) > 2:
-        item = get_internal_document(uid, int(parts[2]))
-        if not item:
-            return await query.answer("Không tìm thấy hồ sơ.", show_alert=True)
-        department = state.get("department") if state.get("department") in INTERNAL_DOC_DEPARTMENTS else ""
-        return await safe_edit_query_message(query, internal_archive_document_text(item), reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📎 Gửi file", callback_data=f"archive|file|{item['id']}"), InlineKeyboardButton("🔍 Tìm lại", callback_data="archive|search_dept" if department else "archive|search")],
-            [InlineKeyboardButton("⬅️ Phòng ban", callback_data="archive|back_department") if department else InlineKeyboardButton("⬅️ Hồ sơ nội bộ", callback_data="archive|root"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-        ]))
-    if action == "file" and len(parts) > 2:
-        item = get_internal_document(uid, int(parts[2]))
-        if not item or not item.get("file_id"):
-            return await query.answer("File không còn khả dụng.", show_alert=True)
-        await context.bot.send_document(chat_id=query.message.chat_id, document=item["file_id"], caption=f"Hồ sơ #{item['id']}: {item.get('title') or item.get('file_name')}")
-        return
-
 async def handle_internal_archive_pending_upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.effective_user:
         return False
@@ -235188,7 +235720,7 @@ async def handle_translation_media_pending_upload(update: Update, context: Conte
             remember_last_media(update)
             save_translation_request(uid, "voice")
             clear_translation_menu_pending(uid)
-            await show_translation_picker(update, "voice")
+            await show_translation_picker(update, "voice", origin="language")
             return True
         await message.reply_text(
             f"{public_hub_copy(normalize_user_language(lang) or 'vi')['translation_audio_only']} "
@@ -237344,23 +237876,50 @@ def video_downloader_start_text(lang: str = "vi") -> str:
         "TOAN AAS không trừ Xu nếu tải lỗi."
     )
 
-def video_downloader_start_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def video_downloader_start_keyboard(lang: str = "vi", origin: str = "video") -> InlineKeyboardMarkup:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    origin = "freehub" if origin == "freehub" else "video"
+    if origin == "freehub":
+        back_button = InlineKeyboardButton(
+            f"⬅️ {copy.get('free_tools_label', 'Công cụ miễn phí')}", callback_data="freehub|main"
+        )
+        alternate_button = InlineKeyboardButton(
+            f"🎬 {copy.get('video_label', 'Video Studio')}", callback_data="menu|main_video"
+        )
+    else:
+        back_button = InlineKeyboardButton(
+            f"⬅️ {copy.get('video_label', 'Video Studio')}", callback_data="menu|main_video"
+        )
+        alternate_button = InlineKeyboardButton(
+            f"🆓 {copy.get('free_tools_label', 'Công cụ miễn phí')}", callback_data="freehub|main"
+        )
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(f"⬅️ {copy.get('video_label', 'Video Studio')}", callback_data="menu|main_video"),
-            InlineKeyboardButton(f"🆓 {copy.get('free_tools_label', 'Công cụ miễn phí')}", callback_data="freehub|main"),
-        ],
+        [back_button, alternate_button],
         [InlineKeyboardButton(f"🏠 {copy.get('main_menu', 'Menu chính')}", callback_data="menu|main")],
     ])
 
-def video_downloader_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def video_downloader_choice_keyboard(lang: str = "vi", origin: str = "video") -> InlineKeyboardMarkup:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    origin = "freehub" if origin == "freehub" else "video"
     is_vi = normalize_user_language(lang) == "vi"
     dl_video = "🎬 Tải video" if is_vi else "🎬 Download video"
     dl_audio = "🎵 Tải audio" if is_vi else "🎵 Download audio"
     dl_cover = "🖼 Tải ảnh bìa" if is_vi else "🖼 Cover image"
     send_another = "✏️ Gửi link khác" if is_vi else "✏️ Another link"
+    if origin == "freehub":
+        back_button = InlineKeyboardButton(
+            f"⬅️ {copy.get('free_tools_label', 'Công cụ miễn phí')}", callback_data="freehub|main"
+        )
+        alternate_button = InlineKeyboardButton(
+            f"🎬 {copy.get('video_label', 'Video Studio')}", callback_data="menu|main_video"
+        )
+    else:
+        back_button = InlineKeyboardButton(
+            f"⬅️ {copy.get('video_label', 'Video Studio')}", callback_data="menu|main_video"
+        )
+        alternate_button = InlineKeyboardButton(
+            f"🆓 {copy.get('free_tools_label', 'Công cụ miễn phí')}", callback_data="freehub|main"
+        )
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(dl_video, callback_data="vdownload|download|video"),
@@ -237368,12 +237927,9 @@ def video_downloader_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(dl_cover, callback_data="vdownload|download|cover"),
-            InlineKeyboardButton(send_another, callback_data="vdownload|start"),
+            InlineKeyboardButton(send_another, callback_data=f"vdownload|start|{origin}"),
         ],
-        [
-            InlineKeyboardButton(f"⬅️ {copy.get('video_label', 'Video Studio')}", callback_data="menu|main_video"),
-            InlineKeyboardButton(f"🆓 {copy.get('free_tools_label', 'Công cụ miễn phí')}", callback_data="freehub|main"),
-        ],
+        [back_button, alternate_button],
         [InlineKeyboardButton(f"🏠 {copy.get('main_menu', 'Menu chính')}", callback_data="menu|main")],
     ])
 
@@ -237495,6 +238051,7 @@ async def handle_video_downloader_pending_text(update: Update, context: ContextT
     state = get_video_downloader_pending(uid)
     if not state or state.get("step") != "await_link":
         return False
+    origin = state.get("origin") if state.get("origin") in {"video", "freehub"} else "video"
     lang = get_user_language(uid) or "vi"
     url = extract_first_http_url(update.message.text) or str(update.message.text or "").strip()
     adapter = video_downloader_provider()
@@ -237503,7 +238060,7 @@ async def handle_video_downloader_pending_text(update: Update, context: ContextT
         await update.message.reply_text(
             video_downloader_guard_text(detection.get("reason"), lang, detection),
             parse_mode="HTML",
-            reply_markup=video_downloader_start_keyboard(lang),
+            reply_markup=video_downloader_start_keyboard(lang, origin=origin),
         )
         return True
     metadata = {}
@@ -237535,12 +238092,13 @@ async def handle_video_downloader_pending_text(update: Update, context: ContextT
             await update.message.reply_text(
                 video_downloader_guard_text(prepared.blocker, lang, detection),
                 parse_mode="HTML",
-                reply_markup=video_downloader_start_keyboard(lang),
+                reply_markup=video_downloader_start_keyboard(lang, origin=origin),
             )
             return True
     set_video_downloader_pending(
         uid,
         "choose_format",
+        origin=origin,
         source_url=url,
         final_url=detection.get("final_url") or "",
         job_id=detection.get("job_id") or "",
@@ -237551,7 +238109,7 @@ async def handle_video_downloader_pending_text(update: Update, context: ContextT
     await update.message.reply_text(
         video_downloader_preview_text(detection, metadata, lang),
         parse_mode="HTML",
-        reply_markup=video_downloader_choice_keyboard(lang),
+        reply_markup=video_downloader_choice_keyboard(lang, origin=origin),
     )
     return True
 
@@ -237596,38 +238154,40 @@ async def handle_video_downloader_callback(update: Update, context: ContextTypes
     action = parts[1] if len(parts) > 1 else "start"
     value = parts[2] if len(parts) > 2 else ""
     if action == "start":
+        origin = value if value in {"video", "freehub"} else "video"
         set_video_route_session(uid, "video_downloader", "tool_home")
         clear_video_downloader_pending(uid)
-        set_video_downloader_pending(uid, "await_link")
+        set_video_downloader_pending(uid, "await_link", origin=origin)
         return await safe_edit_or_send(
             query,
             video_downloader_start_text(lang),
             parse_mode="HTML",
-            reply_markup=video_downloader_start_keyboard(lang),
+            reply_markup=video_downloader_start_keyboard(lang, origin=origin),
         )
     if action != "download":
         set_video_route_session(uid, "video_downloader", "tool_home")
         clear_video_downloader_pending(uid)
         return await safe_edit_or_send(query, video_downloader_start_text(lang), parse_mode="HTML", reply_markup=video_downloader_start_keyboard(lang))
     state = get_video_downloader_pending(uid)
+    origin = state.get("origin") if state.get("origin") in {"video", "freehub"} else "video"
     source_url = str(state.get("source_url") or "")
     if not source_url:
-        set_video_downloader_pending(uid, "await_link")
-        return await safe_edit_or_send(query, video_downloader_start_text(lang), parse_mode="HTML", reply_markup=video_downloader_start_keyboard(lang))
+        set_video_downloader_pending(uid, "await_link", origin=origin)
+        return await safe_edit_or_send(query, video_downloader_start_text(lang), parse_mode="HTML", reply_markup=video_downloader_start_keyboard(lang, origin=origin))
     detection = dict(state.get("detection") or {})
     if not VIDEO_DOWNLOADER_PUBLIC_ENABLED:
         return await safe_edit_or_send(
             query,
             video_downloader_guard_text("disabled", lang, detection),
             parse_mode="HTML",
-            reply_markup=video_downloader_choice_keyboard(lang),
+            reply_markup=video_downloader_choice_keyboard(lang, origin=origin),
         )
     kind = value if value in {"video", "audio", "cover"} else "video"
     await safe_edit_or_send(
         query,
         f"⏳ Đang tải {html.escape(kind)} từ link công khai. TOAN AAS chưa trừ Xu.",
         parse_mode="HTML",
-        reply_markup=video_downloader_choice_keyboard(lang),
+        reply_markup=video_downloader_choice_keyboard(lang, origin=origin),
     )
     adapter = video_downloader_provider()
     request = LinkDownloadRequest(
@@ -237648,7 +238208,7 @@ async def handle_video_downloader_callback(update: Update, context: ContextTypes
             query,
             video_downloader_guard_text(result.get("reason") or result.get("blocker"), lang, dict(result.get("detection") or detection)),
             parse_mode="HTML",
-            reply_markup=video_downloader_choice_keyboard(lang),
+            reply_markup=video_downloader_choice_keyboard(lang, origin=origin),
         )
     delivery = await send_video_downloader_file(query, result, lang)
     await asyncio.to_thread(
@@ -237661,6 +238221,7 @@ async def handle_video_downloader_callback(update: Update, context: ContextTypes
     set_video_downloader_pending(
         uid,
         "choose_format",
+        origin=origin,
         source_url=source_url,
         final_url=str(result.get("final_url") or state.get("final_url") or ""),
         job_id=str(result.get("job_id") or request.job_id or state.get("job_id") or ""),
@@ -237675,7 +238236,7 @@ async def handle_video_downloader_callback(update: Update, context: ContextTypes
         query,
         "✅ Đã gửi file tải về. Anh/chị có thể chọn tải thêm audio hoặc ảnh bìa từ cùng link." if normalize_user_language(lang) == "vi" else "✅ Download sent. You can still choose audio or cover from the same link.",
         parse_mode="HTML",
-        reply_markup=video_downloader_choice_keyboard(lang),
+        reply_markup=video_downloader_choice_keyboard(lang, origin=origin),
     )
 
 def linkdl_yes_no(value) -> str:
@@ -272135,7 +272696,7 @@ async def handle_feedback_pending_text(update: Update, context: ContextTypes.DEF
     await update.message.reply_text(
         message,
         parse_mode="HTML",
-        reply_markup=support_ticket_created_keyboard(ticket["id"], lang),
+        reply_markup=ticket_customer_origin_keyboard(support_ticket_created_keyboard(ticket["id"], lang), "feedback_result", lang),
     )
     await notify_admin_new_support_ticket(
         context,
@@ -274567,7 +275128,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_image_tools_callback, pattern=r"^imgtool\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_storage_addon_callback, pattern=r"^storage\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_memory_callback, pattern=r"^memory\|"))
-    tg_app.add_handler(CallbackQueryHandler(handle_translation_callback, pattern=r"^tr_(target|more|pick|transcribe)(\||$)"))
+    tg_app.add_handler(CallbackQueryHandler(handle_translation_callback, pattern=r"^tr_(target|more|pick_back|pick|back|transcribe)(\||$)"))
     tg_app.add_handler(CallbackQueryHandler(handle_language_callback, pattern=r"^(lang\|(?:[a-z]{2}|fil)|lang_more|back_lang|lang_back)(?:\|.*)?$"))
     tg_app.add_handler(CallbackQueryHandler(handle_package_purchase_callback, pattern=r"^pkgbuy\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_pkgcombo_callback, pattern=r"^pkgcombo:"))

@@ -17,6 +17,16 @@ class _Query:
         self.answers.append((args, kwargs))
 
 
+class _Button:
+    def __init__(self, text, callback_data=None):
+        self.text, self.callback_data = text, callback_data
+
+
+class _Markup:
+    def __init__(self, inline_keyboard):
+        self.inline_keyboard = inline_keyboard
+
+
 def _load_handler(side_effects, edits):
     match = re.search(
         r"(?ms)^async def handle_ticket_callback\(.*?(?=^(?:async\s+)?def\s|^class\s|\Z)",
@@ -27,9 +37,15 @@ def _load_handler(side_effects, edits):
     async def _safe_edit_or_send(query, text, **kwargs):
         edits.append((query, text, kwargs))
 
+    async def _to_thread(function, *args, **kwargs):
+        return function(*args, **kwargs)
+
     namespace = {
+        "asyncio": SimpleNamespace(to_thread=_to_thread),
         "Update": object,
         "ContextTypes": SimpleNamespace(DEFAULT_TYPE=object),
+        "InlineKeyboardButton": _Button,
+        "InlineKeyboardMarkup": _Markup,
         "normalize_user_language": lambda value: value if value in {"vi", "en"} else None,
         "get_user_language": lambda _uid: "vi",
         "public_hub_copy": lambda _lang: {
@@ -57,16 +73,21 @@ def _registered_ticket_pattern():
     return re.compile(match.group(2))
 
 
-def test_stale_admin_ticket_detail_gets_one_not_found_alert_ack():
+def test_stale_admin_ticket_detail_gets_one_ack_and_list_home_recovery():
     query = _Query("ticket|av|987654321")
     assert _registered_ticket_pattern().match(query.data)
     side_effects = []
-    handler = _load_handler(side_effects, [])
+    edits = []
+    handler = _load_handler(side_effects, edits)
 
     asyncio.run(handler(SimpleNamespace(callback_query=query), SimpleNamespace()))
 
-    assert query.answers == [(("Không tìm thấy ticket.",), {"show_alert": True})], query.answers
+    assert query.answers == [((), {})], query.answers
     assert side_effects == [("clear_pending", 123), ("get_ticket", 987654321, None)]
+    assert len(edits) == 1
+    assert "Không tìm thấy ticket." in edits[0][1]
+    callbacks = [button.callback_data for row in edits[0][2]["reply_markup"].inline_keyboard for button in row]
+    assert callbacks == ["ticket|al|new|0", "menu|main"]
 
 
 def test_ticket_start_keeps_one_ack_and_existing_screen():

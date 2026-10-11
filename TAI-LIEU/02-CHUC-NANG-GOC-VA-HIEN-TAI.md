@@ -1,5 +1,13 @@
 # Product Video: chức năng gốc và hiện tại
 
+## Đối chiếu UI bổ trợ — 11/10/2026
+
+Các lỗi Back bỏ qua menu cha, mất origin Catalog/Tài khoản và kiểm tra ID
+Ticket được đối chiếu riêng trong
+[Telegram UI handover](../docs/reports/TELEGRAM_UI_BATCH_HANDOVER_20261011.md).
+Bảng phân biệt hành vi cũ và candidate ở đó là nguồn cho batch UI đang kiểm
+chứng; các đối chiếu engine/sản phẩm trong tài liệu này giữ phạm vi/ngày gốc.
+
 ## Tài liệu giai đoạn trước
 
 Nguồn đối chiếu:

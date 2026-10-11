@@ -90,6 +90,9 @@ class AdminTicketNoteOriginPaginationTest(unittest.TestCase):
             query.reply_markups.append(markup)
             self.edits.append((text, markup))
 
+        async def to_thread(function, *args, **kwargs):
+            return function(*args, **kwargs)
+
         def list_support_tickets(**kwargs):
             self.list_calls.append(kwargs)
             return self.page_tickets
@@ -103,7 +106,10 @@ class AdminTicketNoteOriginPaginationTest(unittest.TestCase):
             return dict(self.ticket)
 
         self.namespace = {
+            "asyncio": SimpleNamespace(to_thread=to_thread),
             "html": html,
+            "USER_PENDING": {},
+            "support_ticket_pending_key": lambda user_id: f"support_ticket:{user_id}",
             "InlineKeyboardButton": _Button,
             "InlineKeyboardMarkup": _Markup,
             "Update": object,
@@ -138,10 +144,24 @@ class AdminTicketNoteOriginPaginationTest(unittest.TestCase):
         ):
             code = _function_source(self.source, name)
             exec(compile(code, f"bot.py:{name}", "exec"), self.namespace)
+        registered_handlers = []
+        self.namespace["tg_app"] = SimpleNamespace(add_handler=registered_handlers.append)
+        self.namespace["CallbackQueryHandler"] = lambda callback, pattern: SimpleNamespace(
+            callback=callback, pattern=re.compile(pattern)
+        )
+        registration = next(
+            line.strip() for line in self.source.splitlines()
+            if "tg_app.add_handler(CallbackQueryHandler(handle_ticket_callback," in line
+        )
+        exec(registration, self.namespace)
+        self.assertEqual(1, len(registered_handlers))
+        self.ticket_route = registered_handlers[0]
 
     async def _press(self, data):
+        if not self.ticket_route.pattern.match(data):
+            raise AssertionError("ticket callback does not match its registered route")
         query = _Query(data, self.admin_id)
-        await self.namespace["handle_ticket_callback"](
+        await self.ticket_route.callback(
             SimpleNamespace(callback_query=query), SimpleNamespace()
         )
         return query
@@ -156,6 +176,27 @@ class AdminTicketNoteOriginPaginationTest(unittest.TestCase):
         )
         await self._press(detail_callback)
         return self.edits[-1][1]
+
+    def test_emitted_next_page_callback_keeps_filter_and_advances_offset(self):
+        async def exercise():
+            page_six = await self._press("ticket|al|high|6")
+            callbacks = _callbacks(page_six.reply_markups[-1])
+
+            self.assertIn("ticket|al|high|0", callbacks)
+            self.assertIn("ticket|al|high|12", callbacks)
+            self.assertEqual(
+                {"limit": 6, "offset": 6, "high_priority": True},
+                self.list_calls[-1],
+            )
+
+            next_page = await self._press("ticket|al|high|12")
+            self.assertEqual(1, len(next_page.answers))
+            self.assertEqual(
+                {"limit": 6, "offset": 12, "high_priority": True},
+                self.list_calls[-1],
+            )
+
+        asyncio.run(exercise())
 
     def test_emitted_note_button_preserves_originating_list_filter_and_page(self):
         detail_markup = asyncio.run(self._open_high_priority_page_six())

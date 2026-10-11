@@ -1,4 +1,3 @@
-import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -7,6 +6,14 @@ import pytest
 
 BOT_PATH = Path(__file__).resolve().parents[1] / "bot.py"
 HOME_LABELS = ("🏠 TOAN AAS MENU", "🛸 MENU DỊCH VỤ TOAN AAS")
+
+
+def _run_immediate(coro):
+    try:
+        coro.send(None)
+    except StopIteration as completed:
+        return completed.value
+    raise AssertionError("fixture unexpectedly yielded I/O")
 
 
 def _load_handle_message(source, events):
@@ -64,7 +71,7 @@ def test_home_reply_keyboard_preempts_pending_autopost_content(label):
     )
     context = SimpleNamespace(user_data={"awaiting_content_input_type": "text"})
 
-    result = asyncio.run(handler(update, context))
+    result = _run_immediate(handler(update, context))
 
     assert result == "home"
     assert events == ["home"]
@@ -89,7 +96,7 @@ def test_regular_text_still_completes_pending_autopost_content():
     )
     context = SimpleNamespace(user_data={"awaiting_content_input_type": "text"})
 
-    result = asyncio.run(handler(update, context))
+    result = _run_immediate(handler(update, context))
 
     assert result == "autopost"
     assert events == ["save_content_input", "autopost_reply"]

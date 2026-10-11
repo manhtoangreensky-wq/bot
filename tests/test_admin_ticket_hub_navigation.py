@@ -1,5 +1,4 @@
 """Ticket hub and read-only panel controls navigate to their actual parent."""
-import asyncio
 import importlib.util
 import inspect
 import unittest
@@ -12,12 +11,32 @@ _spec.loader.exec_module(fixture)
 feedback, menu = fixture.feedback, fixture.menu
 
 
+def _dispatch_no_io(route, callback):
+    if not route.pattern.match(callback):
+        raise AssertionError("emitted control does not match its registration")
+    query = feedback._Query(callback)
+    coroutine = route.callback(SimpleNamespace(callback_query=query), SimpleNamespace(user_data={}))
+    try:
+        coroutine.send(None)
+    except StopIteration:
+        return query
+    coroutine.close()
+    raise AssertionError("callback fixture yielded; unexpected async I/O")
+
+
+fixture._dispatch = _dispatch_no_io
+
+
 def _runtime(admin=True):
     cleared, reads = [], []
+    async def to_thread(function, *args, **kwargs):
+        return function(*args, **kwargs)
+
     async def render(query, text, **kwargs):
         query.edits.append((text, kwargs))
     namespace = feedback._load_functions(
         ("admin_module_keyboard", "support_admin_menu_text", "support_admin_menu_keyboard", "handle_ticket_callback"),
+        asyncio=SimpleNamespace(to_thread=to_thread),
         normalize_user_language=lambda value: value,
         get_user_language=lambda _uid: "vi",
         public_hub_copy=lambda _lang: {"support_ticket_admin_only": "Admin only", "support_ticket_action_unsupported": "Unsupported"},
@@ -25,6 +44,7 @@ def _runtime(admin=True):
         clear_support_ticket_pending=lambda _uid: cleared.append(True),
         support_ticket_stats_text=lambda: reads.append("stats") or "INERT STATS",
         support_reply_templates_text=lambda: reads.append("templates") or "INERT TEMPLATES",
+        support_admin_list_payload=lambda kind, offset: reads.append(("list", kind, offset)) or ("INERT LIST", None),
         safe_edit_or_send=render,
     )
     return namespace, fixture._route(namespace, "handle_ticket_callback"), cleared, reads
@@ -96,6 +116,76 @@ class AdminTicketHubNavigationTests(unittest.TestCase):
                 self.assertTrue(query.answers[0][1].get("show_alert"))
             self.assertEqual([], cleared)
             self.assertEqual([], reads)
+
+    def test_malformed_admin_list_offset_fails_closed_before_cleanup_or_list_read(self):
+        _, route, cleared, reads = _runtime()
+        invalid_callbacks = (
+            "ticket|al|new|not-a-number",
+            "ticket|al|new",
+            "ticket|al|new|",
+            "ticket|al|unknown|0",
+            "ticket|al|high|-6",
+            "ticket|al|refund|٦",
+        )
+        for callback in invalid_callbacks:
+            with self.subTest(callback=callback):
+                query = fixture._dispatch(route, callback)
+                self.assertEqual(
+                    [(('Nút danh sách ticket đã hết phiên. Vui lòng mở lại từ CSKH/Ticket.',), {"show_alert": True})],
+                    query.answers,
+                )
+                self.assertEqual([], query.edits)
+        self.assertEqual([], cleared)
+        self.assertEqual([], reads)
+
+    def test_valid_admin_list_page_preserves_filter_and_offset(self):
+        _, route, cleared, reads = _runtime()
+        query = fixture._dispatch(route, "ticket|al|high|6")
+
+        self.assertEqual(1, len(query.answers))
+        self.assertFalse(query.answers[0][1].get("show_alert", False))
+        self.assertEqual([True], cleared)
+        self.assertEqual([("list", "high", 6)], reads)
+        self.assertEqual("INERT LIST", query.edits[0][0])
+
+    def test_emitted_stats_control_offloads_read_after_ack_and_keeps_hub_back(self):
+        namespace, route, cleared, reads = _runtime()
+        active_queries, offloads = [], []
+
+        def stats_text():
+            reads.append(("stats_read_ack", len(active_queries[-1].answers)))
+            return "INERT STATS"
+
+        async def to_thread(function, *args, **kwargs):
+            offloads.append((function.__name__, len(active_queries[-1].answers)))
+            return function(*args, **kwargs)
+
+        namespace["support_ticket_stats_text"] = stats_text
+        namespace["asyncio"] = SimpleNamespace(to_thread=to_thread)
+        emitted = next(
+            button for row in namespace["support_admin_menu_keyboard"]("admin").inline_keyboard
+            for button in row if button.text == "📊 Thống kê"
+        )
+        self.assertEqual("ticket|stats|admin", emitted.callback_data)
+        self.assertIsNotNone(route.pattern.match(emitted.callback_data))
+
+        query = feedback._Query(emitted.callback_data)
+        active_queries.append(query)
+        coroutine = route.callback(SimpleNamespace(callback_query=query), SimpleNamespace(user_data={}))
+        try:
+            coroutine.send(None)
+        except StopIteration:
+            pass
+        else:
+            coroutine.close()
+            self.fail("stats fixture unexpectedly yielded I/O")
+
+        self.assertEqual([((), {})], query.answers)
+        self.assertEqual([("stats_text", 1)], offloads)
+        self.assertEqual([("stats_read_ack", 1)], reads)
+        self.assertEqual([True], cleared)
+        self.assertEqual("ticket|admin", _button(query, "⬅").callback_data)
+        self.assertEqual("menu|main", _button(query, "🏠").callback_data)
 
 
 if __name__ == "__main__":

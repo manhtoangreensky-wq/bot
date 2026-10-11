@@ -79,6 +79,9 @@ class AdminTicketBackPaginationTest(unittest.TestCase):
         async def capture_edit(query, *_args, **kwargs):
             query.reply_markups.append(kwargs.get("reply_markup"))
 
+        async def to_thread(function, *args, **kwargs):
+            return function(*args, **kwargs)
+
         listed_offsets = []
 
         def fake_list_support_tickets(**kwargs):
@@ -86,6 +89,7 @@ class AdminTicketBackPaginationTest(unittest.TestCase):
             return page_tickets
 
         namespace = {
+            "asyncio": SimpleNamespace(to_thread=to_thread),
             "html": html,
             "InlineKeyboardButton": _Button,
             "InlineKeyboardMarkup": _Markup,

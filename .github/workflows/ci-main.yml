@@ -47,6 +47,7 @@ jobs:
             tests/test_admin_feedback_inbox_navigation.py \
             tests/test_admin_queue_confirm_back_origin.py \
             tests/test_admin_module_child_back_origin.py \
+            tests/test_operator_menu_callback_single_ack.py \
             tests/test_admin_finance_action_renderers.py \
             tests/test_support_ticket_reply_origin_pagination.py \
             tests/test_support_admin_ticket_origin_pagination.py \
@@ -59,6 +60,9 @@ jobs:
             tests/test_admin_runtime_help_back_origin.py \
             tests/test_admin_root_menu_callback_single_ack.py \
             tests/test_callback_dispatch_timing.py
+
+      - name: Product Callback Replay Guard Boundary
+        run: python -m unittest tests/test_video_public_callback_dedupe_guard.py
 
       - name: Stale Self-shot Callback Acknowledgement
         run: python -m unittest tests/test_selfshot_stale_callback_ack.py
@@ -106,19 +110,32 @@ jobs:
             tests/test_owner_access_ui_runtime_copy.py \
             tests/test_small_flow_pending_expiry.py \
             tests/test_feedback_callback_single_ack.py \
+            tests/test_admin_stale_ticket_detail_callback_single_ack.py \
+            tests/test_ticket_view_stale_callback_single_ack.py \
             tests/test_marketing_callback_single_ack.py \
             tests/test_admin_tool_test_pending_reset.py \
+            tests/test_admin_overview_callback.py \
+            tests/test_admin_report_source_availability.py \
             tests/test_broadcast_lite_back_pending_cleanup.py \
             tests/test_start_translation_pending_reset.py \
+            tests/test_reply_keyboard_home_route_priority.py \
             tests/test_menu_video_callback_timing.py \
             tests/test_support_ticket_send_concurrency.py \
             tests/test_support_ticket_file_send_concurrency.py \
             tests/test_support_ticket_send_matches_preview.py \
             tests/test_internal_archive_type_back_label.py \
             tests/test_internal_archive_search_back_origin.py \
+            tests/test_internal_archive_preview_callback_single_ack.py \
+            tests/test_internal_archive_save_callback_single_ack.py \
+            tests/test_doc_tool_callback_single_ack.py \
             tests/test_doc_split_back_emitted_callback.py \
+            tests/test_doc_expired_page_spec_input.py \
+            tests/test_profile_support_pending_origin.py \
+            tests/test_p0_i18n_root_flow_copy.py \
+            tests/test_support_expired_input_dispatch.py \
             tests/test_subdub_voice_child_back.py \
-            tests/test_voice_settings_input_back.py
+            tests/test_voice_settings_input_back.py \
+            tests/test_video_downloader_freehub_exit_pending.py
 
       - name: Run Workflow Hygiene Unit Tests
         run: |
