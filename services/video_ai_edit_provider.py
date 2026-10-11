@@ -904,10 +904,14 @@ def submit_video_edit(
             cost_source = ""
 
         if spend_context is not None:
-            spend_ctx = spend_context
-            # Central guard does not trust caller-forged low cost (CALLER_COST_AUTHORITY_TRUSTED=NO)
-            if cost_usd > 0 and float(getattr(spend_ctx, "estimated_max_cost_usd", 0.0) or 0.0) < cost_usd:
-                spend_ctx.has_proven_cost_authority = False
+            spend_ctx = dataclasses.replace(
+                spend_context,
+                product_family="Video AI Edit",
+                provider=config.provider_name,
+                model=config.model,
+                operation="submit_video_edit",
+                metadata={**getattr(spend_context, "metadata", {}), "duration_seconds": dur},
+            )
         else:
             spend_ctx = SpendGuardContext(
                 job_id=str(job_id or ""),
@@ -925,6 +929,7 @@ def submit_video_edit(
                 user_flow="video_ai_edit_bot",
                 entrypoint="bot",
                 is_paid_live_attempt=bool(is_paid_live or is_real_provider_transport),
+                metadata={"duration_seconds": dur},
             )
         spend_res = reserve_provider_spend(spend_ctx, db_path=db_path, env=effective_env)
         if not spend_res.allowed:

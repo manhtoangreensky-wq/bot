@@ -6589,7 +6589,7 @@ def _run_provider_generation_impl(
             bot_confirm_authority = str(
                 metadata.get("bot_confirm_authority")
                 or (request.metadata or {}).get("bot_confirm_authority")
-                or ("bot_telegram_ui_confirmed" if bot_originated_action else "")
+                or ""
             )
 
             spend_res = None

@@ -68451,7 +68451,17 @@ def public_video_active_job_keyboard(active_job: dict | None, lang: str = "vi") 
         return keyboard
     return InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]])
 
-async def shopaikey_video_create_for_model(model: str, prompt: str = "") -> dict:
+async def shopaikey_video_create_for_model(
+    model: str,
+    prompt: str = "",
+    *,
+    job_id: str = "",
+    request_id: str = "",
+    bot_confirm_authority: str = "",
+    bot_originated_action: bool = False,
+    entrypoint: str = "direct_provider",
+    spend_context: SpendGuardContext | None = None,
+) -> dict:
     if not SHOPAIKEY_API_KEY:
         return {"status": "MISSING", "http_status": 0, "latency_ms": 0, "model": SHOPAIKEY_VIDEO_MODEL, "task_id": "", "provider_status": "", "message": "SHOPAIKEY_API_KEY missing", "error_class": "missing_api_key"}
 
@@ -68466,23 +68476,37 @@ async def shopaikey_video_create_for_model(model: str, prompt: str = "") -> dict
     if is_kill_switch_active():
         return {"status": "SPEND_GUARD_BLOCKED", "http_status": 0, "latency_ms": 0, "model": model, "task_id": "", "provider_status": "", "message": "paid_provider_kill_switch_active", "error_class": BLOCKER_KILL_SWITCH_ACTIVE}
 
-    shopai_spend_ctx = SpendGuardContext(
-        job_id=f"shopai_vid_{int(time.perf_counter()*1000)}",
-        request_id=f"REQ-SHOPAI-VID-{int(time.perf_counter()*1000)}",
-        trace_id=f"TR-SHOPAI-VID-{int(time.perf_counter()*1000)}",
-        product_family="Product Video",
-        provider="shopaikey_kling_video",
-        operation="create_video_task",
-        model=model,
-        estimated_max_cost_usd=1.00,
-        has_proven_cost_authority=True,
-        bot_originated_action=True,
-        bot_confirm_authority="bot_telegram_ui_confirmed",
-        user_flow="shopaikey_video_direct",
-        entrypoint="bot",
-        is_paid_live_attempt=bool(SHOPAIKEY_API_KEY),
-    )
+    stable_hash = hashlib.sha256(f"{model}:{prompt}".encode("utf-8")).hexdigest()[:16]
+    eff_job_id = str(job_id or f"shopai_vid_{stable_hash}")
+    eff_req_id = str(request_id or f"REQ-SHOPAI-VID-{stable_hash}")
+    eff_trace_id = f"TR-SHOPAI-VID-{stable_hash}"
+
+    if spend_context is not None:
+        import dataclasses
+        shopai_spend_ctx = dataclasses.replace(
+            spend_context,
+            product_family="Product Video",
+            provider="shopaikey_kling_video",
+            operation="create_video_task",
+            model=model,
+        )
+    else:
+        shopai_spend_ctx = SpendGuardContext(
+            job_id=eff_job_id,
+            request_id=eff_req_id,
+            trace_id=eff_trace_id,
+            product_family="Product Video",
+            provider="shopaikey_kling_video",
+            operation="create_video_task",
+            model=model,
+            bot_originated_action=bool(bot_originated_action),
+            bot_confirm_authority=str(bot_confirm_authority or ""),
+            user_flow="bot_shopaikey_video" if bot_originated_action else "shopaikey_video_direct",
+            entrypoint=str(entrypoint or ("bot" if bot_originated_action else "direct_provider")),
+            is_paid_live_attempt=bool(SHOPAIKEY_API_KEY),
+        )
     shopai_spend_res = reserve_provider_spend(shopai_spend_ctx)
+
     if not shopai_spend_res.allowed:
         return {"status": "SPEND_GUARD_BLOCKED", "http_status": 0, "latency_ms": 0, "model": model, "task_id": "", "provider_status": "", "message": f"spend_guard_blocked: {shopai_spend_res.blocker}", "error_class": shopai_spend_res.blocker}
 
