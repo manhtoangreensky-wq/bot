@@ -8,6 +8,15 @@ from types import SimpleNamespace
 BOT_SOURCE = (Path(__file__).resolve().parents[1] / "bot.py").read_text(encoding="utf-8")
 
 
+def _run_immediate(coroutine):
+    try:
+        coroutine.send(None)
+    except StopIteration as stop:
+        return stop.value
+    coroutine.close()
+    raise AssertionError("fixture callback unexpectedly yielded asynchronous I/O")
+
+
 class _Query:
     def __init__(self, data):
         self.data = data
@@ -18,7 +27,7 @@ class _Query:
         self.answers.append((args, kwargs))
 
 
-def _load_handler(side_effects, edits):
+def _load_handler(side_effects, edits, user_lang=None):
     match = re.search(
         r"(?ms)^async def handle_feedback_callback\(.*?(?=^(?:async\s+)?def\s|^class\s|\Z)",
         BOT_SOURCE,
@@ -31,7 +40,7 @@ def _load_handler(side_effects, edits):
     namespace = {
         "Update": object,
         "ContextTypes": SimpleNamespace(DEFAULT_TYPE=object),
-        "user_ui_lang": lambda _uid: "vi",
+        "user_ui_lang": user_lang or (lambda _uid: "vi"),
         "clear_feedback_pending": lambda uid: side_effects.append(("clear_feedback_pending", uid)),
         "clear_support_ticket_pending": lambda uid: side_effects.append(("clear_support_ticket_pending", uid)),
         "feedback_start_text": lambda lang: f"feedback-{lang}",
@@ -63,6 +72,43 @@ def _registered_feedback_pattern():
     return re.compile(match.group(2))
 
 
+def _emitted_feedback_category_callbacks():
+    labels_match = re.search(r"(?ms)^FEEDBACK_CATEGORY_LABELS\s*=\s*\{.*?^\}", BOT_SOURCE)
+    keyboard_match = re.search(
+        r"(?ms)^def feedback_category_keyboard\(.*?(?=^(?:async\s+)?def\s|^class\s|\Z)",
+        BOT_SOURCE,
+    )
+    assert labels_match and keyboard_match
+    namespace = {
+        "InlineKeyboardButton": lambda text, callback_data: SimpleNamespace(
+            text=text, callback_data=callback_data
+        ),
+        "InlineKeyboardMarkup": lambda rows: SimpleNamespace(inline_keyboard=rows),
+        "normalize_user_language": lambda lang: lang,
+        "public_hub_copy": lambda _lang: {
+            "feedback_payment_topup": "Payment",
+            "feedback_image_error": "Image",
+            "feedback_video_error": "Video",
+            "feedback_document_pdf": "Documents",
+            "feedback_package_combo": "Packages",
+            "feedback_refund": "Refund",
+            "feedback_feature_request": "Feature",
+            "feedback_other": "Other",
+            "main_menu": "Main",
+        },
+    }
+    exec(compile(labels_match.group(0), "bot.py:FEEDBACK_CATEGORY_LABELS", "exec"), namespace)
+    exec(compile(keyboard_match.group(0), "bot.py:feedback_category_keyboard", "exec"), namespace)
+    keyboard = namespace["feedback_category_keyboard"]("vi")
+    callbacks = [
+        button.callback_data
+        for row in keyboard.inline_keyboard
+        for button in row
+        if button.callback_data
+    ]
+    return namespace["FEEDBACK_CATEGORY_LABELS"], callbacks
+
+
 def test_unsupported_feedback_callback_gets_one_alert_ack():
     query = _Query("feedback|unexpected")
     assert _registered_feedback_pattern().match(query.data)
@@ -86,6 +132,25 @@ def test_feedback_start_keeps_one_ack_and_existing_screen():
 
     assert query.answers == [((), {})]
     assert side_effects == [("clear_feedback_pending", 123), ("clear_support_ticket_pending", 123)]
+    assert edits == [(query, "feedback-vi", {"parse_mode": "HTML", "reply_markup": "categories-vi"})]
+
+
+def test_feedback_start_acknowledges_before_user_language_lookup():
+    query = _Query("feedback|start")
+    side_effects = []
+    edits = []
+    language_lookups = []
+
+    def user_lang_after_ack(uid):
+        assert query.answers == [((), {})]
+        language_lookups.append(uid)
+        return "vi"
+
+    handler = _load_handler(side_effects, edits, user_lang=user_lang_after_ack)
+    _run_immediate(handler(SimpleNamespace(callback_query=query), SimpleNamespace()))
+
+    assert query.answers == [((), {})]
+    assert language_lookups == [123]
     assert edits == [(query, "feedback-vi", {"parse_mode": "HTML", "reply_markup": "categories-vi"})]
 
 
@@ -187,6 +252,7 @@ def test_concurrent_duplicate_feedback_update_is_suppressed_before_pending_handl
         },
         "html": html,
         "support_ticket_created_keyboard": lambda _ticket_id, _lang: "fixture-actions",
+        "ticket_customer_origin_keyboard": lambda markup, *_args, **_kwargs: markup,
         "notify_admin_new_support_ticket": _notify,
         "support_reply_for_classification": lambda _classification: "ACK",
     }
@@ -318,45 +384,41 @@ def test_unsupported_feedback_category_callback_fails_closed():
 
 
 def test_feedback_category_keyboard_emits_only_whitelisted_categories_and_home():
-    labels_match = re.search(r"(?ms)^FEEDBACK_CATEGORY_LABELS\s*=\s*\{.*?^\}", BOT_SOURCE)
-    keyboard_match = re.search(
-        r"(?ms)^def feedback_category_keyboard\(.*?(?=^(?:async\s+)?def\s|^class\s|\Z)",
-        BOT_SOURCE,
-    )
-    assert labels_match and keyboard_match
-    namespace = {
-        "InlineKeyboardButton": lambda text, callback_data: SimpleNamespace(
-            text=text, callback_data=callback_data
-        ),
-        "InlineKeyboardMarkup": lambda rows: SimpleNamespace(inline_keyboard=rows),
-        "normalize_user_language": lambda lang: lang,
-        "public_hub_copy": lambda _lang: {
-            "feedback_payment_topup": "Payment",
-            "feedback_image_error": "Image",
-            "feedback_video_error": "Video",
-            "feedback_document_pdf": "Documents",
-            "feedback_package_combo": "Packages",
-            "feedback_refund": "Refund",
-            "feedback_feature_request": "Feature",
-            "feedback_other": "Other",
-            "main_menu": "Main",
-        },
-    }
-    exec(compile(labels_match.group(0), "bot.py:FEEDBACK_CATEGORY_LABELS", "exec"), namespace)
-    exec(compile(keyboard_match.group(0), "bot.py:feedback_category_keyboard", "exec"), namespace)
-    keyboard = namespace["feedback_category_keyboard"]("vi")
-    callbacks = [
-        button.callback_data
-        for row in keyboard.inline_keyboard
-        for button in row
-        if button.callback_data
-    ]
+    labels, callbacks = _emitted_feedback_category_callbacks()
     emitted = [data.split("|", 2)[2] for data in callbacks if data.startswith("feedback|cat|")]
 
     assert len(emitted) == 8
     assert len(set(emitted)) == 8
-    assert set(emitted) == set(namespace["FEEDBACK_CATEGORY_LABELS"])
+    assert set(emitted) == set(labels)
     assert "menu|main" in callbacks
+
+
+def test_every_emitted_feedback_category_reaches_registered_handler():
+    labels, callbacks = _emitted_feedback_category_callbacks()
+    category_callbacks = [data for data in callbacks if data.startswith("feedback|cat|")]
+
+    assert len(category_callbacks) == 8
+    assert {data.split("|", 2)[2] for data in category_callbacks} == set(labels)
+
+    for callback_data in category_callbacks:
+        category = callback_data.split("|", 2)[2]
+        query = _Query(callback_data)
+        side_effects = []
+        edits = []
+        handler = _load_handler(side_effects, edits)
+
+        assert _registered_feedback_pattern().match(callback_data)
+        asyncio.run(handler(SimpleNamespace(callback_query=query), SimpleNamespace()))
+
+        assert query.answers == [((), {})]
+        assert side_effects == [("set_feedback_pending", 123, category)]
+        assert len(edits) == 1
+        assert edits[0][1] == f"prompt-{category}"
+        assert edits[0][2]["parse_mode"] == "HTML"
+        assert [button[1] for button in edits[0][2]["reply_markup"][0]] == [
+            "feedback|start",
+            "menu|main",
+        ]
 
 
 def test_feedback_expired_copy_covers_all_supported_locales():
@@ -378,3 +440,189 @@ def test_feedback_expired_copy_covers_all_supported_locales():
     assert len(messages) == 17
     assert all(text.strip() and text != "common.expired_not_charged" for text in messages.values())
     assert namespace["feedback_expired_text"]("unsupported") == messages["en"]
+
+
+def test_transient_feedback_classification_failure_preserves_pending_for_same_message_retry():
+    message_handler_match = re.search(
+        r"(?ms)^@telegram_message_idempotent\s*\nasync def handle_message\(.*?handle_feedback_pending_text\(update, context\)",
+        BOT_SOURCE,
+    )
+    assert message_handler_match, "the registered message path must dispatch Feedback pending text"
+
+    def _source_function(name):
+        start = re.search(rf"(?m)^(?:async\s+)?def {re.escape(name)}\b", BOT_SOURCE)
+        assert start, name
+        following = re.search(r"(?m)^(?:async\s+)?def [A-Za-z_]\w*\s*\(", BOT_SOURCE[start.end():])
+        end = start.end() + following.start() if following else len(BOT_SOURCE)
+        return BOT_SOURCE[start.start():end]
+
+    user_pending = {
+        "feedback:123": {
+            "pending_action": "feedback",
+            "category": "image_error",
+            "created_at_ts": __import__("time").time(),
+        }
+    }
+    calls = []
+    classify_attempts = 0
+
+    async def _classify(text, uid):
+        nonlocal classify_attempts
+        classify_attempts += 1
+        calls.append(("classify", text, uid))
+        if classify_attempts == 1:
+            raise RuntimeError("transient classifier fixture failure")
+        return {"suggested_reply_id": "technical_image_error"}
+
+    def _create(user, category, text, _classification):
+        calls.append(("create", user.id, category, text))
+        return {"id": 901, "ticket_code": "FIXTURE-901"}, True
+
+    async def _notify(*_args, **kwargs):
+        calls.append(("notify", kwargs.get("customer_message")))
+
+    namespace = {
+        "Update": object,
+        "ContextTypes": SimpleNamespace(DEFAULT_TYPE=object),
+        "USER_PENDING": user_pending,
+        "QUICK_MEDIA_PENDING_TTL_SECONDS": 600,
+        "SUPPORT_CATEGORIES": {"image_error"},
+        "time": __import__("time"),
+        "asyncio": asyncio,
+        "wraps": __import__("functools").wraps,
+        "html": html,
+        "TELEGRAM_MESSAGE_DEDUPE_TTL_SECONDS": 600,
+        "TELEGRAM_MESSAGE_DEDUPE_MAX": 5000,
+        "TELEGRAM_MESSAGE_DEDUPE_DONE": {},
+        "TELEGRAM_MESSAGE_DEDUPE_LOCKS": {},
+        "safe_int": lambda value, fallback=0: int(value) if str(value or "").isdigit() else fallback,
+        "logger": SimpleNamespace(info=lambda *_args, **_kwargs: None),
+        "normalize_user_language": lambda lang: lang,
+        "user_ui_lang": lambda _uid: "vi",
+        "classify_support_message": _classify,
+        "support_ticket_priority": lambda _category, _text: "normal",
+        "create_or_append_support_ticket": _create,
+        "clear_feedback_pending": lambda uid: (calls.append(("clear", uid)), user_pending.pop(f"feedback:{uid}", None)),
+        "public_hub_copy": lambda _lang: {
+            "support_ticket_feedback_notice": "Feedback received",
+            "support_ticket_label_code": "Ticket",
+            "support_ticket_view_current": "View current",
+            "support_ticket_add_message": "Add message",
+            "support_ticket_add_attachment": "Add attachment",
+            "support_my_tickets": "My tickets",
+            "support_back": "Support",
+            "main_menu": "Main",
+        },
+        "support_ticket_created_keyboard": lambda *_args: "fixture-actions",
+        "InlineKeyboardButton": lambda text, callback_data: SimpleNamespace(text=text, callback_data=callback_data),
+        "InlineKeyboardMarkup": lambda rows: SimpleNamespace(inline_keyboard=rows),
+        "ui_text": lambda _lang, _key: "Back",
+        "notify_admin_new_support_ticket": _notify,
+        "support_reply_for_classification": lambda _classification: "ACK",
+    }
+    for name in (
+        "support_ticket_created_keyboard",
+        "ticket_customer_origin_keyboard",
+        "feedback_pending_key",
+        "get_feedback_pending",
+        "handle_feedback_pending_text",
+        "telegram_message_dedupe_key",
+        "_prune_telegram_message_dedupe",
+        "telegram_message_idempotent",
+    ):
+        exec(compile(_source_function(name), f"bot.py:{name}", "exec"), namespace)
+
+    async def _not_pending(*_args, **_kwargs):
+        return False
+
+    namespace.update(
+        handle_state_reset_slash_command=_not_pending,
+        get_video_downloader_pending=lambda _uid: None,
+        handle_video_ai_edit_pending_text=_not_pending,
+        get_video_editor_pending=lambda _uid: None,
+        handle_broadcast_lite_pending_text=_not_pending,
+        get_video_dubbing_pending=lambda _uid: {},
+        VIDEO_DUBBING_PENDING_TEXT_STEPS=set(),
+        handle_manual_approval_pending_text=_not_pending,
+        handle_manual_topup_pending_text=_not_pending,
+        handle_local_video_planning_pending_text=_not_pending,
+        handle_free_hub_pending_text=_not_pending,
+        handle_translation_menu_pending_text=_not_pending,
+        handle_translation_session_text=_not_pending,
+        handle_finance_compliance_pending_text=_not_pending,
+    )
+    handle_message_source = _source_function("handle_message").split("\ntg_app: Application = None", 1)[0]
+    exec(
+        compile("@telegram_message_idempotent\n" + handle_message_source,
+                "bot.py:handle_message", "exec"),
+        namespace,
+    )
+    registrations = []
+    namespace.update(
+        tg_app=SimpleNamespace(add_handler=registrations.append),
+        filters=SimpleNamespace(TEXT=1, COMMAND=2),
+        MessageHandler=lambda filter_, callback: (filter_, callback),
+    )
+    message_registration = next(
+        line.strip()
+        for line in BOT_SOURCE.splitlines()
+        if "MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)" in line
+    )
+    exec(message_registration, namespace)
+    assert len(registrations) == 1
+    assert registrations[0][1] is namespace["handle_message"]
+
+    class _Message:
+        message_id = 444
+        text = "Fixture feedback"
+        chat = SimpleNamespace(id=123)
+
+        def __init__(self):
+            self.replies = []
+
+        async def reply_text(self, text, **kwargs):
+            self.replies.append((text, kwargs))
+
+    message = _Message()
+    update = SimpleNamespace(
+        message=message,
+        effective_user=SimpleNamespace(id=123, username="tester", first_name="Tester"),
+    )
+    context = SimpleNamespace(user_data={})
+    handler = registrations[0][1]
+
+    async def _fail_then_retry():
+        try:
+            await handler(update, context)
+        except RuntimeError as exc:
+            assert str(exc) == "transient classifier fixture failure"
+        else:
+            raise AssertionError("the first fixture classification must fail")
+
+        assert user_pending["feedback:123"]["pending_action"] == "feedback"
+        assert namespace["TELEGRAM_MESSAGE_DEDUPE_DONE"] == {}
+        assert calls == [("classify", "Fixture feedback", 123)]
+        assert message.replies == []
+
+        assert await handler(update, context) is None
+
+    _run_immediate(_fail_then_retry())
+
+    assert user_pending == {}
+    assert calls == [
+        ("classify", "Fixture feedback", 123),
+        ("classify", "Fixture feedback", 123),
+        ("create", 123, "image_error", "Fixture feedback"),
+        ("clear", 123),
+        ("notify", "Fixture feedback"),
+    ]
+    assert len(message.replies) == 1
+    assert set(namespace["TELEGRAM_MESSAGE_DEDUPE_DONE"]) == {"123:444"}
+    reply_markup = message.replies[0][1]["reply_markup"]
+    emitted_view = next(
+        button.callback_data
+        for row in reply_markup.inline_keyboard
+        for button in row
+        if button.callback_data.startswith("ticket|pv|")
+    )
+    assert emitted_view == "ticket|pv|901|feedback_result"

@@ -1,9 +1,17 @@
-import asyncio
 import re
 import unittest
 from contextvars import ContextVar
 from types import SimpleNamespace
 from pathlib import Path
+
+
+def _run_no_io(coroutine):
+    try:
+        coroutine.send(None)
+    except StopIteration as result:
+        return result.value
+    coroutine.close()
+    raise AssertionError("callback timing fixture unexpectedly yielded I/O")
 
 
 BOT_SOURCE = (Path(__file__).resolve().parents[1] / "bot.py").read_text(encoding="utf-8")
@@ -125,7 +133,7 @@ class CallbackDispatchTimingTests(unittest.TestCase):
             await app.handlers[0][0].callback(update, context)
             await app.handlers[observer_group][0].callback(update, context)
 
-        asyncio.run(dispatch())
+        _run_no_io(dispatch())
 
         self.assertEqual(len(self.logs), 1)
         log = self.logs[0]
@@ -159,6 +167,7 @@ class CallbackDispatchTimingTests(unittest.TestCase):
         observer_logs = []
         for callback_data, expected_route_key in (
             ("menu|main_profile", "account_root"),
+            ("menu|main", "main_home"),
             ("menu|main_profile|PRIVATE-CALLBACK-SECRET", "unclassified"),
         ):
             with self.subTest(callback_data=callback_data.split("|")[1]):
@@ -172,7 +181,7 @@ class CallbackDispatchTimingTests(unittest.TestCase):
                     await app.handlers[0][0].callback(update, context)
                     await app.handlers[observer_group][0].callback(update, context)
 
-                asyncio.run(dispatch())
+                _run_no_io(dispatch())
                 observer_logs.append(self.logs[-1])
                 fields = dict(re.findall(r"(\w+)=([^ ]+)", self.logs[-1]))
                 self.assertEqual(fields.get("route_key"), expected_route_key)
@@ -180,7 +189,7 @@ class CallbackDispatchTimingTests(unittest.TestCase):
                 self.assertNotIn("PRIVATE-MESSAGE-SECRET", self.logs[-1])
                 self.assertNotIn("987654321", self.logs[-1])
 
-        self.assertEqual(len(observer_logs), 2)
+        self.assertEqual(len(observer_logs), 3)
 
     def test_stopped_shared_guard_logs_coarse_block_and_resets_scope(self):
         async def blocked_guard(_update, _context):
@@ -195,7 +204,7 @@ class CallbackDispatchTimingTests(unittest.TestCase):
         self.namespace["install_callback_latency_instrumentation"](app)
         update = SimpleNamespace(callback_query=SimpleNamespace(data="shopai|private"))
         with self.assertRaises(ApplicationHandlerStop):
-            asyncio.run(app.handlers[-11][0].callback(update, SimpleNamespace()))
+            _run_no_io(app.handlers[-11][0].callback(update, SimpleNamespace()))
 
         self.assertEqual(len(self.logs), 1)
         self.assertIn("guard_phases=", self.logs[0])
@@ -220,7 +229,7 @@ class CallbackDispatchTimingTests(unittest.TestCase):
             await app.handlers[0][0].callback(update, context)
 
         with self.assertRaisesRegex(RuntimeError, "PRIVATE-EXCEPTION-SECRET"):
-            asyncio.run(dispatch())
+            _run_no_io(dispatch())
 
         self.assertEqual(len(self.logs), 1)
         self.assertIn("outcome=error", self.logs[0])

@@ -27,6 +27,7 @@ def _runtime():
 
     definitions = "\n".join((
         block("def internal_archive_pending_key(", "def internal_archive_menu_text()"),
+        block("def internal_archive_preview_keyboard(", "def save_internal_document("),
         block("async def handle_internal_archive_callback(", "async def handle_internal_archive_pending_upload("),
     ))
     saved = []
@@ -89,7 +90,15 @@ class InternalArchiveSaveCallbackSingleAckTests(unittest.TestCase):
             },
         )
         context = SimpleNamespace()
-        first = _FakeQuery(user_id, "archive|save")
+        preview = runtime["internal_archive_preview_keyboard"]()
+        save_button = next(
+            button
+            for row in preview.inline_keyboard
+            for button in row
+            if button.text == "✅ Lưu hồ sơ"
+        )
+        self.assertEqual("archive|save", save_button.callback_data)
+        first = _FakeQuery(user_id, save_button.callback_data)
         asyncio.run(runtime["handle_internal_archive_callback"](
             SimpleNamespace(callback_query=first), context,
         ))
@@ -99,7 +108,7 @@ class InternalArchiveSaveCallbackSingleAckTests(unittest.TestCase):
         self.assertIsNone(runtime["get_internal_archive_pending"](user_id))
         self.assertIn("Đã lưu hồ sơ #701", rendered[-1][0])
 
-        stale = _FakeQuery(user_id, "archive|save")
+        stale = _FakeQuery(user_id, save_button.callback_data)
         asyncio.run(runtime["handle_internal_archive_callback"](
             SimpleNamespace(callback_query=stale), context,
         ))

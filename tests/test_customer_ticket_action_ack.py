@@ -32,7 +32,11 @@ def _runtime(ticket=None):
     reads, edits, writes = [], [], []
     handler = fixture._load_handler([], edits)
     ns = handler.__globals__
+    async def to_thread(function, *args, **kwargs):
+        return function(*args, **kwargs)
+
     ns.update({
+        "asyncio": SimpleNamespace(to_thread=to_thread),
         "InlineKeyboardButton": Button, "InlineKeyboardMarkup": Markup,
         "html": html, "time": time, "USER_PENDING": {},
         "public_hub_copy": lambda _lang: Copy(support_ticket_not_found="Ticket not found", support_ticket_action_unsupported="Action not supported"),
@@ -62,7 +66,7 @@ def _dispatch(route, data):
 
 
 class CustomerTicketActionAckTests(unittest.TestCase):
-    def test_real_emitted_stale_actions_get_one_alert_without_writes(self):
+    def test_real_emitted_stale_actions_get_recovery_after_one_ack_without_writes(self):
         ns, route, reads, edits, writes = _runtime()
         markup = ns["support_ticket_detail_keyboard"]({"id": 901}, "vi")
         for action in ("reply_user", "done", "attach"):
@@ -71,9 +75,13 @@ class CustomerTicketActionAckTests(unittest.TestCase):
                             if button.callback_data.split("|")[1] == action)
                 before = len(reads)
                 query = _dispatch(route, data)
-                self.assertEqual([(("Ticket not found",), {"show_alert": True})], query.answers)
+                self.assertEqual([((), {})], query.answers)
                 self.assertEqual([(901, 123)], reads[before:])
-        self.assertEqual([], edits)
+        self.assertEqual(3, len(edits))
+        for _query, text, kwargs in edits:
+            self.assertIn("Ticket not found", text)
+            callbacks = [button.callback_data for row in kwargs["reply_markup"].inline_keyboard for button in row]
+            self.assertEqual(["ticket|start", "menu|main"], callbacks)
         self.assertEqual([], writes)
         self.assertEqual({}, ns["USER_PENDING"])
 

@@ -54,6 +54,15 @@ def _load_functions(*names, **dependencies):
     return namespace
 
 
+def _run_no_io(coroutine):
+    try:
+        coroutine.send(None)
+    except StopIteration as completed:
+        return completed.value
+    coroutine.close()
+    raise AssertionError("callback fixture unexpectedly yielded I/O")
+
+
 def _main_menu_dependencies(is_admin, effects):
     copy = {
         key: key
@@ -623,7 +632,7 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
             self.assertRegex(callback, route_pattern)
             query = _Query(user.id, callback)
             update = SimpleNamespace(callback_query=query, effective_user=user)
-            asyncio.run(namespace["handle_translation_callback"](update, SimpleNamespace()))
+            _run_no_io(namespace["handle_translation_callback"](update, SimpleNamespace()))
             self.assertEqual(query.answers, [((), {})])
             return query
 
@@ -634,7 +643,7 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
                     effective_user=user,
                     message=_Message(),
                 )
-                asyncio.run(namespace["show_translation_picker"](
+                _run_no_io(namespace["show_translation_picker"](
                     initial_update, source_type, lang="vi",
                 ))
                 initial_markup = replies[-1][1]["reply_markup"]
@@ -673,11 +682,193 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
         self.assertEqual(len(edits), 4)
         self.assertEqual(contexts, ["context"] * 4)
 
+    def test_emitted_translation_text_target_reaches_registered_pre_provider_boundary(self):
+        replies = []
+        target_calls = []
+        labels = {
+            "translation_picker_choose": "Choose target",
+            "translation_text": "Text",
+            "translation_pair_source": "Source",
+            "translation_picker_target": "Target language",
+            "translation_picker_no_charge": "No processing at this step",
+            "translation_picker_more": "More languages",
+            "main_menu": "Main menu",
+        }
+
+        class _Message:
+            async def reply_text(self, text, **kwargs):
+                replies.append((text, kwargs))
+
+        async def run_translation_boundary(update, context, source_text, target):
+            target_calls.append((source_text, target, list(update.callback_query.answers)))
+
+        dependencies = {
+            "html": html,
+            "InlineKeyboardButton": _Button,
+            "InlineKeyboardMarkup": _Markup,
+            "TRANSLATION_MORE_LANGS": ("fr", "de"),
+            "normalize_user_language": lambda lang: lang or "vi",
+            "public_hub_copy": lambda _lang: labels,
+            "translate_target_button_label": lambda code: code.upper(),
+            "get_user_language": lambda _uid: "vi",
+            "enter_product_context": lambda *_args, **_kwargs: None,
+            "PRODUCT_CONTEXT_SHOWROOM": "showroom",
+            "normalize_translate_target": lambda value: value if value in {"vi", "en", "zh", "fr", "de"} else "",
+            "get_translation_request": lambda uid, source: (
+                {"source_text": "fixture source text"}
+                if uid == 991181 and source == "text"
+                else {}
+            ),
+            "run_translate_text_to_target": run_translation_boundary,
+        }
+        namespace = _load_functions(
+            "translation_pick_text", "translation_target_keyboard",
+            "reply_translation_surface", "show_translation_picker",
+            "handle_translation_callback", **dependencies,
+        )
+        route_pattern = _registered_pattern("handle_translation_callback")
+        user = SimpleNamespace(id=991181)
+        initial_update = SimpleNamespace(
+            callback_query=None,
+            effective_user=user,
+            message=_Message(),
+        )
+        _run_no_io(namespace["show_translation_picker"](
+            initial_update, "text", lang="vi",
+        ))
+        emitted_markup = replies[0][1]["reply_markup"]
+        target_button = next(
+            button
+            for row in emitted_markup.inline_keyboard
+            for button in row
+            if button.callback_data == "tr_target|text|en"
+        )
+
+        query = _Query(user.id, target_button.callback_data)
+        update = SimpleNamespace(callback_query=query, effective_user=user)
+        self.assertRegex(target_button.callback_data, route_pattern)
+        _run_no_io(namespace["handle_translation_callback"](update, SimpleNamespace()))
+
+        self.assertEqual(query.answers, [((), {})])
+        self.assertEqual(
+            target_calls,
+            [("fixture source text", "en", [((), {})])],
+        )
+        self.assertEqual(len(replies), 1)
+
+    def test_emitted_translation_file_and_voice_targets_reach_inert_boundaries(self):
+        replies = []
+        runner_calls = []
+        saved_requests = []
+        contexts = []
+        labels = {
+            "translation_picker_choose": "Choose target",
+            "translation_audio": "Audio",
+            "translation_text": "Text",
+            "translation_file": "File",
+            "translation_pair_source": "Source",
+            "translation_picker_target": "Target language",
+            "translation_picker_no_charge": "No processing at this step",
+            "translation_picker_more": "More languages",
+            "translation_picker_back": "Back",
+            "main_menu": "Main menu",
+        }
+
+        class _Message:
+            async def reply_text(self, text, **kwargs):
+                replies.append((text, kwargs))
+
+        async def run_voice_boundary(update, context, target):
+            runner_calls.append((
+                "voice", target, list(update.callback_query.answers),
+            ))
+
+        async def run_file_boundary(update, context, target, *, info):
+            runner_calls.append((
+                "file", target, info, list(update.callback_query.answers),
+            ))
+
+        def get_request(uid, source_type):
+            if uid != 991182:
+                return None
+            if source_type == "file":
+                return {"source_ref": {"file_id": "fixture-file"}}
+            if source_type == "voice":
+                return {"source_ref": {"file_id": "fixture-audio"}}
+            return None
+
+        dependencies = {
+            "html": html,
+            "InlineKeyboardButton": _Button,
+            "InlineKeyboardMarkup": _Markup,
+            "TRANSLATION_MORE_LANGS": ("fr", "de"),
+            "normalize_user_language": lambda lang: lang or "vi",
+            "public_hub_copy": lambda _lang: labels,
+            "translate_target_button_label": lambda code: code.upper(),
+            "get_user_language": lambda _uid: "vi",
+            "enter_product_context": lambda *_args, **_kwargs: contexts.append("context"),
+            "PRODUCT_CONTEXT_SHOWROOM": "showroom",
+            "normalize_translate_target": lambda value: value if value in {"vi", "en", "zh", "fr", "de"} else "",
+            "get_translation_request": get_request,
+            "has_recent_audio_input": lambda _update: True,
+            "save_translation_request": lambda uid, source: saved_requests.append((uid, source)),
+            "run_translate_voice_to_target": run_voice_boundary,
+            "run_translate_file_to_target": run_file_boundary,
+        }
+        namespace = _load_functions(
+            "translation_pick_text", "translation_target_keyboard",
+            "reply_translation_surface", "show_translation_picker",
+            "handle_translation_callback", **dependencies,
+        )
+        route_pattern = _registered_pattern("handle_translation_callback")
+        user = SimpleNamespace(id=991182)
+
+        for source_type in ("file", "voice"):
+            with self.subTest(source_type=source_type):
+                initial_update = SimpleNamespace(
+                    callback_query=None,
+                    effective_user=user,
+                    message=_Message(),
+                )
+                _run_no_io(namespace["show_translation_picker"](
+                    initial_update, source_type, lang="vi",
+                ))
+                markup = replies[-1][1]["reply_markup"]
+                target_button = next(
+                    button
+                    for row in markup.inline_keyboard
+                    for button in row
+                    if button.callback_data == f"tr_target|{source_type}|en"
+                )
+                self.assertRegex(target_button.callback_data, route_pattern)
+
+                query = _Query(user.id, target_button.callback_data)
+                update = SimpleNamespace(callback_query=query, effective_user=user)
+                _run_no_io(namespace["handle_translation_callback"](
+                    update, SimpleNamespace(),
+                ))
+                self.assertEqual(query.answers, [((), {})])
+
+        self.assertEqual(
+            runner_calls,
+            [
+                ("file", "en", {"file_id": "fixture-file"}, [((), {})]),
+                ("voice", "en", [((), {})]),
+            ],
+        )
+        self.assertEqual(saved_requests, [(991182, "voice")])
+        self.assertEqual(contexts, ["context"] * 2)
+        self.assertEqual(len(replies), 2)
+
     def test_translation_voice_picker_label_matches_audio_callback_and_returns_from_more(self):
         edits = []
         contexts = []
+        replies = []
+        runner_calls = []
+        audio_available = {"value": True}
         copy = {
             "translation_audio": "Dịch audio",
+            "translation_transcribe": "Bóc băng",
             "translation_text": "Văn bản",
             "translation_session_enable_voice": "Bật giọng nói",
             "translation_language": "Dịch ngôn ngữ",
@@ -687,11 +878,16 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
             "translation_picker_no_charge": "Chưa xử lý ở bước này",
             "translation_picker_more": "Thêm ngôn ngữ",
             "translation_picker_back": "Quay lại",
+            "translation_recent_media_missing": "Gửi audio lại để tiếp tục",
+            "translation_audio_received_body": "Audio đã nhận",
             "main_menu": "Menu chính",
         }
 
         async def safe_edit(query, text, **kwargs):
             edits.append((query.data, text, kwargs))
+
+        async def reply_text(text, **kwargs):
+            replies.append((text, kwargs))
 
         def build_two_column_keyboard(items, *, nav_back, nav_main, lang, main_label):
             flat = [_Button(label, callback) for label, callback in items]
@@ -708,16 +904,23 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
             "normalize_user_language": lambda lang: lang or "vi",
             "public_hub_copy": lambda _lang: copy,
             "translate_target_button_label": lambda code: code.upper(),
+            "normalize_translate_target": lambda value: value if value in {"vi", "en", "zh", "fr", "de"} else "",
             "build_2col_keyboard": build_two_column_keyboard,
             "get_user_language": lambda _uid: "vi",
             "enter_product_context": lambda *_args, **_kwargs: contexts.append("context"),
             "PRODUCT_CONTEXT_SHOWROOM": "showroom",
-            "has_recent_audio_input": lambda _update: True,
+            "has_recent_audio_input": lambda _update: audio_available["value"],
             "safe_edit_query_message": safe_edit,
+            "translation_voice_menu_text": lambda _lang: "voice menu parent",
+            "voice_translation_action_keyboard": lambda _lang: _Markup([]),
+            "run_translate_voice_to_target": lambda *_args, **_kwargs: runner_calls.append("run"),
+            "save_translation_request": lambda *_args, **_kwargs: runner_calls.append("save"),
         }
         namespace = _load_functions(
-            "translation_voice_menu_keyboard", "translation_pick_text",
-            "translation_target_keyboard", "show_translation_picker",
+            "translation_voice_menu_keyboard", "translation_voice_recovery_keyboard",
+            "translation_pick_text",
+            "translation_target_keyboard", "voice_translation_action_keyboard",
+            "audio_voice_received_text", "show_translation_picker",
             "handle_translation_callback", **dependencies,
         )
         route_pattern = _registered_pattern("handle_translation_callback")
@@ -726,19 +929,23 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
             button
             for row in voice_menu.inline_keyboard
             for button in row
-            if button.callback_data == "tr_pick|voice"
+            if button.callback_data.startswith("tr_pick|voice")
         )
         self.assertEqual(voice_button.text, "🌐 Dịch audio")
+
+        async def receive_warning(text, **kwargs):
+            replies.append((text, kwargs))
 
         def press(callback):
             self.assertRegex(callback, route_pattern)
             query = _Query(991179, callback)
+            query.message = SimpleNamespace(text="", reply_text=receive_warning)
             update = SimpleNamespace(
                 callback_query=query,
                 effective_user=query.from_user,
                 effective_message=SimpleNamespace(reply_to_message=None),
             )
-            asyncio.run(namespace["handle_translation_callback"](update, SimpleNamespace()))
+            _run_no_io(namespace["handle_translation_callback"](update, SimpleNamespace()))
             self.assertEqual(query.answers, [((), {})])
             return query
 
@@ -749,23 +956,90 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
             for row in first_markup.inline_keyboard
             for button in row
         ]
-        self.assertIn("tr_more|voice", first_callbacks)
-        press("tr_more|voice")
+        self.assertEqual(voice_button.callback_data, "tr_pick|voice|language")
+        self.assertIn("tr_more|voice|language", first_callbacks)
+        self.assertIn("tr_back|voice|language", first_callbacks)
+        self.assertIn("menu|main", first_callbacks)
+        press("tr_more|voice|language")
         expanded_callbacks = [
             button.callback_data
             for row in edits[-1][2]["reply_markup"].inline_keyboard
             for button in row
         ]
-        self.assertIn("tr_pick|voice", expanded_callbacks)
-        press("tr_pick|voice")
+        self.assertIn("tr_pick_back|voice|language", expanded_callbacks)
+        self.assertIn("menu|main", expanded_callbacks)
+        audio_available["value"] = False
+        press("tr_pick_back|voice|language")
         restored_callbacks = [
             button.callback_data
             for row in edits[-1][2]["reply_markup"].inline_keyboard
             for button in row
         ]
         self.assertEqual(restored_callbacks, first_callbacks)
-        self.assertEqual(len(edits), 3)
-        self.assertEqual(contexts, ["context"] * 3)
+        press("tr_target|voice|en|language")
+        self.assertEqual(len(replies), 1)
+        press("tr_back|voice|language")
+        self.assertEqual(edits[-1][1], "voice menu parent")
+        self.assertEqual(
+            next(
+                button.callback_data
+                for row in edits[-1][2]["reply_markup"].inline_keyboard
+                for button in row
+                if button.text == "🌐 Dịch audio"
+            ),
+            "tr_pick|voice|language",
+        )
+        press(voice_button.callback_data)
+        self.assertEqual(len(replies), 2)
+        recovery_callbacks = [
+            button.callback_data
+            for row in replies[-1][1]["reply_markup"].inline_keyboard
+            for button in row
+        ]
+        self.assertIn("tr_pick|voice|language", recovery_callbacks)
+        self.assertIn("menu|translation_language_hub", recovery_callbacks)
+        self.assertEqual(runner_calls, [])
+
+        audio_available["value"] = True
+        media_menu = namespace["translation_voice_menu_keyboard"]("vi", parent="media")
+        media_button = next(
+            button
+            for row in media_menu.inline_keyboard
+            for button in row
+            if button.text == "🌐 Dịch audio"
+        )
+        self.assertEqual(media_button.callback_data, "tr_pick|voice|media")
+        press(media_button.callback_data)
+        press("tr_back|voice|media")
+        self.assertEqual(edits[-1][1], "voice menu parent")
+        self.assertEqual(
+            next(
+                button.callback_data
+                for row in edits[-1][2]["reply_markup"].inline_keyboard
+                for button in row
+                if button.text.startswith("⬅️")
+            ),
+            "menu|translation_video_factory",
+        )
+
+        action_keyboard = namespace["voice_translation_action_keyboard"]("vi")
+        action_callbacks = [
+            button.callback_data
+            for row in action_keyboard.inline_keyboard
+            for button in row
+        ]
+        self.assertIn("menu|main", action_callbacks)
+        press("tr_pick|voice|actions")
+        action_picker_callbacks = [
+            button.callback_data
+            for row in edits[-1][2]["reply_markup"].inline_keyboard
+            for button in row
+        ]
+        self.assertIn("tr_back|voice|actions", action_picker_callbacks)
+        press("tr_back|voice|actions")
+        self.assertEqual(edits[-1][1], namespace["audio_voice_received_text"]("vi"))
+        self.assertEqual(len(edits), 8)
+        self.assertEqual(contexts, ["context"] * 10)
 
     def test_free_tools_aichat_entry_requires_consent_and_back_returns_to_free_tools(self):
         user_id = 991180
@@ -893,16 +1167,372 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
         self.assertEqual(consent_grants, [])
         self.assertEqual(len(saved_states), 1)
 
-    def test_customer_image_menu_renders_and_its_back_returns_home_without_entering_tools(self):
+    def test_aichat_consent_requires_pending_state_and_preserves_valid_grant(self):
+        user_id = 991181
+        state = {"enabled": False, "consented": True, "pending_consent": False}
+        consent_grants = []
+        saved_states = []
+
+        consent_namespace = _load_functions(
+            "aichat_consent_keyboard",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+        )
+        stale_button = next(
+            button
+            for row in consent_namespace["aichat_consent_keyboard"]().inline_keyboard
+            for button in row
+            if button.callback_data == "aichat|consent_on"
+        )
+        holder = {"state": state}
+        rendered = []
+
+        async def safe_edit_or_send(query, text, **kwargs):
+            rendered.append((text, kwargs))
+            query.edits.append((text, kwargs))
+
+        def status_payload(current, _target_user_id):
+            return {
+                "enabled": bool(current.get("enabled")),
+                "consented": bool(current.get("consented")),
+                "pending_consent": bool(current.get("pending_consent")),
+                "assist_actions": False,
+                "last_trace": {},
+            }
+
+        def enable_with_consent(current, target_user_id):
+            consent_grants.append(target_user_id)
+            return {
+                **current,
+                "enabled": True,
+                "consented": True,
+                "pending_consent": False,
+            }, {"reply": "Enabled."}
+
+        keyboard_namespace = _load_functions(
+            "aichat_control_keyboard",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+        )
+        dependencies = {
+            "get_user_language": lambda _uid: "vi",
+            "aichat_state": lambda: holder["state"],
+            "save_aichat_state": lambda value: (holder.update(state=value), saved_states.append(value)),
+            "ai_chatbot_copilot": SimpleNamespace(
+                enable_with_consent=enable_with_consent,
+                status_payload=status_payload,
+            ),
+            "aichat_control_keyboard": keyboard_namespace["aichat_control_keyboard"],
+            "free_hub_main_text": lambda _lang: "Free Tools root",
+            "free_hub_main_keyboard": lambda _lang: _Markup([[_Button("AI Chatbot", "aichat|on")]]),
+            "safe_edit_or_send": safe_edit_or_send,
+        }
+        namespace = _load_functions("handle_aichat_callback", **dependencies)
+        self.assertRegex(stale_button.callback_data, _registered_pattern("handle_aichat_callback"))
+
+        query = _Query(user_id, stale_button.callback_data)
+        asyncio.run(namespace["handle_aichat_callback"](
+            SimpleNamespace(callback_query=query), SimpleNamespace(),
+        ))
+
+        self.assertEqual(query.answers, [((), {})])
+        self.assertFalse(holder["state"]["enabled"])
+        self.assertFalse(holder["state"]["pending_consent"])
+        self.assertEqual(consent_grants, [])
+        self.assertEqual(saved_states, [])
+        self.assertEqual(rendered[0][0], "Free Tools root")
+
+        holder["state"] = {"enabled": False, "consented": False, "pending_consent": True}
+        pending_query = _Query(user_id, stale_button.callback_data)
+        asyncio.run(namespace["handle_aichat_callback"](
+            SimpleNamespace(callback_query=pending_query), SimpleNamespace(),
+        ))
+
+        self.assertEqual(pending_query.answers, [((), {})])
+        self.assertEqual(consent_grants, [user_id])
+        self.assertTrue(holder["state"]["enabled"])
+        self.assertEqual(len(saved_states), 1)
+        self.assertEqual(pending_query.edits[0][0], "Enabled.")
+
+    def test_aichat_trace_emitted_back_returns_to_enabled_status_without_state_write(self):
+        user_id = 991182
+        state = {"enabled": True, "consented": True, "pending_consent": False}
+        payload = {
+            "enabled": True,
+            "consented": True,
+            "assist_actions": False,
+            "last_trace": {},
+            "trace": [],
+            "state_source": "fixture",
+        }
+        state_before = dict(state)
+        rendered = []
+
+        async def safe_edit_or_send(query, text, **kwargs):
+            query.edits.append((text, kwargs))
+            rendered.append((text, kwargs))
+
+        dependencies = {
+            "html": html,
+            "InlineKeyboardButton": _Button,
+            "InlineKeyboardMarkup": _Markup,
+            "get_user_language": lambda _uid: "vi",
+            "aichat_state": lambda: state,
+            "save_aichat_state": lambda _value: self.fail("read-only route must not save state"),
+            "ai_chatbot_copilot": SimpleNamespace(
+                status_payload=lambda _current, _uid: dict(payload),
+            ),
+            "aichat_control_keyboard": _load_functions(
+                "aichat_control_keyboard",
+                InlineKeyboardButton=_Button,
+                InlineKeyboardMarkup=_Markup,
+            )["aichat_control_keyboard"],
+            "aichat_trace_keyboard": _load_functions(
+                "aichat_trace_keyboard",
+                InlineKeyboardButton=_Button,
+                InlineKeyboardMarkup=_Markup,
+            )["aichat_trace_keyboard"],
+            "aichat_status_text": _load_functions("aichat_status_text", html=html)["aichat_status_text"],
+            "aichat_trace_text": _load_functions("aichat_trace_text", html=html)["aichat_trace_text"],
+            "safe_edit_or_send": safe_edit_or_send,
+        }
+        namespace = _load_functions("handle_aichat_callback", **dependencies)
+        route_pattern = _registered_pattern("handle_aichat_callback")
+
+        emitted_control_keyboard = dependencies["aichat_control_keyboard"](payload)
+        trace_button = next(
+            button
+            for row in emitted_control_keyboard.inline_keyboard
+            for button in row
+            if button.text == "Trace"
+        )
+        self.assertEqual(trace_button.callback_data, "aichat|trace")
+        self.assertRegex(trace_button.callback_data, route_pattern)
+        trace_query = _Query(user_id, trace_button.callback_data)
+        asyncio.run(namespace["handle_aichat_callback"](
+            SimpleNamespace(callback_query=trace_query), SimpleNamespace(),
+        ))
+
+        self.assertEqual(trace_query.answers, [((), {})])
+        self.assertIn("AI Chatbot Trace", trace_query.edits[0][0])
+        trace_markup = trace_query.edits[0][1]["reply_markup"]
+        back_button = next(
+            button
+            for row in trace_markup.inline_keyboard
+            for button in row
+            if button.callback_data == "aichat|back_active"
+        )
+        self.assertEqual(back_button.text, "⬅️ AI Chatbot")
+        self.assertRegex(back_button.callback_data, route_pattern)
+
+        back_query = _Query(user_id, back_button.callback_data)
+        asyncio.run(namespace["handle_aichat_callback"](
+            SimpleNamespace(callback_query=back_query), SimpleNamespace(),
+        ))
+
+        self.assertEqual(back_query.answers, [((), {})])
+        self.assertIn("Enabled: <code>yes</code>", back_query.edits[0][0])
+        self.assertEqual(
+            [
+                button.callback_data
+                for row in back_query.edits[0][1]["reply_markup"].inline_keyboard
+                for button in row
+            ],
+            [
+                "aichat|off", "aichat|assist_on", "aichat|status",
+                "aichat|trace", "aichat|back_freehub", "menu|main",
+            ],
+        )
+        self.assertEqual(state, state_before)
+        self.assertEqual(len(rendered), 2)
+
+    def test_aichat_status_emitted_control_renders_status_without_state_write(self):
+        user_id = 991183
+        state = {"enabled": True, "consented": True, "pending_consent": False}
+        payload = {
+            "enabled": True,
+            "consented": True,
+            "assist_actions": False,
+            "last_trace": {},
+            "state_source": "fixture",
+        }
+        state_before = dict(state)
+        rendered = []
+
+        async def safe_edit_or_send(query, text, **kwargs):
+            query.edits.append((text, kwargs))
+            rendered.append((text, kwargs))
+
+        control_keyboard = _load_functions(
+            "aichat_control_keyboard",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+        )["aichat_control_keyboard"]
+        trace_keyboard = _load_functions(
+            "aichat_trace_keyboard",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+        )["aichat_trace_keyboard"]
+        status_text = _load_functions("aichat_status_text", html=html)["aichat_status_text"]
+        dependencies = {
+            "html": html,
+            "get_user_language": lambda _uid: "vi",
+            "aichat_state": lambda: state,
+            "save_aichat_state": lambda _value: self.fail("read-only status route must not save state"),
+            "ai_chatbot_copilot": SimpleNamespace(
+                status_payload=lambda _current, _uid: dict(payload),
+            ),
+            "aichat_control_keyboard": control_keyboard,
+            "aichat_trace_keyboard": trace_keyboard,
+            "aichat_status_text": status_text,
+            "safe_edit_or_send": safe_edit_or_send,
+        }
+        namespace = _load_functions("handle_aichat_callback", **dependencies)
+        route_pattern = _registered_pattern("handle_aichat_callback")
+        emitted_control_keyboard = control_keyboard(payload)
+        status_button = next(
+            button
+            for row in emitted_control_keyboard.inline_keyboard
+            for button in row
+            if button.text == "AI Chatbot status"
+        )
+        self.assertEqual(status_button.callback_data, "aichat|status")
+        self.assertRegex(status_button.callback_data, route_pattern)
+
+        query = _Query(user_id, status_button.callback_data)
+        asyncio.run(namespace["handle_aichat_callback"](
+            SimpleNamespace(callback_query=query), SimpleNamespace(),
+        ))
+
+        self.assertEqual(query.answers, [((), {})])
+        self.assertIn("Enabled: <code>yes</code>", query.edits[0][0])
+        self.assertIn("Consent: <code>yes</code>", query.edits[0][0])
+        self.assertEqual(
+            [
+                button.callback_data
+                for row in query.edits[0][1]["reply_markup"].inline_keyboard
+                for button in row
+            ],
+            ["aichat|back_active", "menu|main"],
+        )
+        self.assertEqual(state, state_before)
+        self.assertEqual(len(rendered), 1)
+
+    def test_aichat_enabled_back_emitted_control_restores_free_tools_root(self):
+        user_id = 991184
+        state = {"enabled": True, "consented": True, "pending_consent": False}
+        state_before = dict(state)
+        copy = {
+            "freehub_enable_ai_chatbot": "AI Chatbot",
+            "freehub_meta": "Meta prompts",
+            "freehub_caption": "Captions",
+            "freehub_ideas": "Ideas",
+            "freehub_prompts": "Prompt library",
+            "freehub_library": "Saved prompts",
+            "freehub_publish_package": "Publishing packages",
+            "freehub_notes_docs": "Notes / Documents",
+            "freehub_save_temp_media": "Temporary media",
+            "freehub_voice_subdub_script": "Voiceover scripts",
+            "freehub_music_sfx_ideas": "Music / SFX",
+            "main_menu": "Main menu",
+        }
+
+        def build_two_column_keyboard(items, *, nav_back, nav_main, lang, main_label):
+            flat = [_Button(label, callback) for label, callback in items]
+            rows = [flat[index:index + 2] for index in range(0, len(flat), 2)]
+            if nav_back:
+                rows.append([_Button(nav_back[0], nav_back[1])])
+            if nav_main:
+                rows.append([_Button(main_label, "menu|main")])
+            return _Markup(rows)
+
+        freehub_namespace = _load_functions(
+            "build_2col_keyboard", "free_hub_main_keyboard",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+            normalize_user_language=lambda lang: lang or "vi",
+            public_hub_copy=lambda _lang: copy,
+            build_2col_keyboard=build_two_column_keyboard,
+        )
+        control_namespace = _load_functions(
+            "aichat_control_keyboard",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+        )
+        rendered = []
+
+        async def safe_edit_or_send(query, text, **kwargs):
+            query.edits.append((text, kwargs))
+            rendered.append((text, kwargs))
+
+        dependencies = {
+            "get_user_language": lambda _uid: "vi",
+            "aichat_state": lambda: state,
+            "save_aichat_state": lambda _value: self.fail("navigation must not save AI Chat state"),
+            "free_hub_main_text": lambda _lang: "Free Tools root",
+            "free_hub_main_keyboard": freehub_namespace["free_hub_main_keyboard"],
+            "aichat_control_keyboard": control_namespace["aichat_control_keyboard"],
+            "safe_edit_or_send": safe_edit_or_send,
+        }
+        namespace = _load_functions("handle_aichat_callback", **dependencies)
+        route_pattern = _registered_pattern("handle_aichat_callback")
+        emitted_control = control_namespace["aichat_control_keyboard"]({
+            "enabled": True,
+            "consented": True,
+            "assist_actions": False,
+        })
+        back_button = next(
+            button
+            for row in emitted_control.inline_keyboard
+            for button in row
+            if button.callback_data == "aichat|back_freehub"
+        )
+        self.assertEqual(back_button.text, "⬅️ Quay lại")
+        self.assertRegex(back_button.callback_data, route_pattern)
+
+        query = _Query(user_id, back_button.callback_data)
+        asyncio.run(namespace["handle_aichat_callback"](
+            SimpleNamespace(callback_query=query), SimpleNamespace(),
+        ))
+
+        self.assertEqual(query.answers, [((), {})])
+        self.assertEqual(query.edits[0][0], "Free Tools root")
+        self.assertEqual(
+            [
+                button.callback_data
+                for row in query.edits[0][1]["reply_markup"].inline_keyboard
+                for button in row
+            ],
+            [
+                "aichat|on", "freehub|open_utilities", "freehub|meta",
+                "freehub|caption", "freehub|ideas", "freehub|prompts",
+                "freehub|library", "freehub|publish_package",
+                "menu|main_memory|freehub", "freehub|upload", "freehub|hook",
+                "freehub|lib_music", "freehub|open_translate", "vdownload|start|freehub",
+                "menu|main",
+            ],
+        )
+        self.assertEqual(state, state_before)
+        self.assertEqual(len(rendered), 1)
+
+    def test_customer_image_menu_prompt_back_and_home_restore_expected_parent_without_entering_tools(self):
         effects = []
         dependencies = _main_menu_dependencies(False, effects)
         copy = {
             "image_quick": "Quick image",
             "image_prompt_from_image": "Prompt from image",
+            "image_upload_reference": "Upload a reference image",
+            "common_no_charge": "No charge",
             "image_ai_edit": "AI image edit",
             "image_edit": "Image edit",
             "back": "Back",
             "main_menu": "Main menu",
+        }
+        image_screen_copy = {
+            "send_image": "Send image",
+            "manual_description": "Manual description",
+            "back_image": "Back to Image",
+            "send_prompt_hint": "Send an image to start",
         }
 
         def build_two_column_keyboard(buttons, *, nav_back, lang, main_label):
@@ -913,8 +1543,12 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
 
         dependencies.update({
             "public_hub_copy": lambda _lang: copy,
+            "public_image_screen_copy": lambda _lang: image_screen_copy,
+            "ui_text": lambda _lang, key: "Main menu" if key == "common.main_menu" else key,
             "build_2col_keyboard": build_two_column_keyboard,
             "image_menu_v5_text": lambda _lang: "actual image menu",
+            "image_prompt_menu_start_text": lambda _lang: "actual prompt screen",
+            "set_image_menu_pending": lambda *_args, **_kwargs: None,
             "localized_start_menu_text": lambda *_args: "actual main menu",
             "localized_main_menu_keyboard": lambda *_args: _Markup([]),
             "time": SimpleNamespace(perf_counter=lambda: 1.0),
@@ -922,7 +1556,8 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
         })
         namespace = _load_functions(
             "menu_text_main_image", "menu_text_main_image_i18n", "main_image_keyboard",
-            "localized_menu_content", "handle_menu_callback", **dependencies,
+            "image_prompt_start_keyboard", "localized_menu_content", "handle_menu_callback",
+            **dependencies,
         )
         route_pattern = _registered_menu_pattern()
         image_entry = "menu|main_image"
@@ -942,7 +1577,37 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
              "menu|image_edit_start", "menu|main", "menu|main"],
             image_callbacks,
         )
-        # The image-tool callbacks are inspected only; no tool/engine callback is dispatched.
+
+        prompt_entry = next(data for data in image_callbacks if data == "menu|image_prompt_start")
+        self.assertRegex(prompt_entry, route_pattern)
+        prompt_query = _Query(991126, prompt_entry)
+        asyncio.run(namespace["handle_menu_callback"](
+            SimpleNamespace(callback_query=prompt_query), context,
+        ))
+        self.assertEqual([((), {})], prompt_query.answers)
+        self.assertEqual("actual prompt screen", prompt_query.edits[0][0])
+        prompt_markup = prompt_query.edits[0][1]["reply_markup"]
+        prompt_back = next(
+            button for row in prompt_markup.inline_keyboard for button in row
+            if button.text.startswith("⬅️")
+        )
+        self.assertEqual("menu|main_image", prompt_back.callback_data)
+        self.assertRegex(prompt_back.callback_data, route_pattern)
+
+        back_query = _Query(991126, prompt_back.callback_data)
+        asyncio.run(namespace["handle_menu_callback"](
+            SimpleNamespace(callback_query=back_query), context,
+        ))
+        self.assertEqual([((), {})], back_query.answers)
+        self.assertEqual("actual image menu", back_query.edits[0][0])
+        restored_callbacks = [
+            button.callback_data
+            for row in back_query.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+        ]
+        self.assertEqual(image_callbacks, restored_callbacks)
+
+        # Other image-tool callbacks are inspected only; no tool/engine callback is dispatched.
         home_query = _Query(991126, "menu|main")
         self.assertRegex(home_query.data, route_pattern)
         asyncio.run(namespace["handle_menu_callback"](
@@ -950,6 +1615,271 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
         ))
         self.assertEqual([((), {})], home_query.answers)
         self.assertEqual("actual main menu", home_query.edits[0][0])
+
+    def test_image_prompt_send_image_back_clears_only_actor_pending_and_returns_to_image_hub(self):
+        user_id, other_user_id = 991127, 991128
+        effects = []
+        dependencies = _main_menu_dependencies(False, effects)
+        copy = {
+            "image_quick": "Quick image",
+            "image_prompt_from_image": "Prompt from image",
+            "image_upload_reference": "Upload a reference image",
+            "common_no_charge": "No charge",
+            "image_ai_edit": "AI image edit",
+            "image_edit": "Image edit",
+            "back": "Back",
+            "main_menu": "Main menu",
+        }
+        image_screen_copy = {
+            "send_image": "Send image",
+            "manual_description": "Manual description",
+            "back_image": "Back to Image",
+            "send_prompt_hint": "Send an image to start",
+        }
+
+        def build_two_column_keyboard(buttons, *, nav_back, lang, main_label):
+            flat = [_Button(label, callback) for label, callback in buttons]
+            rows = [flat[index:index + 2] for index in range(0, len(flat), 2)]
+            rows.append([_Button(nav_back[0], nav_back[1]), _Button(main_label, "menu|main")])
+            return _Markup(rows)
+
+        clear_helpers = (
+            "clear_free_hub_pending", "clear_support_ticket_pending", "clear_quick_media_pending",
+            "clear_quick_image_flow", "clear_public_image_prompt_pending",
+            "clear_public_video_prompt_pending", "clear_media_aspect_pending",
+            "clear_public_video_package_context", "clear_creative_motion_pending",
+            "clear_cinematic_ad_pending", "clear_trend_video_flow_pending",
+            "clear_trend_workflow_confirm_pending", "clear_feedback_pending",
+            "clear_frame_video_state", "clear_storyboard_state",
+            "clear_developing_video_pending", "clear_product_context",
+            "clear_video_editor_pending", "clear_video_downloader_pending",
+            "clear_video_dubbing_pending", "clear_video_finalization_state",
+            "clear_video_addon_state", "clear_marketing_pending",
+            "clear_shopaikey_pending_confirmations_for_user",
+        )
+        dependencies.update({
+            "public_hub_copy": lambda _lang: copy,
+            "public_image_screen_copy": lambda _lang: image_screen_copy,
+            "ui_text": lambda _lang, key: "Main menu" if key == "common.main_menu" else key,
+            "build_2col_keyboard": build_two_column_keyboard,
+            "image_menu_v5_text": lambda _lang: "actual image menu",
+            "image_prompt_menu_start_text": lambda _lang: "actual prompt screen",
+            "image_prompt_send_image_hint_text": lambda _lang: "fixture image intake prompt",
+            "localized_start_menu_text": lambda *_args: "actual main menu",
+            "localized_main_menu_keyboard": lambda *_args: _Markup([]),
+            "get_user_language": lambda _uid: "vi",
+            "QUICK_MEDIA_PENDING_TTL_SECONDS": 600,
+            "IMAGE_MENU_PENDING_ACTIONS": {"image_prompt_wait_image"},
+            "USER_PENDING": {},
+            "time": SimpleNamespace(time=lambda: 100.0, perf_counter=lambda: 1.0),
+            "video_ai_edit_state": SimpleNamespace(clear_draft=lambda _uid: False),
+            "logger": SimpleNamespace(info=lambda *_args, **_kwargs: None),
+        })
+        dependencies.update({name: (lambda *_args, **_kwargs: False) for name in clear_helpers})
+        namespace = _load_functions(
+            "menu_text_main_image", "menu_text_main_image_i18n", "main_image_keyboard",
+            "image_prompt_menu_start_text", "image_prompt_start_keyboard",
+            "image_menu_pending_key", "set_image_menu_pending", "get_image_menu_pending",
+            "clear_image_menu_pending", "clear_media_creator_pending_states",
+            "localized_menu_content", "handle_menu_callback", "handle_image_tools_callback",
+            **dependencies,
+        )
+        # The actual shared cleanup helper runs with all unrelated cleanup seams inert.
+        namespace["clear_media_creator_pending_states"] = _load_functions(
+            "clear_media_creator_pending_states",
+            **{key: value for key, value in namespace.items() if key.startswith("clear_")},
+            video_ai_edit_state=dependencies["video_ai_edit_state"],
+        )["clear_media_creator_pending_states"]
+        registered = []
+        namespace.update(
+            tg_app=SimpleNamespace(add_handler=registered.append),
+            CallbackQueryHandler=lambda callback, pattern: (callback, re.compile(pattern)),
+        )
+        for handler_name in ("handle_menu_callback", "handle_image_tools_callback"):
+            registration = re.search(
+                rf"(?m)^\s*tg_app\.add_handler\(CallbackQueryHandler\({handler_name},.*$",
+                BOT_SOURCE,
+            )
+            self.assertIsNotNone(registration, f"missing registration for {handler_name}")
+            exec(compile(registration.group(0).strip(), f"bot.py:{handler_name} registration", "exec"), namespace)
+        callbacks_by_handler = {callback.__name__: (callback, pattern) for callback, pattern in registered}
+        menu_callback, menu_pattern = callbacks_by_handler["handle_menu_callback"]
+        image_callback, image_pattern = callbacks_by_handler["handle_image_tools_callback"]
+        context = SimpleNamespace(user_data={})
+
+        image_query = _Query(user_id, "menu|main_image")
+        self.assertRegex(image_query.data, menu_pattern)
+        asyncio.run(menu_callback(
+            SimpleNamespace(callback_query=image_query), context,
+        ))
+        self.assertEqual([((), {})], image_query.answers)
+        image_callbacks = [
+            button.callback_data
+            for row in image_query.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+        ]
+        prompt_entry = next(data for data in image_callbacks if data == "menu|image_prompt_start")
+        prompt_query = _Query(user_id, prompt_entry)
+        asyncio.run(menu_callback(
+            SimpleNamespace(callback_query=prompt_query), context,
+        ))
+        self.assertEqual([((), {})], prompt_query.answers)
+        send_image = next(
+            button for row in prompt_query.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row if button.callback_data == "imgtool|prompt_need_image"
+        )
+        self.assertRegex(send_image.callback_data, image_pattern)
+
+        send_query = _Query(user_id, send_image.callback_data)
+        asyncio.run(image_callback(
+            SimpleNamespace(callback_query=send_query), context,
+        ))
+        self.assertEqual([((), {})], send_query.answers)
+        self.assertEqual("image_prompt_wait_image", namespace["get_image_menu_pending"](user_id)["pending_action"])
+        self.assertEqual("fixture image intake prompt", send_query.edits[0][0])
+        back = next(
+            button for row in send_query.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row if button.callback_data == "menu|main_image"
+        )
+        self.assertRegex(back.callback_data, menu_pattern)
+        namespace["set_image_menu_pending"](other_user_id, "image_prompt_wait_image")
+
+        back_query = _Query(user_id, back.callback_data)
+        asyncio.run(menu_callback(
+            SimpleNamespace(callback_query=back_query), context,
+        ))
+        self.assertEqual([((), {})], back_query.answers)
+        restored_callbacks = [
+            button.callback_data
+            for row in back_query.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+        ]
+        self.assertEqual(image_callbacks, restored_callbacks)
+        self.assertEqual([((), {})], back_query.answers)
+        self.assertIsNone(namespace["get_image_menu_pending"](user_id))
+        self.assertEqual("image_prompt_wait_image", namespace["get_image_menu_pending"](other_user_id)["pending_action"])
+
+    def test_image_ai_edit_intake_back_restores_hub_and_clears_only_actor_pending(self):
+        user_id, other_user_id = 991129, 991130
+        dependencies = _main_menu_dependencies(False, [])
+        hub_copy = {
+            "image_quick": "Quick image", "image_prompt_from_image": "Prompt from image",
+            "image_ai_edit": "AI image edit", "image_edit": "Image edit",
+            "back": "Back", "main_menu": "Main menu",
+        }
+        screen_copy = {"send_image": "Send image", "back_image": "Back to Image"}
+
+        def build_two_column_keyboard(buttons, *, nav_back, lang, main_label="Main menu"):
+            flat = [_Button(label, callback) for label, callback in buttons]
+            rows = [flat[index:index + 2] for index in range(0, len(flat), 2)]
+            rows.append([_Button(nav_back[0], nav_back[1]), _Button(main_label, "menu|main")])
+            return _Markup(rows)
+
+        clear_helpers = (
+            "clear_free_hub_pending", "clear_support_ticket_pending", "clear_quick_media_pending",
+            "clear_quick_image_flow", "clear_public_image_prompt_pending",
+            "clear_public_video_prompt_pending", "clear_media_aspect_pending",
+            "clear_public_video_package_context", "clear_creative_motion_pending",
+            "clear_cinematic_ad_pending", "clear_trend_video_flow_pending",
+            "clear_trend_workflow_confirm_pending", "clear_feedback_pending",
+            "clear_frame_video_state", "clear_storyboard_state",
+            "clear_developing_video_pending", "clear_product_context",
+            "clear_video_editor_pending", "clear_video_downloader_pending",
+            "clear_video_dubbing_pending", "clear_video_finalization_state",
+            "clear_video_addon_state", "clear_marketing_pending",
+            "clear_shopaikey_pending_confirmations_for_user",
+        )
+        dependencies.update({
+            "public_hub_copy": lambda _lang: hub_copy,
+            "public_image_screen_copy": lambda _lang: screen_copy,
+            "build_2col_keyboard": build_two_column_keyboard,
+            "image_menu_v5_text": lambda _lang: "actual image menu",
+            "get_user_language": lambda _uid: "vi",
+            "recent_image_file_state": lambda _uid: {},
+            "QUICK_MEDIA_PENDING_TTL_SECONDS": 600,
+            "IMAGE_MENU_PENDING_ACTIONS": {"image_edit_wait_image"},
+            "USER_PENDING": {},
+            "time": SimpleNamespace(time=lambda: 100.0, perf_counter=lambda: 1.0),
+            "re": re,
+            "video_ai_edit_state": SimpleNamespace(clear_draft=lambda _uid: False),
+            "logger": SimpleNamespace(info=lambda *_args, **_kwargs: None),
+        })
+        dependencies.update({name: (lambda *_args, **_kwargs: False) for name in clear_helpers})
+        namespace = _load_functions(
+            "menu_text_main_image", "menu_text_main_image_i18n", "main_image_keyboard",
+            "image_edit_start_keyboard", "image_menu_pending_key", "set_image_menu_pending",
+            "get_image_menu_pending", "clear_image_menu_pending", "clear_media_creator_pending_states",
+            "localized_menu_content", "handle_menu_callback", "handle_image_tools_callback",
+            **dependencies,
+        )
+        namespace["clear_media_creator_pending_states"] = _load_functions(
+            "clear_media_creator_pending_states",
+            **{key: value for key, value in namespace.items() if key.startswith("clear_")},
+            video_ai_edit_state=dependencies["video_ai_edit_state"],
+        )["clear_media_creator_pending_states"]
+
+        registered = []
+        namespace.update(
+            tg_app=SimpleNamespace(add_handler=registered.append),
+            CallbackQueryHandler=lambda callback, pattern: (callback, re.compile(pattern)),
+        )
+        for handler_name in ("handle_menu_callback", "handle_image_tools_callback"):
+            registration = re.search(
+                rf"(?m)^\s*tg_app\.add_handler\(CallbackQueryHandler\({handler_name},.*$",
+                BOT_SOURCE,
+            )
+            self.assertIsNotNone(registration, f"missing registration for {handler_name}")
+            exec(compile(registration.group(0).strip(), f"bot.py:{handler_name} registration", "exec"), namespace)
+        callbacks_by_handler = {callback.__name__: (callback, pattern) for callback, pattern in registered}
+        menu_callback, menu_pattern = callbacks_by_handler["handle_menu_callback"]
+        image_callback, image_pattern = callbacks_by_handler["handle_image_tools_callback"]
+        context = SimpleNamespace(user_data={})
+
+        root_query = _Query(user_id, "menu|main_image")
+        self.assertRegex(root_query.data, menu_pattern)
+        asyncio.run(menu_callback(SimpleNamespace(callback_query=root_query), context))
+        root_callbacks = [
+            button.callback_data
+            for row in root_query.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+        ]
+        self.assertEqual(((), {}), root_query.answers[0])
+
+        ai_edit = next(
+            button for row in root_query.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row if button.callback_data == "imgtool|edit_ai_start"
+        )
+        self.assertRegex(ai_edit.callback_data, image_pattern)
+        edit_query = _Query(user_id, ai_edit.callback_data)
+        asyncio.run(image_callback(SimpleNamespace(callback_query=edit_query), context))
+        self.assertEqual([((), {})], edit_query.answers)
+        self.assertEqual(
+            "image_edit_wait_image",
+            namespace["get_image_menu_pending"](user_id)["pending_action"],
+        )
+        self.assertEqual("ai_edit", namespace["get_image_menu_pending"](user_id)["edit_type"])
+        back = next(
+            button for row in edit_query.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row if button.text.startswith("⬅️")
+        )
+        self.assertEqual("menu|main_image", back.callback_data)
+        self.assertRegex(back.callback_data, menu_pattern)
+        namespace["set_image_menu_pending"](other_user_id, "image_edit_wait_image", edit_type="ai_edit")
+
+        back_query = _Query(user_id, back.callback_data)
+        asyncio.run(menu_callback(SimpleNamespace(callback_query=back_query), context))
+        self.assertEqual([((), {})], back_query.answers)
+        restored_callbacks = [
+            button.callback_data
+            for row in back_query.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+        ]
+        self.assertEqual(root_callbacks, restored_callbacks)
+        self.assertIsNone(namespace["get_image_menu_pending"](user_id))
+        self.assertEqual(
+            "image_edit_wait_image",
+            namespace["get_image_menu_pending"](other_user_id)["pending_action"],
+        )
 
     def test_customer_notes_documents_landing_and_back_stay_in_the_same_ui_flow(self):
         dependencies = _main_menu_dependencies(False, [])
@@ -1804,6 +2734,9 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
         async def render(query, text, **kwargs):
             query.edits.append((text, kwargs))
 
+        async def allow_memory_access(_update):
+            return True
+
         def list_notes(owner_id, where_sql="", params=(), limit=10):
             result_reads.append((owner_id, where_sql, params, limit))
             if str(owner_id) != str(user_id):
@@ -1830,7 +2763,7 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
             memory_can_use_full=lambda _uid: True, memory_access_message=lambda: "Denied",
             set_memory_guided_pending=set_pending, clear_memory_guided_pending=clear_pending,
             get_memory_guided_pending=lambda owner_id: pending.get(owner_id),
-            memory_require_access=lambda _update: asyncio.sleep(0, result=True),
+            memory_require_access=allow_memory_access,
             memory_list_notes=list_notes,
             memory_fetch_note=fetch_note,
             memory_delete_confirm_text=lambda *_args: "Confirm delete fixture",
@@ -2440,6 +3373,7 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
             ("freehub|meta", "meta_ai_prompt"),
             ("freehub|caption", "caption_hashtag"),
             ("freehub|ideas", "content_idea"),
+            ("freehub|hook", "hook_script"),
         ):
             with self.subTest(callback_data=callback_data):
                 root_callbacks = {
@@ -2468,7 +3402,13 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
                 self.assertEqual({"pending_action": "free_hub", "task_type": "other-user"}, pending[other_user_id])
 
         self.assertEqual(
-            [("image_video_prompt", 0), ("meta_ai_prompt", 0), ("caption_hashtag", 0), ("content_idea", 0)],
+            [
+                ("image_video_prompt", 0),
+                ("meta_ai_prompt", 0),
+                ("caption_hashtag", 0),
+                ("content_idea", 0),
+                ("hook_script", 0),
+            ],
             suggestion_calls,
         )
 
@@ -3103,6 +4043,86 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
                     ],
                 )
 
+    def test_profile_command_registration_sends_the_actual_localized_account_keyboard(self):
+        class Copy(dict):
+            def __missing__(self, key):
+                return key
+
+        side_effects = []
+        locale_inputs = []
+
+        async def inert_birthday_check(*_args):
+            side_effects.append("birthday-check")
+
+        def copy_for_locale(lang):
+            locale_inputs.append(lang)
+            return Copy()
+
+        dependencies = _main_menu_dependencies(False, [])
+        dependencies.update({
+            "html": html,
+            "public_pricing_locale": lambda lang: locale_inputs.append(lang) or lang,
+            "get_user_language": lambda _uid: "en",
+            "public_account_flow_copy": lambda lang: locale_inputs.append(lang) or Copy(
+                profile_title="Account", save_service_xu="Save {discount}%"
+            ),
+            "maybe_auto_grant_birthday_gift": inert_birthday_check,
+            "get_user": lambda *_args: (100, 20, False),
+            "get_member_profile": lambda _uid: {"total_paid_vnd": 0},
+            "referral_stats_for_user": lambda _uid: {"pending": 0, "rewarded": 0, "reward_xu": 0},
+            "admin_display_badge": lambda _uid: "",
+            "get_role_badge": lambda _uid: "Member",
+            "public_hub_copy": copy_for_locale,
+            "referral_link_for_user": lambda _uid: "https://example.test/ref",
+            "birthday_gift_status": lambda _uid: {"birthday": None},
+            "get_user_plan": lambda _uid: {"active": False},
+            "get_member_service_discount_rate": lambda _uid: 0,
+        })
+        namespace = _load_functions("cmd_profile", "main_profile_keyboard", **dependencies)
+        registrations = []
+        namespace.update({
+            "CommandHandler": lambda command, callback: SimpleNamespace(command=command, callback=callback),
+            "tg_app": SimpleNamespace(add_handler=registrations.append),
+        })
+        registration_line = next(
+            line.strip() for line in BOT_SOURCE.splitlines()
+            if 'CommandHandler("profile"' in line and "cmd_profile" in line
+        )
+        exec(registration_line, namespace)
+        self.assertEqual(1, len(registrations))
+        self.assertEqual("profile", registrations[0].command)
+        self.assertIs(registrations[0].callback, namespace["cmd_profile"])
+
+        sent = {}
+
+        async def capture_reply(text, **kwargs):
+            sent["text"] = text
+            sent.update(kwargs)
+
+        update = SimpleNamespace(
+            effective_user=SimpleNamespace(id=987654321, first_name="Fixture"),
+            message=SimpleNamespace(reply_text=capture_reply),
+        )
+        coroutine = registrations[0].callback(update, SimpleNamespace())
+        try:
+            coroutine.send(None)
+        except StopIteration:
+            pass
+        else:
+            coroutine.close()
+            self.fail("profile command fixture unexpectedly yielded I/O")
+
+        self.assertEqual(["birthday-check"], side_effects)
+        self.assertEqual("HTML", sent["parse_mode"])
+        self.assertIn("Account", sent["text"])
+        expected = namespace["main_profile_keyboard"]("en")
+        self.assertEqual(
+            [[button.callback_data for button in row] for row in expected.inline_keyboard],
+            [[button.callback_data for button in row] for row in sent["reply_markup"].inline_keyboard],
+        )
+        self.assertEqual(6, len(sent["reply_markup"].inline_keyboard))
+        self.assertEqual({"en"}, set(locale_inputs))
+
     def test_customer_feedback_root_button_dispatches_to_registered_feedback_handler(self):
         effects = []
         dependencies = _main_menu_dependencies(False, effects)
@@ -3229,6 +4249,61 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
         self.assertEqual(query.answers, [((), {})])
         self.assertEqual(query.edits, [
             ("existing screen:main", {"reply_markup": "existing keyboard:main"}),
+        ])
+
+    def test_knowledge_vault_status_dispatches_emitted_control_to_read_only_status(self):
+        keyboard_namespace = _load_functions(
+            "vault_admin_keyboard",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+        )
+        keyboard = keyboard_namespace["vault_admin_keyboard"]()
+        status_button = next(
+            button
+            for row in keyboard.inline_keyboard
+            for button in row
+            if button.callback_data == "vault|status"
+        )
+        self.assertRegex(
+            status_button.callback_data,
+            _registered_pattern("handle_knowledge_vault_callback"),
+        )
+
+        status = {"importer": "ready", "pending": 0}
+        effects = []
+
+        class _Importer:
+            def debug_status(self):
+                effects.append("read_status")
+                return status
+
+        async def edit_message_text(text, **kwargs):
+            effects.append(("edit", text, kwargs))
+
+        query = _Query(123, status_button.callback_data)
+        query.edit_message_text = edit_message_text
+        dependencies = {
+            "is_admin_user": lambda user_id: user_id == 123,
+            "toan_knowledge_vault": lambda: effects.append("vault_factory") or object(),
+            "toan_vault_importer": lambda: _Importer(),
+            "vault_json_block": lambda payload: f"<status>{payload!r}</status>",
+            "vault_admin_keyboard": lambda: keyboard,
+        }
+        namespace = _load_functions("handle_knowledge_vault_callback", **dependencies)
+
+        _run_no_io(namespace["handle_knowledge_vault_callback"](
+            SimpleNamespace(callback_query=query), SimpleNamespace(),
+        ))
+
+        self.assertEqual(query.answers, [((), {})])
+        self.assertEqual(effects, [
+            "vault_factory",
+            "read_status",
+            (
+                "edit",
+                "🧠 <b>Kho học liệu TOAN AAS</b>\n\n<status>{'importer': 'ready', 'pending': 0}</status>",
+                {"parse_mode": "HTML", "reply_markup": keyboard},
+            ),
         ])
 
     def test_knowledge_vault_instruction_shortcuts_are_labeled_as_guides(self):
@@ -3527,6 +4602,146 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
         self.assertEqual(home_query.answers, [((), {})])
         self.assertEqual(home_query.edits, [("Main menu fixture", {"reply_markup": main_markup})])
         self.assertIn(("context", user_id, showroom, "menu|main", "voice"), effects)
+
+    def test_public_music_hub_back_restores_audio_studio_and_home_returns_main_via_registered_handlers(self):
+        showroom = "showroom"
+        video_addon = "video_addon"
+        product_helpers = _load_functions(
+            "normalize_product_context",
+            "product_context_callback",
+            "infer_product_context_from_callback",
+            "parse_product_context_callback",
+            PRODUCT_CONTEXT_SHOWROOM=showroom,
+            PRODUCT_CONTEXT_VIDEO_ADDON=video_addon,
+            PRODUCT_CONTEXTS={showroom, video_addon},
+        )
+        copy = {
+            "audio_root_voice": "Voice",
+            "audio_root_music": "Music",
+            "audio_root_back": "Back",
+            "audio_studio_label": "Audio Studio",
+            "music_background": "Background music",
+            "music_song": "Lyrics song",
+            "music_vault": "Music library",
+            "music_edit": "Music editor",
+            "music_hub_title": "Music Hub",
+            "music_hub_body": "Choose an option",
+            "main_menu": "Main menu",
+        }
+        keyboard_namespace = _load_functions(
+            "build_2col_keyboard",
+            "music_tools_keyboard",
+            "music_hub_text",
+            "music_hub_keyboard",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+            ui_text=lambda _lang, key: key,
+            music_ui_lang=lambda user_id=None, lang="": "vi",
+            public_hub_copy=lambda _lang: copy,
+            _audio_label=lambda _lang, key: copy.get(key, key),
+            normalize_product_context=product_helpers["normalize_product_context"],
+            product_context_callback=product_helpers["product_context_callback"],
+            PRODUCT_CONTEXT_SHOWROOM=showroom,
+            PRODUCT_CONTEXT_VIDEO_ADDON=video_addon,
+        )
+        audio_markup = keyboard_namespace["music_tools_keyboard"]("vi", "menu|main")
+        music_button = next(
+            button
+            for row in audio_markup.inline_keyboard
+            for button in row
+            if button.callback_data == "music_quick|showroom|music_hub"
+        )
+
+        replies = []
+
+        async def record_reply(text, **kwargs):
+            replies.append((text, kwargs))
+
+        music_namespace = _load_functions(
+            "handle_music_quick_callback",
+            Update=object,
+            ContextTypes=SimpleNamespace(DEFAULT_TYPE=object),
+            LEGACY_CANONICAL_CALLBACK_REDIRECTS={},
+            PRODUCT_CONTEXT_SHOWROOM=showroom,
+            PRODUCT_CONTEXT_VIDEO_ADDON=video_addon,
+            parse_product_context_callback=product_helpers["parse_product_context_callback"],
+            music_ui_lang=lambda _uid: "vi",
+            normalize_product_context=product_helpers["normalize_product_context"],
+            enter_product_context=lambda *_args, **_kwargs: None,
+            clear_music_guided_pending=lambda _uid: None,
+            menu_text_main_music_i18n=lambda _lang: "Audio Studio screen",
+            music_tools_keyboard=keyboard_namespace["music_tools_keyboard"],
+            music_hub_text=keyboard_namespace["music_hub_text"],
+            music_hub_keyboard=keyboard_namespace["music_hub_keyboard"],
+        )
+        user_id = 991131
+        music_pattern = _registered_pattern("handle_music_quick_callback")
+
+        def dispatch_music(callback_data):
+            self.assertRegex(callback_data, music_pattern)
+            query = _Query(user_id, callback_data)
+            query.message = SimpleNamespace(reply_text=record_reply)
+            asyncio.run(music_namespace["handle_music_quick_callback"](
+                SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=user_id)),
+                SimpleNamespace(),
+            ))
+            self.assertEqual(query.answers, [((), {})])
+            return query
+
+        self.assertRegex(music_button.callback_data, music_pattern)
+        self.assertEqual(music_button.callback_data, "music_quick|showroom|music_hub")
+        dispatch_music(music_button.callback_data)
+        self.assertEqual(replies[-1][0], "🎵 <b>Music Hub</b>\n\nChoose an option")
+        self.assertEqual(
+            [button.callback_data for row in replies[-1][1]["reply_markup"].inline_keyboard for button in row],
+            [
+                "music_quick|showroom|ai_music",
+                "music_quick|showroom|song_menu",
+                "music_quick|showroom|music",
+                "music_quick|showroom|music_edit",
+                "music_quick|showroom|root",
+                "menu|main",
+            ],
+        )
+        back_button, home_button = replies[-1][1]["reply_markup"].inline_keyboard[-1]
+        self.assertEqual((back_button.callback_data, home_button.callback_data),
+                         ("music_quick|showroom|root", "menu|main"))
+        dispatch_music(back_button.callback_data)
+        self.assertEqual(replies[-1][0], "Audio Studio screen")
+        self.assertEqual(replies[-1][1]["parse_mode"], "HTML")
+        self.assertEqual(
+            [button.callback_data for row in replies[-1][1]["reply_markup"].inline_keyboard for button in row],
+            [
+                "music_quick|showroom|voice_hub",
+                "music_quick|showroom|music_hub",
+                "menu|main",
+                "menu|main",
+            ],
+        )
+
+        main_dependencies = _main_menu_dependencies(False, [])
+        main_dependencies.update({
+            "PRODUCT_CONTEXT_SHOWROOM": showroom,
+            "product_context_callback": product_helpers["product_context_callback"],
+        })
+        main_markup = _load_functions(
+            "localized_main_menu_keyboard", **main_dependencies,
+        )["localized_main_menu_keyboard"](False, "vi")
+        main_dependencies.update({
+            "time": SimpleNamespace(perf_counter=lambda: 1.0),
+            "logger": SimpleNamespace(info=lambda *_args, **_kwargs: None),
+            "localized_menu_content": lambda action, *_args: ("Main menu fixture", main_markup),
+        })
+        menu_namespace = _load_functions("handle_menu_callback", **main_dependencies)
+        menu_pattern = _registered_menu_pattern()
+        self.assertRegex(home_button.callback_data, menu_pattern)
+        home_query = _Query(user_id, home_button.callback_data)
+        asyncio.run(menu_namespace["handle_menu_callback"](
+            SimpleNamespace(callback_query=home_query),
+            SimpleNamespace(user_data={}),
+        ))
+        self.assertEqual(home_query.answers, [((), {})])
+        self.assertEqual(home_query.edits, [("Main menu fixture", {"reply_markup": main_markup})])
 
     def test_customer_ticket_category_prompt_back_restores_category_menu(self):
         class Copy(dict):

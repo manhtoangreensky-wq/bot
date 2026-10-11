@@ -30,6 +30,8 @@ def _runtime():
         query.edits.append((text, kwargs))
     ns.update({
         "InlineKeyboardButton": Button, "html": html,
+        "time": SimpleNamespace(perf_counter=lambda: 1.0),
+        "logger": SimpleNamespace(info=lambda *_args, **_kwargs: None),
         "public_hub_copy": lambda _lang: Copy(),
         "safe_edit_or_send": edit,
         "clear_support_ticket_pending": lambda uid: cleared.append(uid),
@@ -60,10 +62,85 @@ def _entry(ns):
                 for button in row if button.callback_data.startswith("menu|support"))
 
 
+def _dispatch_now(route, data):
+    handler, pattern = route
+    assert pattern.match(data), "emitted callback has no registered owner"
+    query = fixture.fixture.Query(data)
+    coroutine = handler(SimpleNamespace(callback_query=query), SimpleNamespace(user_data={}))
+    try:
+        coroutine.send(None)
+    except StopIteration:
+        return query
+    coroutine.close()
+    raise AssertionError("fixture callback unexpectedly yielded I/O")
+
+
 class AccountSupportReadOriginTests(unittest.TestCase):
+    def test_emitted_public_auto_support_page_back_and_home_restore_their_parents(self):
+        ns, menu, support, cleared = _runtime()
+        public_root = ns["human_support_keyboard"]("vi")
+        root_callbacks = [
+            button.callback_data
+            for row in public_root.inline_keyboard
+            for button in row
+        ]
+        auto_entry = next(button.callback_data for row in public_root.inline_keyboard for button in row
+                          if button.callback_data == "support|cskh_auto")
+
+        page = _dispatch_now(support, auto_entry)
+        self.assertIn("support_auto_title", page.edits[0][0])
+        self.assertEqual([((), {})], page.answers)
+        self.assertEqual([123], cleared)
+        page_buttons = fixture._buttons(page)
+        back = next(button.callback_data for button in page_buttons if button.text.startswith("⬅"))
+        home = next(button.callback_data for button in page_buttons if button.callback_data == "menu|main")
+        self.assertEqual("support|start", back)
+
+        returned = _dispatch_now(support, back)
+        self.assertEqual([((), {})], returned.answers)
+        self.assertIn("support", returned.edits[0][0].lower())
+        self.assertEqual(root_callbacks, [button.callback_data for button in fixture._buttons(returned)])
+        self.assertEqual([123, 123], cleared)
+        main = _dispatch_now(menu, home)
+        self.assertEqual([((), {})], main.answers)
+        self.assertIn("MAIN MENU", main.edits[0][0])
+        self.assertEqual({123}, set(cleared))
+
+    def test_public_support_information_buttons_back_to_exact_support_root(self):
+        expected_pages = {
+            "admin_contact": "support_contact_title",
+            "premium": "support_premium",
+            "bot": "support_custom_bot",
+            "consult": "support_consult",
+        }
+        for action, expected_heading in expected_pages.items():
+            with self.subTest(action=action):
+                ns, menu, support, cleared = _runtime()
+                root = ns["human_support_keyboard"]("vi")
+                root_callbacks = [button.callback_data for row in root.inline_keyboard for button in row]
+                entry = next(callback for callback in root_callbacks if callback == f"support|{action}")
+
+                page = _dispatch_now(support, entry)
+                self.assertEqual([((), {})], page.answers)
+                self.assertIn(expected_heading, page.edits[0][0])
+                page_buttons = fixture._buttons(page)
+                back = next(button.callback_data for button in page_buttons if button.text.startswith("⬅"))
+                self.assertIn("menu|main", [button.callback_data for button in page_buttons])
+                self.assertEqual("support|start", back)
+                # URLs in the Admin-contact keyboard are only inspected as data; they are never opened.
+
+                returned = _dispatch_now(support, back)
+                self.assertEqual([((), {})], returned.answers)
+                self.assertEqual(root_callbacks, [button.callback_data for button in fixture._buttons(returned)])
+                self.assertEqual([123, 123], cleared)
+
+                main = _dispatch_now(menu, "menu|main")
+                self.assertEqual([((), {})], main.answers)
+                self.assertIn("MAIN MENU", main.edits[0][0])
+
     def test_account_support_has_back_to_account_and_keeps_home(self):
         ns, menu, _, _ = _runtime()
-        hub = fixture._dispatch(menu, _entry(ns))
+        hub = _dispatch_now(menu, _entry(ns))
         callbacks = [button.callback_data for button in fixture._buttons(hub)]
         self.assertIn("menu|main_profile", callbacks)
         self.assertIn("menu|main", callbacks)
@@ -72,46 +149,70 @@ class AccountSupportReadOriginTests(unittest.TestCase):
         for action in ("admin_contact", "cskh_auto", "premium", "bot", "consult"):
             with self.subTest(action=action):
                 ns, menu, support, _ = _runtime()
-                hub = fixture._dispatch(menu, _entry(ns))
+                hub = _dispatch_now(menu, _entry(ns))
                 child = next(button.callback_data for button in fixture._buttons(hub)
                              if str(button.callback_data).split("|")[:2] == ["support", action])
-                page = fixture._dispatch(support, child)
+                page = _dispatch_now(support, child)
                 back = next(button.callback_data for button in fixture._buttons(page) if button.text.startswith("⬅"))
-                hub_again = fixture._dispatch(support, back)
+                hub_again = _dispatch_now(support, back)
                 self.assertIn("menu|main_profile", [button.callback_data for button in fixture._buttons(hub_again)])
+
+    def test_account_support_information_pages_exact_back_and_home(self):
+        for action in ("admin_contact", "cskh_auto", "premium", "bot", "consult"):
+            for exit_action in ("back", "home"):
+                with self.subTest(action=action, exit_action=exit_action):
+                    ns, menu, support, _ = _runtime()
+                    hub = _dispatch_now(menu, _entry(ns))
+                    hub_callbacks = [button.callback_data for button in fixture._buttons(hub)]
+                    child = next(button.callback_data for button in fixture._buttons(hub)
+                                 if str(button.callback_data).split("|")[:2] == ["support", action])
+                    page = _dispatch_now(support, child)
+                    self.assertEqual([((), {})], page.answers)
+                    page_buttons = fixture._buttons(page)
+                    back = next(button.callback_data for button in page_buttons if button.text.startswith("⬅"))
+                    home = next(button.callback_data for button in page_buttons if button.callback_data == "menu|main")
+
+                    if exit_action == "back":
+                        returned = _dispatch_now(support, back)
+                        self.assertEqual(hub_callbacks, [button.callback_data for button in fixture._buttons(returned)])
+                    else:
+                        returned = _dispatch_now(menu, home)
+                        self.assertIn("MAIN MENU", returned.edits[0][0])
+
+                    self.assertEqual([((), {})], returned.answers)
 
     def test_bot_and_consult_details_back_retain_their_read_only_parent(self):
         ns, menu, support, _ = _runtime()
         for action, child_action, heading in (("bot", "bot_type", "support_custom_bot"), ("consult", "consult_type", "support_consult")):
-            hub = fixture._dispatch(menu, _entry(ns))
+            hub = _dispatch_now(menu, _entry(ns))
             parent_data = next(button.callback_data for button in fixture._buttons(hub)
                                if str(button.callback_data).split("|")[:2] == ["support", action])
-            parent = fixture._dispatch(support, parent_data)
+            parent = _dispatch_now(support, parent_data)
             for button in fixture._buttons(parent):
                 if str(button.callback_data).split("|")[:2] != ["support", child_action]:
                     continue
                 with self.subTest(callback=button.callback_data):
-                    detail = fixture._dispatch(support, button.callback_data)
+                    detail = _dispatch_now(support, button.callback_data)
                     back = next(item.callback_data for item in fixture._buttons(detail) if item.text.startswith("⬅"))
-                    returned = fixture._dispatch(support, back)
+                    returned = _dispatch_now(support, back)
                     self.assertIn(heading, returned.edits[0][0])
                     hub_back = next(item.callback_data for item in fixture._buttons(returned) if item.text.startswith("⬅"))
-                    hub_again = fixture._dispatch(support, hub_back)
+                    hub_again = _dispatch_now(support, hub_back)
                     self.assertIn("menu|main_profile", [item.callback_data for item in fixture._buttons(hub_again)])
 
     def test_invalid_read_origin_stops_before_pending_cleanup_or_render(self):
         _ns, menu, support, cleared = _runtime()
         for route, data in ((menu, "menu|support|admin"), (menu, "menu|support|main_profile|extra"),
                             (support, "support|start|admin"), (support, "support|bot_type|shop|profile|extra")):
-            query = fixture._dispatch(route, data)
+            query = _dispatch_now(route, data)
             self.assertEqual(1, len(query.answers))
             self.assertTrue(query.answers[0][1].get("show_alert"))
             self.assertEqual([], query.edits)
         self.assertEqual([], cleared)
 
-    def test_legacy_and_pending_form_ticket_controls_are_unchanged(self):
+    def test_legacy_and_account_scoped_ticket_controls_keep_their_origins(self):
         ns, menu, _, _ = _runtime()
-        legacy = fixture._dispatch(menu, "menu|support")
+        legacy = _dispatch_now(menu, "menu|support")
         self.assertEqual([button.callback_data for row in ns["human_support_keyboard"]().inline_keyboard for button in row],
                          [button.callback_data for button in fixture._buttons(legacy)])
         for builder, args in (("human_support_keyboard", ()), ("support_premium_keyboard", ()),
@@ -121,7 +222,16 @@ class AccountSupportReadOriginTests(unittest.TestCase):
             protected = lambda markup: [button.callback_data for row in markup.inline_keyboard for button in row
                                          if str(button.callback_data).startswith("ticket|") or str(button.callback_data).split("|")[1:2] in
                                          (["ticket"], ["premium_type"], ["bot_input"], ["consult_need"], ["consult_input"])]
-            expected = [callback + "|profile" if callback in {"ticket|mine", "support|ticket"} else callback for callback in protected(original)]
+            expected = []
+            for callback in protected(original):
+                if callback == "ticket|mine|premium":
+                    expected.append("ticket|mine|profile_premium")
+                elif callback == "ticket|mine|support":
+                    expected.append("ticket|mine|profile")
+                elif callback in {"ticket|mine", "support|ticket"}:
+                    expected.append(callback + "|profile")
+                else:
+                    expected.append(callback)
             self.assertEqual(expected, protected(scoped))
             self.assertTrue(all(len(button.callback_data.encode("utf-8")) <= 64 for row in scoped.inline_keyboard
                                 for button in row if button.callback_data))

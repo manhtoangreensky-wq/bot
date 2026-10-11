@@ -336,7 +336,7 @@ def test_support_and_profile_roots_have_direct_native_copy_with_unchanged_callba
     expected_support_callbacks = {
         "support|admin_contact",
         "support|ticket",
-        "ticket|mine",
+        "ticket|mine|support",
         "support|premium",
         "support|bot",
         "support|consult",
@@ -344,16 +344,16 @@ def test_support_and_profile_roots_have_direct_native_copy_with_unchanged_callba
         "menu|main",
     }
     expected_profile_callbacks = {
-        "menu|main_topup",
-        "pricing|main",
+        "menu|main_topup|main_profile",
+        "pricing|main|profile",
         "menu|profile_packages",
-        "pricing|member",
-        "menu|guide_credits",
-        "menu|support",
+        "pricing|member|profile",
+        "menu|guide_credits|main_profile",
+        "menu|support|main_profile",
         "menu|profile_ref_link",
         "menu|profile_ref_stats",
         "menu|profile_ref_policy",
-        "back_lang",
+        "back_lang|profile",
         "menu|main",
     }
 
@@ -660,7 +660,7 @@ def test_support_ticket_root_and_common_ticket_actions_receive_active_locale():
         "support_ticket_menu_keyboard(lang)",
         "support_ticket_message_prompt(category, lang)",
         "support_ticket_input_keyboard(lang)",
-        "public_support_ticket_list_keyboard(uid, lang)",
+        "public_support_ticket_list_keyboard(uid, lang, tickets=tickets)",
         "public_support_ticket_text(ticket, lang)",
         "support_ticket_detail_keyboard(ticket, lang)",
     )
@@ -770,7 +770,7 @@ def test_public_ticket_renderers_use_native_copy_and_preserve_customer_callbacks
         "ticket|cat|payment_topup", "ticket|cat|image_error", "ticket|cat|video_error",
         "ticket|cat|document_pdf", "ticket|cat|package_combo", "ticket|cat|refund",
         "ticket|cat|feature_request", "ticket|cat|lead_consulting", "ticket|cat|other",
-        "ticket|mine", "menu|main",
+        "ticket|mine|ticket_menu", "menu|main",
     }
     expected_created = {
         "ticket|pv|17", "ticket|reply_user|17", "ticket|attach|17", "ticket|mine",
@@ -900,9 +900,9 @@ def test_public_support_child_keyboard_copy_is_native_and_callbacks_are_stable()
         exec(_function_source(name), namespace)
 
     expected = {
-        "support_cskh_auto_keyboard": {"support|ticket", "ticket|mine", "support|start", "menu|main"},
-        "support_admin_contact_keyboard": {"support|ticket", "ticket|mine", "support|start", "menu|main"},
-        "support_premium_keyboard": {"support|premium_type|personal", "support|premium_type|shop", "support|premium_type|business", "support|premium_type|private", "ticket|mine", "support|start", "menu|main"},
+        "support_cskh_auto_keyboard": {"support|ticket", "ticket|mine|cskh_auto", "support|start", "menu|main"},
+        "support_admin_contact_keyboard": {"support|ticket", "ticket|mine|admin_contact", "support|start", "menu|main"},
+        "support_premium_keyboard": {"support|premium_type|personal", "support|premium_type|shop", "support|premium_type|business", "support|premium_type|private", "ticket|mine|premium", "support|start", "menu|main"},
         "support_custom_bot_keyboard": {"support|bot_type|shop", "support|bot_type|content", "support|bot_type|support", "support|bot_type|internal", "support|bot_type|custom", "support|start", "menu|main"},
         "support_consult_keyboard": {"support|consult_type|image", "support|consult_type|video", "support|consult_type|frame_video", "support|consult_type|document", "support|consult_type|voice", "support|consult_type|package", "support|start", "menu|main"},
     }
