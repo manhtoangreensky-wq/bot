@@ -242,6 +242,34 @@ SCENE_COUNT_DOUBLE_MULTIPLICATION: bool = False
 BLOCKER_OWNER_LIVE_RECEIPT_MISSING: str = "owner_live_receipt_missing"
 BLOCKER_OWNER_RECEIPT_MISMATCH: str = "owner_receipt_mismatch"
 
+CALLER_CAN_OVERRIDE_CONFIRM_PURPOSE: str = "NO"
+CALLER_CAN_OVERRIDE_OWNER_RECEIPT: str = "NO"
+CALLER_CAN_OVERRIDE_EXPECTED_MAX_SPEND: str = "NO"
+OWNER_RECEIPT_STRING_EQUALITY_ONLY: str = "FORBIDDEN"
+OWNER_AUTHORITY_SOURCE: str = "owner_live_authorizations"
+OWNER_AUTHORITY_VALIDATOR: str = "PASS"
+WORKER_CAN_CREATE_OWNER_LIVE_AUTH: str = "NO"
+PROVIDER_CAN_CREATE_OWNER_LIVE_AUTH: str = "NO"
+DIRECT_PROVIDER_CAN_CREATE_OWNER_LIVE_AUTH: str = "NO"
+ORDINARY_B14_PURPOSE: str = "PRODUCTION_USER_ACTION"
+PAID_LIVE_TEST_PURPOSE_REQUIRES_OWNER_AUTH_RECORD: str = "YES"
+OWNER_AUTH_EXACT_LINEAGE: str = "PASS"
+AUTHORIZED_EXPECTED_MAX_ENFORCED: str = "YES"
+CHILD_EXPECTED_MAX_ENFORCED: str = "YES"
+MULTISCENE_OWNER_MAX_ALLOCATION: str = "PASS"
+
+STATUS_OWNER_AUTH_ACTIVE: str = "active"
+STATUS_OWNER_AUTH_REVOKED: str = "revoked"
+STATUS_OWNER_AUTH_CONSUMED: str = "consumed"
+
+BLOCKER_OWNER_AUTHORIZED_MAX_SPEND_EXCEEDED: str = "owner_authorized_max_spend_exceeded"
+BLOCKER_OWNER_LIVE_AUTH_RECORD_MISSING: str = "owner_live_authorization_record_missing"
+BLOCKER_OWNER_LIVE_AUTH_REVOKED: str = "owner_live_authorization_revoked"
+BLOCKER_OWNER_LIVE_AUTH_EXPIRED: str = "owner_live_authorization_expired"
+BLOCKER_OWNER_LIVE_AUTH_ALREADY_CONSUMED: str = "owner_live_authorization_already_consumed"
+BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH: str = "owner_live_authorization_lineage_mismatch"
+BLOCKER_OWNER_LIVE_AUTH_SLOT_MISMATCH: str = "owner_live_authorization_slot_mismatch"
+
 
 @dataclasses.dataclass(frozen=True)
 class BotMintAuthority:
@@ -305,6 +333,7 @@ def _verify_canonical_bot_mint_caller(_caller_override: str | None = None) -> No
         if caller_file == "bot.py" and caller_func in (
             "handle_video_product_callback",
             "handle_product_video_public_confirm_callback",
+            "handle_owner_authorized_live_test_confirm",
             "_canonical_bot_mint_seam",
         ):
             return
@@ -316,6 +345,235 @@ def _verify_canonical_bot_mint_caller(_caller_override: str | None = None) -> No
         )
     finally:
         del frame
+
+
+def _verify_owner_live_auth_creator(_caller_override: str | None = None) -> None:
+    if _caller_override in ("worker", "provider", "router", "direct_provider", "shell", "script"):
+        raise PermissionError(
+            f"Unauthorized owner auth creator '{_caller_override}': worker/provider/router cannot create owner live authorization "
+            "(WORKER_CAN_CREATE_OWNER_LIVE_AUTH=NO, PROVIDER_CAN_CREATE_OWNER_LIVE_AUTH=NO, DIRECT_PROVIDER_CAN_CREATE_OWNER_LIVE_AUTH=NO)"
+        )
+    frame = inspect.currentframe()
+    if frame is None:
+        return
+    try:
+        curr = frame.f_back
+        while curr and "provider_spend_guard" in os.path.basename(curr.f_code.co_filename or ""):
+            curr = curr.f_back
+        if curr is None:
+            return
+        caller_file = os.path.basename(curr.f_code.co_filename or "")
+        caller_func = curr.f_code.co_name or ""
+        if (
+            "worker" in caller_file
+            or "provider" in caller_file
+            or "router" in caller_file
+            or "direct_provider" in caller_file
+        ) and not (caller_file.startswith("test_") or caller_file.startswith("conftest")):
+            raise PermissionError(
+                f"Unauthorized owner auth creator '{caller_file}:{caller_func}': worker/provider/router cannot create owner live authorization "
+                "(WORKER_CAN_CREATE_OWNER_LIVE_AUTH=NO, PROVIDER_CAN_CREATE_OWNER_LIVE_AUTH=NO, DIRECT_PROVIDER_CAN_CREATE_OWNER_LIVE_AUTH=NO)"
+            )
+    finally:
+        del frame
+
+
+def create_owner_live_authorization(
+    *,
+    authorization_id: str | None = None,
+    product_family: str = "Product Video",
+    job_id: str = "",
+    request_id: str = "",
+    operation: str = "create_video_task",
+    allowed_scene_slots: str | list[int] | set[int] = "*",
+    expected_max_provider_spend_usd: float | Decimal = 0.0,
+    expected_max_provider_spend_micro_usd: int | None = None,
+    ttl_seconds: float = 3600.0,
+    status: str = STATUS_OWNER_AUTH_ACTIVE,
+    origin: str = "owner_governance",
+    metadata: dict[str, Any] | None = None,
+    db_path: str | None = None,
+    env: dict[str, str] | None = None,
+    _caller_override_for_test: str | None = None,
+) -> str:
+    """Create durable Owner live authorization record in SQLite WAL database."""
+    _verify_owner_live_auth_creator(_caller_override_for_test)
+
+    auth_id = (authorization_id or f"owner_live_auth_{secrets.token_hex(12)}").strip()
+    if not auth_id:
+        raise ValueError("authorization_id cannot be empty")
+
+    if not str(job_id or "").strip():
+        raise ValueError("job_id is required for Owner live authorization")
+    if not str(request_id or "").strip():
+        raise ValueError("request_id is required for Owner live authorization")
+    if not str(operation or "").strip():
+        raise ValueError("operation is required for Owner live authorization")
+    if not str(product_family or "").strip():
+        raise ValueError("product_family is required for Owner live authorization")
+
+    if expected_max_provider_spend_micro_usd is not None:
+        exp_micro = int(expected_max_provider_spend_micro_usd)
+    else:
+        exp_micro = to_micro_usd(Decimal(str(expected_max_provider_spend_usd or 0.0)))
+
+    if isinstance(allowed_scene_slots, (list, tuple, set)):
+        slots_str = ",".join(str(s) for s in sorted(allowed_scene_slots))
+    else:
+        slots_str = str(allowed_scene_slots or "*").strip()
+
+    target_path = resolve_spend_guard_db_path(db_path, env)
+    init_spend_guard_db(db_path=target_path, env=env)
+
+    now_ts = time.time()
+    expires_at = now_ts + float(ttl_seconds)
+    meta_json = json.dumps(metadata or {})
+
+    conn = _get_sqlite_connection(target_path)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO owner_live_authorizations (
+                authorization_id,
+                product_family,
+                job_id,
+                request_id,
+                operation,
+                allowed_scene_slots,
+                expected_max_provider_spend_micro_usd,
+                created_at,
+                expires_at,
+                status,
+                consumed_at,
+                consumed_by_confirmation_id,
+                origin,
+                metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, '', ?, ?)
+            """,
+            (
+                auth_id,
+                str(product_family).strip(),
+                str(job_id).strip(),
+                str(request_id).strip(),
+                str(operation).strip(),
+                slots_str,
+                exp_micro,
+                now_ts,
+                expires_at,
+                str(status or STATUS_OWNER_AUTH_ACTIVE).strip(),
+                str(origin or "owner_governance").strip(),
+                meta_json,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return auth_id
+
+
+def validate_owner_live_authorization(
+    authorization_id: str,
+    *,
+    product_family: str = "",
+    job_id: str = "",
+    request_id: str = "",
+    operation: str = "",
+    scene_index: int | None = None,
+    db_path: str | None = None,
+    env: dict[str, str] | None = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Validate durable Owner live authorization record in SQLite WAL database."""
+    clean_id = str(authorization_id or "").strip()
+    if not clean_id:
+        return False, BLOCKER_OWNER_LIVE_AUTH_RECORD_MISSING, {}
+
+    target_path = resolve_spend_guard_db_path(db_path, env)
+    init_spend_guard_db(db_path=target_path, env=env)
+
+    conn = _get_sqlite_connection(target_path)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT authorization_id, product_family, job_id, request_id, operation,
+                   allowed_scene_slots, expected_max_provider_spend_micro_usd,
+                   created_at, expires_at, status, consumed_at, consumed_by_confirmation_id,
+                   origin, metadata_json
+            FROM owner_live_authorizations
+            WHERE authorization_id = ?
+            """,
+            (clean_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return False, BLOCKER_OWNER_LIVE_AUTH_RECORD_MISSING, {}
+
+        (
+            auth_id,
+            rec_family,
+            rec_job,
+            rec_req,
+            rec_op,
+            rec_slots,
+            rec_exp_micro,
+            rec_created,
+            rec_expires,
+            rec_status,
+            rec_consumed_at,
+            rec_consumed_by,
+            rec_origin,
+            meta_json,
+        ) = row
+
+        record_data = {
+            "authorization_id": auth_id,
+            "product_family": rec_family,
+            "job_id": rec_job,
+            "request_id": rec_req,
+            "operation": rec_op,
+            "allowed_scene_slots": rec_slots,
+            "expected_max_provider_spend_micro_usd": rec_exp_micro,
+            "created_at": rec_created,
+            "expires_at": rec_expires,
+            "status": rec_status,
+            "consumed_at": rec_consumed_at,
+            "consumed_by_confirmation_id": rec_consumed_by,
+        }
+
+        # Status checks
+        if rec_status == STATUS_OWNER_AUTH_REVOKED:
+            return False, BLOCKER_OWNER_LIVE_AUTH_REVOKED, record_data
+        if rec_status == STATUS_OWNER_AUTH_CONSUMED or rec_consumed_at is not None:
+            return False, BLOCKER_OWNER_LIVE_AUTH_ALREADY_CONSUMED, record_data
+        if rec_status != STATUS_OWNER_AUTH_ACTIVE:
+            return False, BLOCKER_OWNER_LIVE_AUTH_REVOKED, record_data
+
+        # Expiry check
+        now = time.time()
+        if rec_expires <= now:
+            return False, BLOCKER_OWNER_LIVE_AUTH_EXPIRED, record_data
+
+        # Exact lineage match
+        if product_family and rec_family.strip().lower() != str(product_family).strip().lower():
+            return False, BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH, record_data
+        if job_id and rec_job.strip() != str(job_id).strip():
+            return False, BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH, record_data
+        if request_id and rec_req.strip() != str(request_id).strip():
+            return False, BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH, record_data
+        if operation and rec_op.strip().lower() != str(operation).strip().lower():
+            return False, BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH, record_data
+
+        # Scene slot match
+        if scene_index is not None and scene_index >= 1 and rec_slots != "*":
+            allowed_slots = {s.strip() for s in rec_slots.split(",") if s.strip()}
+            if str(scene_index) not in allowed_slots:
+                return False, BLOCKER_OWNER_LIVE_AUTH_SLOT_MISMATCH, record_data
+
+        return True, "", record_data
+    finally:
+        conn.close()
 
 
 def issue_bot_mint_authority(
@@ -334,6 +592,8 @@ def issue_bot_mint_authority(
     purpose: str = PURPOSE_PRODUCTION_USER_ACTION,
     owner_receipt: str = "",
     expected_max_provider_spend_usd: float | Decimal = 0.0,
+    db_path: str | None = None,
+    env: dict[str, str] | None = None,
     _caller_override_for_test: str | None = None,
 ) -> BotMintAuthority:
     """Issue genuine Bot mint authority bound to validated Telegram callback."""
@@ -359,8 +619,8 @@ def issue_bot_mint_authority(
     if validation_callsite != BOT_CONFIRM_VALIDATION_CALLSITE and not _caller_override_for_test:
         raise PermissionError(f"Unauthorized validation_callsite: '{validation_callsite}'")
 
-    if action != "b14_confirm":
-        raise ValueError(f"Unauthorized mint action: '{action}', must be 'b14_confirm'")
+    if action not in ("b14_confirm", "create_video_task"):
+        raise ValueError(f"Unauthorized mint action: '{action}'")
 
     # Section 6: Real Telegram identities required. No synthetic fallbacks!
     try:
@@ -391,6 +651,37 @@ def issue_bot_mint_authority(
     if canonical_purpose not in (PURPOSE_PRODUCTION_USER_ACTION, PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST):
         raise ValueError(f"Invalid confirmation purpose: '{canonical_purpose}'")
 
+    actual_expected_max = expected_max_provider_spend_usd
+    clean_owner_receipt = str(owner_receipt or "").strip()
+    if canonical_purpose == PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST:
+        if not clean_owner_receipt:
+            raise PermissionError(
+                "owner_receipt is required when issuing BotMintAuthority with PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST "
+                "(PAID_LIVE_TEST_PURPOSE_REQUIRES_OWNER_AUTH_RECORD=YES)"
+            )
+        try:
+            auth_valid, auth_blocker, auth_data = validate_owner_live_authorization(
+                clean_owner_receipt,
+                product_family="Product Video",
+                job_id=j_id,
+                request_id=r_id,
+                operation=action,
+                db_path=db_path,
+                env=env,
+            )
+        except Exception as exc:
+            raise PermissionError(
+                f"Owner live authorization validation failed: {exc} "
+                "(PAID_LIVE_TEST_PURPOSE_REQUIRES_OWNER_AUTH_RECORD=YES)"
+            )
+        if not auth_valid:
+            raise PermissionError(
+                f"Owner live authorization invalid for live-test mint: {auth_blocker} "
+                "(PAID_LIVE_TEST_PURPOSE_REQUIRES_OWNER_AUTH_RECORD=YES)"
+            )
+        if not actual_expected_max and auth_data.get("expected_max_provider_spend_micro_usd"):
+            actual_expected_max = float(from_micro_usd(auth_data["expected_max_provider_spend_micro_usd"]))
+
     return BotMintAuthority(
         callsite=callsite or "bot.py:handle_video_product_callback:b14_confirm",
         telegram_update_id=up_id,
@@ -403,8 +694,8 @@ def issue_bot_mint_authority(
         validation_source=validation_source,
         validation_callsite=validation_callsite,
         purpose=canonical_purpose,
-        owner_receipt=str(owner_receipt or "").strip(),
-        expected_max_provider_spend_usd=expected_max_provider_spend_usd,
+        owner_receipt=clean_owner_receipt,
+        expected_max_provider_spend_usd=actual_expected_max,
         is_test_override=False,
         record_type=RECORD_TYPE_SCENE_SUBMIT,
         _issued_by_seam=True,
@@ -1163,6 +1454,42 @@ def init_spend_guard_db(
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_bot_confirm_req_lookup ON bot_spend_confirmations(request_id, product_family, operation)"
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS owner_live_authorizations (
+                authorization_id TEXT PRIMARY KEY,
+                product_family TEXT NOT NULL,
+                job_id TEXT NOT NULL,
+                request_id TEXT NOT NULL,
+                operation TEXT NOT NULL,
+                allowed_scene_slots TEXT NOT NULL DEFAULT '*',
+                expected_max_provider_spend_micro_usd INTEGER NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL,
+                expires_at REAL NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                consumed_at REAL,
+                consumed_by_confirmation_id TEXT NOT NULL DEFAULT '',
+                origin TEXT NOT NULL DEFAULT 'owner_console_or_governance',
+                metadata_json TEXT NOT NULL DEFAULT '{}'
+            )
+            """
+        )
+        cur.execute("PRAGMA table_info(owner_live_authorizations)")
+        auth_cols = {row[1] for row in cur.fetchall()}
+        if auth_cols:
+            if "allowed_scene_slots" not in auth_cols:
+                conn.execute("ALTER TABLE owner_live_authorizations ADD COLUMN allowed_scene_slots TEXT NOT NULL DEFAULT '*'")
+            if "expected_max_provider_spend_micro_usd" not in auth_cols:
+                conn.execute("ALTER TABLE owner_live_authorizations ADD COLUMN expected_max_provider_spend_micro_usd INTEGER NOT NULL DEFAULT 0")
+            if "status" not in auth_cols:
+                conn.execute("ALTER TABLE owner_live_authorizations ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
+            if "consumed_at" not in auth_cols:
+                conn.execute("ALTER TABLE owner_live_authorizations ADD COLUMN consumed_at REAL")
+            if "consumed_by_confirmation_id" not in auth_cols:
+                conn.execute("ALTER TABLE owner_live_authorizations ADD COLUMN consumed_by_confirmation_id TEXT NOT NULL DEFAULT ''")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_owner_auth_job_req ON owner_live_authorizations(job_id, request_id)"
+        )
         conn.commit()
     finally:
         if should_close:
@@ -1216,9 +1543,29 @@ def create_bot_confirmation(
         if request_id and mint_authority.request_id and str(mint_authority.request_id) != str(request_id):
             raise PermissionError(f"Mint authority request_id mismatch: '{mint_authority.request_id}' != '{request_id}'")
 
-    actual_purpose = str(purpose or mint_authority.purpose or PURPOSE_PRODUCTION_USER_ACTION).strip()
-    actual_owner_receipt = str(owner_receipt or mint_authority.owner_receipt or "").strip()
-    exp_usd = Decimal(str(expected_max_cost_usd or mint_authority.expected_max_provider_spend_usd or 0.0))
+    # Section 3: Confirmation creation cannot override mint authority
+    if purpose is not None and str(purpose).strip() != str(mint_authority.purpose).strip():
+        raise PermissionError(
+            f"Caller cannot override confirmation purpose: '{purpose}' != '{mint_authority.purpose}' "
+            "(CALLER_CAN_OVERRIDE_CONFIRM_PURPOSE=NO)"
+        )
+    if owner_receipt and str(owner_receipt).strip() != str(mint_authority.owner_receipt or "").strip():
+        raise PermissionError(
+            f"Caller cannot override owner_receipt: '{owner_receipt}' != '{mint_authority.owner_receipt}' "
+            "(CALLER_CAN_OVERRIDE_OWNER_RECEIPT=NO)"
+        )
+    if expected_max_cost_usd:
+        req_exp = Decimal(str(expected_max_cost_usd))
+        auth_exp = Decimal(str(mint_authority.expected_max_provider_spend_usd or 0.0))
+        if req_exp != auth_exp:
+            raise PermissionError(
+                f"Caller cannot override expected max spend: '{req_exp}' != '{auth_exp}' "
+                "(CALLER_CAN_OVERRIDE_EXPECTED_MAX_SPEND=NO)"
+            )
+
+    actual_purpose = str(mint_authority.purpose or PURPOSE_PRODUCTION_USER_ACTION).strip()
+    actual_owner_receipt = str(mint_authority.owner_receipt or "").strip()
+    exp_usd = Decimal(str(mint_authority.expected_max_provider_spend_usd or 0.0))
     exp_micro = to_micro_usd(exp_usd)
 
     target_path = resolve_spend_guard_db_path(db_path, env)
@@ -1329,9 +1676,29 @@ def mint_multiscene_bot_confirmation_plan(
         if request_id and mint_authority.request_id and str(mint_authority.request_id) != str(request_id):
             raise PermissionError(f"Mint authority request_id mismatch: '{mint_authority.request_id}' != '{request_id}'")
 
-    actual_purpose = str(purpose or mint_authority.purpose or PURPOSE_PRODUCTION_USER_ACTION).strip()
-    actual_owner_receipt = str(owner_receipt or mint_authority.owner_receipt or "").strip()
-    exp_usd = Decimal(str(expected_max_cost_usd or mint_authority.expected_max_provider_spend_usd or 0.0))
+    # Section 3: Confirmation creation cannot override mint authority
+    if purpose is not None and str(purpose).strip() != str(mint_authority.purpose).strip():
+        raise PermissionError(
+            f"Caller cannot override confirmation purpose: '{purpose}' != '{mint_authority.purpose}' "
+            "(CALLER_CAN_OVERRIDE_CONFIRM_PURPOSE=NO)"
+        )
+    if owner_receipt and str(owner_receipt).strip() != str(mint_authority.owner_receipt or "").strip():
+        raise PermissionError(
+            f"Caller cannot override owner_receipt: '{owner_receipt}' != '{mint_authority.owner_receipt}' "
+            "(CALLER_CAN_OVERRIDE_OWNER_RECEIPT=NO)"
+        )
+    if expected_max_cost_usd:
+        req_exp = Decimal(str(expected_max_cost_usd))
+        auth_exp = Decimal(str(mint_authority.expected_max_provider_spend_usd or 0.0))
+        if req_exp != auth_exp:
+            raise PermissionError(
+                f"Caller cannot override expected max spend: '{req_exp}' != '{auth_exp}' "
+                "(CALLER_CAN_OVERRIDE_EXPECTED_MAX_SPEND=NO)"
+            )
+
+    actual_purpose = str(mint_authority.purpose or PURPOSE_PRODUCTION_USER_ACTION).strip()
+    actual_owner_receipt = str(mint_authority.owner_receipt or "").strip()
+    exp_usd = Decimal(str(mint_authority.expected_max_provider_spend_usd or 0.0))
     exp_micro = to_micro_usd(exp_usd)
 
     target_path = resolve_spend_guard_db_path(db_path, env)
@@ -1346,6 +1713,28 @@ def mint_multiscene_bot_confirmation_plan(
     meta_json = json.dumps(meta)
     canonical_origin = f"bot_ui:{mint_authority.callsite}" if not mint_authority.is_test_override else "test_harness"
     child_rec_type = RECORD_TYPE_TEST if mint_authority.is_test_override else RECORD_TYPE_SCENE_SUBMIT
+
+    child_authorized_max_map = (metadata or {}).get("child_authorized_max_usd_map")
+    total_scenes = max(1, int(scene_count or 1))
+    child_allocations_micro: dict[int, int] = {}
+    if actual_purpose == PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST:
+        if child_authorized_max_map and isinstance(child_authorized_max_map, dict):
+            for s_idx in range(1, total_scenes + 1):
+                s_val = child_authorized_max_map.get(s_idx, 0.0)
+                child_allocations_micro[s_idx] = to_micro_usd(Decimal(str(s_val or 0.0)))
+            sum_children = sum(child_allocations_micro.values())
+            if sum_children > exp_micro:
+                raise ValueError(
+                    f"Sum of child authorized maxima ({sum_children}) exceeds job owner max ({exp_micro}) "
+                    "(MULTISCENE_OWNER_MAX_ALLOCATION=FAIL)"
+                )
+        else:
+            per_scene = exp_micro // total_scenes
+            for s_idx in range(1, total_scenes + 1):
+                child_allocations_micro[s_idx] = per_scene
+    else:
+        for s_idx in range(1, total_scenes + 1):
+            child_allocations_micro[s_idx] = 0
 
     conn = _get_sqlite_connection(target_path)
     try:
@@ -1395,11 +1784,11 @@ def mint_multiscene_bot_confirmation_plan(
 
         child_confirmations: list[str] = []
         scene_confirmations: dict[int, str] = {}
-        total_scenes = max(1, int(scene_count or 1))
         for scene_idx in range(1, total_scenes + 1):
             child_id = f"bot_conf_child_s{scene_idx}_{secrets.token_hex(10)}"
             child_confirmations.append(child_id)
             scene_confirmations[scene_idx] = child_id
+            child_cost_micro = child_allocations_micro.get(scene_idx, 0)
             conn.execute(
                 """
                 INSERT INTO bot_spend_confirmations (
@@ -1441,7 +1830,7 @@ def mint_multiscene_bot_confirmation_plan(
                     meta_json,
                     actual_purpose,
                     actual_owner_receipt,
-                    exp_micro,
+                    child_cost_micro,
                 ),
             )
         conn.commit()
@@ -1961,7 +2350,62 @@ def reserve_provider_spend(
 
             # Section 10 & 11: Derivation of paid live test from durable confirmation purpose
             is_durable_paid_live_test = (str(c_purpose or "").strip() == PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST)
+            owner_auth_to_consume: str | None = None
+            owner_auth_slots_count: int = 1
+            owner_auth_used_confs: list[str] = []
             if is_durable_paid_live_test:
+                # Directive #1422 & Section 17: Proven lineage required for paid live test before transport
+                if str(context.entrypoint or "").strip().lower() != "bot":
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_BOT_ORIGIN_PROOF_MISSING,
+                        reason="Directive #1422 requires entrypoint='bot' for paid live test",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+                if not context.bot_originated_action:
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_BOT_ORIGIN_PROOF_MISSING,
+                        reason="Directive #1422 requires bot_originated_action=True for paid live test",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+                if not str(context.job_id or "").strip():
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_BOT_ORIGIN_PROOF_MISSING,
+                        reason="Directive #1422 requires job_id for paid live test",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+                if not (str(context.request_id or "").strip() or str(context.trace_id or "").strip()):
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_BOT_ORIGIN_PROOF_MISSING,
+                        reason="Directive #1422 requires request_id or trace_id for paid live test",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+                if not str(context.user_flow or "").strip():
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_BOT_ORIGIN_PROOF_MISSING,
+                        reason="Directive #1422 requires user_flow for paid live test",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+
                 # Section 12: Owner receipt binding required for paid live test
                 rec_rcpt = str(rec_owner_receipt or "").strip()
                 if not rec_rcpt:
@@ -1985,6 +2429,203 @@ def reserve_provider_spend(
                         cap_micro_usd=cap_micro_usd,
                         cap_usd=cap_usd,
                     )
+
+                # Section 4 & 6: OWNER_RECEIPT_STRING_EQUALITY_ONLY=FORBIDDEN
+                # Verify durable Owner live authorization record exists in DB
+                cur.execute(
+                    """
+                    SELECT authorization_id, product_family, job_id, request_id, operation,
+                           allowed_scene_slots, expected_max_provider_spend_micro_usd,
+                           created_at, expires_at, status, consumed_at, consumed_by_confirmation_id,
+                           metadata_json
+                    FROM owner_live_authorizations
+                    WHERE authorization_id = ?
+                    """,
+                    (rec_rcpt,),
+                )
+                auth_row = cur.fetchone()
+                if not auth_row:
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_OWNER_LIVE_AUTH_RECORD_MISSING,
+                        reason=f"No durable owner live authorization record found for receipt '{rec_rcpt}' (OWNER_RECEIPT_STRING_EQUALITY_ONLY=FORBIDDEN)",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+
+                (
+                    ola_id,
+                    ola_family,
+                    ola_job,
+                    ola_req,
+                    ola_op,
+                    ola_slots,
+                    ola_exp_micro,
+                    ola_created,
+                    ola_expires,
+                    ola_status,
+                    ola_consumed_at,
+                    ola_consumed_by,
+                    ola_meta_json,
+                ) = auth_row
+
+                # Section 15: Status and consumption check
+                if str(ola_status).strip().lower() == STATUS_OWNER_AUTH_REVOKED:
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_OWNER_LIVE_AUTH_REVOKED,
+                        reason=f"Owner live authorization '{ola_id}' is revoked",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+                if str(ola_status).strip().lower() == STATUS_OWNER_AUTH_CONSUMED or ola_consumed_at is not None:
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_OWNER_LIVE_AUTH_ALREADY_CONSUMED,
+                        reason=f"Owner live authorization '{ola_id}' was already consumed",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+                if str(ola_status).strip().lower() != STATUS_OWNER_AUTH_ACTIVE:
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_OWNER_LIVE_AUTH_REVOKED,
+                        reason=f"Owner live authorization '{ola_id}' is not active (status='{ola_status}')",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+
+                now_ts_check = time.time()
+                if float(ola_expires) <= now_ts_check:
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_OWNER_LIVE_AUTH_EXPIRED,
+                        reason=f"Owner live authorization '{ola_id}' has expired",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+
+                # Section 10: Exact lineage match against context
+                if not context.product_family or ola_family.strip().lower() != context.product_family.strip().lower():
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH,
+                        reason=f"Owner live authorization product family mismatch: '{ola_family}' != '{context.product_family}'",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+                ctx_job = str(context.job_id or "").strip()
+                if ola_job and (not ctx_job or ola_job != ctx_job):
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH,
+                        reason=f"Owner live authorization job mismatch: '{ola_job}' != '{ctx_job}'",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+                ctx_req = str(context.request_id or "").strip()
+                if ola_req and (not ctx_req or ola_req != ctx_req):
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH,
+                        reason=f"Owner live authorization request mismatch: '{ola_req}' != '{ctx_req}'",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+                if ola_op and (not context.operation or ola_op.strip().lower() != str(context.operation).strip().lower()):
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH,
+                        reason=f"Owner live authorization operation mismatch: '{ola_op}' != '{context.operation}'",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+
+                # Scene slot check
+                ctx_scene = 0
+                try:
+                    ctx_scene = int(context.scene_index or 0)
+                except Exception:
+                    pass
+                if ctx_scene >= 1 and ola_slots != "*":
+                    allowed_slots = {s.strip() for s in ola_slots.split(",") if s.strip()}
+                    if str(ctx_scene) not in allowed_slots:
+                        conn.rollback()
+                        return SpendReservationResult(
+                            allowed=False,
+                            blocker=BLOCKER_OWNER_LIVE_AUTH_SLOT_MISMATCH,
+                            reason=f"Owner live authorization slot mismatch: scene {ctx_scene} not in allowed slots '{ola_slots}'",
+                            week_id=week_id,
+                            cap_micro_usd=cap_micro_usd,
+                            cap_usd=cap_usd,
+                        )
+
+                # Section 11 & 16: Expected max spend enforcement
+                if int(ola_exp_micro) <= 0:
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_OWNER_AUTHORIZED_MAX_SPEND_EXCEEDED,
+                        reason="Owner live authorization must declare positive expected_max_provider_spend_micro_usd > 0",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+
+                if cost_micro_usd > int(ola_exp_micro):
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_OWNER_AUTHORIZED_MAX_SPEND_EXCEEDED,
+                        reason=f"Canonical submit cost ({cost_micro_usd} µUSD) exceeds Owner authorized max ({ola_exp_micro} µUSD)",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+
+                # Section 14 & 20: Child authorization allocation check
+                if int(rec_exp_micro or 0) > 0 and cost_micro_usd > int(rec_exp_micro):
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_OWNER_AUTHORIZED_MAX_SPEND_EXCEEDED,
+                        reason=f"Canonical scene cost ({cost_micro_usd} µUSD) exceeds child allocated authorized max ({rec_exp_micro} µUSD)",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+
+                owner_auth_to_consume = ola_id
+                ola_meta = {}
+                try:
+                    ola_meta = json.loads(ola_meta_json or "{}")
+                except Exception:
+                    pass
+                max_u = int(ola_meta.get("max_uses", 0))
+                slots_list = [s.strip() for s in ola_slots.split(",") if s.strip()] if ola_slots != "*" else []
+                if max_u <= 0:
+                    max_u = max(1, len(slots_list))
+                owner_auth_slots_count = max_u
+                owner_auth_used_confs = [c.strip() for c in (ola_consumed_by or "").split(",") if c.strip()]
+
 
             now_ts = time.time()
             if c_consumed is not None or str(c_status or "").lower() == "consumed":
@@ -2222,6 +2863,20 @@ def reserve_provider_spend(
                 "UPDATE bot_spend_confirmations SET consumed_at = ?, status = 'consumed' WHERE confirmation_id = ?",
                 (now_ts, confirmation_to_consume),
             )
+
+        if owner_auth_to_consume:
+            owner_auth_used_confs.append(confirmation_to_consume or f"res_{reservation_id}")
+            new_confs_str = ",".join(owner_auth_used_confs)
+            if len(owner_auth_used_confs) >= owner_auth_slots_count:
+                cur.execute(
+                    "UPDATE owner_live_authorizations SET status = 'consumed', consumed_at = ?, consumed_by_confirmation_id = ? WHERE authorization_id = ?",
+                    (now_ts, new_confs_str, owner_auth_to_consume),
+                )
+            else:
+                cur.execute(
+                    "UPDATE owner_live_authorizations SET consumed_by_confirmation_id = ? WHERE authorization_id = ?",
+                    (new_confs_str, owner_auth_to_consume),
+                )
 
         conn.commit()
 

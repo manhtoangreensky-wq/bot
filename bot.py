@@ -108856,6 +108856,91 @@ async def handle_product_video_public_confirm_callback(update: Update, context: 
             pass
 
 
+async def handle_owner_authorized_live_test_confirm(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    owner_receipt: str,
+    job_id: str | int,
+    request_id: str,
+    scene_count: int = 1,
+    expected_max_usd: float | Decimal = 0.0,
+) -> dict[str, Any]:
+    """Production Bot entrypoint for Owner-authorized paid live acceptance (Directive #1422, N21Z).
+
+    Strictly requires pre-existing valid Owner live authorization record in SQLite WAL database.
+    Mints PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST confirmation with bounded allocation.
+    """
+    from services.provider_spend_guard import (
+        issue_bot_mint_authority,
+        mint_multiscene_bot_confirmation_plan,
+        validate_owner_live_authorization,
+        PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+        BOT_CONFIRM_VALIDATION_SOURCE,
+        BOT_CONFIRM_VALIDATION_CALLSITE,
+    )
+
+    clean_rcpt = str(owner_receipt or "").strip()
+    if not clean_rcpt:
+        raise PermissionError("Owner live authorization receipt is required for live test acceptance")
+
+    # Validate durable pre-existing Owner live authorization record
+    is_valid, blocker, auth_data = validate_owner_live_authorization(
+        clean_rcpt,
+        product_family="Product Video",
+        job_id=str(job_id),
+        request_id=str(request_id),
+        operation="create_video_task",
+    )
+    if not is_valid:
+        raise PermissionError(f"Cannot mint live test confirmation: Owner authorization invalid ({blocker})")
+
+    query = getattr(update, "callback_query", None)
+    real_update_id = getattr(update, "update_id", 0) or 0
+    real_cbq_id = getattr(query, "id", "") or ""
+    real_chat_id = getattr(getattr(query, "message", None), "chat_id", 0) or getattr(getattr(update, "effective_chat", None), "id", 0) or 0
+    real_user_id = getattr(getattr(query, "from_user", None), "id", 0) or getattr(getattr(update, "effective_user", None), "id", 0) or 0
+
+    mint_auth = issue_bot_mint_authority(
+        callsite="bot.py:handle_owner_authorized_live_test_confirm",
+        telegram_update_id=real_update_id,
+        callback_query_id=real_cbq_id,
+        chat_id=real_chat_id,
+        user_id=real_user_id,
+        job_id=str(job_id),
+        request_id=str(request_id),
+        action="create_video_task",
+        validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+        validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+        validated_ownership=True,
+        purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+        owner_receipt=clean_rcpt,
+        expected_max_provider_spend_usd=expected_max_usd or (auth_data.get("expected_max_provider_spend_micro_usd", 0) / 1_000_000.0),
+    )
+
+    plan = mint_multiscene_bot_confirmation_plan(
+        mint_authority=mint_auth,
+        chat_id=real_chat_id,
+        user_id=real_user_id,
+        job_id=str(job_id),
+        request_id=str(request_id),
+        product_family="Product Video",
+        operation="create_video_task",
+        scene_count=scene_count,
+        purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+        owner_receipt=clean_rcpt,
+        expected_max_cost_usd=mint_auth.expected_max_provider_spend_usd,
+        metadata={
+            "telegram_update_id": real_update_id,
+            "callback_query_id": real_cbq_id,
+            "production_callsite": "bot.py:handle_owner_authorized_live_test_confirm",
+            "owner_live_authorization_id": clean_rcpt,
+            "purpose": PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+        },
+    )
+    return plan
+
+
 VIDEO_TREND2_STATE_KEY = "video_trend2_state"
 VIDEO_TREND2_PUBLIC_SCREENS = frozenset({
     "entry",

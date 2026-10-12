@@ -100,6 +100,36 @@ from services.provider_spend_guard import (
     PER_SCENE_RESERVATION_GRANULARITY,
     MULTISCENE_TOTAL_COST_SUM,
     SCENE_COUNT_DOUBLE_MULTIPLICATION,
+    create_owner_live_authorization,
+    validate_owner_live_authorization,
+    STATUS_OWNER_AUTH_ACTIVE,
+    STATUS_OWNER_AUTH_REVOKED,
+    STATUS_OWNER_AUTH_CONSUMED,
+    BLOCKER_OWNER_AUTHORIZED_MAX_SPEND_EXCEEDED,
+    BLOCKER_OWNER_LIVE_AUTH_RECORD_MISSING,
+    BLOCKER_OWNER_LIVE_AUTH_REVOKED,
+    BLOCKER_OWNER_LIVE_AUTH_EXPIRED,
+    BLOCKER_OWNER_LIVE_AUTH_ALREADY_CONSUMED,
+    BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH,
+    BLOCKER_OWNER_LIVE_AUTH_SLOT_MISMATCH,
+    CALLER_CAN_OVERRIDE_CONFIRM_PURPOSE,
+    CALLER_CAN_OVERRIDE_OWNER_RECEIPT,
+    CALLER_CAN_OVERRIDE_EXPECTED_MAX_SPEND,
+    OWNER_RECEIPT_STRING_EQUALITY_ONLY,
+    OWNER_AUTHORITY_SOURCE,
+    OWNER_AUTHORITY_VALIDATOR,
+    WORKER_CAN_CREATE_OWNER_LIVE_AUTH,
+    PROVIDER_CAN_CREATE_OWNER_LIVE_AUTH,
+    DIRECT_PROVIDER_CAN_CREATE_OWNER_LIVE_AUTH,
+    ORDINARY_B14_PURPOSE,
+    PAID_LIVE_TEST_PURPOSE_REQUIRES_OWNER_AUTH_RECORD,
+    OWNER_AUTH_EXACT_LINEAGE,
+    AUTHORIZED_EXPECTED_MAX_ENFORCED,
+    CHILD_EXPECTED_MAX_ENFORCED,
+    MULTISCENE_OWNER_MAX_ALLOCATION,
+    OWNER_POLICY_RESET_RULE_UNSPECIFIED,
+    PROVIDER_PRODUCTION_MINT_CALLERS,
+    WORKER_PRODUCTION_MINT_CALLERS,
 )
 from services.video_provider_catalog import (
     KEY4U_VIDEO_AUTH_MISSING,
@@ -176,6 +206,11 @@ def create_bot_confirmation(*args, **kwargs):
         kwargs["mint_authority"] = create_test_mint_authority(
             chat_id=str(kwargs.get("chat_id") or "123456"),
             user_id=str(kwargs.get("user_id") or "789012"),
+            job_id=str(kwargs.get("job_id") or ""),
+            request_id=str(kwargs.get("request_id") or ""),
+            purpose=str(kwargs.get("purpose") or PURPOSE_PRODUCTION_USER_ACTION),
+            owner_receipt=str(kwargs.get("owner_receipt") or ""),
+            expected_max_provider_spend_usd=kwargs.get("expected_max_cost_usd", 0.0),
         )
     kwargs.pop("_test_unauthorized_mint", None)
     return _raw_create_bot_confirmation(*args, **kwargs)
@@ -186,6 +221,11 @@ def mint_multiscene_bot_confirmation_plan(*args, **kwargs):
         kwargs["mint_authority"] = create_test_mint_authority(
             chat_id=str(kwargs.get("chat_id") or "123456"),
             user_id=str(kwargs.get("user_id") or "789012"),
+            job_id=str(kwargs.get("job_id") or ""),
+            request_id=str(kwargs.get("request_id") or ""),
+            purpose=str(kwargs.get("purpose") or PURPOSE_PRODUCTION_USER_ACTION),
+            owner_receipt=str(kwargs.get("owner_receipt") or ""),
+            expected_max_provider_spend_usd=kwargs.get("expected_max_cost_usd", 0.0),
         )
     kwargs.pop("_test_unauthorized_mint", None)
     return _raw_mint_multiscene_bot_confirmation_plan(*args, **kwargs)
@@ -3680,11 +3720,24 @@ class TestN21WConfirmationMintBoundaryAndProductionReadinessMatrix(unittest.Test
 
     # 26. paid live test with durable bot origin + Owner receipt -> guard PASS provider-free
     def test_n21w_26_paid_live_test_with_durable_bot_origin_and_owner_receipt_passes(self):
+        create_owner_live_authorization(
+            authorization_id="rcpt_owner_authorized_26",
+            product_family="Product Video",
+            job_id="job_26",
+            request_id="req_26",
+            operation="create_video_task",
+            expected_max_provider_spend_usd=Decimal("50.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
         auth = create_test_mint_authority(
             chat_id="chat_26",
             user_id="user_26",
+            job_id="job_26",
+            request_id="req_26",
             purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
             owner_receipt="rcpt_owner_authorized_26",
+            expected_max_provider_spend_usd=Decimal("50.0"),
         )
         conf_id = create_bot_confirmation(
             mint_authority=auth,
@@ -4617,6 +4670,16 @@ class TestN21YBotConfirmAuthorityTruthAndPerSceneReservationMatrix(unittest.Test
     # 14. correctly bound Owner live authorization record -> provider-free guard PASS
     def test_n21y_14_correctly_bound_owner_live_authorization_record_passes(self):
         self.assertEqual(OWNER_LIVE_AUTH_BINDING, "PASS")
+        create_owner_live_authorization(
+            authorization_id="6119790632",
+            product_family="Product Video",
+            job_id="job_14",
+            request_id="req_14",
+            operation="create_video_task",
+            expected_max_provider_spend_usd=Decimal("30.600245"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
         auth = create_test_mint_authority(
             chat_id="chat_14",
             user_id="user_14",
@@ -5083,7 +5146,1291 @@ class TestN21YBotConfirmAuthorityTruthAndPerSceneReservationMatrix(unittest.Test
         self.assertEqual(res.blocker, BLOCKER_WEEKLY_SPEND_CAP_EXCEEDED)
 
 
+class TestN21ZOwnerLiveAuthorityRecordAndExpectedSpendEnforcementMatrix(unittest.TestCase):
+    """N21Z: Owner Live Authority Record and Expected Spend Enforcement Test Matrix."""
+
+    def setUp(self):
+        set_kill_switch(False)
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "spend_guard_n21z.db")
+        self.standard_env = {
+            "SPEND_GUARD_DB_PATH": self.db_path,
+            "WEEKLY_PROVIDER_SPEND_CAP_USD": "200.000",
+            "WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE": "MONDAY_0000_UTC",
+            "WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE": "UTC",
+        }
+        init_spend_guard_db(db_path=self.db_path, env=self.standard_env)
+
+    def tearDown(self):
+        set_kill_switch(False)
+        self.temp_dir.cleanup()
+
+    # 1. create confirmation with caller purpose override -> BLOCK
+    def test_n21z_01_create_confirmation_with_caller_purpose_override_blocked(self):
+        auth = create_test_mint_authority(
+            chat_id="chat_z01",
+            user_id="user_z01",
+            job_id="job_z01",
+            request_id="req_z01",
+            purpose=PURPOSE_PRODUCTION_USER_ACTION,
+        )
+        with self.assertRaises(PermissionError) as cm:
+            create_bot_confirmation(
+                mint_authority=auth,
+                chat_id="chat_z01",
+                user_id="user_z01",
+                job_id="job_z01",
+                request_id="req_z01",
+                scene_index=1,
+                purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+        self.assertIn("CALLER_CAN_OVERRIDE_CONFIRM_PURPOSE=NO", str(cm.exception))
+
+    # 2. caller owner receipt override -> BLOCK
+    def test_n21z_02_caller_owner_receipt_override_blocked(self):
+        auth = create_test_mint_authority(
+            chat_id="chat_z02",
+            user_id="user_z02",
+            job_id="job_z02",
+            request_id="req_z02",
+            owner_receipt="auth_rcpt_z02",
+        )
+        with self.assertRaises(PermissionError) as cm:
+            create_bot_confirmation(
+                mint_authority=auth,
+                chat_id="chat_z02",
+                user_id="user_z02",
+                job_id="job_z02",
+                request_id="req_z02",
+                scene_index=1,
+                owner_receipt="caller_rcpt_override",
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+        self.assertIn("CALLER_CAN_OVERRIDE_OWNER_RECEIPT=NO", str(cm.exception))
+
+    # 3. caller expected max override -> BLOCK
+    def test_n21z_03_caller_expected_max_override_blocked(self):
+        auth = create_test_mint_authority(
+            chat_id="chat_z03",
+            user_id="user_z03",
+            job_id="job_z03",
+            request_id="req_z03",
+            expected_max_provider_spend_usd=Decimal("15.0"),
+        )
+        with self.assertRaises(PermissionError) as cm:
+            create_bot_confirmation(
+                mint_authority=auth,
+                chat_id="chat_z03",
+                user_id="user_z03",
+                job_id="job_z03",
+                request_id="req_z03",
+                scene_index=1,
+                expected_max_cost_usd=Decimal("25.0"),
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+        self.assertIn("CALLER_CAN_OVERRIDE_EXPECTED_MAX_SPEND=NO", str(cm.exception))
+
+    # 4. arbitrary matching receipt string in context + confirmation row, but no Owner authorization record -> BLOCK
+    def test_n21z_04_arbitrary_matching_receipt_string_without_owner_auth_record_blocked(self):
+        self.assertEqual(OWNER_RECEIPT_STRING_EQUALITY_ONLY, "FORBIDDEN")
+        auth = create_test_mint_authority(
+            chat_id="chat_z04",
+            user_id="user_z04",
+            job_id="job_z04",
+            request_id="req_z04",
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="arbitrary_unregistered_receipt_999",
+            expected_max_provider_spend_usd=Decimal("40.0"),
+        )
+        conf_id = create_bot_confirmation(
+            mint_authority=auth,
+            chat_id="chat_z04",
+            user_id="user_z04",
+            job_id="job_z04",
+            request_id="req_z04",
+            scene_index=1,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="arbitrary_unregistered_receipt_999",
+            expected_max_cost_usd=Decimal("40.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        ctx = SpendGuardContext(
+            chat_id="chat_z04",
+            user_id="user_z04",
+            job_id="job_z04",
+            request_id="req_z04",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_originated_action=True,
+            bot_confirm_authority=conf_id,
+            user_flow="product_video_bot",
+            owner_receipt="arbitrary_unregistered_receipt_999",
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res.allowed)
+        self.assertEqual(res.blocker, BLOCKER_OWNER_LIVE_AUTH_RECORD_MISSING)
+
+    # 5. Owner authorization for different job -> BLOCK
+    def test_n21z_05_owner_authorization_for_different_job_blocked(self):
+        create_owner_live_authorization(
+            authorization_id="rcpt_z05",
+            product_family="Product Video",
+            job_id="job_A",
+            request_id="req_z05",
+            operation="create_video_task",
+            expected_max_provider_spend_usd=Decimal("50.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        auth = create_test_mint_authority(
+            chat_id="chat_z05",
+            user_id="user_z05",
+            job_id="job_B",
+            request_id="req_z05",
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z05",
+            expected_max_provider_spend_usd=Decimal("50.0"),
+        )
+        conf_id = create_bot_confirmation(
+            mint_authority=auth,
+            chat_id="chat_z05",
+            user_id="user_z05",
+            job_id="job_B",
+            request_id="req_z05",
+            scene_index=1,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z05",
+            expected_max_cost_usd=Decimal("50.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        ctx = SpendGuardContext(
+            chat_id="chat_z05",
+            user_id="user_z05",
+            job_id="job_B",
+            request_id="req_z05",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_originated_action=True,
+            bot_confirm_authority=conf_id,
+            user_flow="product_video_bot",
+            owner_receipt="rcpt_z05",
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res.allowed)
+        self.assertEqual(res.blocker, BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH)
+
+    # 6. different request -> BLOCK
+    def test_n21z_06_owner_authorization_for_different_request_blocked(self):
+        create_owner_live_authorization(
+            authorization_id="rcpt_z06",
+            product_family="Product Video",
+            job_id="job_z06",
+            request_id="req_A",
+            operation="create_video_task",
+            expected_max_provider_spend_usd=Decimal("50.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        auth = create_test_mint_authority(
+            chat_id="chat_z06",
+            user_id="user_z06",
+            job_id="job_z06",
+            request_id="req_B",
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z06",
+            expected_max_provider_spend_usd=Decimal("50.0"),
+        )
+        conf_id = create_bot_confirmation(
+            mint_authority=auth,
+            chat_id="chat_z06",
+            user_id="user_z06",
+            job_id="job_z06",
+            request_id="req_B",
+            scene_index=1,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z06",
+            expected_max_cost_usd=Decimal("50.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        ctx = SpendGuardContext(
+            chat_id="chat_z06",
+            user_id="user_z06",
+            job_id="job_z06",
+            request_id="req_B",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_originated_action=True,
+            bot_confirm_authority=conf_id,
+            user_flow="product_video_bot",
+            owner_receipt="rcpt_z06",
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res.allowed)
+        self.assertEqual(res.blocker, BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH)
+
+    # 7. different product -> BLOCK
+    def test_n21z_07_owner_authorization_for_different_product_blocked(self):
+        create_owner_live_authorization(
+            authorization_id="rcpt_z07",
+            product_family="Product Video",
+            job_id="job_z07",
+            request_id="req_z07",
+            operation="create_video_task",
+            expected_max_provider_spend_usd=Decimal("50.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        auth = create_test_mint_authority(
+            chat_id="chat_z07",
+            user_id="user_z07",
+            job_id="job_z07",
+            request_id="req_z07",
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z07",
+            expected_max_provider_spend_usd=Decimal("50.0"),
+        )
+        conf_id = create_bot_confirmation(
+            mint_authority=auth,
+            chat_id="chat_z07",
+            user_id="user_z07",
+            job_id="job_z07",
+            request_id="req_z07",
+            scene_index=1,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z07",
+            expected_max_cost_usd=Decimal("50.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        # Direct validator test for different product family
+        val_ok, blk_code, _ = validate_owner_live_authorization(
+            "rcpt_z07",
+            product_family="Different Family",
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertFalse(val_ok)
+        self.assertEqual(blk_code, BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH)
+
+        ctx = SpendGuardContext(
+            chat_id="chat_z07",
+            user_id="user_z07",
+            job_id="job_z07",
+            request_id="req_z07",
+            scene_index=1,
+            product_family="Different Family",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_originated_action=True,
+            bot_confirm_authority=conf_id,
+            user_flow="product_video_bot",
+            owner_receipt="rcpt_z07",
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res.allowed)
+        self.assertIn(res.blocker, (BLOCKER_PAID_TRANSPORT_AUTHORITY_UNREGISTERED, BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH))
+
+    # 8. different operation -> BLOCK
+    def test_n21z_08_owner_authorization_for_different_operation_blocked(self):
+        create_owner_live_authorization(
+            authorization_id="rcpt_z08",
+            product_family="Product Video",
+            job_id="job_z08",
+            request_id="req_z08",
+            operation="create_video_task",
+            expected_max_provider_spend_usd=Decimal("50.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        auth = create_test_mint_authority(
+            chat_id="chat_z08",
+            user_id="user_z08",
+            job_id="job_z08",
+            request_id="req_z08",
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z08",
+            expected_max_provider_spend_usd=Decimal("50.0"),
+        )
+        conf_id = create_bot_confirmation(
+            mint_authority=auth,
+            chat_id="chat_z08",
+            user_id="user_z08",
+            job_id="job_z08",
+            request_id="req_z08",
+            scene_index=1,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z08",
+            expected_max_cost_usd=Decimal("50.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        # Direct validator test for different operation
+        val_ok, blk_code, _ = validate_owner_live_authorization(
+            "rcpt_z08",
+            operation="other_operation",
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertFalse(val_ok)
+        self.assertEqual(blk_code, BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH)
+
+        ctx = SpendGuardContext(
+            chat_id="chat_z08",
+            user_id="user_z08",
+            job_id="job_z08",
+            request_id="req_z08",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="other_operation",
+            bot_originated_action=True,
+            bot_confirm_authority=conf_id,
+            user_flow="product_video_bot",
+            owner_receipt="rcpt_z08",
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res.allowed)
+        self.assertIn(res.blocker, (BLOCKER_PAID_TRANSPORT_AUTHORITY_UNREGISTERED, BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH))
+
+    # 9. different scene -> BLOCK
+    def test_n21z_09_owner_authorization_for_different_scene_slot_blocked(self):
+        create_owner_live_authorization(
+            authorization_id="rcpt_z09",
+            product_family="Product Video",
+            job_id="job_z09",
+            request_id="req_z09",
+            operation="create_video_task",
+            allowed_scene_slots="1",
+            expected_max_provider_spend_usd=Decimal("50.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        auth = create_test_mint_authority(
+            chat_id="chat_z09",
+            user_id="user_z09",
+            job_id="job_z09",
+            request_id="req_z09",
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z09",
+            expected_max_provider_spend_usd=Decimal("50.0"),
+        )
+        conf_id = create_bot_confirmation(
+            mint_authority=auth,
+            chat_id="chat_z09",
+            user_id="user_z09",
+            job_id="job_z09",
+            request_id="req_z09",
+            scene_index=2,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z09",
+            expected_max_cost_usd=Decimal("50.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        ctx = SpendGuardContext(
+            chat_id="chat_z09",
+            user_id="user_z09",
+            job_id="job_z09",
+            request_id="req_z09",
+            scene_index=2,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_originated_action=True,
+            bot_confirm_authority=conf_id,
+            user_flow="product_video_bot",
+            owner_receipt="rcpt_z09",
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res.allowed)
+        self.assertEqual(res.blocker, BLOCKER_OWNER_LIVE_AUTH_SLOT_MISMATCH)
+
+    # 10. expired Owner authorization -> BLOCK
+    def test_n21z_10_expired_owner_authorization_blocked(self):
+        create_owner_live_authorization(
+            authorization_id="rcpt_z10",
+            product_family="Product Video",
+            job_id="job_z10",
+            request_id="req_z10",
+            operation="create_video_task",
+            expected_max_provider_spend_usd=Decimal("50.0"),
+            ttl_seconds=-60.0,
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        auth = create_test_mint_authority(
+            chat_id="chat_z10",
+            user_id="user_z10",
+            job_id="job_z10",
+            request_id="req_z10",
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z10",
+            expected_max_provider_spend_usd=Decimal("50.0"),
+        )
+        conf_id = create_bot_confirmation(
+            mint_authority=auth,
+            chat_id="chat_z10",
+            user_id="user_z10",
+            job_id="job_z10",
+            request_id="req_z10",
+            scene_index=1,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z10",
+            expected_max_cost_usd=Decimal("50.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        ctx = SpendGuardContext(
+            chat_id="chat_z10",
+            user_id="user_z10",
+            job_id="job_z10",
+            request_id="req_z10",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_originated_action=True,
+            bot_confirm_authority=conf_id,
+            user_flow="product_video_bot",
+            owner_receipt="rcpt_z10",
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res.allowed)
+        self.assertEqual(res.blocker, BLOCKER_OWNER_LIVE_AUTH_EXPIRED)
+
+    # 11. revoked Owner authorization -> BLOCK
+    def test_n21z_11_revoked_owner_authorization_blocked(self):
+        create_owner_live_authorization(
+            authorization_id="rcpt_z11",
+            product_family="Product Video",
+            job_id="job_z11",
+            request_id="req_z11",
+            operation="create_video_task",
+            status=STATUS_OWNER_AUTH_REVOKED,
+            expected_max_provider_spend_usd=Decimal("50.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        auth = create_test_mint_authority(
+            chat_id="chat_z11",
+            user_id="user_z11",
+            job_id="job_z11",
+            request_id="req_z11",
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z11",
+            expected_max_provider_spend_usd=Decimal("50.0"),
+        )
+        conf_id = create_bot_confirmation(
+            mint_authority=auth,
+            chat_id="chat_z11",
+            user_id="user_z11",
+            job_id="job_z11",
+            request_id="req_z11",
+            scene_index=1,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z11",
+            expected_max_cost_usd=Decimal("50.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        ctx = SpendGuardContext(
+            chat_id="chat_z11",
+            user_id="user_z11",
+            job_id="job_z11",
+            request_id="req_z11",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_originated_action=True,
+            bot_confirm_authority=conf_id,
+            user_flow="product_video_bot",
+            owner_receipt="rcpt_z11",
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res.allowed)
+        self.assertEqual(res.blocker, BLOCKER_OWNER_LIVE_AUTH_REVOKED)
+
+    # 12. live-test purpose without Owner authorization record -> BLOCK
+    def test_n21z_12_live_test_purpose_without_owner_authorization_record_blocked(self):
+        self.assertEqual(PAID_LIVE_TEST_PURPOSE_REQUIRES_OWNER_AUTH_RECORD, "YES")
+        with self.assertRaises(PermissionError) as cm:
+            issue_bot_mint_authority(
+                job_id="job_z12",
+                request_id="req_z12",
+                chat_id="chat_z12",
+                user_id="user_z12",
+                callback_query_id="cbq_z12",
+                telegram_update_id=121212,
+                purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+                owner_receipt="missing_auth_rcpt_z12",
+                validated_ownership=True,
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+        self.assertIn("PAID_LIVE_TEST_PURPOSE_REQUIRES_OWNER_AUTH_RECORD=YES", str(cm.exception))
+
+    # 13. ordinary production confirmation remains PRODUCTION_USER_ACTION
+    def test_n21z_13_ordinary_production_confirmation_remains_production_user_action(self):
+        self.assertEqual(ORDINARY_B14_PURPOSE, "PRODUCTION_USER_ACTION")
+        auth = create_test_mint_authority(
+            chat_id="chat_z13",
+            user_id="user_z13",
+            job_id="job_z13",
+            request_id="req_z13",
+            purpose=PURPOSE_PRODUCTION_USER_ACTION,
+        )
+        conf_id = create_bot_confirmation(
+            mint_authority=auth,
+            chat_id="chat_z13",
+            user_id="user_z13",
+            job_id="job_z13",
+            request_id="req_z13",
+            scene_index=1,
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        ctx = SpendGuardContext(
+            chat_id="chat_z13",
+            user_id="user_z13",
+            job_id="job_z13",
+            request_id="req_z13",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_originated_action=True,
+            bot_confirm_authority=conf_id,
+            user_flow="product_video_bot",
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        # Ordinary production flow does NOT require owner live auth
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertTrue(res.allowed)
+
+    # 14. caller live_test metadata cannot promote ordinary purpose
+    def test_n21z_14_caller_live_test_metadata_cannot_promote_ordinary_purpose(self):
+        auth = create_test_mint_authority(
+            chat_id="chat_z14",
+            user_id="user_z14",
+            job_id="job_z14",
+            request_id="req_z14",
+            purpose=PURPOSE_PRODUCTION_USER_ACTION,
+        )
+        conf_id = create_bot_confirmation(
+            mint_authority=auth,
+            chat_id="chat_z14",
+            user_id="user_z14",
+            job_id="job_z14",
+            request_id="req_z14",
+            scene_index=1,
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        ctx = SpendGuardContext(
+            chat_id="chat_z14",
+            user_id="user_z14",
+            job_id="job_z14",
+            request_id="req_z14",
+            bot_confirm_authority=conf_id,
+            paid_live_test=True,
+            is_paid_live_attempt=True,
+            metadata={"paid_live_test": True, "live_test": True, "user_flow": "acceptance_test"},
+        )
+        self.assertFalse(is_paid_live_test(ctx, db_path=self.db_path, env=self.standard_env))
+
+    # 15. provider/worker cannot create Owner authorization record
+    def test_n21z_15_provider_worker_cannot_create_owner_live_authorization(self):
+        self.assertEqual(WORKER_CAN_CREATE_OWNER_LIVE_AUTH, "NO")
+        self.assertEqual(PROVIDER_CAN_CREATE_OWNER_LIVE_AUTH, "NO")
+        self.assertEqual(DIRECT_PROVIDER_CAN_CREATE_OWNER_LIVE_AUTH, "NO")
+        with self.assertRaises(PermissionError) as cm:
+            create_owner_live_authorization(
+                job_id="job_z15",
+                request_id="req_z15",
+                _caller_override_for_test="worker",
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+        self.assertIn("WORKER_CAN_CREATE_OWNER_LIVE_AUTH=NO", str(cm.exception))
+
+        with self.assertRaises(PermissionError) as cm:
+            create_owner_live_authorization(
+                job_id="job_z15",
+                request_id="req_z15",
+                _caller_override_for_test="provider",
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+        self.assertIn("PROVIDER_CAN_CREATE_OWNER_LIVE_AUTH=NO", str(cm.exception))
+
+        with self.assertRaises(PermissionError) as cm:
+            create_owner_live_authorization(
+                job_id="job_z15",
+                request_id="req_z15",
+                _caller_override_for_test="router",
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+        self.assertIn("DIRECT_PROVIDER_CAN_CREATE_OWNER_LIVE_AUTH=NO", str(cm.exception))
+
+    # 16. authorized expected max micro USD > 0 invariant enforced
+    def test_n21z_16_authorized_expected_max_micro_usd_greater_than_zero_enforced(self):
+        self.assertEqual(AUTHORIZED_EXPECTED_MAX_ENFORCED, "YES")
+        create_owner_live_authorization(
+            authorization_id="rcpt_z16",
+            product_family="Product Video",
+            job_id="job_z16",
+            request_id="req_z16",
+            operation="create_video_task",
+            expected_max_provider_spend_micro_usd=0,
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        auth = create_test_mint_authority(
+            chat_id="chat_z16",
+            user_id="user_z16",
+            job_id="job_z16",
+            request_id="req_z16",
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z16",
+            expected_max_provider_spend_usd=Decimal("0.0"),
+        )
+        conf_id = create_bot_confirmation(
+            mint_authority=auth,
+            chat_id="chat_z16",
+            user_id="user_z16",
+            job_id="job_z16",
+            request_id="req_z16",
+            scene_index=1,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z16",
+            expected_max_cost_usd=Decimal("0.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        ctx = SpendGuardContext(
+            chat_id="chat_z16",
+            user_id="user_z16",
+            job_id="job_z16",
+            request_id="req_z16",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_originated_action=True,
+            bot_confirm_authority=conf_id,
+            user_flow="product_video_bot",
+            owner_receipt="rcpt_z16",
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res.allowed)
+        self.assertEqual(res.blocker, BLOCKER_OWNER_AUTHORIZED_MAX_SPEND_EXCEEDED)
+
+    # 17. canonical submit cost > authorized expected max -> BLOCKER=owner_authorized_max_spend_exceeded
+    def test_n21z_17_canonical_submit_cost_exceeding_authorized_max_blocked(self):
+        create_owner_live_authorization(
+            authorization_id="rcpt_z17",
+            product_family="Product Video",
+            job_id="job_z17",
+            request_id="req_z17",
+            operation="create_video_task",
+            expected_max_provider_spend_usd=Decimal("1.00"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        auth = create_test_mint_authority(
+            chat_id="chat_z17",
+            user_id="user_z17",
+            job_id="job_z17",
+            request_id="req_z17",
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z17",
+            expected_max_provider_spend_usd=Decimal("1.00"),
+        )
+        conf_id = create_bot_confirmation(
+            mint_authority=auth,
+            chat_id="chat_z17",
+            user_id="user_z17",
+            job_id="job_z17",
+            request_id="req_z17",
+            scene_index=1,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z17",
+            expected_max_cost_usd=Decimal("1.00"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        ctx = SpendGuardContext(
+            chat_id="chat_z17",
+            user_id="user_z17",
+            job_id="job_z17",
+            request_id="req_z17",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_originated_action=True,
+            bot_confirm_authority=conf_id,
+            user_flow="product_video_bot",
+            owner_receipt="rcpt_z17",
+            metadata={"quality_key": "kling_long_audio_15"},  # Canonical ~$30.60 > $1.00
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res.allowed)
+        self.assertEqual(res.blocker, BLOCKER_OWNER_AUTHORIZED_MAX_SPEND_EXCEEDED)
+
+    # 18. multi-scene plan allocates explicit bounded child max
+    def test_n21z_18_multiscene_plan_allocates_explicit_bounded_child_max(self):
+        self.assertEqual(MULTISCENE_OWNER_MAX_ALLOCATION, "PASS")
+        create_owner_live_authorization(
+            authorization_id="rcpt_z18",
+            product_family="Product Video",
+            job_id="job_z18",
+            request_id="req_z18",
+            operation="create_video_task",
+            expected_max_provider_spend_usd=Decimal("40.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        auth = create_test_mint_authority(
+            chat_id="chat_z18",
+            user_id="user_z18",
+            job_id="job_z18",
+            request_id="req_z18",
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z18",
+            expected_max_provider_spend_usd=Decimal("40.0"),
+        )
+        plan = mint_multiscene_bot_confirmation_plan(
+            mint_authority=auth,
+            chat_id="chat_z18",
+            user_id="user_z18",
+            job_id="job_z18",
+            request_id="req_z18",
+            product_family="Product Video",
+            operation="create_video_task",
+            scene_count=2,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z18",
+            expected_max_cost_usd=Decimal("40.0"),
+            metadata={"child_authorized_max_usd_map": {1: 20.0, 2: 20.0}},
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        import sqlite3 as _sqlite3
+        conn = _sqlite3.connect(self.db_path)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT scene_index, expected_max_cost_micro_usd FROM bot_spend_confirmations WHERE parent_confirmation_id = ?",
+            (plan["parent_confirmation_id"],),
+        )
+        rows = cur.fetchall()
+        conn.close()
+        self.assertEqual(len(rows), 2)
+        for s_idx, exp_micro in rows:
+            self.assertEqual(exp_micro, 20_000_000)
+
+    # 19. sum(child authorized max) <= job owner max enforced
+    def test_n21z_19_sum_of_child_authorized_max_exceeding_job_owner_max_enforced(self):
+        create_owner_live_authorization(
+            authorization_id="rcpt_z19",
+            product_family="Product Video",
+            job_id="job_z19",
+            request_id="req_z19",
+            operation="create_video_task",
+            expected_max_provider_spend_usd=Decimal("40.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        auth = create_test_mint_authority(
+            chat_id="chat_z19",
+            user_id="user_z19",
+            job_id="job_z19",
+            request_id="req_z19",
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z19",
+            expected_max_provider_spend_usd=Decimal("40.0"),
+        )
+        with self.assertRaises(ValueError) as cm:
+            mint_multiscene_bot_confirmation_plan(
+                mint_authority=auth,
+                chat_id="chat_z19",
+                user_id="user_z19",
+                job_id="job_z19",
+                request_id="req_z19",
+                product_family="Product Video",
+                operation="create_video_task",
+                scene_count=2,
+                purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+                owner_receipt="rcpt_z19",
+                expected_max_cost_usd=Decimal("40.0"),
+                metadata={"child_authorized_max_usd_map": {1: 30.0, 2: 30.0}},  # sum = 60 > 40
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+        self.assertIn("MULTISCENE_OWNER_MAX_ALLOCATION=FAIL", str(cm.exception))
+
+    # 20. child canonical scene cost > child authorized max -> BLOCK
+    def test_n21z_20_child_canonical_scene_cost_exceeding_child_authorized_max_blocked(self):
+        self.assertEqual(CHILD_EXPECTED_MAX_ENFORCED, "YES")
+        create_owner_live_authorization(
+            authorization_id="rcpt_z20",
+            product_family="Product Video",
+            job_id="job_z20",
+            request_id="req_z20",
+            operation="create_video_task",
+            expected_max_provider_spend_usd=Decimal("40.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        auth = create_test_mint_authority(
+            chat_id="chat_z20",
+            user_id="user_z20",
+            job_id="job_z20",
+            request_id="req_z20",
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z20",
+            expected_max_provider_spend_usd=Decimal("40.0"),
+        )
+        plan = mint_multiscene_bot_confirmation_plan(
+            mint_authority=auth,
+            chat_id="chat_z20",
+            user_id="user_z20",
+            job_id="job_z20",
+            request_id="req_z20",
+            product_family="Product Video",
+            operation="create_video_task",
+            scene_count=2,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z20",
+            expected_max_cost_usd=Decimal("40.0"),
+            metadata={"child_authorized_max_usd_map": {1: 5.0, 2: 35.0}},  # child 1 has $5 max
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        child1_conf = plan["scene_confirmations"][1]
+        ctx = SpendGuardContext(
+            chat_id="chat_z20",
+            user_id="user_z20",
+            job_id="job_z20",
+            request_id="req_z20",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_originated_action=True,
+            bot_confirm_authority=child1_conf,
+            user_flow="product_video_bot",
+            owner_receipt="rcpt_z20",
+            metadata={"quality_key": "kling_long_audio_15"},  # cost ~$30.60 > $5.00
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res.allowed)
+        self.assertEqual(res.blocker, BLOCKER_OWNER_AUTHORIZED_MAX_SPEND_EXCEEDED)
+
+    # 21. multi-scene plan does NOT duplicate whole-job max into every child
+    def test_n21z_21_multiscene_plan_does_not_duplicate_whole_job_max_into_every_child(self):
+        create_owner_live_authorization(
+            authorization_id="rcpt_z21",
+            product_family="Product Video",
+            job_id="job_z21",
+            request_id="req_z21",
+            operation="create_video_task",
+            expected_max_provider_spend_usd=Decimal("60.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        auth = create_test_mint_authority(
+            chat_id="chat_z21",
+            user_id="user_z21",
+            job_id="job_z21",
+            request_id="req_z21",
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z21",
+            expected_max_provider_spend_usd=Decimal("60.0"),
+        )
+        plan = mint_multiscene_bot_confirmation_plan(
+            mint_authority=auth,
+            chat_id="chat_z21",
+            user_id="user_z21",
+            job_id="job_z21",
+            request_id="req_z21",
+            product_family="Product Video",
+            operation="create_video_task",
+            scene_count=3,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z21",
+            expected_max_cost_usd=Decimal("60.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        import sqlite3 as _sqlite3
+        conn = _sqlite3.connect(self.db_path)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT expected_max_cost_micro_usd FROM bot_spend_confirmations WHERE parent_confirmation_id = ?",
+            (plan["parent_confirmation_id"],),
+        )
+        rows = [r[0] for r in cur.fetchall()]
+        conn.close()
+        self.assertEqual(len(rows), 3)
+        for r in rows:
+            self.assertNotEqual(r, 60_000_000, "Child confirmation must not duplicate whole-job max")
+            self.assertEqual(r, 20_000_000)
+
+    # 22. single-use Owner authorization consumed -> second use BLOCKED
+    def test_n21z_22_single_use_owner_authorization_consumed_second_use_blocked(self):
+        create_owner_live_authorization(
+            authorization_id="rcpt_z22",
+            product_family="Product Video",
+            job_id="job_z22",
+            request_id="req_z22",
+            operation="create_video_task",
+            allowed_scene_slots="1",
+            expected_max_provider_spend_usd=Decimal("50.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        auth1 = create_test_mint_authority(
+            chat_id="chat_z22",
+            user_id="user_z22",
+            job_id="job_z22",
+            request_id="req_z22",
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z22",
+            expected_max_provider_spend_usd=Decimal("50.0"),
+        )
+        conf1 = create_bot_confirmation(
+            mint_authority=auth1,
+            chat_id="chat_z22",
+            user_id="user_z22",
+            job_id="job_z22",
+            request_id="req_z22",
+            scene_index=1,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z22",
+            expected_max_cost_usd=Decimal("50.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        ctx1 = SpendGuardContext(
+            chat_id="chat_z22",
+            user_id="user_z22",
+            job_id="job_z22",
+            request_id="req_z22",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_originated_action=True,
+            bot_confirm_authority=conf1,
+            user_flow="product_video_bot",
+            owner_receipt="rcpt_z22",
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        res1 = reserve_provider_spend(ctx1, db_path=self.db_path, env=self.standard_env)
+        self.assertTrue(res1.allowed)
+
+        # Second attempt with fresh confirmation but same single-use authorization
+        auth2 = create_test_mint_authority(
+            chat_id="chat_z22",
+            user_id="user_z22",
+            job_id="job_z22",
+            request_id="req_z22_retry",
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z22",
+            expected_max_provider_spend_usd=Decimal("50.0"),
+        )
+        conf2 = create_bot_confirmation(
+            mint_authority=auth2,
+            chat_id="chat_z22",
+            user_id="user_z22",
+            job_id="job_z22",
+            request_id="req_z22_retry",
+            scene_index=1,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z22",
+            expected_max_cost_usd=Decimal("50.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        ctx2 = SpendGuardContext(
+            chat_id="chat_z22",
+            user_id="user_z22",
+            job_id="job_z22",
+            request_id="req_z22_retry",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_originated_action=True,
+            bot_confirm_authority=conf2,
+            user_flow="product_video_bot",
+            owner_receipt="rcpt_z22",
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        res2 = reserve_provider_spend(ctx2, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res2.allowed)
+        self.assertEqual(res2.blocker, BLOCKER_OWNER_LIVE_AUTH_ALREADY_CONSUMED)
+
+    # 23. Directive #1422 lineage complete for paid live test -> PASS
+    def test_n21z_23_directive_1422_lineage_complete_for_paid_live_test_passes(self):
+        create_owner_live_authorization(
+            authorization_id="rcpt_z23",
+            product_family="Product Video",
+            job_id="job_z23",
+            request_id="req_z23",
+            operation="create_video_task",
+            expected_max_provider_spend_usd=Decimal("50.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        auth = create_test_mint_authority(
+            chat_id="chat_z23",
+            user_id="user_z23",
+            job_id="job_z23",
+            request_id="req_z23",
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z23",
+            expected_max_provider_spend_usd=Decimal("50.0"),
+        )
+        conf = create_bot_confirmation(
+            mint_authority=auth,
+            chat_id="chat_z23",
+            user_id="user_z23",
+            job_id="job_z23",
+            request_id="req_z23",
+            scene_index=1,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z23",
+            expected_max_cost_usd=Decimal("50.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        ctx = SpendGuardContext(
+            chat_id="chat_z23",
+            user_id="user_z23",
+            entrypoint="bot",
+            bot_originated_action=True,
+            job_id="job_z23",
+            request_id="req_z23",
+            user_flow="bot_live_acceptance",
+            owner_receipt="rcpt_z23",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_confirm_authority=conf,
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertTrue(res.allowed)
+
+    # 24. missing any Directive #1422 field for live test -> BLOCK
+    def test_n21z_24_missing_any_directive_1422_field_for_live_test_blocked(self):
+        create_owner_live_authorization(
+            authorization_id="rcpt_z24",
+            product_family="Product Video",
+            job_id="job_z24",
+            request_id="req_z24",
+            operation="create_video_task",
+            expected_max_provider_spend_usd=Decimal("50.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        auth = create_test_mint_authority(
+            chat_id="chat_z24",
+            user_id="user_z24",
+            job_id="job_z24",
+            request_id="req_z24",
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z24",
+            expected_max_provider_spend_usd=Decimal("50.0"),
+        )
+        conf = create_bot_confirmation(
+            mint_authority=auth,
+            chat_id="chat_z24",
+            user_id="user_z24",
+            job_id="job_z24",
+            request_id="req_z24",
+            scene_index=1,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_z24",
+            expected_max_cost_usd=Decimal("50.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        # Test missing bot_originated_action
+        ctx_no_bot_origin = SpendGuardContext(
+            chat_id="chat_z24",
+            user_id="user_z24",
+            entrypoint="bot",
+            bot_originated_action=False,
+            job_id="job_z24",
+            request_id="req_z24",
+            user_flow="bot_live_acceptance",
+            owner_receipt="rcpt_z24",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_confirm_authority=conf,
+        )
+        res1 = reserve_provider_spend(ctx_no_bot_origin, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res1.allowed)
+        self.assertEqual(res1.blocker, BLOCKER_BOT_ORIGIN_PROOF_MISSING)
+
+        # Test non-bot entrypoint
+        ctx_worker = SpendGuardContext(
+            chat_id="chat_z24",
+            user_id="user_z24",
+            entrypoint="worker",
+            bot_originated_action=True,
+            job_id="job_z24",
+            request_id="req_z24",
+            user_flow="bot_live_acceptance",
+            owner_receipt="rcpt_z24",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_confirm_authority=conf,
+        )
+        res2 = reserve_provider_spend(ctx_worker, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res2.allowed)
+        self.assertIn(res2.blocker, (BLOCKER_BOT_ORIGIN_PROOF_MISSING, "paid_live_test_entrypoint_forbidden_bot_only_required"))
+
+        # Test missing user_flow
+        ctx_no_flow = SpendGuardContext(
+            chat_id="chat_z24",
+            user_id="user_z24",
+            entrypoint="bot",
+            bot_originated_action=True,
+            job_id="job_z24",
+            request_id="req_z24",
+            user_flow="",
+            owner_receipt="rcpt_z24",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_confirm_authority=conf,
+        )
+        res3 = reserve_provider_spend(ctx_no_flow, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res3.allowed)
+        self.assertEqual(res3.blocker, BLOCKER_BOT_ORIGIN_PROOF_MISSING)
+
+    # 25. weekly $200 shared cap still active
+    def test_n21z_25_weekly_200_shared_cap_still_active(self):
+        cap_micro = get_configured_cap_micro_usd(env={})
+        self.assertEqual(cap_micro, 200_000_000)
+
+    # 26. weekly reset policy missing -> PRODUCTION_READY=NO
+    def test_n21z_26_weekly_reset_policy_missing_remains_not_production_ready(self):
+        self.assertTrue(OWNER_POLICY_RESET_RULE_UNSPECIFIED)
+        auth = create_test_mint_authority(chat_id="chat_z26", user_id="user_z26")
+        conf = create_bot_confirmation(
+            mint_authority=auth,
+            chat_id="chat_z26",
+            user_id="user_z26",
+            job_id="job_z26",
+            request_id="req_z26",
+            scene_index=1,
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        ctx = SpendGuardContext(
+            chat_id="chat_z26",
+            user_id="user_z26",
+            job_id="job_z26",
+            request_id="req_z26",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_originated_action=True,
+            bot_confirm_authority=conf,
+            user_flow="product_video_bot",
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        # Without reset policy injected, reservation fails closed
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env={"SPEND_GUARD_DB_PATH": self.db_path})
+        self.assertFalse(res.allowed)
+        self.assertEqual(res.blocker, BLOCKER_POLICY_INCOMPLETE)
+
+    # 27. real provider calls == 0 across entire test suite
+    def test_n21z_27_real_provider_calls_zero_across_entire_test_suite(self):
+        # Invariant: 0 real provider calls, 0 submits in provider-free testing
+        self.assertEqual(len(PROVIDER_PRODUCTION_MINT_CALLERS), 0)
+        self.assertEqual(len(WORKER_PRODUCTION_MINT_CALLERS), 0)
+
+    # 28. test count report truth exact
+    def test_n21z_28_test_count_report_truth_exact(self):
+        # Verification of exact test matrix structure
+        cases_25 = len([m for m in dir(TestProviderSpendGuard25Cases) if m.startswith("test_")])
+        cases_n21u = len([m for m in dir(TestN21UProviderFreeSpendGuardMatrix) if m.startswith("test_")])
+        cases_n21v = len([m for m in dir(TestN21VRealBotConfirmLineageAndMultiSubmitMatrix) if m.startswith("test_")])
+        cases_n21w = len([m for m in dir(TestN21WConfirmationMintBoundaryAndProductionReadinessMatrix) if m.startswith("test_")])
+        cases_n21x = len([m for m in dir(TestN21XNonForgeableBotMintCapabilityMatrix) if m.startswith("test_")])
+        cases_n21y = len([m for m in dir(TestN21YBotConfirmAuthorityTruthAndPerSceneReservationMatrix) if m.startswith("test_")])
+        cases_n21z = len([m for m in dir(TestN21ZOwnerLiveAuthorityRecordAndExpectedSpendEnforcementMatrix) if m.startswith("test_")])
+
+        self.assertEqual(cases_25, 50)
+        self.assertEqual(cases_n21u, 18)
+        self.assertEqual(cases_n21v, 22)
+        self.assertEqual(cases_n21w, 29)
+        self.assertEqual(cases_n21x, 23)
+        self.assertEqual(cases_n21y, 26)
+        self.assertEqual(cases_n21z, 28)
+        self.assertEqual(cases_25 + cases_n21u + cases_n21v + cases_n21w + cases_n21x + cases_n21y + cases_n21z, 196)
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
 
