@@ -106549,15 +106549,32 @@ def product_video_public_preflight_panel_keyboard(
     ready=None,
     back_callback: str = "vproduct|b14_scene_count_screen",
     owner_receipt: str = "",
+    job_id: str | int = 0,
+    request_id: str = "",
+    db_path: str | None = None,
 ) -> InlineKeyboardMarkup:
     if not resolved_state:
         resolved_state = "ready_healthy" if bool(ready) else "blocked_provider"
     panel_kind = product_video_public_preflight_public_kind(resolved_state)
     rows = []
-    if owner_receipt:
-        token = str(owner_receipt).strip()[:12]
-        cb_data = f"vproduct|owner_live_accept|{token}" if token else "vproduct|owner_live_accept"
-        rows.append([InlineKeyboardButton("👑 Xác nhận kiểm thử trực tiếp (Owner)", callback_data=cb_data)])
+    if owner_receipt and job_id and request_id:
+        should_render = False  # N21AC §13: OWNER_LIVE_BUTTON_DEFAULT_RENDER=NO (fail-closed)
+        from services.provider_spend_guard import validate_canonical_owner_live_authorization
+        try:
+            is_valid, _, _ = validate_canonical_owner_live_authorization(
+                owner_receipt,
+                product_family="Product Video",
+                job_id=str(job_id) if job_id else "",
+                request_id=str(request_id) if request_id else "",
+                db_path=db_path,
+            )
+            should_render = is_valid
+        except Exception:
+            should_render = False
+        if should_render:
+            token = str(owner_receipt).strip()[:12]
+            cb_data = f"vproduct|owner_live_accept|{token}" if token else "vproduct|owner_live_accept"
+            rows.append([InlineKeyboardButton("👑 Xác nhận kiểm thử trực tiếp (Owner)", callback_data=cb_data)])
     if panel_kind == "ready":
         rows.append([InlineKeyboardButton("✅ Xác nhận tạo video", callback_data="vproduct|b14_confirm"), InlineKeyboardButton("🧾 Xem lại hóa đơn", callback_data="vproduct|b14_invoice_screen")])
     elif panel_kind == "ready_try":
@@ -109040,6 +109057,12 @@ async def handle_owner_authorized_live_test_confirm(
     real_cbq_id = getattr(query, "id", "") or ""
     real_chat_id = getattr(getattr(query, "message", None), "chat_id", 0) or getattr(getattr(update, "effective_chat", None), "id", 0) or 0
     real_user_id = getattr(getattr(query, "from_user", None), "id", 0) or getattr(getattr(update, "effective_user", None), "id", 0) or 0
+
+    if not real_cbq_id or not real_update_id or not real_chat_id or not real_user_id:
+        raise PermissionError(
+            "Real Telegram callback query event with valid update/callback_query/chat/user is required "
+            "(REAL_TELEGRAM_EVENT=YES, REAL_CALLBACK_QUERY_ID=YES, CALLSITE_STRING_ALONE_CAN_AUTHORIZE=NO)"
+        )
 
     # Section 10: DURABLE_OWNER_MAX_SOLE_SOURCE=YES, CALLER_EXPECTED_MAX_INFLUENCE=NO
     auth_micro = auth_data.get("expected_max_provider_spend_micro_usd") or 0

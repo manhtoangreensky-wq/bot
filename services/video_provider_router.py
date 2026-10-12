@@ -3531,6 +3531,7 @@ def validate_owner_acceptance_authorization(
     environ: dict[str, str] | None = None,
     current_time: float | None = None,
     db_path: str | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Validate Owner-authorized acceptance lane for a single controlled live job.
 
@@ -3595,9 +3596,9 @@ def validate_owner_acceptance_authorization(
     attempt_fingerprint = compute_owner_acceptance_attempt_fingerprint(auth)
     env = dict(environ or os.environ)
     effective_db_path = db_path or env.get("DB_PATH") or env.get("SQLITE_DB_PATH")
-    if is_owner_acceptance_token_claimed_or_consumed(fingerprint, db_path=effective_db_path):
+    if is_owner_acceptance_token_claimed_or_consumed(fingerprint, conn=conn, db_path=effective_db_path):
         return False, "owner_acceptance_already_consumed", {"token_fingerprint": fingerprint}
-    if is_owner_acceptance_attempt_claimed_or_consumed(attempt_fingerprint, db_path=effective_db_path):
+    if is_owner_acceptance_attempt_claimed_or_consumed(attempt_fingerprint, conn=conn, db_path=effective_db_path):
         return False, "owner_acceptance_already_consumed", {"attempt_fingerprint": attempt_fingerprint}
 
     if is_r05a:
