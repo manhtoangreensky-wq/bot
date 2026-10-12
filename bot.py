@@ -106557,21 +106557,20 @@ def product_video_public_preflight_panel_keyboard(
         resolved_state = "ready_healthy" if bool(ready) else "blocked_provider"
     panel_kind = product_video_public_preflight_public_kind(resolved_state)
     rows = []
-    if owner_receipt:
-        should_render = True
-        if job_id or request_id or db_path:
-            from services.provider_spend_guard import validate_canonical_owner_live_authorization
-            try:
-                is_valid, _, _ = validate_canonical_owner_live_authorization(
-                    owner_receipt,
-                    product_family="Product Video",
-                    job_id=str(job_id) if job_id else "",
-                    request_id=str(request_id) if request_id else "",
-                    db_path=db_path,
-                )
-                should_render = is_valid
-            except Exception:
-                should_render = False
+    if owner_receipt and job_id and request_id:
+        should_render = False  # N21AC §13: OWNER_LIVE_BUTTON_DEFAULT_RENDER=NO (fail-closed)
+        from services.provider_spend_guard import validate_canonical_owner_live_authorization
+        try:
+            is_valid, _, _ = validate_canonical_owner_live_authorization(
+                owner_receipt,
+                product_family="Product Video",
+                job_id=str(job_id) if job_id else "",
+                request_id=str(request_id) if request_id else "",
+                db_path=db_path,
+            )
+            should_render = is_valid
+        except Exception:
+            should_render = False
         if should_render:
             token = str(owner_receipt).strip()[:12]
             cb_data = f"vproduct|owner_live_accept|{token}" if token else "vproduct|owner_live_accept"
