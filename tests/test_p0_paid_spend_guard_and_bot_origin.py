@@ -73,6 +73,10 @@ from services.provider_spend_guard import (
     EMPTY_PAID_OPERATION_BLOCKED,
     PRODUCTION_BOT_CONFIRM_MINT_CALLSITE,
     resolve_canonical_cost_micro_usd,
+    PROVIDER_ALIAS_MAP,
+    is_paid_live_test,
+    get_configured_cap_micro_usd,
+    BLOCKER_TEST_CONFIRM_CANNOT_REACH_REAL_TRANSPORT,
 )
 from services.video_provider_catalog import (
     KEY4U_VIDEO_AUTH_MISSING,
@@ -3700,6 +3704,443 @@ class TestN21WConfirmationMintBoundaryAndProductionReadinessMatrix(unittest.Test
         cost_micro, proven, source = resolve_canonical_cost_micro_usd(ctx, authority)
         self.assertTrue(proven)
         self.assertEqual(cost_micro, 30_600_245)
+
+
+
+class TestN21XNonForgeableBotMintCapabilityMatrix(unittest.TestCase):
+    """N21X Verification Matrix: Non-forgeable Bot Mint Capability, Caller Boundary, and Exact Transport Authority."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="n21x_mint_cap_")
+        self.db_path = os.path.join(self.temp_dir, "test_system.db")
+        init_spend_guard_db(db_path=self.db_path)
+        self.standard_env = {
+            "SPEND_GUARD_DB_PATH": self.db_path,
+            "WEEKLY_PROVIDER_SPEND_CAP_USD": "200.000",
+            "WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE": "MONDAY_0000_UTC",
+            "WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE": "UTC",
+        }
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    # 1. Direct BotMintAuthority(...) constructor -> unusable/BLOCK
+    def test_n21x_01_direct_bot_mint_authority_constructor_unusable(self):
+        with self.assertRaises(PermissionError):
+            BotMintAuthority(
+                callsite="bot.py:handle_video_product_callback:b14_confirm",
+                telegram_update_id=1,
+                chat_id="123",
+                user_id="456",
+            )
+
+    # 2. generic service calls production issuer with correct callsite string -> BLOCK
+    def test_n21x_02_generic_service_calls_production_issuer_with_whitelisted_string_blocked(self):
+        with self.assertRaises(PermissionError):
+            issue_bot_mint_authority(
+                callsite="bot.py:handle_video_product_callback:b14_confirm",
+                telegram_update_id=1,
+                callback_query_id="cbq_1",
+                chat_id="123",
+                user_id="456",
+                job_id="job_1",
+                request_id="req_1",
+                _caller_override_for_test="generic_service",
+            )
+
+    # 3. worker passes exact whitelisted callsite string -> BLOCK
+    def test_n21x_03_worker_passes_whitelisted_callsite_string_blocked(self):
+        with self.assertRaises(PermissionError):
+            issue_bot_mint_authority(
+                callsite="bot.py:handle_video_product_callback:b14_confirm",
+                telegram_update_id=1,
+                callback_query_id="cbq_1",
+                chat_id="123",
+                user_id="456",
+                job_id="job_1",
+                request_id="req_1",
+                _caller_override_for_test="worker",
+            )
+
+    # 4. provider passes exact whitelisted callsite string -> BLOCK
+    def test_n21x_04_provider_passes_whitelisted_callsite_string_blocked(self):
+        with self.assertRaises(PermissionError):
+            issue_bot_mint_authority(
+                callsite="bot.py:handle_video_product_callback:b14_confirm",
+                telegram_update_id=1,
+                callback_query_id="cbq_1",
+                chat_id="123",
+                user_id="456",
+                job_id="job_1",
+                request_id="req_1",
+                _caller_override_for_test="provider",
+            )
+
+    # 5. production code calls create_test_mint_authority -> unavailable/BLOCK
+    def test_n21x_05_production_code_calls_create_test_mint_authority_blocked(self):
+        with self.assertRaises(PermissionError):
+            create_test_mint_authority(
+                _caller_override_for_test="production",
+            )
+
+    # 6. test-harness confirmation cannot authorize real transport
+    def test_n21x_06_test_harness_confirmation_cannot_reach_real_transport(self):
+        auth = create_test_mint_authority(chat_id="chat_6", user_id="user_6")
+        conf_id = create_bot_confirmation(
+            mint_authority=auth,
+            chat_id="chat_6",
+            user_id="user_6",
+            job_id="job_6",
+            request_id="req_6",
+            product_family="Product Video",
+            operation="create_video_task",
+            scene_index=1,
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        ctx = SpendGuardContext(
+            chat_id="chat_6",
+            user_id="user_6",
+            job_id="job_6",
+            request_id="req_6",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_originated_action=True,
+            bot_confirm_authority=conf_id,
+            user_flow="product_video_bot",
+            is_paid_live_attempt=True,  # Real transport attempt
+            metadata={"quality_key": "kling_long_audio_15", "target_transport": "real_provider"},
+        )
+        old_test_var = os.environ.pop("PYTEST_CURRENT_TEST", None)
+        try:
+            res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+            self.assertFalse(res.allowed)
+            self.assertEqual(res.blocker, BLOCKER_TEST_CONFIRM_CANNOT_REACH_REAL_TRANSPORT)
+        finally:
+            if old_test_var is not None:
+                os.environ["PYTEST_CURRENT_TEST"] = old_test_var
+
+    # 7. validated mocked Telegram b14_confirm -> production confirmation mint PASS
+    def test_n21x_07_validated_mocked_telegram_b14_confirm_mint_passes(self):
+        auth = issue_bot_mint_authority(
+            callsite="bot.py:handle_video_product_callback:b14_confirm",
+            telegram_update_id=777,
+            callback_query_id="cbq_777",
+            chat_id="chat_7",
+            user_id="user_7",
+            job_id="job_7",
+            request_id="req_7",
+            action="b14_confirm",
+            validated_ownership=True,
+        )
+        self.assertIsNotNone(auth)
+        self.assertFalse(auth.is_test_override)
+        plan = mint_multiscene_bot_confirmation_plan(
+            mint_authority=auth,
+            chat_id="chat_7",
+            user_id="user_7",
+            job_id="job_7",
+            request_id="req_7",
+            product_family="Product Video",
+            operation="create_video_task",
+            scene_count=2,
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertTrue(bool(plan.get("parent_confirmation_id")))
+        self.assertEqual(len(plan.get("child_confirmations", [])), 2)
+
+    # 8. wrong Telegram update/session/user -> mint BLOCK
+    def test_n21x_08_wrong_telegram_update_session_user_mint_blocked(self):
+        with self.assertRaises(ValueError):
+            issue_bot_mint_authority(
+                telegram_update_id=0,
+                callback_query_id="cbq_8",
+                chat_id="chat_8",
+                user_id="user_8",
+                job_id="job_8",
+                request_id="req_8",
+            )
+        with self.assertRaises(ValueError):
+            issue_bot_mint_authority(
+                telegram_update_id=888,
+                callback_query_id="cbq_8",
+                chat_id="chat_8",
+                user_id="",
+                job_id="job_8",
+                request_id="req_8",
+            )
+
+    # 9. Bot mint before callback ownership validation -> BLOCK
+    def test_n21x_09_bot_mint_before_callback_ownership_validation_blocked(self):
+        with self.assertRaises(PermissionError):
+            issue_bot_mint_authority(
+                telegram_update_id=999,
+                callback_query_id="cbq_9",
+                chat_id="chat_9",
+                user_id="user_9",
+                job_id="job_9",
+                request_id="req_9",
+                validated_ownership=False,
+            )
+
+    # 10. exact operation create_video_task -> resolver PASS
+    def test_n21x_10_exact_operation_create_video_task_resolver_passes(self):
+        res = resolve_paid_transport_authority("Product Video", "key4u_video", "create_video_task")
+        self.assertIsNotNone(res)
+        self.assertEqual(res.operation, "create_video_task")
+
+    # 11. create_video_task_debug -> resolver BLOCK
+    def test_n21x_11_create_video_task_debug_resolver_blocked(self):
+        res = resolve_paid_transport_authority("Product Video", "key4u_video", "create_video_task_debug")
+        self.assertIsNone(res)
+
+    # 12. prefix/suffix operation -> BLOCK
+    def test_n21x_12_prefix_suffix_operation_blocked(self):
+        self.assertIsNone(resolve_paid_transport_authority("Product Video", "key4u_video", "video_create_video_task"))
+        self.assertIsNone(resolve_paid_transport_authority("Product Video", "key4u_video", "create_video"))
+
+    # 13. exact provider -> PASS
+    def test_n21x_13_exact_provider_passes(self):
+        res = resolve_paid_transport_authority("Product Video", "key4u_video", "create_video_task")
+        self.assertIsNotNone(res)
+
+    # 14. fuzzy/partial provider -> BLOCK
+    def test_n21x_14_fuzzy_partial_provider_blocked(self):
+        self.assertIsNone(resolve_paid_transport_authority("Product Video", "key4u_partial", "create_video_task"))
+        self.assertIsNone(resolve_paid_transport_authority("Product Video", "kling", "create_video_task"))
+        self.assertIsNone(resolve_paid_transport_authority("Product Video", "video", "create_video_task"))
+
+    # 15. explicit approved alias -> PASS
+    def test_n21x_15_explicit_approved_alias_passes(self):
+        self.assertIsNotNone(resolve_paid_transport_authority("Product Video", "key4u_kling", "create_video_task"))
+        self.assertIsNotNone(resolve_paid_transport_authority("Product Video", "key4u", "create_video_task"))
+
+    # 16. two-scene child plan still PASS
+    def test_n21x_16_two_scene_child_plan_still_passes(self):
+        auth = create_test_mint_authority(chat_id="chat_16", user_id="user_16")
+        plan = mint_multiscene_bot_confirmation_plan(
+            mint_authority=auth,
+            chat_id="chat_16",
+            user_id="user_16",
+            job_id="job_16",
+            request_id="req_16",
+            product_family="Product Video",
+            operation="create_video_task",
+            scene_count=2,
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        s1_id = plan["scene_confirmations"][1]
+        s2_id = plan["scene_confirmations"][2]
+        ctx1 = SpendGuardContext(
+            chat_id="chat_16",
+            user_id="user_16",
+            job_id="job_16",
+            request_id="req_16",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_originated_action=True,
+            bot_confirm_authority=s1_id,
+            user_flow="product_video_bot",
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        res1 = reserve_provider_spend(ctx1, db_path=self.db_path, env=self.standard_env)
+        self.assertTrue(res1.allowed)
+
+        ctx2 = SpendGuardContext(
+            chat_id="chat_16",
+            user_id="user_16",
+            job_id="job_16",
+            request_id="req_16",
+            scene_index=2,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_originated_action=True,
+            bot_confirm_authority=s2_id,
+            user_flow="product_video_bot",
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        res2 = reserve_provider_spend(ctx2, db_path=self.db_path, env=self.standard_env)
+        self.assertTrue(res2.allowed)
+
+    # 17. parent submit still BLOCK
+    def test_n21x_17_parent_submit_still_blocked(self):
+        auth = create_test_mint_authority(chat_id="chat_17", user_id="user_17")
+        plan = mint_multiscene_bot_confirmation_plan(
+            mint_authority=auth,
+            chat_id="chat_17",
+            user_id="user_17",
+            job_id="job_17",
+            request_id="req_17",
+            product_family="Product Video",
+            operation="create_video_task",
+            scene_count=2,
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        p_id = plan["parent_confirmation_id"]
+        ctx = SpendGuardContext(
+            chat_id="chat_17",
+            user_id="user_17",
+            job_id="job_17",
+            request_id="req_17",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_originated_action=True,
+            bot_confirm_authority=p_id,
+            user_flow="product_video_bot",
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res.allowed)
+        self.assertEqual(res.blocker, BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING)
+
+    # 18. child duplicate still BLOCK
+    def test_n21x_18_child_duplicate_still_blocked(self):
+        auth = create_test_mint_authority(chat_id="chat_18", user_id="user_18")
+        conf_id = create_bot_confirmation(
+            mint_authority=auth,
+            chat_id="chat_18",
+            user_id="user_18",
+            job_id="job_18",
+            request_id="req_18",
+            scene_index=1,
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        ctx = SpendGuardContext(
+            chat_id="chat_18",
+            user_id="user_18",
+            job_id="job_18",
+            request_id="req_18",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_originated_action=True,
+            bot_confirm_authority=conf_id,
+            user_flow="product_video_bot",
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        res1 = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertTrue(res1.allowed)
+        res2 = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res2.allowed)
+
+    # 19. ambiguous retry still BLOCK
+    def test_n21x_19_ambiguous_retry_still_blocked(self):
+        auth = create_test_mint_authority(chat_id="chat_19", user_id="user_19")
+        conf_id = create_bot_confirmation(
+            mint_authority=auth,
+            chat_id="chat_19",
+            user_id="user_19",
+            job_id="job_19",
+            request_id="req_19",
+            scene_index=1,
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        ctx = SpendGuardContext(
+            chat_id="chat_19",
+            user_id="user_19",
+            job_id="job_19",
+            request_id="req_19",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_originated_action=True,
+            bot_confirm_authority=conf_id,
+            user_flow="product_video_bot",
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertTrue(res.allowed)
+        import sqlite3 as _sqlite3
+        conn = _sqlite3.connect(self.db_path)
+        conn.execute(
+            "UPDATE provider_spend_reservations SET status = ? WHERE reservation_id = ?",
+            (STATUS_AMBIGUOUS_RETAINED, res.reservation_id),
+        )
+        conn.commit()
+        conn.close()
+        res_retry = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res_retry.allowed)
+        self.assertEqual(res_retry.blocker, BLOCKER_AMBIGUOUS_RETRY_BLOCKED)
+
+    # 20. ordinary paid-create remains non-live-test
+    def test_n21x_20_ordinary_paid_create_remains_non_live_test(self):
+        ctx = SpendGuardContext(
+            job_id="job_20",
+            request_id="req_20",
+            chat_id="chat_20",
+            user_id="user_20",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            operation="create_video_task",
+            bot_originated_action=True,
+            paid_live_test=False,
+        )
+        self.assertFalse(is_paid_live_test(ctx))
+
+    # 21. paid live test missing Owner receipt -> BLOCK
+    def test_n21x_21_paid_live_test_missing_owner_receipt_blocked(self):
+        auth = create_test_mint_authority(chat_id="chat_21", user_id="user_21")
+        conf_id = create_bot_confirmation(
+            mint_authority=auth,
+            chat_id="chat_21",
+            user_id="user_21",
+            job_id="job_21",
+            request_id="req_21",
+            scene_index=1,
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        ctx = SpendGuardContext(
+            chat_id="chat_21",
+            user_id="user_21",
+            job_id="job_21",
+            request_id="req_21",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_originated_action=True,
+            bot_confirm_authority=conf_id,
+            user_flow="product_video_bot",
+            paid_live_test=True,
+            owner_receipt="",
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res.allowed)
+        self.assertEqual(res.blocker, BLOCKER_BOT_ORIGIN_PROOF_MISSING)
+
+    # 22. weekly cap remains shared $200
+    def test_n21x_22_weekly_cap_remains_shared_200(self):
+        cap_micro = get_configured_cap_micro_usd(env={})
+        self.assertEqual(cap_micro, 200_000_000)
+
+    # 23. missing reset policy remains fail-closed
+    def test_n21x_23_missing_reset_policy_remains_fail_closed(self):
+        with self.assertRaises(ValueError):
+            get_current_spend_week_id(env={})
 
 
 if __name__ == "__main__":

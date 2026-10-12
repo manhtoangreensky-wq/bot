@@ -121936,29 +121936,37 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 issue_bot_mint_authority,
                 mint_multiscene_bot_confirmation_plan,
             )
+            request_id = str(intake_result.get("request_id") or f"req_{job_id}")
+            callback_query_id = str(getattr(query, "id", "") or f"cbq_{telegram_update_id or 1}")
             mint_authority = issue_bot_mint_authority(
                 callsite="bot.py:handle_video_product_callback:b14_confirm",
                 telegram_update_id=telegram_update_id or 1,
+                callback_query_id=callback_query_id,
                 chat_id=chat_id,
                 user_id=uid,
+                job_id=job_id,
+                request_id=request_id,
+                action="b14_confirm",
+                validated_ownership=True,
             )
             confirm_plan = mint_multiscene_bot_confirmation_plan(
                 mint_authority=mint_authority,
                 chat_id=chat_id,
                 user_id=uid,
                 job_id=job_id,
-                request_id=str(intake_result.get("request_id") or ""),
+                request_id=request_id,
                 product_family="Product Video",
                 operation="create_video_task",
                 scene_count=final_admitted_scene_count,
                 ttl_seconds=600.0,
                 metadata={
                     "telegram_update_id": telegram_update_id,
+                    "callback_query_id": callback_query_id,
                     "production_callsite": "bot.py:handle_video_product_callback:b14_confirm",
                     "chat_id": chat_id,
                     "user_id": uid,
                     "job_id": job_id,
-                    "request_id": str(intake_result.get("request_id") or ""),
+                    "request_id": request_id,
                     "confirm_plan_scene_count_source": "final_admitted_scene_count",
                     "final_admitted_scene_count": final_admitted_scene_count,
                 },

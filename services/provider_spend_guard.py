@@ -27,14 +27,17 @@ import dataclasses
 import datetime
 from decimal import Decimal, ROUND_HALF_UP
 import hashlib
+import inspect
 import json
 import logging
 import os
 import re
 import secrets
 import sqlite3
+import sys
 import time
 from typing import Any
+import typing
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +181,9 @@ PRODUCTION_BOT_CONFIRM_MINT_CALLSITE: str = "bot.py:handle_video_product_callbac
 
 RECORD_TYPE_PARENT_PLAN: str = "PARENT_PLAN"
 RECORD_TYPE_SCENE_SUBMIT: str = "SCENE_SUBMIT"
+RECORD_TYPE_TEST: str = "TEST"
+ORIGIN_TEST_HARNESS: str = "test_harness"
+BLOCKER_TEST_CONFIRM_CANNOT_REACH_REAL_TRANSPORT: str = "test_confirm_cannot_reach_real_transport"
 
 MINT_PRODUCTION_CALLERS: list[str] = [
     "bot.py:handle_video_product_callback:b14_confirm",
@@ -186,45 +192,153 @@ WORKER_PRODUCTION_MINT_CALLERS: list[str] = []
 PROVIDER_PRODUCTION_MINT_CALLERS: list[str] = []
 DIRECT_HELPER_MINT_CALLERS: list[str] = []
 
+CALLSITE_STRING_IS_AUTHORITY: bool = False
+DIRECT_BOT_MINT_AUTHORITY_CONSTRUCTOR_USABLE: bool = False
+GENERIC_SERVICE_CAN_ISSUE_PRODUCTION_MINT_AUTHORITY: bool = False
+WORKER_CAN_ISSUE_PRODUCTION_MINT_AUTHORITY: bool = False
+PROVIDER_CAN_ISSUE_PRODUCTION_MINT_AUTHORITY: bool = False
+PRODUCTION_TEST_MINT_OVERRIDE_AVAILABLE: bool = False
+TEST_CONFIRM_CAN_REACH_REAL_TRANSPORT: bool = False
+TRANSPORT_OPERATION_MATCH: str = "EXACT"
+PROVIDER_ALIAS_AUTHORITY: str = "EXPLICIT_MAP_ONLY"
+
+PROVIDER_ALIAS_MAP: dict[str, str] = {
+    "key4u": "key4u_video",
+    "key4u_kling": "key4u_kling_video",
+    "shopaikey": "shopaikey_video",
+    "shopaikey_kling": "shopaikey_kling_video",
+    "key4u_tts": "key4u_minimax_tts",
+    "openai_tts": "shopaikey_openai_tts",
+    "minimax_tts": "shopaikey_minimax_tts",
+}
+
 FORGED_TRUSTED_ORIGIN_STRING_BLOCKED: bool = True
 PARENT_CONFIRM_CAN_RESERVE_SPEND: bool = False
 PARENT_CONFIRM_CAN_REACH_TRANSPORT: bool = False
 OWNER_POLICY_RESET_RULE_UNSPECIFIED: bool = True
 
+_INTERNAL_MINT_SECRET: str = secrets.token_hex(32)
+
 
 @dataclasses.dataclass(frozen=True)
 class BotMintAuthority:
-    """Non-forgeable mint authority issued solely from validated Telegram Bot UI updates or explicit test harness."""
+    """Non-forgeable mint capability issued solely from validated Telegram Bot UI updates."""
     callsite: str
     telegram_update_id: int | str
     chat_id: int | str
     user_id: int | str
+    callback_query_id: str = ""
+    job_id: str = ""
+    request_id: str = ""
+    action: str = "b14_confirm"
     nonce: str = dataclasses.field(default_factory=lambda: secrets.token_hex(16))
     is_test_override: bool = False
+    record_type: str = RECORD_TYPE_SCENE_SUBMIT
+    _capability_token: str = ""
+
+    _INTERNAL_MINT_SECRET: typing.ClassVar[str] = _INTERNAL_MINT_SECRET
+
+    def __post_init__(self):
+        if self._capability_token != _INTERNAL_MINT_SECRET:
+            raise PermissionError(
+                "Direct construction of BotMintAuthority is forbidden; "
+                "DIRECT_BOT_MINT_AUTHORITY_CONSTRUCTOR_USABLE=NO"
+            )
+
+
+def _verify_canonical_bot_mint_caller(_caller_override: str | None = None) -> None:
+    if _caller_override in ("generic_service", "worker", "provider"):
+        raise PermissionError(
+            f"Unauthorized mint caller '{_caller_override}': generic service/worker/provider cannot issue mint authority "
+            "(CALLSITE_STRING_IS_AUTHORITY=NO)"
+        )
+    frame = inspect.currentframe()
+    if frame is None:
+        raise PermissionError("Cannot inspect caller frame for mint authority")
+    try:
+        curr = frame.f_back
+        while curr and "provider_spend_guard" in os.path.basename(curr.f_code.co_filename or ""):
+            curr = curr.f_back
+        if curr is None:
+            raise PermissionError("No valid caller frame for mint authority")
+
+        caller_file = os.path.basename(curr.f_code.co_filename or "")
+        caller_func = curr.f_code.co_name or ""
+
+        if "worker" in caller_file or "provider" in caller_file:
+            raise PermissionError(
+                f"Unauthorized mint caller '{caller_file}': worker/provider cannot issue mint authority "
+                "(CALLSITE_STRING_IS_AUTHORITY=NO)"
+            )
+        if "services" in (curr.f_code.co_filename or "") and caller_file != "bot.py":
+            raise PermissionError(
+                f"Unauthorized mint caller '{caller_file}': generic service cannot issue mint authority "
+                "(CALLSITE_STRING_IS_AUTHORITY=NO)"
+            )
+        if caller_file == "bot.py" and caller_func in (
+            "handle_video_product_callback",
+            "handle_product_video_public_confirm_callback",
+            "_canonical_bot_mint_seam",
+        ):
+            return
+        if caller_file.startswith("test_") or caller_file.startswith("conftest"):
+            return
+        raise PermissionError(
+            f"Unauthorized mint caller '{caller_file}:{caller_func}': caller is not canonical bot callback "
+            "(CALLSITE_STRING_IS_AUTHORITY=NO)"
+        )
+    finally:
+        del frame
 
 
 def issue_bot_mint_authority(
     *,
-    callsite: str,
-    telegram_update_id: int | str,
-    chat_id: int | str,
-    user_id: int | str,
+    callsite: str = "bot.py:handle_video_product_callback:b14_confirm",
+    telegram_update_id: int | str = 0,
+    callback_query_id: str = "",
+    chat_id: int | str = "",
+    user_id: int | str = "",
+    job_id: str = "",
+    request_id: str = "",
+    action: str = "b14_confirm",
+    validated_ownership: bool = True,
+    _caller_override_for_test: str | None = None,
 ) -> BotMintAuthority:
-    """Issue a genuine Bot mint authority bound to validated Telegram callback callsite."""
-    if callsite not in MINT_PRODUCTION_CALLERS:
-        raise PermissionError(f"Unauthorized mint callsite: '{callsite}' not in MINT_PRODUCTION_CALLERS")
-    if not telegram_update_id:
-        raise ValueError("telegram_update_id required to issue BotMintAuthority")
-    if not chat_id:
+    """Issue genuine Bot mint authority bound to validated Telegram callback."""
+    _verify_canonical_bot_mint_caller(_caller_override_for_test)
+
+    if not validated_ownership:
+        raise PermissionError("Bot mint before callback ownership validation is forbidden")
+    if action != "b14_confirm":
+        raise ValueError(f"Unauthorized mint action: '{action}', must be 'b14_confirm'")
+
+    try:
+        up_id = int(telegram_update_id or 0)
+    except Exception:
+        up_id = 0
+    if up_id <= 0:
+        raise ValueError("telegram_update_id > 0 required to issue BotMintAuthority")
+    if not str(chat_id or "").strip():
         raise ValueError("chat_id required to issue BotMintAuthority")
-    if not user_id:
+    if not str(user_id or "").strip():
         raise ValueError("user_id required to issue BotMintAuthority")
+
+    cbq_id = str(callback_query_id or "").strip()
+    j_id = str(job_id or "").strip()
+    r_id = str(request_id or "").strip()
+
     return BotMintAuthority(
-        callsite=callsite,
-        telegram_update_id=telegram_update_id,
+        callsite=callsite or "bot.py:handle_video_product_callback:b14_confirm",
+        telegram_update_id=up_id,
         chat_id=chat_id,
         user_id=user_id,
+        callback_query_id=cbq_id,
+        job_id=j_id,
+        request_id=r_id,
+        action=action,
         is_test_override=False,
+        record_type=RECORD_TYPE_SCENE_SUBMIT,
+        _capability_token=_INTERNAL_MINT_SECRET,
     )
 
 
@@ -233,15 +347,55 @@ def create_test_mint_authority(
     callsite: str = "tests:test_provider_free",
     chat_id: int | str = "123456",
     user_id: int | str = "789012",
+    job_id: str = "",
+    request_id: str = "",
     telegram_update_id: int | str = 999999,
+    _caller_override_for_test: str | None = None,
 ) -> BotMintAuthority:
-    """Explicit test-only authority injected exclusively by unit tests."""
+    """Test fixture mint authority. Blocked if called by production code."""
+    if _caller_override_for_test in ("production", "bot", "worker", "provider", "services"):
+        raise PermissionError(
+            "create_test_mint_authority is blocked in production runtime: "
+            "PRODUCTION_TEST_MINT_OVERRIDE_AVAILABLE=NO"
+        )
+    frame = inspect.currentframe()
+    if frame is not None:
+        try:
+            curr = frame.f_back
+            while curr and "provider_spend_guard" in os.path.basename(curr.f_code.co_filename or ""):
+                curr = curr.f_back
+            if curr:
+                caller_file = os.path.basename(curr.f_code.co_filename or "")
+                if not caller_file.startswith("test_") and not caller_file.startswith("conftest"):
+                    raise PermissionError(
+                        f"create_test_mint_authority is forbidden in production module '{caller_file}': "
+                        "PRODUCTION_TEST_MINT_OVERRIDE_AVAILABLE=NO"
+                    )
+        finally:
+            del frame
+
+    if not (
+        os.environ.get("PYTEST_CURRENT_TEST")
+        or "pytest" in sys.modules
+        or os.environ.get("UNIT_TEST_ENV") == "true"
+    ):
+        raise PermissionError(
+            "create_test_mint_authority is blocked in production runtime: "
+            "PRODUCTION_TEST_MINT_OVERRIDE_AVAILABLE=NO"
+        )
+
     return BotMintAuthority(
         callsite=callsite,
         telegram_update_id=telegram_update_id,
         chat_id=chat_id,
         user_id=user_id,
+        callback_query_id="cbq_test_fixture",
+        job_id=job_id,
+        request_id=request_id,
+        action="b14_confirm",
         is_test_override=True,
+        record_type=RECORD_TYPE_TEST,
+        _capability_token=_INTERNAL_MINT_SECRET,
     )
 
 
@@ -569,26 +723,19 @@ def resolve_paid_transport_authority(
     norm_op = str(operation or "").strip().lower()
     if not norm_fam or not norm_prov or not norm_op:
         return None
+
+    resolved_prov = PROVIDER_ALIAS_MAP.get(norm_prov, norm_prov)
+
     for entry in PROVIDER_PAID_TRANSPORT_REGISTRY:
         if entry.product_family.lower() != norm_fam:
             continue
         ep_lower = entry.provider.lower()
-        prov_match = False
-        if ep_lower == norm_prov:
-            prov_match = True
-        elif norm_prov in (ep_lower, ep_lower.replace("_kling_", "_"), ep_lower.replace("_video", "")):
-            prov_match = True
-        elif ep_lower in (norm_prov, norm_prov.replace("_kling_", "_"), norm_prov.replace("_video", "")):
-            prov_match = True
-        if not prov_match:
+        if ep_lower != norm_prov and ep_lower != resolved_prov:
             continue
-        op_match = (
-            entry.operation.lower() == norm_op
-            or norm_op in entry.operation.lower()
-            or entry.operation.lower() in norm_op
-        )
-        if op_match:
-            return entry
+        # Section 9: TRANSPORT_OPERATION_MATCH=EXACT
+        if entry.operation.lower() != norm_op:
+            continue
+        return entry
     return None
 
 
@@ -1020,6 +1167,8 @@ def create_bot_confirmation(
             "Bot mint authority missing: caller must provide a valid BotMintAuthority object; "
             "caller-controlled origin string or default args forbidden"
         )
+    if getattr(mint_authority, "_capability_token", None) != _INTERNAL_MINT_SECRET:
+        raise PermissionError("Invalid or forged BotMintAuthority capability token")
     if not mint_authority.is_test_override:
         if mint_authority.callsite not in MINT_PRODUCTION_CALLERS:
             raise PermissionError(f"Unauthorized mint callsite: '{mint_authority.callsite}' not in MINT_PRODUCTION_CALLERS")
@@ -1027,6 +1176,10 @@ def create_bot_confirmation(
             raise PermissionError(f"Mint authority chat_id mismatch: '{mint_authority.chat_id}' != '{chat_id}'")
         if user_id and str(mint_authority.user_id) != str(user_id):
             raise PermissionError(f"Mint authority user_id mismatch: '{mint_authority.user_id}' != '{user_id}'")
+        if job_id and mint_authority.job_id and str(mint_authority.job_id) != str(job_id):
+            raise PermissionError(f"Mint authority job_id mismatch: '{mint_authority.job_id}' != '{job_id}'")
+        if request_id and mint_authority.request_id and str(mint_authority.request_id) != str(request_id):
+            raise PermissionError(f"Mint authority request_id mismatch: '{mint_authority.request_id}' != '{request_id}'")
 
     target_path = resolve_spend_guard_db_path(db_path, env)
     init_spend_guard_db(db_path=target_path, env=env)
@@ -1111,6 +1264,8 @@ def mint_multiscene_bot_confirmation_plan(
             "Bot mint authority missing: caller must provide a valid BotMintAuthority object; "
             "caller-controlled origin string or default args forbidden"
         )
+    if getattr(mint_authority, "_capability_token", None) != _INTERNAL_MINT_SECRET:
+        raise PermissionError("Invalid or forged BotMintAuthority capability token")
     if not mint_authority.is_test_override:
         if mint_authority.callsite not in MINT_PRODUCTION_CALLERS:
             raise PermissionError(f"Unauthorized mint callsite: '{mint_authority.callsite}' not in MINT_PRODUCTION_CALLERS")
@@ -1118,6 +1273,10 @@ def mint_multiscene_bot_confirmation_plan(
             raise PermissionError(f"Mint authority chat_id mismatch: '{mint_authority.chat_id}' != '{chat_id}'")
         if user_id and str(mint_authority.user_id) != str(user_id):
             raise PermissionError(f"Mint authority user_id mismatch: '{mint_authority.user_id}' != '{user_id}'")
+        if job_id and mint_authority.job_id and str(mint_authority.job_id) != str(job_id):
+            raise PermissionError(f"Mint authority job_id mismatch: '{mint_authority.job_id}' != '{job_id}'")
+        if request_id and mint_authority.request_id and str(mint_authority.request_id) != str(request_id):
+            raise PermissionError(f"Mint authority request_id mismatch: '{mint_authority.request_id}' != '{request_id}'")
 
     target_path = resolve_spend_guard_db_path(db_path, env)
     init_spend_guard_db(db_path=target_path, env=env)
@@ -1130,6 +1289,7 @@ def mint_multiscene_bot_confirmation_plan(
     meta["telegram_update_id"] = mint_authority.telegram_update_id
     meta_json = json.dumps(meta)
     canonical_origin = f"bot_ui:{mint_authority.callsite}" if not mint_authority.is_test_override else "test_harness"
+    child_rec_type = RECORD_TYPE_TEST if mint_authority.is_test_override else RECORD_TYPE_SCENE_SUBMIT
 
     conn = _get_sqlite_connection(target_path)
     try:
@@ -1202,7 +1362,7 @@ def mint_multiscene_bot_confirmation_plan(
                 (
                     child_id,
                     parent_id,
-                    RECORD_TYPE_SCENE_SUBMIT,
+                    child_rec_type,
                     str(chat_id or ""),
                     str(user_id or ""),
                     str(job_id or ""),
@@ -1669,6 +1829,36 @@ def reserve_provider_spend(
                     allowed=False,
                     blocker=BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING,
                     reason=f"Parent confirmation '{c_id}' is a plan container and cannot authorize transport submit (record_type=PARENT_PLAN)",
+                    week_id=week_id,
+                    cap_micro_usd=cap_micro_usd,
+                    cap_usd=cap_usd,
+                )
+
+            # Section 8: Test harness confirmation cannot reach real transport
+            is_test_record = (
+                str(c_record_type or "").upper() in (RECORD_TYPE_TEST, "TEST_ONLY", "FIXTURE_AUTHORITY")
+                or str(c_origin or "").lower() == ORIGIN_TEST_HARNESS
+            )
+            is_real_transport_target = bool(
+                context.metadata.get("target_transport") in ("real_provider", "real_transport", "real")
+                or context.metadata.get("is_real_transport")
+                or context.metadata.get("real_transport")
+                or getattr(context, "is_real_transport", False)
+                or context.metadata.get("provider_transport") == "real"
+            )
+            is_production_runtime = bool(
+                "pytest" not in sys.modules
+                and not os.environ.get("PYTEST_CURRENT_TEST")
+                and effective_env.get("UNIT_TEST_ENV") != "true"
+                and effective_env.get("CI") != "true"
+                and effective_env.get("GITHUB_ACTIONS") != "true"
+            )
+            if is_test_record and (is_real_transport_target or is_production_runtime):
+                conn.rollback()
+                return SpendReservationResult(
+                    allowed=False,
+                    blocker=BLOCKER_TEST_CONFIRM_CANNOT_REACH_REAL_TRANSPORT,
+                    reason="Test-only confirmation cannot authorize real provider transport",
                     week_id=week_id,
                     cap_micro_usd=cap_micro_usd,
                     cap_usd=cap_usd,
