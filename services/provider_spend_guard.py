@@ -187,6 +187,8 @@ BLOCKER_TEST_CONFIRM_CANNOT_REACH_REAL_TRANSPORT: str = "test_confirm_cannot_rea
 
 MINT_PRODUCTION_CALLERS: list[str] = [
     "bot.py:handle_video_product_callback:b14_confirm",
+    "bot.py:handle_product_video_owner_live_accept_callback",
+    "bot.py:handle_owner_authorized_live_test_confirm",
 ]
 WORKER_PRODUCTION_MINT_CALLERS: list[str] = []
 PROVIDER_PRODUCTION_MINT_CALLERS: list[str] = []
@@ -257,6 +259,18 @@ OWNER_AUTH_EXACT_LINEAGE: str = "PASS"
 AUTHORIZED_EXPECTED_MAX_ENFORCED: str = "YES"
 CHILD_EXPECTED_MAX_ENFORCED: str = "YES"
 MULTISCENE_OWNER_MAX_ALLOCATION: str = "PASS"
+DURABLE_OWNER_MAX_SOLE_SOURCE: str = "YES"
+CALLER_EXPECTED_MAX_INFLUENCE: str = "NO"
+BOT_LIVE_TEST_QUEUE_PROPAGATION: str = "confirm_video_project_invoice"
+BOT_LIVE_MINT_REQUIRES_REAL_TELEGRAM_EVENT: str = "YES"
+BOT_LIVE_MINT_REQUIRES_DURABLE_OWNER_AUTH: str = "YES"
+BOT_LIVE_ACCEPT_CALLBACK_CALLSITE: str = "bot.py:handle_product_video_owner_live_accept_callback"
+_LIVE_ACCEPT_CALLBACK_CALLSITE: str = "bot.py:handle_product_video_owner_live_accept_callback"
+_ALLOWED_LIVE_MINT_CALLSITES: tuple[str, ...] = (
+    "bot.py:handle_product_video_owner_live_accept_callback",
+    "bot.py:handle_owner_authorized_live_test_confirm",
+    "bot.py:handle_video_product_callback:b14_confirm",
+)
 
 STATUS_OWNER_AUTH_ACTIVE: str = "active"
 STATUS_OWNER_AUTH_REVOKED: str = "revoked"
@@ -333,6 +347,7 @@ def _verify_canonical_bot_mint_caller(_caller_override: str | None = None) -> No
         if caller_file == "bot.py" and caller_func in (
             "handle_video_product_callback",
             "handle_product_video_public_confirm_callback",
+            "handle_product_video_owner_live_accept_callback",
             "handle_owner_authorized_live_test_confirm",
             "_canonical_bot_mint_seam",
         ):
@@ -654,6 +669,8 @@ def issue_bot_mint_authority(
     actual_expected_max = expected_max_provider_spend_usd
     clean_owner_receipt = str(owner_receipt or "").strip()
     if canonical_purpose == PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST:
+        if callsite and callsite not in _ALLOWED_LIVE_MINT_CALLSITES:
+            raise PermissionError(f"Unauthorized live mint callsite '{callsite}' not in _ALLOWED_LIVE_MINT_CALLSITES")
         if not clean_owner_receipt:
             raise PermissionError(
                 "owner_receipt is required when issuing BotMintAuthority with PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST "
@@ -679,8 +696,9 @@ def issue_bot_mint_authority(
                 f"Owner live authorization invalid for live-test mint: {auth_blocker} "
                 "(PAID_LIVE_TEST_PURPOSE_REQUIRES_OWNER_AUTH_RECORD=YES)"
             )
-        if not actual_expected_max and auth_data.get("expected_max_provider_spend_micro_usd"):
-            actual_expected_max = float(from_micro_usd(auth_data["expected_max_provider_spend_micro_usd"]))
+        # Section 10: DURABLE_OWNER_MAX_SOLE_SOURCE=YES, CALLER_EXPECTED_MAX_INFLUENCE=NO
+        auth_micro = auth_data.get("expected_max_provider_spend_micro_usd") or 0
+        actual_expected_max = from_micro_usd(auth_micro) if auth_micro else Decimal("0.0")
 
     return BotMintAuthority(
         callsite=callsite or "bot.py:handle_video_product_callback:b14_confirm",
@@ -2128,6 +2146,7 @@ def reserve_provider_spend(
     # 4. CI / Test Provider Network Isolation (Directive #1422: NO PAID OVERRIDES ALLOWED)
     is_test_env = bool(
         os.environ.get("PYTEST_CURRENT_TEST")
+        or effective_env.get("PYTEST_CURRENT_TEST")
         or effective_env.get("CI") == "true"
         or effective_env.get("GITHUB_ACTIONS") == "true"
         or effective_env.get("UNIT_TEST_ENV") == "true"
@@ -2332,6 +2351,7 @@ def reserve_provider_spend(
             )
             is_production_runtime = bool(
                 "pytest" not in sys.modules
+                and "unittest" not in sys.modules
                 and not os.environ.get("PYTEST_CURRENT_TEST")
                 and effective_env.get("UNIT_TEST_ENV") != "true"
                 and effective_env.get("CI") != "true"

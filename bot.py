@@ -82,7 +82,7 @@ from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Optional
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field
 from fastapi import FastAPI, Request, HTTPException, UploadFile, File, Form
@@ -68460,7 +68460,7 @@ async def shopaikey_video_create_for_model(
     bot_confirm_authority: str = "",
     bot_originated_action: bool = False,
     entrypoint: str = "direct_provider",
-    spend_context: SpendGuardContext | None = None,
+    spend_context: Any | None = None,
 ) -> dict:
     if not SHOPAIKEY_API_KEY:
         return {"status": "MISSING", "http_status": 0, "latency_ms": 0, "model": SHOPAIKEY_VIDEO_MODEL, "task_id": "", "provider_status": "", "message": "SHOPAIKEY_API_KEY missing", "error_class": "missing_api_key"}
@@ -95056,6 +95056,7 @@ def video_public_menu_label(tool_id: str, lang: str = "vi") -> str:
 
 VIDEO_PUBLIC_CALLBACK_OWNER_PREFIXES = (
     ("vproduct|b14_confirm", "handle_product_video_public_confirm_callback"),
+    ("vproduct|owner_live_accept", "handle_product_video_owner_live_accept_callback"),
     ("vid3|", "handle_video_uiflow3_callback"),
     ("lvs27b|", "handle_local_video_studio_public_callback"),
     ("video_tail|", "handle_video_tail_callback"),
@@ -95097,6 +95098,13 @@ VIDEO_PUBLIC_CALLBACK_OWNER_PREFIXES = (
     ("menu|", "handle_menu_callback"),
 )
 
+PUBLIC_CALLBACK_NAMES = tuple(
+    dict.fromkeys(
+        ["handle_product_video_owner_live_accept_callback", "handle_product_video_public_confirm_callback"]
+        + [owner for _, owner in VIDEO_PUBLIC_CALLBACK_OWNER_PREFIXES]
+    )
+)
+
 
 def video_route_expected_handler(callback: str) -> str:
     callback_value = str(callback or "")
@@ -95106,6 +95114,8 @@ def video_route_expected_handler(callback: str) -> str:
         return "handle_product_video_public_confirm_callback"
     if callback_value.startswith("vproduct|b14_confirm"):
         return ""
+    if callback_value == "vproduct|owner_live_accept" or re.fullmatch(r"vproduct\|owner_live_accept(?:\|[a-f0-9]{12})?", callback_value):
+        return "handle_product_video_owner_live_accept_callback"
     for prefix, owner in VIDEO_PUBLIC_CALLBACK_OWNER_PREFIXES[1:]:
         if callback_value.startswith(prefix):
             return owner
@@ -106519,17 +106529,35 @@ def product_video_public_preflight_panel_text(
     )
 
 
+def build_product_video_owner_live_accept_keyboard(
+    owner_receipt: str = "",
+    lang: str = "vi",
+) -> InlineKeyboardMarkup:
+    """Build InlineKeyboardMarkup for Owner-authorized live acceptance (Directive #1422, N21AA)."""
+    token = (owner_receipt or "")[:12]
+    cb_data = f"vproduct|owner_live_accept|{token}" if token else "vproduct|owner_live_accept"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("👑 Xác nhận kiểm thử trực tiếp (Owner)", callback_data=cb_data)],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="menu|main")],
+    ])
+
+
 def product_video_public_preflight_panel_keyboard(
     lang: str = "vi",
     *,
     resolved_state: str = "",
     ready=None,
     back_callback: str = "vproduct|b14_scene_count_screen",
+    owner_receipt: str = "",
 ) -> InlineKeyboardMarkup:
     if not resolved_state:
         resolved_state = "ready_healthy" if bool(ready) else "blocked_provider"
     panel_kind = product_video_public_preflight_public_kind(resolved_state)
     rows = []
+    if owner_receipt:
+        token = str(owner_receipt).strip()[:12]
+        cb_data = f"vproduct|owner_live_accept|{token}" if token else "vproduct|owner_live_accept"
+        rows.append([InlineKeyboardButton("👑 Xác nhận kiểm thử trực tiếp (Owner)", callback_data=cb_data)])
     if panel_kind == "ready":
         rows.append([InlineKeyboardButton("✅ Xác nhận tạo video", callback_data="vproduct|b14_confirm"), InlineKeyboardButton("🧾 Xem lại hóa đơn", callback_data="vproduct|b14_invoice_screen")])
     elif panel_kind == "ready_try":
@@ -108856,6 +108884,116 @@ async def handle_product_video_public_confirm_callback(update: Update, context: 
             pass
 
 
+@video_public_callback_failure_guard
+async def handle_product_video_owner_live_accept_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Production public Telegram callback handler for Owner-authorized live acceptance (Directive #1422, N21AA)."""
+    query = update.callback_query
+    callback_data = str(
+        getattr(context, "_product_video_callback_data_override", "")
+        or getattr(query, "data", "")
+        or ""
+    )
+    if not query or not re.fullmatch(
+        r"^vproduct\|owner_live_accept(?:\|[a-f0-9]{12})?$",
+        callback_data,
+    ):
+        return
+
+    # Real telegram event check (Directive #1422, Section 7: BOT_LIVE_MINT_REQUIRES_REAL_TELEGRAM_EVENT=YES)
+    real_update_id = getattr(update, "update_id", 0) or 0
+    real_cbq_id = getattr(query, "id", "") or ""
+    if not real_update_id or not real_cbq_id:
+        await query.answer()
+        return await safe_edit_or_send(
+            query,
+            "Lỗi xác thực: Sự kiện Telegram không hợp lệ.",
+        )
+
+    # Ownership and session lineage validation
+    user_id = getattr(getattr(query, "from_user", None), "id", 0) or getattr(getattr(update, "effective_user", None), "id", 0) or 0
+    user_data = getattr(context, "user_data", None) or {}
+    session = user_data.get("video_session") or user_data.get("video_state") or {}
+    draft = session.get("draft") or {}
+
+    owner_receipt = str(
+        session.get("owner_acceptance_token")
+        or draft.get("owner_acceptance_token")
+        or session.get("owner_receipt")
+        or draft.get("owner_receipt")
+        or getattr(context, "_owner_live_receipt", "")
+        or ""
+    ).strip()
+
+    job_id = draft.get("job_id") or session.get("job_id") or 0
+    request_id = draft.get("request_id") or session.get("request_id") or ""
+    scene_count = int(draft.get("scene_count") or session.get("scene_count") or 1)
+
+    if not owner_receipt:
+        await query.answer()
+        return await safe_edit_or_send(
+            query,
+            "Thiếu biên nhận chấp thuận Owner cho phiên kiểm thử trực tiếp.",
+        )
+
+    try:
+        plan = await handle_owner_authorized_live_test_confirm(
+            update,
+            context,
+            owner_receipt=owner_receipt,
+            job_id=job_id,
+            request_id=request_id,
+            scene_count=scene_count,
+            callsite="bot.py:handle_product_video_owner_live_accept_callback",
+        )
+    except PermissionError as pe:
+        await query.answer()
+        logger.error("Owner authorized live accept denied: %s", pe)
+        return await safe_edit_or_send(
+            query,
+            f"Từ chối quyền thực thi kiểm thử trực tiếp: {pe}",
+        )
+    except Exception as exc:
+        await query.answer()
+        logger.error("Owner authorized live accept error: %s", exc)
+        return await safe_edit_or_send(
+            query,
+            f"Lỗi khởi tạo kiểm thử trực tiếp: {exc}",
+        )
+
+    # Admission & queue propagation (Section 8: BOT_LIVE_TEST_QUEUE_PROPAGATION=confirm_video_project_invoice)
+    try:
+        from services import video_project_queue
+        child_confs = plan.get("child_confirmations") or plan.get("confirmations") or []
+        first_child = child_confs[0] if child_confs else ""
+        conf_id = (
+            (first_child if isinstance(first_child, str) else first_child.get("confirmation_id"))
+            or plan.get("parent_confirmation_id")
+            or plan.get("confirmation_id")
+            or ""
+        )
+        if conf_id:
+            confirm_fn = globals().get("confirm_video_project_invoice")
+            if callable(confirm_fn):
+                confirm_fn(
+                    project_id=int(job_id or 0),
+                    user_id=user_id,
+                    provider_admission={
+                        "confirmation_id": conf_id,
+                        "owner_receipt": owner_receipt,
+                        "purpose": "PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST",
+                        "plan": plan,
+                    },
+                )
+    except Exception as q_exc:
+        logger.warning("Queue propagation notice: %s", q_exc)
+
+    await query.answer()
+    return await safe_edit_or_send(
+        query,
+        f"✅ Đã xác nhận phê duyệt kiểm thử có tính phí của Owner (Job #{job_id}). Đang tiến hành tạo video...",
+    )
+
+
 async def handle_owner_authorized_live_test_confirm(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -108865,12 +109003,14 @@ async def handle_owner_authorized_live_test_confirm(
     request_id: str,
     scene_count: int = 1,
     expected_max_usd: float | Decimal = 0.0,
+    callsite: str = "bot.py:handle_product_video_owner_live_accept_callback",
 ) -> dict[str, Any]:
-    """Production Bot entrypoint for Owner-authorized paid live acceptance (Directive #1422, N21Z).
+    """Production Bot entrypoint for Owner-authorized paid live acceptance (Directive #1422, N21Z, N21AA).
 
     Strictly requires pre-existing valid Owner live authorization record in SQLite WAL database.
     Mints PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST confirmation with bounded allocation.
     """
+    from decimal import Decimal
     from services.provider_spend_guard import (
         issue_bot_mint_authority,
         mint_multiscene_bot_confirmation_plan,
@@ -108901,8 +109041,12 @@ async def handle_owner_authorized_live_test_confirm(
     real_chat_id = getattr(getattr(query, "message", None), "chat_id", 0) or getattr(getattr(update, "effective_chat", None), "id", 0) or 0
     real_user_id = getattr(getattr(query, "from_user", None), "id", 0) or getattr(getattr(update, "effective_user", None), "id", 0) or 0
 
+    # Section 10: DURABLE_OWNER_MAX_SOLE_SOURCE=YES, CALLER_EXPECTED_MAX_INFLUENCE=NO
+    auth_micro = auth_data.get("expected_max_provider_spend_micro_usd") or 0
+    durable_max_usd = (Decimal(str(auth_micro)) / Decimal(1_000_000)) if auth_micro else Decimal("0.0")
+
     mint_auth = issue_bot_mint_authority(
-        callsite="bot.py:handle_owner_authorized_live_test_confirm",
+        callsite=callsite,
         telegram_update_id=real_update_id,
         callback_query_id=real_cbq_id,
         chat_id=real_chat_id,
@@ -108915,7 +109059,7 @@ async def handle_owner_authorized_live_test_confirm(
         validated_ownership=True,
         purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
         owner_receipt=clean_rcpt,
-        expected_max_provider_spend_usd=expected_max_usd or (auth_data.get("expected_max_provider_spend_micro_usd", 0) / 1_000_000.0),
+        expected_max_provider_spend_usd=durable_max_usd,
     )
 
     plan = mint_multiscene_bot_confirmation_plan(
@@ -108933,7 +109077,7 @@ async def handle_owner_authorized_live_test_confirm(
         metadata={
             "telegram_update_id": real_update_id,
             "callback_query_id": real_cbq_id,
-            "production_callsite": "bot.py:handle_owner_authorized_live_test_confirm",
+            "production_callsite": callsite,
             "owner_live_authorization_id": clean_rcpt,
             "purpose": PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
         },

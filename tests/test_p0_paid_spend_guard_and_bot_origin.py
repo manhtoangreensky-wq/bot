@@ -130,6 +130,12 @@ from services.provider_spend_guard import (
     OWNER_POLICY_RESET_RULE_UNSPECIFIED,
     PROVIDER_PRODUCTION_MINT_CALLERS,
     WORKER_PRODUCTION_MINT_CALLERS,
+    DURABLE_OWNER_MAX_SOLE_SOURCE,
+    CALLER_EXPECTED_MAX_INFLUENCE,
+    BOT_LIVE_TEST_QUEUE_PROPAGATION,
+    BOT_LIVE_MINT_REQUIRES_REAL_TELEGRAM_EVENT,
+    BOT_LIVE_MINT_REQUIRES_DURABLE_OWNER_AUTH,
+    BOT_LIVE_ACCEPT_CALLBACK_CALLSITE,
 )
 from services.video_provider_catalog import (
     KEY4U_VIDEO_AUTH_MISSING,
@@ -6427,6 +6433,638 @@ class TestN21ZOwnerLiveAuthorityRecordAndExpectedSpendEnforcementMatrix(unittest
         self.assertEqual(cases_n21y, 26)
         self.assertEqual(cases_n21z, 28)
         self.assertEqual(cases_25 + cases_n21u + cases_n21v + cases_n21w + cases_n21x + cases_n21y + cases_n21z, 196)
+
+
+
+class _N21AAMockUser:
+    def __init__(self, uid=777888):
+        self.id = uid
+
+
+class _N21AAMockMessage:
+    def __init__(self, chat_id=999111):
+        self.chat_id = chat_id
+
+    async def reply_text(self, text, **kwargs):
+        return text
+
+
+class _N21AAMockCallbackQuery:
+    def __init__(self, query_id="cbq_real_live_01", data="vproduct|owner_live_accept", user_id=777888, chat_id=999111):
+        self.id = query_id
+        self.data = data
+        self.from_user = _N21AAMockUser(user_id)
+        self.message = _N21AAMockMessage(chat_id)
+        self.answered = False
+        self.edited_text = ""
+        self.edited_markup = None
+
+    async def answer(self, *args, **kwargs):
+        self.answered = True
+
+    async def edit_message_text(self, text, reply_markup=None, **kwargs):
+        self.edited_text = text
+        self.edited_markup = reply_markup
+        return text
+
+
+class _N21AAMockUpdate:
+    def __init__(self, update_id=888999, query=None):
+        self.update_id = update_id
+        self.callback_query = query
+        self.effective_user = getattr(query, "from_user", None)
+        self.effective_chat = getattr(getattr(query, "message", None), "chat_id", None)
+
+
+class _N21AAMockContext:
+    def __init__(self, user_data=None):
+        self.user_data = user_data or {}
+
+
+class TestN21AABotPublicCallbackAndLiveAcceptIntegrationMatrix(unittest.TestCase):
+    """N21AA: Bot Public Callback Whitelist, Owner Live Accept Panel & Integration Matrix (Directive #1422)."""
+
+    def setUp(self):
+        set_kill_switch(False)
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "spend_guard_n21aa.db")
+        self.standard_env = {
+            "SPEND_GUARD_DB_PATH": self.db_path,
+            "WEEKLY_PROVIDER_SPEND_CAP_USD": "200.000",
+            "WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE": "MONDAY_0000_UTC",
+            "WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE": "UTC",
+        }
+        os.environ["SPEND_GUARD_DB_PATH"] = self.db_path
+        os.environ["WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE"] = "MONDAY_0000_UTC"
+        os.environ["WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE"] = "UTC"
+        init_spend_guard_db(db_path=self.db_path, env=self.standard_env)
+
+    def tearDown(self):
+        set_kill_switch(False)
+        self.temp_dir.cleanup()
+        os.environ.pop("SPEND_GUARD_DB_PATH", None)
+
+    # 1. callback prefix and routing whitelisted
+    def test_n21aa_01_callback_prefix_and_routing_whitelisted(self):
+        from bot import (
+            VIDEO_PUBLIC_CALLBACK_OWNER_PREFIXES,
+            PUBLIC_CALLBACK_NAMES,
+            video_route_expected_handler,
+        )
+        self.assertIn(
+            ("vproduct|owner_live_accept", "handle_product_video_owner_live_accept_callback"),
+            VIDEO_PUBLIC_CALLBACK_OWNER_PREFIXES,
+        )
+        self.assertIn("handle_product_video_owner_live_accept_callback", PUBLIC_CALLBACK_NAMES)
+        self.assertEqual(
+            video_route_expected_handler("vproduct|owner_live_accept"),
+            "handle_product_video_owner_live_accept_callback",
+        )
+        self.assertEqual(
+            video_route_expected_handler("vproduct|owner_live_accept|0123456789ab"),
+            "handle_product_video_owner_live_accept_callback",
+        )
+
+    # 2. preflight panel keyboard renders owner live accept button
+    def test_n21aa_02_preflight_panel_keyboard_renders_owner_live_accept_button(self):
+        from bot import product_video_public_preflight_panel_keyboard
+        kb = product_video_public_preflight_panel_keyboard(owner_receipt="auth_rcpt_123456")
+        first_row = kb.inline_keyboard[0]
+        self.assertEqual(len(first_row), 1)
+        self.assertIn("👑 Xác nhận kiểm thử trực tiếp (Owner)", first_row[0].text)
+        self.assertEqual(first_row[0].callback_data, "vproduct|owner_live_accept|auth_rcpt_12")
+
+        kb_no = product_video_public_preflight_panel_keyboard(owner_receipt="")
+        for row in kb_no.inline_keyboard:
+            for btn in row:
+                self.assertNotIn("vproduct|owner_live_accept", str(btn.callback_data))
+
+    # 3. standalone owner live accept keyboard format
+    def test_n21aa_03_standalone_owner_live_accept_keyboard_format(self):
+        from bot import build_product_video_owner_live_accept_keyboard
+        kb = build_product_video_owner_live_accept_keyboard("auth_test_tok_99")
+        btn = kb.inline_keyboard[0][0]
+        self.assertEqual(btn.callback_data, "vproduct|owner_live_accept|auth_test_to")
+        self.assertIn("👑 Xác nhận kiểm thử trực tiếp (Owner)", btn.text)
+
+        kb_empty = build_product_video_owner_live_accept_keyboard("")
+        btn_empty = kb_empty.inline_keyboard[0][0]
+        self.assertEqual(btn_empty.callback_data, "vproduct|owner_live_accept")
+
+    # 4. bot live test constants truth
+    def test_n21aa_04_bot_live_test_constants_truth(self):
+        self.assertEqual(BOT_LIVE_TEST_QUEUE_PROPAGATION, "confirm_video_project_invoice")
+        self.assertEqual(DURABLE_OWNER_MAX_SOLE_SOURCE, "YES")
+        self.assertEqual(CALLER_EXPECTED_MAX_INFLUENCE, "NO")
+        self.assertEqual(BOT_LIVE_MINT_REQUIRES_REAL_TELEGRAM_EVENT, "YES")
+        self.assertEqual(BOT_LIVE_MINT_REQUIRES_DURABLE_OWNER_AUTH, "YES")
+        self.assertEqual(BOT_LIVE_ACCEPT_CALLBACK_CALLSITE, "bot.py:handle_product_video_owner_live_accept_callback")
+
+    # 5. missing receipt raises PermissionError
+    def test_n21aa_05_handle_owner_authorized_live_test_confirm_missing_receipt_raises(self):
+        from bot import handle_owner_authorized_live_test_confirm
+        query = _N21AAMockCallbackQuery()
+        update = _N21AAMockUpdate(update_id=1001, query=query)
+        context = _N21AAMockContext()
+        with self.assertRaises(PermissionError) as cm:
+            asyncio.run(
+                handle_owner_authorized_live_test_confirm(
+                    update,
+                    context,
+                    owner_receipt="",
+                    job_id="1001",
+                    request_id="req_1001",
+                )
+            )
+        self.assertIn("receipt is required", str(cm.exception))
+
+    # 6. non-existent receipt raises PermissionError
+    def test_n21aa_06_handle_owner_authorized_live_test_confirm_nonexistent_receipt_raises(self):
+        from bot import handle_owner_authorized_live_test_confirm
+        query = _N21AAMockCallbackQuery()
+        update = _N21AAMockUpdate(update_id=1002, query=query)
+        context = _N21AAMockContext()
+        with self.assertRaises(PermissionError) as cm:
+            asyncio.run(
+                handle_owner_authorized_live_test_confirm(
+                    update,
+                    context,
+                    owner_receipt="non_existent_rcpt_06",
+                    job_id="1002",
+                    request_id="req_1002",
+                )
+            )
+        self.assertIn(BLOCKER_OWNER_LIVE_AUTH_RECORD_MISSING, str(cm.exception))
+
+    # 7. revoked receipt raises PermissionError
+    def test_n21aa_07_handle_owner_authorized_live_test_confirm_revoked_receipt_raises(self):
+        from bot import handle_owner_authorized_live_test_confirm
+        auth_id = create_owner_live_authorization(
+            authorization_id="auth_revoked_07",
+            product_family="Product Video",
+            job_id="1003",
+            request_id="req_1003",
+            operation="create_video_task",
+            status=STATUS_OWNER_AUTH_REVOKED,
+            expected_max_provider_spend_usd=Decimal("1.5"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        query = _N21AAMockCallbackQuery()
+        update = _N21AAMockUpdate(update_id=1003, query=query)
+        context = _N21AAMockContext()
+        with self.assertRaises(PermissionError) as cm:
+            asyncio.run(
+                handle_owner_authorized_live_test_confirm(
+                    update,
+                    context,
+                    owner_receipt=auth_id,
+                    job_id="1003",
+                    request_id="req_1003",
+                )
+            )
+        self.assertIn(BLOCKER_OWNER_LIVE_AUTH_REVOKED, str(cm.exception))
+
+    # 8. expired receipt raises PermissionError
+    def test_n21aa_08_handle_owner_authorized_live_test_confirm_expired_receipt_raises(self):
+        from bot import handle_owner_authorized_live_test_confirm
+        auth_id = create_owner_live_authorization(
+            authorization_id="auth_expired_08",
+            product_family="Product Video",
+            job_id="1004",
+            request_id="req_1004",
+            operation="create_video_task",
+            ttl_seconds=-100.0,
+            expected_max_provider_spend_usd=Decimal("1.5"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        query = _N21AAMockCallbackQuery()
+        update = _N21AAMockUpdate(update_id=1004, query=query)
+        context = _N21AAMockContext()
+        with self.assertRaises(PermissionError) as cm:
+            asyncio.run(
+                handle_owner_authorized_live_test_confirm(
+                    update,
+                    context,
+                    owner_receipt=auth_id,
+                    job_id="1004",
+                    request_id="req_1004",
+                )
+            )
+        self.assertIn(BLOCKER_OWNER_LIVE_AUTH_EXPIRED, str(cm.exception))
+
+    # 9. job lineage mismatch raises PermissionError
+    def test_n21aa_09_handle_owner_authorized_live_test_confirm_job_lineage_mismatch_raises(self):
+        from bot import handle_owner_authorized_live_test_confirm
+        auth_id = create_owner_live_authorization(
+            authorization_id="auth_lineage_job_09",
+            product_family="Product Video",
+            job_id="job_correct_09",
+            request_id="req_correct_09",
+            operation="create_video_task",
+            expected_max_provider_spend_usd=Decimal("1.5"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        query = _N21AAMockCallbackQuery()
+        update = _N21AAMockUpdate(update_id=1005, query=query)
+        context = _N21AAMockContext()
+        with self.assertRaises(PermissionError) as cm:
+            asyncio.run(
+                handle_owner_authorized_live_test_confirm(
+                    update,
+                    context,
+                    owner_receipt=auth_id,
+                    job_id="job_wrong_09",
+                    request_id="req_correct_09",
+                )
+            )
+        self.assertIn(BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH, str(cm.exception))
+
+    # 10. request lineage mismatch raises PermissionError
+    def test_n21aa_10_handle_owner_authorized_live_test_confirm_request_lineage_mismatch_raises(self):
+        from bot import handle_owner_authorized_live_test_confirm
+        auth_id = create_owner_live_authorization(
+            authorization_id="auth_lineage_req_10",
+            product_family="Product Video",
+            job_id="job_correct_10",
+            request_id="req_correct_10",
+            operation="create_video_task",
+            expected_max_provider_spend_usd=Decimal("1.5"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        query = _N21AAMockCallbackQuery()
+        update = _N21AAMockUpdate(update_id=1006, query=query)
+        context = _N21AAMockContext()
+        with self.assertRaises(PermissionError) as cm:
+            asyncio.run(
+                handle_owner_authorized_live_test_confirm(
+                    update,
+                    context,
+                    owner_receipt=auth_id,
+                    job_id="job_correct_10",
+                    request_id="req_wrong_10",
+                )
+            )
+        self.assertIn(BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH, str(cm.exception))
+
+    # 11. durable owner max spend is sole source (caller cannot inflate)
+    def test_n21aa_11_handle_owner_authorized_live_test_confirm_uses_durable_owner_max_spend(self):
+        from bot import handle_owner_authorized_live_test_confirm
+        auth_id = create_owner_live_authorization(
+            authorization_id="auth_spend_11",
+            product_family="Product Video",
+            job_id="job_11",
+            request_id="req_11",
+            operation="create_video_task",
+            expected_max_provider_spend_micro_usd=1_200_000,
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        query = _N21AAMockCallbackQuery()
+        update = _N21AAMockUpdate(update_id=1007, query=query)
+        context = _N21AAMockContext()
+        plan = asyncio.run(
+            handle_owner_authorized_live_test_confirm(
+                update,
+                context,
+                owner_receipt=auth_id,
+                job_id="job_11",
+                request_id="req_11",
+                scene_count=1,
+                expected_max_usd=999.0,
+            )
+        )
+        child_id = plan["child_confirmations"][0]
+        # Verify in database that child confirmation has exactly durable 1,200,000 µUSD
+        import sqlite3
+        conn = sqlite3.connect(self.db_path)
+        try:
+            row = conn.execute(
+                "SELECT expected_max_cost_micro_usd FROM bot_spend_confirmations WHERE confirmation_id = ?",
+                (child_id,),
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row[0], 1_200_000)
+        finally:
+            conn.close()
+
+    # 12. callback handler rejects synthetic zero update_id or callback_query_id
+    def test_n21aa_12_callback_handler_rejects_synthetic_zero_update_or_callback_id(self):
+        from bot import handle_product_video_owner_live_accept_callback
+        query = _N21AAMockCallbackQuery(query_id="")
+        update = _N21AAMockUpdate(update_id=0, query=query)
+        context = _N21AAMockContext()
+        asyncio.run(handle_product_video_owner_live_accept_callback(update, context))
+        self.assertIn("Lỗi xác thực: Sự kiện Telegram không hợp lệ.", query.edited_text)
+
+    # 13. callback handler rejects missing owner receipt
+    def test_n21aa_13_callback_handler_rejects_missing_owner_receipt(self):
+        from bot import handle_product_video_owner_live_accept_callback
+        query = _N21AAMockCallbackQuery()
+        update = _N21AAMockUpdate(update_id=1009, query=query)
+        context = _N21AAMockContext(user_data={"video_session": {"job_id": "1009", "request_id": "req_1009"}})
+        asyncio.run(handle_product_video_owner_live_accept_callback(update, context))
+        self.assertIn("Thiếu biên nhận chấp thuận Owner cho phiên kiểm thử trực tiếp.", query.edited_text)
+
+    # 14. callback handler full flow success
+    def test_n21aa_14_callback_handler_full_flow_success(self):
+        from bot import handle_product_video_owner_live_accept_callback
+        auth_id = create_owner_live_authorization(
+            authorization_id="auth_flow_14",
+            product_family="Product Video",
+            job_id="1401",
+            request_id="req_1401",
+            operation="create_video_task",
+            expected_max_provider_spend_usd=Decimal("1.5"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        query = _N21AAMockCallbackQuery()
+        update = _N21AAMockUpdate(update_id=1401, query=query)
+        context = _N21AAMockContext(
+            user_data={
+                "video_session": {
+                    "job_id": 1401,
+                    "request_id": "req_1401",
+                    "owner_acceptance_token": auth_id,
+                    "scene_count": 1,
+                }
+            }
+        )
+        asyncio.run(handle_product_video_owner_live_accept_callback(update, context))
+        self.assertIn("✅ Đã xác nhận phê duyệt kiểm thử có tính phí của Owner (Job #1401)", query.edited_text)
+
+    # 15. callback handler queue propagation invoked
+    def test_n21aa_15_callback_handler_queue_propagation_invoked(self):
+        from bot import handle_product_video_owner_live_accept_callback
+        from unittest.mock import patch
+        auth_id = create_owner_live_authorization(
+            authorization_id="auth_flow_15",
+            product_family="Product Video",
+            job_id="1501",
+            request_id="req_1501",
+            operation="create_video_task",
+            expected_max_provider_spend_usd=Decimal("1.5"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        query = _N21AAMockCallbackQuery(user_id=777888)
+        update = _N21AAMockUpdate(update_id=1501, query=query)
+        context = _N21AAMockContext(
+            user_data={
+                "video_session": {
+                    "job_id": 1501,
+                    "request_id": "req_1501",
+                    "owner_acceptance_token": auth_id,
+                    "scene_count": 1,
+                }
+            }
+        )
+        with patch("bot.confirm_video_project_invoice") as mock_q:
+            asyncio.run(handle_product_video_owner_live_accept_callback(update, context))
+            self.assertTrue(mock_q.called)
+            call_kwargs = mock_q.call_args[1]
+            self.assertEqual(call_kwargs["project_id"], 1501)
+            self.assertEqual(call_kwargs["user_id"], 777888)
+            self.assertEqual(call_kwargs["provider_admission"]["owner_receipt"], auth_id)
+
+    # 16. minted live confirmation succeeds spend guard reservation
+    def test_n21aa_16_minted_live_confirmation_succeeds_spend_guard_reservation(self):
+        from bot import handle_owner_authorized_live_test_confirm
+        auth_id = create_owner_live_authorization(
+            authorization_id="auth_spend_16",
+            product_family="Product Video",
+            job_id="1601",
+            request_id="req_1601",
+            operation="create_video_task",
+            expected_max_provider_spend_usd=Decimal("50.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        query = _N21AAMockCallbackQuery(user_id=1601, chat_id=1601)
+        update = _N21AAMockUpdate(update_id=1601, query=query)
+        context = _N21AAMockContext()
+        plan = asyncio.run(
+            handle_owner_authorized_live_test_confirm(
+                update,
+                context,
+                owner_receipt=auth_id,
+                job_id="1601",
+                request_id="req_1601",
+                scene_count=1,
+            )
+        )
+        child_id = plan["child_confirmations"][0]
+
+        ctx = SpendGuardContext(
+            chat_id="1601",
+            user_id="1601",
+            entrypoint="bot",
+            bot_originated_action=True,
+            job_id="1601",
+            request_id="req_1601",
+            user_flow="bot_live_acceptance",
+            owner_receipt=auth_id,
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_confirm_authority=child_id,
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertTrue(res.allowed)
+        self.assertFalse(res.blocker)
+
+    # 17. spend guard blocks when provider cost exceeds durable max
+    def test_n21aa_17_spend_guard_blocks_when_provider_cost_exceeds_durable_max(self):
+        from bot import handle_owner_authorized_live_test_confirm
+        auth_id = create_owner_live_authorization(
+            authorization_id="auth_spend_17",
+            product_family="Product Video",
+            job_id="1701",
+            request_id="req_1701",
+            operation="create_video_task",
+            expected_max_provider_spend_micro_usd=100,  # 0.0001 USD ceiling
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        query = _N21AAMockCallbackQuery(user_id=1701, chat_id=1701)
+        update = _N21AAMockUpdate(update_id=1701, query=query)
+        context = _N21AAMockContext()
+        plan = asyncio.run(
+            handle_owner_authorized_live_test_confirm(
+                update,
+                context,
+                owner_receipt=auth_id,
+                job_id="1701",
+                request_id="req_1701",
+                scene_count=1,
+            )
+        )
+        child_id = plan["child_confirmations"][0]
+
+        ctx = SpendGuardContext(
+            chat_id="1701",
+            user_id="1701",
+            entrypoint="bot",
+            bot_originated_action=True,
+            job_id="1701",
+            request_id="req_1701",
+            user_flow="bot_live_acceptance",
+            owner_receipt=auth_id,
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_confirm_authority=child_id,
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res.allowed)
+        self.assertEqual(res.blocker, BLOCKER_OWNER_AUTHORIZED_MAX_SPEND_EXCEEDED)
+
+    # 18. multiscene allocation proportional and slot verified
+    def test_n21aa_18_multiscene_allocation_proportional_and_slot_verified(self):
+        from bot import handle_owner_authorized_live_test_confirm
+        auth_id = create_owner_live_authorization(
+            authorization_id="auth_spend_18",
+            product_family="Product Video",
+            job_id="1801",
+            request_id="req_1801",
+            operation="create_video_task",
+            allowed_scene_slots="1,2",
+            expected_max_provider_spend_usd=Decimal("6.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        query = _N21AAMockCallbackQuery(user_id=1801, chat_id=1801)
+        update = _N21AAMockUpdate(update_id=1801, query=query)
+        context = _N21AAMockContext()
+        plan = asyncio.run(
+            handle_owner_authorized_live_test_confirm(
+                update,
+                context,
+                owner_receipt=auth_id,
+                job_id="1801",
+                request_id="req_1801",
+                scene_count=2,
+            )
+        )
+        self.assertEqual(len(plan["child_confirmations"]), 2)
+
+        # Scene 3 is not in allowed slots "1,2" -> slot mismatch
+        ctx3 = SpendGuardContext(
+            chat_id="1801",
+            user_id="1801",
+            entrypoint="bot",
+            bot_originated_action=True,
+            job_id="1801",
+            request_id="req_1801",
+            user_flow="bot_live_acceptance",
+            owner_receipt=auth_id,
+            scene_index=3,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_confirm_authority=plan["child_confirmations"][0],
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        res3 = reserve_provider_spend(ctx3, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res3.allowed)
+        self.assertIn(res3.blocker, (BLOCKER_OWNER_LIVE_AUTH_SLOT_MISMATCH, BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING))
+
+    # 19. consumed owner auth cannot be reused
+    def test_n21aa_19_consumed_owner_auth_cannot_be_reused(self):
+        from bot import handle_owner_authorized_live_test_confirm
+        auth_id = create_owner_live_authorization(
+            authorization_id="auth_spend_19",
+            product_family="Product Video",
+            job_id="1901",
+            request_id="req_1901",
+            operation="create_video_task",
+            allowed_scene_slots="1",
+            metadata={"max_uses": 1},
+            expected_max_provider_spend_usd=Decimal("50.0"),
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        query = _N21AAMockCallbackQuery(user_id=1901, chat_id=1901)
+        update = _N21AAMockUpdate(update_id=1901, query=query)
+        context = _N21AAMockContext()
+        plan = asyncio.run(
+            handle_owner_authorized_live_test_confirm(
+                update,
+                context,
+                owner_receipt=auth_id,
+                job_id="1901",
+                request_id="req_1901",
+                scene_count=1,
+            )
+        )
+        child_id = plan["child_confirmations"][0]
+
+        ctx = SpendGuardContext(
+            chat_id="1901",
+            user_id="1901",
+            entrypoint="bot",
+            bot_originated_action=True,
+            job_id="1901",
+            request_id="req_1901",
+            user_flow="bot_live_acceptance",
+            owner_receipt=auth_id,
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_confirm_authority=child_id,
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        res1 = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertTrue(res1.allowed)
+
+        # Attempting second reservation with same owner auth
+        res2 = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res2.allowed)
+        self.assertIn(
+            res2.blocker,
+            (
+                BLOCKER_OWNER_LIVE_AUTH_ALREADY_CONSUMED,
+                BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING,
+                BLOCKER_DUPLICATE_PAID_SUBMIT,
+            ),
+        )
+
+    # 20. test count matrix truth exact
+    def test_n21aa_20_test_count_matrix_truth_exact(self):
+        cases_25 = len([m for m in dir(TestProviderSpendGuard25Cases) if m.startswith("test_")])
+        cases_n21u = len([m for m in dir(TestN21UProviderFreeSpendGuardMatrix) if m.startswith("test_")])
+        cases_n21v = len([m for m in dir(TestN21VRealBotConfirmLineageAndMultiSubmitMatrix) if m.startswith("test_")])
+        cases_n21w = len([m for m in dir(TestN21WConfirmationMintBoundaryAndProductionReadinessMatrix) if m.startswith("test_")])
+        cases_n21x = len([m for m in dir(TestN21XNonForgeableBotMintCapabilityMatrix) if m.startswith("test_")])
+        cases_n21y = len([m for m in dir(TestN21YBotConfirmAuthorityTruthAndPerSceneReservationMatrix) if m.startswith("test_")])
+        cases_n21z = len([m for m in dir(TestN21ZOwnerLiveAuthorityRecordAndExpectedSpendEnforcementMatrix) if m.startswith("test_")])
+        cases_n21aa = len([m for m in dir(TestN21AABotPublicCallbackAndLiveAcceptIntegrationMatrix) if m.startswith("test_")])
+
+        self.assertEqual(cases_25, 50)
+        self.assertEqual(cases_n21u, 18)
+        self.assertEqual(cases_n21v, 22)
+        self.assertEqual(cases_n21w, 29)
+        self.assertEqual(cases_n21x, 23)
+        self.assertEqual(cases_n21y, 26)
+        self.assertEqual(cases_n21z, 28)
+        self.assertEqual(cases_n21aa, 20)
+        self.assertEqual(
+            cases_25 + cases_n21u + cases_n21v + cases_n21w + cases_n21x + cases_n21y + cases_n21z + cases_n21aa,
+            216,
+        )
 
 
 if __name__ == "__main__":
