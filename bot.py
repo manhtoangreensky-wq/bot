@@ -82,7 +82,7 @@ from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Optional
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field
 from fastapi import FastAPI, Request, HTTPException, UploadFile, File, Form
@@ -68451,7 +68451,17 @@ def public_video_active_job_keyboard(active_job: dict | None, lang: str = "vi") 
         return keyboard
     return InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]])
 
-async def shopaikey_video_create_for_model(model: str, prompt: str = "") -> dict:
+async def shopaikey_video_create_for_model(
+    model: str,
+    prompt: str = "",
+    *,
+    job_id: str = "",
+    request_id: str = "",
+    bot_confirm_authority: str = "",
+    bot_originated_action: bool = False,
+    entrypoint: str = "direct_provider",
+    spend_context: Any | None = None,
+) -> dict:
     if not SHOPAIKEY_API_KEY:
         return {"status": "MISSING", "http_status": 0, "latency_ms": 0, "model": SHOPAIKEY_VIDEO_MODEL, "task_id": "", "provider_status": "", "message": "SHOPAIKEY_API_KEY missing", "error_class": "missing_api_key"}
 
@@ -68466,23 +68476,37 @@ async def shopaikey_video_create_for_model(model: str, prompt: str = "") -> dict
     if is_kill_switch_active():
         return {"status": "SPEND_GUARD_BLOCKED", "http_status": 0, "latency_ms": 0, "model": model, "task_id": "", "provider_status": "", "message": "paid_provider_kill_switch_active", "error_class": BLOCKER_KILL_SWITCH_ACTIVE}
 
-    shopai_spend_ctx = SpendGuardContext(
-        job_id=f"shopai_vid_{int(time.perf_counter()*1000)}",
-        request_id=f"REQ-SHOPAI-VID-{int(time.perf_counter()*1000)}",
-        trace_id=f"TR-SHOPAI-VID-{int(time.perf_counter()*1000)}",
-        product_family="Product Video",
-        provider="shopaikey_kling_video",
-        operation="create_video_task",
-        model=model,
-        estimated_max_cost_usd=1.00,
-        has_proven_cost_authority=True,
-        bot_originated_action=True,
-        bot_confirm_authority="bot_telegram_ui_confirmed",
-        user_flow="shopaikey_video_direct",
-        entrypoint="bot",
-        is_paid_live_attempt=bool(SHOPAIKEY_API_KEY),
-    )
+    stable_hash = hashlib.sha256(f"{model}:{prompt}".encode("utf-8")).hexdigest()[:16]
+    eff_job_id = str(job_id or f"shopai_vid_{stable_hash}")
+    eff_req_id = str(request_id or f"REQ-SHOPAI-VID-{stable_hash}")
+    eff_trace_id = f"TR-SHOPAI-VID-{stable_hash}"
+
+    if spend_context is not None:
+        import dataclasses
+        shopai_spend_ctx = dataclasses.replace(
+            spend_context,
+            product_family="Product Video",
+            provider="shopaikey_kling_video",
+            operation="create_video_task",
+            model=model,
+        )
+    else:
+        shopai_spend_ctx = SpendGuardContext(
+            job_id=eff_job_id,
+            request_id=eff_req_id,
+            trace_id=eff_trace_id,
+            product_family="Product Video",
+            provider="shopaikey_kling_video",
+            operation="create_video_task",
+            model=model,
+            bot_originated_action=bool(bot_originated_action),
+            bot_confirm_authority=str(bot_confirm_authority or ""),
+            user_flow="bot_shopaikey_video" if bot_originated_action else "shopaikey_video_direct",
+            entrypoint=str(entrypoint or ("bot" if bot_originated_action else "direct_provider")),
+            is_paid_live_attempt=bool(SHOPAIKEY_API_KEY),
+        )
     shopai_spend_res = reserve_provider_spend(shopai_spend_ctx)
+
     if not shopai_spend_res.allowed:
         return {"status": "SPEND_GUARD_BLOCKED", "http_status": 0, "latency_ms": 0, "model": model, "task_id": "", "provider_status": "", "message": f"spend_guard_blocked: {shopai_spend_res.blocker}", "error_class": shopai_spend_res.blocker}
 
@@ -95032,6 +95056,7 @@ def video_public_menu_label(tool_id: str, lang: str = "vi") -> str:
 
 VIDEO_PUBLIC_CALLBACK_OWNER_PREFIXES = (
     ("vproduct|b14_confirm", "handle_product_video_public_confirm_callback"),
+    ("vproduct|owner_live_accept", "handle_product_video_owner_live_accept_callback"),
     ("vid3|", "handle_video_uiflow3_callback"),
     ("lvs27b|", "handle_local_video_studio_public_callback"),
     ("video_tail|", "handle_video_tail_callback"),
@@ -95073,6 +95098,13 @@ VIDEO_PUBLIC_CALLBACK_OWNER_PREFIXES = (
     ("menu|", "handle_menu_callback"),
 )
 
+PUBLIC_CALLBACK_NAMES = tuple(
+    dict.fromkeys(
+        ["handle_product_video_owner_live_accept_callback", "handle_product_video_public_confirm_callback"]
+        + [owner for _, owner in VIDEO_PUBLIC_CALLBACK_OWNER_PREFIXES]
+    )
+)
+
 
 def video_route_expected_handler(callback: str) -> str:
     callback_value = str(callback or "")
@@ -95082,6 +95114,8 @@ def video_route_expected_handler(callback: str) -> str:
         return "handle_product_video_public_confirm_callback"
     if callback_value.startswith("vproduct|b14_confirm"):
         return ""
+    if callback_value == "vproduct|owner_live_accept" or re.fullmatch(r"vproduct\|owner_live_accept(?:\|[a-f0-9]{12})?", callback_value):
+        return "handle_product_video_owner_live_accept_callback"
     for prefix, owner in VIDEO_PUBLIC_CALLBACK_OWNER_PREFIXES[1:]:
         if callback_value.startswith(prefix):
             return owner
@@ -106495,17 +106529,35 @@ def product_video_public_preflight_panel_text(
     )
 
 
+def build_product_video_owner_live_accept_keyboard(
+    owner_receipt: str = "",
+    lang: str = "vi",
+) -> InlineKeyboardMarkup:
+    """Build InlineKeyboardMarkup for Owner-authorized live acceptance (Directive #1422, N21AA)."""
+    token = (owner_receipt or "")[:12]
+    cb_data = f"vproduct|owner_live_accept|{token}" if token else "vproduct|owner_live_accept"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("👑 Xác nhận kiểm thử trực tiếp (Owner)", callback_data=cb_data)],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="menu|main")],
+    ])
+
+
 def product_video_public_preflight_panel_keyboard(
     lang: str = "vi",
     *,
     resolved_state: str = "",
     ready=None,
     back_callback: str = "vproduct|b14_scene_count_screen",
+    owner_receipt: str = "",
 ) -> InlineKeyboardMarkup:
     if not resolved_state:
         resolved_state = "ready_healthy" if bool(ready) else "blocked_provider"
     panel_kind = product_video_public_preflight_public_kind(resolved_state)
     rows = []
+    if owner_receipt:
+        token = str(owner_receipt).strip()[:12]
+        cb_data = f"vproduct|owner_live_accept|{token}" if token else "vproduct|owner_live_accept"
+        rows.append([InlineKeyboardButton("👑 Xác nhận kiểm thử trực tiếp (Owner)", callback_data=cb_data)])
     if panel_kind == "ready":
         rows.append([InlineKeyboardButton("✅ Xác nhận tạo video", callback_data="vproduct|b14_confirm"), InlineKeyboardButton("🧾 Xem lại hóa đơn", callback_data="vproduct|b14_invoice_screen")])
     elif panel_kind == "ready_try":
@@ -108830,6 +108882,207 @@ async def handle_product_video_public_confirm_callback(update: Update, context: 
             delattr(context, "_product_video_authoritative_confirm")
         except Exception:
             pass
+
+
+@video_public_callback_failure_guard
+async def handle_product_video_owner_live_accept_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Production public Telegram callback handler for Owner-authorized live acceptance (Directive #1422, N21AA)."""
+    query = update.callback_query
+    callback_data = str(
+        getattr(context, "_product_video_callback_data_override", "")
+        or getattr(query, "data", "")
+        or ""
+    )
+    if not query or not re.fullmatch(
+        r"^vproduct\|owner_live_accept(?:\|[a-f0-9]{12})?$",
+        callback_data,
+    ):
+        return
+
+    # Real telegram event check (Directive #1422, Section 7: BOT_LIVE_MINT_REQUIRES_REAL_TELEGRAM_EVENT=YES)
+    real_update_id = getattr(update, "update_id", 0) or 0
+    real_cbq_id = getattr(query, "id", "") or ""
+    if not real_update_id or not real_cbq_id:
+        await query.answer()
+        return await safe_edit_or_send(
+            query,
+            "Lỗi xác thực: Sự kiện Telegram không hợp lệ.",
+        )
+
+    # Ownership and session lineage validation
+    user_id = getattr(getattr(query, "from_user", None), "id", 0) or getattr(getattr(update, "effective_user", None), "id", 0) or 0
+    user_data = getattr(context, "user_data", None) or {}
+    session = user_data.get("video_session") or user_data.get("video_state") or {}
+    draft = session.get("draft") or {}
+
+    owner_receipt = str(
+        session.get("owner_acceptance_token")
+        or draft.get("owner_acceptance_token")
+        or session.get("owner_receipt")
+        or draft.get("owner_receipt")
+        or getattr(context, "_owner_live_receipt", "")
+        or ""
+    ).strip()
+
+    job_id = draft.get("job_id") or session.get("job_id") or 0
+    request_id = draft.get("request_id") or session.get("request_id") or ""
+    scene_count = int(draft.get("scene_count") or session.get("scene_count") or 1)
+
+    if not owner_receipt:
+        await query.answer()
+        return await safe_edit_or_send(
+            query,
+            "Thiếu biên nhận chấp thuận Owner cho phiên kiểm thử trực tiếp.",
+        )
+
+    try:
+        plan = await handle_owner_authorized_live_test_confirm(
+            update,
+            context,
+            owner_receipt=owner_receipt,
+            job_id=job_id,
+            request_id=request_id,
+            scene_count=scene_count,
+            callsite="bot.py:handle_product_video_owner_live_accept_callback",
+        )
+    except PermissionError as pe:
+        await query.answer()
+        logger.error("Owner authorized live accept denied: %s", pe)
+        return await safe_edit_or_send(
+            query,
+            f"Từ chối quyền thực thi kiểm thử trực tiếp: {pe}",
+        )
+    except Exception as exc:
+        await query.answer()
+        logger.error("Owner authorized live accept error: %s", exc)
+        return await safe_edit_or_send(
+            query,
+            f"Lỗi khởi tạo kiểm thử trực tiếp: {exc}",
+        )
+
+    # Admission & queue propagation (Section 8: BOT_LIVE_TEST_QUEUE_PROPAGATION=confirm_video_project_invoice)
+    try:
+        from services import video_project_queue
+        child_confs = plan.get("child_confirmations") or plan.get("confirmations") or []
+        first_child = child_confs[0] if child_confs else ""
+        conf_id = (
+            (first_child if isinstance(first_child, str) else first_child.get("confirmation_id"))
+            or plan.get("parent_confirmation_id")
+            or plan.get("confirmation_id")
+            or ""
+        )
+        if conf_id:
+            confirm_fn = globals().get("confirm_video_project_invoice")
+            if callable(confirm_fn):
+                confirm_fn(
+                    project_id=int(job_id or 0),
+                    user_id=user_id,
+                    provider_admission={
+                        "confirmation_id": conf_id,
+                        "owner_receipt": owner_receipt,
+                        "purpose": "PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST",
+                        "plan": plan,
+                    },
+                )
+    except Exception as q_exc:
+        logger.warning("Queue propagation notice: %s", q_exc)
+
+    await query.answer()
+    return await safe_edit_or_send(
+        query,
+        f"✅ Đã xác nhận phê duyệt kiểm thử có tính phí của Owner (Job #{job_id}). Đang tiến hành tạo video...",
+    )
+
+
+async def handle_owner_authorized_live_test_confirm(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    owner_receipt: str,
+    job_id: str | int,
+    request_id: str,
+    scene_count: int = 1,
+    expected_max_usd: float | Decimal = 0.0,
+    callsite: str = "bot.py:handle_product_video_owner_live_accept_callback",
+) -> dict[str, Any]:
+    """Production Bot entrypoint for Owner-authorized paid live acceptance (Directive #1422, N21Z, N21AA).
+
+    Strictly requires pre-existing valid Owner live authorization record in SQLite WAL database.
+    Mints PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST confirmation with bounded allocation.
+    """
+    from decimal import Decimal
+    from services.provider_spend_guard import (
+        issue_bot_mint_authority,
+        mint_multiscene_bot_confirmation_plan,
+        validate_owner_live_authorization,
+        PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+        BOT_CONFIRM_VALIDATION_SOURCE,
+        BOT_CONFIRM_VALIDATION_CALLSITE,
+    )
+
+    clean_rcpt = str(owner_receipt or "").strip()
+    if not clean_rcpt:
+        raise PermissionError("Owner live authorization receipt is required for live test acceptance")
+
+    # Validate durable pre-existing Owner live authorization record
+    is_valid, blocker, auth_data = validate_owner_live_authorization(
+        clean_rcpt,
+        product_family="Product Video",
+        job_id=str(job_id),
+        request_id=str(request_id),
+        operation="create_video_task",
+    )
+    if not is_valid:
+        raise PermissionError(f"Cannot mint live test confirmation: Owner authorization invalid ({blocker})")
+
+    query = getattr(update, "callback_query", None)
+    real_update_id = getattr(update, "update_id", 0) or 0
+    real_cbq_id = getattr(query, "id", "") or ""
+    real_chat_id = getattr(getattr(query, "message", None), "chat_id", 0) or getattr(getattr(update, "effective_chat", None), "id", 0) or 0
+    real_user_id = getattr(getattr(query, "from_user", None), "id", 0) or getattr(getattr(update, "effective_user", None), "id", 0) or 0
+
+    # Section 10: DURABLE_OWNER_MAX_SOLE_SOURCE=YES, CALLER_EXPECTED_MAX_INFLUENCE=NO
+    auth_micro = auth_data.get("expected_max_provider_spend_micro_usd") or 0
+    durable_max_usd = (Decimal(str(auth_micro)) / Decimal(1_000_000)) if auth_micro else Decimal("0.0")
+
+    mint_auth = issue_bot_mint_authority(
+        callsite=callsite,
+        telegram_update_id=real_update_id,
+        callback_query_id=real_cbq_id,
+        chat_id=real_chat_id,
+        user_id=real_user_id,
+        job_id=str(job_id),
+        request_id=str(request_id),
+        action="create_video_task",
+        validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+        validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+        validated_ownership=True,
+        purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+        owner_receipt=clean_rcpt,
+        expected_max_provider_spend_usd=durable_max_usd,
+    )
+
+    plan = mint_multiscene_bot_confirmation_plan(
+        mint_authority=mint_auth,
+        chat_id=real_chat_id,
+        user_id=real_user_id,
+        job_id=str(job_id),
+        request_id=str(request_id),
+        product_family="Product Video",
+        operation="create_video_task",
+        scene_count=scene_count,
+        purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+        owner_receipt=clean_rcpt,
+        expected_max_cost_usd=mint_auth.expected_max_provider_spend_usd,
+        metadata={
+            "telegram_update_id": real_update_id,
+            "callback_query_id": real_cbq_id,
+            "production_callsite": callsite,
+            "owner_live_authorization_id": clean_rcpt,
+            "purpose": PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+        },
+    )
+    return plan
 
 
 VIDEO_TREND2_STATE_KEY = "video_trend2_state"
@@ -121878,6 +122131,150 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 query, context, blocked_session, None, uid, lang
             )
         session = dict(ready.get("session") or session)
+        telegram_update_id = safe_int(getattr(update, "update_id", 0), 0)
+        final_admitted_scene_count = safe_int(
+            final_admission.get("scene_count") or project.get("scene_count") or confirm_scene_count,
+            0,
+        )
+        if final_admitted_scene_count <= 0 or confirm_scene_count != final_admitted_scene_count:
+            logger.error(
+                "product_video_admitted_scene_count_mismatch | user_id=%s | job_id=%s | confirm_scene_count=%s | admitted=%s",
+                uid,
+                job_id,
+                confirm_scene_count,
+                final_admitted_scene_count,
+            )
+            blocked_session = video_uiflow3_prepare_existing_job_precheck_status(
+                uid,
+                session,
+                job_id=job_id,
+                blocker_code="scene_count_mismatch",
+                public_message=(
+                    "TOAN AAS đã tạo tác vụ nhưng số lượng phân cảnh thực nhận không khớp với cấu hình xác nhận. "
+                    "Hóa đơn được giữ nguyên; tài khoản chưa bị trừ Xu."
+                ),
+                preflight_result="PASS",
+                admission_result="BLOCKED",
+            )
+            return await video_b14_send_or_edit_status_panel(
+                query, context, blocked_session, None, uid, lang
+            )
+
+        real_update_id = safe_int(getattr(update, "update_id", 0), 0)
+        real_cbq_id = str(getattr(query, "id", "") or "").strip()
+        real_request_id = str(intake_result.get("request_id") or "").strip()
+        real_chat_id = safe_int(chat_id, 0)
+        real_user_id = safe_int(uid, 0)
+        real_job_id = safe_int(job_id, 0)
+
+        if (
+            real_update_id <= 0
+            or not real_cbq_id
+            or not real_request_id
+            or real_chat_id <= 0
+            or real_user_id <= 0
+            or real_job_id <= 0
+        ):
+            logger.error(
+                "bot_spend_guard_mint_blocked_missing_identity | update_id=%s | cbq_id=%s | req_id=%s | chat_id=%s | user_id=%s | job_id=%s",
+                real_update_id,
+                real_cbq_id,
+                real_request_id,
+                real_chat_id,
+                real_user_id,
+                real_job_id,
+            )
+            blocked_session = video_uiflow3_prepare_existing_job_precheck_status(
+                uid,
+                session,
+                job_id=job_id,
+                blocker_code="missing_telegram_identity",
+                public_message=(
+                    "TOAN AAS đã tạo tác vụ nhưng thiếu dữ liệu định danh Telegram để cấp quyền bảo vệ ngân sách. "
+                    "Hóa đơn và toàn bộ cấu hình được giữ nguyên; tài khoản chưa bị trừ Xu."
+                ),
+                preflight_result="PASS",
+                admission_result="BLOCKED",
+            )
+            return await video_b14_send_or_edit_status_panel(
+                query, context, blocked_session, None, uid, lang
+            )
+
+        try:
+            from services.provider_spend_guard import (
+                issue_bot_mint_authority,
+                mint_multiscene_bot_confirmation_plan,
+                PURPOSE_PRODUCTION_USER_ACTION,
+                BOT_CONFIRM_VALIDATION_SOURCE,
+                BOT_CONFIRM_VALIDATION_CALLSITE,
+            )
+            mint_authority = issue_bot_mint_authority(
+                callsite="bot.py:handle_video_product_callback:b14_confirm",
+                telegram_update_id=real_update_id,
+                callback_query_id=real_cbq_id,
+                chat_id=real_chat_id,
+                user_id=real_user_id,
+                job_id=str(real_job_id),
+                request_id=real_request_id,
+                action="b14_confirm",
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                validated_ownership=True,
+                purpose=PURPOSE_PRODUCTION_USER_ACTION,
+            )
+            confirm_plan = mint_multiscene_bot_confirmation_plan(
+                mint_authority=mint_authority,
+                chat_id=real_chat_id,
+                user_id=real_user_id,
+                job_id=str(real_job_id),
+                request_id=real_request_id,
+                product_family="Product Video",
+                operation="create_video_task",
+                scene_count=final_admitted_scene_count,
+                ttl_seconds=600.0,
+                purpose=PURPOSE_PRODUCTION_USER_ACTION,
+                metadata={
+                    "telegram_update_id": real_update_id,
+                    "callback_query_id": real_cbq_id,
+                    "production_callsite": "bot.py:handle_video_product_callback:b14_confirm",
+                    "chat_id": real_chat_id,
+                    "user_id": real_user_id,
+                    "job_id": str(real_job_id),
+                    "request_id": real_request_id,
+                    "confirm_plan_scene_count_source": "final_admitted_scene_count",
+                    "final_admitted_scene_count": final_admitted_scene_count,
+                },
+            )
+            auth_child_count = len(confirm_plan.get("child_confirmations") or [])
+            if auth_child_count != final_admitted_scene_count:
+                raise ValueError(
+                    f"auth_child_count_mismatch: {auth_child_count} != {final_admitted_scene_count}"
+                )
+            final_admission["bot_confirm_authority"] = confirm_plan.get("parent_confirmation_id", "")
+            final_admission["child_confirmations"] = confirm_plan.get("child_confirmations", [])
+            final_admission["scene_confirmations"] = confirm_plan.get("scene_confirmations", {})
+        except Exception as mint_exc:
+            logger.error(
+                "bot_spend_guard_mint_failed | user_id=%s | job_id=%s | exc=%s",
+                uid,
+                job_id,
+                mint_exc,
+            )
+            blocked_session = video_uiflow3_prepare_existing_job_precheck_status(
+                uid,
+                session,
+                job_id=job_id,
+                blocker_code="spend_guard_mint_failed",
+                public_message=(
+                    "TOAN AAS đã tạo tác vụ nhưng hệ thống chưa thể cấp quyền xác thực ngân sách. "
+                    "Hóa đơn và toàn bộ cấu hình được giữ nguyên; tài khoản chưa bị trừ Xu."
+                ),
+                preflight_result="PASS",
+                admission_result="BLOCKED",
+            )
+            return await video_b14_send_or_edit_status_panel(
+                query, context, blocked_session, None, uid, lang
+            )
         queue_result = confirm_video_project_invoice(
             project_id,
             uid,

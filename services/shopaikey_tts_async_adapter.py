@@ -161,6 +161,7 @@ async def shopaikey_minimax_tts_async_submit(
     endpoint: str = "",
     timeout_seconds: float = 60.0,
     *,
+    provider: str = "shopaikey_minimax_tts",
     job_id: str = "",
     request_id: str = "",
     trace_id: str = "",
@@ -209,6 +210,8 @@ async def shopaikey_minimax_tts_async_submit(
     )
     spend_res = None
     if should_guard:
+        eff_provider = str(getattr(spend_context, "provider", "") or provider or "shopaikey_minimax_tts")
+        eff_model = str(getattr(spend_context, "model", "") or model or "speech-01-turbo")
         if has_proven_cost_authority and float(estimated_max_cost_usd or 0.0) > 0:
             cost_usd = float(estimated_max_cost_usd)
             cost_proven = True
@@ -224,27 +227,35 @@ async def shopaikey_minimax_tts_async_submit(
             cost_source = ""
 
         if spend_context is not None:
-            spend_ctx = spend_context
-        else:
-            spend_ctx = SpendGuardContext(
-                job_id=str(job_id or request_id or text_clean[:32]),
-                request_id=str(request_id or ""),
-                trace_id=str(trace_id or ""),
+            import dataclasses
+            spend_ctx = dataclasses.replace(
+                spend_context,
                 product_family="Voice / TTS",
-                provider="shopaikey_minimax_tts",
+                provider=eff_provider,
                 operation="create_tts_task",
-                model=str(model or "speech-01-turbo"),
-                estimated_max_cost_usd=cost_usd,
-                has_proven_cost_authority=cost_proven,
-                cost_authority_source=cost_source,
+                model=eff_model,
+                metadata={**getattr(spend_context, "metadata", {}), "char_count": len(text_clean), "text": text_clean},
+            )
+        else:
+            import hashlib
+            stable_tts = hashlib.sha256(f"{eff_model}:{text_clean}".encode("utf-8")).hexdigest()[:16]
+            spend_ctx = SpendGuardContext(
+                job_id=str(job_id or f"tts_{stable_tts}"),
+                request_id=str(request_id or f"REQ-TTS-{stable_tts}"),
+                trace_id=str(trace_id or f"TR-TTS-{stable_tts}"),
+                product_family="Voice / TTS",
+                provider=eff_provider,
+                operation="create_tts_task",
+                model=eff_model,
                 bot_originated_action=bool(bot_originated_action),
                 bot_confirm_authority=str(bot_confirm_authority or ""),
-                user_flow="bot_tts_confirm",
-                entrypoint="bot",
+                user_flow="bot_tts_confirm" if bot_originated_action else "tts_direct",
+                entrypoint="bot" if bot_originated_action else "direct_provider",
                 is_paid_live_attempt=bool(is_paid_live or is_real_provider_transport),
                 metadata={"char_count": len(text_clean), "text": text_clean},
             )
         spend_res = reserve_provider_spend(spend_ctx, db_path=db_path, env=effective_env)
+
         if not spend_res.allowed:
             return "FAIL_SPEND_GUARD_BLOCKED", "", f"spend_guard_blocked: {spend_res.blocker}", 0
 

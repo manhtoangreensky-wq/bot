@@ -278,9 +278,11 @@ class PublicChatRuntime:
                         cost_proven = False
                         cost_source = ""
                 spend_ctx = SpendGuardContext(
-                    job_id=str(decision.request_id),
+                    job_id=str(getattr(request, "source_message_id", "") or decision.request_id),
                     request_id=str(decision.request_id),
                     trace_id=str(getattr(request, "trace_id", "") or decision.request_id),
+                    chat_id=str(getattr(request, "chat_id", "") or ""),
+                    user_id=str(getattr(request, "account_id", "") or getattr(request, "user_id", "") or ""),
                     product_family="Public Chat Pro",
                     provider="claude-opus",
                     model=CLAUDE_OPUS_MODEL,

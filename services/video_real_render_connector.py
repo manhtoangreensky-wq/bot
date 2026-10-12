@@ -6125,6 +6125,9 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         "probation_lock_owned_by_other_job": bool(
             _meta_value("probation_lock_owned_by_other_job")
         ),
+        "bot_confirm_authority": str(_meta_value("bot_confirm_authority") or ""),
+        "scene_confirmations": _meta_value("scene_confirmations") or {},
+        "child_confirmations": _meta_value("child_confirmations") or [],
     }
     model_context: dict[str, Any] = {}
     for source in (pending_scene_task, job or {}, asset_pack, invoice):

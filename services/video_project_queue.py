@@ -3769,6 +3769,9 @@ def _product_video_final_admission_state(
         "runtime_candidate_keys": candidates,
         "final_eligible_provider_count": len(candidates),
         "candidate_set_consistent": True,
+        "bot_confirm_authority": str(admission.get("bot_confirm_authority") or ""),
+        "scene_confirmations": dict(admission.get("scene_confirmations") or {}),
+        "child_confirmations": list(admission.get("child_confirmations") or []),
     }
 
 

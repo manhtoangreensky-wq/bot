@@ -1736,23 +1736,32 @@ class Key4UProvider:
             )
 
         # Lowest safe seam guard: direct provider adapter calls MUST not bypass spend guard
-        ctx = spend_context or SpendGuardContext(
-            job_id=f"k4u_vid_{int(time.perf_counter()*1000)}",
-            request_id=f"REQ-K4U-VID-{int(time.perf_counter()*1000)}",
-            trace_id=f"TR-K4U-VID-{int(time.perf_counter()*1000)}",
-            product_family="Product Video",
-            provider="key4u_kling_video",
-            operation="create_video_task",
-            model=selected_model,
-            estimated_max_cost_usd=1.00,
-            has_proven_cost_authority=True,
-            bot_originated_action=bool(bot_originated_action),
-            bot_confirm_authority=str(bot_confirm_authority or ""),
-            user_flow="key4u_video_direct",
-            entrypoint="bot",
-            is_paid_live_attempt=bool(is_paid_live or self.is_configured()),
-        )
+        if spend_context is not None:
+            ctx = dataclasses.replace(
+                spend_context,
+                product_family="Product Video",
+                provider="key4u_kling_video",
+                operation="create_video_task",
+                model=selected_model,
+            )
+        else:
+            stable_sig = hashlib.sha256(f"{selected_model}:{prompt}:{aspect_ratio}".encode("utf-8")).hexdigest()[:16]
+            ctx = SpendGuardContext(
+                job_id=f"k4u_vid_{stable_sig}",
+                request_id=f"REQ-K4U-VID-{stable_sig}",
+                trace_id=f"TR-K4U-VID-{stable_sig}",
+                product_family="Product Video",
+                provider="key4u_kling_video",
+                operation="create_video_task",
+                model=selected_model,
+                bot_originated_action=bool(bot_originated_action),
+                bot_confirm_authority=str(bot_confirm_authority or ""),
+                user_flow="key4u_video_direct",
+                entrypoint="direct_provider",
+                is_paid_live_attempt=bool(is_paid_live or self.is_configured()),
+            )
         spend_res = reserve_provider_spend(ctx)
+
         if not spend_res.allowed:
             return _result(
                 ok=False,
@@ -2226,15 +2235,20 @@ class Key4UProvider:
         if is_kill_switch_active():
             return _result(ok=False, capability="suno", model=selected_model, status="SPEND_GUARD_BLOCKED", error_class=BLOCKER_KILL_SWITCH_ACTIVE, error_message_safe="paid_provider_kill_switch_active")
 
+        stable_suno = hashlib.sha256(f"{selected_model}:{lyrics or ''}:{prompt or ''}:{instrumental}".encode("utf-8")).hexdigest()[:16]
         suno_spend_ctx = SpendGuardContext(
-            job_id=f"suno_{int(time.perf_counter()*1000)}",
+            job_id=f"suno_{stable_suno}",
+            request_id=f"REQ-SUNO-{stable_suno}",
+            trace_id=f"TR-SUNO-{stable_suno}",
             product_family="Music / Suno",
             provider="key4u_suno",
             operation="suno_create",
             model=selected_model,
+            entrypoint="direct_provider",
             is_paid_live_attempt=True,
         )
         suno_spend_res = reserve_provider_spend(suno_spend_ctx)
+
         if not suno_spend_res.allowed:
             return _result(ok=False, capability="suno", model=selected_model, status="SPEND_GUARD_BLOCKED", error_class=suno_spend_res.blocker, error_message_safe=f"spend_guard_blocked: {suno_spend_res.blocker}")
 
