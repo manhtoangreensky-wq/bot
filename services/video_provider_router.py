@@ -6571,10 +6571,16 @@ def _run_provider_generation_impl(
                 or getattr(current_adapter, "auth_header_value", None)
                 or getattr(getattr(current_adapter, "config", None), "auth_header_value", None)
             )
-            is_paid_attempt = bool(
-                metadata.get("is_paid_live")
-                or metadata.get("is_paid_live_test")
+            is_paid_live_test = bool(
+                metadata.get("is_paid_live_test")
+                or metadata.get("is_paid_live")
                 or metadata.get("live_test")
+                or (request.metadata or {}).get("is_paid_live_test")
+                or (request.metadata or {}).get("is_paid_live")
+                or (request.metadata or {}).get("live_test")
+            )
+            is_paid_attempt = bool(
+                is_paid_live_test
                 or metadata.get("owner_acceptance_auth")
                 or (is_real_transport and current_adapter.provider_name != "stub_video")
             )
@@ -6591,20 +6597,13 @@ def _run_provider_generation_impl(
                 or {}
             )
             bot_confirm_authority = ""
-            if isinstance(scene_confirm_map, dict):
+            if scene_idx >= 1 and isinstance(scene_confirm_map, dict):
                 bot_confirm_authority = str(
                     scene_confirm_map.get(scene_idx)
                     or scene_confirm_map.get(str(scene_idx))
-                    or scene_confirm_map.get(scene_idx + 1)
-                    or scene_confirm_map.get(str(scene_idx + 1))
                     or ""
-                )
-            if not bot_confirm_authority:
-                bot_confirm_authority = str(
-                    metadata.get("bot_confirm_authority")
-                    or (request.metadata or {}).get("bot_confirm_authority")
-                    or ""
-                )
+                ).strip()
+            # Section 8: Exact scene child lookup only. No +/-1 fallback, NO parent fallback.
 
             # Strict trust boundary: Caller metadata is NOT trusted for bot origin (Section 5 & 11)
             # CALLER_BOT_ORIGIN_METADATA_TRUSTED = NO
@@ -6630,7 +6629,7 @@ def _run_provider_generation_impl(
                     user_flow=str(metadata.get("user_flow") or "product_video_bot"),
                     owner_receipt=str(metadata.get("owner_live_authorization_receipt") or (verified_acceptance or {}).get("token_fingerprint") or ""),
                     entrypoint=str(metadata.get("entrypoint") or metadata.get("source_entrypoint") or "bot"),
-                    is_paid_live_attempt=is_paid_attempt,
+                    is_paid_live_attempt=is_paid_live_test,
                     metadata=dict(metadata),
                 )
 

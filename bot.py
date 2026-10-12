@@ -121903,18 +121903,55 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             )
         session = dict(ready.get("session") or session)
         telegram_update_id = safe_int(getattr(update, "update_id", 0), 0)
+        final_admitted_scene_count = safe_int(
+            final_admission.get("scene_count") or project.get("scene_count") or confirm_scene_count,
+            0,
+        )
+        if final_admitted_scene_count <= 0 or confirm_scene_count != final_admitted_scene_count:
+            logger.error(
+                "product_video_admitted_scene_count_mismatch | user_id=%s | job_id=%s | confirm_scene_count=%s | admitted=%s",
+                uid,
+                job_id,
+                confirm_scene_count,
+                final_admitted_scene_count,
+            )
+            blocked_session = video_uiflow3_prepare_existing_job_precheck_status(
+                uid,
+                session,
+                job_id=job_id,
+                blocker_code="scene_count_mismatch",
+                public_message=(
+                    "TOAN AAS đã tạo tác vụ nhưng số lượng phân cảnh thực nhận không khớp với cấu hình xác nhận. "
+                    "Hóa đơn được giữ nguyên; tài khoản chưa bị trừ Xu."
+                ),
+                preflight_result="PASS",
+                admission_result="BLOCKED",
+            )
+            return await video_b14_send_or_edit_status_panel(
+                query, context, blocked_session, None, uid, lang
+            )
+
         try:
-            from services.provider_spend_guard import mint_multiscene_bot_confirmation_plan
+            from services.provider_spend_guard import (
+                issue_bot_mint_authority,
+                mint_multiscene_bot_confirmation_plan,
+            )
+            mint_authority = issue_bot_mint_authority(
+                callsite="bot.py:handle_video_product_callback:b14_confirm",
+                telegram_update_id=telegram_update_id or 1,
+                chat_id=chat_id,
+                user_id=uid,
+            )
             confirm_plan = mint_multiscene_bot_confirmation_plan(
+                mint_authority=mint_authority,
                 chat_id=chat_id,
                 user_id=uid,
                 job_id=job_id,
                 request_id=str(intake_result.get("request_id") or ""),
                 product_family="Product Video",
                 operation="create_video_task",
-                scene_count=confirm_scene_count,
+                scene_count=final_admitted_scene_count,
                 ttl_seconds=600.0,
-                origin="telegram_bot_callback_or_command",
                 metadata={
                     "telegram_update_id": telegram_update_id,
                     "production_callsite": "bot.py:handle_video_product_callback:b14_confirm",
@@ -121922,17 +121959,39 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                     "user_id": uid,
                     "job_id": job_id,
                     "request_id": str(intake_result.get("request_id") or ""),
+                    "confirm_plan_scene_count_source": "final_admitted_scene_count",
+                    "final_admitted_scene_count": final_admitted_scene_count,
                 },
             )
+            auth_child_count = len(confirm_plan.get("child_confirmations") or [])
+            if auth_child_count != final_admitted_scene_count:
+                raise ValueError(
+                    f"auth_child_count_mismatch: {auth_child_count} != {final_admitted_scene_count}"
+                )
             final_admission["bot_confirm_authority"] = confirm_plan.get("parent_confirmation_id", "")
             final_admission["child_confirmations"] = confirm_plan.get("child_confirmations", [])
             final_admission["scene_confirmations"] = confirm_plan.get("scene_confirmations", {})
         except Exception as mint_exc:
-            logger.warning(
+            logger.error(
                 "bot_spend_guard_mint_failed | user_id=%s | job_id=%s | exc=%s",
                 uid,
                 job_id,
                 mint_exc,
+            )
+            blocked_session = video_uiflow3_prepare_existing_job_precheck_status(
+                uid,
+                session,
+                job_id=job_id,
+                blocker_code="spend_guard_mint_failed",
+                public_message=(
+                    "TOAN AAS đã tạo tác vụ nhưng hệ thống chưa thể cấp quyền xác thực ngân sách. "
+                    "Hóa đơn và toàn bộ cấu hình được giữ nguyên; tài khoản chưa bị trừ Xu."
+                ),
+                preflight_result="PASS",
+                admission_result="BLOCKED",
+            )
+            return await video_b14_send_or_edit_status_panel(
+                query, context, blocked_session, None, uid, lang
             )
         queue_result = confirm_video_project_invoice(
             project_id,

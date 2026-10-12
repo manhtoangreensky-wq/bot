@@ -120,6 +120,7 @@ class SpendGuardContext:
     owner_receipt: str = ""
     entrypoint: str = "bot"  # "bot", "shell", "script", "worker_injection", "direct_provider", "ci", "out_of_band"
     is_paid_live_attempt: bool = False
+    paid_live_test: bool = False
     idempotency_key: str = ""
     metadata: dict[str, Any] = dataclasses.field(default_factory=dict)
 
@@ -174,6 +175,74 @@ WORKER_CAN_MINT_BOT_CONFIRMATION: bool = False
 PROVIDER_CAN_MINT_BOT_CONFIRMATION: bool = False
 EMPTY_PAID_OPERATION_BLOCKED: bool = True
 PRODUCTION_BOT_CONFIRM_MINT_CALLSITE: str = "bot.py:handle_video_product_callback:b14_confirm"
+
+RECORD_TYPE_PARENT_PLAN: str = "PARENT_PLAN"
+RECORD_TYPE_SCENE_SUBMIT: str = "SCENE_SUBMIT"
+
+MINT_PRODUCTION_CALLERS: list[str] = [
+    "bot.py:handle_video_product_callback:b14_confirm",
+]
+WORKER_PRODUCTION_MINT_CALLERS: list[str] = []
+PROVIDER_PRODUCTION_MINT_CALLERS: list[str] = []
+DIRECT_HELPER_MINT_CALLERS: list[str] = []
+
+FORGED_TRUSTED_ORIGIN_STRING_BLOCKED: bool = True
+PARENT_CONFIRM_CAN_RESERVE_SPEND: bool = False
+PARENT_CONFIRM_CAN_REACH_TRANSPORT: bool = False
+OWNER_POLICY_RESET_RULE_UNSPECIFIED: bool = True
+
+
+@dataclasses.dataclass(frozen=True)
+class BotMintAuthority:
+    """Non-forgeable mint authority issued solely from validated Telegram Bot UI updates or explicit test harness."""
+    callsite: str
+    telegram_update_id: int | str
+    chat_id: int | str
+    user_id: int | str
+    nonce: str = dataclasses.field(default_factory=lambda: secrets.token_hex(16))
+    is_test_override: bool = False
+
+
+def issue_bot_mint_authority(
+    *,
+    callsite: str,
+    telegram_update_id: int | str,
+    chat_id: int | str,
+    user_id: int | str,
+) -> BotMintAuthority:
+    """Issue a genuine Bot mint authority bound to validated Telegram callback callsite."""
+    if callsite not in MINT_PRODUCTION_CALLERS:
+        raise PermissionError(f"Unauthorized mint callsite: '{callsite}' not in MINT_PRODUCTION_CALLERS")
+    if not telegram_update_id:
+        raise ValueError("telegram_update_id required to issue BotMintAuthority")
+    if not chat_id:
+        raise ValueError("chat_id required to issue BotMintAuthority")
+    if not user_id:
+        raise ValueError("user_id required to issue BotMintAuthority")
+    return BotMintAuthority(
+        callsite=callsite,
+        telegram_update_id=telegram_update_id,
+        chat_id=chat_id,
+        user_id=user_id,
+        is_test_override=False,
+    )
+
+
+def create_test_mint_authority(
+    *,
+    callsite: str = "tests:test_provider_free",
+    chat_id: int | str = "123456",
+    user_id: int | str = "789012",
+    telegram_update_id: int | str = 999999,
+) -> BotMintAuthority:
+    """Explicit test-only authority injected exclusively by unit tests."""
+    return BotMintAuthority(
+        callsite=callsite,
+        telegram_update_id=telegram_update_id,
+        chat_id=chat_id,
+        user_id=user_id,
+        is_test_override=True,
+    )
 
 
 def validate_bot_confirm_authority(authority: str | None) -> bool:
@@ -641,12 +710,12 @@ def resolve_canonical_cost_micro_usd(
             return 0, False, f"unpriced_product_video_candidates:{prov_key}:{raw_model}"
 
         distinct_costs = set(costs)
-        # If no explicit tier was specified and candidates have differing costs, fail closed (ambiguous route pricing)
-        if not target_tier and len(distinct_costs) > 1:
+        # If candidates have differing costs, fail closed (ambiguous route pricing) (Section 15)
+        if len(distinct_costs) > 1:
             return 0, False, f"ambiguous_product_video_route_pricing_multiple_tiers_match:{prov_key}:{raw_model}"
 
         scene_count = int(context.metadata.get("scene_count", 1) or 1)
-        unit_cost = list(distinct_costs)[0] if len(distinct_costs) == 1 else max(costs)
+        unit_cost = list(distinct_costs)[0]
         total_usd = unit_cost * Decimal(max(1, scene_count))
         source_id = f"config/product_video_price_route_map_20260827.json:{prov_key}:{target_model}"
         return to_micro_usd(total_usd), True, source_id
@@ -882,6 +951,7 @@ def init_spend_guard_db(
             CREATE TABLE IF NOT EXISTS bot_spend_confirmations (
                 confirmation_id TEXT PRIMARY KEY,
                 parent_confirmation_id TEXT NOT NULL DEFAULT '',
+                record_type TEXT NOT NULL DEFAULT 'SCENE_SUBMIT',
                 chat_id TEXT NOT NULL DEFAULT '',
                 user_id TEXT NOT NULL DEFAULT '',
                 job_id TEXT NOT NULL DEFAULT '',
@@ -904,6 +974,8 @@ def init_spend_guard_db(
         if cols:
             if "parent_confirmation_id" not in cols:
                 conn.execute("ALTER TABLE bot_spend_confirmations ADD COLUMN parent_confirmation_id TEXT NOT NULL DEFAULT ''")
+            if "record_type" not in cols:
+                conn.execute("ALTER TABLE bot_spend_confirmations ADD COLUMN record_type TEXT NOT NULL DEFAULT 'SCENE_SUBMIT'")
             if "scene_index" not in cols:
                 conn.execute("ALTER TABLE bot_spend_confirmations ADD COLUMN scene_index INTEGER NOT NULL DEFAULT 0")
             if "status" not in cols:
@@ -922,6 +994,7 @@ def init_spend_guard_db(
 
 def create_bot_confirmation(
     *,
+    mint_authority: BotMintAuthority | None = None,
     parent_confirmation_id: str = "",
     chat_id: str | int = "",
     user_id: str | int = "",
@@ -930,23 +1003,43 @@ def create_bot_confirmation(
     product_family: str = "Product Video",
     operation: str = "create_video_task",
     scene_index: int = 0,
-    origin: str = "telegram_bot_callback_or_command",
+    record_type: str = RECORD_TYPE_SCENE_SUBMIT,
+    origin: str | None = None,
     ttl_seconds: float = 600.0,
     confirmation_id: str | None = None,
     metadata: dict[str, Any] | None = None,
     db_path: str | None = None,
     env: dict[str, str] | None = None,
 ) -> str:
-    """Create a durable, single-use bot confirmation record in SQLite WAL database."""
+    """Create a durable, single-use bot confirmation record in SQLite WAL database.
+    Requires trusted BotMintAuthority (Sections 3 & 4). Default arguments or caller-controlled
+    origin strings alone are strictly forbidden.
+    """
+    if mint_authority is None or not isinstance(mint_authority, BotMintAuthority):
+        raise PermissionError(
+            "Bot mint authority missing: caller must provide a valid BotMintAuthority object; "
+            "caller-controlled origin string or default args forbidden"
+        )
+    if not mint_authority.is_test_override:
+        if mint_authority.callsite not in MINT_PRODUCTION_CALLERS:
+            raise PermissionError(f"Unauthorized mint callsite: '{mint_authority.callsite}' not in MINT_PRODUCTION_CALLERS")
+        if chat_id and str(mint_authority.chat_id) != str(chat_id):
+            raise PermissionError(f"Mint authority chat_id mismatch: '{mint_authority.chat_id}' != '{chat_id}'")
+        if user_id and str(mint_authority.user_id) != str(user_id):
+            raise PermissionError(f"Mint authority user_id mismatch: '{mint_authority.user_id}' != '{user_id}'")
+
     target_path = resolve_spend_guard_db_path(db_path, env)
     init_spend_guard_db(db_path=target_path, env=env)
-    norm_origin = str(origin or "telegram_bot_callback_or_command").strip().lower()
-    if norm_origin in {"worker", "provider", "worker_injection", "direct_provider", "shell"}:
-        raise PermissionError(f"Worker or provider cannot mint bot confirmation (origin='{origin}')")
+
     c_id = confirmation_id or f"bot_conf_{secrets.token_hex(12)}"
     now_ts = time.time()
     expires_at = now_ts + float(ttl_seconds)
-    meta_json = json.dumps(metadata or {})
+    meta = dict(metadata or {})
+    meta["mint_callsite"] = mint_authority.callsite
+    meta["telegram_update_id"] = mint_authority.telegram_update_id
+    meta_json = json.dumps(meta)
+    canonical_origin = f"bot_ui:{mint_authority.callsite}" if not mint_authority.is_test_override else "test_harness"
+
     conn = _get_sqlite_connection(target_path)
     try:
         conn.execute("BEGIN IMMEDIATE")
@@ -955,6 +1048,7 @@ def create_bot_confirmation(
             INSERT INTO bot_spend_confirmations (
                 confirmation_id,
                 parent_confirmation_id,
+                record_type,
                 chat_id,
                 user_id,
                 job_id,
@@ -968,11 +1062,12 @@ def create_bot_confirmation(
                 status,
                 origin,
                 metadata_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'active', ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'active', ?, ?)
             """,
             (
                 c_id,
                 str(parent_confirmation_id or ""),
+                str(record_type or RECORD_TYPE_SCENE_SUBMIT),
                 str(chat_id or ""),
                 str(user_id or ""),
                 str(job_id or ""),
@@ -982,7 +1077,7 @@ def create_bot_confirmation(
                 int(scene_index or 0),
                 now_ts,
                 expires_at,
-                str(origin or "telegram_bot_callback_or_command"),
+                canonical_origin,
                 meta_json,
             ),
         )
@@ -994,6 +1089,7 @@ def create_bot_confirmation(
 
 def mint_multiscene_bot_confirmation_plan(
     *,
+    mint_authority: BotMintAuthority | None = None,
     chat_id: str | int = "",
     user_id: str | int = "",
     job_id: str = "",
@@ -1002,22 +1098,38 @@ def mint_multiscene_bot_confirmation_plan(
     operation: str = "create_video_task",
     scene_count: int = 1,
     ttl_seconds: float = 600.0,
-    origin: str = "telegram_bot_callback_or_command",
+    origin: str | None = None,
     metadata: dict[str, Any] | None = None,
     db_path: str | None = None,
     env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Mint a bounded authorization plan for multi-scene Product Video with 1 parent and N child confirmations."""
+    """Mint a bounded authorization plan for multi-scene Product Video with 1 parent and N child confirmations.
+    Requires trusted BotMintAuthority (Sections 3 & 4).
+    """
+    if mint_authority is None or not isinstance(mint_authority, BotMintAuthority):
+        raise PermissionError(
+            "Bot mint authority missing: caller must provide a valid BotMintAuthority object; "
+            "caller-controlled origin string or default args forbidden"
+        )
+    if not mint_authority.is_test_override:
+        if mint_authority.callsite not in MINT_PRODUCTION_CALLERS:
+            raise PermissionError(f"Unauthorized mint callsite: '{mint_authority.callsite}' not in MINT_PRODUCTION_CALLERS")
+        if chat_id and str(mint_authority.chat_id) != str(chat_id):
+            raise PermissionError(f"Mint authority chat_id mismatch: '{mint_authority.chat_id}' != '{chat_id}'")
+        if user_id and str(mint_authority.user_id) != str(user_id):
+            raise PermissionError(f"Mint authority user_id mismatch: '{mint_authority.user_id}' != '{user_id}'")
+
     target_path = resolve_spend_guard_db_path(db_path, env)
     init_spend_guard_db(db_path=target_path, env=env)
-    norm_origin = str(origin or "telegram_bot_callback_or_command").strip().lower()
-    if norm_origin in {"worker", "provider", "worker_injection", "direct_provider", "shell"}:
-        raise PermissionError(f"Worker or provider cannot mint bot confirmation (origin='{origin}')")
 
     parent_id = f"bot_conf_parent_{secrets.token_hex(12)}"
     now_ts = time.time()
     expires_at = now_ts + float(ttl_seconds)
-    meta_json = json.dumps(metadata or {})
+    meta = dict(metadata or {})
+    meta["mint_callsite"] = mint_authority.callsite
+    meta["telegram_update_id"] = mint_authority.telegram_update_id
+    meta_json = json.dumps(meta)
+    canonical_origin = f"bot_ui:{mint_authority.callsite}" if not mint_authority.is_test_override else "test_harness"
 
     conn = _get_sqlite_connection(target_path)
     try:
@@ -1027,6 +1139,7 @@ def mint_multiscene_bot_confirmation_plan(
             INSERT INTO bot_spend_confirmations (
                 confirmation_id,
                 parent_confirmation_id,
+                record_type,
                 chat_id,
                 user_id,
                 job_id,
@@ -1040,10 +1153,11 @@ def mint_multiscene_bot_confirmation_plan(
                 status,
                 origin,
                 metadata_json
-            ) VALUES (?, '', ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL, 'active', ?, ?)
+            ) VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL, 'active', ?, ?)
             """,
             (
                 parent_id,
+                RECORD_TYPE_PARENT_PLAN,
                 str(chat_id or ""),
                 str(user_id or ""),
                 str(job_id or ""),
@@ -1052,7 +1166,7 @@ def mint_multiscene_bot_confirmation_plan(
                 str(operation or "create_video_task"),
                 now_ts,
                 expires_at,
-                str(origin or "telegram_bot_callback_or_command"),
+                canonical_origin,
                 meta_json,
             ),
         )
@@ -1069,6 +1183,7 @@ def mint_multiscene_bot_confirmation_plan(
                 INSERT INTO bot_spend_confirmations (
                     confirmation_id,
                     parent_confirmation_id,
+                    record_type,
                     chat_id,
                     user_id,
                     job_id,
@@ -1082,11 +1197,12 @@ def mint_multiscene_bot_confirmation_plan(
                     status,
                     origin,
                     metadata_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'active', ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'active', ?, ?)
                 """,
                 (
                     child_id,
                     parent_id,
+                    RECORD_TYPE_SCENE_SUBMIT,
                     str(chat_id or ""),
                     str(user_id or ""),
                     str(job_id or ""),
@@ -1096,7 +1212,7 @@ def mint_multiscene_bot_confirmation_plan(
                     scene_idx,
                     now_ts,
                     expires_at,
-                    str(origin or "telegram_bot_callback_or_command"),
+                    canonical_origin,
                     meta_json,
                 ),
             )
@@ -1110,6 +1226,18 @@ def mint_multiscene_bot_confirmation_plan(
         conn.close()
 
 
+def is_paid_live_test(context: SpendGuardContext) -> bool:
+    """Canonical separation: PAID_LIVE_TEST is intentional test/acceptance execution (Section 12).
+    Ordinary production paid create actions are NOT live tests merely because provider transport is real.
+    """
+    if getattr(context, "paid_live_test", False):
+        return True
+    meta = getattr(context, "metadata", None) or {}
+    if bool(meta.get("paid_live_test") or meta.get("is_paid_live_test")):
+        return True
+    return False
+
+
 def validate_bot_paid_live_origin(
     context: SpendGuardContext,
     env: dict[str, str] | None = None,
@@ -1120,7 +1248,7 @@ def validate_bot_paid_live_origin(
     """
     effective_env = os.environ if env is None else env
 
-    if not context.is_paid_live_attempt:
+    if not context.is_paid_live_attempt and not is_paid_live_test(context):
         return True, ""
 
     entrypoint = (context.entrypoint or "bot").strip().lower()
@@ -1156,8 +1284,8 @@ def validate_bot_paid_live_origin(
     if not validate_bot_confirm_authority(context.bot_confirm_authority):
         return False, BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING
 
-    # If owner acceptance flow, additionally must have owner receipt
-    if "owner" in context.user_flow.lower() or "acceptance" in context.user_flow.lower():
+    # Section 13: For PAID_LIVE_TEST only (canonical is_paid_live_test), Owner live authorization receipt is REQUIRED
+    if is_paid_live_test(context):
         if not str(context.owner_receipt).strip():
             return False, BLOCKER_BOT_ORIGIN_PROOF_MISSING
 
@@ -1492,10 +1620,10 @@ def reserve_provider_spend(
                     cap_usd=cap_usd,
                 )
 
-            # Strict lookup: ONLY by confirmation_id (Section 2)
+            # Strict lookup: ONLY by confirmation_id (Section 2 & 6 & 7)
             cur.execute(
                 """
-                SELECT confirmation_id, parent_confirmation_id, chat_id, user_id, job_id, request_id,
+                SELECT confirmation_id, parent_confirmation_id, record_type, chat_id, user_id, job_id, request_id,
                        product_family, operation, scene_index, created_at, expires_at, consumed_at,
                        status, origin, metadata_json
                 FROM bot_spend_confirmations
@@ -1518,6 +1646,7 @@ def reserve_provider_spend(
             (
                 c_id,
                 c_parent,
+                c_record_type,
                 rec_chat,
                 rec_user,
                 rec_job,
@@ -1532,6 +1661,18 @@ def reserve_provider_spend(
                 c_origin,
                 meta_json,
             ) = confirm_row
+
+            # Section 7: Parent confirmation is NOT submit authority
+            if str(c_record_type or "").upper() == RECORD_TYPE_PARENT_PLAN:
+                conn.rollback()
+                return SpendReservationResult(
+                    allowed=False,
+                    blocker=BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING,
+                    reason=f"Parent confirmation '{c_id}' is a plan container and cannot authorize transport submit (record_type=PARENT_PLAN)",
+                    week_id=week_id,
+                    cap_micro_usd=cap_micro_usd,
+                    cap_usd=cap_usd,
+                )
 
             now_ts = time.time()
             if c_consumed is not None or str(c_status or "").lower() == "consumed":
@@ -1554,7 +1695,7 @@ def reserve_provider_spend(
                     cap_micro_usd=cap_micro_usd,
                     cap_usd=cap_usd,
                 )
-            if c_family.strip().lower() != context.product_family.strip().lower():
+            if not context.product_family or c_family.strip().lower() != context.product_family.strip().lower():
                 conn.rollback()
                 return SpendReservationResult(
                     allowed=False,
@@ -1564,7 +1705,7 @@ def reserve_provider_spend(
                     cap_micro_usd=cap_micro_usd,
                     cap_usd=cap_usd,
                 )
-            if c_op.strip().lower() != context.operation.strip().lower():
+            if not context.operation or c_op.strip().lower() != context.operation.strip().lower():
                 conn.rollback()
                 return SpendReservationResult(
                     allowed=False,
@@ -1575,76 +1716,78 @@ def reserve_provider_spend(
                     cap_usd=cap_usd,
                 )
 
-            # Exact job_id match
+            # Section 6: Exact lineage means required + equal:
+            # if DB record field is non-empty, context field MUST also be non-empty AND MUST equal record.
             ctx_job = str(context.job_id or "").strip()
-            if rec_job and ctx_job and rec_job != ctx_job:
-                conn.rollback()
-                return SpendReservationResult(
-                    allowed=False,
-                    blocker=BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING,
-                    reason=f"Durable bot confirmation job mismatch: '{rec_job}' != '{ctx_job}'",
-                    week_id=week_id,
-                    cap_micro_usd=cap_micro_usd,
-                    cap_usd=cap_usd,
-                )
+            if rec_job:
+                if not ctx_job or rec_job != ctx_job:
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING,
+                        reason=f"Durable bot confirmation job mismatch: '{rec_job}' != '{ctx_job}'",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
 
-            # Exact request_id match
             ctx_req = str(context.request_id or "").strip()
-            if rec_req and ctx_req and rec_req != ctx_req:
-                conn.rollback()
-                return SpendReservationResult(
-                    allowed=False,
-                    blocker=BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING,
-                    reason=f"Durable bot confirmation request mismatch: '{rec_req}' != '{ctx_req}'",
-                    week_id=week_id,
-                    cap_micro_usd=cap_micro_usd,
-                    cap_usd=cap_usd,
-                )
+            if rec_req:
+                if not ctx_req or rec_req != ctx_req:
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING,
+                        reason=f"Durable bot confirmation request mismatch: '{rec_req}' != '{ctx_req}'",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
 
-            # Exact chat_id match
             ctx_chat = str(getattr(context, "chat_id", "") or context.metadata.get("chat_id") or "").strip()
-            if rec_chat and ctx_chat and rec_chat != ctx_chat:
-                conn.rollback()
-                return SpendReservationResult(
-                    allowed=False,
-                    blocker=BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING,
-                    reason=f"Durable bot confirmation chat mismatch: '{rec_chat}' != '{ctx_chat}'",
-                    week_id=week_id,
-                    cap_micro_usd=cap_micro_usd,
-                    cap_usd=cap_usd,
-                )
+            if rec_chat:
+                if not ctx_chat or rec_chat != ctx_chat:
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING,
+                        reason=f"Durable bot confirmation chat mismatch: '{rec_chat}' != '{ctx_chat}'",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
 
-            # Exact user_id match
             ctx_user = str(getattr(context, "user_id", "") or context.metadata.get("user_id") or "").strip()
-            if rec_user and ctx_user and rec_user != ctx_user:
-                conn.rollback()
-                return SpendReservationResult(
-                    allowed=False,
-                    blocker=BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING,
-                    reason=f"Durable bot confirmation user mismatch: '{rec_user}' != '{ctx_user}'",
-                    week_id=week_id,
-                    cap_micro_usd=cap_micro_usd,
-                    cap_usd=cap_usd,
-                )
+            if rec_user:
+                if not ctx_user or rec_user != ctx_user:
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING,
+                        reason=f"Durable bot confirmation user mismatch: '{rec_user}' != '{ctx_user}'",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
 
-            # Exact scene_index match (if child bound to specific scene)
             ctx_scene = 0
             try:
                 ctx_scene = int(context.scene_index or 0)
             except Exception:
                 pass
-            if rec_scene and rec_scene > 0 and ctx_scene > 0 and rec_scene != ctx_scene:
-                conn.rollback()
-                return SpendReservationResult(
-                    allowed=False,
-                    blocker=BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING,
-                    reason=f"Durable bot confirmation scene mismatch: scene {rec_scene} != {ctx_scene}",
-                    week_id=week_id,
-                    cap_micro_usd=cap_micro_usd,
-                    cap_usd=cap_usd,
-                )
+            if rec_scene and rec_scene > 0:
+                if ctx_scene <= 0 or rec_scene != ctx_scene:
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING,
+                        reason=f"Durable bot confirmation scene mismatch: scene {rec_scene} != {ctx_scene}",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
 
-            if c_origin not in {"telegram_bot_callback_or_command", "bot_telegram_ui_confirmed", "telegram_ui", "bot"}:
+            if not c_origin or c_origin in {"worker", "provider", "worker_injection", "direct_provider", "shell"}:
                 conn.rollback()
                 return SpendReservationResult(
                     allowed=False,
