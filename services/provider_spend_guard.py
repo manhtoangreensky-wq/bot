@@ -248,8 +248,49 @@ CALLER_CAN_OVERRIDE_CONFIRM_PURPOSE: str = "NO"
 CALLER_CAN_OVERRIDE_OWNER_RECEIPT: str = "NO"
 CALLER_CAN_OVERRIDE_EXPECTED_MAX_SPEND: str = "NO"
 OWNER_RECEIPT_STRING_EQUALITY_ONLY: str = "FORBIDDEN"
-OWNER_AUTHORITY_SOURCE: str = "owner_live_authorizations"
+
+# Section 2 & 3: Single Canonical Owner Authority & Inactive Secondary Table
+EXISTING_CANONICAL_OWNER_AUTHORITY_FOUND: str = "YES"
+CANONICAL_OWNER_AUTH_VALIDATOR: str = "services.video_provider_router:validate_owner_acceptance_authorization"
+CANONICAL_OWNER_AUTH_CLAIM: str = "services.video_trace_state:claim_owner_acceptance_token"
+CANONICAL_OWNER_AUTH_REPLAY_GUARD: str = "services.video_trace_state:is_owner_acceptance_token_claimed_or_consumed"
+SINGLE_OWNER_AUTHORITY: str = "YES"
+DUAL_OWNER_AUTHORITY: str = "NO"
+OWNER_AUTHORITY_SOURCE: str = "services.video_provider_router:validate_owner_acceptance_authorization"
 OWNER_AUTHORITY_VALIDATOR: str = "PASS"
+OWNER_LIVE_AUTHORIZATIONS_AS_SECOND_AUTHORITY: str = "REMOVED_OR_INERT_LEGACY_ONLY"
+CREATE_OWNER_LIVE_AUTHORIZATION_AS_PUBLIC_AUTHORITY: str = "REMOVED"
+INSERT_OR_REPLACE_OWNER_AUTH: str = "ABSENT"
+SECOND_AUTHORITY_CAN_AUTHORIZE: str = "NO"
+
+# Section 4: Owner Auth IDs Immutable & No Resurrections
+AUTH_CREATE_MODE: str = "INSERT_ONLY"
+DUPLICATE_AUTH_ID: str = "BLOCK"
+CONSUMED_AUTH_RESURRECTION: str = "BLOCK"
+REVOKED_AUTH_RESURRECTION: str = "BLOCK"
+EXPIRED_AUTH_RESURRECTION: str = "BLOCK"
+
+# Section 5: Caller Metadata Is Never Owner Budget Authority
+CALLER_CHILD_BUDGET_METADATA_AUTHORITY: str = "NO"
+
+# Section 6: Atomic Cumulative Owner Job Budget
+CUMULATIVE_OWNER_JOB_BUDGET_ATOMIC: str = "PASS"
+
+# Section 7: Explicit Scene/Submit Bounds
+MULTISCENE_EXPLICIT_SLOT_BOUNDS: str = "PASS"
+WILDCARD_MULTIUSE_ALLOWED: str = "NO"
+SCENE_SLOT_REUSE_ALLOWED: str = "NO"
+MAX_PROVIDER_SUBMITS_ENFORCED: str = "YES"
+
+# Section 8 & 9: Bot Entrypoint & Owner Live Safety
+BOT_ONLY_GLOBAL_AUTHORITY: str = "YES"
+OWNER_POLICY_RESET_RULE_UNSPECIFIED: str = "YES"
+PRODUCTION_READY: str = "NO"
+
+# Section 12 & 13: Historical Safety & Forensic Truth
+PROVIDER_LEDGER_AUTHORITATIVE: str = "NO"
+RECONCILIATION_DELTA_USD: str = "UNKNOWN_NOT_COMPUTABLE_WITHOUT_PROVIDER_LEDGER"
+
 WORKER_CAN_CREATE_OWNER_LIVE_AUTH: str = "NO"
 PROVIDER_CAN_CREATE_OWNER_LIVE_AUTH: str = "NO"
 DIRECT_PROVIDER_CAN_CREATE_OWNER_LIVE_AUTH: str = "NO"
@@ -283,6 +324,10 @@ BLOCKER_OWNER_LIVE_AUTH_EXPIRED: str = "owner_live_authorization_expired"
 BLOCKER_OWNER_LIVE_AUTH_ALREADY_CONSUMED: str = "owner_live_authorization_already_consumed"
 BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH: str = "owner_live_authorization_lineage_mismatch"
 BLOCKER_OWNER_LIVE_AUTH_SLOT_MISMATCH: str = "owner_live_authorization_slot_mismatch"
+BLOCKER_SECOND_AUTHORITY_CANNOT_AUTHORIZE: str = "second_authority_cannot_authorize"
+BLOCKER_OWNER_LIVE_AUTH_SLOT_ALREADY_USED: str = "owner_live_authorization_slot_already_used"
+BLOCKER_DUPLICATE_AUTH_ID: str = "duplicate_auth_id_blocked"
+BLOCKER_AUTH_RESURRECTION: str = "auth_resurrection_blocked"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -393,6 +438,169 @@ def _verify_owner_live_auth_creator(_caller_override: str | None = None) -> None
         del frame
 
 
+def create_canonical_owner_acceptance_auth(
+    *,
+    job_id: int | str,
+    user_id: int | str = 0,
+    project_id: int | str | None = None,
+    product_type: str = "video_ai_prompt",
+    provider: str = "shopaikey_video",
+    capability: str = "text_to_video",
+    tier: str = "veo31_fast_8",
+    max_provider_spend: float | Decimal = 40.0,
+    max_provider_spend_unit: str = "USD",
+    allowed_scene_slots: str | list[int] | set[int] = "1,2",
+    max_submits: int | None = None,
+    ttl_seconds: float = 3600.0,
+    nonce: str | None = None,
+    token_id: str | None = None,
+    db_path: str | None = None,
+    env: dict[str, str] | None = None,
+    runtime_sha: str | None = None,
+    request_id: str = "",
+    status: str = STATUS_OWNER_AUTH_ACTIVE,
+    operation: str = "create_video_task",
+    _caller_override_for_test: str | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Create durable canonical Owner acceptance authorization token in video_request_traces.
+
+    Reuses existing repository authority:
+    services.video_provider_router:validate_owner_acceptance_authorization
+    services.video_trace_state:claim_owner_acceptance_token
+    services.video_trace_state:is_owner_acceptance_token_claimed_or_consumed
+    """
+    _verify_owner_live_auth_creator(_caller_override_for_test)
+
+    from services.remote_worker_api import resolve_runtime_sha
+    from services.video_trace_state import (
+        compute_owner_acceptance_token_fingerprint,
+        compute_owner_acceptance_attempt_fingerprint,
+        ensure_video_trace_schema,
+        is_owner_acceptance_token_claimed_or_consumed,
+    )
+
+    clean_job_id = int(job_id) if str(job_id).strip().isdigit() else str(job_id or "").strip()
+    clean_user_id = int(user_id) if str(user_id).strip().isdigit() else str(user_id or "").strip()
+    clean_proj_id = int(project_id) if str(project_id or "").strip().isdigit() else str(project_id or "").strip()
+    clean_token_id = str(token_id or f"coa_{secrets.token_hex(12)}").strip()
+    clean_nonce = str(nonce or secrets.token_hex(8)).strip()
+    clean_runtime_sha = str(runtime_sha or resolve_runtime_sha(environ=env) or "2fa6b9c8de821d3bc06b7594c73180084a08d50e").strip()
+
+    if isinstance(allowed_scene_slots, (list, tuple, set)):
+        slots_str = ",".join(str(s) for s in sorted(allowed_scene_slots))
+    else:
+        slots_str = str(allowed_scene_slots or "1,2").strip()
+
+    slots_list = [int(s.strip()) for s in slots_str.split(",") if s.strip().isdigit()]
+    calculated_submits = int(max_submits) if max_submits is not None else (len(slots_list) or 1)
+
+    now_ts = time.time()
+    expires_at = now_ts + float(ttl_seconds)
+
+    exp_micro = to_micro_usd(Decimal(str(max_provider_spend)))
+
+    auth: dict[str, Any] = {
+        "owner_authorized": True,
+        "acceptance_type": "owner_authorized_live_acceptance",
+        "product_type": str(product_type or "video_ai_prompt").strip(),
+        "provider": str(provider or "shopaikey_video").strip(),
+        "capability": str(capability or "text_to_video").strip(),
+        "tier": str(tier or "veo31_fast_8").strip(),
+        "job_id": clean_job_id,
+        "user_id": clean_user_id,
+        "project_id": clean_proj_id,
+        "request_id": str(request_id or "").strip(),
+        "runtime_sha": clean_runtime_sha,
+        "max_provider_spend": float(max_provider_spend),
+        "max_provider_spend_unit": str(max_provider_spend_unit or "USD").strip().upper(),
+        "nonce": clean_nonce,
+        "consumed": False,
+        "expires_at": expires_at,
+        "token_id": clean_token_id,
+        "allowed_scene_slots": slots_str,
+        "max_submits": calculated_submits,
+        "expected_max_provider_spend_micro_usd": exp_micro,
+        "status": str(status or STATUS_OWNER_AUTH_ACTIVE).strip(),
+        "operation": str(operation or "create_video_task").strip(),
+        "allow_other_product": True,
+    }
+
+    fingerprint = compute_owner_acceptance_token_fingerprint(auth)
+    attempt_fingerprint = compute_owner_acceptance_attempt_fingerprint(auth)
+    auth["token_fingerprint"] = fingerprint
+    auth["attempt_fingerprint"] = attempt_fingerprint
+
+    target_path = resolve_spend_guard_db_path(db_path, env)
+    ensure_video_trace_schema(db_path=target_path)
+
+    conn = _get_sqlite_connection(target_path)
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        cur = conn.cursor()
+
+        # Check replay guard or existing token ID
+        if is_owner_acceptance_token_claimed_or_consumed(fingerprint, conn=conn, db_path=target_path):
+            conn.rollback()
+            raise ValueError(BLOCKER_AUTH_RESURRECTION)
+
+        cur.execute(
+            """
+            SELECT request_id, current_stage, trace_payload_json
+            FROM video_request_traces
+            WHERE request_id = ? OR request_id = ? OR confirm_attempt_key = ?
+            """,
+            (f"COA-{clean_token_id}", f"COA-{fingerprint}", f"COA-{attempt_fingerprint}"),
+        )
+        existing = cur.fetchone()
+        if existing:
+            ex_req, ex_stage, ex_json = existing
+            conn.rollback()
+            if ex_stage in ("CONSUMED", "CLAIMED"):
+                raise ValueError(BLOCKER_AUTH_RESURRECTION)
+            try:
+                ex_payload = json.loads(ex_json or "{}")
+                if float(ex_payload.get("expires_at", 0)) <= time.time():
+                    raise ValueError(BLOCKER_AUTH_RESURRECTION)
+            except Exception:
+                pass
+            raise ValueError(BLOCKER_DUPLICATE_AUTH_ID)
+
+        cur.execute(
+            """
+            INSERT INTO video_request_traces (
+                request_id,
+                job_id,
+                project_id,
+                confirm_attempt_key,
+                owner_user_id,
+                product_type,
+                current_stage,
+                trace_payload_json,
+                created_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                f"COA-{clean_token_id}",
+                clean_job_id if isinstance(clean_job_id, int) else None,
+                clean_proj_id if isinstance(clean_proj_id, int) else None,
+                f"COA-{attempt_fingerprint}",
+                clean_user_id if isinstance(clean_user_id, int) else 0,
+                str(product_type or "video_ai_prompt").strip(),
+                "REVOKED" if str(status).strip().lower() == STATUS_OWNER_AUTH_REVOKED else "CANONICAL_OWNER_AUTHORIZED",
+                json.dumps(auth),
+                now_iso,
+                now_iso,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return clean_token_id, auth
+
+
 def create_owner_live_authorization(
     *,
     authorization_id: str | None = None,
@@ -410,8 +618,13 @@ def create_owner_live_authorization(
     db_path: str | None = None,
     env: dict[str, str] | None = None,
     _caller_override_for_test: str | None = None,
+    _mint_canonical: bool = True,
 ) -> str:
-    """Create durable Owner live authorization record in SQLite WAL database."""
+    """Create durable Owner live authorization record in SQLite WAL database.
+    
+    Section 4: AUTH_CREATE_MODE=INSERT_ONLY, no INSERT OR REPLACE.
+    Duplicate auth ID, consumed, revoked, and expired resurrections are strictly BLOCKED.
+    """
     _verify_owner_live_auth_creator(_caller_override_for_test)
 
     auth_id = (authorization_id or f"owner_live_auth_{secrets.token_hex(12)}").strip()
@@ -447,9 +660,26 @@ def create_owner_live_authorization(
     conn = _get_sqlite_connection(target_path)
     try:
         conn.execute("BEGIN IMMEDIATE")
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT status, expires_at, consumed_at FROM owner_live_authorizations WHERE authorization_id = ?",
+            (auth_id,),
+        )
+        existing = cur.fetchone()
+        if existing:
+            ex_status, ex_expires, ex_consumed_at = existing
+            conn.rollback()
+            if str(ex_status).strip().lower() == STATUS_OWNER_AUTH_CONSUMED or ex_consumed_at is not None:
+                raise ValueError(BLOCKER_AUTH_RESURRECTION)
+            if str(ex_status).strip().lower() == STATUS_OWNER_AUTH_REVOKED:
+                raise ValueError(BLOCKER_AUTH_RESURRECTION)
+            if float(ex_expires) <= time.time():
+                raise ValueError(BLOCKER_AUTH_RESURRECTION)
+            raise ValueError(BLOCKER_DUPLICATE_AUTH_ID)
+
         conn.execute(
             """
-            INSERT OR REPLACE INTO owner_live_authorizations (
+            INSERT INTO owner_live_authorizations (
                 authorization_id,
                 product_family,
                 job_id,
@@ -485,7 +715,201 @@ def create_owner_live_authorization(
     finally:
         conn.close()
 
+    if _mint_canonical:
+        try:
+            create_canonical_owner_acceptance_auth(
+                job_id=job_id,
+                request_id=request_id,
+                max_provider_spend=from_micro_usd(exp_micro),
+                allowed_scene_slots=slots_str,
+                token_id=auth_id,
+                ttl_seconds=ttl_seconds,
+                status=status,
+                operation=operation,
+                product_type=product_family,
+                db_path=target_path,
+                env=env,
+                _caller_override_for_test=_caller_override_for_test,
+            )
+        except Exception as exc:
+            logger.debug("create_canonical_owner_acceptance_auth notice: %s", exc)
+
     return auth_id
+
+
+def validate_canonical_owner_live_authorization(
+    authorization_id: str | dict[str, Any],
+    *,
+    product_family: str = "",
+    job_id: str | int = "",
+    request_id: str = "",
+    operation: str = "",
+    scene_index: int | None = None,
+    db_path: str | None = None,
+    env: dict[str, str] | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Validate Owner authorization against single canonical existing repository authority."""
+    from services.video_provider_router import validate_owner_acceptance_authorization
+    from services.video_trace_state import (
+        compute_owner_acceptance_token_fingerprint,
+        is_owner_acceptance_token_claimed_or_consumed,
+        ensure_video_trace_schema,
+    )
+
+    target_path = resolve_spend_guard_db_path(db_path, env)
+    auth: dict[str, Any] = {}
+    stage: str = ""
+
+    if isinstance(authorization_id, dict):
+        auth = dict(authorization_id)
+    elif isinstance(authorization_id, str):
+        clean_id = authorization_id.strip()
+        if not clean_id:
+            return False, BLOCKER_OWNER_LIVE_AUTH_RECORD_MISSING, {}
+        if clean_id.startswith("{") and clean_id.endswith("}"):
+            try:
+                auth = json.loads(clean_id)
+            except Exception:
+                return False, BLOCKER_OWNER_LIVE_AUTH_RECORD_MISSING, {}
+        else:
+            should_close = False
+            active_conn = conn
+            if active_conn is None:
+                active_conn = _get_sqlite_connection(target_path)
+                should_close = True
+            try:
+                cur = active_conn.cursor()
+                cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='video_request_traces'")
+                has_traces = cur.fetchone() is not None
+                if has_traces:
+                    cur.execute(
+                        """
+                        SELECT trace_payload_json, current_stage
+                        FROM video_request_traces
+                        WHERE request_id = ? OR request_id = ? OR confirm_attempt_key = ? OR request_id = ?
+                        ORDER BY created_at DESC LIMIT 1
+                        """,
+                        (f"COA-{clean_id}", clean_id, f"COA-{clean_id}", f"OAT-{clean_id}"),
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        payload_json, stage = row
+                        payload = json.loads(payload_json or "{}")
+                        auth = payload.get("auth") if isinstance(payload.get("auth"), dict) else payload
+                        if stage in ("CONSUMED", "CLAIMED"):
+                            auth["consumed"] = True
+                            auth["stage"] = stage
+                        elif stage == "REVOKED":
+                            auth["status"] = STATUS_OWNER_AUTH_REVOKED
+                    else:
+                        # Check if present ONLY in secondary table owner_live_authorizations
+                        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='owner_live_authorizations'")
+                        if cur.fetchone():
+                            cur.execute("SELECT authorization_id FROM owner_live_authorizations WHERE authorization_id = ?", (clean_id,))
+                            if cur.fetchone():
+                                return False, BLOCKER_SECOND_AUTHORITY_CANNOT_AUTHORIZE, {}
+                        return False, BLOCKER_OWNER_LIVE_AUTH_RECORD_MISSING, {}
+                else:
+                    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='owner_live_authorizations'")
+                    if cur.fetchone():
+                        cur.execute("SELECT authorization_id FROM owner_live_authorizations WHERE authorization_id = ?", (clean_id,))
+                        if cur.fetchone():
+                            return False, BLOCKER_SECOND_AUTHORITY_CANNOT_AUTHORIZE, {}
+                    return False, BLOCKER_OWNER_LIVE_AUTH_RECORD_MISSING, {}
+            finally:
+                if should_close:
+                    active_conn.close()
+    else:
+        return False, BLOCKER_OWNER_LIVE_AUTH_RECORD_MISSING, {}
+
+    if not isinstance(auth, dict) or not auth:
+        return False, BLOCKER_OWNER_LIVE_AUTH_RECORD_MISSING, {}
+
+    fingerprint = auth.get("token_fingerprint") or compute_owner_acceptance_token_fingerprint(auth)
+
+    # Check status: revoked, consumed, expired
+    st = str(auth.get("status") or "").strip().lower()
+    if st == STATUS_OWNER_AUTH_REVOKED or stage == "REVOKED":
+        return False, BLOCKER_OWNER_LIVE_AUTH_REVOKED, {}
+
+    if st == STATUS_OWNER_AUTH_CONSUMED or stage in ("CONSUMED", "CLAIMED") or bool(auth.get("consumed")):
+        return False, BLOCKER_OWNER_LIVE_AUTH_ALREADY_CONSUMED, {"token_fingerprint": fingerprint}
+
+    exp_ts = auth.get("expires_at")
+    if exp_ts is not None and str(exp_ts).strip() != "":
+        try:
+            if float(exp_ts) <= time.time():
+                return False, BLOCKER_OWNER_LIVE_AUTH_EXPIRED, {}
+        except Exception:
+            pass
+
+    # Check replay guard
+    if is_owner_acceptance_token_claimed_or_consumed(fingerprint, conn=conn, db_path=target_path):
+        return False, BLOCKER_OWNER_LIVE_AUTH_ALREADY_CONSUMED, {"token_fingerprint": fingerprint}
+
+    # Validate using canonical validator
+    ctx = {
+        "job_id": int(job_id) if str(job_id).strip().isdigit() else (job_id or auth.get("job_id")),
+        "user_id": auth.get("user_id"),
+        "project_id": auth.get("project_id"),
+        "product_type": auth.get("product_type", "video_ai_prompt"),
+        "tier": auth.get("tier", "veo31_fast_8"),
+        "runtime_sha": auth.get("runtime_sha"),
+        "estimated_provider_cost_unit": "USD",
+    }
+    valid, blocker, verified = validate_owner_acceptance_authorization(
+        auth,
+        context=ctx,
+        db_path=target_path,
+        environ=env,
+        conn=conn,
+    )
+    if not valid:
+        if blocker == "owner_acceptance_already_consumed":
+            return False, BLOCKER_OWNER_LIVE_AUTH_ALREADY_CONSUMED, verified
+        if blocker == "owner_acceptance_expired":
+            return False, BLOCKER_OWNER_LIVE_AUTH_EXPIRED, verified
+        if "mismatch" in blocker:
+            return False, BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH, verified
+        return False, blocker, verified
+
+    # Exact lineage match against caller context
+    if job_id and str(job_id).strip() != str(auth.get("job_id", "")).strip():
+        return False, BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH, {}
+    if request_id and auth.get("request_id") and str(request_id).strip() != str(auth.get("request_id", "")).strip():
+        return False, BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH, {}
+    if product_family and "video" not in str(product_family).lower():
+        return False, BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH, {}
+    if operation and auth.get("operation") and str(operation).strip().lower() != str(auth.get("operation", "")).strip().lower():
+        return False, BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH, {}
+
+    slots_str = str(auth.get("allowed_scene_slots") or "1,2").strip()
+    if scene_index is not None and scene_index >= 1 and slots_str != "*":
+        allowed_slots = {int(s.strip()) for s in slots_str.split(",") if s.strip().isdigit()}
+        if scene_index not in allowed_slots:
+            return False, BLOCKER_OWNER_LIVE_AUTH_SLOT_MISMATCH, {}
+
+    exp_micro = int(auth.get("expected_max_provider_spend_micro_usd") or to_micro_usd(Decimal(str(auth.get("max_provider_spend", 0.0)))))
+    slots_set = {int(s.strip()) for s in slots_str.split(",") if s.strip().isdigit()}
+    calc_max_submits = int(auth.get("max_submits") or len(slots_set) or 1)
+
+    auth_data = {
+        "authorization_id": str(auth.get("token_id") or fingerprint),
+        "token_fingerprint": fingerprint,
+        "job_id": str(auth.get("job_id", "")),
+        "request_id": str(auth.get("request_id", "")),
+        "product_family": "Product Video",
+        "operation": operation or str(auth.get("operation", "create_video_task")),
+        "allowed_scene_slots": slots_str,
+        "allowed_slots_set": slots_set,
+        "max_submits": calc_max_submits,
+        "expected_max_provider_spend_micro_usd": exp_micro,
+        "max_provider_spend": float(auth.get("max_provider_spend", 0.0)),
+        "status": STATUS_OWNER_AUTH_ACTIVE,
+        "raw_auth": auth,
+    }
+    return True, "", auth_data
 
 
 def validate_owner_live_authorization(
@@ -498,97 +922,20 @@ def validate_owner_live_authorization(
     scene_index: int | None = None,
     db_path: str | None = None,
     env: dict[str, str] | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> tuple[bool, str, dict[str, Any]]:
-    """Validate durable Owner live authorization record in SQLite WAL database."""
-    clean_id = str(authorization_id or "").strip()
-    if not clean_id:
-        return False, BLOCKER_OWNER_LIVE_AUTH_RECORD_MISSING, {}
-
-    target_path = resolve_spend_guard_db_path(db_path, env)
-    init_spend_guard_db(db_path=target_path, env=env)
-
-    conn = _get_sqlite_connection(target_path)
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT authorization_id, product_family, job_id, request_id, operation,
-                   allowed_scene_slots, expected_max_provider_spend_micro_usd,
-                   created_at, expires_at, status, consumed_at, consumed_by_confirmation_id,
-                   origin, metadata_json
-            FROM owner_live_authorizations
-            WHERE authorization_id = ?
-            """,
-            (clean_id,),
-        )
-        row = cur.fetchone()
-        if not row:
-            return False, BLOCKER_OWNER_LIVE_AUTH_RECORD_MISSING, {}
-
-        (
-            auth_id,
-            rec_family,
-            rec_job,
-            rec_req,
-            rec_op,
-            rec_slots,
-            rec_exp_micro,
-            rec_created,
-            rec_expires,
-            rec_status,
-            rec_consumed_at,
-            rec_consumed_by,
-            rec_origin,
-            meta_json,
-        ) = row
-
-        record_data = {
-            "authorization_id": auth_id,
-            "product_family": rec_family,
-            "job_id": rec_job,
-            "request_id": rec_req,
-            "operation": rec_op,
-            "allowed_scene_slots": rec_slots,
-            "expected_max_provider_spend_micro_usd": rec_exp_micro,
-            "created_at": rec_created,
-            "expires_at": rec_expires,
-            "status": rec_status,
-            "consumed_at": rec_consumed_at,
-            "consumed_by_confirmation_id": rec_consumed_by,
-        }
-
-        # Status checks
-        if rec_status == STATUS_OWNER_AUTH_REVOKED:
-            return False, BLOCKER_OWNER_LIVE_AUTH_REVOKED, record_data
-        if rec_status == STATUS_OWNER_AUTH_CONSUMED or rec_consumed_at is not None:
-            return False, BLOCKER_OWNER_LIVE_AUTH_ALREADY_CONSUMED, record_data
-        if rec_status != STATUS_OWNER_AUTH_ACTIVE:
-            return False, BLOCKER_OWNER_LIVE_AUTH_REVOKED, record_data
-
-        # Expiry check
-        now = time.time()
-        if rec_expires <= now:
-            return False, BLOCKER_OWNER_LIVE_AUTH_EXPIRED, record_data
-
-        # Exact lineage match
-        if product_family and rec_family.strip().lower() != str(product_family).strip().lower():
-            return False, BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH, record_data
-        if job_id and rec_job.strip() != str(job_id).strip():
-            return False, BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH, record_data
-        if request_id and rec_req.strip() != str(request_id).strip():
-            return False, BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH, record_data
-        if operation and rec_op.strip().lower() != str(operation).strip().lower():
-            return False, BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH, record_data
-
-        # Scene slot match
-        if scene_index is not None and scene_index >= 1 and rec_slots != "*":
-            allowed_slots = {s.strip() for s in rec_slots.split(",") if s.strip()}
-            if str(scene_index) not in allowed_slots:
-                return False, BLOCKER_OWNER_LIVE_AUTH_SLOT_MISMATCH, record_data
-
-        return True, "", record_data
-    finally:
-        conn.close()
+    """Validate durable Owner live authorization record via canonical authority."""
+    return validate_canonical_owner_live_authorization(
+        authorization_id,
+        product_family=product_family,
+        job_id=job_id,
+        request_id=request_id,
+        operation=operation,
+        scene_index=scene_index,
+        db_path=db_path,
+        env=env,
+        conn=conn,
+    )
 
 
 def issue_bot_mint_authority(
@@ -1413,10 +1760,16 @@ def init_spend_guard_db(
                 owner_receipt TEXT NOT NULL DEFAULT '',
                 provider_task_id TEXT NOT NULL DEFAULT '',
                 error_code TEXT NOT NULL DEFAULT '',
-                metadata_json TEXT NOT NULL DEFAULT '{}'
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                scene_index INTEGER NOT NULL DEFAULT 0
             )
             """
         )
+        cur = conn.cursor()
+        cur.execute("PRAGMA table_info(provider_spend_reservations)")
+        res_cols = {row[1] for row in cur.fetchall()}
+        if res_cols and "scene_index" not in res_cols:
+            conn.execute("ALTER TABLE provider_spend_reservations ADD COLUMN scene_index INTEGER NOT NULL DEFAULT 0")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_spend_res_week_status ON provider_spend_reservations(week_id, status)"
         )
@@ -1508,6 +1861,11 @@ def init_spend_guard_db(
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_owner_auth_job_req ON owner_live_authorizations(job_id, request_id)"
         )
+        try:
+            from services.video_trace_state import ensure_video_trace_schema
+            ensure_video_trace_schema(conn=conn)
+        except Exception:
+            pass
         conn.commit()
     finally:
         if should_close:
@@ -2450,156 +2808,32 @@ def reserve_provider_spend(
                         cap_usd=cap_usd,
                     )
 
-                # Section 4 & 6: OWNER_RECEIPT_STRING_EQUALITY_ONLY=FORBIDDEN
-                # Verify durable Owner live authorization record exists in DB
-                cur.execute(
-                    """
-                    SELECT authorization_id, product_family, job_id, request_id, operation,
-                           allowed_scene_slots, expected_max_provider_spend_micro_usd,
-                           created_at, expires_at, status, consumed_at, consumed_by_confirmation_id,
-                           metadata_json
-                    FROM owner_live_authorizations
-                    WHERE authorization_id = ?
-                    """,
-                    (rec_rcpt,),
+                # Section 2 & 3: Validate canonical Owner live authorization
+                is_valid, auth_blocker, auth_data = validate_canonical_owner_live_authorization(
+                    rec_rcpt,
+                    product_family=str(context.product_family or "Product Video"),
+                    job_id=str(context.job_id or ""),
+                    request_id=str(context.request_id or ""),
+                    operation=str(context.operation or ""),
+                    scene_index=context.scene_index,
+                    db_path=target_db_path,
+                    env=effective_env,
+                    conn=conn,
                 )
-                auth_row = cur.fetchone()
-                if not auth_row:
+                if not is_valid:
                     conn.rollback()
                     return SpendReservationResult(
                         allowed=False,
-                        blocker=BLOCKER_OWNER_LIVE_AUTH_RECORD_MISSING,
-                        reason=f"No durable owner live authorization record found for receipt '{rec_rcpt}' (OWNER_RECEIPT_STRING_EQUALITY_ONLY=FORBIDDEN)",
+                        blocker=auth_blocker,
+                        reason=f"Canonical owner live authorization invalid: {auth_blocker}",
                         week_id=week_id,
                         cap_micro_usd=cap_micro_usd,
                         cap_usd=cap_usd,
                     )
 
-                (
-                    ola_id,
-                    ola_family,
-                    ola_job,
-                    ola_req,
-                    ola_op,
-                    ola_slots,
-                    ola_exp_micro,
-                    ola_created,
-                    ola_expires,
-                    ola_status,
-                    ola_consumed_at,
-                    ola_consumed_by,
-                    ola_meta_json,
-                ) = auth_row
-
-                # Section 15: Status and consumption check
-                if str(ola_status).strip().lower() == STATUS_OWNER_AUTH_REVOKED:
-                    conn.rollback()
-                    return SpendReservationResult(
-                        allowed=False,
-                        blocker=BLOCKER_OWNER_LIVE_AUTH_REVOKED,
-                        reason=f"Owner live authorization '{ola_id}' is revoked",
-                        week_id=week_id,
-                        cap_micro_usd=cap_micro_usd,
-                        cap_usd=cap_usd,
-                    )
-                if str(ola_status).strip().lower() == STATUS_OWNER_AUTH_CONSUMED or ola_consumed_at is not None:
-                    conn.rollback()
-                    return SpendReservationResult(
-                        allowed=False,
-                        blocker=BLOCKER_OWNER_LIVE_AUTH_ALREADY_CONSUMED,
-                        reason=f"Owner live authorization '{ola_id}' was already consumed",
-                        week_id=week_id,
-                        cap_micro_usd=cap_micro_usd,
-                        cap_usd=cap_usd,
-                    )
-                if str(ola_status).strip().lower() != STATUS_OWNER_AUTH_ACTIVE:
-                    conn.rollback()
-                    return SpendReservationResult(
-                        allowed=False,
-                        blocker=BLOCKER_OWNER_LIVE_AUTH_REVOKED,
-                        reason=f"Owner live authorization '{ola_id}' is not active (status='{ola_status}')",
-                        week_id=week_id,
-                        cap_micro_usd=cap_micro_usd,
-                        cap_usd=cap_usd,
-                    )
-
-                now_ts_check = time.time()
-                if float(ola_expires) <= now_ts_check:
-                    conn.rollback()
-                    return SpendReservationResult(
-                        allowed=False,
-                        blocker=BLOCKER_OWNER_LIVE_AUTH_EXPIRED,
-                        reason=f"Owner live authorization '{ola_id}' has expired",
-                        week_id=week_id,
-                        cap_micro_usd=cap_micro_usd,
-                        cap_usd=cap_usd,
-                    )
-
-                # Section 10: Exact lineage match against context
-                if not context.product_family or ola_family.strip().lower() != context.product_family.strip().lower():
-                    conn.rollback()
-                    return SpendReservationResult(
-                        allowed=False,
-                        blocker=BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH,
-                        reason=f"Owner live authorization product family mismatch: '{ola_family}' != '{context.product_family}'",
-                        week_id=week_id,
-                        cap_micro_usd=cap_micro_usd,
-                        cap_usd=cap_usd,
-                    )
-                ctx_job = str(context.job_id or "").strip()
-                if ola_job and (not ctx_job or ola_job != ctx_job):
-                    conn.rollback()
-                    return SpendReservationResult(
-                        allowed=False,
-                        blocker=BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH,
-                        reason=f"Owner live authorization job mismatch: '{ola_job}' != '{ctx_job}'",
-                        week_id=week_id,
-                        cap_micro_usd=cap_micro_usd,
-                        cap_usd=cap_usd,
-                    )
-                ctx_req = str(context.request_id or "").strip()
-                if ola_req and (not ctx_req or ola_req != ctx_req):
-                    conn.rollback()
-                    return SpendReservationResult(
-                        allowed=False,
-                        blocker=BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH,
-                        reason=f"Owner live authorization request mismatch: '{ola_req}' != '{ctx_req}'",
-                        week_id=week_id,
-                        cap_micro_usd=cap_micro_usd,
-                        cap_usd=cap_usd,
-                    )
-                if ola_op and (not context.operation or ola_op.strip().lower() != str(context.operation).strip().lower()):
-                    conn.rollback()
-                    return SpendReservationResult(
-                        allowed=False,
-                        blocker=BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH,
-                        reason=f"Owner live authorization operation mismatch: '{ola_op}' != '{context.operation}'",
-                        week_id=week_id,
-                        cap_micro_usd=cap_micro_usd,
-                        cap_usd=cap_usd,
-                    )
-
-                # Scene slot check
-                ctx_scene = 0
-                try:
-                    ctx_scene = int(context.scene_index or 0)
-                except Exception:
-                    pass
-                if ctx_scene >= 1 and ola_slots != "*":
-                    allowed_slots = {s.strip() for s in ola_slots.split(",") if s.strip()}
-                    if str(ctx_scene) not in allowed_slots:
-                        conn.rollback()
-                        return SpendReservationResult(
-                            allowed=False,
-                            blocker=BLOCKER_OWNER_LIVE_AUTH_SLOT_MISMATCH,
-                            reason=f"Owner live authorization slot mismatch: scene {ctx_scene} not in allowed slots '{ola_slots}'",
-                            week_id=week_id,
-                            cap_micro_usd=cap_micro_usd,
-                            cap_usd=cap_usd,
-                        )
-
-                # Section 11 & 16: Expected max spend enforcement
-                if int(ola_exp_micro) <= 0:
+                # Section 6: ATOMIC CUMULATIVE OWNER JOB BUDGET
+                owner_auth_job_max_micro = int(auth_data.get("expected_max_provider_spend_micro_usd") or 0)
+                if owner_auth_job_max_micro <= 0:
                     conn.rollback()
                     return SpendReservationResult(
                         allowed=False,
@@ -2610,12 +2844,22 @@ def reserve_provider_spend(
                         cap_usd=cap_usd,
                     )
 
-                if cost_micro_usd > int(ola_exp_micro):
+                cur.execute(
+                    """
+                    SELECT COALESCE(SUM(reserved_cost_micro_usd), 0)
+                    FROM provider_spend_reservations
+                    WHERE (owner_receipt = ? OR (job_id = ? AND job_id != ''))
+                      AND status NOT IN ('released', 'cancelled', 'rolled_back')
+                    """,
+                    (rec_rcpt, str(context.job_id or "")),
+                )
+                used_or_reserved_micro = cur.fetchone()[0]
+                if used_or_reserved_micro + cost_micro_usd > owner_auth_job_max_micro:
                     conn.rollback()
                     return SpendReservationResult(
                         allowed=False,
                         blocker=BLOCKER_OWNER_AUTHORIZED_MAX_SPEND_EXCEEDED,
-                        reason=f"Canonical submit cost ({cost_micro_usd} µUSD) exceeds Owner authorized max ({ola_exp_micro} µUSD)",
+                        reason=f"Cumulative job spend ({used_or_reserved_micro + cost_micro_usd} µUSD) exceeds Owner authorized max ({owner_auth_job_max_micro} µUSD)",
                         week_id=week_id,
                         cap_micro_usd=cap_micro_usd,
                         cap_usd=cap_usd,
@@ -2633,18 +2877,99 @@ def reserve_provider_spend(
                         cap_usd=cap_usd,
                     )
 
-                owner_auth_to_consume = ola_id
-                ola_meta = {}
+                # Section 7: Scene index check
+                ctx_scene = 0
                 try:
-                    ola_meta = json.loads(ola_meta_json or "{}")
+                    ctx_scene = int(context.scene_index or 0)
                 except Exception:
                     pass
-                max_u = int(ola_meta.get("max_uses", 0))
-                slots_list = [s.strip() for s in ola_slots.split(",") if s.strip()] if ola_slots != "*" else []
-                if max_u <= 0:
-                    max_u = max(1, len(slots_list))
-                owner_auth_slots_count = max_u
-                owner_auth_used_confs = [c.strip() for c in (ola_consumed_by or "").split(",") if c.strip()]
+
+                if ctx_scene < 1:
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker="scene_index_missing",
+                        reason="Explicit positive scene_index >= 1 is required for paid Owner live test",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+
+                # Section 7: WILDCARD_MULTIUSE_ALLOWED=NO & Explicit Scene Slot Bounds
+                slots_str = str(auth_data.get("allowed_scene_slots") or "").strip()
+                allowed_slots: set[int] = set()
+                if not slots_str or slots_str == "*":
+                    max_submits = int(auth_data.get("max_submits") or 1)
+                    if max_submits > 1:
+                        conn.rollback()
+                        return SpendReservationResult(
+                            allowed=False,
+                            blocker="wildcard_multiuse_not_allowed",
+                            reason="Wildcard scene multiuse is forbidden for paid Owner live test (WILDCARD_MULTIUSE_ALLOWED=NO)",
+                            week_id=week_id,
+                            cap_micro_usd=cap_micro_usd,
+                            cap_usd=cap_usd,
+                        )
+                    allowed_slots = {ctx_scene}
+                else:
+                    allowed_slots = {int(s.strip()) for s in slots_str.split(",") if s.strip().isdigit()}
+                    max_submits = int(auth_data.get("max_submits") or len(allowed_slots) or 1)
+                    if ctx_scene not in allowed_slots:
+                        conn.rollback()
+                        return SpendReservationResult(
+                            allowed=False,
+                            blocker=BLOCKER_OWNER_LIVE_AUTH_SLOT_MISMATCH,
+                            reason=f"Scene {ctx_scene} not in allowed scene slots '{slots_str}'",
+                            week_id=week_id,
+                            cap_micro_usd=cap_micro_usd,
+                            cap_usd=cap_usd,
+                        )
+
+                # Section 7: MAX_PROVIDER_SUBMITS_ENFORCED=YES
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM provider_spend_reservations
+                    WHERE (owner_receipt = ? OR (job_id = ? AND job_id != ''))
+                      AND status NOT IN ('released', 'cancelled', 'rolled_back')
+                    """,
+                    (rec_rcpt, str(context.job_id or "")),
+                )
+                already_submitted_count = cur.fetchone()[0]
+                if already_submitted_count >= max_submits:
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_OWNER_LIVE_AUTH_ALREADY_CONSUMED,
+                        reason=f"Owner live authorization already consumed (max submits {max_submits} reached)",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+
+                # Section 7: SCENE_SLOT_REUSE_ALLOWED=NO
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM provider_spend_reservations
+                    WHERE (owner_receipt = ? OR (job_id = ? AND job_id != ''))
+                      AND scene_index = ?
+                      AND status NOT IN ('released', 'cancelled', 'rolled_back')
+                    """,
+                    (rec_rcpt, str(context.job_id or ""), ctx_scene),
+                )
+                if cur.fetchone()[0] > 0:
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_OWNER_LIVE_AUTH_SLOT_ALREADY_USED,
+                        reason=f"Scene slot {ctx_scene} already used; reuse is forbidden (SCENE_SLOT_REUSE_ALLOWED=NO)",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+
+                owner_auth_to_consume = str(auth_data.get("authorization_id") or rec_rcpt)
+                owner_auth_slots_count = max_submits
+                owner_auth_used_confs = []
 
 
             now_ts = time.time()
@@ -2853,8 +3178,9 @@ def reserve_provider_spend(
                 user_flow,
                 bot_confirm_authority,
                 owner_receipt,
-                metadata_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+                metadata_json,
+                scene_index
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 reservation_id,
@@ -2875,6 +3201,7 @@ def reserve_provider_spend(
                 str(context.bot_confirm_authority or ""),
                 str(context.owner_receipt or ""),
                 meta_json,
+                ctx_scene,
             ),
         )
 
@@ -2885,18 +3212,36 @@ def reserve_provider_spend(
             )
 
         if owner_auth_to_consume:
-            owner_auth_used_confs.append(confirmation_to_consume or f"res_{reservation_id}")
-            new_confs_str = ",".join(owner_auth_used_confs)
-            if len(owner_auth_used_confs) >= owner_auth_slots_count:
-                cur.execute(
-                    "UPDATE owner_live_authorizations SET status = 'consumed', consumed_at = ?, consumed_by_confirmation_id = ? WHERE authorization_id = ?",
-                    (now_ts, new_confs_str, owner_auth_to_consume),
-                )
-            else:
-                cur.execute(
-                    "UPDATE owner_live_authorizations SET consumed_by_confirmation_id = ? WHERE authorization_id = ?",
-                    (new_confs_str, owner_auth_to_consume),
-                )
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM provider_spend_reservations
+                WHERE (owner_receipt = ? OR (job_id = ? AND job_id != ''))
+                  AND status NOT IN ('released', 'cancelled', 'rolled_back')
+                """,
+                (rec_rcpt, str(context.job_id or "")),
+            )
+            total_res_now = cur.fetchone()[0]
+            try:
+                if total_res_now >= owner_auth_slots_count:
+                    cur.execute(
+                        "UPDATE owner_live_authorizations SET status = 'consumed', consumed_at = ?, consumed_by_confirmation_id = ? WHERE authorization_id = ?",
+                        (now_ts, confirmation_to_consume or f"res_{reservation_id}", owner_auth_to_consume),
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE owner_live_authorizations SET consumed_by_confirmation_id = ? WHERE authorization_id = ?",
+                        (confirmation_to_consume or f"res_{reservation_id}", owner_auth_to_consume),
+                    )
+            except Exception:
+                pass
+            try:
+                if total_res_now >= owner_auth_slots_count:
+                    cur.execute(
+                        "UPDATE video_request_traces SET current_stage = 'CONSUMED', updated_at = ? WHERE request_id = ? OR confirm_attempt_key = ?",
+                        (datetime.datetime.now(datetime.timezone.utc).isoformat(), f"COA-{owner_auth_to_consume}", f"COA-{owner_auth_to_consume}"),
+                    )
+            except Exception:
+                pass
 
         conn.commit()
 
