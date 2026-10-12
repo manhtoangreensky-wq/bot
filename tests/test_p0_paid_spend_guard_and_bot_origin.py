@@ -182,6 +182,13 @@ from services.provider_spend_guard import (
     OWNER_AUTH_ISSUANCE_SEAM,
     PAID_LIVE_TEST_AVAILABLE,
     PRODUCTION_READY,
+    PRODUCTION_SPEND_GUARD_CAN_INSERT_CANONICAL_OWNER_AUTH,
+    PRODUCTION_SPEND_GUARD_CAN_MINT_OWNER_AUTH_TOKEN,
+    PRODUCTION_SPEND_GUARD_CAN_PROMOTE_SECONDARY_AUTH_TO_CANONICAL,
+    SPEND_GUARD_AUTHORITY_ROLE,
+    TEST_AUTH_FIXTURE_LOCATION,
+    PRODUCTION_MODULE_TEST_MINT_HELPER_COUNT,
+    AUTHORITY_DEFAULTS_IN_PRODUCTION_MINT_PATH,
 )
 from services.video_provider_catalog import (
     KEY4U_VIDEO_AUTH_MISSING,
@@ -323,6 +330,225 @@ def _process_reserve_worker(db_path: str, env_dict: dict, job_id: str, cost: flo
             "blocker": "worker_exception",
             "error": str(exc),
         })
+
+
+def _create_owner_live_authorization_test_fixture(
+    *,
+    authorization_id: str | None = None,
+    product_family: str = "Product Video",
+    job_id: str = "",
+    request_id: str = "",
+    operation: str = "create_video_task",
+    allowed_scene_slots: str | list[int] | set[int] = "*",
+    expected_max_provider_spend_usd: float | Decimal = 0.0,
+    expected_max_provider_spend_micro_usd: int | None = None,
+    ttl_seconds: float = 3600.0,
+    status: str = STATUS_OWNER_AUTH_ACTIVE,
+    origin: str = "owner_governance",
+    metadata: dict[str, Any] | None = None,
+    db_path: str | None = None,
+    env: dict[str, str] | None = None,
+    _caller_override_for_test: str | None = None,
+    _mint_canonical: bool = True,
+    user_id: int | str = 0,
+    project_id: int | str | None = None,
+    provider: str = "shopaikey_video",
+    tier: str = "veo31_fast_8",
+    runtime_sha: str | None = None,
+) -> str:
+    """TEST FIXTURE ONLY: Insert owner_live_authorizations and trace row for legacy test classes.
+
+    Lives exclusively in tests/ per Section 5 (TEST_AUTH_FIXTURE_LOCATION=TESTS_ONLY).
+    Production path: create_owner_live_authorization() unconditionally raises PermissionError.
+    """
+    import secrets
+    import time
+    import json
+    import datetime
+    from decimal import Decimal
+    import sqlite3
+    from services.provider_spend_guard import (
+        resolve_spend_guard_db_path,
+        init_spend_guard_db,
+        to_micro_usd,
+        from_micro_usd,
+        STATUS_OWNER_AUTH_ACTIVE,
+        STATUS_OWNER_AUTH_CONSUMED,
+        STATUS_OWNER_AUTH_REVOKED,
+        BLOCKER_AUTH_RESURRECTION,
+        BLOCKER_DUPLICATE_AUTH_ID,
+    )
+
+    auth_id = (authorization_id or f"owner_live_auth_{secrets.token_hex(12)}").strip()
+    if not auth_id:
+        raise ValueError("authorization_id cannot be empty")
+    if not str(job_id or "").strip():
+        raise ValueError("job_id is required for Owner live authorization")
+    if not str(request_id or "").strip():
+        raise ValueError("request_id is required for Owner live authorization")
+    if not str(operation or "").strip():
+        raise ValueError("operation is required for Owner live authorization")
+    if not str(product_family or "").strip():
+        raise ValueError("product_family is required for Owner live authorization")
+
+    if expected_max_provider_spend_micro_usd is not None:
+        exp_micro = int(expected_max_provider_spend_micro_usd)
+    else:
+        exp_micro = to_micro_usd(Decimal(str(expected_max_provider_spend_usd or 0.0)))
+
+    if isinstance(allowed_scene_slots, (list, tuple, set)):
+        slots_str = ",".join(str(s) for s in sorted(allowed_scene_slots))
+    else:
+        slots_str = str(allowed_scene_slots or "*").strip()
+
+    target_path = resolve_spend_guard_db_path(db_path, env)
+    init_spend_guard_db(db_path=target_path, env=env)
+
+    now_ts = time.time()
+    expires_at = now_ts + float(ttl_seconds)
+    meta_json = json.dumps(metadata or {})
+
+    conn = sqlite3.connect(target_path, timeout=30.0)
+    conn.execute("PRAGMA busy_timeout=30000")
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT status, expires_at, consumed_at FROM owner_live_authorizations WHERE authorization_id = ?",
+            (auth_id,),
+        )
+        existing = cur.fetchone()
+        if existing:
+            ex_status, ex_expires, ex_consumed_at = existing
+            conn.rollback()
+            if str(ex_status).strip().lower() == STATUS_OWNER_AUTH_CONSUMED or ex_consumed_at is not None:
+                raise ValueError(BLOCKER_AUTH_RESURRECTION)
+            if str(ex_status).strip().lower() == STATUS_OWNER_AUTH_REVOKED:
+                raise ValueError(BLOCKER_AUTH_RESURRECTION)
+            if float(ex_expires) <= time.time():
+                raise ValueError(BLOCKER_AUTH_RESURRECTION)
+            raise ValueError(BLOCKER_DUPLICATE_AUTH_ID)
+
+        conn.execute(
+            """
+            INSERT INTO owner_live_authorizations (
+                authorization_id,
+                product_family,
+                job_id,
+                request_id,
+                operation,
+                allowed_scene_slots,
+                expected_max_provider_spend_micro_usd,
+                created_at,
+                expires_at,
+                status,
+                consumed_at,
+                consumed_by_confirmation_id,
+                origin,
+                metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, '', ?, ?)
+            """,
+            (
+                auth_id,
+                str(product_family).strip(),
+                str(job_id).strip(),
+                str(request_id).strip(),
+                str(operation).strip(),
+                slots_str,
+                exp_micro,
+                now_ts,
+                expires_at,
+                str(status or STATUS_OWNER_AUTH_ACTIVE).strip(),
+                str(origin or "owner_governance").strip(),
+                meta_json,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    if _mint_canonical:
+        try:
+            from services.video_trace_state import (
+                compute_owner_acceptance_token_fingerprint,
+                compute_owner_acceptance_attempt_fingerprint,
+                ensure_video_trace_schema,
+            )
+            from services.remote_worker_api import resolve_runtime_sha
+
+            clean_user_id = int(user_id) if str(user_id).strip().isdigit() else 0
+            clean_proj_id = int(project_id) if str(project_id or "").strip().isdigit() else None
+            clean_runtime_sha = str(runtime_sha or resolve_runtime_sha(environ=env) or "test_sha_placeholder").strip()
+
+            canonical_auth: dict[str, Any] = {
+                "owner_authorized": True,
+                "acceptance_type": "owner_authorized_live_acceptance",
+                "product_type": str(product_family or "Product Video").strip(),
+                "provider": str(provider or "shopaikey_video").strip(),
+                "capability": "text_to_video",
+                "tier": str(tier or "veo31_fast_8").strip(),
+                "job_id": str(job_id).strip(),
+                "user_id": clean_user_id,
+                "project_id": clean_proj_id,
+                "request_id": str(request_id).strip(),
+                "runtime_sha": clean_runtime_sha,
+                "max_provider_spend": float(from_micro_usd(exp_micro)),
+                "max_provider_spend_unit": "USD",
+                "nonce": secrets.token_hex(8),
+                "consumed": False,
+                "expires_at": expires_at,
+                "token_id": auth_id,
+                "allowed_scene_slots": slots_str,
+                "max_submits": len([s for s in slots_str.split(",") if s.strip().isdigit()]) or 1,
+                "expected_max_provider_spend_micro_usd": exp_micro,
+                "status": str(status or STATUS_OWNER_AUTH_ACTIVE).strip(),
+                "operation": str(operation or "create_video_task").strip(),
+            }
+
+            fingerprint = compute_owner_acceptance_token_fingerprint(canonical_auth)
+            attempt_fp = compute_owner_acceptance_attempt_fingerprint(canonical_auth)
+            canonical_auth["token_fingerprint"] = fingerprint
+            canonical_auth["attempt_fingerprint"] = attempt_fp
+
+            ensure_video_trace_schema(db_path=target_path)
+            c2 = sqlite3.connect(target_path, timeout=30.0)
+            c2.execute("PRAGMA busy_timeout=30000")
+            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            try:
+                c2.execute("BEGIN IMMEDIATE")
+                c2.execute(
+                    """
+                    INSERT OR IGNORE INTO video_request_traces (
+                        request_id, job_id, project_id, confirm_attempt_key,
+                        owner_user_id, product_type, current_stage,
+                        trace_payload_json, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        f"COA-{auth_id}",
+                        int(job_id) if str(job_id).strip().isdigit() else None,
+                        clean_proj_id,
+                        f"COA-{attempt_fp}",
+                        clean_user_id,
+                        str(product_family or "Product Video").strip(),
+                        "CANONICAL_OWNER_AUTHORIZED",
+                        json.dumps(canonical_auth),
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+                c2.commit()
+            finally:
+                c2.close()
+        except Exception:
+            pass
+
+    return auth_id
 
 
 def insert_test_canonical_owner_auth(
@@ -3939,7 +4165,7 @@ class TestN21WConfirmationMintBoundaryAndProductionReadinessMatrix(unittest.Test
 
     # 26. paid live test with durable bot origin + Owner receipt -> guard PASS provider-free
     def test_n21w_26_paid_live_test_with_durable_bot_origin_and_owner_receipt_passes(self):
-        create_owner_live_authorization(
+        _create_owner_live_authorization_test_fixture(
             authorization_id="rcpt_owner_authorized_26",
             product_family="Product Video",
             job_id="job_26",
@@ -4889,7 +5115,7 @@ class TestN21YBotConfirmAuthorityTruthAndPerSceneReservationMatrix(unittest.Test
     # 14. correctly bound Owner live authorization record -> provider-free guard PASS
     def test_n21y_14_correctly_bound_owner_live_authorization_record_passes(self):
         self.assertEqual(OWNER_LIVE_AUTH_BINDING, "PASS")
-        create_owner_live_authorization(
+        _create_owner_live_authorization_test_fixture(
             authorization_id="6119790632",
             product_family="Product Video",
             job_id="job_14",
@@ -5500,7 +5726,7 @@ class TestN21ZOwnerLiveAuthorityRecordAndExpectedSpendEnforcementMatrix(unittest
 
     # 5. Owner authorization for different job -> BLOCK
     def test_n21z_05_owner_authorization_for_different_job_blocked(self):
-        create_owner_live_authorization(
+        _create_owner_live_authorization_test_fixture(
             authorization_id="rcpt_z05",
             product_family="Product Video",
             job_id="job_A",
@@ -5554,7 +5780,7 @@ class TestN21ZOwnerLiveAuthorityRecordAndExpectedSpendEnforcementMatrix(unittest
 
     # 6. different request -> BLOCK
     def test_n21z_06_owner_authorization_for_different_request_blocked(self):
-        create_owner_live_authorization(
+        _create_owner_live_authorization_test_fixture(
             authorization_id="rcpt_z06",
             product_family="Product Video",
             job_id="job_z06",
@@ -5608,7 +5834,7 @@ class TestN21ZOwnerLiveAuthorityRecordAndExpectedSpendEnforcementMatrix(unittest
 
     # 7. different product -> BLOCK
     def test_n21z_07_owner_authorization_for_different_product_blocked(self):
-        create_owner_live_authorization(
+        _create_owner_live_authorization_test_fixture(
             authorization_id="rcpt_z07",
             product_family="Product Video",
             job_id="job_z07",
@@ -5672,7 +5898,7 @@ class TestN21ZOwnerLiveAuthorityRecordAndExpectedSpendEnforcementMatrix(unittest
 
     # 8. different operation -> BLOCK
     def test_n21z_08_owner_authorization_for_different_operation_blocked(self):
-        create_owner_live_authorization(
+        _create_owner_live_authorization_test_fixture(
             authorization_id="rcpt_z08",
             product_family="Product Video",
             job_id="job_z08",
@@ -5736,7 +5962,7 @@ class TestN21ZOwnerLiveAuthorityRecordAndExpectedSpendEnforcementMatrix(unittest
 
     # 9. different scene -> BLOCK
     def test_n21z_09_owner_authorization_for_different_scene_slot_blocked(self):
-        create_owner_live_authorization(
+        _create_owner_live_authorization_test_fixture(
             authorization_id="rcpt_z09",
             product_family="Product Video",
             job_id="job_z09",
@@ -5791,7 +6017,7 @@ class TestN21ZOwnerLiveAuthorityRecordAndExpectedSpendEnforcementMatrix(unittest
 
     # 10. expired Owner authorization -> BLOCK
     def test_n21z_10_expired_owner_authorization_blocked(self):
-        create_owner_live_authorization(
+        _create_owner_live_authorization_test_fixture(
             authorization_id="rcpt_z10",
             product_family="Product Video",
             job_id="job_z10",
@@ -5846,7 +6072,7 @@ class TestN21ZOwnerLiveAuthorityRecordAndExpectedSpendEnforcementMatrix(unittest
 
     # 11. revoked Owner authorization -> BLOCK
     def test_n21z_11_revoked_owner_authorization_blocked(self):
-        create_owner_live_authorization(
+        _create_owner_live_authorization_test_fixture(
             authorization_id="rcpt_z11",
             product_family="Product Video",
             job_id="job_z11",
@@ -6028,7 +6254,7 @@ class TestN21ZOwnerLiveAuthorityRecordAndExpectedSpendEnforcementMatrix(unittest
     # 16. authorized expected max micro USD > 0 invariant enforced
     def test_n21z_16_authorized_expected_max_micro_usd_greater_than_zero_enforced(self):
         self.assertEqual(AUTHORIZED_EXPECTED_MAX_ENFORCED, "YES")
-        create_owner_live_authorization(
+        _create_owner_live_authorization_test_fixture(
             authorization_id="rcpt_z16",
             product_family="Product Video",
             job_id="job_z16",
@@ -6082,7 +6308,7 @@ class TestN21ZOwnerLiveAuthorityRecordAndExpectedSpendEnforcementMatrix(unittest
 
     # 17. canonical submit cost > authorized expected max -> BLOCKER=owner_authorized_max_spend_exceeded
     def test_n21z_17_canonical_submit_cost_exceeding_authorized_max_blocked(self):
-        create_owner_live_authorization(
+        _create_owner_live_authorization_test_fixture(
             authorization_id="rcpt_z17",
             product_family="Product Video",
             job_id="job_z17",
@@ -6137,7 +6363,7 @@ class TestN21ZOwnerLiveAuthorityRecordAndExpectedSpendEnforcementMatrix(unittest
     # 18. multi-scene plan allocates explicit bounded child max
     def test_n21z_18_multiscene_plan_allocates_explicit_bounded_child_max(self):
         self.assertEqual(MULTISCENE_OWNER_MAX_ALLOCATION, "PASS")
-        create_owner_live_authorization(
+        _create_owner_live_authorization_test_fixture(
             authorization_id="rcpt_z18",
             product_family="Product Video",
             job_id="job_z18",
@@ -6187,7 +6413,7 @@ class TestN21ZOwnerLiveAuthorityRecordAndExpectedSpendEnforcementMatrix(unittest
 
     # 19. sum(child authorized max) <= job owner max enforced
     def test_n21z_19_sum_of_child_authorized_max_exceeding_job_owner_max_enforced(self):
-        create_owner_live_authorization(
+        _create_owner_live_authorization_test_fixture(
             authorization_id="rcpt_z19",
             product_family="Product Video",
             job_id="job_z19",
@@ -6228,7 +6454,7 @@ class TestN21ZOwnerLiveAuthorityRecordAndExpectedSpendEnforcementMatrix(unittest
     # 20. child canonical scene cost > child authorized max -> BLOCK
     def test_n21z_20_child_canonical_scene_cost_exceeding_child_authorized_max_blocked(self):
         self.assertEqual(CHILD_EXPECTED_MAX_ENFORCED, "YES")
-        create_owner_live_authorization(
+        _create_owner_live_authorization_test_fixture(
             authorization_id="rcpt_z20",
             product_family="Product Video",
             job_id="job_z20",
@@ -6286,7 +6512,7 @@ class TestN21ZOwnerLiveAuthorityRecordAndExpectedSpendEnforcementMatrix(unittest
 
     # 21. multi-scene plan does NOT duplicate whole-job max into every child
     def test_n21z_21_multiscene_plan_does_not_duplicate_whole_job_max_into_every_child(self):
-        create_owner_live_authorization(
+        _create_owner_live_authorization_test_fixture(
             authorization_id="rcpt_z21",
             product_family="Product Video",
             job_id="job_z21",
@@ -6336,7 +6562,7 @@ class TestN21ZOwnerLiveAuthorityRecordAndExpectedSpendEnforcementMatrix(unittest
 
     # 22. single-use Owner authorization consumed -> second use BLOCKED
     def test_n21z_22_single_use_owner_authorization_consumed_second_use_blocked(self):
-        create_owner_live_authorization(
+        _create_owner_live_authorization_test_fixture(
             authorization_id="rcpt_z22",
             product_family="Product Video",
             job_id="job_z22",
@@ -6433,7 +6659,7 @@ class TestN21ZOwnerLiveAuthorityRecordAndExpectedSpendEnforcementMatrix(unittest
 
     # 23. Directive #1422 lineage complete for paid live test -> PASS
     def test_n21z_23_directive_1422_lineage_complete_for_paid_live_test_passes(self):
-        create_owner_live_authorization(
+        _create_owner_live_authorization_test_fixture(
             authorization_id="rcpt_z23",
             product_family="Product Video",
             job_id="job_z23",
@@ -6487,7 +6713,7 @@ class TestN21ZOwnerLiveAuthorityRecordAndExpectedSpendEnforcementMatrix(unittest
 
     # 24. missing any Directive #1422 field for live test -> BLOCK
     def test_n21z_24_missing_any_directive_1422_field_for_live_test_blocked(self):
-        create_owner_live_authorization(
+        _create_owner_live_authorization_test_fixture(
             authorization_id="rcpt_z24",
             product_family="Product Video",
             job_id="job_z24",
@@ -6827,7 +7053,7 @@ class TestN21AABotPublicCallbackAndLiveAcceptIntegrationMatrix(unittest.TestCase
     # 7. revoked receipt raises PermissionError
     def test_n21aa_07_handle_owner_authorized_live_test_confirm_revoked_receipt_raises(self):
         from bot import handle_owner_authorized_live_test_confirm
-        auth_id = create_owner_live_authorization(
+        auth_id = _create_owner_live_authorization_test_fixture(
             authorization_id="auth_revoked_07",
             product_family="Product Video",
             job_id="1003",
@@ -6856,7 +7082,7 @@ class TestN21AABotPublicCallbackAndLiveAcceptIntegrationMatrix(unittest.TestCase
     # 8. expired receipt raises PermissionError
     def test_n21aa_08_handle_owner_authorized_live_test_confirm_expired_receipt_raises(self):
         from bot import handle_owner_authorized_live_test_confirm
-        auth_id = create_owner_live_authorization(
+        auth_id = _create_owner_live_authorization_test_fixture(
             authorization_id="auth_expired_08",
             product_family="Product Video",
             job_id="1004",
@@ -6885,7 +7111,7 @@ class TestN21AABotPublicCallbackAndLiveAcceptIntegrationMatrix(unittest.TestCase
     # 9. job lineage mismatch raises PermissionError
     def test_n21aa_09_handle_owner_authorized_live_test_confirm_job_lineage_mismatch_raises(self):
         from bot import handle_owner_authorized_live_test_confirm
-        auth_id = create_owner_live_authorization(
+        auth_id = _create_owner_live_authorization_test_fixture(
             authorization_id="auth_lineage_job_09",
             product_family="Product Video",
             job_id="job_correct_09",
@@ -6913,7 +7139,7 @@ class TestN21AABotPublicCallbackAndLiveAcceptIntegrationMatrix(unittest.TestCase
     # 10. request lineage mismatch raises PermissionError
     def test_n21aa_10_handle_owner_authorized_live_test_confirm_request_lineage_mismatch_raises(self):
         from bot import handle_owner_authorized_live_test_confirm
-        auth_id = create_owner_live_authorization(
+        auth_id = _create_owner_live_authorization_test_fixture(
             authorization_id="auth_lineage_req_10",
             product_family="Product Video",
             job_id="job_correct_10",
@@ -6941,7 +7167,7 @@ class TestN21AABotPublicCallbackAndLiveAcceptIntegrationMatrix(unittest.TestCase
     # 11. durable owner max spend is sole source (caller cannot inflate)
     def test_n21aa_11_handle_owner_authorized_live_test_confirm_uses_durable_owner_max_spend(self):
         from bot import handle_owner_authorized_live_test_confirm
-        auth_id = create_owner_live_authorization(
+        auth_id = _create_owner_live_authorization_test_fixture(
             authorization_id="auth_spend_11",
             product_family="Product Video",
             job_id="job_11",
@@ -7000,7 +7226,7 @@ class TestN21AABotPublicCallbackAndLiveAcceptIntegrationMatrix(unittest.TestCase
     # 14. callback handler full flow success
     def test_n21aa_14_callback_handler_full_flow_success(self):
         from bot import handle_product_video_owner_live_accept_callback
-        auth_id = create_owner_live_authorization(
+        auth_id = _create_owner_live_authorization_test_fixture(
             authorization_id="auth_flow_14",
             product_family="Product Video",
             job_id="1401",
@@ -7029,7 +7255,7 @@ class TestN21AABotPublicCallbackAndLiveAcceptIntegrationMatrix(unittest.TestCase
     def test_n21aa_15_callback_handler_queue_propagation_invoked(self):
         from bot import handle_product_video_owner_live_accept_callback
         from unittest.mock import patch
-        auth_id = create_owner_live_authorization(
+        auth_id = _create_owner_live_authorization_test_fixture(
             authorization_id="auth_flow_15",
             product_family="Product Video",
             job_id="1501",
@@ -7062,7 +7288,7 @@ class TestN21AABotPublicCallbackAndLiveAcceptIntegrationMatrix(unittest.TestCase
     # 16. minted live confirmation succeeds spend guard reservation
     def test_n21aa_16_minted_live_confirmation_succeeds_spend_guard_reservation(self):
         from bot import handle_owner_authorized_live_test_confirm
-        auth_id = create_owner_live_authorization(
+        auth_id = _create_owner_live_authorization_test_fixture(
             authorization_id="auth_spend_16",
             product_family="Product Video",
             job_id="1601",
@@ -7111,7 +7337,7 @@ class TestN21AABotPublicCallbackAndLiveAcceptIntegrationMatrix(unittest.TestCase
     # 17. spend guard blocks when provider cost exceeds durable max
     def test_n21aa_17_spend_guard_blocks_when_provider_cost_exceeds_durable_max(self):
         from bot import handle_owner_authorized_live_test_confirm
-        auth_id = create_owner_live_authorization(
+        auth_id = _create_owner_live_authorization_test_fixture(
             authorization_id="auth_spend_17",
             product_family="Product Video",
             job_id="1701",
@@ -7160,7 +7386,7 @@ class TestN21AABotPublicCallbackAndLiveAcceptIntegrationMatrix(unittest.TestCase
     # 18. multiscene allocation proportional and slot verified
     def test_n21aa_18_multiscene_allocation_proportional_and_slot_verified(self):
         from bot import handle_owner_authorized_live_test_confirm
-        auth_id = create_owner_live_authorization(
+        auth_id = _create_owner_live_authorization_test_fixture(
             authorization_id="auth_spend_18",
             product_family="Product Video",
             job_id="1801",
@@ -7211,7 +7437,7 @@ class TestN21AABotPublicCallbackAndLiveAcceptIntegrationMatrix(unittest.TestCase
     # 19. consumed owner auth cannot be reused
     def test_n21aa_19_consumed_owner_auth_cannot_be_reused(self):
         from bot import handle_owner_authorized_live_test_confirm
-        auth_id = create_owner_live_authorization(
+        auth_id = _create_owner_live_authorization_test_fixture(
             authorization_id="auth_spend_19",
             product_family="Product Video",
             job_id="1901",
@@ -7378,7 +7604,7 @@ class TestN21ABSingleOwnerAuthorityHotfixMatrix(unittest.TestCase):
 
     # 3. absence of insert or replace and duplicate auth ID blocked
     def test_n21ab_03_absence_of_insert_or_replace_and_duplicate_auth_id_blocked(self):
-        create_owner_live_authorization(
+        _create_owner_live_authorization_test_fixture(
             authorization_id="auth_ab03",
             product_family="Product Video",
             job_id="job_ab03",
@@ -7390,7 +7616,7 @@ class TestN21ABSingleOwnerAuthorityHotfixMatrix(unittest.TestCase):
         )
         # Attempting duplicate auth ID must raise ValueError with duplicate blocker
         with self.assertRaises(ValueError) as cm:
-            create_owner_live_authorization(
+            _create_owner_live_authorization_test_fixture(
                 authorization_id="auth_ab03",
                 product_family="Product Video",
                 job_id="job_ab03",
@@ -9090,6 +9316,303 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
         self.assertEqual(OWNER_POLICY_RESET_RULE_UNSPECIFIED, "YES")
         self.assertEqual(PRODUCTION_READY, "NO")
 
+    # ============================================================
+    # FIX1 Negative Security Tests (Section 9 A through J)
+    # ============================================================
+
+    # A: Call create_owner_live_authorization with full params -> PermissionError
+    def test_n21ac_fix1_a_call_with_full_params_raises_permission_error(self):
+        with self.assertRaises(PermissionError) as cm:
+            create_owner_live_authorization(
+                authorization_id="auth_attack_full_params",
+                request_id="req_attack_full",
+                job_id="job_attack_full",
+                product_family="Product Video",
+                provider="shopaikey_video",
+                tier="veo31_fast_8",
+                runtime_sha="sha_attack_full",
+                expected_max_provider_spend_usd=Decimal("50.0"),
+                allowed_scene_slots="1,2",
+                operation="create_video_task",
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+        self.assertIn("SPEND_GUARD_CAN_CREATE_OWNER_AUTHORITY=NO", str(cm.exception))
+
+    # B: After A verify: new canonical video_request_traces auth rows = 0
+    def test_n21ac_fix1_b_after_a_canonical_video_request_traces_auth_rows_zero(self):
+        from services.video_trace_state import ensure_video_trace_schema
+        ensure_video_trace_schema(db_path=self.db_path)
+        with self.assertRaises(PermissionError):
+            create_owner_live_authorization(
+                authorization_id="auth_attack_b",
+                request_id="req_attack_b",
+                job_id="job_attack_b",
+                product_family="Product Video",
+                provider="shopaikey_video",
+                tier="veo31_fast_8",
+                runtime_sha="sha_attack_b",
+                expected_max_provider_spend_usd=Decimal("50.0"),
+                allowed_scene_slots="1,2",
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+        import sqlite3 as _sqlite3
+        conn = _sqlite3.connect(self.db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM video_request_traces WHERE request_id LIKE '%auth_attack_b%'")
+        count = cur.fetchone()[0]
+        conn.close()
+        self.assertEqual(count, 0)
+
+    # C: Verify: new owner_live_authorizations rows = 0 from production callable
+    def test_n21ac_fix1_c_new_owner_live_authorizations_rows_zero_from_production_callable(self):
+        init_spend_guard_db(db_path=self.db_path, env=self.standard_env)
+        with self.assertRaises(PermissionError):
+            create_owner_live_authorization(
+                authorization_id="auth_attack_c",
+                request_id="req_attack_c",
+                job_id="job_attack_c",
+                product_family="Product Video",
+                provider="shopaikey_video",
+                tier="veo31_fast_8",
+                runtime_sha="sha_attack_c",
+                expected_max_provider_spend_usd=Decimal("50.0"),
+                allowed_scene_slots="1,2",
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+        import sqlite3 as _sqlite3
+        conn = _sqlite3.connect(self.db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM owner_live_authorizations WHERE authorization_id = 'auth_attack_c'")
+        count = cur.fetchone()[0]
+        conn.close()
+        self.assertEqual(count, 0)
+
+    # D: Attempt direct access to previous production test helper -> absent
+    def test_n21ac_fix1_d_direct_access_to_production_test_helper_absent(self):
+        import services.provider_spend_guard as psg
+        self.assertFalse(hasattr(psg, "_create_owner_live_authorization_test_only"))
+        from services.provider_spend_guard import (
+            PRODUCTION_MODULE_TEST_MINT_HELPER_COUNT,
+            TEST_AUTH_FIXTURE_LOCATION,
+        )
+        self.assertEqual(PRODUCTION_MODULE_TEST_MINT_HELPER_COUNT, 0)
+        self.assertEqual(TEST_AUTH_FIXTURE_LOCATION, "TESTS_ONLY")
+
+    # E: Supply _caller_override_for_test with arbitrary values -> PermissionError, no authority minted
+    def test_n21ac_fix1_e_supply_caller_override_with_arbitrary_values_blocked(self):
+        for override in ("test", "bypass", "bot", "owner", "admin", "fixture", "worker", "provider", "production"):
+            with self.subTest(override=override):
+                with self.assertRaises(PermissionError) as cm:
+                    create_owner_live_authorization(
+                        authorization_id=f"auth_override_{override}",
+                        request_id=f"req_override_{override}",
+                        job_id=f"job_override_{override}",
+                        product_family="Product Video",
+                        _caller_override_for_test=override,
+                        db_path=self.db_path,
+                        env=self.standard_env,
+                    )
+                self.assertIn("SPEND_GUARD_CAN_CREATE_OWNER_AUTHORITY=NO", str(cm.exception))
+
+    # F: Seed secondary table only -> SECOND_AUTHORITY_CANNOT_AUTHORIZE
+    def test_n21ac_fix1_f_seed_secondary_table_only_fails_with_second_authority_cannot_authorize(self):
+        init_spend_guard_db(db_path=self.db_path, env=self.standard_env)
+        from services.video_trace_state import ensure_video_trace_schema
+        ensure_video_trace_schema(db_path=self.db_path)
+        import sqlite3 as _sqlite3
+        conn = _sqlite3.connect(self.db_path)
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO owner_live_authorizations (
+                    authorization_id, product_family, job_id, request_id, operation,
+                    allowed_scene_slots, expected_max_provider_spend_micro_usd,
+                    created_at, expires_at, status, consumed_at, consumed_by_confirmation_id,
+                    origin, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, '', ?, ?)
+                """,
+                (
+                    "auth_secondary_only_f",
+                    "Product Video",
+                    "job_f",
+                    "req_f",
+                    "create_video_task",
+                    "1,2",
+                    50_000_000,
+                    time.time(),
+                    time.time() + 3600.0,
+                    STATUS_OWNER_AUTH_ACTIVE,
+                    "legacy_seed",
+                    "{}",
+                ),
+            )
+        conn.close()
+
+        val, blk, _ = validate_canonical_owner_live_authorization(
+            "auth_secondary_only_f",
+            product_family="Product Video",
+            job_id="job_f",
+            request_id="req_f",
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertFalse(val)
+        self.assertEqual(blk, BLOCKER_SECOND_AUTHORITY_CANNOT_AUTHORIZE)
+        self.assertEqual(OWNER_LIVE_AUTHORIZATIONS_CAN_AUTHORIZE, "NO")
+
+    # G: Missing canonical authority must remain missing (no auto-create fallback)
+    def test_n21ac_fix1_g_missing_canonical_authority_remains_missing_no_auto_create(self):
+        init_spend_guard_db(db_path=self.db_path, env=self.standard_env)
+        from services.video_trace_state import ensure_video_trace_schema
+        ensure_video_trace_schema(db_path=self.db_path)
+        val, blk, _ = validate_canonical_owner_live_authorization(
+            "auth_missing_nonexistent_g",
+            product_family="Product Video",
+            job_id="job_g",
+            request_id="req_g",
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertFalse(val)
+        self.assertEqual(blk, BLOCKER_OWNER_LIVE_AUTH_RECORD_MISSING)
+
+        import sqlite3 as _sqlite3
+        conn = _sqlite3.connect(self.db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM video_request_traces WHERE request_id LIKE '%auth_missing_nonexistent_g%'")
+        trace_cnt = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM owner_live_authorizations WHERE authorization_id = 'auth_missing_nonexistent_g'")
+        owner_cnt = cur.fetchone()[0]
+        conn.close()
+        self.assertEqual(trace_cnt, 0)
+        self.assertEqual(owner_cnt, 0)
+
+    # H: Existing genuine canonical authority still validates provider-free
+    def test_n21ac_fix1_h_existing_genuine_canonical_authority_validates_provider_free(self):
+        token_id, auth_dict = insert_test_canonical_owner_auth(
+            self.db_path,
+            token_id="auth_genuine_h",
+            job_id=9876,
+            user_id="user_h",
+            request_id="req_h",
+            product_type="Product Video",
+            provider="shopaikey_video",
+            tier="veo31_fast_8",
+            max_provider_spend=40.0,
+            allowed_scene_slots="1,2",
+            env=self.standard_env,
+        )
+        val, blk, vdata = validate_canonical_owner_live_authorization(
+            token_id,
+            product_family="Product Video",
+            job_id=9876,
+            user_id="user_h",
+            request_id="req_h",
+            provider="shopaikey_video",
+            tier="veo31_fast_8",
+            operation="create_video_task",
+            scene_index=1,
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertTrue(val)
+        self.assertFalse(blk)
+        self.assertEqual(vdata.get("product_family"), "Product Video")
+        self.assertEqual(vdata.get("max_provider_spend"), 40.0)
+
+    # I: Consumed/revoked/expired genuine canonical authority remains blocked
+    def test_n21ac_fix1_i_consumed_revoked_expired_genuine_canonical_authority_blocked(self):
+        # 1. Consumed
+        t_con, _ = insert_test_canonical_owner_auth(
+            self.db_path,
+            token_id="auth_con_i",
+            job_id=9877,
+            request_id="req_con_i",
+            status="consumed",
+            env=self.standard_env,
+        )
+        val1, blk1, _ = validate_canonical_owner_live_authorization(
+            t_con,
+            product_family="Product Video",
+            job_id=9877,
+            request_id="req_con_i",
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertFalse(val1)
+        self.assertEqual(blk1, BLOCKER_OWNER_LIVE_AUTH_ALREADY_CONSUMED)
+
+        # 2. Revoked
+        t_rev, _ = insert_test_canonical_owner_auth(
+            self.db_path,
+            token_id="auth_rev_i",
+            job_id=9878,
+            request_id="req_rev_i",
+            status="revoked",
+            env=self.standard_env,
+        )
+        val2, blk2, _ = validate_canonical_owner_live_authorization(
+            t_rev,
+            product_family="Product Video",
+            job_id=9878,
+            request_id="req_rev_i",
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertFalse(val2)
+        self.assertEqual(blk2, BLOCKER_OWNER_LIVE_AUTH_REVOKED)
+
+        # 3. Expired
+        t_exp, _ = insert_test_canonical_owner_auth(
+            self.db_path,
+            token_id="auth_exp_i",
+            job_id=9879,
+            request_id="req_exp_i",
+            ttl_seconds=-60.0,
+            env=self.standard_env,
+        )
+        val3, blk3, _ = validate_canonical_owner_live_authorization(
+            t_exp,
+            product_family="Product Video",
+            job_id=9879,
+            request_id="req_exp_i",
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertFalse(val3)
+        self.assertEqual(blk3, BLOCKER_OWNER_LIVE_AUTH_EXPIRED)
+
+    # J: No stack/filename/function inspection security is reintroduced
+    def test_n21ac_fix1_j_no_stack_filename_function_inspection_reintroduced(self):
+        from services.provider_spend_guard import (
+            CALLER_FILENAME_SECURITY_AUTHORITY,
+            CALLER_FUNCTION_SECURITY_AUTHORITY,
+            STACK_INSPECTION_SECURITY_AUTHORITY,
+            FALSE_NONFORGEABLE_CLAIM_REMOVED,
+            MODULE_LOCAL_SECRET_IS_SECURITY_AUTHORITY,
+            PYTHON_PRIVATE_NAME_IS_SECURITY_AUTHORITY,
+            PRODUCTION_SPEND_GUARD_CAN_INSERT_CANONICAL_OWNER_AUTH,
+            PRODUCTION_SPEND_GUARD_CAN_MINT_OWNER_AUTH_TOKEN,
+            PRODUCTION_SPEND_GUARD_CAN_PROMOTE_SECONDARY_AUTH_TO_CANONICAL,
+            SPEND_GUARD_AUTHORITY_ROLE,
+            AUTHORITY_DEFAULTS_IN_PRODUCTION_MINT_PATH,
+        )
+        self.assertEqual(CALLER_FILENAME_SECURITY_AUTHORITY, "NO")
+        self.assertEqual(CALLER_FUNCTION_SECURITY_AUTHORITY, "NO")
+        self.assertEqual(STACK_INSPECTION_SECURITY_AUTHORITY, "NO")
+        self.assertTrue(FALSE_NONFORGEABLE_CLAIM_REMOVED)
+        self.assertFalse(MODULE_LOCAL_SECRET_IS_SECURITY_AUTHORITY)
+        self.assertFalse(PYTHON_PRIVATE_NAME_IS_SECURITY_AUTHORITY)
+        self.assertEqual(PRODUCTION_SPEND_GUARD_CAN_INSERT_CANONICAL_OWNER_AUTH, "NO")
+        self.assertEqual(PRODUCTION_SPEND_GUARD_CAN_MINT_OWNER_AUTH_TOKEN, "NO")
+        self.assertEqual(PRODUCTION_SPEND_GUARD_CAN_PROMOTE_SECONDARY_AUTH_TO_CANONICAL, "NO")
+        self.assertEqual(SPEND_GUARD_AUTHORITY_ROLE, "VALIDATE_AND_CONSUME_EXISTING_AUTHORITY_ONLY")
+        self.assertEqual(AUTHORITY_DEFAULTS_IN_PRODUCTION_MINT_PATH, "ABSENT")
+
 
 if __name__ == "__main__":
     unittest.main()
+

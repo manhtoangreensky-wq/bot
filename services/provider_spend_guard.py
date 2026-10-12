@@ -333,8 +333,8 @@ BLOCKER_OWNER_LIVE_AUTH_SLOT_ALREADY_USED: str = "owner_live_authorization_slot_
 BLOCKER_DUPLICATE_AUTH_ID: str = "duplicate_auth_id_blocked"
 BLOCKER_AUTH_RESURRECTION: str = "auth_resurrection_blocked"
 
-# ─── N21AC INVARIANT CONSTANTS ──────────────────────────────────────────────
-# These constants document architectural security decisions enforced by N21AC.
+# ─── N21AC / N21AC-FIX1 INVARIANT CONSTANTS ────────────────────────────────
+# These constants document architectural security decisions enforced by N21AC / N21AC-FIX1.
 # They MUST NOT be changed without Owner approval.
 SPEND_GUARD_CAN_CREATE_OWNER_AUTHORITY: str = "NO"
 CREATE_CANONICAL_OWNER_ACCEPTANCE_AUTH_IN_SPEND_GUARD: str = "ABSENT"
@@ -359,6 +359,15 @@ QUEUE_WORKER_LINEAGE: str = "PASS"
 CANONICAL_OWNER_AUTH_ISSUANCE_SOURCE: str = "NOT_PROVEN_IN_BOT_REPO_OR_WEB_ACCEPTANCE_BRIDGE_ONLY"
 OWNER_AUTH_ISSUANCE_SEAM: str = "NOT_PROVEN"
 PAID_LIVE_TEST_AVAILABLE: str = "NO"
+
+# N21AC-FIX1 explicit additions
+PRODUCTION_SPEND_GUARD_CAN_INSERT_CANONICAL_OWNER_AUTH: str = "NO"
+PRODUCTION_SPEND_GUARD_CAN_MINT_OWNER_AUTH_TOKEN: str = "NO"
+PRODUCTION_SPEND_GUARD_CAN_PROMOTE_SECONDARY_AUTH_TO_CANONICAL: str = "NO"
+SPEND_GUARD_AUTHORITY_ROLE: str = "VALIDATE_AND_CONSUME_EXISTING_AUTHORITY_ONLY"
+TEST_AUTH_FIXTURE_LOCATION: str = "TESTS_ONLY"
+PRODUCTION_MODULE_TEST_MINT_HELPER_COUNT: int = 0
+AUTHORITY_DEFAULTS_IN_PRODUCTION_MINT_PATH: str = "ABSENT"
 # ─── END N21AC INVARIANT CONSTANTS ──────────────────────────────────────────
 
 @dataclasses.dataclass(frozen=True)
@@ -396,7 +405,7 @@ class BotMintAuthority:
 
 
 def create_owner_live_authorization(*args: Any, **kwargs: Any) -> str:
-    """RETIRED by N21AC §6 — CREATE_OWNER_LIVE_AUTHORIZATION_PRODUCTION_CALLABLE=NO.
+    """RETIRED unconditionally (N21AC-FIX1) — CREATE_OWNER_LIVE_AUTHORIZATION_PRODUCTION_CALLABLE=NO.
 
     Owner authority is issued exclusively through the canonical web acceptance bridge
     (video_request_traces table). The spend guard must NEVER create authority records.
@@ -406,214 +415,13 @@ def create_owner_live_authorization(*args: Any, **kwargs: Any) -> str:
     if caller_override in ("worker", "provider", "router", "direct_provider", "shell", "script"):
         raise PermissionError(
             f"Unauthorized owner auth creator '{caller_override}': worker/provider/router cannot create owner live authorization "
-            "(WORKER_CAN_CREATE_OWNER_LIVE_AUTH=NO, PROVIDER_CAN_CREATE_OWNER_LIVE_AUTH=NO, DIRECT_PROVIDER_CAN_CREATE_OWNER_LIVE_AUTH=NO)"
+            "(WORKER_CAN_CREATE_OWNER_LIVE_AUTH=NO, PROVIDER_CAN_CREATE_OWNER_LIVE_AUTH=NO, DIRECT_PROVIDER_CAN_CREATE_OWNER_LIVE_AUTH=NO, SPEND_GUARD_CAN_CREATE_OWNER_AUTHORITY=NO)"
         )
-    # Block production / unit test calls that attempt to mint without full test fixture params
-    if not kwargs.get("request_id") or not kwargs.get("authorization_id"):
-        raise PermissionError(
-            "create_owner_live_authorization is RETIRED (N21AC §6). "
-            "Owner authority must be issued through the canonical web acceptance bridge, "
-            "not created inside the spend guard. "
-            "CREATE_OWNER_LIVE_AUTHORIZATION_PRODUCTION_CALLABLE=NO"
-        )
-    return _create_owner_live_authorization_test_only(*args, **kwargs)
-
-
-def _create_owner_live_authorization_test_only(
-    *,
-    authorization_id: str | None = None,
-    product_family: str = "Product Video",
-    job_id: str = "",
-    request_id: str = "",
-    operation: str = "create_video_task",
-    allowed_scene_slots: str | list[int] | set[int] = "*",
-    expected_max_provider_spend_usd: float | Decimal = 0.0,
-    expected_max_provider_spend_micro_usd: int | None = None,
-    ttl_seconds: float = 3600.0,
-    status: str = STATUS_OWNER_AUTH_ACTIVE,
-    origin: str = "owner_governance",
-    metadata: dict[str, Any] | None = None,
-    db_path: str | None = None,
-    env: dict[str, str] | None = None,
-    _caller_override_for_test: str | None = None,
-    _mint_canonical: bool = True,
-    user_id: int | str = 0,
-    project_id: int | str | None = None,
-    provider: str = "shopaikey_video",
-    tier: str = "veo31_fast_8",
-    runtime_sha: str | None = None,
-) -> str:
-    """TEST-ONLY: Insert owner_live_authorizations row for legacy test classes.
-
-    This function is NOT production-callable. It exists solely to support pre-N21AC
-    test classes (TestN21Z, TestN21AA) that test budget enforcement, slot reuse, and
-    resurrection blocking against the owner_live_authorizations table.
-
-    Production path: create_owner_live_authorization() tombstone raises PermissionError.
-    """
-    auth_id = (authorization_id or f"owner_live_auth_{secrets.token_hex(12)}").strip()
-    if not auth_id:
-        raise ValueError("authorization_id cannot be empty")
-    if not str(job_id or "").strip():
-        raise ValueError("job_id is required for Owner live authorization")
-    if not str(request_id or "").strip():
-        raise ValueError("request_id is required for Owner live authorization")
-    if not str(operation or "").strip():
-        raise ValueError("operation is required for Owner live authorization")
-    if not str(product_family or "").strip():
-        raise ValueError("product_family is required for Owner live authorization")
-
-    if expected_max_provider_spend_micro_usd is not None:
-        exp_micro = int(expected_max_provider_spend_micro_usd)
-    else:
-        exp_micro = to_micro_usd(Decimal(str(expected_max_provider_spend_usd or 0.0)))
-
-    if isinstance(allowed_scene_slots, (list, tuple, set)):
-        slots_str = ",".join(str(s) for s in sorted(allowed_scene_slots))
-    else:
-        slots_str = str(allowed_scene_slots or "*").strip()
-
-    target_path = resolve_spend_guard_db_path(db_path, env)
-    init_spend_guard_db(db_path=target_path, env=env)
-
-    now_ts = time.time()
-    expires_at = now_ts + float(ttl_seconds)
-    meta_json = json.dumps(metadata or {})
-
-    conn = _get_sqlite_connection(target_path)
-    try:
-        conn.execute("BEGIN IMMEDIATE")
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT status, expires_at, consumed_at FROM owner_live_authorizations WHERE authorization_id = ?",
-            (auth_id,),
-        )
-        existing = cur.fetchone()
-        if existing:
-            ex_status, ex_expires, ex_consumed_at = existing
-            conn.rollback()
-            if str(ex_status).strip().lower() == STATUS_OWNER_AUTH_CONSUMED or ex_consumed_at is not None:
-                raise ValueError(BLOCKER_AUTH_RESURRECTION)
-            if str(ex_status).strip().lower() == STATUS_OWNER_AUTH_REVOKED:
-                raise ValueError(BLOCKER_AUTH_RESURRECTION)
-            if float(ex_expires) <= time.time():
-                raise ValueError(BLOCKER_AUTH_RESURRECTION)
-            raise ValueError(BLOCKER_DUPLICATE_AUTH_ID)
-
-        conn.execute(
-            """
-            INSERT INTO owner_live_authorizations (
-                authorization_id,
-                product_family,
-                job_id,
-                request_id,
-                operation,
-                allowed_scene_slots,
-                expected_max_provider_spend_micro_usd,
-                created_at,
-                expires_at,
-                status,
-                consumed_at,
-                consumed_by_confirmation_id,
-                origin,
-                metadata_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, '', ?, ?)
-            """,
-            (
-                auth_id,
-                str(product_family).strip(),
-                str(job_id).strip(),
-                str(request_id).strip(),
-                str(operation).strip(),
-                slots_str,
-                exp_micro,
-                now_ts,
-                expires_at,
-                str(status or STATUS_OWNER_AUTH_ACTIVE).strip(),
-                str(origin or "owner_governance").strip(),
-                meta_json,
-            ),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-    if _mint_canonical:
-        try:
-            from services.video_trace_state import (
-                compute_owner_acceptance_token_fingerprint,
-                compute_owner_acceptance_attempt_fingerprint,
-                ensure_video_trace_schema,
-            )
-            from services.remote_worker_api import resolve_runtime_sha
-
-            clean_user_id = int(user_id) if str(user_id).strip().isdigit() else 0
-            clean_proj_id = int(project_id) if str(project_id or "").strip().isdigit() else None
-            clean_runtime_sha = str(runtime_sha or resolve_runtime_sha(environ=env) or "test_sha_placeholder").strip()
-
-            canonical_auth: dict[str, Any] = {
-                "owner_authorized": True,
-                "acceptance_type": "owner_authorized_live_acceptance",
-                "product_type": str(product_family or "Product Video").strip(),
-                "provider": str(provider or "shopaikey_video").strip(),
-                "capability": "text_to_video",
-                "tier": str(tier or "veo31_fast_8").strip(),
-                "job_id": str(job_id).strip(),
-                "user_id": clean_user_id,
-                "project_id": clean_proj_id,
-                "request_id": str(request_id).strip(),
-                "runtime_sha": clean_runtime_sha,
-                "max_provider_spend": float(from_micro_usd(exp_micro)),
-                "max_provider_spend_unit": "USD",
-                "nonce": secrets.token_hex(8),
-                "consumed": False,
-                "expires_at": expires_at,
-                "token_id": auth_id,
-                "allowed_scene_slots": slots_str,
-                "max_submits": len([s for s in slots_str.split(",") if s.strip().isdigit()]) or 1,
-                "expected_max_provider_spend_micro_usd": exp_micro,
-                "status": str(status or STATUS_OWNER_AUTH_ACTIVE).strip(),
-                "operation": str(operation or "create_video_task").strip(),
-            }
-
-            fingerprint = compute_owner_acceptance_token_fingerprint(canonical_auth)
-            attempt_fp = compute_owner_acceptance_attempt_fingerprint(canonical_auth)
-            canonical_auth["token_fingerprint"] = fingerprint
-            canonical_auth["attempt_fingerprint"] = attempt_fp
-
-            ensure_video_trace_schema(db_path=target_path)
-            c2 = _get_sqlite_connection(target_path)
-            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-            try:
-                c2.execute("BEGIN IMMEDIATE")
-                c2.execute(
-                    """
-                    INSERT OR IGNORE INTO video_request_traces (
-                        request_id, job_id, project_id, confirm_attempt_key,
-                        owner_user_id, product_type, current_stage,
-                        trace_payload_json, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        f"COA-{auth_id}",
-                        int(job_id) if str(job_id).strip().isdigit() else None,
-                        clean_proj_id,
-                        f"COA-{attempt_fp}",
-                        clean_user_id,
-                        str(product_family or "Product Video").strip(),
-                        "CANONICAL_OWNER_AUTHORIZED",
-                        json.dumps(canonical_auth),
-                        now_iso,
-                        now_iso,
-                    ),
-                )
-                c2.commit()
-            finally:
-                c2.close()
-        except Exception as exc:
-            logger.debug("_create_owner_live_authorization_test_only canonical mint notice: %s", exc)
-
-    return auth_id
+    raise PermissionError(
+        "create_owner_live_authorization is RETIRED unconditionally (N21AC-FIX1). "
+        "Owner authority cannot be created in spend_guard under any arguments or caller overrides. "
+        "SPEND_GUARD_CAN_CREATE_OWNER_AUTHORITY=NO, CREATE_OWNER_LIVE_AUTHORIZATION_PRODUCTION_CALLABLE=NO"
+    )
 
 
 def validate_canonical_owner_live_authorization(
