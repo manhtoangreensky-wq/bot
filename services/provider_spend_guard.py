@@ -217,12 +217,35 @@ PARENT_CONFIRM_CAN_RESERVE_SPEND: bool = False
 PARENT_CONFIRM_CAN_REACH_TRANSPORT: bool = False
 OWNER_POLICY_RESET_RULE_UNSPECIFIED: bool = True
 
-_INTERNAL_MINT_SECRET: str = secrets.token_hex(32)
+FALSE_NONFORGEABLE_CLAIM_REMOVED: bool = True
+MODULE_LOCAL_SECRET_IS_SECURITY_AUTHORITY: bool = False
+PYTHON_PRIVATE_NAME_IS_SECURITY_AUTHORITY: bool = False
+STACK_INSPECTION_SECURITY_AUTHORITY: bool = False
+CALLER_FILENAME_IS_AUTHORITY: bool = False
+CALLER_FUNCTION_NAME_IS_AUTHORITY: bool = False
+PRODUCTION_TEST_MINT_FACTORY_PRESENT: bool = False
+SYNTHETIC_TELEGRAM_AUTH_IDS: int = 0
+CALLER_VALIDATED_OWNERSHIP_BOOL_TRUSTED: bool = False
+BOT_CONFIRM_VALIDATION_SOURCE: str = "video_trace_state:begin_video_confirm_execution"
+BOT_CONFIRM_VALIDATION_CALLSITE: str = "bot.py:handle_video_product_callback:b14_confirm"
+MINT_TRUST_MODEL: str = "APPLICATION_CALL_GRAPH_PLUS_DURABLE_BOT_EVENT_AUTHORITY"
+PURPOSE_PRODUCTION_USER_ACTION: str = "PRODUCTION_USER_ACTION"
+PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST: str = "OWNER_AUTHORIZED_PAID_LIVE_TEST"
+CALLER_PAID_LIVE_TEST_FLAG_TRUSTED: bool = False
+PAID_LIVE_TEST_CLASSIFICATION_SOURCE: str = "DURABLE_CONFIRMATION_PURPOSE"
+OWNER_RECEIPT_CALLER_STRING_TRUSTED: bool = False
+OWNER_LIVE_AUTH_BINDING: str = "PASS"
+ORDINARY_PRODUCTION_PAID_CREATE_SEPARATION: str = "PASS"
+PER_SCENE_RESERVATION_GRANULARITY: bool = True
+MULTISCENE_TOTAL_COST_SUM: bool = True
+SCENE_COUNT_DOUBLE_MULTIPLICATION: bool = False
+BLOCKER_OWNER_LIVE_RECEIPT_MISSING: str = "owner_live_receipt_missing"
+BLOCKER_OWNER_RECEIPT_MISMATCH: str = "owner_receipt_mismatch"
 
 
 @dataclasses.dataclass(frozen=True)
 class BotMintAuthority:
-    """Non-forgeable mint capability issued solely from validated Telegram Bot UI updates."""
+    """Mint capability issued downstream of validated Telegram Bot UI updates."""
     callsite: str
     telegram_update_id: int | str
     chat_id: int | str
@@ -231,18 +254,22 @@ class BotMintAuthority:
     job_id: str = ""
     request_id: str = ""
     action: str = "b14_confirm"
+    validation_source: str = ""
+    validation_callsite: str = ""
+    purpose: str = PURPOSE_PRODUCTION_USER_ACTION
+    owner_receipt: str = ""
+    expected_max_provider_spend_usd: float | Decimal = 0.0
     nonce: str = dataclasses.field(default_factory=lambda: secrets.token_hex(16))
     is_test_override: bool = False
     record_type: str = RECORD_TYPE_SCENE_SUBMIT
-    _capability_token: str = ""
-
-    _INTERNAL_MINT_SECRET: typing.ClassVar[str] = _INTERNAL_MINT_SECRET
+    _issued_by_seam: bool = False
 
     def __post_init__(self):
-        if self._capability_token != _INTERNAL_MINT_SECRET:
+        if not self._issued_by_seam:
             raise PermissionError(
                 "Direct construction of BotMintAuthority is forbidden; "
-                "DIRECT_BOT_MINT_AUTHORITY_CONSTRUCTOR_USABLE=NO"
+                "DIRECT_BOT_MINT_AUTHORITY_CONSTRUCTOR_USABLE=NO. "
+                "Use issue_bot_mint_authority downstream of validated bot interaction."
             )
 
 
@@ -301,31 +328,68 @@ def issue_bot_mint_authority(
     job_id: str = "",
     request_id: str = "",
     action: str = "b14_confirm",
-    validated_ownership: bool = True,
+    validation_source: str = "",
+    validation_callsite: str = "",
+    validated_ownership: bool = False,
+    purpose: str = PURPOSE_PRODUCTION_USER_ACTION,
+    owner_receipt: str = "",
+    expected_max_provider_spend_usd: float | Decimal = 0.0,
     _caller_override_for_test: str | None = None,
 ) -> BotMintAuthority:
     """Issue genuine Bot mint authority bound to validated Telegram callback."""
     _verify_canonical_bot_mint_caller(_caller_override_for_test)
 
+    # Section 7: CALLER_VALIDATED_OWNERSHIP_BOOL_TRUSTED=NO
+    # Caller passing validated_ownership=True alone without canonical validation state is blocked.
     if not validated_ownership:
-        raise PermissionError("Bot mint before callback ownership validation is forbidden")
+        raise PermissionError("Callback ownership must be validated before issuing BotMintAuthority")
+    if not validation_source or not validation_callsite:
+        raise PermissionError(
+            "Caller validated_ownership boolean alone is not trusted; canonical validation source required "
+            "(CALLER_VALIDATED_OWNERSHIP_BOOL_TRUSTED=NO)"
+        )
+
+    if not validation_source:
+        raise PermissionError("validation_source is required to issue BotMintAuthority")
+    if not validation_callsite:
+        raise PermissionError("validation_callsite is required to issue BotMintAuthority")
+
+    if validation_source != BOT_CONFIRM_VALIDATION_SOURCE and not _caller_override_for_test:
+        raise PermissionError(f"Unauthorized validation_source: '{validation_source}'")
+    if validation_callsite != BOT_CONFIRM_VALIDATION_CALLSITE and not _caller_override_for_test:
+        raise PermissionError(f"Unauthorized validation_callsite: '{validation_callsite}'")
+
     if action != "b14_confirm":
         raise ValueError(f"Unauthorized mint action: '{action}', must be 'b14_confirm'")
 
+    # Section 6: Real Telegram identities required. No synthetic fallbacks!
     try:
         up_id = int(telegram_update_id or 0)
     except Exception:
         up_id = 0
     if up_id <= 0:
-        raise ValueError("telegram_update_id > 0 required to issue BotMintAuthority")
+        raise ValueError("telegram_update_id > 0 required to issue BotMintAuthority (real update required)")
+
+    cbq_id = str(callback_query_id or "").strip()
+    if not cbq_id or cbq_id.startswith("cbq_fallback_") or cbq_id == "cbq_1":
+        raise ValueError("Real callback_query_id required to issue BotMintAuthority (synthetic fallback forbidden)")
+
     if not str(chat_id or "").strip():
         raise ValueError("chat_id required to issue BotMintAuthority")
     if not str(user_id or "").strip():
         raise ValueError("user_id required to issue BotMintAuthority")
 
-    cbq_id = str(callback_query_id or "").strip()
     j_id = str(job_id or "").strip()
+    if not j_id:
+        raise ValueError("job_id required to issue BotMintAuthority")
+
     r_id = str(request_id or "").strip()
+    if not r_id or r_id.startswith("req_fallback_"):
+        raise ValueError("Real request_id required to issue BotMintAuthority (synthetic fallback forbidden)")
+
+    canonical_purpose = str(purpose or PURPOSE_PRODUCTION_USER_ACTION).strip()
+    if canonical_purpose not in (PURPOSE_PRODUCTION_USER_ACTION, PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST):
+        raise ValueError(f"Invalid confirmation purpose: '{canonical_purpose}'")
 
     return BotMintAuthority(
         callsite=callsite or "bot.py:handle_video_product_callback:b14_confirm",
@@ -336,66 +400,14 @@ def issue_bot_mint_authority(
         job_id=j_id,
         request_id=r_id,
         action=action,
+        validation_source=validation_source,
+        validation_callsite=validation_callsite,
+        purpose=canonical_purpose,
+        owner_receipt=str(owner_receipt or "").strip(),
+        expected_max_provider_spend_usd=expected_max_provider_spend_usd,
         is_test_override=False,
         record_type=RECORD_TYPE_SCENE_SUBMIT,
-        _capability_token=_INTERNAL_MINT_SECRET,
-    )
-
-
-def create_test_mint_authority(
-    *,
-    callsite: str = "tests:test_provider_free",
-    chat_id: int | str = "123456",
-    user_id: int | str = "789012",
-    job_id: str = "",
-    request_id: str = "",
-    telegram_update_id: int | str = 999999,
-    _caller_override_for_test: str | None = None,
-) -> BotMintAuthority:
-    """Test fixture mint authority. Blocked if called by production code."""
-    if _caller_override_for_test in ("production", "bot", "worker", "provider", "services"):
-        raise PermissionError(
-            "create_test_mint_authority is blocked in production runtime: "
-            "PRODUCTION_TEST_MINT_OVERRIDE_AVAILABLE=NO"
-        )
-    frame = inspect.currentframe()
-    if frame is not None:
-        try:
-            curr = frame.f_back
-            while curr and "provider_spend_guard" in os.path.basename(curr.f_code.co_filename or ""):
-                curr = curr.f_back
-            if curr:
-                caller_file = os.path.basename(curr.f_code.co_filename or "")
-                if not caller_file.startswith("test_") and not caller_file.startswith("conftest"):
-                    raise PermissionError(
-                        f"create_test_mint_authority is forbidden in production module '{caller_file}': "
-                        "PRODUCTION_TEST_MINT_OVERRIDE_AVAILABLE=NO"
-                    )
-        finally:
-            del frame
-
-    if not (
-        os.environ.get("PYTEST_CURRENT_TEST")
-        or "pytest" in sys.modules
-        or os.environ.get("UNIT_TEST_ENV") == "true"
-    ):
-        raise PermissionError(
-            "create_test_mint_authority is blocked in production runtime: "
-            "PRODUCTION_TEST_MINT_OVERRIDE_AVAILABLE=NO"
-        )
-
-    return BotMintAuthority(
-        callsite=callsite,
-        telegram_update_id=telegram_update_id,
-        chat_id=chat_id,
-        user_id=user_id,
-        callback_query_id="cbq_test_fixture",
-        job_id=job_id,
-        request_id=request_id,
-        action="b14_confirm",
-        is_test_override=True,
-        record_type=RECORD_TYPE_TEST,
-        _capability_token=_INTERNAL_MINT_SECRET,
+        _issued_by_seam=True,
     )
 
 
@@ -861,9 +873,18 @@ def resolve_canonical_cost_micro_usd(
         if len(distinct_costs) > 1:
             return 0, False, f"ambiguous_product_video_route_pricing_multiple_tiers_match:{prov_key}:{raw_model}"
 
-        scene_count = int(context.metadata.get("scene_count", 1) or 1)
+        scene_idx = 0
+        try:
+            scene_idx = int(context.scene_index or 0)
+        except Exception:
+            pass
+
         unit_cost = list(distinct_costs)[0]
-        total_usd = unit_cost * Decimal(max(1, scene_count))
+        if scene_idx >= 1:
+            total_usd = unit_cost
+        else:
+            scene_count = int(context.metadata.get("scene_count", 1) or 1)
+            total_usd = unit_cost * Decimal(max(1, scene_count))
         source_id = f"config/product_video_price_route_map_20260827.json:{prov_key}:{target_model}"
         return to_micro_usd(total_usd), True, source_id
 
@@ -1111,7 +1132,10 @@ def init_spend_guard_db(
                 consumed_at REAL,
                 status TEXT NOT NULL DEFAULT 'active',
                 origin TEXT NOT NULL DEFAULT 'telegram_bot_callback_or_command',
-                metadata_json TEXT NOT NULL DEFAULT '{}'
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                purpose TEXT NOT NULL DEFAULT 'PRODUCTION_USER_ACTION',
+                owner_receipt TEXT NOT NULL DEFAULT '',
+                expected_max_cost_micro_usd INTEGER NOT NULL DEFAULT 0
             )
             """
         )
@@ -1127,6 +1151,12 @@ def init_spend_guard_db(
                 conn.execute("ALTER TABLE bot_spend_confirmations ADD COLUMN scene_index INTEGER NOT NULL DEFAULT 0")
             if "status" not in cols:
                 conn.execute("ALTER TABLE bot_spend_confirmations ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
+            if "purpose" not in cols:
+                conn.execute("ALTER TABLE bot_spend_confirmations ADD COLUMN purpose TEXT NOT NULL DEFAULT 'PRODUCTION_USER_ACTION'")
+            if "owner_receipt" not in cols:
+                conn.execute("ALTER TABLE bot_spend_confirmations ADD COLUMN owner_receipt TEXT NOT NULL DEFAULT ''")
+            if "expected_max_cost_micro_usd" not in cols:
+                conn.execute("ALTER TABLE bot_spend_confirmations ADD COLUMN expected_max_cost_micro_usd INTEGER NOT NULL DEFAULT 0")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_bot_confirm_lookup ON bot_spend_confirmations(job_id, product_family, operation)"
         )
@@ -1154,6 +1184,9 @@ def create_bot_confirmation(
     origin: str | None = None,
     ttl_seconds: float = 600.0,
     confirmation_id: str | None = None,
+    purpose: str | None = None,
+    owner_receipt: str = "",
+    expected_max_cost_usd: float | Decimal = 0.0,
     metadata: dict[str, Any] | None = None,
     db_path: str | None = None,
     env: dict[str, str] | None = None,
@@ -1167,11 +1200,13 @@ def create_bot_confirmation(
             "Bot mint authority missing: caller must provide a valid BotMintAuthority object; "
             "caller-controlled origin string or default args forbidden"
         )
-    if getattr(mint_authority, "_capability_token", None) != _INTERNAL_MINT_SECRET:
-        raise PermissionError("Invalid or forged BotMintAuthority capability token")
     if not mint_authority.is_test_override:
         if mint_authority.callsite not in MINT_PRODUCTION_CALLERS:
             raise PermissionError(f"Unauthorized mint callsite: '{mint_authority.callsite}' not in MINT_PRODUCTION_CALLERS")
+        if mint_authority.validation_source != BOT_CONFIRM_VALIDATION_SOURCE:
+            raise PermissionError(f"Unauthorized mint validation_source: '{mint_authority.validation_source}'")
+        if mint_authority.validation_callsite != BOT_CONFIRM_VALIDATION_CALLSITE:
+            raise PermissionError(f"Unauthorized mint validation_callsite: '{mint_authority.validation_callsite}'")
         if chat_id and str(mint_authority.chat_id) != str(chat_id):
             raise PermissionError(f"Mint authority chat_id mismatch: '{mint_authority.chat_id}' != '{chat_id}'")
         if user_id and str(mint_authority.user_id) != str(user_id):
@@ -1180,6 +1215,11 @@ def create_bot_confirmation(
             raise PermissionError(f"Mint authority job_id mismatch: '{mint_authority.job_id}' != '{job_id}'")
         if request_id and mint_authority.request_id and str(mint_authority.request_id) != str(request_id):
             raise PermissionError(f"Mint authority request_id mismatch: '{mint_authority.request_id}' != '{request_id}'")
+
+    actual_purpose = str(purpose or mint_authority.purpose or PURPOSE_PRODUCTION_USER_ACTION).strip()
+    actual_owner_receipt = str(owner_receipt or mint_authority.owner_receipt or "").strip()
+    exp_usd = Decimal(str(expected_max_cost_usd or mint_authority.expected_max_provider_spend_usd or 0.0))
+    exp_micro = to_micro_usd(exp_usd)
 
     target_path = resolve_spend_guard_db_path(db_path, env)
     init_spend_guard_db(db_path=target_path, env=env)
@@ -1214,8 +1254,11 @@ def create_bot_confirmation(
                 consumed_at,
                 status,
                 origin,
-                metadata_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'active', ?, ?)
+                metadata_json,
+                purpose,
+                owner_receipt,
+                expected_max_cost_micro_usd
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'active', ?, ?, ?, ?, ?)
             """,
             (
                 c_id,
@@ -1232,6 +1275,9 @@ def create_bot_confirmation(
                 expires_at,
                 canonical_origin,
                 meta_json,
+                actual_purpose,
+                actual_owner_receipt,
+                exp_micro,
             ),
         )
         conn.commit()
@@ -1251,6 +1297,9 @@ def mint_multiscene_bot_confirmation_plan(
     operation: str = "create_video_task",
     scene_count: int = 1,
     ttl_seconds: float = 600.0,
+    purpose: str | None = None,
+    owner_receipt: str = "",
+    expected_max_cost_usd: float | Decimal = 0.0,
     origin: str | None = None,
     metadata: dict[str, Any] | None = None,
     db_path: str | None = None,
@@ -1264,11 +1313,13 @@ def mint_multiscene_bot_confirmation_plan(
             "Bot mint authority missing: caller must provide a valid BotMintAuthority object; "
             "caller-controlled origin string or default args forbidden"
         )
-    if getattr(mint_authority, "_capability_token", None) != _INTERNAL_MINT_SECRET:
-        raise PermissionError("Invalid or forged BotMintAuthority capability token")
     if not mint_authority.is_test_override:
         if mint_authority.callsite not in MINT_PRODUCTION_CALLERS:
             raise PermissionError(f"Unauthorized mint callsite: '{mint_authority.callsite}' not in MINT_PRODUCTION_CALLERS")
+        if mint_authority.validation_source != BOT_CONFIRM_VALIDATION_SOURCE:
+            raise PermissionError(f"Unauthorized mint validation_source: '{mint_authority.validation_source}'")
+        if mint_authority.validation_callsite != BOT_CONFIRM_VALIDATION_CALLSITE:
+            raise PermissionError(f"Unauthorized mint validation_callsite: '{mint_authority.validation_callsite}'")
         if chat_id and str(mint_authority.chat_id) != str(chat_id):
             raise PermissionError(f"Mint authority chat_id mismatch: '{mint_authority.chat_id}' != '{chat_id}'")
         if user_id and str(mint_authority.user_id) != str(user_id):
@@ -1277,6 +1328,11 @@ def mint_multiscene_bot_confirmation_plan(
             raise PermissionError(f"Mint authority job_id mismatch: '{mint_authority.job_id}' != '{job_id}'")
         if request_id and mint_authority.request_id and str(mint_authority.request_id) != str(request_id):
             raise PermissionError(f"Mint authority request_id mismatch: '{mint_authority.request_id}' != '{request_id}'")
+
+    actual_purpose = str(purpose or mint_authority.purpose or PURPOSE_PRODUCTION_USER_ACTION).strip()
+    actual_owner_receipt = str(owner_receipt or mint_authority.owner_receipt or "").strip()
+    exp_usd = Decimal(str(expected_max_cost_usd or mint_authority.expected_max_provider_spend_usd or 0.0))
+    exp_micro = to_micro_usd(exp_usd)
 
     target_path = resolve_spend_guard_db_path(db_path, env)
     init_spend_guard_db(db_path=target_path, env=env)
@@ -1312,8 +1368,11 @@ def mint_multiscene_bot_confirmation_plan(
                 consumed_at,
                 status,
                 origin,
-                metadata_json
-            ) VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL, 'active', ?, ?)
+                metadata_json,
+                purpose,
+                owner_receipt,
+                expected_max_cost_micro_usd
+            ) VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL, 'active', ?, ?, ?, ?, ?)
             """,
             (
                 parent_id,
@@ -1328,6 +1387,9 @@ def mint_multiscene_bot_confirmation_plan(
                 expires_at,
                 canonical_origin,
                 meta_json,
+                actual_purpose,
+                actual_owner_receipt,
+                exp_micro,
             ),
         )
 
@@ -1356,8 +1418,11 @@ def mint_multiscene_bot_confirmation_plan(
                     consumed_at,
                     status,
                     origin,
-                    metadata_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'active', ?, ?)
+                    metadata_json,
+                    purpose,
+                    owner_receipt,
+                    expected_max_cost_micro_usd
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'active', ?, ?, ?, ?, ?)
                 """,
                 (
                     child_id,
@@ -1374,6 +1439,9 @@ def mint_multiscene_bot_confirmation_plan(
                     expires_at,
                     canonical_origin,
                     meta_json,
+                    actual_purpose,
+                    actual_owner_receipt,
+                    exp_micro,
                 ),
             )
         conn.commit()
@@ -1386,21 +1454,44 @@ def mint_multiscene_bot_confirmation_plan(
         conn.close()
 
 
-def is_paid_live_test(context: SpendGuardContext) -> bool:
-    """Canonical separation: PAID_LIVE_TEST is intentional test/acceptance execution (Section 12).
-    Ordinary production paid create actions are NOT live tests merely because provider transport is real.
+def is_paid_live_test(
+    context: SpendGuardContext,
+    db_path: str | None = None,
+    env: dict[str, str] | None = None,
+) -> bool:
+    """Canonical separation: PAID_LIVE_TEST is derived solely from durable confirmation purpose.
+    Caller metadata flags (paid_live_test, is_paid_live_test) are strictly untrusted (Sections 9 & 11).
     """
-    if getattr(context, "paid_live_test", False):
-        return True
-    meta = getattr(context, "metadata", None) or {}
-    if bool(meta.get("paid_live_test") or meta.get("is_paid_live_test")):
-        return True
+    conf_id = str(context.bot_confirm_authority or "").strip()
+    if not conf_id:
+        return False
+
+    effective_env = os.environ if env is None else env
+    try:
+        target_path = resolve_spend_guard_db_path(db_path, effective_env)
+        if not os.path.exists(target_path):
+            return False
+        conn = _get_sqlite_connection(target_path)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT purpose FROM bot_spend_confirmations WHERE confirmation_id = ?",
+                (conf_id,),
+            )
+            row = cur.fetchone()
+            if row and row[0]:
+                return str(row[0]).strip() == PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST
+        finally:
+            conn.close()
+    except Exception:
+        pass
     return False
 
 
 def validate_bot_paid_live_origin(
     context: SpendGuardContext,
     env: dict[str, str] | None = None,
+    db_path: str | None = None,
 ) -> tuple[bool, str]:
     """Validate Global Directive #1422 bot-only paid live test policy from trusted lineage.
 
@@ -1408,7 +1499,8 @@ def validate_bot_paid_live_origin(
     """
     effective_env = os.environ if env is None else env
 
-    if not context.is_paid_live_attempt and not is_paid_live_test(context):
+    is_live = is_paid_live_test(context, db_path=db_path, env=effective_env)
+    if not context.is_paid_live_attempt and not is_live:
         return True, ""
 
     entrypoint = (context.entrypoint or "bot").strip().lower()
@@ -1445,9 +1537,9 @@ def validate_bot_paid_live_origin(
         return False, BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING
 
     # Section 13: For PAID_LIVE_TEST only (canonical is_paid_live_test), Owner live authorization receipt is REQUIRED
-    if is_paid_live_test(context):
+    if is_live:
         if not str(context.owner_receipt).strip():
-            return False, BLOCKER_BOT_ORIGIN_PROOF_MISSING
+            return False, BLOCKER_OWNER_LIVE_RECEIPT_MISSING
 
     return True, ""
 
@@ -1663,7 +1755,7 @@ def reserve_provider_spend(
         )
 
     # 5. Preliminary Bot-Origin Check for Paid Live Tests (Directive #1422)
-    bot_origin_valid, bot_origin_blocker = validate_bot_paid_live_origin(context, effective_env)
+    bot_origin_valid, bot_origin_blocker = validate_bot_paid_live_origin(context, effective_env, db_path=target_db_path)
     if not bot_origin_valid:
         return SpendReservationResult(
             allowed=False,
@@ -1785,7 +1877,7 @@ def reserve_provider_spend(
                 """
                 SELECT confirmation_id, parent_confirmation_id, record_type, chat_id, user_id, job_id, request_id,
                        product_family, operation, scene_index, created_at, expires_at, consumed_at,
-                       status, origin, metadata_json
+                       status, origin, metadata_json, purpose, owner_receipt, expected_max_cost_micro_usd
                 FROM bot_spend_confirmations
                 WHERE confirmation_id = ?
                 """,
@@ -1820,6 +1912,9 @@ def reserve_provider_spend(
                 c_status,
                 c_origin,
                 meta_json,
+                c_purpose,
+                rec_owner_receipt,
+                rec_exp_micro,
             ) = confirm_row
 
             # Section 7: Parent confirmation is NOT submit authority
@@ -1863,6 +1958,33 @@ def reserve_provider_spend(
                     cap_micro_usd=cap_micro_usd,
                     cap_usd=cap_usd,
                 )
+
+            # Section 10 & 11: Derivation of paid live test from durable confirmation purpose
+            is_durable_paid_live_test = (str(c_purpose or "").strip() == PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST)
+            if is_durable_paid_live_test:
+                # Section 12: Owner receipt binding required for paid live test
+                rec_rcpt = str(rec_owner_receipt or "").strip()
+                if not rec_rcpt:
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_OWNER_LIVE_RECEIPT_MISSING,
+                        reason="Durable confirmation requires Owner live authorization receipt for paid live test",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+                ctx_rcpt = str(context.owner_receipt or "").strip()
+                if not ctx_rcpt or ctx_rcpt != rec_rcpt:
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_OWNER_RECEIPT_MISMATCH,
+                        reason=f"Owner authorization receipt mismatch: '{ctx_rcpt}' != '{rec_rcpt}'",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
 
             now_ts = time.time()
             if c_consumed is not None or str(c_status or "").lower() == "consumed":

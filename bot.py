@@ -121931,42 +121931,87 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 query, context, blocked_session, None, uid, lang
             )
 
+        real_update_id = safe_int(getattr(update, "update_id", 0), 0)
+        real_cbq_id = str(getattr(query, "id", "") or "").strip()
+        real_request_id = str(intake_result.get("request_id") or "").strip()
+        real_chat_id = safe_int(chat_id, 0)
+        real_user_id = safe_int(uid, 0)
+        real_job_id = safe_int(job_id, 0)
+
+        if (
+            real_update_id <= 0
+            or not real_cbq_id
+            or not real_request_id
+            or real_chat_id <= 0
+            or real_user_id <= 0
+            or real_job_id <= 0
+        ):
+            logger.error(
+                "bot_spend_guard_mint_blocked_missing_identity | update_id=%s | cbq_id=%s | req_id=%s | chat_id=%s | user_id=%s | job_id=%s",
+                real_update_id,
+                real_cbq_id,
+                real_request_id,
+                real_chat_id,
+                real_user_id,
+                real_job_id,
+            )
+            blocked_session = video_uiflow3_prepare_existing_job_precheck_status(
+                uid,
+                session,
+                job_id=job_id,
+                blocker_code="missing_telegram_identity",
+                public_message=(
+                    "TOAN AAS đã tạo tác vụ nhưng thiếu dữ liệu định danh Telegram để cấp quyền bảo vệ ngân sách. "
+                    "Hóa đơn và toàn bộ cấu hình được giữ nguyên; tài khoản chưa bị trừ Xu."
+                ),
+                preflight_result="PASS",
+                admission_result="BLOCKED",
+            )
+            return await video_b14_send_or_edit_status_panel(
+                query, context, blocked_session, None, uid, lang
+            )
+
         try:
             from services.provider_spend_guard import (
                 issue_bot_mint_authority,
                 mint_multiscene_bot_confirmation_plan,
+                PURPOSE_PRODUCTION_USER_ACTION,
+                BOT_CONFIRM_VALIDATION_SOURCE,
+                BOT_CONFIRM_VALIDATION_CALLSITE,
             )
-            request_id = str(intake_result.get("request_id") or f"req_{job_id}")
-            callback_query_id = str(getattr(query, "id", "") or f"cbq_{telegram_update_id or 1}")
             mint_authority = issue_bot_mint_authority(
                 callsite="bot.py:handle_video_product_callback:b14_confirm",
-                telegram_update_id=telegram_update_id or 1,
-                callback_query_id=callback_query_id,
-                chat_id=chat_id,
-                user_id=uid,
-                job_id=job_id,
-                request_id=request_id,
+                telegram_update_id=real_update_id,
+                callback_query_id=real_cbq_id,
+                chat_id=real_chat_id,
+                user_id=real_user_id,
+                job_id=str(real_job_id),
+                request_id=real_request_id,
                 action="b14_confirm",
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
                 validated_ownership=True,
+                purpose=PURPOSE_PRODUCTION_USER_ACTION,
             )
             confirm_plan = mint_multiscene_bot_confirmation_plan(
                 mint_authority=mint_authority,
-                chat_id=chat_id,
-                user_id=uid,
-                job_id=job_id,
-                request_id=request_id,
+                chat_id=real_chat_id,
+                user_id=real_user_id,
+                job_id=str(real_job_id),
+                request_id=real_request_id,
                 product_family="Product Video",
                 operation="create_video_task",
                 scene_count=final_admitted_scene_count,
                 ttl_seconds=600.0,
+                purpose=PURPOSE_PRODUCTION_USER_ACTION,
                 metadata={
-                    "telegram_update_id": telegram_update_id,
-                    "callback_query_id": callback_query_id,
+                    "telegram_update_id": real_update_id,
+                    "callback_query_id": real_cbq_id,
                     "production_callsite": "bot.py:handle_video_product_callback:b14_confirm",
-                    "chat_id": chat_id,
-                    "user_id": uid,
-                    "job_id": job_id,
-                    "request_id": request_id,
+                    "chat_id": real_chat_id,
+                    "user_id": real_user_id,
+                    "job_id": str(real_job_id),
+                    "request_id": real_request_id,
                     "confirm_plan_scene_count_source": "final_admitted_scene_count",
                     "final_admitted_scene_count": final_admitted_scene_count,
                 },
