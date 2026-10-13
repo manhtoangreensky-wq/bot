@@ -7518,7 +7518,8 @@ def test_free_tools_menu_byok_and_docs_are_guarded():
     assert not any("API key" in button for button in byok_buttons)
 
     docs_callbacks = [button.callback_data for row in bot.free_hub_docs_keyboard("vi").inline_keyboard for button in row]
-    assert "menu|hint_doc_image_to_pdf" in docs_callbacks
+    assert "freehub|docs_image_to_pdf" in docs_callbacks
+    assert "freehub|docs_compress_pdf" in docs_callbacks
     assert "freehub|docs_split_merge" in docs_callbacks
     assert "freehub|docs_summary_guard" in docs_callbacks
 

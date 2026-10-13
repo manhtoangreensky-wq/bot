@@ -271,7 +271,7 @@ def test_current_existing_free_music_helper_shortcut_included_if_verified():
     labels = _labels(_free_menu())
     callbacks = _callbacks(_free_menu())
     assert "🎵 Ý tưởng nhạc/SFX" in labels
-    assert "freehub|lib_music" in callbacks
+    assert "freehub|lib_music_root" in callbacks
     assert bot.FREE_HUB_LIBRARY_CATEGORIES["music"][0] == "music_sfx"
     assert prompt_library_counts(bot.FREE_PROMPT_LIBRARY)["music_sfx"] > 0
 

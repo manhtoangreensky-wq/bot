@@ -12437,10 +12437,21 @@ async def handle_product_progress_callback(update: Update, context: ContextTypes
     job = get_engine_async_job(job_id) if job_id and job_id != "latest" else {}
     canonical = resolve_progress_product_type(job_id, canonical, job)
     actor_id = query.from_user.id if getattr(query, "from_user", None) else 0
+
+    def video_progress_unavailable():
+        copy = public_hub_copy(lang)
+        text = f"⚠️ {copy.get('common_failed', 'Status unavailable')}\n\n{copy.get('common_retry', 'Return to Video and try again.')}"
+        status_keyboard = product_progress_status_keyboard(canonical, job_id, lang)
+        keyboard = InlineKeyboardMarkup(status_keyboard.inline_keyboard[-1:])
+        return text, keyboard
+
     job_owner = str(job.get("user_id") or "").strip()
     if not job_owner and isinstance(job.get("debug_job"), dict):
         job_owner = str(job["debug_job"].get("user_id") or "").strip()
     if job_owner and job_owner != str(actor_id) and not is_admin_user(actor_id):
+        if canonical in product_progress_status.VIDEO_PROGRESS_TYPES:
+            text, keyboard = video_progress_unavailable()
+            return await safe_edit_or_send(query, text, reply_markup=keyboard)
         return await safe_edit_or_send(
             query,
             product_progress_status_from_job_text(canonical, {}, "", lang),
@@ -12524,6 +12535,9 @@ async def handle_product_progress_callback(update: Update, context: ContextTypes
             )
     if not job and canonical == "frame_video":
         job = frame_video_job_for_user(job_id, query.from_user.id if getattr(query, "from_user", None) else 0)
+    if canonical in product_progress_status.VIDEO_PROGRESS_TYPES and not job:
+        text, keyboard = video_progress_unavailable()
+        return await safe_edit_or_send(query, text, reply_markup=keyboard)
     text = product_progress_status_from_job_text(canonical, job, job_id, lang)
     result = await safe_edit_or_send(
         query,
@@ -17944,10 +17958,22 @@ async def handle_payos_risk_callback(update: Update, context: ContextTypes.DEFAU
     query = update.callback_query
     if not is_admin_user(query.from_user.id):
         return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
-    await query.answer()
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "menu"
     value = parts[2] if len(parts) > 2 else ""
+    supported_actions = {
+        "menu", "root", "review", "hour", "report", "orders_recent",
+        "suspicious", "orders", "user", "user_help", "block_help",
+        "unlock_help", "mark_help", "unlocklock", "unlockuser", "keep",
+        "cancel", "mark",
+    }
+    if (
+        action not in supported_actions
+        or (action in {"unlocklock", "keep"} and not value.isdigit())
+        or (action in {"unlockuser", "cancel", "mark"} and not value)
+    ):
+        return await query.answer("Thao tác rủi ro PayOS chưa được hỗ trợ.", show_alert=True)
+    await query.answer()
     if action in {"menu", "root"}:
         return await safe_edit_query_message(query, payos_risk_menu_text(), reply_markup=payos_risk_menu_keyboard())
     if action == "review":
@@ -17999,7 +18025,7 @@ async def handle_payos_risk_callback(update: Update, context: ContextTypes.DEFAU
         result = payos_risk_mark_order_suspicious(query.from_user.id, value, "admin_button_mark_suspicious")
         text = "⚠️ Đã đánh dấu lệnh đáng ngờ." if result.get("ok") else f"⚠️ Không đánh dấu được: <code>{html.escape(result.get('reason') or 'unknown')}</code>"
         return await safe_edit_query_message(query, text, reply_markup=payos_risk_menu_keyboard())
-    return await query.answer("Thao tác rủi ro PayOS chưa được hỗ trợ.", show_alert=True)
+    return None
 
 async def cmd_payos_risk(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -43703,26 +43729,41 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
 
 async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Xử lý sinh hóa đơn và link QR Động từ PayOS khi khách click chọn gói"""
-    expire_old_payos_orders()
     query = update.callback_query
-    await query.answer()
     parts = query.data.split("|")
     if len(parts) != 3:
+        await query.answer()
+        expire_old_payos_orders()
         return
     _, pkg_key, uid_str = parts
-    uid = int(uid_str)
+    try:
+        uid = int(uid_str)
+    except ValueError:
+        await query.answer(
+            "⚠️ Nút nạp đã hết phiên. Vui lòng mở lại bảng nạp.",
+            show_alert=True,
+        )
+        expire_old_payos_orders()
+        return
+
+    if query.from_user.id != uid:
+        lang = get_user_language(query.from_user.id) or "vi"
+        locale = public_copy_locale(lang)
+        hub_copy = public_hub_copy(locale)
+        await query.answer(
+            "⚠️ Không phải yêu cầu của bạn!" if locale == "vi" else f"⚠️ {hub_copy['common_failed']}",
+            show_alert=True,
+        )
+        expire_old_payos_orders()
+        return
+
+    await query.answer()
+    expire_old_payos_orders()
     lang = get_user_language(uid) or "vi"
     locale = public_copy_locale(lang)
     hub_copy = public_hub_copy(locale)
     account_copy = public_account_flow_copy(locale)
     deep_copy = public_topup_deep_copy(lang)
-
-    if query.from_user.id != uid:
-        await query.answer(
-            "⚠️ Không phải yêu cầu của bạn!" if locale == "vi" else f"⚠️ {hub_copy['common_failed']}",
-            show_alert=True,
-        )
-        return
 
     if pkg_key.startswith("manual_"):
         manual_key = pkg_key.replace("manual_", "", 1)
@@ -44018,14 +44059,15 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def handle_manual_package_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     parts = (query.data or "").split("|")
     if len(parts) < 2:
+        await query.answer()
         return
     action = parts[1]
     if action in {"approve", "approve_expected", "approve_custom", "reject", "confirm"}:
         if not is_admin_user(query.from_user.id):
             return await query.answer("Bạn không có quyền duyệt bill.", show_alert=True)
+        await query.answer()
         if action in {"approve", "approve_expected", "approve_custom"} and len(parts) == 3 and str(parts[2]).isdigit():
             deposit_id = int(parts[2])
             conn = db_connect()
@@ -44102,6 +44144,7 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
         uid = int(parts[3]) if str(parts[3]).isdigit() else int(query.from_user.id)
         if query.from_user.id != uid:
             return await query.answer(f"⚠️ {copy['common_failed']}", show_alert=True)
+        await query.answer()
         if currency == "VND":
             existing_state = get_active_manual_bill_state(uid) or {}
             selected_pkg_key = str(existing_state.get("pkg_key") or "")
@@ -44140,6 +44183,7 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
         uid = int(parts[3]) if str(parts[3]).isdigit() else int(query.from_user.id)
         if query.from_user.id != uid:
             return await query.answer(f"⚠️ {copy['common_failed']}", show_alert=True)
+        await query.answer()
         if pkg_key not in PAYMENT_PACKAGES:
             return await query.edit_message_text(manual_domestic_amount_text(uid, lang), parse_mode="HTML", reply_markup=manual_domestic_amount_keyboard(uid, lang))
         preview = manual_vnd_topup_preview(uid, pkg_key, "bank_acb")
@@ -44157,6 +44201,7 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
         uid = int(parts[4]) if str(parts[4]).isdigit() else int(query.from_user.id)
         if query.from_user.id != uid:
             return await query.answer(f"⚠️ {copy['common_failed']}", show_alert=True)
+        await query.answer()
         try:
             preview = foreign_topup_preview(currency, parts[3])
         except ValueError:
@@ -44172,6 +44217,7 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
         uid = int(parts[3]) if str(parts[3]).isdigit() else int(query.from_user.id)
         if query.from_user.id != uid:
             return await query.answer(f"⚠️ {copy['common_failed']}", show_alert=True)
+        await query.answer()
         set_manual_bill_state(uid, order_code="MANUAL", currency=currency, foreign_manual=True, step="await_foreign_amount")
         return await query.edit_message_text(
             f"✍️ {account_copy['manual_topup_rules']}\n\n{account_copy['topup_verified_base']}",
@@ -44186,6 +44232,7 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
         uid = int(parts[5]) if str(parts[5]).isdigit() else int(query.from_user.id)
         if query.from_user.id != uid:
             return await query.answer(f"⚠️ {copy['common_failed']}", show_alert=True)
+        await query.answer()
         if method not in {"zalopay_personal", "zalopay_merchant", "momo_tuithantai", "usdt_trc20"} or not manual_method_enabled(method, uid):
             return await query.edit_message_text(f"⚠️ {copy['common_failed']}", reply_markup=manual_foreign_amount_keyboard(currency, uid, lang))
         try:
@@ -44217,6 +44264,7 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
     if query.from_user.id != uid and not (action == "history" and is_admin_user(query.from_user.id)):
         await query.answer(f"⚠️ {copy['common_failed']}", show_alert=True)
         return
+    await query.answer()
     if action == "menu":
         state = get_active_manual_bill_state(uid)
         if not state:
@@ -61023,6 +61071,25 @@ def update_support_ticket(ticket_id, **fields) -> dict | None:
         conn.close()
     return get_support_ticket(ticket_id)
 
+def resolve_support_ticket_once(ticket_id, user_id) -> dict | None:
+    conn = db_connect()
+    try:
+        conn.row_factory = sqlite3.Row
+        stamp = now_text()
+        conn.execute(
+            "UPDATE support_tickets SET status=?, updated_at=?, closed_at=? "
+            "WHERE id=? AND user_id=? AND LOWER(COALESCE(status, '')) NOT IN ('resolved', 'closed')",
+            ("resolved", stamp, stamp, int(ticket_id), str(user_id)),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM support_tickets WHERE id=? AND user_id=?",
+            (int(ticket_id), str(user_id)),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
 def add_support_ticket_message(ticket_id, sender_type: str, sender_id, message: str, delivery_status: str = "recorded") -> int:
     conn = db_connect()
     try:
@@ -61432,6 +61499,7 @@ def set_image_menu_pending(user_id, action: str, **fields) -> None:
                 "image_prompt_selected_ratio", "image_prompt_selected_purpose",
                 "image_prompt_selected_style", "image_prompt_subject",
                 "image_prompt_selected_variant",
+                "ai_choice_origin",
             }:
                 payload[key] = re.sub(r"\s+", " ", str(value or "").strip())[:900]
             elif key in {"variants", "image_prompt_variants"} and isinstance(value, list):
@@ -61932,7 +62000,7 @@ def image_edit_ai_choice_text(lang: str = "vi") -> str:
     screen = public_image_screen_copy(lang)
     return f"✨ <b>{screen['ai_edit_title']}</b>\n\n{screen['edit_request_title']}\n\n{public_hub_copy(lang)['common_no_charge']}"
 
-def image_edit_ai_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def image_edit_ai_choice_keyboard(lang: str = "vi", back_callback: str = "imgtool|edit_back_choice") -> InlineKeyboardMarkup:
     copy = public_image_flow_copy(lang)
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(f"➕ {copy['edit_add']}", callback_data="imgtool|edit_type|add_object"), InlineKeyboardButton(f"🧹 {copy['edit_remove']}", callback_data="imgtool|edit_type|remove_object")],
@@ -61941,7 +62009,7 @@ def image_edit_ai_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton(f"🎭 {copy['preset_logo']}", callback_data="imgtool|editor_logo_menu"), InlineKeyboardButton(f"📐 {copy['edit_ratio']}", callback_data="imgtool|edit_type|ai_ratio")],
         [InlineKeyboardButton(f"✍️ {copy['edit_custom']}", callback_data="imgtool|edit_type_custom")],
         [InlineKeyboardButton(f"🔁 {copy['edit_ad']}", callback_data="imgtool|edit_type|ad_creative")],
-        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="imgtool|edit_back_choice"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=back_callback), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 def image_edit_suggestions(edit_type: str = "", lang: str = "vi") -> list[str]:
@@ -71934,7 +72002,7 @@ def free_hub_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             (f"📝 {copy['freehub_notes_docs']}", "menu|main_memory|freehub"),
             (f"📥 {copy['freehub_save_temp_media']}", "freehub|upload"),
             (f"🎙 {copy['freehub_voice_subdub_script']}", "freehub|hook"),
-            (f"🎵 {copy['freehub_music_sfx_ideas']}", "freehub|lib_music"),
+            (f"🎵 {copy['freehub_music_sfx_ideas']}", "freehub|lib_music_root"),
             (f"🌐 {copy.get('freehub_translation', 'Dịch thuật')}", "freehub|open_translate"),
             (f"📥 {copy.get('freehub_video_downloader', 'Tải video từ link')}", "vdownload|start|freehub"),
         ],
@@ -72482,6 +72550,29 @@ def free_hub_library_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMar
         lang=lang,
     )
 
+def free_hub_library_suggestions_keyboard_for_parent(lang: str, parent_callback: str) -> InlineKeyboardMarkup:
+    parent_callback = parent_callback if parent_callback in {"freehub|main", "freehub|library"} else "freehub|library"
+    markup = free_hub_library_suggestions_keyboard(lang)
+    if parent_callback == "freehub|library":
+        return markup
+    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    callback_map = {
+        "freehub|lib_pick1": "freehub|lib_pick1_root",
+        "freehub|lib_pick2": "freehub|lib_pick2_root",
+        "freehub|lib_pick3": "freehub|lib_pick3_root",
+        "freehub|lib_more": "freehub|lib_more_root",
+        "freehub|library": "freehub|main",
+    }
+    rows = []
+    for row in markup.inline_keyboard:
+        rewritten = []
+        for button in row:
+            callback_data = callback_map.get(button.callback_data, button.callback_data)
+            label = f"⬅️ {copy['freehub_main']}" if button.callback_data == "freehub|library" else button.text
+            rewritten.append(InlineKeyboardButton(label, callback_data=callback_data))
+        rows.append(rewritten)
+    return InlineKeyboardMarkup(rows)
+
 def free_hub_library_item_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return build_2col_keyboard(
@@ -72493,6 +72584,21 @@ def free_hub_library_item_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         lang=lang,
     )
 
+def free_hub_library_item_keyboard_for_parent(lang: str, parent_callback: str) -> InlineKeyboardMarkup:
+    markup = free_hub_library_item_keyboard(lang)
+    if parent_callback != "freehub|main":
+        return markup
+    rows = []
+    for row in markup.inline_keyboard:
+        rows.append([
+            InlineKeyboardButton(
+                button.text,
+                callback_data="freehub|lib_back_root" if button.callback_data == "freehub|lib_back" else button.callback_data,
+            )
+            for button in row
+        ])
+    return InlineKeyboardMarkup(rows)
+
 def free_hub_docs_text(lang: str = "vi") -> str:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return f"📄 <b>{copy['freehub_docs_title']}</b>\n\n{copy['freehub_docs_body']}"
@@ -72501,8 +72607,8 @@ def free_hub_docs_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     copy = public_hub_copy(normalize_user_language(lang) or "vi")
     return build_2col_keyboard(
         [
-            (f"🖼 {copy['freehub_image_to_pdf']}", "menu|hint_doc_image_to_pdf"), (f"✂️ {copy['freehub_split_merge']}", "freehub|docs_split_merge"),
-            (f"🗜 {copy['freehub_compress']}", "menu|hint_doc_compress_pdf"), (f"📝 {copy['freehub_summary']}", "freehub|docs_summary_guard"),
+            (f"🖼 {copy['freehub_image_to_pdf']}", "freehub|docs_image_to_pdf"), (f"✂️ {copy['freehub_split_merge']}", "freehub|docs_split_merge"),
+            (f"🗜 {copy['freehub_compress']}", "freehub|docs_compress_pdf"), (f"📝 {copy['freehub_summary']}", "freehub|docs_summary_guard"),
         ],
         nav_back=(f"⬅️ {copy['freehub_main']}", "freehub|main"),
         lang=lang,
@@ -72524,7 +72630,18 @@ def free_hub_notes_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     )
 
 def free_hub_byok_text(lang: str = "vi") -> str:
-    copy = public_hub_copy(normalize_user_language(lang) or "vi")
+    lang = normalize_user_language(lang) or "vi"
+    copy = public_hub_copy(lang)
+    if not FREE_HUB_BYOK_ENABLED:
+        if lang == "vi":
+            return (
+                "🔐 <b>Kết nối API riêng chưa mở</b>\n\n"
+                "TOAN AAS chưa nhận API key; không nên gửi API key trong chat."
+            )
+        return (
+            "🔐 <b>Private API connection is not available</b>\n\n"
+            "TOAN AAS is not accepting API keys. Please do not send an API key in chat."
+        )
     return f"🔐 <b>{copy['freehub_byok_title']}</b>\n\n{copy['freehub_byok_body']}"
 
 def free_hub_byok_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -137187,9 +137304,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if isinstance(getattr(context, "user_data", None), dict):
         context.user_data.pop("memory_nav_origin", None)
     uid = update.effective_user.id
+    _local_video_planning_clear_pending(context)
     clear_pending_admin_tool_test(uid)
     clear_support_ticket_pending(uid)
     clear_internal_archive_pending(uid)
+    clear_finance_compliance_pending(uid)
     user_existed_before = user_exists(uid)
     clear_memory_guided_pending(uid)
     get_user(uid, update.effective_user.first_name)
@@ -141746,7 +141865,33 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
     )
     if early_admin_ticket_detail_ack:
         await query.answer()
-    lang = normalize_user_language(get_user_language(uid)) or "vi"
+    early_admin_ticket_status_ack = (
+        action == "st"
+        and is_admin_user(uid)
+        and len(parts) in {4, 5, 6}
+        and parts[2].isdigit()
+        and parts[3] in {"resolved", "refund_pending", "waiting_provider"}
+        and (len(parts) < 5 or parts[4] in {"new", "high", "refund"})
+        and (len(parts) < 6 or (parts[5].isascii() and parts[5].isdecimal()))
+    )
+    if early_admin_ticket_status_ack:
+        await query.answer()
+    if early_admin_ticket_detail_ack:
+        lang = "vi"
+    elif action == "admin" and len(parts) == 2 and is_admin_user(uid):
+        lang = "vi"
+    elif action == "al" and len(parts) == 4 and parts[2] in {"new", "high", "refund"} and parts[3].isascii() and parts[3].isdecimal() and is_admin_user(uid):
+        lang = "vi"
+    elif is_admin_user(uid) and (
+        (action == "stats" and len(parts) == 3 and parts[2] in {"admin", "templates"})
+        or (action == "templates" and len(parts) == 3 and parts[2] in {"admin", "stats"})
+        or (action == "asearch" and len(parts) == 3 and parts[2] in {"user", "all"})
+    ):
+        lang = "vi"
+    elif action in {"reply", "ask", "suggest", "note", "assign", "lead", "st", "send", "file"} and is_admin_user(uid):
+        lang = normalize_user_language(await asyncio.to_thread(get_user_language, uid)) or "vi"
+    else:
+        lang = normalize_user_language(get_user_language(uid)) or "vi"
     copy = public_hub_copy(lang)
     ticket_profile_origin = ""
     customer_arities = {"mine": 2, "pv": 3, "reply_user": 3, "done": 3, "attach": 3, "summary": 3}
@@ -141857,10 +142002,24 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
     admin_ticket_status = None
     if action == "st":
-        if len(parts) < 4 or not parts[2].isdigit():
+        if len(parts) < 4 or not parts[2].isdigit() or parts[3] not in {"resolved", "refund_pending", "waiting_provider"}:
             return await query.answer(copy["support_ticket_action_unsupported"], show_alert=True)
-        admin_ticket_status = get_support_ticket(int(parts[2]))
+        admin_ticket_status = await asyncio.to_thread(get_support_ticket, int(parts[2]))
         if not admin_ticket_status:
+            if early_admin_ticket_status_ack:
+                source = parts[4] if len(parts) >= 5 else "new"
+                try:
+                    list_offset = max(0, int(parts[5] or 0)) if len(parts) >= 6 else 0
+                except (TypeError, ValueError):
+                    list_offset = 0
+                return await safe_edit_or_send(
+                    query,
+                    f"⚠️ {copy['support_ticket_not_found']}",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("⬅️ Danh sách", callback_data=f"ticket|al|{source}|{list_offset}")],
+                        [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+                    ]),
+                )
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
     if not early_start_ack and not early_ticket_mine_ack and not early_ticket_category_ack and not early_ticket_summary_ack and not early_ticket_reply_ack and not early_ticket_attach_ack and not early_ticket_done_ack and action not in {"send", "file", "pv", "av", "st", "reply", "ask", "suggest", "note", "assign", "lead"}:
         await query.answer()
@@ -141927,7 +142086,16 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         )
     if action == "done" and len(parts) >= 3:
         ticket = customer_action_ticket
-        ticket = update_support_ticket(ticket["id"], status="resolved") or ticket
+        ticket = await asyncio.to_thread(resolve_support_ticket_once, ticket["id"], uid)
+        if not ticket:
+            return await safe_edit_or_send(
+                query,
+                f"⚠️ {copy['support_ticket_not_found']}",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(f"📂 {copy['support_ticket']}", callback_data="ticket|start")],
+                    [InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
+                ]),
+            )
         clear_support_ticket_pending(uid)
         return await safe_edit_or_send(
             query,
@@ -141981,7 +142149,8 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         except (TypeError, ValueError):
             list_offset = 0
         previous_ticket = admin_ticket_status if new_status == "refund_pending" else None
-        await query.answer()
+        if not early_admin_ticket_status_ack:
+            await query.answer()
         ticket = update_support_ticket(ticket_id, status=new_status)
         if not ticket:
             return await safe_edit_or_send(query, "Không tìm thấy ticket.", reply_markup=support_admin_menu_keyboard())
@@ -141990,7 +142159,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket, source, list_offset))
     if action == "reply" and len(parts) >= 3:
         ticket_id = int(parts[2])
-        if not get_support_ticket(ticket_id):
+        if not await asyncio.to_thread(get_support_ticket, ticket_id):
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
         source = parts[3] if len(parts) >= 4 and parts[3] in {"new", "high", "refund"} else "new"
         try:
@@ -142002,7 +142171,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         return await safe_edit_or_send(query, "💬 Nhập nội dung phản hồi cho khách. Bot chỉ gửi sau khi admin xem preview và bấm xác nhận.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|{source}|{list_offset}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]]))
     if action == "ask" and len(parts) >= 3:
         ticket_id = int(parts[2])
-        if not get_support_ticket(ticket_id):
+        if not await asyncio.to_thread(get_support_ticket, ticket_id):
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
         source = parts[3] if len(parts) >= 4 and parts[3] in {"new", "high", "refund"} else "new"
         try:
@@ -142020,7 +142189,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
             list_offset = max(0, int(parts[5] or 0)) if len(parts) >= 6 else 0
         except (TypeError, ValueError):
             list_offset = 0
-        ticket = get_support_ticket(ticket_id)
+        ticket = await asyncio.to_thread(get_support_ticket, ticket_id)
         if not ticket:
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
         await query.answer()
@@ -142053,7 +142222,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
             list_offset = max(0, int(state.get("list_offset") or 0))
         except (TypeError, ValueError):
             list_offset = 0
-        ticket = get_support_ticket(ticket_id)
+        ticket = await asyncio.to_thread(get_support_ticket, ticket_id)
         reply_text = str(state.get("reply_text") or "").strip()
         if not ticket or not reply_text:
             return await query.answer("Không có nội dung hợp lệ để gửi.", show_alert=True)
@@ -142087,7 +142256,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket, source, list_offset))
     if action == "note" and len(parts) >= 3:
         ticket_id = int(parts[2])
-        if not get_support_ticket(ticket_id):
+        if not await asyncio.to_thread(get_support_ticket, ticket_id):
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
         source = parts[3] if len(parts) >= 4 and parts[3] in {"new", "high", "refund"} else "new"
         try:
@@ -142099,7 +142268,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         return await safe_edit_or_send(query, "📌 Nhập ghi chú nội bộ. Nội dung này không hiển thị cho khách.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|{source}|{list_offset}")]]))
     if action == "assign" and len(parts) >= 3:
         ticket_id = int(parts[2])
-        if not get_support_ticket(ticket_id):
+        if not await asyncio.to_thread(get_support_ticket, ticket_id):
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
         source = parts[3] if len(parts) >= 4 and parts[3] in {"new", "high", "refund"} else "new"
         try:
@@ -142112,7 +142281,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
             return await safe_edit_or_send(query, "Không tìm thấy ticket.", reply_markup=support_admin_menu_keyboard())
         return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket, source, list_offset))
     if action == "lead" and len(parts) >= 4:
-        ticket = get_support_ticket(int(parts[2]))
+        ticket = await asyncio.to_thread(get_support_ticket, int(parts[2]))
         if not ticket:
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
         source = parts[4] if len(parts) >= 5 and parts[4] in {"new", "high", "refund"} else "new"
@@ -142131,7 +142300,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         ticket = update_support_ticket(ticket["id"], status="reviewing", assigned_admin_id=uid, admin_note=note)
         return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket, source, list_offset))
     if action == "file" and len(parts) >= 3:
-        ticket = get_support_ticket(int(parts[2]))
+        ticket = await asyncio.to_thread(get_support_ticket, int(parts[2]))
         if not ticket or not ticket.get("attachment_file_id"):
             return await query.answer("Ticket chưa có file đính kèm.", show_alert=True)
         send_lock_key = f"support_ticket_file_inflight:{uid}:{ticket['id']}"
@@ -142743,6 +142912,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         query.from_user.id,
         preserve_translation_menu=preserve_translation_menu,
     )
+    _local_video_planning_clear_pending(context)
     clear_support_ticket_pending(query.from_user.id)
     if action != "finance_compliance_update":
         clear_finance_compliance_pending(query.from_user.id)
@@ -143497,6 +143667,13 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
     query = update.callback_query
     await query.answer()
     action = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else "main"
+    root_library_action = action in {"lib_music_root", "lib_more_root", "lib_back_root"} or (
+        action.startswith("lib_pick") and action.endswith("_root")
+    )
+    if action in {"lib_more_root", "lib_back_root"} or (
+        action.startswith("lib_pick") and action.endswith("_root")
+    ):
+        action = action[:-5]
     uid = query.from_user.id
     lang = get_user_language(uid) or "vi"
     if action == "main":
@@ -143553,13 +143730,35 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
             parse_mode="HTML",
             reply_markup=free_hub_suggestions_keyboard(lang),
         )
-    if action in {"docs", "notes"}:
+    if action == "docs":
+        clear_free_hub_pending(uid)
+        return await safe_edit_or_send(
+            query,
+            free_hub_docs_text(lang),
+            parse_mode="HTML",
+            reply_markup=free_hub_docs_keyboard(lang),
+        )
+    if action == "notes":
         clear_free_hub_pending(uid)
         return await safe_edit_or_send(
             query,
             menu_text_main_memory_i18n(lang),
             parse_mode="HTML",
             reply_markup=main_memory_keyboard(lang, uid),
+        )
+    if action in {"docs_image_to_pdf", "docs_compress_pdf"}:
+        hint_action = "hint_doc_image_to_pdf" if action == "docs_image_to_pdf" else "hint_doc_compress_pdf"
+        _, hint_text = menu_hint_text_i18n(hint_action, lang)
+        copy = public_hub_copy(lang)
+        return await safe_edit_or_send(
+            query,
+            hint_text,
+            parse_mode="HTML",
+            reply_markup=build_2col_keyboard(
+                [],
+                nav_back=(f"⬅️ {copy['freehub_docs_title']}", "freehub|docs"),
+                lang=lang,
+            ),
         )
     if action == "docs_split_merge":
         copy = public_hub_copy(lang)
@@ -143593,7 +143792,7 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
         copy = public_hub_copy(lang)
         return await safe_edit_or_send(
             query,
-            f"🔐 <b>{copy['freehub_byok_title']}</b>\n\n{copy['freehub_byok_body']}\n{copy['freehub_input_free']}",
+            f"{free_hub_byok_text(lang)}\n\n{copy['freehub_input_free']}",
             reply_markup=free_hub_main_keyboard(lang),
         )
     if action == "upload":
@@ -143835,12 +144034,14 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
         )
         return await maybe_send_free_hub_promo(query.message, uid, lang, count)
     if action.startswith("lib_") and action not in {"lib_more", "lib_back"} and not action.startswith("lib_pick"):
-        token = action.replace("lib_", "", 1)
+        root_music_shortcut = action == "lib_music_root"
+        token = "music" if root_music_shortcut else action.replace("lib_", "", 1)
         category_id, _label = FREE_HUB_LIBRARY_CATEGORIES.get(token, ("", ""))
         label = free_hub_library_category_label(token, lang)
         if not category_id:
             return await query.answer(public_hub_copy(lang)["freehub_video_guard_title"], show_alert=True)
         industry_id = FREE_HUB_LIBRARY_INDUSTRY_FILTERS.get(token, "")
+        library_back_callback = "freehub|main" if root_music_shortcut else "freehub|library"
         items = prompt_library_suggestions(
             FREE_PROMPT_LIBRARY,
             category_id,
@@ -143855,19 +144056,28 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
             library_category=category_id,
             library_label=label,
             library_industry=industry_id,
+            library_back_callback=library_back_callback,
             library_ids=[item.get("id") for item in items],
         )
         return await safe_edit_or_send(
             query,
             free_hub_library_suggestions_text(items, label, lang),
-            reply_markup=free_hub_library_suggestions_keyboard(lang),
+            reply_markup=free_hub_library_suggestions_keyboard_for_parent(lang, library_back_callback),
         )
     if action in {"lib_more", "lib_back"}:
         state = get_free_hub_pending(uid)
         category_id = str(state.get("library_category") or "")
         label = str(state.get("library_label") or public_hub_copy(lang)["freehub_library_title"])
         industry_id = str(state.get("library_industry") or "")
+        library_back_callback = str(
+            state.get("library_back_callback")
+            or ("freehub|main" if root_library_action else "freehub|library")
+        )
+        if library_back_callback not in {"freehub|main", "freehub|library"}:
+            library_back_callback = "freehub|library"
         if not category_id:
+            if library_back_callback == "freehub|main":
+                return await safe_edit_or_send(query, free_hub_main_text(lang), reply_markup=free_hub_main_keyboard(lang))
             return await safe_edit_or_send(query, free_hub_library_text(lang), reply_markup=free_hub_library_keyboard(lang))
         if action == "lib_back":
             items = [
@@ -143890,17 +144100,25 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
         return await safe_edit_or_send(
             query,
             free_hub_library_suggestions_text(items, label, lang),
-            reply_markup=free_hub_library_suggestions_keyboard(lang),
+            reply_markup=free_hub_library_suggestions_keyboard_for_parent(lang, library_back_callback),
         )
     if action.startswith("lib_pick"):
         state = get_free_hub_pending(uid)
         ids = list(state.get("library_ids") or [])
+        library_back_callback = str(
+            state.get("library_back_callback")
+            or ("freehub|main" if root_library_action else "freehub|library")
+        )
+        if library_back_callback not in {"freehub|main", "freehub|library"}:
+            library_back_callback = "freehub|library"
         try:
             selected_index = max(0, min(2, int(action[-1]) - 1))
         except Exception:
             selected_index = 0
         selected = prompt_library_item(FREE_PROMPT_LIBRARY, ids[selected_index] if selected_index < len(ids) else "")
         if not selected:
+            if library_back_callback == "freehub|main":
+                return await safe_edit_or_send(query, free_hub_main_text(lang), reply_markup=free_hub_main_keyboard(lang))
             return await safe_edit_or_send(query, free_hub_library_text(lang), reply_markup=free_hub_library_keyboard(lang))
         result = {
             "title": selected.get("title"),
@@ -143911,7 +144129,7 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
         return await safe_edit_or_send(
             query,
             free_hub_prompt_result_text(result, "prompt_library", lang=lang),
-            reply_markup=free_hub_library_item_keyboard(lang),
+            reply_markup=free_hub_library_item_keyboard_for_parent(lang, library_back_callback),
         )
     state = get_free_hub_pending(uid)
     if action.startswith("use_prompt"):
@@ -144013,7 +144231,9 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
             return await safe_edit_or_send(
                 query,
                 free_hub_prompt_result_text(result, task_type, provider, lang),
-                reply_markup=(free_hub_library_item_keyboard(lang) if task_type == "prompt_library"
+                reply_markup=(free_hub_library_item_keyboard_for_parent(
+                                  lang, str(state.get("library_back_callback") or "freehub|library")
+                              ) if task_type == "prompt_library"
                               else free_hub_result_keyboard(lang, task_type, meta=task_type == "meta_ai_prompt")),
             )
         if action == "edit":
@@ -144252,7 +144472,10 @@ async def handle_translation_callback(update: Update, context: ContextTypes.DEFA
     enter_product_context(uid, PRODUCT_CONTEXT_SHOWROOM, origin_screen="menu|translate", product_area="translation")
     if data == "tr_transcribe":
         if not has_recent_audio_input(update):
-            return await query.message.reply_text(f"⚠️ {copy['translation_recent_media_missing']}")
+            return await query.message.reply_text(
+                f"⚠️ {copy['translation_recent_media_missing']}",
+                reply_markup=translation_voice_recovery_keyboard("actions", lang, uid),
+            )
         return await cmd_transcribe(update, context)
     if data.startswith("tr_back|voice|"):
         parts = data.split("|")
@@ -156384,13 +156607,13 @@ async def handle_public_video_status_callback(update: Update, context: ContextTy
     query = update.callback_query
     if not query:
         return
-    await query.answer()
-    uid = query.from_user.id if query.from_user else 0
-    lang = user_ui_lang(uid)
     parts = str(query.data or "").split("|")
     task_id = str(parts[2] if len(parts) >= 3 else "").strip()
     if not task_id:
         return await query.answer("Không tìm thấy trạng thái xử lý.", show_alert=True)
+    await query.answer()
+    uid = query.from_user.id if query.from_user else 0
+    lang = user_ui_lang(uid)
     db_job = shopaikey_job_by_task_id(task_id)
     if not is_admin_user(uid) and (
         not db_job
@@ -157139,7 +157362,7 @@ async def handle_image_tools_callback(update: Update, context: ContextTypes.DEFA
         state = dict(pending or get_image_tool_result(uid, "editor") or recent_image_file_state(uid) or {})
         if state.get("file_id"):
             set_image_menu_pending(uid, "image_edit_choice", **state)
-            return await safe_edit_query_message(query, image_edit_ai_choice_text(lang), reply_markup=image_edit_ai_choice_keyboard(lang))
+            return await safe_edit_query_message(query, image_edit_ai_choice_text(lang), reply_markup=image_edit_ai_choice_keyboard(lang, back_callback="menu|main_image" if state.get("ai_choice_origin") == "main_image" else "imgtool|edit_back_choice"))
         set_image_menu_pending(uid, "image_edit_wait_image")
         return await safe_edit_query_message(query, image_edit_menu_start_text(lang), reply_markup=image_edit_start_keyboard(lang))
 
@@ -157362,9 +157585,9 @@ async def handle_image_tools_callback(update: Update, context: ContextTypes.DEFA
     if action == "edit_ai_start":
         image_state = recent_image_file_state(uid)
         if image_state.get("file_id"):
-            set_image_menu_pending(uid, "image_edit_choice", **image_state)
-            return await safe_edit_query_message(query, image_edit_ai_choice_text(lang), reply_markup=image_edit_ai_choice_keyboard(lang))
-        set_image_menu_pending(uid, "image_edit_wait_image", edit_type="ai_edit")
+            set_image_menu_pending(uid, "image_edit_choice", **{**image_state, "ai_choice_origin": "main_image"})
+            return await safe_edit_query_message(query, image_edit_ai_choice_text(lang), reply_markup=image_edit_ai_choice_keyboard(lang, back_callback="menu|main_image"))
+        set_image_menu_pending(uid, "image_edit_wait_image", edit_type="ai_edit", ai_choice_origin="main_image")
         return await safe_edit_query_message(
             query,
             "✨ <b>Chỉnh sửa ảnh bằng AI</b>\n\nBạn hãy gửi ảnh muốn chỉnh. Sau đó TOAN AAS sẽ hỏi bạn muốn sửa gì.\n\nBot chưa gọi provider và chưa trừ Xu.",
@@ -157449,7 +157672,7 @@ async def handle_image_tools_callback(update: Update, context: ContextTypes.DEFA
             image_state = recent_image_file_state(uid)
             if image_state.get("file_id"):
                 set_image_menu_pending(uid, "image_edit_choice", **image_state)
-                return await safe_edit_query_message(query, image_edit_ai_choice_text(lang), reply_markup=image_edit_ai_choice_keyboard(lang))
+                return await safe_edit_query_message(query, image_edit_ai_choice_text(lang), reply_markup=image_edit_ai_choice_keyboard(lang, back_callback="menu|main_image" if image_state.get("ai_choice_origin") == "main_image" else "imgtool|edit_back_choice"))
             set_image_menu_pending(uid, "image_edit_wait_image")
             return await safe_edit_query_message(
                 query,
@@ -157458,7 +157681,7 @@ async def handle_image_tools_callback(update: Update, context: ContextTypes.DEFA
                 reply_markup=image_edit_start_keyboard(lang),
             )
         set_image_menu_pending(uid, "image_edit_choice", **pending)
-        return await safe_edit_query_message(query, image_edit_ai_choice_text(lang), reply_markup=image_edit_ai_choice_keyboard(lang))
+        return await safe_edit_query_message(query, image_edit_ai_choice_text(lang), reply_markup=image_edit_ai_choice_keyboard(lang, back_callback="menu|main_image" if pending.get("ai_choice_origin") == "main_image" else "imgtool|edit_back_choice"))
     if action == "edit_prompt_only":
         set_image_menu_pending(uid, "image_edit_prompt_only")
         return await safe_edit_query_message(query, "✍️ Bạn hãy mô tả ảnh hiện có và yêu cầu sửa. Bot sẽ tạo prompt sửa ảnh, chưa gọi provider và chưa trừ Xu.", parse_mode=None, reply_markup=image_menu_child_keyboard(lang))
@@ -157547,7 +157770,7 @@ async def handle_image_tools_callback(update: Update, context: ContextTypes.DEFA
                 reply_markup=image_edit_detail_request_keyboard(edit_type, lang),
             )
         set_image_menu_pending(uid, "image_edit_choice", **state)
-        return await safe_edit_query_message(query, image_edit_ai_choice_text(lang), reply_markup=image_edit_ai_choice_keyboard(lang))
+        return await safe_edit_query_message(query, image_edit_ai_choice_text(lang), reply_markup=image_edit_ai_choice_keyboard(lang, back_callback="menu|main_image" if state.get("ai_choice_origin") == "main_image" else "imgtool|edit_back_choice"))
     if action in {"edit_prompt_output", "edit_back_result"}:
         state = dict(pending or get_image_tool_result(uid, "edit") or {})
         if not state:
@@ -157564,7 +157787,7 @@ async def handle_image_tools_callback(update: Update, context: ContextTypes.DEFA
         state = dict(get_image_tool_result(uid, "edit_output") or {})
         if state.get("file_id"):
             set_image_menu_pending(uid, "image_edit_choice", **state)
-            return await safe_edit_query_message(query, image_edit_ai_choice_text(lang), reply_markup=image_edit_ai_choice_keyboard(lang))
+            return await safe_edit_query_message(query, image_edit_ai_choice_text(lang), reply_markup=image_edit_ai_choice_keyboard(lang, back_callback="menu|main_image" if state.get("ai_choice_origin") == "main_image" else "imgtool|edit_back_choice"))
         return await safe_edit_query_message(query, image_edit_menu_start_text(lang), reply_markup=image_edit_start_keyboard(lang))
     if action == "edit_ai_variation":
         state = dict(get_image_tool_result(uid, "edit_output") or pending or {})
@@ -157957,11 +158180,12 @@ async def handle_image_menu_pending_photo(update: Update, context: ContextTypes.
         file_unique_id = update.message.photo[-1].file_unique_id if update.message.photo else ""
         state = {"file_id": file_id, "file_unique_id": file_unique_id}
         if pending.get("edit_type"):
+            state["ai_choice_origin"] = str(pending.get("ai_choice_origin") or "")
             set_image_menu_pending(uid, "image_edit_choice", **state)
             await update.message.reply_text(
                 "✅ <b>Đã nhận ảnh.</b>\n\nBạn muốn AI chỉnh ảnh theo cách nào?",
                 parse_mode="HTML",
-                reply_markup=image_edit_ai_choice_keyboard(lang),
+                reply_markup=image_edit_ai_choice_keyboard(lang, back_callback="menu|main_image" if pending.get("ai_choice_origin") == "main_image" else "imgtool|edit_back_choice"),
             )
             return True
         set_image_menu_pending(uid, "image_edit_choice", **state)
@@ -158073,11 +158297,12 @@ async def handle_image_menu_pending_document(update: Update, context: ContextTyp
             "source_name": file_name,
         }
         if pending.get("edit_type"):
+            state["ai_choice_origin"] = str(pending.get("ai_choice_origin") or "")
             set_image_menu_pending(uid, "image_edit_choice", **state)
             await update.message.reply_text(
                 "✅ <b>Đã nhận ảnh.</b>\n\nBạn muốn AI chỉnh ảnh theo cách nào?",
                 parse_mode="HTML",
-                reply_markup=image_edit_ai_choice_keyboard(lang),
+                reply_markup=image_edit_ai_choice_keyboard(lang, back_callback="menu|main_image" if pending.get("ai_choice_origin") == "main_image" else "imgtool|edit_back_choice"),
             )
             return True
         set_image_menu_pending(
@@ -187820,9 +188045,7 @@ async def handle_doc_tool_callback(update: Update, context: ContextTypes.DEFAULT
     back_origin = ""
     if action.startswith("back|"):
         action, back_origin = action.split("|", 1)
-    if action == "confirm":
-        lang = get_user_language(uid) or "vi"
-    else:
+    if action != "confirm":
         await query.answer()
         lang = get_user_language(uid) or "vi"
     state = get_doc_tool_pending(uid)
@@ -187836,6 +188059,7 @@ async def handle_doc_tool_callback(update: Update, context: ContextTypes.DEFAULT
             return await query.answer("Chưa đủ file để xử lý.", show_alert=True)
     if action == "confirm":
         await query.answer()
+        lang = await asyncio.to_thread(get_user_language, uid) or "vi"
     if action == "main":
         clear_doc_tool_pending(uid)
         return await safe_edit_or_send(query, localized_start_menu_text(uid, lang), parse_mode="HTML", reply_markup=localized_main_menu_keyboard(is_admin_user(uid), lang))
@@ -189490,12 +189714,25 @@ async def handle_memory_callback(update: Update, context: ContextTypes.DEFAULT_T
             search_created_at = float(search_state.get("created_at_ts") or 0)
         except (TypeError, ValueError):
             search_created_at = 0
+
+        def clear_matching_search_delete_pending():
+            if action not in {"view", "delete"} or len(action_parts) <= 2:
+                return
+            pending = get_memory_guided_pending(uid) or {}
+            if (
+                pending.get("pending_action") == "delete_confirm"
+                and str(pending.get("note_id") or "") == str(safe_int(action_parts[2], 0))
+                and str(pending.get("origin_search_token") or "") == str(search_token or "")
+            ):
+                clear_memory_guided_pending(uid)
+
         if (
             not search_token
             or search_token != str(search_state.get("token") or "")
             or not 0 <= time.time() - search_created_at <= QUICK_MEDIA_PENDING_TTL_SECONDS
             or not isinstance(search_ids, (list, tuple))
         ):
+            clear_matching_search_delete_pending()
             return await safe_edit_or_send(
                 query, menu_text_main_memory_i18n(lang), parse_mode="HTML",
                 reply_markup=main_memory_keyboard(lang, uid),
@@ -189503,6 +189740,7 @@ async def handle_memory_callback(update: Update, context: ContextTypes.DEFAULT_T
         search_ids = [safe_int(note_id, 0) for note_id in search_ids]
         search_ids = [note_id for note_id in search_ids if note_id > 0][:10]
         if not search_ids or (action != "search_results" and safe_int(action_parts[2], 0) not in search_ids):
+            clear_matching_search_delete_pending()
             return await safe_edit_or_send(
                 query, menu_text_main_memory_i18n(lang), parse_mode="HTML",
                 reply_markup=main_memory_keyboard(lang, uid),
@@ -189538,6 +189776,7 @@ async def handle_memory_callback(update: Update, context: ContextTypes.DEFAULT_T
         confirm_token = str(time.time_ns())
         set_memory_guided_pending(
             uid, "delete_confirm", note_id=note_id, confirm_token=confirm_token,
+            **({"origin_search_token": search_token} if search_token else {}),
         )
         return await safe_edit_or_send(
             query, memory_delete_confirm_text(note, lang), parse_mode="HTML",
@@ -211019,6 +211258,11 @@ async def cmd_vault_review(update: Update, context: ContextTypes.DEFAULT_TYPE):
     drafts = [prompt for prompt in prompts if prompt.get("status") != "approved"]
     text = vault_prompt_list_text(drafts, title="🧾 Nháp cần duyệt")
     rows = [[InlineKeyboardButton(f"Duyệt #{prompt['id']}", callback_data=f"vault|approve_prompt|{int(prompt['id'])}")] for prompt in drafts[:8]]
+    if rows:
+        rows.append([
+            InlineKeyboardButton("🔙 Quay lại Kho học liệu", callback_data="vault|status"),
+            InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+        ])
     await update.message.reply_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows) if rows else vault_admin_keyboard())
 
 
@@ -211028,7 +211272,14 @@ async def cmd_vault_prompt_library(update: Update, context: ContextTypes.DEFAULT
     prompts = toan_knowledge_vault().search_prompt(query=query, public_only=not is_admin, limit=10)
     text = vault_prompt_list_text(prompts, title="📚 Kho Prompt TOAN AAS")
     rows = [[InlineKeyboardButton(f"Dùng prompt #{prompt['id']}", callback_data=f"vault|use|{int(prompt['id'])}")] for prompt in prompts[:8]]
-    await update.message.reply_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows) if rows else None)
+    if is_admin:
+        rows.append([
+            InlineKeyboardButton("🔙 Quay lại Kho học liệu", callback_data="vault|status"),
+            InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+        ])
+    else:
+        rows.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    await update.message.reply_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows))
 
 
 async def handle_knowledge_vault_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -211073,10 +211324,20 @@ async def handle_knowledge_vault_callback(update: Update, context: ContextTypes.
     if action == "prompts":
         prompts = vault.search_prompt(public_only=False, limit=10)
         rows = [[InlineKeyboardButton(f"Dùng prompt #{prompt['id']}", callback_data=f"vault|use|{int(prompt['id'])}")] for prompt in prompts[:8]]
+        if rows:
+            rows.append([
+                InlineKeyboardButton("🔙 Quay lại Kho học liệu", callback_data="vault|status"),
+                InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+            ])
         return await query.edit_message_text(vault_prompt_list_text(prompts), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows) if rows else vault_admin_keyboard())
     if action == "review":
         prompts = [prompt for prompt in vault.search_prompt(public_only=False, limit=20) if prompt.get("status") != "approved"]
         rows = [[InlineKeyboardButton(f"Duyệt #{prompt['id']}", callback_data=f"vault|approve_prompt|{int(prompt['id'])}")] for prompt in prompts[:8]]
+        if rows:
+            rows.append([
+                InlineKeyboardButton("🔙 Quay lại Kho học liệu", callback_data="vault|status"),
+                InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+            ])
         return await query.edit_message_text(vault_prompt_list_text(prompts, title="🧾 Nháp cần duyệt"), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows) if rows else vault_admin_keyboard())
     if action == "assets":
         requested = parts[2] if len(parts) > 2 else ""

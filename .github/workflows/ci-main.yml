@@ -50,6 +50,7 @@ jobs:
             tests/test_operator_menu_callback_single_ack.py \
             tests/test_admin_finance_action_renderers.py \
             tests/test_support_ticket_reply_origin_pagination.py \
+            tests/test_support_ticket_lead_action_repeat.py \
             tests/test_support_admin_ticket_origin_pagination.py \
             tests/test_support_admin_ticket_note_origin_pagination.py \
             tests/test_support_ticket_ask_stale_guard.py \
@@ -106,6 +107,8 @@ jobs:
           python -m pip install pytest PyYAML
           python -c "from pathlib import Path; import yaml; yaml.safe_load(Path('.agents/state/telegram-small-flow-audit-20261006.yaml').read_text(encoding='utf-8')); print('UI state YAML PASS')"
           python -m pytest -q --noconftest \
+            tests/test_admin_ticket_stale_actions_emitted.py \
+            tests/test_admin_stale_ticket_status_callback_single_ack.py \
             tests/test_admin_marketing_support_back_origin.py \
             tests/test_owner_access_ui_runtime_copy.py \
             tests/test_small_flow_pending_expiry.py \
@@ -123,13 +126,22 @@ jobs:
             tests/test_support_ticket_send_concurrency.py \
             tests/test_support_ticket_file_send_concurrency.py \
             tests/test_support_ticket_send_matches_preview.py \
+            tests/test_music_suggestions_back_pending.py \
             tests/test_internal_archive_type_back_label.py \
             tests/test_internal_archive_search_back_origin.py \
             tests/test_internal_archive_preview_callback_single_ack.py \
             tests/test_internal_archive_save_callback_single_ack.py \
             tests/test_doc_tool_callback_single_ack.py \
+            tests/test_package_choice_callback_ack_order.py \
+            tests/test_manual_package_callback_single_ack.py \
+            tests/test_manual_foreign_owner_callback_single_ack.py \
+            tests/test_payos_risk_callback_single_ack.py \
+            tests/test_public_video_status_callback_single_ack.py \
+            tests/test_image_ai_entry_back_origin.py \
+            tests/test_suggest_music_callback_ui_route.py \
             tests/test_doc_split_back_emitted_callback.py \
             tests/test_doc_expired_page_spec_input.py \
+            tests/test_p0_ui_nav1_global_bottom_navigation.py \
             tests/test_profile_support_pending_origin.py \
             tests/test_p0_i18n_root_flow_copy.py \
             tests/test_support_expired_input_dispatch.py \

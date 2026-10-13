@@ -12,6 +12,15 @@ ROOT = Path(__file__).resolve().parents[1]
 BOT_SOURCE = (ROOT / "bot.py").read_text(encoding="utf-8")
 
 
+def _run_inert(coroutine):
+    try:
+        yielded = coroutine.send(None)
+    except StopIteration as completed:
+        return completed.value
+    coroutine.close()
+    raise AssertionError(f"No-I/O handler unexpectedly yielded: {yielded!r}")
+
+
 def _source_function(name):
     match = re.search(rf"(?m)^(?:async )?def {re.escape(name)}\b", BOT_SOURCE)
     if not match:
@@ -50,8 +59,10 @@ class _Query:
         self.from_user = SimpleNamespace(id=501)
         self.message = _Message()
         self.answers = []
+        self.events = []
 
     async def answer(self, *args, **kwargs):
+        self.events.append("ack")
         self.answers.append((args, kwargs))
 
 
@@ -61,8 +72,10 @@ class _FakeBot:
         self.started = asyncio.Event()
         self.release = asyncio.Event()
         self.sent = []
+        self.events = []
 
     async def send_document(self, **kwargs):
+        self.events.append("document")
         self.sent.append(kwargs)
         self.started.set()
         await self.release.wait()
@@ -70,6 +83,7 @@ class _FakeBot:
             raise RuntimeError("simulated Telegram send failure")
 
     async def send_photo(self, **kwargs):
+        self.events.append("photo")
         self.sent.append(kwargs)
         self.started.set()
         await self.release.wait()
@@ -88,19 +102,22 @@ class SupportTicketFileSendConcurrencyTests(unittest.TestCase):
             "attachment_type": "document",
         }
         self.user_pending = {}
+        self.read_dispatch = []
         self.get_ticket = lambda ticket_id: (
             self.ticket if int(ticket_id) == self.ticket["id"] else None
         )
+        self.get_language = lambda _uid: "vi"
         self.namespace = {
             "Update": object,
             "ContextTypes": SimpleNamespace(DEFAULT_TYPE=object),
+            "asyncio": SimpleNamespace(to_thread=self._read_only_thread),
             "InlineKeyboardButton": _Button,
             "InlineKeyboardMarkup": _Markup,
             "USER_PENDING": self.user_pending,
             "html": html,
             "logger": SimpleNamespace(warning=lambda *args, **kwargs: None),
             "normalize_user_language": lambda language: language,
-            "get_user_language": lambda uid: "vi",
+            "get_user_language": self.get_language,
             "public_hub_copy": lambda language: {
                 "support_ticket_admin_only": "Chỉ dành cho admin."
             },
@@ -113,6 +130,12 @@ class SupportTicketFileSendConcurrencyTests(unittest.TestCase):
                 self.namespace,
             )
         self.handler = self.namespace["handle_ticket_callback"]
+
+    async def _read_only_thread(self, helper, *args, **kwargs):
+        self.read_dispatch.append(
+            "language" if helper is self.namespace["get_user_language"] else "ticket"
+        )
+        return helper(*args, **kwargs)
 
     def _file_callback(self):
         keyboard = self.namespace["support_ticket_admin_keyboard"](self.ticket)
@@ -133,7 +156,7 @@ class SupportTicketFileSendConcurrencyTests(unittest.TestCase):
 
     def _run(self, query, bot):
         update = SimpleNamespace(callback_query=query)
-        return asyncio.run(self.handler(update, SimpleNamespace(bot=bot)))
+        return _run_inert(self.handler(update, SimpleNamespace(bot=bot)))
 
     def test_concurrent_file_callback_only_sends_once_and_alerts_duplicate(self):
         callback_data = self._file_callback()
@@ -197,6 +220,32 @@ class SupportTicketFileSendConcurrencyTests(unittest.TestCase):
         self.assertEqual(len(bot.sent), 1)
         self.assertEqual(bot.sent[0]["photo"], "file-74")
         self.assertNotIn("document", bot.sent[0])
+
+    def test_file_callback_offloads_reads_and_acks_before_document_and_photo_send(self):
+        callback_data = self._file_callback()
+
+        for attachment_type, send_kind in (("document", "document"), ("photo", "photo")):
+            with self.subTest(attachment_type=attachment_type):
+                self.ticket["attachment_type"] = attachment_type
+                self.read_dispatch.clear()
+                bot = _FakeBot()
+                bot.release.set()
+                query = _Query(callback_data)
+                bot.events = query.events
+
+                _run_inert(
+                    self.handler(
+                        SimpleNamespace(callback_query=query),
+                        SimpleNamespace(bot=bot),
+                    )
+                )
+
+                self.assertEqual(self.read_dispatch, ["language", "ticket"])
+                self.assertEqual(query.answers, [(('Đang gửi file đính kèm...',), {"show_alert": False})])
+                self.assertEqual(query.events, ["ack", send_kind])
+                self.assertEqual(len(bot.sent), 1)
+                self.assertIn(send_kind, bot.sent[0])
+                self.assertNotIn(f"support_ticket_file_inflight:501:74", self.user_pending)
 
     def test_stale_file_callback_answers_once_without_sending(self):
         callback_data = self._file_callback()

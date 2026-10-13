@@ -112,6 +112,7 @@ class AdminOverviewActualCallbackTest(unittest.TestCase):
             "clear_memory_guided_pending",
             "clear_music_guided_pending",
             "clear_pending_admin_tool_test",
+            "_local_video_planning_clear_pending",
         ):
             namespace[helper_name] = lambda *_args, **_kwargs: None
 
@@ -185,6 +186,7 @@ def finance_tax_menu_callback_fixture():
         "clear_memory_guided_pending",
         "clear_music_guided_pending",
         "clear_pending_admin_tool_test",
+        "_local_video_planning_clear_pending",
     ):
         namespace[helper_name] = lambda *_args, **_kwargs: None
 

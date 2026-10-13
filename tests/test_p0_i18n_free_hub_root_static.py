@@ -127,7 +127,7 @@ def test_free_hub_root_keyboard_uses_native_copy_without_changing_callbacks():
         "menu|main_memory",
         "freehub|upload",
         "freehub|hook",
-        "freehub|lib_music",
+        "freehub|lib_music_root",
         "menu|main",
     }
     for locale in SUPPORTED_LOCALES:

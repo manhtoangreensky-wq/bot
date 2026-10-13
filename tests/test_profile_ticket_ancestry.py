@@ -28,12 +28,19 @@ def _runtime():
     def update(ticket_id, **fields):
         calls.append(("update", ticket_id, fields)); ticket.update(fields)
         return dict(ticket)
+    def resolve_once(ticket_id, user_id):
+        if int(ticket_id) != int(ticket["id"]) or str(user_id) != ticket["user_id"]:
+            return None
+        if str(ticket.get("status") or "").strip().lower() not in {"resolved", "closed"}:
+            return update(ticket_id, status="resolved")
+        return dict(ticket)
     def listing(**kwargs):
         reads.append(("list", kwargs))
         return [dict(ticket)] if str(kwargs.get("user_id")) == ticket["user_id"] else []
     ns.update({
         "asyncio": SimpleNamespace(to_thread=to_thread),
-        "get_support_ticket": get, "update_support_ticket": update, "list_support_tickets": listing,
+        "get_support_ticket": get, "update_support_ticket": update,
+        "resolve_support_ticket_once": resolve_once, "list_support_tickets": listing,
         "add_support_ticket_message": lambda *args: calls.append(("message", args)),
         "latest_admin_ticket_reply": lambda _id: "", "latest_support_ticket_message": lambda *_args: "Fixture ticket",
     })
@@ -630,6 +637,129 @@ class AccountTicketAncestryTests(unittest.TestCase):
         self.assertEqual("ticket|mine|profile", _back(returned))
         self.assertEqual("resolved", ticket["status"])
         self.assertEqual([("update", 901, {"status": "resolved"})], calls)
+
+    def test_emitted_customer_done_replay_does_not_repeat_resolution_update(self):
+        ns, menu, _, tickets, calls, _, _, ticket = _runtime()
+        detail = click(tickets, _select(_list(ns, menu, tickets), "ticket", "pv"))
+        emitted_done = _select(detail, "ticket", "done")
+        self.assertTrue(emitted_done.startswith("ticket|done|901|"))
+
+        first = click(tickets, emitted_done)
+        self.assertEqual([((), {})], first.answers)
+        self.assertEqual("resolved", ticket["status"])
+        self.assertEqual([("update", 901, {"status": "resolved"})], calls)
+
+        stale_replay = click(tickets, emitted_done)
+        self.assertIsNot(first, stale_replay)
+        self.assertEqual([((), {})], stale_replay.answers)
+        self.assertIn(ns["public_hub_copy"]("vi")["support_ticket_done_success"], stale_replay.edits[0][0])
+        self.assertEqual([("update", 901, {"status": "resolved"})], calls)
+        self.assertEqual("ticket|pv|901|profile", _back(stale_replay))
+
+        ticket["status"] = "closed"
+        closed_replay = click(tickets, emitted_done)
+        self.assertEqual([((), {})], closed_replay.answers)
+        self.assertIn(ns["public_hub_copy"]("vi")["support_ticket_done_success"], closed_replay.edits[0][0])
+        self.assertEqual([("update", 901, {"status": "resolved"})], calls)
+        self.assertEqual("ticket|pv|901|profile", _back(closed_replay))
+
+    def test_concurrent_emitted_customer_done_presses_resolve_only_once(self):
+        import itertools
+        import sqlite3
+        import uuid
+
+        ns, menu, _, tickets, calls, _, _, ticket = _runtime()
+        detail = click(tickets, _select(_list(ns, menu, tickets), "ticket", "pv"))
+        emitted_done = _select(detail, "ticket", "done")
+        handler, pattern = tickets
+        self.assertTrue(pattern.match(emitted_done))
+
+        memory_uri = f"file:ticket_done_once_{uuid.uuid4().hex}?mode=memory&cache=shared"
+        anchor = sqlite3.connect(memory_uri, uri=True, timeout=10)
+        self.addCleanup(anchor.close)
+        anchor.execute(
+            "CREATE TABLE support_tickets (id INTEGER PRIMARY KEY, user_id TEXT, "
+            "ticket_code TEXT, status TEXT, updated_at TEXT, closed_at TEXT)"
+        )
+        anchor.execute("CREATE TABLE update_counter (count INTEGER NOT NULL)")
+        anchor.execute("INSERT INTO update_counter(count) VALUES (0)")
+        anchor.execute(
+            "CREATE TRIGGER count_ticket_resolution AFTER UPDATE OF status ON support_tickets "
+            "WHEN NEW.status='resolved' BEGIN UPDATE update_counter SET count=count+1; END"
+        )
+        anchor.execute(
+            "INSERT INTO support_tickets(id,user_id,ticket_code,status,updated_at,closed_at) "
+            "VALUES (901,'123','FIXTURE-901','new','created','')"
+        )
+        anchor.commit()
+        clock = itertools.count(1)
+        helper_namespace = {
+            "sqlite3": sqlite3,
+            "db_connect": lambda: sqlite3.connect(memory_uri, uri=True, timeout=10),
+            "now_text": lambda: f"fixture-{next(clock)}",
+        }
+        exec(compile(
+            "from __future__ import annotations\n" + source._function("resolve_support_ticket_once"),
+            "bot.py:resolve_support_ticket_once",
+            "exec",
+        ), helper_namespace)
+        ns["resolve_support_ticket_once"] = helper_namespace["resolve_support_ticket_once"]
+
+        ticket_lookup = ns["get_support_ticket"]
+
+        class _PauseAfterSnapshot:
+            def __await__(self):
+                yield "ticket-read-barrier"
+                return None
+
+        snapshots = []
+
+        async def barrier_to_thread(function, *args, **kwargs):
+            if function is ticket_lookup and int(args[0]) == 901:
+                snapshot = function(*args, **kwargs)
+                snapshots.append(snapshot)
+                await _PauseAfterSnapshot()
+                return snapshot
+            return function(*args, **kwargs)
+
+        ns["asyncio"] = SimpleNamespace(to_thread=barrier_to_thread)
+
+        class ConcurrentQuery:
+            def __init__(self, data):
+                self.data = data
+                self.from_user = SimpleNamespace(id=123)
+                self.answers = []
+                self.edits = []
+
+            async def answer(self, *args, **kwargs):
+                self.answers.append((args, kwargs))
+
+        queries = [ConcurrentQuery(emitted_done), ConcurrentQuery(emitted_done)]
+        coroutines = [
+            handler(SimpleNamespace(callback_query=query), SimpleNamespace(user_data={}))
+            for query in queries
+        ]
+        for coroutine in coroutines:
+            self.assertEqual("ticket-read-barrier", coroutine.send(None))
+
+        self.assertEqual(2, len(snapshots))
+        self.assertEqual(["new", "new"], [snapshot["status"] for snapshot in snapshots])
+        for coroutine in coroutines:
+            with self.assertRaises(StopIteration):
+                coroutine.send(None)
+
+        first, second = queries
+        self.assertEqual([((), {})], first.answers)
+        self.assertEqual([((), {})], second.answers)
+        self.assertEqual([], calls)
+        self.assertEqual("new", ticket["status"], "the handler's read fixture remains immutable")
+        status_row = anchor.execute(
+            "SELECT status, updated_at, closed_at FROM support_tickets WHERE id=901"
+        ).fetchone()
+        self.assertEqual(("resolved", "fixture-1", "fixture-1"), tuple(status_row))
+        self.assertEqual(1, anchor.execute("SELECT count FROM update_counter").fetchone()[0])
+        self.assertEqual("ticket|pv|901|profile", _back(first))
+        self.assertEqual("ticket|pv|901|profile", _back(second))
 
     def test_empty_owned_list_and_legacy_controls_keep_defined_destinations(self):
         ns, menu, _, tickets, calls, _, _, ticket = _runtime()

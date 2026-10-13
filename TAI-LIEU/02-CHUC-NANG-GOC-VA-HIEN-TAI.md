@@ -1,5 +1,19 @@
 # Product Video: chức năng gốc và hiện tại
 
+## Đối chiếu candidate Telegram UI — 13/10/2026
+
+Nguồn cũ để đối chiếu: `bot.py` trên main `e2b48f21` và các case UI bên dưới.
+
+| Hành vi source main | Candidate đã kiểm thử | Bằng chứng |
+|---|---|---|
+| AI edit được mở từ Image hub nhưng Back về local editor | Back về đúng Image hub; origin giữ qua intake và option Back | S12.35.402; 4 fixture dùng keyboard/registration/pending helpers thật |
+| Callback status Video thiếu task ID ACK rỗng rồi alert | Đúng một alert trước tra job | S12.35.401 RED/GREEN |
+| Callback nạp thủ công của người khác ACK rồi cảnh báo | Đúng một cảnh báo, dừng trước payment/DB | S12.35.399/.400 RED/GREEN |
+
+Những dòng ghi toàn bộ UI đã hoàn tất hoặc mọi nút mượt chưa có bằng chứng.
+Candidate mới chưa được deploy. Bảng giá, sản phẩm và các mô tả engine phía
+dưới giữ phạm vi/ngày đo gốc; không được suy ra live status từ bảng đối chiếu UI.
+
 ## Đối chiếu UI bổ trợ — 11/10/2026
 
 Các lỗi Back bỏ qua menu cha, mất origin Catalog/Tài khoản và kiểm tra ID

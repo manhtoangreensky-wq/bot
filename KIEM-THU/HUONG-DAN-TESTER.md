@@ -1,5 +1,23 @@
 # Hướng dẫn tester Product Video
 
+## Telegram UI candidate 13/10/2026
+
+Source/case gốc: [DANH-SACH-CASE.md](DANH-SACH-CASE.md), case
+`UI-IMAGE-AI-ENTRY-BACK-01` và `UI-VIDEO-STATUS-ACK-01`.
+
+1. Sau batch deploy, dùng tài khoản test mở `/start` → Ảnh → Chỉnh sửa AI.
+   Nếu đã có ảnh gần nhất, bấm Back ngay: phải về menu Ảnh. Lặp sau khi gửi
+   photo và file PNG/JPEG trong cùng luồng. Chỉ mở màn; không xác nhận tạo ảnh.
+2. Mở lại AI, chọn một kiểu sửa rồi Back → Back. Màn cuối phải là menu Ảnh;
+   state nhập của tài khoản khác và ảnh đã gửi không bị xóa.
+3. `UI-VIDEO-STATUS-ACK-01` là case fixture tự động: thiếu task ID phải trả
+   đúng một alert và không tra job/provider. Không tạo callback giả trên bot live.
+4. Khi báo lỗi, dùng mẫu `.github/ISSUE_TEMPLATE/05-telegram-ui-callback.yml`.
+   Ghi menu đã mở, nút đã bấm, màn mong đợi/thực tế, HH:MM:SS +07 và thời
+   gian click-to-screen. Trạng thái offline GREEN không thay cho xác nhận client.
+
+Các hướng dẫn Product Video/engine bên dưới giữ phạm vi riêng.
+
 Strategy V2 có đúng 8 representative rows và 9 quality-only rows. Tier `400`
 được representative rows bao phủ; không tạo quality-only job thứ mười.
 
