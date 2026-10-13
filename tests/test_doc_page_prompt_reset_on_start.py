@@ -76,6 +76,7 @@ class DocPagePromptResetOnStartTests(unittest.TestCase):
             "clear_internal_archive_pending", "clear_storage_addon_pending",
             "clear_translation_menu_pending", "clear_translation_session",
             "clear_broadcast_lite_pending",
+            "_local_video_planning_clear_pending", "clear_finance_compliance_pending",
         ):
             scope.setdefault(helper, lambda *_args, **_kwargs: None)
         for name in (

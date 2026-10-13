@@ -5,6 +5,8 @@ base_sha: e2b48f215f30a088156a1e29c1f402170274dcf0
 audit_origin_base_sha: 93919f93d7207f252252f10f9c03d1e8a2d458f8
 integration_workspace: C:/Users/toann/Documents/Codex/2026-09-15/l-m-c-i-tr-x20/work/telegram-ui-integration-20261013
 integration_branch: audit/telegram-ui-integration-20261013
+integration_pr: https://github.com/manhtoangreensky-wq/bot/pull/1426
+integration_pr_initial_head: 53a18c67d3d3e15762010a4e704ae171bacbae5c
 objective: >-
   Audit the current Telegram bot's Admin/customer small flows for wrong callback
   destinations, Back/Home ancestry, stale pending state, expired controls,
@@ -30,8 +32,15 @@ next_action: >-
   44 failed, 256 passed and 66 subtests passed. Concrete test-fixture causes
   were fixed; failed cleanup cases reran 16 passed / 7 subtests, and Admin
   action/status modules reran 46 passed. Pytest lastfailed cache is now empty.
-  Read docs/reports/TELEGRAM_UI_INTEGRATION_20261013.md, prepare one draft PR
-  for complete Linux CI, and keep merge/deployment/whole-goal gates open.
+  Draft PR #1426 is open. Linux source compile passed; full CI #38347923041
+  failed at Admin Package Orders with the same missing planner-cleanup fixture
+  dependency. Test-only sibling fixture fixes pass 9 tests / 8 subtests; Home
+  fixtures pass 5 tests / 22 subtests. Customer Done missing helper was reproduced
+  and its fixture fixed: 3 tests / 18 subtests pass; actual SQLite replay and
+  concurrent regressions pass 2 tests. Bot blob remains 36cd263870c077a1115509d941b8b82a22e1a7be.
+  Push this test-only follow-up to #1426 and verify its full Linux run. Keep
+  merge/deployment/whole-goal gates open; review concrete CI failures before
+  any next change. Read docs/reports/TELEGRAM_UI_INTEGRATION_20261013.md.
   Current VPS SHA is 381c71bb9e52876eb35b15f5c417ca2cf833dc28,
   blob d7e4f3da4f07c326571084dcdb5d45e6053090eb; bot/web/nginx active/running
   with NRestarts=0. Main's protected #1424 delta is not live, so an immediate
@@ -11517,7 +11526,7 @@ latest_local_parser_recovery_20261013:
     No package download, installation or production environment change.
 
 S12_35_403_main_integration_consolidated_verification:
-  status: local_compile_and_failure_reruns_green_remote_ci_pending
+  status: linux_ci_fixture_failure_followup_verified_pending_push
   source_base: e2b48f215f30a088156a1e29c1f402170274dcf0
   workspace: C:/Users/toann/Documents/Codex/2026-09-15/l-m-c-i-tr-x20/work/telegram-ui-integration-20261013
   branch: audit/telegram-ui-integration-20261013
@@ -11549,4 +11558,29 @@ S12_35_403_main_integration_consolidated_verification:
   delivery_gate: >-
     Current-main #1424 protected delta is not on runtime; deploying main would
     include that delta. Full compile/suite/CI, remaining route/visual acceptance
-    and A7 are still open. No push/new PR/merge/deploy/restart happened.
+    and A7 are still open. Draft PR #1426 was pushed; no merge/deploy/restart.
+
+S12_35_403_linux_ci_fixture_followup:
+  pr: https://github.com/manhtoangreensky-wq/bot/pull/1426
+  initial_head: 53a18c67d3d3e15762010a4e704ae171bacbae5c
+  source_compile_run: 38347923052 SUCCESS
+  main_ci_run: 38347923041 FAILURE
+  first_red: >-
+    Admin Package Orders Back source fixture omitted the existing
+    _local_video_planning_clear_pending dependency. Compile/Media Preview steps
+    passed; later workflow steps were skipped.
+  followup: >-
+    Test-only dependencies supplied to four independent Menu fixtures and five
+    Home/start fixtures. The Customer Ticket Done fixture also lacked the
+    resolve_support_ticket_once seam; a separate RED reproduced it before fixing.
+  verification: >-
+    Menu/Admin: 9 passed, 8 subtests passed in 21.04s. Home/start: 5 passed,
+    22 subtests passed in 71.36s. Customer action: 3 passed, 18 subtests passed
+    in 7.75s. Actual SQLite replay/concurrent: 2 passed in 51.13s.
+  product_source: >-
+    No new bot.py edit after commit 53a18c67; blob remains
+    36cd263870c077a1115509d941b8b82a22e1a7be. Protected engine/provider paths
+    remain unchanged against base.
+  attachment: >-
+    Attempted required Codex attach_artifact; app returned thread attachment
+    identity count exceeds 100. Keep the verified PR URL; do not unlink history.

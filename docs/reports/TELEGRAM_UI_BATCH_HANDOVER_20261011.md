@@ -21,7 +21,12 @@
   needs its delta reviewed separately; the UI batch has not been deployed.
 - Existing GitHub tester labels and UI issue template are available. Two
   candidate cases and scoped operating-document updates were added locally;
-  no issue/project or new PR was created yet.
+  [draft PR #1426](https://github.com/manhtoangreensky-wq/bot/pull/1426) is open.
+  No issue/project object was created.
+- First Linux CI failed at one missing Package Orders fixture dependency;
+  source compile and Media Preview passed. Same-class Menu/Home fixture owners
+  and Customer Done dependency have been fixed and verified. Product source
+  blob is unchanged; await the test-only follow-up CI before merge/deploy.
 - Detailed integration evidence:
   [TELEGRAM_UI_INTEGRATION_20261013.md](TELEGRAM_UI_INTEGRATION_20261013.md).
 

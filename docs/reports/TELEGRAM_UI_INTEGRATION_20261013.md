@@ -74,7 +74,7 @@ Strict-host SSH read returns runtime SHA
 `NRestarts=0`. Main's protected #1424 delta is not on runtime. A main deploy would
 include that delta, so delivery requires review of it in addition to this UI batch.
 
-This batch is prepared for a draft PR and CI. Merge/deploy remain separate gates.
+This batch is on draft PR #1426 and requires complete CI. Merge/deploy remain separate gates.
 Remaining A3/A5/A6 visual/dynamic coverage and A7 client timing are open. The goal
 must stay active; no claim of complete bot audit or all-button smoothness follows.
 
@@ -82,3 +82,30 @@ Tester cases and operating-document updates are linked from
 `KIEM-THU/DANH-SACH-CASE.md`, `KIEM-THU/HUONG-DAN-TESTER.md` and the two
 `TAI-LIEU` operating documents. Existing GitHub tester labels and UI issue template
 were verified; no new issue or Projects object was created.
+
+## PR #1426 — first Linux run and fixture follow-up
+
+Draft PR: https://github.com/manhtoangreensky-wq/bot/pull/1426.
+Initial tested HEAD: `53a18c67d3d3e15762010a4e704ae171bacbae5c`.
+
+- Source compile guard #38347923052 succeeded. Main CI #38347923041 completed
+  complete-source compile, Python compile and Media Preview successfully, then
+  failed in Admin Package Orders because its source-extracted Menu fixture had
+  not supplied `_local_video_planning_clear_pending`.
+- The same test-only dependency was supplied in independent Admin Package,
+  Security/DB, denied-menu and Finance fixtures. Result: `9 passed,
+  8 subtests passed in 21.04s`.
+- Home/start fixture owners were checked for both new cleanup dependencies;
+  relevant Broadcast, Document, Archive, Memory and Storage fixtures now provide
+  their unrelated no-op seams. Result: `5 passed, 22 subtests passed in 71.36s`.
+- Customer Done fixture separately reproduced missing `resolve_support_ticket_once`:
+  `1 failed, 3 passed, 17 subtests passed`. Its owner-scoped once-only fixture
+  seam preserves the original write/ACK assertions; GREEN: `3 passed,
+  18 subtests passed in 7.75s`.
+- The actual SQLite replay/concurrent regressions also passed: `2 passed
+  in 51.13s`. This avoids relying solely on the Customer-action fixture stub.
+- All follow-up source changes are test-only. `bot.py` blob remains
+  `36cd263870c077a1115509d941b8b82a22e1a7be`; the complete-source compile result
+  still applies to that exact blob. A new complete CI run is required after push.
+- Codex PR attachment was attempted but the app returned
+  `thread attachment identity count exceeds 100`; the PR is available by URL.

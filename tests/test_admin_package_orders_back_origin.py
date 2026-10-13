@@ -101,6 +101,7 @@ class AdminPackageOrdersBackOriginTests(unittest.TestCase):
             "clear_internal_archive_pending", "clear_doc_tool_pending",
             "clear_storage_addon_pending", "clear_memory_guided_pending",
             "clear_music_guided_pending", "clear_pending_admin_tool_test",
+            "_local_video_planning_clear_pending",
         ):
             namespace[helper] = lambda *_args, **_kwargs: None
         exec(compile(_function_source("admin_package_orders_keyboard"), str(BOT_PATH), "exec"), namespace)

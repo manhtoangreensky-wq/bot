@@ -53,6 +53,7 @@ def _load_menu_handler(clear_calls):
         "clear_memory_guided_pending": _record("memory_guided"),
         "clear_music_guided_pending": _record("music_guided"),
         "clear_pending_admin_tool_test": _record("admin_tool_test"),
+        "_local_video_planning_clear_pending": _record("video_planning_input"),
         "DOC_TOOL_MENU_ACTIONS": set(),
     }
     exec(compile(match.group(0), "bot.py:handle_menu_callback", "exec"), namespace)
