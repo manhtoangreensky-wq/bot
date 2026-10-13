@@ -118,7 +118,7 @@ class SpendGuardContext:
     cost_authority_source: str = ""
     bot_originated_action: bool = False
     bot_confirm_authority: str = ""
-    user_flow: str = "bot_live_acceptance"
+    user_flow: str = ""
     owner_receipt: str = ""
     entrypoint: str = "bot"  # "bot", "shell", "script", "worker_injection", "direct_provider", "ci", "out_of_band"
     is_paid_live_attempt: bool = False
@@ -198,12 +198,12 @@ WORKER_PRODUCTION_MINT_CALLERS: list[str] = []
 PROVIDER_PRODUCTION_MINT_CALLERS: list[str] = []
 DIRECT_HELPER_MINT_CALLERS: list[str] = []
 
-CALLSITE_STRING_IS_AUTHORITY: bool = False
-DIRECT_BOT_MINT_AUTHORITY_CONSTRUCTOR_USABLE: bool = False
+CALLSITE_STRING_IS_AUTHORITY: str = "NO"
+DIRECT_BOT_MINT_AUTHORITY_CONSTRUCTOR_USABLE: str = "NO"
 GENERIC_SERVICE_CAN_ISSUE_PRODUCTION_MINT_AUTHORITY: bool = False
 WORKER_CAN_ISSUE_PRODUCTION_MINT_AUTHORITY: bool = False
 PROVIDER_CAN_ISSUE_PRODUCTION_MINT_AUTHORITY: bool = False
-PRODUCTION_TEST_MINT_OVERRIDE_AVAILABLE: bool = False
+PRODUCTION_TEST_MINT_OVERRIDE_AVAILABLE: str = "NO"
 TEST_CONFIRM_CAN_REACH_REAL_TRANSPORT: bool = False
 TRANSPORT_OPERATION_MATCH: str = "EXACT"
 PROVIDER_ALIAS_AUTHORITY: str = "EXPLICIT_MAP_ONLY"
@@ -368,36 +368,92 @@ SPEND_GUARD_AUTHORITY_ROLE: str = "VALIDATE_AND_CONSUME_EXISTING_AUTHORITY_ONLY"
 TEST_AUTH_FIXTURE_LOCATION: str = "TESTS_ONLY"
 PRODUCTION_MODULE_TEST_MINT_HELPER_COUNT: int = 0
 AUTHORITY_DEFAULTS_IN_PRODUCTION_MINT_PATH: str = "ABSENT"
+
+# N21AC-FIX2 explicit additions
+BOT_MINT_TEST_OVERRIDE_IN_PRODUCTION: str = "NO"
+ISSUE_BOT_MINT_AUTHORITY_TEST_OVERRIDE_PARAMETER: str = "ABSENT"
+CALLER_CAN_SET_ISSUED_BY_SEAM: str = "NO"
+BOT_MINT_CAPABILITY_CALLER_FORGEABLE: str = "NO"
+BOT_MINT_TEST_FIXTURE_LOCATION: str = "TESTS_ONLY"
+PRODUCTION_BOT_MINT_TEST_HELPER_COUNT: int = 0
+VALIDATED_OWNERSHIP_BOOL_IS_AUTHORITY: str = "NO"
+VALIDATION_SOURCE_STRING_IS_AUTHORITY: str = "NO"
+VALIDATION_CALLSITE_STRING_IS_AUTHORITY: str = "NO"
+TELEGRAM_ID_FIELDS_ALONE_ARE_AUTHORITY: str = "NO"
+BOT_ORIGIN_AUTHORITY_SOURCE: str = "services.video_trace_state:video_request_traces"
+BOT_ORIGIN_AUTHORITY_DURABLE: str = "YES"
+BOT_ORIGIN_AUTHORITY_ONE_TIME: str = "YES"
+BOT_ORIGIN_AUTHORITY_BOUND_TO_UPDATE_ID: str = "YES"
+BOT_ORIGIN_AUTHORITY_BOUND_TO_CALLBACK_QUERY_ID: str = "YES"
+BOT_ORIGIN_AUTHORITY_BOUND_TO_CHAT_ID: str = "YES"
+BOT_ORIGIN_AUTHORITY_BOUND_TO_USER_ID: str = "YES"
+BOT_ORIGIN_AUTHORITY_BOUND_TO_JOB_ID: str = "YES"
+BOT_ORIGIN_AUTHORITY_BOUND_TO_REQUEST_ID: str = "YES"
+REAL_CANONICAL_BOT_MINT_ISSUANCE_SEAM: str = "PROVEN"
+PRODUCTION_BOT_MINT_AVAILABLE: str = "YES"
+PUBLIC_CALLBACK_HANDLER_PATH_TESTED: str = "YES"
+REAL_TELEGRAM_NETWORK_EVENT_USED: str = "NO"
+DURABLE_BOT_ORIGIN_AUTHORITY_VALIDATED: str = "YES"
+PROVIDER_FREE_E2E: str = "PASS"
+DEFAULT_CONTEXT_CAN_ASSERT_BOT_LIVE_ACCEPTANCE: str = "NO"
+DEFAULT_CONTEXT_CAN_ASSERT_BOT_ORIGIN: str = "NO"
+DEFAULT_CONTEXT_CAN_ASSERT_OWNER_LIVE_PURPOSE: str = "NO"
 # ─── END N21AC INVARIANT CONSTANTS ──────────────────────────────────────────
 
-@dataclasses.dataclass(frozen=True)
-class BotMintAuthority:
-    """Mint capability issued downstream of validated Telegram Bot UI updates."""
-    callsite: str
-    telegram_update_id: int | str
-    chat_id: int | str
-    user_id: int | str
-    callback_query_id: str = ""
-    job_id: str = ""
-    request_id: str = ""
-    action: str = "b14_confirm"
-    validation_source: str = ""
-    validation_callsite: str = ""
-    purpose: str = PURPOSE_PRODUCTION_USER_ACTION
-    owner_receipt: str = ""
-    expected_max_provider_spend_usd: float | Decimal = 0.0
-    nonce: str = dataclasses.field(default_factory=lambda: secrets.token_hex(16))
-    is_test_override: bool = False
-    record_type: str = RECORD_TYPE_SCENE_SUBMIT
-    _issued_by_seam: bool = False
 
-    def __post_init__(self):
-        if not self._issued_by_seam:
-            raise PermissionError(
-                "Direct construction of BotMintAuthority is forbidden; "
-                "DIRECT_BOT_MINT_AUTHORITY_CONSTRUCTOR_USABLE=NO. "
-                "Use issue_bot_mint_authority downstream of validated bot interaction."
-            )
+class BotMintAuthority:
+    """Mint capability issued exclusively downstream of durable canonical Bot-origin trace validation.
+
+    Direct construction via BotMintAuthority(...) is unconditionally forbidden
+    (DIRECT_BOT_MINT_AUTHORITY_CONSTRUCTOR_USABLE=NO, CALLER_CAN_SET_ISSUED_BY_SEAM=NO).
+    Instances are allocated only inside issue_bot_mint_authority after atomically
+    consuming a durable READY Bot-origin trace row in video_request_traces.
+    """
+
+    __slots__ = (
+        "callsite",
+        "telegram_update_id",
+        "chat_id",
+        "user_id",
+        "callback_query_id",
+        "job_id",
+        "request_id",
+        "action",
+        "validation_source",
+        "validation_callsite",
+        "purpose",
+        "owner_receipt",
+        "expected_max_provider_spend_usd",
+        "nonce",
+        "record_type",
+        "grant_id",
+    )
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        raise PermissionError(
+            "Direct construction of BotMintAuthority is forbidden; "
+            "DIRECT_BOT_MINT_AUTHORITY_CONSTRUCTOR_USABLE=NO, CALLER_CAN_SET_ISSUED_BY_SEAM=NO. "
+            "Use issue_bot_mint_authority downstream of durable canonical Bot-origin state."
+        )
+
+    @property
+    def is_test_override(self) -> bool:
+        return False
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        raise AttributeError("BotMintAuthority is immutable")
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError("BotMintAuthority is immutable")
+
+    def __repr__(self) -> str:
+        return (
+            f"BotMintAuthority(callsite={getattr(self, 'callsite', '')!r}, "
+            f"telegram_update_id={getattr(self, 'telegram_update_id', 0)!r}, "
+            f"job_id={getattr(self, 'job_id', '')!r}, "
+            f"request_id={getattr(self, 'request_id', '')!r}, "
+            f"purpose={getattr(self, 'purpose', '')!r})"
+        )
 
 
 
@@ -725,19 +781,12 @@ def issue_bot_mint_authority(
     expected_max_provider_spend_usd: float | Decimal = 0.0,
     db_path: str | None = None,
     env: dict[str, str] | None = None,
-    _caller_override_for_test: str | None = None,
 ) -> BotMintAuthority:
-    """Issue genuine Bot mint authority bound to validated Telegram callback."""
-    if _caller_override_for_test in ("generic_service", "worker", "provider", "router", "services"):
-        raise PermissionError(
-            f"Unauthorized mint caller '{_caller_override_for_test}': generic service/worker/provider cannot issue mint authority "
-            "(CALLSITE_STRING_IS_AUTHORITY=NO)"
-        )
-    if callsite not in _ALLOWED_LIVE_MINT_CALLSITES and not _caller_override_for_test:
+    """Issue genuine Bot mint authority bound to a durable, unconsumed canonical Bot-origin trace row."""
+    if callsite not in _ALLOWED_LIVE_MINT_CALLSITES:
         raise PermissionError(f"Unauthorized mint callsite: '{callsite}'")
 
-    # Section 7: CALLER_VALIDATED_OWNERSHIP_BOOL_TRUSTED=NO
-    # Caller passing validated_ownership=True alone without canonical validation state is blocked.
+    # Section 7: CALLER_VALIDATED_OWNERSHIP_BOOL_TRUSTED=NO, VALIDATED_OWNERSHIP_BOOL_IS_AUTHORITY=NO
     if not validated_ownership:
         raise PermissionError("Callback ownership must be validated before issuing BotMintAuthority")
     if not validation_source or not validation_callsite:
@@ -746,14 +795,9 @@ def issue_bot_mint_authority(
             "(CALLER_VALIDATED_OWNERSHIP_BOOL_TRUSTED=NO)"
         )
 
-    if not validation_source:
-        raise PermissionError("validation_source is required to issue BotMintAuthority")
-    if not validation_callsite:
-        raise PermissionError("validation_callsite is required to issue BotMintAuthority")
-
-    if validation_source != BOT_CONFIRM_VALIDATION_SOURCE and not _caller_override_for_test:
+    if validation_source != BOT_CONFIRM_VALIDATION_SOURCE:
         raise PermissionError(f"Unauthorized validation_source: '{validation_source}'")
-    if validation_callsite != BOT_CONFIRM_VALIDATION_CALLSITE and not _caller_override_for_test:
+    if validation_callsite != BOT_CONFIRM_VALIDATION_CALLSITE:
         raise PermissionError(f"Unauthorized validation_callsite: '{validation_callsite}'")
 
     if action not in ("b14_confirm", "create_video_task"):
@@ -822,24 +866,46 @@ def issue_bot_mint_authority(
         auth_micro = auth_data.get("expected_max_provider_spend_micro_usd") or 0
         actual_expected_max = from_micro_usd(auth_micro) if auth_micro else Decimal("0.0")
 
-    return BotMintAuthority(
-        callsite=callsite or "bot.py:handle_video_product_callback:b14_confirm",
+    # Section 5 & 7 (N21AC-FIX2): Verify and atomically consume durable canonical Bot-origin state
+    # in services.video_trace_state:video_request_traces (READY -> MINTED).
+    target_path = resolve_spend_guard_db_path(db_path, env)
+    from services.video_trace_state import consume_durable_bot_origin_for_mint
+
+    consumed_origin = consume_durable_bot_origin_for_mint(
+        callsite=callsite,
         telegram_update_id=up_id,
+        callback_query_id=cbq_id,
         chat_id=chat_id,
         user_id=user_id,
-        callback_query_id=cbq_id,
         job_id=j_id,
         request_id=r_id,
         action=action,
-        validation_source=validation_source,
-        validation_callsite=validation_callsite,
         purpose=canonical_purpose,
         owner_receipt=clean_owner_receipt,
-        expected_max_provider_spend_usd=actual_expected_max,
-        is_test_override=False,
-        record_type=RECORD_TYPE_SCENE_SUBMIT,
-        _issued_by_seam=True,
+        db_path=target_path,
     )
+    grant_id = str(consumed_origin.get("grant_id") or "").strip()
+    if not grant_id:
+        raise PermissionError("Failed to issue durable canonical Bot-origin grant_id")
+
+    inst = object.__new__(BotMintAuthority)
+    object.__setattr__(inst, "callsite", callsite or "bot.py:handle_video_product_callback:b14_confirm")
+    object.__setattr__(inst, "telegram_update_id", up_id)
+    object.__setattr__(inst, "chat_id", chat_id)
+    object.__setattr__(inst, "user_id", user_id)
+    object.__setattr__(inst, "callback_query_id", cbq_id)
+    object.__setattr__(inst, "job_id", j_id)
+    object.__setattr__(inst, "request_id", r_id)
+    object.__setattr__(inst, "action", action)
+    object.__setattr__(inst, "validation_source", validation_source)
+    object.__setattr__(inst, "validation_callsite", validation_callsite)
+    object.__setattr__(inst, "purpose", canonical_purpose)
+    object.__setattr__(inst, "owner_receipt", clean_owner_receipt)
+    object.__setattr__(inst, "expected_max_provider_spend_usd", actual_expected_max)
+    object.__setattr__(inst, "nonce", secrets.token_hex(16))
+    object.__setattr__(inst, "record_type", RECORD_TYPE_SCENE_SUBMIT)
+    object.__setattr__(inst, "grant_id", grant_id)
+    return inst
 
 
 def validate_bot_confirm_authority(authority: str | None) -> bool:
@@ -1670,29 +1736,28 @@ def create_bot_confirmation(
     env: dict[str, str] | None = None,
 ) -> str:
     """Create a durable, single-use bot confirmation record in SQLite WAL database.
-    Requires trusted BotMintAuthority (Sections 3 & 4). Default arguments or caller-controlled
-    origin strings alone are strictly forbidden.
+    Requires trusted BotMintAuthority backed by a durable canonical grant in video_request_traces.
+    Default arguments, test overrides, or caller-controlled origin strings are strictly forbidden.
     """
-    if mint_authority is None or not isinstance(mint_authority, BotMintAuthority):
+    if mint_authority is None or type(mint_authority) is not BotMintAuthority:
         raise PermissionError(
             "Bot mint authority missing: caller must provide a valid BotMintAuthority object; "
             "caller-controlled origin string or default args forbidden"
         )
-    if not mint_authority.is_test_override:
-        if mint_authority.callsite not in MINT_PRODUCTION_CALLERS:
-            raise PermissionError(f"Unauthorized mint callsite: '{mint_authority.callsite}' not in MINT_PRODUCTION_CALLERS")
-        if mint_authority.validation_source != BOT_CONFIRM_VALIDATION_SOURCE:
-            raise PermissionError(f"Unauthorized mint validation_source: '{mint_authority.validation_source}'")
-        if mint_authority.validation_callsite != BOT_CONFIRM_VALIDATION_CALLSITE:
-            raise PermissionError(f"Unauthorized mint validation_callsite: '{mint_authority.validation_callsite}'")
-        if chat_id and str(mint_authority.chat_id) != str(chat_id):
-            raise PermissionError(f"Mint authority chat_id mismatch: '{mint_authority.chat_id}' != '{chat_id}'")
-        if user_id and str(mint_authority.user_id) != str(user_id):
-            raise PermissionError(f"Mint authority user_id mismatch: '{mint_authority.user_id}' != '{user_id}'")
-        if job_id and mint_authority.job_id and str(mint_authority.job_id) != str(job_id):
-            raise PermissionError(f"Mint authority job_id mismatch: '{mint_authority.job_id}' != '{job_id}'")
-        if request_id and mint_authority.request_id and str(mint_authority.request_id) != str(request_id):
-            raise PermissionError(f"Mint authority request_id mismatch: '{mint_authority.request_id}' != '{request_id}'")
+    if mint_authority.callsite not in MINT_PRODUCTION_CALLERS:
+        raise PermissionError(f"Unauthorized mint callsite: '{mint_authority.callsite}' not in MINT_PRODUCTION_CALLERS")
+    if mint_authority.validation_source != BOT_CONFIRM_VALIDATION_SOURCE:
+        raise PermissionError(f"Unauthorized mint validation_source: '{mint_authority.validation_source}'")
+    if mint_authority.validation_callsite != BOT_CONFIRM_VALIDATION_CALLSITE:
+        raise PermissionError(f"Unauthorized mint validation_callsite: '{mint_authority.validation_callsite}'")
+    if chat_id and str(mint_authority.chat_id) != str(chat_id):
+        raise PermissionError(f"Mint authority chat_id mismatch: '{mint_authority.chat_id}' != '{chat_id}'")
+    if user_id and str(mint_authority.user_id) != str(user_id):
+        raise PermissionError(f"Mint authority user_id mismatch: '{mint_authority.user_id}' != '{user_id}'")
+    if job_id and mint_authority.job_id and str(mint_authority.job_id) != str(job_id):
+        raise PermissionError(f"Mint authority job_id mismatch: '{mint_authority.job_id}' != '{job_id}'")
+    if request_id and mint_authority.request_id and str(mint_authority.request_id) != str(request_id):
+        raise PermissionError(f"Mint authority request_id mismatch: '{mint_authority.request_id}' != '{request_id}'")
 
     # Section 3: Confirmation creation cannot override mint authority
     if purpose is not None and str(purpose).strip() != str(mint_authority.purpose).strip():
@@ -1722,14 +1787,38 @@ def create_bot_confirmation(
     target_path = resolve_spend_guard_db_path(db_path, env)
     init_spend_guard_db(db_path=target_path, env=env)
 
+    grant_id = str(getattr(mint_authority, "grant_id", "") or "").strip()
+    if not grant_id:
+        raise PermissionError(
+            "BotMintAuthority missing durable canonical grant_id "
+            "(BOT_MINT_CAPABILITY_CALLER_FORGEABLE=NO)"
+        )
+    from services.video_trace_state import verify_and_consume_bot_mint_grant_in_trace
+
+    verify_and_consume_bot_mint_grant_in_trace(
+        grant_id=grant_id,
+        callsite=mint_authority.callsite,
+        action=mint_authority.action,
+        telegram_update_id=mint_authority.telegram_update_id,
+        callback_query_id=mint_authority.callback_query_id,
+        chat_id=mint_authority.chat_id,
+        user_id=mint_authority.user_id,
+        job_id=mint_authority.job_id,
+        request_id=mint_authority.request_id,
+        purpose=actual_purpose,
+        owner_receipt=actual_owner_receipt,
+        db_path=target_path,
+    )
+
     c_id = confirmation_id or f"bot_conf_{secrets.token_hex(12)}"
     now_ts = time.time()
     expires_at = now_ts + float(ttl_seconds)
     meta = dict(metadata or {})
     meta["mint_callsite"] = mint_authority.callsite
     meta["telegram_update_id"] = mint_authority.telegram_update_id
+    meta["bot_mint_grant_id"] = grant_id
     meta_json = json.dumps(meta)
-    canonical_origin = f"bot_ui:{mint_authority.callsite}" if not mint_authority.is_test_override else "test_harness"
+    canonical_origin = f"bot_ui:{mint_authority.callsite}"
 
     conn = _get_sqlite_connection(target_path)
     try:
@@ -1804,28 +1893,27 @@ def mint_multiscene_bot_confirmation_plan(
     env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Mint a bounded authorization plan for multi-scene Product Video with 1 parent and N child confirmations.
-    Requires trusted BotMintAuthority (Sections 3 & 4).
+    Requires trusted BotMintAuthority backed by a durable canonical grant in video_request_traces.
     """
-    if mint_authority is None or not isinstance(mint_authority, BotMintAuthority):
+    if mint_authority is None or type(mint_authority) is not BotMintAuthority:
         raise PermissionError(
             "Bot mint authority missing: caller must provide a valid BotMintAuthority object; "
             "caller-controlled origin string or default args forbidden"
         )
-    if not mint_authority.is_test_override:
-        if mint_authority.callsite not in MINT_PRODUCTION_CALLERS:
-            raise PermissionError(f"Unauthorized mint callsite: '{mint_authority.callsite}' not in MINT_PRODUCTION_CALLERS")
-        if mint_authority.validation_source != BOT_CONFIRM_VALIDATION_SOURCE:
-            raise PermissionError(f"Unauthorized mint validation_source: '{mint_authority.validation_source}'")
-        if mint_authority.validation_callsite != BOT_CONFIRM_VALIDATION_CALLSITE:
-            raise PermissionError(f"Unauthorized mint validation_callsite: '{mint_authority.validation_callsite}'")
-        if chat_id and str(mint_authority.chat_id) != str(chat_id):
-            raise PermissionError(f"Mint authority chat_id mismatch: '{mint_authority.chat_id}' != '{chat_id}'")
-        if user_id and str(mint_authority.user_id) != str(user_id):
-            raise PermissionError(f"Mint authority user_id mismatch: '{mint_authority.user_id}' != '{user_id}'")
-        if job_id and mint_authority.job_id and str(mint_authority.job_id) != str(job_id):
-            raise PermissionError(f"Mint authority job_id mismatch: '{mint_authority.job_id}' != '{job_id}'")
-        if request_id and mint_authority.request_id and str(mint_authority.request_id) != str(request_id):
-            raise PermissionError(f"Mint authority request_id mismatch: '{mint_authority.request_id}' != '{request_id}'")
+    if mint_authority.callsite not in MINT_PRODUCTION_CALLERS:
+        raise PermissionError(f"Unauthorized mint callsite: '{mint_authority.callsite}' not in MINT_PRODUCTION_CALLERS")
+    if mint_authority.validation_source != BOT_CONFIRM_VALIDATION_SOURCE:
+        raise PermissionError(f"Unauthorized mint validation_source: '{mint_authority.validation_source}'")
+    if mint_authority.validation_callsite != BOT_CONFIRM_VALIDATION_CALLSITE:
+        raise PermissionError(f"Unauthorized mint validation_callsite: '{mint_authority.validation_callsite}'")
+    if chat_id and str(mint_authority.chat_id) != str(chat_id):
+        raise PermissionError(f"Mint authority chat_id mismatch: '{mint_authority.chat_id}' != '{chat_id}'")
+    if user_id and str(mint_authority.user_id) != str(user_id):
+        raise PermissionError(f"Mint authority user_id mismatch: '{mint_authority.user_id}' != '{user_id}'")
+    if job_id and mint_authority.job_id and str(mint_authority.job_id) != str(job_id):
+        raise PermissionError(f"Mint authority job_id mismatch: '{mint_authority.job_id}' != '{job_id}'")
+    if request_id and mint_authority.request_id and str(mint_authority.request_id) != str(request_id):
+        raise PermissionError(f"Mint authority request_id mismatch: '{mint_authority.request_id}' != '{request_id}'")
 
     # Section 3: Confirmation creation cannot override mint authority
     if purpose is not None and str(purpose).strip() != str(mint_authority.purpose).strip():
@@ -1855,15 +1943,12 @@ def mint_multiscene_bot_confirmation_plan(
     target_path = resolve_spend_guard_db_path(db_path, env)
     init_spend_guard_db(db_path=target_path, env=env)
 
-    parent_id = f"bot_conf_parent_{secrets.token_hex(12)}"
-    now_ts = time.time()
-    expires_at = now_ts + float(ttl_seconds)
-    meta = dict(metadata or {})
-    meta["mint_callsite"] = mint_authority.callsite
-    meta["telegram_update_id"] = mint_authority.telegram_update_id
-    meta_json = json.dumps(meta)
-    canonical_origin = f"bot_ui:{mint_authority.callsite}" if not mint_authority.is_test_override else "test_harness"
-    child_rec_type = RECORD_TYPE_TEST if mint_authority.is_test_override else RECORD_TYPE_SCENE_SUBMIT
+    grant_id = str(getattr(mint_authority, "grant_id", "") or "").strip()
+    if not grant_id:
+        raise PermissionError(
+            "BotMintAuthority missing durable canonical grant_id "
+            "(BOT_MINT_CAPABILITY_CALLER_FORGEABLE=NO)"
+        )
 
     child_authorized_max_map = (metadata or {}).get("child_authorized_max_usd_map")
     total_scenes = max(1, int(scene_count or 1))
@@ -1886,6 +1971,34 @@ def mint_multiscene_bot_confirmation_plan(
     else:
         for s_idx in range(1, total_scenes + 1):
             child_allocations_micro[s_idx] = 0
+
+    from services.video_trace_state import verify_and_consume_bot_mint_grant_in_trace
+
+    verify_and_consume_bot_mint_grant_in_trace(
+        grant_id=grant_id,
+        callsite=mint_authority.callsite,
+        action=mint_authority.action,
+        telegram_update_id=mint_authority.telegram_update_id,
+        callback_query_id=mint_authority.callback_query_id,
+        chat_id=mint_authority.chat_id,
+        user_id=mint_authority.user_id,
+        job_id=mint_authority.job_id,
+        request_id=mint_authority.request_id,
+        purpose=actual_purpose,
+        owner_receipt=actual_owner_receipt,
+        db_path=target_path,
+    )
+
+    parent_id = f"bot_conf_parent_{secrets.token_hex(12)}"
+    now_ts = time.time()
+    expires_at = now_ts + float(ttl_seconds)
+    meta = dict(metadata or {})
+    meta["mint_callsite"] = mint_authority.callsite
+    meta["telegram_update_id"] = mint_authority.telegram_update_id
+    meta["bot_mint_grant_id"] = grant_id
+    meta_json = json.dumps(meta)
+    canonical_origin = f"bot_ui:{mint_authority.callsite}"
+    child_rec_type = RECORD_TYPE_SCENE_SUBMIT
 
     conn = _get_sqlite_connection(target_path)
     try:

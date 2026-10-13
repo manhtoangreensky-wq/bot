@@ -65,6 +65,7 @@ def get_canonical_db_path() -> str:
         or os.getenv("DB_FILE")
         or os.getenv("DATABASE_PATH")
         or os.getenv("SQLITE_DB_PATH")
+        or os.getenv("SPEND_GUARD_DB_PATH")
         or "toandaas_system.db"
     ).strip()
 
@@ -1026,12 +1027,26 @@ def record_video_confirm_precheck_result(
             stage = STAGE_ADMISSION_BLOCKED
         else:
             stage = STAGE_PREFLIGHT_BLOCKED
+        eff_update_id = int(precheck_payload.get("telegram_update_id") or trace.get("telegram_update_id") or 0)
+        eff_cbq_id = str(precheck_payload.get("callback_query_id") or trace.get("callback_query_id") or "").strip()
+        eff_cb_action = str(precheck_payload.get("callback_action") or trace.get("callback_action") or "b14_confirm").strip()
+        eff_cb_owned = bool(
+            precheck_payload.get("callback_ownership_validated")
+            if "callback_ownership_validated" in precheck_payload
+            else trace.get("callback_ownership_validated")
+        )
+        prior_mint_status = str(trace.get("bot_origin_mint_status") or "").strip().upper()
+
         trace.update(
             {
                 **precheck_payload,
                 "job_id": clean_job_id,
                 "owner_user_id": clean_user_id,
                 "owner_chat_id": effective_chat_id,
+                "bound_user_id": str(clean_user_id),
+                "bound_chat_id": str(effective_chat_id),
+                "bound_job_id": str(clean_job_id),
+                "bound_request_id": str(trace.get("request_id") or ""),
                 "preflight_result": preflight,
                 "admission_result": admission,
                 "internal_blocker_code": str(blocker_code or "").strip() or None,
@@ -1042,6 +1057,24 @@ def record_video_confirm_precheck_result(
                 "charge_state": "NO_CHARGE",
             }
         )
+        if (
+            stage == STAGE_READY_TO_SUBMIT
+            and eff_update_id > 0
+            and eff_cbq_id
+            and not eff_cbq_id.startswith("cbq_fallback_")
+            and eff_cb_owned
+            and prior_mint_status not in {"MINTED", "CONSUMED"}
+        ):
+            trace.update(
+                {
+                    "telegram_update_id": eff_update_id,
+                    "callback_query_id": eff_cbq_id,
+                    "callback_action": eff_cb_action,
+                    "callback_ownership_validated": True,
+                    "bot_origin_mint_status": "READY",
+                    "bot_origin_ready_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                }
+            )
         trace = _append_trace_event(
             trace,
             stage,
@@ -1097,6 +1130,466 @@ def record_video_confirm_precheck_result(
             "session": session,
             "reason": str(exc or "precheck_persistence_failed"),
         }
+    finally:
+        if should_close:
+            connection.close()
+
+
+def record_owner_live_callback_origin_in_trace(
+    *,
+    owner_receipt: str,
+    telegram_update_id: int | str,
+    callback_query_id: str,
+    chat_id: int | str,
+    user_id: int | str,
+    job_id: int | str,
+    request_id: str,
+    callback_action: str = "create_video_task",
+    conn: sqlite3.Connection | None = None,
+    db_path: str | None = None,
+) -> dict[str, Any]:
+    """Record validated Telegram callback origin onto an existing canonical Owner live authorization trace row.
+
+    Enforces one-time callback origin recording and exact job/request lineage binding on COA-<owner_receipt>.
+    Cannot create a new Owner authorization row.
+    """
+    clean_rcpt = str(owner_receipt or "").strip()
+    if not clean_rcpt:
+        raise PermissionError("owner_receipt is required to record canonical owner callback origin")
+    try:
+        up_id = int(telegram_update_id or 0)
+    except Exception:
+        up_id = 0
+    if up_id <= 0:
+        raise ValueError("telegram_update_id > 0 is required to record canonical owner callback origin")
+    cbq_id = str(callback_query_id or "").strip()
+    if not cbq_id or cbq_id.startswith("cbq_fallback_") or cbq_id == "cbq_1":
+        raise ValueError("Valid callback_query_id is required to record canonical owner callback origin")
+    c_id = str(chat_id or "").strip()
+    u_id = str(user_id or "").strip()
+    j_id = str(job_id or "").strip()
+    r_id = str(request_id or "").strip()
+    if not c_id or not u_id or not j_id or not r_id or r_id.startswith("req_fallback_"):
+        raise ValueError("chat_id, user_id, job_id, and request_id are required to record canonical owner callback origin")
+
+    ensure_video_trace_schema(conn, db_path=db_path)
+    connection, should_close = get_db_connection(conn, db_path=db_path)
+    savepoint = ""
+    try:
+        savepoint = _begin_sqlite_transaction(connection)
+        trace_req_id = f"COA-{clean_rcpt}"
+        row = connection.execute(
+            "SELECT * FROM video_request_traces WHERE request_id = ? LIMIT 1",
+            (trace_req_id,),
+        ).fetchone()
+        if row is None:
+            raise PermissionError("Canonical owner authorization trace record missing in video_request_traces")
+
+        row_dict = dict(row)
+        stage_upper = str(row_dict.get("current_stage") or "").strip().upper()
+        if stage_upper in {"CONSUMED", "CONSUMED_SUCCESS", "CONSUMED_FAILED", "CONSUMED_AMBIGUOUS", "REVOKED"}:
+            raise PermissionError(f"Canonical owner authorization trace record is not active (stage={stage_upper})")
+
+        try:
+            payload = json.loads(row_dict.get("trace_payload_json") or "{}")
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+
+        mint_status = str(payload.get("bot_origin_mint_status") or "").strip().upper()
+        if mint_status in {"READY", "MINTED", "CONSUMED"}:
+            raise PermissionError(
+                "Canonical owner callback origin already recorded or consumed "
+                "(BOT_ORIGIN_AUTHORITY_ONE_TIME=YES)"
+            )
+
+        rec_job_id = str(payload.get("job_id") if payload.get("job_id") is not None else (row_dict.get("job_id") or "")).strip()
+        rec_req_id = str(payload.get("request_id") or "").strip()
+        if rec_job_id and rec_job_id != j_id:
+            raise PermissionError(f"Canonical owner trace job_id mismatch: {rec_job_id} != {j_id}")
+        if rec_req_id and rec_req_id != r_id:
+            raise PermissionError(f"Canonical owner trace request_id mismatch: {rec_req_id} != {r_id}")
+
+        dup_rows = connection.execute(
+            "SELECT request_id, trace_payload_json FROM video_request_traces WHERE trace_payload_json LIKE ?",
+            (f"%{cbq_id}%",),
+        ).fetchall()
+        for d_row in dup_rows:
+            try:
+                d_payload = json.loads(d_row[1] or "{}")
+            except Exception:
+                d_payload = {}
+            if (
+                isinstance(d_payload, dict)
+                and int(d_payload.get("telegram_update_id") or 0) == up_id
+                and str(d_payload.get("callback_query_id") or "").strip() == cbq_id
+                and str(d_payload.get("bot_origin_mint_status") or "").strip().upper() in {"READY", "MINTED", "CONSUMED"}
+            ):
+                raise PermissionError(
+                    "Telegram callback event (telegram_update_id, callback_query_id) already used for Bot origin minting "
+                    "(BOT_ORIGIN_AUTHORITY_ONE_TIME=YES)"
+                )
+
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        payload.update(
+            {
+                "telegram_update_id": up_id,
+                "callback_query_id": cbq_id,
+                "bound_chat_id": c_id,
+                "bound_user_id": u_id,
+                "bound_job_id": j_id,
+                "bound_request_id": r_id,
+                "callback_action": str(callback_action or "create_video_task").strip(),
+                "callback_ownership_validated": True,
+                "bot_origin_mint_status": "READY",
+                "bot_origin_ready_at": now_iso,
+            }
+        )
+        connection.execute(
+            "UPDATE video_request_traces SET trace_payload_json = ?, updated_at = ? WHERE request_id = ?",
+            (json.dumps(payload, ensure_ascii=False), now_iso, trace_req_id),
+        )
+        _commit_sqlite_transaction(connection, savepoint)
+        savepoint = ""
+        return payload
+    except Exception:
+        try:
+            _rollback_sqlite_transaction(connection, savepoint)
+        except Exception:
+            pass
+        raise
+    finally:
+        if should_close:
+            connection.close()
+
+
+def consume_durable_bot_origin_for_mint(
+    *,
+    callsite: str,
+    telegram_update_id: int | str,
+    callback_query_id: str,
+    chat_id: int | str,
+    user_id: int | str,
+    job_id: int | str,
+    request_id: str,
+    action: str,
+    purpose: str,
+    owner_receipt: str = "",
+    expected_max_micro_usd: int = 0,
+    conn: sqlite3.Connection | None = None,
+    db_path: str | None = None,
+) -> dict[str, Any]:
+    """Verify and atomically transition durable canonical Bot-origin state READY -> MINTED in video_request_traces.
+
+    Enforces:
+    - BOT_ORIGIN_AUTHORITY_SOURCE = services.video_trace_state:video_request_traces
+    - BOT_ORIGIN_AUTHORITY_DURABLE = YES
+    - BOT_ORIGIN_AUTHORITY_ONE_TIME = YES
+    - Exact binding to update_id, callback_query_id, chat_id, user_id, job_id, request_id.
+    - Caller-supplied strings/booleans/IDs alone without durable READY trace row fail closed.
+    """
+    try:
+        up_id = int(telegram_update_id or 0)
+    except Exception:
+        up_id = 0
+    cbq_id = str(callback_query_id or "").strip()
+    c_id = str(chat_id or "").strip()
+    u_id = str(user_id or "").strip()
+    j_id = str(job_id or "").strip()
+    r_id = str(request_id or "").strip()
+    clean_purpose = str(purpose or "PRODUCTION_USER_ACTION").strip()
+    clean_rcpt = str(owner_receipt or "").strip()
+
+    if up_id <= 0 or not cbq_id or not c_id or not u_id or not j_id or not r_id:
+        raise PermissionError("Incomplete Telegram callback identity for durable Bot-origin verification")
+
+    ensure_video_trace_schema(conn, db_path=db_path)
+    connection, should_close = get_db_connection(conn, db_path=db_path)
+    savepoint = ""
+    try:
+        savepoint = _begin_sqlite_transaction(connection)
+        if clean_purpose == "OWNER_AUTHORIZED_PAID_LIVE_TEST":
+            if not clean_rcpt:
+                raise PermissionError("owner_receipt is required for OWNER_AUTHORIZED_PAID_LIVE_TEST durable Bot-origin lookup")
+            trace_req_id = f"COA-{clean_rcpt}"
+        else:
+            trace_req_id = r_id
+
+        row = connection.execute(
+            "SELECT * FROM video_request_traces WHERE request_id = ? LIMIT 1",
+            (trace_req_id,),
+        ).fetchone()
+        if row is None:
+            raise PermissionError(
+                f"Durable canonical Bot-origin trace record '{trace_req_id}' missing in video_request_traces; "
+                "caller-supplied callsite/validation_source/IDs alone cannot authorize Bot mint "
+                "(CALLSITE_STRING_IS_AUTHORITY=NO, VALIDATED_OWNERSHIP_BOOL_IS_AUTHORITY=NO, "
+                "VALIDATION_SOURCE_STRING_IS_AUTHORITY=NO, TELEGRAM_ID_FIELDS_ALONE_ARE_AUTHORITY=NO)"
+            )
+
+        row_dict = dict(row)
+        stage_upper = str(row_dict.get("current_stage") or "").strip().upper()
+        if clean_purpose == "OWNER_AUTHORIZED_PAID_LIVE_TEST":
+            if stage_upper in {"CONSUMED", "CONSUMED_SUCCESS", "CONSUMED_FAILED", "CONSUMED_AMBIGUOUS", "REVOKED"}:
+                raise PermissionError(f"Canonical owner authorization trace record is not active (stage={stage_upper})")
+        else:
+            if stage_upper not in {STAGE_READY_TO_SUBMIT, "STAGE_READY_TO_SUBMIT"}:
+                raise PermissionError(
+                    f"Durable Bot-origin trace record '{trace_req_id}' is not in READY_TO_SUBMIT stage (stage={stage_upper})"
+                )
+
+        try:
+            payload = json.loads(row_dict.get("trace_payload_json") or "{}")
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+
+        mint_status = str(payload.get("bot_origin_mint_status") or "").strip().upper()
+        if mint_status in {"MINTED", "CONSUMED"}:
+            raise PermissionError(
+                f"Durable Bot-origin authority for '{trace_req_id}' already minted or consumed "
+                "(BOT_ORIGIN_AUTHORITY_ONE_TIME=YES)"
+            )
+        if mint_status != "READY":
+            raise PermissionError(
+                f"Durable Bot-origin authority for '{trace_req_id}' is not READY (status={mint_status or 'NONE'})"
+            )
+
+        if not bool(payload.get("callback_ownership_validated")):
+            raise PermissionError("Durable Bot-origin trace record lacks callback_ownership_validated=True")
+
+        rec_up_id = int(payload.get("telegram_update_id") or 0)
+        if rec_up_id <= 0 or rec_up_id != up_id:
+            raise PermissionError(
+                f"Durable Bot-origin telegram_update_id mismatch: {rec_up_id} != {up_id} "
+                "(BOT_ORIGIN_AUTHORITY_BOUND_TO_UPDATE_ID=YES)"
+            )
+
+        rec_cbq_id = str(payload.get("callback_query_id") or "").strip()
+        if not rec_cbq_id or rec_cbq_id != cbq_id:
+            raise PermissionError(
+                f"Durable Bot-origin callback_query_id mismatch: '{rec_cbq_id}' != '{cbq_id}' "
+                "(BOT_ORIGIN_AUTHORITY_BOUND_TO_CALLBACK_QUERY_ID=YES)"
+            )
+
+        rec_chat_id = str(payload.get("bound_chat_id") if payload.get("bound_chat_id") is not None else (payload.get("owner_chat_id") or "")).strip()
+        if not rec_chat_id or rec_chat_id != c_id:
+            raise PermissionError(
+                f"Durable Bot-origin chat_id mismatch: '{rec_chat_id}' != '{c_id}' "
+                "(BOT_ORIGIN_AUTHORITY_BOUND_TO_CHAT_ID=YES)"
+            )
+
+        rec_user_id = str(
+            payload.get("bound_user_id")
+            if payload.get("bound_user_id") is not None
+            else (payload.get("owner_user_id") if payload.get("owner_user_id") is not None else (row_dict.get("owner_user_id") or ""))
+        ).strip()
+        if not rec_user_id or rec_user_id != u_id:
+            raise PermissionError(
+                f"Durable Bot-origin user_id mismatch: '{rec_user_id}' != '{u_id}' "
+                "(BOT_ORIGIN_AUTHORITY_BOUND_TO_USER_ID=YES)"
+            )
+
+        rec_job_id = str(
+            payload.get("bound_job_id")
+            if payload.get("bound_job_id") is not None
+            else (payload.get("job_id") if payload.get("job_id") is not None else (row_dict.get("job_id") or ""))
+        ).strip()
+        if not rec_job_id or rec_job_id != j_id:
+            raise PermissionError(
+                f"Durable Bot-origin job_id mismatch: '{rec_job_id}' != '{j_id}' "
+                "(BOT_ORIGIN_AUTHORITY_BOUND_TO_JOB_ID=YES)"
+            )
+
+        rec_req_id = str(
+            payload.get("bound_request_id")
+            if payload.get("bound_request_id") is not None
+            else (payload.get("request_id") or "")
+        ).strip()
+        if not rec_req_id or rec_req_id != r_id:
+            raise PermissionError(
+                f"Durable Bot-origin request_id mismatch: '{rec_req_id}' != '{r_id}' "
+                "(BOT_ORIGIN_AUTHORITY_BOUND_TO_REQUEST_ID=YES)"
+            )
+
+        rec_action = str(payload.get("callback_action") or "").strip()
+        if rec_action not in {"b14_confirm", "create_video_task"}:
+            raise PermissionError(f"Durable Bot-origin callback_action invalid: '{rec_action}'")
+
+        # Ensure no other trace row has already minted or consumed the same (telegram_update_id, callback_query_id)
+        dup_rows = connection.execute(
+            "SELECT request_id, trace_payload_json FROM video_request_traces WHERE request_id != ? AND trace_payload_json LIKE ?",
+            (trace_req_id, f"%{cbq_id}%"),
+        ).fetchall()
+        for d_row in dup_rows:
+            try:
+                d_payload = json.loads(d_row[1] or "{}")
+            except Exception:
+                d_payload = {}
+            if (
+                isinstance(d_payload, dict)
+                and int(d_payload.get("telegram_update_id") or 0) == up_id
+                and str(d_payload.get("callback_query_id") or "").strip() == cbq_id
+                and str(d_payload.get("bot_origin_mint_status") or "").strip().upper() in {"MINTED", "CONSUMED"}
+            ):
+                raise PermissionError(
+                    "Telegram callback event (telegram_update_id, callback_query_id) already used for Bot origin minting "
+                    "(BOT_ORIGIN_AUTHORITY_ONE_TIME=YES)"
+                )
+
+        grant_id = f"bmg_{secrets.token_hex(16)}"
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        payload.update(
+            {
+                "bot_origin_mint_status": "MINTED",
+                "bot_mint_grant_id": grant_id,
+                "bot_mint_callsite": str(callsite or "").strip(),
+                "bot_mint_action": str(action or "").strip(),
+                "bot_mint_purpose": clean_purpose,
+                "bot_mint_owner_receipt": clean_rcpt,
+                "bot_mint_expected_max_micro_usd": int(expected_max_micro_usd or 0),
+                "bot_origin_minted_at": now_iso,
+            }
+        )
+        connection.execute(
+            "UPDATE video_request_traces SET trace_payload_json = ?, updated_at = ? WHERE request_id = ?",
+            (json.dumps(payload, ensure_ascii=False), now_iso, trace_req_id),
+        )
+        _commit_sqlite_transaction(connection, savepoint)
+        savepoint = ""
+        return {
+            "grant_id": grant_id,
+            "trace_request_id": trace_req_id,
+            "payload": payload,
+        }
+    except Exception:
+        try:
+            _rollback_sqlite_transaction(connection, savepoint)
+        except Exception:
+            pass
+        raise
+    finally:
+        if should_close:
+            connection.close()
+
+
+def verify_and_consume_bot_mint_grant_in_trace(
+    *,
+    grant_id: str,
+    callsite: str = "",
+    action: str = "",
+    telegram_update_id: int | str,
+    callback_query_id: str,
+    chat_id: int | str,
+    user_id: int | str,
+    job_id: int | str,
+    request_id: str,
+    purpose: str,
+    owner_receipt: str = "",
+    conn: sqlite3.Connection | None = None,
+    db_path: str | None = None,
+) -> dict[str, Any]:
+    """Verify durable MINTED Bot-origin grant in video_request_traces and atomically transition MINTED -> CONSUMED."""
+    clean_grant = str(grant_id or "").strip()
+    if not clean_grant or not clean_grant.startswith("bmg_"):
+        raise PermissionError(
+            "Missing or forged BotMintAuthority grant_id; durable canonical Bot-origin grant required "
+            "(BOT_MINT_CAPABILITY_CALLER_FORGEABLE=NO)"
+        )
+    try:
+        up_id = int(telegram_update_id or 0)
+    except Exception:
+        up_id = 0
+    cbq_id = str(callback_query_id or "").strip()
+    c_id = str(chat_id or "").strip()
+    u_id = str(user_id or "").strip()
+    j_id = str(job_id or "").strip()
+    r_id = str(request_id or "").strip()
+    clean_purpose = str(purpose or "PRODUCTION_USER_ACTION").strip()
+    clean_rcpt = str(owner_receipt or "").strip()
+
+    ensure_video_trace_schema(conn, db_path=db_path)
+    connection, should_close = get_db_connection(conn, db_path=db_path)
+    savepoint = ""
+    try:
+        savepoint = _begin_sqlite_transaction(connection)
+        trace_req_id = f"COA-{clean_rcpt}" if clean_purpose == "OWNER_AUTHORIZED_PAID_LIVE_TEST" else r_id
+        row = connection.execute(
+            "SELECT * FROM video_request_traces WHERE request_id = ? LIMIT 1",
+            (trace_req_id,),
+        ).fetchone()
+        if row is None:
+            raise PermissionError(
+                f"Durable Bot-origin grant trace record '{trace_req_id}' missing in video_request_traces "
+                "(BOT_MINT_CAPABILITY_CALLER_FORGEABLE=NO)"
+            )
+
+        row_dict = dict(row)
+        try:
+            payload = json.loads(row_dict.get("trace_payload_json") or "{}")
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+
+        mint_status = str(payload.get("bot_origin_mint_status") or "").strip().upper()
+        if mint_status == "CONSUMED":
+            raise PermissionError(
+                f"Durable Bot-origin mint grant for '{trace_req_id}' was already consumed "
+                "(BOT_ORIGIN_AUTHORITY_ONE_TIME=YES)"
+            )
+        if mint_status != "MINTED":
+            raise PermissionError(
+                f"Durable Bot-origin mint grant for '{trace_req_id}' is not in MINTED state (status={mint_status or 'NONE'}) "
+                "(BOT_MINT_CAPABILITY_CALLER_FORGEABLE=NO)"
+            )
+
+        rec_grant = str(payload.get("bot_mint_grant_id") or "").strip()
+        if not rec_grant or rec_grant != clean_grant:
+            raise PermissionError(
+                "BotMintAuthority grant_id does not match durable video_request_traces grant "
+                "(BOT_MINT_CAPABILITY_CALLER_FORGEABLE=NO)"
+            )
+
+        if int(payload.get("telegram_update_id") or 0) != up_id:
+            raise PermissionError("BotMintAuthority telegram_update_id mismatch with durable grant")
+        if str(payload.get("callback_query_id") or "").strip() != cbq_id:
+            raise PermissionError("BotMintAuthority callback_query_id mismatch with durable grant")
+        if str(payload.get("bound_chat_id") or "").strip() != c_id:
+            raise PermissionError("BotMintAuthority chat_id mismatch with durable grant")
+        if str(payload.get("bound_user_id") or "").strip() != u_id:
+            raise PermissionError("BotMintAuthority user_id mismatch with durable grant")
+        if str(payload.get("bound_job_id") or "").strip() != j_id:
+            raise PermissionError("BotMintAuthority job_id mismatch with durable grant")
+        if str(payload.get("bound_request_id") or "").strip() != r_id:
+            raise PermissionError("BotMintAuthority request_id mismatch with durable grant")
+        if str(payload.get("bot_mint_purpose") or "").strip() != clean_purpose:
+            raise PermissionError("BotMintAuthority purpose mismatch with durable grant")
+        if str(payload.get("bot_mint_owner_receipt") or "").strip() != clean_rcpt:
+            raise PermissionError("BotMintAuthority owner_receipt mismatch with durable grant")
+
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        payload.update(
+            {
+                "bot_origin_mint_status": "CONSUMED",
+                "bot_origin_consumed_at": now_iso,
+            }
+        )
+        connection.execute(
+            "UPDATE video_request_traces SET trace_payload_json = ?, updated_at = ? WHERE request_id = ?",
+            (json.dumps(payload, ensure_ascii=False), now_iso, trace_req_id),
+        )
+        _commit_sqlite_transaction(connection, savepoint)
+        savepoint = ""
+        return payload
+    except Exception:
+        try:
+            _rollback_sqlite_transaction(connection, savepoint)
+        except Exception:
+            pass
+        raise
     finally:
         if should_close:
             connection.close()

@@ -109064,6 +109064,19 @@ async def handle_owner_authorized_live_test_confirm(
             "(REAL_TELEGRAM_EVENT=YES, REAL_CALLBACK_QUERY_ID=YES, CALLSITE_STRING_ALONE_CAN_AUTHORIZE=NO)"
         )
 
+    # Record durable canonical Bot callback origin onto COA-<owner_receipt> in video_request_traces
+    from services import video_trace_state as _vts
+    _vts.record_owner_live_callback_origin_in_trace(
+        owner_receipt=clean_rcpt,
+        telegram_update_id=real_update_id,
+        callback_query_id=real_cbq_id,
+        chat_id=real_chat_id,
+        user_id=real_user_id,
+        job_id=str(job_id),
+        request_id=str(request_id),
+        callback_action="create_video_task",
+    )
+
     # Section 10: DURABLE_OWNER_MAX_SOLE_SOURCE=YES, CALLER_EXPECTED_MAX_INFLUENCE=NO
     auth_micro = auth_data.get("expected_max_provider_spend_micro_usd") or 0
     durable_max_usd = (Decimal(str(auth_micro)) / Decimal(1_000_000)) if auth_micro else Decimal("0.0")
@@ -121785,6 +121798,8 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             )
 
         chat_id = safe_int(getattr(getattr(query, "message", None), "chat_id", 0), 0)
+        cb_update_id = safe_int(getattr(update, "update_id", 0), 0)
+        cb_query_id = str(getattr(query, "id", "") or "").strip()
         intake_result = video_trace_state.begin_video_confirm_execution(
             session,
             user_id=uid,
@@ -121797,6 +121812,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 "seconds_per_scene": safe_int(draft.get("b14_scene_seconds"), 8),
                 "unit_xu": safe_int(draft.get("b14_quality_xu"), 80),
                 "entry_mode": "prompt_video",
+                "telegram_update_id": cb_update_id,
+                "callback_query_id": cb_query_id,
+                "callback_action": "b14_confirm",
+                "callback_ownership_validated": bool(cb_update_id > 0 and cb_query_id),
             },
         )
         session = dict(intake_result.get("session") or session)

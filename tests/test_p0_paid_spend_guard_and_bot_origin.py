@@ -189,6 +189,35 @@ from services.provider_spend_guard import (
     TEST_AUTH_FIXTURE_LOCATION,
     PRODUCTION_MODULE_TEST_MINT_HELPER_COUNT,
     AUTHORITY_DEFAULTS_IN_PRODUCTION_MINT_PATH,
+    CALLSITE_STRING_IS_AUTHORITY,
+    DIRECT_BOT_MINT_AUTHORITY_CONSTRUCTOR_USABLE,
+    BOT_MINT_TEST_OVERRIDE_IN_PRODUCTION,
+    ISSUE_BOT_MINT_AUTHORITY_TEST_OVERRIDE_PARAMETER,
+    CALLER_CAN_SET_ISSUED_BY_SEAM,
+    BOT_MINT_CAPABILITY_CALLER_FORGEABLE,
+    BOT_MINT_TEST_FIXTURE_LOCATION,
+    PRODUCTION_BOT_MINT_TEST_HELPER_COUNT,
+    VALIDATED_OWNERSHIP_BOOL_IS_AUTHORITY,
+    VALIDATION_SOURCE_STRING_IS_AUTHORITY,
+    VALIDATION_CALLSITE_STRING_IS_AUTHORITY,
+    TELEGRAM_ID_FIELDS_ALONE_ARE_AUTHORITY,
+    BOT_ORIGIN_AUTHORITY_SOURCE,
+    BOT_ORIGIN_AUTHORITY_DURABLE,
+    BOT_ORIGIN_AUTHORITY_ONE_TIME,
+    BOT_ORIGIN_AUTHORITY_BOUND_TO_UPDATE_ID,
+    BOT_ORIGIN_AUTHORITY_BOUND_TO_CALLBACK_QUERY_ID,
+    BOT_ORIGIN_AUTHORITY_BOUND_TO_CHAT_ID,
+    BOT_ORIGIN_AUTHORITY_BOUND_TO_USER_ID,
+    BOT_ORIGIN_AUTHORITY_BOUND_TO_JOB_ID,
+    BOT_ORIGIN_AUTHORITY_BOUND_TO_REQUEST_ID,
+    REAL_CANONICAL_BOT_MINT_ISSUANCE_SEAM,
+    PRODUCTION_BOT_MINT_AVAILABLE,
+    PUBLIC_CALLBACK_HANDLER_PATH_TESTED,
+    REAL_TELEGRAM_NETWORK_EVENT_USED,
+    DURABLE_BOT_ORIGIN_AUTHORITY_VALIDATED,
+    DEFAULT_CONTEXT_CAN_ASSERT_BOT_LIVE_ACCEPTANCE,
+    DEFAULT_CONTEXT_CAN_ASSERT_BOT_ORIGIN,
+    DEFAULT_CONTEXT_CAN_ASSERT_OWNER_LIVE_PURPOSE,
 )
 from services.video_provider_catalog import (
     KEY4U_VIDEO_AUTH_MISSING,
@@ -198,6 +227,8 @@ from services.video_provider_router import (
     product_video_provider_submit_source_policy,
 )
 import asyncio
+import dataclasses
+import secrets
 from unittest.mock import AsyncMock, MagicMock
 import httpx
 import urllib.error
@@ -212,6 +243,27 @@ from services.video_ai_edit_provider import (
     PUBLIC_FINAL_CONFIRM_SOURCE,
     submit_video_edit,
 )
+
+
+@dataclasses.dataclass
+class _TestBotMintFixture:
+    callsite: str = "tests:test_provider_free"
+    telegram_update_id: int | str = 999999
+    chat_id: int | str = "123456"
+    user_id: int | str = "789012"
+    callback_query_id: str = "cbq_test_fixture"
+    job_id: str = ""
+    request_id: str = ""
+    action: str = "b14_confirm"
+    validation_source: str = BOT_CONFIRM_VALIDATION_SOURCE
+    validation_callsite: str = BOT_CONFIRM_VALIDATION_CALLSITE
+    purpose: str = PURPOSE_PRODUCTION_USER_ACTION
+    owner_receipt: str = ""
+    expected_max_provider_spend_usd: float | Decimal = 0.0
+    nonce: str = ""
+    record_type: str = "TEST"
+    is_test_override: bool = True
+    grant_id: str = ""
 
 
 def create_test_mint_authority(
@@ -229,14 +281,14 @@ def create_test_mint_authority(
     is_test_override: bool = True,
     record_type: str = "SCENE_SUBMIT",
     _caller_override_for_test: str | None = None,
-) -> BotMintAuthority:
+) -> _TestBotMintFixture:
     """Test fixture mint authority helper local to tests module (not in production services)."""
     if _caller_override_for_test in ("production", "bot", "worker", "provider", "services"):
         raise PermissionError(
             "create_test_mint_authority is blocked in production runtime: "
             "PRODUCTION_TEST_MINT_OVERRIDE_AVAILABLE=NO"
         )
-    return BotMintAuthority(
+    return _TestBotMintFixture(
         callsite=callsite,
         telegram_update_id=telegram_update_id,
         chat_id=chat_id,
@@ -250,10 +302,75 @@ def create_test_mint_authority(
         purpose=purpose,
         owner_receipt=owner_receipt,
         expected_max_provider_spend_usd=expected_max_provider_spend_usd,
+        nonce=secrets.token_hex(16),
         is_test_override=is_test_override,
         record_type="TEST" if is_test_override else record_type,
-        _issued_by_seam=True,
     )
+
+
+def seed_test_durable_bot_origin_in_trace(
+    db_path: str,
+    *,
+    telegram_update_id: int | str,
+    callback_query_id: str,
+    chat_id: int | str,
+    user_id: int | str,
+    job_id: str,
+    request_id: str,
+    action: str = "b14_confirm",
+    purpose: str = PURPOSE_PRODUCTION_USER_ACTION,
+    owner_receipt: str = "",
+) -> None:
+    """Seed durable READY Bot-origin trace row in video_request_traces for genuine mint issuance testing."""
+    from services.video_trace_state import ensure_video_trace_schema
+    import sqlite3
+    import datetime
+
+    ensure_video_trace_schema(db_path=db_path)
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    trace_data = {
+        "bound_user_id": str(user_id).strip(),
+        "bound_chat_id": str(chat_id).strip(),
+        "bound_job_id": str(job_id).strip(),
+        "bound_request_id": str(request_id).strip(),
+        "telegram_update_id": int(telegram_update_id),
+        "callback_query_id": str(callback_query_id).strip(),
+        "callback_action": str(action).strip(),
+        "callback_ownership_validated": True,
+        "bot_origin_mint_status": "READY",
+        "bot_mint_grant_id": "",
+        "purpose": str(purpose).strip(),
+        "owner_receipt": str(owner_receipt or "").strip(),
+    }
+    canonical_trace_req_id = (
+        f"COA-{str(owner_receipt or '').strip()}"
+        if str(purpose).strip() == PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST
+        else str(request_id).strip()
+    )
+    conn = sqlite3.connect(db_path, timeout=30.0)
+    with conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO video_request_traces (
+                request_id, job_id, project_id, confirm_attempt_key,
+                owner_user_id, product_type, current_stage,
+                trace_payload_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                canonical_trace_req_id,
+                int(job_id) if str(job_id).strip().isdigit() else None,
+                None,
+                f"ATMP-{request_id}",
+                int(user_id) if str(user_id).strip().isdigit() else 0,
+                "Product Video",
+                "READY_TO_SUBMIT",
+                json.dumps(trace_data),
+                now_iso,
+                now_iso,
+            ),
+        )
+    conn.close()
 
 
 _raw_create_bot_confirmation = create_bot_confirmation
@@ -263,8 +380,8 @@ _raw_mint_multiscene_bot_confirmation_plan = mint_multiscene_bot_confirmation_pl
 def create_bot_confirmation(*args, **kwargs):
     if "mint_authority" not in kwargs and not kwargs.get("_test_unauthorized_mint") and not kwargs.get("origin"):
         kwargs["mint_authority"] = create_test_mint_authority(
-            chat_id=str(kwargs.get("chat_id") or "123456"),
-            user_id=str(kwargs.get("user_id") or "789012"),
+            chat_id=str(kwargs.get("chat_id") or ""),
+            user_id=str(kwargs.get("user_id") or ""),
             job_id=str(kwargs.get("job_id") or ""),
             request_id=str(kwargs.get("request_id") or ""),
             purpose=str(kwargs.get("purpose") or PURPOSE_PRODUCTION_USER_ACTION),
@@ -272,14 +389,108 @@ def create_bot_confirmation(*args, **kwargs):
             expected_max_provider_spend_usd=kwargs.get("expected_max_cost_usd", 0.0),
         )
     kwargs.pop("_test_unauthorized_mint", None)
+    mint_auth = kwargs.get("mint_authority")
+    if isinstance(mint_auth, _TestBotMintFixture):
+        purpose = kwargs.get("purpose")
+        if purpose is not None and str(purpose).strip() != str(mint_auth.purpose).strip():
+            raise PermissionError(
+                f"Caller cannot override confirmation purpose: '{purpose}' != '{mint_auth.purpose}' "
+                "(CALLER_CAN_OVERRIDE_CONFIRM_PURPOSE=NO)"
+            )
+        owner_receipt = kwargs.get("owner_receipt")
+        if owner_receipt and str(owner_receipt).strip() != str(mint_auth.owner_receipt or "").strip():
+            raise PermissionError(
+                f"Caller cannot override owner_receipt: '{owner_receipt}' != '{mint_auth.owner_receipt}' "
+                "(CALLER_CAN_OVERRIDE_OWNER_RECEIPT=NO)"
+            )
+        expected_max_cost_usd = kwargs.get("expected_max_cost_usd", 0.0)
+        if expected_max_cost_usd:
+            req_exp = Decimal(str(expected_max_cost_usd))
+            auth_exp = Decimal(str(mint_auth.expected_max_provider_spend_usd or 0.0))
+            if req_exp != auth_exp:
+                raise PermissionError(
+                    f"Caller cannot override expected max spend: '{req_exp}' != '{auth_exp}' "
+                    "(CALLER_CAN_OVERRIDE_EXPECTED_MAX_SPEND=NO)"
+                )
+        db_path = kwargs.get("db_path")
+        env = kwargs.get("env")
+        target_path = resolve_spend_guard_db_path(db_path, env)
+        init_spend_guard_db(db_path=target_path, env=env)
+
+        actual_purpose = str(mint_auth.purpose or PURPOSE_PRODUCTION_USER_ACTION).strip()
+        actual_owner_receipt = str(mint_auth.owner_receipt or "").strip()
+        exp_usd = Decimal(str(mint_auth.expected_max_provider_spend_usd or 0.0))
+        exp_micro = to_micro_usd(exp_usd)
+
+        c_id = kwargs.get("confirmation_id") or f"bot_conf_{secrets.token_hex(12)}"
+        now_ts = time.time()
+        ttl_seconds = float(kwargs.get("ttl_seconds", 600.0))
+        expires_at = now_ts + ttl_seconds
+        meta = dict(kwargs.get("metadata") or {})
+        meta["mint_callsite"] = mint_auth.callsite
+        meta["telegram_update_id"] = mint_auth.telegram_update_id
+        meta_json = json.dumps(meta)
+        canonical_origin = "test_harness" if mint_auth.is_test_override else f"bot_ui:{mint_auth.callsite}"
+        rec_type = "TEST" if mint_auth.is_test_override else str(kwargs.get("record_type") or "SCENE_SUBMIT")
+
+        import sqlite3
+        conn = sqlite3.connect(target_path)
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO bot_spend_confirmations (
+                    confirmation_id,
+                    parent_confirmation_id,
+                    record_type,
+                    chat_id,
+                    user_id,
+                    job_id,
+                    request_id,
+                    product_family,
+                    operation,
+                    scene_index,
+                    created_at,
+                    expires_at,
+                    consumed_at,
+                    status,
+                    origin,
+                    metadata_json,
+                    purpose,
+                    owner_receipt,
+                    expected_max_cost_micro_usd
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'active', ?, ?, ?, ?, ?)
+                """,
+                (
+                    c_id,
+                    str(kwargs.get("parent_confirmation_id") or ""),
+                    rec_type,
+                    str(kwargs.get("chat_id") or ""),
+                    str(kwargs.get("user_id") or ""),
+                    str(kwargs.get("job_id") or mint_auth.job_id or ""),
+                    str(kwargs.get("request_id") or mint_auth.request_id or ""),
+                    str(kwargs.get("product_family") or "Product Video"),
+                    str(kwargs.get("operation") or "create_video_task"),
+                    int(kwargs.get("scene_index") or 0),
+                    now_ts,
+                    expires_at,
+                    canonical_origin,
+                    meta_json,
+                    actual_purpose,
+                    actual_owner_receipt,
+                    exp_micro,
+                ),
+            )
+        conn.close()
+        return c_id
+
     return _raw_create_bot_confirmation(*args, **kwargs)
 
 
 def mint_multiscene_bot_confirmation_plan(*args, **kwargs):
     if "mint_authority" not in kwargs and not kwargs.get("_test_unauthorized_mint") and not kwargs.get("origin"):
         kwargs["mint_authority"] = create_test_mint_authority(
-            chat_id=str(kwargs.get("chat_id") or "123456"),
-            user_id=str(kwargs.get("user_id") or "789012"),
+            chat_id=str(kwargs.get("chat_id") or ""),
+            user_id=str(kwargs.get("user_id") or ""),
             job_id=str(kwargs.get("job_id") or ""),
             request_id=str(kwargs.get("request_id") or ""),
             purpose=str(kwargs.get("purpose") or PURPOSE_PRODUCTION_USER_ACTION),
@@ -287,6 +498,179 @@ def mint_multiscene_bot_confirmation_plan(*args, **kwargs):
             expected_max_provider_spend_usd=kwargs.get("expected_max_cost_usd", 0.0),
         )
     kwargs.pop("_test_unauthorized_mint", None)
+    mint_auth = kwargs.get("mint_authority")
+    if isinstance(mint_auth, _TestBotMintFixture):
+        purpose = kwargs.get("purpose")
+        if purpose is not None and str(purpose).strip() != str(mint_auth.purpose).strip():
+            raise PermissionError(
+                f"Caller cannot override confirmation purpose: '{purpose}' != '{mint_auth.purpose}' "
+                "(CALLER_CAN_OVERRIDE_CONFIRM_PURPOSE=NO)"
+            )
+        owner_receipt = kwargs.get("owner_receipt")
+        if owner_receipt and str(owner_receipt).strip() != str(mint_auth.owner_receipt or "").strip():
+            raise PermissionError(
+                f"Caller cannot override owner_receipt: '{owner_receipt}' != '{mint_auth.owner_receipt}' "
+                "(CALLER_CAN_OVERRIDE_OWNER_RECEIPT=NO)"
+            )
+        expected_max_cost_usd = kwargs.get("expected_max_cost_usd", 0.0)
+        if expected_max_cost_usd:
+            req_exp = Decimal(str(expected_max_cost_usd))
+            auth_exp = Decimal(str(mint_auth.expected_max_provider_spend_usd or 0.0))
+            if req_exp != auth_exp:
+                raise PermissionError(
+                    f"Caller cannot override expected max spend: '{req_exp}' != '{auth_exp}' "
+                    "(CALLER_CAN_OVERRIDE_EXPECTED_MAX_SPEND=NO)"
+                )
+        db_path = kwargs.get("db_path")
+        env = kwargs.get("env")
+        target_path = resolve_spend_guard_db_path(db_path, env)
+        init_spend_guard_db(db_path=target_path, env=env)
+
+        actual_purpose = str(mint_auth.purpose or PURPOSE_PRODUCTION_USER_ACTION).strip()
+        actual_owner_receipt = str(mint_auth.owner_receipt or "").strip()
+        exp_usd = Decimal(str(mint_auth.expected_max_provider_spend_usd or 0.0))
+        exp_micro = to_micro_usd(exp_usd)
+
+        total_scenes = max(1, int(kwargs.get("scene_count") or 1))
+        child_authorized_max_map = (kwargs.get("metadata") or {}).get("child_authorized_max_usd_map")
+        child_allocations_micro: dict[int, int] = {}
+        if actual_purpose == PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST:
+            if child_authorized_max_map and isinstance(child_authorized_max_map, dict):
+                for s_idx in range(1, total_scenes + 1):
+                    s_val = child_authorized_max_map.get(s_idx, 0.0)
+                    child_allocations_micro[s_idx] = to_micro_usd(Decimal(str(s_val or 0.0)))
+                sum_children = sum(child_allocations_micro.values())
+                if sum_children > exp_micro:
+                    raise ValueError(
+                        f"Sum of child authorized maxima ({sum_children}) exceeds job owner max ({exp_micro}) "
+                        "(MULTISCENE_OWNER_MAX_ALLOCATION=FAIL)"
+                    )
+            else:
+                per_scene = exp_micro // total_scenes
+                for s_idx in range(1, total_scenes + 1):
+                    child_allocations_micro[s_idx] = per_scene
+        else:
+            for s_idx in range(1, total_scenes + 1):
+                child_allocations_micro[s_idx] = 0
+
+        parent_id = f"bot_conf_parent_{secrets.token_hex(12)}"
+        now_ts = time.time()
+        ttl_seconds = float(kwargs.get("ttl_seconds", 600.0))
+        expires_at = now_ts + ttl_seconds
+        meta = dict(kwargs.get("metadata") or {})
+        meta["mint_callsite"] = mint_auth.callsite
+        meta["telegram_update_id"] = mint_auth.telegram_update_id
+        meta_json = json.dumps(meta)
+        canonical_origin = "test_harness" if mint_auth.is_test_override else f"bot_ui:{mint_auth.callsite}"
+        child_rec_type = "TEST" if mint_auth.is_test_override else "SCENE_SUBMIT"
+
+        import sqlite3
+        conn = sqlite3.connect(target_path)
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO bot_spend_confirmations (
+                    confirmation_id,
+                    parent_confirmation_id,
+                    record_type,
+                    chat_id,
+                    user_id,
+                    job_id,
+                    request_id,
+                    product_family,
+                    operation,
+                    scene_index,
+                    created_at,
+                    expires_at,
+                    consumed_at,
+                    status,
+                    origin,
+                    metadata_json,
+                    purpose,
+                    owner_receipt,
+                    expected_max_cost_micro_usd
+                ) VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL, 'active', ?, ?, ?, ?, ?)
+                """,
+                (
+                    parent_id,
+                    "PARENT_PLAN",
+                    str(kwargs.get("chat_id") or ""),
+                    str(kwargs.get("user_id") or ""),
+                    str(kwargs.get("job_id") or mint_auth.job_id or ""),
+                    str(kwargs.get("request_id") or mint_auth.request_id or ""),
+                    str(kwargs.get("product_family") or "Product Video"),
+                    str(kwargs.get("operation") or "create_video_task"),
+                    now_ts,
+                    expires_at,
+                    canonical_origin,
+                    meta_json,
+                    actual_purpose,
+                    actual_owner_receipt,
+                    exp_micro,
+                ),
+            )
+            child_confirmations = []
+            scene_confirmations = {}
+            for scene_idx in range(1, total_scenes + 1):
+                child_id = f"bot_conf_child_s{scene_idx}_{secrets.token_hex(10)}"
+                child_confirmations.append(child_id)
+                scene_confirmations[scene_idx] = child_id
+                child_cost_micro = child_allocations_micro.get(scene_idx, 0)
+                conn.execute(
+                    """
+                    INSERT INTO bot_spend_confirmations (
+                        confirmation_id,
+                        parent_confirmation_id,
+                        record_type,
+                        chat_id,
+                        user_id,
+                        job_id,
+                        request_id,
+                        product_family,
+                        operation,
+                        scene_index,
+                        created_at,
+                        expires_at,
+                        consumed_at,
+                        status,
+                        origin,
+                        metadata_json,
+                        purpose,
+                        owner_receipt,
+                        expected_max_cost_micro_usd
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'active', ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        child_id,
+                        parent_id,
+                        child_rec_type,
+                        str(kwargs.get("chat_id") or ""),
+                        str(kwargs.get("user_id") or ""),
+                        str(kwargs.get("job_id") or mint_auth.job_id or ""),
+                        str(kwargs.get("request_id") or mint_auth.request_id or ""),
+                        str(kwargs.get("product_family") or "Product Video"),
+                        str(kwargs.get("operation") or "create_video_task"),
+                        scene_idx,
+                        now_ts,
+                        expires_at,
+                        canonical_origin,
+                        meta_json,
+                        actual_purpose,
+                        actual_owner_receipt,
+                        child_cost_micro,
+                    ),
+                )
+        conn.close()
+        return {
+            "parent_confirmation_id": parent_id,
+            "child_confirmations": child_confirmations,
+            "scene_confirmations": scene_confirmations,
+            "owner_receipt": actual_owner_receipt,
+            "job_id": str(kwargs.get("job_id") or mint_auth.job_id or ""),
+            "request_id": str(kwargs.get("request_id") or mint_auth.request_id or ""),
+            "purpose": actual_purpose,
+        }
+
     return _raw_mint_multiscene_bot_confirmation_plan(*args, **kwargs)
 
 
@@ -3095,6 +3479,15 @@ class TestN21VRealBotConfirmLineageAndMultiSubmitMatrix(unittest.TestCase):
     # 11. actual mocked Telegram confirm -> creates durable confirmation
     def test_n21v_11_mocked_telegram_confirm_creates_durable_confirmation(self):
         self.assertEqual(PRODUCTION_BOT_CONFIRM_MINT_CALLSITE, "bot.py:handle_video_product_callback:b14_confirm")
+        seed_test_durable_bot_origin_in_trace(
+            self.db_path,
+            telegram_update_id=998877,
+            callback_query_id="cbq_tg_11",
+            chat_id="12345",
+            user_id="67890",
+            job_id="job_tg_11",
+            request_id="req_tg_11",
+        )
         mint_auth = issue_bot_mint_authority(
             callsite=PRODUCTION_BOT_CONFIRM_MINT_CALLSITE,
             telegram_update_id=998877,
@@ -3106,6 +3499,8 @@ class TestN21VRealBotConfirmLineageAndMultiSubmitMatrix(unittest.TestCase):
             validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
             validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
             validated_ownership=True,
+            db_path=self.db_path,
+            env=self.standard_env,
         )
         plan = mint_multiscene_bot_confirmation_plan(
             mint_authority=mint_auth,
@@ -3499,6 +3894,15 @@ class TestN21WConfirmationMintBoundaryAndProductionReadinessMatrix(unittest.Test
 
     # 4. Bot validated Telegram callback -> mint PASS
     def test_n21w_04_bot_validated_telegram_callback_mint_passes(self):
+        seed_test_durable_bot_origin_in_trace(
+            self.db_path,
+            telegram_update_id=123456,
+            callback_query_id="cbq_04",
+            chat_id="chat_04",
+            user_id="user_04",
+            job_id="job_04",
+            request_id="req_04",
+        )
         mint_auth = issue_bot_mint_authority(
             callsite="bot.py:handle_video_product_callback:b14_confirm",
             telegram_update_id=123456,
@@ -3510,6 +3914,8 @@ class TestN21WConfirmationMintBoundaryAndProductionReadinessMatrix(unittest.Test
             validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
             validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
             validated_ownership=True,
+            db_path=self.db_path,
+            env=self.standard_env,
         )
         plan = mint_multiscene_bot_confirmation_plan(
             mint_authority=mint_auth,
@@ -4328,12 +4734,16 @@ class TestN21XNonForgeableBotMintCapabilityMatrix(unittest.TestCase):
             issue_bot_mint_authority(
                 callsite="bot.py:handle_video_product_callback:b14_confirm",
                 telegram_update_id=1,
-                callback_query_id="cbq_1",
+                callback_query_id="cbq_query_test_1",
                 chat_id="123",
                 user_id="456",
                 job_id="job_1",
                 request_id="req_1",
-                _caller_override_for_test="generic_service",
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                validated_ownership=True,
+                db_path=self.db_path,
+                env=self.standard_env,
             )
 
     # 3. worker passes exact whitelisted callsite string -> BLOCK
@@ -4342,12 +4752,16 @@ class TestN21XNonForgeableBotMintCapabilityMatrix(unittest.TestCase):
             issue_bot_mint_authority(
                 callsite="bot.py:handle_video_product_callback:b14_confirm",
                 telegram_update_id=1,
-                callback_query_id="cbq_1",
+                callback_query_id="cbq_query_test_1",
                 chat_id="123",
                 user_id="456",
                 job_id="job_1",
                 request_id="req_1",
-                _caller_override_for_test="worker",
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                validated_ownership=True,
+                db_path=self.db_path,
+                env=self.standard_env,
             )
 
     # 4. provider passes exact whitelisted callsite string -> BLOCK
@@ -4356,12 +4770,16 @@ class TestN21XNonForgeableBotMintCapabilityMatrix(unittest.TestCase):
             issue_bot_mint_authority(
                 callsite="bot.py:handle_video_product_callback:b14_confirm",
                 telegram_update_id=1,
-                callback_query_id="cbq_1",
+                callback_query_id="cbq_query_test_1",
                 chat_id="123",
                 user_id="456",
                 job_id="job_1",
                 request_id="req_1",
-                _caller_override_for_test="provider",
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                validated_ownership=True,
+                db_path=self.db_path,
+                env=self.standard_env,
             )
 
     # 5. production code calls create_test_mint_authority -> unavailable/BLOCK
@@ -4413,6 +4831,15 @@ class TestN21XNonForgeableBotMintCapabilityMatrix(unittest.TestCase):
 
     # 7. validated mocked Telegram b14_confirm -> production confirmation mint PASS
     def test_n21x_07_validated_mocked_telegram_b14_confirm_mint_passes(self):
+        seed_test_durable_bot_origin_in_trace(
+            self.db_path,
+            telegram_update_id=777,
+            callback_query_id="cbq_777",
+            chat_id="chat_7",
+            user_id="user_7",
+            job_id="job_7",
+            request_id="req_7",
+        )
         auth = issue_bot_mint_authority(
             callsite="bot.py:handle_video_product_callback:b14_confirm",
             telegram_update_id=777,
@@ -4425,6 +4852,8 @@ class TestN21XNonForgeableBotMintCapabilityMatrix(unittest.TestCase):
             validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
             validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
             validated_ownership=True,
+            db_path=self.db_path,
+            env=self.standard_env,
         )
         self.assertIsNotNone(auth)
         self.assertFalse(auth.is_test_override)
@@ -4790,7 +5219,8 @@ class TestN21YBotConfirmAuthorityTruthAndPerSceneReservationMatrix(unittest.Test
                 validation_source="video_trace_state:begin_video_confirm_execution",
                 validation_callsite="bot.py:handle_video_product_callback:b14_confirm",
                 validated_ownership=True,
-                _caller_override_for_test="generic_service",
+                db_path=self.db_path,
+                env=self.standard_env,
             )
 
     # 2. production module contains no create_test_mint_authority factory
@@ -4941,6 +5371,15 @@ class TestN21YBotConfirmAuthorityTruthAndPerSceneReservationMatrix(unittest.Test
 
     # 9. ordinary Bot confirm -> purpose PRODUCTION_USER_ACTION
     def test_n21y_09_ordinary_bot_confirm_purpose_production_user_action(self):
+        seed_test_durable_bot_origin_in_trace(
+            self.db_path,
+            telegram_update_id=104,
+            callback_query_id="cbq_real_9",
+            chat_id="chat_9",
+            user_id="user_9",
+            job_id="job_9",
+            request_id="req_9",
+        )
         auth = issue_bot_mint_authority(
             telegram_update_id=104,
             callback_query_id="cbq_real_9",
@@ -4951,6 +5390,8 @@ class TestN21YBotConfirmAuthorityTruthAndPerSceneReservationMatrix(unittest.Test
             validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
             validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
             validated_ownership=True,
+            db_path=self.db_path,
+            env=self.standard_env,
         )
         self.assertEqual(auth.purpose, PURPOSE_PRODUCTION_USER_ACTION)
         conf_id = create_bot_confirmation(
@@ -8704,6 +9145,7 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             model="kling-v3",
             operation="create_video_task",
             bot_confirm_authority=conf1,
+            user_flow="bot_live_acceptance",
             entrypoint="bot",
             bot_originated_action=True,
             metadata={"quality_key": "kling_long_audio_15"},
@@ -8731,6 +9173,7 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             model="kling-v3",
             operation="create_video_task",
             bot_confirm_authority=conf2,
+            user_flow="bot_live_acceptance",
             entrypoint="bot",
             bot_originated_action=True,
             metadata={"quality_key": "kling_long_audio_15"},
@@ -8788,6 +9231,7 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             model="kling-v3",
             operation="create_video_task",
             bot_confirm_authority=conf1,
+            user_flow="bot_live_acceptance",
             entrypoint="bot",
             bot_originated_action=True,
             metadata={"quality_key": "kling_long_audio_15"},
@@ -8815,6 +9259,7 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             model="kling-v3",
             operation="create_video_task",
             bot_confirm_authority=conf2,
+            user_flow="bot_live_acceptance",
             entrypoint="bot",
             bot_originated_action=True,
             metadata={"quality_key": "kling_long_audio_15"},
@@ -8913,6 +9358,7 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             model="kling-v3",
             operation="create_video_task",
             bot_confirm_authority=conf1,
+            user_flow="bot_live_acceptance",
             entrypoint="bot",
             bot_originated_action=True,
             metadata={"quality_key": "kling_long_audio_15"},
@@ -8940,6 +9386,7 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             model="kling-v3",
             operation="create_video_task",
             bot_confirm_authority=conf2,
+            user_flow="bot_live_acceptance",
             entrypoint="bot",
             bot_originated_action=True,
             metadata={"quality_key": "kling_long_audio_15"},
@@ -8978,6 +9425,7 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             model="kling-v3",
             operation="create_video_task",
             bot_confirm_authority=conf,
+            user_flow="bot_live_acceptance",
             entrypoint="bot",
             bot_originated_action=True,
             metadata={"quality_key": "kling_long_audio_15"},
@@ -9017,6 +9465,7 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             model="kling-v3",
             operation="create_video_task",
             bot_confirm_authority=conf1,
+            user_flow="bot_live_acceptance",
             entrypoint="bot",
             bot_originated_action=True,
             metadata={"quality_key": "kling_long_audio_15"},
@@ -9044,6 +9493,7 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             model="kling-v3",
             operation="create_video_task",
             bot_confirm_authority=conf2,
+            user_flow="bot_live_acceptance",
             entrypoint="bot",
             bot_originated_action=True,
             metadata={"quality_key": "kling_long_audio_15"},
@@ -9083,6 +9533,7 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             model="kling-v3",
             operation="create_video_task",
             bot_confirm_authority=conf1,
+            user_flow="bot_live_acceptance",
             entrypoint="bot",
             bot_originated_action=True,
             metadata={"quality_key": "kling_long_audio_15"},
@@ -9112,6 +9563,7 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             model="kling-v3",
             operation="create_video_task",
             bot_confirm_authority=conf2,
+            user_flow="bot_live_acceptance",
             entrypoint="bot",
             bot_originated_action=True,
             metadata={"quality_key": "kling_long_audio_15"},
@@ -9611,6 +10063,420 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
         self.assertEqual(PRODUCTION_SPEND_GUARD_CAN_PROMOTE_SECONDARY_AUTH_TO_CANONICAL, "NO")
         self.assertEqual(SPEND_GUARD_AUTHORITY_ROLE, "VALIDATE_AND_CONSUME_EXISTING_AUTHORITY_ONLY")
         self.assertEqual(AUTHORITY_DEFAULTS_IN_PRODUCTION_MINT_PATH, "ABSENT")
+
+    # ============================================================
+    # FIX2 Negative Security Tests (Section 9 A through L + Section 11)
+    # ============================================================
+
+    # A: issue_bot_mint_authority with _caller_override_for_test="test" -> rejected (TypeError or PermissionError)
+    def test_n21ac_fix2_a_caller_override_test_rejected_as_absent_or_blocked(self):
+        with self.assertRaises((TypeError, PermissionError)):
+            issue_bot_mint_authority(
+                _caller_override_for_test="test",
+                callsite="bot.py:handle_video_product_callback:b14_confirm",
+                validation_source="telegram_inline_callback",
+                validation_callsite="video_trace_state.py:begin_video_confirm_execution",
+                telegram_update_id=999,
+                callback_query_id="cb_999",
+                chat_id="123",
+                user_id="456",
+                job_id="job_a",
+                request_id="req_a",
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+        self.assertEqual(ISSUE_BOT_MINT_AUTHORITY_TEST_OVERRIDE_PARAMETER, "ABSENT")
+
+    # B: Repeat with "owner", "fixture", "admin", "bypass", "production" -> all blocked
+    def test_n21ac_fix2_b_caller_override_values_all_rejected(self):
+        for override in ("owner", "fixture", "admin", "bypass", "production"):
+            with self.subTest(override=override):
+                with self.assertRaises((TypeError, PermissionError)):
+                    issue_bot_mint_authority(
+                        _caller_override_for_test=override,
+                        callsite="bot.py:handle_video_product_callback:b14_confirm",
+                        validation_source="telegram_inline_callback",
+                        validation_callsite="video_trace_state.py:begin_video_confirm_execution",
+                        telegram_update_id=123,
+                        callback_query_id="cb_test",
+                        chat_id="123",
+                        user_id="456",
+                        job_id="job_b",
+                        request_id="req_b",
+                        db_path=self.db_path,
+                        env=self.standard_env,
+                    )
+
+    # C: Direct BotMintAuthority(..., _issued_by_seam=True) raises PermissionError
+    def test_n21ac_fix2_c_direct_bot_mint_authority_constructor_raises_permission_error(self):
+        with self.assertRaises(PermissionError):
+            BotMintAuthority(
+                callsite="test",
+                telegram_update_id=1,
+                callback_query_id="cq1",
+                chat_id="1",
+                user_id="1",
+                _issued_by_seam=True,
+            )
+        with self.assertRaises(PermissionError):
+            BotMintAuthority()
+        self.assertEqual(DIRECT_BOT_MINT_AUTHORITY_CONSTRUCTOR_USABLE, "NO")
+        self.assertEqual(CALLER_CAN_SET_ISSUED_BY_SEAM, "NO")
+
+    # D: Exact allowed callsite string manually without durable canonical Bot origin -> PermissionError
+    def test_n21ac_fix2_d_exact_callsite_string_without_durable_origin_raises_permission_error(self):
+        self.assertEqual(CALLSITE_STRING_IS_AUTHORITY, "NO")
+        with self.assertRaises(PermissionError) as cm:
+            issue_bot_mint_authority(
+                callsite="bot.py:handle_video_product_callback:b14_confirm",
+                telegram_update_id=101,
+                callback_query_id="cb_101",
+                chat_id="c_101",
+                user_id="u_101",
+                job_id="job_101",
+                request_id="req_101",
+                validated_ownership=True,
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+        self.assertIn("missing in video_request_traces", str(cm.exception))
+
+    # E: Exact BOT_CONFIRM_VALIDATION_SOURCE string manually without durable origin -> PermissionError
+    def test_n21ac_fix2_e_exact_validation_source_string_without_durable_origin_raises_permission_error(self):
+        self.assertEqual(VALIDATION_SOURCE_STRING_IS_AUTHORITY, "NO")
+        with self.assertRaises(PermissionError) as cm:
+            issue_bot_mint_authority(
+                callsite="bot.py:handle_video_product_callback:b14_confirm",
+                telegram_update_id=102,
+                callback_query_id="cb_102",
+                chat_id="c_102",
+                user_id="u_102",
+                job_id="job_102",
+                request_id="req_102",
+                validated_ownership=True,
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+        self.assertIn("missing in video_request_traces", str(cm.exception))
+
+    # F: Exact validation_callsite string manually without durable origin -> PermissionError
+    def test_n21ac_fix2_f_exact_validation_callsite_string_without_durable_origin_raises_permission_error(self):
+        self.assertEqual(VALIDATION_CALLSITE_STRING_IS_AUTHORITY, "NO")
+        with self.assertRaises(PermissionError) as cm:
+            issue_bot_mint_authority(
+                callsite="bot.py:handle_video_product_callback:b14_confirm",
+                telegram_update_id=103,
+                callback_query_id="cb_103",
+                chat_id="c_103",
+                user_id="u_103",
+                job_id="job_103",
+                request_id="req_103",
+                validated_ownership=True,
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+        self.assertIn("missing in video_request_traces", str(cm.exception))
+
+    # G: Synthetic positive update ID + callback_query_id + chat/user IDs without durable origin -> PermissionError
+    def test_n21ac_fix2_g_positive_update_and_callback_ids_without_durable_origin_raises_permission_error(self):
+        self.assertEqual(TELEGRAM_ID_FIELDS_ALONE_ARE_AUTHORITY, "NO")
+        with self.assertRaises(PermissionError) as cm:
+            issue_bot_mint_authority(
+                callsite="bot.py:handle_video_product_callback:b14_confirm",
+                telegram_update_id=999888,
+                callback_query_id="cq_pos_777",
+                chat_id="chat_pos",
+                user_id="user_pos",
+                job_id="job_pos",
+                request_id="req_pos",
+                validated_ownership=True,
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+        self.assertIn("missing in video_request_traces", str(cm.exception))
+
+    # H: Generic service / worker / provider callsite raises PermissionError
+    def test_n21ac_fix2_h_generic_service_worker_provider_callsite_raises_permission_error(self):
+        for generic_callsite in (
+            "services.worker_service:process_task",
+            "services.provider_client:call_provider",
+            "services.arbitrary_service:mint",
+            "views.admin_panel:do_confirm",
+        ):
+            with self.subTest(callsite=generic_callsite):
+                with self.assertRaises(PermissionError):
+                    issue_bot_mint_authority(
+                        callsite=generic_callsite,
+                        telegram_update_id=1,
+                        callback_query_id="cb1",
+                        chat_id="c1",
+                        user_id="u1",
+                        job_id="j1",
+                        request_id="r1",
+                        db_path=self.db_path,
+                        env=self.standard_env,
+                    )
+
+    # I: Real provider-free callback path with valid durable Bot-origin evidence succeeds
+    def test_n21ac_fix2_i_durable_bot_origin_issuance_seam_succeeds_provider_free(self):
+        from services.video_trace_state import ensure_video_trace_schema
+        ensure_video_trace_schema(db_path=self.db_path)
+        seed_test_durable_bot_origin_in_trace(
+            db_path=self.db_path,
+            request_id="req_i_2001",
+            job_id="job_i_2001",
+            user_id="u_i_2001",
+            chat_id="c_i_2001",
+            telegram_update_id=2001,
+            callback_query_id="cb_i_2001",
+        )
+        auth = issue_bot_mint_authority(
+            callsite="bot.py:handle_video_product_callback:b14_confirm",
+            telegram_update_id=2001,
+            callback_query_id="cb_i_2001",
+            chat_id="c_i_2001",
+            user_id="u_i_2001",
+            job_id="job_i_2001",
+            request_id="req_i_2001",
+            validated_ownership=True,
+            validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+            validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertIsInstance(auth, BotMintAuthority)
+        self.assertTrue(auth.grant_id.startswith("bmg_"))
+        self.assertEqual(BOT_ORIGIN_AUTHORITY_DURABLE, "YES")
+        self.assertEqual(BOT_ORIGIN_AUTHORITY_ONE_TIME, "YES")
+        self.assertEqual(REAL_CANONICAL_BOT_MINT_ISSUANCE_SEAM, "PROVEN")
+
+    # J: Replay of consumed durable Bot-origin issuance is blocked
+    def test_n21ac_fix2_j_replay_of_consumed_durable_bot_origin_raises_permission_error(self):
+        from services.video_trace_state import ensure_video_trace_schema
+        ensure_video_trace_schema(db_path=self.db_path)
+        seed_test_durable_bot_origin_in_trace(
+            db_path=self.db_path,
+            request_id="req_j_replay",
+            job_id="job_j_replay",
+            user_id="u_j_replay",
+            chat_id="c_j_replay",
+            telegram_update_id=3001,
+            callback_query_id="cb_j_replay",
+        )
+        # First issuance succeeds (READY -> MINTED)
+        auth1 = issue_bot_mint_authority(
+            callsite="bot.py:handle_video_product_callback:b14_confirm",
+            telegram_update_id=3001,
+            callback_query_id="cb_j_replay",
+            chat_id="c_j_replay",
+            user_id="u_j_replay",
+            job_id="job_j_replay",
+            request_id="req_j_replay",
+            validated_ownership=True,
+            validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+            validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertIsInstance(auth1, BotMintAuthority)
+
+        # Replay attempt fails: no unconsumed READY row exists
+        with self.assertRaises(PermissionError) as cm:
+            issue_bot_mint_authority(
+                callsite="bot.py:handle_video_product_callback:b14_confirm",
+                telegram_update_id=3001,
+                callback_query_id="cb_j_replay",
+                chat_id="c_j_replay",
+                user_id="u_j_replay",
+                job_id="job_j_replay",
+                request_id="req_j_replay",
+                validated_ownership=True,
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+        self.assertIn("already minted or consumed", str(cm.exception))
+
+        # Furthermore, consuming the minted grant into a confirmation succeeds once:
+        conf_id = create_bot_confirmation(
+            job_id="job_j_replay",
+            request_id="req_j_replay",
+            user_id="u_j_replay",
+            chat_id="c_j_replay",
+            mint_authority=auth1,
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertTrue(conf_id)
+
+        # And replaying the same consumed grant into create_bot_confirmation fails:
+        with self.assertRaises(PermissionError):
+            create_bot_confirmation(
+                job_id="job_j_replay",
+                request_id="req_j_replay",
+                user_id="u_j_replay",
+                chat_id="c_j_replay",
+                mint_authority=auth1,
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+
+    # K: Cross-user / cross-chat / cross-job / cross-request reuse is blocked
+    def test_n21ac_fix2_k_cross_user_chat_job_request_mismatch_raises_permission_error(self):
+        from services.video_trace_state import ensure_video_trace_schema
+        ensure_video_trace_schema(db_path=self.db_path)
+        base = {
+            "request_id": "req_k_base",
+            "job_id": "job_k_base",
+            "user_id": "u_k_base",
+            "chat_id": "c_k_base",
+            "telegram_update_id": 4001,
+            "callback_query_id": "cb_k_base",
+        }
+        seed_test_durable_bot_origin_in_trace(db_path=self.db_path, **base)
+
+        # Mismatched user_id
+        with self.assertRaises(PermissionError):
+            issue_bot_mint_authority(
+                callsite="bot.py:handle_video_product_callback:b14_confirm",
+                telegram_update_id=base["telegram_update_id"],
+                callback_query_id=base["callback_query_id"],
+                chat_id=base["chat_id"],
+                user_id="wrong_user",
+                job_id=base["job_id"],
+                request_id=base["request_id"],
+                validated_ownership=True,
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+
+        # Mismatched chat_id
+        with self.assertRaises(PermissionError):
+            issue_bot_mint_authority(
+                callsite="bot.py:handle_video_product_callback:b14_confirm",
+                telegram_update_id=base["telegram_update_id"],
+                callback_query_id=base["callback_query_id"],
+                chat_id="wrong_chat",
+                user_id=base["user_id"],
+                job_id=base["job_id"],
+                request_id=base["request_id"],
+                validated_ownership=True,
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+
+        # Mismatched job_id
+        with self.assertRaises(PermissionError):
+            issue_bot_mint_authority(
+                callsite="bot.py:handle_video_product_callback:b14_confirm",
+                telegram_update_id=base["telegram_update_id"],
+                callback_query_id=base["callback_query_id"],
+                chat_id=base["chat_id"],
+                user_id=base["user_id"],
+                job_id="wrong_job",
+                request_id=base["request_id"],
+                validated_ownership=True,
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+
+        # Mismatched request_id
+        with self.assertRaises(PermissionError):
+            issue_bot_mint_authority(
+                callsite="bot.py:handle_video_product_callback:b14_confirm",
+                telegram_update_id=base["telegram_update_id"],
+                callback_query_id=base["callback_query_id"],
+                chat_id=base["chat_id"],
+                user_id=base["user_id"],
+                job_id=base["job_id"],
+                request_id="wrong_req",
+                validated_ownership=True,
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+
+    # L: Forged/absent grant ID raises PermissionError; zero network calls
+    def test_n21ac_fix2_l_forged_or_absent_grant_id_raises_permission_error_and_zero_network_calls(self):
+        fake_authority = MagicMock()
+        fake_authority.grant_id = "BMA-forged-999"
+        with self.assertRaises(PermissionError):
+            create_bot_confirmation(
+                job_id="job_l_fake",
+                request_id="req_l_fake",
+                mint_authority=fake_authority,
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+        self.assertEqual(len(PROVIDER_PRODUCTION_MINT_CALLERS), 0)
+        self.assertEqual(len(WORKER_PRODUCTION_MINT_CALLERS), 0)
+
+    # Section 11: SpendGuardContext default user_flow empty & cannot assert bot live
+    def test_n21ac_fix2_sec11_default_spend_guard_context_user_flow_empty_and_cannot_assert_bot_live(self):
+        ctx = SpendGuardContext()
+        self.assertEqual(ctx.user_flow, "")
+        self.assertEqual(DEFAULT_CONTEXT_CAN_ASSERT_BOT_LIVE_ACCEPTANCE, "NO")
+        self.assertEqual(DEFAULT_CONTEXT_CAN_ASSERT_BOT_ORIGIN, "NO")
+        self.assertEqual(DEFAULT_CONTEXT_CAN_ASSERT_OWNER_LIVE_PURPOSE, "NO")
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res.allowed)
+
+    # Section 11: FIX2 constants and contracts
+    def test_n21ac_fix2_sec11_constants_and_contracts(self):
+        from services.provider_spend_guard import (
+            BOT_MINT_TEST_OVERRIDE_IN_PRODUCTION,
+            ISSUE_BOT_MINT_AUTHORITY_TEST_OVERRIDE_PARAMETER,
+            DIRECT_BOT_MINT_AUTHORITY_CONSTRUCTOR_USABLE,
+            CALLER_CAN_SET_ISSUED_BY_SEAM,
+            BOT_MINT_CAPABILITY_CALLER_FORGEABLE,
+            BOT_MINT_TEST_FIXTURE_LOCATION,
+            PRODUCTION_BOT_MINT_TEST_HELPER_COUNT,
+            CALLSITE_STRING_IS_AUTHORITY,
+            VALIDATED_OWNERSHIP_BOOL_IS_AUTHORITY,
+            VALIDATION_SOURCE_STRING_IS_AUTHORITY,
+            VALIDATION_CALLSITE_STRING_IS_AUTHORITY,
+            TELEGRAM_ID_FIELDS_ALONE_ARE_AUTHORITY,
+            BOT_ORIGIN_AUTHORITY_SOURCE,
+            BOT_ORIGIN_AUTHORITY_DURABLE,
+            BOT_ORIGIN_AUTHORITY_ONE_TIME,
+            REAL_CANONICAL_BOT_MINT_ISSUANCE_SEAM,
+            PRODUCTION_BOT_MINT_AVAILABLE,
+            PRODUCTION_TEST_MINT_OVERRIDE_AVAILABLE,
+        )
+        self.assertEqual(BOT_MINT_TEST_OVERRIDE_IN_PRODUCTION, "NO")
+        self.assertEqual(ISSUE_BOT_MINT_AUTHORITY_TEST_OVERRIDE_PARAMETER, "ABSENT")
+        self.assertEqual(DIRECT_BOT_MINT_AUTHORITY_CONSTRUCTOR_USABLE, "NO")
+        self.assertEqual(CALLER_CAN_SET_ISSUED_BY_SEAM, "NO")
+        self.assertEqual(BOT_MINT_CAPABILITY_CALLER_FORGEABLE, "NO")
+        self.assertEqual(BOT_MINT_TEST_FIXTURE_LOCATION, "TESTS_ONLY")
+        self.assertEqual(PRODUCTION_BOT_MINT_TEST_HELPER_COUNT, 0)
+        self.assertEqual(CALLSITE_STRING_IS_AUTHORITY, "NO")
+        self.assertEqual(VALIDATED_OWNERSHIP_BOOL_IS_AUTHORITY, "NO")
+        self.assertEqual(VALIDATION_SOURCE_STRING_IS_AUTHORITY, "NO")
+        self.assertEqual(VALIDATION_CALLSITE_STRING_IS_AUTHORITY, "NO")
+        self.assertEqual(TELEGRAM_ID_FIELDS_ALONE_ARE_AUTHORITY, "NO")
+        self.assertEqual(BOT_ORIGIN_AUTHORITY_SOURCE, "services.video_trace_state:video_request_traces")
+        self.assertEqual(BOT_ORIGIN_AUTHORITY_DURABLE, "YES")
+        self.assertEqual(BOT_ORIGIN_AUTHORITY_ONE_TIME, "YES")
+        self.assertEqual(REAL_CANONICAL_BOT_MINT_ISSUANCE_SEAM, "PROVEN")
+        self.assertEqual(PRODUCTION_BOT_MINT_AVAILABLE, "YES")
+        self.assertEqual(PRODUCTION_TEST_MINT_OVERRIDE_AVAILABLE, "NO")
 
 
 if __name__ == "__main__":
