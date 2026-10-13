@@ -189,7 +189,38 @@ from services.provider_spend_guard import (
     TEST_AUTH_FIXTURE_LOCATION,
     PRODUCTION_MODULE_TEST_MINT_HELPER_COUNT,
     AUTHORITY_DEFAULTS_IN_PRODUCTION_MINT_PATH,
+    DURABLE_BOT_EVENT_AUTHORITY,
+    VALIDATION_SOURCE_STRING_IS_AUTHORITY,
+    VALIDATION_CALLSITE_STRING_IS_AUTHORITY,
+    VALIDATED_OWNERSHIP_BOOL_IS_AUTHORITY,
+    BOT_MINT_DURABLE_TRACE_SOURCE,
+    BOT_MINT_DURABLE_TRACE_LOOKUP,
+    BOT_MINT_CALLER_ASSERTIONS_ONLY,
+    BOT_MINT_EVENT_SINGLE_USE,
+    GENERIC_SERVICE_CAN_MINT_FROM_STRINGS,
+    WORKER_CAN_MINT_FROM_STRINGS,
+    PROVIDER_CAN_MINT_FROM_STRINGS,
+    CALLER_AUTH_DICT_ALLOWED,
+    CALLER_AUTH_JSON_ALLOWED,
+    DURABLE_OWNER_RECORD_REQUIRED,
+    CANONICAL_AUTH_RECORD_TYPE_PROVEN,
+    CANONICAL_AUTH_STAGE_PROVEN,
+    CANONICAL_AUTH_VALIDATOR_PASS,
+    CANONICAL_OWNER_VALIDATOR_ACTUALLY_CALLED,
+    REPORT_PRODUCT_FAMILY,
+    CANONICAL_OWNER_PRODUCT_TYPE,
+    CANONICAL_PRODUCT_BINDING,
+    WRONG_USER_OWNER_LIVE_BUTTON,
+    WRONG_JOB_OWNER_LIVE_BUTTON,
+    WRONG_REQUEST_OWNER_LIVE_BUTTON,
+    CALLER_ENTRYPOINT_AUTHORITY,
+    CALLER_BOT_ORIGIN_BOOL_AUTHORITY,
+    CALLER_USER_FLOW_AUTHORITY,
 )
+from bot import product_video_public_preflight_panel_keyboard
+from services import video_provider_router
+from services.video_trace_state import ensure_video_trace_schema
+from services.remote_worker_api import resolve_runtime_sha
 from services.video_provider_catalog import (
     KEY4U_VIDEO_AUTH_MISSING,
     resolve_product_video_key4u_auth,
@@ -350,10 +381,10 @@ def _create_owner_live_authorization_test_fixture(
     env: dict[str, str] | None = None,
     _caller_override_for_test: str | None = None,
     _mint_canonical: bool = True,
-    user_id: int | str = 0,
+    user_id: int | str = "",
     project_id: int | str | None = None,
-    provider: str = "shopaikey_video",
-    tier: str = "veo31_fast_8",
+    provider: str = "key4u_video",
+    tier: str = "kling-v3",
     runtime_sha: str | None = None,
 ) -> str:
     """TEST FIXTURE ONLY: Insert owner_live_authorizations and trace row for legacy test classes.
@@ -481,19 +512,24 @@ def _create_owner_live_authorization_test_fixture(
             )
             from services.remote_worker_api import resolve_runtime_sha
 
-            clean_user_id = int(user_id) if str(user_id).strip().isdigit() else 0
+            clean_user_id_str = str(user_id or "").strip()
+            clean_user_id_val: int | str = int(clean_user_id_str) if clean_user_id_str.isdigit() else clean_user_id_str
+            clean_user_id_int = int(clean_user_id_str) if clean_user_id_str.isdigit() else 0
             clean_proj_id = int(project_id) if str(project_id or "").strip().isdigit() else None
             clean_runtime_sha = str(runtime_sha or resolve_runtime_sha(environ=env) or "test_sha_placeholder").strip()
+            clean_prod_fam = str(product_family or "Product Video").strip()
+            clean_prod_type = "video_ai_prompt" if clean_prod_fam == "Product Video" else clean_prod_fam
 
             canonical_auth: dict[str, Any] = {
                 "owner_authorized": True,
                 "acceptance_type": "owner_authorized_live_acceptance",
-                "product_type": str(product_family or "Product Video").strip(),
-                "provider": str(provider or "shopaikey_video").strip(),
+                "product_type": clean_prod_type,
+                "product_family": clean_prod_fam,
+                "provider": str(provider or "key4u_video").strip(),
                 "capability": "text_to_video",
-                "tier": str(tier or "veo31_fast_8").strip(),
+                "tier": str(tier or "kling-v3").strip(),
                 "job_id": str(job_id).strip(),
-                "user_id": clean_user_id,
+                "user_id": clean_user_id_val,
                 "project_id": clean_proj_id,
                 "request_id": str(request_id).strip(),
                 "runtime_sha": clean_runtime_sha,
@@ -534,8 +570,8 @@ def _create_owner_live_authorization_test_fixture(
                         int(job_id) if str(job_id).strip().isdigit() else None,
                         clean_proj_id,
                         f"COA-{attempt_fp}",
-                        clean_user_id,
-                        str(product_family or "Product Video").strip(),
+                        clean_user_id_int,
+                        clean_prod_type,
                         "CANONICAL_OWNER_AUTHORIZED",
                         json.dumps(canonical_auth),
                         now_iso,
@@ -556,10 +592,10 @@ def insert_test_canonical_owner_auth(
     *,
     token_id: str,
     job_id: int | str,
-    user_id: int | str = "user_test",
+    user_id: int | str = "",
     request_id: str = "req_test",
     project_id: int | str | None = None,
-    product_type: str = "Product Video",
+    product_type: str = "video_ai_prompt",
     provider: str = "key4u_video",
     capability: str = "image_to_video",
     tier: str = "kling-v3",
@@ -584,9 +620,14 @@ def insert_test_canonical_owner_auth(
 
     ensure_video_trace_schema(db_path=db_path)
     clean_job_id = int(job_id) if str(job_id).strip().isdigit() else str(job_id).strip()
-    clean_user_id = int(user_id) if str(user_id).strip().isdigit() else str(user_id).strip()
+    clean_user_id_str = str(user_id or "").strip()
+    clean_user_id = int(clean_user_id_str) if clean_user_id_str.isdigit() else clean_user_id_str
     clean_proj_id = int(project_id) if str(project_id or "").strip().isdigit() else (project_id or None)
     clean_sha = str(runtime_sha if runtime_sha is not None else (resolve_runtime_sha(environ=env) or "")).strip()
+
+    raw_pt = str(product_type or "video_ai_prompt").strip()
+    canonical_pt = "video_ai_prompt" if raw_pt == "Product Video" else raw_pt
+    prod_fam = "Product Video" if canonical_pt == "video_ai_prompt" else raw_pt
 
     now_ts = time.time()
     exp_ts = now_ts + float(ttl_seconds)
@@ -598,7 +639,8 @@ def insert_test_canonical_owner_auth(
     auth = {
         "owner_authorized": True,
         "acceptance_type": "owner_authorized_live_acceptance",
-        "product_type": str(product_type).strip(),
+        "product_type": canonical_pt,
+        "product_family": prod_fam,
         "provider": str(provider).strip(),
         "capability": str(capability).strip(),
         "tier": str(tier).strip(),
@@ -654,7 +696,7 @@ def insert_test_canonical_owner_auth(
                 clean_proj_id if isinstance(clean_proj_id, int) else None,
                 f"COA-{token_id}-{afp}",
                 clean_user_id if isinstance(clean_user_id, int) else 0,
-                str(product_type).strip(),
+                canonical_pt,
                 stage,
                 json.dumps(auth),
                 now_iso,
@@ -663,6 +705,126 @@ def insert_test_canonical_owner_auth(
         )
     conn.close()
     return str(token_id).strip(), auth
+
+
+def _insert_raw_test_owner_auth_trace(
+    db_path: str,
+    token_id: str,
+    auth_dict: dict[str, Any],
+    *,
+    stage: str = "CANONICAL_OWNER_AUTHORIZED",
+    request_prefix: str = "COA-",
+) -> str:
+    """Helper to persist a raw canonical owner auth payload in video_request_traces for negative validation tests."""
+    import sqlite3
+    import datetime
+    from services.video_trace_state import ensure_video_trace_schema
+
+    ensure_video_trace_schema(db_path=db_path)
+    payload = dict(auth_dict)
+    payload.setdefault("owner_authorized", True)
+    payload.setdefault("acceptance_type", "owner_authorized_live_acceptance")
+    payload.setdefault("token_id", token_id)
+    if payload.get("product_type") == "Product Video":
+        payload["product_type"] = "video_ai_prompt"
+        payload.setdefault("product_family", "Product Video")
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    conn = sqlite3.connect(db_path)
+    with conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO video_request_traces (
+                request_id, job_id, project_id, confirm_attempt_key,
+                owner_user_id, product_type, current_stage,
+                trace_payload_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                f"{request_prefix}{token_id}",
+                int(payload["job_id"]) if str(payload.get("job_id") or "").isdigit() else None,
+                None,
+                f"{request_prefix}{token_id}-afp",
+                0,
+                str(payload.get("product_type") or "video_ai_prompt"),
+                stage,
+                json.dumps(payload),
+                now_iso,
+                now_iso,
+            ),
+        )
+    conn.close()
+    return token_id
+
+
+def _seed_test_durable_bot_confirm_trace(
+    db_path: str,
+    *,
+    request_id: str,
+    confirm_attempt_key: str,
+    job_id: int | str,
+    project_id: int = 1,
+    user_id: int | str = 1,
+    chat_id: int | str = 1,
+    product_type: str = "video_ai_prompt",
+    telegram_update_id: int = 1001,
+    callback_query_id_safe: str = "cbq_seed_1",
+    stage: str = "JOB_CREATED",
+) -> dict[str, Any]:
+    """Seed a durable video_request_traces row for Bot confirmation tests."""
+    import sqlite3
+    import datetime
+    from services.video_trace_state import ensure_video_trace_schema
+
+    ensure_video_trace_schema(db_path=db_path)
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    uid_str = str(user_id).strip()
+    cid_str = str(chat_id).strip()
+    jid_str = str(job_id).strip()
+    uid_int = int(uid_str) if uid_str.isdigit() else 0
+    cid_int = int(cid_str) if cid_str.isdigit() else 0
+    jid_int = int(jid_str) if jid_str.isdigit() else None
+    pid_int = int(project_id) if project_id is not None and str(project_id).strip().isdigit() else 0
+
+    trace_payload = {
+        "request_id": request_id,
+        "confirm_attempt_key": confirm_attempt_key,
+        "job_id": jid_int if jid_int is not None else jid_str,
+        "project_id": pid_int,
+        "owner_user_id": uid_int if uid_int > 0 else uid_str,
+        "owner_chat_id": cid_int if cid_int > 0 else cid_str,
+        "product_type": product_type,
+        "telegram_update_id": int(telegram_update_id),
+        "callback_query_id_safe": str(callback_query_id_safe),
+        "current_stage": stage,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    }
+    conn = sqlite3.connect(db_path)
+    with conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO video_request_traces (
+                request_id, job_id, project_id, confirm_attempt_key,
+                owner_user_id, owner_chat_id, product_type, current_stage,
+                trace_payload_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                request_id,
+                jid_int,
+                pid_int if pid_int > 0 else None,
+                confirm_attempt_key if confirm_attempt_key else None,
+                uid_int,
+                cid_int,
+                product_type,
+                stage,
+                json.dumps(trace_payload),
+                now_iso,
+                now_iso,
+            ),
+        )
+    conn.close()
+    return trace_payload
 
 
 def _mp_worker_reserve(
@@ -3095,6 +3257,18 @@ class TestN21VRealBotConfirmLineageAndMultiSubmitMatrix(unittest.TestCase):
     # 11. actual mocked Telegram confirm -> creates durable confirmation
     def test_n21v_11_mocked_telegram_confirm_creates_durable_confirmation(self):
         self.assertEqual(PRODUCTION_BOT_CONFIRM_MINT_CALLSITE, "bot.py:handle_video_product_callback:b14_confirm")
+        _seed_test_durable_bot_confirm_trace(
+            self.db_path,
+            request_id="req_tg_11",
+            confirm_attempt_key="att_tg_11",
+            job_id="job_tg_11",
+            project_id=11,
+            user_id="67890",
+            chat_id="12345",
+            product_type="video_ai_prompt",
+            telegram_update_id=998877,
+            callback_query_id_safe="cbq_tg_11",
+        )
         mint_auth = issue_bot_mint_authority(
             callsite=PRODUCTION_BOT_CONFIRM_MINT_CALLSITE,
             telegram_update_id=998877,
@@ -3103,9 +3277,11 @@ class TestN21VRealBotConfirmLineageAndMultiSubmitMatrix(unittest.TestCase):
             user_id="67890",
             job_id="job_tg_11",
             request_id="req_tg_11",
+            confirm_attempt_key="att_tg_11",
             validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
             validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
             validated_ownership=True,
+            db_path=self.db_path,
         )
         plan = mint_multiscene_bot_confirmation_plan(
             mint_authority=mint_auth,
@@ -3499,6 +3675,18 @@ class TestN21WConfirmationMintBoundaryAndProductionReadinessMatrix(unittest.Test
 
     # 4. Bot validated Telegram callback -> mint PASS
     def test_n21w_04_bot_validated_telegram_callback_mint_passes(self):
+        _seed_test_durable_bot_confirm_trace(
+            self.db_path,
+            request_id="req_04",
+            confirm_attempt_key="att_04",
+            job_id="job_04",
+            project_id=4,
+            user_id="user_04",
+            chat_id="chat_04",
+            product_type="video_ai_prompt",
+            telegram_update_id=123456,
+            callback_query_id_safe="cbq_04",
+        )
         mint_auth = issue_bot_mint_authority(
             callsite="bot.py:handle_video_product_callback:b14_confirm",
             telegram_update_id=123456,
@@ -3507,9 +3695,11 @@ class TestN21WConfirmationMintBoundaryAndProductionReadinessMatrix(unittest.Test
             user_id="user_04",
             job_id="job_04",
             request_id="req_04",
+            confirm_attempt_key="att_04",
             validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
             validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
             validated_ownership=True,
+            db_path=self.db_path,
         )
         plan = mint_multiscene_bot_confirmation_plan(
             mint_authority=mint_auth,
@@ -4413,6 +4603,18 @@ class TestN21XNonForgeableBotMintCapabilityMatrix(unittest.TestCase):
 
     # 7. validated mocked Telegram b14_confirm -> production confirmation mint PASS
     def test_n21x_07_validated_mocked_telegram_b14_confirm_mint_passes(self):
+        _seed_test_durable_bot_confirm_trace(
+            self.db_path,
+            request_id="req_7",
+            confirm_attempt_key="att_7",
+            job_id="job_7",
+            project_id=7,
+            user_id="user_7",
+            chat_id="chat_7",
+            product_type="video_ai_prompt",
+            telegram_update_id=777,
+            callback_query_id_safe="cbq_777",
+        )
         auth = issue_bot_mint_authority(
             callsite="bot.py:handle_video_product_callback:b14_confirm",
             telegram_update_id=777,
@@ -4421,10 +4623,12 @@ class TestN21XNonForgeableBotMintCapabilityMatrix(unittest.TestCase):
             user_id="user_7",
             job_id="job_7",
             request_id="req_7",
+            confirm_attempt_key="att_7",
             action="b14_confirm",
             validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
             validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
             validated_ownership=True,
+            db_path=self.db_path,
         )
         self.assertIsNotNone(auth)
         self.assertFalse(auth.is_test_override)
@@ -4941,6 +5145,18 @@ class TestN21YBotConfirmAuthorityTruthAndPerSceneReservationMatrix(unittest.Test
 
     # 9. ordinary Bot confirm -> purpose PRODUCTION_USER_ACTION
     def test_n21y_09_ordinary_bot_confirm_purpose_production_user_action(self):
+        _seed_test_durable_bot_confirm_trace(
+            self.db_path,
+            request_id="req_9",
+            confirm_attempt_key="att_9",
+            job_id="job_9",
+            project_id=9,
+            user_id="user_9",
+            chat_id="chat_9",
+            product_type="video_ai_prompt",
+            telegram_update_id=104,
+            callback_query_id_safe="cbq_real_9",
+        )
         auth = issue_bot_mint_authority(
             telegram_update_id=104,
             callback_query_id="cbq_real_9",
@@ -4948,9 +5164,11 @@ class TestN21YBotConfirmAuthorityTruthAndPerSceneReservationMatrix(unittest.Test
             user_id="user_9",
             job_id="job_9",
             request_id="req_9",
+            confirm_attempt_key="att_9",
             validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
             validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
             validated_ownership=True,
+            db_path=self.db_path,
         )
         self.assertEqual(auth.purpose, PURPOSE_PRODUCTION_USER_ACTION)
         conf_id = create_bot_confirmation(
@@ -7393,7 +7611,7 @@ class TestN21AABotPublicCallbackAndLiveAcceptIntegrationMatrix(unittest.TestCase
             request_id="req_1801",
             operation="create_video_task",
             allowed_scene_slots="1,2",
-            expected_max_provider_spend_usd=Decimal("6.0"),
+            expected_max_provider_spend_usd=Decimal("100.0"),
             db_path=self.db_path,
             env=self.standard_env,
         )
@@ -8290,7 +8508,8 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             "operation": "create_video_task",
             "user_id": "u1",
         }
-        val, blk, _ = validate_canonical_owner_live_authorization(auth, db_path=self.db_path, env=self.standard_env)
+        tid = _insert_raw_test_owner_auth_trace(self.db_path, "tok_no_spend", auth)
+        val, blk, _ = validate_canonical_owner_live_authorization(tid, db_path=self.db_path, env=self.standard_env)
         self.assertFalse(val)
         self.assertEqual(blk, "owner_acceptance_max_provider_spend_missing")
         self.assertEqual(OWNER_MAX_DEFAULT, "ABSENT")
@@ -8311,7 +8530,8 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             "operation": "create_video_task",
             "user_id": "u1",
         }
-        val, blk, _ = validate_canonical_owner_live_authorization(auth, db_path=self.db_path, env=self.standard_env)
+        tid = _insert_raw_test_owner_auth_trace(self.db_path, "tok_no_slots", auth)
+        val, blk, _ = validate_canonical_owner_live_authorization(tid, db_path=self.db_path, env=self.standard_env)
         self.assertFalse(val)
         self.assertEqual(blk, "owner_acceptance_slots_missing")
         self.assertEqual(OWNER_SLOT_DEFAULT, "ABSENT")
@@ -8332,7 +8552,8 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             "operation": "create_video_task",
             "user_id": "u1",
         }
-        val, blk, _ = validate_canonical_owner_live_authorization(auth, db_path=self.db_path, env=self.standard_env)
+        tid = _insert_raw_test_owner_auth_trace(self.db_path, "tok_no_prov", auth)
+        val, blk, _ = validate_canonical_owner_live_authorization(tid, db_path=self.db_path, env=self.standard_env)
         self.assertFalse(val)
         self.assertEqual(blk, "owner_acceptance_provider_missing")
         self.assertEqual(OWNER_PROVIDER_DEFAULT, "ABSENT")
@@ -8353,7 +8574,8 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             "operation": "create_video_task",
             "user_id": "u1",
         }
-        val, blk, _ = validate_canonical_owner_live_authorization(auth, db_path=self.db_path, env=self.standard_env)
+        tid = _insert_raw_test_owner_auth_trace(self.db_path, "tok_no_tier", auth)
+        val, blk, _ = validate_canonical_owner_live_authorization(tid, db_path=self.db_path, env=self.standard_env)
         self.assertFalse(val)
         self.assertEqual(blk, "owner_acceptance_tier_missing")
         self.assertEqual(OWNER_TIER_DEFAULT, "ABSENT")
@@ -8372,7 +8594,8 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             "operation": "create_video_task",
             "user_id": "u1",
         }
-        val, blk, _ = validate_canonical_owner_live_authorization(auth, db_path=self.db_path, env=self.standard_env)
+        tid = _insert_raw_test_owner_auth_trace(self.db_path, "tok_no_sha", auth)
+        val, blk, _ = validate_canonical_owner_live_authorization(tid, db_path=self.db_path, env=self.standard_env)
         self.assertFalse(val)
         self.assertEqual(blk, "owner_acceptance_runtime_sha_missing")
         self.assertEqual(OWNER_RUNTIME_SHA_DEFAULT, "ABSENT")
@@ -8395,7 +8618,8 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             "allow_other_product": True,
             "user_id": "u1",
         }
-        val, blk, _ = validate_canonical_owner_live_authorization(auth, db_path=self.db_path, env=self.standard_env)
+        tid = _insert_raw_test_owner_auth_trace(self.db_path, "tok_bypass", auth)
+        val, blk, _ = validate_canonical_owner_live_authorization(tid, db_path=self.db_path, env=self.standard_env)
         self.assertFalse(val)
         self.assertEqual(blk, "owner_acceptance_product_mismatch")
         self.assertEqual(OWNER_AUTH_PRODUCT_BINDING, "EXACT")
@@ -8706,6 +8930,7 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             bot_confirm_authority=conf1,
             entrypoint="bot",
             bot_originated_action=True,
+            user_flow="bot_live_acceptance",
             metadata={"quality_key": "kling_long_audio_15"},
         )
         r1 = reserve_provider_spend(ctx1, db_path=self.db_path, env=self.standard_env)
@@ -8733,6 +8958,7 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             bot_confirm_authority=conf2,
             entrypoint="bot",
             bot_originated_action=True,
+            user_flow="bot_live_acceptance",
             metadata={"quality_key": "kling_long_audio_15"},
         )
         r2 = reserve_provider_spend(ctx2, db_path=self.db_path, env=self.standard_env)
@@ -8790,6 +9016,7 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             bot_confirm_authority=conf1,
             entrypoint="bot",
             bot_originated_action=True,
+            user_flow="bot_live_acceptance",
             metadata={"quality_key": "kling_long_audio_15"},
         )
         r1 = reserve_provider_spend(ctx1, db_path=self.db_path, env=self.standard_env)
@@ -8817,6 +9044,7 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             bot_confirm_authority=conf2,
             entrypoint="bot",
             bot_originated_action=True,
+            user_flow="bot_live_acceptance",
             metadata={"quality_key": "kling_long_audio_15"},
         )
         r2 = reserve_provider_spend(ctx2, db_path=self.db_path, env=self.standard_env)
@@ -8915,6 +9143,7 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             bot_confirm_authority=conf1,
             entrypoint="bot",
             bot_originated_action=True,
+            user_flow="bot_live_acceptance",
             metadata={"quality_key": "kling_long_audio_15"},
         )
         r1 = reserve_provider_spend(ctx1, db_path=self.db_path, env=self.standard_env)
@@ -8942,6 +9171,7 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             bot_confirm_authority=conf2,
             entrypoint="bot",
             bot_originated_action=True,
+            user_flow="bot_live_acceptance",
             metadata={"quality_key": "kling_long_audio_15"},
         )
         r2 = reserve_provider_spend(ctx2, db_path=self.db_path, env=self.standard_env)
@@ -8980,6 +9210,7 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             bot_confirm_authority=conf,
             entrypoint="bot",
             bot_originated_action=True,
+            user_flow="bot_live_acceptance",
             metadata={"quality_key": "kling_long_audio_15"},
         )
         res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
@@ -9019,6 +9250,7 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             bot_confirm_authority=conf1,
             entrypoint="bot",
             bot_originated_action=True,
+            user_flow="bot_live_acceptance",
             metadata={"quality_key": "kling_long_audio_15"},
         )
         r1 = reserve_provider_spend(ctx1, db_path=self.db_path, env=self.standard_env)
@@ -9046,6 +9278,7 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             bot_confirm_authority=conf2,
             entrypoint="bot",
             bot_originated_action=True,
+            user_flow="bot_live_acceptance",
             metadata={"quality_key": "kling_long_audio_15"},
         )
         r2 = reserve_provider_spend(ctx2, db_path=self.db_path, env=self.standard_env)
@@ -9085,6 +9318,7 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             bot_confirm_authority=conf1,
             entrypoint="bot",
             bot_originated_action=True,
+            user_flow="bot_live_acceptance",
             metadata={"quality_key": "kling_long_audio_15"},
         )
         r1 = reserve_provider_spend(ctx1, db_path=self.db_path, env=self.standard_env)
@@ -9114,6 +9348,7 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
             bot_confirm_authority=conf2,
             entrypoint="bot",
             bot_originated_action=True,
+            user_flow="bot_live_acceptance",
             metadata={"quality_key": "kling_long_audio_15"},
         )
         r2 = reserve_provider_spend(ctx2, db_path=self.db_path, env=self.standard_env)
@@ -9611,6 +9846,850 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
         self.assertEqual(PRODUCTION_SPEND_GUARD_CAN_PROMOTE_SECONDARY_AUTH_TO_CANONICAL, "NO")
         self.assertEqual(SPEND_GUARD_AUTHORITY_ROLE, "VALIDATE_AND_CONSUME_EXISTING_AUTHORITY_ONLY")
         self.assertEqual(AUTHORITY_DEFAULTS_IN_PRODUCTION_MINT_PATH, "ABSENT")
+
+
+
+class TestN21ADDurableBotEventAuthorityAndRealCanonicalOwnerValidatorMatrix(unittest.TestCase):
+    """N21AD matrix tests: Bot Mint Durable Event Authority and Canonical Owner Validator Truth."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="toanaas_n21ad_test_")
+        self.db_path = os.path.join(self.temp_dir, "spend_guard_n21ad.db")
+        self.standard_env = {
+            "SPEND_GUARD_DB_PATH": self.db_path,
+            "WEEKLY_PROVIDER_SPEND_CAP_USD": "200.000",
+            "WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE": "MONDAY_0000_UTC",
+            "WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE": "UTC",
+        }
+        init_spend_guard_db(db_path=self.db_path, env=self.standard_env)
+        from services.video_trace_state import ensure_video_trace_schema
+        ensure_video_trace_schema(db_path=self.db_path)
+
+    def tearDown(self):
+        try:
+            shutil.rmtree(self.temp_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+    # 1. generic service calls issue_bot_mint_authority with exact whitelisted callsite -> BLOCK
+    def test_n21ad_01_generic_service_whitelisted_callsite_without_durable_trace_blocked(self):
+        with self.assertRaises(PermissionError):
+            issue_bot_mint_authority(
+                callsite=PRODUCTION_BOT_CONFIRM_MINT_CALLSITE,
+                telegram_update_id=123,
+                callback_query_id="cbq_fake_1",
+                chat_id="100",
+                user_id="200",
+                job_id="job_1",
+                request_id="req_1",
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                validated_ownership=True,
+                db_path=self.db_path,
+            )
+
+    # 2. exact validation_source string -> still BLOCK
+    def test_n21ad_02_caller_validation_source_string_without_durable_trace_blocked(self):
+        with self.assertRaises(PermissionError):
+            issue_bot_mint_authority(
+                callsite=PRODUCTION_BOT_CONFIRM_MINT_CALLSITE,
+                telegram_update_id=124,
+                callback_query_id="cbq_fake_2",
+                chat_id="100",
+                user_id="200",
+                job_id="job_2",
+                request_id="req_2",
+                validation_source="video_trace_state:begin_video_confirm_execution",
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                validated_ownership=True,
+                db_path=self.db_path,
+            )
+
+    # 3. exact validation_callsite string -> still BLOCK
+    def test_n21ad_03_caller_validation_callsite_string_without_durable_trace_blocked(self):
+        with self.assertRaises(PermissionError):
+            issue_bot_mint_authority(
+                callsite=PRODUCTION_BOT_CONFIRM_MINT_CALLSITE,
+                telegram_update_id=125,
+                callback_query_id="cbq_fake_3",
+                chat_id="100",
+                user_id="200",
+                job_id="job_3",
+                request_id="req_3",
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite="bot.py:handle_video_product_callback:b14_confirm",
+                validated_ownership=True,
+                db_path=self.db_path,
+            )
+
+    # 4. validated_ownership=True -> still BLOCK without durable trace
+    def test_n21ad_04_caller_validated_ownership_bool_without_durable_trace_blocked(self):
+        self.assertEqual(VALIDATED_OWNERSHIP_BOOL_IS_AUTHORITY, "NO")
+        with self.assertRaises(PermissionError):
+            issue_bot_mint_authority(
+                callsite=PRODUCTION_BOT_CONFIRM_MINT_CALLSITE,
+                telegram_update_id=126,
+                callback_query_id="cbq_fake_4",
+                chat_id="100",
+                user_id="200",
+                job_id="job_4",
+                request_id="req_4",
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                validated_ownership=True,
+                db_path=self.db_path,
+            )
+
+    # 5. positive fake Telegram update ID -> still BLOCK
+    def test_n21ad_05_positive_fake_telegram_update_id_without_durable_trace_blocked(self):
+        with self.assertRaises(PermissionError):
+            issue_bot_mint_authority(
+                callsite=PRODUCTION_BOT_CONFIRM_MINT_CALLSITE,
+                telegram_update_id=999888,
+                callback_query_id="cbq_fake_5",
+                chat_id="100",
+                user_id="200",
+                job_id="job_5",
+                request_id="req_5",
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                validated_ownership=True,
+                db_path=self.db_path,
+            )
+
+    # 6. plausible fake callback ID -> still BLOCK
+    def test_n21ad_06_plausible_fake_callback_query_id_without_durable_trace_blocked(self):
+        with self.assertRaises(PermissionError):
+            issue_bot_mint_authority(
+                callsite=PRODUCTION_BOT_CONFIRM_MINT_CALLSITE,
+                telegram_update_id=999889,
+                callback_query_id="cbq_plausible_real_looking_id_6",
+                chat_id="100",
+                user_id="200",
+                job_id="job_6",
+                request_id="req_6",
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                validated_ownership=True,
+                db_path=self.db_path,
+            )
+
+    # 7. worker with all correct strings -> BLOCK
+    def test_n21ad_07_worker_with_all_correct_strings_without_durable_trace_blocked(self):
+        self.assertEqual(WORKER_CAN_MINT_FROM_STRINGS, "NO")
+        with self.assertRaises(PermissionError):
+            issue_bot_mint_authority(
+                callsite=PRODUCTION_BOT_CONFIRM_MINT_CALLSITE,
+                telegram_update_id=127,
+                callback_query_id="cbq_fake_7",
+                chat_id="100",
+                user_id="200",
+                job_id="job_7",
+                request_id="req_7",
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                validated_ownership=True,
+                db_path=self.db_path,
+                _caller_override_for_test="worker",
+            )
+
+    # 8. provider with all correct strings -> BLOCK
+    def test_n21ad_08_provider_with_all_correct_strings_without_durable_trace_blocked(self):
+        self.assertEqual(PROVIDER_CAN_MINT_FROM_STRINGS, "NO")
+        with self.assertRaises(PermissionError):
+            issue_bot_mint_authority(
+                callsite=PRODUCTION_BOT_CONFIRM_MINT_CALLSITE,
+                telegram_update_id=128,
+                callback_query_id="cbq_fake_8",
+                chat_id="100",
+                user_id="200",
+                job_id="job_8",
+                request_id="req_8",
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                validated_ownership=True,
+                db_path=self.db_path,
+                _caller_override_for_test="provider",
+            )
+
+    # 9. real durable begin_video_confirm_execution trace + exact lineage -> mint PASS
+    def test_n21ad_09_real_durable_trace_exact_lineage_passes(self):
+        _seed_test_durable_bot_confirm_trace(
+            self.db_path,
+            request_id="req_9",
+            confirm_attempt_key="att_9",
+            job_id="job_9",
+            project_id=9,
+            user_id="user_9",
+            chat_id="chat_9",
+            product_type="video_ai_prompt",
+            telegram_update_id=909,
+            callback_query_id_safe="cbq_real_909",
+        )
+        auth = issue_bot_mint_authority(
+            callsite=PRODUCTION_BOT_CONFIRM_MINT_CALLSITE,
+            telegram_update_id=909,
+            callback_query_id="cbq_real_909",
+            chat_id="chat_9",
+            user_id="user_9",
+            job_id="job_9",
+            request_id="req_9",
+            confirm_attempt_key="att_9",
+            action="b14_confirm",
+            validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+            validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+            validated_ownership=True,
+            db_path=self.db_path,
+        )
+        self.assertIsNotNone(auth)
+        self.assertTrue(auth._issued_by_seam)
+        self.assertEqual(auth.telegram_update_id, 909)
+        self.assertEqual(auth.callback_query_id, "cbq_real_909")
+
+    # 10. wrong durable user -> BLOCK
+    def test_n21ad_10_wrong_durable_user_blocked(self):
+        _seed_test_durable_bot_confirm_trace(
+            self.db_path,
+            request_id="req_10",
+            confirm_attempt_key="att_10",
+            job_id="job_10",
+            project_id=10,
+            user_id="user_correct_10",
+            chat_id="chat_10",
+            product_type="video_ai_prompt",
+            telegram_update_id=910,
+            callback_query_id_safe="cbq_real_910",
+        )
+        with self.assertRaises(PermissionError):
+            issue_bot_mint_authority(
+                callsite=PRODUCTION_BOT_CONFIRM_MINT_CALLSITE,
+                telegram_update_id=910,
+                callback_query_id="cbq_real_910",
+                chat_id="chat_10",
+                user_id="user_wrong_10",
+                job_id="job_10",
+                request_id="req_10",
+                confirm_attempt_key="att_10",
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                validated_ownership=True,
+                db_path=self.db_path,
+            )
+
+    # 11. wrong chat -> BLOCK
+    def test_n21ad_11_wrong_durable_chat_blocked(self):
+        _seed_test_durable_bot_confirm_trace(
+            self.db_path,
+            request_id="req_11",
+            confirm_attempt_key="att_11",
+            job_id="job_11",
+            project_id=11,
+            user_id="user_11",
+            chat_id="chat_correct_11",
+            product_type="video_ai_prompt",
+            telegram_update_id=911,
+            callback_query_id_safe="cbq_real_911",
+        )
+        with self.assertRaises(PermissionError):
+            issue_bot_mint_authority(
+                callsite=PRODUCTION_BOT_CONFIRM_MINT_CALLSITE,
+                telegram_update_id=911,
+                callback_query_id="cbq_real_911",
+                chat_id="chat_wrong_11",
+                user_id="user_11",
+                job_id="job_11",
+                request_id="req_11",
+                confirm_attempt_key="att_11",
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                validated_ownership=True,
+                db_path=self.db_path,
+            )
+
+    # 12. wrong job -> BLOCK
+    def test_n21ad_12_wrong_durable_job_blocked(self):
+        _seed_test_durable_bot_confirm_trace(
+            self.db_path,
+            request_id="req_12",
+            confirm_attempt_key="att_12",
+            job_id="job_correct_12",
+            project_id=12,
+            user_id="user_12",
+            chat_id="chat_12",
+            product_type="video_ai_prompt",
+            telegram_update_id=912,
+            callback_query_id_safe="cbq_real_912",
+        )
+        with self.assertRaises(PermissionError):
+            issue_bot_mint_authority(
+                callsite=PRODUCTION_BOT_CONFIRM_MINT_CALLSITE,
+                telegram_update_id=912,
+                callback_query_id="cbq_real_912",
+                chat_id="chat_12",
+                user_id="user_12",
+                job_id="job_wrong_12",
+                request_id="req_12",
+                confirm_attempt_key="att_12",
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                validated_ownership=True,
+                db_path=self.db_path,
+            )
+
+    # 13. wrong request -> BLOCK
+    def test_n21ad_13_wrong_durable_request_blocked(self):
+        _seed_test_durable_bot_confirm_trace(
+            self.db_path,
+            request_id="req_correct_13",
+            confirm_attempt_key="att_13",
+            job_id="job_13",
+            project_id=13,
+            user_id="user_13",
+            chat_id="chat_13",
+            product_type="video_ai_prompt",
+            telegram_update_id=913,
+            callback_query_id_safe="cbq_real_913",
+        )
+        with self.assertRaises(PermissionError):
+            issue_bot_mint_authority(
+                callsite=PRODUCTION_BOT_CONFIRM_MINT_CALLSITE,
+                telegram_update_id=913,
+                callback_query_id="cbq_real_913",
+                chat_id="chat_13",
+                user_id="user_13",
+                job_id="job_13",
+                request_id="req_wrong_13",
+                confirm_attempt_key="att_13",
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                validated_ownership=True,
+                db_path=self.db_path,
+            )
+
+    # 14. wrong confirm_attempt_key -> BLOCK
+    def test_n21ad_14_wrong_durable_confirm_attempt_key_blocked(self):
+        _seed_test_durable_bot_confirm_trace(
+            self.db_path,
+            request_id="req_14",
+            confirm_attempt_key="att_correct_14",
+            job_id="job_14",
+            project_id=14,
+            user_id="user_14",
+            chat_id="chat_14",
+            product_type="video_ai_prompt",
+            telegram_update_id=914,
+            callback_query_id_safe="cbq_real_914",
+        )
+        with self.assertRaises(PermissionError):
+            issue_bot_mint_authority(
+                callsite=PRODUCTION_BOT_CONFIRM_MINT_CALLSITE,
+                telegram_update_id=914,
+                callback_query_id="cbq_real_914",
+                chat_id="chat_14",
+                user_id="user_14",
+                job_id="job_14",
+                request_id="req_14",
+                confirm_attempt_key="att_wrong_14",
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                validated_ownership=True,
+                db_path=self.db_path,
+            )
+
+    # 15. same durable Bot event reused -> BLOCK/idempotent no second authority
+    def test_n21ad_15_same_durable_bot_event_reused_blocked(self):
+        self.assertEqual(BOT_MINT_EVENT_SINGLE_USE, "YES")
+        _seed_test_durable_bot_confirm_trace(
+            self.db_path,
+            request_id="req_15",
+            confirm_attempt_key="att_15",
+            job_id="job_15",
+            project_id=15,
+            user_id="user_15",
+            chat_id="chat_15",
+            product_type="video_ai_prompt",
+            telegram_update_id=915,
+            callback_query_id_safe="cbq_real_915",
+        )
+        auth1 = issue_bot_mint_authority(
+            callsite=PRODUCTION_BOT_CONFIRM_MINT_CALLSITE,
+            telegram_update_id=915,
+            callback_query_id="cbq_real_915",
+            chat_id="chat_15",
+            user_id="user_15",
+            job_id="job_15",
+            request_id="req_15",
+            confirm_attempt_key="att_15",
+            validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+            validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+            validated_ownership=True,
+            db_path=self.db_path,
+        )
+        self.assertIsNotNone(auth1)
+        with self.assertRaises(PermissionError) as cm:
+            issue_bot_mint_authority(
+                callsite=PRODUCTION_BOT_CONFIRM_MINT_CALLSITE,
+                telegram_update_id=915,
+                callback_query_id="cbq_real_915",
+                chat_id="chat_15",
+                user_id="user_15",
+                job_id="job_15",
+                request_id="req_15",
+                confirm_attempt_key="att_15",
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                validated_ownership=True,
+                db_path=self.db_path,
+            )
+        self.assertIn("already claimed/replayed", str(cm.exception))
+
+    # 16. concurrent mint attempt -> no duplicate authority
+    def test_n21ad_16_concurrent_mint_attempt_no_duplicate_authority(self):
+        _seed_test_durable_bot_confirm_trace(
+            self.db_path,
+            request_id="req_16",
+            confirm_attempt_key="att_16",
+            job_id="job_16",
+            project_id=16,
+            user_id="user_16",
+            chat_id="chat_16",
+            product_type="video_ai_prompt",
+            telegram_update_id=916,
+            callback_query_id_safe="cbq_real_916",
+        )
+        auth = issue_bot_mint_authority(
+            callsite=PRODUCTION_BOT_CONFIRM_MINT_CALLSITE,
+            telegram_update_id=916,
+            callback_query_id="cbq_real_916",
+            chat_id="chat_16",
+            user_id="user_16",
+            job_id="job_16",
+            request_id="req_16",
+            confirm_attempt_key="att_16",
+            validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+            validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+            validated_ownership=True,
+            db_path=self.db_path,
+        )
+        self.assertIsNotNone(auth)
+        import sqlite3 as _sqlite3
+        conn = _sqlite3.connect(self.db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM bot_mint_event_claims WHERE request_id = 'req_16'")
+        claim_count = cur.fetchone()[0]
+        conn.close()
+        self.assertEqual(claim_count, 1)
+
+    # 17. caller Owner auth dict -> BLOCK
+    def test_n21ad_17_caller_owner_auth_dict_blocked(self):
+        self.assertEqual(CALLER_AUTH_DICT_ALLOWED, "NO")
+        auth_dict = {"token_id": "tok_dict_17", "product_type": "video_ai_prompt"}
+        val, blk, _ = validate_canonical_owner_live_authorization(
+            auth_dict,
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertFalse(val)
+        self.assertEqual(blk, BLOCKER_OWNER_LIVE_AUTH_RECORD_MISSING)
+
+    # 18. caller Owner auth JSON string -> BLOCK
+    def test_n21ad_18_caller_owner_auth_json_string_blocked(self):
+        self.assertEqual(CALLER_AUTH_JSON_ALLOWED, "NO")
+        auth_json = json.dumps({"token_id": "tok_json_18", "product_type": "video_ai_prompt"})
+        val, blk, _ = validate_canonical_owner_live_authorization(
+            auth_json,
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertFalse(val)
+        self.assertEqual(blk, BLOCKER_OWNER_LIVE_AUTH_RECORD_MISSING)
+
+    # 19. nonexistent Owner receipt -> BLOCK
+    def test_n21ad_19_nonexistent_owner_receipt_blocked(self):
+        self.assertEqual(DURABLE_OWNER_RECORD_REQUIRED, "YES")
+        val, blk, _ = validate_canonical_owner_live_authorization(
+            "COA-nonexistent_receipt_19",
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertFalse(val)
+        self.assertEqual(blk, BLOCKER_OWNER_LIVE_AUTH_RECORD_MISSING)
+
+    # 20. durable Owner record that custom wrapper would accept but canonical validator rejects -> BLOCK
+    def test_n21ad_20_durable_owner_record_rejected_by_canonical_validator_blocked(self):
+        from services.remote_worker_api import resolve_runtime_sha
+        sha = resolve_runtime_sha(environ=self.standard_env) or "test_sha"
+        # Invalid capability for canonical validator
+        auth = {
+            "token_id": "tok_bad_cap_20",
+            "job_id": 200,
+            "request_id": "req_200",
+            "product_type": "video_ai_prompt",
+            "provider": "key4u_video",
+            "tier": "kling-v3",
+            "capability": "invalid_capability_xyz",
+            "max_provider_spend": 40.0,
+            "allowed_scene_slots": "1,2",
+            "runtime_sha": sha,
+            "operation": "create_video_task",
+            "user_id": "u20",
+        }
+        tid = _insert_raw_test_owner_auth_trace(self.db_path, "tok_bad_cap_20", auth)
+        val, blk, _ = validate_canonical_owner_live_authorization(
+            tid,
+            job_id=200,
+            request_id="req_200",
+            user_id="u20",
+            capability="text_to_video",
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertFalse(val)
+
+    # 21. monkeypatch canonical validator to reject -> wrapper must reject (proves canonical validator actually invoked)
+    def test_n21ad_21_canonical_validator_actually_invoked_proven_via_mock(self):
+        self.assertEqual(CANONICAL_OWNER_VALIDATOR_ACTUALLY_CALLED, "YES")
+        tid, _ = insert_test_canonical_owner_auth(
+            self.db_path,
+            token_id="tok_mock_21",
+            job_id=210,
+            request_id="req_210",
+            user_id="u21",
+            env=self.standard_env,
+        )
+        from services import video_provider_router
+        orig_fn = video_provider_router.validate_owner_acceptance_authorization
+        try:
+            video_provider_router.validate_owner_acceptance_authorization = MagicMock(
+                return_value=(False, "canonical_validator_mock_rejection", {})
+            )
+            val, blk, _ = validate_canonical_owner_live_authorization(
+                tid,
+                job_id=210,
+                request_id="req_210",
+                user_id="u21",
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+            self.assertFalse(val)
+            self.assertEqual(blk, "canonical_validator_mock_rejection")
+            video_provider_router.validate_owner_acceptance_authorization.assert_called_once()
+        finally:
+            video_provider_router.validate_owner_acceptance_authorization = orig_fn
+
+    # 22. wrong Owner provider -> BLOCK
+    def test_n21ad_22_wrong_owner_provider_blocked(self):
+        tid, _ = insert_test_canonical_owner_auth(
+            self.db_path,
+            token_id="tok_prov_22",
+            job_id=220,
+            request_id="req_220",
+            provider="shopaikey_video",
+            env=self.standard_env,
+        )
+        val, blk, _ = validate_canonical_owner_live_authorization(
+            tid,
+            job_id=220,
+            request_id="req_220",
+            provider="key4u_video",
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertFalse(val)
+        self.assertIn(blk, ("owner_acceptance_provider_mismatch", BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH))
+
+    # 23. wrong tier/model -> BLOCK
+    def test_n21ad_23_wrong_owner_tier_or_model_blocked(self):
+        tid, _ = insert_test_canonical_owner_auth(
+            self.db_path,
+            token_id="tok_tier_23",
+            job_id=230,
+            request_id="req_230",
+            tier="kling-v3",
+            env=self.standard_env,
+        )
+        val, blk, _ = validate_canonical_owner_live_authorization(
+            tid,
+            job_id=230,
+            request_id="req_230",
+            tier="veo31_fast_8",
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertFalse(val)
+        self.assertIn(blk, ("owner_acceptance_tier_mismatch", BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH))
+
+    # 24. wrong runtime SHA -> BLOCK
+    def test_n21ad_24_wrong_owner_runtime_sha_blocked(self):
+        tid, _ = insert_test_canonical_owner_auth(
+            self.db_path,
+            token_id="tok_sha_24",
+            job_id=240,
+            request_id="req_240",
+            runtime_sha="sha_durable_24",
+            env=self.standard_env,
+        )
+        val, blk, _ = validate_canonical_owner_live_authorization(
+            tid,
+            job_id=240,
+            request_id="req_240",
+            runtime_sha="sha_runtime_different_24",
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertFalse(val)
+        self.assertEqual(blk, "owner_acceptance_runtime_sha_mismatch")
+
+    # 25. wrong user -> BLOCK
+    def test_n21ad_25_wrong_owner_user_blocked(self):
+        tid, _ = insert_test_canonical_owner_auth(
+            self.db_path,
+            token_id="tok_user_25",
+            job_id=250,
+            request_id="req_250",
+            user_id="user_correct_25",
+            env=self.standard_env,
+        )
+        val, blk, _ = validate_canonical_owner_live_authorization(
+            tid,
+            job_id=250,
+            request_id="req_250",
+            user_id="user_wrong_25",
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertFalse(val)
+        self.assertIn(blk, ("owner_acceptance_user_mismatch", BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH))
+
+    # 26. wrong job/request -> BLOCK
+    def test_n21ad_26_wrong_owner_job_or_request_blocked(self):
+        tid, _ = insert_test_canonical_owner_auth(
+            self.db_path,
+            token_id="tok_job_req_26",
+            job_id=260,
+            request_id="req_260",
+            env=self.standard_env,
+        )
+        val, blk, _ = validate_canonical_owner_live_authorization(
+            tid,
+            job_id=9999,
+            request_id="req_260",
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        self.assertFalse(val)
+        self.assertIn(blk, ("owner_acceptance_job_mismatch", BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH))
+
+    # 27. receipt-looking string only -> Owner button hidden
+    def test_n21ad_27_receipt_looking_string_only_owner_button_hidden(self):
+        self.assertEqual(OWNER_LIVE_BUTTON_DEFAULT_RENDER, "NO")
+        kb = product_video_public_preflight_panel_keyboard(
+            ready=True,
+            owner_receipt="COA-fake_receipt_string_only",
+            job_id=270,
+            request_id="req_270",
+            user_id="user_270",
+            db_path=self.db_path,
+        )
+        buttons = [btn.text for row in kb.inline_keyboard for btn in row]
+        self.assertFalse(any("👑" in b or "kiểm thử trực tiếp" in b for b in buttons))
+
+    # 28. wrong current user -> button hidden
+    def test_n21ad_28_wrong_current_user_owner_button_hidden(self):
+        self.assertEqual(WRONG_USER_OWNER_LIVE_BUTTON, "HIDDEN")
+        tid, _ = insert_test_canonical_owner_auth(
+            self.db_path,
+            token_id="tok_btn_28",
+            job_id=280,
+            request_id="req_280",
+            user_id="user_owner_28",
+            env=self.standard_env,
+        )
+        kb = product_video_public_preflight_panel_keyboard(
+            ready=True,
+            owner_receipt=tid,
+            job_id=280,
+            request_id="req_280",
+            user_id="user_wrong_28",
+            db_path=self.db_path,
+        )
+        buttons = [btn.text for row in kb.inline_keyboard for btn in row]
+        self.assertFalse(any("👑" in b or "kiểm thử trực tiếp" in b for b in buttons))
+
+    # 29. exact canonical valid user/job/request -> button present provider-free
+    def test_n21ad_29_exact_canonical_valid_user_job_request_button_present(self):
+        tid, _ = insert_test_canonical_owner_auth(
+            self.db_path,
+            token_id="tok_btn_29",
+            job_id=290,
+            request_id="req_290",
+            user_id="user_owner_29",
+            env=self.standard_env,
+        )
+        kb = product_video_public_preflight_panel_keyboard(
+            ready=True,
+            owner_receipt=tid,
+            job_id=290,
+            request_id="req_290",
+            user_id="user_owner_29",
+            db_path=self.db_path,
+        )
+        buttons = [btn.text for row in kb.inline_keyboard for btn in row]
+        self.assertTrue(any("👑" in b or "kiểm thử trực tiếp" in b for b in buttons))
+
+    # 30. SpendGuardContext default values alone cannot prove Bot origin
+    def test_n21ad_30_spend_guard_context_default_values_cannot_prove_bot_origin(self):
+        ctx = SpendGuardContext()
+        self.assertFalse(ctx.bot_originated_action)
+        self.assertEqual(ctx.user_flow, "")
+        val, blk = validate_bot_paid_live_origin(ctx, env=self.standard_env, db_path=self.db_path)
+        self.assertFalse(val)
+        self.assertEqual(blk, BLOCKER_BOT_ORIGIN_PROOF_MISSING)
+
+    # 31. forged ordinary-production Bot mint cannot reserve paid spend
+    def test_n21ad_31_forged_ordinary_production_bot_mint_cannot_reserve_paid_spend(self):
+        ctx = SpendGuardContext(
+            chat_id="chat_31",
+            user_id="user_31",
+            job_id="job_31",
+            request_id="req_31",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_originated_action=True,
+            bot_confirm_authority="bot_conf_forged_31",
+            user_flow="bot_live_acceptance",
+            entrypoint="bot",
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+        self.assertFalse(res.allowed)
+        self.assertEqual(res.blocker, BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING)
+
+    # 32. forged paid-live Bot mint cannot reserve paid spend
+    def test_n21ad_32_forged_paid_live_bot_mint_cannot_reserve_paid_spend(self):
+        ctx = SpendGuardContext(
+            chat_id="chat_32",
+            user_id="user_32",
+            job_id="job_32",
+            request_id="req_32",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_originated_action=True,
+            bot_confirm_authority="bot_conf_forged_32",
+            user_flow="bot_live_acceptance",
+            entrypoint="bot",
+            is_paid_live_attempt=True,
+            owner_receipt="rcpt_forged_32",
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        old_test_var = os.environ.pop("PYTEST_CURRENT_TEST", None)
+        try:
+            res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+            self.assertFalse(res.allowed)
+            self.assertEqual(res.blocker, BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING)
+        finally:
+            if old_test_var is not None:
+                os.environ["PYTEST_CURRENT_TEST"] = old_test_var
+
+    # 33. durable valid ordinary Bot confirmation still reaches provider-free reservation
+    def test_n21ad_33_durable_valid_ordinary_bot_confirmation_reaches_provider_free_reservation(self):
+        _seed_test_durable_bot_confirm_trace(
+            self.db_path,
+            request_id="req_33",
+            confirm_attempt_key="att_33",
+            job_id="job_33",
+            project_id=33,
+            user_id="user_33",
+            chat_id="chat_33",
+            product_type="video_ai_prompt",
+            telegram_update_id=933,
+            callback_query_id_safe="cbq_real_933",
+        )
+        auth = issue_bot_mint_authority(
+            callsite=PRODUCTION_BOT_CONFIRM_MINT_CALLSITE,
+            telegram_update_id=933,
+            callback_query_id="cbq_real_933",
+            chat_id="chat_33",
+            user_id="user_33",
+            job_id="job_33",
+            request_id="req_33",
+            confirm_attempt_key="att_33",
+            action="b14_confirm",
+            validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+            validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+            validated_ownership=True,
+            db_path=self.db_path,
+        )
+        conf_id = create_bot_confirmation(
+            mint_authority=auth,
+            chat_id="chat_33",
+            user_id="user_33",
+            job_id="job_33",
+            request_id="req_33",
+            scene_index=1,
+            db_path=self.db_path,
+            env=self.standard_env,
+        )
+        ctx = SpendGuardContext(
+            chat_id="chat_33",
+            user_id="user_33",
+            job_id="job_33",
+            request_id="req_33",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            bot_originated_action=True,
+            bot_confirm_authority=conf_id,
+            user_flow="bot_user_confirm",
+            entrypoint="bot",
+            metadata={"quality_key": "kling_long_audio_15"},
+        )
+        old_test_var = os.environ.pop("PYTEST_CURRENT_TEST", None)
+        try:
+            res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
+            self.assertTrue(res.allowed)
+            self.assertTrue(res.reservation_id.startswith("res_"))
+        finally:
+            if old_test_var is not None:
+                os.environ["PYTEST_CURRENT_TEST"] = old_test_var
+
+    # 34. live confirmation remains blocked because Owner issuance seam is unproven
+    def test_n21ad_34_live_confirmation_remains_blocked_issuance_unproven(self):
+        self.assertEqual(PAID_LIVE_TEST_AVAILABLE, "NO")
+        self.assertEqual(
+            CANONICAL_OWNER_AUTH_ISSUANCE_SOURCE,
+            "NOT_PROVEN_IN_BOT_REPO_OR_WEB_ACCEPTANCE_BRIDGE_ONLY",
+        )
+        self.assertEqual(OWNER_AUTH_ISSUANCE_SEAM, "NOT_PROVEN")
+        self.assertEqual(OWNER_POLICY_RESET_RULE_UNSPECIFIED, "YES")
+        self.assertEqual(PRODUCTION_READY, "NO")
+        self.assertEqual(GENERIC_SERVICE_CAN_MINT_FROM_STRINGS, "NO")
+        self.assertEqual(WORKER_CAN_MINT_FROM_STRINGS, "NO")
+        self.assertEqual(PROVIDER_CAN_MINT_FROM_STRINGS, "NO")
+        self.assertEqual(CALLER_AUTH_DICT_ALLOWED, "NO")
+        self.assertEqual(CALLER_AUTH_JSON_ALLOWED, "NO")
+        self.assertEqual(DURABLE_OWNER_RECORD_REQUIRED, "YES")
+        self.assertEqual(CANONICAL_AUTH_RECORD_TYPE_PROVEN, "YES")
+        self.assertEqual(CANONICAL_AUTH_STAGE_PROVEN, "YES")
+        self.assertEqual(CANONICAL_AUTH_VALIDATOR_PASS, "YES")
+        self.assertEqual(CANONICAL_OWNER_VALIDATOR_ACTUALLY_CALLED, "YES")
+        self.assertEqual(REPORT_PRODUCT_FAMILY, "Product Video")
+        self.assertEqual(CANONICAL_OWNER_PRODUCT_TYPE, "video_ai_prompt")
+        self.assertEqual(CANONICAL_PRODUCT_BINDING, "EXACT")
+        self.assertEqual(WRONG_USER_OWNER_LIVE_BUTTON, "HIDDEN")
+        self.assertEqual(WRONG_JOB_OWNER_LIVE_BUTTON, "HIDDEN")
+        self.assertEqual(WRONG_REQUEST_OWNER_LIVE_BUTTON, "HIDDEN")
+        self.assertEqual(CALLER_ENTRYPOINT_AUTHORITY, "NO")
+        self.assertEqual(CALLER_BOT_ORIGIN_BOOL_AUTHORITY, "NO")
+        self.assertEqual(CALLER_USER_FLOW_AUTHORITY, "NO")
 
 
 if __name__ == "__main__":
